@@ -19,11 +19,11 @@ pub(crate) use Items::{
 pub(super) use Serde::expand_builtin_serde_items;
 
 fn is_void_named(ty: &Type) -> bool {
-    matches!(ty, Type::Named(name) if name == Syntax::TYPE_VOID || name == "Unit")
+    matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
 }
 
-/// True when a declared return type carries no value payload: `Void` / `Unit`,
-/// or fallible void (`Void ? E`). Same void-named match used by asm return
+/// True when a declared return type carries no value payload: `()` / `Unit`,
+/// or fallible void (`() ? E`). Same void-named match used by asm return
 /// checks in this file.
 fn is_void_like_return(ty: &Type) -> bool {
     is_void_named(ty)
@@ -38,7 +38,7 @@ fn is_fallible_void_return(
     matches!(
         ty,
         Type::Result { ok, err }
-            if matches!(ok.as_ref(), Type::Named(n) if n == Syntax::TYPE_VOID)
+            if matches!(ok.as_ref(), Type::Named(n) if n == Syntax::INTERNAL_UNIT_TYPE)
                 && matches!(err.as_ref(), Type::Named(n)
                     if n == Syntax::TYPE_ERROR
                         || (n == "CryptoError"
@@ -155,7 +155,7 @@ impl<'a> Checker<'a> {
         if let Some(name) = params.iter().find(|name| !used.contains(**name)) {
             bad = Some(format!("parameter `{name}` has no named `{{{name}}}` operand"));
         }
-        let returns_value = f.return_type.as_ref().is_some_and(|ty| !matches!(ty, Type::Named(name) if name == Syntax::TYPE_VOID || name == "Unit"));
+        let returns_value = f.return_type.as_ref().is_some_and(|ty| !matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE));
         if return_anchors != usize::from(returns_value) {
             bad = Some(if returns_value { "a value-returning assembly body needs exactly one `; -> return` anchor".to_string() } else { "a void assembly body can't declare a `; -> return` anchor".to_string() });
         }
@@ -174,8 +174,8 @@ impl<'a> Checker<'a> {
     /// declare parameters, check the body, enforce definite return.
     pub(crate) fn check_params_and_body(&mut self, f: &mut Func, owner_type: Option<&str>) {
         // D-ARROW-CONTROL1=A: an explicit *value* result contract makes the
-        // final expression of a multiline body its normal result. Void / Unit
-        // and fallible Void (`Void ? …`) keep a trailing expression as a
+        // final expression of a multiline body its normal result. () / Unit
+        // and fallible () (`() ? …`) keep a trailing expression as a
         // statement — rewriting `print(...)` into `return print(...)` would
         // force value-context inference (E0116). Lower after parsing so
         // source-preserving formatter paths keep the written expression
@@ -494,7 +494,7 @@ impl<'a> Checker<'a> {
 
 fn inline_ffi_scalar(ty: &Type) -> bool {
     matches!(ty, Type::Int | Type::Float | Type::IntN { bits: 8 | 16 | 32 | 64, .. } | Type::Float32 | Type::Bool)
-        || matches!(ty, Type::Named(name) if name == Syntax::TYPE_VOID || name == "Unit")
+        || matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
 }
 
 fn inline_asm_integer(ty: &Type) -> bool {
@@ -503,7 +503,7 @@ fn inline_asm_integer(ty: &Type) -> bool {
 
 fn inline_asm_integer_or_void(ty: &Type) -> bool {
     inline_asm_integer(ty)
-        || matches!(ty, Type::Named(name) if name == Syntax::TYPE_VOID || name == "Unit")
+        || matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
 }
 
 fn asm_register_known(reg: &str) -> bool {
@@ -1266,6 +1266,7 @@ pub(crate) fn synthesize_delegation_method(
         )),
         method: sig.name.clone(),
         method_span: zero,
+        owner_type_args: Vec::new(),
         type_args: Vec::new(),
         args,
         recv_type: None,
@@ -1282,13 +1283,14 @@ pub(crate) fn synthesize_delegation_method(
     // Build the `self` param.
     let self_param = Param {
         convention: AccessConvention::Read,
+        root: false,
         name: Syntax::KW_SELF.to_string(),
         name_span: zero,
         ty: Type::Named(String::new()), // S27: sema fills in the actual type name
         ty_span: zero,
         default: None,
         variadic: false,
-        variadic_bound_list: None, declared_view_from_names: None,
+        variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: crate::AST::ParamZone::Either,
     };
 
     let mut params = vec![self_param];
@@ -1360,13 +1362,14 @@ pub(crate) fn synthesize_default_method(
     let zero = Span::new(0, 0);
     let self_param = Param {
         convention: AccessConvention::Read,
+        root: false,
         name: Syntax::KW_SELF.to_string(),
         name_span: zero,
         ty: Type::Named(String::new()), // S27: sema fills in the actual type name
         ty_span: zero,
         default: None,
         variadic: false,
-        variadic_bound_list: None, declared_view_from_names: None,
+        variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: crate::AST::ParamZone::Either,
     };
     let mut params = vec![self_param];
     params.extend(

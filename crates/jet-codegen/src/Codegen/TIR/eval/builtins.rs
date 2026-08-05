@@ -1,4 +1,5 @@
 //! Exhaustive TBuiltinOp dispatch (#777).
+use crate::AST::{CtFloat, Type};
 use crate::Comptime::Builtins::{apply_method, apply_mutating, apply_static_type_method};
 use crate::Comptime::CollectionEval;
 use crate::Comptime::CtValue;
@@ -6,6 +7,164 @@ use crate::Diagnostics::{Diagnostic, Span};
 use crate::Codegen::TIR::TBuiltinOp;
 use crate::Syntax;
 use super::unsupported;
+
+fn eval_zip_source(value: &CtValue, span: Span) -> Result<Vec<CtValue>, Diagnostic> {
+    if let Some((items, _)) = super::progress_iter_parts(value) {
+        return Ok(items);
+    }
+    match value {
+        CtValue::List(items) => Ok(items.clone()),
+        _ => Err(unsupported("zip input", span)),
+    }
+}
+
+fn coerce_zip_fill(value: CtValue, target: &Type) -> CtValue {
+    let target = match target {
+        Type::Option(inner) | Type::Tagged { inner, .. } => {
+            return coerce_zip_fill(value, inner);
+        }
+        _ => target,
+    };
+    match (value, target) {
+        (CtValue::Int(value), Type::Float) => CtValue::Float(CtFloat::f64(value as f64)),
+        (CtValue::Int(value), Type::Float32) => CtValue::Float(CtFloat::f32(value as f32)),
+        (CtValue::Float(value), Type::Float) => CtValue::Float(CtFloat::f64(value.as_f64())),
+        (CtValue::Float(value), Type::Float32) => CtValue::Float(CtFloat::f32(value.as_f32())),
+        (value, Type::Tagged { inner, .. }) => coerce_zip_fill(value, inner),
+        (value, _) => value,
+    }
+}
+
+fn zip_none_type(ty: &Type) -> Type {
+    match ty {
+        Type::Option(inner) => zip_none_type(inner),
+        Type::Tagged { inner, .. } => zip_none_type(inner),
+        _ => ty.clone(),
+    }
+}
+
+fn eval_zip_family(
+    recv: &CtValue,
+    args: &[CtValue],
+    tuple_struct: &str,
+    mode: crate::Codegen::TIR::TZipMode,
+    fields: &[String],
+    input_count: usize,
+    fill_mode: crate::Codegen::TIR::TZipFillMode,
+    field_types: &[Type],
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    if input_count == 0 {
+        return Ok(super::progress_iter_value(Vec::new(), true));
+    }
+    let mut columns = Vec::with_capacity(input_count);
+    columns.push(eval_zip_source(recv, span)?);
+    for value in args.iter().take(input_count.saturating_sub(1)) {
+        columns.push(eval_zip_source(value, span)?);
+    }
+    if columns.len() != input_count {
+        return Err(unsupported("zip input arity", span));
+    }
+    let fill_args = &args[input_count.saturating_sub(1)..];
+    if mode == crate::Codegen::TIR::TZipMode::Strict
+        && columns.iter().any(|column| column.len() != columns[0].len())
+    {
+        return Err(Diagnostic::error(
+            "E0128",
+            "zip inputs have different lengths".to_string(),
+            "strict `zip` requires every input to end on the same row".to_string(),
+            "use `zip_short` or `zip_pad` when lengths may differ".to_string(),
+            Some(span),
+        ));
+    }
+    let row_count = match mode {
+        crate::Codegen::TIR::TZipMode::Strict | crate::Codegen::TIR::TZipMode::Short => {
+            columns.iter().map(Vec::len).min().unwrap_or(0)
+        }
+        crate::Codegen::TIR::TZipMode::Pad => columns.iter().map(Vec::len).max().unwrap_or(0),
+    };
+    let fills_for = |index: usize| -> CtValue {
+        match fill_mode {
+            crate::Codegen::TIR::TZipFillMode::DefaultNone => CtValue::None(
+                field_types
+                    .get(index)
+                    .map(zip_none_type)
+                    .unwrap_or(Type::Int),
+            ),
+            crate::Codegen::TIR::TZipFillMode::Common => {
+                fill_args
+                    .first()
+                    .cloned()
+                    .map(|value| {
+                        coerce_zip_fill(
+                            value,
+                            field_types.get(index).unwrap_or(&Type::Int),
+                        )
+                    })
+                    .unwrap_or_else(|| {
+                        CtValue::None(
+                            field_types
+                                .get(index)
+                                .map(zip_none_type)
+                                .unwrap_or(Type::Int),
+                        )
+                    })
+            }
+            crate::Codegen::TIR::TZipFillMode::Columns => {
+                let field = fields.get(index).map(String::as_str).unwrap_or("");
+                match fill_args.first() {
+                    Some(CtValue::Struct { fields, .. }) => fields
+                        .iter()
+                        .find(|(name, _)| {
+                            name == field || name.strip_prefix("user_") == Some(field)
+                        })
+                        .map(|(_, value)| {
+                            coerce_zip_fill(
+                                value.clone(),
+                                field_types.get(index).unwrap_or(&Type::Int),
+                            )
+                        })
+                        .unwrap_or_else(|| {
+                            CtValue::None(
+                                field_types
+                                    .get(index)
+                                    .map(zip_none_type)
+                                    .unwrap_or(Type::Int),
+                            )
+                        }),
+                    _ => CtValue::None(
+                        field_types
+                            .get(index)
+                            .map(zip_none_type)
+                            .unwrap_or(Type::Int),
+                    ),
+                }
+            }
+        }
+    };
+    let mut rows = Vec::with_capacity(row_count);
+    for row in 0..row_count {
+        let values = columns
+            .iter()
+            .enumerate()
+            .map(|(index, column)| {
+                column
+                    .get(row)
+                    .cloned()
+                    .unwrap_or_else(|| fills_for(index))
+            })
+            .collect::<Vec<_>>();
+        rows.push(CtValue::Struct {
+            type_name: tuple_struct.to_string(),
+            fields: fields
+                .iter()
+                .cloned()
+                .zip(values)
+                .collect(),
+        });
+    }
+    Ok(super::progress_iter_value(rows, true))
+}
 
 pub(super) fn eval_builtin(
     op: &TBuiltinOp,
@@ -27,6 +186,9 @@ pub(super) fn eval_builtin(
         TBuiltinOp::InsertList => apply_mutating(recv, "insert", args, span),
         TBuiltinOp::RemoveMap => apply_mutating(recv, "remove", args, span),
         TBuiltinOp::RemoveList { .. } => apply_mutating(recv, "remove", args, span),
+        TBuiltinOp::CountList => apply_method(recv, "count", args, span),
+        TBuiltinOp::ExtendList => apply_mutating(recv, "extend", args, span),
+        TBuiltinOp::ConcatList => apply_method(recv, "concat", args, span),
         TBuiltinOp::GetMap => apply_method(recv, "get", args, span),
         TBuiltinOp::GetList => apply_method(recv, "get", args, span),
         TBuiltinOp::First => apply_method(recv, "first", args, span),
@@ -100,10 +262,34 @@ pub(super) fn eval_builtin(
         TBuiltinOp::Windows => apply_method(recv, "windows", args, span),
         TBuiltinOp::Indexed { .. } => apply_method(recv, "indexed", args, span),
         TBuiltinOp::Indexes => apply_method(recv, "indexes", args, span),
-        TBuiltinOp::Zip { .. } => apply_method(recv, "zip", args, span),
+        TBuiltinOp::Zip {
+            tuple_struct,
+            mode,
+            fields,
+            input_count,
+            fill_mode,
+            field_types,
+            ..
+        } => eval_zip_family(
+            recv,
+            &args,
+            tuple_struct,
+            *mode,
+            fields,
+            *input_count,
+            *fill_mode,
+            field_types,
+            span,
+        ),
         TBuiltinOp::OptionZip { .. } => apply_method(recv, "zip", args, span),
         TBuiltinOp::IterToList => apply_method(recv, "to_list", args, span),
-        TBuiltinOp::ListLazy => apply_method(recv, "lazy", args, span),
+        TBuiltinOp::ListLazy => {
+            let value = apply_method(recv, "lazy", args, span)?;
+            let CtValue::List(items) = value else {
+                return Err(unsupported("List.lazy result", span));
+            };
+            Ok(super::progress_iter_value(items, true))
+        }
         TBuiltinOp::IterCollect => apply_method(recv, "collect", args, span),
         // From-ctors: recv is the source list/bytes (see method_calls.rs).
         TBuiltinOp::SetFrom => CollectionEval::from_list(Syntax::TYPE_SET, recv, span),

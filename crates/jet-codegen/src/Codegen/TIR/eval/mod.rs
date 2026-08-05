@@ -52,6 +52,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Condvar, Mutex, OnceLock};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::AST::{Expr, Func, ProgramBundle, Stmt, Type};
 use super::Cx;
@@ -94,6 +95,86 @@ pub(super) fn unsupported(what: &str, span: Span) -> Diagnostic {
         "use a simpler form, or run via `jet build` / `jet run`".to_string(),
         Some(span),
     )
+}
+
+pub(super) fn progress_now() -> f64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs_f64())
+        .unwrap_or(0.0)
+}
+
+pub(super) fn progress_elapsed(started_at: f64) -> f64 {
+    (progress_now() - started_at).max(0.0)
+}
+
+pub(super) fn progress_no_color() -> bool {
+    std::env::var_os("NO_COLOR").is_some()
+}
+
+pub(super) fn progress_emit(
+    sink: Option<&Arc<Mutex<DevSink>>>,
+    text: &str,
+) {
+    use std::io::IsTerminal;
+
+    let tty = std::io::stdout().is_terminal();
+    if let Some(sink) = sink {
+        let mut sink = sink.lock().expect("evaluator sink poisoned");
+        if tty {
+            sink.stdout.push('\r');
+        }
+        sink.stdout.push_str(text);
+        if !tty {
+            sink.stdout.push('\n');
+        }
+    }
+}
+
+pub(super) fn progress_source_has_exact_total(expr: &TExpr) -> bool {
+    matches!(
+        &expr.kind,
+        TIR::TExprKind::BuiltinMethod {
+            op: TIR::TBuiltinOp::ListLazy,
+            ..
+        }
+    )
+}
+
+pub(super) fn progress_iter_value(items: Vec<CtValue>, known_total: bool) -> CtValue {
+    CtValue::Struct {
+        type_name: "__JetIter".to_string(),
+        fields: vec![
+            ("items".to_string(), CtValue::List(items)),
+            ("known_total".to_string(), CtValue::Bool(known_total)),
+        ],
+    }
+}
+
+pub(super) fn progress_iter_parts(value: &CtValue) -> Option<(Vec<CtValue>, bool)> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return None;
+    };
+    if type_name != "__JetIter" {
+        return None;
+    }
+    let items = fields.iter().find_map(|(name, value)| {
+        (name == "items").then(|| match value {
+            CtValue::List(items) => Some(items.clone()),
+            _ => None,
+        })
+    })??;
+    let known_total = fields
+        .iter()
+        .find_map(|(name, value)| {
+            (name == "known_total").then(|| match value {
+                CtValue::Bool(value) => Some(*value),
+                _ => None,
+            })
+        })
+        .flatten()
+        .unwrap_or(true);
+    Some((items, known_total))
 }
 
 pub(super) fn range_window(
@@ -1564,6 +1645,14 @@ fn seed_fragment_funcs(cx: &mut Cx, funcs: &HashMap<String, &Func>) {
                 .map(|parameter| parameter.name.clone())
                 .collect(),
         );
+        cx.fn_type_param_order.insert(
+            name.clone(),
+            function
+                .type_params
+                .iter()
+                .map(|parameter| parameter.name.clone())
+                .collect(),
+        );
         cx.sigs.insert(
             name.clone(),
             function
@@ -1595,6 +1684,7 @@ fn seed_fragment_funcs(cx: &mut Cx, funcs: &HashMap<String, &Func>) {
                     .collect(),
                 ret: function.return_type.clone().map(Box::new),
                 effect_bound: None, return_view_provenance: None,
+                param_contract: None,
             },
         );
     }

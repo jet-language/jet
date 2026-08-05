@@ -335,7 +335,7 @@ pub(super) fn core_call_args_in_subset(
             });
     }
     args.iter()
-        .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals))
+        .all(|a| expr_in_subset(&a.expr, cx, locals))
 }
 
 /// c109 Phase 13: is a closure-taking core call (`tasks.spawn`/`http.serve`/

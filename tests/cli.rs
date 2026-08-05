@@ -4593,6 +4593,53 @@ fn expand_json_is_canonical_and_lens_scoped() {
     assert!(!stdout.contains("inline —"), "human lens header leaked into JSON: {stdout}");
 }
 
+fn expand_layout_fixture() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/expand_layout_facts.jet")
+}
+
+#[test]
+fn expand_layout_human_and_json_are_deterministic() {
+    let fixture = expand_layout_fixture();
+    let run = || {
+        Command::new(jet())
+            .args(["inspect", "expand", "--facts", "layout"])
+            .arg(&fixture)
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap()
+    };
+    let first = run();
+    let second = run();
+    assert_eq!(first.status.code(), Some(0));
+    assert_eq!(first.stdout, second.stdout, "layout text must be byte-stable");
+    let human = scrub_fixture(&String::from_utf8_lossy(&first.stdout), &fixture);
+    assert!(!human.contains('\u{1b}'), "NO_COLOR leaked ANSI: {human:?}");
+    for type_name in ["PlainPacket", "CPacket", "ColumnPacket", "PacketState"] {
+        assert!(human.contains(&format!("{type_name}.$layout")), "{type_name}: {human}");
+    }
+    assert!(human.contains("size=unknown") && human.contains("offset=unknown"));
+    check_snapshot("expand_layout.txt", &human);
+
+    let json_run = || {
+        Command::new(jet())
+            .args(["inspect", "expand", "--facts", "layout", "--json"])
+            .arg(&fixture)
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap()
+    };
+    let json_first = json_run();
+    let json_second = json_run();
+    assert_eq!(json_first.status.code(), Some(0));
+    assert_eq!(json_first.stdout, json_second.stdout, "layout JSON must be byte-stable");
+    let json = scrub_fixture(&String::from_utf8_lossy(&json_first.stdout), &fixture);
+    assert!(parse_json(&json).is_ok(), "layout JSON must parse: {json}");
+    assert!(json.contains("\"selection\":\"layout\""));
+    assert!(json.contains("\"kind\":\"c\"") && json.contains("\"kind\":\"columnar\""));
+    assert!(json.contains("\"type\":\"PacketState\"") && json.contains("\"size\":null"));
+    assert!(json.contains("\"offset\":null"));
+}
+
 #[test]
 fn expand_json_bare_projects_every_lens() {
     let p = expand_fixture();

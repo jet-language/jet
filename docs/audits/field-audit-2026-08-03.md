@@ -313,7 +313,7 @@ Evidence: [encoding decisions](../spec/encoding-decisions.md),
    signature facts to `jet inspect expand`, including machine-readable output.
    Active #1388 owns general `inspect expand --json`. Tower #1397 is its blocked
    non-duplicate successor after both #1388 and #1396 for the two new lenses.
-7. **P1 — Make Python API parity a release gate.** Tower #1406 owns the closed
+7. **P1 — Make Python API parity a release gate.** Tower #1442 owns the closed
    method-level Core-versus-Python ledger. Tower #1398 consumes that ledger and
    owns the release gate. Extend the Core API rubric and reuse the agent corpus
    machinery for independently minimized beginner and expert fixtures. Card
@@ -340,8 +340,8 @@ Evidence: [encoding decisions](../spec/encoding-decisions.md),
 | Exact Decimal and BigInt JSON numbers | #1395, after #1394 | D-JSON-EXACTNUM1=A ratified | Blocked |
 | Signature-preserving callable policies | #1396, after #1393 | Ballot produced, then implemented by card | Blocked research |
 | Derive and callable inspection lenses | #1397, after #1388 and #1396 | Existing inspect law | Blocked |
-| Method-level Core-versus-Python ledger | #1406 | Existing API laws | Ready |
-| Python API release gate | #1398, after #1392–#1397 and #1406 | Audit policy | Blocked |
+| Method-level Core-versus-Python ledger | #1442 | Existing API laws | Ready |
+| Python API release gate | #1398, after #1392–#1397 and #1442 | Audit policy | Blocked |
 
 ## Existing ownership and duplicate check
 
@@ -357,7 +357,7 @@ Evidence: [encoding decisions](../spec/encoding-decisions.md),
   Python baseline and is currently blocked by #1170; it does not own this Core
   API inventory.
 
-Cards #1392–#1398 and #1406 are the durable work owners. D-APILABEL1=A and
+Cards #1392–#1398 and #1442 are the durable work owners. D-APILABEL1=A and
 D-JSON-EXACTNUM1=A are ratified. Card #1396 must prepare the callable-policy
 ballot and then implement its ratified result. The audit remains evidence and
 does not act as a second backlog.

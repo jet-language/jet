@@ -10,7 +10,7 @@ use crate::Codegen::is_json_type_name;
 use crate::Codegen::mangle;
 use crate::Codegen::net_handle_rust_type;
 use crate::Codegen::TIR::ast_operand_is_integer;
-use crate::Codegen::TIR::call_return_type;
+use crate::Codegen::TIR::{call_return_type, call_return_type_with_args};
 use crate::Codegen::TIR::clone_env;
 use crate::Codegen::TIR::int_lit_type;
 use crate::Codegen::TIR::is_numeric_bounds_const;
@@ -18,6 +18,7 @@ use crate::Codegen::TIR::ListSpreadPart;
 use crate::Codegen::TIR::lower_enum_arg;
 use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::TLocal;
+use crate::Codegen::TIR::TStmt;
 use crate::Codegen::TIR::TMethodRef;
 use crate::Codegen::TIR::lower_extern_call_arg;
 use crate::Codegen::TIR::lower::is_binding_free_user_variant_pattern_test;
@@ -142,6 +143,7 @@ fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             receiver,
             method,
             method_span,
+            owner_type_args,
             type_args,
             args,
             recv_type,
@@ -150,10 +152,11 @@ fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         else {
             unreachable!("method chain contains only method calls")
         };
-        lowered_receiver = Some(lower_method_call(
+        let lowered = lower_method_call(
             receiver,
             method,
             *method_span,
+            owner_type_args,
             type_args,
             args,
             recv_type,
@@ -161,7 +164,13 @@ fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             cx,
             env,
             lowered_receiver,
-        ));
+        );
+        // D-APILABEL1=A: a method whose labels reordered its arguments keeps
+        // the same source evaluation order as a free call.
+        lowered_receiver = Some(match source_arg_order(args) {
+            Some(order) => preserve_source_arg_order(lowered, &order, args.len(), method_span.start as u32),
+            None => lowered,
+        });
     }
 
     lowered_receiver.expect("method chain is non-empty")
@@ -234,6 +243,7 @@ fn expr_tag(e: &Expr) -> &'static str {
         Expr::Present(..) => "Present",
         Expr::Absent(_) => "Absent",
         Expr::Todo { .. } => "Todo",
+        Expr::NoElse(_) => "NoElse",
         Expr::ReduceMarker(..) => "ReduceMarker",
         Expr::Ok(..) => "Ok",
         Expr::Err(..) => "Err",
@@ -316,12 +326,26 @@ pub(crate) fn join_print_args(
     cx: &Cx,
     env: &mut LowerEnv,
 ) -> TExpr {
-    let mut parts = Vec::with_capacity(args.len() * 2);
-    for (index, arg) in args.iter().enumerate() {
+    join_print_values(
+        args.iter()
+            .map(|arg| lower_expr(&arg.expr, cx, env)),
+        cx,
+    )
+}
+
+pub(crate) fn join_print_values(
+    values: impl IntoIterator<Item = TExpr>,
+    cx: &Cx,
+) -> TExpr {
+    let values: Vec<TExpr> = values
+        .into_iter()
+        .map(|value| lower_display_value(value, cx))
+        .collect();
+    let mut parts = Vec::with_capacity(values.len() * 2);
+    for (index, value) in values.into_iter().enumerate() {
         if index > 0 {
             parts.push(TStrPart::Lit("\n".to_string()));
         }
-        let value = lower_display_value(lower_expr(&arg.expr, cx, env), cx);
         parts.push(TStrPart::Interp(value, crate::AST::StrFormat::Display));
     }
     TExpr {
@@ -348,6 +372,7 @@ fn lower_display_value(value: TExpr, cx: &Cx) -> TExpr {
         kind: TExprKind::MethodCall {
             recv: Box::new(value),
             method: TMethodRef::bare("display"),
+            type_args: Vec::new(),
             args: Vec::new(),
             source_first_string_literal: None,
             operator_line: None,
@@ -566,7 +591,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     lower_one_call_arg(a, conv, env, cx)
                 })
                 .collect();
-            TExpr {
+            let lowered = TExpr {
                 ty: ret_ty,
                 kind: TExprKind::FnValue {
                     kind: TFnValueKind::Call {
@@ -574,6 +599,12 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         args: targs,
                     },
                 },
+            };
+            // D-APILABEL1=A: a function type may declare a call contract, so a
+            // call through the value can reorder just like a named one.
+            match source_arg_order(args) {
+                Some(order) => preserve_source_arg_order(lowered, &order, args.len(), e.span().start as u32),
+                None => lowered,
             }
         }
         Expr::Unary(op, inner, _) => {
@@ -959,7 +990,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         lower_one_call_arg(a, conv, env, cx)
                     })
                     .collect();
-                return TExpr {
+                let lowered = TExpr {
                     ty: ret_ty,
                     kind: TExprKind::FnValue {
                         kind: TFnValueKind::Call {
@@ -967,6 +998,12 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             args: targs,
                         },
                     },
+                };
+                return match source_arg_order(&call.args) {
+                    Some(order) => preserve_source_arg_order(
+                        lowered, &order, call.args.len(), call.name_span.start as u32,
+                    ),
+                    None => lowered,
                 };
             }
             if call.name == Syntax::RESOURCE_CLOSE
@@ -1219,7 +1256,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 // `unqualified_inline` arm) → `{root}user_{mangled}(args)`.
                 if let Some(mangled_key) = cx.unqualified_inline.get(&call.name).cloned() {
                     let sig = cx.sigs.get(&mangled_key).cloned();
-                    let args = call
+                    let args: Vec<_> = call
                         .args
                         .iter()
                         .enumerate()
@@ -1232,11 +1269,17 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         })
                         .collect();
                     return TExpr {
-                        ty: call_return_type(cx, &mangled_key),
+                        ty: call_return_type_with_args(
+                            cx,
+                            &mangled_key,
+                            &call.type_args,
+                            &args,
+                        ),
                         kind: TExprKind::ModuleCall {
                             form: TModuleCallForm::InlineMangled {
                                 mangled: mangled_key,
                             },
+                            type_args: call.type_args.clone(),
                             args,
                         },
                     };
@@ -1274,10 +1317,59 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                 rust_mod,
                                 rust_fn: mangle(&fn_name).to_string(),
                             },
+                            type_args: call.type_args.clone(),
                             args,
                         },
                     };
                 }
+            }
+            // D-ZIPPAD1: free zip-family calls carry their complete result type
+            // from sema. Lower the same variadic contract as the method form;
+            // no ordinary function lookup or codegen-side type inference is
+            // involved.
+            if matches!(call.name.as_str(), "zip" | "zip_short" | "zip_pad")
+                && !cx.sigs.contains_key(&call.name)
+                && call.resolved_ret.is_some()
+            {
+                let is_pad = call.name == "zip_pad";
+                let mut inputs = Vec::new();
+                let mut fields = Vec::new();
+                let mut fills = Vec::new();
+                for arg in &call.args {
+                    match (is_pad, arg.label.as_ref().map(|(name, _)| name.as_str())) {
+                        (true, Some("fill")) | (true, Some("fills")) => {
+                            fills.push(lower_expr(&arg.expr, cx, env));
+                        }
+                        _ => {
+                            let index = fields.len();
+                            let name = arg.label.as_ref().map(|(name, _)| name.as_str());
+                            let field = name.map_or_else(
+                                || {
+                                    ["a", "b", "c", "d", "e", "f"]
+                                        .get(index)
+                                        .map_or_else(|| format!("column_{index}"), |name| (*name).to_string())
+                                },
+                                str::to_string,
+                            );
+                            fields.push(field);
+                            inputs.push(lower_expr(&arg.expr, cx, env));
+                        }
+                    }
+                }
+                let ret = call.resolved_ret.as_ref().expect("zip result resolved by sema");
+                if inputs.is_empty() {
+                    return crate::Codegen::TIR::lower_empty_zip_family(ret, &call.name);
+                }
+                let mut all = inputs.into_iter();
+                let first = all.next().expect("non-empty zip inputs");
+                return crate::Codegen::TIR::lower_zip_family(
+                    first,
+                    all.collect(),
+                    fills,
+                    fields,
+                    &call.name,
+                    Some(ret),
+                );
             }
             // D-BIGINT1 / D-DECIMAL1: `BigInt(…)` / `Decimal(…)` constructors.
             if !env.locals.contains_key(&call.name)
@@ -1389,48 +1481,37 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 .entry(call.name.clone())
                 .or_default()
                 .push(
-                    args.iter()
-                        .map(|arg| {
-                            if arg.widen_to_vec {
-                                if let Type::FixedList { elem, .. } = &arg.value.ty {
-                                    return Type::List(elem.clone());
+                    {
+                        let mut shape: Vec<Type> = args
+                            .iter()
+                            .map(|arg| {
+                                if arg.widen_to_vec {
+                                    if let Type::FixedList { elem, .. } = &arg.value.ty {
+                                        return Type::List(elem.clone());
+                                    }
                                 }
-                            }
-                            arg.value.ty.clone()
-                        })
-                        .collect(),
+                                arg.value.ty.clone()
+                            })
+                            .collect();
+                        shape.extend(call.type_args.iter().cloned());
+                        shape
+                    },
                 );
-            let declared_ret = call_return_type(cx, &call.name);
-            let ret = match (
-                cx.fn_type_params.get(&call.name),
-                cx.sigs.get(&call.name),
-            ) {
-                (Some(params), Some(sig)) if !params.is_empty() => {
-                    let mut subst = std::collections::HashMap::new();
-                    if sig.iter().zip(&args).all(|((_, template), actual)| {
-                        crate::Codegen::TIR::bind_generic_type(
-                            template,
-                            &actual.value.ty,
-                            params,
-                            &mut subst,
-                        )
-                    }) {
-                        crate::Generics::substitute_type(&declared_ret, &subst)
-                    } else {
-                        declared_ret
-                    }
-                }
-                _ => declared_ret,
-            };
-            TExpr {
+            let ret = call_return_type_with_args(cx, &call.name, &call.type_args, &args);
+            let lowered = TExpr {
                 ty: ret,
                 kind: TExprKind::Call {
                     name: cx.jit_local_call_prefix.as_ref().map_or_else(
                         || call.name.clone(),
                         |prefix| format!("{prefix}{}", mangle(&call.name)),
                     ),
+                    type_args: call.type_args.clone(),
                     args,
                 },
+            };
+            match source_arg_order(&call.args) {
+                Some(order) => preserve_source_arg_order(lowered, &order, call.args.len(), call.name_span.start as u32),
+                None => lowered,
             }
         }
         // c109 Phase 6: a method call. The gate (`method_call_in_subset`) admitted
@@ -1789,6 +1870,30 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         // covered function never reaches here with a non-struct receiver (sema
         // guarantees field reads target struct values).
         Expr::Field(receiver, member, _) => {
+            // D-LAYOUT-FACTS1=B: derive bodies bind their type parameter as a
+            // comptime `TypeInfo` value, but fragment lowering has no ordinary
+            // local type fact for that binding. Keep `$layout` on the field
+            // path so `T.$layout` is not mistaken for an enum literal.
+            let compiler_fact_receiver = match receiver.as_ref() {
+                // A qualified type path lowers as a field chain. The final
+                // segment is still the type name (`module.Packet`), while a
+                // value path such as `info.layout` remains lowercase.
+                Expr::Ident(name, _) | Expr::Field(_, name, _) => {
+                    name.chars().next().is_some_and(char::is_uppercase)
+                }
+                _ => false,
+            };
+            if member == Syntax::COMPILER_FACT_LAYOUT && compiler_fact_receiver {
+                let recv = lower_expr(receiver, cx, env);
+                return TExpr {
+                    ty: Type::Named(Syntax::TYPE_LAYOUT_INFO.to_string()),
+                    kind: TExprKind::Field {
+                        recv: Box::new(recv),
+                        field: member.clone(),
+                        boxed: false,
+                    },
+                };
+            }
             // c109 Phase 4: a *unit* enum literal (`Light.Yellow`) reaches codegen as
             // a `Field` whose receiver is the enum-name ident (sema re-types but does
             // not rewrite the node). The gate proved this is a covered enum + unit
@@ -1817,6 +1922,21 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         ty: Type::Named("DataEvent".to_string()),
                         kind: TExprKind::EnumLit {
                             enum_type: "DataEvent".to_string(),
+                            variant: member.clone(),
+                            payload: TEnumPayload::Unit,
+                        },
+                    };
+                }
+                // D-LISTREMOVE1/F: `RemoveBy.Val` / `RemoveBy.Slot` is a
+                // built-in enum with a registered type fact, so it does not
+                // pass through the user-enum field path above.
+                if enum_name == crate::Syntax::TYPE_REMOVE_BY
+                    && matches!(member.as_str(), "Val" | "Slot")
+                {
+                    return TExpr {
+                        ty: Type::Named(crate::Syntax::TYPE_REMOVE_BY.to_string()),
+                        kind: TExprKind::EnumLit {
+                            enum_type: crate::Syntax::TYPE_REMOVE_BY.to_string(),
                             variant: member.clone(),
                             payload: TEnumPayload::Unit,
                         },
@@ -2044,6 +2164,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         kind: TExprKind::MethodCall {
                             recv: Box::new(recv),
                             method: crate::Codegen::TIR::TMethodRef::inherent(member),
+                            type_args: Vec::new(),
                             args: vec![],
                             source_first_string_literal: None,
                             operator_line: None,
@@ -2333,6 +2454,27 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             span,
             kind,
         } => {
+            // D-LAYOUT-FACTS1=B: the parser stores `[.field]` as an internal
+            // selector identifier. Project it through the same `Field` TIR
+            // node used by every other comptime struct read; the evaluator
+            // resolves the selected `LayoutField` from `LayoutInfo.fields`.
+            if let Expr::Ident(name, _) = index.as_ref() {
+                if let Some(field_name) = Syntax::layout_selector_name(name) {
+                    let base_t = lower_expr(base, cx, env);
+                    return TExpr {
+                        ty: Type::Named(Syntax::TYPE_LAYOUT_FIELD.to_string()),
+                        kind: TExprKind::Field {
+                            recv: Box::new(base_t),
+                            field: format!(
+                                "{}{}",
+                                Syntax::LAYOUT_FIELD_PROJECTION_PREFIX,
+                                field_name
+                            ),
+                            boxed: false,
+                        },
+                    };
+                }
+            }
             // Sema's IndexKind::Unknown must not abort the interpreter path;
             // treat it as a list index and let runtime miss if wrong.
             let kind = if matches!(kind, IndexKind::Unknown) {
@@ -2531,6 +2673,16 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 },
             }
         }
+        // Card #1440: the dead end of an else-less exhaustive dispatch. Sema
+        // proved coverage (E0307); like Todo, the result `ty` is never
+        // load-bearing — the node diverges on every tier.
+        Expr::NoElse(span) => {
+            let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
+            TExpr {
+                ty: Type::Named("Unit".to_string()),
+                kind: TExprKind::Unreachable { line },
+            }
+        }
         // c109 Phase 8: `Ok(x)` → `Ok(x)`. The result is a `Result` whose ok type is
         // the inner's; the err type is unresolved here (Rust infers it from the
         // function return context, exactly as the AST path's bare `Ok(x)` does).
@@ -2675,6 +2827,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     params,
                     ret,
                     effect_bound: None,
+                    param_contract: None,
                     return_view_provenance: lam.meta.return_view_provenance.clone(),
                 },
                 kind: TExprKind::Lambda(Box::new(tl)),
@@ -2900,4 +3053,182 @@ pub(crate) fn lower_owned_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
     } else {
         lowered
     }
+}
+
+/// D-APILABEL1=A: keep the ratified evaluation order across a label reorder.
+///
+/// The binder rewrote the argument list into declaration order, so lowering
+/// it straight through would run the supplied expressions in declaration
+/// order too. `order` lists the argument slots in the order the caller wrote
+/// them; each is evaluated into a temporary first, and the call then reads
+/// the temporaries in declaration order.
+///
+/// The result is an ordinary `InlineBlock`, so AOT emit, the interpreter, and
+/// the JIT all keep the same meaning without an engine-specific rule.
+/// `order` lists the *lowered* argument slots in the order the caller wrote
+/// them, taken from each source argument's `flags.source_index`. Slots the
+/// caller did not write (a filled default) are absent — a default runs after
+/// every supplied argument anyway, in the declaration order the rewritten list
+/// already has.
+pub(crate) fn source_arg_order(args: &[crate::AST::CallArg]) -> Option<Vec<usize>> {
+    if !args.iter().any(|arg| arg.flags.source_index.is_some()) {
+        return None;
+    }
+    let mut slots: Vec<usize> = (0..args.len())
+        .filter(|slot| args[*slot].flags.source_index.is_some())
+        .collect();
+    slots.sort_by_key(|slot| args[*slot].flags.source_index);
+    Some(slots)
+}
+
+pub(crate) fn preserve_source_arg_order(
+    mut call: TExpr,
+    order: &[usize],
+    ast_arg_count: usize,
+    site: u32,
+) -> TExpr {
+    let Some(args) = call_args_mut(&mut call.kind) else {
+        return call;
+    };
+    // A `#Root` dot call (D-CALLDUAL1=E) lowers its receiver into slot 0 of the
+    // TIR argument list, while `order` was computed over the AST list the
+    // receiver was stripped from. Recovering the offset from the two lengths
+    // keeps this right for every node shape instead of special-casing one.
+    let offset = args.len().saturating_sub(ast_arg_count);
+    let order: Vec<usize> = order.iter().map(|slot| slot + offset).collect();
+    let mut stmts = bind_arg_temporaries(args, &order, site);
+    if stmts.is_empty() {
+        return call;
+    }
+    let ty = call.ty.clone();
+    stmts.push(TStmt::ExprStmt(call));
+    TExpr {
+        ty,
+        kind: TExprKind::InlineBlock(stmts),
+    }
+}
+
+/// D-APILABEL1=A: can evaluating this argument be *observed*? Reading a place,
+/// a literal, or a borrow of one cannot, so moving such an argument across
+/// another has no effect anyone can see — and hoisting it into a temporary
+/// would be actively wrong, because that moves the place instead of passing it.
+///
+/// Conservative: anything not recognised here is assumed to have an effect.
+fn effect_free(e: &TExpr) -> bool {
+    match &e.kind {
+        TExprKind::IntLit(..)
+        | TExprKind::FloatLit(_)
+        | TExprKind::BoolLit(_)
+        | TExprKind::CharLit(_)
+        | TExprKind::Local(_)
+        | TExprKind::Unit
+        | TExprKind::DefaultLit
+        | TExprKind::CtLit(_)
+        | TExprKind::ConstRef(_) => true,
+        TExprKind::StrLit(parts) => parts.iter().all(|part| match part {
+            crate::Codegen::TIR::TStrPart::Lit(_) => true,
+            crate::Codegen::TIR::TStrPart::Interp(inner, ..) => effect_free(inner),
+        }),
+        TExprKind::Field { recv, .. } => effect_free(recv),
+        TExprKind::Borrow { place, .. } => effect_free(place),
+        TExprKind::Clone(inner) | TExprKind::Deref(inner) => effect_free(inner),
+        TExprKind::Unary { operand, .. } => effect_free(operand),
+        TExprKind::Binary { lhs, rhs, .. } => effect_free(lhs) && effect_free(rhs),
+        _ => false,
+    }
+}
+
+/// Whether this argument may be hoisted into a temporary at all.
+///
+/// What must never be hoisted is a **place**: binding `let t = bag` moves or
+/// copies it, so a `&bag` argument would have the callee write to the temporary
+/// and the caller's value would never change. That case is already excluded by
+/// `effect_free`, which is true of every place read — so a by-reference
+/// argument only reaches here when it is a computed value, and `&(t)` over a
+/// temporary holding that value is exactly right.
+///
+/// Only two decorations genuinely cannot move: an `Fn` coercion, whose `let`
+/// would be typed before the coercion rather than after, and a fixed-list
+/// widening, which emit applies to the original expression.
+fn hoistable(arg: &crate::Codegen::TIR::TCallArg) -> bool {
+    arg.fn_coerce.is_none() && !arg.widen_to_vec
+}
+
+/// The argument list of any TIR node that takes one, so the D-APILABEL1 order
+/// rule is written once rather than per call shape.
+fn call_args_mut(kind: &mut TExprKind) -> Option<&mut Vec<crate::Codegen::TIR::TCallArg>> {
+    match kind {
+        TExprKind::Call { args, .. }
+        | TExprKind::MethodCall { args, .. }
+        | TExprKind::FnFieldCall { args, .. }
+        | TExprKind::StaticCall { args, .. }
+        | TExprKind::ModuleCall { args, .. } => Some(args),
+        // A call through a function value carries its arguments one level down.
+        TExprKind::FnValue { kind: crate::Codegen::TIR::TFnValueKind::Call { args, .. } } => {
+            Some(args)
+        }
+        _ => None,
+    }
+}
+
+/// Replace each listed argument with a read of a fresh temporary, and return
+/// the `let` statements that bind them — emitted in `order`, which is source
+/// order, not declaration order.
+fn bind_arg_temporaries(
+    args: &mut [crate::Codegen::TIR::TCallArg],
+    order: &[usize],
+    site: u32,
+) -> Vec<TStmt> {
+    // Only arguments that can actually be observed need pinning down. Count
+    // them across the whole list, not just the written ones: a filled default
+    // with an effect also has to run after every supplied argument, and it
+    // sits in the call rather than in `order`. With fewer than two, nothing can
+    // be observed out of order and the call stays a plain call.
+    let observable_total = args.iter().filter(|arg| !effect_free(&arg.value)).count();
+    if observable_total < 2 {
+        return Vec::new();
+    }
+    let observable: Vec<usize> = order
+        .iter()
+        .copied()
+        .filter(|slot| {
+            args.get(*slot)
+                .is_some_and(|arg| hoistable(arg) && !effect_free(&arg.value))
+        })
+        .collect();
+    if observable.is_empty() {
+        return Vec::new();
+    }
+    let mut stmts: Vec<TStmt> = Vec::with_capacity(observable.len() + 1);
+    for (step, slot) in observable.iter().enumerate() {
+        let Some(arg) = args.get_mut(*slot) else {
+            continue;
+        };
+        // The name has to be unique across nesting: a nested reordered call is
+        // lowered as the initialiser of one of these very temporaries, and the
+        // interpreter shares one scope with it. `site` is the call's source
+        // offset, so two calls can never collide and the name stays stable
+        // across runs.
+        let temp = format!("__jet_arg{site}_{step}");
+        let ty = arg.value.ty.clone();
+        let bound = std::mem::replace(
+            &mut arg.value,
+            TExpr {
+                ty: ty.clone(),
+                // A `user` slot, not `generated`: `TStmt::Let` spells its name
+                // through `mangle`, and only `TLocal::user` reads it back the
+                // same way. The name itself is unspellable in Jet source.
+                kind: TExprKind::Local(TLocal::user(&temp)),
+            },
+        );
+        stmts.push(TStmt::Let {
+            name: temp,
+            kw: "let",
+            let_ty: crate::Codegen::TIR::TLetTy::plain(ty),
+            init: bound,
+            gc_promotion: None,
+            gc_transferred: false,
+        });
+    }
+    stmts
 }

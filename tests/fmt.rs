@@ -51,6 +51,31 @@ fn fixed_interpolation_selector_is_stable() {
 }
 
 #[test]
+fn fmt_preserves_root_receiver_declarations() {
+    let src = "fn show(#Root value: Int) { print(value) }\n";
+    let once = jet::format_source(src).expect("#Root declaration should format");
+    assert!(
+        once.contains("fn show(#Root value: Int)"),
+        "formatter dropped the #Root marker:\n{once}"
+    );
+    let twice = jet::format_source(&once).expect("formatted #Root declaration should re-format");
+    assert_eq!(once, twice, "#Root formatting must be stable");
+}
+
+#[test]
+fn fmt_canonicalizes_unit_return_types() {
+    let src = "fn run() => () ? { return Err(\"boom\") }\n";
+    let once = jet::format_source(src).expect("unit return type should format");
+    assert!(once.contains("fn run() => () ?"), "formatter lost `()`:\n{once}");
+    let twice = jet::format_source(&once).expect("formatted unit return should re-format");
+    assert_eq!(once, twice, "unit return formatting must be idempotent");
+    assert!(
+        jet::format_source("fn run() => Void ? { return Err(\"boom\") }\n").is_err(),
+        "retired Void must not be accepted by the formatter"
+    );
+}
+
+#[test]
 fn fmt_parallel_collection_adapters_are_stable() {
     let src = r#"fn run() {
     values := [1, 2, 3, 4]
@@ -1755,6 +1780,40 @@ fn fmt_comptime_splice_stability() {
 }
 
 #[test]
+fn fmt_layout_compiler_fact_and_field_selector_stability() {
+    let src = "derive T.LayoutFacts {\n    info :: T.$layout\n    selected :: info[.count]\n    full :: T.reflect().layout\n}\n\nfn run() {}\n";
+    let once = jet::format_source(src).expect("layout compiler fact should parse");
+    assert!(once.contains("T.$layout"), "fact spelling was lost:\n{once}");
+    assert!(once.contains("info[.count]"), "typed selector spelling was lost:\n{once}");
+    assert!(once.contains("T.reflect().layout"), "reflection projection was lost:\n{once}");
+    let twice = jet::format_source(&once).expect("formatted layout fact should parse");
+    assert_eq!(once, twice, "layout fact formatting must be idempotent");
+}
+
+#[test]
+fn layout_compiler_fact_rejects_unknown_and_user_owned_dollar_members() {
+    let unknown = jet::Compiler::parse_source(
+        "derive T.LayoutFacts { info :: T.$unknown }\nfn run() {}\n",
+    );
+    let unknown = unknown
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E0302")
+        .expect("unknown compiler fact should have a registered diagnostic");
+    assert!(unknown.message.contains("$unknown"), "{unknown:?}");
+    assert!(unknown.fix.contains("$layout"), "{unknown:?}");
+
+    let user_member = jet::Compiler::parse_source(
+        "struct Bad { $layout: Int }\nfn run() {}\n",
+    );
+    assert!(
+        user_member.diagnostics.iter().any(|diagnostic| diagnostic.code == "E0003"),
+        "user declarations must not claim the compiler-owned dollar member: {:?}",
+        user_member.diagnostics
+    );
+}
+
+#[test]
 fn fmt_impl_dot_trait_stability() {
     // D-IMPLDOT1=A: `impl Type.Trait { … }` round-trips unchanged.
     let src = "\
@@ -3106,4 +3165,38 @@ fn fmt_output_callable_stability() {
     }
     let twice = jet::format_source(&once).expect("formatted Output should reparse");
     assert_eq!(once, twice, "Output callable formatting must be byte-stable");
+}
+
+#[test]
+fn fmt_preserves_parameter_zones_and_public_labels() {
+    // D-APILABEL1=A: `/` closes the positional-only zone, `*` opens the
+    // label-only zone, and `timeout seconds: Int` splits the public call label
+    // from the local name. All three must round-trip byte-for-byte (fmt
+    // STABILITY — idempotence alone would not notice a dropped separator,
+    // because a dropped one stays dropped on the second pass).
+    let src = "fn connect(host: String, /, *, timeout seconds: Int = 30, tls: Bool = true) => String = host\n";
+    let once = jet::format_source(src).expect("fmt should accept parameter zones");
+    for token in ["host: String", ", /,", ", *,", "timeout seconds: Int = 30", "tls: Bool = true"] {
+        assert!(once.contains(token), "fmt dropped `{token}`:\n{once}");
+    }
+    let twice = jet::format_source(&once).expect("zoned parameters should re-fmt");
+    assert_eq!(once, twice, "parameter-zone formatting must be byte-stable");
+}
+
+#[test]
+fn fmt_keeps_reordered_and_skipped_argument_labels() {
+    // D-APILABEL1=A: a label binds by name, so fmt must never reorder a call
+    // back into declaration order nor add a label the author omitted.
+    let src = "fn run() {\n    a :: connect(\"db\", tls: false, timeout: 5)\n    b :: connect(\"db\", tls: false)\n}\n";
+    let once = jet::format_source(src).expect("fmt should accept reordered labels");
+    assert!(
+        once.contains("connect(\"db\", tls: false, timeout: 5)"),
+        "fmt reordered or relabelled the call:\n{once}"
+    );
+    assert!(
+        once.contains("connect(\"db\", tls: false)"),
+        "fmt filled in a skipped default:\n{once}"
+    );
+    let twice = jet::format_source(&once).expect("labelled call should re-fmt");
+    assert_eq!(once, twice, "argument-label formatting must be byte-stable");
 }

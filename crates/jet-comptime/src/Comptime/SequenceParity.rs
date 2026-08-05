@@ -20,6 +20,7 @@ pub(super) fn eval_sequence_method(
     recv: &CtValue,
     method: &str,
     args: &[CtValue],
+    arg_labels: &[Option<String>],
     resolved_ret: Option<&Type>,
     span: Span,
     scope: &mut HashMap<String, CtValue>,
@@ -69,6 +70,8 @@ pub(super) fn eval_sequence_method(
             | "unzip"
             | "windows"
             | "zip"
+            | "zip_short"
+            | "zip_pad"
     ) {
         return None;
     }
@@ -86,7 +89,19 @@ pub(super) fn eval_sequence_method(
             Ok(SequenceOutcome::WriteBack(CtValue::List(out)))
         })());
     }
-    Some(eval(interp, xs, method, args, resolved_ret, span, scope).map(SequenceOutcome::Value))
+    Some(
+        eval(
+            interp,
+            xs,
+            method,
+            args,
+            arg_labels,
+            resolved_ret,
+            span,
+            scope,
+        )
+        .map(SequenceOutcome::Value),
+    )
 }
 
 fn eval(
@@ -94,6 +109,7 @@ fn eval(
     xs: &[CtValue],
     method: &str,
     args: &[CtValue],
+    arg_labels: &[Option<String>],
     resolved_ret: Option<&Type>,
     span: Span,
     scope: &mut HashMap<String, CtValue>,
@@ -408,15 +424,111 @@ fn eval(
                 xs.windows(n).map(|window| CtValue::List(window.to_vec())).collect()
             })
         }
-        ("zip", [CtValue::List(other)]) => CtValue::List(
-            xs.iter()
-                .zip(other)
-                .map(|(a, b)| tuple(vec![("a", a.clone()), ("b", b.clone())]))
-                .collect(),
-        ),
+        ("zip" | "zip_short" | "zip_pad", _) => {
+            eval_zip(xs, method, args, arg_labels, span)?
+        }
         _ => return Err(unsupported(&format!("the method `.{method}` with these arguments"), span)),
     };
     Ok(value)
+}
+
+fn eval_zip(
+    first: &[CtValue],
+    method: &str,
+    args: &[CtValue],
+    arg_labels: &[Option<String>],
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let mut columns = vec![first.to_vec()];
+    let mut common_fill = None;
+    let mut column_fills = None;
+    for (index, value) in args.iter().enumerate() {
+        match arg_labels.get(index).and_then(Option::as_deref) {
+            Some("fill") => common_fill = Some(value.clone()),
+            Some("fills") => column_fills = Some(value.clone()),
+            _ => match value {
+                CtValue::List(values) => columns.push(values.clone()),
+                _ => {
+                    return Err(unsupported(
+                        "zip with a non-list argument",
+                        span,
+                    ))
+                }
+            },
+        }
+    }
+
+    if method == "zip" && columns.iter().any(|column| column.len() != columns[0].len()) {
+        return Err(Diagnostic::error(
+            "E0128",
+            "zip inputs have different lengths".to_string(),
+            "strict `zip` requires every input to end on the same row".to_string(),
+            "use `zip_short` or `zip_pad` when lengths may differ".to_string(),
+            Some(span),
+        ));
+    }
+
+    let row_count = match method {
+        "zip_pad" => columns.iter().map(Vec::len).max().unwrap_or(0),
+        _ => columns.iter().map(Vec::len).min().unwrap_or(0),
+    };
+    if columns.len() == 1 {
+        return Ok(CtValue::List(columns.pop().unwrap_or_default()));
+    }
+    let fields = (0..columns.len())
+        .map(|index| zip_field_name(index).to_string())
+        .collect::<Vec<_>>();
+    let fill_for = |index: usize| -> CtValue {
+        if let Some(value) = &common_fill {
+            return value.clone();
+        }
+        if let Some(CtValue::Struct { fields, .. }) = &column_fills {
+            let field = zip_field_name(index);
+            if let Some((_, value)) = fields.iter().find(|(name, _)| {
+                name == &field || name.strip_prefix("user_") == Some(field.as_str())
+            }) {
+                return value.clone();
+            }
+        }
+        CtValue::None(
+            columns[index]
+                .first()
+                .map(CtValue::jet_type)
+                .unwrap_or(Type::Int),
+        )
+    };
+    let rows = (0..row_count)
+        .map(|row| {
+            tuple(
+                fields
+                    .iter()
+                    .enumerate()
+                    .map(|(index, field)| {
+                        (
+                            field.as_str(),
+                            columns[index]
+                                .get(row)
+                                .cloned()
+                                .unwrap_or_else(|| fill_for(index)),
+                        )
+                    })
+                    .collect(),
+            )
+        })
+        .collect();
+    Ok(CtValue::List(rows))
+}
+
+fn zip_field_name(index: usize) -> String {
+    match index {
+        0 => "a".to_string(),
+        1 => "b".to_string(),
+        2 => "c".to_string(),
+        3 => "d".to_string(),
+        4 => "e".to_string(),
+        5 => "f".to_string(),
+        n => format!("column_{}", n + 1),
+    }
 }
 
 fn tuple(fields: Vec<(&str, CtValue)>) -> CtValue {

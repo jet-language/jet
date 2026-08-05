@@ -257,6 +257,7 @@ test('lint(): combines core rules; --docs adds the doc-gap rule only when asked'
 
 test('nextCards burndown scope: current-epoch epoch-track + sidequests, other epochs excluded', () => {
   const st = fresh();
+  st.mutate((s) => db.updateEpoch(s, 'e1', { status: 'planned' }));
   st.mutate((s) => db.addEpoch(s, { id: 'e3', name: 'E3' }));
   st.mutate((s) => db.addEpoch(s, { id: 'e4', name: 'E4' }));
   st.mutate((s) => db.setCurrentEpoch(s, 'e3'));
@@ -321,6 +322,7 @@ test('cli: tower lint --docs finds a ratified id in a doc rooted at --docs-root'
 test('cli: tower next --burndown scopes to current epoch + sidequests', () => {
   const cwd = mkdtempSync(join(tmpdir(), 'tower-next-burndown-'));
   run(cwd, ['init', '--name', 'Burndown Test']);
+  run(cwd, ['epoch', 'update', 'e1', '--status', 'planned']);
   run(cwd, ['epoch', 'add', 'e3', '--name', 'E3']);
   run(cwd, ['epoch', 'add', 'e4', '--name', 'E4']);
   run(cwd, ['epoch', 'current', 'e3']);

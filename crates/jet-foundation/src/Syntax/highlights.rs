@@ -324,7 +324,7 @@ pub const JET_HIGHLIGHT_TOKENS: &[HighlightToken] = &[
         class: HighlightClass::TypeBuiltin,
     },
     HighlightToken {
-        text: TYPE_VOID,
+        text: TYPE_UNIT,
         class: HighlightClass::TypeBuiltin,
     },
     HighlightToken {
@@ -957,7 +957,6 @@ fn is_zed_anonymous_word_token(s: &str) -> bool {
             | "U32"
             | "U64"
             | "U8"
-            | "Void"
             | "add"
             | "as"
             | "break"
@@ -1064,7 +1063,7 @@ use super::{
     TYPE_LRU, TYPE_MEASUREMENT, TYPE_PRIORITY_QUEUE, TYPE_PTR, TYPE_SELECT_BUILDER, TYPE_SET,
     TYPE_SHARED, TYPE_SHARED_GUARD, TYPE_SHARED_WEAK, TYPE_CONDITION, TYPE_SIGNAL, TYPE_SORTED_SET,
     TYPE_STREAM, TYPE_ITER, TYPE_STRING, TYPE_SUBSCRIPTION,
-    TYPE_TASKGROUP, TYPE_U16, TYPE_U32, TYPE_U64, TYPE_U8, TYPE_UTF8_ERROR, TYPE_VOID,
+    TYPE_TASKGROUP, TYPE_U16, TYPE_U32, TYPE_U64, TYPE_U8, TYPE_UTF8_ERROR, TYPE_UNIT,
     TYPE_WATCH_EVENT, TYPE_WATCH_HANDLE, TYPE_WATCH_SET,
 };
 use crate::JSON::json_escape;

@@ -14,7 +14,6 @@ use crate::Sema::Diagnostics::{
 };
 use crate::Sema::Effects::builtin_effect;
 use crate::Sema::FFI::e3211;
-use crate::Sema::substitute_param_refs;
 use crate::Syntax;
 use std::collections::HashMap;
 impl<'a> Checker<'a> {
@@ -545,6 +544,7 @@ impl<'a> Checker<'a> {
                         &mangled,
                         call.name_span,
                         call.name_span,
+                        &call.type_args,
                         &mut call.args,
                     );
                     return Some(result);
@@ -556,7 +556,7 @@ impl<'a> Checker<'a> {
                         &fn_name,
                         call.name_span,
                         call.name_span,
-                        &[],
+                        &call.type_args,
                         &mut call.args,
                     );
                     return Some(result);
@@ -666,7 +666,20 @@ impl<'a> Checker<'a> {
                 }
                 return Some(Some(Type::Named(call.name.clone())));
             }
-    
+
+            // D-ZIPPAD1: free `zip`/`zip_short`/`zip_pad` calls are built-in
+            // sequence family calls when no user function shadows the name.
+            // Check them before ordinary function lookup so arbitrary input
+            // counts keep their concrete element types.
+            if self.funcs.get(&call.name).is_none()
+                && self.lookup(&call.name).is_none()
+                && matches!(call.name.as_str(), "zip" | "zip_short" | "zip_pad")
+            {
+                if let Some(result) = self.check_zip_family_free(call) {
+                    return Some(result);
+                }
+            }
+
             // D-DECIMAL1: `Decimal("12.34")` — exact base-10 parse.
             if self.funcs.get(&call.name).is_none()
                 && !self.registry.contains(&call.name)
@@ -711,6 +724,14 @@ impl<'a> Checker<'a> {
                     }
                     return None;
                 }
+            }
+
+            // D-ZIPPAD1: free zip-family calls are compiler-owned variadic
+            // forms. Keep them ahead of the ordinary unknown-function error;
+            // a user declaration still wins through the shadowing check in
+            // `check_zip_family_free`.
+            if let Some(result) = self.check_zip_family_free(call) {
+                return Some(result);
             }
     
             let Some(mut sig) = self.funcs.get(&call.name).cloned() else {
@@ -817,98 +838,30 @@ impl<'a> Checker<'a> {
                 ));
             }
     
-            // D-NARG-D4 (S61, E0125): label validation — if a call arg has
-            // `name: val`, verify it matches the parameter name at that position.
-            // Labels never reorder.
+            // D-APILABEL1=A: one binder resolves labels, zones, reordering, and
+            // skipped defaults. It rewrites `call.args` into declaration order
+            // and marks each argument with where the caller wrote it, so
+            // lowering can keep the source evaluation order.
             if !sig.param_info.is_empty() {
-                let all_param_names: Vec<&str> =
-                    sig.param_info.iter().map(|(n, _)| n.as_str()).collect();
-                for (i, arg) in call.args.iter().enumerate() {
-                    if let Some((label, label_span)) = &arg.label {
-                        if let Some((param_name, _)) = sig.param_info.get(i) {
-                            if label != param_name {
-                                // Is the label a real param name at a different position?
-                                if all_param_names.contains(&label.as_str()) {
-                                    // Transposed: label names a real param, but wrong position.
-                                    self.diags.push(Diagnostic::error(
-                                        "E0125",
-                                        format!(
-                                            "label `{}:` doesn't match the parameter `{}` here",
-                                            label, param_name
-                                        ),
-                                        "labels are checked documentation — each names the parameter at its own position, and arguments stay in the order they're declared".to_string(),
-                                        format!(
-                                            "write `{}:` here, or drop the label",
-                                            param_name
-                                        ),
-                                        Some(*label_span),
-                                    ));
-                                } else {
-                                    // Unknown: label doesn't name any parameter.
-                                    self.diags.push(Diagnostic::error(
-                                        "E0125",
-                                        format!(
-                                            "`{}` has no parameter named `{}`",
-                                            call.name, label
-                                        ),
-                                        format!(
-                                            "a label must name the parameter at its position; `{}` takes {}",
-                                            call.name,
-                                            all_param_names.join(", ")
-                                        ),
-                                        format!(
-                                            "use one of `{}`'s parameter names, or drop the label",
-                                            call.name
-                                        ),
-                                        Some(*label_span),
-                                    ));
-                                }
-                            }
-                        }
+                let params = crate::Sema::CallBinder::bind_params_from_sig(&sig);
+                let bound = crate::Sema::CallBinder::bind_call_args(
+                    &call.name,
+                    &params,
+                    &mut call.args,
+                    call.name_span,
+                    &mut self.diags,
+                );
+                if bound.is_none() {
+                    // The call's arguments never resolved to parameters, so
+                    // arity and per-position type errors below would all be
+                    // about slots that do not exist. Report the argument
+                    // expressions' own problems and stop.
+                    for arg in call.args.iter_mut() {
+                        self.infer(&mut arg.expr);
                     }
-                }
-                // L2401: advisory lint — public API has a positional Bool parameter.
-                // (Only warn on the callee definition side, not every call site.)
-            }
-    
-            // D-NARG-D2 (S61): default-value filling — append defaults for omitted
-            // trailing params. Earlier-param refs in defaults are substituted with
-            // the supplied argument expression so codegen never sees an unresolved
-            // identifier (invariant I2).
-            if call.args.len() < sig.params.len() && !sig.defaults.is_empty() {
-                let provided = call.args.len();
-                let required: usize = sig.defaults.iter().take_while(|d| d.is_none()).count();
-                if provided >= required {
-                    // fill trailing omitted params with their defaults. We build
-                    // `earlier_names` incrementally so a default like `d: Int = h`
-                    // can reference an earlier-defaulted param `h` that was already
-                    // filled (and is now in call.args at position 1).
-                    let all_param_names: Vec<String> =
-                        sig.param_info.iter().map(|(n, _)| n.clone()).collect();
-                    for i in provided..sig.params.len() {
-                        if let Some(Some(default_expr)) = sig.defaults.get(i) {
-                            // earlier_names covers all params up to (not including) i.
-                            let earlier_names: Vec<String> =
-                                all_param_names.iter().take(i).cloned().collect();
-                            // Substitute any earlier-param idents with the supplied arg.
-                            let resolved = substitute_param_refs(
-                                default_expr.clone(),
-                                &earlier_names,
-                                &call.args,
-                            );
-                            call.args.push(crate::AST::CallArg {
-                                convention: sig.params[i].0,
-                                expr: resolved,
-                                span: call.name_span,
-                                flags: Default::default(),
-                                label: None,
-                                spread: false,
-                            });
-                        }
-                    }
+                    return Some(sig.return_type.clone());
                 }
             }
-    
             let variadic = sig.param_variadic.last().copied().unwrap_or(false);
             // D-ANY-JAI1/D-VARARGBOUND1 (c7jaiany): a trait-bounded variadic
             // (`...Trait` / `...[A, B]`) can't be packed into one `[T]` list —
@@ -1012,7 +965,45 @@ impl<'a> Checker<'a> {
             let mut call_access = self.call_access_frame();
             let mut generic_subst = HashMap::new();
             let mut pre_inferred: Vec<Option<Type>> = Vec::new();
-            if !fn_type_params.is_empty() {
+            if !fn_type_params.is_empty() && !call.type_args.is_empty() {
+                if call.type_args.len() != fn_type_params.len() {
+                    self.diags.push(Diagnostic::error(
+                        "E0119",
+                        format!(
+                            "{} expects {} type argument{}, got {}",
+                            call.name,
+                            fn_type_params.len(),
+                            if fn_type_params.len() == 1 { "" } else { "s" },
+                            call.type_args.len()
+                        ),
+                        "a generic call must provide one type for every declared type parameter"
+                            .to_string(),
+                        format!(
+                            "write {} with {} type argument{}",
+                            call.name,
+                            fn_type_params.len(),
+                            if fn_type_params.len() == 1 { "" } else { "s" }
+                        ),
+                        Some(call.name_span),
+                    ));
+                } else {
+                    for (param, actual) in fn_type_params.iter().zip(&call.type_args) {
+                        let actual = self.resolve_type(actual.clone());
+                        self.check_declared_type(&actual, call.name_span);
+                        for bound in &param.bounds {
+                            if !self.type_satisfies_bound(&actual, bound) {
+                                self.diags.push(e0905(
+                                    &actual.name(),
+                                    bound,
+                                    call.name_span,
+                                    false,
+                                ));
+                            }
+                        }
+                        generic_subst.insert(param.name.clone(), actual);
+                    }
+                }
+            } else if !fn_type_params.is_empty() {
                 for (index, arg) in call.args.iter_mut().enumerate() {
                     pre_inferred.push(self.with_call_access(&mut call_access, |checker| {
                         if let Some((param_conv, param_ty)) = sig.params.get(index) {
@@ -1063,6 +1054,15 @@ impl<'a> Checker<'a> {
                         Err(p) => self.diags.push(e0904(call.name_span, &p)),
                     }
                 }
+            } else if !call.type_args.is_empty() {
+                self.diags.push(Diagnostic::error(
+                    "E0119",
+                    format!("{} is not generic", call.name),
+                    "only functions declared with type parameters accept call-site type arguments"
+                        .to_string(),
+                    format!("call {} without type arguments", call.name),
+                    Some(call.name_span),
+                ));
             }
             let effective_params: Vec<(AccessConvention, Type)> = if generic_subst.is_empty() {
                 sig.params.clone()

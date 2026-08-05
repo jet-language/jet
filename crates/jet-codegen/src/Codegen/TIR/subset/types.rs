@@ -24,8 +24,9 @@ pub(crate) fn resolve_self_ty(ty: &Type, type_name: &str) -> Type {
 /// A param/return type the subset allows: scalar (Int/IntN/Float/F32/Bool),
 /// Char, String, a covered *plain user struct* (c109 Phase 3), a covered
 /// *plain user enum* (c109 Phase 4), a covered collection (Phase 5), or a covered
-/// *optional* `T?` / *fallible* `T ? E` (c109 Phase 8). Traits, generics,
-/// recursive (boxed) types are still out.
+/// *optional* `T?` / *fallible* `T ? E` (c109 Phase 8). Generic type variables
+/// are admitted when active in the enclosing function; generic struct
+/// applications and recursive (boxed) types are still out.
 pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
     let ty = cx.expand_type_aliases(ty);
     // D-QUAL4=A: tagged types are transparent — strip the marker and check the inner type.
@@ -89,7 +90,22 @@ pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
         || is_covered_pool_ty(&ty, cx)
         || is_covered_cell_ty(&ty, cx)
         || is_covered_data_ty(&ty, cx)
+        || is_covered_compute_ty(&ty)
         || is_covered_vault_ty(&ty, cx)
+}
+
+/// D-COMPUTE-TYPE1: all compute aliases use the same `JetTensor` value
+/// representation. Sema owns the shape checks; this gate only admits the
+/// resolved forms that `cx.rust_type` renders to that representation.
+pub(crate) fn is_covered_compute_ty(ty: &Type) -> bool {
+    match ty {
+        Type::Named(name) => name == "Tensor",
+        Type::Apply { name, args } if name == "Tensor" => args.len() <= 1,
+        Type::Apply { name, .. } if matches!(name.as_str(), "Vec" | "Matrix") => {
+            ty.compute_shape_dimensions().is_some()
+        }
+        _ => false,
+    }
 }
 
 fn is_covered_vault_ty(ty: &Type, cx: &Cx) -> bool {
@@ -452,6 +468,7 @@ pub(crate) fn is_prelude_struct_name(name: &str) -> bool {
     matches!(
         name,
         "HTTPRequest" | "HTTPResponse" | "Range" | "TextWidth" | "TerminalSize" | "TerminalPolicy"
+            | "DataLineOptions"
             | "AsyncPolicy" | "FieldError"
             | "EncodingLimits" | "EncodingCause" | "EncodingError"
             | "CBOROptions" | "CBORError" | "XMLLimits" | "XMLParseOptions"
@@ -546,7 +563,7 @@ pub(crate) fn is_covered_fallible_ty(ty: &Type, cx: &Cx) -> bool {
 
 /// An optional/fallible payload (`T` in `T?`, or `ok`/`err` in `T ? E`) the subset
 /// can lower: a scalar, Char, String, a covered struct/enum, a covered collection,
-/// `Void` (the ok payload of fallible `run`, rendered as `()`), or sema's
+/// `()` (the ok payload of fallible `run`, rendered as `()`), or sema's
 /// default error type `Error` (`Type::Named("Error")`, which `cx.rust_type`
 /// lowers to plain `String` — its construction/binding is a String, so no clone/box
 /// decision the subset can't make).
@@ -560,7 +577,7 @@ pub(crate) fn fallible_payload_covered(ty: &Type, cx: &Cx) -> bool {
         return true;
     }
     if let Type::Named(n) = ty {
-        if n == "Void" {
+        if n == "Unit" {
             return true;
         }
         if n == "Error" {

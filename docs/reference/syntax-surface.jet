@@ -95,7 +95,8 @@ fn largest<T: Comparable>(xs: [T]) => T {
     // ...
 }
 
-// Argument labels + trailing defaults; labels never reorder (S61, D-NARG1).
+// Argument labels bind by name and may skip defaults; `/` and `*` mark the
+// positional-only and label-only zones (S61, D-APILABEL1=A).
 fn schedule(task: String, delay: Int  = 0, urgent: Bool  = false) => Bool = urgent
 fn call_with_labels() {
     schedule("backup", delay: 30, urgent: true)   // labels are checked docs
@@ -290,12 +291,12 @@ impl FileErr.Fallible {
 //>>> tracked: #33 D-IMPLDOT1
 // # RATIFIED, NOT YET IMPLEMENTED (S80)
 // Rich default `Error` carrier (message + optional code + optional source) and a
-// fallible `fn run() => Void ?`. (The `Fallible` conversion above ships; the
+// fallible `fn run() => () ?`. (The `Fallible` conversion above ships; the
 // structured carrier is still pending.)
 // fn load() => Config ? {
 //     return Err(Error.message("bad config").code(2).with_source(io_err))
 // }
-// fn run() => Void ? {
+// fn run() => () ? {
 //     cfg :: load()?
 // }
 
@@ -414,6 +415,23 @@ fn apply(f: fn(Int) => Int, x: Int) => Int = f(x)
 fn fixed_size_list() {
     tripled :: [Int#3].{3, 6, 9}
     [t0, t1, t2] :: tripled
+}
+
+// Generators (D-STREAMYIELD1): one `yield` hands one value to one ordinary
+// consumer pull. The producer resumes after that value is accepted. A
+// consumer `break` drops the owned pull iterator and closes the producer.
+fn numbers(n: Int) => Stream<Int> {
+    i := 0
+    loop i < n {
+        yield i
+        i += 1
+    }
+}
+fn first_number() {
+    loop value, numbers(3) {
+        print("{value}")
+        break
+    }
 }
 
 

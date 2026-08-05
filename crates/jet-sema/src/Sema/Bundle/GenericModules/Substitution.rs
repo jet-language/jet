@@ -65,6 +65,7 @@ pub(super) fn substitute_expr(
         | Expr::Absent(..)
         | Expr::ReduceMarker(..)
         | Expr::Todo { .. }
+        | Expr::NoElse(_)
         | Expr::UnitLit { .. }
         | Expr::ComptimeSplice { .. }
         | Expr::StrMatchLit(..)

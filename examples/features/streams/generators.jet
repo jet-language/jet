@@ -1,7 +1,18 @@
 // D-STREAMYIELD1: a generator returns `Stream<T>` and uses `yield` to hand a
 // value to the consumer, suspending until the next pull. One keyword
 // (`yield`), one type (`Stream<T>`); consumers are ordinary loops — no
-// async/await coloring anywhere.
+// async/await coloring anywhere. Breaking the loop closes the stream, so the
+// producer does not run the statements after the last accepted pull.
+struct CleanupMarker {
+    name: String
+}
+
+impl CleanupMarker.Close {
+    fn close(^self) {
+        print("cleanup: {self.name}")
+    }
+}
+
 fn count(n: Int) => Stream<Int> {
     i := 0
     loop i < n {
@@ -10,8 +21,44 @@ fn count(n: Int) => Stream<Int> {
     }
 }
 
+fn stop_after_one() => Stream<Int> {
+    print("producer: before")
+    yield 1
+    print("producer: after-close")
+    yield 2
+}
+
+fn nested() => Stream<Int> {
+    yield 10
+    loop value, count(2) {
+        print("nested: {value + 20}")
+    }
+    yield 99
+}
+
+fn cleanup_after_break() => Stream<Int> {
+    marker := CleanupMarker.{name: "stream"}
+    defer close(^marker)
+    print("cleanup: before")
+    yield 7
+    print("cleanup: after")
+    yield 8
+}
+
 fn run() {
     loop x, count(3) {
         print("{x}")
     }
+    loop x, stop_after_one() {
+        print("consumer: {x}")
+        break
+    }
+    loop x, nested() {
+        print("nested: {x}")
+    }
+    loop x, cleanup_after_break() {
+        print("cleanup: {x}")
+        break
+    }
+    print("closed")
 }

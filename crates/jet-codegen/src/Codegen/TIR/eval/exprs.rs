@@ -7,12 +7,380 @@ use crate::Codegen::TIR::{
     TPlace, TStrPart,
 };
 use crate::Comptime::Builtins::{as_bool, as_int, eval_binop};
-use crate::Comptime::{apply_core_call, apply_impure_core_call, CtValue};
+use crate::Comptime::{apply_core_call, apply_impure_core_call, CtValue, DevSink};
 use crate::Diagnostics::Diagnostic;
 use super::builtins::eval_builtin;
 use super::handles::eval_handle;
 use super::local_cell::{internal_index, project_mut, project_pair_mut, project_ref};
-use super::{materialize_view_mut_window, unsupported, EvalCallable, EvalCtx, Flow};
+use super::{
+    materialize_view_mut_window, progress_elapsed, progress_emit, progress_iter_parts,
+    progress_no_color, progress_now, progress_source_has_exact_total, unsupported, EvalCallable,
+    EvalCtx, Flow,
+};
+
+fn progress_parts(
+    value: &CtValue,
+) -> Option<(Vec<CtValue>, String, String, f64, Vec<usize>, usize, usize, bool)> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return None;
+    };
+    if type_name != "__JetProgressIter" {
+        return None;
+    }
+    let items = fields.iter().find_map(|(name, value)| {
+        (name == "items").then(|| match value {
+            CtValue::List(items) => Some(items.clone()),
+            _ => None,
+        })
+    })??;
+    let description = fields.iter().find_map(|(name, value)| {
+        (name == "description").then(|| match value {
+            CtValue::Str(value) => Some(value.clone()),
+            _ => None,
+        })
+    })??;
+    let format = fields.iter().find_map(|(name, value)| {
+        (name == "format").then(|| match value {
+            CtValue::Str(value) => Some(value.clone()),
+            _ => None,
+        })
+    })??;
+    let started_at = fields
+        .iter()
+        .find_map(|(name, value)| {
+            (name == "started_at").then(|| match value {
+                CtValue::Float(value) => Some(value.as_f64()),
+                CtValue::Int(value) => Some(*value as f64),
+                _ => None,
+            })
+        })
+        .flatten()
+        .unwrap_or_else(progress_now);
+    let pulls = fields
+        .iter()
+        .find(|(name, _)| name == "pulls")
+        .and_then(|(_, value)| match value {
+            CtValue::List(values) => values
+                .iter()
+                .map(|value| match value {
+                    CtValue::Int(value) => Some((*value).max(0) as usize),
+                    _ => None,
+                })
+                .collect::<Option<Vec<_>>>(),
+            _ => None,
+        })
+        .unwrap_or_else(|| vec![1; items.len()]);
+    let tail = fields
+        .iter()
+        .find_map(|(name, value)| {
+            (name == "tail").then(|| match value {
+                CtValue::Int(value) => Some((*value).max(0) as usize),
+                _ => None,
+            })
+        })
+        .flatten()
+        .unwrap_or(0);
+    let total = fields
+        .iter()
+        .find_map(|(name, value)| {
+            (name == "total").then(|| match value {
+                CtValue::Int(value) => Some((*value).max(0) as usize),
+                _ => None,
+            })
+        })
+        .flatten()
+        .unwrap_or(items.len());
+    let known_total = fields
+        .iter()
+        .find_map(|(name, value)| {
+            (name == "known_total").then(|| match value {
+                CtValue::Bool(value) => Some(*value),
+                _ => None,
+            })
+        })
+        .flatten()
+        .unwrap_or(true);
+    Some((
+        items,
+        description,
+        format,
+        started_at,
+        pulls,
+        tail,
+        total,
+        known_total,
+    ))
+}
+
+fn progress_value(
+    items: Vec<CtValue>,
+    description: String,
+    format: String,
+    started_at: f64,
+    pulls: Vec<usize>,
+    tail: usize,
+    total: usize,
+    known_total: bool,
+) -> CtValue {
+    CtValue::Struct {
+        type_name: "__JetProgressIter".to_string(),
+        fields: vec![
+            ("items".to_string(), CtValue::List(items)),
+            ("description".to_string(), CtValue::Str(description)),
+            ("format".to_string(), CtValue::Str(format)),
+            ("started_at".to_string(), CtValue::Float(CtFloat::f64(started_at))),
+            (
+                "pulls".to_string(),
+                CtValue::List(pulls.into_iter().map(|n| CtValue::Int(n as i64)).collect()),
+            ),
+            ("tail".to_string(), CtValue::Int(tail as i64)),
+            ("total".to_string(), CtValue::Int(total as i64)),
+            ("known_total".to_string(), CtValue::Bool(known_total)),
+        ],
+    }
+}
+
+fn mark_unknown_progress_total(
+    mut value: CtValue,
+    module: &str,
+    method: &str,
+    args: &[TExpr],
+    known_total: Option<bool>,
+) -> CtValue {
+    let is_iter = matches!(
+        args.first().map(|arg| &arg.ty),
+        Some(Type::Apply { name, .. }) if name == crate::Syntax::TYPE_ITER
+    );
+    let known_total = known_total.unwrap_or_else(|| {
+        args.first()
+            .is_some_and(progress_source_has_exact_total)
+    });
+    if module == "core.io" && method == "progress" && is_iter && !known_total {
+        if let CtValue::Struct { type_name, fields } = &mut value {
+            if type_name == "__JetProgressIter" {
+                if let Some((_, known_total)) = fields
+                    .iter_mut()
+                    .find(|(name, _)| name == "known_total")
+                {
+                    *known_total = CtValue::Bool(false);
+                } else {
+                    fields.push(("known_total".to_string(), CtValue::Bool(false)));
+                }
+            }
+        }
+    }
+    value
+}
+
+fn progress_lazy_builtin(op: &crate::Codegen::TIR::TBuiltinOp) -> bool {
+    matches!(
+        op,
+        crate::Codegen::TIR::TBuiltinOp::Take
+            | crate::Codegen::TIR::TBuiltinOp::Skip
+            | crate::Codegen::TIR::TBuiltinOp::StepBy
+            | crate::Codegen::TIR::TBuiltinOp::Dedup
+            | crate::Codegen::TIR::TBuiltinOp::Chunks
+            | crate::Codegen::TIR::TBuiltinOp::Windows
+            | crate::Codegen::TIR::TBuiltinOp::Flatten
+            | crate::Codegen::TIR::TBuiltinOp::Intersperse
+            | crate::Codegen::TIR::TBuiltinOp::Indexed { .. }
+            | crate::Codegen::TIR::TBuiltinOp::Indexes
+            | crate::Codegen::TIR::TBuiltinOp::Zip { .. }
+    )
+}
+
+fn progress_terminal_builtin(op: &crate::Codegen::TIR::TBuiltinOp) -> bool {
+    matches!(
+        op,
+        crate::Codegen::TIR::TBuiltinOp::IterToList
+            | crate::Codegen::TIR::TBuiltinOp::IterCollect
+            | crate::Codegen::TIR::TBuiltinOp::TryCollect
+            | crate::Codegen::TIR::TBuiltinOp::JoinSep
+            | crate::Codegen::TIR::TBuiltinOp::Sum { .. }
+            | crate::Codegen::TIR::TBuiltinOp::Product { .. }
+            | crate::Codegen::TIR::TBuiltinOp::Min { .. }
+            | crate::Codegen::TIR::TBuiltinOp::Max { .. }
+    )
+}
+
+fn emit_progress_pulls(
+    sink: Option<&Arc<std::sync::Mutex<DevSink>>>,
+    description: &str,
+    format: &str,
+    started_at: f64,
+    total: usize,
+    known_total: bool,
+    raw_pulls: usize,
+) {
+    for index in 0..raw_pulls {
+        let text = progress_semantics::jet_progress_render(
+            description,
+            format,
+            index + 1,
+            known_total.then_some(total),
+            progress_elapsed(started_at),
+            progress_no_color(),
+        );
+        progress_emit(sink, &text);
+    }
+}
+
+fn progress_builtin_plan(
+    op: &crate::Codegen::TIR::TBuiltinOp,
+    source_items: &[CtValue],
+    output_items: &[CtValue],
+    source_pulls: &[usize],
+    old_tail: usize,
+    arg: Option<&CtValue>,
+) -> (Vec<usize>, usize) {
+    let n = arg
+        .and_then(|value| match value {
+            CtValue::Int(value) => Some((*value).max(0) as usize),
+            _ => None,
+        })
+        .unwrap_or(0);
+    let source_len = source_items.len();
+    let output_len = output_items.len();
+    let pull_at = |index: usize| source_pulls.get(index).copied().unwrap_or(1);
+    let sum_from = |index: usize| source_pulls.iter().copied().skip(index).sum::<usize>();
+    match op {
+        crate::Codegen::TIR::TBuiltinOp::Take => {
+            let len = output_len.min(n).min(source_pulls.len());
+            let tail = if n != 0 && n >= source_len { old_tail } else { 0 };
+            (source_pulls.iter().copied().take(len).collect(), tail)
+        }
+        crate::Codegen::TIR::TBuiltinOp::Skip => {
+            if n >= source_pulls.len() {
+                (Vec::new(), source_pulls.iter().sum::<usize>() + old_tail)
+            } else {
+                let mut pulls = source_pulls[n..].to_vec();
+                if let Some(first) = pulls.first_mut() {
+                    *first = source_pulls[..=n].iter().sum();
+                }
+                (pulls, old_tail)
+            }
+        }
+        crate::Codegen::TIR::TBuiltinOp::StepBy => {
+            let n = n.max(1);
+            let mut pulls = Vec::new();
+            let mut index = 0;
+            if !source_pulls.is_empty() {
+                pulls.push(source_pulls[0]);
+                index = 1;
+                while index < source_pulls.len() {
+                    let end = (index + n).min(source_pulls.len());
+                    if end - index < n {
+                        break;
+                    }
+                    pulls.push(source_pulls[index..end].iter().sum());
+                    index = end;
+                }
+            }
+            (pulls, source_pulls[index..].iter().sum::<usize>() + old_tail)
+        }
+        crate::Codegen::TIR::TBuiltinOp::Dedup => {
+            let mut pulls = Vec::new();
+            let mut pending = 0usize;
+            let mut previous: Option<&CtValue> = None;
+            for (index, item) in source_items.iter().enumerate() {
+                let pull = pull_at(index);
+                if previous.is_some_and(|previous| previous == item) {
+                    pending = pending.saturating_add(pull);
+                } else {
+                    pulls.push(pending.saturating_add(pull));
+                    pending = 0;
+                    previous = Some(item);
+                }
+            }
+            (pulls, pending.saturating_add(old_tail))
+        }
+        crate::Codegen::TIR::TBuiltinOp::Chunks => {
+            let mut pulls = Vec::with_capacity(output_len);
+            let mut source_index = 0usize;
+            for output in output_items {
+                let CtValue::List(chunk) = output else {
+                    return (vec![1; output_len], old_tail);
+                };
+                let end = (source_index + chunk.len()).min(source_len);
+                pulls.push(source_pulls[source_index..end].iter().sum());
+                source_index = end;
+            }
+            (pulls, sum_from(source_index).saturating_add(old_tail))
+        }
+        crate::Codegen::TIR::TBuiltinOp::Windows => {
+            let size = n.max(1);
+            if source_len < size {
+                (Vec::new(), sum_from(0).saturating_add(old_tail))
+            } else {
+                let mut pulls = Vec::with_capacity(output_len);
+                if output_len > 0 {
+                    pulls.push(source_pulls[..size].iter().sum());
+                    for index in 1..output_len {
+                        pulls.push(pull_at(size + index - 1));
+                    }
+                }
+                let consumed = size.saturating_add(output_len.saturating_sub(1));
+                (pulls, sum_from(consumed).saturating_add(old_tail))
+            }
+        }
+        crate::Codegen::TIR::TBuiltinOp::Flatten => {
+            let mut pulls = Vec::new();
+            let mut pending = 0usize;
+            for (index, item) in source_items.iter().enumerate() {
+                let pull = pull_at(index);
+                let CtValue::List(inner) = item else {
+                    return (vec![1; output_len], old_tail);
+                };
+                if inner.is_empty() {
+                    pending = pending.saturating_add(pull);
+                } else {
+                    pulls.push(pending.saturating_add(pull));
+                    pulls.extend(std::iter::repeat_n(0, inner.len().saturating_sub(1)));
+                    pending = 0;
+                }
+            }
+            (pulls, pending.saturating_add(old_tail))
+        }
+        crate::Codegen::TIR::TBuiltinOp::Intersperse => {
+            let mut pulls = Vec::with_capacity(output_len);
+            for (index, pull) in source_pulls.iter().copied().take(source_len).enumerate() {
+                pulls.push(pull);
+                if index + 1 < source_len {
+                    pulls.push(0);
+                }
+            }
+            (pulls, old_tail)
+        }
+        crate::Codegen::TIR::TBuiltinOp::Zip { .. } => {
+            let consumed = output_len.min(source_len);
+            let tail = if consumed < source_len {
+                // The AOT/JIT zip adapters ask the receiver for the next
+                // item before discovering that the other side is exhausted.
+                pull_at(consumed)
+            } else {
+                old_tail
+            };
+            (source_pulls.iter().copied().take(consumed).collect(), tail)
+        }
+        _ if output_len == source_len => (source_pulls.to_vec(), old_tail),
+        _ => (vec![1; output_len], old_tail),
+    }
+}
+
+fn try_collect_pulls(items: &[CtValue], pulls: &[usize], tail: usize) -> usize {
+    let mut consumed = 0usize;
+    for (index, item) in items.iter().enumerate() {
+        consumed = consumed.saturating_add(pulls.get(index).copied().unwrap_or(1));
+        if matches!(item, CtValue::ResErr(_)) {
+            return consumed;
+        }
+    }
+    consumed.saturating_add(tail)
+}
+
+mod progress_semantics {
+    include!("../../../Prelude/Core/Progress.rs");
+}
 
 /// Stable place identity for `mem.address_of` under TIR-eval (no real ASLR).
 fn tir_place_address_key(expr: &TExpr) -> String {
@@ -1460,6 +1828,33 @@ impl<'a> EvalCtx<'a> {
                 let Some((tail, prefix)) = stmts.split_last() else {
                     return Ok(CtValue::Unit);
                 };
+                // AOT emits a real Rust block here and the JIT saves and
+                // restores its slots, so this block's own `let` bindings must
+                // not outlive it in the interpreter either. Restore exactly the
+                // names it introduces — a collecting loop still needs to write
+                // through to the enclosing scope, so a blanket child scope
+                // would be wrong.
+                let bound: Vec<(String, Option<CtValue>)> = prefix
+                    .iter()
+                    .filter_map(|stmt| match stmt {
+                        crate::Codegen::TIR::TStmt::Let { name, .. } => {
+                            Some((name.clone(), scope.get(name).cloned()))
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                let restore = |scope: &mut HashMap<String, CtValue>| {
+                    for (name, prior) in &bound {
+                        match prior {
+                            Some(value) => {
+                                scope.insert(name.clone(), value.clone());
+                            }
+                            None => {
+                                scope.remove(name);
+                            }
+                        }
+                    }
+                };
                 match self.exec_stmts(prefix, scope)? {
                     Flow::Normal => {}
                     Flow::Return(value) => {
@@ -1472,9 +1867,11 @@ impl<'a> EvalCtx<'a> {
                     }
                 }
                 if let crate::Codegen::TIR::TStmt::Loop { label, body } = tail {
-                    return self.exec_loop_value(label.as_deref(), body, scope);
+                    let value = self.exec_loop_value(label.as_deref(), body, scope);
+                    restore(scope);
+                    return value;
                 }
-                match tail {
+                let value = match tail {
                     crate::Codegen::TIR::TStmt::ExprStmt(value) => self.eval_expr(value, scope),
                     crate::Codegen::TIR::TStmt::Return(value) => {
                         let value = match value {
@@ -1495,7 +1892,9 @@ impl<'a> EvalCtx<'a> {
                             Err(unsupported("pending loop control", self.span()))
                         }
                     },
-                }
+                };
+                restore(scope);
+                value
             }
             TExprKind::Uninit => match &expr.ty {
                 Type::FixedList { len, .. } => Ok(super::uninit_fixed_carrier(*len as usize)),
@@ -1636,7 +2035,7 @@ impl<'a> EvalCtx<'a> {
                 }
                 Ok(CtValue::Bool(true))
             }
-            TExprKind::Call { name, args } => self.eval_call(name, args, scope),
+            TExprKind::Call { name, args, .. } => self.eval_call(name, args, scope),
             TExprKind::IfExpr {
                 cond,
                 then_body,
@@ -1821,6 +2220,13 @@ impl<'a> EvalCtx<'a> {
                     }
                 }
                 let mut r = self.eval_expr(recv, scope)?;
+                let progress = progress_parts(&r);
+                let iter = progress_iter_parts(&r);
+                if let Some((items, _, _, _, _, _, _, _)) = &progress {
+                    r = CtValue::List(items.clone());
+                } else if let Some((items, _)) = &iter {
+                    r = CtValue::List(items.clone());
+                }
                 // `__JetViewMut` is a write-through handle; read builtins see the
                 // inclusive window as a List (same surface as View after ViewNew).
                 // Do not write the temporary List back over the ViewMut binding.
@@ -1854,7 +2260,52 @@ impl<'a> EvalCtx<'a> {
                 for a in args {
                     argv.push(self.eval_expr(a, scope)?);
                 }
-                let result = eval_builtin(op, &mut r, argv, self.span())?;
+                let progress_arg = argv.first().cloned();
+                if let Some((source_items, description, format, started_at, pulls, tail, total, known_total)) = &progress {
+                    if progress_terminal_builtin(op) {
+                        let raw_pulls = if matches!(op, crate::Codegen::TIR::TBuiltinOp::TryCollect) {
+                            try_collect_pulls(source_items, pulls, *tail)
+                        } else {
+                            pulls.iter().sum::<usize>().saturating_add(*tail)
+                        };
+                        emit_progress_pulls(
+                            self.sink.as_ref(),
+                            description,
+                            format,
+                            *started_at,
+                            *total,
+                            *known_total,
+                            raw_pulls,
+                        );
+                    }
+                }
+                let mut result = eval_builtin(op, &mut r, argv, self.span())?;
+                if let Some((source_items, description, format, started_at, source_pulls, source_tail, total, known_total)) = progress {
+                    if progress_lazy_builtin(op) {
+                        let CtValue::List(items) = result else {
+                            return Err(unsupported("progress adapter result", self.span()));
+                        };
+                        let (pulls, tail) = progress_builtin_plan(
+                            op,
+                            &source_items,
+                            &items,
+                            &source_pulls,
+                            source_tail,
+                            progress_arg.as_ref(),
+                        );
+                        r = progress_value(
+                            items,
+                            description,
+                            format,
+                            started_at,
+                            pulls,
+                            tail,
+                            total,
+                            known_total,
+                        );
+                        result = r.clone();
+                    }
+                }
                 if !skip_view_mut_wb {
                     self.write_back_place(recv, r, scope)?;
                 }
@@ -2190,6 +2641,28 @@ impl<'a> EvalCtx<'a> {
                 for a in args {
                     argv.push(self.eval_expr(a, scope)?);
                 }
+                let progress_known_total = if module == "core.io" && method == "progress" {
+                    if let Some((items, known_total)) =
+                        argv.first().and_then(progress_iter_parts)
+                    {
+                        if let Some(source) = argv.first_mut() {
+                            *source = CtValue::List(items);
+                        }
+                        Some(known_total)
+                    } else {
+                        match args.first().map(|arg| &arg.ty) {
+                            Some(Type::List(_)) | Some(Type::FixedList { .. }) => Some(true),
+                            Some(Type::Apply { name, .. })
+                                if name == crate::Syntax::TYPE_ITER => Some(
+                                    args.first()
+                                        .is_some_and(progress_source_has_exact_total),
+                                ),
+                            _ => None,
+                        }
+                    }
+                } else {
+                    None
+                };
                 // AOT reflection uses the resolved user-struct layout. Keep
                 // that static fact in the erased TIR carrier so `.fields()`
                 // cannot expose implementation fields from built-ins or
@@ -2347,7 +2820,16 @@ impl<'a> EvalCtx<'a> {
                 let is_tier2 =
                     crate::Comptime::is_tier2_core_call(module, method, self.repl_mode);
                 if !is_tier2 {
-                    return apply_core_call(module, method, argv, *source_span, self.repl_mode);
+                    return apply_core_call(module, method, argv, *source_span, self.repl_mode)
+                        .map(|value| {
+                            mark_unknown_progress_total(
+                                value,
+                                module,
+                                method,
+                                args,
+                                progress_known_total,
+                            )
+                        });
                 }
                 // Runtime deopt / `jet run` sets impure_depth>0 so Tier-2
                 // ambient I/O matches AOT (env/fs/process/auth store). Pure
@@ -2359,7 +2841,7 @@ impl<'a> EvalCtx<'a> {
                         .sink
                         .as_ref()
                         .map(|sink| sink.lock().expect("evaluator sink poisoned"));
-                    apply_impure_core_call(
+                    let result = apply_impure_core_call(
                         module,
                         method,
                         argv,
@@ -2369,7 +2851,16 @@ impl<'a> EvalCtx<'a> {
                         self.repl_mode,
                         None,
                         None,
-                    )
+                    );
+                    result.map(|value| {
+                        mark_unknown_progress_total(
+                            value,
+                            module,
+                            method,
+                            args,
+                            progress_known_total,
+                        )
+                    })
                 } else if self.impure_depth == 0 {
                     Err(Diagnostic::error(
                         "E3410",
@@ -2418,6 +2909,115 @@ impl<'a> EvalCtx<'a> {
             }
             TExprKind::Field { recv, field, .. } => {
                 let r = self.eval_expr(recv, scope)?;
+                // D-LAYOUT-FACTS1=B: `$layout` is a contextual projection of
+                // the TypeInfo value bound to a derive type parameter. It is
+                // not a second stored TypeInfo member; ordinary `.layout`
+                // remains the full-reflection projection.
+                if field == crate::Syntax::COMPILER_FACT_LAYOUT {
+                    let CtValue::Struct { type_name, fields } = r else {
+                        return Err(Diagnostic::error(
+                            "E0302",
+                            "`$layout` needs a reflected type value".to_string(),
+                            "compiler facts attach to the type parameter in a derive body"
+                                .to_string(),
+                            "use `T.$layout`, or use `T.reflect().layout` for full reflection"
+                                .to_string(),
+                            Some(self.span()),
+                        ));
+                    };
+                    if type_name != crate::Syntax::TYPE_TYPE_INFO {
+                        return Err(Diagnostic::error(
+                            "E0302",
+                            "`$layout` needs a reflected type value".to_string(),
+                            "compiler facts attach to the type parameter in a derive body"
+                                .to_string(),
+                            "use `T.$layout`, or use `T.reflect().layout` for full reflection"
+                                .to_string(),
+                            Some(self.span()),
+                        ));
+                    }
+                    return fields
+                        .into_iter()
+                        .find(|(name, _)| name == "layout")
+                        .map(|(_, value)| value)
+                        .ok_or_else(|| {
+                            Diagnostic::error(
+                                "E0302",
+                                "the reflected type has no `$layout` fact".to_string(),
+                                "the compiler fact projection is fixed by D-LAYOUT-FACTS1"
+                                    .to_string(),
+                                "use `T.reflect().layout` for the full reflection object"
+                                    .to_string(),
+                                Some(self.span()),
+                            )
+                        });
+                }
+                // D-LAYOUT-FACTS1=B: `LayoutInfo[.field]` is lowered as an
+                // ordinary field read with an internal projection name. The
+                // value still comes from the one reflected `fields` list, so
+                // source and `jet inspect expand` cannot drift.
+                if let Some(selected) = field
+                    .strip_prefix(crate::Syntax::LAYOUT_FIELD_PROJECTION_PREFIX)
+                {
+                    let CtValue::Struct { type_name, fields } = r else {
+                        return Err(Diagnostic::error(
+                            "E0302",
+                            "layout field selector needs a `LayoutInfo` value".to_string(),
+                            "typed field selection is only defined on compiler layout facts"
+                                .to_string(),
+                            "use `T.$layout[.field]` for a reflected field fact".to_string(),
+                            Some(self.span()),
+                        ));
+                    };
+                    if type_name != crate::Syntax::TYPE_LAYOUT_INFO {
+                        return Err(Diagnostic::error(
+                            "E0302",
+                            "layout field selector needs a `LayoutInfo` value".to_string(),
+                            "typed field selection is only defined on compiler layout facts"
+                                .to_string(),
+                            "use `T.$layout[.field]` for a reflected field fact".to_string(),
+                            Some(self.span()),
+                        ));
+                    }
+                    let Some(CtValue::List(layout_fields)) = fields
+                        .into_iter()
+                        .find(|(name, _)| name == "fields")
+                        .map(|(_, value)| value)
+                    else {
+                        return Err(Diagnostic::error(
+                            "E0302",
+                            "the reflected layout has no field facts".to_string(),
+                            "typed selectors read the canonical `LayoutInfo.fields` list"
+                                .to_string(),
+                            "use `T.reflect().layout.fields` for dynamic field iteration"
+                                .to_string(),
+                            Some(self.span()),
+                        ));
+                    };
+                    return layout_fields
+                        .into_iter()
+                        .find(|value| {
+                            matches!(
+                                value,
+                                CtValue::Struct { type_name, fields }
+                                    if type_name == crate::Syntax::TYPE_LAYOUT_FIELD
+                                        && fields.iter().any(|(name, value)| {
+                                            name == "name"
+                                                && matches!(value, CtValue::Str(value) if value == selected)
+                                        })
+                            )
+                        })
+                        .ok_or_else(|| {
+                            Diagnostic::error(
+                                "E0302",
+                                format!("the reflected layout has no field `{selected}`"),
+                                "typed selectors must name a field declared by the reflected type"
+                                    .to_string(),
+                                "use one of the names in `T.reflect().fields`".to_string(),
+                                Some(self.span()),
+                            )
+                        });
+                }
                 match r {
                     // TupleLit stores Rust-mangled `user_<f>` names (emit needs them);
                     // Field TIR keeps Jet names. Accept either so named-tuple reads work.
@@ -2783,7 +3383,7 @@ impl<'a> EvalCtx<'a> {
                     return result;
                 }
                 const MUTATING: &[&str] = &[
-                    "push", "pop", "add", "add_new", "insert", "remove", "clear", "reverse",
+                    "push", "pop", "add", "add_new", "insert", "remove", "extend", "clear", "reverse",
                     "sort", "tick", "advance", "wait", "int", "float", "float_range", "bool",
                     "normal", "exponential", "bytes", "split", "pick", "weighted_pick", "sample",
                     "shuffle", "require",
@@ -4132,6 +4732,7 @@ impl<'a> EvalCtx<'a> {
                 owner_type,
                 method,
                 args,
+                ..
             } => {
                 let mut argv = Vec::with_capacity(args.len());
                 for a in args {
@@ -4288,6 +4889,12 @@ impl<'a> EvalCtx<'a> {
                 }
             }
             TExprKind::Todo { expected_type, .. } => Err(unsupported(&format!("expr Todo ({expected_type})"), self.span())),
+            // Card #1440: sema proved this arm dead (E0307) — reaching it in
+            // the interpreter is a compiler bug, reported as an internal error.
+            TExprKind::Unreachable { line } => Err(unsupported(
+                &format!("proven-unreachable exhaustive-dispatch arm (line {line})"),
+                self.span(),
+            )),
             TExprKind::DistinctRaw(inner) => self.eval_expr(inner, scope),
             TExprKind::OptField {
                 base,
@@ -4498,7 +5105,7 @@ impl<'a> EvalCtx<'a> {
                     self.call_callable(&callable, argv)
                 }
             },
-            TExprKind::ModuleCall { form, args } => {
+            TExprKind::ModuleCall { form, args, .. } => {
                 let target = match form {
                     TModuleCallForm::Qualified { rust_mod, rust_fn } => {
                         format!("{rust_mod}::{rust_fn}")

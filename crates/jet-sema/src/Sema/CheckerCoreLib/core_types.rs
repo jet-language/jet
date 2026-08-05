@@ -157,7 +157,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
     }
     matches!(
         name,
-        "Unit" | "Void" | "U8" | "Error" | "ProcessResult" | "ProcessSpec" | "ProcessChild" | "Stopwatch" | "Closed"
+        "Unit" | "U8" | "Error" | "ProcessResult" | "ProcessSpec" | "ProcessChild" | "Stopwatch" | "Closed"
         | "Claims" | "AuthError" | "Session" | "Auth"
         | "SyncText" | "SyncCounter" | "SyncMap" | "SyncList" | "RowPolicy"
         // D-PROCESS1=A: `ProcessStreamMode` is a core dot-literal enum
@@ -194,7 +194,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "DirEntry" | "Stat" | "WalkEntry" | "TempDir" | "TempFile" | "FileLock"
         | "WatchEvent" | "WatchHandle" | "WatchSet"
         // D-DATA-SURFACE1=A / D-DATA-STATUS1=A: data summary/status values.
-        | "DataGroup" | "DataColumn" | "DataStatus" | "DataSummary"
+        | "DataGroup" | "DataLineOptions" | "DataColumn" | "DataStatus" | "DataSummary"
         | "DataLimits" | "DataError" | "DataErrorKind" | "DataStream" | "DataPivotCell"
         // D-LOGTRACE1=A: typed structured logging values.
         | "LogField" | "LogSpan"
@@ -315,7 +315,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "DecodeResult" | "MigrationStatus"
         // D-BUILD*: selected-root build-program handles. No runtime values.
         | "BuildContext" | "BuildPlan" | "BuildAction" | "BuildTarget"
-        | "BuildToolchain" | "BuildProbe" | "BuildSigningIdentity" | "ProgramInfo" | "TypeInfo" | "SourceSpan"
+        | "BuildToolchain" | "BuildProbe" | "BuildSigningIdentity" | "ProgramInfo" | "TypeInfo" | "LayoutInfo" | "LayoutField" | "SourceSpan"
         | "CompilerLexed" | "CompilerSyntaxTree" | "CompilerChecked"
         | "CompilerSemanticIndex" | "CompilerDefinition" | "CompilerSymbolKind"
         | "CompilerParam" | "CompilerField" | "CompilerViewProvenance"
@@ -676,6 +676,7 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     if type_name == Syntax::TYPE_TYPE_INFO {
         return match field {
             "name" | "module" | "identity" | "kind" => Some(Type::String),
+            "layout" => Some(Type::Named(Syntax::TYPE_LAYOUT_INFO.to_string())),
             "fields" => Some(Type::List(Box::new(Type::Named("FieldInfo".to_string())))),
             "methods" => Some(Type::List(Box::new(Type::Named("MethodInfo".to_string())))),
             "type_params" => Some(Type::List(Box::new(Type::Named("TypeParamInfo".to_string())))),
@@ -685,6 +686,23 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             "transitions" => Some(Type::List(Box::new(Type::Named("TransitionInfo".to_string())))),
             "facts" => Some(Type::List(Box::new(Type::Named("FactInfo".to_string())))),
             "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
+            _ => None,
+        };
+    }
+    if type_name == Syntax::TYPE_LAYOUT_INFO {
+        return match field {
+            "kind" | "target" | "guarantee" | "source" => Some(Type::String),
+            "size" | "alignment" | "stride" => Some(Type::Option(Box::new(Type::Int))),
+            "fields" => Some(Type::List(Box::new(Type::Named(
+                Syntax::TYPE_LAYOUT_FIELD.to_string(),
+            )))),
+            _ => None,
+        };
+    }
+    if type_name == Syntax::TYPE_LAYOUT_FIELD {
+        return match field {
+            "name" | "ty" | "target" | "guarantee" | "source" => Some(Type::String),
+            "offset" | "size" => Some(Type::Option(Box::new(Type::Int))),
             _ => None,
         };
     }
@@ -823,6 +841,16 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             "key" => Some(Type::String),
             "count" => Some(Type::Int),
             "sum" | "mean" => Some(Type::Float),
+            _ => None,
+        };
+    }
+    if type_name == "DataLineOptions" {
+        return match field {
+            "title" | "x_label" | "y_label" | "style" | "color" | "legend" => {
+                Some(Type::String)
+            }
+            "markers" => Some(Type::Bool),
+            "reference" => Some(Type::Option(Box::new(Type::Float))),
             _ => None,
         };
     }
@@ -965,9 +993,9 @@ pub(super) fn game_run_label_error(
     };
     let label_span = arg.label.as_ref().map(|(_, s)| *s).unwrap_or(span);
     diags.push(Diagnostic::error(
-        "E0125",
+        "E0764",
         format!("`game.run` has no `{label}:` option at argument {}", index + 1),
-        format!("this position accepts {expected}; labels document the positional shape and never reorder arguments"),
+        format!("this position accepts {expected}"),
         fix.to_string(),
         Some(label_span),
     ));
@@ -1680,6 +1708,16 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
             ("max_sort_rows".to_string(), Type::Int),
             ("max_join_rows".to_string(), Type::Int),
             ("max_output_rows".to_string(), Type::Int),
+        ]),
+        "DataLineOptions" => Some(vec![
+            ("title".to_string(), Type::String),
+            ("x_label".to_string(), Type::String),
+            ("y_label".to_string(), Type::String),
+            ("markers".to_string(), Type::Bool),
+            ("reference".to_string(), Type::Option(Box::new(Type::Float))),
+            ("style".to_string(), Type::String),
+            ("color".to_string(), Type::String),
+            ("legend".to_string(), Type::String),
         ]),
         "DataError" => Some(vec![
             ("kind".to_string(), Type::Named("DataErrorKind".to_string())),

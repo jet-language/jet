@@ -56,6 +56,9 @@ pub const CONTRACT_FLAG: &str = "Flag"; // D-CLI-POS1
 pub const CONTRACT_SHORT: &str = "Short"; // D-CLI-FIELD-MARKERS1
 /// D-CLI-FIELD-MARKERS1=A: environment fallback for a value `#[CLI]` field.
 pub const CONTRACT_ENV: &str = "Env"; // D-CLI-FIELD-MARKERS1
+/// D-CALLDUAL1=E: marks the first bare-read parameter of a free function as
+/// the receiver for the equivalent `value.function(…)` spelling.
+pub const CONTRACT_ROOT: &str = "Root";
 
 /// D-CABI-PLATFORM1=A: per-function native calling-convention marker for C
 /// declarations. C remains the implicit default; alternate ABIs never inherit.

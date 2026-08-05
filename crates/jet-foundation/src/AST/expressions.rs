@@ -8,7 +8,15 @@ use crate::{Diagnostics::Span, Syntax};
 pub struct Call {
     pub name: String,
     pub name_span: Span,
+    /// D-GENERIC-CALL1=A: optional explicit type arguments on every generic
+    /// free call (\`identity<Int>(value)\`). Empty means infer as usual.
+    pub type_args: Vec<Type>,
     pub args: Vec<CallArg>,
+    /// D-ZIPPAD1: a built-in free zip call carries its resolved result so the
+    /// code generator can declare the concrete named row type before lowering.
+    /// Ordinary calls leave this unset; method calls already carry the same
+    /// fact on `Expr::MethodCall`.
+    pub resolved_ret: Option<Type>,
     /// D-RANGETYPE1: sema sets this on a range-constrained distinct
     /// constructor when it appears under postfix `?`. Codegen then emits the
     /// checked constructor as a `Result`, while the ordinary constructor form
@@ -26,6 +34,12 @@ pub struct CallArgFlags {
     pub is_trailing_block: bool,
     /// D-CABI-CALLBACK1: sema proved this argument is a stable C callback symbol.
     pub c_callback_symbol: bool,
+    /// D-APILABEL1=A: where the caller wrote this argument, when labels put the
+    /// list out of declaration order. The binder rewrites `args` into
+    /// declaration order, so lowering needs this to keep the ratified rule that
+    /// supplied expressions run left to right in source order. `None` means the
+    /// call reads in the order it was written and needs no temporaries.
+    pub source_index: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -433,9 +447,12 @@ pub enum Expr {
         receiver: Box<Expr>,
         method: String,
         method_span: Span,
-        /// D-SERDE6 (= C): call-site type arguments — `decode<Order>(text)`. Jet's
-        /// first turbofish; empty for an ordinary call. Drives the typed encoding
-        /// decoders and is available for any generic call going forward.
+        /// Generic arguments on a type receiver, such as `Pool<Int>.new()`.
+        /// These belong to the receiver type, not to the method call.
+        owner_type_args: Vec<Type>,
+        /// D-GENERIC-CALL1=A: call-site type arguments — `decode<Order>(text)` or
+        /// any other generic method. Empty for an ordinary call. Jet uses adjacent
+        /// angle brackets, not Rust's `::<T>` separator.
         type_args: Vec<Type>,
         args: Vec<CallArg>,
         /// Filled by sema when the method resolves to a user-defined type,
@@ -503,6 +520,12 @@ pub enum Expr {
         /// The expected type, as a display string — filled by sema.
         expected_type: Option<String>,
     },
+    /// Card #1440: the synthesized final arm of an else-less all-pattern value
+    /// dispatch (`if subject == { .A -> x  .B -> y }`). Never user-spellable —
+    /// only `parse_dispatch_expr` builds it. Sema proves the pattern arms cover
+    /// the subject's whole type (E0307 otherwise); codegen emits a diverging
+    /// unreachable, exactly like the statement form's dead match arm.
+    NoElse(Span),
     /// Internal teaching node for a retired `#Add`/`#Mul`/`#Min`/`#Max`
     /// reduce selector. Canonical calls retain a typed `ReduceOp` enum literal.
     ReduceMarker(String, Span),
@@ -620,6 +643,7 @@ impl Expr {
             | Expr::Present(_, s)
             | Expr::Absent(s)
             | Expr::Todo { span: s, .. }
+            | Expr::NoElse(s)
             | Expr::ReduceMarker(_, s)
             | Expr::Ok(_, s)
             | Expr::Err(_, s)

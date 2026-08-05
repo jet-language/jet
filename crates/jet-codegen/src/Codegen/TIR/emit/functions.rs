@@ -186,7 +186,7 @@ fn is_fallible_void_return(ret: &Option<Type>, cx: &Cx) -> bool {
     matches!(
         ret,
         Some(Type::Result { ok, err })
-            if matches!(ok.as_ref(), Type::Named(n) if n == crate::Syntax::TYPE_VOID)
+            if matches!(ok.as_ref(), Type::Named(n) if n == crate::Syntax::INTERNAL_UNIT_TYPE)
                 && matches!(err.as_ref(), Type::Named(n)
                     if n == crate::Syntax::TYPE_ERROR
                         || (n == "CryptoError" && !cx.type_names.contains(n)))
@@ -194,19 +194,28 @@ fn is_fallible_void_return(ret: &Option<Type>, cx: &Cx) -> bool {
 }
 
 /// D-STREAMYIELD1: a generator (`=> Stream<T>`) spawns its body on its own
-/// thread and hands the caller the channel receiver immediately — `yield`
-/// (lowered to `__jet_yield_tx.send(...)`) blocks on the rendezvous channel
-/// until the consumer's `loop x; stream { }` pulls the next value. No
-/// coroutine/async machinery: a real OS thread IS the suspended generator.
+/// thread and hands the caller the Prelude receiver immediately. `yield`
+/// blocks on the rendezvous channel until the consumer pulls the next value;
+/// a closed consumer returns from the producer after lexical cleanup. No
+/// coroutine/async machinery: a real OS thread is the suspended generator.
 fn emit_generator_wrapped_body(body: &[TStmt], cx: &Cx, out: &mut String, indent: usize) {
     let pad = "    ".repeat(indent);
     let inner = indent + 1;
     out.push_str(&format!(
-        "{}let (__jet_yield_tx, __jet_yield_rx) = std::sync::mpsc::sync_channel(0);\n",
+        "{}let (mut __jet_yield_tx, __jet_yield_rx) = jet_std::stream();\n",
         pad
     ));
     out.push_str(&format!("{}std::thread::spawn(move || {{\n", pad));
-    emit_tir_stmts(body, cx, out, inner);
+    out.push_str(&format!(
+        "{}let __jet_stream_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {{\n",
+        "    ".repeat(inner)
+    ));
+    emit_tir_stmts(body, cx, out, inner + 1);
+    out.push_str(&format!(
+        "{}}}));\n{}if __jet_stream_result.is_err() {{ __jet_yield_tx.fail(); }}\n",
+        "    ".repeat(inner),
+        "    ".repeat(inner),
+    ));
     out.push_str(&format!("{}}});\n", pad));
     out.push_str(&format!("{}__jet_yield_rx\n", pad));
 }
@@ -320,13 +329,31 @@ pub(crate) fn emit_tir_method(
     for line in &tir.reactive_upgrades {
         out.push_str(&format!("{pad}/* jet-reactive-upgrade: {line} */\n"));
     }
+    let (method_generics, method_where) = tir
+        .generics
+        .split_once(" where ")
+        .map_or((tir.generics.as_str(), ""), |(generics, bounds)| {
+            (generics, bounds)
+        });
+    let method_generics = if has_view_return {
+        if method_generics.is_empty() {
+            "<'__jet_view>".to_string()
+        } else {
+            format!("<'__jet_view, {}", &method_generics[1..])
+        }
+    } else {
+        method_generics.to_string()
+    };
+    let method_where = if method_where.is_empty() {
+        String::new()
+    } else {
+        format!(" where {method_where}")
+    };
     out.push_str(&format!(
-        "{inline_attr}{pad}pub {unsafe_kw}fn {name}{view_generic}({params}){ret}{where_clause} {{\n",
+        "{inline_attr}{pad}pub {unsafe_kw}fn {name}{method_generics}({params}){ret}{method_where} {{\n",
         name = mangle(&tir.name),
-        view_generic = if has_view_return { "<'__jet_view>" } else { "" },
         params = params.join(", "),
         ret = ret_clause,
-        where_clause = tir.generics,
     ));
     // D-COV1: probe at the method head.
     if cx.coverage {

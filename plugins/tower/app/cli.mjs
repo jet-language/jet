@@ -42,9 +42,11 @@ const readPayload = (flags) => {
 };
 
 const out = (flags, human, data) => {
-  if (flags.json) console.log(JSON.stringify(data ?? human, null, 2));
-  else if (typeof human === 'string') console.log(human);
-  else console.log(JSON.stringify(human, null, 2));
+  // `show` verbs pass human=null with the record in `data`; human output falls
+  // back to the record instead of printing "null".
+  const payload = flags.json ? data ?? human : human ?? data;
+  if (typeof payload === 'string') console.log(payload);
+  else console.log(JSON.stringify(payload, null, 2));
 };
 
 // One zero-dependency vocabulary shared by Tower's two human dashboard
@@ -395,6 +397,33 @@ function cmdMessage(store, { pos, flags }) {
       return out(flags, `marked message ${result.id} done`, result);
     }
     default: throw new TowerError('E_USAGE', `unknown message verb "${verb}" — list/add/done`);
+  }
+}
+
+function cmdPapercut(store, { pos, flags }) {
+  const [verb, id] = pos;
+  switch (verb) {
+    case 'list': {
+      const papercuts = db.listPapercuts(store.load(), { status: flags.open ? 'open' : null });
+      if (flags.json) return out(flags, null, papercuts);
+      for (const pc of papercuts)
+        console.log(`${pc.id.padEnd(14)} ${(pc.status || '').padEnd(9)} [${pc.by}] ${pc.text.slice(0, 70)}`);
+      if (!papercuts.length) console.log('(no papercuts match)');
+      return;
+    }
+    case 'add': {
+      const { result } = store.mutate((s) => db.addPapercut(s, {
+        text: flags.text,
+        cardId: flags.card,
+        by: flags.by,
+      }));
+      return out(flags, `logged papercut ${result.id}${result.cardNum ? ` on card #${result.cardNum}` : ''}`, result);
+    }
+    case 'resolve': {
+      const { result } = store.mutate((s) => db.resolvePapercut(s, id, flags.by));
+      return out(flags, `resolved papercut ${result.id}`, result);
+    }
+    default: throw new TowerError('E_USAGE', `unknown papercut verb "${verb}" — list/add/resolve`);
   }
 }
 
@@ -896,6 +925,10 @@ const HELP = `tower — file-backed project board for an owner + AI agents
                                             exact, rev-guarded two-store leaf repair
   tower question list|ask|answer|delete
   tower message  list|add|done
+  tower papercut list|add|resolve
+  tower papercut add --by <agent> --text "…" [--card '#N']   log one-line tooling
+                                            friction; never blocked by card lanes
+  tower papercut resolve <id> --by owner    owner clears a handled papercut
   tower idea     list|add|promote|delete
   tower epoch    list|add|update|current
   tower milestone list|add|update|delete
@@ -959,6 +992,7 @@ export async function run(argv) {
       case 'decision':  return cmdDecision(store, sub);
       case 'question':  return cmdQuestion(store, sub);
       case 'message':   return cmdMessage(store, sub);
+      case 'papercut':  return cmdPapercut(store, sub);
       case 'idea':      return cmdIdea(store, sub);
       case 'epoch':     return cmdEpoch(store, sub);
       case 'milestone': return cmdMilestone(store, sub);

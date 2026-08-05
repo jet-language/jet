@@ -116,7 +116,8 @@ impl<'a> Checker<'a> {
         type_name: &str,
         method: &str,
         span: Span,
-        type_args: &mut Vec<Type>,
+        owner_type_args: &mut Vec<Type>,
+        method_type_args: &[Type],
         args: &mut Vec<crate::AST::CallArg>,
     ) -> Option<Type> {
         if matches!(type_name, "Arena" | "Bump") && method == "new" {
@@ -232,7 +233,7 @@ impl<'a> Checker<'a> {
         .unwrap_or_default();
         let mut call_access = self.call_access_frame();
         let mut pre_inferred = None;
-        if method == "new" && type_args.is_empty() {
+        if method == "new" && owner_type_args.is_empty() {
             if !declared.is_empty() {
                 let expected = self.expected_type.clone();
                 let mut inference_args = Vec::new();
@@ -331,14 +332,26 @@ impl<'a> Checker<'a> {
                         return None;
                     }
                 };
-                type_args.extend(
+                owner_type_args.extend(
                     declared
                         .iter()
                         .filter_map(|param| subst.get(&param.name).cloned()),
                 );
             }
         }
-        Self::instantiate_method_sig_from(&mut msig, &declared, type_args);
+        Self::instantiate_method_sig_from(&mut msig, &declared, owner_type_args);
+        if !self.bind_method_args(method, &msig, args, span) {
+            return msig.return_type.clone();
+        }
+        let pre_inferred_method = self.instantiate_method_type_args(
+            type_name,
+            method,
+            &mut msig,
+            method_type_args,
+            args,
+            span,
+            &mut call_access,
+        );
         self.record_method_reference(type_name, method, span);
         self.record_edge(super::effect_key(Some(type_name), method), span);
         if !msig.is_static {
@@ -357,9 +370,208 @@ impl<'a> Checker<'a> {
             None,
             args,
             span,
-            pre_inferred.as_deref(),
+            pre_inferred_method
+                .as_deref()
+                .or(pre_inferred.as_deref()),
             Some(call_access),
         )
+    }
+
+    /// D-GENERIC-CALL1=A: resolve method-owned call arguments after the receiver
+    /// type has been instantiated. Receiver arguments and method arguments are
+    /// deliberately separate so `Box<Int>.make<String>(...)` has one clear
+    /// substitution for each binder.
+    pub(crate) fn instantiate_method_type_args(
+        &mut self,
+        type_name: &str,
+        method: &str,
+        sig: &mut MethodSig,
+        type_args: &[Type],
+        args: &mut [crate::AST::CallArg],
+        span: Span,
+        call_access: &mut CallAccessFrame,
+    ) -> Option<Vec<Option<Type>>> {
+        if sig.type_params.is_empty() {
+            if !type_args.is_empty() {
+                self.diags.push(Diagnostic::error(
+                    "E0119",
+                    format!("{type_name}.{method} is not generic"),
+                    "only methods declared with type parameters accept call-site type arguments"
+                        .to_string(),
+                    format!("call {type_name}.{method}(...) without type arguments"),
+                    Some(span),
+                ));
+            }
+            return None;
+        }
+
+        if !type_args.is_empty() {
+            if type_args.len() != sig.type_params.len() {
+                self.diags.push(Diagnostic::error(
+                    "E0119",
+                    format!(
+                        "{type_name}.{method} expects {} type argument{}, got {}",
+                        sig.type_params.len(),
+                        if sig.type_params.len() == 1 { "" } else { "s" },
+                        type_args.len()
+                    ),
+                    "a generic method call must provide one type for every declared type parameter"
+                        .to_string(),
+                    format!("write {type_name}.{method}<…>(...) with the declared types"),
+                    Some(span),
+                ));
+                return None;
+            }
+            let mut subst = HashMap::new();
+            for (param, actual) in sig.type_params.iter().zip(type_args) {
+                let actual = self.resolve_type(actual.clone());
+                self.check_declared_type(&actual, span);
+                for bound in &param.bounds {
+                    if !self.type_satisfies_bound(&actual, bound) {
+                        self.diags.push(crate::Generics::e0905(
+                            &actual.name(),
+                            bound,
+                            span,
+                            false,
+                        ));
+                    }
+                }
+                subst.insert(param.name.clone(), actual);
+            }
+            for (_, ty) in &mut sig.params {
+                *ty = crate::Generics::substitute_type(ty, &subst);
+            }
+            if let Some(ret) = &mut sig.return_type {
+                *ret = crate::Generics::substitute_type(ret, &subst);
+            }
+            return None;
+        }
+
+        let params: Vec<(AccessConvention, Type)> = sig
+            .params
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| !(sig.self_conv.is_some() && *index == 0))
+            .map(|(_, param)| param.clone())
+            .collect();
+        let mut pre_inferred = Vec::with_capacity(args.len());
+        for (index, arg) in args.iter_mut().enumerate() {
+            pre_inferred.push(self.with_call_access(call_access, |checker| {
+                if let Some((param_conv, param_ty)) = params.get(index) {
+                    checker.check_call_argument_access(arg, *param_conv, param_ty, true);
+                }
+                let saved_expected = checker.expected_type.clone();
+                if let Some((_, param_ty)) = params.get(index) {
+                    checker.expected_type = Some(param_ty.clone());
+                }
+                let inferred = checker.infer(&mut arg.expr);
+                checker.expected_type = saved_expected;
+                checker.check_call_argument_captures(&arg.expr);
+                inferred
+            }));
+        }
+        let arg_types: Vec<Type> = pre_inferred.iter().filter_map(Clone::clone).collect();
+        if arg_types.len() != args.len() {
+            return Some(pre_inferred);
+        }
+        let subst = match self.trait_reg.infer_subst(
+            &params,
+            sig.return_type.as_ref(),
+            &arg_types,
+            &sig.type_params,
+            self.expected_type.as_ref(),
+        ) {
+            Ok(subst) => subst,
+            Err(param) => {
+                self.diags.push(crate::Generics::e0904(span, &param));
+                return Some(pre_inferred);
+            }
+        };
+        for param in &sig.type_params {
+            if let Some(actual) = subst.get(&param.name) {
+                if let Some(bound) = param
+                    .bounds
+                    .iter()
+                    .find(|bound| !self.type_satisfies_bound(actual, bound))
+                {
+                    self.diags.push(crate::Generics::e0905(
+                        &actual.name(),
+                        bound,
+                        span,
+                        false,
+                    ));
+                }
+            }
+        }
+        for (_, ty) in &mut sig.params {
+            *ty = crate::Generics::substitute_type(ty, &subst);
+        }
+        if let Some(ret) = &mut sig.return_type {
+            *ret = crate::Generics::substitute_type(ret, &subst);
+        }
+        let _ = (type_name, method);
+        Some(pre_inferred)
+    }
+
+    /// D-APILABEL1=A: methods bind through the same one binder as free calls —
+    /// labels bind by name, zones decide whether a label is forbidden or
+    /// required, and skipped defaults are filled here.
+    ///
+    /// This runs **before** type-argument inference, not inside
+    /// `check_method_args`. Inference walks the argument list positionally and
+    /// hands back a `pre_inferred` vector indexed by position, so binding
+    /// afterwards would leave that vector describing the source order while
+    /// every later read assumed declaration order — which rejected correct
+    /// generic calls such as `s.put(value: 3, key: "k")`.
+    ///
+    /// Returns false when nothing could be bound and a diagnostic was reported.
+    pub(crate) fn bind_method_args(
+        &mut self,
+        method: &str,
+        sig: &MethodSig,
+        args: &mut Vec<crate::AST::CallArg>,
+        span: Span,
+    ) -> bool {
+        if sig.param_info.is_empty() {
+            return true;
+        }
+        // `params` is self-first when there is a receiver; `param_info` already
+        // excludes it, so the conventions line up after the skip.
+        let self_offset = usize::from(sig.self_conv.is_some());
+        let params: Vec<crate::Sema::CallBinder::BindParam<'_>> = (0..sig.param_info.len())
+            .map(|index| crate::Sema::CallBinder::BindParam {
+                label: sig
+                    .param_call
+                    .get(index)
+                    .map(|(label, _)| label.as_str())
+                    .unwrap_or(sig.param_info[index].0.as_str()),
+                name: sig.param_info[index].0.as_str(),
+                zone: sig
+                    .param_call
+                    .get(index)
+                    .map(|(_, zone)| *zone)
+                    .unwrap_or(crate::AST::ParamZone::Either),
+                default: sig.defaults.get(index).and_then(|d| d.as_ref()),
+                convention: sig
+                    .params
+                    .get(index + self_offset)
+                    .map(|(convention, _)| *convention)
+                    .unwrap_or(crate::AST::AccessConvention::Read),
+                variadic: sig.param_variadic.get(index).copied().unwrap_or(false),
+                core_default: None,
+            })
+            .collect();
+        let bound =
+            crate::Sema::CallBinder::bind_call_args(method, &params, args, span, &mut self.diags);
+        if bound.is_none() {
+            // Nothing bound, so every later check would be about slots that do
+            // not exist. Report each argument's own problems only.
+            for arg in args.iter_mut() {
+                self.infer(&mut arg.expr);
+            }
+            return false;
+        }
+        true
     }
 
     pub(crate) fn check_method_args(
@@ -380,101 +592,6 @@ impl<'a> Checker<'a> {
             sig.params.len()
         };
 
-        // D-NARG-D4 (S61, E0125): label validation — if a call arg has
-        // `name: val`, verify it matches the parameter name at that position.
-        // Labels never reorder. param_info is already self-excluded.
-        if !sig.param_info.is_empty() {
-            let all_param_names: Vec<&str> =
-                sig.param_info.iter().map(|(n, _)| n.as_str()).collect();
-            for (i, arg) in args.iter().enumerate() {
-                if let Some((label, label_span)) = &arg.label {
-                    if let Some((param_name, _)) = sig.param_info.get(i) {
-                        if label != param_name {
-                            // Is the label a real param name at a different position?
-                            if all_param_names.contains(&label.as_str()) {
-                                // Transposed: label names a real param, but wrong position.
-                                self.diags.push(Diagnostic::error(
-                                    "E0125",
-                                    format!(
-                                        "label `{}:` doesn't match the parameter `{}` here",
-                                        label, param_name
-                                    ),
-                                    "labels are checked documentation — each names the parameter at its own position, and arguments stay in the order they're declared".to_string(),
-                                    format!(
-                                        "write `{}:` here, or drop the label",
-                                        param_name
-                                    ),
-                                    Some(*label_span),
-                                ));
-                            } else {
-                                // Unknown: label doesn't name any parameter.
-                                self.diags.push(Diagnostic::error(
-                                    "E0125",
-                                    format!(
-                                        "`{}` has no parameter named `{}`",
-                                        method, label
-                                    ),
-                                    format!(
-                                        "a label must name the parameter at its position; `{}` takes {}",
-                                        method,
-                                        all_param_names.join(", ")
-                                    ),
-                                    format!(
-                                        "use one of `{}`'s parameter names, or drop the label",
-                                        method
-                                    ),
-                                    Some(*label_span),
-                                ));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // D-NARG-D2 (S61): default-value filling — append defaults for omitted
-        // trailing params. Earlier-param refs in defaults are substituted with
-        // the supplied argument expression so codegen never sees an unresolved
-        // identifier (invariant I2).
-        if args.len() < expected_args && !sig.defaults.is_empty() {
-            let provided = args.len();
-            let required: usize = sig.defaults.iter().take_while(|d| d.is_none()).count();
-            if provided >= required {
-                // Build earlier_names incrementally so a default like `d = h`
-                // can reference an already-filled synthetic arg `h`.
-                let all_param_names: Vec<String> =
-                    sig.param_info.iter().map(|(n, _)| n.clone()).collect();
-                for i in provided..expected_args {
-                    if let Some(Some(default_expr)) = sig.defaults.get(i) {
-                        // earlier_names covers all params up to (not including) i.
-                        let earlier_names: Vec<String> =
-                            all_param_names.iter().take(i).cloned().collect();
-                        // Substitute any earlier-param idents with the supplied arg.
-                        let resolved = super::substitute_param_refs(
-                            default_expr.clone(),
-                            &earlier_names,
-                            args,
-                        );
-                        // Use the first non-self param conv (offset by self).
-                        let param_idx = if sig.self_conv.is_some() { i + 1 } else { i };
-                        let conv = sig
-                            .params
-                            .get(param_idx)
-                            .map(|(c, _)| *c)
-                            .unwrap_or(crate::AST::AccessConvention::Read);
-                        args.push(crate::AST::CallArg {
-                            convention: conv,
-                            expr: resolved,
-                            span,
-                            flags: Default::default(),
-                            label: None,
-                            spread: false,
-                        });
-                    }
-                }
-            }
-        }
-
         let mut call_access = call_access.unwrap_or_else(|| self.call_access_frame());
         if let (Some(receiver), Some(convention)) = (receiver, sig.self_conv) {
             self.with_call_access(&mut call_access, |checker| {
@@ -486,6 +603,12 @@ impl<'a> Checker<'a> {
             });
         }
 
+        // A rest parameter on a *method* is still rejected here, exactly as
+        // before D-APILABEL1: codegen has no lowering for one, so accepting the
+        // call would reach an internal compiler error instead of a diagnostic
+        // (I2). Free-function variadics are unaffected and bind normally.
+        // The binder above already knows the parameter is variadic, so it does
+        // not additionally claim a missing argument before this fires.
         if args.len() != expected_args {
             self.diags.push(Diagnostic::error(
                 "E0104",

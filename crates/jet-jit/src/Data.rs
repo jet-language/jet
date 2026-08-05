@@ -6,6 +6,34 @@ use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
 use std::collections::BTreeMap;
 
+mod data_plot_rt {
+    pub(crate) mod jet_std {
+        #[derive(Clone, Debug)]
+        pub(crate) struct DataGroup {
+            pub(crate) key: String,
+            pub(crate) count: i64,
+            pub(crate) sum: f64,
+            pub(crate) mean: f64,
+        }
+
+        #[derive(Clone, Debug, Default)]
+        pub(crate) struct DataLineOptions {
+            pub(crate) title: String,
+            pub(crate) x_label: String,
+            pub(crate) y_label: String,
+            pub(crate) markers: bool,
+            pub(crate) reference: Option<f64>,
+            pub(crate) style: String,
+            pub(crate) color: String,
+            pub(crate) legend: String,
+        }
+    }
+
+    include!("../../jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs");
+}
+
+use data_plot_rt::jet_std::{DataGroup, DataLineOptions};
+
 #[derive(Clone, Debug)]
 struct DataError {
     kind: &'static str,
@@ -227,14 +255,6 @@ fn describe_checked(values: &[f64]) -> Result<DataSummary, DataError> {
     })
 }
 
-#[derive(Clone)]
-struct DataGroup {
-    key: String,
-    count: i64,
-    sum: f64,
-    mean: f64,
-}
-
 fn bar_text_checked(groups: &[DataGroup]) -> Result<String, DataError> {
     for (index, g) in groups.iter().enumerate() {
         if g.count < 0 {
@@ -323,48 +343,6 @@ fn bar_svg_checked(groups: &[DataGroup]) -> Result<String, DataError> {
     }
     out.push_str("</svg>");
     Ok(out)
-}
-
-fn line_render_checked(
-    groups: &[DataGroup],
-    title: String,
-    x_label: String,
-    y_label: String,
-    markers: bool,
-    reference: f64,
-    style: String,
-    color: String,
-    legend: String,
-    svg: bool,
-) -> Result<String, DataError> {
-    let points = groups
-        .iter()
-        .map(|group| jet_foundation::DataPlot::LinePoint {
-            label: group.key.clone(),
-            value: group.sum,
-        })
-        .collect::<Vec<_>>();
-    let config = jet_foundation::DataPlot::LineConfig {
-        title,
-        x_label,
-        y_label,
-        markers,
-        reference,
-        style,
-        color,
-        legend,
-    };
-    jet_foundation::DataPlot::validate_line(&points, &config).map_err(|error| DataError {
-        kind: error.kind,
-        operation: if svg { "line_svg" } else { "line_text" }.into(),
-        reason: error.reason,
-        index: error.index,
-    })?;
-    Ok(if svg {
-        jet_foundation::DataPlot::render_line_svg(&points, &config)
-    } else {
-        jet_foundation::DataPlot::render_line_text(&points, &config)
-    })
 }
 
 struct DataStatus {
@@ -666,70 +644,94 @@ extern "C" fn jet_jit_data_bar_svg(groups: i64) -> i64 {
     })
 }
 
-fn clone_heap_string(handle: i64) -> String {
-    Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(handle).unwrap_or_default())
+fn load_line_options(options: i64) -> DataLineOptions {
+    Concurrency::with_runtime_mut(|rt| {
+        let title = rt
+            .heap
+            .record_get_string(options, 0)
+            .and_then(|sid| rt.heap.clone_string(sid))
+            .unwrap_or_default();
+        let x_label = rt
+            .heap
+            .record_get_string(options, 1)
+            .and_then(|sid| rt.heap.clone_string(sid))
+            .unwrap_or_default();
+        let y_label = rt
+            .heap
+            .record_get_string(options, 2)
+            .and_then(|sid| rt.heap.clone_string(sid))
+            .unwrap_or_default();
+        let style = rt
+            .heap
+            .record_get_string(options, 5)
+            .and_then(|sid| rt.heap.clone_string(sid))
+            .unwrap_or_default();
+        let color = rt
+            .heap
+            .record_get_string(options, 6)
+            .and_then(|sid| rt.heap.clone_string(sid))
+            .unwrap_or_default();
+        let legend = rt
+            .heap
+            .record_get_string(options, 7)
+            .and_then(|sid| rt.heap.clone_string(sid))
+            .unwrap_or_default();
+        let reference = rt.heap.record_get_int(options, 4).and_then(|raw| {
+            (raw != 0).then(|| f64::from_bits(raw.wrapping_sub(1) as u64))
+        });
+        let markers = rt.heap.record_get_bool(options, 3).unwrap_or(false);
+        DataLineOptions {
+            title,
+            x_label,
+            y_label,
+            markers,
+            reference,
+            style,
+            color,
+            legend,
+        }
+    })
 }
 
-fn line_result(result: Result<String, DataError>) -> i64 {
-    match result {
-        Ok(value) => Concurrency::with_runtime_mut(|rt| {
-            let handle = rt.heap.alloc_string(value);
-            crate::runtime_host::alloc_jit_result(rt, true, handle as u64)
-        }),
-        Err(error) => result_data_err(error),
-    }
+fn result_data_plot_err(error: data_plot_rt::DataPlotError) -> i64 {
+    result_data_err(DataError {
+        kind: error.kind,
+        operation: error.operation.to_string(),
+        reason: error.reason.to_string(),
+        index: error.index,
+    })
 }
 
-extern "C" fn jet_jit_data_line_text(
-    groups: i64,
-    title: i64,
-    x_label: i64,
-    y_label: i64,
-    markers: i64,
-    reference: i64,
-    style: i64,
-    color: i64,
-    legend: i64,
-) -> i64 {
-    let result = line_render_checked(
-        &load_groups(groups),
-        clone_heap_string(title),
-        clone_heap_string(x_label),
-        clone_heap_string(y_label),
-        markers != 0,
-        f64::from_bits(reference as u64),
-        clone_heap_string(style),
-        clone_heap_string(color),
-        clone_heap_string(legend),
-        false,
-    );
-    line_result(result)
+extern "C" fn jet_jit_data_line_text(groups: i64, options: i64) -> i64 {
+    let groups = load_groups(groups);
+    let options = load_line_options(options);
+    Concurrency::with_runtime_mut(|rt| match data_plot_rt::jet_data_line_text_plot_checked(
+        &groups, &options,
+    ) {
+        Ok(s) => {
+            let sid = rt.heap.alloc_string(s);
+            crate::runtime_host::alloc_jit_result(rt, true, sid as u64)
+        }
+        Err(e) => {
+            result_data_plot_err(e)
+        }
+    })
 }
 
-extern "C" fn jet_jit_data_line_svg(
-    groups: i64,
-    title: i64,
-    x_label: i64,
-    y_label: i64,
-    markers: i64,
-    reference: i64,
-    style: i64,
-    color: i64,
-    legend: i64,
-) -> i64 {
-    let result = line_render_checked(
-        &load_groups(groups),
-        clone_heap_string(title),
-        clone_heap_string(x_label),
-        clone_heap_string(y_label),
-        markers != 0,
-        f64::from_bits(reference as u64),
-        clone_heap_string(style),
-        clone_heap_string(color),
-        clone_heap_string(legend),
-        true,
-    );
-    line_result(result)
+extern "C" fn jet_jit_data_line_svg(groups: i64, options: i64) -> i64 {
+    let groups = load_groups(groups);
+    let options = load_line_options(options);
+    Concurrency::with_runtime_mut(|rt| match data_plot_rt::jet_data_line_svg_plot_checked(
+        &groups, &options,
+    ) {
+        Ok(s) => {
+            let sid = rt.heap.alloc_string(s);
+            crate::runtime_host::alloc_jit_result(rt, true, sid as u64)
+        }
+        Err(e) => {
+            result_data_plot_err(e)
+        }
+    })
 }
 
 extern "C" fn jet_jit_data_group_reduce(keys: i64, values: i64, mode: i64) -> i64 {
@@ -1475,10 +1477,6 @@ pub(crate) fn declare(module: &mut JITModule) -> Result<DataHostFns, String> {
     sig_ternary.params.push(AbiParam::new(types::I64));
     let mut sig_quaternary = sig_ternary.clone();
     sig_quaternary.params.push(AbiParam::new(types::I64));
-    let mut sig_plot = sig_unary.clone();
-    for _ in 0..8 {
-        sig_plot.params.push(AbiParam::new(types::I64));
-    }
     let mut import = |name: &str, sig: &Signature| -> Result<FuncId, String> {
         module
             .declare_function(name, Linkage::Import, sig)
@@ -1492,8 +1490,8 @@ pub(crate) fn declare(module: &mut JITModule) -> Result<DataHostFns, String> {
         describe: import("jet_jit_data_describe", &sig_unary)?,
         bar_text: import("jet_jit_data_bar_text", &sig_unary)?,
         bar_svg: import("jet_jit_data_bar_svg", &sig_unary)?,
-        line_text: import("jet_jit_data_line_text", &sig_plot)?,
-        line_svg: import("jet_jit_data_line_svg", &sig_plot)?,
+        line_text: import("jet_jit_data_line_text", &sig_binary)?,
+        line_svg: import("jet_jit_data_line_svg", &sig_binary)?,
         group_reduce: import("jet_jit_data_group_reduce", &sig_ternary)?,
         group_reduce_limited: import("jet_jit_data_group_reduce_limited", &sig_ternary)?,
         error_show: import("jet_jit_data_error_show", &sig_unary)?,

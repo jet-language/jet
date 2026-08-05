@@ -38,15 +38,9 @@ loop field; meta.layout.fields { print(field.name) }
 and navigates to the field declaration. Dynamic tools can search `.fields`.
 Ordinary source does not turn a known field into text.
 
-The dunder alternative remains strong:
-
-```jet
-Packet.__layout
-```
-
-Under that option, dunder is declaration-reserved rather than
-access-forbidden. Users cannot declare `__*`, but code can read documented
-compiler members. This is a coherent amendment to D-SHAPE-DUNDER2.
+The compiler-dunder alternative was rejected. D-LAYOUT-FACTS1=B reserves the
+focused member for the single `$` compiler-fact plane and leaves ordinary
+double-underscore names governed by the existing identifier rules.
 
 ## Why `$` is the only credible single sigil
 
@@ -270,16 +264,10 @@ hide compiler facts by default.
 
 ## Ballot options
 
-### A — Compiler dunder member
+### A — Compiler-owned hidden member
 
-```jet
-Packet.__layout.size
-Packet.__layout[.count].offset
-Packet.reflect().layout
-```
-
-Strong system-owned precedent. Keeps `$` splice-only. Costs two underscores
-and inherited hidden-member expectations.
+A compiler-owned hidden member would keep `$` splice-only, but would cost two
+underscores and inherit hidden-member expectations. The owner rejected it.
 
 ### B — Single `$` meta member
 
@@ -305,7 +293,7 @@ the full metaprogramming path.
 ## Rejected shapes
 
 - `T._layout`: falsely means internal or soft-public.
-- Python-style `__layout__`: trailing underscores add noise.
+- Python-style trailing-underscore compiler members: trailing underscores add noise.
 - scalar magic members such as `$size` and `$offset`: flat catalog.
 - `T.@layout`, `T.#layout`, `T.?layout`, and similar forms: collide with a
   stronger existing plane.

@@ -52,9 +52,13 @@ export class TowerError extends Error {
 }
 const fail = (code, msg) => { throw new TowerError(code, msg); };
 
+// A board is born with one active epoch: every card must live in an epoch, be
+// a sidequest, or be frozen (owner ruling 2026-08-05), so an epoch-less board
+// would have nowhere to put epoch-track work.
 export const empty = (project = 'Project') => ({
   meta: { version: VERSION, project, currentEpoch: null, nextNum: 1, rev: 0, ui: { toggled: [] } },
-  epochs: [], milestones: [], cards: [], decisions: [], questions: [], ideas: [], events: [],
+  epochs: [{ id: 'e1', name: 'Epoch 1', goal: '', status: 'active' }],
+  milestones: [], cards: [], decisions: [], questions: [], ideas: [], papercuts: [], events: [],
 });
 
 // ---- store handle ---------------------------------------------------------
@@ -299,7 +303,7 @@ export function normalize(s) {
   if (s.meta.completionCursor == null && s.meta.digestCursor != null)
     s.meta.completionCursor = s.meta.digestCursor;
   delete s.meta.digestCursor;
-  for (const k of ['epochs', 'milestones', 'cards', 'decisions', 'questions', 'ideas', 'events']) s[k] ||= [];
+  for (const k of ['epochs', 'milestones', 'cards', 'decisions', 'questions', 'ideas', 'papercuts', 'events']) s[k] ||= [];
   delete s.messages;   // messaging was removed; drop the legacy key on next write
   // D-TWR-OPS1=A: active epoch is derived solely from epoch.status === 'active'.
   // One-time reconcile of the retired meta.currentEpoch pointer, then drop it so
@@ -531,7 +535,7 @@ export function project(s, config = null, history = null) {
     openQuestions: s.questions.filter(q => q.kind !== 'message' && q.status === 'open').length,
   };
   return { meta: s.meta, config: publicConfig(config) || undefined, epochs: s.epochs, milestones, phases: PHASES, lanes: LANES,
-    cards, decisions: s.decisions, questions: s.questions, ideas: s.ideas,
+    cards, decisions: s.decisions, questions: s.questions, ideas: s.ideas, papercuts: s.papercuts,
     events: s.events.slice(0, 300), counts, recentlyDecided, radar: radarData(s, historyCards) };
 }
 
@@ -552,6 +556,14 @@ const checkEnum = (val, list, what) => {
   if (val != null && !list.includes(val)) fail('E_INVALID', `${what} must be one of: ${list.join(', ')} (got ${JSON.stringify(val)})`);
 };
 const checkEpoch = (s, id) => { if (id != null && !s.epochs.find(e => e.id === id)) fail('E_NOT_FOUND', `no epoch ${id}`); };
+
+// Owner ruling 2026-08-05: every card lives in an epoch, is a sidequest, or is
+// frozen. An epoch-track card with no epoch is unreachable from every board
+// view, so the state is rejected at the store boundary (CLI and API alike).
+const checkCardHome = ({ track, epoch, phase }) => {
+  if (track === 'epoch' && epoch == null && phase !== 'frozen')
+    fail('E_INVALID', 'a card must live in an epoch, be a sidequest, or be frozen — pass --epoch <id> (no epoch is active to inherit) or --track sidequest');
+};
 const checkMilestone = (s, id) => { if (id != null && !s.milestones.find(m => m.id === id)) fail('E_NOT_FOUND', `no milestone ${id}`); };
 function checkCardMilestone(s, { epoch, track, milestoneId }) {
   if (milestoneId == null) return;
@@ -624,6 +636,7 @@ export function addCard(s, p, config) {
   const epoch = p.epoch ?? activeEpoch(s);
   const track = p.track || config.tracks[0];
   checkEpoch(s, epoch); checkMilestone(s, p.milestoneId);
+  checkCardHome({ track, epoch, phase: p.phase || 'planning' });
   checkCardMilestone(s, { epoch, track, milestoneId: p.milestoneId });
   checkRefs(p.refs);
   const parentId = 'parentId' in p || 'parent' in p
@@ -685,6 +698,16 @@ function applyDoneGate(s, c, targetPhase, by) {
     return 'verify';
   }
   return null;
+}
+
+// A needsAcceptance card parked in verify with every criterion verified is the
+// same owner handoff as asking for done — without this the owner's Accept
+// button stays disabled forever, because the ballot only minted on a `--phase
+// done` attempt and agents park in verify directly.
+function maybeMintAcceptance(s, c) {
+  const items = c.criteria || [];
+  if (c.needsAcceptance && c.phase === 'verify' && items.length && items.every(i => i.status === 'verified'))
+    mintAcceptance(s, c);
 }
 
 // #515 pass 2 (2026-07-12, owner directive): acceptance entries were too
@@ -767,6 +790,11 @@ export function updateCard(s, ref, patch, config) {
   checkEnum(patch.phase, PHASE_IDS, 'phase');
   if ('epoch' in patch) checkEpoch(s, patch.epoch);
   if ('milestoneId' in patch) checkMilestone(s, patch.milestoneId);
+  checkCardHome({
+    track: 'track' in patch ? patch.track : c.track,
+    epoch: 'epoch' in patch ? patch.epoch : c.epoch,
+    phase: 'phase' in patch ? patch.phase : c.phase,
+  });
   checkCardMilestone(s, {
     epoch: 'epoch' in patch ? patch.epoch : c.epoch,
     track: 'track' in patch ? patch.track : c.track,
@@ -806,6 +834,7 @@ export function updateCard(s, ref, patch, config) {
       else c[k] = patch[k];
     }
   }
+  if (oldPhase !== 'verify' && c.phase === 'verify') maybeMintAcceptance(s, c);
   if (c.assignee && c.assignee === patch.by) c.claimedAt = now();
   if (c.phase === 'done' || c.phase === 'frozen') {
     c.assignee = null;
@@ -864,6 +893,7 @@ export function verifyCriterion(s, ref, n, { evidence, by } = {}) {
   if (evidence != null) item.evidence = evidence;
   item.at = now();
   touchCard(c, by);
+  maybeMintAcceptance(s, c);
   logEvent(s, { by, action: 'card.criteria-verify', ref: c.id, note: `#${item.n}` });
   return { ...item, cardId: c.id, cardNum: c.num };
 }
@@ -1323,6 +1353,44 @@ export function doneMessage(s, id, by) {
   message.doneBy = by;
   logEvent(s, { by, action: 'message.done', ref: id });
   return message;
+}
+
+// ---- mutations: papercuts (append-only friction log) ----------------------
+// Steve Ruiz's "papercuts": agents log one line of tooling friction instead
+// of silently pushing through. Append-only, attributed, owner-resolved. Kept
+// OFF the questions machinery on purpose — high-volume, never blocks a card,
+// never gated by a card's owner lane. Logging friction must never fail.
+
+export function listPapercuts(s, { status } = {}) {
+  const list = status ? s.papercuts.filter(p => p.status === status) : s.papercuts;
+  return [...list].sort((a, b) => (b.created || '').localeCompare(a.created || ''));
+}
+
+export function addPapercut(s, p) {
+  if (!p.text || !String(p.text).trim()) fail('E_INVALID', 'papercut needs text');
+  if (!p.by || p.by === 'owner') fail('E_INVALID', 'papercut add needs --by <agent>');
+  const card = p.cardId == null ? null : mustCard(s, p.cardId);   // link only; no lane guard
+  const pc = {
+    id: newId('pc'),
+    by: p.by,
+    text: String(p.text).trim(),
+    cardId: card ? card.id : null,
+    created: now(),
+    status: 'open',
+  };
+  s.papercuts.push(pc);
+  logEvent(s, { by: p.by, action: 'papercut.add', ref: pc.id, note: card ? `#${card.num}` : '' });
+  return card ? { ...pc, cardNum: card.num } : pc;
+}
+
+export function resolvePapercut(s, id, by) {
+  if (by !== 'owner') fail('E_OWNER_ONLY', 'papercut resolve is owner-only');
+  const pc = s.papercuts.find(x => x.id === id) || fail('E_NOT_FOUND', `no papercut ${id}`);
+  pc.status = 'resolved';
+  pc.resolvedAt = now();
+  pc.resolvedBy = by;
+  logEvent(s, { by, action: 'papercut.resolve', ref: id });
+  return pc;
 }
 
 // ---- mutations: ideas ------------------------------------------------------

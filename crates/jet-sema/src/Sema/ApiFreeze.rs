@@ -741,8 +741,11 @@ mod tests {
     fn param(name: &str, conv: AccessConvention, ty: Type) -> Param {
         Param {
             convention: conv,
+            root: false,
             name: name.to_string(),
             name_span: zero(),
+            public_label: None,
+            zone: crate::AST::ParamZone::Either,
             ty,
             ty_span: zero(),
             default: None,

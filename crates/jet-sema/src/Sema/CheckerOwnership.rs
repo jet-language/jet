@@ -617,7 +617,9 @@ impl<'a> Checker<'a> {
         }
         match self.lookup(&place.owner.name).map(|info| &info.ty) {
             Some(Type::Named(name)) if name == Syntax::TYPE_BYTE_BUFFER => ViewKind::Buffer,
-            Some(Type::Apply { name, .. }) if matches!(name.as_str(), "Matrix" | "Tensor") => {
+            Some(Type::Apply { name, .. })
+                if matches!(name.as_str(), "Vec" | "Matrix" | "Tensor") =>
+            {
                 ViewKind::Matrix
             }
             Some(Type::Named(name)) if name == "Tensor" => ViewKind::Matrix,
@@ -1287,6 +1289,7 @@ impl<'a> Checker<'a> {
             | Expr::UnitLit { .. }
             | Expr::Absent(..)
             | Expr::Todo { .. }
+        | Expr::NoElse(_)
             | Expr::ReduceMarker(..)
             | Expr::ComptimeSplice { .. }
             | Expr::IncDec { .. } => {}
@@ -5260,6 +5263,7 @@ impl<'a> Checker<'a> {
             params: vec![],
             ret: Some(value.clone()),
             effect_bound: None,
+            param_contract: None,
             return_view_provenance: None,
         };
         let saved_expected = self.expected_type.clone();
@@ -5471,6 +5475,7 @@ impl<'a> Checker<'a> {
             params: vec![inner.clone()],
             ret: expected_return.map(Box::new),
             effect_bound: None, return_view_provenance: None,
+            param_contract: None,
         };
         let saved_exp = self.expected_type.clone();
         self.expected_type = Some(expected);

@@ -66,12 +66,53 @@ fn known_list_len(checker: &Checker<'_>, expr: &crate::AST::Expr) -> Option<usiz
     }
 }
 
+fn exactly_one_type_arg(
+    checker: &mut Checker<'_>,
+    name: &str,
+    type_args: &[Type],
+    span: Span,
+) -> Option<Type> {
+    if type_args.len() != 1 {
+        checker.diags.push(Diagnostic::error(
+            "E0119",
+            format!("`{name}` expects exactly one type argument, got {}", type_args.len()),
+            "a typed decode call needs one target type".to_string(),
+            format!("write `{name}<Target>(...)` with one target type"),
+            Some(span),
+        ));
+        return None;
+    }
+    Some(type_args[0].clone())
+}
+
 fn literal_int(expr: &crate::AST::Expr) -> Option<i64> {
     match expr {
         crate::AST::Expr::Int(value, ..) => Some(*value),
         crate::AST::Expr::Paren(inner, _) => literal_int(inner),
         crate::AST::Expr::Unary(crate::AST::UnOp::Neg, inner, _) => {
             literal_int(inner)?.checked_neg()
+        }
+        _ => None,
+    }
+}
+
+fn compute_alias_return(name: &str, args: &[crate::AST::CallArg]) -> Option<Type> {
+    match name {
+        "vec" => literal_int(&args.first()?.expr)
+            .filter(|value| *value >= 0)
+            .map(|value| {
+                result_ty(
+                    Type::compute_shape_type("Vec", &[value as u64]),
+                    Type::Named("ComputeError".to_string()),
+                )
+            }),
+        "matrix" => {
+            let rows = literal_int(&args.first()?.expr).filter(|value| *value >= 0)?;
+            let cols = literal_int(&args.get(1)?.expr).filter(|value| *value >= 0)?;
+            Some(result_ty(
+                Type::compute_shape_type("Matrix", &[rows as u64, cols as u64]),
+                Type::Named("ComputeError".to_string()),
+            ))
         }
         _ => None,
     }
@@ -359,7 +400,7 @@ impl<'a> Checker<'a> {
             alias_span: Span,
             span: Span,
             type_args: &[Type],
-            args: &mut [crate::AST::CallArg],
+            args: &mut Vec<crate::AST::CallArg>,
         ) -> Option<Type> {
             // D-FRONTENDAPI1=A: the compiler surface is a read-only
             // compile-time value API. It is intentionally handled before the
@@ -587,6 +628,44 @@ impl<'a> Checker<'a> {
             } else {
                 resolved_core_fixed_sig(module, name)
             };
+            // D-APILABEL1=A: a Core function that publishes a call contract
+            // binds through the same binder as user code, so a caller can name
+            // the one policy it changes and skip the rest. Filling the skipped
+            // defaults here is also what stops each engine spelling its own
+            // fallback: every tier now receives the same argument.
+            if let Some(contract) = super::core_param_contract(module, name) {
+                let params: Vec<crate::Sema::CallBinder::BindParam<'_>> = contract
+                    .iter()
+                    .enumerate()
+                    .map(|(index, param)| crate::Sema::CallBinder::BindParam {
+                        label: param.label,
+                        name: param.label,
+                        zone: param.zone,
+                        default: None,
+                        convention: sig
+                            .as_ref()
+                            .and_then(|(params, _)| params.get(index))
+                            .map(|(convention, _)| *convention)
+                            .unwrap_or(AccessConvention::Read),
+                        variadic: false,
+                        core_default: param.default,
+                    })
+                    .collect();
+                if crate::Sema::CallBinder::bind_call_args(
+                    name,
+                    &params,
+                    args,
+                    span,
+                    &mut self.diags,
+                )
+                .is_none()
+                {
+                    for arg in args.iter_mut() {
+                        self.infer(&mut arg.expr);
+                    }
+                    return sig.and_then(|(_, ret)| ret);
+                }
+            }
             match (module, name) {
                 ("core.vault", "current" | "versions" | "load" | "status"
                     | "prepare_generate" | "prepare_store" | "prepare_rotate" | "prepare_retire" | "prepare_revoke"
@@ -731,7 +810,9 @@ impl<'a> Checker<'a> {
                     if let Some(arg) = args.get_mut(1) {
                         self.expect_core_arg(name, 1, &Type::Named("XMLParseOptions".to_string()), arg);
                     }
-                    let t = type_args[0].clone();
+                    let Some(t) = exactly_one_type_arg(self, name, type_args, span) else {
+                        return None;
+                    };
                     self.check_decodable(&t, span);
                     return Some(result_ty(t, decode_error_ty()));
                 }
@@ -745,7 +826,9 @@ impl<'a> Checker<'a> {
                     if let Some(arg) = args.get_mut(1) {
                         self.expect_core_arg(name, 1, &Type::Named("XMLParseOptions".to_string()), arg);
                     }
-                    let t = type_args[0].clone();
+                    let Some(t) = exactly_one_type_arg(self, name, type_args, span) else {
+                        return None;
+                    };
                     self.check_decodable(&t, span);
                     return Some(result_ty(t, decode_error_ty()));
                 }
@@ -823,7 +906,9 @@ impl<'a> Checker<'a> {
                     if !(1..=2).contains(&args.len()) { self.diags.push(wrong_core_arity(name, 1, args.len(), span)); }
                     if let Some(arg) = args.get_mut(0) { self.expect_core_arg(name, 0, &Type::List(Box::new(u8_ty())), arg); }
                     if let Some(arg) = args.get_mut(1) { self.expect_core_arg(name, 1, &Type::Named("CBOROptions".to_string()), arg); }
-                    let t = type_args[0].clone();
+                    let Some(t) = exactly_one_type_arg(self, name, type_args, span) else {
+                        return None;
+                    };
                     self.check_decodable(&t, span);
                     return Some(result_ty(t, decode_error_ty()));
                 }
@@ -940,7 +1025,8 @@ impl<'a> Checker<'a> {
                     }
                     return Some(Type::String);
                 }
-                // D-ENC1 / D-SERDE6: typed encode/decode over the Encode/Decode model.
+                // D-ENC1 / D-GENERIC-CALL1 / D-SERDE6: typed encode/decode over
+                // the Encode/Decode model.
                 // `to_string`/`to_string_pretty` accept any encodable value (the dynamic
                 // `JSON` / `[[String]]` / `Map` forms AND a `#[Codable]` value); the
                 // codegen routes by the lowered arg type. `decode<T>` is the typed decode
@@ -1023,7 +1109,9 @@ impl<'a> Checker<'a> {
                     for a in args.iter_mut() {
                         self.infer(&mut a.expr);
                     }
-                    let t = type_args[0].clone();
+                    let Some(t) = exactly_one_type_arg(self, name, type_args, span) else {
+                        return None;
+                    };
                     self.check_decodable(&t, span);
                     let inner = if module == "core.encoding.csv" {
                         Type::List(Box::new(t))
@@ -1048,7 +1136,9 @@ impl<'a> Checker<'a> {
                     for a in args.iter_mut() {
                         self.infer(&mut a.expr);
                     }
-                    let t = type_args[0].clone();
+                    let Some(t) = exactly_one_type_arg(self, name, type_args, span) else {
+                        return None;
+                    };
                     self.check_decodable(&t, span);
                     let inner = if module == "core.encoding.csv" {
                         Type::List(Box::new(t))
@@ -1070,7 +1160,9 @@ impl<'a> Checker<'a> {
                     for a in args.iter_mut() {
                         self.expect_core_arg(name, 0, &Type::String, a);
                     }
-                    let t = type_args[0].clone();
+                    let Some(t) = exactly_one_type_arg(self, name, type_args, span) else {
+                        return None;
+                    };
                     self.check_decodable(&t, span);
                     return Some(result_ty(Type::List(Box::new(t)), decode_error_ty()));
                 }
@@ -1084,7 +1176,9 @@ impl<'a> Checker<'a> {
                     if let Some(arg) = args.get_mut(1) {
                         self.expect_core_arg(name, 1, &Type::Named("DataLimits".to_string()), arg);
                     }
-                    let t = type_args[0].clone();
+                    let Some(t) = exactly_one_type_arg(self, name, type_args, span) else {
+                        return None;
+                    };
                     self.check_decodable(&t, span);
                     return Some(result_ty(
                         Type::Apply {
@@ -1344,6 +1438,7 @@ impl<'a> Checker<'a> {
                             params: vec![row_ty.clone()],
                             ret: Some(Box::new(ret)),
                             effect_bound: None, return_view_provenance: None,
+                            param_contract: None,
                         };
                         self.expect_core_arg(name, 1, &fn_ty, fn_arg);
                     }
@@ -1384,6 +1479,7 @@ impl<'a> Checker<'a> {
                             params: vec![row_ty.clone()],
                             ret: Some(Box::new(ret)),
                             effect_bound: None, return_view_provenance: None,
+                            param_contract: None,
                         };
                         self.expect_core_arg(name, 1, &fn_ty, fn_arg);
                     }
@@ -1431,6 +1527,7 @@ impl<'a> Checker<'a> {
                             params: vec![row_ty.clone()],
                             ret: Some(Box::new(Type::String)),
                             effect_bound: None, return_view_provenance: None,
+                            param_contract: None,
                         };
                         self.expect_core_arg(name, 1, &key_fn, key_arg);
                     }
@@ -1440,6 +1537,7 @@ impl<'a> Checker<'a> {
                                 params: vec![row_ty],
                                 ret: Some(Box::new(Type::Float)),
                                 effect_bound: None, return_view_provenance: None,
+                                param_contract: None,
                             };
                             self.expect_core_arg(name, 2, &value_fn, value_arg);
                         }
@@ -1494,6 +1592,7 @@ impl<'a> Checker<'a> {
                             params: vec![left_row.clone()],
                             ret: Some(Box::new(Type::String)),
                             effect_bound: None, return_view_provenance: None,
+                            param_contract: None,
                         };
                         self.expect_core_arg(name, 2, &key_fn, left_key);
                     }
@@ -1502,6 +1601,7 @@ impl<'a> Checker<'a> {
                             params: vec![right_row.clone()],
                             ret: Some(Box::new(Type::String)),
                             effect_bound: None, return_view_provenance: None,
+                            param_contract: None,
                         };
                         self.expect_core_arg(name, 3, &key_fn, right_key);
                     }
@@ -1548,6 +1648,7 @@ impl<'a> Checker<'a> {
                                 params: vec![row_ty.clone()],
                                 ret: Some(Box::new(Type::String)),
                                 effect_bound: None, return_view_provenance: None,
+                                param_contract: None,
                             };
                             self.expect_core_arg(name, idx, &key_fn, arg);
                         }
@@ -1557,6 +1658,7 @@ impl<'a> Checker<'a> {
                             params: vec![row_ty],
                             ret: Some(Box::new(Type::Float)),
                             effect_bound: None, return_view_provenance: None,
+                            param_contract: None,
                         };
                         self.expect_core_arg(name, 3, &value_fn, value_arg);
                     }
@@ -1730,6 +1832,55 @@ impl<'a> Checker<'a> {
                         }
                     }
                     return None;
+                }
+                ("core.io", "progress") => {
+                    if args.is_empty() || args.len() > 3 {
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            "`io.progress` needs one to three arguments".to_string(),
+                            "the first argument is a String message or a List/Iter source; the optional arguments set the description and format".to_string(),
+                            "write `io.progress(items, description, format)` for an iterable".to_string(),
+                            Some(span),
+                        ));
+                        for arg in args.iter_mut() {
+                            self.infer(&mut arg.expr);
+                        }
+                        return None;
+                    }
+                    let source = self.infer(&mut args[0].expr)?;
+                    if matches!(source, Type::String) {
+                        if args.len() != 1 {
+                            self.diags.push(Diagnostic::error(
+                                "E0112",
+                                "`io.progress` takes only one argument for a text update".to_string(),
+                                "the one-string form writes one progress message".to_string(),
+                                "use `io.progress(items, description, format)` for an iterable".to_string(),
+                                Some(args[1].expr.span()),
+                            ));
+                        }
+                        return Some(result_ty(unit_ty(), io_error_ty()));
+                    }
+                    let elem = match source {
+                        Type::List(inner) => *inner,
+                        Type::FixedList { elem, .. } => *elem,
+                        Type::Apply { name, mut args } if name == Syntax::TYPE_ITER && args.len() == 1 => {
+                            args.pop().expect("Iter has one element type")
+                        }
+                        _ => {
+                            self.diags.push(Diagnostic::error(
+                                "E0112",
+                                format!("`io.progress` cannot wrap {}", source.show()),
+                                "progress adapters wrap List<T> and Iter<T> values".to_string(),
+                                "pass a list or lazy iterator".to_string(),
+                                Some(args[0].expr.span()),
+                            ));
+                            return None;
+                        }
+                    };
+                    for arg in args.iter_mut().skip(1) {
+                        self.expect_core_arg("progress", 1, &Type::String, arg);
+                    }
+                    return Some(crate::Collections::iter_ty(elem));
                 }
                 ("core.io", "eprint") => {
                     // D-VERDICT-1321-1: variadic — each argument prints on its own line.
@@ -3576,14 +3727,14 @@ impl<'a> Checker<'a> {
                         match args[2].label.as_ref().map(|(label, span)| (label.as_str(), *span)) {
                             Some(("tls", _)) => {}
                             Some((label, label_span)) => self.diags.push(Diagnostic::error(
-                                "E0125",
+                                "E0764",
                                 format!("`bind` has no option named `{label}` here"),
                                 "the third HTTP server argument is a named TLS option, not a positional value".to_string(),
                                 "write `tls: Server.tls(cert, key)`".to_string(),
                                 Some(label_span),
                             )),
                             None => self.diags.push(Diagnostic::error(
-                                "E0125",
+                                "E0769",
                                 "`bind` needs `tls:` before the third argument".to_string(),
                                 "the label makes the transport switch explicit at the call site".to_string(),
                                 "write `Server.bind(addr, mux, tls: Server.tls(cert, key))`".to_string(),
@@ -3623,14 +3774,14 @@ impl<'a> Checker<'a> {
                         match args[2].label.as_ref().map(|(label, span)| (label.as_str(), *span)) {
                             Some(("tls", _)) => {}
                             Some((label, label_span)) => self.diags.push(Diagnostic::error(
-                                "E0125",
+                                "E0764",
                                 format!("`serve` has no option named `{label}` here"),
                                 "the third HTTP server argument is a named TLS option, not a positional value".to_string(),
                                 "write `tls: Server.tls(cert, key)`".to_string(),
                                 Some(label_span),
                             )),
                             None => self.diags.push(Diagnostic::error(
-                                "E0125",
+                                "E0769",
                                 "`serve` needs `tls:` before the third argument".to_string(),
                                 "the label makes the transport switch explicit at the call site".to_string(),
                                 "write `Server.serve(addr, mux, tls: Server.tls(cert, key))`".to_string(),
@@ -4133,9 +4284,9 @@ impl<'a> Checker<'a> {
                                 Some(label) => {
                                     let label_span = args[1].label.as_ref().map(|(_, s)| *s).unwrap_or(span);
                                     self.diags.push(Diagnostic::error(
-                                        "E0125",
-                                        format!("`display_width` has no `{label}:` option at argument 2"),
-                                        "this position accepts a `TextWidth` policy; labels document the positional shape and never reorder arguments".to_string(),
+                                        "E0764",
+                                        format!("`display_width` has no parameter labelled `{label}`"),
+                                        "this position accepts a `TextWidth` policy".to_string(),
                                         "write `policy:` here, or drop the label".to_string(),
                                         Some(label_span),
                                     ));
@@ -4200,6 +4351,11 @@ impl<'a> Checker<'a> {
                 return ret;
             }
 
+            let compute_alias_ret = if module == "core.compute" {
+                compute_alias_return(name, args)
+            } else {
+                None
+            };
             let Some((params, ret)) = sig else {
                 self.diags.push(unknown_core_item(module, name, span));
                 for a in args.iter_mut() {
@@ -4294,7 +4450,7 @@ impl<'a> Checker<'a> {
             if module == "core.time" && name == "clock" {
                 ret.map(crate::Sema::Diagnostics::deterministic_clock_type)
             } else {
-                ret
+                compute_alias_ret.or(ret)
             }
         }
     

@@ -3,11 +3,18 @@ use core.sync as sync
 use app
 
 fn run() {
-    a0 :: sync.text_new("r1", "hello")
-    b :: sync.text_new("r2", "world")
-    a :: sync.text_set(a0, "r1", "hellp")
+    // Two replicas edit the same document while apart, then merge.  A text
+    // CRDT keeps both edits and reaches one document, in either merge order.
+    base :: sync.text_new("r1", "hello world")
+    a :: sync.text_edit(base, "r1", 5, 0, ",")
+    b :: sync.text_edit(base, "r2", 11, 0, "!")
     merged :: sync.text_merge(a, b)
     print(sync.text_show(merged))
+    print(sync.text_show(sync.text_merge(b, a)))
+    // Merging twice changes nothing, and a replica that already saw the
+    // result still agrees with it.
+    print(sync.text_show(sync.text_merge(merged, a)))
+    print(sync.text_metadata(merged))
 
     c0 :: sync.counter_new("r1", 2)
     c2 :: sync.counter_new("r2", 3)

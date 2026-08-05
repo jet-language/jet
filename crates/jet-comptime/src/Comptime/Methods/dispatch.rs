@@ -23,7 +23,7 @@ use super::super::Diagnostics::{EARLY_RETURN_CODE, ERR_PROPAGATE_CODE};
 use super::super::Interpreter::{Flow, Interp};
 use super::super::Value::CtValue;
 use super::core_calls::{
-    apply_core_call, apply_impure_core_call, as_bytes, as_float, display_core_pure_value,
+    apply_core_call, apply_data_line_call, apply_impure_core_call, as_bytes, as_float, display_core_pure_value,
     eval_regex_replace_all_with, shuffle_ct_list, sketch_add, solver_new, solver_require,
     with_ambient_rng,
 };

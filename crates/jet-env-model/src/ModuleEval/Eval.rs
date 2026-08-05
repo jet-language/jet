@@ -758,7 +758,7 @@ fn package_profile_collisions(
         crate::Comptime::CtValue::Map(entries) => {
             let mut out = Vec::new();
             for (key, value) in entries {
-                let crate::Comptime::CtKey::Str(key) = key else {
+                let crate::AST::CtKey::Str(key) = key else {
                     return Err(Diagnostic::error(
                         "E1333",
                         format!("package profile `{name}` has a non-string collision path"),

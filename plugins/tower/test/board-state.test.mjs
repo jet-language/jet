@@ -85,3 +85,21 @@ test('ownerVerifyQueue: ONLY needsAcceptance verify cards — bare verify is age
   assert.equal(openAcceptanceBallot(q[0].card)?.id, 'D-ACCEPT-360');
   assert.equal(ownerVerifyQueue([bare]).length, 0);
 });
+
+test('milestone filter narrows to one milestone and sorts unassigned last', () => {
+  const inMile = card(20, 'building', 'building', { milestoneId: 'e3-ul4' });
+  const other = card(21, 'building', 'building', { milestoneId: 'e3-ul7' });
+  const none = card(22, 'building', 'building');
+
+  assert.equal(cardMatches(inMile, { milestone: 'e3-ul4' }), true);
+  assert.equal(cardMatches(other, { milestone: 'e3-ul4' }), false);
+  assert.equal(cardMatches(none, { milestone: 'e3-ul4' }), false);
+  assert.equal(cardMatches(none, {}), true);
+
+  const closed = card(23, 'done', 'done', { milestoneId: 'e3-ul4' });
+  assert.equal(cardMatches(closed, { milestone: 'e3-ul4' }), false);
+  assert.equal(cardMatches(closed, { milestone: 'e3-ul4', showClosed: true }), true);
+
+  const sorted = sortCards([none, other, inMile], { col: 'milestone', dir: 'asc' });
+  assert.deepEqual(sorted.map(c => c.num), [20, 21, 22]);
+});

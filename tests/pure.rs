@@ -193,6 +193,7 @@ fn run() {
                         .iter()
                         .map(|p| (p.convention.clone(), p.ty.clone()))
                         .collect(),
+                    root_param: f.params.first().is_some_and(|p| p.root),
                     return_type: f.return_type.clone(),
                     return_view_provenance: provenance_cell(&f.return_view_provenance),
                     is_extern: false,
@@ -278,6 +279,7 @@ fn run() {
                         .iter()
                         .map(|p| (p.convention.clone(), p.ty.clone()))
                         .collect(),
+                    root_param: f.params.first().is_some_and(|p| p.root),
                     return_type: f.return_type.clone(),
                     return_view_provenance: provenance_cell(&f.return_view_provenance),
                     is_extern: false,
@@ -351,6 +353,7 @@ fn run() {
                         .iter()
                         .map(|p| (p.convention.clone(), p.ty.clone()))
                         .collect(),
+                    root_param: f.params.first().is_some_and(|p| p.root),
                     return_type: f.return_type.clone(),
                     return_view_provenance: provenance_cell(&f.return_view_provenance),
                     is_extern: false,

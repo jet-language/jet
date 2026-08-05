@@ -2240,6 +2240,7 @@ pub(crate) fn run_eval(file: &str, pure_required: bool, mode: OutputMode) {
                             .iter()
                             .map(|p| (p.convention.clone(), p.ty.clone()))
                             .collect(),
+                        root_param: f.params.first().is_some_and(|p| p.root),
                         return_type: f.return_type.clone(),
                         return_view_provenance: f
                             .return_view_provenance
@@ -2263,6 +2264,11 @@ pub(crate) fn run_eval(file: &str, pure_required: bool, mode: OutputMode) {
                             .params
                             .iter()
                             .map(|p| (p.name.clone(), p.default.is_some()))
+                            .collect(),
+                        param_call: f
+                            .params
+                            .iter()
+                            .map(|p| (p.call_label().to_string(), p.zone))
                             .collect(),
                         defaults: f
                             .params

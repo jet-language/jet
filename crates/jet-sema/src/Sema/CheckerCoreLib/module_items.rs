@@ -182,7 +182,8 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "reader",
             "writer",
         ],
-        // D-SERDE6: typed `decode<T>` rides every format submodule alongside `parse`.
+        // D-GENERIC-CALL1 owns the `decode<T>` call grammar; D-SERDE6 owns the
+        // typed codec surface in every format submodule alongside `parse`.
         "core.encoding.csv" => &[
             "CSVReader",
             "CSVWriter",
@@ -244,6 +245,7 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "csv_reader",
             "json_reader",
             "DataLimits",
+            "DataLineOptions",
             "DataError",
             "DataErrorKind",
             "DataStream",
@@ -945,6 +947,8 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "text_set",
             "text_merge",
             "text_show",
+            "text_edit",
+            "text_metadata",
             "counter_new",
             "counter_inc",
             "counter_merge",

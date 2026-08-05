@@ -1,0 +1,20 @@
+// E0307 (card #1440): an else-less all-pattern value dispatch must cover the
+// subject's whole enum; a missing variant is a sema error, not a parse error.
+enum Direction {
+    North
+    South
+    East
+    West
+}
+
+fn label(d: Direction) => String {
+    return if d == {
+        .North -> "north"
+        .South -> "south"
+        .East -> "east"
+    }
+}
+
+fn run() {
+    print(label(Direction.North))
+}

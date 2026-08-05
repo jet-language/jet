@@ -159,6 +159,104 @@ mod tests {
     }
 
     #[test]
+    fn hover_shows_source_module_for_imported_root_call() {
+        let project = TestProject::new();
+        std::fs::write(
+            project.root.join("library.jet"),
+            "pub fn render(#Root value: Int) => Int { return value }\n",
+        )
+        .expect("write imported root-call library");
+        let src = "use \"./library\" as one\nfn run() { value :: 1\n    value.render()\n}\n";
+        let (diagnostics, bundle, facts) = check_document_with_bundle(project.entry(), src);
+        assert!(
+            diagnostics.iter().all(|diagnostic| diagnostic.severity != crate::Diagnostics::Severity::Error),
+            "imported root-call fixture should check: {diagnostics:#?}"
+        );
+        let bundle = bundle.expect("imported root-call bundle");
+        let db = build_symbol_db(&bundle, &facts);
+        let (tokens, lex_diagnostics) = crate::Lexer::lex(src);
+        assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:#?}");
+        let hover = compute_hover(
+            &db,
+            &tokens,
+            src,
+            project.entry(),
+            src.find("render").expect("root-call method name"),
+        )
+        .expect("imported root-call hover");
+        assert!(hover.contains("from module `"), "{hover}");
+        assert!(hover.contains("library.jet"), "{hover}");
+    }
+
+    #[test]
+    fn compiler_layout_fact_lsp_surface_is_visible_and_fixed() {
+        let src = "struct Packet { count: Int }\nderive T.LayoutFacts { info :: T.$layout }\nfn run() {}\n";
+        let (project, diagnostics, bundle, facts) = check_test_document(src);
+        assert!(
+            diagnostics.iter().all(|diagnostic| diagnostic.severity != crate::Diagnostics::Severity::Error),
+            "layout fact LSP fixture should check: {diagnostics:#?}"
+        );
+        let bundle = bundle.expect("bundle");
+        let db = build_symbol_db(&bundle, &facts);
+        let layout_offset = src.find("$layout").expect("layout fact") + 2;
+        let completions = compute_completions(
+            &db,
+            src,
+            layout_offset + 4,
+            project.entry(),
+            None,
+            None,
+        );
+        assert!(
+            completions.iter().any(|item| {
+                item.label == "$layout"
+                    && item.detail.as_deref() == Some("compiler fact: LayoutInfo")
+            }),
+            "compiler fact completion missing: {}",
+            completions
+                .iter()
+                .map(|item| item.label.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+
+        let (tokens, lex_diagnostics) = crate::Lexer::lex(src);
+        assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:#?}");
+        let hover = compute_hover(&db, &tokens, src, project.entry(), layout_offset)
+            .expect("layout fact hover");
+        assert!(hover.contains("$layout"), "{hover}");
+
+        // Definition lookup is driven by the receiver type. The compiler
+        // accepts the focused fact on the derive type parameter `T`; use the
+        // same resolver with a concrete receiver to prove navigation lands on
+        // that type declaration.
+        let navigation_src = "struct Packet { count: Int }\nfn run() { info :: Packet.$layout }\n";
+        let (navigation_tokens, navigation_diagnostics) = crate::Lexer::lex(navigation_src);
+        assert!(navigation_diagnostics.is_empty(), "{navigation_diagnostics:#?}");
+        let navigation_offset = navigation_src.find("$layout").expect("layout fact") + 2;
+        let (definition_path, definition_span) = compute_definition(
+            &db,
+            &navigation_tokens,
+            navigation_src,
+            project.entry(),
+            navigation_offset,
+        )
+        .expect("layout fact definition");
+        assert_eq!(definition_path, project.entry());
+        assert_eq!(&src[definition_span.start..definition_span.end], "Packet");
+
+        let rename_error = compute_rename(
+            &db,
+            &tokens,
+            project.entry(),
+            layout_offset,
+            "Other",
+        )
+        .expect_err("compiler facts are not renameable");
+        assert!(rename_error.contains("compiler-owned $layout"), "{rename_error}");
+    }
+
+    #[test]
     fn rename_basic_function() {
         let src = "fn greet() {}\nfn run() { greet(); }\n";
         let (project, _, bundle, facts) = check_test_document(src);

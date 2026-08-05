@@ -228,6 +228,11 @@ pub enum Type {
         params: Vec<Type>,
         ret: Option<Box<Type>>,
         effect_bound: Option<Vec<(String, Span)>>,
+        /// D-APILABEL1=A: the declared call contract — public label and zone
+        /// per parameter, parallel to `params`. Part of callable identity, so
+        /// a `fn(*, force: Bool)` value rejects a positional call. `None` for
+        /// a bare structural `fn(Int) => Int`, which keeps its old meaning.
+        param_contract: Option<Vec<(String, super::ParamZone)>>,
         /// Relation from returned view slots to possible parameter owners.
         /// D-MEMPROVENANCE3=A: a trailing `from` on the function type fills this
         /// at parse time (names resolve then and are not kept on the type).
@@ -288,6 +293,10 @@ pub enum Type {
     Union(Vec<Type>),
 }
 
+/// Compiler-owned encoding for the const dimensions in `Vec<N>` and
+/// `Matrix<M, N>`. The NUL prefix makes it impossible to spell as a user type.
+const COMPUTE_DIMENSION_PREFIX: &str = "\0compute.dimension.";
+
 /// Manual structural equality (D-EFF2). Identical to a derived `PartialEq`
 /// except the `Fn` arm ignores `effect_bound`: a callback effect bound is a
 /// call-site obligation, not part of a function type's identity, so a
@@ -320,18 +329,31 @@ impl PartialEq for Type {
             (Option(a), Option(b)) => a == b,
             (Result { ok: o1, err: e1 }, Result { ok: o2, err: e2 }) => o1 == o2 && e1 == e2,
             // D-EFF2: effect_bound deliberately excluded from the comparison.
+            // D-APILABEL1=A: the call contract — public labels and zones — IS
+            // callable identity, so `fn(*, force: Bool)` and `fn(Bool)` are
+            // different types. A type that declares no contract still matches
+            // one that does; only a declared contract constrains a caller.
             (
                 Fn {
                     params: p1,
                     ret: r1,
+                    param_contract: c1,
                     ..
                 },
                 Fn {
                     params: p2,
                     ret: r2,
+                    param_contract: c2,
                     ..
                 },
-            ) => p1 == p2 && r1 == r2,
+            ) => {
+                p1 == p2
+                    && r1 == r2
+                    && match (c1, c2) {
+                        (Some(a), Some(b)) => a == b,
+                        _ => true,
+                    }
+            }
             (Named(a), Named(b)) => a == b,
             (Apply { name: n1, args: a1 }, Apply { name: n2, args: a2 }) => n1 == n2 && a1 == a2,
             (TraitObject(a), TraitObject(b)) => a == b,
@@ -446,7 +468,7 @@ pub fn canonicalize_union(members: Vec<Type>) -> Type {
     }
     unique.sort_by(|a, b| a.name().cmp(&b.name()));
     match unique.len() {
-        0 => Type::Named("Void".to_string()),
+        0 => Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string()),
         1 => unique.pop().unwrap(),
         _ => Type::Union(unique),
     }
@@ -492,6 +514,62 @@ impl Type {
     /// numeric widening consumes the explicit loss opt-out.
     pub const APPROX_NUMERIC_WIDEN_MARKER: &'static str = "\0numeric.approx_widen";
 
+    /// D-COMPUTE-TYPE1: preserve a fixed compute dimension in the type tree.
+    pub fn compute_dimension_type(value: u64) -> Type {
+        Type::Named(format!("{COMPUTE_DIMENSION_PREFIX}{value}"))
+    }
+
+    /// Return a fixed compute dimension, if this is the compiler-owned marker.
+    pub fn compute_dimension_value(&self) -> Option<u64> {
+        let value = match self {
+            Type::Named(name) => name.strip_prefix(COMPUTE_DIMENSION_PREFIX)?,
+            _ => return None,
+        };
+        if value.is_empty() || !value.chars().all(|ch| ch.is_ascii_digit()) {
+            return None;
+        }
+        value.parse().ok()
+    }
+
+    /// Build one of the fixed-shape compute aliases from its dimensions.
+    pub fn compute_shape_type(name: &str, dimensions: &[u64]) -> Type {
+        Type::Apply {
+            name: name.to_string(),
+            args: dimensions
+                .iter()
+                .copied()
+                .map(Self::compute_dimension_type)
+                .collect(),
+        }
+    }
+
+    /// Return the dimensions carried by `Vec<N>` or `Matrix<M, N>`.
+    pub fn compute_shape_dimensions(&self) -> Option<Vec<u64>> {
+        let Type::Apply { name, args } = self else {
+            return None;
+        };
+        if !matches!(name.as_str(), "Vec" | "Matrix") {
+            return None;
+        }
+        args.iter().map(Self::compute_dimension_value).collect()
+    }
+
+    /// Compute values all share the `JetTensor` storage substrate. An erased
+    /// `Tensor` is compatible with a shaped alias; two shaped aliases still
+    /// require exact equality, so `Vec<3>` cannot silently become `Vec<4>`.
+    pub fn is_compute_tensor_family(&self) -> bool {
+        matches!(self, Type::Named(name) if name == "Tensor")
+            || matches!(self, Type::Apply { name, .. } if matches!(name.as_str(), "Tensor" | "Vec" | "Matrix"))
+    }
+
+    pub fn compute_tensor_compatible(want: &Type, got: &Type) -> bool {
+        if want == got {
+            return true;
+        }
+        (matches!(want, Type::Named(name) if name == "Tensor") && got.is_compute_tensor_family())
+            || (matches!(got, Type::Named(name) if name == "Tensor") && want.is_compute_tensor_family())
+    }
+
     /// Recursively rewrite nominal leaves while preserving every container and
     /// callback shape. Import resolution uses this to attach module identity to
     /// unit-family members in signatures.
@@ -510,10 +588,11 @@ impl Type {
                 ok: Box::new(ok.map_named_types(map)),
                 err: Box::new(err.map_named_types(map)),
             },
-            Type::Fn { params, ret, effect_bound, return_view_provenance } => Type::Fn {
+            Type::Fn { params, ret, effect_bound, param_contract, return_view_provenance } => Type::Fn {
                 params: params.iter().map(|ty| ty.map_named_types(map)).collect(),
                 ret: ret.as_ref().map(|ty| Box::new(ty.map_named_types(map))),
                 effect_bound: effect_bound.clone(),
+                param_contract: param_contract.clone(),
                 return_view_provenance: return_view_provenance.clone(),
             },
             Type::Apply { name, args } => Type::Apply {
@@ -586,7 +665,9 @@ impl Type {
                     (None, None) => format!("fn({})", ps),
                 }
             }
-            Type::Named(n) => format!("`{}`", n),
+            Type::Named(n) => self
+                .compute_dimension_value()
+                .map_or_else(|| format!("`{}`", n), |value| format!("{value} (a fixed compute dimension)")),
             // D-CAP9: the raw-pointer type shows as the canonical `*T`.
             Type::Apply { name, args } if name == crate::Syntax::TYPE_PTR && args.len() == 1 => {
                 format!("`*{}`", args[0].name())
@@ -596,6 +677,13 @@ impl Type {
                 format!("{} (a physical quantity)", dimension.display_name())
             }
             Type::Apply { name, args } => {
+                if let Some(dimensions) = self.compute_shape_dimensions() {
+                    return format!(
+                        "`{}`<{}>",
+                        name,
+                        dimensions.iter().map(u64::to_string).collect::<Vec<_>>().join(", ")
+                    );
+                }
                 let a = args.iter().map(|x| x.name()).collect::<Vec<_>>().join(", ");
                 format!("`{}`<{}>", name, a)
             }
@@ -671,7 +759,9 @@ impl Type {
                     (None, None) => format!("fn({})", ps),
                 }
             }
-            Type::Named(n) => n.clone(),
+            Type::Named(n) => self
+                .compute_dimension_value()
+                .map_or_else(|| n.clone(), |value| value.to_string()),
             // D-CAP9: the raw-pointer type names as the canonical `*T`.
             Type::Apply { name, args } if name == crate::Syntax::TYPE_PTR && args.len() == 1 => {
                 format!("*{}", args[0].name())
@@ -686,6 +776,13 @@ impl Type {
                 )
             }
             Type::Apply { name, args } => {
+                if let Some(dimensions) = self.compute_shape_dimensions() {
+                    return format!(
+                        "{}<{}>",
+                        name,
+                        dimensions.iter().map(u64::to_string).collect::<Vec<_>>().join(", ")
+                    );
+                }
                 let a = args.iter().map(|x| x.name()).collect::<Vec<_>>().join(", ");
                 format!("{}<{}>", name, a)
             }
@@ -941,6 +1038,7 @@ mod tests {
                 err: Box::new(Type::String),
             })),
             effect_bound: None,
+            param_contract: None,
             return_view_provenance: None,
         };
         let length = nested.map_named_types(&|name| (name == "Unit").then(|| "length.Unit".into()));

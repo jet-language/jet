@@ -475,12 +475,12 @@ use std::collections::HashSet;
                     }
                     // S46 one-line bodies: `() => transfer(...)` is the brace-free
                     // form of `() => { transfer(...) }`. When no value is expected
-                    // (Void / Void ? E callback, or inferred spawn body), treat the
+                    // (() / () ? E callback, or inferred spawn body), treat the
                     // call as a statement so void functions do not trip E0116.
                     let needs_value = match exp_ret.map(|r| r.as_ref()) {
-                        Some(Type::Named(name)) if name == "Void" => false,
+                        Some(Type::Named(name)) if name == "Unit" => false,
                         Some(Type::Result { ok, .. })
-                            if matches!(ok.as_ref(), Type::Named(name) if name == "Void") =>
+                            if matches!(ok.as_ref(), Type::Named(name) if name == "Unit") =>
                         {
                             false
                         }
@@ -518,7 +518,7 @@ use std::collections::HashSet;
                     self.diags.push(Diagnostic::error(
                         "E0073",
                         "this yielding loop path produces no item".to_string(),
-                        "every accepted iteration must contribute one non-Void value unless `next` omits it".to_string(),
+                        "every accepted iteration must contribute one non-unit value unless `next` omits it".to_string(),
                         "add a yielded value, or remove `->`".to_string(),
                         Some(lam.span),
                     ));
@@ -647,6 +647,7 @@ use std::collections::HashSet;
                 // carries no effect bound (D-EFF2 bounds ride callback *parameter*
                 // types, checked against this value at the call site).
                 effect_bound: None,
+                param_contract: None,
                 return_view_provenance: lambda_return_view_provenance,
             })
         }
@@ -791,6 +792,7 @@ fn rewrite_collect_yields(stmts: &mut [Stmt], target: &str) {
                     receiver: Box::new(crate::AST::Expr::Ident(target.to_string(), *span)),
                     method: "push".to_string(),
                     method_span: *span,
+                    owner_type_args: Vec::new(),
                     type_args: Vec::new(),
                     args: vec![crate::AST::CallArg {
                         convention: AccessConvention::Read,
@@ -801,7 +803,7 @@ fn rewrite_collect_yields(stmts: &mut [Stmt], target: &str) {
                         spread: false,
                     }],
                     recv_type: None,
-                    resolved_ret: Some(Type::Named(Syntax::TYPE_VOID.to_string())),
+                    resolved_ret: Some(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())),
                 });
             }
             Stmt::Loop { body, .. }

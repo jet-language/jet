@@ -137,6 +137,7 @@ fn collect_tuple_shapes_from_expr(expr: &Expr, out: &mut CollectedTypeShapes) {
         | Expr::Absent(_)
         | Expr::ReduceMarker(_, _)
         | Expr::Todo { .. }
+        | Expr::NoElse(_)
         | Expr::UnitLit { .. }
         | Expr::ComptimeSplice { .. }
         // D-SHIFT1 (c7shift) / D-BINPAT1 (card #506 follow-up): a leaf
@@ -146,6 +147,9 @@ fn collect_tuple_shapes_from_expr(expr: &Expr, out: &mut CollectedTypeShapes) {
         Expr::Call(c) => {
             for a in &c.args {
                 collect_tuple_shapes_from_expr(&a.expr, out);
+            }
+            if let Some(ty) = &c.resolved_ret {
+                collect_tuple_shapes_from_type(ty, out);
             }
         }
         Expr::Unary(_, inner, _)

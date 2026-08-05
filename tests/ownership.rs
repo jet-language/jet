@@ -1033,7 +1033,7 @@ fn builtin_and_composite_receivers_use_the_call_access_frame() {
     let builtin = r#"
 fn run() {
     values := [1, 2]
-    values.insert(0, values.remove(0))
+    values.insert(0, values.remove(0, .Slot))
 }
 "#;
     let diags = jet::compile(builtin)
@@ -1189,7 +1189,7 @@ fn run() {
     let rejected = r#"
 fn run() {
     values := [1, 2]
-    values.push(values.remove(0))
+    values.push(values.remove(0, .Slot))
 }
 "#;
     let diags =

@@ -9,18 +9,10 @@ impl<'a> Parser<'a> {
             self.expect_kw(TokKind::KwFn, "to start a trait method signature")?;
             let (name, name_span) = self.expect_ident("after `fn`")?;
             self.expect(TokKind::LParen, "after the method name")?;
-            let mut params = Vec::new();
-            if !matches!(self.peek().kind, TokKind::RParen) {
-                loop {
-                    params.push(self.param()?);
-                    if matches!(self.peek().kind, TokKind::RParen) {
-                        break;
-                    }
-                    self.expect(TokKind::Comma, "between parameters")?;
-                }
-            }
-            self.expect(TokKind::RParen, "to close the parameter list")?;
+            let params = self.parse_param_list()?;
             self.validate_variadic_params(&params);
+            self.validate_param_labels(&params);
+            self.reject_root_method_params(&params);
             // D-EFF3 / D-SHAPE8 / D-ARROW-CONTROL1: optional `=[GPU]=>`
             // effect bound.
             let declared_effects = self.parse_opt_effect_annotation()?;
@@ -115,6 +107,7 @@ impl<'a> Parser<'a> {
                 false,
                 None,
             )?;
+            self.reject_root_method_params(&function.params);
             self.apply_method_markers(function, markers)
         }
     

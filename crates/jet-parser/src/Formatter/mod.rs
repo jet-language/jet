@@ -903,7 +903,10 @@ impl<'a> Fmt<'a> {
                 self.write(" ");
                 self.fmt_stmt_inline(statement);
                 self.write(" }");
-                if self.col <= MAX_WIDTH {
+                // A statement can render multi-line even on the inline path (a
+                // value dispatch table, card #1440) — never keep a collapsed
+                // body whose content spans lines.
+                if self.col <= MAX_WIDTH && !self.out[saved_out..].contains('\n') {
                     return;
                 }
                 self.out.truncate(saved_out);

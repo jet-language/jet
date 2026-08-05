@@ -348,13 +348,14 @@ fn synthesize_computed_field_getter(f: &Field) -> Func {
 
     let self_param = Param {
         convention: AccessConvention::Read,
+        root: false,
         name: Syntax::KW_SELF.to_string(),
         name_span: span,
         ty: Type::Named(String::new()), // S27: sema fills in the actual type name
         ty_span: span,
         default: None,
         variadic: false,
-        variadic_bound_list: None, declared_view_from_names: None,
+        variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: crate::AST::ParamZone::Either,
     };
 
     Func {

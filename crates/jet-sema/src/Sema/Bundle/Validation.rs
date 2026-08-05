@@ -1068,6 +1068,7 @@ pub(crate) fn collect_core_expr(
         | Expr::Absent(_)
         | Expr::ReduceMarker(_, _)
         | Expr::Todo { .. }
+        | Expr::NoElse(_)
         | Expr::UnitLit { .. }
         | Expr::ComptimeSplice { .. }
         // D-SHIFT1 (c7shift) / D-BINPAT1 (card #506 follow-up): a leaf
@@ -1905,9 +1906,10 @@ pub(crate) fn check_module_bodies(
                         ty: Type::Named(String::new()),
                         ty_span: ec.from_span,
                         convention: AccessConvention::Move,
+                        root: false,
                         default: None,
                         variadic: false,
-                        variadic_bound_list: None, declared_view_from_names: None,
+                        variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: crate::AST::ParamZone::Either,
                     }],
                     return_type: Some(Type::Named(ec.to_ty.clone())),
                     return_type_span: Some(ec.to_span),
@@ -2191,6 +2193,7 @@ pub(crate) fn check_func_body_bundle(
             .collect(),
         expected_type: None,
         iter_borrowed: HashSet::new(),
+        noelse_chains_checked: HashSet::new(),
         lending_view_loop_vars: HashSet::new(),
         view_facts: Default::default(),
         return_view_provenance: None,
@@ -2506,6 +2509,7 @@ pub(crate) fn func_sig_to_fn_type(sig: &FuncSig) -> Type {
         params: sig.params.iter().map(|(_, t)| t.clone()).collect(),
         ret: sig.return_type.clone().map(Box::new),
         effect_bound: None,
+        param_contract: None,
         return_view_provenance: sig.return_view_provenance.get(),
     }
 }

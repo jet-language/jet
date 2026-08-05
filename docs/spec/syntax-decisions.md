@@ -132,11 +132,18 @@ fn load(path: String) =[FS]=> String {
 ```
 
 A returned block uses its final value. `return` remains the explicit early-exit
-form. A Void callable with no explicit effect ceiling needs no arrow.
+form. A unit-returning callable with no explicit effect ceiling needs no arrow.
 `->` is not a general operator.
 
+**D-VOID1=A — one no-information result spelling** *(ratified 2026-08-04,
+card #1411)*: user-facing no-information results use `()`. The compiler keeps
+the internal `Unit` value, but `Void` is retired and produces E0431 with a fix
+to `()`. This decision does not add or change tuple syntax. D-NEVER1=C keeps
+non-returning paths as a compiler-only bottom fact; Jet has no public `Never`
+type.
+
 **S12 — Entry point**: `fn run()`; no `pub` required. May be fallible:
-`fn run() => Void ?` (S80, D-S80-RUN1). **D-CLIFLAG1** (implemented, c7cliflag): a
+`fn run() => () ?` (S80, D-S80-RUN1). **D-CLIFLAG1** (implemented, c7cliflag): a
 typed entry parameter optionally opts into CLI parsing — `fn run(args: ServeArgs)`
 derives `--flag` names/defaults/help from the struct's fields
 (`#CLI`/`#Doc("...")` markers, bracket form matching `#Codable`); an
@@ -186,6 +193,19 @@ type body, in `impl Type { }`, or top-level `fn Type.method(self)`
 (**D-EXTMETH1** — `.` connector, orphan rule: same source module; `~~` retired
 → E0325). No-`self` fn in a type = static method (`Circle.unit()`).
 
+**D-CALLDUAL1=E — marked receiver for reversible calls** *(ratified
+2026-08-03, card #1401)*: a top-level free function may mark its first
+bare-read parameter with `#Root`. The function then accepts both `f(value, …)`
+and `value.f(…)`. Dot-call lookup is limited to functions visible through the
+current module's imports; it is never a global search. A real method with the
+same name is an error, and more than one matching imported function is an
+ambiguity error. Resolution never uses the return type. `#Root` is not valid on
+a write or move parameter, on a later parameter, or on a method. Foreign
+top-level declarations preserve the marker. Normal argument compatibility,
+including numeric widening, applies to the hidden receiver. Inspect and LSP
+show the module that supplied an imported `#Root` function. Formatting preserves
+the declaration and never rewrites either call spelling.
+
 **D-CTOR1 — Named constructors only**: many ways to build a type = many
 named statics (`Point.cartesian(…)`, `Point.polar(…)`); duplicate name E0105.
 No marker keyword — return-type-is-the-type identifies a constructor (D-CTOR2).
@@ -212,11 +232,32 @@ the source binding remains available. Owned values that cannot be copied move.
 Mutable and borrowed captures remain subject to sema's ownership checks. No
 `take(...)` capture prefix or preparatory copy binding is required.
 
-**S61 — Argument labels & defaults** *(D-NARG1, D-NARG2)*: optional call-site
-labels, positional order fixed — labels never reorder; wrong label = compile
-error showing the order. Trailing defaulted params omittable
-(`fn f(x: Int, urgent: Bool = false)`). Methods/constructors behave the same.
-fmt never adds nor strips labels.
+**S61 — Argument labels & parameter contracts** *(D-NARG1, D-NARG2,
+D-APILABEL1=A ratified 2026-08-05, card #1393)*: a written label binds by
+**name**. A call may skip a default and write its labelled arguments in any
+order. Two zone separators split the parameter list: `/` closes the
+positional-only zone (a label there is E0767) and `*` opens the label-only
+zone (a positional argument there is E0769); parameters between them take
+either form. A parameter may publish a label distinct from its local name —
+`timeout seconds: Int` binds callers with `timeout:` while the body reads
+`seconds`. Public labels and zones are callable type identity; local names
+and default bodies are not.
+
+Supplied expressions run left to right in the order they were **written**;
+unbound defaults then run in declaration order and may read an earlier
+parameter. Diagnostics: E0763 misplaced zone separator, E0764 unknown label,
+E0765 repeated label, E0766 missing argument, E0767 label forbidden, E0768
+bare argument after a labelled one, E0769 label required. Methods,
+constructors, generic calls, variadics, and function values all bind through
+the one binder. fmt never adds nor strips labels.
+
+```jet
+fn connect(host: String, /, *, timeout seconds: Int = 30, tls: Bool = true) => Client ? ConnectError
+client :: connect("db.internal", tls: true, timeout: 5)?
+```
+
+Retires the fixed-position rule: labels used to be spelling checks at one
+position and never reordered (E0125).
 
 **S83 — Multi-head functions**: same name, different parameter patterns, each
 head its own body; dispatch by argument shape; heads must be exhaustive.
@@ -296,7 +337,7 @@ Commas separate loop header clauses. Semicolons remain statement boundaries only
 is retired with teaching diagnostic E0376; prefer `loop i, 0..<n` or a range step rule.
 
 A finite source loop may use `-> expression` or `-> { ... }`.
-Each accepted iteration yields one non-Void item. The result is an eager
+Each accepted iteration yields one non-unit item. The result is an eager
 `List<T>` in iteration order. A header guard filters items. Multiple source
 clauses nest left to right and yield one flat List. An inner yielding loop
 preserves nesting. `next` omits the current item. Maps, Sets, and lazy
@@ -373,7 +414,7 @@ One-line effect and value forms stay quiet. Fmt does not change branch shape.
 - Value form marks each selected value: `m :: if a > b -> a else -> b`.
   `else` is required (E0003), and branch types must match (E0124). A returned
   multiline arm uses `-> { ... }`. The same arm-table spelling works in
-  expression position and yields `Void` or one unified value type (D-IFDIST1).
+  expression position and yields `()` or one unified value type (D-IFDIST1).
 - **Dispatch form** — a comparison between subject and `{` is required (bare
   `if subject { arm -> … }` is E0992, auto-fixed). Any of `== != < > <= >=`
   distributes over bare arm atoms (D-IFDIST1=A):
@@ -400,19 +441,19 @@ tighter than `&&`/`||` and mixes without requiring parens (D-IFDIST1 amends
 D-MATCHARM2). Catch-all is `else ->`. Braceless single-expression bodies
 are allowed. Exhaustive pattern arms may omit `else`.
 
-**D-IFDIST1=A — distributed compare markers + Void-or-value tables** *(ratified
+**D-IFDIST1=A — distributed compare markers + ()-or-value tables** *(ratified
 2026-07-28, card #1305)*: amends D-IF3 / D-MATCHARM2 / S68. The dispatch marker
 is any comparison operator. Each bare atom desugars to `subject OP atom`; `|`
 is OR of those atoms (including for `!=`); `&&`/`||` combine further Bool
 heads. Pattern heads remain `==`-only. Statement and expression position share
-one table spelling; expression tables unify arm values or yield `Void`.
+one table spelling; expression tables unify arm values or yield `()`.
 
 **D-IFGUARD1=A — ordered subjectless guards** *(ratified 2026-07-18, card
 #680; amended by D-ARROW-CONTROL1)*: `if cond statement` is the one-line
 effect guard. A direct adjacent nested `if` requires braces when its boundary
 would be ambiguous. The subjectless spelling is the same ordered arm-table
 model without a named subject, not a separate or lesser branching mechanism.
-It keeps `->` because each arrow selects one arm, including a Void arm. Each
+It keeps `->` because each arrow selects one arm, including an arm yielding `()`. Each
 head is an arbitrary `Bool` expression evaluated in order; the first true head
 wins. A value table requires a final `else` and all result types unify. A
 pattern binding under `&&` reaches the rest of that head and its body;
@@ -601,9 +642,11 @@ always means Optional; fallible is spaced `T ? E` / `T ?` (S34).
 reserved for collections/indexing/shorthands. Calls infer type arguments by
 default. **D-GENERIC-CALL1=A** *(ratified 2026-08-03)* allows explicit
 `call<T>(…)` arguments on every generic free, namespaced, and method call.
-Jet does not use Rust's `::<T>` separator. This final uniform law supersedes
-S45's ban, D-SERDE6's `decode<T>` exception, and D-SHAPE-CONVERT1's preserved
-general ban.
+The callee, `<…>`, and `(...)` stay adjacent, so spaced `a < B > (c)` remains
+a comparison. The formatter writes `call<T>(…)`. Jet does not use Rust's
+`::<T>` separator. This final uniform law supersedes S45's ban,
+D-SERDE6's `decode<T>` exception, and D-SHAPE-CONVERT1's preserved general
+ban.
 
 **S45 — Generic functions & types**: `fn largest<T: Comparable>(…)`,
 `struct Pair<T> { }`; multi-trait bounds are lists `<T: [A, B]>`
@@ -932,6 +975,17 @@ driving a consumed `Iter` twice is use-after-move (E0121).
 `indexed()` (D-RANGE-EXCL1=C amend of D-ITER1) yields `(idx: Int, item: T)`;
 there is no public `enumerate` adapter.
 
+**D-ZIPPAD1 (ratified on card #1400):** the zip family is one lazy iterator
+mechanism. Free calls and methods accept any number of sequence inputs and
+preserve every input type in named row fields. `zip` is strict and reports
+E0128 when lengths differ; `zip_short` stops at the shortest input; and
+`zip_pad` continues to the longest input. Zero free inputs produce an empty
+`Iter<Unit>` and one input is the identity sequence. Free row labels are
+preserved; methods use `a`, `b`, `c`, and so on. `zip_pad` without a fill uses
+`None` for each missing value, `fill: value` supplies one typed value for every
+column, and `fills: (field: value, ...)` supplies typed per-column values.
+Every form stays lazy and has the same AOT, dev/JIT, and interpreter meaning.
+
 **D-COLLBREADTH1 / D-ITERTOOLS1=A**: `Set<T: [Hash, Eq]>`,
 `SortedSet<T>`, ring-buffer `Deque<T>`, `PriorityQueue<T>`, `Cache<K,V>`,
 `Bag<T>`, `BitSet`, and `ByteBuffer` in Core (E0506). `[K: V]` is the default
@@ -1039,7 +1093,7 @@ Rust `Result` (not surface syntax).
 
 **S80 — Error carrier & fallible `run`** *(D-ERR2, D-S80-RUN1)*: default `Error` carries
 message + optional code + optional source (`Error.message("…")`,
-`Error.code(n)`, `Error.with_source(e)`). `fn run() => Void ?` allowed;
+`Error.code(n)`, `Error.with_source(e)`). `fn run() => () ?` allowed;
 returned errors print in the diagnostic voice, exit non-zero. Cross-type `?`
 conversion is opt-in via the `Fallible` trait (`fn to_error(self) => Error`);
 prelude types implement it, unrelated enums never convert silently.
@@ -1915,10 +1969,12 @@ malformed block E1221.
 hand a value to the consumer and suspend until the next pull; falling off
 the end (or a bare `return;`) ends the stream; `return value;` is E0806.
 Consumers are ordinary `loop x; f() { }` loops — one keyword, one type, no
-async/await coloring. Implemented on a real OS thread + a rendezvous
-channel (`std::sync::mpsc::sync_channel(0)`): `yield` blocks the producer
-thread until the consumer's loop pulls, exactly reproducing suspend/resume
-with zero coroutine machinery.
+async/await coloring. The emitted program uses the scheduler-backed Prelude
+receiver and an owned pull iterator: `yield` blocks the producer until the
+consumer pulls, and dropping the iterator on `break` closes the receiver. A
+failed producer send returns through the active lexical cleanups, so no
+statement after the last accepted pull runs. This is one pull/cancellation
+law for AOT, JIT, and the interpreter; it does not require coroutine syntax.
 
 ### Comptime & metaprogramming
 
@@ -2642,6 +2698,10 @@ index, not a substitute for that law.
   Implemented Epoch 3 stream surface: `io.stdout()` / `io.stderr()` handles with
   `.write`, `.write_line`, `.write_bytes`, `.flush`, `.is_tty`,
   `io.terminal_width/height`, `io.style`, `io.style_force`, and `io.progress`;
+  `io.progress(source[, description[, format]])` wraps `List<T>` or `Iter<T>` and
+  reports percent, count, elapsed time, remaining estimate, and rate. TTY output
+  redraws one line; non-TTY output appends one line per update. `NO_COLOR` removes
+  ANSI sequences from custom formats.
   D-TERM1's `core.term` remains the direct raw-key bridge.
 - **D-COREARGS1=A**: `ArgsSpec` is the one CLI parsing model. Typed
   `fn run(args: T)` derives an `ArgsSpec`; library/tooling code may build the
@@ -2656,8 +2716,8 @@ index, not a substitute for that law.
   and `env_remove`, then passes raw entries to the OS. Jet mutations never
   mutate libc `environ` or the Windows process environment block. Invalid
   names and values fail without revealing inputs; `vars` fails as a whole on
-  any non-Unicode entry. Existing editions keep `set => Void` and report
-  invalid input through E3001; its fallible `Void ? EnvError` signature waits
+  any non-Unicode entry. Existing editions keep `set => ()` and report
+  invalid input through E3001; its fallible `() ? EnvError` signature waits
   for a major release plus edition opt-in.
 - **D-PROCESS-SESSION1=A**: terminal-backed children use the existing
   `core.process` mechanism. `ProcessSpec.terminal()` is an explicit opt-in;
@@ -3108,6 +3168,14 @@ alias, or priority rule.
 **D-CACHENAME1=A — bounded cache is `Cache<K,V>`** *(ratified 2026-07-31, card #1356)*: rename the Core type formerly spelled `Lru<K,V>` to `Cache<K,V>`. Eviction remains least-recently-used when full; method law unchanged (`has_key`, `add`, `add_new`, …). Amends D-COLLBREADTH1 / D-ITERTOOLS1 naming.
 
 **D-MAP-MERGE1=E — `Map.merge`** *(ratified 2026-07-31, card #1354)*: one method `merge(other, conflict: ((K, V, V) => V)? = None)`. Omit `conflict` → right wins on shared keys (beginner default). Pass `conflict:` → callback result per shared key. Distinct from `Set.union` and struct Patch `merge`. Semantics live in Prelude (`jet_map_merge` / `jet_map_merge_with`); engines marshall only (I9).
+
+**D-LISTREMOVE1=F — value-first list removal** *(ratified by owner, card #1410)*:
+`List.remove(value)` removes the first equal item and returns `T?`; explicit
+`.Val` spells the same behavior. `List.remove(index, .Slot)` removes by
+position and retains the existing bounds diagnostic. The old one-argument index
+meaning is retired, and every in-repo caller uses `.Slot` where positional
+removal is intended. `RemoveBy.{Val, Slot}` is the closed selector type; no
+parallel `remove_value` or `remove_at` names ship. Map removal is unchanged.
 
 **D-FIELDDEF1=C — field defaults use `=`** *(ratified 2026-07-31, card #1367)*: `field: T = expr` covers wire/CLI absence and omitted `Type.{ … }` construction fields (same spelling as parameter defaults, S61). `#Default(expr)` is retired (E0375); defaults must be compile-time constants (E2414). Required fields are those without `=`.
 
@@ -3976,7 +4044,11 @@ implementation.
     is the D-WD dossier lens `jet inspect dossier data`.
   - **D-DATA-PLOT1 (=A, ratified 2026-07-06, #237)**: Core plotting starts with
     first-party deterministic SVG plus a text backend; bitmap export may layer
-    on the same model later.
+    on the same model later. The shipped line family is `line_text(groups,
+    options)` / `line_svg(groups, options)` over `DataGroup`; `DataLineOptions`
+    carries title, x/y labels, point markers, an optional horizontal reference,
+    line style, color, and legend. Bar and line renderers use deterministic
+    output and the same checked geometry rules on every execution tier.
 - **D-WD10**: `core.game` is a stable game substrate: assets, ECS, input,
   fixed-step timing, deterministic replay, editor hooks, and budgets; renderer,
   audio, and editor backends remain replaceable packages.
@@ -5428,6 +5500,11 @@ reference cycle are rejected at sema (E0221). Expert intentional cycles use
 `.strong_count()` — and free when strong roots drop. One Shared mechanism (I8);
 full I9; no follow-on card. Flagship: `examples/features/memory/shared_weak_cycle.jet`.
 Card #1372.
+
+**2026-08-04 — D-ZIPPAD1:** `zip`, `zip_short`, and `zip_pad` share one
+variadic lazy sequence family with strict, shortest, and longest-length
+policies. Padding supports default `None`, one common `fill:`, or named
+per-column `fills:`. Implemented end to end on card #1400.
 
 **2026-07-26 — D-PIN1=A / D-PIN2=A / D-PIN3=A**: `mem.pin(&place) -> Pin<T>` is
 the reusable address-stability contract. `Pin<T>` is a tracked write window on

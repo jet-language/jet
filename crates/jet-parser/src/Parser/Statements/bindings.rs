@@ -656,6 +656,7 @@ fn desugar_layout_expr(layout_name: &str, e: &mut Expr) {
                     receiver: Box::new(Expr::Ident(layout_name.to_string(), ident_span)),
                     method: method.to_string(),
                     method_span: span,
+                    owner_type_args: Vec::new(),
                     type_args: Vec::new(),
                     args: vec![
                         CallArg {

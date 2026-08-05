@@ -160,6 +160,7 @@ fn method_call(receiver: Expr, method: &str, args: Vec<CallArg>, span: Span) -> 
         receiver: Box::new(receiver),
         method: method.to_string(),
         method_span: span,
+        owner_type_args: Vec::new(),
         type_args: Vec::new(),
         args,
         recv_type: None,
@@ -269,13 +270,14 @@ fn build_validate_impl(s: &StructDef, rules: &[ValidateRule], span: Span) -> Imp
         // call site, matching the ratified spelling) and hands back an
         // owned copy on success (`return Ok(copy value)`).
         convention: AccessConvention::Read,
+        root: false,
         name: VALUE_VAR.to_string(),
         name_span: span,
         ty: Type::Named(s.name.clone()),
         ty_span: span,
         default: None,
         variadic: false,
-        variadic_bound_list: None, declared_view_from_names: None,
+        variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: crate::AST::ParamZone::Either,
     };
 
     let validate_func = Func {

@@ -29,7 +29,7 @@ pub use items::{
     VmTestFieldValue, PerfLit, ProfileLit, BudgetDecl, BudgetField, Namespace, TypeParam, TraitDef, TagDef, ProtocolDirection, ProtocolMessage,
     ProtocolDecl, StateDecl, EffectDecl, DeriveDef, TraitMethodSig, TraitImplBlock, ExternRustBlock, ExternFn,
     TestDef, BenchDef, MaturityTag, KernelMode, KernelProof, KernelMarker, Func, TaskMetadata, TaskSkip, TaskCachePolicy, InlineForeign, ContractClause, StateTransition, EveryMarker,
-    EveryArg, EverySchedule, EveryScheduleError, Param, StructLayout, CEnumTag,
+    EveryArg, EverySchedule, EveryScheduleError, Param, ParamZone, StructLayout, CEnumTag,
     Marker, StructDef, TypeAliasDef, DistinctDef, QuantityKind, UnitDimensionDecl, UnitFamilyDef, UnitFamilyMember, UnitRatio, UnitScaleProvenance, EnumDef,
     EnumGroup, Variant, VariantPayload, VariantField, ImplDef, Field, SerdeWireShape,
     resolved_decode_wire_shapes,
@@ -47,7 +47,8 @@ pub use patterns::{
 #[path = "AST/statements.rs"]
 mod statements;
 pub use statements::{
-    ElseBranch, IfStmt, Stmt, SwitchArm, is_subjectless_guard, uses_classic_if_spelling,
+    ElseBranch, IfStmt, Stmt, SwitchArm, is_subjectless_guard, noelse_terminated,
+    uses_classic_if_spelling,
 };
 
 #[path = "AST/lvalues.rs"]

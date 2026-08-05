@@ -636,14 +636,17 @@ extern "C" fn jet_jit_process_spec_detached(spec: i64) -> i64 {
 }
 
 fn terminal_config_from_policy(policy: i64) -> PtyConfig {
-    Concurrency::with_runtime_mut(|rt| {
+    // `with_runtime_mut` needs a `Default` result, and `PtyConfig` has no
+    // meaningful zero, so read the fields out and build the config here.
+    let (cols, rows, raw) = Concurrency::with_runtime_mut(|rt| {
         let size = rt.heap.record_get_int(policy, 0).unwrap_or(0);
-        PtyConfig {
-            cols: rt.heap.record_get_int(size, 0).unwrap_or(0),
-            rows: rt.heap.record_get_int(size, 1).unwrap_or(0),
-            raw: rt.heap.record_get_int(policy, 1).unwrap_or(1) == 0,
-        }
-    })
+        (
+            rt.heap.record_get_int(size, 0).unwrap_or(0),
+            rt.heap.record_get_int(size, 1).unwrap_or(0),
+            rt.heap.record_get_int(policy, 1).unwrap_or(1) == 0,
+        )
+    });
+    PtyConfig { cols, rows, raw }
 }
 
 fn terminal_size_from_handle(size: i64) -> (i64, i64) {
@@ -680,14 +683,16 @@ extern "C" fn jet_jit_process_spec_terminal_with_policy(spec: i64, policy: i64) 
 
 extern "C" fn jet_jit_process_spec_capabilities(_spec: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
+        // A resident string set is a set of heap string handles tagged
+        // `string_kind = true`.
         let mut facts = std::collections::HashSet::new();
         if process_pty::supported() {
-            facts.insert("terminal".to_string());
-            facts.insert("resize".to_string());
-            facts.insert("raw".to_string());
+            for fact in ["terminal", "resize", "raw"] {
+                facts.insert(rt.heap.alloc_string(fact.to_string()));
+            }
         }
         rt.sets.push(facts);
-        rt.set_string_kinds.push(false);
+        rt.set_string_kinds.push(true);
         rt.sets.len() as i64
     })
 }
@@ -712,12 +717,15 @@ extern "C" fn jet_jit_terminal_session_resize(session: i64, size: i64) -> i64 {
     }
     let (cols, rows) = terminal_size_from_handle(size);
     let idx = (session as usize).saturating_sub(1);
-    let result = Concurrency::with_runtime_mut(|rt| {
-        let Some(slot) = rt.process_children.get(idx) else {
-            return Err("this child has no terminal session".to_string());
-        };
-        let Some(master) = slot.terminal_master.as_ref() else {
-            return Err("this child has no terminal session".to_string());
+    // `with_runtime_mut` needs a `Default` result, so report failure as
+    // `Some(message)` rather than a `Result`.
+    let failure = Concurrency::with_runtime_mut(|rt| {
+        let Some(master) = rt
+            .process_children
+            .get(idx)
+            .and_then(|slot| slot.terminal_master.as_ref())
+        else {
+            return Some("this child has no terminal session".to_string());
         };
         process_pty::resize(
             master,
@@ -727,11 +735,14 @@ extern "C" fn jet_jit_terminal_session_resize(session: i64, size: i64) -> i64 {
                 raw: false,
             },
         )
-        .map_err(|error| error.to_string())
+        .err()
+        .map(|error| error.to_string())
     });
-    match result {
-        Ok(()) => result_ok_bits(0),
-        Err(error) => result_err_msg(&format!("I/O error during resolve `process terminal`: {error}")),
+    match failure {
+        None => result_ok_bits(0),
+        Some(error) => {
+            result_err_msg(&format!("I/O error during resolve `process terminal`: {error}"))
+        }
     }
 }
 

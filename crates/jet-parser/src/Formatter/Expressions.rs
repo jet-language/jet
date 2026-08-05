@@ -84,6 +84,12 @@ impl<'a> Fmt<'a> {
         let table_op = Self::cmp_op_before_brace(rest)?;
         match cond.as_ref() {
             Expr::Binary(op, lhs, _, _) if *op == table_op => Some((lhs.as_ref(), table_op)),
+            // Card #1440: a pattern-headed value table (`if d == { .North -> … }`)
+            // desugars its first arm to a PatternTest; the table subject is the
+            // test's subject. Pattern heads are `==`-only (E0366).
+            Expr::PatternTest { subject, .. } if table_op == BinOp::Eq => {
+                Some((subject.as_ref(), table_op))
+            }
             _ => None,
         }
     }
@@ -143,6 +149,11 @@ impl<'a> Fmt<'a> {
                         f.fmt_expr(then_value, Prec::OrFallback);
                     } else {
                         f.fmt_value_block(then_body, then_value, false);
+                    }
+                    // Card #1440: an exhaustive all-pattern table has no `else`
+                    // arm — the chain ends in the synthesized NoElse marker.
+                    if else_body.is_empty() && matches!(else_value.as_ref(), Expr::NoElse(_)) {
+                        break;
                     }
                     f.newline();
                     if else_body.is_empty()
@@ -232,6 +243,15 @@ impl<'a> Fmt<'a> {
                 if *op == table_op && self.same_dispatch_subject(lhs, subject) =>
             {
                 self.fmt_expr(rhs, Prec::Cmp);
+            }
+            // Card #1440: a pattern arm head renders as its bare pattern — the
+            // subject and `==` live on the table head line.
+            Expr::PatternTest {
+                subject: s,
+                pattern,
+                ..
+            } if table_op == BinOp::Eq && self.same_dispatch_subject(s, subject) => {
+                self.fmt_pattern(pattern);
             }
             _ => self.fmt_expr(cond, Prec::OrFallback),
         }
@@ -350,14 +370,47 @@ impl<'a> Fmt<'a> {
                 params,
                 ret,
                 effect_bound,
+                param_contract,
                 return_view_provenance,
             } => {
                 self.write("fn(");
+                // D-APILABEL1=A: reprint the declared call contract — the
+                // labels and the `/` and `*` zone separators — so a function
+                // type round-trips with its identity intact.
+                let contract = param_contract.as_deref().unwrap_or(&[]);
+                let mut written = 0usize;
+                let mut star_done = false;
                 for (i, p) in params.iter().enumerate() {
-                    if i > 0 {
+                    let zone = contract.get(i).map(|(_, zone)| *zone);
+                    if zone == Some(crate::AST::ParamZone::LabelOnly) && !star_done {
+                        star_done = true;
+                        if written > 0 {
+                            self.write(", ");
+                        }
+                        self.write(Syntax::PARAM_ZONE_LABEL_ONLY);
+                        written += 1;
+                    }
+                    if written > 0 {
                         self.write(", ");
                     }
+                    if let Some((label, _)) = contract.get(i) {
+                        if !label.is_empty() {
+                            self.write(label);
+                            self.write(": ");
+                        }
+                    }
                     self.fmt_type(p);
+                    written += 1;
+                    let last_positional_only = zone
+                        == Some(crate::AST::ParamZone::PositionalOnly)
+                        && contract
+                            .get(i + 1)
+                            .is_none_or(|(_, next)| *next != crate::AST::ParamZone::PositionalOnly);
+                    if last_positional_only {
+                        self.write(", ");
+                        self.write(Syntax::PARAM_ZONE_POSITIONAL_ONLY);
+                        written += 1;
+                    }
                 }
                 self.write(")");
                 if let Some(bound) = effect_bound {
@@ -385,6 +438,7 @@ impl<'a> Fmt<'a> {
                         .enumerate()
                         .map(|(index, ty)| crate::AST::Param {
                             convention: crate::AST::AccessConvention::Read,
+                            root: false,
                             name: format!("_{index}"),
                             name_span: crate::Diagnostics::Span::new(0, 0),
                             ty: ty.clone(),
@@ -393,6 +447,8 @@ impl<'a> Fmt<'a> {
                             variadic: false,
                             variadic_bound_list: None,
                             declared_view_from_names: None,
+                            public_label: None,
+                            zone: crate::AST::ParamZone::Either,
                         })
                         .collect();
                     // Reuse Items helper via a local reprint of the empty-path form.
@@ -432,6 +488,7 @@ impl<'a> Fmt<'a> {
                     let _ = synthetic;
                 }
             }
+            Type::Named(n) if n == Syntax::INTERNAL_UNIT_TYPE => self.write(Syntax::TYPE_UNIT),
             Type::Named(n) => self.write(n),
             // D-CAP9: the raw-pointer type renders as the canonical `*T`, never
             // the deprecated `Ptr<T>` alias.
@@ -720,7 +777,16 @@ impl<'a> Fmt<'a> {
             Expr::Index { base, index, .. } => {
                 self.fmt_expr(base, Prec::Postfix);
                 self.write("[");
-                self.fmt_expr(index, Prec::OrFallback);
+                if let Expr::Ident(name, _) = index.as_ref() {
+                    if let Some(field) = Syntax::layout_selector_name(name) {
+                        self.write(".");
+                        self.write(field);
+                    } else {
+                        self.fmt_expr(index, Prec::OrFallback);
+                    }
+                } else {
+                    self.fmt_expr(index, Prec::OrFallback);
+                }
                 self.write("]");
             }
             Expr::Slice {
@@ -893,21 +959,13 @@ impl<'a> Fmt<'a> {
                 receiver,
                 method,
                 method_span,
+                owner_type_args,
                 type_args,
                 args,
                 ..
             } => {
                 self.fmt_expr(receiver, Prec::Postfix);
-                let receiver_type_args = method == Syntax::MEM_ALLOC_NEW
-                    && matches!(
-                        receiver.as_ref(),
-                        Expr::Ident(name, _)
-                            if name.chars().next().is_some_and(char::is_uppercase)
-                    )
-                    && !type_args.is_empty();
-                if receiver_type_args {
-                    self.fmt_method_type_args(type_args);
-                }
+                self.fmt_call_type_args(owner_type_args);
                 // S69 (D-SG3): keep an author-placed break before `.method(...)`.
                 if self.chain_break_between(receiver.span().end, method_span.start) {
                     // The receiver's own trailing comment (e.g. `.step()  // note`)
@@ -917,17 +975,13 @@ impl<'a> Fmt<'a> {
                         f.newline();
                         f.write(".");
                         f.write(method);
-                        if !receiver_type_args {
-                            f.fmt_method_type_args(type_args);
-                        }
+                        f.fmt_call_type_args(type_args);
                         f.fmt_method_args(method, args);
                     });
                 } else {
                     self.write(".");
                     self.write(method);
-                    if !receiver_type_args {
-                        self.fmt_method_type_args(type_args);
-                    }
+                    self.fmt_call_type_args(type_args);
                     self.fmt_method_args(method, args);
                 }
             }
@@ -1162,6 +1216,10 @@ impl<'a> Fmt<'a> {
             // Retired reduce selector retained only so `jet fmt` can teach its replacement.
             Expr::ReduceMarker(name, _) => self.write(&format!("#{}", name)),
             Expr::Todo { .. } => self.write(&format!("#{}", Syntax::KW_TODO)),
+            // Card #1440: the synthesized end of an else-less exhaustive
+            // dispatch — never user-spellable, never printed (fmt_guard_expr
+            // stops the table before reaching it).
+            Expr::NoElse(_) => {}
             Expr::PatternTest {
                 subject, pattern, ..
             } => {
@@ -1623,12 +1681,13 @@ impl<'a> Fmt<'a> {
 
     fn fmt_call(&mut self, c: &Call) {
         self.write(&c.name);
+        self.fmt_call_type_args(&c.type_args);
         self.fmt_call_args_or_trailing_block(&c.args);
     }
 
-    /// D-SERDE6: call-site turbofish `<T, …>` on a method call (`decode<Order>(…)`).
+    /// D-GENERIC-CALL1=A: call-site type arguments `<T, …>` on any generic call.
     /// No-op when the call carries no type arguments.
-    fn fmt_method_type_args(&mut self, type_args: &[crate::AST::Type]) {
+    fn fmt_call_type_args(&mut self, type_args: &[crate::AST::Type]) {
         if type_args.is_empty() {
             return;
         }

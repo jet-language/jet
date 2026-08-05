@@ -86,6 +86,7 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
             | "UiNode"
             | "MigrationStatus"
             | "DataGroup"
+            | "DataLineOptions"
             | "DataPivotCell"
             | "DataLimits"
             | "DataError"
@@ -134,8 +135,14 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
             member,
             "domain" | "kind" | "path" | "detail" | "pid" | "port"
         ),
-        // D-DATA-SURFACE1=A / D-DATA-STATUS1=A: core.data fields use plain Rust names.
+        // D-DATA-SURFACE1=A / D-DATA-STATUS1=A / D-DATA-PLOT1=A: core.data fields
+        // use plain Rust names.
         "DataGroup" => matches!(member, "key" | "count" | "sum" | "mean"),
+        "DataLineOptions" => matches!(
+            member,
+            "title" | "x_label" | "y_label" | "markers" | "reference" | "style"
+                | "color" | "legend"
+        ),
         "DataPivotCell" => matches!(member, "row_key" | "column_key" | "count" | "sum" | "mean"),
         "DataLimits" => matches!(
             member,
@@ -207,6 +214,16 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
         "Claims" => matches!(member, "subject" | "audience" | "issuer" | "expires_at" | "issued_at"),
         "Session" => matches!(member, "id" | "user_id" | "expires_at" | "cookie"),
         "Auth" => matches!(member, "users_table"),
+        n if n == Syntax::TYPE_TYPE_INFO => {
+            matches!(member, "layout")
+        }
+        n if n == Syntax::TYPE_LAYOUT_INFO => matches!(
+            member,
+            "kind" | "size" | "alignment" | "stride" | "target" | "guarantee" | "source" | "fields"
+        ),
+        n if n == Syntax::TYPE_LAYOUT_FIELD => {
+            matches!(member, "name" | "ty" | "offset" | "size" | "target" | "guarantee" | "source")
+        }
         _ => false,
     };
     if known {
@@ -421,6 +438,16 @@ pub(crate) fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<
             _ => None,
         };
     }
+    if name == "DataLineOptions" && !cx.struct_fields.contains_key(name) {
+        return match field {
+            "title" | "x_label" | "y_label" | "style" | "color" | "legend" => {
+                Some(Type::String)
+            }
+            "markers" => Some(Type::Bool),
+            "reference" => Some(Type::Option(Box::new(Type::Float))),
+            _ => None,
+        };
+    }
     if name == "DataPivotCell" && !cx.struct_fields.contains_key(name) {
         return match field {
             "row_key" | "column_key" => Some(Type::String),
@@ -469,6 +496,31 @@ pub(crate) fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<
             "sum" | "mean" | "min" | "max" | "median" | "variance" | "stddev" => {
                 Some(Type::Float)
             }
+            _ => None,
+        };
+    }
+    if name == Syntax::TYPE_TYPE_INFO {
+        return match field {
+            "layout" => {
+                Some(Type::Named(Syntax::TYPE_LAYOUT_INFO.to_string()))
+            }
+            _ => None,
+        };
+    }
+    if name == Syntax::TYPE_LAYOUT_INFO {
+        return match field {
+            "kind" | "target" | "guarantee" | "source" => Some(Type::String),
+            "size" | "alignment" | "stride" => Some(Type::Option(Box::new(Type::Int))),
+            "fields" => Some(Type::List(Box::new(Type::Named(
+                Syntax::TYPE_LAYOUT_FIELD.to_string(),
+            )))),
+            _ => None,
+        };
+    }
+    if name == Syntax::TYPE_LAYOUT_FIELD {
+        return match field {
+            "name" | "ty" | "target" | "guarantee" | "source" => Some(Type::String),
+            "offset" | "size" => Some(Type::Option(Box::new(Type::Int))),
             _ => None,
         };
     }
@@ -560,4 +612,42 @@ pub(crate) fn call_return_type(cx: &Cx, name: &str) -> Type {
         _ if cx.distinct_types.contains_key(name) => Type::Named(name.to_string()),
         _ => unit_type(),
     }
+}
+
+/// Resolve a generic call's result using the explicit arguments first, then
+/// the concrete lowered argument types. This is the codegen-side mirror of
+/// sema's substitution; engines receive a concrete TIR type, never a binder.
+pub(crate) fn call_return_type_with_args(
+    cx: &Cx,
+    name: &str,
+    type_args: &[Type],
+    args: &[crate::Codegen::TIR::TCallArg],
+) -> Type {
+    let declared = call_return_type(cx, name);
+    let Some(params) = cx.fn_type_params.get(name) else {
+        return declared;
+    };
+    if params.is_empty() {
+        return declared;
+    }
+    let Some(order) = cx.fn_type_param_order.get(name) else {
+        return declared;
+    };
+    let mut subst = std::collections::HashMap::new();
+    for (param, actual) in order.iter().zip(type_args) {
+        subst.insert(param.clone(), cx.expand_type_aliases(actual));
+    }
+    if let Some(sig) = cx.sigs.get(name) {
+        for ((_, template), actual) in sig.iter().zip(args) {
+            if !crate::Codegen::TIR::bind_generic_type(
+                template,
+                &actual.value.ty,
+                params,
+                &mut subst,
+            ) {
+                return declared;
+            }
+        }
+    }
+    crate::Generics::substitute_type(&declared, &subst)
 }

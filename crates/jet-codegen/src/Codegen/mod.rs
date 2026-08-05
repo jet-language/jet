@@ -56,6 +56,7 @@ const PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/Core/SetAlgebra.rs"),
     include_str!("../Prelude/Core.rs"),
     include_str!("../Prelude/TypedText.rs"),
+    include_str!("../Prelude/Core/Progress.rs"),
     include_str!("../Prelude/Core/Collections.rs"),
     include_str!("../Prelude/SharedProtocol.rs"),
     include_str!("../Prelude/Core/RuntimeControl.rs"),
@@ -462,11 +463,15 @@ fn core_usage_matches(used: &std::collections::HashSet<String>, prefixes: &[&str
     })
 }
 
-fn push_corelib_prelude(out: &mut String, used_core: &std::collections::HashSet<String>) {
-    // `core.archive` is an explicit ABI bridge, not ordinary-Jet behavior
-    // source. Emit no compiler fragment, so no older template becomes a
-    // fallback implementation.
-    if !core_needs_embedded_runtime(used_core) {
+fn push_corelib_prelude(
+    out: &mut String,
+    used_core: &std::collections::HashSet<String>,
+    force: bool,
+) {
+    // `core.archive` is emitted as a reachable ordinary-Jet source module. Its
+    // internal ABI calls do not require a compiler prelude fragment, so no old
+    // template can become a fallback implementation.
+    if !force && !core_needs_embedded_runtime(used_core) {
         return;
     }
     let mut body = String::new();
@@ -474,6 +479,119 @@ fn push_corelib_prelude(out: &mut String, used_core: &std::collections::HashSet<
     out.push_str(&corelib_emission_identity(&body, used_core));
     out.push('\n');
     out.push_str(&body);
+}
+
+fn type_uses_stream(ty: &Type) -> bool {
+    match ty {
+        Type::Apply { name, args } => {
+            name == "Stream" || args.iter().any(type_uses_stream)
+        }
+        Type::List(inner)
+        | Type::Shared(inner)
+        | Type::Option(inner)
+        | Type::FixedList { elem: inner, .. }
+        | Type::Tagged { inner, .. } => type_uses_stream(inner),
+        Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+            type_uses_stream(key) || type_uses_stream(value)
+        }
+        Type::Tuple(fields) => fields.iter().any(|(_, field)| type_uses_stream(field)),
+        Type::Union(members) => members.iter().any(type_uses_stream),
+        Type::Fn { params, ret, .. } => {
+            params.iter().any(type_uses_stream)
+                || ret.as_deref().is_some_and(type_uses_stream)
+        }
+        _ => false,
+    }
+}
+
+fn func_uses_stream(func: &crate::AST::Func) -> bool {
+    func.params.iter().any(|param| type_uses_stream(&param.ty))
+        || func
+            .return_type
+            .as_ref()
+            .is_some_and(type_uses_stream)
+}
+
+fn trait_method_uses_stream(method: &crate::AST::TraitMethodSig) -> bool {
+    method
+        .params
+        .iter()
+        .any(|param| type_uses_stream(&param.ty))
+        || method
+            .return_type
+            .as_ref()
+            .is_some_and(type_uses_stream)
+}
+
+fn items_use_stream(items: &[Item]) -> bool {
+    items.iter().any(|item| match item {
+        Item::Func(func) => func_uses_stream(func),
+        Item::Struct(def) => {
+            def.fields.iter().any(|field| type_uses_stream(&field.ty))
+                || def.methods.iter().any(func_uses_stream)
+                || def.trait_impls.iter().any(|impl_block| {
+                    impl_block.methods.iter().any(func_uses_stream)
+                        || impl_block
+                            .assoc_type_impls
+                            .iter()
+                            .any(|(_, _, ty)| type_uses_stream(ty))
+                })
+        }
+        Item::Enum(def) => {
+            def.variants.iter().any(|variant| match &variant.payload {
+                crate::AST::VariantPayload::Unit => false,
+                crate::AST::VariantPayload::Single(ty, _) => type_uses_stream(ty),
+                crate::AST::VariantPayload::Named(fields) => {
+                    fields.iter().any(|field| type_uses_stream(&field.ty))
+                }
+            }) || def.methods.iter().any(func_uses_stream)
+                || def.trait_impls.iter().any(|impl_block| {
+                    impl_block.methods.iter().any(func_uses_stream)
+                        || impl_block
+                            .assoc_type_impls
+                            .iter()
+                            .any(|(_, _, ty)| type_uses_stream(ty))
+                })
+        }
+        Item::Distinct(def) => type_uses_stream(&def.base),
+        Item::TypeAlias(def) => type_uses_stream(&def.target),
+        Item::Trait(def) => def.methods.iter().any(trait_method_uses_stream),
+        Item::Impl(def) => {
+            def.methods.iter().any(func_uses_stream)
+                || def
+                    .assoc_type_impls
+                    .iter()
+                    .any(|(_, _, ty)| type_uses_stream(ty))
+        }
+        Item::ExternRust(def) => def.functions.iter().any(|func| {
+            func.params.iter().any(|param| type_uses_stream(&param.ty))
+                || func
+                    .return_type
+                    .as_ref()
+                    .is_some_and(type_uses_stream)
+        }),
+        Item::ProtocolDecl(def) => def
+            .messages
+            .iter()
+            .any(|message| message.fields.iter().any(|(_, ty)| type_uses_stream(ty))),
+        Item::CodeModule(def) => def
+            .body
+            .as_deref()
+            .is_some_and(items_use_stream),
+        Item::GenericModule(def) => items_use_stream(&def.body),
+        _ => false,
+    })
+}
+
+fn uses_stream(bundle: &ProgramBundle) -> bool {
+    bundle
+        .modules
+        .iter()
+        .any(|module| items_use_stream(&module.items))
+}
+
+fn needs_embedded_runtime(bundle: &ProgramBundle) -> bool {
+    core_needs_embedded_runtime(&bundle.used_core) || uses_stream(bundle)
 }
 
 /// R10 / #1133: content identity of the semantic Core closure and emitted
@@ -595,6 +713,13 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
             "core.db",
         ],
     );
+    // DataFmt.rs holds the `jet_fmt_*` helpers behind `core.fmt` and the
+    // toml/yaml/csv text helpers behind `core.encoding`, not just the
+    // `core.data` surface it is filed under. Gate it on every surface that
+    // calls into it, or a program using only one of them emits calls to
+    // helpers the generated file never included and rustc rejects it (I2).
+    let needs_data_fmt =
+        needs_data || needs_encoding || core_usage_matches(used_core, &["core.fmt"]);
     let needs_compute = core_usage_matches(used_core, &["core.compute"]);
     let needs_net = core_usage_matches(
         used_core,
@@ -701,16 +826,21 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
         // CryptoEntropy already in kernel closure (TLS identity + JetStd).
     }
     if needs_math {
+        // Math and random helpers first — LinalgFns and the rest of the math
+        // surface call them.
+        out.push_str(include_str!("../Prelude/CoreLib/Top/MathRandomFns.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/LinalgFns.rs"));
     }
     if needs_encoding {
         // Encoding templates already in kernel closure.
     }
     if needs_data {
-        out.push_str("mod jet_data_plot {\n");
-        out.push_str(include_str!("../../../jet-foundation/src/DataPlot.rs"));
-        out.push_str("\n}\n");
+        out.push_str(include_str!("../Prelude/CoreLib/Top/DataPlot.rs"));
+    }
+    if needs_data_fmt {
         out.push_str(include_str!("../Prelude/CoreLib/Top/DataFmt.rs"));
+    }
+    if needs_data {
         out.push_str(include_str!("../Prelude/CoreLib/Top/DataFlow.rs"));
     }
     if needs_compute {
@@ -761,6 +891,7 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
     }
 }
 const SCHEDULER_PRELUDE_RAW: &str = include_str!("../Prelude/Scheduler.rs");
+const STREAM_PRELUDE_RAW: &str = include_str!("../Prelude/Stream.rs");
 /// D-RENDERTGT1=A + D-RENDERTGT2=A (c133 M1): UI backend trait seam + null backend.
 const UI_PRELUDE: &str = include_str!("../Prelude/Ui.rs");
 /// D-UIDEVSHELL1=A (c134 Phase 8): native Linux GTK4 backend. Emitted only when
@@ -858,13 +989,17 @@ fn scheduler_prelude_for_emit(native_io: bool) -> &'static str {
     static PORTABLE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     if native_io {
         NATIVE.get_or_init(|| {
-            SCHEDULER_PRELUDE_RAW.replace("feature = \"jet_native_io\"", "all()")
+            let mut source = SCHEDULER_PRELUDE_RAW.replace("feature = \"jet_native_io\"", "all()");
+            source.push_str(STREAM_PRELUDE_RAW);
+            source
         })
     } else {
         PORTABLE.get_or_init(|| {
-            ["notify", "epoll", "kqueue", "iocp"]
+            let mut source = ["notify", "epoll", "kqueue", "iocp"]
                 .into_iter()
-                .fold(SCHEDULER_PRELUDE_RAW.to_string(), strip_scheduler_region)
+                .fold(SCHEDULER_PRELUDE_RAW.to_string(), strip_scheduler_region);
+            source.push_str(STREAM_PRELUDE_RAW);
+            source
         })
     }
 }
@@ -1820,7 +1955,7 @@ mod tests {
         // templates into generated source.
         let files_only = HashSet::from(["core.files::read".to_string()]);
         let mut files_out = String::new();
-        push_corelib_prelude(&mut files_out, &files_only);
+        push_corelib_prelude(&mut files_out, &files_only, false);
         assert!(
             files_out.contains("struct JetPath"),
             "files usage must emit PathFiles"
@@ -1838,7 +1973,7 @@ mod tests {
 
         let net_only = HashSet::from(["core.net::tcp_connect".to_string()]);
         let mut net_out = String::new();
-        push_corelib_prelude(&mut net_out, &net_only);
+        push_corelib_prelude(&mut net_out, &net_only, false);
         assert!(
             net_out.contains("struct JetTCPStream") && net_out.contains("fn jet_net_tcp_connect"),
             "net usage must emit NetHTTP"
@@ -1850,7 +1985,7 @@ mod tests {
 
         let http = HashSet::from(["core.http.client::get".to_string()]);
         let mut http_out = String::new();
-        push_corelib_prelude(&mut http_out, &http);
+        push_corelib_prelude(&mut http_out, &http, false);
         assert!(
             http_out.contains("JetHTTPServer") || http_out.contains("fn jet_http_"),
             "http usage must emit HTTP templates"
@@ -1870,7 +2005,7 @@ mod tests {
 
         let compute_only = HashSet::from(["core.compute::zeros".to_string()]);
         let mut compute_out = String::new();
-        push_corelib_prelude(&mut compute_out, &compute_only);
+        push_corelib_prelude(&mut compute_out, &compute_only, false);
         assert!(
             compute_out.contains("fn jet_compute_zeros")
                 && compute_out.contains("struct JetTensor"),
@@ -2679,8 +2814,8 @@ pub fn emit_bundle_dbg(
     push_mem_prelude(&mut out);
     push_gc_prelude(&mut out);
     out.push_str(LAYOUT_PRELUDE);
-    if core_needs_embedded_runtime(&bundle.used_core) {
-        push_corelib_prelude(&mut out, &bundle.used_core);
+    if needs_embedded_runtime(bundle) {
+        push_corelib_prelude(&mut out, &bundle.used_core, uses_stream(bundle));
         out.push_str(scheduler_prelude_for_emit(uses_native_scheduler(bundle)));
         out.push_str(UI_PRELUDE);
         if uses_gtk_backend(bundle) {
@@ -2708,6 +2843,8 @@ pub fn emit_bundle_dbg(
             &extern_funcs,
         );
         apply_auto_derives(&mut cx, &bundle_auto_derives[i]);
+        cx.module_alias = module.alias.clone();
+        cx.core_archive_source = bundle.modules.iter().any(|module| module.alias == "core_archive");
         // D-DBG3 step 2: line markers stay scoped to the entry file only (v1, same
         // restriction as the step-1 interpreter debugger) — a bare `// jet:line N`
         // can't disambiguate which file N belongs to across modules.
@@ -2740,6 +2877,8 @@ pub fn emit_bundle_dbg(
         &extern_funcs,
     );
     apply_auto_derives(&mut cx, &bundle_auto_derives[bundle.entry]);
+    cx.module_alias = entry.alias.clone();
+    cx.core_archive_source = bundle.modules.iter().any(|module| module.alias == "core_archive");
     cx.debug_linemap = debug_linemap;
     cx.active_os = active_os;
     cx.import_mods = import_mods;
@@ -2862,8 +3001,8 @@ pub fn emit_bundle_tests_cov(
     if coverage {
         out.push_str(COV_PRELUDE);
     }
-    if core_needs_embedded_runtime(&bundle.used_core) {
-        push_corelib_prelude(&mut out, &bundle.used_core);
+    if needs_embedded_runtime(bundle) {
+        push_corelib_prelude(&mut out, &bundle.used_core, uses_stream(bundle));
         out.push_str(scheduler_prelude_for_emit(uses_native_scheduler(bundle)));
         out.push_str(UI_PRELUDE);
         if uses_gtk_backend(bundle) {
@@ -2891,6 +3030,8 @@ pub fn emit_bundle_tests_cov(
             &extern_funcs,
         );
         apply_auto_derives(&mut cx, &bundle_auto_derives[i]);
+        cx.module_alias = module.alias.clone();
+        cx.core_archive_source = bundle.modules.iter().any(|module| module.alias == "core_archive");
         cx.test_mode = true;
         cx.coverage = coverage;
         cx.import_mods = import_mod_map(bundle, i);
@@ -2920,6 +3061,8 @@ pub fn emit_bundle_tests_cov(
         &extern_funcs,
     );
     apply_auto_derives(&mut cx, &bundle_auto_derives[bundle.entry]);
+    cx.module_alias = entry.alias.clone();
+    cx.core_archive_source = bundle.modules.iter().any(|module| module.alias == "core_archive");
     cx.test_mode = true;
     cx.coverage = coverage;
     cx.import_mods = import_mods;
@@ -3063,8 +3206,8 @@ pub fn emit_bundle_fuzz(
     // runtime is always needed (unlike `jet test`, which only emits it when a
     // property test is present).
     out.push_str(PROP_PRELUDE);
-    if core_needs_embedded_runtime(&bundle.used_core) {
-        push_corelib_prelude(&mut out, &bundle.used_core);
+    if needs_embedded_runtime(bundle) {
+        push_corelib_prelude(&mut out, &bundle.used_core, uses_stream(bundle));
         out.push_str(scheduler_prelude_for_emit(uses_native_scheduler(bundle)));
         out.push_str(UI_PRELUDE);
         if uses_gtk_backend(bundle) {
@@ -3092,6 +3235,8 @@ pub fn emit_bundle_fuzz(
             &extern_funcs,
         );
         apply_auto_derives(&mut cx, &bundle_auto_derives[i]);
+        cx.module_alias = module.alias.clone();
+        cx.core_archive_source = bundle.modules.iter().any(|module| module.alias == "core_archive");
         cx.test_mode = true;
         cx.import_mods = import_mod_map(bundle, i);
         cx.foreign_types = foreign_type_map(bundle, i);
@@ -3120,6 +3265,8 @@ pub fn emit_bundle_fuzz(
         &extern_funcs,
     );
     apply_auto_derives(&mut cx, &bundle_auto_derives[bundle.entry]);
+    cx.module_alias = entry.alias.clone();
+    cx.core_archive_source = bundle.modules.iter().any(|module| module.alias == "core_archive");
     cx.test_mode = true;
     cx.import_mods = import_mods;
     cx.foreign_types = foreign_type_map(bundle, bundle.entry);
@@ -3322,8 +3469,8 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
     if coverage {
         out.push_str(COV_PRELUDE);
     }
-    if core_needs_embedded_runtime(&bundle.used_core) {
-        push_corelib_prelude(&mut out, &bundle.used_core);
+    if needs_embedded_runtime(bundle) {
+        push_corelib_prelude(&mut out, &bundle.used_core, uses_stream(bundle));
         out.push_str(scheduler_prelude_for_emit(uses_native_scheduler(bundle)));
         out.push_str(UI_PRELUDE);
         if uses_gtk_backend(bundle) {
@@ -3351,6 +3498,8 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
             &extern_funcs,
         );
         apply_auto_derives(&mut cx, &bundle_auto_derives[i]);
+        cx.module_alias = module.alias.clone();
+        cx.core_archive_source = bundle.modules.iter().any(|module| module.alias == "core_archive");
         cx.test_mode = true;
         cx.coverage = coverage;
         cx.import_mods = import_mod_map(bundle, i);
@@ -3380,6 +3529,8 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
         &extern_funcs,
     );
     apply_auto_derives(&mut cx, &bundle_auto_derives[bundle.entry]);
+    cx.module_alias = entry.alias.clone();
+    cx.core_archive_source = bundle.modules.iter().any(|module| module.alias == "core_archive");
     cx.test_mode = true;
     cx.coverage = coverage;
     cx.import_mods = import_mods;

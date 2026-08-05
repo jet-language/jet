@@ -206,6 +206,8 @@ fn relative_target_stays_in_root(link: &Path, target: &Path, root: &Path) -> boo
 fn create_migration_symlink(target: &Path, destination: &Path, source: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
+        // `source` only tells Windows whether to make a dir or file symlink.
+        let _ = source;
         std::os::unix::fs::symlink(target, destination)
     }
     #[cfg(windows)]

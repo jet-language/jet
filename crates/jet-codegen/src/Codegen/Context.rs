@@ -86,6 +86,10 @@ pub(crate) struct Cx {
     pub(crate) fn_types: HashMap<String, Type>,
     /// `(TypeName, method)` -> parameter conventions+types (including `self`).
     pub(crate) method_sigs: HashMap<(String, String), Vec<(AccessConvention, Type)>>,
+    /// Method-owned type parameters in declaration order. Owner parameters are
+    /// kept separately in `struct_type_param_order`.
+    pub(crate) method_type_params:
+        HashMap<(String, String), Vec<crate::AST::TypeParam>>,
     pub(crate) method_self_convs: HashMap<(String, String), AccessConvention>,
     /// c109 Phase 6 (TIR): `(TypeName, method)` -> resolved return type (or `None`
     /// for a unit-returning method). Used by TIR lowering to give a method-call
@@ -148,6 +152,11 @@ pub(crate) struct Cx {
     pub(crate) computed_fields: HashMap<String, HashSet<String>>,
     pub(crate) src: String,
     pub(crate) file: String,
+    /// Rust module alias for this loaded source file, when it is emitted as a
+    /// file module.  TIR uses this only to keep the source package's internal
+    /// ABI calls distinct from calls into the package's public surface.
+    pub(crate) module_alias: String,
+    pub(crate) core_archive_source: bool,
     /// When true, `require`/`require_eq` unwind instead of exiting (test bodies).
     pub(crate) test_mode: bool,
     /// D-COV1: `jet test --coverage`. When true, every emitted user function head
@@ -225,7 +234,7 @@ pub(crate) struct Cx {
     /// Concrete generic owner methods reached while lowering executable TIR.
     /// The key is `Owner<Args>::method`, keeping discovery deterministic.
     pub(crate) jit_method_calls:
-        std::cell::RefCell<std::collections::BTreeMap<String, (Type, String)>>,
+        std::cell::RefCell<std::collections::BTreeMap<String, (Type, String, Vec<Type>)>>,
     /// Concrete argument types at calls to generic free functions. TIR uses
     /// these facts to admit one native specialization per concrete call shape.
     pub(crate) jit_generic_calls:
@@ -240,6 +249,10 @@ pub(crate) struct Cx {
     /// Free-function type parameter names, used to give generic call results
     /// their concrete TIR type at the call site.
     pub(crate) fn_type_params: HashMap<String, HashSet<String>>,
+    /// The same free-function parameters in declaration order. HashSet is still
+    /// useful for structural binding, but explicit `call<T>(…)` must map each
+    /// source argument to the matching binder deterministically.
+    pub(crate) fn_type_param_order: HashMap<String, Vec<String>>,
     /// D-DBG3 step 2 (dap-debugger): when true, `lower_stmts` interleaves a
     /// `TStmt::LineMarker` before every lowered statement, and emission turns each
     /// into a `// jet:line N` comment. Set ONLY by the native `jet debug` build path
@@ -282,7 +295,7 @@ pub(crate) struct Cx {
     pub(crate) stm_touched: std::cell::Cell<bool>,
 }
 
-pub(crate) const MOD_USE: &str = "use super::{JetShow, JetDisplay, JetDebug, JetArith, jet_panic, jet_panic_rich, jet_trace_err, jet_index_vec, jet_index_vec_mut, jet_views_mut_new, jet_views_mut_range_new, jet_split_write, jet_get_disjoint_write, jet_edit_disjoint, jet_unpack_vec, jet_slice_vec, jet_index_map, jet_map_insert, jet_map_merge, jet_map_merge_with, jet_list_remove, jet_char_len, jet_string_split, jet_string_lines, jet_string_after, jet_string_before, jet_string_slice, jet_list_map, jet_list_map_mut, jet_list_filter, jet_list_each, jet_list_each_ref, jet_list_each_mut, jet_list_find, jet_list_any, jet_list_all, jet_list_sort_by, jet_list_reduce, jet_map_each, jet_list_take, jet_list_skip, jet_list_step_by, jet_list_dedup, jet_list_chunks, jet_list_windows, jet_list_sum, jet_list_product, jet_list_flatten, jet_list_intersperse, jet_list_count_by, jet_list_take_while, jet_list_skip_while, jet_list_flat_map, jet_list_scan, jet_list_fold, jet_list_position, jet_list_min_by, jet_list_max_by, jet_list_group_by, jet_list_partition, jet_list_para_map, jet_list_para_filter, jet_list_para_partition, jet_list_para_fold, JetIter, jet_iter_from_vec, jet_iter_string_split, jet_iter_take, jet_iter_skip, jet_iter_step_by, jet_iter_dedup, jet_iter_chunks, jet_iter_windows, jet_iter_map, jet_iter_map_mut, jet_iter_filter, jet_iter_take_while, jet_iter_skip_while, jet_iter_flat_map, jet_iter_filter_map, jet_iter_scan, jet_iter_flatten, jet_iter_intersperse, jet_iter_enumerate, jet_iter_indexes, jet_iter_zip};\n\n";
+pub(crate) const MOD_USE: &str = "use super::{JetShow, JetDisplay, JetDebug, JetArith, JetMap, JetRemoveBy, jet_panic, jet_panic_rich, jet_trace_err, jet_index_vec, jet_index_vec_mut, jet_views_mut_new, jet_views_mut_range_new, jet_split_write, jet_get_disjoint_write, jet_edit_disjoint, jet_unpack_vec, jet_slice_vec, jet_index_map, jet_map_insert, jet_map_merge, jet_map_merge_with, jet_map_keys, jet_map_values, jet_list_remove_value, jet_list_remove_slot, jet_list_count, jet_list_concat, jet_char_len, jet_string_split, jet_string_lines, jet_string_after, jet_string_before, jet_string_slice, jet_list_map, jet_list_map_mut, jet_list_filter, jet_list_each, jet_list_each_ref, jet_list_each_mut, jet_list_find, jet_list_any, jet_list_all, jet_list_sort_by, jet_list_reduce, jet_map_each, jet_list_take, jet_list_skip, jet_list_step_by, jet_list_dedup, jet_list_chunks, jet_list_windows, jet_list_sum, jet_list_product, jet_list_flatten, jet_list_intersperse, jet_list_count_by, jet_list_take_while, jet_list_skip_while, jet_list_flat_map, jet_list_scan, jet_list_fold, jet_list_position, jet_list_min_by, jet_list_max_by, jet_list_group_by, jet_list_partition, jet_list_para_map, jet_list_para_filter, jet_list_para_partition, jet_list_para_fold, JetIter, jet_iter_from_vec, jet_iter_empty, jet_iter_some, jet_iter_string_split, jet_iter_take, jet_iter_skip, jet_iter_step_by, jet_iter_dedup, jet_iter_chunks, jet_iter_windows, jet_iter_map, jet_iter_map_mut, jet_iter_filter, jet_iter_take_while, jet_iter_skip_while, jet_iter_flat_map, jet_iter_filter_map, jet_iter_scan, jet_iter_flatten, jet_iter_intersperse, jet_iter_enumerate, jet_iter_indexes, jet_iter_zip, jet_iter_zip_strict, jet_iter_zip_pad};\n\n";
 
 /// D-ITER-HOOK: metadata for zero-copy `for x in mytype` lowering.
 #[derive(Debug, Clone)]
@@ -378,8 +391,9 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "TempDir" => Some("TempDir"),
         "TempFile" => Some("TempFile"),
         "FileLock" => Some("FileLock"),
-        // D-DATA-SURFACE1=A / D-DATA-STATUS1=A: core.data summary/status values.
+        // D-DATA-SURFACE1=A / D-DATA-STATUS1=A / D-DATA-PLOT1=A: core.data values.
         "DataGroup" => Some("DataGroup"),
+        "DataLineOptions" => Some("DataLineOptions"),
         "DataColumn" => Some("DataColumn"),
         "DataStatus" => Some("DataStatus"),
         "DataSummary" => Some("DataSummary"),
@@ -1047,7 +1061,8 @@ impl Cx {
                     format!("Vec<{}>", render(cx, inner, base))
                 }
                 Type::Map { key, value, .. } if cx.type_contains_view(ty) => format!(
-                    "std::collections::BTreeMap<{}, {}>",
+                    "{}JetMap<{}, {}>",
+                    cx.root_prefix,
                     render(cx, key, base),
                     render(cx, value, base)
                 ),
@@ -1201,12 +1216,14 @@ impl Cx {
             Type::Fn {
                 params,
                 ret,
+                param_contract: _,
                 effect_bound,
                 return_view_provenance,
             } => Type::Fn {
                 params: params.iter().map(|p| self.expand_type_aliases(p)).collect(),
                 ret: ret.as_ref().map(|r| Box::new(self.expand_type_aliases(r))),
                 effect_bound: effect_bound.clone(),
+                param_contract: None,
                 return_view_provenance: return_view_provenance.clone(),
             },
             Type::Tuple(fields) => Type::Tuple(
@@ -1253,7 +1270,8 @@ impl Cx {
             }
             Type::List(inner) => format!("Vec<{}>", self.rust_type(inner)),
             Type::Map { key, value, .. } => format!(
-                "std::collections::BTreeMap<{}, {}>",
+                "{}JetMap<{}, {}>",
+                self.root_prefix,
                 self.rust_type(key),
                 self.rust_type(value)
             ),
@@ -1282,9 +1300,14 @@ impl Cx {
                 name.clone()
             }
             Type::Named(name)
-                if (name == "Unit" || name == "Void") && !self.type_names.contains(name) =>
+                if (name == "Unit") && !self.type_names.contains(name) =>
             {
                 "()".to_string()
+            }
+            Type::Named(name)
+                if name == Syntax::TYPE_REMOVE_BY && !self.type_names.contains(name) =>
+            {
+                format!("{}JetRemoveBy", self.root_prefix)
             }
             // D-TASKGROUP-PARAM1=A: helpers receive the lexical group's real
             // internal collector. The surface remains second-class.
@@ -1589,7 +1612,9 @@ impl Cx {
                 )
             }
             Type::Apply { name, args }
-                if name == "Tensor" && args.len() <= 1 && compute_handle_rust_type(name).is_some() =>
+                if matches!(name.as_str(), "Tensor" | "Vec" | "Matrix")
+                    && (name != "Tensor" || args.len() <= 1)
+                    && compute_handle_rust_type("Tensor").is_some() =>
             {
                 format!("{}JetTensor", self.root_prefix)
             }
@@ -1804,12 +1829,16 @@ impl Cx {
                     self.rust_type(&args[0])
                 )
             }
-            // D-STREAMYIELD1: a generator's `Stream<T>` is a rendezvous-channel
-            // receiver — `Receiver<T>` already implements `IntoIterator<Item = T>`,
-            // which is exactly `loop x; stream { }`'s pull-one-block-until-ready
-            // shape (no coroutine machinery needed).
+            // D-STREAMYIELD1: a generator's `Stream<T>` is the Prelude's
+            // rendezvous receiver. Its owned iterator closes the receiver when
+            // a consumer breaks or drops it, so a blocked producer observes the
+            // same cancellation rule on every emitted program.
             Type::Apply { name, args } if name == "Stream" && !args.is_empty() => {
-                format!("std::sync::mpsc::Receiver<{}>", self.rust_type(&args[0]))
+                format!(
+                    "{}jet_std::JetStream<{}>",
+                    self.root_prefix,
+                    self.rust_type(&args[0])
+                )
             }
             // D-REACT1=B: reactive handle types lower to the std-only jet_std runtime.
             Type::Apply { name, args } if name == Syntax::TYPE_SIGNAL && !args.is_empty() => {
@@ -2442,6 +2471,11 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
         reexport_call_map, unqualified_import_maps,
     };
     cx.import_mods = import_mod_map(bundle, module_idx);
+    cx.module_alias = bundle.modules[module_idx].alias.clone();
+    cx.core_archive_source = bundle
+        .modules
+        .iter()
+        .any(|module| module.alias == "core_archive");
     cx.foreign_types = foreign_type_map(bundle, module_idx);
     cx.reexport_calls = reexport_call_map(bundle, module_idx);
     cx.import_sigs = import_sig_map(bundle, module_idx);
@@ -2728,6 +2762,7 @@ pub(crate) fn build_cx_items(
         sigs: HashMap::new(),
         fn_types: HashMap::new(),
         method_sigs: HashMap::new(),
+        method_type_params: HashMap::new(),
         method_self_convs: HashMap::new(),
         method_rets: HashMap::new(),
         consts: HashMap::new(),
@@ -2757,6 +2792,8 @@ pub(crate) fn build_cx_items(
         computed_fields: HashMap::new(),
         src: src.to_string(),
         file: file.to_string(),
+        module_alias: String::new(),
+        core_archive_source: false,
         test_mode: false,
         coverage: false,
         debug_linemap: false,
@@ -2792,6 +2829,7 @@ pub(crate) fn build_cx_items(
         jit_canonical_calls: std::cell::RefCell::new(HashSet::new()),
         jit_local_call_prefix: None,
         fn_type_params: HashMap::new(),
+        fn_type_param_order: HashMap::new(),
         variadic_bound_fns: HashMap::new(),
         needed_variadic_arities: std::cell::RefCell::new(std::collections::BTreeMap::new()),
         active_os: crate::Syntax::OSTarget::host(),
@@ -3021,11 +3059,27 @@ pub(crate) fn build_cx_items(
             .insert(name.to_string(), Syntax::TYPE_ORDERING.to_string());
     }
     cx.cloneable.insert(Syntax::TYPE_ORDERING.to_string());
+    cx.enum_variants.insert(
+        Syntax::TYPE_REMOVE_BY.to_string(),
+        ["Val", "Slot"]
+            .into_iter()
+            .map(|name| (name.to_string(), VariantPayload::Unit))
+            .collect(),
+    );
+    for name in ["Val", "Slot"] {
+        cx.variant_owner
+            .insert(name.to_string(), Syntax::TYPE_REMOVE_BY.to_string());
+    }
+    cx.cloneable.insert(Syntax::TYPE_REMOVE_BY.to_string());
 
     for item in items {
         match item {
             Item::Func(f) => {
                 cx.fn_type_params.insert(
+                    f.name.clone(),
+                    f.type_params.iter().map(|param| param.name.clone()).collect(),
+                );
+                cx.fn_type_param_order.insert(
                     f.name.clone(),
                     f.type_params.iter().map(|param| param.name.clone()).collect(),
                 );
@@ -3060,6 +3114,7 @@ pub(crate) fn build_cx_items(
                             .collect(),
                         ret: f.return_type.clone().map(Box::new),
                         effect_bound: None,
+                        param_contract: None,
                         return_view_provenance: f.return_view_provenance.clone(),
                     },
                 );
@@ -3185,6 +3240,7 @@ pub(crate) fn build_cx_items(
                             params: ef.params.iter().map(|p| p.ty.clone()).collect(),
                             ret: ef.return_type.clone().map(Box::new),
                             effect_bound: None, return_view_provenance: None,
+                            param_contract: None,
                         },
                     );
                 }
@@ -3206,6 +3262,7 @@ pub(crate) fn build_cx_items(
                             params: ef.params.iter().map(|p| p.ty.clone()).collect(),
                             ret: ef.return_type.clone().map(Box::new),
                             effect_bound: None, return_view_provenance: None,
+                            param_contract: None,
                         },
                     );
                 }
@@ -3318,6 +3375,14 @@ pub(crate) fn build_cx_items(
                     for inner in body {
                         if let Item::Func(f) = inner {
                             let mangled = format!("{}__{}", cm.name, f.name);
+                            cx.fn_type_params.insert(
+                                mangled.clone(),
+                                f.type_params.iter().map(|param| param.name.clone()).collect(),
+                            );
+                            cx.fn_type_param_order.insert(
+                                mangled.clone(),
+                                f.type_params.iter().map(|param| param.name.clone()).collect(),
+                            );
                             cx.sigs.insert(
                                 mangled.clone(),
                                 f.params.iter().map(|p| (p.convention, p.ty.clone())).collect(),
@@ -3328,6 +3393,7 @@ pub(crate) fn build_cx_items(
                                     params: f.params.iter().map(|p| p.ty.clone()).collect(),
                                     ret: f.return_type.clone().map(Box::new),
                                     effect_bound: None, return_view_provenance: None,
+                                    param_contract: None,
                                 },
                             );
                         }
@@ -3385,6 +3451,8 @@ pub(crate) fn build_cx_items(
                     }
                     cx.method_sigs
                         .insert((s.name.clone(), m.name.clone()), method_sig_params(m));
+                    cx.method_type_params
+                        .insert((s.name.clone(), m.name.clone()), m.type_params.clone());
                     cx.method_rets
                         .insert((s.name.clone(), m.name.clone()), m.return_type.clone());
                 }
@@ -3466,6 +3534,8 @@ pub(crate) fn build_cx_items(
                     }
                     cx.method_sigs
                         .insert((e.name.clone(), m.name.clone()), method_sig_params(m));
+                    cx.method_type_params
+                        .insert((e.name.clone(), m.name.clone()), m.type_params.clone());
                     cx.method_rets
                         .insert((e.name.clone(), m.name.clone()), m.return_type.clone());
                 }
@@ -3480,6 +3550,8 @@ pub(crate) fn build_cx_items(
                     }
                     cx.method_sigs
                         .insert((i.type_name.clone(), m.name.clone()), method_sig_params(m));
+                    cx.method_type_params
+                        .insert((i.type_name.clone(), m.name.clone()), m.type_params.clone());
                     cx.method_rets
                         .insert((i.type_name.clone(), m.name.clone()), m.return_type.clone());
                     // S62: track trait-impl methods so call sites know not to mangle.

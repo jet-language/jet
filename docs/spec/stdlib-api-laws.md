@@ -15,6 +15,9 @@ existing drift found during review.
 - Storage uses `add`: keyed `add(key, value)` returns the displaced value, keyed
   `add_new(key, value)` never overwrites and returns whether it stored, and element
   `add(value)` returns whether it added a new element (D-API-STORE1=A).
+- `List.remove(value)` removes the first equal value by default; pass `.Slot` for
+  positional removal (D-LISTREMOVE1=F). Do not add parallel `remove_value` or
+  `remove_at` spellings.
 - Boolean predicates are verb-prefixed: `is_empty`, `has_prefix`, `contains`.
 - Fallible variants add no suffix; the `?` return type signals fallibility.
 - Constructor idioms (D-API-CTOR1=A): bare `Type(args)` when the args are the value's

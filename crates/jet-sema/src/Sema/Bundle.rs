@@ -842,6 +842,7 @@ fn expr_has_comptime_evaluation(expr: &Expr) -> bool {
         | Expr::UnitLit { .. }
         | Expr::Absent(_)
         | Expr::Todo { .. }
+        | Expr::NoElse(_)
         | Expr::ReduceMarker(..) => false,
     }
 }
@@ -856,6 +857,18 @@ fn builtin_type_registry() -> TypeRegistry {
         variants, variant_order: vec!["Less".to_string(), "Equal".to_string(), "Greater".to_string()],
         groups: HashMap::new(), methods: HashMap::new(), single_use: false,
         must_use: false, c_layout_tag: None,
+    });
+    let remove_by_variants = ["Val", "Slot"].into_iter().map(|name| {
+        (name.to_string(), (zero, VariantPayload::Unit))
+    }).collect::<HashMap<_, _>>();
+    types.insert(crate::Syntax::TYPE_REMOVE_BY.to_string(), TypeDef::Enum {
+        variants: remove_by_variants,
+        variant_order: vec!["Val".to_string(), "Slot".to_string()],
+        groups: HashMap::new(),
+        methods: HashMap::new(),
+        single_use: false,
+        must_use: false,
+        c_layout_tag: None,
     });
     TypeRegistry {
         types,
@@ -1526,6 +1539,11 @@ fn check_bundle_opts_for_output_inner(
                                 let mangled = format!("{}__{}", cm.name, f.name);
                                 st.func_spans.insert(mangled.clone(), f.name_span);
                                 st.funcs.insert(mangled.clone(), func_to_sig(f));
+                                if !f.type_params.is_empty() {
+                                    st.trait_reg
+                                        .fn_params
+                                        .insert(mangled.clone(), f.type_params.clone());
+                                }
                                 st.func_pub.insert(mangled, f.is_pub && !f.is_package_pub);
                                 st.func_pkg_pub
                                     .insert(format!("{}__{}", cm.name, f.name), f.is_package_pub);
@@ -2271,7 +2289,7 @@ fn check_bundle_opts_for_output_inner(
             _ => None,
         }) {
             // S12/D-S80-RUN1/D-CLIFLAG1: `run` is the only program entry name.
-            // It is zero-arg (optionally `-> Void ?`), or one typed CLI-spec
+            // It is zero-arg (optionally `-> () ?`), or one typed CLI-spec
             // parameter (`#[CLI]` struct / enum).
             if run_fn.params.is_empty() {
                 if mode == CompileMode::Run
@@ -2283,9 +2301,9 @@ fn check_bundle_opts_for_output_inner(
                     diags.push(Diagnostic::error(
                         "E0122",
                         "`run` returns the wrong kind of value".to_string(),
-                        "`run` is where running starts; it either returns nothing or reports top-level errors with `Void ?`"
+                        "`run` is where running starts; it either returns nothing or reports top-level errors with `() ?`"
                             .to_string(),
-                        "write `fn run() { ... }`, or `fn run() => Void ? { ... }` if the entry uses `?`"
+                        "write `fn run() { ... }`, or `fn run() => () ? { ... }` if the entry uses `?`"
                             .to_string(),
                         Some(run_fn.name_span),
                     ));

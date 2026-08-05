@@ -428,7 +428,7 @@ fn run() {
 /// A block lambda's last expression is its value. Prefix statements retain their
 /// semicolons, while the tail must not gain one in generated Rust. The unit lambda
 /// covers the same emitter path and proves removing the tail semicolon does not
-/// change Void closure behavior.
+/// change unit-returning closure behavior.
 #[test]
 fn block_lambda_preserves_value_tail_and_void_behavior() {
     if !have_rustc() {

@@ -1,11 +1,30 @@
 // core.archive — zip/tar containers (D-CORE-COMPRESS1=A / D-DEP-ARCHIVE1=A).
 //
-// This file declares the package boundary. It is not ordinary-Jet behavior
-// source. Current archive behavior uses an explicit audited Rust ABI bridge in
-// `src/lib.rs`; it does not yet satisfy D-CORE-SOURCE-AUTHORITY1=A.
-// `CoreProvider::realize()` compiles that source tree (D-BFS1), and the same
-// implementation serves the consumer FFI bridge and JIT host. No compiler
-// template fallback is allowed. Card #1133 remains open until behavior moves
-// through ordinary Jet source.
+// This is the source-owned public package. The four small wrappers below are
+// checked by the normal Jet frontend and are emitted as ordinary Jet
+// functions. Their calls to `abi` are the one audited ABI boundary for byte
+// format work; no compiler template or engine-specific implementation is used.
 
 module archive { }
+
+use core.archive as abi
+
+pub fn zip_compress(name: String, data: [U8]) => [U8] {
+    return abi.zip_compress(name, data)
+}
+
+pub fn zip_decompress(data: [U8]) => [U8] {
+    return abi.zip_decompress(data)
+}
+
+pub fn tar_add(archive: [U8], name: String, data: [U8]) => [U8] {
+    return abi.tar_add(archive, name, data)
+}
+
+pub fn tar_get(archive: [U8], name: String) => [U8] {
+    return abi.tar_get(archive, name)
+}
+
+pub fn tar_names_json(archive: [U8]) => String {
+    return abi.tar_names_json(archive)
+}

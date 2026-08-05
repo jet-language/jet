@@ -2,7 +2,8 @@ use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
 use jet_codegen::scheduler::{
-    JetSchedulerChannel, JetSchedulerJoin, JetSchedulerSender, JetTaskControl,
+    JetSchedulerChannel, JetSchedulerJoin, JetSchedulerSender, JetStream, JetStreamSender,
+    JetTaskControl,
 };
 use std::cell::Cell;
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -79,6 +80,15 @@ pub(crate) struct JitRuntime {
     pub(crate) invocations: u64,
     pub(crate) channels: Vec<JetSchedulerChannel<i64>>,
     pub(crate) senders: Vec<Option<JetSchedulerSender<i64>>>,
+    /// Opaque Stream handles. The pull/close/completion law lives in the
+    /// shared Prelude; these maps only translate Cranelift i64 handles.
+    pub(crate) stream_consumers: std::collections::HashMap<i64, JetStream<i64>>,
+    pub(crate) stream_producers:
+        std::collections::HashMap<i64, std::sync::Arc<JetStreamSender<i64>>>,
+    pub(crate) stream_senders:
+        std::collections::HashMap<i64, std::sync::Arc<JetStreamSender<i64>>>,
+    pub(crate) next_stream_channel: i64,
+    pub(crate) next_stream_sender: i64,
     pub(crate) tasks: Vec<Option<JetSchedulerJoin<i64>>>,
     pub(crate) task_controls: Vec<std::sync::Arc<JetTaskControl>>,
     pub(crate) task_groups:

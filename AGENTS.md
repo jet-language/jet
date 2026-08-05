@@ -76,9 +76,18 @@ on host tools unless testing host-shell independence. Group dependent checks whe
 Rebuild before compiler smoke tests: the `jet` wrapper runs `target/debug/jet`. Check `/tmp` before trusting ENOSPC.
 The verification skill owns snapshot, golden, formatter, grammar, and full-suite traps.
 
-Start the local Tower board with the one canonical command:
-`node plugins/tower/tower.mjs serve --open`. Board data lives in
-`plugins/tower/.tower/`. Read and write board state through that CLI.
+Only the owner starts the Tower board server (`node plugins/tower/tower.mjs
+serve --open`). Agents never run `tower serve` — not on another port, not in a
+worktree, not to "restart" a stale one; a second server holds divergent
+in-memory state and has silently lost board data. If a server looks stale or
+wrong, report it and stop. Board data lives in `plugins/tower/.tower/` (main
+checkout only). Agents read and write board state through the non-serve CLI
+commands, which operate on the store directly.
+
+When tooling snags you mid-task — a dead-end command, a broken helper, a
+misleading doc, a stale cache — log it in one line and keep going:
+`node plugins/tower/tower.mjs papercut add --by <agent> --text "..."`. Do not
+silently push through, and do not derail the task to fix it.
 
 ## Invariants
 

@@ -22,6 +22,26 @@ impl<'a> Parser<'a> {
 
     fn type_generic_arg(&mut self, label: &str) -> Result<(Type, Span), Diagnostic> {
         let span = self.peek().span;
+        // D-COMPUTE-TYPE1: `Vec<N>` and `Matrix<M, N>` use literal shape
+        // arguments, not ordinary types. Keep the value in the existing type
+        // tree so sema can enforce exact shaped aliases without adding a
+        // second parser or runtime representation.
+        if matches!(label.rsplit('.').next(), Some("Vec" | "Matrix")) {
+            if let TokKind::Int(value, _) = self.peek().kind {
+                self.bump();
+                if value >= 0 {
+                    return Ok((Type::compute_dimension_type(value as u64), span));
+                }
+                self.diags.push(Diagnostic::error(
+                    "E0119",
+                    "compute shape dimensions must be non-negative".to_string(),
+                    "fixed compute aliases use literal dimensions known at compile time".to_string(),
+                    "write a non-negative dimension such as `Vec<3>`".to_string(),
+                    Some(span),
+                ));
+                return Ok((Type::compute_dimension_type(0), span));
+            }
+        }
         if !self.enter_generic_type_layer(label, span) {
             self.sync_type_arg();
             return Ok((Type::Int, span));
@@ -59,16 +79,6 @@ impl<'a> Parser<'a> {
         // D-RESULT-OPTION-CANON1: return types use the same `T?` / `T ?` / `T ? E`
         // rules as every other type position. Parentheses only group
         // (including optional `=> (T?)` when the author wants them).
-        if matches!(self.peek().kind, TokKind::LParen) {
-            let start = self.bump().span;
-            if self.looks_like_named_tuple(true) {
-                let ty = self.parse_tuple_type(start)?;
-                return Ok((ty, start));
-            }
-            let (ty, _) = self.type_()?;
-            self.expect(TokKind::RParen, "to close this parenthesized return type")?;
-            return Ok((ty, start));
-        }
         self.type_()
     }
 
@@ -265,11 +275,14 @@ impl<'a> Parser<'a> {
     }
 
     /// S33: close `Type<…>`; splits `>>` when nested generics end with `>`.
-    /// D-SERDE6 (= C): true when the cursor (on `<`) begins a call-site turbofish
-    /// `<T, …>(` — a balanced `<…>` immediately followed by `(`. Used to read `<`
-    /// as type arguments on a call (`decode<Order>(s)`) rather than a comparison.
+    /// D-GENERIC-CALL1=A: true when the cursor (on `<`) begins explicit call type
+    /// arguments `<T, …>(`. Both angle-bracket edges must be adjacent to the call
+    /// name, so spaced comparisons such as `f < T > (x)` keep their meaning.
     pub(super) fn at_turbofish(&self) -> bool {
         if !matches!(self.peek().kind, TokKind::Lt) {
+            return false;
+        }
+        if self.pos == 0 || self.toks[self.pos - 1].span.end != self.peek().span.start {
             return false;
         }
         let mut depth = 0i32;
@@ -280,19 +293,19 @@ impl<'a> Parser<'a> {
                 TokKind::Gt => {
                     depth -= 1;
                     if depth == 0 {
-                        return matches!(
-                            self.toks.get(i + 1).map(|t| &t.kind),
-                            Some(TokKind::LParen)
-                        );
+                        return self.toks.get(i + 1).is_some_and(|next| {
+                            matches!(next.kind, TokKind::LParen)
+                                && self.toks[i].span.end == next.span.start
+                        });
                     }
                 }
                 TokKind::Shr => {
                     depth -= 2;
                     if depth <= 0 {
-                        return matches!(
-                            self.toks.get(i + 1).map(|t| &t.kind),
-                            Some(TokKind::LParen)
-                        );
+                        return self.toks.get(i + 1).is_some_and(|next| {
+                            matches!(next.kind, TokKind::LParen)
+                                && self.toks[i].span.end == next.span.start
+                        });
                     }
                 }
                 // Tokens that never appear inside a type-argument list → not a turbofish.
@@ -304,8 +317,8 @@ impl<'a> Parser<'a> {
         false
     }
 
-    /// D-SERDE6: parse a call-site turbofish `<T, …>` (cursor on `<`). Callers must
-    /// first confirm [`Self::at_turbofish`].
+    /// D-GENERIC-CALL1=A: parse call-site type arguments `<T, …>` (cursor on `<`).
+    /// Callers must first confirm [`Self::at_turbofish`].
     pub(super) fn parse_turbofish(&mut self) -> Result<Vec<crate::AST::Type>, Diagnostic> {
         self.expect_type_args_open("for type arguments")?;
         let mut args = Vec::new();
@@ -473,6 +486,14 @@ impl<'a> Parser<'a> {
                 self.bump();
                 self.parse_tuple_type(start)?
             }
+            // D-VOID1: the empty tuple spelling is the one public
+            // no-information result type. It lowers to the existing internal
+            // unit value; non-empty tuple syntax is unchanged.
+            TokKind::LParen if matches!(self.peek2().kind, TokKind::RParen) => {
+                self.bump();
+                self.bump();
+                Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())
+            }
             TokKind::LParen => {
                 self.bump();
                 let (inner, _) = self.type_()?;
@@ -540,6 +561,16 @@ impl<'a> Parser<'a> {
                         Type::String
                     }
                     Syntax::TYPE_CHAR => Type::Char,
+                    Syntax::RETIRED_TYPE_VOID => {
+                        self.diags.push(Diagnostic::error(
+                            "E0431",
+                            "`Void` is retired".to_string(),
+                            "Jet uses `()` for a result with no information; non-returning paths are compiler facts under D-NEVER1".to_string(),
+                            "replace `Void` with `()`".to_string(),
+                            Some(start),
+                        ));
+                        Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())
+                    }
                     Syntax::FOREIGN_DYN if retired_s14_teaching_enabled() => {
                         self.diags.push(Generics::e0036(Syntax::FOREIGN_DYN, start));
                         let (trait_name, _) = self.expect_ident("after `dyn`")?;
@@ -739,24 +770,52 @@ impl<'a> Parser<'a> {
         self.expect(TokKind::LParen, "after `fn` in a function type")?;
         let mut params = Vec::new();
         let mut param_names: Vec<Option<String>> = Vec::new();
+        // D-APILABEL1=A: a function type reuses the parameter grammar, so it
+        // carries the same zone separators. Public labels and zones are part of
+        // callable identity; local names and default bodies are not.
+        let mut param_zones: Vec<crate::AST::ParamZone> = Vec::new();
+        let mut zone = crate::AST::ParamZone::Either;
+        let mut saw_slash = false;
+        let mut saw_star = false;
         if !matches!(self.peek().kind, TokKind::RParen) {
             loop {
-                let named = matches!(
-                    (&self.peek().kind, &self.peek2().kind),
-                    (TokKind::Ident(_), TokKind::Colon)
-                );
-                let name = if named {
-                    let TokKind::Ident(name) = self.bump().kind else {
-                        unreachable!("peek matched Ident");
-                    };
-                    self.expect(TokKind::Colon, "after a named function-type parameter")?;
-                    Some(name)
+                if matches!(self.peek().kind, TokKind::Slash) {
+                    let span = self.bump().span;
+                    if saw_slash || saw_star || params.is_empty() {
+                        self.diags.push(Self::fn_type_zone_error(span));
+                    } else {
+                        saw_slash = true;
+                        for slot in param_zones.iter_mut() {
+                            *slot = crate::AST::ParamZone::PositionalOnly;
+                        }
+                    }
+                } else if matches!(self.peek().kind, TokKind::Star) {
+                    let span = self.bump().span;
+                    if saw_star {
+                        self.diags.push(Self::fn_type_zone_error(span));
+                    } else {
+                        saw_star = true;
+                        zone = crate::AST::ParamZone::LabelOnly;
+                    }
                 } else {
-                    None
-                };
-                let (pty, _) = self.type_()?;
-                params.push(pty);
-                param_names.push(name);
+                    let named = matches!(
+                        (&self.peek().kind, &self.peek2().kind),
+                        (TokKind::Ident(_), TokKind::Colon)
+                    );
+                    let name = if named {
+                        let TokKind::Ident(name) = self.bump().kind else {
+                            unreachable!("peek matched Ident");
+                        };
+                        self.expect(TokKind::Colon, "after a named function-type parameter")?;
+                        Some(name)
+                    } else {
+                        None
+                    };
+                    let (pty, _) = self.type_()?;
+                    params.push(pty);
+                    param_names.push(name);
+                    param_zones.push(zone);
+                }
                 if matches!(self.peek().kind, TokKind::RParen) {
                     break;
                 }
@@ -764,6 +823,40 @@ impl<'a> Parser<'a> {
             }
         }
         self.expect(TokKind::RParen, "after parameter types in `fn(...)`")?;
+        if saw_star && !param_zones.contains(&crate::AST::ParamZone::LabelOnly) {
+            self.diags.push(Self::fn_type_zone_error(self.peek().span));
+        }
+        // D-APILABEL1=A: a label-only parameter needs a label to be called by,
+        // so an unnamed one after `*` could never receive an argument.
+        if param_names
+            .iter()
+            .zip(param_zones.iter())
+            .any(|(name, zone)| name.is_none() && *zone == crate::AST::ParamZone::LabelOnly)
+        {
+            self.diags.push(Diagnostic::error(
+                "E0763",
+                format!(
+                    "a parameter after `{}` in this function type has no label",
+                    Syntax::PARAM_ZONE_LABEL_ONLY
+                ),
+                "a label-only parameter is reached by writing its label, so it has to have one"
+                    .to_string(),
+                "name it, as in `fn(*, force: Bool) => Int`".to_string(),
+                Some(self.peek().span),
+            ));
+        }
+        // Identity only exists when the type actually declares one; an
+        // unannotated `fn(Int) => Int` keeps its bare structural meaning.
+        let param_contract: Option<Vec<(String, crate::AST::ParamZone)>> = (saw_slash
+            || saw_star
+            || param_names.iter().any(Option::is_some))
+        .then(|| {
+            param_names
+                .iter()
+                .zip(param_zones.iter())
+                .map(|(name, zone)| (name.clone().unwrap_or_default(), *zone))
+                .collect()
+        });
         let decorated = matches!(self.peek().kind, TokKind::Eq)
             && matches!(self.peek2().kind, TokKind::LBracket);
         let retired_double = matches!(self.peek().kind, TokKind::MinusMinus);
@@ -803,13 +896,14 @@ impl<'a> Parser<'a> {
             .enumerate()
             .map(|(index, (name, ty))| crate::AST::Param {
                 convention: crate::AST::AccessConvention::Read,
+                root: false,
                 name: name.unwrap_or_else(|| format!("_{index}")),
                 name_span: crate::Diagnostics::Span::new(0, 0),
                 ty: ty.clone(),
                 ty_span: crate::Diagnostics::Span::new(0, 0),
                 default: None,
                 variadic: false,
-                variadic_bound_list: None, declared_view_from_names: None,
+                variadic_bound_list: None, declared_view_from_names: None, public_label: None, zone: crate::AST::ParamZone::Either,
             })
             .collect();
         let return_view_provenance = self.parse_opt_declared_view_from(&from_params);
@@ -817,6 +911,7 @@ impl<'a> Parser<'a> {
             params,
             ret,
             effect_bound,
+            param_contract,
             return_view_provenance,
         })
     }
@@ -907,5 +1002,25 @@ impl<'a> Parser<'a> {
         }
         self.expect(TokKind::RParen, "to close the callback effect list")?;
         Ok(effects)
+    }
+}
+
+impl<'a> Parser<'a> {
+    /// D-APILABEL1=A: a function type's zone separators follow the same rule as
+    /// a declaration's — one `/`, one `*`, `/` before `*`, and neither may mark
+    /// an empty zone.
+    pub(in crate::Parser) fn fn_type_zone_error(span: Span) -> Diagnostic {
+        Diagnostic::error(
+            "E0763",
+            "this function type's parameter zones are out of order".to_string(),
+            "the zones read left to right: positional-only, then either, then label-only"
+                .to_string(),
+            format!(
+                "write at most one `{}` before at most one `{}`, each with parameters on its side",
+                Syntax::PARAM_ZONE_POSITIONAL_ONLY,
+                Syntax::PARAM_ZONE_LABEL_ONLY
+            ),
+            Some(span),
+        )
     }
 }

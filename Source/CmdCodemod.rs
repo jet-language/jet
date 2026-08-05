@@ -1785,7 +1785,7 @@ fn is_identifier_literal(text: &str) -> bool {
 fn is_builtin(n: &str) -> bool {
     matches!(
         n,
-        "print" | "Some" | "None" | "Ok" | "Err" | "Int" | "Float" | "Bool" | "String" | "Void"
+        "print" | "Some" | "None" | "Ok" | "Err" | "Int" | "Float" | "Bool" | "String"
     )
 }
 fn sanitize_file_name(n: &str) -> String {

@@ -14,7 +14,8 @@ impl<'a> Checker<'a> {
             mangled: &str,
             alias_span: Span,
             span: Span,
-            args: &mut [crate::AST::CallArg],
+            type_args: &[Type],
+            args: &mut Vec<crate::AST::CallArg>,
         ) -> Option<Type> {
             let Some(sig) = self.funcs.get(mangled).cloned() else {
                 self.diags.push(Diagnostic::error(
@@ -81,19 +82,115 @@ impl<'a> Checker<'a> {
                     Some(span),
                 ));
             }
+            let type_params = self.trait_reg.fn_params.get(mangled).cloned().unwrap_or_default();
+            let mut subst = HashMap::new();
             let mut call_access = self.call_access_frame();
-            for (arg, (pconv, pty)) in args.iter_mut().zip(sig.params.iter()) {
+            let mut pre_inferred = Vec::new();
+            if !type_args.is_empty() {
+                if type_params.is_empty() {
+                    self.diags.push(Diagnostic::error(
+                        "E0119",
+                        format!("{alias}.{item} is not generic"),
+                        "only functions declared with type parameters accept call-site type arguments"
+                            .to_string(),
+                        format!("call {alias}.{item}(...) without type arguments"),
+                        Some(span),
+                    ));
+                } else if type_args.len() != type_params.len() {
+                    self.diags.push(Diagnostic::error(
+                        "E0119",
+                        format!(
+                            "{alias}.{item} expects {} type argument{}, got {}",
+                            type_params.len(),
+                            if type_params.len() == 1 { "" } else { "s" },
+                            type_args.len()
+                        ),
+                        "a generic call must provide one type for every declared type parameter"
+                            .to_string(),
+                        format!("write {alias}.{item}<…>(...) with the declared types"),
+                        Some(span),
+                    ));
+                } else {
+                    for (param, actual) in type_params.iter().zip(type_args) {
+                        let actual = self.resolve_type(actual.clone());
+                        self.check_declared_type(&actual, span);
+                        for bound in &param.bounds {
+                            if !self.type_satisfies_bound(&actual, bound) {
+                                self.diags.push(crate::Generics::e0905(
+                                    &actual.name(),
+                                    bound,
+                                    span,
+                                    false,
+                                ));
+                            }
+                        }
+                        subst.insert(param.name.clone(), actual);
+                    }
+                }
+            } else if !type_params.is_empty() {
+                for (index, arg) in args.iter_mut().enumerate() {
+                    pre_inferred.push(self.with_call_access(&mut call_access, |checker| {
+                        if let Some((param_conv, param_ty)) = sig.params.get(index) {
+                            checker.check_call_argument_access(arg, *param_conv, param_ty, true);
+                        }
+                        let inferred = checker.infer(&mut arg.expr);
+                        checker.check_call_argument_captures(&arg.expr);
+                        inferred
+                    }));
+                }
+                let arg_types = pre_inferred.iter().filter_map(Clone::clone).collect::<Vec<_>>();
+                if arg_types.len() == args.len() {
+                    match self.trait_reg.infer_fn_subst_without_bounds(
+                        &sig,
+                        &arg_types,
+                        &type_params,
+                        self.expected_type.as_ref(),
+                    ) {
+                        Ok(inferred) => {
+                            if let Some((ty, bound)) = type_params.iter().find_map(|param| {
+                                let ty = inferred.get(&param.name)?;
+                                param
+                                    .bounds
+                                    .iter()
+                                    .find(|bound| !self.type_satisfies_bound(ty, bound))
+                                    .map(|bound| (ty, bound))
+                            }) {
+                                self.diags.push(crate::Generics::e0905(
+                                    &ty.name(),
+                                    bound,
+                                    span,
+                                    false,
+                                ));
+                            }
+                            subst = inferred;
+                        }
+                        Err(param) => self.diags.push(crate::Generics::e0904(span, &param)),
+                    }
+                }
+            }
+            let effective_params: Vec<(AccessConvention, Type)> = sig
+                .params
+                .iter()
+                .map(|(conv, ty)| (*conv, self.trait_reg.instantiate_type(ty, &subst)))
+                .collect();
+            for (index, (arg, (pconv, pty))) in args
+                .iter_mut()
+                .zip(effective_params.iter())
+                .enumerate()
+            {
                 if matches!(pconv, AccessConvention::Read) && !pty.is_scalar() {
                     self.borrow_ctx = true;
                 }
                 // D-SG9: a fixed-width literal argument adopts the parameter's width.
                 let saved = self.expected_type.clone();
                 self.expected_type = Some(pty.clone());
-                let aty = self.with_call_access(&mut call_access, |checker| {
-                    checker.check_call_argument_access(arg, *pconv, pty, true);
-                    let inferred = checker.infer(&mut arg.expr);
-                    checker.check_call_argument_captures(&arg.expr);
-                    inferred
+                let aty = pre_inferred.get(index).cloned().unwrap_or_else(|| {
+                    self.with_call_access(&mut call_access, |checker| {
+                        checker.check_call_argument_access(arg, *pconv, pty, true);
+                        let inferred = checker.infer(&mut arg.expr);
+                        checker.check_call_argument_captures(&arg.expr);
+                        inferred
+                    })
                 });
                 self.expected_type = saved;
                 if let Some(aty) = aty {
@@ -117,6 +214,8 @@ impl<'a> Checker<'a> {
                 self.check_write_arg_change(arg);
             }
             sig.return_type
+                .as_ref()
+                .map(|ty| self.trait_reg.instantiate_type(ty, &subst))
         }
 
         pub(crate) fn infer_import_call(
@@ -126,7 +225,7 @@ impl<'a> Checker<'a> {
             alias_span: Span,
             span: Span,
             type_args: &[Type],
-            args: &mut [crate::AST::CallArg],
+            args: &mut Vec<crate::AST::CallArg>,
         ) -> Option<Type> {
             self.infer_import_call_with_warning(
                 mod_idx, name, alias_span, span, type_args, args, true,
@@ -140,7 +239,7 @@ impl<'a> Checker<'a> {
             alias_span: Span,
             span: Span,
             type_args: &[Type],
-            args: &mut [crate::AST::CallArg],
+            args: &mut Vec<crate::AST::CallArg>,
             warn_soft_public: bool,
         ) -> Option<Type> {
             let Some(mods) = self.modules else {
@@ -186,17 +285,61 @@ impl<'a> Checker<'a> {
                     self.diags.push(soft_public_use(name, span));
                 }
                 let sig = target.funcs.get(name).unwrap().clone();
+                // D-APILABEL1=A: a call across a module boundary binds by the
+                // same law as a local one. Without this a label here was read
+                // positionally, so `other.schedule(delay: 1, task: 2)` bound
+                // the values the wrong way round and said nothing.
+                {
+                    let params = crate::Sema::CallBinder::bind_params_from_sig(&sig);
+                    if crate::Sema::CallBinder::bind_call_args(
+                        name,
+                        &params,
+                        args,
+                        span,
+                        &mut self.diags,
+                    )
+                    .is_none()
+                    {
+                        for arg in args.iter_mut() {
+                            self.infer(&mut arg.expr);
+                        }
+                        return sig.return_type.clone();
+                    }
+                }
                 let mut call_access = self.call_access_frame();
                 let type_params = target.trait_reg.fn_params.get(name).cloned().unwrap_or_default();
                 let mut subst = HashMap::new();
                 let mut pre_inferred = Vec::new();
-                if !type_params.is_empty() && !type_args.is_empty() {
-                    if type_args.len() != type_params.len() {
-                        self.diags.push(crate::Generics::e0904(span, &type_params[0].name));
+                if !type_args.is_empty() {
+                    if type_params.is_empty() {
+                        self.diags.push(Diagnostic::error(
+                            "E0119",
+                            format!("{name} is not generic"),
+                            "only functions declared with type parameters accept call-site type arguments"
+                                .to_string(),
+                            format!("call {name}(...) without type arguments"),
+                            Some(span),
+                        ));
+                    } else if type_args.len() != type_params.len() {
+                        self.diags.push(Diagnostic::error(
+                            "E0119",
+                            format!(
+                                "{name} expects {} type argument{}, got {}",
+                                type_params.len(),
+                                if type_params.len() == 1 { "" } else { "s" },
+                                type_args.len()
+                            ),
+                            "a generic call must provide one type for every declared type parameter"
+                                .to_string(),
+                            format!("write {name}<…>(...) with the declared types"),
+                            Some(span),
+                        ));
                     } else {
                         for (param, actual) in type_params.iter().zip(type_args) {
+                            let actual = self.resolve_type(actual.clone());
+                            self.check_declared_type(&actual, span);
                             for bound in &param.bounds {
-                                if !self.type_satisfies_bound(actual, bound) {
+                                if !self.type_satisfies_bound(&actual, bound) {
                                     self.diags.push(crate::Generics::e0905(
                                         &actual.name(),
                                         bound,
@@ -205,7 +348,7 @@ impl<'a> Checker<'a> {
                                     ));
                                 }
                             }
-                            subst.insert(param.name.clone(), actual.clone());
+                            subst.insert(param.name.clone(), actual);
                         }
                     }
                 } else if !type_params.is_empty() {

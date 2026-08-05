@@ -435,6 +435,19 @@
         pub mean: f64,
     }
 
+    /// D-DATA-PLOT1=A: shared options for deterministic line renderers.
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct DataLineOptions {
+        pub title: String,
+        pub x_label: String,
+        pub y_label: String,
+        pub markers: bool,
+        pub reference: Option<f64>,
+        pub style: String,
+        pub color: String,
+        pub legend: String,
+    }
+
     /// D-DATAFLOW1=A: typed streaming + invalid-data policy (edition 2027 surface).
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub enum DataErrorKind {

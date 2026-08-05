@@ -438,7 +438,8 @@ impl<'a> Parser<'a> {
                         if member == Syntax::TYPE_PTR && matches!(self.peek().kind, TokKind::Lt) {
                             return self.ptr_from_addr(type_name, span);
                         }
-                        // D-SERDE6: optional call-site turbofish `csv.decode<Order>(raw)`.
+                        // D-GENERIC-CALL1=A: optional call-site type arguments on
+                        // every qualified call, such as `csv.decode<Order>(raw)`.
                         // D-MEM1 S6 fix: don't blindly overwrite `type_args` — a
                         // capitalized receiver's OWN turbofish (`Pool<Player>.new()`,
                         // parsed above at the type-name position) has no call-site
@@ -449,10 +450,10 @@ impl<'a> Parser<'a> {
                         // never reaches the type-name turbofish parse above), so
                         // falling back to the outer `type_args` when there's no
                         // call-site turbofish is a pure bug fix, not a behavior change.
-                        let type_args = if self.at_turbofish() {
+                        let method_type_args = if self.at_turbofish() {
                             self.parse_turbofish()?
                         } else {
-                            type_args
+                            Vec::new()
                         };
                         if matches!(self.peek().kind, TokKind::LParen) {
                             // D-JPK-BUILDRECIPE1: the finite build-step values
@@ -536,7 +537,8 @@ impl<'a> Parser<'a> {
                                 receiver: Box::new(Expr::Ident(type_name, span)),
                                 method: member,
                                 method_span: member_span,
-                                type_args,
+                                owner_type_args: type_args,
+                                type_args: method_type_args,
                                 args,
                                 recv_type: None,
                                 resolved_ret: None,
@@ -550,8 +552,13 @@ impl<'a> Parser<'a> {
                             member_span,
                         ));
                     }
+                    let call_type_args = if self.at_turbofish() {
+                        self.parse_turbofish()?
+                    } else {
+                        type_args
+                    };
                     if matches!(self.peek().kind, TokKind::LParen) {
-                        let call = self.call_after_name(type_name, span)?;
+                        let call = self.call_after_name(type_name, span, call_type_args)?;
                         return Ok(Expr::Call(call));
                     }
                     Ok(Expr::Ident(type_name, span))

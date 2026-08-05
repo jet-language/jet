@@ -11,7 +11,11 @@ fn run() {
     diff :: compute.sub(a, b) ?? panic("sub")
     print("sub:{compute.to_list(diff)}")
 
-    t :: compute.matrix(2, 3, 1.0) ?? panic("matrix")
+    fused :: compute.add(wide, row) ?? panic("fused add")
+    print("fused_broadcast:{compute.to_list(fused)}")
+
+    values :: compute.from_list([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]) ?? panic("values")
+    t :: compute.reshape(values, [2, 3]) ?? panic("reshape")
     tt :: compute.transpose(t) ?? panic("transpose")
     print("transpose_shape:{compute.shape(tt)}")
     summed :: compute.sum_axis(tt, 0) ?? panic("sum_axis")

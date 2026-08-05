@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, HashMap};
 use crate::AST::{CtFloat, Type};
 use crate::Codegen::TIR::TExpr;
 use crate::Comptime::Builtins::as_bool;
-use crate::Comptime::{apply_core_call, CtValue};
+use crate::Comptime::{apply_core_call, apply_data_line_call, CtValue};
 use crate::Diagnostics::{Diagnostic, Span};
 use jet_foundation::PackageEdition;
 
@@ -435,36 +435,17 @@ impl<'a> EvalCtx<'a> {
                     Ok(CtValue::List(out))
                 }
             }
-            "bar_text" | "bar_svg" => {
+            "bar_text" | "bar_svg" | "line_text" | "line_svg" => {
                 let groups = self.eval_expr(&args[0], scope)?;
-                let v = apply_core_call(
-                    "core.data",
-                    method,
-                    vec![groups],
-                    span,
-                    self.repl_mode,
-                )?;
-                if checked {
-                    match v {
-                        CtValue::Str(_) => Ok(ok(v)),
-                        other => Ok(other),
-                    }
-                } else {
-                    Ok(v)
+                let mut call_args = vec![groups];
+                if args.len() > 1 {
+                    call_args.push(self.eval_expr(&args[1], scope)?);
                 }
-            }
-            "line_text" | "line_svg" => {
-                let argv = args
-                    .iter()
-                    .map(|arg| self.eval_expr(arg, scope))
-                    .collect::<Result<Vec<_>, _>>()?;
-                let v = apply_core_call(
-                    "core.data",
-                    method,
-                    argv,
-                    span,
-                    self.repl_mode,
-                )?;
+                let v = if matches!(method, "line_text" | "line_svg") {
+                    apply_data_line_call(method, call_args, span, checked)?
+                } else {
+                    apply_core_call("core.data", method, call_args, span, self.repl_mode)?
+                };
                 if checked {
                     match v {
                         CtValue::Str(_) => Ok(ok(v)),

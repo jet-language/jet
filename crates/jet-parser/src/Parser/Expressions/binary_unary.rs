@@ -9,6 +9,7 @@ fn write_window_at_maximal_place(expr: Expr, start: usize) -> Expr {
             receiver,
             method,
             method_span,
+            owner_type_args,
             type_args,
             args,
             recv_type,
@@ -17,6 +18,7 @@ fn write_window_at_maximal_place(expr: Expr, start: usize) -> Expr {
             receiver: Box::new(write_window_at_maximal_place(*receiver, start)),
             method,
             method_span,
+            owner_type_args,
             type_args,
             args,
             recv_type,
@@ -514,8 +516,11 @@ impl<'a> Parser<'a> {
                 }
                 // D-DOTCTOR1: `.{ … }` inferred struct literal (type from context).
                 // A leading `.` immediately followed by `{` is unambiguous — it is not
-                // valid as a field access (no receiver) or any other production.
-                TokKind::Dot if allow_struct_lit && matches!(self.peek2().kind, TokKind::LBrace) => {
+                // valid as a field access (no receiver) or any other production — so it
+                // is accepted even where `allow_struct_lit` is false: that restriction
+                // exists for the dotless `Type {` / block ambiguity, which has no
+                // leading-dot counterpart (card #1441).
+                TokKind::Dot if matches!(self.peek2().kind, TokKind::LBrace) => {
                     let dot_start = self.bump().span.start; // consume `.`
                     self.struct_lit_inferred(dot_start)
                 }
@@ -539,10 +544,11 @@ impl<'a> Parser<'a> {
                     }
                     self.expect(TokKind::RParen, "to finish the call")?;
                     Ok(Expr::MethodCall {
-                        receiver: Box::new(Expr::Ident(String::new(), dot)),
-                        method,
-                        method_span,
-                        type_args: Vec::new(),
+                    receiver: Box::new(Expr::Ident(String::new(), dot)),
+                    method,
+                    method_span,
+                    owner_type_args: Vec::new(),
+                    type_args: Vec::new(),
                         args,
                         recv_type: None,
                         resolved_ret: None,
@@ -575,8 +581,9 @@ impl<'a> Parser<'a> {
                     // D-UITREE1/D-DOTCTOR1: `.Variant.{ field: val, … }` — named-payload
                     // construction reuses the struct dot-brace spelling (one leading-dot
                     // rule for every inferred construction, structs and enums alike).
-                    let (args, end) = if allow_struct_lit
-                        && matches!(self.peek().kind, TokKind::Dot)
+                    // Like bare `.{` above, `.{` after a variant path is unambiguous, so
+                    // it is accepted even where `allow_struct_lit` is false (card #1441).
+                    let (args, end) = if matches!(self.peek().kind, TokKind::Dot)
                         && matches!(self.peek2().kind, TokKind::LBrace)
                     {
                         self.bump(); // consume `.`

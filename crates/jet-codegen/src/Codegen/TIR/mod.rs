@@ -532,25 +532,52 @@ impl TPlace {
 }
 
 fn demand_serde_codec(
-    demands: &mut std::collections::BTreeMap<String, (Type, String)>,
+    demands: &mut std::collections::BTreeMap<String, (Type, String, Vec<Type>)>,
     ty: &Type,
     method: &str,
 ) {
     if matches!(ty, Type::Apply { .. }) {
         demands.insert(
             format!("{}::{method}", ty.name()),
-            (ty.clone(), method.to_string()),
+            (ty.clone(), method.to_string(), Vec::new()),
         );
     }
+}
+
+/// Stable symbol key for one concrete method instance. Empty method arguments
+/// retain the historical `Owner<Args>::method` key used by serde demands.
+pub fn generic_method_instance_key(
+    owner: &Type,
+    method: &str,
+    type_args: &[Type],
+) -> String {
+    let base = format!("{}::{method}", owner.name());
+    if type_args.is_empty() {
+        return base;
+    }
+    let suffix = type_args
+        .iter()
+        .map(Type::name)
+        .map(|name| {
+            name.chars()
+                .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("__");
+    format!("{base}__generic__{suffix}")
 }
 
 /// Seed monomorphize demand for generic Codable from encoding core calls and
 /// SerdeEncode/DataTreeDecode ops already present in lowered bodies.
 fn collect_serde_codec_demands(
     funcs: &[TFunc],
-    demands: &mut std::collections::BTreeMap<String, (Type, String)>,
+    demands: &mut std::collections::BTreeMap<String, (Type, String, Vec<Type>)>,
 ) {
-    fn walk_expr(expr: &TExpr, demands: &mut std::collections::BTreeMap<String, (Type, String)>) {
+    fn walk_expr(
+        expr: &TExpr,
+        demands: &mut std::collections::BTreeMap<String, (Type, String, Vec<Type>)>,
+    ) {
         match &expr.kind {
             TExprKind::Print(inner) | TExprKind::DistinctCtor { arg: inner, .. } => {
                 walk_expr(inner, demands);
@@ -613,7 +640,10 @@ fn collect_serde_codec_demands(
             _ => {}
         }
     }
-    fn walk_stmt(stmt: &TStmt, demands: &mut std::collections::BTreeMap<String, (Type, String)>) {
+    fn walk_stmt(
+        stmt: &TStmt,
+        demands: &mut std::collections::BTreeMap<String, (Type, String, Vec<Type>)>,
+    ) {
         match stmt {
             TStmt::ExprStmt(e) | TStmt::Return(Some(e)) => walk_expr(e, demands),
             TStmt::Let { init, .. } | TStmt::Assign { value: init, .. } => {
@@ -633,8 +663,8 @@ fn lower_demanded_generic_methods(items: &[Item], cx: &Cx, funcs: &mut Vec<TFunc
     let mut pending = std::mem::take(&mut *cx.jit_method_calls.borrow_mut());
     collect_serde_codec_demands(funcs, &mut pending);
     let mut processed = std::collections::BTreeSet::new();
-    while let Some((key, (owner_ty, method_name))) = pending.pop_first() {
-        if !processed.insert(key) {
+    while let Some((key, (owner_ty, method_name, method_type_args))) = pending.pop_first() {
+        if !processed.insert(key.clone()) {
             continue;
         }
         if let Some(chain) = crate::Generics::generic_depth_exceeded(&owner_ty) {
@@ -645,30 +675,38 @@ fn lower_demanded_generic_methods(items: &[Item], cx: &Cx, funcs: &mut Vec<TFunc
             });
             return None;
         }
-        let Type::Apply { name, args } = &owner_ty else {
-            continue;
+        let (name, owner_args): (&str, &[Type]) = match &owner_ty {
+            Type::Apply { name, args } => (name.as_str(), args.as_slice()),
+            Type::Named(name) => (name.as_str(), &[]),
+            _ => continue,
         };
         let Some(params) = items.iter().find_map(|item| match item {
-            Item::Struct(def) if def.name == *name => Some(def.type_params.as_slice()),
-            Item::Enum(def) if def.name == *name => Some(def.type_params.as_slice()),
+            Item::Struct(def) if def.name == name => Some(def.type_params.as_slice()),
+            Item::Enum(def) if def.name == name => Some(def.type_params.as_slice()),
             _ => None,
         }) else {
             continue;
         };
-        let subst = params
+        let owner_subst: std::collections::HashMap<String, Type> = params
             .iter()
-            .zip(args)
+            .zip(owner_args)
             .map(|(param, arg)| (param.name.clone(), arg.clone()))
             .collect();
         for item in items {
             let (method, trait_name) = match item {
-                Item::Struct(def) if def.name == *name => {
+                Item::Struct(def) if def.name == name => {
                     match def.methods.iter().find(|method| method.name == method_name) {
                         Some(method) => (method, None),
                         None => continue,
                     }
                 }
-                Item::Impl(imp) if imp.type_name == *name => {
+                Item::Enum(def) if def.name == name => {
+                    match def.methods.iter().find(|method| method.name == method_name) {
+                        Some(method) => (method, None),
+                        None => continue,
+                    }
+                }
+                Item::Impl(imp) if imp.type_name == name => {
                     let Some(method) = imp.methods.iter().find(|method| method.name == method_name)
                     else {
                         continue;
@@ -685,6 +723,17 @@ fn lower_demanded_generic_methods(items: &[Item], cx: &Cx, funcs: &mut Vec<TFunc
                 }
                 _ => continue,
             };
+            let mut subst = owner_subst.clone();
+            if !method_type_args.is_empty() {
+                if method_type_args.len() != method.type_params.len() {
+                    continue;
+                }
+                for (param, actual) in method.type_params.iter().zip(&method_type_args) {
+                    subst.insert(param.name.clone(), actual.clone());
+                }
+            } else if !method.type_params.is_empty() {
+                continue;
+            }
             let mut specialized = crate::Sema::specialize_function_types(method.clone(), &subst);
             // Subst already rewrote the binder; drop residual type params so the
             // mono body is admitted as a concrete JIT function.
@@ -709,7 +758,7 @@ fn lower_demanded_generic_methods(items: &[Item], cx: &Cx, funcs: &mut Vec<TFunc
                 }
                 lower_method_for_owner(&specialized, name, owner_ty.clone(), cx)
             };
-            lowered.name = format!("{}::{}", owner_ty.name(), method.name);
+            lowered.name = key.clone();
             // Nested SerdeEncode/DataTreeDecode inside this body may demand more.
             collect_serde_codec_demands(std::slice::from_ref(&lowered), &mut pending);
             funcs.push(lowered);
@@ -806,16 +855,29 @@ fn specialize_generic_free_functions(items: &[Item], cx: &Cx, funcs: &mut Vec<TF
             };
             (source, called_name.clone())
         };
-        if template.params.len() != actuals.len() || template.type_params.is_empty() {
+        if template.type_params.is_empty() {
             continue;
         }
+        let explicit_count = template.type_params.len();
+        let (param_actuals, explicit_actuals) =
+            if actuals.len() == template.params.len() + explicit_count {
+                let split = template.params.len();
+                (&actuals[..split], &actuals[split..])
+            } else if actuals.len() == template.params.len() {
+                (&actuals[..], &[][..])
+            } else {
+                continue;
+            };
         let names: std::collections::HashSet<String> =
             template.type_params.iter().map(|param| param.name.clone()).collect();
         let mut subst = std::collections::HashMap::new();
+        for (param, actual) in template.type_params.iter().zip(explicit_actuals) {
+            subst.insert(param.name.clone(), actual.clone());
+        }
         if !template
             .params
             .iter()
-            .zip(actuals)
+            .zip(param_actuals)
             .all(|(param, actual)| bind_generic_type(&param.ty, actual, &names, &mut subst))
             || subst.len() != names.len()
         {
@@ -2706,6 +2768,10 @@ pub enum TExprKind {
     /// Call to a plain top-level function. Each arg carries its emit decisions.
     Call {
         name: String,
+        /// D-GENERIC-CALL1=A: explicit source-level type arguments. This is
+        /// separate from value arguments so result-only generics retain their
+        /// specialization in every execution tier.
+        type_args: Vec<Type>,
         args: Vec<TCallArg>,
     },
     /// Transparent constructor for an unchecked distinct value. Resident JIT
@@ -3003,7 +3069,7 @@ pub enum TExprKind {
         fields: Vec<(String, TExpr)>,
     },
     /// c109 Phase 5: a map literal `[k: v, …]` or empty `[:]`. The empty form
-    /// lowers to `std::collections::BTreeMap::new()` (Rust infers the element
+    /// lowers to `JetMap::new()` (Rust infers the element
     /// types from the binding context); a non-empty form lowers to the
     /// `{ let mut _m = …; _m.insert((k).clone(), v); … _m }` builder, byte-for-byte
     /// the AST `Expr::MapLit` form.
@@ -3096,6 +3162,9 @@ pub enum TExprKind {
     MethodCall {
         recv: Box<TExpr>,
         method: TMethodRef,
+        /// D-GENERIC-CALL1=A: resolved method-owned call arguments, explicit or
+        /// inferred. Empty for a non-generic method.
+        type_args: Vec<Type>,
         args: Vec<TCallArg>,
         /// First source argument when it is one plain string literal. The
         /// comptime BuildContext host surface uses this to preserve the
@@ -3125,6 +3194,10 @@ pub enum TExprKind {
         owner: TStaticOwner,
         owner_type: Option<Type>,
         method: TMethodRef,
+        /// D-GENERIC-CALL1=A: resolved method-owned call arguments on a static
+        /// method, explicit or inferred. Receiver/owner arguments live in
+        /// `owner_type`.
+        type_args: Vec<Type>,
         args: Vec<TCallArg>,
     },
     /// D-VALIDATE-DECODE1=B: prefix every error in a typed child result while
@@ -3180,6 +3253,13 @@ pub enum TExprKind {
     Todo {
         line: usize,
         expected_type: String,
+    },
+    /// Card #1440: the synthesized dead end of an else-less exhaustive value
+    /// dispatch (`Expr::NoElse`). Sema proved the pattern arms cover the
+    /// subject's whole type (E0307), so no execution reaches it on any tier —
+    /// AOT emits a diverging `unreachable!(…)`, JIT traps, TIR-eval errors.
+    Unreachable {
+        line: usize,
     },
     /// c109 Phase 23: `.raw()` on a distinct type (`Expr::MethodCall { method: "raw" }`,
     /// D-DIST3). The AST `emit_method_call` special-cases this BEFORE any user dispatch:
@@ -3377,6 +3457,8 @@ pub enum TExprKind {
     /// where the AST path prepends it.
     ModuleCall {
         form: TModuleCallForm,
+        /// D-GENERIC-CALL1=A: explicit generic arguments for the target.
+        type_args: Vec<Type>,
         args: Vec<TCallArg>,
     },
     /// c109 Phase 14: an FFI extern call (`extern rust`/`extern C`). `emit_call`'s
@@ -3722,6 +3804,16 @@ pub struct TEnumArg {
     pub boxed: bool,
 }
 
+/// D-LISTREMOVE1/F: the selector is resolved before emission. `Dynamic` is only
+/// used for an Int list when the selector is stored in a variable; other element
+/// types cannot accept both a value and a positional Int in one statically typed call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ListRemoveMode {
+    Value,
+    Slot,
+    Dynamic,
+}
+
 /// c109 Phase 9: a resolved built-in collection/string method op. Each variant is
 /// one emit form from `emit_builtin_method` (Source/Codegen/Expression.rs). The
 /// receiver-type dispatch (`rty = expr_jet_ty(receiver)` → Map vs List vs String)
@@ -3730,6 +3822,20 @@ pub struct TEnumArg {
 /// lowering; `cx.file`/`cx.root_prefix` are read at emit (program-level, not a
 /// per-node decision). Args are emitted plainly (no clone/borrow wrappers), exactly
 /// as `emit_builtin_method`'s `arg(i)` does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TZipMode {
+    Strict,
+    Short,
+    Pad,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TZipFillMode {
+    DefaultNone,
+    Common,
+    Columns,
+}
+
 pub enum TBuiltinOp {
     /// `len` on a `String` → `jet_char_len(&(recv))` (char count, not byte len).
     LenString,
@@ -3753,10 +3859,17 @@ pub enum TBuiltinOp {
     InsertList,
     /// `remove(k)` on a map → `(recv).remove(&(a0).clone())`.
     RemoveMap,
-    /// `remove(i)` on a list → `jet_list_remove(&mut (recv), a0, file, line)`.
+    /// `remove(x[, by])` on a list; the selector is fixed at lowering.
     RemoveList {
         line: usize,
+        mode: ListRemoveMode,
     },
+    /// `count(value)` on a list.
+    CountList,
+    /// `extend(other)` on a list.
+    ExtendList,
+    /// `concat(other)` on a list.
+    ConcatList,
     /// `get(k)` on a map → `(recv).get(&(a0).clone()).cloned()`.
     GetMap,
     /// `get(i)` on a list → `(recv).get(a0 as usize).cloned()`.
@@ -3848,9 +3961,9 @@ pub enum TBuiltinOp {
     /// D-MEM1 stage S5: the zero-copy sibling of `Before`, same `string_view`
     /// gate → `jet_string_before_view(&(recv), &a0)`.
     BeforeView,
-    /// `keys()` → `(recv).keys().cloned().collect::<Vec<_>>()`.
+    /// `keys()` → a lazy `JetIter` over map keys.
     Keys,
-    /// `values()` → `(recv).values().cloned().collect::<Vec<_>>()`.
+    /// `values()` → a lazy `JetIter` over map values.
     Values,
     /// `contains_key(k)` → `(recv).contains_key(&a0)`.
     ContainsKey,
@@ -3886,6 +3999,16 @@ pub enum TBuiltinOp {
     /// `zip([U])` → inline emit building `JetTup_<hash>` struct.
     Zip {
         tuple_struct: String,
+        mode: TZipMode,
+        /// Output field names in source input order.
+        fields: Vec<String>,
+        /// The left input is a nested pair from an earlier n-ary stage.
+        flatten: bool,
+        /// Number of source inputs in the complete zip family call.
+        input_count: usize,
+        fill_mode: TZipFillMode,
+        /// Resolved row-field types, used to marshal typed fills per column.
+        field_types: Vec<Type>,
     },
     // D-HOLE1: Option combinators.
     /// `zip(U?)` on `T?` → `(recv).clone().zip((a0).clone()).map(|(x,y)| Struct{…})`

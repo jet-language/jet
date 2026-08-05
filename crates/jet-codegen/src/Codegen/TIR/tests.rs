@@ -854,6 +854,7 @@ fn mk() {
             receiver: Box::new(Expr::Ident("b".to_string(), sp)),
             method: method.to_string(),
             method_span: sp,
+            owner_type_args: Vec::new(),
             type_args: Vec::new(),
             args: Vec::new(),
             recv_type: Some("Bag".to_string()),
@@ -1384,6 +1385,7 @@ fn greet() => String { return input() }
             params: vec![Type::Int],
             ret: Some(Box::new(Type::Int)),
             effect_bound: None,
+            param_contract: None,
             return_view_provenance: None,
         };
         assert!(field_ty_covered(&fn_ty, &cx, &mut HashSet::new()));
@@ -1586,7 +1588,7 @@ fn consume(ch: Receiver<Int>) => Int {
 
     #[test]
     fn covers_named_args_at_call_site() {
-        // c109 Phase 23: a call-site label is allowed (labels never reorder; codegen
+        // c109 Phase 23: a call-site label is allowed (sema binds by name; codegen
         // ignores them). The callee `area` is a plain fn; the labeled call is in-subset.
         let src = "fn area(width: Int, height: Int) => Int {\n return (width * height)\n}\nfn use_it() => Int {\n return area(width: 4, height: 3)\n}\n";
         assert!(covers(src, "use_it"));
@@ -2105,4 +2107,3 @@ fn run() {
             "wildcard enum-payload if-let not covered"
         );
     }
-

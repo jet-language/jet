@@ -703,7 +703,7 @@ pub fn resident_jit_safe_bundle_detail(bundle: &ProgramBundle) -> String {
                 && f.params.is_empty()
                 && (f.ret.is_none()
                     || matches!(&f.ret, Some(Type::Result { ok, err })
-                        if matches!(ok.as_ref(), Type::Named(n) if n == "Void" || n == "Unit")
+                        if matches!(ok.as_ref(), Type::Named(n) if n == "Unit")
                             && matches!(err.as_ref(), Type::String | Type::Named(_))))
                 && resident_safe_func(f, &names)
         })

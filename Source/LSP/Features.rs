@@ -12,8 +12,15 @@ use jet_foundation::JSON::json_escape;
 
 // ── Hover ─────────────────────────────────────────────────────────────────────
 
-fn semantic_hover(symbol: &jet_semindex::SemanticSymbol) -> String {
+fn semantic_hover(symbol: &jet_semindex::SemanticSymbol, requested_path: &str) -> String {
     let mut out = String::new();
+    if symbol.module_path != requested_path
+        && matches!(&symbol.kind, jet_semindex::SemanticSymbolKind::Function)
+    {
+        out.push_str("from module `");
+        out.push_str(&symbol.module_path);
+        out.push_str("`\n\n");
+    }
     if !symbol.summary.is_empty() {
         out.push_str(&symbol.summary);
         out.push_str("\n\n---\n\n");
@@ -34,8 +41,14 @@ pub(crate) fn compute_hover(
     path: &str,
     offset: usize,
 ) -> Option<String> {
+    if compiler_fact_at(tokens, offset) {
+        return Some(
+            "Compiler fact $layout: focused layout metadata with typed optional physical facts."
+                .to_string(),
+        );
+    }
     if let Some(symbol) = db.symbols.at(path, offset) {
-        return Some(semantic_hover(symbol));
+        return Some(semantic_hover(symbol, path));
     }
     if let Some(reference) = db.refs.iter().find(|reference| {
         reference.module_path == path
@@ -47,13 +60,13 @@ pub(crate) fn compute_hover(
                 symbol.module_path == target.module_path
                     && symbol.span == Some(target.def_span)
             }) {
-                return Some(semantic_hover(symbol));
+                return Some(semantic_hover(symbol, path));
             }
         }
     }
     let name = find_ident_at(tokens, offset)?;
     if let Some(symbol) = db.symbols.resolve_visible_in(name, Some(path)) {
-        return Some(semantic_hover(symbol));
+        return Some(semantic_hover(symbol, path));
     }
     db.hover_at(path, offset).map(str::to_string)
 }
@@ -67,6 +80,37 @@ fn find_ident_at<'a>(tokens: &'a [Token], offset: usize) -> Option<&'a str> {
         }
     }
     None
+}
+
+fn compiler_fact_at(tokens: &[Token], offset: usize) -> bool {
+    tokens.windows(2).any(|pair| {
+        matches!(pair[0].kind, TokKind::Dollar)
+            && matches!(&pair[1].kind, TokKind::Ident(name) if name == "layout")
+            && pair[1].span.start <= offset
+            && offset <= pair[1].span.end
+    })
+}
+
+fn compiler_fact_receiver(tokens: &[Token], src: &str, offset: usize) -> Option<String> {
+    let pair = tokens.windows(2).find(|pair| {
+        matches!(pair[0].kind, TokKind::Dollar)
+            && matches!(&pair[1].kind, TokKind::Ident(name) if name == "layout")
+            && pair[1].span.start <= offset
+            && offset <= pair[1].span.end
+    })?;
+    let before = &src[..pair[0].span.start];
+    let dot = before.len().checked_sub(1)?;
+    if before.as_bytes().get(dot) != Some(&b'.') {
+        return None;
+    }
+    let mut start = dot;
+    while start > 0
+        && (before.as_bytes()[start - 1].is_ascii_alphanumeric()
+            || before.as_bytes()[start - 1] == b'_')
+    {
+        start -= 1;
+    }
+    (start < dot).then(|| before[start..dot].to_string())
 }
 
 /// Resolve a call into source owned by the canonical build graph. Generated
@@ -103,10 +147,15 @@ pub(crate) fn compute_generated_definition(
 pub(crate) fn compute_definition(
     db: &SymbolDB,
     tokens: &[Token],
-    _src: &str,
+    src: &str,
     path: &str,
     offset: usize,
 ) -> Option<(String, Span)> {
+    if let Some(receiver) = compiler_fact_receiver(tokens, src, offset) {
+        if let Some(def) = db.defs.iter().find(|def| def.name == receiver) {
+            return Some((def.module_path.clone(), def.def_span));
+        }
+    }
     let name = find_ident_at(tokens, offset)?;
     // Look for a top-level or local def with this name
     // Prefer defs in same module, then other modules
@@ -263,6 +312,9 @@ pub(crate) fn compute_rename(
             "`{}` is a keyword and cannot be used as a name",
             new_name
         ));
+    }
+    if compiler_fact_at(tokens, offset) {
+        return Err("compiler-owned $layout is fixed; rename the reflected type or field instead".to_string());
     }
     let name = match find_ident_at(tokens, offset) {
         Some(n) => n,

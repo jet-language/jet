@@ -288,7 +288,7 @@ fn lower_lambda_expecting_with_host_borrow(
         source_params: lam.params.iter().map(|p| p.name.clone()).collect(),
         jit_name: format!("__jit_lambda_{}_{}", lam.span.start, lam.span.end),
         param_types,
-        ret: (!matches!(&body_ty, Type::Named(name) if name == "Unit" || name == "Void"))
+        ret: (!matches!(&body_ty, Type::Named(name) if name == "Unit"))
             .then_some(body_ty),
         is_move,
         boxed: lam.meta.escapes,

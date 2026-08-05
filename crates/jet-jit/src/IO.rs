@@ -8,6 +8,38 @@ use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
 use std::io::{BufRead, IsTerminal, Write};
+use std::collections::{HashMap, HashSet};
+use std::sync::{Mutex, OnceLock};
+
+mod progress_semantics {
+    include!("../../jet-codegen/src/Prelude/Core/Progress.rs");
+}
+
+#[derive(Clone)]
+struct JitProgressState {
+    description: String,
+    format: String,
+    total: Option<usize>,
+    started: std::time::Instant,
+    count: usize,
+    /// `None` means the caller supplies raw source-pull counts (a direct
+    /// loop). `Some` maps each materialized adapter output to the number of
+    /// source pulls needed to produce it.
+    plan: Option<Vec<usize>>,
+    yielded: usize,
+    tail: usize,
+    displayed: bool,
+}
+
+fn progress_states() -> &'static Mutex<HashMap<i64, JitProgressState>> {
+    static STATES: OnceLock<Mutex<HashMap<i64, JitProgressState>>> = OnceLock::new();
+    STATES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn known_iter_lists() -> &'static Mutex<HashSet<i64>> {
+    static KNOWN: OnceLock<Mutex<HashSet<i64>>> = OnceLock::new();
+    KNOWN.get_or_init(|| Mutex::new(HashSet::new()))
+}
 
 fn clone_str(id: i64) -> String {
     Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(id).unwrap_or_default())
@@ -411,6 +443,640 @@ extern "C" fn jet_jit_io_progress(text: i64) -> i64 {
     result_ok_unit()
 }
 
+fn jet_jit_io_progress_iter_with_total(
+    list: i64,
+    description: i64,
+    format: i64,
+    total: Option<usize>,
+) -> i64 {
+    let description = clone_str(description);
+    let format = clone_str(format);
+    let wrapped = Concurrency::with_runtime_mut(|rt| {
+        let wrapped = rt.heap.clone_list(list).unwrap_or(list);
+        wrapped
+    });
+    progress_states()
+        .lock()
+        .expect("JIT progress state poisoned")
+        .insert(
+            wrapped,
+            JitProgressState {
+                description,
+                format,
+                total,
+                started: std::time::Instant::now(),
+                count: 0,
+                plan: None,
+                yielded: 0,
+                tail: 0,
+                displayed: false,
+            },
+        );
+    wrapped
+}
+
+extern "C" fn jet_jit_io_progress_iter(list: i64, description: i64, format: i64) -> i64 {
+    let known_total = known_iter_lists()
+        .lock()
+        .expect("JIT progress known-iter state poisoned")
+        .remove(&list);
+    let total = known_total.then(|| {
+        Concurrency::with_runtime_mut(|rt| rt.heap.list_len(list).unwrap_or(0) as usize)
+    });
+    jet_jit_io_progress_iter_with_total(list, description, format, total)
+}
+
+extern "C" fn jet_jit_io_progress_list(list: i64, description: i64, format: i64) -> i64 {
+    known_iter_lists()
+        .lock()
+        .expect("JIT progress known-iter state poisoned")
+        .remove(&list);
+    let total = Concurrency::with_runtime_mut(|rt| rt.heap.list_len(list).unwrap_or(0) as usize);
+    jet_jit_io_progress_iter_with_total(list, description, format, Some(total))
+}
+
+extern "C" fn jet_jit_io_mark_exact_iter(list: i64) -> i64 {
+    known_iter_lists()
+        .lock()
+        .expect("JIT progress known-iter state poisoned")
+        .insert(list);
+    list
+}
+
+pub(crate) fn jet_jit_io_progress_pull_n(list: i64, pulls: i64) {
+    let requested = pulls.max(0) as usize;
+    if requested == 0 {
+        return;
+    }
+    let tty = std::io::stdout().is_terminal();
+    let Some(texts) = (|| {
+        let mut states = progress_states()
+            .lock()
+            .expect("JIT progress state poisoned");
+        let state = states.get_mut(&list)?;
+        let pulls = if let Some(plan) = &state.plan {
+            let end = (state.yielded + requested).min(plan.len());
+            let pulls = plan[state.yielded..end].iter().sum();
+            state.yielded = end;
+            pulls
+        } else {
+            requested
+        };
+        let pulls = state
+            .total
+            .map(|total| pulls.min(total.saturating_sub(state.count)))
+            .unwrap_or(pulls);
+        if pulls == 0 {
+            return Some(Vec::new());
+        }
+        let mut texts = Vec::with_capacity(pulls);
+        for _ in 0..pulls {
+            state.count = state.count.saturating_add(1);
+            texts.push(progress_semantics::jet_progress_render(
+                &state.description,
+                &state.format,
+                state.count,
+                state.total,
+                state.started.elapsed().as_secs_f64(),
+                env_value("NO_COLOR").is_some(),
+            ));
+        }
+        state.displayed = true;
+        Some(texts)
+    })() else {
+        return;
+    };
+    Concurrency::with_runtime_mut(|rt| {
+        for text in texts {
+            if tty {
+                rt.stdout.push('\r');
+            }
+            rt.stdout.push_str(&text);
+            if !tty {
+                rt.stdout.push('\n');
+            }
+        }
+    });
+}
+
+/// Finish a naturally exhausted JIT iterator. A stepped iterator can consume
+/// trailing source items while looking for its next yielded item, so account
+/// for the final unreported pulls before removing the sidecar state. Early
+/// break/return paths call `progress_finish_state` directly and must not claim
+/// those source pulls.
+pub(crate) fn progress_exhaust_state(list: i64) {
+    let remaining = progress_states()
+        .lock()
+        .expect("JIT progress state poisoned")
+        .get(&list)
+        .map(|state| {
+            if state.plan.is_some() {
+                state.tail
+            } else {
+                state
+                    .total
+                    .map(|total| total.saturating_sub(state.count))
+                    .unwrap_or(0)
+            }
+        })
+        .unwrap_or_default();
+    if remaining != 0 {
+        // A plan's tail is already a raw source-pull count. The direct-loop
+        // form has no plan and uses the same argument as a raw count.
+        let tty = std::io::stdout().is_terminal();
+        let Some(texts) = (|| {
+            let mut states = progress_states()
+                .lock()
+                .expect("JIT progress state poisoned");
+            let state = states.get_mut(&list)?;
+            let pulls = state
+                .total
+                .map(|total| remaining.min(total.saturating_sub(state.count)))
+                .unwrap_or(remaining);
+            let mut texts = Vec::with_capacity(pulls);
+            for _ in 0..pulls {
+                state.count = state.count.saturating_add(1);
+                texts.push(progress_semantics::jet_progress_render(
+                    &state.description,
+                    &state.format,
+                    state.count,
+                    state.total,
+                    state.started.elapsed().as_secs_f64(),
+                    env_value("NO_COLOR").is_some(),
+                ));
+            }
+            state.displayed |= !texts.is_empty();
+            Some(texts)
+        })() else {
+            return;
+        };
+        Concurrency::with_runtime_mut(|rt| {
+            for text in texts {
+                if tty {
+                    rt.stdout.push('\r');
+                }
+                rt.stdout.push_str(&text);
+                if !tty {
+                    rt.stdout.push('\n');
+                }
+            }
+        });
+    }
+    progress_finish_state(list);
+}
+
+/// Move progress ownership when the JIT materializes a lazy adapter into a
+/// fresh list handle. Ordinary lists have no state, so this is a no-op for all
+/// other callers.
+pub(crate) fn progress_transfer_state(source: i64, target: i64) {
+    if source == target {
+        return;
+    }
+    let mut states = progress_states()
+        .lock()
+        .expect("JIT progress state poisoned");
+    if let Some(state) = states.remove(&source) {
+        states.remove(&target);
+        let target_len = Concurrency::with_runtime_mut(|rt| rt.heap.list_len(target).unwrap_or(0))
+            as usize;
+        let (plan, tail) = match state.plan.as_ref() {
+            Some(source_plan) => {
+                let mut plan = source_plan.clone();
+                plan.truncate(target_len);
+                if plan.len() < target_len {
+                    plan.resize(target_len, 1);
+                }
+                (plan, state.tail)
+            }
+            None => (vec![1; target_len], 0),
+        };
+        states.insert(
+            target,
+            JitProgressState {
+                plan: Some(plan),
+                yielded: 0,
+                tail,
+                ..state
+            },
+        );
+    }
+}
+
+fn source_plan(source: i64) -> Option<(Vec<usize>, usize)> {
+    let states = progress_states()
+        .lock()
+        .expect("JIT progress state poisoned");
+    let state = states.get(&source)?;
+    let plan = match &state.plan {
+        Some(plan) => plan.clone(),
+        None => {
+            let len = Concurrency::with_runtime_mut(|rt| rt.heap.list_len(source).unwrap_or(0))
+                as usize;
+            vec![1; len]
+        }
+    };
+    Some((plan, state.tail))
+}
+
+/// Read the source-pull plan while a lazy progress adapter is being lowered.
+/// A missing state means the value is an ordinary list and needs no sidecar.
+pub(crate) fn progress_source_plan(source: i64) -> Option<(Vec<usize>, usize)> {
+    source_plan(source)
+}
+
+fn install_plan(source: i64, target: i64, plan: Vec<usize>, tail: usize) {
+    if source == target {
+        return;
+    }
+    let mut states = progress_states()
+        .lock()
+        .expect("JIT progress state poisoned");
+    let Some(mut state) = states.remove(&source) else {
+        return;
+    };
+    states.remove(&target);
+    state.plan = Some(plan);
+    state.yielded = 0;
+    state.tail = tail;
+    states.insert(target, state);
+}
+
+/// Install an operation-specific source-pull plan on a materialized result.
+/// The operation owns the mapping because output values alone cannot recover
+/// how many source items a lazy adapter consumed.
+pub(crate) fn progress_transfer_plan(
+    source: i64,
+    target: i64,
+    plan: Vec<usize>,
+    tail: usize,
+) {
+    install_plan(source, target, plan, tail);
+}
+
+fn progress_remove_state(list: i64) {
+    progress_states()
+        .lock()
+        .expect("JIT progress state poisoned")
+        .remove(&list);
+}
+
+fn prefix_plan(plan: &[usize], n: usize) -> Vec<usize> {
+    plan.iter().copied().take(n).collect()
+}
+
+pub(crate) fn progress_transfer_take_state(source: i64, target: i64, n: i64) {
+    let Some((plan, old_tail)) = source_plan(source) else {
+        return;
+    };
+    let n = n.max(0) as usize;
+    let output_len = n.min(plan.len());
+    let tail = if n != 0 && n >= plan.len() { old_tail } else { 0 };
+    install_plan(source, target, prefix_plan(&plan, output_len), tail);
+}
+
+pub(crate) fn progress_transfer_skip_state(source: i64, target: i64, n: i64) {
+    let Some((plan, old_tail)) = source_plan(source) else {
+        return;
+    };
+    let n = n.max(0) as usize;
+    if n >= plan.len() {
+        install_plan(source, target, Vec::new(), plan.iter().sum::<usize>() + old_tail);
+        return;
+    }
+    let mut output = plan[n..].to_vec();
+    output[0] = plan[..=n].iter().sum();
+    install_plan(source, target, output, old_tail);
+}
+
+pub(crate) fn progress_transfer_step_state(source: i64, target: i64, n: i64) {
+    let Some((plan, old_tail)) = source_plan(source) else {
+        return;
+    };
+    let n = n.max(1) as usize;
+    let mut output = Vec::new();
+    let mut index = 0;
+    if !plan.is_empty() {
+        output.push(plan[0]);
+        index = 1;
+        while index < plan.len() {
+            let end = (index + n).min(plan.len());
+            if end - index < n {
+                break;
+            }
+            output.push(plan[index..end].iter().sum());
+            index = end;
+        }
+    }
+    install_plan(source, target, output, plan[index..].iter().sum::<usize>() + old_tail);
+}
+
+pub(crate) fn progress_transfer_filter_state(source: i64, target: i64) {
+    let Some((plan, old_tail)) = source_plan(source) else {
+        return;
+    };
+    let source_values = Concurrency::with_runtime_mut(|rt| rt.heap.clone_int_list(source).unwrap_or_default());
+    let target_values = Concurrency::with_runtime_mut(|rt| rt.heap.clone_int_list(target).unwrap_or_default());
+    let target_len = target_values.len();
+    let mut output = Vec::with_capacity(target_len);
+    let mut source_index = 0;
+    for &target_value in &target_values {
+        let Some(found) = source_values[source_index..]
+            .iter()
+            .position(|source_value| *source_value == target_value || string_handle_eq(*source_value, target_value))
+            .map(|offset| source_index + offset)
+        else {
+            install_plan(source, target, vec![1; target_values.len()], old_tail);
+            return;
+        };
+        output.push(plan[source_index..=found].iter().sum());
+        source_index = found + 1;
+    }
+    let tail = plan[source_index..].iter().sum::<usize>() + old_tail;
+    install_plan(source, target, output, tail);
+}
+
+fn progress_value_equal(a: i64, b: i64) -> bool {
+    if a == b {
+        return true;
+    }
+    Concurrency::with_runtime_mut(|rt| {
+        matches!((rt.heap.get_string(a), rt.heap.get_string(b)), (Some(a), Some(b)) if a == b)
+    })
+}
+
+pub(crate) fn progress_transfer_dedup_state(source: i64, target: i64, string_elems: bool) {
+    let Some((plan, old_tail)) = source_plan(source) else {
+        return;
+    };
+    let values = Concurrency::with_runtime_mut(|rt| rt.heap.clone_int_list(source).unwrap_or_default());
+    let mut output = Vec::new();
+    let mut pending = 0usize;
+    let mut previous = None;
+    for (index, value) in values.into_iter().enumerate() {
+        let pull = plan.get(index).copied().unwrap_or(1);
+        let duplicate = previous.is_some_and(|last| {
+            if string_elems {
+                progress_value_equal(last, value)
+            } else {
+                last == value
+            }
+        });
+        if duplicate {
+            pending += pull;
+        } else {
+            output.push(pending + pull);
+            pending = 0;
+            previous = Some(value);
+        }
+    }
+    install_plan(source, target, output, pending + old_tail);
+}
+
+pub(crate) fn progress_transfer_chunks_state(source: i64, target: i64, n: i64) {
+    let Some((plan, old_tail)) = source_plan(source) else {
+        return;
+    };
+    let source_len = Concurrency::with_runtime_mut(|rt| rt.heap.list_len(source).unwrap_or(0)) as usize;
+    let size = n.max(1) as usize;
+    let mut output = Vec::new();
+    let mut start = 0usize;
+    while start < source_len {
+        let end = (start + size).min(source_len);
+        output.push(plan[start..end].iter().sum());
+        start = end;
+    }
+    install_plan(source, target, output, old_tail);
+}
+
+pub(crate) fn progress_transfer_windows_state(source: i64, target: i64, n: i64) {
+    let Some((plan, old_tail)) = source_plan(source) else {
+        return;
+    };
+    let source_len = plan.len();
+    let size = n.max(1) as usize;
+    if source_len < size {
+        install_plan(
+            source,
+            target,
+            Vec::new(),
+            plan.iter().sum::<usize>() + old_tail,
+        );
+        return;
+    }
+    let mut output = Vec::with_capacity(source_len - size + 1);
+    output.push(plan[..size].iter().sum());
+    output.extend(plan.iter().copied().skip(size).take(source_len - size));
+    install_plan(source, target, output, old_tail);
+}
+
+pub(crate) fn progress_transfer_flatten_state(source: i64, target: i64) {
+    let Some((plan, old_tail)) = source_plan(source) else {
+        return;
+    };
+    let outer = Concurrency::with_runtime_mut(|rt| rt.heap.clone_int_list(source).unwrap_or_default());
+    let mut output = Vec::new();
+    let mut pending = 0usize;
+    for (index, inner_handle) in outer.into_iter().enumerate() {
+        let pull = plan.get(index).copied().unwrap_or(1);
+        let inner = Concurrency::with_runtime_mut(|rt| rt.heap.clone_int_list(inner_handle).unwrap_or_default());
+        if inner.is_empty() {
+            pending += pull;
+        } else {
+            output.push(pending + pull);
+            output.extend(std::iter::repeat(0).take(inner.len() - 1));
+            pending = 0;
+        }
+    }
+    install_plan(source, target, output, pending + old_tail);
+}
+
+pub(crate) fn progress_transfer_intersperse_state(source: i64, target: i64) {
+    let Some((plan, old_tail)) = source_plan(source) else {
+        return;
+    };
+    let source_len = plan.len();
+    let mut output = Vec::with_capacity(source_len.saturating_mul(2));
+    for pull in plan {
+        output.push(pull);
+        output.push(0);
+    }
+    if !output.is_empty() {
+        output.pop();
+    }
+    install_plan(source, target, output, old_tail);
+}
+
+pub(crate) fn progress_transfer_take_while_state(source: i64, target: i64, is_skip: bool) {
+    let Some((plan, old_tail)) = source_plan(source) else {
+        return;
+    };
+    let source_len = Concurrency::with_runtime_mut(|rt| rt.heap.list_len(source).unwrap_or(0)) as usize;
+    let target_len = Concurrency::with_runtime_mut(|rt| rt.heap.list_len(target).unwrap_or(0)) as usize;
+    let target_len = target_len.min(source_len);
+    if is_skip {
+        if target_len == 0 {
+            install_plan(source, target, Vec::new(), plan.iter().sum::<usize>() + old_tail);
+            return;
+        }
+        let skipped = source_len.saturating_sub(target_len);
+        let first = plan[..=skipped.min(plan.len().saturating_sub(1))]
+            .iter()
+            .sum();
+        let mut output = Vec::with_capacity(target_len);
+        output.push(first);
+        output.extend(plan.iter().copied().skip(skipped + 1).take(target_len - 1));
+        install_plan(source, target, output, old_tail);
+    } else {
+        let output = plan.iter().copied().take(target_len).collect::<Vec<_>>();
+        let tail = if target_len < source_len {
+            plan.get(target_len).copied().unwrap_or(0)
+        } else {
+            old_tail
+        };
+        install_plan(source, target, output, tail);
+    }
+}
+
+fn string_handle_eq(a: i64, b: i64) -> bool {
+    if a == b {
+        return true;
+    }
+    Concurrency::with_runtime_mut(|rt| {
+        matches!((rt.heap.get_string(a), rt.heap.get_string(b)), (Some(a), Some(b)) if a == b)
+    })
+}
+
+pub(crate) fn progress_transfer_zip_state(left: i64, right: i64, target: i64) {
+    let left_active = progress_states()
+        .lock()
+        .expect("JIT progress state poisoned")
+        .contains_key(&left);
+    let right_active = progress_states()
+        .lock()
+        .expect("JIT progress state poisoned")
+        .contains_key(&right);
+    let target_len = Concurrency::with_runtime_mut(|rt| rt.heap.list_len(target).unwrap_or(0)) as usize;
+    let selected = if left_active { Some(left) } else if right_active { Some(right) } else { None };
+    if let Some(source) = selected {
+        if let Some((plan, old_tail)) = source_plan(source) {
+            let consumed = target_len.min(plan.len());
+            // `Iterator::zip` asks the receiver for one item before it asks
+            // the other side. When the other side ends first, an exhaustive
+            // zip therefore consumes one extra receiver item while probing
+            // for the next pair. Preserve that source pull in the progress
+            // sidecar; a right-only active source has no such probe.
+            let tail = if target_len < plan.len() && source == left {
+                plan.get(target_len).copied().unwrap_or(0)
+            } else if target_len >= plan.len() {
+                old_tail
+            } else {
+                0
+            };
+            install_plan(source, target, plan.into_iter().take(consumed).collect(), tail);
+        }
+    }
+    if left_active && right_active {
+        progress_remove_state(if selected == Some(left) { right } else { left });
+    }
+}
+
+pub(crate) fn progress_finish_state(list: i64) {
+    let Some(state) = progress_states()
+        .lock()
+        .expect("JIT progress state poisoned")
+        .remove(&list)
+    else {
+        return;
+    };
+    if state.displayed && std::io::stdout().is_terminal() {
+        Concurrency::with_runtime_mut(|rt| rt.stdout.push('\n'));
+    }
+}
+
+extern "C" fn jet_jit_io_progress_pull(list: i64, pulls: i64) {
+    jet_jit_io_progress_pull_n(list, pulls);
+}
+
+extern "C" fn jet_jit_io_progress_finish(list: i64) {
+    progress_finish_state(list);
+}
+
+extern "C" fn jet_jit_io_progress_exhaust(list: i64) {
+    progress_exhaust_state(list);
+}
+
+extern "C" fn jet_jit_io_progress_transfer(source: i64, target: i64) {
+    progress_transfer_state(source, target);
+}
+
+extern "C" fn jet_jit_io_progress_transfer_filter(source: i64, target: i64) {
+    progress_transfer_filter_state(source, target);
+}
+
+extern "C" fn jet_jit_io_progress_transfer_dedup(source: i64, target: i64, string_elems: i64) {
+    progress_transfer_dedup_state(source, target, string_elems != 0);
+}
+
+extern "C" fn jet_jit_io_progress_transfer_chunks(source: i64, target: i64, n: i64) {
+    progress_transfer_chunks_state(source, target, n);
+}
+
+extern "C" fn jet_jit_io_progress_transfer_windows(source: i64, target: i64, n: i64) {
+    progress_transfer_windows_state(source, target, n);
+}
+
+extern "C" fn jet_jit_io_progress_transfer_flatten(source: i64, target: i64) {
+    progress_transfer_flatten_state(source, target);
+}
+
+extern "C" fn jet_jit_io_progress_transfer_intersperse(source: i64, target: i64) {
+    progress_transfer_intersperse_state(source, target);
+}
+
+extern "C" fn jet_jit_io_progress_transfer_take_while(
+    source: i64,
+    target: i64,
+    is_skip: i64,
+) {
+    progress_transfer_take_while_state(source, target, is_skip != 0);
+}
+
+extern "C" fn jet_jit_io_progress_source_pull(source: i64, index: i64) -> i64 {
+    progress_source_plan(source)
+        .and_then(|(plan, _)| plan.get(index.max(0) as usize).copied())
+        .unwrap_or(1) as i64
+}
+
+extern "C" fn jet_jit_io_progress_transfer_plan(
+    source: i64,
+    target: i64,
+    plan: i64,
+    tail: i64,
+) {
+    let plan = Concurrency::with_runtime_mut(|rt| {
+        rt.heap
+            .clone_int_list(plan)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|value| value.max(0) as usize)
+            .collect::<Vec<_>>()
+    });
+    progress_transfer_plan(source, target, plan, tail.max(0) as usize);
+}
+
+extern "C" fn jet_jit_io_progress_collect(list: i64) -> i64 {
+    let active = progress_states()
+        .lock()
+        .expect("JIT progress state poisoned")
+        .contains_key(&list);
+    if active {
+        let total = Concurrency::with_runtime_mut(|rt| rt.heap.list_len(list).unwrap_or(0));
+        jet_jit_io_progress_pull_n(list, total);
+        progress_exhaust_state(list);
+    }
+    list
+}
+
 extern "C" fn jet_jit_io_confirm(prompt: i64) -> i8 {
     i8::from(prompt_confirm(&clone_str(prompt)))
 }
@@ -560,6 +1226,23 @@ pub(crate) struct IOHostFns {
     pub style: FuncId,
     pub style_force: FuncId,
     pub progress: FuncId,
+    pub progress_iter: FuncId,
+    pub progress_list: FuncId,
+    pub progress_mark_exact: FuncId,
+    pub progress_pull: FuncId,
+    pub progress_finish: FuncId,
+    pub progress_exhaust: FuncId,
+    pub progress_transfer: FuncId,
+    pub progress_transfer_filter: FuncId,
+    pub progress_transfer_dedup: FuncId,
+    pub progress_transfer_chunks: FuncId,
+    pub progress_transfer_windows: FuncId,
+    pub progress_transfer_flatten: FuncId,
+    pub progress_transfer_intersperse: FuncId,
+    pub progress_transfer_take_while: FuncId,
+    pub progress_source_pull: FuncId,
+    pub progress_transfer_plan: FuncId,
+    pub progress_collect: FuncId,
     pub confirm: FuncId,
     pub choose: FuncId,
     pub input_secret: FuncId,
@@ -592,6 +1275,74 @@ pub(crate) fn register_io_symbols(builder: &mut JITBuilder) {
     builder.symbol("jet_jit_io_style", jet_jit_io_style as *const u8);
     builder.symbol("jet_jit_io_style_force", jet_jit_io_style_force as *const u8);
     builder.symbol("jet_jit_io_progress", jet_jit_io_progress as *const u8);
+    builder.symbol(
+        "jet_jit_io_progress_iter",
+        jet_jit_io_progress_iter as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_io_progress_list",
+        jet_jit_io_progress_list as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_io_mark_exact_iter",
+        jet_jit_io_mark_exact_iter as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_io_progress_pull",
+        jet_jit_io_progress_pull as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_io_progress_finish",
+        jet_jit_io_progress_finish as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_io_progress_exhaust",
+        jet_jit_io_progress_exhaust as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_io_progress_transfer",
+        jet_jit_io_progress_transfer as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_io_progress_transfer_filter",
+        jet_jit_io_progress_transfer_filter as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_io_progress_transfer_dedup",
+        jet_jit_io_progress_transfer_dedup as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_io_progress_transfer_chunks",
+        jet_jit_io_progress_transfer_chunks as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_io_progress_transfer_windows",
+        jet_jit_io_progress_transfer_windows as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_io_progress_transfer_flatten",
+        jet_jit_io_progress_transfer_flatten as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_io_progress_transfer_intersperse",
+        jet_jit_io_progress_transfer_intersperse as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_io_progress_transfer_take_while",
+        jet_jit_io_progress_transfer_take_while as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_io_progress_source_pull",
+        jet_jit_io_progress_source_pull as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_io_progress_transfer_plan",
+        jet_jit_io_progress_transfer_plan as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_io_progress_collect",
+        jet_jit_io_progress_collect as *const u8,
+    );
     builder.symbol("jet_jit_io_confirm", jet_jit_io_confirm as *const u8);
     builder.symbol("jet_jit_io_choose", jet_jit_io_choose as *const u8);
     builder.symbol(
@@ -637,6 +1388,23 @@ pub(crate) fn declare_io_host_fns(module: &mut JITModule) -> Result<IOHostFns, S
     binary.params.push(AbiParam::new(types::I64));
     binary.params.push(AbiParam::new(types::I64));
     binary.returns.push(AbiParam::new(types::I64));
+    let mut binary_void = Signature::new(cc);
+    binary_void.params.push(AbiParam::new(types::I64));
+    binary_void.params.push(AbiParam::new(types::I64));
+    let mut ternary = Signature::new(cc);
+    ternary.params.push(AbiParam::new(types::I64));
+    ternary.params.push(AbiParam::new(types::I64));
+    ternary.params.push(AbiParam::new(types::I64));
+    ternary.returns.push(AbiParam::new(types::I64));
+    let mut ternary_void = Signature::new(cc);
+    ternary_void.params.push(AbiParam::new(types::I64));
+    ternary_void.params.push(AbiParam::new(types::I64));
+    ternary_void.params.push(AbiParam::new(types::I64));
+    let mut quaternary_void = Signature::new(cc);
+    quaternary_void.params.push(AbiParam::new(types::I64));
+    quaternary_void.params.push(AbiParam::new(types::I64));
+    quaternary_void.params.push(AbiParam::new(types::I64));
+    quaternary_void.params.push(AbiParam::new(types::I64));
     let mut import = |name: &str, sig: &Signature| {
         module
             .declare_function(name, Linkage::Import, sig)
@@ -661,6 +1429,23 @@ pub(crate) fn declare_io_host_fns(module: &mut JITModule) -> Result<IOHostFns, S
         style: import("jet_jit_io_style", &binary)?,
         style_force: import("jet_jit_io_style_force", &binary)?,
         progress: import("jet_jit_io_progress", &unary)?,
+        progress_iter: import("jet_jit_io_progress_iter", &ternary)?,
+        progress_list: import("jet_jit_io_progress_list", &ternary)?,
+        progress_mark_exact: import("jet_jit_io_mark_exact_iter", &unary)?,
+        progress_pull: import("jet_jit_io_progress_pull", &binary_void)?,
+        progress_finish: import("jet_jit_io_progress_finish", &unary_void)?,
+        progress_exhaust: import("jet_jit_io_progress_exhaust", &unary_void)?,
+        progress_transfer: import("jet_jit_io_progress_transfer", &binary_void)?,
+        progress_transfer_filter: import("jet_jit_io_progress_transfer_filter", &binary_void)?,
+        progress_transfer_dedup: import("jet_jit_io_progress_transfer_dedup", &ternary_void)?,
+        progress_transfer_chunks: import("jet_jit_io_progress_transfer_chunks", &ternary_void)?,
+        progress_transfer_windows: import("jet_jit_io_progress_transfer_windows", &ternary_void)?,
+        progress_transfer_flatten: import("jet_jit_io_progress_transfer_flatten", &binary_void)?,
+        progress_transfer_intersperse: import("jet_jit_io_progress_transfer_intersperse", &binary_void)?,
+        progress_transfer_take_while: import("jet_jit_io_progress_transfer_take_while", &ternary_void)?,
+        progress_source_pull: import("jet_jit_io_progress_source_pull", &binary)?,
+        progress_transfer_plan: import("jet_jit_io_progress_transfer_plan", &quaternary_void)?,
+        progress_collect: import("jet_jit_io_progress_collect", &unary)?,
         confirm: import("jet_jit_io_confirm", &unary_i8)?,
         choose: import("jet_jit_io_choose", &binary)?,
         input_secret: import("jet_jit_io_input_secret", &unary)?,

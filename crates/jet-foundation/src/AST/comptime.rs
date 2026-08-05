@@ -1,4 +1,4 @@
-use super::{AccessConvention, BinOp, Expr, Lambda, Type};
+use super::{AccessConvention, BinOp, Expr, Lambda, ParamZone, Type};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
@@ -122,6 +122,9 @@ impl ViewSourcePath {
 #[derive(Debug, Clone)]
 pub struct FuncSig {
     pub params: Vec<(AccessConvention, Type)>,
+    /// D-CALLDUAL1=E: the function has a `#Root` first parameter and may be
+    /// selected by the receiver-first call spelling.
+    pub root_param: bool,
     pub return_type: Option<Type>,
     /// Sema-proved stable source for a returned view. Callers compose the
     /// parameter index onto the corresponding actual argument place.
@@ -156,6 +159,11 @@ pub struct FuncSig {
     /// S61: parameter names and default-value presence, parallel to `params`.
     /// Empty for extern/built-in functions.
     pub param_info: Vec<(String, bool)>,
+    /// D-APILABEL1=A: the public call contract, parallel to `params` — the
+    /// label a caller writes and the zone that decides whether they may (or
+    /// must) write it. Public labels and zones are callable type identity;
+    /// the local names in `param_info` are not. Empty alongside `param_info`.
+    pub param_call: Vec<(String, ParamZone)>,
     /// S61: default expressions for parameters that have them, parallel to `params`.
     pub defaults: Vec<Option<Expr>>,
     /// D-VARIADIC1: parallel to `params` — true when that parameter is variadic.
@@ -585,6 +593,7 @@ impl CtValue {
                 params: Vec::new(),
                 ret: None,
                 effect_bound: None, return_view_provenance: None,
+                param_contract: None,
             },
         }
     }
@@ -986,9 +995,9 @@ impl CtValue {
             }
             CtValue::Map(m) => {
                 if m.is_empty() {
-                    "std::collections::BTreeMap::new()".to_string()
+                    "JetMap::new()".to_string()
                 } else {
-                    let mut s = String::from("{ let mut _m = std::collections::BTreeMap::new(); ");
+                    let mut s = String::from("{ let mut _m = JetMap::new(); ");
                     for (k, v) in m {
                         s.push_str(&format!(
                             "_m.insert(({}), {}); ",
@@ -1010,6 +1019,14 @@ impl CtValue {
                     .map(|(n, v)| format!("{}: {}", ct_mangle(n), v.serialize()))
                     .collect();
                 format!("user_{} {{ {} }}", type_name, parts.join(", "))
+            }
+            CtValue::Enum {
+                type_name,
+                variant,
+                args,
+            } if type_name == "RemoveBy" => {
+                debug_assert!(args.is_empty(), "RemoveBy variants are unit values");
+                format!("JetRemoveBy::{}", variant.strip_prefix("user_").unwrap_or(variant))
             }
             CtValue::Enum {
                 type_name,

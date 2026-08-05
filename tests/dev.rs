@@ -2974,6 +2974,73 @@ fn archive_matches_interpreter_resident_jit_default_dev_and_aot() {
 }
 
 #[test]
+fn progress_reporter_matches_interpreter_resident_jit_default_dev_and_aot() {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+        return;
+    }
+    let _guard = dev_diff_lock().lock().unwrap();
+    let file = "examples/features/io/progress.jet";
+    let expected = ProgramOutput::ran(golden_stdout("io/progress"), String::new(), 0);
+
+    let interpreted = match dev_iteration_with_timeout("progress_reporter", file, true) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => {
+            panic!("progress example must execute in interpreter tier: {diags:?}")
+        }
+    };
+
+    let source = fs::read_to_string(file).unwrap();
+    jet_jit::reset_jit_trace_for_test();
+    let resident_source = source.clone();
+    let (resident, resident_flags, resident_trace) = std::thread::Builder::new()
+        .name("progress_reporter-resident".into())
+        .stack_size(64 * 1024 * 1024)
+        .spawn(move || {
+            jet_jit::set_trace_tiers(true);
+            let resident = run_cranelift_without_fallback(&resident_source, "progress_reporter");
+            let flags = jet_jit::jit_trace_flags_for_test();
+            let trace = jet_jit::take_last_trace();
+            (resident, flags, trace)
+        })
+        .expect("spawn progress resident worker")
+        .join()
+        .expect("progress resident worker panicked");
+    jet_jit::merge_jit_trace_flags_for_test(resident_flags);
+    assert!(
+        !jet_jit::fallback_invoked_for_test(),
+        "progress example must not fall back to a second runtime"
+    );
+    // A resident JIT may deopt an unsupported adapter. I9 requires the same
+    // Prelude meaning after deopt; it does not require every collection shape
+    // to have a native Cranelift lowering.
+    let _native_jit = jet_jit::jit_executed_for_test();
+    let _trace = resident_trace;
+    let default = match dev_iteration_with_timeout("progress_reporter", file, false) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => panic!("default dev failed progress example: {diags:?}"),
+    };
+
+    let dir = std::env::temp_dir().join(format!("jet_progress_reporter_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let aot = compiled_binary_output(&dir, "progress_reporter", 0, "progress_reporter", file);
+
+    assert_eq!(interpreted, expected);
+    assert_eq!(resident, expected);
+    assert_eq!(default, expected);
+    assert_eq!(aot, expected);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn set_union_matches_interpreter_resident_jit_default_dev_and_aot() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
@@ -3395,7 +3462,7 @@ fn physical_quantities_run_in_resident_jit_without_fallback() {
     thirdish(scale: 2/3)
 }
 #UnitFamily(Time) { second }
-fn run() => Void ? {
+fn run() => () ? {
     distance :: 12meter
     elapsed :: 3second
     speed :: distance / elapsed
@@ -3414,7 +3481,7 @@ fn run() => Void ? {
     meter
     thirdish(scale: 2/3)
 }
-fn run() => Void ? {
+fn run() => () ? {
     Meter.from_thirdish(1thirdish)?
 }
 "#, "physical_quantity_inexact");
@@ -3428,7 +3495,7 @@ fn run() => Void ? {
     meter
     almost(scale: 9007199254740993/9007199254740992)
 }
-fn run() => Void ? {
+fn run() => () ? {
     Meter.from_almost(1almost)?
 }
 "#, "physical_quantity_exact_rational_edge");
@@ -3451,7 +3518,7 @@ fn run() => Void ? {
     above_offset(scale: 1, offset: 9007199254740993/18014398509481984)
     below_offset(scale: 1, offset: -9007199254740993/18014398509481984)
 }
-fn run() => Void ? {
+fn run() => () ? {
     tie :: Meter.from_half_rounded(1half, .NearestEven, digits: 0)?
     above :: Meter.from_above_half_rounded(1above_half, .NearestEven, digits: 0)?
     negative_source :: ThreeHalves.from_float(-1.0)
@@ -3472,7 +3539,7 @@ fn run() => Void ? {
 
     let overflow = r#"
 #UnitFamily(Length, base: meter) { meter double(scale: 2) }
-fn run() => Void ? {
+fn run() => () ? {
     source :: Double.from_float(1.7976931348623157e308)
     Meter.from_double_rounded(source, .NearestEven, digits: 0)?
 }
@@ -3503,7 +3570,7 @@ fn rounded_physical_quantities_match_resident_default_dev_and_aot() {
     kelvin
     shifted(scale: 1, offset: 249/1000)
 }
-fn run() => Void ? {
+fn run() => () ? {
     positive :: Half.from_float(5.0)
     negative :: Half.from_float(-5.0)
     toward_zero :: Meter.from_half_rounded(positive, .TowardZero, digits: 0)?
@@ -3911,7 +3978,7 @@ fn forward() => Float ? String {
     return Ok(value + 0.25)
 }
 
-fn run() => Void ? {
+fn run() => () ? {
     print(forward()?)
 }
 "#;
@@ -3954,7 +4021,7 @@ fn direct_ok() => Int ? {
     return Ok(7)
 }
 
-fn run() => Void ? {
+fn run() => () ? {
     print(direct_ok()?)
     stop :: false
     if stop {
@@ -3968,7 +4035,7 @@ fn direct_ok() => Int ? {
     return Ok(7)
 }
 
-fn run() => Void ? {
+fn run() => () ? {
     print(direct_ok()?)
     outer :: true
     inner :: false
@@ -3985,7 +4052,7 @@ fn direct_ok() => Int ? {
     return Ok(7)
 }
 
-fn run() => Void ? {
+fn run() => () ? {
     print(direct_ok()?)
     if true {
         print("left continues")
@@ -4000,7 +4067,7 @@ fn direct_ok() => Int ? {
     return Ok(7)
 }
 
-fn run() => Void ? {
+fn run() => () ? {
     print(direct_ok()?)
     if true {
         return Err("left branch")
@@ -4059,7 +4126,7 @@ fn resident_jit_fidelity_matches_runtime_contract() {
     let valid = r#"
 use core.perf as perf
 
-fn run() => Void ? {
+fn run() => () ? {
     perf.reset_fidelity()
     print(perf.default_fidelity())
     perf.override_fidelity(0.25)?
@@ -4094,7 +4161,7 @@ fn run() => Void ? {
     ] {
         let src = format!(
             r#"use core.perf as perf
-fn run() => Void ? {{
+fn run() => () ? {{
     perf.reset_fidelity()
     perf.override_fidelity(0.375)?
     perf.override_fidelity({value})?
@@ -4465,6 +4532,82 @@ fn collections_memory_and_streams_match_interpreter_jit_and_aot() {
         "collection/memory/stream parity failures:\n{}",
         failures.join("\n")
     );
+}
+
+#[test]
+fn stream_pull_hostile_matrix_matches_interpreter_jit_and_aot() {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+        return;
+    }
+    let stem = "streams/generators";
+    let file = example_path(stem);
+    let expected = golden_stdout(stem);
+    match dev_iteration_with_timeout(stem, &file, true) {
+        RunOutcome::Ran { stdout, .. } => {
+            assert_eq!(stdout, expected, "hostile Stream matrix drifted from its golden");
+        }
+        RunOutcome::Problems(diags) => {
+            panic!("hostile Stream matrix did not run in the interpreter: {diags:?}");
+        }
+    }
+    assert_cranelift_three_way(&file, stem);
+}
+
+#[test]
+fn stream_producer_failure_matches_interpreter_jit_and_aot() {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+        return;
+    }
+    let source = r#"fn failing() => Stream<Int> {
+    yield 1
+    if true {
+        panic("producer failure")
+    }
+}
+
+fn run() {
+    loop value, failing() {
+        print("value: {value}")
+    }
+}
+"#;
+    let file = std::env::temp_dir().join(format!("jet_stream_failure_{}.jet", std::process::id()));
+    fs::write(&file, source).expect("write Stream failure fixture");
+    let file = file.to_string_lossy().into_owned();
+    let interpreted = match dev_iteration(&file, false, true) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => {
+            panic!("Stream producer failure did not run in the interpreter: {diags:?}");
+        }
+    };
+
+    let bundle = checked_bundle_from_path(&file);
+    jet_jit::reset_jit_trace_for_test();
+    let mut backend = CraneliftBackend::new();
+    let jit = jet_jit::with_program_args(std::slice::from_ref(&file), || {
+        match backend.run(&bundle, false) {
+            RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            } => ProgramOutput::ran(stdout, stderr, exit_code),
+            RunOutcome::Problems(diags) => {
+                panic!("Stream producer failure did not run in JIT: {diags:?}");
+            }
+        }
+    });
+    let aot_dir = std::env::temp_dir().join(format!("jet_stream_failure_aot_{}", std::process::id()));
+    let aot = compiled_binary_output(&aot_dir, "stream_failure", 0, "streams/generators", &file);
+
+    assert_eq!(jit, interpreted, "Stream producer failure drifted in JIT");
+    assert_eq!(aot, interpreted, "Stream producer failure drifted in AOT");
+    assert_eq!(interpreted.exit_code, 70, "producer failure must remain a panic");
+    assert_eq!(interpreted.stdout, "value: 1\n");
+    assert!(interpreted.stderr.contains("panic: producer failure"));
 }
 
 #[test]
@@ -5057,6 +5200,7 @@ fn data_pipelines_and_parsing_match_interpreter_jit_and_aot() {
         "tooling/data_line",
         "tooling/data_json",
         "tooling/data_pipeline",
+        "tooling/data_plot",
         "tooling/data_schema",
         "tooling/data_stream_bounds",
         // #1224 — parsing / reflection / tooling

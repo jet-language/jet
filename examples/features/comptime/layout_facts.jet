@@ -1,0 +1,23 @@
+// D-LAYOUT-FACTS1=B: focused layout facts and full reflection share one
+// typed model; physical byte facts are intentionally absent by default.
+derive T.LayoutFacts {
+    info :: T.$layout
+    reflected :: T.reflect().layout
+    selected :: info[.count]
+    kind :: info.kind
+    reflected_kind :: reflected.kind
+    field_name :: selected.name
+    name :: T.reflect().name
+    emit("impl $name {{ fn layout_facts(self) => String {{ return \"$kind:$reflected_kind:$field_name\" }} }}")
+}
+
+#LayoutFacts
+struct Packet {
+    count: Int
+    label: String
+}
+
+fn run() {
+    packet :: Packet.{count: 2, label: "ok"}
+    print(packet.layout_facts())
+}

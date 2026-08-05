@@ -13,6 +13,10 @@ use super::repl_process::run_repl_process;
 #[path = "../CorePureParity.rs"]
 mod core_pure_parity;
 
+mod progress_semantics {
+    include!("../../../../jet-codegen/src/Prelude/Core/Progress.rs");
+}
+
 pub(in super::super) fn apply_core_pure_method(
     recv: &CtValue,
     method: &str,
@@ -281,46 +285,166 @@ fn as_data_groups(v: &CtValue, span: Span) -> Result<Vec<(String, i64)>, Diagnos
     }
 }
 
-fn as_line_groups(
-    v: &CtValue,
-    span: Span,
-) -> Result<Vec<jet_foundation::DataPlot::LinePoint>, Diagnostic> {
+fn as_data_line_groups(v: &CtValue, span: Span) -> Result<Vec<(String, f64)>, Diagnostic> {
     match v {
         CtValue::List(xs) => xs
             .iter()
             .map(|x| match x {
                 CtValue::Struct { type_name, fields } if type_name == "DataGroup" => {
-                    let label = fields
+                    let key = fields
                         .iter()
-                        .find(|(name, _)| name == "key")
-                        .and_then(|(_, value)| match value {
-                            CtValue::Str(value) => Some(value.clone()),
-                            _ => None,
-                        });
-                    let value = fields
+                        .find(|(n, _)| n == "key")
+                        .map(|(_, v)| v.clone());
+                    let mean = fields
                         .iter()
-                        .find(|(name, _)| name == "sum")
-                        .and_then(|(_, value)| match value {
-                            CtValue::Float(value) => Some(value.as_f64()),
-                            CtValue::Int(value) => Some(*value as f64),
-                            _ => None,
-                        });
-                    match (label, value) {
-                        (Some(label), Some(value)) => Ok(jet_foundation::DataPlot::LinePoint {
-                            label,
-                            value,
-                        }),
+                        .find(|(n, _)| n == "mean")
+                        .map(|(_, v)| v.clone());
+                    match key {
+                        Some(CtValue::Str(key)) => {
+                            let Some(mean) = mean else {
+                                return Err(unsupported(
+                                    "core.data: a `DataGroup` needs `mean: Float`",
+                                    span,
+                                ));
+                            };
+                            Ok((key, as_float(&mean, span)?))
+                        }
                         _ => Err(unsupported(
-                            "core.data: a \`DataGroup\` needs \`key: String\` and \`sum: Float\`",
+                            "core.data: a `DataGroup` needs `key: String`",
                             span,
                         )),
                     }
                 }
-                _ => Err(unsupported("core.data: argument must be \`[DataGroup]\`", span)),
+                _ => Err(unsupported("core.data: argument must be `[DataGroup]`", span)),
             })
             .collect(),
-        _ => Err(unsupported("core.data: argument must be \`[DataGroup]\`", span)),
+        _ => Err(unsupported("core.data: argument must be `[DataGroup]`", span)),
     }
+}
+
+fn as_data_line_options(
+    v: &CtValue,
+    span: Span,
+) -> Result<super::super::DataLite::LineOptions, Diagnostic> {
+    let CtValue::Struct { type_name, fields } = v else {
+        return Err(unsupported(
+            "core.data line renderers need `DataLineOptions`",
+            span,
+        ));
+    };
+    if type_name != "DataLineOptions" {
+        return Err(unsupported(
+            "core.data line renderers need `DataLineOptions`",
+            span,
+        ));
+    }
+    let field = |name: &str| {
+        fields
+            .iter()
+            .find(|(field, _)| field == name)
+            .map(|(_, value)| value.clone())
+            .ok_or_else(|| unsupported("DataLineOptions is missing a required field", span))
+    };
+    let string = |name: &str| match field(name)? {
+        CtValue::Str(value) => Ok(value),
+        _ => Err(unsupported("DataLineOptions string field has the wrong type", span)),
+    };
+    let markers = match field("markers")? {
+        CtValue::Bool(value) => value,
+        _ => return Err(unsupported("DataLineOptions `markers` must be Bool", span)),
+    };
+    let reference = match field("reference")? {
+        CtValue::Some(value) => Some(as_float(&value, span)?),
+        CtValue::None(_) => None,
+        _ => return Err(unsupported("DataLineOptions `reference` must be Float?", span)),
+    };
+    Ok(super::super::DataLite::LineOptions {
+        title: string("title")?,
+        x_label: string("x_label")?,
+        y_label: string("y_label")?,
+        markers,
+        reference,
+        style: string("style")?,
+        color: string("color")?,
+        legend: string("legend")?,
+    })
+}
+
+fn data_line_error(error: super::super::DataLite::LineError) -> CtValue {
+    CtValue::Struct {
+        type_name: "DataError".to_string(),
+        fields: vec![
+            (
+                "kind".to_string(),
+                CtValue::Enum {
+                    type_name: "DataErrorKind".to_string(),
+                    variant: error.kind.to_string(),
+                    args: Vec::new(),
+                },
+            ),
+            (
+                "operation".to_string(),
+                CtValue::Str(error.operation.to_string()),
+            ),
+            ("row".to_string(), CtValue::None(Type::Int)),
+            ("column".to_string(), CtValue::None(Type::Int)),
+            (
+                "index".to_string(),
+                error
+                    .index
+                    .map(|index| CtValue::Some(Box::new(CtValue::Int(index))))
+                    .unwrap_or(CtValue::None(Type::Int)),
+            ),
+            ("reason".to_string(), CtValue::Str(error.reason.to_string())),
+            (
+                "cause".to_string(),
+                CtValue::None(Type::Named("EncodingError".to_string())),
+            ),
+        ],
+    }
+}
+
+pub fn apply_data_line_call(
+    method: &str,
+    args: Vec<CtValue>,
+    span: Span,
+    checked: bool,
+) -> Result<CtValue, Diagnostic> {
+    let groups = as_data_line_groups(
+        args.first()
+            .ok_or_else(|| unsupported("core.data line renderers need groups", span))?,
+        span,
+    )?;
+    let options = as_data_line_options(
+        args.get(1)
+            .ok_or_else(|| unsupported("core.data line renderers need options", span))?,
+        span,
+    )?;
+    let render = |checked| match (method, checked) {
+        ("line_text", false) => Ok(CtValue::Str(super::super::DataLite::line_text(
+            &groups, &options,
+        ))),
+        ("line_svg", false) => Ok(CtValue::Str(super::super::DataLite::line_svg(
+            &groups, &options,
+        ))),
+        ("line_text", true) => Ok(match super::super::DataLite::line_text_checked(
+            &groups, &options,
+        ) {
+            Ok(text) => CtValue::ResOk(Box::new(CtValue::Str(text))),
+            Err(error) => CtValue::ResErr(Box::new(data_line_error(error))),
+        }),
+        ("line_svg", true) => Ok(match super::super::DataLite::line_svg_checked(
+            &groups, &options,
+        ) {
+            Ok(svg) => CtValue::ResOk(Box::new(CtValue::Str(svg))),
+            Err(error) => CtValue::ResErr(Box::new(data_line_error(error))),
+        }),
+        _ => Err(unsupported(
+            &format!("unsupported core.data line renderer `{method}`"),
+            span,
+        )),
+    };
+    render(checked)
 }
 
 const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
@@ -2143,45 +2267,7 @@ pub fn apply_core_call(
             span,
         )?))),
         ("core.data", "line_text" | "line_svg") => {
-            let points = as_line_groups(one(0)?, span)?;
-            let markers = match one(4)? {
-                CtValue::Bool(value) => *value,
-                _ => {
-                    return Err(unsupported(
-                        "core.data line plots need a Bool marker flag",
-                        span,
-                    ))
-                }
-            };
-            let config = jet_foundation::DataPlot::LineConfig {
-                title: as_string(one(1)?, span)?.to_string(),
-                x_label: as_string(one(2)?, span)?.to_string(),
-                y_label: as_string(one(3)?, span)?.to_string(),
-                markers,
-                reference: as_float(one(5)?, span)?,
-                style: as_string(one(6)?, span)?.to_string(),
-                color: as_string(one(7)?, span)?.to_string(),
-                legend: as_string(one(8)?, span)?.to_string(),
-            };
-            if let Err(error) = jet_foundation::DataPlot::validate_line(&points, &config) {
-                let index = error
-                    .index
-                    .map(|index| format!(", index {index}"))
-                    .unwrap_or_default();
-                return Err(unsupported(
-                    &format!(
-                        "core.data.{method}: {}{}: {}",
-                        error.kind, index, error.reason
-                    ),
-                    span,
-                ));
-            }
-            let rendered = if method == "line_text" {
-                jet_foundation::DataPlot::render_line_text(&points, &config)
-            } else {
-                jet_foundation::DataPlot::render_line_svg(&points, &config)
-            };
-            Ok(CtValue::Str(rendered))
+            apply_data_line_call(method, args, span, false)
         }
         // --- core.text.unicode (std-only Unicode scalar helpers, pure) ---
         ("core.text.unicode", "scalar_count") => Ok(CtValue::Int(
@@ -2706,6 +2792,66 @@ pub fn apply_impure_core_call(
             let argv = super::super::Interpreter::runtime_argv()
                 .unwrap_or_else(|| vec!["jet".to_string()]);
             Ok(CtValue::List(argv.into_iter().map(CtValue::Str).collect()))
+        }
+        ("core.io", "progress") => {
+            let Some(source) = args.first() else {
+                return Err(unsupported("`core.io.progress` needs a source", span));
+            };
+            if let CtValue::Str(text) = source {
+                if args.len() != 1 {
+                    return Err(unsupported(
+                        "`core.io.progress` text form takes one argument",
+                        span,
+                    ));
+                }
+                if let Some(sink) = sink {
+                    sink.stdout.push_str(text);
+                    sink.stdout.push('\n');
+                }
+                return Ok(CtValue::Unit);
+            }
+            let CtValue::List(items) = source else {
+                return Err(unsupported(
+                    "`core.io.progress` expects a List or Iter source",
+                    span,
+                ));
+            };
+            let description = args
+                .get(1)
+                .map(|value| as_string(value, span))
+                .transpose()?
+                .unwrap_or("Progress")
+                .to_string();
+            let format = args
+                .get(2)
+                .map(|value| as_string(value, span))
+                .transpose()?
+                .unwrap_or("")
+                .to_string();
+            // Keep the adapter lazy in the TIR interpreter.  The loop evaluator
+            // unwraps this erased carrier and renders one update per pulled
+            // item.  Rendering here would report progress before the caller
+            // consumes anything and would diverge from AOT/JIT.
+            let started_at = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_secs_f64())
+                .unwrap_or(0.0);
+            Ok(CtValue::Struct {
+                type_name: "__JetProgressIter".to_string(),
+                fields: vec![
+                    ("items".to_string(), CtValue::List(items.clone())),
+                    ("description".to_string(), CtValue::Str(description)),
+                    ("format".to_string(), CtValue::Str(format)),
+                    ("started_at".to_string(), CtValue::Float(crate::AST::CtFloat::f64(started_at))),
+                    (
+                        "pulls".to_string(),
+                        CtValue::List(vec![CtValue::Int(1); items.len()]),
+                    ),
+                    ("tail".to_string(), CtValue::Int(0)),
+                    ("total".to_string(), CtValue::Int(items.len() as i64)),
+                    ("known_total".to_string(), CtValue::Bool(true)),
+                ],
+            })
         }
         // D-VERDICT-1321-1: variadic — each argument renders on its own line.
         ("core.io", "print") => {

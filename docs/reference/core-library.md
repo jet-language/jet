@@ -182,8 +182,8 @@ lazy. An expected type never changes the collector or evaluation time.
 
 | Type | Constructors | Main methods |
 | --- | --- | --- |
-| `[T]` | list literal `[a, b]` | `map`, `filter`, `each`, `find`, `any`, `all`, `sort_by`, `reduce`, `take`, `skip`, `step_by`, `dedup`, `chunks`, `windows`, `indexed`, `indexes`, `zip`, `unzip`, `take_while`, `skip_while`, `flat_map`, `filter_map`, `scan`, `fold`, `sum`, `product`, `min`, `max`, `min_by`, `max_by`, `group_by`, `count_by`, `partition`, `flatten`, `intersperse` |
-| `[K: V]` | map literal `["a": 1]` | `keys`, `values`, `has_key`, `get`, `add`, `add_new`, `remove`, `merge`, `len`, `is_empty`, `clear` |
+| `[T]` | list literal `[a, b]` | `map`, `filter`, `each`, `find`, `any`, `all`, `sort_by`, `reduce`, `take`, `skip`, `step_by`, `dedup`, `chunks`, `windows`, `indexed`, `indexes`, `zip`, `zip_short`, `zip_pad`, `unzip`, `take_while`, `skip_while`, `flat_map`, `filter_map`, `scan`, `fold`, `sum`, `product`, `min`, `max`, `min_by`, `max_by`, `group_by`, `count_by`, `count`, `extend`, `concat`, `partition`, `flatten`, `intersperse` |
+| `[K: V]` | map literal `["a": 1]` | `keys`/`values` (lazy `Iter` views), `has_key`, `get`, `add`, `add_new`, `remove`, `merge`, `len`, `is_empty`, `clear` |
 | `Set<T>` | `Set.new()`, `Set.from(xs)` | `add`, `remove`, `has`, `union`, `intersection`, `difference`, `symmetric_difference`, `is_subset`, `is_superset`, `is_disjoint`, `to_list`, `len`, `is_empty`, `clear` |
 | `SortedSet<T>` | `SortedSet.new()`, `SortedSet.from(xs)` | `add`, `remove`, `has`, `first`, `last`, `union`, `intersection`, `difference`, `symmetric_difference`, `is_subset`, `is_superset`, `is_disjoint`, `to_list`, `len`, `is_empty`, `clear` |
 | `Deque<T>` | `Deque.new()`, `Deque.from(xs)` | `push_front`, `push_back`, `pop_front`, `pop_back`, `peek_front`, `peek_back`, `to_list`, `len`, `is_empty`, `clear` |
@@ -196,6 +196,22 @@ lazy. An expected type never changes the collector or evaluation time.
 Example: `examples/features/collections/iter_tools_audit.jet` covers the
 adapter and specialized-container surface. Lazy protocol:
 `examples/features/collections/lazy_iter.jet`.
+
+The zip family is available as a free call or a method and accepts any number
+of list or iterator inputs. `zip` requires equal lengths, `zip_short` stops at
+the shortest input, and `zip_pad` reaches the longest input. Omitted padding is
+`None`; `fill: value` supplies one value for every missing column; and
+`fills: (a: value, b: value, ...)` supplies a value per named column. Free-call
+labels become row fields; methods use `a`, `b`, `c`, and so on.
+
+```jet
+left :: [1, 2, 3]
+right :: [10, 20]
+
+loop row, left.zip_pad(right, fill: 0) {
+    print(row.b)
+}
+```
 
 ---
 
@@ -653,7 +669,7 @@ persist; it contains public identity metadata, never key bytes.
 use core.crypto as crypto
 use core.vault as vault
 
-fn provision() =[Secret]=> Void ? vault.VaultError {
+fn provision() =[Secret]=> () ? vault.VaultError {
     plan :: vault.prepare_generate<crypto.SigningKey>("release")?
     write :: vault.authorize_write(&plan, reason: "create release signer")?
     key_ref :: vault.commit_generate<crypto.SigningKey>(take(write), take(plan))?
@@ -779,7 +795,7 @@ Examples: `examples/features/crypto/auth_tokens.jet`,
 `core.sync` ships D-SYNC1 CRDT value types and D-DBPOLICY1 row policies:
 
 ```jet
-text_new / text_set / text_merge / text_show
+text_new / text_set / text_edit / text_merge / text_show / text_metadata
 counter_new / counter_inc / counter_merge / counter_value
 map_new / map_set / map_get / map_merge / map_show
 list_new / list_push / list_merge / list_show
@@ -787,7 +803,13 @@ policy_new(table, expression) => RowPolicy ? String
 policy_allows(policy, user, row_owner) => Bool
 ```
 
-Merges are deterministic and retain independent replica contributions. Beginner
+Merges are deterministic and keep every replica's edits. `SyncText` is a
+sequence CRDT: `text_edit(doc, replica, at, delete_count, insert)` writes at a
+character position, and two replicas that edit while apart reach one document.
+A replica name must own one line of edits; editing two copies of a document
+under one name is not a concurrent edit and does not merge. `text_metadata`
+reports the highest counter each replica has written, which orders edits but
+does not decide causality. Beginner
 row policies use `owner == user`; expert policies may use `true`. `app.sync(doc,
 over: session)` publishes the typed CRDT representation through a bounded
 session registry and returns a monotonic delivery receipt. Database row-policy
@@ -878,6 +900,7 @@ printf "Ada\n" | nix develop -c jet run ask.jet
 | `style(name, text)` | `String` | ANSI style only when stdout is a TTY and `NO_COLOR` is absent |
 | `style_force(name, text)` | `String` | Expert override that always emits known ANSI styles |
 | `progress(text)` | `() ? IOError` | TTY: carriage-return progress update; non-TTY: one plain line |
+| `progress(source[, description[, format]])` | `Iter<T>` | Wrap a `List<T>` or `Iter<T>`; report percent, count, elapsed time, remaining estimate, and rate as items are pulled. Format fields are `{description}`, `{percent}`, `{count}`, `{total}`, `{elapsed}`, `{remaining}`, and `{rate}`. |
 
 `print` stays in the core prelude (no `use` needed). Use `io.eprint` for stderr.
 Use `input` for public text and scripts. Use `input_secret` for passwords and
@@ -1051,9 +1074,9 @@ decoded losslessly; it never skips or replaces an entry.
 
 `EnvError` has `InvalidName`, `InvalidValue`, and `NonUnicode`. Names must be
 nonempty and contain neither NUL nor `=`; values cannot contain NUL. Current
-editions retain the source-compatible `set => Void` signature and report an
+editions retain the source-compatible `set => ()` signature and report an
 invalid call as E3001. A future major release and edition opt-in changes `set`
-to `Void ? EnvError`.
+to `() ? EnvError`.
 
 ---
 
@@ -1086,13 +1109,13 @@ this process and machine.
 | `pid()` | `Int` | Current process id |
 | `hostname()` | `String` | Hostname, falling back to `localhost` |
 | `username()` | `String` | Current username, or empty if unavailable |
-| `set_current_dir(path)` | `Void ? IOError` | Change process working directory |
-| `on_interrupt(handler)` | `Void` | Register a process-lifetime handler for Ctrl-C / SIGINT on Unix and Windows |
+| `set_current_dir(path)` | `() ? IOError` | Change process working directory |
+| `on_interrupt(handler)` | `()` | Register a process-lifetime handler for Ctrl-C / SIGINT on Unix and Windows |
 
 Interrupt handlers are additive. Each Ctrl-C runs every registered handler in
 registration order on Jet's interrupt dispatcher, never inside the operating
 system callback. Registration is active before `on_interrupt` returns. The
-`Void` return means registrations live until the process exits; there is no
+`()` return means registrations live until the process exits; there is no
 unregister/drop handle. Calling `on_interrupt` on a target without process
 interrupts fails explicitly instead of silently discarding the handler.
 
@@ -1535,7 +1558,7 @@ signal and chooses behavior.
 ```jet
 use core.perf as perf
 
-fn run() => Void ? {
+fn run() => () ? {
     if perf.fidelity() < 0.5 {
         print("low quality mode")
     }
@@ -1548,7 +1571,7 @@ fn run() => Void ? {
 |----------|---------|--------------|
 | `fidelity()` | `Float` | Current value, from `0.0` lowest quality through `1.0` full quality |
 | `default_fidelity()` | `Float` | The default value, `1.0` |
-| `override_fidelity(v)` | `Void ? String` | Set the process-global value; rejects values outside `0.0..1.0` |
+| `override_fidelity(v)` | `() ? String` | Set the process-global value; rejects values outside `0.0..1.0` |
 | `reset_fidelity()` | nothing | Restore `default_fidelity()` |
 
 Platform battery, thermal, network, load, and carbon providers do not ship in
@@ -1925,7 +1948,7 @@ lambdas, so a misspelled row field is a Jet field error before codegen.
 | `status()` | `[DataStatus]` | Native and bridge facts: path, copy, ownership, trust, fallback, replacement |
 | `require_bridge(provider)` | `() ? DataError` | Fail closed for unavailable `py` / `r` / `gpu` bridges; never fabricates results |
 | `bar_text(groups)` / `bar_svg(groups)` | `String ? DataError` | Deterministic text/SVG bar output; reject negative/non-finite geometry |
-| `line_text(groups, title, x_label, y_label, markers, reference, style, color, legend)` / `line_svg(…)` | `String ? DataError` | Deterministic line output from `DataGroup.key`/`.sum`; labels, markers, reference, style, color, and legend are explicit |
+| `line_text(groups, options)` / `line_svg(groups, options)` | `String ? DataError` | Deterministic line output with x labels, title, axis labels, markers, optional reference line, style, color, and legend |
 
 `DataStream<T>.next()` returns `T? ? DataError`: clean EOF is stable `None`,
 terminal errors latch, and complete rows already returned stay valid. Edition
@@ -1933,8 +1956,6 @@ terminal errors latch, and complete rows already returned stay valid. Edition
 
 Flagship proof for this slice is `examples/features/tooling/data_analysis.jet`
 (CSV ingest → filter → sort → join → group → stats → plot → status). The
-line-plot proof is `examples/features/tooling/data_line.jet`; it uses the same
-`DataGroup` series for text and SVG output. The
 hostile corpus is `examples/features/tooling/data_hostile.jet`: empty and
 missing series, duplicate-key joins, delimiter-like pivot keys, stable sort
 ties, non-finite numerics, signed-zero collapse, population variance
@@ -1952,7 +1973,9 @@ type (including when that element is itself a struct). Empty tables and series
 still report the static element model — schema is type-driven, not sample-driven.
 Missing values are ordinary Jet optionals (`T?`) inside a series, not a second
 sentinel type. `DataGroup` fields: `.key: String`, `.count: Int`, `.sum: Float`,
-`.mean: Float`. `DataJoin<L, R>` fields are `.left: L` and `.right: R`; the
+`.mean: Float`. `DataLineOptions` fields are `.title`, `.x_label`, `.y_label`,
+`.markers`, `.reference: Float?`, `.style` (`solid`, `dashed`, or `dotted`),
+`.color`, and `.legend`. `DataJoin<L, R>` fields are `.left: L` and `.right: R`; the
 left-join form uses `R?`. `DataStatus` fields: `.step`, `.path`, `.copy`,
 `.ownership`, `.trust`, `.fallback`, `.replacement`. Bridge rows are separate
 `py.*`, `r.*`, and `gpu.*` entries (D-DATA-BRIDGE1); unavailable bridges keep
@@ -2061,7 +2084,8 @@ fn run() {
 value (the dynamic `JSON` tree and the `[[String]]`/`[K: V]` forms still work too). Field
 order is preserved.
 
-**Typed decode** — `decode<T>(text)` (D-SERDE6) returns `T ? [FieldError]` for
+**Typed decode** — `decode<T>(text)` (D-GENERIC-CALL1; D-SERDE6 owns the codec
+model) returns `T ? [FieldError]` for
 json/toml/yaml, and `[T] ? [FieldError]` for csv (one struct per row, columns mapped
 to fields by header name). The target type comes from the `<T>` turbofish or an
 cfg: Config :: json.decode(text)`). Bare `json.decode(text)` with no
@@ -3333,16 +3357,11 @@ exact automatic promotion sites to migrate back to ownership.
 ## Writing Core in Jet
 
 The ratified target boundary is a minimal audited intrinsic/ABI kernel plus
-ordinary Jet Core packages. The current compiler still carries a compiler-owned
-JetStd kernel closure and optional fragments; sema records their reachable
-closure, but this staged implementation is not ordinary-Jet package authority.
-It must not be described as a completed source-boundary migration.
-
-`core.archive` currently proves the package boundary and one canonical Rust ABI
-source tree: `corelib/core.archive/pkgs/archive/src/lib.rs` is consumed by
-CoreProvider, the AOT bridge, and the JIT host without a second algorithm. It
-does not yet prove ordinary-Jet behavior authority. Do not read this reference
-as claiming that source-authority closeout is complete.
+ordinary Jet Core packages. `core.archive` crosses that boundary through its
+real `archive.jet` source module: the normal frontend checks and emits the
+reachable package, and only the package's internal byte-format calls use the
+audited Rust ABI kernel. AOT, JIT/dev, interpreter, and applicable web checks
+share that source-owned TIR path.
 
 ---
 
@@ -3351,6 +3370,7 @@ as claiming that source-authority closeout is complete.
 | Example | Shows |
 |---------|-------|
 | `examples/features/tooling/compute_tensor.jet` | `core.compute` Tensor / Vec / Matrix CPU oracle |
+| `examples/features/tooling/compute_ndarray.jet` | broadcast, fused elementwise ufuncs, transpose, and axis reduction |
 | `examples/features/tooling/compute_device.jet` | placement, stream, transfer receipts |
 | `examples/features/tooling/compute_kernel.jet` | safe bounds + raw `#Unsafe` kernel contract |
 | `examples/features/tooling/compute_simd.jet` | f32 tiled matmul CPU-SIMD profile |

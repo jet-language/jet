@@ -108,12 +108,22 @@ pub(crate) fn tir_covers_error_conv_body(body: &[Stmt], cx: &Cx) -> bool {
 /// **exclude on any doubt**: a false negative just keeps the method on the AST
 /// path, a false positive risks a silent miscompile (a wrong `self` receiver).
 pub(crate) fn tir_covers_method(f: &Func, type_name: &str, cx: &Cx) -> bool {
-    // Signature shape: no generics. c109 Phase 18: an `#Unsafe fn` method IS covered
+    // Method-owned type parameters are in scope while the structural gate walks
+    // the signature and body. This keeps generic methods on the same TIR path as
+    // generic free functions without leaking their names into the enclosing item.
+    let previous_type_params = cx.current_type_params.borrow().clone();
+    let mut method_type_params = previous_type_params.clone();
+    method_type_params.extend(f.type_params.iter().map(|param| param.name.clone()));
+    cx.current_type_params.replace(method_type_params);
+    let covered = tir_covers_method_inner(f, type_name, cx);
+    cx.current_type_params.replace(previous_type_params);
+    covered
+}
+
+fn tir_covers_method_inner(f: &Func, type_name: &str, cx: &Cx) -> bool {
+    // c109 Phase 18: an `#Unsafe fn` method IS covered
     // (it lowers to an `unsafe fn`, the `is_unsafe` flag driving the prefix). c109
     // Phase 23: a `#Pure fn` method IS covered (purity is sema-only; codegen erases it).
-    if !f.type_params.is_empty() {
-        return false;
-    }
     // The owning type must be a covered struct or enum (the receiver place and
     // every `self.field` read then emit exactly as `emit_method` produces them).
     let generic_owner = struct_is_generic(type_name, cx);

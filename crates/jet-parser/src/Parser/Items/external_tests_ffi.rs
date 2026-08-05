@@ -103,18 +103,9 @@ impl<'a> Parser<'a> {
                 let fn_span = self.bump().span; // the `fn` keyword
                 let (name, name_span) = self.expect_ident("after `fn`")?;
                 self.expect(TokKind::LParen, "after the property test name")?;
-                let mut params = Vec::new();
-                if !matches!(self.peek().kind, TokKind::RParen) {
-                    loop {
-                        params.push(self.param()?);
-                        if matches!(self.peek().kind, TokKind::RParen) {
-                            break;
-                        }
-                        self.expect(TokKind::Comma, "between parameters")?;
-                    }
-                }
-                self.expect(TokKind::RParen, "to close the parameter list")?;
+                let params = self.parse_param_list()?;
                 self.validate_variadic_params(&params);
+                self.validate_param_labels(&params);
                 self.expect(TokKind::LBrace, "to open the property test body")?;
                 let body = self.block_stmts();
                 return Ok(crate::AST::TestDef {
@@ -743,18 +734,9 @@ impl<'a> Parser<'a> {
             let fn_start = fn_span.start;
             let (name, name_span) = self.expect_ident("after `fn`")?;
             self.expect(TokKind::LParen, "after the function name")?;
-            let mut params = Vec::new();
-            if !matches!(self.peek().kind, TokKind::RParen) {
-                loop {
-                    params.push(self.param()?);
-                    if matches!(self.peek().kind, TokKind::RParen) {
-                        break;
-                    }
-                    self.expect(TokKind::Comma, "between parameters")?;
-                }
-            }
-            self.expect(TokKind::RParen, "to close the parameter list")?;
+            let params = self.parse_param_list()?;
             self.validate_variadic_params(&params);
+            self.validate_param_labels(&params);
     
             let mut return_type = None;
             let mut return_type_span = None;

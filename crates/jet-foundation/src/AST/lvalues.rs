@@ -55,6 +55,10 @@ pub enum IndexKind {
     Lane(String),
     /// D-INDEX-HOOK: `mytype[k]` when the type implements `Index` (+ optional `IndexMut`).
     User(String),
+    /// D-LAYOUT-FACTS1=B: sema-approved typed selection from `LayoutInfo`.
+    /// The selector name is carried so evaluator/codegen do not reinterpret
+    /// an unresolved `IndexKind::Unknown` as an ordinary list index.
+    LayoutField(String),
     /// D-MEM1 S6: `pool[id]` on a `Pool<T>` — generation-checked slot access, panics
     /// on a stale `Id<T>` (removed/reused slot). Read returns a clone of `T`; write
     /// (plain overwrite or a nested `pool[id].field = v`) goes through a genuine

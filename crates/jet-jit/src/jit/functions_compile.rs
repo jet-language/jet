@@ -132,6 +132,7 @@ fn lower_spawn_function(
             deadline_depth: 0,
             switch_subject: None,
             yield_sender: None,
+            stream_consumers: Vec::new(),
             in_shared_transaction: false,
             shared_transaction_depth: 0,
             unsafe_depth: 0,
@@ -267,6 +268,7 @@ pub(crate) fn lower_callable_lambda(
         params: lam.param_types.clone(),
         ret: lam.ret.clone().map(Box::new),
         effect_bound: None,
+        param_contract: None,
         return_view_provenance: None,
     };
     let block_returns_value = match &lam.executable {
@@ -336,6 +338,7 @@ pub(crate) fn lower_callable_lambda(
             deadline_depth: 0,
             switch_subject: None,
             yield_sender: None,
+            stream_consumers: Vec::new(),
             in_shared_transaction: false,
             shared_transaction_depth: 0,
             unsafe_depth: 0,
@@ -485,6 +488,7 @@ fn lower_function(
             deadline_depth: 0,
             switch_subject: None,
             yield_sender: None,
+            stream_consumers: Vec::new(),
             in_shared_transaction: false,
             shared_transaction_depth: 0,
             unsafe_depth: 0,
@@ -555,7 +559,7 @@ fn lower_function(
         if !lctx.dead {
             let value = if let Some(ret) = &tir.ret {
                 if matches!(ret, Type::Result { ok, err }
-                    if matches!(ok.as_ref(), Type::Named(n) if n == "Void" || n == "Unit")
+                    if matches!(ok.as_ref(), Type::Named(n) if n == "Unit")
                         && matches!(err.as_ref(), Type::Named(n) if n == "Error"))
                 {
                     let tag = lctx.b.ins().iconst(types::I8, 1);
@@ -670,6 +674,7 @@ fn lower_generator_body(
             deadline_depth: 0,
             switch_subject: None,
             yield_sender: Some(sender),
+            stream_consumers: Vec::new(),
             in_shared_transaction: false,
             shared_transaction_depth: 0,
             unsafe_depth: 0,

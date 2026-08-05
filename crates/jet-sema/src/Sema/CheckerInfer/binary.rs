@@ -223,6 +223,7 @@ impl<'a> Checker<'a> {
             receiver: Box::new(Expr::Ident(target.name(), span)),
             method: Syntax::conversion_method_for_source(&source.name()),
             method_span: span,
+            owner_type_args: Vec::new(),
             type_args: Vec::new(),
             args: vec![crate::AST::CallArg {
                 convention: crate::AST::AccessConvention::Read,
@@ -261,6 +262,7 @@ impl<'a> Checker<'a> {
             receiver: Box::new(expr),
             method: "raw".to_string(),
             method_span: span,
+            owner_type_args: Vec::new(),
             type_args: Vec::new(),
             args: Vec::new(),
             recv_type: Some(type_name.to_string()),
@@ -285,6 +287,7 @@ impl<'a> Checker<'a> {
             receiver: Box::new(Expr::Ident(destination_name.to_string(), span)),
             method: Syntax::conversion_method_for_source(source_leaf),
             method_span: span,
+            owner_type_args: Vec::new(),
             type_args: Vec::new(),
             args: vec![crate::AST::CallArg {
                 convention: crate::AST::AccessConvention::Read,
@@ -341,6 +344,7 @@ impl<'a> Checker<'a> {
                 .expect("Float conversion is registered")
                 .to_string(),
             method_span: span,
+            owner_type_args: Vec::new(),
             type_args: Vec::new(),
             args: vec![crate::AST::CallArg {
                 convention: crate::AST::AccessConvention::Read,
@@ -625,6 +629,7 @@ impl<'a> Checker<'a> {
                             receiver: left,
                             method: method.to_string(),
                             method_span: span,
+                            owner_type_args: Vec::new(),
                             type_args: Vec::new(),
                             args: vec![crate::AST::CallArg {
                                 convention: crate::AST::AccessConvention::Read,

@@ -60,7 +60,8 @@ impl<'a> Parser<'a> {
                                 continue;
                             }
                         }
-                        // D-SERDE6: optional call-site turbofish `decode<Order>(…)`.
+                        // D-GENERIC-CALL1=A: optional call-site type arguments on
+                        // every method call, such as `decode<Order>(…)`.
                         let type_args = if self.at_turbofish() {
                             self.parse_turbofish()?
                         } else {
@@ -77,6 +78,7 @@ impl<'a> Parser<'a> {
                                 receiver: Box::new(expr),
                                 method: member.clone(),
                                 method_span: member_span,
+                                owner_type_args: Vec::new(),
                                 type_args,
                                 args: vec![CallArg {
                                     convention: AccessConvention::Read,
@@ -160,6 +162,7 @@ impl<'a> Parser<'a> {
                                 receiver: Box::new(expr),
                                 method: member,
                                 method_span: member_span,
+                                owner_type_args: Vec::new(),
                                 type_args,
                                 args,
                                 recv_type: None,
@@ -230,6 +233,7 @@ impl<'a> Parser<'a> {
                                     receiver: base.clone(),
                                     method: member.clone(),
                                     method_span: *member_span,
+                                    owner_type_args: Vec::new(),
                                     type_args: Vec::new(),
                                     args: vec![CallArg {
                                         convention: AccessConvention::Read,
@@ -336,7 +340,28 @@ impl<'a> Parser<'a> {
                     }
                     TokKind::LBracket => {
                         let open = self.bump().span;
-                        let start = self.expr()?;
+                        // D-LAYOUT-FACTS1=B: `[.field]` is a typed selector,
+                        // not a leading-dot enum literal. Store it in the
+                        // existing identifier node with an internal sentinel;
+                        // formatter and TIR unwrap it at their boundaries.
+                        let start = if matches!(self.peek().kind, TokKind::Dot)
+                            && matches!(&self.peek2().kind, TokKind::Ident(_))
+                            && matches!(
+                                self.peek3().kind,
+                                TokKind::RBracket | TokKind::DotDot
+                            )
+                        {
+                            let dot = self.bump().span;
+                            let (name, name_span) = self.expect_ident(
+                                "after `.` in a layout field selector",
+                            )?;
+                            Expr::Ident(
+                                Syntax::layout_selector(&name),
+                                Span::new(dot.start, name_span.end),
+                            )
+                        } else {
+                            self.expr()?
+                        };
                         if matches!(self.peek().kind, TokKind::DotDot) {
                             self.bump();
                             let end = self.expr()?;

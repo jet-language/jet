@@ -472,18 +472,22 @@ pub fn require_exact_labels(
         let Some(arg) = args.get(index) else { continue };
         match &arg.label {
             Some((actual, _)) if actual == expected => {}
+            // D-APILABEL1=A: a Core named form publishes label-only parameters,
+            // so a wrong label is an unknown one and a missing label is a
+            // label-only parameter passed by position — the same two codes a
+            // user-defined call reports.
             Some((actual, label_span)) => diags.push(Diagnostic::error(
-                "E0125",
-                format!("`{api}` has no `{actual}:` option at argument {}", index + 1),
-                format!("the ratified named form requires `{expected}:` at this position; labels never reorder arguments"),
+                "E0764",
+                format!("`{api}` has no parameter labelled `{actual}`"),
+                "a label binds an argument to the parameter of that name".to_string(),
                 format!("write `{expected}:` here"),
                 Some(*label_span),
             )),
             None => diags.push(Diagnostic::error(
-                "E0125",
-                format!("`{api}` requires `{expected}:` at argument {}", index + 1),
-                "this is a ratified named form, so its label is part of the public syntax".to_string(),
-                format!("write `{expected}:` before this value"),
+                "E0769",
+                format!("`{expected}` is a label-only parameter of `{api}`"),
+                "this Core form publishes its labels, so the call says what each value means".to_string(),
+                format!("write `{expected}: …` for this argument"),
                 Some(span),
             )),
         }

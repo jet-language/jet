@@ -62,12 +62,23 @@ pub(crate) struct MethodSig {
     is_pub: bool,
     params: Vec<(AccessConvention, Type)>,
     return_type: Option<Type>,
+    /// D-GENERIC-CALL1=A: method-owned type parameters, distinct from the
+    /// receiver's generic arguments.
+    type_params: Vec<crate::AST::TypeParam>,
     is_static: bool,
     self_conv: Option<AccessConvention>,
     /// D-NARG1 (S61): parameter names and default-value presence, parallel to
     /// `params`. Excludes `self` (index 0 of params is self when self_conv is
     /// Some; param_info starts from the first non-self param).
     pub(crate) param_info: Vec<(String, bool)>,
+    /// D-APILABEL1=A: public call label and zone, parallel to `param_info`
+    /// (so it also excludes `self`).
+    pub(crate) param_call: Vec<(String, crate::AST::ParamZone)>,
+    /// D-VARIADIC1: parallel to `param_info` — true when that parameter is a
+    /// rest parameter. The binder needs it to know the parameter may be left
+    /// unbound; without it a labelled call to a variadic method reports a
+    /// missing argument that is not missing.
+    pub(crate) param_variadic: Vec<bool>,
     /// D-NARG1 (S61): default expressions for parameters, parallel to param_info.
     /// `None` when no default; only trailing params may have defaults.
     pub(crate) defaults: Vec<Option<crate::AST::Expr>>,
@@ -477,12 +488,18 @@ fn func_to_method_sig(f: &Func) -> MethodSig {
             .map(|p| (p.convention, p.ty.clone()))
             .collect(),
         return_type: f.return_type.clone(),
+        type_params: f.type_params.clone(),
         is_static: self_param.is_none(),
         self_conv: self_param.map(|p| p.convention),
         param_info: non_self_params
             .clone()
             .map(|p| (p.name.clone(), p.default.is_some()))
             .collect(),
+        param_call: non_self_params
+            .clone()
+            .map(|p| (p.call_label().to_string(), p.zone))
+            .collect(),
+        param_variadic: non_self_params.clone().map(|p| p.variadic).collect(),
         defaults: non_self_params
             .map(|p| p.default.as_ref().map(|d| *d.clone()))
             .collect(),
@@ -510,10 +527,16 @@ fn func_to_sig(f: &Func) -> FuncSig {
                 (p.convention, ty)
             })
             .collect(),
+        root_param: f.params.first().is_some_and(|p| p.root),
         param_info: f
             .params
             .iter()
             .map(|p| (p.name.clone(), p.default.is_some()))
+            .collect(),
+        param_call: f
+            .params
+            .iter()
+            .map(|p| (p.call_label().to_string(), p.zone))
             .collect(),
         defaults: f
             .params
@@ -555,7 +578,16 @@ fn extern_to_sig(ef: &ExternFn, is_c_abi: bool) -> FuncSig {
                 (p.convention, ty)
             })
             .collect(),
+        // D-CALLDUAL1=E: foreign functions use the same first bare-read
+        // receiver contract as ordinary top-level functions. Keep the marker
+        // in the signature so dot-call lookup cannot silently discard it.
+        root_param: ef.params.first().is_some_and(|p| p.root),
         param_info: ef.params.iter().map(|p| (p.name.clone(), false)).collect(),
+        param_call: ef
+            .params
+            .iter()
+            .map(|p| (p.call_label().to_string(), p.zone))
+            .collect(),
         defaults: ef.params.iter().map(|_| None).collect(),
         param_variadic: ef.params.iter().map(|p| p.variadic).collect(),
         variadic_bounds: ef.params.last().and_then(|p| p.variadic_bound_list.clone()),
@@ -1310,6 +1342,9 @@ pub(crate) struct Checker<'a> {
     expected_type: Option<Type>,
     /// Collections currently read by an active `for x in xs` loop (E0507).
     iter_borrowed: HashSet<String>,
+    /// Card #1440: NoElse-terminated dispatch chains already coverage-checked
+    /// (chain span starts) — every level shares one span, the outermost wins.
+    noelse_chains_checked: HashSet<usize>,
     /// Loop bindings that lend one `ViewMut<T>` element from a collection.
     /// These values may edit during the iteration but may not be retained.
     lending_view_loop_vars: HashSet<String>,
@@ -1615,6 +1650,7 @@ impl<'a> Checker<'a> {
                         .expect("Float conversion is registered")
                         .to_string(),
                     method_span: span,
+                    owner_type_args: Vec::new(),
                     type_args: Vec::new(),
                     args: vec![crate::AST::CallArg {
                         convention: crate::AST::AccessConvention::Read,
@@ -1831,6 +1867,8 @@ impl<'a> Checker<'a> {
 
 pub mod ApiFreeze;
 mod Bundle;
+/// D-APILABEL1=A: the one argument binder every call form goes through.
+pub(crate) mod CallBinder;
 mod Captures;
 mod CheckerCli;
 mod CheckerCore;

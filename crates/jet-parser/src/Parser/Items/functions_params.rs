@@ -2,6 +2,7 @@ use super::super::{
     AccessConvention, Diagnostic, EnumDef, Func, MetaAttr, Param, Parser, Span, StructDef, Syntax,
     TokKind, Type,
 };
+use crate::AST::ParamZone;
 
 impl<'a> Parser<'a> {
         #[allow(clippy::too_many_arguments)]
@@ -63,18 +64,12 @@ impl<'a> Parser<'a> {
             };
             let type_params = self.parse_opt_type_params()?;
             self.expect(TokKind::LParen, "after the function name")?;
-            let mut params = Vec::new();
-            if !matches!(self.peek().kind, TokKind::RParen) {
-                loop {
-                    params.push(self.param()?);
-                    if matches!(self.peek().kind, TokKind::RParen) {
-                        break;
-                    }
-                    self.expect(TokKind::Comma, "between parameters")?;
-                }
-            }
-            self.expect(TokKind::RParen, "to close the parameter list")?;
+            let params = self.parse_param_list()?;
             self.validate_variadic_params(&params);
+            self.validate_param_labels(&params);
+            if external_type.is_some() {
+                self.reject_root_method_params(&params);
+            }
     
             // D-ARROW-CONTROL1=A: an optional `=[Net, DB]=>` callable effect
             // arrow. Effect names are validated in sema. D-EFF2 keeps `via f`
@@ -398,13 +393,160 @@ impl<'a> Parser<'a> {
             )
         }
     
+        /// D-APILABEL1=A: parse `(` … `)` parameters including the two zone
+        /// separators. `/` closes the positional-only zone — every parameter
+        /// written before it forbids a label. `*` opens the label-only zone —
+        /// every parameter after it requires one. Unmarked parameters between
+        /// them accept either call form.
+        ///
+        /// The caller has already consumed the `(`; this consumes through `)`.
+        pub(super) fn parse_param_list(&mut self) -> Result<Vec<Param>, Diagnostic> {
+            let mut params: Vec<Param> = Vec::new();
+            let mut zone = ParamZone::Either;
+            let mut slash: Option<Span> = None;
+            let mut star: Option<Span> = None;
+            if !matches!(self.peek().kind, TokKind::RParen) {
+                loop {
+                    match self.peek().kind {
+                        TokKind::Slash => {
+                            let span = self.bump().span;
+                            if let Some(first) = slash {
+                                self.diags.push(Self::repeated_param_zone(Syntax::PARAM_ZONE_POSITIONAL_ONLY, span, first));
+                            } else if let Some(star_span) = star {
+                                self.diags.push(Self::zone_out_of_order(span, star_span));
+                            } else if params.is_empty() {
+                                self.diags.push(Self::empty_param_zone(
+                                    Syntax::PARAM_ZONE_POSITIONAL_ONLY,
+                                    "a positional-only zone needs at least one parameter before the `/`",
+                                    "write the positional-only parameters before `/`, or remove the `/`",
+                                    span,
+                                ));
+                            } else {
+                                slash = Some(span);
+                                for param in params.iter_mut() {
+                                    param.zone = ParamZone::PositionalOnly;
+                                }
+                            }
+                        }
+                        TokKind::Star => {
+                            let span = self.bump().span;
+                            if let Some(first) = star {
+                                self.diags.push(Self::repeated_param_zone(Syntax::PARAM_ZONE_LABEL_ONLY, span, first));
+                            } else {
+                                star = Some(span);
+                                zone = ParamZone::LabelOnly;
+                            }
+                        }
+                        _ => {
+                            let mut param = self.param()?;
+                            param.zone = zone;
+                            params.push(param);
+                        }
+                    }
+                    if matches!(self.peek().kind, TokKind::RParen) {
+                        break;
+                    }
+                    // No trailing comma: a parameter (or a zone separator) has
+                    // to follow. D-APILABEL1 changed nothing here, and lambda
+                    // and call-argument lists reject one too.
+                    self.expect(TokKind::Comma, "between parameters")?;
+                }
+            }
+            self.expect(TokKind::RParen, "to close the parameter list")?;
+            if let Some(span) = star {
+                if !params.iter().any(|p| p.zone == ParamZone::LabelOnly) {
+                    self.diags.push(Self::empty_param_zone(
+                        Syntax::PARAM_ZONE_LABEL_ONLY,
+                        "a label-only zone needs at least one parameter after the `*`",
+                        "write the label-only parameters after `*`, or remove the `*`",
+                        span,
+                    ));
+                }
+            }
+            Ok(params)
+        }
+
+        fn repeated_param_zone(sigil: &str, span: Span, first: Span) -> Diagnostic {
+            let _ = first;
+            Diagnostic::error(
+                "E0763",
+                format!("`{sigil}` appears twice in this parameter list"),
+                format!(
+                    "each parameter list has at most one positional-only `{}` and one label-only `{}`",
+                    Syntax::PARAM_ZONE_POSITIONAL_ONLY, Syntax::PARAM_ZONE_LABEL_ONLY
+                ),
+                format!("remove the extra `{sigil}`"),
+                Some(span),
+            )
+        }
+
+        fn zone_out_of_order(slash: Span, star: Span) -> Diagnostic {
+            let _ = star;
+            Diagnostic::error(
+                "E0763",
+                format!(
+                    "`{}` comes after `{}` in this parameter list",
+                    Syntax::PARAM_ZONE_POSITIONAL_ONLY, Syntax::PARAM_ZONE_LABEL_ONLY
+                ),
+                "the zones read left to right: positional-only, then either, then label-only"
+                    .to_string(),
+                format!(
+                    "move `{}` before `{}`",
+                    Syntax::PARAM_ZONE_POSITIONAL_ONLY, Syntax::PARAM_ZONE_LABEL_ONLY
+                ),
+                Some(slash),
+            )
+        }
+
+        fn empty_param_zone(
+            sigil: &str,
+            why: &str,
+            fix: &str,
+            span: Span,
+        ) -> Diagnostic {
+            Diagnostic::error(
+                "E0763",
+                format!("`{sigil}` marks an empty parameter zone"),
+                why.to_string(),
+                fix.to_string(),
+                Some(span),
+            )
+        }
+
         pub(super) fn param(&mut self) -> Result<Param, Diagnostic> {
+            let root = if matches!(self.peek().kind, TokKind::Hash)
+                && matches!(&self.peek2().kind, TokKind::Ident(name) if name == Syntax::CONTRACT_ROOT)
+            {
+                let marker = self.parse_rule_marker()?;
+                self.bind_rule_fact(
+                    marker.name_span,
+                    None,
+                    crate::Policy::RuleSite::Parameter,
+                );
+                true
+            } else {
+                false
+            };
             let mut convention = self.parse_access_prefix();
-            let (name, name_span) = if matches!(self.peek().kind, TokKind::KwSelf) {
+            let (mut name, mut name_span) = if matches!(self.peek().kind, TokKind::KwSelf) {
                 let span = self.bump().span;
                 (Syntax::KW_SELF.to_string(), span)
             } else {
                 self.expect_ident("for a parameter name")?
+            };
+            // D-APILABEL1=A: `timeout seconds: Int` — two adjacent identifiers
+            // split the public call label from the local parameter name. The
+            // first one parsed is the label; the second is what the body reads.
+            let public_label = if name != Syntax::KW_SELF
+                && matches!(self.peek().kind, TokKind::Ident(_))
+            {
+                let (local, local_span) = self.expect_ident("for the local parameter name")?;
+                let label = (name, name_span);
+                name = local;
+                name_span = local_span;
+                Some(label)
+            } else {
+                None
             };
             let (ty, ty_span, variadic, variadic_bound_list) =
                 if matches!(self.peek().kind, TokKind::Colon) {
@@ -482,8 +624,13 @@ impl<'a> Parser<'a> {
             }
             Ok(Param {
                 convention,
+                root,
                 name,
                 name_span,
+                public_label,
+                // `parse_param_list` assigns the real zone; a parameter parsed
+                // outside a zoned list keeps the unmarked default.
+                zone: ParamZone::default(),
                 ty,
                 ty_span,
                 default,
@@ -494,6 +641,34 @@ impl<'a> Parser<'a> {
         }
     
         /// D-VARIADIC1: a variadic `...` parameter must be the last one in the list.
+        /// D-APILABEL1=A: two parameters may not publish the same call label.
+        /// A label binds by name, so a repeat makes the second parameter
+        /// unreachable and turns every call into nonsense — the binder would
+        /// report the first one twice and the second one missing.
+        pub(super) fn validate_param_labels(&mut self, params: &[Param]) {
+            for (index, param) in params.iter().enumerate() {
+                if param.name == Syntax::KW_SELF {
+                    continue;
+                }
+                let label = param.call_label();
+                let clash = params
+                    .iter()
+                    .take(index)
+                    .find(|earlier| earlier.name != Syntax::KW_SELF && earlier.call_label() == label);
+                if let Some(earlier) = clash {
+                    let _ = earlier;
+                    self.diags.push(Diagnostic::error(
+                        "E0770",
+                        format!("two parameters both publish the label `{label}`"),
+                        "a label binds an argument by name, so a repeated one leaves the second parameter with no way to be called"
+                            .to_string(),
+                        format!("give one of them a different label, as in `{label}_2 {}: …`", param.name),
+                        Some(param.call_label_span()),
+                    ));
+                }
+            }
+        }
+
         pub(super) fn validate_variadic_params(&mut self, params: &[Param]) {
             for (i, p) in params.iter().enumerate() {
                 if p.variadic && i + 1 != params.len() {
@@ -505,6 +680,41 @@ impl<'a> Parser<'a> {
                         Some(p.name_span),
                     ));
                 }
+                if p.root && i != 0 {
+                    self.diags.push(Diagnostic::error(
+                        "E0103",
+                        format!("`#{}` must mark the first parameter", Syntax::CONTRACT_ROOT),
+                        "a reversible dot call has one receiver, and it is always the first value parameter"
+                            .to_string(),
+                        format!("move `#{}` to the first parameter", Syntax::CONTRACT_ROOT),
+                        Some(p.name_span),
+                    ));
+                }
+                if p.root && p.convention != AccessConvention::Read {
+                    self.diags.push(Diagnostic::error(
+                        "E0103",
+                        format!("`#{}` must mark a bare-read parameter", Syntax::CONTRACT_ROOT),
+                        "dot-call syntax never hides a write or move capability behind the receiver"
+                            .to_string(),
+                        format!("remove `&` or `^` from the `#{}` parameter", Syntax::CONTRACT_ROOT),
+                        Some(p.name_span),
+                    ));
+                }
+            }
+        }
+
+        pub(super) fn reject_root_method_params(&mut self, params: &[Param]) {
+            for param in params.iter().filter(|param| param.root) {
+                self.diags.push(Diagnostic::error(
+                    "E0103",
+                    format!("`#{}` is only valid on a top-level function", Syntax::CONTRACT_ROOT),
+                    "a method already owns its receiver after the dot; marking another receiver would make dispatch ambiguous".to_string(),
+                    format!(
+                        "remove `#{}`, or move the function to module scope",
+                        Syntax::CONTRACT_ROOT
+                    ),
+                    Some(param.name_span),
+                ));
             }
         }
     

@@ -1,15 +1,22 @@
 //! Exhaustive TStmt evaluation (#777).
 use std::collections::HashMap;
 use std::sync::{mpsc, Arc};
+use crate::AST::Type;
 use crate::Codegen::TIR::{TForInMethod, TIfCond, TPatternPosition, TPlace, TStmt};
 use crate::Comptime::Builtins::{as_bool, as_int, eval_binop};
 use crate::Comptime::CtValue;
 use crate::Diagnostics::Diagnostic;
 use super::{
     encode_view_mut_path, load_view_mut_owner_list, parse_view_mut_path, raw_place_local,
-    store_view_mut_owner_list, unsupported, EvalCtx, Flow, ViewMutPathStep,
+    progress_elapsed, progress_emit, progress_iter_parts, progress_no_color, progress_now,
+    progress_source_has_exact_total, store_view_mut_owner_list, unsupported, EvalCtx, Flow,
+    ViewMutPathStep,
 };
 use crate::Codegen::TIR::{TExpr, TExprKind};
+
+mod progress_semantics {
+    include!("../../../Prelude/Core/Progress.rs");
+}
 
 /// Inclusive place-region handle used while evaluating `TStmt::SplitViews`.
 /// Reuses the `__JetViewMut` field shape so later splits can resolve absolute
@@ -27,6 +34,100 @@ fn place_region(base: &str, path: &[ViewMutPathStep], start: i64, end: i64) -> C
         type_name: "__JetViewMut".into(),
         fields,
     }
+}
+
+fn progress_wrapper_parts(
+    value: &CtValue,
+) -> Option<(Vec<CtValue>, String, String, f64, Vec<usize>, usize, usize, bool)> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return None;
+    };
+    if type_name != "__JetProgressIter" {
+        return None;
+    }
+    let items = fields.iter().find_map(|(name, value)| {
+        (name == "items").then(|| match value {
+            CtValue::List(items) => Some(items.clone()),
+            _ => None,
+        })
+    })??;
+    let description = fields.iter().find_map(|(name, value)| {
+        (name == "description").then(|| match value {
+            CtValue::Str(value) => Some(value.clone()),
+            _ => None,
+        })
+    })??;
+    let format = fields.iter().find_map(|(name, value)| {
+        (name == "format").then(|| match value {
+            CtValue::Str(value) => Some(value.clone()),
+            _ => None,
+        })
+    })??;
+    let started_at = fields
+        .iter()
+        .find_map(|(name, value)| {
+            (name == "started_at").then(|| match value {
+                CtValue::Float(value) => Some(value.as_f64()),
+                CtValue::Int(value) => Some(*value as f64),
+                _ => None,
+            })
+        })
+        .flatten()
+        .unwrap_or_else(progress_now);
+    let pulls = fields
+        .iter()
+        .find(|(name, _)| name == "pulls")
+        .and_then(|(_, value)| match value {
+            CtValue::List(values) => values
+                .iter()
+                .map(|value| match value {
+                    CtValue::Int(value) => Some((*value).max(0) as usize),
+                    _ => None,
+                })
+                .collect::<Option<Vec<_>>>(),
+            _ => None,
+        })
+        .unwrap_or_else(|| vec![1; items.len()]);
+    let tail = fields
+        .iter()
+        .find_map(|(name, value)| {
+            (name == "tail").then(|| match value {
+                CtValue::Int(value) => Some((*value).max(0) as usize),
+                _ => None,
+            })
+        })
+        .flatten()
+        .unwrap_or(0);
+    let total = fields
+        .iter()
+        .find_map(|(name, value)| {
+            (name == "total").then(|| match value {
+                CtValue::Int(value) => Some((*value).max(0) as usize),
+                _ => None,
+            })
+        })
+        .flatten()
+        .unwrap_or(items.len());
+    let known_total = fields
+        .iter()
+        .find_map(|(name, value)| {
+            (name == "known_total").then(|| match value {
+                CtValue::Bool(value) => Some(*value),
+                _ => None,
+            })
+        })
+        .flatten()
+        .unwrap_or(true);
+    Some((
+        items,
+        description,
+        format,
+        started_at,
+        pulls,
+        tail,
+        total,
+        known_total,
+    ))
 }
 
 fn parse_place_region(value: &CtValue) -> Option<(String, Vec<ViewMutPathStep>, i64, i64)> {
@@ -658,11 +759,91 @@ impl<'a> EvalCtx<'a> {
                 body,
                 ..
             } => {
-                let coll = self.eval_expr(source, scope)?;
-                if let Some(TForInMethod::Iterable {
-                    coll_type,
-                    iter_type,
-                }) = method_kind
+                let mut progress = None;
+                let mut coll = if let TExprKind::CoreCall {
+                    module,
+                    method,
+                    args,
+                    ..
+                } = &source.kind
+                {
+                    if module == "core.io"
+                        && method == "progress"
+                        && args.len() >= 1
+                        && !matches!(args.first().map(|arg| &arg.ty), Some(Type::String))
+                    {
+                        let evaluated = self.eval_expr(&args[0], scope)?;
+                        let (coll, iter_known_total) = match progress_iter_parts(&evaluated) {
+                            Some((items, known_total)) => {
+                                (CtValue::List(items), Some(known_total))
+                            }
+                            None => (evaluated, None),
+                        };
+                        let description = match args.get(1) {
+                            Some(arg) => match self.eval_expr(arg, scope)? {
+                                CtValue::Str(value) => value,
+                                _ => return Err(unsupported("progress description", self.span())),
+                            },
+                            None => "Progress".to_string(),
+                        };
+                        let format = match args.get(2) {
+                            Some(arg) => match self.eval_expr(arg, scope)? {
+                                CtValue::Str(value) => value,
+                                _ => return Err(unsupported("progress format", self.span())),
+                            },
+                            None => String::new(),
+                        };
+                        let total = match &coll {
+                            CtValue::List(items) => items.len(),
+                            _ => return Err(unsupported("progress source", self.span())),
+                        };
+                        let known_total = iter_known_total.unwrap_or_else(|| match args.first().map(|arg| &arg.ty) {
+                            Some(Type::Apply { name, .. })
+                                if name == crate::Syntax::TYPE_ITER => args
+                                    .first()
+                                    .is_some_and(progress_source_has_exact_total),
+                            _ => true,
+                        });
+                        progress = Some((
+                            description,
+                            format,
+                            progress_now(),
+                            total,
+                            vec![1; total],
+                            0,
+                            known_total,
+                        ));
+                        coll
+                    } else {
+                        self.eval_expr(source, scope)?
+                    }
+                } else {
+                    self.eval_expr(source, scope)?
+                };
+                if let Some((items, _)) = progress_iter_parts(&coll) {
+                    coll = CtValue::List(items);
+                }
+                if progress.is_none() {
+                    if let Some((items, description, format, started_at, pulls, tail, total, known_total)) =
+                        progress_wrapper_parts(&coll)
+                    {
+                        progress = Some((
+                            description,
+                            format,
+                            started_at,
+                            total,
+                            pulls,
+                            tail,
+                            known_total,
+                        ));
+                        coll = CtValue::List(items);
+                    }
+                }
+                if progress.is_none() {
+                    if let Some(TForInMethod::Iterable {
+                        coll_type,
+                        iter_type,
+                    }) = method_kind
                 {
                     let iter_func = self
                         .funcs
@@ -705,6 +886,7 @@ impl<'a> EvalCtx<'a> {
                     }
                     return Ok(Flow::Normal);
                 }
+                }
                 if method_kind.is_some() {
                     return Err(unsupported("for-in method collection", self.span()));
                 }
@@ -741,8 +923,45 @@ impl<'a> EvalCtx<'a> {
                 match coll {
                     CtValue::List(items) => {
                         let mut i = 0usize;
+                        let mut progress_count = 0usize;
+                        let mut progress_yielded = 0usize;
+                        let mut naturally_exhausted = true;
                         while i < items.len() {
                             self.burn()?;
+                            let next_i = i.saturating_add(stride as usize).min(items.len());
+                            if let Some((description, format, started_at, total, pulls, _, known_total)) = progress.as_ref() {
+                                let requested = if progress_count == 0 {
+                                    1
+                                } else {
+                                    stride as usize
+                                };
+                                let end = progress_yielded
+                                    .saturating_add(requested)
+                                    .min(pulls.len());
+                                let raw_pulls: usize = pulls[progress_yielded..end].iter().sum();
+                                progress_yielded = end;
+                                let raw_pulls = if *known_total {
+                                    raw_pulls.min(total.saturating_sub(progress_count))
+                                } else {
+                                    raw_pulls
+                                };
+                                if raw_pulls != 0 {
+                                    for pulled in
+                                        (progress_count + 1)..=(progress_count + raw_pulls)
+                                    {
+                                    let text = progress_semantics::jet_progress_render(
+                                        description,
+                                        format,
+                                        pulled,
+                                        (*known_total).then_some(*total),
+                                        progress_elapsed(*started_at),
+                                        progress_no_color(),
+                                    );
+                                    progress_emit(self.sink.as_ref(), &text);
+                                    }
+                                }
+                                progress_count = progress_count.saturating_add(raw_pulls);
+                            }
                             // D-RANGE-EXCL1=C: two bindings are index then item;
                             // one binding stays item-only.
                             if let Some(v2) = var2 {
@@ -753,17 +972,44 @@ impl<'a> EvalCtx<'a> {
                             }
                             match self.exec_stmts(body, scope)? {
                                 Flow::Normal | Flow::Continue => {}
-                                Flow::Break => break,
+                                Flow::Break => {
+                                    naturally_exhausted = false;
+                                    break;
+                                }
                                 Flow::BreakLabel(ref name)
                                     if label.as_deref() == Some(name.as_str()) =>
                                 {
+                                    naturally_exhausted = false;
                                     break
                                 }
                                 Flow::ContinueLabel(ref name)
                                     if label.as_deref() == Some(name.as_str()) => {}
                                 other => return Ok(other),
                             }
-                            i = i.saturating_add(stride as usize);
+                            i = next_i;
+                        }
+                        if naturally_exhausted {
+                            if let Some((description, format, started_at, total, pulls, tail, known_total)) = progress.as_ref() {
+                                let remaining = pulls[progress_yielded..].iter().sum::<usize>() + *tail;
+                                let remaining = if *known_total {
+                                    remaining.min(total.saturating_sub(progress_count))
+                                } else {
+                                    remaining
+                                };
+                                if remaining != 0 {
+                                    for pulled in (progress_count + 1)..=(progress_count + remaining) {
+                                    let text = progress_semantics::jet_progress_render(
+                                        description,
+                                        format,
+                                        pulled,
+                                        (*known_total).then_some(*total),
+                                        progress_elapsed(*started_at),
+                                        progress_no_color(),
+                                    );
+                                    progress_emit(self.sink.as_ref(), &text);
+                                    }
+                                }
+                            }
                         }
                         Ok(Flow::Normal)
                     }

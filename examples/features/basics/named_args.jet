@@ -1,9 +1,13 @@
-// D-NARG1 (S61): named args and defaults on methods.
-// Labels and defaults work on methods just like free functions.
+// D-APILABEL1=A: argument labels and parameter contracts.
+//
+// A written label binds by NAME, so a call may skip a default and write the
+// labelled arguments in any order. `/` closes the positional-only zone and
+// `*` opens the label-only zone. `timeout seconds: Int` publishes the label
+// `timeout` while the body reads `seconds`.
 struct Rect {
     width: Float
     height: Float
-    
+
     fn new(width: Float, height: Float) => Rect { return Rect.{width: width, height: height} }
 
     fn area(self) => Float = (self.width * self.height)
@@ -11,12 +15,30 @@ struct Rect {
     fn scale(self, factor: Float, clamp: Bool = false) => Rect {
         scaled_w :: (self.width * factor)
         scaled_h :: (self.height * factor)
-        if clamp {
-            return Rect.{width: 100.0, height: 100.0}
-        }
+        if clamp { return Rect.{width: 100.0, height: 100.0} }
         return Rect.{width: scaled_w, height: scaled_h}
     }
 }
+
+// `host` is positional-only: its name stays free to change. `timeout` and
+// `tls` are label-only, so every call says which policy it is setting.
+// `timeout seconds` splits the public label from the local name.
+fn connect(host: String, /, *, timeout seconds: Int = 30, tls: Bool = true) => String {
+    return "{host} t={seconds} tls={tls}"
+}
+
+// Prints its tag, then hands back its value — so the output shows the order
+// the supplied expressions actually ran in.
+fn note(label: String, value: Float) => Float {
+    print("eval {label}")
+    return value
+}
+
+// D-APILABEL1=A: a function type reuses the parameter grammar, so its zones
+// are part of callable identity. `apply` only accepts a labelled call.
+fn apply(action: fn(*, force: Bool) => Int) => Int { return action(force: true) }
+
+fn saver(force: Bool) => Int = 7
 
 fn run() {
     r :: Rect.new(width: 4.0, height: 3.0)
@@ -31,4 +53,17 @@ fn run() {
     // explicit labeled Bool
     r4 :: r.scale(1.0, clamp: true)
     print("{r4.width}")
+
+    // Reordered labels, and the `timeout` default skipped over.
+    print(connect("db.internal", tls: false, timeout: 5))
+    print(connect("db.internal", tls: false))
+    print(connect("db.internal"))
+
+    // Supplied expressions run left to right in the order they were WRITTEN,
+    // not in declaration order — so "eval h" prints before "eval w".
+    both :: Rect.new(height: note("h", 2.0), width: note("w", 5.0))
+    print("{both.area()}")
+
+    // A label-only parameter on a function TYPE.
+    print("{apply(saver)}")
 }

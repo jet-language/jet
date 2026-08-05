@@ -9,7 +9,7 @@ missing domains stay implicit.
 |---------|--------|-------|
 | `core.compress.gzip` | shipped | compress/decompress `[U8]`; Prelude codecs |
 | `core.compress.zstd` | shipped | compress/decompress `[U8]` |
-| `core.archive` zip/tar | shipped ABI bridge; source-authority closeout open | package boundary plus one canonical Rust ABI source tree (`corelib/core.archive`); ordinary-Jet behavior is not claimed |
+| `core.archive` zip/tar | ordinary-Jet package plus audited ABI kernel | reachable `archive.jet` source closure; only its internal byte-format ABI crosses into `corelib/core.archive/pkgs/archive/src/lib.rs` |
 | HTTP response compression middleware | non-goal this epoch | open in HTTP table; transport gzip decode is separate |
 | Brotli / lz4 public Core modules | non-goal | not ratified; compose via FFI/`#Unsafe` if needed |
 

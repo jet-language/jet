@@ -647,7 +647,8 @@ pub(crate) fn core_crypto_nominal(ty: Type) -> Type {
             len,
             len_symbol,
         },
-        Type::Fn { params, ret, effect_bound, return_view_provenance } => Type::Fn {
+Type::Fn { params, ret, effect_bound, param_contract, return_view_provenance } => Type::Fn {
+                    param_contract: param_contract.clone(),
             params: params.into_iter().map(core_crypto_nominal).collect(),
             ret: ret.map(|ty| Box::new(core_crypto_nominal(*ty))),
             effect_bound,
@@ -818,6 +819,14 @@ pub(crate) fn one_pass_materializer(ty: &Type) -> Option<&'static str> {
     }
 }
 
+/// Core types that carry a Prelude display but are not user items, so they
+/// never reach the auto-derive sets. Every "can this be shown" predicate must
+/// agree on this list. Splitting it is what let interpolation accept a value
+/// that print rejected.
+pub(crate) fn is_core_shown_type(name: &str) -> bool {
+    matches!(name, "ServiceUpgradeReceipt")
+}
+
 pub(crate) fn is_printable(
     ty: &Type,
     registry: &TypeRegistry,
@@ -838,6 +847,7 @@ pub(crate) fn is_printable(
         Type::Named(n) => {
             registry.is_unit_type(n)
                 || trait_reg.implements_trait(n, Generics::PRINTABLE)
+                || is_core_shown_type(n)
         }
         Type::Apply { .. } if ty.quantity_parts().is_some() => true,
         Type::Apply { name, .. } if name == "KeyRef" => true,
@@ -883,7 +893,7 @@ pub(crate) fn is_displayable(
         Type::Named(n) => {
             type_reg.is_unit_type(n)
                 || trait_reg.implements_trait(n, Generics::DISPLAY)
-                || n == "ServiceUpgradeReceipt"
+                || is_core_shown_type(n)
                 || matches!(
                     n.as_str(),
                     Syntax::TYPE_INT
@@ -987,7 +997,7 @@ pub(crate) fn is_debuggable(
         Type::Named(n) => {
             type_reg.is_unit_type(n)
                 || trait_reg.implements_trait(n, Generics::DEBUG)
-                || n == "ServiceUpgradeReceipt"
+                || is_core_shown_type(n)
         }
         Type::Apply { name, .. } if name == "KeyRef" => true,
         Type::Apply { .. } if ty.quantity_parts().is_some() => true,
@@ -1440,6 +1450,7 @@ mod tests {
                 ),
             ]))),
             effect_bound: None,
+            param_contract: None,
             return_view_provenance: None,
         };
 

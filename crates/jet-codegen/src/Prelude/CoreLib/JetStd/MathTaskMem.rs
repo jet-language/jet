@@ -595,6 +595,11 @@
         (JetSender { tx }, JetReceiver { inner })
     }
 
+    // D-STREAMYIELD1: the canonical pull/cancellation protocol lives in the
+    // shared Prelude scheduler. This module only exposes it under the `jet_std`
+    // namespace used by emitted AOT code.
+    pub use super::{jet_stream as stream, JetStream, JetStreamSender};
+
     /// D-TASKRUNTIME1=A: one-shot timer channel; wakes through the scheduler timer wheel.
     pub fn after(ms: i64) -> JetReceiver<()> {
         let (tx, rx) = channel::<()>();
@@ -677,6 +682,12 @@
     impl<T: Send> JetSender<T> {
         pub fn send(&self, value: T) {
             let _ = self.tx.send(value);
+        }
+
+        /// D-STREAMYIELD1: unlike task-channel `send`, a Stream producer must
+        /// observe that its consumer broke and stop the producer immediately.
+        pub fn send_stream(&self, value: T) -> bool {
+            self.tx.send(value)
         }
     }
     impl<T> Clone for JetSender<T> {

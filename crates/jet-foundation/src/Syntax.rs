@@ -12,6 +12,14 @@
 // KW_COMPTIME, KW_DERIVE, ATTR_TRACK, ATTR_LOCAL, ATTR_SHARED. Constants live in the private modules
 // below; keep this root file mentioning them so I7 audits can check one
 // canonical surface entrypoint.
+// D-GENERIC-CALL1=A: GENERIC_CALL_OPEN and GENERIC_CALL_CLOSE own the adjacent
+// call-site type-argument markers; they reuse the existing angle tokens.
+//
+// D-APILABEL1=A adds the two parameter-zone separators
+// PARAM_ZONE_POSITIONAL_ONLY (`/`) and PARAM_ZONE_LABEL_ONLY (`*`), written in
+// a parameter list rather than as operators. It also gives a parameter an
+// optional public label ahead of its local name (`timeout seconds: Int`),
+// which needs no new token. Retires the S61 fixed-position label rule.
 //
 // D-TRAILBLOCK2=A adds no token: retires D-TRAILBLOCK1 trailing `{ }` sugar.
 // Code arguments are ordinary `() => { … }` lambdas inside call parentheses;
@@ -47,6 +55,8 @@
 // exact form `defer close(^resource)`; KW_DEFER/RESOURCE_CLOSE are canonical.
 // D-SHAPE3a=A adds no token: expected-type `.new(...)` reuses MEM_ALLOC_NEW
 // and ordinary call punctuation, with the receiver resolved by sema.
+// D-GENERIC-CALL1=A adds no token: `call<T>(...)` reuses the existing angle and
+// call tokens for explicit type arguments on every generic call family.
 // D-SHAPE-OPAQUE-INFER1=A adds no token: `Type.new(...)` may omit generic
 // receiver arguments only when ordinary input/expected-type inference is unique.
 // D-SHAPE-CTORVERB1=C closes fresh-value construction under the `new` prefix:
@@ -79,7 +89,7 @@
 // D-IFDIST1=A (ratified 2026-07-28, card #1305) adds no token: any comparison
 // (`== != < > <= >=`) may mark `if subject OP { … }` dispatch. Bare arm atoms
 // desugar to `subject OP atom`; `|` unions those atoms; `&&`/`||` combine.
-// The same table is a Void-or-value expression in expression position.
+// The same table is a ()-or-value expression in expression position.
 // D-BRANCH-PREF1=A / D-BRANCH-ONELINE1=A / D-BRANCH-ELSEIF1=A /
 // D-BRANCH-LINT1=A / D-BRANCH-VALUE1=A / D-BRANCH-FMT1=C /
 // D-BRANCH-TEACH1=A (ratified 2026-07-28, card #1259) add no token:
@@ -138,6 +148,13 @@
 // `#Task` are retired spellings.
 pub const HTTP_ROUTE_PARAM_PREFIX: &str = ":";
 pub const HTTP_ROUTE_CATCH_ALL_PREFIX: &str = "*";
+
+/// D-CALLDUAL1=E: sema-only metadata carried on `Expr::MethodCall` until TIR
+/// lowers a resolved `#Root` call to the ordinary free-function/module-call
+/// shape. These strings are never source syntax.
+pub const INTERNAL_ROOT_CALL_LOCAL: &str = "__jet_root_call_local";
+pub const INTERNAL_ROOT_CALL_IMPORT_PREFIX: &str = "__jet_root_call_import:";
+pub const INTERNAL_ROOT_CALL_CORE_PREFIX: &str = "__jet_root_call_core:";
 
 // D-PARCAPTURE1=D (ratified 2026-07-20): every explicit parallel collection
 // adapter uses the owner-selected `para_` prefix. These are a clean break from

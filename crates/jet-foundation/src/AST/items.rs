@@ -1217,11 +1217,35 @@ impl EveryArg {
     }
 }
 
+/// D-APILABEL1=A: which call forms a parameter accepts. `/` closes the
+/// positional-only zone, `*` opens the label-only zone; a parameter written
+/// between them accepts either form.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ParamZone {
+    /// Before `/` — a label here is forbidden (E0767).
+    PositionalOnly,
+    /// The unmarked default — positional or labelled.
+    #[default]
+    Either,
+    /// After `*` — the label is required (E0769).
+    LabelOnly,
+}
+
 #[derive(Debug, Clone)]
 pub struct Param {
     pub convention: AccessConvention,
+    /// D-CALLDUAL1=E: `#Root` marks the first bare-read parameter that earns
+    /// the corresponding dot-call spelling.
+    pub root: bool,
     pub name: String,
     pub name_span: Span,
+    /// D-APILABEL1=A: the public call label when it differs from the local
+    /// name — `timeout seconds: Int` binds callers with `timeout:` while the
+    /// body reads `seconds`. `None` means the public label *is* `name`.
+    /// Public labels are callable type identity; local names are not.
+    pub public_label: Option<(String, Span)>,
+    /// D-APILABEL1=A: the call-form zone this parameter was declared in.
+    pub zone: ParamZone,
     pub ty: Type,
     pub ty_span: Span,
     /// S61: trailing `= expr` default value. Only trailing params may have defaults.
@@ -1246,6 +1270,24 @@ pub struct Param {
 }
 
 impl Param {
+    /// D-APILABEL1=A: the label a caller writes for this parameter. Defaults to
+    /// the local name; `timeout seconds: Int` publishes `timeout`.
+    pub fn call_label(&self) -> &str {
+        match &self.public_label {
+            Some((label, _)) => label.as_str(),
+            None => self.name.as_str(),
+        }
+    }
+
+    /// The span a diagnostic should point at when it is about this parameter's
+    /// public label.
+    pub fn call_label_span(&self) -> Span {
+        match &self.public_label {
+            Some((_, span)) => *span,
+            None => self.name_span,
+        }
+    }
+
     /// D-ANY-JAI1/D-VARARGBOUND1: the resolved trait-bound list for a variadic
     /// parameter, or `None` when it's the plain D-VARIADIC1 homogeneous-concrete
     /// form. `is_trait_name` lets each crate plug in its own trait-name lookup

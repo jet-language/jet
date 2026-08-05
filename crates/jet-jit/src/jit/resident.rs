@@ -19,6 +19,11 @@ pub(crate) fn fresh_runtime() -> JitRuntime {
         invocations: 0,
         channels: Vec::new(),
         senders: Vec::new(),
+        stream_consumers: std::collections::HashMap::new(),
+        stream_producers: std::collections::HashMap::new(),
+        stream_senders: std::collections::HashMap::new(),
+        next_stream_channel: -1,
+        next_stream_sender: -1,
         tasks: Vec::new(),
         task_controls: Vec::new(),
         task_groups: Vec::new(),
@@ -120,6 +125,14 @@ fn reset_run_heap(rt: &mut JitRuntime) {
     rt.heap.clear();
     crate::Data::clear_lazy_state();
     crate::Math::clear_math_values();
+    let stream_consumers = std::mem::take(&mut rt.stream_consumers);
+    let stream_producers = std::mem::take(&mut rt.stream_producers);
+    let stream_senders = std::mem::take(&mut rt.stream_senders);
+    drop(stream_senders);
+    drop(stream_producers);
+    drop(stream_consumers);
+    rt.next_stream_channel = -1;
+    rt.next_stream_sender = -1;
     rt.channels.clear();
     rt.senders.clear();
     rt.tasks.clear();

@@ -9,7 +9,7 @@ use crate::Syntax;
 use crate::Sema::Diagnostics::soft_public_use;
 use crate::AST::{
     AccessConvention, Call, CallArg, CallArgFlags, EnumLitArg, Expr, IndexKind, StrPart, Type,
-    TypedLitBody, UnOp,
+    TypedLitBody, UnOp, noelse_terminated,
 };
 use std::collections::HashSet;
 
@@ -83,7 +83,9 @@ impl<'a> Checker<'a> {
         *e = Expr::Call(Call {
             name: type_name.clone(),
             name_span: span,
+            type_args: Vec::new(),
             args,
+            resolved_ret: None,
             range_checked: false,
         });
         Some(Type::Named(type_name))
@@ -139,6 +141,7 @@ impl<'a> Checker<'a> {
         *e = Expr::Call(Call {
             name: Syntax::TYPE_REGEX.to_string(),
             name_span: span,
+            type_args: Vec::new(),
             args: vec![CallArg {
                 convention: AccessConvention::Read,
                 expr: Expr::Str(parts, literal_span),
@@ -147,6 +150,7 @@ impl<'a> Checker<'a> {
                 label: None,
                 spread: false,
             }],
+            resolved_ret: None,
             range_checked: false,
         });
         Some(Type::Named(Syntax::TYPE_REGEX.to_string()))
@@ -164,6 +168,11 @@ impl<'a> Checker<'a> {
             return None;
         }
         self.check_scoped_loan_read(e);
+        // Card #1440: an else-less all-pattern dispatch chain proves coverage
+        // once (E0307) before ordinary per-level inference walks its arms.
+        if matches!(e, Expr::If { .. }) && noelse_terminated(e) {
+            self.check_noelse_dispatch_chain(e);
+        }
         let result = self.infer_checked(e);
         self.leave_source_nesting();
         result
@@ -660,6 +669,7 @@ impl<'a> Checker<'a> {
                         .expect("Float has a canonical conversion method")
                         .to_string(),
                     method_span: *suffix_span,
+                    owner_type_args: Vec::new(),
                     type_args: Vec::new(),
                     args: vec![CallArg {
                         convention: AccessConvention::Read,
@@ -1511,6 +1521,7 @@ impl<'a> Checker<'a> {
                             receiver,
                             method: "indexes".to_string(),
                             method_span: span,
+                            owner_type_args: Vec::new(),
                             type_args: Vec::new(),
                             args: Vec::new(),
                             recv_type: None,
@@ -1559,6 +1570,7 @@ impl<'a> Checker<'a> {
                 receiver,
                 method,
                 method_span,
+                owner_type_args,
                 type_args,
                 args,
                 recv_type,
@@ -1614,8 +1626,8 @@ impl<'a> Checker<'a> {
                         return None;
                     };
                     **receiver = Expr::Ident(type_name, receiver.span());
-                    if type_args.is_empty() {
-                        *type_args = expected_args;
+                    if owner_type_args.is_empty() {
+                        *owner_type_args = expected_args;
                     }
                 }
                 // D-MEM1/S7 (D-NOALLOC-SEM1=A): `.push`/`.insert` may grow a
@@ -1695,6 +1707,7 @@ impl<'a> Checker<'a> {
                     receiver,
                     method,
                     *method_span,
+                    owner_type_args,
                     type_args,
                     args,
                     recv_type,
@@ -1882,6 +1895,10 @@ impl<'a> Checker<'a> {
                 ));
                 None
             }
+            // Card #1440: the synthesized final arm of an else-less exhaustive
+            // dispatch. Diverging and typeless — the If unification's
+            // `(Some(then), None)` arm lets the pattern arms' type win.
+            Expr::NoElse(_) => None,
             Expr::Todo { expected_type, .. } => {
                 // D-TOOL2 (E2-M11): `todo` is a typed hole — valid in any
                 // position. Fill the expected-type field so codegen can print
@@ -1918,6 +1935,7 @@ impl<'a> Checker<'a> {
                             err: Box::new(Type::Named("HTTPError".to_string())),
                         })),
                         effect_bound: None, return_view_provenance: None,
+                        param_contract: None,
                     }),
                     _ => self.expected_type.clone(),
                 };
@@ -2508,6 +2526,25 @@ impl<'a> Checker<'a> {
     ) -> Option<Type> {
         self.borrow_ctx = true;
         let base_ty = self.infer(base)?;
+        if let Expr::Ident(name, selector_span) = index.as_ref() {
+            if let Some(field) = crate::Syntax::layout_selector_name(name) {
+                if base_ty != Type::Named(crate::Syntax::TYPE_LAYOUT_INFO.to_string()) {
+                    self.diags.push(Diagnostic::error(
+                        "E0302",
+                        format!(
+                            "layout field selector `.{field}` needs a `{}` value",
+                            crate::Syntax::TYPE_LAYOUT_INFO
+                        ),
+                        "typed `[.field]` selection is only defined on `T.$layout`"
+                            .to_string(),
+                        "use `T.$layout[.field]` for a reflected field fact".to_string(),
+                        Some(*selector_span),
+                    ));
+                }
+                *kind = IndexKind::LayoutField(field.to_string());
+                return Some(Type::Named(crate::Syntax::TYPE_LAYOUT_FIELD.to_string()));
+            }
+        }
         let idx_ty = self.infer(index)?;
         match &base_ty {
             Type::List(inner) => {
@@ -2636,10 +2673,11 @@ impl<'a> Checker<'a> {
             // window. Keep the range fact explicit so TIR can select the
             // owned-copy or mutable-view Prelude path; scalar indexing has no
             // one-axis result type and is not part of this surface.
-            Type::Named(name) if name == "Tensor" => {
+            Type::Named(name) if name == "Tensor"
+                || matches!(&base_ty, Type::Apply { name, .. } if matches!(name.as_str(), "Tensor" | "Vec" | "Matrix")) => {
                 if idx_ty == Type::Named(crate::Syntax::TYPE_RANGE.to_string()) {
                     *kind = IndexKind::Range;
-                    Some(Type::Named(name.clone()))
+                    Some(Type::Named("Tensor".to_string()))
                 } else {
                     self.diags.push(Diagnostic::error(
                         "E0505",
@@ -2923,6 +2961,7 @@ impl<'a> Checker<'a> {
                             params: sig.params.iter().map(|(_, ty)| ty.clone()).collect(),
                             ret: sig.return_type.clone().map(Box::new),
                             effect_bound: None, return_view_provenance: None,
+                            param_contract: None,
                         };
                         self.diags.push(crate::Sema::FFI::e3203(&ty, span));
                         return Some(ty);

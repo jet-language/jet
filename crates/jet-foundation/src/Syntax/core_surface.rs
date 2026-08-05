@@ -47,6 +47,12 @@ pub fn artifact_kind(path: &str) -> Option<ArtifactKind> {
 /// S1 (ratified): keyword that starts a function definition.
 pub const KW_FN: &str = "fn";
 
+/// D-GENERIC-CALL1=A (ratified 2026-08-03): explicit call-site type arguments
+/// use the existing angle tokens and must stay adjacent to the call parens.
+/// These constants name the source surface; Jet does not use Rust's `::<T>`.
+pub const GENERIC_CALL_OPEN: &str = "<";
+pub const GENERIC_CALL_CLOSE: &str = ">";
+
 /// S18 (ratified): marks an item as visible to other files (via `use`).
 pub const KW_PUB: &str = "pub";
 
@@ -173,7 +179,12 @@ pub const TYPE_FLOAT: &str = "Float";
 pub const TYPE_BOOL: &str = "Bool";
 pub const TYPE_STRING: &str = "String";
 pub const TYPE_ERROR: &str = "Error";
-pub const TYPE_VOID: &str = "Void";
+/// D-VOID1: the public no-information result spelling is `()`.
+pub const TYPE_UNIT: &str = "()";
+/// Compiler-only name carried by the existing zero-sized runtime value.
+pub const INTERNAL_UNIT_TYPE: &str = "Unit";
+/// Retired source spelling. The parser reports the migration diagnostic.
+pub const RETIRED_TYPE_VOID: &str = "Void";
 
 /// D-PROCESS-SESSION1=A / D-PROCESS-SESSION2=D: expert terminal-session
 /// controls stay on the one `ProcessSpec` / `ProcessChild` model.
@@ -223,6 +234,13 @@ pub const SIZED_NUMERIC_TYPES: &[&str] = &[
 /// D-CAP2/S4's `copy` verb).
 pub const SIGIL_MOVE: &str = "^";
 pub const SIGIL_WRITE: &str = "&";
+
+/// D-APILABEL1=A: the two parameter-zone separators. Written in a parameter
+/// list, not as operators: `/` closes the positional-only zone (a label is
+/// forbidden before it) and `*` opens the label-only zone (a label is
+/// required after it). Parameters between them accept either call form.
+pub const PARAM_ZONE_POSITIONAL_ONLY: &str = "/";
+pub const PARAM_ZONE_LABEL_ONLY: &str = "*";
 
 /// D-SHAPE-COPY1=A (supersedes D-CAP2/S4): the one copy spelling — `~x`
 /// produces an owned, independent value. A temporary (no named binding
@@ -669,3 +687,27 @@ pub const TYPE_BUILD_PROBE: &str = "BuildProbe";
 pub const TYPE_PROGRAM_INFO: &str = "ProgramInfo";
 pub const TYPE_TYPE_INFO: &str = "TypeInfo";
 pub const TYPE_SOURCE_SPAN: &str = "SourceSpan";
+
+/// D-LAYOUT-FACTS1=B: the one focused compiler-owned type fact. The parser
+/// accepts this after `.` only in the contextual `$layout` form; it is not a
+/// user-declarable member name.
+pub const COMPILER_FACT_LAYOUT: &str = "$layout";
+pub const TYPE_LAYOUT_INFO: &str = "LayoutInfo";
+pub const TYPE_LAYOUT_FIELD: &str = "LayoutField";
+
+/// Internal AST spelling for the typed selector in `T.$layout[.field]`.
+/// Keeping the selector in an existing `Expr::Ident` avoids a second AST
+/// variant for a compile-time-only projection. It is never formatted as this
+/// sentinel and never appears in generated Jet source.
+pub const LAYOUT_SELECTOR_PREFIX: &str = "\u{0}jet.layout.selector.";
+
+pub fn layout_selector(name: &str) -> String {
+    format!("{LAYOUT_SELECTOR_PREFIX}{name}")
+}
+
+pub fn layout_selector_name(name: &str) -> Option<&str> {
+    name.strip_prefix(LAYOUT_SELECTOR_PREFIX)
+}
+
+/// Internal TIR field spelling for a selected `LayoutField`.
+pub const LAYOUT_FIELD_PROJECTION_PREFIX: &str = "\u{0}jet.layout.field.";

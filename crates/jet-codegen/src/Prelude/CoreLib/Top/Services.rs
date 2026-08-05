@@ -1437,8 +1437,12 @@ fn jet_services_send_durable(
             "durable service delivery needs its injected authority".to_string(),
         )
     })?;
+    // The state store is framed by adapter and read back with the adapter it
+    // declares. The durable delivery log has its own framing, so it gets its
+    // own file beside the state store, exactly as the workflow store does.
+    // Sharing one path let a durable send corrupt the typed state read.
     let runtime = JetServiceRuntime {
-        store: authority.store.clone(),
+        store: jet_services_delivery_store(&authority.store),
         retention_ms: 0,
     };
     if idempotency_key.is_empty()
@@ -2133,6 +2137,13 @@ fn jet_services_replay_events(tree: &JetServiceTree) -> String {
     events.join("|")
 }
 
+/// The durable delivery log lives beside the state store, never inside it.
+/// Both are append-only files with different framing, so one path cannot serve
+/// both without the typed state read failing on the other's records.
+fn jet_services_delivery_store(state_store: &str) -> String {
+    format!("{state_store}.delivery")
+}
+
 fn jet_services_workflow_authority(
     tree: &JetServiceTree,
 ) -> Result<JetServiceStateAuthority, JetServiceError> {
@@ -2271,6 +2282,23 @@ fn jet_services_workflow_replay(
     let mut workflows = Vec::new();
     for record in records {
         let payload = jet_services_read_state_record(&prefix, &record)?;
+        jet_services_workflow_apply(&mut workflows, payload)?;
+    }
+    if workflows.len() > MAX_SERVICE_WORKFLOW_STEPS {
+        return Err(jet_services_state_error("workflow run limit exceeded"));
+    }
+    Ok(workflows)
+}
+
+/// The one reader of a workflow record.  Writers reach the in-memory history
+/// only through this function, so a record that cannot be replayed can never
+/// be written, and a replayed history cannot drift from the one the writer
+/// built.
+fn jet_services_workflow_apply(
+    workflows: &mut Vec<JetServiceWorkflow>,
+    payload: &str,
+) -> Result<(), JetServiceError> {
+    {
         if let Some(fields) = payload.strip_prefix("workflow-start:") {
             let (run_id_text, fields) = fields.split_once(':').ok_or_else(|| {
                 jet_services_state_error("workflow start run id is missing")
@@ -2465,12 +2493,50 @@ fn jet_services_workflow_replay(
             ));
         }
     }
-    if workflows.len() > MAX_SERVICE_WORKFLOW_STEPS {
+    // One bound for every record kind.  `history` carries the start entry and
+    // an activity's retries on top of `steps`, so bounding `steps` alone lets
+    // a legal run grow a history the tree validator then rejects.
+    if workflows.len() > MAX_SERVICE_WORKFLOW_STEPS
+        || workflows.iter().any(|workflow| {
+            workflow.steps.len() > MAX_SERVICE_WORKFLOW_STEPS
+                || workflow.history.len() > MAX_SERVICE_WORKFLOW_STEPS
+        })
+    {
+        return Err(jet_services_state_error("workflow history limit exceeded"));
+    }
+    Ok(())
+}
+
+/// Append one workflow record and advance the in-memory history by replaying
+/// it.  The record is applied to the replayed durable log first, so a payload
+/// the reader would reject never reaches the store, and a history that has
+/// drifted from the store is reported instead of extended.  The extra read
+/// costs one more pass over a store the append already re-reads.
+///
+/// The guard is the same process-wide lock the rest of this store uses, so it
+/// orders writers inside one process.  Two processes appending to one store
+/// concurrently are still unordered.
+fn jet_services_workflow_append(
+    tree: &mut JetServiceTree,
+    payload: String,
+) -> Result<(), JetServiceError> {
+    let authority = jet_services_workflow_authority(tree)?;
+    let mut applied = jet_services_workflow_replay(&authority)?;
+    if applied != tree.workflows {
         return Err(jet_services_state_error(
-            "workflow run limit exceeded",
+            "in-memory workflow history does not match the durable workflow log",
         ));
     }
-    Ok(workflows)
+    jet_services_workflow_apply(&mut applied, &payload)?;
+    if applied.len() > MAX_SERVICE_WORKFLOW_STEPS {
+        return Err(JetServiceError::Policy(
+            "workflow run limit exceeded".to_string(),
+        ));
+    }
+    let record = jet_services_state_record(&format!("v{}:", authority.version), &payload);
+    jet_services_state_store_append(&authority, &record)?;
+    tree.workflows = applied;
+    Ok(())
 }
 
 fn jet_services_workflow_store_load(
@@ -2527,22 +2593,13 @@ fn jet_services_workflow_start(
         .unwrap_or(0)
         .checked_add(1)
         .ok_or_else(|| JetServiceError::Policy("workflow run id exhausted".to_string()))?;
-    let authority = jet_services_workflow_authority(tree)?;
-    let record = jet_services_state_record(
-        &format!("v{}:", authority.version),
-        &format!(
-            "workflow-start:{run_id}:{version}{}",
+    jet_services_workflow_append(
+        tree,
+        format!(
+            "workflow-start:{run_id}:{version}:{}",
             jet_services_workflow_frame(&id)
         ),
-    );
-    jet_services_state_store_append(&authority, &record)?;
-    tree.workflows.push(JetServiceWorkflow {
-        id,
-        run_id,
-        version,
-        steps: Vec::new(),
-        history: vec![format!("start@v{version}")],
-    });
+    )?;
     Ok(run_id)
 }
 
@@ -2588,19 +2645,13 @@ fn jet_services_workflow_step(
             "workflow step history limit exceeded".to_string(),
         ));
     }
-    let authority = jet_services_workflow_authority(tree)?;
-    let record = jet_services_state_record(
-        &format!("v{}:", authority.version),
-        &format!(
-            "workflow-step:{run_id}{}",
+    jet_services_workflow_append(
+        tree,
+        format!(
+            "workflow-step:{run_id}:{}",
             jet_services_workflow_frame(&step)
         ),
-    );
-    jet_services_state_store_append(&authority, &record)?;
-    let wf = &mut tree.workflows[index];
-    wf.steps.push(step.clone());
-    wf.history.push(format!("step:{step}"));
-    Ok(())
+    )
 }
 
 fn jet_services_workflow_activity(
@@ -2630,26 +2681,14 @@ fn jet_services_workflow_activity(
     if jet_services_workflow_activity_index(&tree.workflows[workflow_index], &key).is_some() {
         return Ok(format!("ActivityDuplicate({key})"));
     }
-    let authority = jet_services_workflow_authority(tree)?;
-    let record = jet_services_state_record(
-        &format!("v{}:", authority.version),
-        &format!(
-            "workflow-activity:{run_id}:1:{max_attempts}{}{}",
+    jet_services_workflow_append(
+        tree,
+        format!(
+            "workflow-activity:{run_id}:1:{max_attempts}:{}{}",
             jet_services_workflow_frame(&activity),
             jet_services_workflow_frame(&key),
         ),
-    );
-    jet_services_state_store_append(&authority, &record)?;
-    let workflow = &mut tree.workflows[workflow_index];
-    workflow.steps.push(jet_services_workflow_activity_step(
-        &activity,
-        &key,
-        1,
-        max_attempts,
-    ));
-    workflow
-        .history
-        .push(format!("activity:{activity}:{key}@1/{max_attempts}"));
+    )?;
     Ok(format!("ActivityScheduled({key})"))
 }
 
@@ -2669,7 +2708,7 @@ fn jet_services_workflow_activity_retry(
         .iter()
         .position(|workflow| workflow.run_id == run_id)
         .ok_or_else(|| JetServiceError::Unknown(format!("workflow run {run_id} not found")))?;
-    let (step_index, activity, attempt, max_attempts) =
+    let (_, _, attempt, max_attempts) =
         jet_services_workflow_activity_index(&tree.workflows[workflow_index], &key)
             .ok_or_else(|| JetServiceError::Unknown(format!("activity key `{key}` not found")))?;
     if attempt >= max_attempts {
@@ -2678,25 +2717,13 @@ fn jet_services_workflow_activity_retry(
         ));
     }
     let next_attempt = attempt + 1;
-    let authority = jet_services_workflow_authority(tree)?;
-    let record = jet_services_state_record(
-        &format!("v{}:", authority.version),
-        &format!(
-            "workflow-activity-retry:{run_id}:{next_attempt}{}",
+    jet_services_workflow_append(
+        tree,
+        format!(
+            "workflow-activity-retry:{run_id}:{next_attempt}:{}",
             jet_services_workflow_frame(&key)
         ),
-    );
-    jet_services_state_store_append(&authority, &record)?;
-    let workflow = &mut tree.workflows[workflow_index];
-    workflow.steps[step_index] = jet_services_workflow_activity_step(
-        &activity,
-        &key,
-        next_attempt,
-        max_attempts,
-    );
-    workflow
-        .history
-        .push(format!("activity-retry:{key}@{next_attempt}/{max_attempts}"));
+    )?;
     Ok(format!("ActivityRetry({key}, attempt={next_attempt})"))
 }
 
@@ -2733,20 +2760,14 @@ fn jet_services_workflow_activity_complete(
     {
         return Ok(());
     }
-    let authority = jet_services_workflow_authority(tree)?;
-    let record = jet_services_state_record(
-        &format!("v{}:", authority.version),
-        &format!(
-            "workflow-activity-done:{run_id}{}{}",
+    jet_services_workflow_append(
+        tree,
+        format!(
+            "workflow-activity-done:{run_id}:{}{}",
             jet_services_workflow_frame(&key),
             jet_services_workflow_frame(&outcome),
         ),
-    );
-    jet_services_state_store_append(&authority, &record)?;
-    let workflow = &mut tree.workflows[workflow_index];
-    workflow.history.push(marker);
-    workflow.history.push(format!("activity-result:{outcome}"));
-    Ok(())
+    )
 }
 
 fn jet_services_workflow_history(

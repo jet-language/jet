@@ -81,7 +81,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                 return c
                     .args
                     .iter()
-                    .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
+                    .all(|a| expr_in_subset(&a.expr, cx, locals));
             }
             // `print` is the one builtin the subset covers (one or more args —
             // D-VERDICT-1321-1 lowers a multi-arg print to one joined Print).
@@ -89,6 +89,13 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                 && !cx.sigs.contains_key(&c.name)
                 && !locals.contains(&c.name)
                 && !c.args.is_empty();
+            // D-ZIPPAD1: free zip-family calls are resolved by sema into the
+            // call's `resolved_ret`; their labels name output columns or the
+            // padding policy rather than ordinary function parameters.
+            let is_zip_family = matches!(c.name.as_str(), "zip" | "zip_short" | "zip_pad")
+                && !cx.sigs.contains_key(&c.name)
+                && !locals.contains(&c.name)
+                && c.resolved_ret.is_some();
             // D-LIN1-DROP: `drop(x)` — the discard builtin (exactly one arg, not
             // shadowed by a user `drop` fn or local). Lowers to `TExprKind::Drop`.
             let is_drop = c.name == Syntax::BUILTIN_CONSUME
@@ -166,7 +173,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                 ) && c.args.len() == 1
                     && c.args
                         .iter()
-                        .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
+                        .all(|a| expr_in_subset(&a.expr, cx, locals));
             }
             // Otherwise the callee must be a known *plain* top-level function:
             // in `cx.sigs`, not a local, and NOT an extern/FFI function or an
@@ -225,12 +232,12 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             // coercion (`lower_one_call_arg` reproduces it from total facts). The Fn
             // arg itself must be in-subset (a lambda, a fn-name value, or a fn-typed
             // local). No special exclusion remains — the Box-coercion is total.
-            // c109 Phase 23: a call-site LABEL (`f(width: 4.0)`, S61/D-NARG1) is allowed.
-            // Labels are checked DOCUMENTATION (D-NARG-D4): sema validates each label names
-            // the parameter at its OWN position (E0125) — labels NEVER reorder arguments —
-            // and codegen never reads `CallArg.label` (`emit_call_args` is purely
-            // positional). So a labeled arg emits byte-identically to an unlabeled one.
+            // D-APILABEL1=A: a call-site LABEL is allowed. Sema binds labels by
+            // name and hands TIR an argument list already in declaration order,
+            // and the only lowering that reads `CallArg.label` is the D-ZIPPAD1
+            // zip family. So a labelled arg emits byte-identically to a bare one.
             (is_print
+                || is_zip_family
                 || is_drop
                 || is_expect
                 || is_close
@@ -258,7 +265,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                     // the Arc form (the FFI boundary takes a `(…).clone()`, not an Arc).
                     // Labels are sema-only (documentation), checked at their own position.
                     (!a.flags.shared_auto_clone || !is_extern)
-                        && arg_conv_in_subset(a)
+                        && (is_zip_family || arg_conv_in_subset(a))
                         && expr_in_subset(&a.expr, cx, locals)
                 })
         }
@@ -744,6 +751,9 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
         // type (`expected_type.is_some()`); a `None` (sema didn't run/resolve) stays on
         // the AST path so the TIR never guesses the `(unknown)` fallback.
         Expr::Todo { expected_type, .. } => expected_type.is_some(),
+        // Card #1440: the dead end of a sema-proved exhaustive dispatch — a
+        // constant diverging leaf, trivially in-subset.
+        Expr::NoElse(_) => true,
         // c109 Phase 8: fallible constructors `Ok(x)` / `Err(e)`. Covered when the
         // inner value is in-subset — they lower to `Ok(x)` / `Err(e)`.
         Expr::Ok(inner, _) | Expr::Err(inner, _) => expr_in_subset(inner, cx, locals),
@@ -790,7 +800,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             expr_in_subset(callee, cx, locals)
                 && args
                     .iter()
-                    .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals))
+                    .all(|a| expr_in_subset(&a.expr, cx, locals))
         }
         // c109 Phase 18: `mem.Ptr<T>.from_addr(addr)` (`Expr::PtrFromAddr`, S58). The
         // address expr must be in-subset. The cast itself is safe Rust (no `unsafe`); it
@@ -837,7 +847,7 @@ pub(crate) fn orfallback_rhs_in_subset(
         OrFallback::Return(None, _) => true,
         OrFallback::Return(Some(e), _) => expr_in_subset(e, cx, locals),
         OrFallback::Panic { args, .. } => {
-            args.len() == 1 && args[0].label.is_none() && expr_in_subset(&args[0].expr, cx, locals)
+            args.len() == 1 && expr_in_subset(&args[0].expr, cx, locals)
         }
         OrFallback::Break(_)
         | OrFallback::Continue(_)
@@ -866,4 +876,3 @@ pub(crate) fn lambda_in_subset(lam: &Lambda, cx: &Cx, locals: &HashSet<String>) 
             .all(|s| stmt_in_subset(s, cx, &mut body_locals)),
     }
 }
-

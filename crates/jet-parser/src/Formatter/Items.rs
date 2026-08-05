@@ -262,12 +262,7 @@ impl<'a> Fmt<'a> {
                 f.write("fn ");
                 f.write(&m.name);
                 f.write("(");
-                for (i, p) in m.params.iter().enumerate() {
-                    if i > 0 {
-                        f.write(", ");
-                    }
-                    f.fmt_param(p);
-                }
+                f.fmt_param_list(&m.params);
                 f.write(")");
                 // D-EFF3 / D-ARROW-CONTROL1: effect bound inside the callable arrow.
                 if let Some(effects) = &m.declared_effects {
@@ -328,12 +323,7 @@ impl<'a> Fmt<'a> {
         self.write("fn ");
         self.write(&ef.name);
         self.write("(");
-        for (i, p) in ef.params.iter().enumerate() {
-            if i > 0 {
-                self.write(", ");
-            }
-            self.fmt_param(p);
-        }
+        self.fmt_param_list(&ef.params);
         self.write(")");
         if let Some(ret) = &ef.return_type {
             self.write(" => ");
@@ -374,12 +364,7 @@ impl<'a> Fmt<'a> {
                     .expect("property tests have a parsed name"),
             );
             self.write("(");
-            for (i, p) in t.params.iter().enumerate() {
-                if i > 0 {
-                    self.write(", ");
-                }
-                self.fmt_param(p);
-            }
+            self.fmt_param_list(&t.params);
             self.write(")");
         }
         self.write(" ");
@@ -834,12 +819,7 @@ impl<'a> Fmt<'a> {
         self.write(&f.name);
         self.fmt_type_params(&f.type_params);
         self.write("(");
-        for (i, p) in f.params.iter().enumerate() {
-            if i > 0 {
-                self.write(", ");
-            }
-            self.fmt_param(p);
-        }
+        self.fmt_param_list(&f.params);
         self.write(")");
         // D-ARROW-CONTROL1: effect row lives inside the callable arrow.
         if let Some(effects) = &f.declared_effects {
@@ -933,7 +913,45 @@ impl<'a> Fmt<'a> {
         self.write(")");
     }
 
+    /// D-APILABEL1=A: reprint a parameter list with its zone separators.
+    /// `/` goes after the last positional-only parameter, `*` before the first
+    /// label-only one, so the printed form re-parses to the same zones.
+    fn fmt_param_list(&mut self, params: &[Param]) {
+        use crate::AST::ParamZone;
+        let mut written = 0usize;
+        let mut star_done = false;
+        for (i, p) in params.iter().enumerate() {
+            if p.zone == ParamZone::LabelOnly && !star_done {
+                star_done = true;
+                if written > 0 {
+                    self.write(", ");
+                }
+                self.write(Syntax::PARAM_ZONE_LABEL_ONLY);
+                written += 1;
+            }
+            if written > 0 {
+                self.write(", ");
+            }
+            self.fmt_param(p);
+            written += 1;
+            let last_positional_only = p.zone == ParamZone::PositionalOnly
+                && params
+                    .get(i + 1)
+                    .is_none_or(|next| next.zone != ParamZone::PositionalOnly);
+            if last_positional_only {
+                self.write(", ");
+                self.write(Syntax::PARAM_ZONE_POSITIONAL_ONLY);
+                written += 1;
+            }
+        }
+    }
+
     fn fmt_param(&mut self, p: &Param) {
+        if p.root {
+            self.write("#");
+            self.write(Syntax::CONTRACT_ROOT);
+            self.write(" ");
+        }
         // D-MEM1: capability is a sigil, never a word. The sigil rides the type
         // (`name: &Type`), or `self` for a receiver (`&self`). `Read` is
         // unmarked.
@@ -950,6 +968,11 @@ impl<'a> Fmt<'a> {
             }
             self.write(&p.name);
         } else {
+            // D-APILABEL1=A: `timeout seconds: Int` — public label, then local name.
+            if let Some((label, _)) = &p.public_label {
+                self.write(label);
+                self.write(" ");
+            }
             self.write(&p.name);
             self.write(": ");
             if let Some(s) = sigil {

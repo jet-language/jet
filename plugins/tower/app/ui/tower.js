@@ -257,7 +257,10 @@ function renderBeacon() {
       : it.type === 'done'
         ? `done: ${it.text}`
         : it.type === 'decision' ? it.decision.title : 'verify: ' + it.card.title;
-    const seg = el(`<button class="beacon__seg" style="opacity:${Math.min(1, .55 + h / 96).toFixed(2)}" title="${esc(title)}"></button>`);
+    // Done cards are news, not a duty: blue segments so a glance at the beacon
+    // separates "finished" from the red "blocked on you" ballots and checks.
+    const tone = it.type === 'done' ? ' beacon__seg--done' : '';
+    const seg = el(`<button class="beacon__seg${tone}" style="opacity:${Math.min(1, .55 + h / 96).toFixed(2)}" title="${esc(title)}"></button>`);
     seg.addEventListener('click', () => jumpTo(it));
     b.appendChild(seg);
   }
@@ -272,6 +275,7 @@ const VIEWS = [
   { id: 'now', name: 'Now', count: () => ballotCount(), alert: true },
   { id: 'board', name: 'Board', count: () => S.cards.filter(c => c.phase !== 'done' && c.phase !== 'frozen').length },
   { id: 'docs', name: 'Docs', count: () => docsFileCount() },
+  { id: 'papercuts', name: 'Papercuts', count: () => (S.papercuts || []).filter(p => p.status === 'open').length },
 ];
 function docsFileCount() {
   if (!docsCache) return 0;
@@ -516,13 +520,20 @@ function dutyVerify(card, ballot) {
 // ---- BOARD ---------------------------------------------------------------------
 const isOpen = (key, def) => { const t = (S.meta.ui.toggled || []).includes(key); return def ? !t : t; };
 
+// Milestone titles carry their number as the first token ("UL4 · Runtime and
+// production services"), which is the glanceable part. Strip the rest.
+const milestoneOf = (c) => c.milestoneId ? (S.milestones || []).find(m => m.id === c.milestoneId) : null;
+const milestoneTag = (m) => String(m.title || '').split('·')[0].trim() || m.id;
+
 function cardTile(c) {
   const who = c.lane.who === 'owner' ? 'lane-owner' : c.lane.who === 'agent' ? 'lane-agent' : 'lane-none';
+  const ms = milestoneOf(c);
   const node = el(`<button class="card ${c.lane.who === 'owner' ? 'needs-owner' : ''}" style="--stage:var(--s-${c.phase})">
       <div class="card__top">
         ${c.workOrder != null ? `<span class="order">${c.workOrder}</span>` : ''}
         <span class="num">${ticket(c)}</span>
         <span class="prio prio-${c.priority}">${c.priority}</span>
+        ${ms ? `<span class="card__mile" title="${esc(ms.title)}">${esc(milestoneTag(ms))}</span>` : ''}
         <span class="card__kind">${esc(c.kind)}</span>
         ${c.openQ ? `<span class="card__q">✎ ${c.openQ}</span>` : ''}
       </div>
@@ -567,16 +578,23 @@ let radarFilterText = '';
 let radarWorkflow = 'all';
 let radarPriority = 'all';
 let radarShowClosed = false;
+let radarMilestone = null;   // milestone id — drills the board down to one milestone
 let radarSort = { col: 'workflow', dir: 'asc' };
 
+const milestoneById = (id) => (S.milestones || []).find(m => m.id === id) || null;
+// Counting the work left is the whole point of the drill-down, so a milestone
+// filter always shows its closed cards too.
 function radarMatches(c, needle) {
   return cardMatches(c, {
     text: needle,
     workflow: radarWorkflow,
     priority: radarPriority,
-    showClosed: radarShowClosed,
+    showClosed: radarShowClosed || !!radarMilestone,
+    milestone: radarMilestone,
   });
 }
+
+const showRemaining = () => isOpen('radar-remaining', false);
 
 function viewBoard() {
   const v = $('#view');
@@ -611,6 +629,7 @@ function viewBoard() {
       </select>
       <button class="btn btn--ghost" id="radar-direction" aria-label="Reverse sort" title="Reverse sort">${radarSort.dir === 'asc' ? '↑' : '↓'}</button>
       <label class="radar-tools__check"><input id="radar-closed" type="checkbox" ${radarShowClosed ? 'checked' : ''}> Show closed</label>
+      <label class="radar-tools__check"><input id="radar-remaining" type="checkbox" ${showRemaining() ? 'checked' : ''}> Count remaining</label>
     </div>
     <div id="radar-body"></div>`;
 
@@ -635,6 +654,7 @@ function viewBoard() {
     viewBoard();
   });
   $('#radar-closed').addEventListener('change', (e) => { radarShowClosed = e.target.checked; renderRadarBody(); });
+  $('#radar-remaining').addEventListener('change', () => api('ui/toggle', { key: 'radar-remaining' }));
 
   // Ideas bay — the triage half of idea-capture, kept from Board so a
   // captured idea has somewhere to be promoted or dismissed.
@@ -672,6 +692,19 @@ function renderRadarBody() {
   const cardsMode = isOpen('radar-cards', false);
   const radar = boardEpochs(S.radar || [], S.epochs, S.cards, S.milestones, radarShowClosed);
 
+  // Milestone drill-down: a milestone belongs to exactly one epoch, so matching
+  // on milestoneId already pins the epoch. Render one flat list, no sections —
+  // the bar carries the context and the way back out.
+  const drill = radarMilestone ? milestoneById(radarMilestone) : null;
+  if (radarMilestone && !drill) radarMilestone = null;
+  if (drill) {
+    body.appendChild(milestoneFilterBar(drill));
+    const hits = S.cards.filter(c => c.phase !== 'frozen' && radarMatches(c, needle));
+    body.appendChild(hits.length ? radarList('mile:' + drill.id, hits, cardsMode) : el(`<p class="epoch__goal">no match</p>`));
+    if (focused) $('#radar-filter')?.focus();
+    return;
+  }
+
   // Sidequests: their own section — off-plan work, not part of any epoch.
   const sq = S.cards.filter(c => c.track === 'sidequest' && c.phase !== 'frozen' && (radarShowClosed || c.phase !== 'done'));
   if (sq.length) body.appendChild(radarListSection('radar-sq', TERM('sidequest', 'Sidequests'), 'off-plan work', sq.filter(c => radarMatches(c, needle)), sq.length, cardsMode, true));
@@ -687,6 +720,25 @@ function renderRadarBody() {
   if (fz.length) body.appendChild(radarListSection('radar-frozen', 'Frozen', 'parked on purpose', fz.filter(c => radarMatches(c, needle)), fz.length, cardsMode, false));
 
   if (focused) $('#radar-filter')?.focus();
+}
+
+function setMilestoneFilter(id) {
+  radarMilestone = radarMilestone === id ? null : id;
+  renderRadarBody();
+}
+
+function milestoneFilterBar(m) {
+  const done = m.progress?.done ?? 0;
+  const total = m.progress?.total ?? 0;
+  const count = showRemaining() ? `${total - done} of ${total} cards left` : `${done}/${total} cards done`;
+  const bar = el(`<div class="milefilter">
+      <span class="milefilter__tag">${esc(milestoneTag(m))}</span>
+      <span class="milefilter__t">${esc(m.title)}</span>
+      <span class="milefilter__n">${count}</span>
+      <button class="btn btn--sm" data-clear>Clear filter ✕</button>
+    </div>`);
+  $('[data-clear]', bar).addEventListener('click', () => setMilestoneFilter(null));
+  return bar;
 }
 
 // ---- legend / key ----------------------------------------------------------
@@ -713,6 +765,10 @@ function openLegend() {
       <p class="prose">The small number at the top-left of a card is its <b>work order</b> within its epoch — lower numbers come first. Cards without a number are unscheduled and sort last.</p>
       <div class="modal__h">Glowing red = it needs you</div>
       <p class="prose">A card <b style="color:var(--red)">glows red</b> when the next move is yours — a decision to record, or a visual/UX acceptance check. The same red drives the beacon, the “blocked on you” pill, and focus-mode dots.</p>
+      <div class="modal__h">Blue = finished</div>
+      <p class="prose">A completed card reads <b style="color:var(--blue)">blue</b> on the beacon and in the Now queue. Blue is news, not a duty — nothing blue is waiting on you.</p>
+      <div class="modal__h">Milestone tag</div>
+      <p class="prose">The <span class="card__mile">UL4</span>-style chip on a card is its milestone. Click a milestone row — or that chip in the table — to show only its cards. “Count remaining” flips every milestone and epoch tally from done-of-total to work left.</p>
       <div class="modal__h">Priority chips</div>
       <div class="legend">
         <div class="legend__row"><span class="prio prio-P0">P0</span><span class="legend__desc">Urgent — red (glows)</span></div>
@@ -737,9 +793,11 @@ function radarListSection(key, name, sub, shown, total, cardsMode, defOpen) {
     });
 }
 
+// "Count remaining" answers "how much is left?" without the mental subtraction.
 function epochProgressLabel(r, { pct = false } = {}) {
-  const cardTotal = r.active + r.done;
-  const base = `${r.milestonesMet}/${r.milestoneTotal} milestones · ${r.done}/${cardTotal} cards`;
+  const base = showRemaining()
+    ? `${r.milestoneTotal - r.milestonesMet} milestones left · ${r.active} cards left`
+    : `${r.milestonesMet}/${r.milestoneTotal} milestones · ${r.done}/${r.active + r.done} cards`;
   return pct ? `${base} · ${r.pct}%` : base;
 }
 
@@ -787,13 +845,15 @@ function radarMilestones(ms) {
   for (const m of ms) {
     const pct = m.total ? Math.round(m.done / m.total * 100) : 0;
     const stalled = m.stalledDays != null && m.stalledDays > 5;
-    const row = el(`<div class="mile ${m.met ? 'mile--met' : ''}" title="${esc(m.goal || '')}">
+    const count = m.met ? 'met' : showRemaining() ? `${m.total - m.done} left` : `${m.done}/${m.total}`;
+    const row = el(`<button class="mile ${m.met ? 'mile--met' : ''}" type="button" title="${esc(m.goal || 'Show only this milestone')}">
         <span class="mile__dot">${m.met ? '✓' : '◇'}</span>
         <span class="mile__t">${esc(m.title)}</span>
         <span class="mile__bar"><i style="width:${m.met ? 100 : pct}%"></i></span>
-        <span class="mile__n">${m.met ? 'met' : `${m.done}/${m.total}`}</span>
+        <span class="mile__n">${count}</span>
         ${stalled ? `<span class="agechip agechip--hot" title="no activity in ${m.stalledDays}d">⚠ stalled ${m.stalledDays}d</span>` : ''}
-      </div>`);
+      </button>`);
+    row.addEventListener('click', () => setMilestoneFilter(m.id));
     wrap.appendChild(row);
   }
   return wrap;
@@ -802,6 +862,7 @@ function radarMilestones(ms) {
 const OPS_COLS = [
   { k: 'num', label: '#' },
   { k: 'title', label: 'Title' },
+  { k: 'milestone', label: 'Milestone' },
   { k: 'lane', label: 'Lane' },
   { k: 'priority', label: 'Priority' },
   { k: 'workOrder', label: 'Order' },
@@ -835,14 +896,18 @@ function opsTable(key, cards) {
 function opsRow(c) {
   const title = c.title.length > 46 ? c.title.slice(0, 45) + '…' : c.title;
   const who = c.lane.who === 'owner' ? 'lane-owner' : c.lane.who === 'agent' ? 'lane-agent' : 'lane-none';
+  const ms = milestoneOf(c);
   const tr = el(`<tr>
       <td class="num">${ticket(c)}</td>
       <td class="ops__title" title="${esc(c.title)}">${esc(title)}</td>
+      <td class="ops__mile">${ms ? `<button class="card__mile" data-mile title="${esc(ms.title)}">${esc(milestoneTag(ms))}</button>` : ''}</td>
       <td><span class="card__lane ${who}"><span class="pip"></span>${esc(c.lane.label)}</span></td>
       <td class="ops__prio"></td>
       <td class="ops__wo"></td>
       <td class="num">${ageAgo(c.updated)}</td>
     </tr>`);
+
+  $('[data-mile]', tr)?.addEventListener('click', (ev) => { ev.stopPropagation(); setMilestoneFilter(c.milestoneId); });
 
   const prioSel = el(`<select data-fld="priority">${(CFG().priorities || ['P0', 'P1', 'P2', 'P3']).map(p => `<option value="${esc(p)}" ${p === c.priority ? 'selected' : ''}>${esc(p)}</option>`).join('')}</select>`);
   prioSel.addEventListener('click', (ev) => ev.stopPropagation());
@@ -1164,7 +1229,7 @@ let docsCache = null;   // { scratch, sections }
 let docsSel = null;     // { kind:'scratch'|'doc', path? }
 let docsDirty = false;
 let docsMode = 'compose'; // 'compose' | 'source'
-let docsOpen = {};      // section id → bool (default true for named except other; spec defaults collapsed)
+let docsOpen = {};      // section id → bool (every section collapsed until opened)
 let docsDraft = null;   // { key, body } preserved across mode toggles
 let docsBrowse = false; // mobile: file browser and reader are separate views
 const docsKey = (sel) => sel?.kind === 'scratch' ? 'scratch' : (sel?.path || '');
@@ -1216,7 +1281,7 @@ async function viewDocs() {
 
   for (const sec of sections) {
     if (sec.id === 'other' && !sec.files.length) continue;
-    const open = docsOpen[sec.id] ?? (sec.id !== 'other' && sec.id !== 'spec');
+    const open = docsOpen[sec.id] ?? false;
     const head = el(`<button class="docs__sec" type="button" aria-expanded="${open}">
       <span class="docs__chev">${open ? '▾' : '▸'}</span>
       <span>${esc(sec.label)}</span>
@@ -1391,8 +1456,53 @@ async function openDocsFile(sel, { keepDraft = false, keepBrowse = false } = {})
   });
 }
 
+// ---- PAPERCUTS: append-only friction log, grouped by day --------------------
+let papercutFilter = 'open';   // 'open' | 'all'
+function viewPapercuts() {
+  const v = $('#view');
+  const all = [...(S.papercuts || [])].sort((a, b) => (b.created || '').localeCompare(a.created || ''));
+  const open = all.filter(p => p.status === 'open');
+  const list = papercutFilter === 'open' ? open : all;
+  v.innerHTML = `<div class="viewhead"><h1 class="h1">Papercuts</h1>
+      <span class="viewhead__sub">one-line tooling friction agents hit — <b>${open.length}</b> open</span>
+      <div class="viewhead__actions">
+        <button class="btn btn--ghost" id="pc-filter">${papercutFilter === 'open' ? 'Show all' : 'Open only'}</button>
+      </div></div>
+    <div id="pc-list"></div>`;
+  $('#pc-filter').addEventListener('click', () => { papercutFilter = papercutFilter === 'open' ? 'all' : 'open'; viewPapercuts(); });
+  const body = $('#pc-list');
+  if (!list.length) {
+    body.appendChild(el(`<div class="empty"><div class="empty__glyph">✓</div><div>${papercutFilter === 'open'
+      ? 'No open papercuts — nothing snagging the agents.' : 'No papercuts logged yet.'}</div></div>`));
+    return;
+  }
+  let day = null;
+  for (const pc of list) {
+    const d = new Date(pc.created);
+    const key = d.toDateString();
+    if (key !== day) {
+      day = key;
+      body.appendChild(el(`<div class="docs__label">${esc(d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }))}</div>`));
+    }
+    const c = pc.cardId ? cardById(pc.cardId) : null;
+    const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const resolved = pc.status === 'resolved';
+    const row = el(`<div class="idea"${resolved ? ' style="opacity:.5"' : ''}>
+        <span class="num">${esc(time)}</span>
+        <span class="chip">${esc(pc.by)}</span>
+        <span class="idea__t">${esc(pc.text)}${c ? ` <button class="chip" data-card title="open card">#${c.num}</button>` : ''}</span>
+        ${resolved
+          ? '<span class="critrow__badge critrow__badge--verified">resolved</span>'
+          : '<button class="btn btn--ghost btn--sm" data-resolve>Resolve</button>'}
+      </div>`);
+    if (c) $('[data-card]', row).addEventListener('click', () => showDetail(c.id));
+    $('[data-resolve]', row)?.addEventListener('click', () => api('papercut/resolve', { id: pc.id, by: 'owner' }));
+    body.appendChild(row);
+  }
+}
+
 // ---- render + routing -----------------------------------------------------------
-const RENDER = { now: viewNow, board: viewBoard, docs: viewDocs };
+const RENDER = { now: viewNow, board: viewBoard, papercuts: viewPapercuts, docs: viewDocs };
 function render() {
   if (!S) return;
   renderBeacon();
@@ -1431,8 +1541,8 @@ document.addEventListener('keydown', (e) => {
     if (e.key === 'k' || e.key === 'ArrowUp') { e.preventDefault(); return nowMove(-1); }
     if (e.key === 'Enter' && nowSel >= 0) { e.preventDefault(); return nowActivate(); }
   }
-  const i = ['1', '2', '3'].indexOf(e.key);
-  if (i >= 0) go(VIEWS[i].id);
+  const i = ['1', '2', '3', '4'].indexOf(e.key);
+  if (i >= 0 && VIEWS[i]) go(VIEWS[i].id);
 });
 
 // ---- command palette (⌘K / Ctrl-K) -------------------------------------------

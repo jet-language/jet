@@ -30,6 +30,19 @@ pub fn is_subjectless_guard(subject: &Expr, span: Span) -> bool {
     matches!(subject, Expr::Bool(true, subject_span) if *subject_span == span)
 }
 
+/// Card #1440: does this `if` expression chain end in the parser-synthesized
+/// `Expr::NoElse` marker (an else-less all-pattern value dispatch)?
+pub fn noelse_terminated(e: &Expr) -> bool {
+    let mut cur = e;
+    while let Expr::If { else_value, .. } = cur {
+        if matches!(else_value.as_ref(), Expr::NoElse(_)) {
+            return true;
+        }
+        cur = else_value;
+    }
+    false
+}
+
 /// Whether a subjectless `Stmt::Switch` came from classic `if condition { ... }`
 /// spelling rather than `if { condition -> ... }`.
 ///

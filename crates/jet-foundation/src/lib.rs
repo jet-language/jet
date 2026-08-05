@@ -9,7 +9,6 @@ pub mod Collections;
 /// included by the package bridge, JIT host, and resident evaluator.
 #[path = "CoreArchive.rs"]
 pub mod CoreArchive;
-pub mod DataPlot;
 pub mod Diagnostics;
 mod ExactUnitConversion;
 pub mod ExitCodes;
