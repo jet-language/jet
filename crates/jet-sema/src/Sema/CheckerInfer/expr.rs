@@ -87,7 +87,6 @@ impl<'a> Checker<'a> {
             args,
             resolved_ret: None,
             range_checked: false,
-            arg_source_order: None,
         });
         Some(Type::Named(type_name))
     }
@@ -153,7 +152,6 @@ impl<'a> Checker<'a> {
             }],
             resolved_ret: None,
             range_checked: false,
-            arg_source_order: None,
         });
         Some(Type::Named(Syntax::TYPE_REGEX.to_string()))
     }

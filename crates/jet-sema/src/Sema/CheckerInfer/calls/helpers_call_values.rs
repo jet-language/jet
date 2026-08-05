@@ -14,6 +14,7 @@ impl<'a> Checker<'a> {
                     shared_auto_clone: false,
                     is_trailing_block: false,
                     c_callback_symbol: false,
+                    source_index: None,
                 },
                 label: None,
                 spread: false,

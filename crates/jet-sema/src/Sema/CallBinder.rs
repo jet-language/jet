@@ -71,24 +71,6 @@ impl Binding {
         true
     }
 
-    /// The bound argument slots listed in the order the caller wrote them.
-    /// Lowering evaluates the slots in this order into temporaries, then reads
-    /// them back in declaration order — which is what keeps the ratified
-    /// left-to-right rule true once the binder has reordered the list.
-    ///
-    /// Slots filled by a default are absent: a default runs after every
-    /// supplied argument, in declaration order, which is already the order the
-    /// rewritten argument list has them in.
-    pub fn written_source_order(&self) -> Vec<usize> {
-        let mut slots: Vec<usize> = (0..self.sources.len())
-            .filter(|slot| matches!(self.sources[*slot], ArgSource::Written(_)))
-            .collect();
-        slots.sort_by_key(|slot| match self.sources[*slot] {
-            ArgSource::Written(index) => index,
-            ArgSource::Default => usize::MAX,
-        });
-        slots
-    }
 }
 
 /// Read the public call contract off a registered free-function signature.
@@ -228,9 +210,12 @@ fn rewrite(
     for (position, slot) in slots.iter().enumerate() {
         match slot {
             Some(index) => {
-                let arg = taken[*index]
+                let mut arg = taken[*index]
                     .take()
                     .expect("each argument binds to at most one parameter");
+                // Lowering reads this back to keep the ratified evaluation
+                // order across the reorder the binder just performed.
+                arg.flags.source_index = Some(*index);
                 args.push(arg);
                 sources.push(ArgSource::Written(*index));
             }
@@ -261,7 +246,15 @@ fn rewrite(
         args.push(arg);
         sources.push(ArgSource::Default);
     }
-    Binding { sources }
+    let binding = Binding { sources };
+    if binding.is_source_ordered() {
+        // Nothing moved, so lowering needs no temporaries. Clearing the marks
+        // keeps the ordinary call shape identical to before the binder ran.
+        for arg in args.iter_mut() {
+            arg.flags.source_index = None;
+        }
+    }
+    binding
 }
 
 // ── diagnostics (D-APILABEL1=A) ──────────────────────────────────────────────

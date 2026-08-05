@@ -1633,7 +1633,6 @@ impl<'a> Parser<'a> {
                     }],
                     resolved_ret: None,
                     range_checked: false,
-                    arg_source_order: None,
                 })))
             }
             TokKind::Ident(n) if n == Syntax::KW_ASSERT && matches!(self.peek2().kind, TokKind::Ident(_)) => {
@@ -1660,7 +1659,6 @@ impl<'a> Parser<'a> {
                     args,
                     resolved_ret: None,
                     range_checked: false,
-                    arg_source_order: None,
                 })))
             }
             TokKind::KwYield => {

@@ -22,12 +22,6 @@ pub struct Call {
     /// checked constructor as a `Result`, while the ordinary constructor form
     /// still stays infallible and is rejected for runtime values.
     pub range_checked: bool,
-    /// D-APILABEL1=A: set by the binder only when labels put the written
-    /// arguments out of declaration order. Each entry is an index into the
-    /// rewritten `args`, listed in the order the caller wrote them. Lowering
-    /// evaluates those slots into temporaries in this order so the ratified
-    /// left-to-right rule survives the reorder. `None` is the ordinary case.
-    pub arg_source_order: Option<Vec<usize>>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -40,6 +34,12 @@ pub struct CallArgFlags {
     pub is_trailing_block: bool,
     /// D-CABI-CALLBACK1: sema proved this argument is a stable C callback symbol.
     pub c_callback_symbol: bool,
+    /// D-APILABEL1=A: where the caller wrote this argument, when labels put the
+    /// list out of declaration order. The binder rewrites `args` into
+    /// declaration order, so lowering needs this to keep the ratified rule that
+    /// supplied expressions run left to right in source order. `None` means the
+    /// call reads in the order it was written and needs no temporaries.
+    pub source_index: Option<usize>,
 }
 
 #[derive(Debug, Clone)]

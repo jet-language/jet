@@ -840,32 +840,26 @@ impl<'a> Checker<'a> {
     
             // D-APILABEL1=A: one binder resolves labels, zones, reordering, and
             // skipped defaults. It rewrites `call.args` into declaration order
-            // and records the source evaluation order for lowering.
+            // and marks each argument with where the caller wrote it, so
+            // lowering can keep the source evaluation order.
             if !sig.param_info.is_empty() {
                 let params = crate::Sema::CallBinder::bind_params_from_sig(&sig);
-                let binding = crate::Sema::CallBinder::bind_call_args(
+                let bound = crate::Sema::CallBinder::bind_call_args(
                     &call.name,
                     &params,
                     &mut call.args,
                     call.name_span,
                     &mut self.diags,
                 );
-                match binding {
-                    Some(binding) => {
-                        if !binding.is_source_ordered() {
-                            call.arg_source_order = Some(binding.written_source_order());
-                        }
+                if bound.is_none() {
+                    // The call's arguments never resolved to parameters, so
+                    // arity and per-position type errors below would all be
+                    // about slots that do not exist. Report the argument
+                    // expressions' own problems and stop.
+                    for arg in call.args.iter_mut() {
+                        self.infer(&mut arg.expr);
                     }
-                    None => {
-                        // The call's arguments never resolved to parameters, so
-                        // arity and per-position type errors below would all be
-                        // about slots that do not exist. Report the argument
-                        // expressions' own problems and stop.
-                        for arg in call.args.iter_mut() {
-                            self.infer(&mut arg.expr);
-                        }
-                        return Some(sig.return_type.clone());
-                    }
+                    return Some(sig.return_type.clone());
                 }
             }
             let variadic = sig.param_variadic.last().copied().unwrap_or(false);

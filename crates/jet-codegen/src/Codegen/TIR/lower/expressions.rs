@@ -18,6 +18,7 @@ use crate::Codegen::TIR::ListSpreadPart;
 use crate::Codegen::TIR::lower_enum_arg;
 use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::TLocal;
+use crate::Codegen::TIR::TStmt;
 use crate::Codegen::TIR::TMethodRef;
 use crate::Codegen::TIR::lower_extern_call_arg;
 use crate::Codegen::TIR::lower::is_binding_free_user_variant_pattern_test;
@@ -151,7 +152,7 @@ fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         else {
             unreachable!("method chain contains only method calls")
         };
-        lowered_receiver = Some(lower_method_call(
+        let lowered = lower_method_call(
             receiver,
             method,
             *method_span,
@@ -163,7 +164,13 @@ fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             cx,
             env,
             lowered_receiver,
-        ));
+        );
+        // D-APILABEL1=A: a method whose labels reordered its arguments keeps
+        // the same source evaluation order as a free call.
+        lowered_receiver = Some(match source_arg_order(args) {
+            Some(order) => preserve_source_arg_order(lowered, &order),
+            None => lowered,
+        });
     }
 
     lowered_receiver.expect("method chain is non-empty")
@@ -1478,7 +1485,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     },
                 );
             let ret = call_return_type_with_args(cx, &call.name, &call.type_args, &args);
-            TExpr {
+            let lowered = TExpr {
                 ty: ret,
                 kind: TExprKind::Call {
                     name: cx.jit_local_call_prefix.as_ref().map_or_else(
@@ -1488,6 +1495,10 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     type_args: call.type_args.clone(),
                     args,
                 },
+            };
+            match source_arg_order(&call.args) {
+                Some(order) => preserve_source_arg_order(lowered, &order),
+                None => lowered,
             }
         }
         // c109 Phase 6: a method call. The gate (`method_call_in_subset`) admitted
@@ -3018,4 +3029,95 @@ pub(crate) fn lower_owned_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
     } else {
         lowered
     }
+}
+
+/// D-APILABEL1=A: keep the ratified evaluation order across a label reorder.
+///
+/// The binder rewrote the argument list into declaration order, so lowering
+/// it straight through would run the supplied expressions in declaration
+/// order too. `order` lists the argument slots in the order the caller wrote
+/// them; each is evaluated into a temporary first, and the call then reads
+/// the temporaries in declaration order.
+///
+/// The result is an ordinary `InlineBlock`, so AOT emit, the interpreter, and
+/// the JIT all keep the same meaning without an engine-specific rule.
+/// `order` lists the *lowered* argument slots in the order the caller wrote
+/// them, taken from each source argument's `flags.source_index`. Slots the
+/// caller did not write (a filled default) are absent — a default runs after
+/// every supplied argument anyway, in the declaration order the rewritten list
+/// already has.
+pub(crate) fn source_arg_order(args: &[crate::AST::CallArg]) -> Option<Vec<usize>> {
+    if !args.iter().any(|arg| arg.flags.source_index.is_some()) {
+        return None;
+    }
+    let mut slots: Vec<usize> = (0..args.len())
+        .filter(|slot| args[*slot].flags.source_index.is_some())
+        .collect();
+    slots.sort_by_key(|slot| args[*slot].flags.source_index);
+    Some(slots)
+}
+
+pub(crate) fn preserve_source_arg_order(mut call: TExpr, order: &[usize]) -> TExpr {
+    let Some(args) = call_args_mut(&mut call.kind) else {
+        return call;
+    };
+    let mut stmts = bind_arg_temporaries(args, order);
+    if stmts.is_empty() {
+        return call;
+    }
+    let ty = call.ty.clone();
+    stmts.push(TStmt::ExprStmt(call));
+    TExpr {
+        ty,
+        kind: TExprKind::InlineBlock(stmts),
+    }
+}
+
+/// The argument list of any TIR node that takes one, so the D-APILABEL1 order
+/// rule is written once rather than per call shape.
+fn call_args_mut(kind: &mut TExprKind) -> Option<&mut Vec<crate::Codegen::TIR::TCallArg>> {
+    match kind {
+        TExprKind::Call { args, .. }
+        | TExprKind::MethodCall { args, .. }
+        | TExprKind::FnFieldCall { args, .. }
+        | TExprKind::StaticCall { args, .. }
+        | TExprKind::ModuleCall { args, .. } => Some(args),
+        _ => None,
+    }
+}
+
+/// Replace each listed argument with a read of a fresh temporary, and return
+/// the `let` statements that bind them — emitted in `order`, which is source
+/// order, not declaration order.
+fn bind_arg_temporaries(
+    args: &mut [crate::Codegen::TIR::TCallArg],
+    order: &[usize],
+) -> Vec<TStmt> {
+    let mut stmts: Vec<TStmt> = Vec::with_capacity(order.len() + 1);
+    for (step, slot) in order.iter().enumerate() {
+        let Some(arg) = args.get_mut(*slot) else {
+            continue;
+        };
+        let temp = format!("__jet_arg{step}");
+        let ty = arg.value.ty.clone();
+        let bound = std::mem::replace(
+            &mut arg.value,
+            TExpr {
+                ty: ty.clone(),
+                // A `user` slot, not `generated`: `TStmt::Let` spells its name
+                // through `mangle`, and only `TLocal::user` reads it back the
+                // same way. The name itself is unspellable in Jet source.
+                kind: TExprKind::Local(TLocal::user(&temp)),
+            },
+        );
+        stmts.push(TStmt::Let {
+            name: temp,
+            kw: "let",
+            let_ty: crate::Codegen::TIR::TLetTy::plain(ty),
+            init: bound,
+            gc_promotion: None,
+            gc_transferred: false,
+        });
+    }
+    stmts
 }

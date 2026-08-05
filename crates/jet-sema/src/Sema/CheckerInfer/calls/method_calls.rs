@@ -250,7 +250,6 @@ impl<'a> Checker<'a> {
                 type_args: type_args.to_vec(),
                 args: call_args,
                 range_checked: false,
-                arg_source_order: None,
                 resolved_ret: None,
             };
             let result = self.check_call(&mut call, true).flatten();
