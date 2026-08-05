@@ -386,7 +386,7 @@ pub fn core_fixed_sig(
             vec![(read, Type::Named("SyncText".into()))],
             Some(Type::String),
         )),
-        // D-SYNC1: `doc.edit(at:, insert:)` — a positioned edit is what makes
+        // D-SYNC1: a positioned edit is what makes
         // SyncText a text CRDT rather than a whole-document overwrite.
         ("core.sync", "text_edit") => Some((
             vec![

@@ -795,7 +795,7 @@ Examples: `examples/features/crypto/auth_tokens.jet`,
 `core.sync` ships D-SYNC1 CRDT value types and D-DBPOLICY1 row policies:
 
 ```jet
-text_new / text_set / text_merge / text_show
+text_new / text_set / text_edit / text_merge / text_show / text_metadata
 counter_new / counter_inc / counter_merge / counter_value
 map_new / map_set / map_get / map_merge / map_show
 list_new / list_push / list_merge / list_show
@@ -803,7 +803,13 @@ policy_new(table, expression) => RowPolicy ? String
 policy_allows(policy, user, row_owner) => Bool
 ```
 
-Merges are deterministic and retain independent replica contributions. Beginner
+Merges are deterministic and keep every replica's edits. `SyncText` is a
+sequence CRDT: `text_edit(doc, replica, at, delete_count, insert)` writes at a
+character position, and two replicas that edit while apart reach one document.
+A replica name must own one line of edits; editing two copies of a document
+under one name is not a concurrent edit and does not merge. `text_metadata`
+reports the highest counter each replica has written, which orders edits but
+does not decide causality. Beginner
 row policies use `owner == user`; expert policies may use `true`. `app.sync(doc,
 over: session)` publishes the typed CRDT representation through a bounded
 session registry and returns a monotonic delivery receipt. Database row-policy

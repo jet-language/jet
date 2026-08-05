@@ -331,6 +331,8 @@ fn ct_to_text(v: &CtValue, span: Span) -> Result<JetSyncText, Diagnostic> {
                 return Err(unsupported("SyncText atom limit", span));
             }
             let mut atoms = Vec::with_capacity(entries.len());
+            let mut seen: std::collections::BTreeSet<(String, u64)> =
+                std::collections::BTreeSet::new();
             for entry in entries {
                 let CtValue::Struct { type_name, fields } = entry else {
                     return Err(unsupported("SyncText atom", span));
@@ -386,6 +388,9 @@ fn ct_to_text(v: &CtValue, span: Span) -> Result<JetSyncText, Diagnostic> {
                 if !jet_sync_token_is_valid(&replica) {
                     return Err(unsupported("SyncText atom replica", span));
                 }
+                if counter == 0 || !seen.insert((replica.clone(), counter)) {
+                    return Err(unsupported("SyncText atom identity", span));
+                }
                 atoms.push(JetSyncTextAtom {
                     replica,
                     counter,
@@ -394,7 +399,13 @@ fn ct_to_text(v: &CtValue, span: Span) -> Result<JetSyncText, Diagnostic> {
                     deleted,
                 });
             }
-            Ok(JetSyncText { atoms })
+            // I9: refuse here exactly what the Prelude decode refuses, so the
+            // comptime tier cannot evaluate a document AOT would reject.
+            let doc = JetSyncText { atoms };
+            if jet_sync_text_order(&doc).len() != doc.atoms.len() {
+                return Err(unsupported("SyncText reachability", span));
+            }
+            Ok(doc)
         }
         _ => Err(unsupported("SyncText", span)),
     }

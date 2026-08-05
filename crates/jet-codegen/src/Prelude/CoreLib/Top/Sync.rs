@@ -134,14 +134,26 @@ fn jet_sync_text_read(doc: &JetSyncText) -> String {
         .collect()
 }
 
-fn jet_sync_text_next_counter(doc: &JetSyncText, replica: &str) -> u64 {
+/// The counter is a document-wide Lamport clock, not a per-replica one.  The
+/// sibling rule above compares counters across replicas, so a per-replica
+/// counter would place a new character by how much its own replica had written
+/// rather than by what it was inserted after.
+fn jet_sync_text_next_counter(doc: &JetSyncText) -> u64 {
     doc.atoms
         .iter()
-        .filter(|atom| atom.replica == replica)
         .map(|atom| atom.counter)
         .max()
         .unwrap_or(0)
         .saturating_add(1)
+}
+
+/// Would writing `count` more characters run the clock out?  Saturating here
+/// would mint an identity a document already holds, so callers refuse instead.
+fn jet_sync_text_clock_exhausted(doc: &JetSyncText, count: usize) -> bool {
+    u64::try_from(count)
+        .ok()
+        .and_then(|count| jet_sync_text_next_counter(doc).checked_add(count))
+        .is_none()
 }
 
 /// Write `text` as a chain of atoms following `anchor`.  Each character keeps
@@ -154,7 +166,7 @@ fn jet_sync_text_insert_after(
     text: &str,
 ) {
     let mut anchor = anchor;
-    let mut counter = jet_sync_text_next_counter(doc, replica);
+    let mut counter = jet_sync_text_next_counter(doc);
     for ch in text.chars() {
         doc.atoms.push(JetSyncTextAtom {
             replica: replica.to_string(),
@@ -164,7 +176,7 @@ fn jet_sync_text_insert_after(
             deleted: false,
         });
         anchor = Some((replica.to_string(), counter));
-        counter = counter.saturating_add(1);
+        counter += 1;
     }
 }
 
@@ -185,6 +197,7 @@ fn jet_sync_text_set(mut doc: JetSyncText, replica: String, text: String) -> Jet
     if !jet_sync_token_is_valid(&replica)
         || inserted > MAX_SYNC_TEXT
         || doc.atoms.len().saturating_add(inserted) > MAX_SYNC_ATOMS
+        || jet_sync_text_clock_exhausted(&doc, inserted)
     {
         return doc;
     }
@@ -211,6 +224,7 @@ fn jet_sync_text_edit(
         || delete_count < 0
         || inserted > MAX_SYNC_TEXT
         || doc.atoms.len().saturating_add(inserted) > MAX_SYNC_ATOMS
+        || jet_sync_text_clock_exhausted(&doc, inserted)
     {
         return doc;
     }
@@ -247,9 +261,12 @@ fn jet_sync_text_merge(a: &JetSyncText, b: &JetSyncText) -> JetSyncText {
         match merged.get_mut(&key) {
             Some(existing) => {
                 let deleted = existing.deleted || atom.deleted;
-                // One identity carrying two readings can only come from a
-                // forged document.  Keep the smaller one so the merge answers
-                // the same either way round.
+                // One identity carrying two readings means a replica name was
+                // used by two writers, or one document was forked and both
+                // halves edited under the same name.  An anchor must resolve
+                // to one parent, so only one reading can survive; keep the
+                // smaller so the merge answers the same either way round.
+                // A replica name has to own a single line of edits.
                 if (atom.ch, &atom.after) < (existing.ch, &existing.after) {
                     existing.ch = atom.ch;
                     existing.after = atom.after.clone();
@@ -270,6 +287,9 @@ fn jet_sync_text_show(doc: &JetSyncText) -> String {
     format!("SyncText({})", jet_sync_text_read(doc))
 }
 
+/// The highest counter each replica has written, plus the document clock.
+/// This is not a vector clock: a Lamport counter records when a replica wrote,
+/// never what it had seen, so it orders edits but cannot decide causality.
 fn jet_sync_text_metadata(doc: &JetSyncText) -> String {
     let mut clocks: std::collections::BTreeMap<&str, u64> = std::collections::BTreeMap::new();
     for atom in &doc.atoms {
@@ -283,7 +303,7 @@ fn jet_sync_text_metadata(doc: &JetSyncText) -> String {
         .map(|(replica, clock)| format!("{replica}={clock}"))
         .collect::<Vec<_>>()
         .join(",");
-    format!("VectorClock({parts})")
+    format!("LamportClock({parts})")
 }
 
 fn jet_sync_counter_new(replica: String, value: i64) -> JetSyncCounter {
@@ -976,6 +996,8 @@ impl user_Decode for JetSyncText {
             return Err(jet_sync_decode_error("SyncText atom limit exceeded"));
         }
         let mut atoms: Vec<JetSyncTextAtom> = Vec::with_capacity(values.len());
+        let mut seen: std::collections::BTreeSet<(String, u64)> =
+            std::collections::BTreeSet::new();
         let mut errors = Vec::new();
         for (index, value) in values.iter().enumerate() {
             let fields = match jet_sync_object(
@@ -1053,10 +1075,7 @@ impl user_Decode for JetSyncText {
                     (Ok(anchor), Some(ch))
                         if jet_sync_token_is_valid(&replica) && counter > 0 =>
                     {
-                        if atoms
-                            .iter()
-                            .any(|atom| atom.replica == replica && atom.counter == counter)
-                        {
+                        if !seen.insert((replica.clone(), counter)) {
                             entry_errors.extend(jet_sync_decode_error(
                                 "SyncText contains duplicate atom identities",
                             ));
@@ -1083,20 +1102,20 @@ impl user_Decode for JetSyncText {
         if !errors.is_empty() {
             return Err(errors);
         }
-        // An anchor naming an atom the document does not carry would silently
-        // drop that character from the reading order, so refuse it here.
-        for atom in &atoms {
-            if let Some((replica, counter)) = &atom.after {
-                if !atoms
-                    .iter()
-                    .any(|other| &other.replica == replica && other.counter == *counter)
-                {
-                    return Err(jet_sync_decode_error(
-                        "SyncText atom follows a character the document does not carry",
-                    ));
-                }
-            }
+        // A character the reading order cannot reach would vanish from the
+        // document with no error.  Presence of the anchor is not enough: two
+        // atoms may anchor each other, or one may anchor itself, and both
+        // shapes are unreachable.  So walk the real order and refuse anything
+        // it does not visit.
+        let decoded = JetSyncText {
+            atoms: std::mem::take(&mut atoms),
+        };
+        if jet_sync_text_order(&decoded).len() != decoded.atoms.len() {
+            return Err(jet_sync_decode_error(
+                "SyncText carries a character the document cannot reach",
+            ));
         }
+        let mut atoms = decoded.atoms;
         atoms.sort_by(|left, right| {
             left.replica
                 .cmp(&right.replica)

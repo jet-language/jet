@@ -27,6 +27,12 @@ fn run() {
     print("text_idempotent:{sync.text_show(sync.text_merge(abc, abc)) == sync.text_show(abc)}")
     print("text_all_edits:{sync.text_show(abc)}")
     print("text_clock:{sync.text_metadata(abc)}")
+    // A second replica inserting mid-document must land where it was typed,
+    // not where its own write count happens to fall.  Renaming the replicas
+    // must not move a character, so the same edit is repeated under names
+    // that sort the other way.
+    print("mid_low:{sync.text_show(sync.text_edit(sync.text_new("r1", "ab"), "r2", 1, 0, "Z"))}")
+    print("mid_high:{sync.text_show(sync.text_edit(sync.text_new("r9", "ab"), "r2", 1, 0, "Z"))}")
 
     left :: sync.map_set(sync.map_new(), "k", "left")
     right :: sync.map_set(sync.map_new(), "k", "right")
@@ -72,7 +78,7 @@ fn sync_laws_hold_on_aot_path() {
     assert_eq!(code, 0);
     assert_eq!(
         stdout,
-        "text_commutes:true\ntext_merged:SyncText(hello, world!)\ntext_associates:true\ntext_idempotent:true\ntext_all_edits:SyncText(goodbye, world!)\ntext_clock:VectorClock(r1=12,r2=1,r3=7)\nmap_converges:true\nlist_converges:true\ncounter_idempotent:5\ninvalid_policy:rejected\nowner_allowed:true\nowner_denied:false\npublic_allowed:true\nSyncOver(session=sync-laws, generation=1, doc=SyncMap(k=right))\nSyncOver(session=sync-laws, generation=1, doc=SyncMap(k=right))\n"
+        "text_commutes:true\ntext_merged:SyncText(hello, world!)\ntext_associates:true\ntext_idempotent:true\ntext_all_edits:SyncText(goodbye, world!)\ntext_clock:LamportClock(r1=12,r2=12,r3=18)\nmid_low:SyncText(aZb)\nmid_high:SyncText(aZb)\nmap_converges:true\nlist_converges:true\ncounter_idempotent:5\ninvalid_policy:rejected\nowner_allowed:true\nowner_denied:false\npublic_allowed:true\nSyncOver(session=sync-laws, generation=1, doc=SyncMap(k=right))\nSyncOver(session=sync-laws, generation=1, doc=SyncMap(k=right))\n"
     );
 }
 
@@ -82,6 +88,6 @@ fn sync_laws_hold_on_default_run() {
     assert_eq!(code, 0, "default jet run failed: {stderr}");
     assert_eq!(
         stdout,
-        "text_commutes:true\ntext_merged:SyncText(hello, world!)\ntext_associates:true\ntext_idempotent:true\ntext_all_edits:SyncText(goodbye, world!)\ntext_clock:VectorClock(r1=12,r2=1,r3=7)\nmap_converges:true\nlist_converges:true\ncounter_idempotent:5\ninvalid_policy:rejected\nowner_allowed:true\nowner_denied:false\npublic_allowed:true\nSyncOver(session=sync-laws, generation=1, doc=SyncMap(k=right))\nSyncOver(session=sync-laws, generation=1, doc=SyncMap(k=right))\n"
+        "text_commutes:true\ntext_merged:SyncText(hello, world!)\ntext_associates:true\ntext_idempotent:true\ntext_all_edits:SyncText(goodbye, world!)\ntext_clock:LamportClock(r1=12,r2=12,r3=18)\nmid_low:SyncText(aZb)\nmid_high:SyncText(aZb)\nmap_converges:true\nlist_converges:true\ncounter_idempotent:5\ninvalid_policy:rejected\nowner_allowed:true\nowner_denied:false\npublic_allowed:true\nSyncOver(session=sync-laws, generation=1, doc=SyncMap(k=right))\nSyncOver(session=sync-laws, generation=1, doc=SyncMap(k=right))\n"
     );
 }
