@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1438,
-    "rev": 25409,
+    "nextNum": 1439,
+    "rev": 25410,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -80732,6 +80732,30 @@
       "created": "2026-08-05T13:33:36.172Z",
       "updated": "2026-08-05T14:37:05.302Z",
       "updatedBy": "fable"
+    },
+    {
+      "id": "c0ogiepl",
+      "num": 1438,
+      "title": "Variadic methods: sema accepts the declaration but no tier can run one",
+      "body": "A rest parameter on a method parses and registers, but no call to it can succeed. check_method_args rejects every arity with E0104, and loosening that check reaches an internal compiler error in Codegen/Items.rs — codegen has no lowering for a variadic method. Free-function variadics work on every tier.\n\nFound while implementing D-APILABEL1 (#1393). Predates that card: master rejects 'l.write(1)' and 'l.write(1, 2, 3)' identically on a 'fn write(self, level: Int, parts: ...Int)'. The strict arity check stays in place so the failure remains a diagnostic rather than an ICE.\n\nDone when a variadic method call lowers and runs with the same meaning on AOT, the Cranelift JIT and the interpreter, with an example and golden output, or when the language decides methods do not take rest parameters and says so with a registered diagnostic.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-05T17:15:58.572Z",
+      "updated": "2026-08-05T17:15:58.572Z",
+      "updatedBy": "claude-e3-1393"
     }
   ],
   "decisions": [
@@ -105891,6 +105915,13 @@
   ],
   "events": [
     {
+      "at": "2026-08-05T17:15:58.572Z",
+      "by": "claude-e3-1393",
+      "action": "card.add",
+      "ref": "c0ogiepl",
+      "note": "Variadic methods: sema accepts the declaration but no tier can run one"
+    },
+    {
       "at": "2026-08-05T16:24:53.536Z",
       "by": "claude-e3-1393",
       "action": "card.update",
@@ -109382,13 +109413,6 @@
       "action": "card.criteria-add",
       "ref": "c0xsk2wa",
       "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-08-04T19:06:45.742Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0xsk2wa",
-      "note": "#3 jet devtools grammars regenerated"
     }
   ],
   "nextNum": 368,

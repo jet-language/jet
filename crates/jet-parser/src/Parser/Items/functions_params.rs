@@ -445,12 +445,10 @@ impl<'a> Parser<'a> {
                     if matches!(self.peek().kind, TokKind::RParen) {
                         break;
                     }
+                    // No trailing comma: a parameter (or a zone separator) has
+                    // to follow. D-APILABEL1 changed nothing here, and lambda
+                    // and call-argument lists reject one too.
                     self.expect(TokKind::Comma, "between parameters")?;
-                    // A trailing comma closes the list; `*` still needs a
-                    // parameter after it, which the check below reports.
-                    if matches!(self.peek().kind, TokKind::RParen) {
-                        break;
-                    }
                 }
             }
             self.expect(TokKind::RParen, "to close the parameter list")?;

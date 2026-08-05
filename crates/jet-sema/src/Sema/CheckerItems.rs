@@ -602,23 +602,19 @@ impl<'a> Checker<'a> {
             });
         }
 
-        // D-VARIADIC1: a rest parameter collects the trailing arguments, so it
-        // may receive none at all and may receive many. Its slot is the last
-        // one, and everything before it is still exact.
-        let variadic_tail = sig.param_variadic.last().copied().unwrap_or(false);
-        let arity_ok = if variadic_tail {
-            args.len() + 1 >= expected_args
-        } else {
-            args.len() == expected_args
-        };
-        if !arity_ok {
+        // A rest parameter on a *method* is still rejected here, exactly as
+        // before D-APILABEL1: codegen has no lowering for one, so accepting the
+        // call would reach an internal compiler error instead of a diagnostic
+        // (I2). Free-function variadics are unaffected and bind normally.
+        // The binder above already knows the parameter is variadic, so it does
+        // not additionally claim a missing argument before this fires.
+        if args.len() != expected_args {
             self.diags.push(Diagnostic::error(
                 "E0104",
                 format!(
-                    "`{}` expects {} {}argument{}, got {}",
+                    "`{}` expects {} argument{}, got {}",
                     method,
-                    expected_args.saturating_sub(usize::from(variadic_tail)),
-                    if variadic_tail { "or more " } else { "" },
+                    expected_args,
                     if expected_args == 1 { "" } else { "s" },
                     args.len()
                 ),

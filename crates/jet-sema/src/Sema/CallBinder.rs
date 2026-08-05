@@ -55,17 +55,25 @@ pub(crate) struct Binding {
 }
 
 impl Binding {
-    /// True when the caller wrote every supplied argument in declaration
-    /// order. Only a non-identity binding can move an effect, so only that
-    /// case needs order-preserving temporaries during lowering.
+    /// True when evaluating the rewritten list left to right already matches
+    /// the ratified order, so lowering needs no temporaries.
+    ///
+    /// Two things can break it. The written arguments can be out of the order
+    /// the caller wrote them; and a filled default can sit *before* a written
+    /// argument, because the rule is that every supplied expression runs first
+    /// and the unbound defaults run afterwards in declaration order.
     pub fn is_source_ordered(&self) -> bool {
         let mut last = 0usize;
+        let mut seen_default = false;
         for source in &self.sources {
-            if let ArgSource::Written(index) = source {
-                if *index < last {
-                    return false;
+            match source {
+                ArgSource::Written(index) => {
+                    if seen_default || *index < last {
+                        return false;
+                    }
+                    last = *index;
                 }
-                last = *index;
+                ArgSource::Default => seen_default = true,
             }
         }
         true
@@ -173,17 +181,34 @@ pub(crate) fn bind_call_args(
         return None;
     }
 
-    // A missing *labelled* parameter is reported here; a plain short positional
-    // call keeps the existing count-based arity diagnostic, which reads better.
+    let missing: Vec<usize> = slots
+        .iter()
+        .enumerate()
+        .filter(|(position, slot)| slot.is_none() && !params[*position].optional())
+        .map(|(position, _)| position)
+        .collect();
+
+    // A short *positional* call is an arity problem, and the caller's
+    // count-based diagnostic says it better than a per-parameter one. Leave the
+    // arguments exactly as written so that count is the count the user typed,
+    // and fill no defaults — a default belongs to its own parameter, and
+    // placing one while an earlier slot is empty would silently shift it into
+    // the wrong position.
     let labelled = args.iter().any(|arg| arg.label.is_some());
-    for (position, slot) in slots.iter().enumerate() {
-        if slot.is_none()
-            && !params[position].optional()
-            && (labelled || params[position].zone == ParamZone::LabelOnly)
-        {
-            diags.push(missing_argument(callee, params[position].label, call_span));
-            ok = false;
-        }
+    if !missing.is_empty()
+        && !labelled
+        && missing
+            .iter()
+            .all(|position| params[*position].zone != ParamZone::LabelOnly)
+    {
+        return Some(Binding {
+            sources: (0..args.len()).map(ArgSource::Written).collect(),
+        });
+    }
+
+    for position in missing {
+        diags.push(missing_argument(callee, params[position].label, call_span));
+        ok = false;
     }
     if !ok {
         return None;

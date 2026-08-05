@@ -96,6 +96,11 @@ impl<'a> Checker<'a> {
             }
     
             let tail = call.args.split_off(fixed);
+            // D-APILABEL1=A: the packed list stands in for the whole tail, so it
+            // inherits the earliest place the caller wrote any of its elements.
+            // Without this the tail loses its order mark and a reordered call
+            // whose rest arguments have effects runs them last.
+            let packed_source_index = tail.iter().filter_map(|arg| arg.flags.source_index).min();
             let mut packed_elems: Vec<Expr> = Vec::new();
             let mut pack_span = call.name_span;
             for mut arg in tail {
@@ -188,7 +193,10 @@ impl<'a> Checker<'a> {
                 convention: variadic_conv,
                 expr: packed_expr,
                 span: pack_span,
-                flags: Default::default(),
+                flags: crate::AST::CallArgFlags {
+                    source_index: packed_source_index,
+                    ..Default::default()
+                },
                 label: None,
                 spread: false,
             });

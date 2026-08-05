@@ -3151,9 +3151,15 @@ fn bind_arg_temporaries(
     order: &[usize],
     site: u32,
 ) -> Vec<TStmt> {
-    // Only the arguments that can actually be observed need pinning down. If at
-    // most one of them can, nothing can be observed out of order and the call
-    // stays a plain call.
+    // Only arguments that can actually be observed need pinning down. Count
+    // them across the whole list, not just the written ones: a filled default
+    // with an effect also has to run after every supplied argument, and it
+    // sits in the call rather than in `order`. With fewer than two, nothing can
+    // be observed out of order and the call stays a plain call.
+    let observable_total = args.iter().filter(|arg| !effect_free(&arg.value)).count();
+    if observable_total < 2 {
+        return Vec::new();
+    }
     let observable: Vec<usize> = order
         .iter()
         .copied()
@@ -3162,7 +3168,7 @@ fn bind_arg_temporaries(
                 .is_some_and(|arg| hoistable(arg) && !effect_free(&arg.value))
         })
         .collect();
-    if observable.len() < 2 {
+    if observable.is_empty() {
         return Vec::new();
     }
     let mut stmts: Vec<TStmt> = Vec::with_capacity(observable.len() + 1);
