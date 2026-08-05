@@ -418,3 +418,56 @@ fn services_state_workflow_identity_and_upgrade_match_default_run() {
         "snapshot:state-v1\nevents:first|second\nevent_count:2\nworkflow:1:1:start@v1|step:charge\nworkflow_version:rejected\ngeneration:2:2:Endpoint(cluster/api@g2):ServiceUpgradeReceipt(from=1, to=2, migration=none, rollback_available=false, pinned=)\nstale:rejected\nrollback:1:1\nObserve(workers=1, started=true, generation=1, dead_letters=0, events=0, chaos=1, draining=0, partitions=0, rollback=false)\n"
     );
 }
+
+/// Durable delivery and an event log share one service tree but must not share
+/// one file. The delivery log and the state store use different framing, and
+/// the state store is read back with the adapter its header declares, so a
+/// durable send used to leave records the typed read could not parse: a later
+/// `append_event` failed on any tree that had accepted a `send_durable`.
+///
+/// No existing check combined the two surfaces on one tree, so the collision
+/// only showed up in an example.
+const DURABLE_PLUS_EVENT_LOG_SOURCE: &str = r#"
+use core.path as path
+use core.services as services
+use core.testing as testing
+
+fn run() {
+    tree := services.tree("app")
+    services.set_delivery(&tree, services.delivery_durable()) ?? panic("delivery")
+    temp := testing.temp_dir("services-delivery-eventlog")
+    store_path :: path.join(temp, "state.log")
+    store :: services.state_store(store_path) ?? panic("state store")
+    services.set_state_event_log(&tree, store, "app-events", 1) ?? panic("state")
+    worker :: services.worker(&tree, "a", 4) ?? panic("worker")
+    services.start(&tree) ?? panic("start")
+
+    services.send_durable(&tree, worker, "ping", "k1") ?? panic("durable send")
+    services.append_event(&tree, "after-durable-send") ?? panic("append after durable send")
+    services.send_durable(&tree, worker, "pong", "k2") ?? panic("second durable send")
+    services.append_event(&tree, "after-second-send") ?? panic("append after second send")
+
+    print("events:{services.event_count(tree)}")
+}
+"#;
+
+#[test]
+fn durable_delivery_does_not_corrupt_the_event_log_aot() {
+    if !have_rustc() {
+        return;
+    }
+    let (code, stdout) = build_and_run("services_durable_eventlog", DURABLE_PLUS_EVENT_LOG_SOURCE);
+    assert_eq!(code, 0, "durable send beside an event log must not fail");
+    assert_eq!(stdout, "events:2\n");
+}
+
+#[test]
+fn durable_delivery_does_not_corrupt_the_event_log_default_run() {
+    let (code, stdout, stderr) = run_default_multi(
+        "services_durable_eventlog_jit",
+        "main.jet",
+        &[("main.jet", DURABLE_PLUS_EVENT_LOG_SOURCE)],
+    );
+    assert_eq!(code, 0, "default jet run failed: {stderr}");
+    assert_eq!(stdout, "events:2\n");
+}
