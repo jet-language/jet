@@ -471,3 +471,72 @@ fn durable_delivery_does_not_corrupt_the_event_log_default_run() {
     assert_eq!(code, 0, "default jet run failed: {stderr}");
     assert_eq!(stdout, "events:2\n");
 }
+
+/// #1149: the snapshot and event-log adapters must survive a reopen and refuse
+/// a store they cannot trust. The state store is framed with a magic line, an
+/// adapter line and a schema line, so garbage in the file has to surface as a
+/// typed error rather than a panic or a silently empty restore.
+const STATE_ADAPTER_SOURCE: &str = r#"
+use core.files as files
+use core.path as path
+use core.services as services
+use core.testing as testing
+
+fn run() {
+    temp := testing.temp_dir("services-state-adapters")
+
+    snapshot_path :: path.join(temp, "snapshot.log")
+    snap_tree := services.tree("snap")
+    snap_store :: services.state_store(snapshot_path) ?? panic("snapshot store")
+    services.set_state_snapshot(&snap_tree, snap_store, "app-state", 1) ?? panic("snapshot adapter")
+    _snap_worker :: services.worker(&snap_tree, "a", 2) ?? panic("snapshot worker")
+    services.start(&snap_tree) ?? panic("snapshot start")
+    services.commit_snapshot(&snap_tree, "state-v1") ?? panic("commit")
+    print("restored:{services.restore_snapshot(snap_tree) ?? panic("restore")}")
+
+    event_path :: path.join(temp, "events.log")
+    log_tree := services.tree("log")
+    log_store :: services.state_store(event_path) ?? panic("event store")
+    services.set_state_event_log(&log_tree, log_store, "app-events", 1) ?? panic("event adapter")
+    _log_worker :: services.worker(&log_tree, "a", 2) ?? panic("event worker")
+    services.start(&log_tree) ?? panic("event start")
+    services.append_event(&log_tree, "first") ?? panic("first event")
+    services.append_event(&log_tree, "second") ?? panic("second event")
+    print("replay:{services.replay_events(log_tree)}")
+
+    // A store the runtime cannot trust must fail closed, not restore nothing.
+    files.write(snapshot_path, "not a service state store") ?? panic("corrupt write")
+    corrupted :: services.restore_snapshot(snap_tree)
+    if corrupted == {
+        .Ok(_) -> { print("corrupt:accepted") }
+        .Err(_) -> { print("corrupt:rejected") }
+    }
+}
+"#;
+
+#[test]
+fn state_adapters_reopen_and_reject_corrupt_stores_aot() {
+    if !have_rustc() {
+        return;
+    }
+    let (code, stdout) = build_and_run("services_state_adapters", STATE_ADAPTER_SOURCE);
+    assert_eq!(code, 0);
+    assert_eq!(
+        stdout,
+        "restored:state-v1\nreplay:first|second\ncorrupt:rejected\n"
+    );
+}
+
+#[test]
+fn state_adapters_reopen_and_reject_corrupt_stores_default_run() {
+    let (code, stdout, stderr) = run_default_multi(
+        "services_state_adapters_jit",
+        "main.jet",
+        &[("main.jet", STATE_ADAPTER_SOURCE)],
+    );
+    assert_eq!(code, 0, "default jet run failed: {stderr}");
+    assert_eq!(
+        stdout,
+        "restored:state-v1\nreplay:first|second\ncorrupt:rejected\n"
+    );
+}
