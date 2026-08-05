@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1455,
-    "rev": 25503,
+    "rev": 25507,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -81389,7 +81389,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T20:24:56.629Z",
-      "updated": "2026-08-05T20:25:40.511Z",
+      "updated": "2026-08-05T22:12:57.041Z",
       "updatedBy": "fable"
     },
     {
@@ -81416,7 +81416,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T20:47:48.204Z",
-      "updated": "2026-08-05T20:48:28.447Z",
+      "updated": "2026-08-05T22:12:56.724Z",
       "updatedBy": "fable"
     }
   ],
@@ -105883,8 +105883,8 @@
           "key": "C",
           "name": "Statement arrows on every loop header",
           "detail": "In statement position, every loop header takes an arrow body, finite, condition-only, or bare infinite. Value position stays exactly as ratified, finite sources with non-unit yields. Gain: one sentence covers the arrow everywhere, a lightweight body for any control-flow construct. Loss: the same spelling collects in value position and discards as a statement, which one docs paragraph must teach.",
-          "technical": "The grammar allows `-> statement` after any loop header in statement position, with the body value discarded. A non-unit body in statement position gets a lint naming the `::` collection form. The infinite-yield bar stays for value position, since an infinite collection cannot terminate. Formatter emits the arrow form for single-statement bodies and round-trips both forms, with a stability test.",
-          "code": "loop pair, joined -> print(pair)     // finite source\nloop n < 10 -> n += 1                // condition-only\nloop running -> tick()               // bare infinite\n\n// value position: unchanged, still finite + non-unit\ndoubled :: loop v, values -> v * 2"
+          "technical": "The grammar allows `-> statement` after any loop header in statement position, with the body value discarded. A non-unit body in statement position gets a lint naming the `::` collection form and the `&` write form. The write form binds each element through the memory model's write handle, `loop v, &values`, so in-place change is a visible header fact. The infinite-yield bar stays for value position, since an infinite collection cannot terminate.\n\nThe body rule is line-based per D-BODY-ARROW1. A loop whose whole form fits one line uses `->`. A longer body uses a brace block opening on the next line, one statement per line. The formatter picks by width and round-trips both forms, with a stability test.",
+          "code": "loop pair, joined -> print(pair)     // finite source\nloop n < 10 -> n += 1                // condition-only\nloop running -> tick()               // bare infinite\nloop v, &values -> v *= 2            // write handle: change in place\n\n// value position: unchanged, still finite + non-unit\ndoubled :: loop v, values -> v * 2\n\n// the lint that teaches the three intents:\nloop v, values -> v * 2\n// warn: computes `v * 2` and drops it — bind with `::` to collect,\n//       or write `loop v, &values -> v *= 2` to change in place"
         },
         {
           "key": "D",
@@ -105944,77 +105944,77 @@
       "id": "D-BODY-ARROW1",
       "cardId": "c0ej2y7w",
       "group": "syntax",
-      "title": "One body rule across functions and control flow",
-      "gist": "Whether function bodies join the arrow rule, so every body is `-> expression` or `{ statements }`.",
-      "lesson": "A body follows a head, a function signature, an if condition, a loop header, or a dispatch pattern. Control flow already spells the one-expression body with `->` and the statement body with braces. Functions alone spell the one-expression body with `=`, as in `fn f(x: Int) => Int = 3`. The rule is structural, one expression versus a block of statements, never line count, since a long expression may wrap. This choice decides whether the function exception stays.",
+      "title": "One line-based body rule for every head",
+      "gist": "Whether every body is `-> body` when it fits one line and a brace block past that, with `=` retired from bodies.",
+      "lesson": "A body follows a head, a function signature, an if condition, a loop header, or a dispatch arm. Today three spellings split that job. Functions use `= expression`, effect guards use a bare statement with no arrow, and arms use `->`. This choice tests one line-based rule instead. A body that fits on one line is `-> body`. A longer body is a brace block that opens on the next line. The formatter picks by width, so the writer never chooses. Values route to any consumer and drop otherwise, on every form alike.",
       "explainer": "",
-      "story": "Ana learns `if hit -> score + 1` on day one, then writes `fn double(n: Int) => Int -> n * 2` and gets an error. The fix is a symbol she has seen only as assignment. She asks why a function body is different from an if body, and today's answer is history, not design.",
-      "inWild": "// today: two spellings for the same idea, one expression as a body\nfn fib(n: Int) => Int = if n < 2 -> n else -> fib(n - 1) + fib(n - 2)\n\nfn home() => WebPage = web.page(\"Home\", \"hello\")\n\n// control flow, same file, other spelling:\nif verbose -> print(\"computing...\")\nloop v, values -> v * 2",
+      "story": "Ana writes `if err -> return err` on day one and loves it. Then she writes a one-line function and must switch to `=`, and a one-line guard where the arrow is suddenly illegal. Three spellings, one idea. She asks which one the language actually believes in.",
+      "inWild": "// today: three body spellings for one idea\nfn double(n: Int) => Int = n * 2      // functions: `=`\nif ready run()                         // effect guard: no arrow\nm :: if a > b -> a else -> b           // value arms: `->`\n\n// the proposed single rule:\nfn double(n: Int) => Int -> n * 2\nif ready -> run()\nm :: if a > b -> a else -> b",
       "detail": "",
       "options": [
         {
           "key": "A",
-          "name": "Keep the equation form (today)",
-          "detail": "Functions keep `= expression`, control flow keeps `->`. Gain: a one-expression function reads as a math equation, define f of x as this value, which is a beloved beginner reading. Loss: the body rule carries a permanent exception, and the same symbol means definition here and mutation elsewhere.",
-          "technical": "No change. `=` introduces function bodies and parameter defaults, and also spells reassignment.",
-          "code": "fn area(w: Int, h: Int) => Int = w * h\nfn fib(n: Int) => Int = if n < 2 -> n else -> fib(n - 1) + fib(n - 2)"
+          "name": "Keep the three spellings (today)",
+          "detail": "Functions keep `=`, effect guards stay arrowless, arms keep `->`. Gain: each spelling carries a nuance, the equation reading on functions and the bare guard's brevity. Loss: the beginner learns three body forms for one idea, and the formatter cannot collapse or widen a body without changing which spelling it uses.",
+          "technical": "No change to D-ARROW-CONTROL1, D-IFGUARD1, or the function grammar.",
+          "code": "fn double(n: Int) => Int = n * 2\nif ready run()\nm :: if a > b -> a else -> b"
         },
         {
           "key": "B",
-          "name": "One body rule, arrow everywhere",
-          "detail": "Every head takes `-> expression` or `{ statements }`, functions included. Gain: one sentence teaches every body in the language, and each symbol keeps one role, `=>` for types, `->` for bodies, `=` for values only. Loss: the equation reading disappears, and the return type and body arrows sit adjacent, as in `=> Int -> 3`.",
-          "technical": "The function grammar accepts `-> expression` where `= expression` stood, and `= expression` is deleted, with every in-repo consumer migrated in one change. Parameter defaults keep `=`, since a default is a value, not a body. The formatter emits the arrow form and round-trips it, with a stability test.",
-          "code": "fn area(w: Int, h: Int) => Int -> w * h\nfn fib(n: Int) => Int -> if n < 2 -> n else -> fib(n - 1) + fib(n - 2)\nfn greet() -> print(\"hi\")\n\n// the whole rule, everywhere:\n//   head -> expression\n//   head { statements }"
+          "name": "One line-based rule, arrow or block",
+          "detail": "Every head takes `-> body` when the whole form fits one line, and a brace block otherwise, with the body starting on the next line. Functions join the rule, effect guards gain the arrow, and `=` retires from bodies to mean values only. The writer never chooses, since the formatter widens or collapses by line width. Gain: one sentence teaches every body in the language. Loss: the equation reading of `= expression` disappears.",
+          "technical": "Amends D-ARROW-CONTROL1, D-IFGUARD1, and the D-IF3 effect form. Inside arm tables `->` stays before a block, since it also separates head from body. Self-delimiting heads take the bare block. Marker-scoped regions such as `#Unsafe(\"reason\") { … }`, `#Test(\"name\") { … }`, and `#Bench(\"name\") { … }` always keep braces, even for one statement. Their braces state the extent of a fact, the audited region, the registered test, the timed region, and are not bodies, so the arrow never applies to them.\n\nBlocks hold one statement per line under S6, and a block's final expression is its value. A dropped non-unit arrow value in statement position gets a lint naming `::` collection and the `&` write form. The formatter emits the arrow form for one-line bodies, widens past width to a block, and round-trips both, with a stability test.",
+          "code": "fn double(n: Int) => Int -> n * 2\nfn greet(name: String) -> print(\"hi {name}\")\nif ready -> run()\nif ready {\n    warm_cache()\n    start()\n}\ndoubled :: loop v, values -> v * 2\nif code == {\n    200  -> \"ok\"\n    else -> {\n        log(code)\n        \"error\"\n    }\n}"
         },
         {
           "key": "C",
-          "name": "Functions always take braces",
-          "detail": "Delete the one-expression function sugar entirely, so function bodies are always blocks. Gain: no exception and no adjacency, since only control flow has arrow bodies. Loss: the most common function shape, one expression, gains two braces and a return, which is ceremony the short form exists to remove.",
-          "technical": "The `= expression` form is deleted with no replacement, and in-repo one-liners migrate to blocks.",
-          "code": "fn area(w: Int, h: Int) => Int {\n    return w * h\n}\n// every one-liner in the codebase grows three lines"
+          "name": "Blocks only for functions, arrows only for control flow",
+          "detail": "Functions always take a brace block, and the arrow stays a control-flow mark. Gain: the arrow keeps one narrow meaning, and function bodies have exactly one shape. Loss: the most common function, one expression, pays braces and an extra line, and the guard split with `if` remains untouched.",
+          "technical": "The `=` form is deleted and one-line function bodies are written as blocks. Control flow keeps today's arrow rules unchanged.",
+          "code": "fn double(n: Int) => Int {\n    n * 2\n}\nif ready run()   // unchanged, still arrowless"
         }
       ],
       "comparisons": [
         {
+          "lang": "JavaScript",
+          "note": "Arrow functions use one rule, an expression body or a brace body, and it transfers to every arrow a user ever writes.",
+          "code": "const area = (w, h) => w * h\nconst log = (m) => { console.log(m) }"
+        },
+        {
           "lang": "Kotlin",
-          "note": "The equation form is exactly today's Jet spelling, and it is widely loved for one-liners. Kotlin accepts the exception this ballot weighs.",
+          "note": "The equation form is today's Jet function spelling. Kotlin accepts carrying it as a permanent second body form beside braces.",
           "code": "fun area(w: Int, h: Int): Int = w * h"
         },
         {
           "lang": "Rust",
-          "note": "Match arms take one expression or a block after the arrow, while functions always take blocks, so Rust lives with option C's ceremony on functions.",
-          "code": "match n {\n    0 => 1,\n    _ => { let r = n * 2; r }\n}"
-        },
-        {
-          "lang": "JavaScript",
-          "note": "Arrow functions use one rule, an expression body or a brace body, and it transfers to every arrow the user ever writes.",
-          "code": "const area = (w, h) => w * h\nconst log = (m) => { console.log(m) }"
+          "note": "Match arms keep the fat arrow before both expressions and blocks, which is the same head separator rule this ballot keeps inside arm tables.",
+          "code": "match n {\n    0 => 1,\n    _ => { n * 2 }\n}"
         }
       ],
       "rec": "B",
       "recommendation": {
-        "why": "One structural sentence then covers every body in Jet, and each symbol holds one meaning. The arrow says this head maps to this expression, which is what a one-expression function is.",
+        "why": "One structural sentence covers every body, the arrow for one line, braces past it, chosen by the formatter and never by the writer. Each symbol keeps one role, `=>` for callables, `->` for bodies, `=` for values.",
         "whyNot": [
           {
             "key": "A",
-            "reason": "It keeps a permanent exception in the body rule and overloads `=` as definition in one place and mutation in another."
+            "reason": "Three spellings for one idea tax the beginner and block the formatter from resizing a body without respelling it."
           },
           {
             "key": "C",
-            "reason": "It buys uniformity by taxing the most common function shape with braces and a return."
+            "reason": "It taxes the most common function shape with braces and an extra line, and leaves the guard split in place."
           }
         ],
-        "tradeoff": "The equation reading is given up, and `=> Int -> 3` places the type arrow and body arrow adjacent. The two arrows keep distinct constant roles, which is what makes the adjacency readable."
+        "tradeoff": "The equation reading of `= expression` is given up, and `=> Int -> body` places two arrows adjacent. Each arrow keeps one fixed role, which is what keeps the adjacency readable."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "reviewPasses": {
-        "base": "The first draft compared keeping the equation form against extending the arrow rule to functions and recommended the arrow, because one structural rule then covers every body.",
-        "boilOcean": "The breadth pass added braces-only functions and tested unifying on `=` instead. The `=` direction was folded out, since `if c = a` collides with assignment and cannot be an arm spelling.",
-        "hybrid": "The hybrid pass tested accepting both `=` and `->` on functions with the formatter canonicalizing one. It was rejected as a standing alias, which greenfield policy forbids.",
-        "cooperative": "The cooperative pass strengthened the equation form with its math reading and Kotlin precedent, and braces-only with its symbol economy. One keeps the exception, and the other taxes every one-liner.",
-        "adversarial": "The adversarial pass attacked the arrow adjacency in `=> Int -> 3` and arrow chains through control bodies. Each arrow keeps one fixed role, chains already parse in arm position today, and the formatter stability test guards round-trips, so the recommendation stands."
+        "base": "The first draft extended the arrow to function bodies for uniformity and recommended it over the equation form and braces-only functions.",
+        "boilOcean": "The breadth pass tested unifying on `=` instead, which dies on `if c = a` colliding with assignment, and a marker-based body form, which restates what the grammar already shows. Both folded out.",
+        "hybrid": "The hybrid pass tried value-marking arrows and owner review killed them for forcing a value-versus-action choice on every body. The line-based rule replaced them, with the arrow kept inside arm tables as the head separator.",
+        "cooperative": "The cooperative pass strengthened the equation form with its math reading and Kotlin precedent, and braces-only with its narrow-arrow economy. One keeps three spellings for one idea, the other taxes every one-liner.",
+        "adversarial": "The adversarial pass attacked the arrow adjacency in `=> Int -> body`, S6 legality of collapsed blocks, silent value drops, and one-line `#Unsafe` regions losing their audit weight. Fixed symbol roles, the width-based formatter, the discard lint, and the marker-region carve-out that keeps scope braces mandatory repair all four, so the recommendation stands."
       },
       "checkInstructions": null,
       "draft": false,
@@ -107464,6 +107464,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-05T22:12:57.041Z",
+      "by": "fable",
+      "action": "decision.update",
+      "ref": "D-LOOP-STMT-ARROW1",
+      "note": ""
+    },
+    {
+      "at": "2026-08-05T22:12:56.725Z",
+      "by": "fable",
+      "action": "decision.update",
+      "ref": "D-BODY-ARROW1",
+      "note": ""
+    },
+    {
+      "at": "2026-08-05T21:39:52.924Z",
+      "by": "fable",
+      "action": "decision.update",
+      "ref": "D-LOOP-STMT-ARROW1",
+      "note": ""
+    },
+    {
+      "at": "2026-08-05T21:39:38.062Z",
+      "by": "fable",
+      "action": "decision.update",
+      "ref": "D-BODY-ARROW1",
+      "note": ""
+    },
     {
       "at": "2026-08-05T20:49:56.804Z",
       "by": "owner",
@@ -110935,34 +110963,6 @@
       "action": "card.criteria-meet",
       "ref": "c0090v5u",
       "note": "#5"
-    },
-    {
-      "at": "2026-08-04T21:55:01.997Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c0090v5u",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-04T21:55:01.669Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c0090v5u",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-04T21:55:01.355Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c0090v5u",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-04T21:55:01.002Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c0090v5u",
-      "note": "#1"
     }
   ],
   "nextNum": 368,
