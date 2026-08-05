@@ -26,18 +26,18 @@ fn run() {
     // Empty analytics → typed Empty errors.
     empty_mean :: data.mean([Float].{})
     if empty_mean == {
-        .Ok(_) -> { print("empty_mean: ok") }
-        .Err(error) -> { print("empty_mean: {error}") }
+        .Ok(_) -> print("empty_mean: ok")
+        .Err(error) -> print("empty_mean: {error}")
     }
     empty_q :: data.quantile([Float].{}, 0.5)
     if empty_q == {
-        .Ok(_) -> { print("empty_quantile: ok") }
-        .Err(error) -> { print("empty_quantile: {error}") }
+        .Ok(_) -> print("empty_quantile: ok")
+        .Err(error) -> print("empty_quantile: {error}")
     }
     empty_var :: data.variance([Float].{})
     if empty_var == {
-        .Ok(_) -> { print("empty_variance: ok") }
-        .Err(error) -> { print("empty_variance: {error}") }
+        .Ok(_) -> print("empty_variance: ok")
+        .Err(error) -> print("empty_variance: {error}")
     }
 
     // All-missing series: typed optionals, not a second sentinel.
@@ -67,13 +67,13 @@ fn run() {
     // Extreme / non-finite numerics fail closed.
     nan_mean :: data.mean([1.0, Float.NAN, 3.0])
     if nan_mean == {
-        .Ok(_) -> { print("nan_mean: ok") }
-        .Err(error) -> { print("nan_mean: {error}") }
+        .Ok(_) -> print("nan_mean: ok")
+        .Err(error) -> print("nan_mean: {error}")
     }
     inf_sum :: data.sum([1.0, Float.INFINITY])
     if inf_sum == {
-        .Ok(_) -> { print("inf_sum: ok") }
-        .Err(error) -> { print("inf_sum: {error}") }
+        .Ok(_) -> print("inf_sum: ok")
+        .Err(error) -> print("inf_sum: {error}")
     }
 
     // Signed zero collapses to +0.0 on reducer output (no silent -0.0).
@@ -91,13 +91,13 @@ fn run() {
     // Invalid quantile domain and rolling width.
     bad_q :: data.quantile([1.0, 2.0, 3.0], 1.5)
     if bad_q == {
-        .Ok(_) -> { print("bad_quantile: ok") }
-        .Err(error) -> { print("bad_quantile: {error}") }
+        .Ok(_) -> print("bad_quantile: ok")
+        .Err(error) -> print("bad_quantile: {error}")
     }
     bad_w :: data.rolling_mean([1.0, 2.0, 3.0], 0)
     if bad_w == {
-        .Ok(_) -> { print("bad_window: ok") }
-        .Err(error) -> { print("bad_window: {error}") }
+        .Ok(_) -> print("bad_window: ok")
+        .Err(error) -> print("bad_window: {error}")
     }
 
     // Hostile plot labels are SVG-escaped; negative counts reject.
@@ -119,7 +119,7 @@ fn run() {
     reader :: data.csv_reader<Event>(input, limits) ?? panic("reader")
     groups :: data.group_mean(reader, e => e.service, e => e.latency_ms)
     if groups == {
-        .Ok(_) -> { print("large_limit: ok") }
-        .Err(error) -> { print("large_limit: {error}") }
+        .Ok(_) -> print("large_limit: ok")
+        .Err(error) -> print("large_limit: {error}")
     }
 }

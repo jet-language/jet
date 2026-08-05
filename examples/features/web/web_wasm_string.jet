@@ -2,16 +2,15 @@
 // hostile empty / tab+newline / Unicode roundtrip through the JS bridge.
 #WasmExport
 fn pick_str(which: Int) => String {
-    if which == 0 { return "" }
-    if which == 1 { return "ascii-ok" }
-    if which == 2 { return "tab\tline\nbreak" }
-    return "emoji🌍"
+    return if which == {
+        0 -> ""
+        1 -> "ascii-ok"
+        2 -> "tab\tline\nbreak"
+        else -> "emoji🌍"
+    }
 }
 
 #Target(JS)
 fn run() {
-    print(pick_str(0))
-    print(pick_str(1))
-    print(pick_str(2))
-    print(pick_str(3))
+    print(pick_str($[0, 1, 2, 3]$))
 }

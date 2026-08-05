@@ -12,13 +12,9 @@ fn run() {
     rows :: data.csv<Ticket>(raw) ?? panic("bad csv")
     table :: data.table(rows)
     cols :: data.schema(table)
-    loop c, cols {
-        print("{c.name}:{c.type_name}")
-    }
+    loop c, cols { print("{c.name}:{c.type_name}") }
     selected :: data.filter(data.rows(table), t => t.minutes >= 5.0)
     print("selected:{data.count(selected)}")
-    loop t, selected {
-        print("{t.team}:{t.minutes}")
-    }
+    loop t, selected { print("{t.team}:{t.minutes}") }
     print("{data.status()[5].step}:{data.status()[5].path}")
 }

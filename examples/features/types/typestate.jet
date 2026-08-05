@@ -21,10 +21,8 @@ struct Reservation {
 }
 
 impl Reservation {
-    #Transition(_, Pending) fn book(guest: String) => Reservation {
-        // Entry transition: a fresh booking starts life in `Pending`.
-        return .{guest: ~guest}
-    }
+    // Entry transition: a fresh booking starts life in `Pending`.
+    #Transition(_, Pending) fn book(guest: String) => Reservation = .{guest: ~guest}
 
     #Transition(Pending, Confirmed) fn pay(self: ^Reservation) => Reservation {
         // Paying advances `Pending -> Confirmed`. The transition *consumes* the old
@@ -41,10 +39,8 @@ impl Reservation {
         return self
     }
 
-    #State(CheckedIn) fn room_key(self) => String {
-        // A plain guarded read: only legal once checked in. No state change.
-        return "key for {self.guest}"
-    }
+    // A plain guarded read: only legal once checked in. No state change.
+    #State(CheckedIn) fn room_key(self) => String = "key for {self.guest}"
 }
 
 fn run() {
