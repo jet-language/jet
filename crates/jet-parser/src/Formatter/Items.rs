@@ -926,7 +926,7 @@ impl<'a> Fmt<'a> {
                 if written > 0 {
                     self.write(", ");
                 }
-                self.write("*");
+                self.write(Syntax::PARAM_ZONE_LABEL_ONLY);
                 written += 1;
             }
             if written > 0 {
@@ -939,7 +939,8 @@ impl<'a> Fmt<'a> {
                     .get(i + 1)
                     .is_none_or(|next| next.zone != ParamZone::PositionalOnly);
             if last_positional_only {
-                self.write(", /");
+                self.write(", ");
+                self.write(Syntax::PARAM_ZONE_POSITIONAL_ONLY);
                 written += 1;
             }
         }

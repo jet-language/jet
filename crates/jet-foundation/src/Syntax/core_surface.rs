@@ -235,6 +235,13 @@ pub const SIZED_NUMERIC_TYPES: &[&str] = &[
 pub const SIGIL_MOVE: &str = "^";
 pub const SIGIL_WRITE: &str = "&";
 
+/// D-APILABEL1=A: the two parameter-zone separators. Written in a parameter
+/// list, not as operators: `/` closes the positional-only zone (a label is
+/// forbidden before it) and `*` opens the label-only zone (a label is
+/// required after it). Parameters between them accept either call form.
+pub const PARAM_ZONE_POSITIONAL_ONLY: &str = "/";
+pub const PARAM_ZONE_LABEL_ONLY: &str = "*";
+
 /// D-SHAPE-COPY1=A (supersedes D-CAP2/S4): the one copy spelling — `~x`
 /// produces an owned, independent value. A temporary (no named binding
 /// survives to be used-after), so it never needs `^` and never trips E0209.

@@ -15,6 +15,12 @@
 // D-GENERIC-CALL1=A: GENERIC_CALL_OPEN and GENERIC_CALL_CLOSE own the adjacent
 // call-site type-argument markers; they reuse the existing angle tokens.
 //
+// D-APILABEL1=A adds the two parameter-zone separators
+// PARAM_ZONE_POSITIONAL_ONLY (`/`) and PARAM_ZONE_LABEL_ONLY (`*`), written in
+// a parameter list rather than as operators. It also gives a parameter an
+// optional public label ahead of its local name (`timeout seconds: Int`),
+// which needs no new token. Retires the S61 fixed-position label rule.
+//
 // D-TRAILBLOCK2=A adds no token: retires D-TRAILBLOCK1 trailing `{ }` sugar.
 // Code arguments are ordinary `() => { … }` lambdas inside call parentheses;
 // a bare `{` after a call is E0335.

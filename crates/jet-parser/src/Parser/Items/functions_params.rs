@@ -410,12 +410,12 @@ impl<'a> Parser<'a> {
                         TokKind::Slash => {
                             let span = self.bump().span;
                             if let Some(first) = slash {
-                                self.diags.push(Self::repeated_param_zone("/", span, first));
+                                self.diags.push(Self::repeated_param_zone(Syntax::PARAM_ZONE_POSITIONAL_ONLY, span, first));
                             } else if let Some(star_span) = star {
                                 self.diags.push(Self::zone_out_of_order(span, star_span));
                             } else if params.is_empty() {
                                 self.diags.push(Self::empty_param_zone(
-                                    "/",
+                                    Syntax::PARAM_ZONE_POSITIONAL_ONLY,
                                     "a positional-only zone needs at least one parameter before the `/`",
                                     "write the positional-only parameters before `/`, or remove the `/`",
                                     span,
@@ -430,7 +430,7 @@ impl<'a> Parser<'a> {
                         TokKind::Star => {
                             let span = self.bump().span;
                             if let Some(first) = star {
-                                self.diags.push(Self::repeated_param_zone("*", span, first));
+                                self.diags.push(Self::repeated_param_zone(Syntax::PARAM_ZONE_LABEL_ONLY, span, first));
                             } else {
                                 star = Some(span);
                                 zone = ParamZone::LabelOnly;
@@ -457,7 +457,7 @@ impl<'a> Parser<'a> {
             if let Some(span) = star {
                 if !params.iter().any(|p| p.zone == ParamZone::LabelOnly) {
                     self.diags.push(Self::empty_param_zone(
-                        "*",
+                        Syntax::PARAM_ZONE_LABEL_ONLY,
                         "a label-only zone needs at least one parameter after the `*`",
                         "write the label-only parameters after `*`, or remove the `*`",
                         span,
@@ -472,8 +472,10 @@ impl<'a> Parser<'a> {
             Diagnostic::error(
                 "E0763",
                 format!("`{sigil}` appears twice in this parameter list"),
-                "each parameter list has at most one positional-only `/` and one label-only `*`"
-                    .to_string(),
+                format!(
+                    "each parameter list has at most one positional-only `{}` and one label-only `{}`",
+                    Syntax::PARAM_ZONE_POSITIONAL_ONLY, Syntax::PARAM_ZONE_LABEL_ONLY
+                ),
                 format!("remove the extra `{sigil}`"),
                 Some(span),
             )
@@ -483,10 +485,16 @@ impl<'a> Parser<'a> {
             let _ = star;
             Diagnostic::error(
                 "E0763",
-                "`/` comes after `*` in this parameter list".to_string(),
+                format!(
+                    "`{}` comes after `{}` in this parameter list",
+                    Syntax::PARAM_ZONE_POSITIONAL_ONLY, Syntax::PARAM_ZONE_LABEL_ONLY
+                ),
                 "the zones read left to right: positional-only, then either, then label-only"
                     .to_string(),
-                "move `/` before `*`".to_string(),
+                format!(
+                    "move `{}` before `{}`",
+                    Syntax::PARAM_ZONE_POSITIONAL_ONLY, Syntax::PARAM_ZONE_LABEL_ONLY
+                ),
                 Some(slash),
             )
         }

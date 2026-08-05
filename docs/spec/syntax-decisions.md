@@ -232,11 +232,32 @@ the source binding remains available. Owned values that cannot be copied move.
 Mutable and borrowed captures remain subject to sema's ownership checks. No
 `take(...)` capture prefix or preparatory copy binding is required.
 
-**S61 — Argument labels & defaults** *(D-NARG1, D-NARG2)*: optional call-site
-labels, positional order fixed — labels never reorder; wrong label = compile
-error showing the order. Trailing defaulted params omittable
-(`fn f(x: Int, urgent: Bool = false)`). Methods/constructors behave the same.
-fmt never adds nor strips labels.
+**S61 — Argument labels & parameter contracts** *(D-NARG1, D-NARG2,
+D-APILABEL1=A ratified 2026-08-05, card #1393)*: a written label binds by
+**name**. A call may skip a default and write its labelled arguments in any
+order. Two zone separators split the parameter list: `/` closes the
+positional-only zone (a label there is E0767) and `*` opens the label-only
+zone (a positional argument there is E0769); parameters between them take
+either form. A parameter may publish a label distinct from its local name —
+`timeout seconds: Int` binds callers with `timeout:` while the body reads
+`seconds`. Public labels and zones are callable type identity; local names
+and default bodies are not.
+
+Supplied expressions run left to right in the order they were **written**;
+unbound defaults then run in declaration order and may read an earlier
+parameter. Diagnostics: E0763 misplaced zone separator, E0764 unknown label,
+E0765 repeated label, E0766 missing argument, E0767 label forbidden, E0768
+bare argument after a labelled one, E0769 label required. Methods,
+constructors, generic calls, variadics, and function values all bind through
+the one binder. fmt never adds nor strips labels.
+
+```jet
+fn connect(host: String, /, *, timeout seconds: Int = 30, tls: Bool = true) => Client ? ConnectError
+client :: connect("db.internal", tls: true, timeout: 5)?
+```
+
+Retires the fixed-position rule: labels used to be spelling checks at one
+position and never reordered (E0125).
 
 **S83 — Multi-head functions**: same name, different parameter patterns, each
 head its own body; dispatch by argument shape; heads must be exhaustive.
