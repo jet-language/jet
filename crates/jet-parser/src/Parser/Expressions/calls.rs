@@ -1,4 +1,4 @@
-use super::super::{Call, CallArg, Diagnostic, Expr, Parser, Span, TokKind, Type};
+use super::super::{AccessConvention, Call, CallArg, Diagnostic, Expr, Parser, Span, TokKind, Type};
 
 impl<'a> Parser<'a> {
         pub(super) fn call_after_name(
@@ -46,7 +46,7 @@ impl<'a> Parser<'a> {
     ) -> Result<CallArg, Diagnostic> {
         // D-MEM1/S2: an unmarked argument is a plain read at the call site —
         // `parse_access_prefix` already resolves unmarked to `Read` directly.
-        let convention = self.parse_access_prefix();
+        let mut convention = self.parse_access_prefix();
             let span = self.peek().span;
             // D-VARIADIC1: `f(...xs)` call spread.
             let spread = if matches!(self.peek().kind, TokKind::DotDotDot) {
@@ -71,6 +71,26 @@ impl<'a> Parser<'a> {
             } else {
                 None
             };
+            // D-MEM1 + D-APILABEL1=A: the capability sigil rides the VALUE, so
+            // with a label it lands after the colon — `absorb(payload: ^owned)`.
+            // Without this a label-only (`*`) parameter that takes `^` or `&`
+            // would be uncallable, since a label is the only way to reach it.
+            if label.is_some() {
+                let after_label = self.parse_access_prefix();
+                if after_label != AccessConvention::Read {
+                    if convention != AccessConvention::Read {
+                        self.diags.push(Diagnostic::error(
+                            "E0029",
+                            "this argument has two capability markers".to_string(),
+                            "an argument's access capability is written once, on the value"
+                                .to_string(),
+                            "keep the sigil after the label and remove the other".to_string(),
+                            Some(span),
+                        ));
+                    }
+                    convention = after_label;
+                }
+            }
             let expr = if label.as_ref().map(|(name, _)| name.as_str()) == Some("source")
                 && self.looks_like_provider_ref_value()
             {
