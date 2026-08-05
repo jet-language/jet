@@ -22,6 +22,12 @@ pub struct Call {
     /// checked constructor as a `Result`, while the ordinary constructor form
     /// still stays infallible and is rejected for runtime values.
     pub range_checked: bool,
+    /// D-APILABEL1=A: set by the binder only when labels put the written
+    /// arguments out of declaration order. Each entry is an index into the
+    /// rewritten `args`, listed in the order the caller wrote them. Lowering
+    /// evaluates those slots into temporaries in this order so the ratified
+    /// left-to-right rule survives the reorder. `None` is the ordinary case.
+    pub arg_source_order: Option<Vec<usize>>,
 }
 
 #[derive(Debug, Default, Clone)]

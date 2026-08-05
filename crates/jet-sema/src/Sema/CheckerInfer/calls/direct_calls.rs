@@ -14,7 +14,6 @@ use crate::Sema::Diagnostics::{
 };
 use crate::Sema::Effects::builtin_effect;
 use crate::Sema::FFI::e3211;
-use crate::Sema::substitute_param_refs;
 use crate::Syntax;
 use std::collections::HashMap;
 impl<'a> Checker<'a> {
@@ -839,98 +838,36 @@ impl<'a> Checker<'a> {
                 ));
             }
     
-            // D-NARG-D4 (S61, E0125): label validation — if a call arg has
-            // `name: val`, verify it matches the parameter name at that position.
-            // Labels never reorder.
+            // D-APILABEL1=A: one binder resolves labels, zones, reordering, and
+            // skipped defaults. It rewrites `call.args` into declaration order
+            // and records the source evaluation order for lowering.
             if !sig.param_info.is_empty() {
-                let all_param_names: Vec<&str> =
-                    sig.param_info.iter().map(|(n, _)| n.as_str()).collect();
-                for (i, arg) in call.args.iter().enumerate() {
-                    if let Some((label, label_span)) = &arg.label {
-                        if let Some((param_name, _)) = sig.param_info.get(i) {
-                            if label != param_name {
-                                // Is the label a real param name at a different position?
-                                if all_param_names.contains(&label.as_str()) {
-                                    // Transposed: label names a real param, but wrong position.
-                                    self.diags.push(Diagnostic::error(
-                                        "E0125",
-                                        format!(
-                                            "label `{}:` doesn't match the parameter `{}` here",
-                                            label, param_name
-                                        ),
-                                        "labels are checked documentation — each names the parameter at its own position, and arguments stay in the order they're declared".to_string(),
-                                        format!(
-                                            "write `{}:` here, or drop the label",
-                                            param_name
-                                        ),
-                                        Some(*label_span),
-                                    ));
-                                } else {
-                                    // Unknown: label doesn't name any parameter.
-                                    self.diags.push(Diagnostic::error(
-                                        "E0125",
-                                        format!(
-                                            "`{}` has no parameter named `{}`",
-                                            call.name, label
-                                        ),
-                                        format!(
-                                            "a label must name the parameter at its position; `{}` takes {}",
-                                            call.name,
-                                            all_param_names.join(", ")
-                                        ),
-                                        format!(
-                                            "use one of `{}`'s parameter names, or drop the label",
-                                            call.name
-                                        ),
-                                        Some(*label_span),
-                                    ));
-                                }
-                            }
+                let params = crate::Sema::CallBinder::bind_params_from_sig(&sig);
+                let binding = crate::Sema::CallBinder::bind_call_args(
+                    &call.name,
+                    &params,
+                    &mut call.args,
+                    call.name_span,
+                    &mut self.diags,
+                );
+                match binding {
+                    Some(binding) => {
+                        if !binding.is_source_ordered() {
+                            call.arg_source_order = Some(binding.written_source_order());
                         }
                     }
-                }
-                // L2401: advisory lint — public API has a positional Bool parameter.
-                // (Only warn on the callee definition side, not every call site.)
-            }
-    
-            // D-NARG-D2 (S61): default-value filling — append defaults for omitted
-            // trailing params. Earlier-param refs in defaults are substituted with
-            // the supplied argument expression so codegen never sees an unresolved
-            // identifier (invariant I2).
-            if call.args.len() < sig.params.len() && !sig.defaults.is_empty() {
-                let provided = call.args.len();
-                let required: usize = sig.defaults.iter().take_while(|d| d.is_none()).count();
-                if provided >= required {
-                    // fill trailing omitted params with their defaults. We build
-                    // `earlier_names` incrementally so a default like `d: Int = h`
-                    // can reference an earlier-defaulted param `h` that was already
-                    // filled (and is now in call.args at position 1).
-                    let all_param_names: Vec<String> =
-                        sig.param_info.iter().map(|(n, _)| n.clone()).collect();
-                    for i in provided..sig.params.len() {
-                        if let Some(Some(default_expr)) = sig.defaults.get(i) {
-                            // earlier_names covers all params up to (not including) i.
-                            let earlier_names: Vec<String> =
-                                all_param_names.iter().take(i).cloned().collect();
-                            // Substitute any earlier-param idents with the supplied arg.
-                            let resolved = substitute_param_refs(
-                                default_expr.clone(),
-                                &earlier_names,
-                                &call.args,
-                            );
-                            call.args.push(crate::AST::CallArg {
-                                convention: sig.params[i].0,
-                                expr: resolved,
-                                span: call.name_span,
-                                flags: Default::default(),
-                                label: None,
-                                spread: false,
-                            });
+                    None => {
+                        // The call's arguments never resolved to parameters, so
+                        // arity and per-position type errors below would all be
+                        // about slots that do not exist. Report the argument
+                        // expressions' own problems and stop.
+                        for arg in call.args.iter_mut() {
+                            self.infer(&mut arg.expr);
                         }
+                        return Some(sig.return_type.clone());
                     }
                 }
             }
-    
             let variadic = sig.param_variadic.last().copied().unwrap_or(false);
             // D-ANY-JAI1/D-VARARGBOUND1 (c7jaiany): a trait-bounded variadic
             // (`...Trait` / `...[A, B]`) can't be packed into one `[T]` list —

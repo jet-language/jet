@@ -528,100 +528,51 @@ impl<'a> Checker<'a> {
             sig.params.len()
         };
 
-        // D-NARG-D4 (S61, E0125): label validation — if a call arg has
-        // `name: val`, verify it matches the parameter name at that position.
-        // Labels never reorder. param_info is already self-excluded.
+        // D-APILABEL1=A: methods bind through the same one binder as free
+        // calls — labels bind by name, zones decide whether a label is
+        // forbidden or required, and skipped defaults are filled here.
+        let mut binding = None;
         if !sig.param_info.is_empty() {
-            let all_param_names: Vec<&str> =
-                sig.param_info.iter().map(|(n, _)| n.as_str()).collect();
-            for (i, arg) in args.iter().enumerate() {
-                if let Some((label, label_span)) = &arg.label {
-                    if let Some((param_name, _)) = sig.param_info.get(i) {
-                        if label != param_name {
-                            // Is the label a real param name at a different position?
-                            if all_param_names.contains(&label.as_str()) {
-                                // Transposed: label names a real param, but wrong position.
-                                self.diags.push(Diagnostic::error(
-                                    "E0125",
-                                    format!(
-                                        "label `{}:` doesn't match the parameter `{}` here",
-                                        label, param_name
-                                    ),
-                                    "labels are checked documentation — each names the parameter at its own position, and arguments stay in the order they're declared".to_string(),
-                                    format!(
-                                        "write `{}:` here, or drop the label",
-                                        param_name
-                                    ),
-                                    Some(*label_span),
-                                ));
-                            } else {
-                                // Unknown: label doesn't name any parameter.
-                                self.diags.push(Diagnostic::error(
-                                    "E0125",
-                                    format!(
-                                        "`{}` has no parameter named `{}`",
-                                        method, label
-                                    ),
-                                    format!(
-                                        "a label must name the parameter at its position; `{}` takes {}",
-                                        method,
-                                        all_param_names.join(", ")
-                                    ),
-                                    format!(
-                                        "use one of `{}`'s parameter names, or drop the label",
-                                        method
-                                    ),
-                                    Some(*label_span),
-                                ));
-                            }
-                        }
-                    }
+            // `params` is self-first when there is a receiver; `param_info`
+            // already excludes it, so the conventions line up after the skip.
+            let self_offset = usize::from(sig.self_conv.is_some());
+            let params: Vec<crate::Sema::CallBinder::BindParam<'_>> = (0..sig
+                .param_info
+                .len())
+                .map(|index| crate::Sema::CallBinder::BindParam {
+                    label: sig
+                        .param_call
+                        .get(index)
+                        .map(|(label, _)| label.as_str())
+                        .unwrap_or(sig.param_info[index].0.as_str()),
+                    name: sig.param_info[index].0.as_str(),
+                    zone: sig
+                        .param_call
+                        .get(index)
+                        .map(|(_, zone)| *zone)
+                        .unwrap_or(crate::AST::ParamZone::Either),
+                    default: sig.defaults.get(index).and_then(|d| d.as_ref()),
+                    convention: sig
+                        .params
+                        .get(index + self_offset)
+                        .map(|(convention, _)| *convention)
+                        .unwrap_or(crate::AST::AccessConvention::Read),
+                    variadic: false,
+                })
+                .collect();
+            binding = crate::Sema::CallBinder::bind_call_args(
+                method, &params, args, span, &mut self.diags,
+            );
+            if binding.is_none() {
+                // Nothing bound, so the checks below would all be about slots
+                // that do not exist. Report each argument's own problems only.
+                for arg in args.iter_mut() {
+                    self.infer(&mut arg.expr);
                 }
+                return sig.return_type.clone();
             }
         }
-
-        // D-NARG-D2 (S61): default-value filling — append defaults for omitted
-        // trailing params. Earlier-param refs in defaults are substituted with
-        // the supplied argument expression so codegen never sees an unresolved
-        // identifier (invariant I2).
-        if args.len() < expected_args && !sig.defaults.is_empty() {
-            let provided = args.len();
-            let required: usize = sig.defaults.iter().take_while(|d| d.is_none()).count();
-            if provided >= required {
-                // Build earlier_names incrementally so a default like `d = h`
-                // can reference an already-filled synthetic arg `h`.
-                let all_param_names: Vec<String> =
-                    sig.param_info.iter().map(|(n, _)| n.clone()).collect();
-                for i in provided..expected_args {
-                    if let Some(Some(default_expr)) = sig.defaults.get(i) {
-                        // earlier_names covers all params up to (not including) i.
-                        let earlier_names: Vec<String> =
-                            all_param_names.iter().take(i).cloned().collect();
-                        // Substitute any earlier-param idents with the supplied arg.
-                        let resolved = super::substitute_param_refs(
-                            default_expr.clone(),
-                            &earlier_names,
-                            args,
-                        );
-                        // Use the first non-self param conv (offset by self).
-                        let param_idx = if sig.self_conv.is_some() { i + 1 } else { i };
-                        let conv = sig
-                            .params
-                            .get(param_idx)
-                            .map(|(c, _)| *c)
-                            .unwrap_or(crate::AST::AccessConvention::Read);
-                        args.push(crate::AST::CallArg {
-                            convention: conv,
-                            expr: resolved,
-                            span,
-                            flags: Default::default(),
-                            label: None,
-                            spread: false,
-                        });
-                    }
-                }
-            }
-        }
+        let _ = &binding;
 
         let mut call_access = call_access.unwrap_or_else(|| self.call_access_frame());
         if let (Some(receiver), Some(convention)) = (receiver, sig.self_conv) {

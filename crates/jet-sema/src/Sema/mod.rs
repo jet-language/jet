@@ -71,6 +71,9 @@ pub(crate) struct MethodSig {
     /// `params`. Excludes `self` (index 0 of params is self when self_conv is
     /// Some; param_info starts from the first non-self param).
     pub(crate) param_info: Vec<(String, bool)>,
+    /// D-APILABEL1=A: public call label and zone, parallel to `param_info`
+    /// (so it also excludes `self`).
+    pub(crate) param_call: Vec<(String, crate::AST::ParamZone)>,
     /// D-NARG1 (S61): default expressions for parameters, parallel to param_info.
     /// `None` when no default; only trailing params may have defaults.
     pub(crate) defaults: Vec<Option<crate::AST::Expr>>,
@@ -487,6 +490,10 @@ fn func_to_method_sig(f: &Func) -> MethodSig {
             .clone()
             .map(|p| (p.name.clone(), p.default.is_some()))
             .collect(),
+        param_call: non_self_params
+            .clone()
+            .map(|p| (p.call_label().to_string(), p.zone))
+            .collect(),
         defaults: non_self_params
             .map(|p| p.default.as_ref().map(|d| *d.clone()))
             .collect(),
@@ -519,6 +526,11 @@ fn func_to_sig(f: &Func) -> FuncSig {
             .params
             .iter()
             .map(|p| (p.name.clone(), p.default.is_some()))
+            .collect(),
+        param_call: f
+            .params
+            .iter()
+            .map(|p| (p.call_label().to_string(), p.zone))
             .collect(),
         defaults: f
             .params
@@ -565,6 +577,11 @@ fn extern_to_sig(ef: &ExternFn, is_c_abi: bool) -> FuncSig {
         // in the signature so dot-call lookup cannot silently discard it.
         root_param: ef.params.first().is_some_and(|p| p.root),
         param_info: ef.params.iter().map(|p| (p.name.clone(), false)).collect(),
+        param_call: ef
+            .params
+            .iter()
+            .map(|p| (p.call_label().to_string(), p.zone))
+            .collect(),
         defaults: ef.params.iter().map(|_| None).collect(),
         param_variadic: ef.params.iter().map(|p| p.variadic).collect(),
         variadic_bounds: ef.params.last().and_then(|p| p.variadic_bound_list.clone()),
@@ -1841,6 +1858,8 @@ impl<'a> Checker<'a> {
 
 pub mod ApiFreeze;
 mod Bundle;
+/// D-APILABEL1=A: the one argument binder every call form goes through.
+pub(crate) mod CallBinder;
 mod Captures;
 mod CheckerCli;
 mod CheckerCore;

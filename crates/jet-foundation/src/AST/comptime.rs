@@ -1,4 +1,4 @@
-use super::{AccessConvention, BinOp, Expr, Lambda, Type};
+use super::{AccessConvention, BinOp, Expr, Lambda, ParamZone, Type};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
@@ -159,6 +159,11 @@ pub struct FuncSig {
     /// S61: parameter names and default-value presence, parallel to `params`.
     /// Empty for extern/built-in functions.
     pub param_info: Vec<(String, bool)>,
+    /// D-APILABEL1=A: the public call contract, parallel to `params` — the
+    /// label a caller writes and the zone that decides whether they may (or
+    /// must) write it. Public labels and zones are callable type identity;
+    /// the local names in `param_info` are not. Empty alongside `param_info`.
+    pub param_call: Vec<(String, ParamZone)>,
     /// S61: default expressions for parameters that have them, parallel to `params`.
     pub defaults: Vec<Option<Expr>>,
     /// D-VARIADIC1: parallel to `params` — true when that parameter is variadic.
