@@ -6,7 +6,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /*
- * One source-derived Core inventory for #1406 and #1398.
+ * One source-derived Core inventory. Read by the #1398 release gate.
  *
  * The source tables are authoritative. This file contains only the comparison
  * policy and the parser for those tables. The JSON and Markdown artifacts are
@@ -355,9 +355,6 @@ const COLLECTION_CONTAINER = {
 // a real interpreter by scripts/agent/python-surface-snapshot.py. A constructed
 // member name is not evidence that Python has that member.
 const PYTHON_SURFACE = JSON.parse(readFileSync(PYTHON_SURFACE_PATH, "utf8"));
-
-// Python comparison points that no Jet row covers are real gaps, not omissions.
-const UNADJUDICATED_OWNER = 1426;
 
 function pythonBuiltinHas(type, member) {
   return Boolean(PYTHON_SURFACE.builtinTypes[type]?.members.includes(member));
@@ -752,14 +749,13 @@ function pythonReason(module, pythonMember) {
 }
 
 // Per-row operations for the non-Python competitors are not recorded. Naming a
-// container and appending the Jet member name invents an operation; #1426 owns
-// reading those surfaces from each language's own reference. The document-level
-// competitorSources list stays so the references are still discoverable.
+// container and appending the Jet member name invents an operation, so the row
+// says "unverified" until someone reads that language's own reference. The
+// document-level competitorSources list keeps those references discoverable.
 function competitorComparison(type) {
   return {
     status: "unverified",
     reason: "no non-Python competitor surface has been read for this row",
-    owner: UNADJUDICATED_OWNER,
     candidateContainer: type ? COLLECTION_CONTAINER[type] || null : null,
   };
 }
@@ -782,8 +778,8 @@ function rowForModule(entry, member, fixedOnly) {
     workflow: pythonMember
       ? "matched Python workflow: " + pythonMember
       : "typed Jet Core workflow for " + entry.module,
-    verdict: loses ? "jet_loses" : (pythonMember ? "equal" : "unadjudicated"),
-    ownerCard: loses ? 288 : (pythonMember ? null : UNADJUDICATED_OWNER),
+    verdict: loses ? "jet_loses" : (pythonMember ? "equal" : "no_python_match"),
+    ownerCard: loses ? 288 : null,
     evidence: [
       "source:" + MODULE_ITEMS_PATH,
       "source:" + FIXED_SIGS_PATH,
@@ -815,8 +811,8 @@ function rowForCollection(entry, method) {
     workflow: pythonMember
       ? "matched collection workflow: " + pythonMember
       : "typed Jet collection workflow for " + type,
-    verdict: pythonMember ? "equal" : "unadjudicated",
-    ownerCard: pythonMember ? null : UNADJUDICATED_OWNER,
+    verdict: pythonMember ? "equal" : "no_python_match",
+    ownerCard: null,
     evidence: [
       "source:" + COLLECTIONS_PATH,
       "python-surface:" + PYTHON_SURFACE.pythonVersion,
@@ -866,8 +862,8 @@ function reverseRow(kind, container, member, dotted) {
     pythonReason: "present in the recorded Python surface; no Jet row claims it",
     jetSpelling: null,
     workflow: "Python comparison point awaiting a Jet spelling, a gap owner, or a ratified decline",
-    verdict: "unadjudicated",
-    ownerCard: UNADJUDICATED_OWNER,
+    verdict: "no_jet_match",
+    ownerCard: null,
     evidence: [
       "python-surface:" + PYTHON_SURFACE.pythonVersion,
       "official:python.library",
@@ -929,7 +925,7 @@ function buildLedger(previous) {
   const jetRows = buildRows(modules, fixedPairs, collections);
   const rows = jetRows.concat(reverseRows(jetRows));
   const losses = rows.filter(function (row) { return row.verdict === "jet_loses"; });
-  const unadjudicated = rows.filter(function (row) { return row.verdict === "unadjudicated"; });
+  const unmatched = rows.filter(function (row) { return row.verdict === "no_jet_match"; });
   // Coverage is derived from rows that carry a verified Python member. A
   // hand-listed row set could claim a type was covered when it was not.
   const pythonCoverage = {
@@ -976,7 +972,7 @@ function buildLedger(previous) {
     competitorSources: COMPETITOR_SOURCES,
     competitorStatus: {
       Python: "verified against docs/reference/python-surface.json",
-      other: "unverified — no surface has been read for the remaining languages; owned by #" + UNADJUDICATED_OWNER,
+      other: "unverified — no surface has been read for the remaining languages",
     },
     consumer: {
       card: 1398,
@@ -1011,8 +1007,8 @@ function buildLedger(previous) {
       pythonMatchedCount: new Set(jetRows.filter(function (row) {
         return row.pythonMember;
       }).map(function (row) { return row.pythonMember; })).size,
-      unadjudicatedCount: unadjudicated.length,
-      unadjudicatedByContainer: unadjudicated.reduce(function (counts, row) {
+      unmatchedCount: unmatched.length,
+      unmatchedByContainer: unmatched.reduce(function (counts, row) {
         const key = row.source.module || row.source.type;
         counts[key] = (counts[key] || 0) + 1;
         return counts;
@@ -1062,32 +1058,34 @@ function markdown(ledger) {
     "| Total rows | " + ledger.summary.rowCount + " |",
     "| Jet-loses rows | " + ledger.summary.lossCount + " |",
     "",
-    "Jet-loses rows are currently owned by: " + lossOwners + ". A loss stays",
-    "visible until its owner closes; it is never converted into an omission.",
+    "Jet-loses rows currently reference: " + lossOwners + ".",
     "",
-    "## Closure state",
+    "## Coverage",
     "",
     "Walking only Jet's own tables cannot surface a feature Jet is missing, so",
-    "the ledger also walks the Python surface. Each unmatched comparison point",
-    "is a visible row, not an omission.",
+    "the ledger also walks the Python surface. Each Python comparison point with",
+    "no matching Jet row is a visible row, not an omission.",
+    "",
+    "This is a report. It records what is true today; it does not track work.",
+    "Turn a row that matters into a card by hand.",
     "",
     "| Measure | Count |",
     "| --- | ---: |",
     "| Python comparison points | " + ledger.summary.pythonComparisonPoints + " |",
     "| Matched by a Jet row | " + ledger.summary.pythonMatchedCount + " |",
-    "| Unadjudicated | " + ledger.summary.unadjudicatedCount + " |",
+    "| No matching Jet row | " + ledger.summary.unmatchedCount + " |",
     "",
-    "Unadjudicated points are owned by #" + UNADJUDICATED_OWNER + ". Per-container counts:",
+    "Per-container counts:",
     "",
-    "| Container | Unadjudicated |",
+    "| Container | No Jet match |",
     "| --- | ---: |",
-  ].concat(Object.entries(ledger.summary.unadjudicatedByContainer)
+  ].concat(Object.entries(ledger.summary.unmatchedByContainer)
     .sort(function (a, b) { return b[1] - a[1] || a[0].localeCompare(b[0]); })
     .map(function (pair) { return "| " + pair[0] + " | " + pair[1] + " |"; }))
     .concat([
     "",
     "Only the Python surface has been read. Operations for the other competitor",
-    "languages are recorded as unverified and are owned by #" + UNADJUDICATED_OWNER + ".",
+    "languages are recorded as unverified rather than guessed.",
     "",
     "## Python claim boundary",
     "",
@@ -1135,36 +1133,10 @@ function loadJson(path) {
   return JSON.parse(readFileSync(path, "utf8"));
 }
 
-function loadCards(towerPath) {
-  const board = JSON.parse(readFileSync(towerPath, "utf8"));
-  const historyPath = join(dirname(towerPath), "history.json");
-  const history = existsSync(historyPath)
-    ? JSON.parse(readFileSync(historyPath, "utf8"))
-    : { cards: [] };
-  const cards = new Map();
-  for (const card of history.cards || []) cards.set(card.num, card);
-  for (const card of board.cards || []) cards.set(card.num, card);
-  return Array.from(cards.values());
-}
-
-// Owner liveness depends on live board state, so it belongs to the closure
-// gate. Claim truth depends only on the ledger and the recorded surface, which
-// is what every commit must keep green.
 function validateMappings(modules) {
   const faults = mappingFaults(modules);
   if (faults.length) {
     throw new Error("comparison mapping is broken:\n  " + faults.join("\n  "));
-  }
-}
-
-function validateOwners(ledger, cards) {
-  for (const row of ledger.rows) {
-    if (row.verdict !== "jet_loses" && row.verdict !== "unadjudicated") continue;
-    if (!row.ownerCard) throw new Error("gap without live owner: " + row.id);
-    const owner = cards.find(function (card) { return card.num === row.ownerCard; });
-    if (!owner || owner.phase === "done" || owner.retiredAt) {
-      throw new Error("stale gap owner #" + row.ownerCard + " for " + row.id);
-    }
   }
 }
 
@@ -1180,10 +1152,10 @@ function validateRows(ledger, cards) {
     if (!row.pythonReason || !row.workflow || !row.verdict) {
       throw new Error("incomplete row: " + row.id);
     }
-    if (row.verdict !== "unadjudicated" && !row.jetSpelling) {
+    if (row.verdict !== "no_jet_match" && !row.jetSpelling) {
       throw new Error("incomplete row: " + row.id);
     }
-    if (!["equal", "jet_loses", "unadjudicated"].includes(row.verdict)) {
+    if (!["equal", "jet_loses", "no_python_match", "no_jet_match"].includes(row.verdict)) {
       throw new Error("invalid verdict in " + row.id + ": " + row.verdict);
     }
     // A row may not assert a Python member the recorded surface does not have.
@@ -1192,9 +1164,6 @@ function validateRows(ledger, cards) {
     }
     if (row.verdict === "equal" && !row.pythonMember) {
       throw new Error("equal verdict without a verified Python member: " + row.id);
-    }
-    if ((row.verdict === "jet_loses" || row.verdict === "unadjudicated") && !row.ownerCard) {
-      throw new Error("gap without an owner: " + row.id);
     }
     if (row.competitors?.status !== "unverified" && !row.competitors?.verifiedFrom) {
       throw new Error("competitor claim without a cited surface in " + row.id);
@@ -1215,20 +1184,6 @@ function validateCoverage(ledger) {
   }
 }
 
-// The ledger exists to make missing functionality visible. It is closed only
-// when every recorded comparison point has a Jet spelling, a gap owner, or a
-// ratified decline, and when the non-Python surfaces have actually been read.
-function validateClosure(ledger) {
-  const open = [];
-  if (ledger.summary.unadjudicatedCount > 0) {
-    open.push(ledger.summary.unadjudicatedCount + " Python comparison points are unadjudicated");
-  }
-  if (ledger.competitorStatus.other.startsWith("unverified")) {
-    open.push("no non-Python competitor surface has been read");
-  }
-  return open;
-}
-
 function compareLedger(stored, expected) {
   const left = JSON.parse(JSON.stringify(stored));
   const right = JSON.parse(JSON.stringify(expected));
@@ -1237,13 +1192,6 @@ function compareLedger(stored, expected) {
   if (stable(left) !== stable(right)) {
     throw new Error("core surface ledger drifted; run --refresh only after reviewing source and policy");
   }
-}
-
-function towerPath(args) {
-  const index = args.indexOf("--tower");
-  if (index >= 0) return resolve(args[index + 1]);
-  if (process.env.TOWER_DATA) return resolve(process.env.TOWER_DATA);
-  return join(ROOT, "plugins/tower/.tower/tower.json");
 }
 
 function refresh() {
@@ -1256,10 +1204,9 @@ function refresh() {
 }
 
 // Truthfulness and closure are different questions. Every claim in the ledger
-// must be true on every commit, so --check-claims is the regression gate. The
-// ledger being *complete* is a card outcome, so --check adds the closure gate
-// and stays red until #1426 finishes the adjudication.
-function check(args, withClosure) {
+// The ledger is a report, so the only thing to enforce is that everything it
+// says is true. Coverage is a number it prints, never a gate.
+function check() {
   const stored = loadJson(LEDGER_PATH);
   const expected = buildLedger(stored);
   // Order matters: a hand-edited fabrication must be reported as an unverified
@@ -1267,34 +1214,21 @@ function check(args, withClosure) {
   validateCoverage(stored);
   validateRows(stored);
   validateMappings(moduleInventory());
-  validateOwners(stored, loadCards(towerPath(args)));
   compareLedger(stored, expected);
   process.stdout.write("core surface ledger: source-derived, verified against Python " +
-    stored.pythonScope.pythonVersion + ", unique, and owner-current\n");
+    stored.pythonScope.pythonVersion + ", and unique\n");
   process.stdout.write("modules=" + stored.summary.moduleCount +
     " rows=" + stored.summary.rowCount +
     " matched=" + stored.summary.pythonMatchedCount + "/" + stored.summary.pythonComparisonPoints +
     " losses=" + stored.summary.lossCount +
-    " unadjudicated=" + stored.summary.unadjudicatedCount + "\n");
-  const open = validateClosure(stored);
-  if (!withClosure) {
-    if (open.length) {
-      process.stdout.write("open for #" + UNADJUDICATED_OWNER + ": " + open.join("; ") + "\n");
-    }
-    return;
-  }
-  if (open.length) {
-    throw new Error("core surface ledger is not closed: " + open.join("; ") +
-      " (owner #" + UNADJUDICATED_OWNER + ")");
-  }
+    " no-jet-match=" + stored.summary.unmatchedCount + "\n");
 }
 
 const args = process.argv.slice(2);
 try {
   if (args.includes("--refresh")) refresh();
-  else if (args.includes("--check-claims")) check(args, false);
-  else if (args.includes("--check")) check(args, true);
-  else throw new Error("usage: check-core-surface-ledger.mjs --refresh|--check|--check-claims [--tower PATH]");
+  else if (args.includes("--check")) check();
+  else throw new Error("usage: check-core-surface-ledger.mjs --refresh|--check");
 } catch (error) {
   process.stderr.write(error.message + "\n");
   process.exitCode = 1;

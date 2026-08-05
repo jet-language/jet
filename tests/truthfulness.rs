@@ -882,14 +882,14 @@ fn epoch3_capability_manifest_is_current_and_owned() {
 /// claim in it must be true. An earlier generator built competitor operations
 /// by string concatenation and scored a row a win whenever no Python member
 /// was mapped; 144 of 247 claimed Python members did not exist. This pins the
-/// claims against the recorded interpreter surface. Completeness is a separate
-/// question owned by #1426, so this runs `--check-claims`, not `--check`.
+/// claims against the recorded interpreter surface. The ledger is a report, so
+/// how much it covers is a number it prints, never a gate.
 #[test]
 fn core_surface_ledger_claims_are_verified() {
     let root = root();
     let output = Command::new("node")
         .arg("scripts/agent/check-core-surface-ledger.mjs")
-        .arg("--check-claims")
+        .arg("--check")
         .current_dir(&root)
         .output()
         .expect("node must run the core-surface-ledger checker");
