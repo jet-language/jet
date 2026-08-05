@@ -326,6 +326,16 @@ fn state_adapters_survive_process_restart() {
         "count:2\nreplay:first|second\nappended:first|second|third\n"
     );
 
+    let events_reversed = dir.join("events-default-to-aot.log");
+    assert_eq!(
+        run_restart_default_process(&dir, &events_reversed, "write", Some("event-log")),
+        "wrote:2\n"
+    );
+    assert_eq!(
+        run_restart_process(&bin, &events_reversed, "read", Some("event-log")),
+        "count:2\nreplay:first|second\nappended:first|second|third\n"
+    );
+
     let snapshot = dir.join("snapshot.log");
     assert_eq!(
         run_restart_process(&bin, &snapshot, "write", Some("snapshot")),
@@ -333,6 +343,16 @@ fn state_adapters_survive_process_restart() {
     );
     assert_eq!(
         run_restart_default_process(&dir, &snapshot, "read", Some("snapshot")),
+        "restored:state-v1\nrecommitted:state-v2\n"
+    );
+
+    let snapshot_reversed = dir.join("snapshot-default-to-aot.log");
+    assert_eq!(
+        run_restart_default_process(&dir, &snapshot_reversed, "write", Some("snapshot")),
+        "wrote:state-v1\n"
+    );
+    assert_eq!(
+        run_restart_process(&bin, &snapshot_reversed, "read", Some("snapshot")),
         "restored:state-v1\nrecommitted:state-v2\n"
     );
 }
@@ -363,6 +383,14 @@ fn run() {
         if versioned == {
             .Ok(_) -> { print("version:accepted") }
             .Err(_) -> { print("version:rejected") }
+        }
+        if phase == "extend" {
+            refund :: services.workflow_start(&tree, "refund", 1) ?? panic("refund")
+            services.workflow_step(&tree, refund, "credit") ?? panic("credit step")
+            print("refund:{refund}")
+        }
+        if phase == "final" {
+            print("refund_history:{services.workflow_history(tree, 2) ?? panic("refund history")}")
         }
     }
 }
@@ -402,6 +430,30 @@ fn workflow_history_survives_process_restart() {
     assert_eq!(
         run_restart_default_process(&dir, &crossed, "read", None),
         WORKFLOW_RESTART_HISTORY
+    );
+
+    let reversed = dir.join("workflow-default-to-aot.log");
+    assert_eq!(
+        run_restart_default_process(&dir, &reversed, "write", None),
+        "run:1\n"
+    );
+    assert_eq!(
+        run_restart_process(&bin, &reversed, "read", None),
+        WORKFLOW_RESTART_HISTORY
+    );
+
+    // A replayed history has to be writable, not just readable: the third
+    // process only sees run 2 if the second process numbered and recorded it
+    // from replayed state.
+    let extended = dir.join("workflow-extended.log");
+    assert_eq!(run_restart_process(&bin, &extended, "write", None), "run:1\n");
+    assert_eq!(
+        run_restart_process(&bin, &extended, "extend", None),
+        format!("{WORKFLOW_RESTART_HISTORY}refund:2\n")
+    );
+    assert_eq!(
+        run_restart_default_process(&dir, &extended, "final", None),
+        format!("{WORKFLOW_RESTART_HISTORY}refund_history:start@v1|step:credit\n")
     );
 }
 
