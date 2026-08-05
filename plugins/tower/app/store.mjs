@@ -52,9 +52,13 @@ export class TowerError extends Error {
 }
 const fail = (code, msg) => { throw new TowerError(code, msg); };
 
+// A board is born with one active epoch: every card must live in an epoch, be
+// a sidequest, or be frozen (owner ruling 2026-08-05), so an epoch-less board
+// would have nowhere to put epoch-track work.
 export const empty = (project = 'Project') => ({
   meta: { version: VERSION, project, currentEpoch: null, nextNum: 1, rev: 0, ui: { toggled: [] } },
-  epochs: [], milestones: [], cards: [], decisions: [], questions: [], ideas: [], papercuts: [], events: [],
+  epochs: [{ id: 'e1', name: 'Epoch 1', goal: '', status: 'active' }],
+  milestones: [], cards: [], decisions: [], questions: [], ideas: [], papercuts: [], events: [],
 });
 
 // ---- store handle ---------------------------------------------------------
@@ -552,6 +556,14 @@ const checkEnum = (val, list, what) => {
   if (val != null && !list.includes(val)) fail('E_INVALID', `${what} must be one of: ${list.join(', ')} (got ${JSON.stringify(val)})`);
 };
 const checkEpoch = (s, id) => { if (id != null && !s.epochs.find(e => e.id === id)) fail('E_NOT_FOUND', `no epoch ${id}`); };
+
+// Owner ruling 2026-08-05: every card lives in an epoch, is a sidequest, or is
+// frozen. An epoch-track card with no epoch is unreachable from every board
+// view, so the state is rejected at the store boundary (CLI and API alike).
+const checkCardHome = ({ track, epoch, phase }) => {
+  if (track === 'epoch' && epoch == null && phase !== 'frozen')
+    fail('E_INVALID', 'a card must live in an epoch, be a sidequest, or be frozen — pass --epoch <id> (no epoch is active to inherit) or --track sidequest');
+};
 const checkMilestone = (s, id) => { if (id != null && !s.milestones.find(m => m.id === id)) fail('E_NOT_FOUND', `no milestone ${id}`); };
 function checkCardMilestone(s, { epoch, track, milestoneId }) {
   if (milestoneId == null) return;
@@ -624,6 +636,7 @@ export function addCard(s, p, config) {
   const epoch = p.epoch ?? activeEpoch(s);
   const track = p.track || config.tracks[0];
   checkEpoch(s, epoch); checkMilestone(s, p.milestoneId);
+  checkCardHome({ track, epoch, phase: p.phase || 'planning' });
   checkCardMilestone(s, { epoch, track, milestoneId: p.milestoneId });
   checkRefs(p.refs);
   const parentId = 'parentId' in p || 'parent' in p
@@ -777,6 +790,11 @@ export function updateCard(s, ref, patch, config) {
   checkEnum(patch.phase, PHASE_IDS, 'phase');
   if ('epoch' in patch) checkEpoch(s, patch.epoch);
   if ('milestoneId' in patch) checkMilestone(s, patch.milestoneId);
+  checkCardHome({
+    track: 'track' in patch ? patch.track : c.track,
+    epoch: 'epoch' in patch ? patch.epoch : c.epoch,
+    phase: 'phase' in patch ? patch.phase : c.phase,
+  });
   checkCardMilestone(s, {
     epoch: 'epoch' in patch ? patch.epoch : c.epoch,
     track: 'track' in patch ? patch.track : c.track,

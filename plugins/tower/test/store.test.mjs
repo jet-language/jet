@@ -125,7 +125,7 @@ test('card writes renew active claims and terminal phases clear them', () => {
 
 test('milestones: cards drive progress and completion; delete unlinks', () => {
   const st = fresh();
-  st.mutate((s) => db.addEpoch(s, { id: 'e1', name: 'One' }));
+  st.mutate((s) => db.updateEpoch(s, 'e1', { name: 'One' }));
   const { result: m } = st.mutate((s) => db.addMilestone(s, { epochId: 'e1', title: 'MVP' }));
   st.mutate((s, cfg) => db.addCard(s, { title: 'A', epoch: 'e1', milestoneId: m.id, phase: 'done' }, cfg));
   st.mutate((s, cfg) => db.addCard(s, { title: 'B', epoch: 'e1', milestoneId: m.id }, cfg));
@@ -162,7 +162,7 @@ test('milestone progress deduplicates live and archived copies by card id', () =
 test('milestones: cards cannot cross epochs and sidequests stay unlinked', () => {
   const st = fresh();
   st.mutate((s) => {
-    db.addEpoch(s, { id: 'e1', name: 'One' });
+    db.updateEpoch(s, 'e1', { name: 'One' });
     db.addEpoch(s, { id: 'e2', name: 'Two' });
   });
   const m = st.mutate((s) => db.addMilestone(s, { epochId: 'e1', title: 'MVP' })).result;

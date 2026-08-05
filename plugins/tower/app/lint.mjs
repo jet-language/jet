@@ -129,7 +129,7 @@ export function ruleBlockerUnpopulated(s) {
   return findings;
 }
 
-const CORE_RULES = [ruleDoneWithoutEvidence, ruleClaimedIdle, ruleMissingAttribution, ruleBallotGaps, ruleStaleDraft, ruleBlockerUnpopulated];
+const CORE_RULES = [ruleDoneWithoutEvidence, ruleClaimedIdle, ruleMissingAttribution, ruleBallotGaps, ruleStaleDraft, ruleBlockerUnpopulated, ruleUnhomedCard];
 
 // ---- --docs mode: ratified decision id still listed in an open-ballot doc --
 // Precise on purpose: only docs/ballots/*.md (not docs/plans/**), since plans
@@ -163,6 +163,18 @@ export function ruleBallotDocGaps(s, history, { docsRoot } = {}) {
 }
 
 // ---- aggregate ---------------------------------------------------------------
+// Owner ruling 2026-08-05: every card lives in an epoch, is a sidequest, or is
+// frozen. The store rejects new violations; this rule catches any that predate
+// the guard or arrive through repair/restore paths.
+export function ruleUnhomedCard(s) {
+  const findings = [];
+  for (const c of s.cards.filter(c => c.track === 'epoch' && c.epoch == null && c.phase !== 'frozen')) {
+    findings.push({ rule: 'unhomed-card', ref: `#${c.num}`,
+      detail: `epoch-track card with no epoch — assign an epoch, make it a sidequest, or freeze it` });
+  }
+  return findings;
+}
+
 export function lint(s, history, { docs = false, docsRoot } = {}) {
   let findings = CORE_RULES.flatMap(fn => fn(s));
   findings = findings.concat(ruleOrphanBlockers(s, history));

@@ -21,7 +21,7 @@ test('cli end-to-end: init → epoch → milestone → card → decision → nex
   run(cwd, ['init', '--name', 'CLI Test']);
   assert.match(readFileSync(join(cwd, '.tower', '.gitignore'), 'utf8'), /^secrets\.json$/m);
   assert.match(readFileSync(join(cwd, '.tower', '.gitignore'), 'utf8'), /^\.secrets\.json\.tmp-\*$/m);
-  run(cwd, ['epoch', 'add', 'e1', '--name', 'Epoch One', '--goal', 'ship']);
+  run(cwd, ['epoch', 'update', 'e1', '--name', 'Epoch One', '--goal', 'ship']);
   run(cwd, ['epoch', 'current', 'e1']);
   const m = JSON.parse(run(cwd, ['milestone', 'add', '--epoch', 'e1', '--title', 'MVP', '--json']).out);
   const c = JSON.parse(run(cwd, ['card', 'add', '--title', 'Build it', '--priority', 'P1', '--milestone', m.id, '--json']).out);
@@ -200,7 +200,7 @@ test('cli refuses legacy secrets in tracked config with safe migration guidance'
 test('cli card tags, parent, and list filters', () => {
   const cwd = mkdtempSync(join(tmpdir(), 'tower-cli-tags-'));
   run(cwd, ['init', '--name', 'Tags']);
-  run(cwd, ['epoch', 'add', 'e1', '--name', 'E1']);
+  run(cwd, ['epoch', 'update', 'e1', '--name', 'E1']);
   run(cwd, ['epoch', 'current', 'e1']);
   const map = JSON.parse(run(cwd, [
     'card', 'add', '--title', 'Map', '--add-tag', 'wayfinder:map,needs-triage', '--json', '--by', 'tester',

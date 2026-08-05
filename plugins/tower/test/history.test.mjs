@@ -307,7 +307,7 @@ test('undo of a retiring write does not corrupt history: no duplicate archive en
 
 test('archived cards still drive milestone completion', () => {
   const st = fresh();
-  st.mutate((s) => db.addEpoch(s, { id: 'e1', name: 'One' }));
+  st.mutate((s) => db.updateEpoch(s, 'e1', { name: 'One' }));
   const milestone = st.mutate((s) => db.addMilestone(s, { epochId: 'e1', title: 'MVP' })).result;
   st.mutate((s, cfg) => db.addCard(s, {
     title: 'Archived done work', epoch: 'e1', milestoneId: milestone.id, phase: 'done',

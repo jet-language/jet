@@ -35,7 +35,7 @@ const ballot = (extra = {}) => ({
 
 test('packet.card carries epoch name/goal and milestone title/goal/criteria when set', () => {
   const st = fresh();
-  st.mutate((s) => db.addEpoch(s, { id: 'e1', name: 'Epoch One', goal: 'ship it' }));
+  st.mutate((s) => db.updateEpoch(s, 'e1', { name: 'Epoch One', goal: 'ship it' }));
   const m = st.mutate((s) => db.addMilestone(s, { epochId: 'e1', title: 'MVP', goal: 'usable v1', criteria: '9/9 features' })).result;
   st.mutate((s, cfg) => db.addCard(s, { title: 'A', body: 'do the thing', plan: '1. x 2. y', epoch: 'e1', milestoneId: m.id, priority: 'P1' }, cfg));
   const s = st.load();
@@ -49,11 +49,11 @@ test('packet.card carries epoch name/goal and milestone title/goal/criteria when
   assert.deepEqual(p.card.milestone, { id: m.id, title: 'MVP', goal: 'usable v1', criteria: '9/9 features' });
 });
 
-test('packet.card.epoch/milestone are null when unset', () => {
+test('packet.card inherits the born-with epoch; milestone is null when unset', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
   const p = buildBrief(st.load(), '#1');
-  assert.equal(p.card.epoch, null);
+  assert.deepEqual(p.card.epoch, { id: 'e1', name: 'Epoch 1', goal: '' });
   assert.equal(p.card.milestone, null);
 });
 
