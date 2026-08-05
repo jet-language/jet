@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1438,
-    "rev": 25322,
+    "rev": 25401,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -79839,14 +79839,14 @@
       "id": "c0kw5dh0",
       "num": 1428,
       "title": "Exponent operator spelling: rebind ^ from xor",
-      "body": "",
+      "body": "Ratified D-EXPOP1=A: infix ^ is the power operator, ^= is power-assign, and xor leaves ^ (respelled ~| by D-XORSPELL1, card #1430). Scope of this card: the ^ rebind only — lexer/parser BinOp::Pow, sema wiring, TIR, Prelude jet_pow called by every tier (I9), formatter, editor grammars. Grouping, precedence, and Int typing rules live on #1429; do not implement them here beyond what compiling requires.",
       "kind": "task",
       "track": "epoch",
-      "epoch": null,
+      "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P1",
-      "plan": null,
+      "plan": "1) Add BinOp::Pow, retire BitXor spelling ^. 2) Sema + TIR + Prelude jet_pow, all tiers call it. 3) Formatter + grammars. 4) Example + golden. 5) Targeted tests.",
       "blockedBy": [],
       "assignee": null,
       "log": [],
@@ -79886,6 +79886,42 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-08-05T13:43:26.122Z"
+        },
+        {
+          "n": 5,
+          "text": "Example examples/features/math/power_operator.jet golden-proves 3 ^ 2 == 9 and a ^= compound; expected output file committed and byte-identical under AOT build and default jet run (I9)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T14:36:44.505Z"
+        },
+        {
+          "n": 6,
+          "text": "No infix ^ means xor anywhere: sema unit test shows Int ^ Int type-checks as power; canon.jet and all in-repo examples migrated off ^-as-xor",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T14:36:44.812Z"
+        },
+        {
+          "n": 7,
+          "text": "Formatter round-trip: jet fmt is idempotent on the power example and preserves ^ and ^= (fmt stability test green)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T14:36:45.122Z"
+        },
+        {
+          "n": 8,
+          "text": "Prefix ^ (take sigil) regression: existing take-capability targeted tests still green after the rebind",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T14:36:45.426Z"
         }
       ],
       "refs": [],
@@ -79896,22 +79932,24 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T13:33:32.504Z",
-      "updated": "2026-08-05T13:43:26.122Z",
-      "updatedBy": "owner"
+      "updated": "2026-08-05T14:37:01.968Z",
+      "updatedBy": "fable"
     },
     {
       "id": "c0q2s3u5",
       "num": 1429,
       "title": "Exponent semantics: precedence, associativity, Int typing",
-      "body": "",
+      "body": "Ratified D-EXPSEM1=A: power is right-associative (2^3^2 == 512); power binds tighter than unary minus (-3^2 == -9); Int ^ non-negative Int returns exact Int; Int ^ negative Int returns Float; any Float operand makes the result Float. Builds on the ^ operator from #1428.",
       "kind": "task",
       "track": "epoch",
-      "epoch": null,
+      "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P1",
-      "plan": null,
-      "blockedBy": [],
+      "plan": "1) Parser associativity + precedence. 2) Sema result-type rules. 3) Prelude int_pow/float pow paths per I9. 4) Example + golden with the four canonical values. 5) Targeted parser and sema tests.",
+      "blockedBy": [
+        "#1428"
+      ],
       "assignee": null,
       "log": [],
       "criteria": [
@@ -79950,6 +79988,33 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-08-05T14:22:31.011Z"
+        },
+        {
+          "n": 5,
+          "text": "Example power_semantics.jet golden-prints exactly 512 (2^3^2), -9 (-3^2), 1024 (2^10, exact Int), 0.5 (2^-1); identical on AOT and jet run (I9)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T14:36:45.723Z"
+        },
+        {
+          "n": 6,
+          "text": "Sema unit tests: Int ^ negative Int infers Float; Int ^ non-negative Int infers Int; any Float operand infers Float",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T14:36:46.030Z"
+        },
+        {
+          "n": 7,
+          "text": "Parser test proves right-associativity (2^3^2 groups as 2^(3^2)) and that unary minus binds looser (-3^2 groups as -(3^2))",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T14:36:46.331Z"
         }
       ],
       "refs": [],
@@ -79960,22 +80025,24 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T13:33:32.817Z",
-      "updated": "2026-08-05T14:22:31.011Z",
-      "updatedBy": "owner"
+      "updated": "2026-08-05T14:37:02.335Z",
+      "updatedBy": "fable"
     },
     {
       "id": "c0v2fuet",
       "num": 1430,
       "title": "Respell xor after ^ becomes exponent",
-      "body": "",
+      "body": "Ratified D-XORSPELL1=A: bitwise exclusive-or is infix ~| with compound ~|=, replacing infix ^. Prefix ~ (copy, D-SHAPE-COPY1) is untouched; parser position disambiguates. Same-width integer rule (D-SG9) carries over unchanged. Blocked on #1428 freeing ^.",
       "kind": "task",
       "track": "epoch",
-      "epoch": null,
+      "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P1",
-      "plan": null,
-      "blockedBy": [],
+      "plan": "1) Token ~| and ~|=. 2) Parser + sema reuse BitXor paths. 3) Formatter + grammars. 4) Example + golden. 5) Targeted tests incl. prefix-copy regression.",
+      "blockedBy": [
+        "#1428"
+      ],
       "assignee": null,
       "log": [],
       "criteria": [
@@ -80014,6 +80081,33 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-08-05T14:24:07.451Z"
+        },
+        {
+          "n": 5,
+          "text": "Example xor_operator.jet golden-proves ~| values and a ~|= accumulator loop; identical on AOT and jet run (I9)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T14:36:46.648Z"
+        },
+        {
+          "n": 6,
+          "text": "Sema test: ~| enforces same-width integers both sides (D-SG9 rule carried over)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T14:36:46.967Z"
+        },
+        {
+          "n": 7,
+          "text": "Prefix ~ copy regression: existing copy-sigil targeted tests green; a line mixing copy and xor (x ~| ~y) parses correctly in a parser test",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T14:36:47.285Z"
         }
       ],
       "refs": [],
@@ -80024,21 +80118,21 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T13:33:33.119Z",
-      "updated": "2026-08-05T14:24:07.451Z",
-      "updatedBy": "owner"
+      "updated": "2026-08-05T14:37:02.707Z",
+      "updatedBy": "fable"
     },
     {
       "id": "c04513m9",
       "num": 1431,
       "title": "Floor division operator /%",
-      "body": "",
+      "body": "Ratified D-FLOORDIV1=A: /% is floor division with compound /%=, flooring toward negative infinity on Int and Float. Pairs with floored % (#1432) so a == b*(a /% b) + a % b. Division by zero traps like /.",
       "kind": "task",
       "track": "epoch",
-      "epoch": null,
+      "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P1",
-      "plan": null,
+      "plan": "1) Token /% and /%=. 2) Parser + sema (same operand rules as /). 3) Prelude jet_floordiv per I9. 4) Formatter + grammars. 5) Example + golden + trap test.",
       "blockedBy": [],
       "assignee": null,
       "log": [],
@@ -80078,6 +80172,33 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-08-05T13:57:39.734Z"
+        },
+        {
+          "n": 5,
+          "text": "Example floor_div.jet golden-prints 3 (7 /% 2), -4 (-7 /% 2), 3.0 (7.5 /% 2.0), and a /%= compound; identical on AOT and jet run (I9)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T14:36:47.609Z"
+        },
+        {
+          "n": 6,
+          "text": "Trap test: /% by zero panics with the divided-by-zero message (targeted test)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T14:36:47.934Z"
+        },
+        {
+          "n": 7,
+          "text": "Formatter round-trip preserves /% and /%= (fmt stability test green)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T14:36:48.257Z"
         }
       ],
       "refs": [],
@@ -80088,21 +80209,21 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T13:33:33.668Z",
-      "updated": "2026-08-05T13:57:39.735Z",
-      "updatedBy": "owner"
+      "updated": "2026-08-05T14:37:03.080Z",
+      "updatedBy": "fable"
     },
     {
       "id": "c0c74q4f",
       "num": 1432,
       "title": "Modulo semantics: % floored, %% truncated",
-      "body": "",
+      "body": "Ratified D-MODSEM1=A: % becomes floored modulo (-7 % 2 == 1) with %=; new %% is truncated remainder (-7 %% 2 == -1) with %%=. Identity a == b*(a /% b) + a % b holds with #1431. Both trap on zero divisor. Prelude jet_rem splits into jet_mod (floored) and jet_rem (truncated) across all tiers (I9).",
       "kind": "task",
       "track": "epoch",
-      "epoch": null,
+      "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P1",
-      "plan": null,
+      "plan": "1) Token %% and %%=. 2) Sema. 3) Prelude split jet_mod/jet_rem, all tiers. 4) Migrate in-repo % uses that relied on truncation. 5) Example + golden + identity test.",
       "blockedBy": [],
       "assignee": null,
       "log": [],
@@ -80142,6 +80263,42 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-08-05T14:22:40.137Z"
+        },
+        {
+          "n": 5,
+          "text": "Example modulo.jet golden-prints 1 (-7 % 2), -1 (-7 %% 2), and %= / %%= compounds; identical on AOT and jet run (I9)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T14:36:48.580Z"
+        },
+        {
+          "n": 6,
+          "text": "Identity test across positive and negative operand pairs: a == b * (a /% b) + a % b (targeted test or example assert)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T14:36:48.896Z"
+        },
+        {
+          "n": 7,
+          "text": "Both % and %% trap on zero divisor (targeted test); Prelude has distinct jet_mod and jet_rem and every tier calls them (no engine-local reimplementation)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T14:36:49.226Z"
+        },
+        {
+          "n": 8,
+          "text": "In-repo uses of % that relied on truncated semantics audited and migrated to %% where needed (list in card log)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T14:36:49.552Z"
         }
       ],
       "refs": [],
@@ -80152,22 +80309,24 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T13:33:34.155Z",
-      "updated": "2026-08-05T14:22:40.137Z",
-      "updatedBy": "owner"
+      "updated": "2026-08-05T14:37:03.448Z",
+      "updatedBy": "fable"
     },
     {
       "id": "c0kfh1yl",
       "num": 1433,
       "title": "Integer division result type: Int / Int",
-      "body": "",
+      "body": "Ratified D-INTDIV1=A: Int / Int returns Float (7 / 2 == 3.5), the Python 3 model; /% (#1431) is the integer path. /= on an Int binding whose division yields Float is a type error pointing at /%=. In-repo examples that intended integer division migrate to /%. Blocked on #1431.",
       "kind": "task",
       "track": "epoch",
-      "epoch": null,
+      "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P1",
-      "plan": null,
-      "blockedBy": [],
+      "plan": "1) Sema result-type change. 2) New diagnostic for /= on Int. 3) Prelude div path per I9. 4) Migrate in-repo integer / uses to /%. 5) Example + golden; full golden sweep rides the batch closeout run.",
+      "blockedBy": [
+        "#1431"
+      ],
       "assignee": null,
       "log": [],
       "criteria": [
@@ -80206,6 +80365,33 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-08-05T13:49:57.463Z"
+        },
+        {
+          "n": 5,
+          "text": "Example int_div.jet golden-prints 3.5 (7 / 2) and a correct 8.5 average; identical on AOT and jet run (I9)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T14:36:49.879Z"
+        },
+        {
+          "n": 6,
+          "text": "Sema test: Int / Int infers Float; /= on an Int binding errors with the new diagnostic pointing at /%= (UI snapshot committed)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T14:36:50.194Z"
+        },
+        {
+          "n": 7,
+          "text": "In-repo examples intending integer division migrated to /%; full golden sweep deferred to the batch closeout run (D-VERDICT-675-1), not per-card",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T14:36:50.501Z"
         }
       ],
       "refs": [],
@@ -80216,21 +80402,21 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T13:33:34.653Z",
-      "updated": "2026-08-05T13:49:57.463Z",
-      "updatedBy": "owner"
+      "updated": "2026-08-05T14:37:03.817Z",
+      "updatedBy": "fable"
     },
     {
       "id": "c0skl5w6",
       "num": 1434,
       "title": "Bitwise NOT: extend ! to integers",
-      "body": "",
+      "body": "Ratified D-BITNOT1=A: prefix ! extends from Bool to all integer types as bitwise NOT (Rust model). On the default arbitrary-precision Int, complement is -x - 1 (width-free two-s complement identity); fixed-width types flip exact bits. Bool behavior unchanged.",
       "kind": "task",
       "track": "epoch",
-      "epoch": null,
+      "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P1",
-      "plan": null,
+      "plan": "1) Sema UnOp::Not accepts integers. 2) Prelude jet_bitnot per I9. 3) Update E0109 bool-only diagnostic + snapshot. 4) Example + golden. 5) Targeted tests.",
       "blockedBy": [],
       "assignee": null,
       "log": [],
@@ -80270,6 +80456,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-08-05T13:50:06.240Z"
+        },
+        {
+          "n": 5,
+          "text": "Example bit_not.jet golden-prints -1 (!0), -6 (!5), a flags & !mask bit-clear, and false (!true); identical on AOT and jet run (I9)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T14:36:50.820Z"
+        },
+        {
+          "n": 6,
+          "text": "Sema test: ! on each integer width returns the same width; on default Int equals -x - 1; E0109 bool-only diagnostic text updated with snapshot",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T14:36:51.135Z"
         }
       ],
       "refs": [],
@@ -80280,21 +80484,21 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T13:33:35.145Z",
-      "updated": "2026-08-05T13:50:06.240Z",
-      "updatedBy": "owner"
+      "updated": "2026-08-05T14:37:04.185Z",
+      "updatedBy": "fable"
     },
     {
       "id": "c0z2v4l9",
       "num": 1435,
       "title": "Three-way comparison: <=> or compare method",
-      "body": "",
+      "body": "Ratified D-CMP3WAY1=B (owner overrode rec A): ship the spaceship operator <=> AND the Ordering story. Core Ordering type (Less, Equal, Greater) with then and reverse; <=> desugars to the compare method; user types defining compare(self, other) get the six comparison operators and sorting derived. Lexer: <=> tokenizes before <= (spelling verified free).",
       "kind": "task",
       "track": "epoch",
-      "epoch": null,
+      "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P1",
-      "plan": null,
+      "plan": "1) Ordering core type + combinators. 2) Token <=>, desugar to compare. 3) Derivation of six operators + sort integration. 4) Formatter + grammars. 5) Examples + golden + targeted tests.",
       "blockedBy": [],
       "assignee": null,
       "log": [],
@@ -80334,6 +80538,42 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-08-05T13:56:38.538Z"
+        },
+        {
+          "n": 5,
+          "text": "Core Ordering type (Less, Equal, Greater) with then and reverse; targeted unit tests for both combinators",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T14:36:51.447Z"
+        },
+        {
+          "n": 6,
+          "text": "Example spaceship.jet golden-proves Int and String <=> results and a leaderboard sort driven by a user compare method; identical on AOT and jet run (I9)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T14:36:51.768Z"
+        },
+        {
+          "n": 7,
+          "text": "User type defining compare(self, other) gets all six comparison operators derived (end-to-end test); <=> desugars to compare (sema or TIR test)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T14:36:52.086Z"
+        },
+        {
+          "n": 8,
+          "text": "Lexer test: <=> tokenizes as one token before <=; a <= > b still errors as before",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T14:36:52.411Z"
         }
       ],
       "refs": [],
@@ -80344,25 +80584,80 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T13:33:35.539Z",
-      "updated": "2026-08-05T13:56:38.538Z",
-      "updatedBy": "owner"
+      "updated": "2026-08-05T14:37:04.565Z",
+      "updatedBy": "fable"
     },
     {
       "id": "c04czzvb",
       "num": 1436,
       "title": "Default Int overflow model: arbitrary precision",
-      "body": "",
+      "body": "Ratified D-INTBIG1=A (amends D-NUMOPS1 for default Int): default Int becomes arbitrary precision with a machine-word small-int fast path, spilling past ~63 bits. Overflow stops existing for default Int. Fixed-width I8..I128 / U8..U128 keep trap-on-overflow plus explicit wrapping_*/saturating_* methods. Crossing to fixed-width or FFI range-checks with a real diagnostic. I9: identical semantics on AOT, JIT, interpreter, web — representation lives in Prelude, engines marshal only. This is the largest slice of the slate; sequence it last.",
       "kind": "task",
       "track": "epoch",
-      "epoch": null,
+      "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P1",
-      "plan": null,
+      "plan": "1) Prelude bignum representation + arithmetic. 2) Sema literal/width rules. 3) All-tier wiring per I9. 4) Fixed-width trap + range diagnostics. 5) Examples + golden incl. factorial(25). 6) Targeted perf smoke on small-int path.",
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Example big_int.jet golden-prints factorial(25) == 15511210043330985984000000 exactly; identical on AOT, jet run, and interpreter deopt (I9)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T14:36:52.729Z"
+        },
+        {
+          "n": 2,
+          "text": "Former default-Int overflow panic repro now returns the exact value (targeted test); no overflow panic path remains for default Int",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T14:36:53.105Z"
+        },
+        {
+          "n": 3,
+          "text": "Fixed-width types still trap on overflow and reject out-of-range literals with snapshot diagnostics (targeted tests for I64 and U8)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T14:36:53.416Z"
+        },
+        {
+          "n": 4,
+          "text": "Small-int fast path proven: machine-word arithmetic does not heap-allocate (unit test or debug assert) and values crossing the ~63-bit spill boundary round-trip exactly",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T14:36:53.733Z"
+        },
+        {
+          "n": 5,
+          "text": "Fixed-width and FFI boundary conversions range-check with a real diagnostic (snapshot); wrapping_* and saturating_* methods exist on fixed-width types with targeted tests",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T14:36:54.061Z"
+        },
+        {
+          "n": 6,
+          "text": "syntax-decisions.md (or the owning spec section) records D-INTBIG1 semantics; D-NUMOPS1 entry amended, not duplicated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T14:36:54.381Z"
+        }
+      ],
       "refs": [],
       "tags": [
         "syntax",
@@ -80371,25 +80666,62 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T13:33:35.858Z",
-      "updated": "2026-08-05T13:57:20.617Z",
-      "updatedBy": "owner"
+      "updated": "2026-08-05T14:37:04.932Z",
+      "updatedBy": "fable"
     },
     {
       "id": "c09k2xje",
       "num": 1437,
       "title": "Design operator-level matrix and linear algebra surface",
-      "body": "Owner wants a full design pass for operator-level matrix and linear algebra, to beat MATLAB and NumPy ergonomics. Today core.compute has matrix, det, inv, solve, fft as function calls only — no Matrix type in the surface language, no literals, no operator arithmetic. Design scope: a real Matrix/Vector type story; literal syntax; matmul vs elementwise operators (MATLAB * vs .*, Julia broadcasting dot, Python @); broadcasting rules; indexing and slicing; interaction with the ratifying operator slate (D-EXPOP1 ^, D-EXPSEM1, D-MODSEM1, D-INTDIV1, D-INTBIG1); beginner surface vs expert control (views, in-place, storage layout); I9 parity across all tiers. Deliverable: proposal doc in docs/proposals with one full worked real example per option (owner style: distinct UX archetypes, not variants), then a ballot slate. Operator-slate ratifications feed the design; start after those verdicts land.",
+      "body": "Full design pass for operator-level matrix and linear algebra (owner directive: design fully before any code). Deliverable is a proposal doc plus a ballot slate — no implementation on this card. Today core.compute is function-only (matrix, det, inv, solve, fft); no Matrix type, literals, or operator arithmetic. Design must cover: Matrix/Vector types, literal syntax, matmul vs elementwise operators, broadcasting, indexing/slicing, beginner surface vs expert control (views, in-place, layout), and interaction with the ratified operator slate (^ power, /% floor div, floored %, Float division, bigint Int).",
       "kind": "task",
       "track": "epoch",
-      "epoch": null,
+      "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P1",
-      "plan": "1) Study MATLAB, Julia, NumPy, R surfaces for the same worked example. 2) Draft proposal with worked options. 3) Owner review. 4) Ballot slate. 5) Implement per I9.",
+      "plan": "1) Same worked example (e.g. least-squares fit) written in MATLAB, Julia, NumPy, R. 2) Proposal doc with >=3 distinct UX archetypes, each carrying that full example. 3) Owner review. 4) Mint ballot slate. 5) Implementation cards after ratification.",
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "docs/proposals/matrix-surface.md exists with at least 3 distinct UX archetypes, each carrying the SAME fully worked real example end to end (distinct archetypes, not one design in three coats)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T14:36:54.687Z"
+        },
+        {
+          "n": 2,
+          "text": "Comparisons section shows that same example in MATLAB, Julia, NumPy, and R",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T14:36:54.995Z"
+        },
+        {
+          "n": 3,
+          "text": "Every open owner choice from the doc is minted as a ballot-ready Tower decision; none pre-ratified, none implemented",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T14:36:55.317Z"
+        },
+        {
+          "n": 4,
+          "text": "No code lands from this card: git shows doc + board changes only",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T14:36:55.628Z"
+        }
+      ],
       "refs": [],
       "tags": [
         "design",
@@ -80398,7 +80730,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T13:33:36.172Z",
-      "updated": "2026-08-05T13:39:33.662Z",
+      "updated": "2026-08-05T14:37:05.302Z",
       "updatedBy": "fable"
     }
   ],
@@ -105559,6 +105891,559 @@
   ],
   "events": [
     {
+      "at": "2026-08-05T14:37:05.302Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c09k2xje",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-05T14:37:04.932Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c04czzvb",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-05T14:37:04.565Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0z2v4l9",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-05T14:37:04.186Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0skl5w6",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-05T14:37:03.818Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0kfh1yl",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-05T14:37:03.448Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0c74q4f",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-05T14:37:03.080Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c04513m9",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-05T14:37:02.708Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0v2fuet",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-05T14:37:02.335Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0q2s3u5",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-05T14:37:01.969Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0kw5dh0",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-05T14:36:55.628Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c09k2xje",
+      "note": "#4 No code lands from this card: git shows doc + board changes "
+    },
+    {
+      "at": "2026-08-05T14:36:55.317Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c09k2xje",
+      "note": "#3 Every open owner choice from the doc is minted as a ballot-r"
+    },
+    {
+      "at": "2026-08-05T14:36:54.996Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c09k2xje",
+      "note": "#2 Comparisons section shows that same example in MATLAB, Julia"
+    },
+    {
+      "at": "2026-08-05T14:36:54.687Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c09k2xje",
+      "note": "#1 docs/proposals/matrix-surface.md exists with at least 3 dist"
+    },
+    {
+      "at": "2026-08-05T14:36:54.381Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c04czzvb",
+      "note": "#6 syntax-decisions.md (or the owning spec section) records D-I"
+    },
+    {
+      "at": "2026-08-05T14:36:54.061Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c04czzvb",
+      "note": "#5 Fixed-width and FFI boundary conversions range-check with a "
+    },
+    {
+      "at": "2026-08-05T14:36:53.734Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c04czzvb",
+      "note": "#4 Small-int fast path proven: machine-word arithmetic does not"
+    },
+    {
+      "at": "2026-08-05T14:36:53.416Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c04czzvb",
+      "note": "#3 Fixed-width types still trap on overflow and reject out-of-r"
+    },
+    {
+      "at": "2026-08-05T14:36:53.105Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c04czzvb",
+      "note": "#2 Former default-Int overflow panic repro now returns the exac"
+    },
+    {
+      "at": "2026-08-05T14:36:52.730Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c04czzvb",
+      "note": "#1 Example big_int.jet golden-prints factorial(25) == 155112100"
+    },
+    {
+      "at": "2026-08-05T14:36:52.411Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0z2v4l9",
+      "note": "#8 Lexer test: <=> tokenizes as one token before <=; a <= > b s"
+    },
+    {
+      "at": "2026-08-05T14:36:52.086Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0z2v4l9",
+      "note": "#7 User type defining compare(self, other) gets all six compari"
+    },
+    {
+      "at": "2026-08-05T14:36:51.768Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0z2v4l9",
+      "note": "#6 Example spaceship.jet golden-proves Int and String <=> resul"
+    },
+    {
+      "at": "2026-08-05T14:36:51.448Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0z2v4l9",
+      "note": "#5 Core Ordering type (Less, Equal, Greater) with then and reve"
+    },
+    {
+      "at": "2026-08-05T14:36:51.136Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0skl5w6",
+      "note": "#6 Sema test: ! on each integer width returns the same width; o"
+    },
+    {
+      "at": "2026-08-05T14:36:50.820Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0skl5w6",
+      "note": "#5 Example bit_not.jet golden-prints -1 (!0), -6 (!5), a flags "
+    },
+    {
+      "at": "2026-08-05T14:36:50.501Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0kfh1yl",
+      "note": "#7 In-repo examples intending integer division migrated to /%; "
+    },
+    {
+      "at": "2026-08-05T14:36:50.194Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0kfh1yl",
+      "note": "#6 Sema test: Int / Int infers Float; /= on an Int binding erro"
+    },
+    {
+      "at": "2026-08-05T14:36:49.879Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0kfh1yl",
+      "note": "#5 Example int_div.jet golden-prints 3.5 (7 / 2) and a correct "
+    },
+    {
+      "at": "2026-08-05T14:36:49.552Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0c74q4f",
+      "note": "#8 In-repo uses of % that relied on truncated semantics audited"
+    },
+    {
+      "at": "2026-08-05T14:36:49.227Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0c74q4f",
+      "note": "#7 Both % and %% trap on zero divisor (targeted test); Prelude "
+    },
+    {
+      "at": "2026-08-05T14:36:48.897Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0c74q4f",
+      "note": "#6 Identity test across positive and negative operand pairs: a "
+    },
+    {
+      "at": "2026-08-05T14:36:48.580Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0c74q4f",
+      "note": "#5 Example modulo.jet golden-prints 1 (-7 % 2), -1 (-7 %% 2), a"
+    },
+    {
+      "at": "2026-08-05T14:36:48.257Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c04513m9",
+      "note": "#7 Formatter round-trip preserves /% and /%= (fmt stability tes"
+    },
+    {
+      "at": "2026-08-05T14:36:47.934Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c04513m9",
+      "note": "#6 Trap test: /% by zero panics with the divided-by-zero messag"
+    },
+    {
+      "at": "2026-08-05T14:36:47.609Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c04513m9",
+      "note": "#5 Example floor_div.jet golden-prints 3 (7 /% 2), -4 (-7 /% 2)"
+    },
+    {
+      "at": "2026-08-05T14:36:47.285Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0v2fuet",
+      "note": "#7 Prefix ~ copy regression: existing copy-sigil targeted tests"
+    },
+    {
+      "at": "2026-08-05T14:36:46.967Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0v2fuet",
+      "note": "#6 Sema test: ~| enforces same-width integers both sides (D-SG9"
+    },
+    {
+      "at": "2026-08-05T14:36:46.648Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0v2fuet",
+      "note": "#5 Example xor_operator.jet golden-proves ~| values and a ~|= a"
+    },
+    {
+      "at": "2026-08-05T14:36:46.331Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0q2s3u5",
+      "note": "#7 Parser test proves right-associativity (2^3^2 groups as 2^(3"
+    },
+    {
+      "at": "2026-08-05T14:36:46.030Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0q2s3u5",
+      "note": "#6 Sema unit tests: Int ^ negative Int infers Float; Int ^ non-"
+    },
+    {
+      "at": "2026-08-05T14:36:45.724Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0q2s3u5",
+      "note": "#5 Example power_semantics.jet golden-prints exactly 512 (2^3^2"
+    },
+    {
+      "at": "2026-08-05T14:36:45.426Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0kw5dh0",
+      "note": "#8 Prefix ^ (take sigil) regression: existing take-capability t"
+    },
+    {
+      "at": "2026-08-05T14:36:45.122Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0kw5dh0",
+      "note": "#7 Formatter round-trip: jet fmt is idempotent on the power exa"
+    },
+    {
+      "at": "2026-08-05T14:36:44.812Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0kw5dh0",
+      "note": "#6 No infix ^ means xor anywhere: sema unit test shows Int ^ In"
+    },
+    {
+      "at": "2026-08-05T14:36:44.506Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0kw5dh0",
+      "note": "#5 Example examples/features/math/power_operator.jet golden-pro"
+    },
+    {
+      "at": "2026-08-05T14:36:11.552Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c09k2xje",
+      "note": "body,plan"
+    },
+    {
+      "at": "2026-08-05T14:36:11.064Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c04czzvb",
+      "note": "body,plan"
+    },
+    {
+      "at": "2026-08-05T14:36:10.525Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0z2v4l9",
+      "note": "body,plan"
+    },
+    {
+      "at": "2026-08-05T14:36:10.134Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0skl5w6",
+      "note": "body,plan"
+    },
+    {
+      "at": "2026-08-05T14:36:09.764Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0kfh1yl",
+      "note": "body,plan"
+    },
+    {
+      "at": "2026-08-05T14:36:09.398Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0c74q4f",
+      "note": "body,plan"
+    },
+    {
+      "at": "2026-08-05T14:36:09.033Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c04513m9",
+      "note": "body,plan"
+    },
+    {
+      "at": "2026-08-05T14:36:08.671Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0v2fuet",
+      "note": "body,plan"
+    },
+    {
+      "at": "2026-08-05T14:36:08.320Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0q2s3u5",
+      "note": "body,plan"
+    },
+    {
+      "at": "2026-08-05T14:36:07.950Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0kw5dh0",
+      "note": "body,plan"
+    },
+    {
+      "at": "2026-08-05T14:35:32.107Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0kfh1yl",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-08-05T14:35:31.593Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0v2fuet",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-08-05T14:35:31.032Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0q2s3u5",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-08-05T14:35:30.670Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c09k2xje",
+      "note": "epoch"
+    },
+    {
+      "at": "2026-08-05T14:35:30.300Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c04czzvb",
+      "note": "epoch"
+    },
+    {
+      "at": "2026-08-05T14:35:29.953Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0z2v4l9",
+      "note": "epoch"
+    },
+    {
+      "at": "2026-08-05T14:35:29.571Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0skl5w6",
+      "note": "epoch"
+    },
+    {
+      "at": "2026-08-05T14:35:29.184Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0kfh1yl",
+      "note": "epoch"
+    },
+    {
+      "at": "2026-08-05T14:35:28.814Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0c74q4f",
+      "note": "epoch"
+    },
+    {
+      "at": "2026-08-05T14:35:28.439Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c04513m9",
+      "note": "epoch"
+    },
+    {
+      "at": "2026-08-05T14:35:28.074Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0v2fuet",
+      "note": "epoch"
+    },
+    {
+      "at": "2026-08-05T14:35:27.704Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0q2s3u5",
+      "note": "epoch"
+    },
+    {
+      "at": "2026-08-05T14:35:27.343Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0kw5dh0",
+      "note": "epoch"
+    },
+    {
+      "at": "2026-08-05T14:30:56.103Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c09k2xje",
+      "note": "epoch"
+    },
+    {
+      "at": "2026-08-05T14:30:55.745Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c04czzvb",
+      "note": "epoch"
+    },
+    {
+      "at": "2026-08-05T14:30:55.379Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0z2v4l9",
+      "note": "epoch"
+    },
+    {
+      "at": "2026-08-05T14:30:55.012Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0skl5w6",
+      "note": "epoch"
+    },
+    {
+      "at": "2026-08-05T14:30:54.646Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0kfh1yl",
+      "note": "epoch"
+    },
+    {
+      "at": "2026-08-05T14:30:54.286Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0c74q4f",
+      "note": "epoch"
+    },
+    {
+      "at": "2026-08-05T14:30:53.922Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c04513m9",
+      "note": "epoch"
+    },
+    {
+      "at": "2026-08-05T14:30:53.558Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0v2fuet",
+      "note": "epoch"
+    },
+    {
+      "at": "2026-08-05T14:30:53.185Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0q2s3u5",
+      "note": "epoch"
+    },
+    {
+      "at": "2026-08-05T14:30:52.817Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0kw5dh0",
+      "note": "epoch"
+    },
+    {
       "at": "2026-08-05T14:24:07.451Z",
       "by": "owner",
       "action": "decision.ratify",
@@ -108504,559 +109389,6 @@
       "action": "card.update",
       "ref": "c0pibmpe",
       "note": "refs"
-    },
-    {
-      "at": "2026-08-04T19:00:45.662Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0s0594k",
-      "note": "refs"
-    },
-    {
-      "at": "2026-08-04T19:00:39.668Z",
-      "by": "fable",
-      "action": "decision.add",
-      "ref": "D-LOOP-GUARD1",
-      "note": "Comprehension guard spelling in the loop head"
-    },
-    {
-      "at": "2026-08-04T19:00:24.580Z",
-      "by": "fable",
-      "action": "decision.add",
-      "ref": "D-SUBJECT-CALL1",
-      "note": "Bare-member shorthand for one-parameter callable arguments"
-    },
-    {
-      "at": "2026-08-04T19:00:24.147Z",
-      "by": "fable",
-      "action": "decision.add",
-      "ref": "D-LOOP-SUBJECT1",
-      "note": "Bindingless loops with an implicit subject"
-    },
-    {
-      "at": "2026-08-04T18:57:56.726Z",
-      "by": "fable",
-      "action": "card.add",
-      "ref": "c0pibmpe",
-      "note": "Comprehension and guard example coverage (I5)"
-    },
-    {
-      "at": "2026-08-04T18:57:52.524Z",
-      "by": "fable",
-      "action": "card.add",
-      "ref": "c0s0594k",
-      "note": "Yielding-loop head misparses ', if' guard as a stride"
-    },
-    {
-      "at": "2026-08-04T18:57:44.734Z",
-      "by": "fable",
-      "action": "card.add",
-      "ref": "c075z2hs",
-      "note": "Bare-member shorthand for one-parameter callable arguments"
-    },
-    {
-      "at": "2026-08-04T18:57:44.167Z",
-      "by": "fable",
-      "action": "card.add",
-      "ref": "c0xsk2wa",
-      "note": "Bindingless loops with an implicit subject"
-    },
-    {
-      "at": "2026-08-04T18:57:43.600Z",
-      "by": "fable",
-      "action": "card.add",
-      "ref": "c0oeuws4",
-      "note": "Comprehension guard spelling in the loop head"
-    },
-    {
-      "at": "2026-08-04T18:54:02.987Z",
-      "by": "codex-e5",
-      "action": "card.claim",
-      "ref": "c0wbxcvq",
-      "note": ""
-    },
-    {
-      "at": "2026-08-04T18:49:50.558Z",
-      "by": "codex-e5",
-      "action": "card.update",
-      "ref": "c0yl347q",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-04T18:49:38.261Z",
-      "by": "codex-e5",
-      "action": "card.claim",
-      "ref": "c0yl347q",
-      "note": ""
-    },
-    {
-      "at": "2026-08-04T18:39:38.304Z",
-      "by": "owner",
-      "action": "idea.delete",
-      "ref": "bnoxiwls",
-      "note": ""
-    },
-    {
-      "at": "2026-08-04T18:38:08.022Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-04T18:38:08.022Z"
-    },
-    {
-      "at": "2026-08-04T18:35:43.271Z",
-      "by": "codex-e5",
-      "action": "card.update",
-      "ref": "c0mr4e37",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-04T18:35:42.890Z",
-      "by": "copernicus",
-      "action": "card.criteria-verify",
-      "ref": "c0mr4e37",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-04T18:35:42.555Z",
-      "by": "copernicus",
-      "action": "card.criteria-verify",
-      "ref": "c0mr4e37",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-04T18:35:42.215Z",
-      "by": "copernicus",
-      "action": "card.criteria-verify",
-      "ref": "c0mr4e37",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-04T18:35:41.880Z",
-      "by": "copernicus",
-      "action": "card.criteria-verify",
-      "ref": "c0mr4e37",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-04T18:35:41.530Z",
-      "by": "copernicus",
-      "action": "card.criteria-verify",
-      "ref": "c0mr4e37",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-04T18:35:41.186Z",
-      "by": "codex-e5",
-      "action": "card.criteria-meet",
-      "ref": "c0mr4e37",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-04T18:35:40.837Z",
-      "by": "codex-e5",
-      "action": "card.criteria-meet",
-      "ref": "c0mr4e37",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-04T18:35:40.490Z",
-      "by": "codex-e5",
-      "action": "card.criteria-meet",
-      "ref": "c0mr4e37",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-04T18:35:40.152Z",
-      "by": "codex-e5",
-      "action": "card.criteria-meet",
-      "ref": "c0mr4e37",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-04T18:35:39.788Z",
-      "by": "codex-e5",
-      "action": "card.criteria-meet",
-      "ref": "c0mr4e37",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-04T18:28:29.096Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c04cbdzd",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-04T18:19:29.084Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-04T18:19:29.084Z"
-    },
-    {
-      "at": "2026-08-04T18:19:22.772Z",
-      "by": "owner",
-      "action": "idea.add",
-      "ref": "bnoxiwls",
-      "note": "Should jet comprehensions use => instead of -> since they es"
-    },
-    {
-      "at": "2026-08-04T18:18:43.544Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c04cbdzd",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-04T18:18:43.132Z",
-      "by": "Poincare",
-      "action": "card.criteria-verify",
-      "ref": "c04cbdzd",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-04T18:18:42.800Z",
-      "by": "Poincare",
-      "action": "card.criteria-verify",
-      "ref": "c04cbdzd",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-04T18:18:42.466Z",
-      "by": "Poincare",
-      "action": "card.criteria-verify",
-      "ref": "c04cbdzd",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-04T18:18:42.106Z",
-      "by": "Poincare",
-      "action": "card.criteria-verify",
-      "ref": "c04cbdzd",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-04T18:17:34.290Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c04cbdzd",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-04T18:16:34.144Z",
-      "by": "codex",
-      "action": "card.criteria-meet",
-      "ref": "c04cbdzd",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-04T18:16:33.794Z",
-      "by": "codex",
-      "action": "card.criteria-meet",
-      "ref": "c04cbdzd",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-04T18:16:33.443Z",
-      "by": "codex",
-      "action": "card.criteria-meet",
-      "ref": "c04cbdzd",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-04T18:16:33.102Z",
-      "by": "codex",
-      "action": "card.criteria-meet",
-      "ref": "c04cbdzd",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-04T18:16:32.750Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c0dthzfc",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-04T17:57:03.707Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-04T17:57:03.707Z"
-    },
-    {
-      "at": "2026-08-04T17:54:24.857Z",
-      "by": "codex-e5",
-      "action": "card.claim",
-      "ref": "c0mr4e37",
-      "note": ""
-    },
-    {
-      "at": "2026-08-04T17:54:21.026Z",
-      "by": "codex-e5",
-      "action": "card.update",
-      "ref": "c0gg1r1f",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-04T17:54:20.463Z",
-      "by": "sartre-e5-review",
-      "action": "card.criteria-verify",
-      "ref": "c0gg1r1f",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-04T17:54:19.977Z",
-      "by": "sartre-e5-review",
-      "action": "card.criteria-verify",
-      "ref": "c0gg1r1f",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-04T17:54:19.443Z",
-      "by": "sartre-e5-review",
-      "action": "card.criteria-verify",
-      "ref": "c0gg1r1f",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-04T17:54:19.067Z",
-      "by": "sartre-e5-review",
-      "action": "card.criteria-verify",
-      "ref": "c0gg1r1f",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-04T17:54:18.686Z",
-      "by": "sartre-e5-review",
-      "action": "card.criteria-verify",
-      "ref": "c0gg1r1f",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-04T17:54:12.506Z",
-      "by": "codex-e5",
-      "action": "card.criteria-meet",
-      "ref": "c0gg1r1f",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-04T17:54:12.125Z",
-      "by": "codex-e5",
-      "action": "card.criteria-meet",
-      "ref": "c0gg1r1f",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-04T17:54:11.742Z",
-      "by": "codex-e5",
-      "action": "card.criteria-meet",
-      "ref": "c0gg1r1f",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-04T17:54:11.350Z",
-      "by": "codex-e5",
-      "action": "card.criteria-meet",
-      "ref": "c0gg1r1f",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-04T17:54:10.959Z",
-      "by": "codex-e5",
-      "action": "card.criteria-meet",
-      "ref": "c0gg1r1f",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-04T17:54:10.487Z",
-      "by": "codex-e5",
-      "action": "card.update",
-      "ref": "c0gg1r1f",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-04T17:49:23.574Z",
-      "by": "codex-e5",
-      "action": "card.claim",
-      "ref": "c0gg1r1f",
-      "note": ""
-    },
-    {
-      "at": "2026-08-04T17:49:19.349Z",
-      "by": "codex-e5",
-      "action": "card.update",
-      "ref": "c0au3zde",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-04T17:49:13.770Z",
-      "by": "nash-e5-review",
-      "action": "card.criteria-verify",
-      "ref": "c0au3zde",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-04T17:49:13.406Z",
-      "by": "nash-e5-review",
-      "action": "card.criteria-verify",
-      "ref": "c0au3zde",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-04T17:49:13.047Z",
-      "by": "nash-e5-review",
-      "action": "card.criteria-verify",
-      "ref": "c0au3zde",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-04T17:49:12.680Z",
-      "by": "nash-e5-review",
-      "action": "card.criteria-verify",
-      "ref": "c0au3zde",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-04T17:49:12.310Z",
-      "by": "nash-e5-review",
-      "action": "card.criteria-verify",
-      "ref": "c0au3zde",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-04T17:48:53.215Z",
-      "by": "codex-e5",
-      "action": "card.criteria-meet",
-      "ref": "c0au3zde",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-04T17:48:52.851Z",
-      "by": "codex-e5",
-      "action": "card.criteria-meet",
-      "ref": "c0au3zde",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-04T17:48:52.482Z",
-      "by": "codex-e5",
-      "action": "card.criteria-meet",
-      "ref": "c0au3zde",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-04T17:48:52.113Z",
-      "by": "codex-e5",
-      "action": "card.criteria-meet",
-      "ref": "c0au3zde",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-04T17:48:51.743Z",
-      "by": "codex-e5",
-      "action": "card.criteria-meet",
-      "ref": "c0au3zde",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-04T17:48:51.370Z",
-      "by": "codex-e5",
-      "action": "card.update",
-      "ref": "c0au3zde",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-04T17:45:51.523Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-CALLPOLICY1",
-      "note": "E"
-    },
-    {
-      "at": "2026-08-04T17:45:51.523Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0b4fyko",
-      "note": "#11 snapshots re-blessed"
-    },
-    {
-      "at": "2026-08-04T17:45:51.523Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0b4fyko",
-      "note": "#10 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-08-04T17:45:51.523Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0b4fyko",
-      "note": "#9 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-08-04T17:45:51.523Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0b4fyko",
-      "note": "#8 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-08-04T17:45:44.888Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-04T17:45:44.888Z"
-    },
-    {
-      "at": "2026-08-04T17:43:39.486Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c04cbdzd",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-04T17:43:31.495Z",
-      "by": "codex",
-      "action": "card.update",
-      "ref": "c04cbdzd",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-04T17:43:24.533Z",
-      "by": "codex",
-      "action": "card.claim",
-      "ref": "c04cbdzd",
-      "note": ""
-    },
-    {
-      "at": "2026-08-04T17:35:24.249Z",
-      "by": "codex-e5",
-      "action": "card.claim",
-      "ref": "c0au3zde",
-      "note": ""
-    },
-    {
-      "at": "2026-08-04T17:35:17.874Z",
-      "by": "codex-e5",
-      "action": "card.update",
-      "ref": "c05eyj7q",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-04T17:35:17.491Z",
-      "by": "bernoulli-e5-review",
-      "action": "card.criteria-verify",
-      "ref": "c05eyj7q",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-04T17:35:17.154Z",
-      "by": "bernoulli-e5-review",
-      "action": "card.criteria-verify",
-      "ref": "c05eyj7q",
-      "note": "#4"
     }
   ],
   "nextNum": 368,
