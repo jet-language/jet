@@ -1068,6 +1068,7 @@ pub(crate) fn collect_core_expr(
         | Expr::Absent(_)
         | Expr::ReduceMarker(_, _)
         | Expr::Todo { .. }
+        | Expr::NoElse(_)
         | Expr::UnitLit { .. }
         | Expr::ComptimeSplice { .. }
         // D-SHIFT1 (c7shift) / D-BINPAT1 (card #506 follow-up): a leaf
@@ -2192,6 +2193,7 @@ pub(crate) fn check_func_body_bundle(
             .collect(),
         expected_type: None,
         iter_borrowed: HashSet::new(),
+        noelse_chains_checked: HashSet::new(),
         lending_view_loop_vars: HashSet::new(),
         view_facts: Default::default(),
         return_view_provenance: None,

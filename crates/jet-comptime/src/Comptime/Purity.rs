@@ -239,6 +239,7 @@ fn walk_expr_nodes(e: &Expr, include_suppressed: bool, f: &mut impl FnMut(&Expr)
         | Expr::UnitLit { .. }
         | Expr::Absent(_)
         | Expr::Todo { .. }
+        | Expr::NoElse(_)
         | Expr::ReduceMarker(_, _)
         | Expr::ComptimeSplice { .. } => {}
         Expr::ListLit(items, _) | Expr::CompareChain { operands: items, .. } => {

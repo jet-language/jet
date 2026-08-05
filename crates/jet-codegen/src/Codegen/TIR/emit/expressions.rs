@@ -2449,6 +2449,13 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             line,
             expected_type
         ),
+        // Card #1440: sema proved the dispatch exhaustive (E0307); this arm is
+        // dead on every input. `unreachable!` diverges so it type-checks in any
+        // value position (I1: no unsafe).
+        TExprKind::Unreachable { line } => format!(
+            "unreachable!(\"exhaustive dispatch at {}:{} (sema-proved, E0307)\")",
+            cx.file, line
+        ),
         // c109 Phase 8: `Ok(x)` → `Ok(x)` / `Err(e)` → `Err(e)`. Mirrors the AST
         // `Expr::Ok`/`Expr::Err`.
         TExprKind::Ok(inner) => format!("Ok({})", emit_tir_expr(inner, cx)),

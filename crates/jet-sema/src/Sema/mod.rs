@@ -1342,6 +1342,9 @@ pub(crate) struct Checker<'a> {
     expected_type: Option<Type>,
     /// Collections currently read by an active `for x in xs` loop (E0507).
     iter_borrowed: HashSet<String>,
+    /// Card #1440: NoElse-terminated dispatch chains already coverage-checked
+    /// (chain span starts) — every level shares one span, the outermost wins.
+    noelse_chains_checked: HashSet<usize>,
     /// Loop bindings that lend one `ViewMut<T>` element from a collection.
     /// These values may edit during the iteration but may not be retained.
     lending_view_loop_vars: HashSet<String>,

@@ -842,6 +842,7 @@ fn expr_has_comptime_evaluation(expr: &Expr) -> bool {
         | Expr::UnitLit { .. }
         | Expr::Absent(_)
         | Expr::Todo { .. }
+        | Expr::NoElse(_)
         | Expr::ReduceMarker(..) => false,
     }
 }

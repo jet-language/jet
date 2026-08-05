@@ -297,6 +297,202 @@ impl<'a> Checker<'a> {
             }
         }
     
+        /// One pattern arm's contribution to the covered set — shared by the
+        /// statement table and the else-less value-dispatch chain (card #1440),
+        /// so unreachable-arm policy (D-PATO or-patterns, D-TAG1 subtree
+        /// ancestors, E0365 vs L0301) lives in exactly one place.
+        pub(crate) fn note_pattern_coverage(
+            &mut self,
+            pattern: &Pattern,
+            st: &Type,
+            covered: &mut HashSet<String>,
+        ) {
+            let pspan = pattern.span();
+            // D-PATO: or-patterns cover multiple variants; insert all of them.
+            let covered_names: Vec<String> = if let Pattern::Or(alts, _) = pattern {
+                alts.iter().filter_map(pattern_variant_name).collect()
+            } else if let Some(v) = pattern_variant_name(pattern) {
+                vec![v]
+            } else {
+                Vec::new()
+            };
+            for variant in covered_names {
+                // D-TAG1: an earlier group arm already covers every leaf in
+                // its subtree, so `.Fire ->` makes a later `.Fire.Burn ->`
+                // unreachable (ancestor-or-equal test on the dotted path).
+                let already = covered.contains(&variant)
+                    || covered
+                        .iter()
+                        .any(|c| variant.starts_with(&format!("{c}.")));
+                if already {
+                    let what = format!(
+                        "arm `{}` is unreachable — that case is already handled",
+                        variant
+                    );
+                    let why = "every earlier arm already covers this pattern".to_string();
+                    let fix = "remove this arm or merge it with the one above".to_string();
+                    if matches!(st, Type::Union(_)) {
+                        self.diags.push(Diagnostic::error("E0365", what, why, fix, Some(pspan)));
+                    } else {
+                        self.diags.push(Diagnostic::lint("L0301", what, why, fix, Some(pspan)));
+                    }
+                } else {
+                    covered.insert(variant);
+                }
+            }
+        }
+
+        /// The completion half of the shared policy: an else-less all-pattern
+        /// table must cover the subject's whole type (E0307); D-PATR open
+        /// scalars can never prove totality.
+        pub(crate) fn check_pattern_coverage_complete(
+            &mut self,
+            st: &Type,
+            covered: &HashSet<String>,
+            has_else: bool,
+            span: Span,
+            insert_at: Option<Span>,
+            subj_name: Option<&str>,
+        ) {
+            if has_else {
+                return;
+            }
+            // D-PATR: Int/Char are open scalar types — range arms can never
+            // prove totality, so an `else` (or wildcard) is always required.
+            // `missing_pattern_coverage` returns None for Int/Char (infinite
+            // domain), so we detect this case separately.
+            if matches!(st, Type::Int | Type::Char) {
+                self.diags.push(Diagnostic::error(
+                    "E0307",
+                    format!(
+                        "this `{}` over `{}` has no `{}` arm — range arms can't cover every value",
+                        Syntax::KW_IF,
+                        st.show(),
+                        Syntax::KW_ELSE,
+                    ),
+                    format!(
+                        "`{}` has infinitely many values; range arms only cover a subset (D-PATR)",
+                        st.show()
+                    ),
+                    format!(
+                        "add `{} {} {{ … }}` to handle values not matched by any range",
+                        Syntax::KW_ELSE,
+                        Syntax::OP_ARM_ARROW
+                    ),
+                    Some(span),
+                ));
+                return;
+            }
+            if let Some(missing) = missing_pattern_coverage(st, covered, self.registry) {
+                let mut diag = Diagnostic::error(
+                    "E0307",
+                    format!(
+                        "this `{}` doesn't cover every case — missing: {}",
+                        Syntax::KW_IF,
+                        missing.join(", ")
+                    ),
+                    "every arm here is a pattern test, so each variant must appear once"
+                        .to_string(),
+                    format!("add an arm for: {}", missing.join(", ")),
+                    Some(span),
+                );
+                // Attach a structured insert so LSP/CLI can add compilable arms.
+                if let Some(at) = insert_at {
+                    diag.edit = Some(TextEdit {
+                        span: at,
+                        new_text: missing_arms_text(st, &missing, subj_name),
+                    });
+                }
+                self.diags.push(diag);
+            }
+        }
+
+        /// Card #1440: an else-less all-pattern value dispatch arrives from the
+        /// parser as a nested `Expr::If` chain terminated by `Expr::NoElse`.
+        /// Prove the pattern arms cover the subject's whole type with the same
+        /// policy the statement table uses above. Runs once per chain (every
+        /// level shares one span; the outermost caller wins the dedup insert).
+        pub(crate) fn check_noelse_dispatch_chain(&mut self, expr: &mut Expr) {
+            let Expr::If { span, .. } = expr else { return };
+            let span = *span;
+            if !self.noelse_chains_checked.insert(span.start) {
+                return;
+            }
+            // Pass 1: collect the subject and the raw arm patterns.
+            let mut subject_clone: Option<Expr> = None;
+            let mut raw: Vec<Pattern> = Vec::new();
+            let mut last_arm_end: Option<usize> = None;
+            {
+                let mut cur: &mut Expr = expr;
+                loop {
+                    let Expr::If {
+                        cond,
+                        then_value,
+                        else_value,
+                        ..
+                    } = cur
+                    else {
+                        break;
+                    };
+                    if let Expr::PatternTest {
+                        subject, pattern, ..
+                    } = cond.as_mut()
+                    {
+                        if subject_clone.is_none() {
+                            subject_clone = Some((**subject).clone());
+                        }
+                        raw.push(pattern.clone());
+                        last_arm_end = Some(then_value.span().end);
+                    }
+                    match else_value.as_mut() {
+                        Expr::If { .. } => cur = else_value,
+                        _ => break,
+                    }
+                }
+            }
+            let Some(mut subj) = subject_clone else { return };
+            let Some(st) = self.infer(&mut subj) else { return };
+            let subj_name = match &subj {
+                Expr::Ident(n, _) => Some(n.clone()),
+                _ => None,
+            };
+            // Probe without retaining recovery diagnostics — the ordinary
+            // per-level inference reports each arm's own errors once.
+            let diag_len = self.diags.len();
+            let mut resolved: Vec<Pattern> = Vec::new();
+            let mut all_pattern = !raw.is_empty();
+            for mut p in raw {
+                normalize_contextual_pattern(&mut p, &st);
+                let pspan = p.span();
+                let cond = Expr::PatternTest {
+                    subject: Box::new(subj.clone()),
+                    pattern: p,
+                    span: pspan,
+                };
+                match self.switch_arm_pattern(&cond, subj_name.as_deref(), &st) {
+                    Some(rp) => resolved.push(rp),
+                    None => all_pattern = false,
+                }
+            }
+            self.diags.truncate(diag_len);
+            if !all_pattern {
+                return;
+            }
+            let mut covered = HashSet::new();
+            for p in &resolved {
+                self.note_pattern_coverage(p, &st, &mut covered);
+            }
+            let insert_at = last_arm_end.map(|e| Span::new(e, e));
+            self.check_pattern_coverage_complete(
+                &st,
+                &covered,
+                false,
+                span,
+                insert_at,
+                subj_name.as_deref(),
+            );
+        }
+
         pub(crate) fn check_switch(
             &mut self,
             subject: &mut Expr,
@@ -370,52 +566,7 @@ impl<'a> Checker<'a> {
                             continue;
                         };
                         let pspan = pattern.span();
-                        // D-PATO: or-patterns cover multiple variants; insert all of them.
-                        let covered_names: Vec<String> = if let Pattern::Or(alts, _) = &pattern {
-                            alts.iter().filter_map(pattern_variant_name).collect()
-                        } else if let Some(v) = pattern_variant_name(&pattern) {
-                            vec![v]
-                        } else {
-                            Vec::new()
-                        };
-                        for variant in covered_names {
-                            // D-TAG1: an earlier group arm already covers every leaf in
-                            // its subtree, so `.Fire ->` makes a later `.Fire.Burn ->`
-                            // unreachable (ancestor-or-equal test on the dotted path).
-                            let already = covered.contains(&variant)
-                                || covered
-                                    .iter()
-                                    .any(|c| variant.starts_with(&format!("{c}.")));
-                            if already {
-                                let what = format!(
-                                    "arm `{}` is unreachable — that case is already handled",
-                                    variant
-                                );
-                                let why =
-                                    "every earlier arm already covers this pattern".to_string();
-                                let fix =
-                                    "remove this arm or merge it with the one above".to_string();
-                                if matches!(st, Type::Union(_)) {
-                                    self.diags.push(Diagnostic::error(
-                                        "E0365",
-                                        what,
-                                        why,
-                                        fix,
-                                        Some(pspan),
-                                    ));
-                                } else {
-                                    self.diags.push(Diagnostic::lint(
-                                        "L0301",
-                                        what,
-                                        why,
-                                        fix,
-                                        Some(pspan),
-                                    ));
-                                }
-                            } else {
-                                covered.insert(variant);
-                            }
-                        }
+                        self.note_pattern_coverage(&pattern, st, &mut covered);
                         let bindings = self.validate_pattern(st, &pattern, pspan);
                         self.mark_pattern_subject_moved(subject, &bindings);
                         self.push_scope();
@@ -468,58 +619,15 @@ impl<'a> Checker<'a> {
             }
             if all_pattern {
                 if let Some(st) = subj_ty {
-                    // D-PATR: Int/Char are open scalar types — range arms can never
-                    // prove totality, so an `else` (or wildcard) is always required.
-                    // `missing_pattern_coverage` returns None for Int/Char (infinite
-                    // domain), so we detect this case separately.
-                    let open_scalar_no_else =
-                        matches!(st, Type::Int | Type::Char) && else_body.is_none();
-                    if open_scalar_no_else {
-                        self.diags.push(Diagnostic::error(
-                            "E0307",
-                            format!(
-                                "this `{}` over `{}` has no `{}` arm — range arms can't cover every value",
-                                Syntax::KW_IF,
-                                st.show(),
-                                Syntax::KW_ELSE,
-                            ),
-                            format!(
-                                "`{}` has infinitely many values; range arms only cover a subset (D-PATR)",
-                                st.show()
-                            ),
-                            format!(
-                                "add `{} {} {{ … }}` to handle values not matched by any range",
-                                Syntax::KW_ELSE,
-                                Syntax::OP_ARM_ARROW
-                            ),
-                            Some(span),
-                        ));
-                    } else if let Some(missing) = missing_pattern_coverage(&st, &covered, self.registry)
-                    {
-                        if else_body.is_none() {
-                            let mut diag = Diagnostic::error(
-                                "E0307",
-                                format!(
-                                    "this `{}` doesn't cover every case — missing: {}",
-                                    Syntax::KW_IF,
-                                    missing.join(", ")
-                                ),
-                                "every arm here is a pattern test, so each variant must appear once"
-                                    .to_string(),
-                                format!("add an arm for: {}", missing.join(", ")),
-                                Some(span),
-                            );
-                            // Attach a structured insert so LSP/CLI can add compilable arms.
-                            if let Some(last_arm) = arms.last() {
-                                let new_text = missing_arms_text(&st, &missing, subj_name.as_deref());
-                                diag.edit = Some(TextEdit {
-                                    span: Span::new(last_arm.span.end, last_arm.span.end),
-                                    new_text,
-                                });
-                            }
-                            self.diags.push(diag);
-                        }
-                    }
+                    let insert_at = arms.last().map(|a| Span::new(a.span.end, a.span.end));
+                    self.check_pattern_coverage_complete(
+                        &st,
+                        &covered,
+                        else_body.is_some(),
+                        span,
+                        insert_at,
+                        subj_name.as_deref(),
+                    );
                 }
             } else if else_body.is_none() && !subjectless_guard {
                 // D-PARSESTR1: a str-match pattern arm is always refutable — the

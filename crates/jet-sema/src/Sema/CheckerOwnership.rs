@@ -1289,6 +1289,7 @@ impl<'a> Checker<'a> {
             | Expr::UnitLit { .. }
             | Expr::Absent(..)
             | Expr::Todo { .. }
+        | Expr::NoElse(_)
             | Expr::ReduceMarker(..)
             | Expr::ComptimeSplice { .. }
             | Expr::IncDec { .. } => {}

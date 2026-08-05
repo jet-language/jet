@@ -243,6 +243,7 @@ fn expr_tag(e: &Expr) -> &'static str {
         Expr::Present(..) => "Present",
         Expr::Absent(_) => "Absent",
         Expr::Todo { .. } => "Todo",
+        Expr::NoElse(_) => "NoElse",
         Expr::ReduceMarker(..) => "ReduceMarker",
         Expr::Ok(..) => "Ok",
         Expr::Err(..) => "Err",
@@ -2670,6 +2671,16 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         .clone()
                         .unwrap_or_else(|| "(unknown)".to_string()),
                 },
+            }
+        }
+        // Card #1440: the dead end of an else-less exhaustive dispatch. Sema
+        // proved coverage (E0307); like Todo, the result `ty` is never
+        // load-bearing — the node diverges on every tier.
+        Expr::NoElse(span) => {
+            let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
+            TExpr {
+                ty: Type::Named("Unit".to_string()),
+                kind: TExprKind::Unreachable { line },
             }
         }
         // c109 Phase 8: `Ok(x)` → `Ok(x)`. The result is a `Result` whose ok type is

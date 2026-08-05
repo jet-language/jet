@@ -751,6 +751,9 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
         // type (`expected_type.is_some()`); a `None` (sema didn't run/resolve) stays on
         // the AST path so the TIR never guesses the `(unknown)` fallback.
         Expr::Todo { expected_type, .. } => expected_type.is_some(),
+        // Card #1440: the dead end of a sema-proved exhaustive dispatch — a
+        // constant diverging leaf, trivially in-subset.
+        Expr::NoElse(_) => true,
         // c109 Phase 8: fallible constructors `Ok(x)` / `Err(e)`. Covered when the
         // inner value is in-subset — they lower to `Ok(x)` / `Err(e)`.
         Expr::Ok(inner, _) | Expr::Err(inner, _) => expr_in_subset(inner, cx, locals),

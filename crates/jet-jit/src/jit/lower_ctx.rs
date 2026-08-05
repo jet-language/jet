@@ -14011,6 +14011,28 @@ impl LowerCtx<'_, '_> {
                 let callee = self.lower_record_field(handle, &type_name, field, &fn_ty)?;
                 self.lower_fn_call(callee, &fn_ty, args)
             }
+            // Card #1440: sema proved this dispatch arm dead (E0307). Reuse the
+            // rich-panic trap so a compiler bug surfaces loudly, exactly like
+            // the Todo hole below — no input can reach it.
+            TExprKind::Unreachable { line } => {
+                let msg = format!("unreachable: exhaustive dispatch at ?:{line} (sema-proved, E0307)");
+                let msg_h = self.runtime.heap.alloc_string(msg);
+                let msg_v = self.b.ins().iconst(types::I64, msg_h);
+                let empty = self.runtime.heap.alloc_string(String::new());
+                let empty_v = self.b.ins().iconst(types::I64, empty);
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.rich_panic, self.b.func);
+                let line_v = self.b.ins().iconst(types::I64, *line as i64);
+                let one = self.b.ins().iconst(types::I64, 1);
+                let caret = self.b.ins().iconst(types::I64, 5);
+                self.b.ins().call(
+                    host,
+                    &[empty_v, line_v, empty_v, empty_v, one, caret, msg_v, empty_v],
+                );
+                self.emit_trap_check()?;
+                Ok(self.b.ins().iconst(types::I64, 0))
+            }
             TExprKind::Todo { line, expected_type } => {
                 let msg = format!("#Todo at ?:{line} — expected {expected_type}");
                 let msg_h = self.runtime.heap.alloc_string(msg);

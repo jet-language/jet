@@ -9,7 +9,7 @@ use crate::Syntax;
 use crate::Sema::Diagnostics::soft_public_use;
 use crate::AST::{
     AccessConvention, Call, CallArg, CallArgFlags, EnumLitArg, Expr, IndexKind, StrPart, Type,
-    TypedLitBody, UnOp,
+    TypedLitBody, UnOp, noelse_terminated,
 };
 use std::collections::HashSet;
 
@@ -168,6 +168,11 @@ impl<'a> Checker<'a> {
             return None;
         }
         self.check_scoped_loan_read(e);
+        // Card #1440: an else-less all-pattern dispatch chain proves coverage
+        // once (E0307) before ordinary per-level inference walks its arms.
+        if matches!(e, Expr::If { .. }) && noelse_terminated(e) {
+            self.check_noelse_dispatch_chain(e);
+        }
         let result = self.infer_checked(e);
         self.leave_source_nesting();
         result
@@ -1890,6 +1895,10 @@ impl<'a> Checker<'a> {
                 ));
                 None
             }
+            // Card #1440: the synthesized final arm of an else-less exhaustive
+            // dispatch. Diverging and typeless — the If unification's
+            // `(Some(then), None)` arm lets the pattern arms' type win.
+            Expr::NoElse(_) => None,
             Expr::Todo { expected_type, .. } => {
                 // D-TOOL2 (E2-M11): `todo` is a typed hole — valid in any
                 // position. Fill the expected-type field so codegen can print

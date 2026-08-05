@@ -84,6 +84,12 @@ impl<'a> Fmt<'a> {
         let table_op = Self::cmp_op_before_brace(rest)?;
         match cond.as_ref() {
             Expr::Binary(op, lhs, _, _) if *op == table_op => Some((lhs.as_ref(), table_op)),
+            // Card #1440: a pattern-headed value table (`if d == { .North -> … }`)
+            // desugars its first arm to a PatternTest; the table subject is the
+            // test's subject. Pattern heads are `==`-only (E0366).
+            Expr::PatternTest { subject, .. } if table_op == BinOp::Eq => {
+                Some((subject.as_ref(), table_op))
+            }
             _ => None,
         }
     }
@@ -143,6 +149,11 @@ impl<'a> Fmt<'a> {
                         f.fmt_expr(then_value, Prec::OrFallback);
                     } else {
                         f.fmt_value_block(then_body, then_value, false);
+                    }
+                    // Card #1440: an exhaustive all-pattern table has no `else`
+                    // arm — the chain ends in the synthesized NoElse marker.
+                    if else_body.is_empty() && matches!(else_value.as_ref(), Expr::NoElse(_)) {
+                        break;
                     }
                     f.newline();
                     if else_body.is_empty()
@@ -232,6 +243,15 @@ impl<'a> Fmt<'a> {
                 if *op == table_op && self.same_dispatch_subject(lhs, subject) =>
             {
                 self.fmt_expr(rhs, Prec::Cmp);
+            }
+            // Card #1440: a pattern arm head renders as its bare pattern — the
+            // subject and `==` live on the table head line.
+            Expr::PatternTest {
+                subject: s,
+                pattern,
+                ..
+            } if table_op == BinOp::Eq && self.same_dispatch_subject(s, subject) => {
+                self.fmt_pattern(pattern);
             }
             _ => self.fmt_expr(cond, Prec::OrFallback),
         }
@@ -1196,6 +1216,10 @@ impl<'a> Fmt<'a> {
             // Retired reduce selector retained only so `jet fmt` can teach its replacement.
             Expr::ReduceMarker(name, _) => self.write(&format!("#{}", name)),
             Expr::Todo { .. } => self.write(&format!("#{}", Syntax::KW_TODO)),
+            // Card #1440: the synthesized end of an else-less exhaustive
+            // dispatch — never user-spellable, never printed (fmt_guard_expr
+            // stops the table before reaching it).
+            Expr::NoElse(_) => {}
             Expr::PatternTest {
                 subject, pattern, ..
             } => {

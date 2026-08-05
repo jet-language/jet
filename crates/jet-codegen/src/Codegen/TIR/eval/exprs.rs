@@ -4889,6 +4889,12 @@ impl<'a> EvalCtx<'a> {
                 }
             }
             TExprKind::Todo { expected_type, .. } => Err(unsupported(&format!("expr Todo ({expected_type})"), self.span())),
+            // Card #1440: sema proved this arm dead (E0307) — reaching it in
+            // the interpreter is a compiler bug, reported as an internal error.
+            TExprKind::Unreachable { line } => Err(unsupported(
+                &format!("proven-unreachable exhaustive-dispatch arm (line {line})"),
+                self.span(),
+            )),
             TExprKind::DistinctRaw(inner) => self.eval_expr(inner, scope),
             TExprKind::OptField {
                 base,

@@ -3254,6 +3254,13 @@ pub enum TExprKind {
         line: usize,
         expected_type: String,
     },
+    /// Card #1440: the synthesized dead end of an else-less exhaustive value
+    /// dispatch (`Expr::NoElse`). Sema proved the pattern arms cover the
+    /// subject's whole type (E0307), so no execution reaches it on any tier —
+    /// AOT emits a diverging `unreachable!(…)`, JIT traps, TIR-eval errors.
+    Unreachable {
+        line: usize,
+    },
     /// c109 Phase 23: `.raw()` on a distinct type (`Expr::MethodCall { method: "raw" }`,
     /// D-DIST3). The AST `emit_method_call` special-cases this BEFORE any user dispatch:
     /// `({recv}).0` (the newtype's inner field). The receiver is lowered as-is; the

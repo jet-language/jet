@@ -369,7 +369,7 @@ impl<'a> InlineAlwaysScan<'a> {
             }
             Expr::Tainted(inner, _, _) | Expr::Present(inner, _) => self.scan_expr(inner),
             Expr::Absent(_) => {}
-            Expr::Todo { .. } => {}
+            Expr::Todo { .. } | Expr::NoElse(_) => {}
             Expr::ReduceMarker(_, _) => {}
             Expr::PatternTest { subject, .. } => self.scan_expr(subject),
             Expr::Ok(inner, _) | Expr::Err(inner, _) => self.scan_expr(inner),

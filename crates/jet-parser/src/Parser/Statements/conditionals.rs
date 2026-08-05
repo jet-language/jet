@@ -968,10 +968,19 @@ impl<'a> Parser<'a> {
                 }
                 TokKind::RBrace => {
                     let close = self.bump().span;
+                    // Card #1440: an all-pattern table may omit `else` — sema
+                    // proves the arms cover the subject's whole type (E0307).
+                    let all_pattern = !arms.is_empty()
+                        && arms
+                            .iter()
+                            .all(|(cond, _, _)| matches!(cond, Expr::PatternTest { .. }));
+                    if all_pattern {
+                        break (Vec::new(), Expr::NoElse(close), close.end);
+                    }
                     return Err(Diagnostic::error(
                         "E0003",
                         "a value dispatch needs a final `else` arm".to_string(),
-                        "open comparison tables cannot prove that one arm always matches"
+                        "only a table whose every arm is a pattern can prove one arm always matches; this one has a comparison or Bool arm"
                             .to_string(),
                         "add `else -> value` so every path produces a value".to_string(),
                         Some(close),

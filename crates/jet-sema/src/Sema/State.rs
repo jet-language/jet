@@ -647,6 +647,7 @@ impl<'a> StateCtx<'a> {
             | Expr::Absent(_)
             | Expr::ReduceMarker(_, _)
             | Expr::Todo { .. }
+        | Expr::NoElse(_)
             | Expr::Lambda(_)
             | Expr::UnitLit { .. }
             | Expr::ComptimeSplice { .. }

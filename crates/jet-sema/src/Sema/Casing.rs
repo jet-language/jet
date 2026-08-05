@@ -410,6 +410,6 @@ fn expr_names(expr: &Expr, out: &mut Vec<Diagnostic>) {
         Expr::PtrFromAddr { addr, .. } => expr_names(addr, out),
         Expr::Char(..) | Expr::Int(..) | Expr::Float(..) | Expr::Bool(..)
         | Expr::Ident(..) | Expr::UnitLit { .. } | Expr::Absent(_)
-        | Expr::Todo { .. } | Expr::ReduceMarker(..) | Expr::ComptimeSplice { .. } => {}
+        | Expr::Todo { .. } | Expr::NoElse(_) | Expr::ReduceMarker(..) | Expr::ComptimeSplice { .. } => {}
     }
 }

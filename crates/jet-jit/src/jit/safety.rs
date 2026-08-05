@@ -1436,6 +1436,7 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             TIR::TRequireKind::Panic { msg } => resident_safe_expr(msg, callees),
         },
         TExprKind::Todo { .. } => true,
+        TExprKind::Unreachable { .. } => true,
         TExprKind::Uninit => matches!(&expr.ty, Type::FixedList { .. })
             && jit_list_native_type(&expr.ty),
         TExprKind::LayoutCompare { lhs, rhs, .. } => {
