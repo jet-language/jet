@@ -12,8 +12,11 @@ Generated on: 2026-08-05
   core.lang policy registry and resolved Syntax constants.
 - Fixed call signatures come from fixed_sigs.rs.
 - Built-in type method returns come from Collections.rs.
-- --check rejects source drift, unmapped members, duplicate rows, hidden
-  exclusions, stale loss owners, and unratified deliberate declines.
+- The Python side comes from docs/reference/python-surface.json, read from
+  a real interpreter. A constructed member name is never evidence.
+- --check rejects source drift, an unverified Python member, an equal
+  verdict without a member, duplicate rows, hidden exclusions, stale gap
+  owners, and unratified deliberate declines.
 
 ## Inventory
 
@@ -24,19 +27,83 @@ Generated on: 2026-08-05
 | Fixed-signature-only rows | 1 |
 | Collection method-return functions | 42 |
 | Collection method rows | 334 |
-| Total rows | 1341 |
+| Jet-side rows | 1341 |
+| Total rows | 2321 |
 | Jet-loses rows | 37 |
 
 Jet-loses rows are currently owned by: #288. A loss stays
 visible until its owner closes; it is never converted into an omission.
 
+## Closure state
+
+Walking only Jet's own tables cannot surface a feature Jet is missing, so
+the ledger also walks the Python surface. Each unmatched comparison point
+is a visible row, not an omission.
+
+| Measure | Count |
+| --- | ---: |
+| Python comparison points | 1036 |
+| Matched by a Jet row | 56 |
+| Unadjudicated | 980 |
+
+Unadjudicated points are owned by #1426. Per-container counts:
+
+| Container | Unadjudicated |
+| --- | ---: |
+| os | 205 |
+| asyncio | 86 |
+| math | 57 |
+| bytes | 42 |
+| str | 41 |
+| socket | 40 |
+| logging | 34 |
+| ssl | 34 |
+| sqlite3 | 28 |
+| time | 27 |
+| random | 26 |
+| statistics | 22 |
+| unittest | 21 |
+| urllib.parse | 21 |
+| base64 | 20 |
+| tarfile | 20 |
+| io | 19 |
+| itertools | 19 |
+| re | 16 |
+| csv | 14 |
+| unicodedata | 14 |
+| binascii | 12 |
+| functools | 12 |
+| uuid | 12 |
+| bool | 11 |
+| heapq | 11 |
+| int | 11 |
+| set | 10 |
+| collections | 9 |
+| subprocess | 9 |
+| tempfile | 9 |
+| float | 8 |
+| struct | 8 |
+| zipfile | 8 |
+| pathlib | 7 |
+| secrets | 7 |
+| datetime | 6 |
+| dict | 6 |
+| json | 5 |
+| range | 5 |
+| http | 2 |
+| list | 2 |
+| tomllib | 2 |
+| tuple | 2 |
+
+Only the Python surface has been read. Operations for the other competitor
+languages are recorded as unverified and are owned by #1426.
+
 ## Python claim boundary
 
-The claim covers every row mapped to the built-in types and standard-library
-modules listed in the JSON pythonScope. Rows without a single Python
-member still carry the Python workflow comparator and an explicit reason.
-The ledger does not pretend that a Python package or a Jet-only domain is a
-stdlib member.
+The claim covers the built-in types and standard-library modules listed in
+the JSON pythonScope, at Python 3.14.6. 1013 module-level constants are
+excluded by the recorded scope rule and stay counted so the exclusion
+cannot hide a gap.
 
 Primary Python references:
 
@@ -60,9 +127,9 @@ Primary Python references:
 ## Consumer
 
 Card #1398 reads docs/reference/core-surface-ledger.json as its only
-workflow inventory. The ledger contains stable row IDs, Python member or
-explicit no-single-member reason, Jet spelling, workflow, verdict, all
-competitor operations, source provenance, and evidence links.
+workflow inventory. The ledger contains stable row IDs, a verified Python
+member or an explicit reason, Jet spelling, workflow, verdict, gap owner,
+source provenance, and evidence links.
 
 Run the focused guard from the repository root:
 

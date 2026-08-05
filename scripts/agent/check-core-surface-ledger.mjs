@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const LEDGER_PATH = join(ROOT, "docs/reference/core-surface-ledger.json");
 const README_PATH = join(ROOT, "docs/reference/core-surface-ledger.md");
+const PYTHON_SURFACE_PATH = join(ROOT, "docs/reference/python-surface.json");
 const MODULE_ITEMS_PATH = "crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs";
 const FIXED_SIGS_PATH = "crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs";
 const COLLECTIONS_PATH = "crates/jet-foundation/src/Collections.rs";
@@ -373,6 +374,37 @@ const COLLECTION_CONTAINER = {
   },
 };
 
+// Every Python claim resolves against this snapshot, which is introspected from
+// a real interpreter by scripts/agent/python-surface-snapshot.py. A constructed
+// member name is not evidence that Python has that member.
+const PYTHON_SURFACE = JSON.parse(readFileSync(PYTHON_SURFACE_PATH, "utf8"));
+
+// Python comparison points that no Jet row covers are real gaps, not omissions.
+const UNADJUDICATED_OWNER = 1426;
+
+function pythonBuiltinHas(type, member) {
+  return Boolean(PYTHON_SURFACE.builtinTypes[type]?.members.includes(member));
+}
+
+function pythonModuleHas(module, member) {
+  return Boolean(PYTHON_SURFACE.stdlibModules[module]?.operations.includes(member));
+}
+
+// "str.upper", "itertools.chain", "collections.deque.append", "urllib.parse.quote"
+function pythonHas(dotted) {
+  const parts = dotted.split(".");
+  for (let take = parts.length - 1; take >= 1; take -= 1) {
+    const head = parts.slice(0, take).join(".");
+    const rest = parts.slice(take);
+    if (rest.length !== 1) continue;
+    if (PYTHON_SURFACE.builtinTypes[head]) return pythonBuiltinHas(head, rest[0]);
+    if (PYTHON_SURFACE.stdlibModules[head]) return pythonModuleHas(head, rest[0]);
+  }
+  // Nested type members such as collections.deque.append are outside the
+  // snapshot's recorded comparison points; refuse the claim rather than guess.
+  return false;
+}
+
 function read(relativePath) {
   const absolute = join(ROOT, relativePath);
   if (!existsSync(absolute)) throw new Error("missing source: " + relativePath);
@@ -668,25 +700,32 @@ function pythonDocsForModule(module) {
   return doc ? [doc] : ["python.library"];
 }
 
+// A curated mapping is a claim; it counts only when the snapshot confirms the
+// member exists. Same-name guesses across a type boundary are still guesses,
+// so they are checked exactly like curated entries.
 function pythonMemberForCollection(type, method) {
   const special = COLLECTION_PYTHON_SPECIAL[type + "." + method];
-  if (special) return special;
+  if (special) return pythonHas(special) ? special : null;
   const doc = COLLECTION_PYTHON[type];
   if (!doc) return null;
-  const name = doc.slice("python.".length);
-  if (type === "Iter") return "itertools." + method;
-  if (type === "Deque") return "collections.deque." + method;
-  if (type === "PriorityQueue") return "heapq." + method;
-  if (type === "ByteBuffer") return "io.BytesIO." + method;
-  if (type === "String") return "str." + method;
-  if (type === "Map") return "dict." + method;
-  if (type === "Set") return "set." + method;
-  if (type === "List") return "list." + method;
-  return name + "." + method;
+  const container = {
+    Iter: "itertools",
+    Deque: "collections.deque",
+    PriorityQueue: "heapq",
+    ByteBuffer: "io.BytesIO",
+    String: "str",
+    Map: "dict",
+    Set: "set",
+    List: "list",
+  }[type] || doc.slice("python.".length);
+  const candidate = container + "." + method;
+  return pythonHas(candidate) ? candidate : null;
 }
 
 function pythonMemberForModule(module, member) {
-  return PYTHON_DIRECT[module + "." + member] || null;
+  const mapped = PYTHON_DIRECT[module + "." + member];
+  if (!mapped) return null;
+  return pythonHas(mapped) ? mapped : null;
 }
 
 function pythonReason(module, pythonMember) {
@@ -697,16 +736,17 @@ function pythonReason(module, pythonMember) {
   return "Jet owns this typed Core domain; Python's standard library has no matching module-level operation";
 }
 
-function collectionOperation(language, type, method) {
-  const container = COLLECTION_CONTAINER[type]?.[language];
-  if (!container) return "no standard-library operation recorded";
-  return container + "." + method;
-}
-
-function moduleOperation(language, module, member, pythonMember) {
-  if (language === "Python" && pythonMember) return pythonMember;
-  if (language === "Python") return "no single Python stdlib member; see " + module;
-  return module + "." + member + " workflow; compare the cited language reference";
+// Per-row operations for the non-Python competitors are not recorded. Naming a
+// container and appending the Jet member name invents an operation; #1426 owns
+// reading those surfaces from each language's own reference. The document-level
+// competitorSources list stays so the references are still discoverable.
+function competitorComparison(type) {
+  return {
+    status: "unverified",
+    reason: "no non-Python competitor surface has been read for this row",
+    owner: UNADJUDICATED_OWNER,
+    candidateContainer: type ? COLLECTION_CONTAINER[type] || null : null,
+  };
 }
 
 function rowForModule(entry, member, fixedOnly) {
@@ -727,23 +767,17 @@ function rowForModule(entry, member, fixedOnly) {
     workflow: pythonMember
       ? "matched Python workflow: " + pythonMember
       : "typed Jet Core workflow for " + entry.module,
-    verdict: loses ? "jet_loses" : (pythonMember ? "equal" : "jet_wins"),
+    verdict: loses ? "jet_loses" : (pythonMember ? "equal" : "jet_only"),
     ownerCard: loses ? 288 : null,
     evidence: [
       "source:" + MODULE_ITEMS_PATH,
       "source:" + FIXED_SIGS_PATH,
-      "official:python.library",
+      "python-surface:" + PYTHON_SURFACE.pythonVersion,
     ].concat(docs).filter(function (value, index, values) {
       return values.indexOf(value) === index;
     }),
-    competitors: {},
+    competitors: competitorComparison(null),
   };
-  for (const language of Object.keys(COMPETITOR_SOURCES)) {
-    row.competitors[language] = {
-      operation: moduleOperation(language, entry.module, member, pythonMember),
-      evidence: "official:" + language,
-    };
-  }
   return row;
 }
 
@@ -766,23 +800,65 @@ function rowForCollection(entry, method) {
     workflow: pythonMember
       ? "matched collection workflow: " + pythonMember
       : "typed Jet collection workflow for " + type,
-    verdict: pythonMember ? "equal" : "jet_wins",
+    verdict: pythonMember ? "equal" : "jet_only",
     ownerCard: null,
     evidence: [
       "source:" + COLLECTIONS_PATH,
-      "official:python.library",
+      "python-surface:" + PYTHON_SURFACE.pythonVersion,
     ].concat(docs),
-    competitors: {},
+    competitors: competitorComparison(type),
   };
-  for (const language of Object.keys(COMPETITOR_SOURCES)) {
-    row.competitors[language] = {
-      operation: language === "Python"
-        ? (pythonMember || "no single Python stdlib member; see collection reference")
-        : collectionOperation(language, type, method),
-      evidence: "official:" + language,
-    };
-  }
   return row;
+}
+
+// Walking only Jet's own tables can never surface a feature Jet is missing, so
+// the ledger also walks the competitor surface. Every Python comparison point
+// that no Jet row matched becomes a visible row with an owner.
+function reverseRows(jetRows) {
+  const matched = new Set();
+  for (const row of jetRows) {
+    if (row.pythonMember) matched.add(row.pythonMember);
+  }
+  const rows = [];
+  for (const [type, entry] of Object.entries(PYTHON_SURFACE.builtinTypes)) {
+    for (const member of entry.members) {
+      const dotted = type + "." + member;
+      if (matched.has(dotted)) continue;
+      rows.push(reverseRow("builtin_type", type, member, dotted));
+    }
+  }
+  for (const [module, entry] of Object.entries(PYTHON_SURFACE.stdlibModules)) {
+    for (const member of entry.operations) {
+      const dotted = module + "." + member;
+      if (matched.has(dotted)) continue;
+      rows.push(reverseRow("stdlib_module", module, member, dotted));
+    }
+  }
+  return rows;
+}
+
+function reverseRow(kind, container, member, dotted) {
+  return {
+    id: "python." + dotted,
+    source: {
+      kind: kind,
+      module: kind === "stdlib_module" ? container : undefined,
+      type: kind === "builtin_type" ? container : undefined,
+      member: member,
+      sourceLine: null,
+    },
+    pythonMember: dotted,
+    pythonReason: "present in the recorded Python surface; no Jet row claims it",
+    jetSpelling: null,
+    workflow: "Python comparison point awaiting a Jet spelling, a gap owner, or a ratified decline",
+    verdict: "unadjudicated",
+    ownerCard: UNADJUDICATED_OWNER,
+    evidence: [
+      "python-surface:" + PYTHON_SURFACE.pythonVersion,
+      "official:python.library",
+    ],
+    competitors: competitorComparison(null),
+  };
 }
 
 function buildRows(modules, fixedPairs, collections) {
@@ -834,37 +910,33 @@ function buildLedger(previous) {
   const modules = moduleInventory();
   const fixedPairs = fixedSignaturePairs(modules);
   const collections = collectionInventory();
-  const rows = buildRows(modules, fixedPairs, collections);
+  const jetRows = buildRows(modules, fixedPairs, collections);
+  const rows = jetRows.concat(reverseRows(jetRows));
   const losses = rows.filter(function (row) { return row.verdict === "jet_loses"; });
-  const builtinRows = {
-    bool: ["module.core.random.bool"],
-    bytes: ["module.core.crypto.random.bytes", "collection.ByteBuffer.to_bytes"],
-    dict: ["collection.Map.len"],
-    float: ["module.core.random.float", "module.core.math.sqrt"],
-    int: ["module.core.random.int", "module.core.math.abs"],
-    list: ["collection.List.len"],
-    range: ["collection.List.indexes"],
-    set: ["collection.Set.len"],
-    str: ["collection.String.len"],
-    tuple: ["collection.List.indexed"],
-  };
-  const rowIds = new Set(rows.map(function (row) { return row.id; }));
+  const unadjudicated = rows.filter(function (row) { return row.verdict === "unadjudicated"; });
+  // Coverage is derived from rows that carry a verified Python member. A
+  // hand-listed row set could claim a type was covered when it was not.
   const pythonCoverage = {
     builtinTypes: PYTHON_SCOPE_TYPES.map(function (name) {
+      const covered = jetRows.filter(function (row) {
+        return row.pythonMember && row.pythonMember.split(".")[0] === name;
+      });
       return {
         name: name,
-        rows: (builtinRows[name] || []).filter(function (id) {
-          return rowIds.has(id);
-        }),
+        rows: covered.map(function (row) { return row.id; }),
+        surfaceMembers: PYTHON_SURFACE.builtinTypes[name]?.memberCount ?? 0,
+        matchedMembers: new Set(covered.map(function (row) { return row.pythonMember; })).size,
       };
     }),
     stdlibModules: PYTHON_SCOPE_MODULES.map(function (name) {
-      const id = "python." + name;
+      const covered = jetRows.filter(function (row) {
+        return row.pythonMember && row.pythonMember.startsWith(name + ".");
+      });
       return {
         name: name,
-        rows: rows.filter(function (row) {
-          return row.evidence.includes(id);
-        }).map(function (row) { return row.id; }),
+        rows: covered.map(function (row) { return row.id; }),
+        surfaceOperations: PYTHON_SURFACE.stdlibModules[name]?.operationCount ?? 0,
+        matchedOperations: new Set(covered.map(function (row) { return row.pythonMember; })).size,
       };
     }),
   };
@@ -875,13 +947,21 @@ function buildLedger(previous) {
     generatedOn: previous?.generatedOn || new Date().toISOString().slice(0, 10),
     sourceFiles: sourceFiles(),
     pythonScope: {
-      rule: "The ledger claims competition only for these Python built-in types and standard-library modules. Every claimed scope row is present even when Python has no single matching member.",
+      rule: "The ledger claims competition only for these Python built-in types and standard-library modules. Every Python claim resolves against the recorded surface; a constructed member name is never evidence.",
       builtinTypes: PYTHON_SCOPE_TYPES,
       stdlibModules: PYTHON_SCOPE_MODULES,
+      surface: "docs/reference/python-surface.json",
+      pythonVersion: PYTHON_SURFACE.pythonVersion,
+      scopeRule: PYTHON_SURFACE.scopeRule,
+      excludedConstantCount: PYTHON_SURFACE.totals.excludedConstants,
       officialIndex: "https://docs.python.org/3/library/index.html",
       builtinIndex: "https://docs.python.org/3/library/functions.html",
     },
     competitorSources: COMPETITOR_SOURCES,
+    competitorStatus: {
+      Python: "verified against docs/reference/python-surface.json",
+      other: "unverified — no surface has been read for the remaining languages; owned by #" + UNADJUDICATED_OWNER,
+    },
     consumer: {
       card: 1398,
       input: "docs/reference/core-surface-ledger.json",
@@ -908,8 +988,19 @@ function buildLedger(previous) {
         return count + entry.methods.length;
       }, 0),
       rowCount: rows.length,
+      jetRowCount: jetRows.length,
       lossCount: losses.length,
       lossOwners: Array.from(new Set(losses.map(function (row) { return row.ownerCard; }))).sort(),
+      pythonComparisonPoints: PYTHON_SURFACE.totals.comparisonPoints,
+      pythonMatchedCount: new Set(jetRows.filter(function (row) {
+        return row.pythonMember;
+      }).map(function (row) { return row.pythonMember; })).size,
+      unadjudicatedCount: unadjudicated.length,
+      unadjudicatedByContainer: unadjudicated.reduce(function (counts, row) {
+        const key = row.source.module || row.source.type;
+        counts[key] = (counts[key] || 0) + 1;
+        return counts;
+      }, {}),
     },
   };
 }
@@ -936,8 +1027,11 @@ function markdown(ledger) {
     "  core.lang policy registry and resolved Syntax constants.",
     "- Fixed call signatures come from fixed_sigs.rs.",
     "- Built-in type method returns come from Collections.rs.",
-    "- --check rejects source drift, unmapped members, duplicate rows, hidden",
-    "  exclusions, stale loss owners, and unratified deliberate declines.",
+    "- The Python side comes from docs/reference/python-surface.json, read from",
+    "  a real interpreter. A constructed member name is never evidence.",
+    "- --check rejects source drift, an unverified Python member, an equal",
+    "  verdict without a member, duplicate rows, hidden exclusions, stale gap",
+    "  owners, and unratified deliberate declines.",
     "",
     "## Inventory",
     "",
@@ -948,19 +1042,44 @@ function markdown(ledger) {
     "| Fixed-signature-only rows | " + ledger.summary.fixedSignatureOnlyCount + " |",
     "| Collection method-return functions | " + ledger.summary.collectionFunctionCount + " |",
     "| Collection method rows | " + ledger.summary.collectionMethodCount + " |",
+    "| Jet-side rows | " + ledger.summary.jetRowCount + " |",
     "| Total rows | " + ledger.summary.rowCount + " |",
     "| Jet-loses rows | " + ledger.summary.lossCount + " |",
     "",
     "Jet-loses rows are currently owned by: " + lossOwners + ". A loss stays",
     "visible until its owner closes; it is never converted into an omission.",
     "",
+    "## Closure state",
+    "",
+    "Walking only Jet's own tables cannot surface a feature Jet is missing, so",
+    "the ledger also walks the Python surface. Each unmatched comparison point",
+    "is a visible row, not an omission.",
+    "",
+    "| Measure | Count |",
+    "| --- | ---: |",
+    "| Python comparison points | " + ledger.summary.pythonComparisonPoints + " |",
+    "| Matched by a Jet row | " + ledger.summary.pythonMatchedCount + " |",
+    "| Unadjudicated | " + ledger.summary.unadjudicatedCount + " |",
+    "",
+    "Unadjudicated points are owned by #" + UNADJUDICATED_OWNER + ". Per-container counts:",
+    "",
+    "| Container | Unadjudicated |",
+    "| --- | ---: |",
+  ].concat(Object.entries(ledger.summary.unadjudicatedByContainer)
+    .sort(function (a, b) { return b[1] - a[1] || a[0].localeCompare(b[0]); })
+    .map(function (pair) { return "| " + pair[0] + " | " + pair[1] + " |"; }))
+    .concat([
+    "",
+    "Only the Python surface has been read. Operations for the other competitor",
+    "languages are recorded as unverified and are owned by #" + UNADJUDICATED_OWNER + ".",
+    "",
     "## Python claim boundary",
     "",
-    "The claim covers every row mapped to the built-in types and standard-library",
-    "modules listed in the JSON pythonScope. Rows without a single Python",
-    "member still carry the Python workflow comparator and an explicit reason.",
-    "The ledger does not pretend that a Python package or a Jet-only domain is a",
-    "stdlib member.",
+    "The claim covers the built-in types and standard-library modules listed in",
+    "the JSON pythonScope, at Python " + ledger.pythonScope.pythonVersion + ". " +
+      ledger.pythonScope.excludedConstantCount + " module-level constants are",
+    "excluded by the recorded scope rule and stay counted so the exclusion",
+    "cannot hide a gap.",
     "",
     "Primary Python references:",
     "",
@@ -969,7 +1088,7 @@ function markdown(ledger) {
     "",
     "## Competitor references",
     "",
-  ];
+  ]);
   for (const [language, urls] of Object.entries(ledger.competitorSources)) {
     lines.push("- " + language + ": " + urls.join(", "));
   }
@@ -978,9 +1097,9 @@ function markdown(ledger) {
     "## Consumer",
     "",
     "Card #1398 reads docs/reference/core-surface-ledger.json as its only",
-    "workflow inventory. The ledger contains stable row IDs, Python member or",
-    "explicit no-single-member reason, Jet spelling, workflow, verdict, all",
-    "competitor operations, source provenance, and evidence links.",
+    "workflow inventory. The ledger contains stable row IDs, a verified Python",
+    "member or an explicit reason, Jet spelling, workflow, verdict, gap owner,",
+    "source provenance, and evidence links.",
     "",
     "Run the focused guard from the repository root:",
     "",
@@ -1012,6 +1131,20 @@ function loadCards(towerPath) {
   return Array.from(cards.values());
 }
 
+// Owner liveness depends on live board state, so it belongs to the closure
+// gate. Claim truth depends only on the ledger and the recorded surface, which
+// is what every commit must keep green.
+function validateOwners(ledger, cards) {
+  for (const row of ledger.rows) {
+    if (row.verdict !== "jet_loses" && row.verdict !== "unadjudicated") continue;
+    if (!row.ownerCard) throw new Error("gap without live owner: " + row.id);
+    const owner = cards.find(function (card) { return card.num === row.ownerCard; });
+    if (!owner || owner.phase === "done" || owner.retiredAt) {
+      throw new Error("stale gap owner #" + row.ownerCard + " for " + row.id);
+    }
+  }
+}
+
 function validateRows(ledger, cards) {
   const ids = new Set();
   const sourceKeys = new Set();
@@ -1021,38 +1154,60 @@ function validateRows(ledger, cards) {
     const sourceKey = row.source.kind + ":" + (row.source.module || row.source.type) + ":" + row.source.member;
     if (sourceKeys.has(sourceKey)) throw new Error("duplicate source row: " + sourceKey);
     sourceKeys.add(sourceKey);
-    if (!row.pythonReason || !row.jetSpelling || !row.workflow || !row.verdict) {
+    if (!row.pythonReason || !row.workflow || !row.verdict) {
       throw new Error("incomplete row: " + row.id);
     }
-    if (!["jet_wins", "equal", "jet_loses", "deliberately_declined"].includes(row.verdict)) {
+    if (row.verdict !== "unadjudicated" && !row.jetSpelling) {
+      throw new Error("incomplete row: " + row.id);
+    }
+    if (!["jet_only", "equal", "jet_loses", "unadjudicated", "deliberately_declined"].includes(row.verdict)) {
       throw new Error("invalid verdict in " + row.id + ": " + row.verdict);
     }
-    if (row.verdict === "jet_loses") {
-      if (!row.ownerCard) throw new Error("loss without live owner: " + row.id);
-      const owner = cards.find(function (card) { return card.num === row.ownerCard; });
-      if (!owner || owner.phase === "done" || owner.retiredAt) {
-        throw new Error("stale loss owner #" + row.ownerCard + " for " + row.id);
-      }
+    // A row may not assert a Python member the recorded surface does not have.
+    if (row.pythonMember && !pythonHas(row.pythonMember)) {
+      throw new Error("unverified Python member in " + row.id + ": " + row.pythonMember);
+    }
+    if (row.verdict === "equal" && !row.pythonMember) {
+      throw new Error("equal verdict without a verified Python member: " + row.id);
+    }
+    if ((row.verdict === "jet_loses" || row.verdict === "unadjudicated") && !row.ownerCard) {
+      throw new Error("gap without an owner: " + row.id);
     }
     if (row.verdict === "deliberately_declined") {
       if (!row.decisionId) throw new Error("decline without decision: " + row.id);
       throw new Error("deliberate declines require a ratified decision check: " + row.id);
     }
-    for (const language of Object.keys(COMPETITOR_SOURCES)) {
-      if (!row.competitors[language]?.operation) {
-        throw new Error("missing competitor operation for " + language + " in " + row.id);
-      }
+    if (row.competitors?.status !== "unverified" && !row.competitors?.verifiedFrom) {
+      throw new Error("competitor claim without a cited surface in " + row.id);
     }
   }
 }
 
 function validateCoverage(ledger) {
+  if (ledger.pythonScope.pythonVersion !== PYTHON_SURFACE.pythonVersion) {
+    throw new Error("ledger was built against Python " + ledger.pythonScope.pythonVersion +
+      " but the recorded surface is " + PYTHON_SURFACE.pythonVersion);
+  }
   for (const item of ledger.pythonCoverage.builtinTypes) {
-    if (item.rows.length === 0) throw new Error("Python builtin type has no rows: " + item.name);
+    if (item.surfaceMembers === 0) throw new Error("Python builtin type missing from the surface: " + item.name);
   }
   for (const item of ledger.pythonCoverage.stdlibModules) {
-    if (item.rows.length === 0) throw new Error("Python stdlib module has no rows: " + item.name);
+    if (item.surfaceOperations === 0) throw new Error("Python stdlib module missing from the surface: " + item.name);
   }
+}
+
+// The ledger exists to make missing functionality visible. It is closed only
+// when every recorded comparison point has a Jet spelling, a gap owner, or a
+// ratified decline, and when the non-Python surfaces have actually been read.
+function validateClosure(ledger) {
+  const open = [];
+  if (ledger.summary.unadjudicatedCount > 0) {
+    open.push(ledger.summary.unadjudicatedCount + " Python comparison points are unadjudicated");
+  }
+  if (ledger.competitorStatus.other.startsWith("unverified")) {
+    open.push("no non-Python competitor surface has been read");
+  }
+  return open;
 }
 
 function compareLedger(stored, expected) {
@@ -1081,23 +1236,43 @@ function refresh() {
   process.stdout.write("rows=" + ledger.summary.rowCount + " losses=" + ledger.summary.lossCount + "\n");
 }
 
-function check(args) {
+// Truthfulness and closure are different questions. Every claim in the ledger
+// must be true on every commit, so --check-claims is the regression gate. The
+// ledger being *complete* is a card outcome, so --check adds the closure gate
+// and stays red until #1426 finishes the adjudication.
+function check(args, withClosure) {
   const stored = loadJson(LEDGER_PATH);
   const expected = buildLedger(stored);
   compareLedger(stored, expected);
   validateCoverage(stored);
-  validateRows(stored, loadCards(towerPath(args)));
-  process.stdout.write("core surface ledger: source-derived, mapped, unique, and owner-current\n");
+  validateRows(stored);
+  if (withClosure) validateOwners(stored, loadCards(towerPath(args)));
+  process.stdout.write("core surface ledger: source-derived, verified against Python " +
+    stored.pythonScope.pythonVersion + ", unique, and owner-current\n");
   process.stdout.write("modules=" + stored.summary.moduleCount +
     " rows=" + stored.summary.rowCount +
-    " losses=" + stored.summary.lossCount + "\n");
+    " matched=" + stored.summary.pythonMatchedCount + "/" + stored.summary.pythonComparisonPoints +
+    " losses=" + stored.summary.lossCount +
+    " unadjudicated=" + stored.summary.unadjudicatedCount + "\n");
+  const open = validateClosure(stored);
+  if (!withClosure) {
+    if (open.length) {
+      process.stdout.write("open for #" + UNADJUDICATED_OWNER + ": " + open.join("; ") + "\n");
+    }
+    return;
+  }
+  if (open.length) {
+    throw new Error("core surface ledger is not closed: " + open.join("; ") +
+      " (owner #" + UNADJUDICATED_OWNER + ")");
+  }
 }
 
 const args = process.argv.slice(2);
 try {
   if (args.includes("--refresh")) refresh();
-  else if (args.includes("--check")) check(args);
-  else throw new Error("usage: check-core-surface-ledger.mjs --refresh|--check [--tower PATH]");
+  else if (args.includes("--check-claims")) check(args, false);
+  else if (args.includes("--check")) check(args, true);
+  else throw new Error("usage: check-core-surface-ledger.mjs --refresh|--check|--check-claims [--tower PATH]");
 } catch (error) {
   process.stderr.write(error.message + "\n");
   process.exitCode = 1;

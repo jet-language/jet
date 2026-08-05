@@ -878,6 +878,30 @@ fn epoch3_capability_manifest_is_current_and_owned() {
     );
 }
 
+/// The Core surface ledger feeds the #1398 release gate, so every comparison
+/// claim in it must be true. An earlier generator built competitor operations
+/// by string concatenation and scored a row a win whenever no Python member
+/// was mapped; 144 of 247 claimed Python members did not exist. This pins the
+/// claims against the recorded interpreter surface. Completeness is a separate
+/// question owned by #1426, so this runs `--check-claims`, not `--check`.
+#[test]
+fn core_surface_ledger_claims_are_verified() {
+    let root = root();
+    let output = Command::new("node")
+        .arg("scripts/agent/check-core-surface-ledger.mjs")
+        .arg("--check-claims")
+        .current_dir(&root)
+        .output()
+        .expect("node must run the core-surface-ledger checker");
+
+    assert!(
+        output.status.success(),
+        "core surface ledger rejected:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 #[test]
 fn epoch3_capability_manifest_rejects_hostile_real_card_fixtures() {
     let root = root();
