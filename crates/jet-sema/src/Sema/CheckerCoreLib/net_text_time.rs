@@ -480,7 +480,7 @@ pub fn require_exact_labels(
                 "E0764",
                 format!("`{api}` has no parameter labelled `{actual}`"),
                 "a label binds an argument to the parameter of that name".to_string(),
-                format!("`{api}` accepts `{expected}` here"),
+                format!("write `{expected}:` here"),
                 Some(*label_span),
             )),
             None => diags.push(Diagnostic::error(

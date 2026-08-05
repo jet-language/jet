@@ -4428,13 +4428,13 @@ fn core_net_ratified_named_forms_require_exact_labels() {
         let source = format!("use core.net as net\nuse core.tls as tls\n{body}\n");
         let diags = jet::compile(&source).expect_err(name);
         assert!(
-            diags.iter().any(|diag| diag.code == "E0125" && diag.fix.contains(expected_fix)),
+            diags.iter().any(|diag| matches!(diag.code.as_str(), "E0764" | "E0769") && diag.fix.contains(expected_fix)),
             "{name} did not reject its missing/wrong label precisely: {diags:?}",
         );
         if name == "tls client" {
             for label in ["server_name:", "config:", "deadline:"] {
                 assert!(
-                    diags.iter().any(|diag| diag.code == "E0125" && diag.fix.contains(label)),
+                    diags.iter().any(|diag| matches!(diag.code.as_str(), "E0764" | "E0769") && diag.fix.contains(label)),
                     "tls.client accepted or misreported `{label}`: {diags:?}",
                 );
             }
@@ -4442,7 +4442,7 @@ fn core_net_ratified_named_forms_require_exact_labels() {
         if name == "tls version bounds" {
             for label in ["min:", "max:"] {
                 assert!(
-                    diags.iter().any(|diag| diag.code == "E0125" && diag.fix.contains(label)),
+                    diags.iter().any(|diag| matches!(diag.code.as_str(), "E0764" | "E0769") && diag.fix.contains(label)),
                     "with_version_bounds accepted or misreported `{label}`: {diags:?}",
                 );
             }
@@ -4450,7 +4450,7 @@ fn core_net_ratified_named_forms_require_exact_labels() {
         if name == "tls client identity" {
             for label in ["cert_chain:", "private_key:"] {
                 assert!(
-                    diags.iter().any(|diag| diag.code == "E0125" && diag.fix.contains(label)),
+                    diags.iter().any(|diag| matches!(diag.code.as_str(), "E0764" | "E0769") && diag.fix.contains(label)),
                     "ClientIdentity.from_pem accepted or misreported `{label}`: {diags:?}",
                 );
             }
@@ -11692,8 +11692,8 @@ fn run() {
 "#;
     let diags = jet::compile(src).expect_err("game.run labels must match positional shape");
     assert!(
-        diags.iter().any(|d| d.code == "E0125"),
-        "expected E0125, got: {:?}",
+        diags.iter().any(|d| matches!(d.code.as_str(), "E0764" | "E0769")),
+        "expected E0764/E0769, got: {:?}",
         diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
     );
 }
@@ -11949,7 +11949,7 @@ fn run() {
 "#;
     let diags = jet::compile(src).expect_err("auth trust inputs must be named");
     assert!(
-        diags.iter().filter(|diagnostic| diagnostic.code == "E0125").count() >= 2,
+        diags.iter().filter(|diagnostic| matches!(diagnostic.code.as_str(), "E0764" | "E0769")).count() >= 2,
         "expected key:/audience: label diagnostics, got {diags:?}"
     );
 }

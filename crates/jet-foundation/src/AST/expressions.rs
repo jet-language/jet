@@ -520,6 +520,12 @@ pub enum Expr {
         /// The expected type, as a display string — filled by sema.
         expected_type: Option<String>,
     },
+    /// Card #1440: the synthesized final arm of an else-less all-pattern value
+    /// dispatch (`if subject == { .A -> x  .B -> y }`). Never user-spellable —
+    /// only `parse_dispatch_expr` builds it. Sema proves the pattern arms cover
+    /// the subject's whole type (E0307 otherwise); codegen emits a diverging
+    /// unreachable, exactly like the statement form's dead match arm.
+    NoElse(Span),
     /// Internal teaching node for a retired `#Add`/`#Mul`/`#Min`/`#Max`
     /// reduce selector. Canonical calls retain a typed `ReduceOp` enum literal.
     ReduceMarker(String, Span),
@@ -637,6 +643,7 @@ impl Expr {
             | Expr::Present(_, s)
             | Expr::Absent(s)
             | Expr::Todo { span: s, .. }
+            | Expr::NoElse(s)
             | Expr::ReduceMarker(_, s)
             | Expr::Ok(_, s)
             | Expr::Err(_, s)
