@@ -266,6 +266,74 @@ fn service_authority_recovers_pending_delivery_across_process_restart() {
     );
 }
 
+const WORKFLOW_RESTART_SOURCE: &str = r#"
+use core.env as env
+use core.services as services
+
+fn run() {
+    store_path :: env.get("JET_SERVICE_AUTH_STORE") ?? panic("store")
+    phase :: env.get("JET_SERVICE_AUTH_PHASE") ?? panic("phase")
+    tree := services.tree("workflows")
+    store :: services.state_store(store_path) ?? panic("state store")
+    services.set_state_event_log(&tree, store, "wf-events", 1) ?? panic("state")
+    services.worker(&tree, "worker", 1) ?? panic("worker")
+    services.start(&tree) ?? panic("start")
+    if phase == "write" {
+        run_id :: services.workflow_start(&tree, "checkout", 1) ?? panic("workflow start")
+        services.workflow_step(&tree, run_id, "charge") ?? panic("charge step")
+        services.workflow_step(&tree, run_id, "ship:express") ?? panic("ship step")
+        print("run:{run_id}")
+    } else {
+        history :: services.workflow_history(tree, 1) ?? panic("history")
+        print("history:{history}")
+        replay :: services.workflow_start(&tree, "checkout", 1) ?? panic("replay")
+        print("replay:{replay}")
+        versioned :: services.workflow_start(&tree, "checkout", 2)
+        if versioned == {
+            .Ok(_) -> { print("version:accepted") }
+            .Err(_) -> { print("version:rejected") }
+        }
+    }
+}
+"#;
+
+const WORKFLOW_RESTART_HISTORY: &str =
+    "history:start@v1|step:charge|step:ship:express\nreplay:1\nversion:rejected\n";
+
+/// A versioned workflow history is only durable if a later process reads back
+/// the same runs, steps, and version conflicts the writer recorded.
+#[test]
+fn workflow_history_survives_process_restart() {
+    if !have_rustc() {
+        return;
+    }
+    let (dir, bin) = compile_restart_binary(WORKFLOW_RESTART_SOURCE);
+
+    let store = dir.join("workflow.log");
+    assert_eq!(run_restart_process(&bin, &store, "write", None), "run:1\n");
+    assert_eq!(
+        run_restart_process(&bin, &store, "read", None),
+        WORKFLOW_RESTART_HISTORY
+    );
+
+    let default_store = dir.join("workflow-default.log");
+    assert_eq!(
+        run_restart_default_process(&dir, &default_store, "write", None),
+        "run:1\n"
+    );
+    assert_eq!(
+        run_restart_default_process(&dir, &default_store, "read", None),
+        WORKFLOW_RESTART_HISTORY
+    );
+
+    let crossed = dir.join("workflow-aot-to-default.log");
+    assert_eq!(run_restart_process(&bin, &crossed, "write", None), "run:1\n");
+    assert_eq!(
+        run_restart_default_process(&dir, &crossed, "read", None),
+        WORKFLOW_RESTART_HISTORY
+    );
+}
+
 const SOURCE: &str = r#"
 use core.path as path
 use core.services as services

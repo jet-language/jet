@@ -2542,7 +2542,7 @@ fn jet_services_workflow_start(
     let record = jet_services_state_record(
         &format!("v{}:", authority.version),
         &format!(
-            "workflow-start:{run_id}:{version}{}",
+            "workflow-start:{run_id}:{version}:{}",
             jet_services_workflow_frame(&id)
         ),
     );
@@ -2603,7 +2603,7 @@ fn jet_services_workflow_step(
     let record = jet_services_state_record(
         &format!("v{}:", authority.version),
         &format!(
-            "workflow-step:{run_id}{}",
+            "workflow-step:{run_id}:{}",
             jet_services_workflow_frame(&step)
         ),
     );
@@ -2645,7 +2645,7 @@ fn jet_services_workflow_activity(
     let record = jet_services_state_record(
         &format!("v{}:", authority.version),
         &format!(
-            "workflow-activity:{run_id}:1:{max_attempts}{}{}",
+            "workflow-activity:{run_id}:1:{max_attempts}:{}{}",
             jet_services_workflow_frame(&activity),
             jet_services_workflow_frame(&key),
         ),
@@ -2693,7 +2693,7 @@ fn jet_services_workflow_activity_retry(
     let record = jet_services_state_record(
         &format!("v{}:", authority.version),
         &format!(
-            "workflow-activity-retry:{run_id}:{next_attempt}{}",
+            "workflow-activity-retry:{run_id}:{next_attempt}:{}",
             jet_services_workflow_frame(&key)
         ),
     );
@@ -2748,7 +2748,7 @@ fn jet_services_workflow_activity_complete(
     let record = jet_services_state_record(
         &format!("v{}:", authority.version),
         &format!(
-            "workflow-activity-done:{run_id}{}{}",
+            "workflow-activity-done:{run_id}:{}{}",
             jet_services_workflow_frame(&key),
             jet_services_workflow_frame(&outcome),
         ),
