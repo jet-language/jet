@@ -948,6 +948,12 @@ pub(crate) fn method_call_in_subset(
     // D-ENCSTREAM-SURFACE1=A: `encoding.EncodingLimits.safe()` is a
     // qualified shared-type constructor, not a submodule call.
     if recv_type.is_none() && method == "safe" && args.is_empty() {
+        // D-APILABEL1=A: the bare spelling is what a synthesized Core default uses.
+        if let Expr::Ident(type_name, _) = receiver {
+            if type_name == "EncodingLimits" && !cx.struct_fields.contains_key(type_name) {
+                return true;
+            }
+        }
         if let Expr::Field(base, leaf, _) = receiver {
             if leaf == "EncodingLimits" {
                 if let Expr::Ident(alias, _) = base.as_ref() {

@@ -2953,6 +2953,7 @@ const ENCODING_LIMITS_DEFAULT: CoreDefault =
     CoreDefault::StaticCall { type_name: "EncodingLimits", method: "safe" };
 
 pub fn core_param_contract(module: &str, name: &str) -> Option<Vec<CoreParam>> {
+
     let normalized_module =
         Syntax::normalize_core_module(module).unwrap_or_else(|| module.to_string());
     let module = normalized_module.as_str();

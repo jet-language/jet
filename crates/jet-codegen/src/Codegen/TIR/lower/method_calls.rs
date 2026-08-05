@@ -4022,6 +4022,23 @@ pub(crate) fn lower_method_call(
     }
     // D-ENCSTREAM-SURFACE1=A: qualified shared type constructor.
     if method == "safe" && args.is_empty() {
+        // D-APILABEL1=A: a Core parameter default is synthesized as a bare
+        // `EncodingLimits.safe()`, because the caller that skipped the argument
+        // need not have imported `core.encoding` to name an alias for it.
+        if let Expr::Ident(type_name, _) = receiver {
+            if type_name == "EncodingLimits" && !cx.struct_fields.contains_key(type_name) {
+                return TExpr {
+                    ty: Type::Named("EncodingLimits".to_string()),
+                    kind: TExprKind::StaticCall {
+                        owner: rooted_owner("jet_std::EncodingLimits"),
+                        owner_type: None,
+                        method: TMethodRef::bare("safe"),
+                        type_args: Vec::new(),
+                        args: vec![],
+                    },
+                };
+            }
+        }
         if let Expr::Field(base, leaf, _) = receiver {
             if leaf == "EncodingLimits"
                 && core_module_path_from_receiver(base, &cx.core_imports, env).as_deref() == Some("core.encoding")

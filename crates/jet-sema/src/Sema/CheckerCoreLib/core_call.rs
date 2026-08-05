@@ -633,7 +633,12 @@ impl<'a> Checker<'a> {
             // the one policy it changes and skip the rest. Filling the skipped
             // defaults here is also what stops each engine spelling its own
             // fallback: every tier now receives the same argument.
-            if let Some(contract) = super::core_param_contract(module, name) {
+            // Only a call that actually writes a label needs binding. A purely
+            // positional Core call already means what it says, and leaving it
+            // untouched keeps every existing lowering path exactly as it was.
+            if let Some(contract) = super::core_param_contract(module, name)
+                .filter(|_| args.iter().any(|arg| arg.label.is_some()))
+            {
                 let params: Vec<crate::Sema::CallBinder::BindParam<'_>> = contract
                     .iter()
                     .enumerate()
