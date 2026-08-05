@@ -581,8 +581,9 @@ impl<'a> Parser<'a> {
                     // D-UITREE1/D-DOTCTOR1: `.Variant.{ field: val, … }` — named-payload
                     // construction reuses the struct dot-brace spelling (one leading-dot
                     // rule for every inferred construction, structs and enums alike).
-                    let (args, end) = if allow_struct_lit
-                        && matches!(self.peek().kind, TokKind::Dot)
+                    // Like bare `.{` above, `.{` after a variant path is unambiguous, so
+                    // it is accepted even where `allow_struct_lit` is false (card #1441).
+                    let (args, end) = if matches!(self.peek().kind, TokKind::Dot)
                         && matches!(self.peek2().kind, TokKind::LBrace)
                     {
                         self.bump(); // consume `.`
