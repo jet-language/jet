@@ -442,6 +442,24 @@ fn workflow_history_survives_process_restart() {
         WORKFLOW_RESTART_HISTORY
     );
 
+    // A truncated tail is the shape a crash mid-append leaves behind.  The
+    // next process must say so, not silently drop the run it cannot read.
+    let corrupt = dir.join("workflow-corrupt.log");
+    assert_eq!(run_restart_process(&bin, &corrupt, "write", None), "run:1\n");
+    let log = corrupt.with_extension("log.workflows");
+    let bytes = fs::read(&log).unwrap();
+    fs::write(&log, &bytes[..bytes.len() - 4]).unwrap();
+    let mut failed = Command::new(&bin);
+    failed
+        .env("JET_SERVICE_AUTH_STORE", &corrupt)
+        .env("JET_SERVICE_AUTH_PHASE", "read");
+    let output = failed.output().unwrap();
+    assert!(
+        !output.status.success(),
+        "a truncated workflow log was accepted: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+
     // A replayed history has to be writable, not just readable: the third
     // process only sees run 2 if the second process numbered and recorded it
     // from replayed state.

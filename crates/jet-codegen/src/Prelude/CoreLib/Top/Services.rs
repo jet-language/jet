@@ -2493,18 +2493,40 @@ fn jet_services_workflow_apply(
             ));
         }
     }
+    // One bound for every record kind.  `history` carries the start entry and
+    // an activity's retries on top of `steps`, so bounding `steps` alone lets
+    // a legal run grow a history the tree validator then rejects.
+    if workflows.len() > MAX_SERVICE_WORKFLOW_STEPS
+        || workflows.iter().any(|workflow| {
+            workflow.steps.len() > MAX_SERVICE_WORKFLOW_STEPS
+                || workflow.history.len() > MAX_SERVICE_WORKFLOW_STEPS
+        })
+    {
+        return Err(jet_services_state_error("workflow history limit exceeded"));
+    }
     Ok(())
 }
 
 /// Append one workflow record and advance the in-memory history by replaying
-/// it.  The record is applied to a copy first, so a payload the reader would
-/// reject never reaches the store.
+/// it.  The record is applied to the replayed durable log first, so a payload
+/// the reader would reject never reaches the store, and a history that has
+/// drifted from the store is reported instead of extended.  The extra read
+/// costs one more pass over a store the append already re-reads.
+///
+/// The guard is the same process-wide lock the rest of this store uses, so it
+/// orders writers inside one process.  Two processes appending to one store
+/// concurrently are still unordered.
 fn jet_services_workflow_append(
     tree: &mut JetServiceTree,
     payload: String,
 ) -> Result<(), JetServiceError> {
     let authority = jet_services_workflow_authority(tree)?;
-    let mut applied = tree.workflows.clone();
+    let mut applied = jet_services_workflow_replay(&authority)?;
+    if applied != tree.workflows {
+        return Err(jet_services_state_error(
+            "in-memory workflow history does not match the durable workflow log",
+        ));
+    }
     jet_services_workflow_apply(&mut applied, &payload)?;
     if applied.len() > MAX_SERVICE_WORKFLOW_STEPS {
         return Err(JetServiceError::Policy(
