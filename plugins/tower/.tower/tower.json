@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1455,
-    "rev": 25511,
+    "nextNum": 1462,
+    "rev": 25594,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -79848,84 +79848,90 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "verify",
       "priority": "P1",
       "plan": "1) Add BinOp::Pow, retire BitXor spelling ^. 2) Sema + TIR + Prelude jet_pow, all tiers call it. 3) Formatter + grammars. 4) Example + golden. 5) Targeted tests.",
       "blockedBy": [],
       "assignee": "bd-exp",
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-05",
+          "by": "bd-exp",
+          "text": "Rebound the caret end to end. Lexer, parser, sema, TIR, AOT emit, Cranelift host, comptime interpreter, and both web tiers now read infix ^ as the power and ^= as power-assign. The rule lives in one Prelude file, crates/jet-codegen/src/Prelude/Core/Power.rs, which the native and wasm Rust modules both include verbatim, so every tier runs one power. Commit a508832d0."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-exp",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T13:43:26.122Z"
+          "evidence": "crates/jet-foundation/src/Syntax/math_layout.rs: OP_CARET documented as D-EXPOP1=A power, OP_CARET_EQ as power-assign, new OP_TILDE_PIPE and OP_TILDE_PIPE_EQ for D-XORSPELL1=A",
+          "at": "2026-08-05T23:30:22.322Z"
         },
         {
           "n": 2,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-exp",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T13:43:26.122Z"
+          "evidence": "docs/spec/syntax-decisions.md: new 2026-08-05 log entry for D-EXPOP1=A / D-EXPSEM1=A / D-XORSPELL1=A",
+          "at": "2026-08-05T23:30:22.640Z"
         },
         {
           "n": 3,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-exp",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T13:43:26.122Z"
+          "evidence": "scripts/agent/jet-env jet self devtools grammars -> regenerated editors/jet.tmGrammar, tree-sitter/grammar.js, vscode/syntaxes/jet.tmLanguage.json, zed highlights.scm",
+          "at": "2026-08-05T23:30:22.951Z"
         },
         {
           "n": 4,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-exp",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T13:43:26.122Z"
+          "evidence": "cargo test --test diagnostic_snapshots: no snapshot changed for this work; the 27 pre-existing mismatches are core-module lists, E1130 and DB policy text, none touching ^ or ~|",
+          "at": "2026-08-05T23:30:23.254Z"
         },
         {
           "n": 5,
           "text": "Example examples/features/math/power_operator.jet golden-proves 3 ^ 2 == 9 and a ^= compound; expected output file committed and byte-identical under AOT build and default jet run (I9)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-exp",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T14:36:44.505Z"
+          "evidence": "examples/features/math/power_operator.jet with expected/math/power_operator.out (9, 64, 1024, 2.25 - covers 3 ^ 2 == 9 and growth ^= 10); jet build then ./build/power_operator and jet run both print the same four lines; JET_GOLDEN_FILTER=math cargo test --test golden passes it",
+          "at": "2026-08-05T23:30:38.536Z"
         },
         {
           "n": 6,
           "text": "No infix ^ means xor anywhere: sema unit test shows Int ^ Int type-checks as power; canon.jet and all in-repo examples migrated off ^-as-xor",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-exp",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T14:36:44.812Z"
+          "evidence": "cargo test --test power_and_exclusive_or infix_caret_never_means_exclusive_or (12 ^ 2 prints 144, not 14) and power_result_types_follow_the_operands; migrated examples/features/basics/compound.jet, examples/features/lowlevel/sized_integers.jet, tests/fuzz/sema/valid/ex_basics_compound.jet and the editor grammars off ^-as-xor; grep finds no infix ^-as-xor left in the repo",
+          "at": "2026-08-05T23:30:38.849Z"
         },
         {
           "n": 7,
           "text": "Formatter round-trip: jet fmt is idempotent on the power example and preserves ^ and ^= (fmt stability test green)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-exp",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T14:36:45.122Z"
+          "evidence": "cargo test --test fmt fmt_keeps_power_and_exclusive_or_spellings: byte-stable round trip preserving ^, ^=, ~|, ~|=, (2 ^ 3) ^ 2 and (-3) ^ 2; jet fmt on all three new examples is a no-op and stable on a second pass",
+          "at": "2026-08-05T23:30:39.157Z"
         },
         {
           "n": 8,
           "text": "Prefix ^ (take sigil) regression: existing take-capability targeted tests still green after the rebind",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-exp",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T14:36:45.426Z"
+          "evidence": "cargo test --test power_and_exclusive_or prefix_take_and_copy_survive_the_rebind: ^blade take argument, ~source copy, and infix ^ on one line print 3, 9, 144",
+          "at": "2026-08-05T23:30:39.470Z"
         }
       ],
       "refs": [],
@@ -79936,9 +79942,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T13:33:32.504Z",
-      "updated": "2026-08-05T22:17:26.750Z",
+      "updated": "2026-08-05T23:32:05.831Z",
       "updatedBy": "bd-exp",
-      "claimedAt": "2026-08-05T22:17:26.750Z"
+      "claimedAt": "2026-08-05T23:32:05.831Z"
     },
     {
       "id": "c0q2s3u5",
@@ -79949,77 +79955,83 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P1",
       "plan": "1) Parser associativity + precedence. 2) Sema result-type rules. 3) Prelude int_pow/float pow paths per I9. 4) Example + golden with the four canonical values. 5) Targeted parser and sema tests.",
       "blockedBy": [
         "#1428"
       ],
-      "assignee": null,
-      "log": [],
+      "assignee": "bd-exp",
+      "log": [
+        {
+          "at": "2026-08-05",
+          "by": "bd-exp",
+          "text": "Power grouping and result types shipped with the operator itself, since the parser needs the precedence to accept ^ at all. Right associative between the unary and postfix levels; sema decides the result type; the exact whole-number rule and its traps live in the shared Prelude power. Commit a508832d0."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-exp",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T14:22:31.010Z"
+          "evidence": "crates/jet-foundation/src/Syntax/math_layout.rs: OP_CARET and OP_CARET_EQ carry the D-EXPOP1=A / D-EXPSEM1=A power meaning",
+          "at": "2026-08-05T23:32:33.589Z"
         },
         {
           "n": 2,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-exp",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T14:22:31.011Z"
+          "evidence": "docs/spec/syntax-decisions.md: the 2026-08-05 entry states right grouping, minus binding looser, exact Int, written negative exponent to Float, any Float operand to Float",
+          "at": "2026-08-05T23:32:33.900Z"
         },
         {
           "n": 3,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-exp",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T14:22:31.011Z"
+          "evidence": "scripts/agent/jet-env jet self devtools grammars regenerated all four editor grammar sections in the same change",
+          "at": "2026-08-05T23:32:34.215Z"
         },
         {
           "n": 4,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-exp",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T14:22:31.011Z"
+          "evidence": "cargo test --test diagnostic_snapshots: the power semantics add no diagnostic text, so no snapshot changed; the 27 pre-existing mismatches are unrelated",
+          "at": "2026-08-05T23:32:34.521Z"
         },
         {
           "n": 5,
           "text": "Example power_semantics.jet golden-prints exactly 512 (2^3^2), -9 (-3^2), 1024 (2^10, exact Int), 0.5 (2^-1); identical on AOT and jet run (I9)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-exp",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T14:36:45.723Z"
+          "evidence": "examples/features/math/power_semantics.jet with expected/math/power_semantics.out prints 512, -9, 1024, 0.5 then 512 (comptime fold), 64, 9, 1024.0; jet build then ./build/power_semantics and jet run give byte-identical output; JET_GOLDEN_FILTER=math cargo test --test golden passes it",
+          "at": "2026-08-05T23:32:34.825Z"
         },
         {
           "n": 6,
           "text": "Sema unit tests: Int ^ negative Int infers Float; Int ^ non-negative Int infers Int; any Float operand infers Float",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-exp",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T14:36:46.030Z"
+          "evidence": "cargo test --test power_and_exclusive_or power_result_types_follow_the_operands: want_int(2 ^ 10) accepted, want_float(2 ^ -1) accepted, want_int(2 ^ -1) rejected, want_float(2.0 ^ 10) accepted, want_int(2.0 ^ 10) rejected",
+          "at": "2026-08-05T23:32:35.138Z"
         },
         {
           "n": 7,
           "text": "Parser test proves right-associativity (2^3^2 groups as 2^(3^2)) and that unary minus binds looser (-3^2 groups as -(3^2))",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-exp",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T14:36:46.331Z"
+          "evidence": "cargo test --test power_and_exclusive_or power_groups_right_and_beats_unary_minus: 2 ^ 3 ^ 2 prints 512 while (2 ^ 3) ^ 2 prints 64, and -3 ^ 2 prints -9 while (-3) ^ 2 prints 9; also 2 * 3 ^ 2 is 18 and 2 ^ 3 * 2 is 16",
+          "at": "2026-08-05T23:32:35.448Z"
         }
       ],
       "refs": [],
@@ -80030,8 +80042,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T13:33:32.817Z",
-      "updated": "2026-08-05T14:37:02.335Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-05T23:32:36.179Z",
+      "updatedBy": "bd-exp",
+      "claimedAt": "2026-08-05T23:32:36.179Z"
     },
     {
       "id": "c0v2fuet",
@@ -80042,77 +80055,83 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P1",
       "plan": "1) Token ~| and ~|=. 2) Parser + sema reuse BitXor paths. 3) Formatter + grammars. 4) Example + golden. 5) Targeted tests incl. prefix-copy regression.",
       "blockedBy": [
         "#1428"
       ],
-      "assignee": null,
-      "log": [],
+      "assignee": "bd-exp",
+      "log": [
+        {
+          "at": "2026-08-05",
+          "by": "bd-exp",
+          "text": "Exclusive-or now spells ~| with compound ~|=, lexed longest-match ahead of ~ and ~~ so prefix copy is untouched. Reuses the BitXor paths at the old ^ precedence. Migrated the compound-assignment example, the sized-integer example, the sema fuzz corpus, and the editor grammars in the same change. Commit a508832d0."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-exp",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T14:24:07.451Z"
+          "evidence": "crates/jet-foundation/src/Syntax/math_layout.rs: new OP_TILDE_PIPE and OP_TILDE_PIPE_EQ constants carry D-XORSPELL1=A",
+          "at": "2026-08-05T23:32:55.072Z"
         },
         {
           "n": 2,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-exp",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T14:24:07.451Z"
+          "evidence": "docs/spec/syntax-decisions.md: the 2026-08-05 entry records ~| and ~|= in the old ^ precedence slot under the same D-SG9 rule",
+          "at": "2026-08-05T23:32:55.393Z"
         },
         {
           "n": 3,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-exp",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T14:24:07.451Z"
+          "evidence": "scripts/agent/jet-env jet self devtools grammars: ~| and ~|= now appear in editors/jet.tmGrammar, tree-sitter/grammar.js, vscode jet.tmLanguage.json and zed highlights.scm",
+          "at": "2026-08-05T23:32:55.703Z"
         },
         {
           "n": 4,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-exp",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T14:24:07.451Z"
+          "evidence": "cargo test --test diagnostic_snapshots: the ~| respelling changes no snapshot text; every .stderr mentioning a caret is the take sigil and still passes",
+          "at": "2026-08-05T23:32:56.017Z"
         },
         {
           "n": 5,
           "text": "Example xor_operator.jet golden-proves ~| values and a ~|= accumulator loop; identical on AOT and jet run (I9)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-exp",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T14:36:46.648Z"
+          "evidence": "examples/features/math/xor_operator.jet with expected/math/xor_operator.out prints 6, 150, 80, 9 - covering ~| on Int and on a U8 pair, a ~|= accumulator loop, and copy beside xor; jet build then ./build/xor_operator and jet run give byte-identical output; JET_GOLDEN_FILTER=math cargo test --test golden passes it",
+          "at": "2026-08-05T23:32:56.338Z"
         },
         {
           "n": 6,
           "text": "Sema test: ~| enforces same-width integers both sides (D-SG9 rule carried over)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-exp",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T14:36:46.967Z"
+          "evidence": "cargo test --test power_and_exclusive_or exclusive_or_needs_matching_integer_widths: U8 ~| U8 accepted, U8 ~| I8 reports E0109, 1.5 ~| 2.5 reports E0109",
+          "at": "2026-08-05T23:32:56.646Z"
         },
         {
           "n": 7,
           "text": "Prefix ~ copy regression: existing copy-sigil targeted tests green; a line mixing copy and xor (x ~| ~y) parses correctly in a parser test",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-exp",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T14:36:47.285Z"
+          "evidence": "cargo test --test power_and_exclusive_or prefix_take_and_copy_survive_the_rebind: melt(^blade) prints 3 and flags ~| ~source prints 9, so prefix copy and infix xor parse correctly on one line",
+          "at": "2026-08-05T23:32:56.955Z"
         }
       ],
       "refs": [],
@@ -80123,8 +80142,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T13:33:33.119Z",
-      "updated": "2026-08-05T14:37:02.707Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-05T23:32:57.701Z",
+      "updatedBy": "bd-exp",
+      "claimedAt": "2026-08-05T23:32:57.701Z"
     },
     {
       "id": "c04513m9",
@@ -80940,12 +80960,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-ul3-core",
-      "phase": "building",
+      "phase": "ready",
       "priority": "P0",
       "plan": "1. Generate a closed inventory from Collections.rs, module_items.rs, and fixed_sigs.rs. Do not trust prose as the source of shipped Jet methods.\n2. Select every Python builtin type and stdlib module Jet claims to cover. Use official Python docs to enumerate the matching public surface.\n3. Give every row a stable ID, Python member, Jet spelling, matched workflow, and one verdict: Jet wins, equal, Jet loses, or out of scope.\n4. Link every Jet-loses row to one live Tower card or open decision. Out-of-scope requires a ratified product-scope decision that explicitly says Jet does not compete for that workflow. A design decline does not remove a scored loss.\n5. Add deterministic checks for an unmapped shipped method, missing Python member, duplicate row, hidden exclusion, stale owner, source-table drift, or unratified scope exclusion.\n6. Store the durable ledger under docs and make #1398 consume it as its only workflow inventory. Do not create a second benchmark framework.\n7. A fresh reviewer checks closure against both source tables and official Python docs.\nblockedBy: none.",
       "blockedBy": [],
-      "assignee": "bd-ledger",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-08-05",
+          "by": "bd-ledger",
+          "text": "[handoff] Queued behind the exponent-operator batch. The tree allows one direct-tree worker at a time, so this card starts after cards #1428, #1429, and #1430 reach verify. No code was written."
+        },
         {
           "at": "2026-08-05",
           "by": "fable",
@@ -81022,9 +81047,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T18:12:13.321Z",
-      "updated": "2026-08-05T22:17:27.439Z",
-      "updatedBy": "bd-ledger",
-      "claimedAt": "2026-08-05T22:17:27.438Z"
+      "updated": "2026-08-05T22:19:49.278Z",
+      "updatedBy": "fable"
     },
     {
       "id": "c0fmfiwg",
@@ -81420,6 +81444,386 @@
       "created": "2026-08-05T20:47:48.204Z",
       "updated": "2026-08-05T22:12:56.724Z",
       "updatedBy": "fable"
+    },
+    {
+      "id": "c0t5khxi",
+      "num": 1455,
+      "title": "Marker plane first-principles rebuild: ballot slate + law zero",
+      "body": "",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-language-coherence",
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-05",
+          "by": "claude-fable",
+          "text": "Proposal docs/proposals/marker-plane-first-principles.md; law zero recorded as D-VERDICT-1455-1; five ballots minted (D-MARK-FORM1, D-MARK-REPEAT1, D-IMPURE-REASON1, D-SQL-ARG1, D-HTML-NAME1); implementation cards #1456-#1461, with #1461 gated on this slate."
+        },
+        {
+          "at": "2026-08-05",
+          "by": "owner",
+          "text": "Verdict recorded (D-VERDICT-1455-1): D-MARK-REG1 — mandatory registration: a marker exists if and only if it is a registry row. No marker may be parsed, checked, formatted, highlighted, or reflected outside Policy::APPLIED_RULES; every active row must be fully implemented end to end or retired. Drift in either direction is a defect enforced by CI guards (name-literal scan, per-row end-to-end coverage, generated editor grammars). Owner words (2026-08-05): 'We must make all markers REQUIRED to be registered in the registry, no exceptions for drift, no tolerance. Not acceptable to have marker drift from registry.'"
+        }
+      ],
+      "criteria": [],
+      "refs": [
+        "docs/proposals/marker-plane-first-principles.md"
+      ],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-05T22:40:12.760Z",
+      "updated": "2026-08-05T22:45:52.674Z",
+      "updatedBy": "claude-fable"
+    },
+    {
+      "id": "c0556cxe",
+      "num": 1456,
+      "title": "Marker uniform attachment: one parse path, markers retained on AST",
+      "body": "",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-language-coherence",
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "Implement D-VERDICT-1455-1 (D-MARK-REG1) structurally. One shared marker reader runs at every node start, accepts any name including keyword-lexed ones, and attaches Marker nodes to the owning AST node for every site. Delete every hand-bumped marker token, both function-marker applicators, the marker_sequence_leads_to_function heuristic, the three shadow site tables, and all lexer marker-name knowledge. Sema receives markers; parse-time desugaring into flags ends.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The shared reader is the only marker parse path; a search proves no hand-bumped marker token remains in parser or lexer",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T22:45:30.769Z"
+        },
+        {
+          "n": 2,
+          "text": "Keyword-named markers need zero special cases; the six Unsafe keyword workarounds are deleted",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T22:45:31.088Z"
+        },
+        {
+          "n": 3,
+          "text": "Marker nodes are retained on every AST target site and reach sema intact",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T22:45:31.548Z"
+        },
+        {
+          "n": 4,
+          "text": "Foundation, parser, sema, marker, and grammar targeted suites green",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T22:45:32.026Z"
+        }
+      ],
+      "refs": [
+        "docs/proposals/marker-plane-first-principles.md",
+        "crates/jet-parser/src/Parser/Items/marker_groups.rs",
+        "crates/jet-parser/src/Parser/Items/markers_contracts.rs",
+        "crates/jet-foundation/src/Policy.rs"
+      ],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-05T22:45:07.350Z",
+      "updated": "2026-08-05T22:45:50.439Z",
+      "updatedBy": "claude-fable"
+    },
+    {
+      "id": "c0ai0h4w",
+      "num": 1457,
+      "title": "Marker validation: one registry pipeline at every site",
+      "body": "",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-language-coherence",
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "One sema pass runs vocabulary, site, signature, and duplicate checks for every marker at every site, reading only registry rows. E0990 and the E0733/E0003 marker fallbacks retire into the E0927/E0355/E0930 families with snapshots. Distinct types join the vocabulary check. Static resolution binds every registered site so comptime argument evaluation runs for block, statement, declaration, constant, and function markers.",
+      "blockedBy": [
+        "#1456"
+      ],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "An unknown marker yields the one E0927 family at every site class, with UI fixtures for function, method, statement, block, expression, distinct, file, parameter, and constant positions",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T22:45:32.447Z"
+        },
+        {
+          "n": 2,
+          "text": "Wrong-site errors are one E0355 family naming the rule's legal targets; E0990 and the E0733/E0003 marker fallbacks are retired in spec and code",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T22:45:32.802Z"
+        },
+        {
+          "n": 3,
+          "text": "Static resolution binds every registered site; comptime argument evaluation runs for block, statement, declaration, constant, and function markers",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T22:45:33.113Z"
+        },
+        {
+          "n": 4,
+          "text": "Per-marker special cases inside the shared binder are deleted or expressed as registry columns; snapshots blessed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T22:45:33.421Z"
+        }
+      ],
+      "refs": [
+        "docs/proposals/marker-plane-first-principles.md",
+        "crates/jet-sema/src/Sema/CheckerMarkers.rs"
+      ],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-05T22:45:07.674Z",
+      "updated": "2026-08-05T22:45:50.808Z",
+      "updatedBy": "claude-fable"
+    },
+    {
+      "id": "c0fsjhdc",
+      "num": 1458,
+      "title": "Marker consumers read registry rows: formatter, tree-sitter, reflection, explain",
+      "body": "",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-language-coherence",
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "The formatter prints retained marker nodes; the 16-flag reconstruction and hardcoded layout lists are deleted. The tree-sitter grammar and highlight lists are generated from the registry: lowercase rows, the signed form, no retired @ sigil, no unbounded stacking. MethodInfo.markers becomes real. jet explain reads the same rows.",
+      "blockedBy": [
+        "#1456"
+      ],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Formatter prints retained marker nodes; flag reconstruction and hardcoded layout lists deleted; formatter stability suite green over marker examples",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T22:45:33.723Z"
+        },
+        {
+          "n": 2,
+          "text": "Tree-sitter parses signed markers and lowercase rows, rejects the retired @ sigil and unbounded stacking; grammar and highlights generated from the registry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T22:45:34.030Z"
+        },
+        {
+          "n": 3,
+          "text": "MethodInfo.markers returns real data with a reflection test; jet explain reads registry rows",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T22:45:34.342Z"
+        }
+      ],
+      "refs": [
+        "docs/proposals/marker-plane-first-principles.md",
+        "crates/jet-parser/src/Formatter/Items.rs",
+        "editors/tree-sitter/grammar.js"
+      ],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-05T22:45:07.994Z",
+      "updated": "2026-08-05T22:45:51.171Z",
+      "updatedBy": "claude-fable"
+    },
+    {
+      "id": "c0kydt2i",
+      "num": 1459,
+      "title": "Marker row debt: dead rows, retired effects, menu special cases",
+      "body": "",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-language-coherence",
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "Resolve Authority and Summarize under card #763's ratified triage terms: implement fully or retire. Retired rows stop applying effects (Pure, InlineAlways). The FFI and RenameAll owned menus and the first-versus-last path-segment handling become registry columns. The Doc-with-Job coupling becomes row data. Marker name constants collapse to one convention.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "No registered row lacks end-to-end behavior: Authority and Summarize implemented fully or retired per card #763's terms",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T22:45:34.645Z"
+        },
+        {
+          "n": 2,
+          "text": "Retired rows diagnose without applying effects; Pure and InlineAlways no longer set flags",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T22:45:34.952Z"
+        },
+        {
+          "n": 3,
+          "text": "Owned menus, path-segment handling, and the Doc-with-Job coupling are registry columns; marker name constants use one convention",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T22:45:35.268Z"
+        }
+      ],
+      "refs": [
+        "docs/proposals/marker-plane-first-principles.md",
+        "crates/jet-foundation/src/Policy.rs"
+      ],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-05T22:45:08.306Z",
+      "updated": "2026-08-05T22:45:51.540Z",
+      "updatedBy": "claude-fable"
+    },
+    {
+      "id": "c0pzumap",
+      "num": 1460,
+      "title": "Law-zero drift guards: name-literal scan, per-row coverage, generated grammars",
+      "body": "",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-language-coherence",
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "Deterministic enforcement of D-VERDICT-1455-1. A CI test scans compiler sources for marker-name string literals outside the registry and its generated artifacts and fails on any hit. A coverage test walks every registry row end to end: parse, validate, format round-trip, highlight, reflect. Editor grammars are generated from the registry, never hand-edited. These guards gate the migration close.",
+      "blockedBy": [
+        "#1456",
+        "#1457",
+        "#1458",
+        "#1459"
+      ],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The name-literal scan test is in CI, green, and fails when seeded with a synthetic drift case",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T22:45:35.586Z"
+        },
+        {
+          "n": 2,
+          "text": "The per-row coverage test walks every registry row through parse, validate, format round-trip, highlight, and reflect",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T22:45:36.136Z"
+        },
+        {
+          "n": 3,
+          "text": "Editor grammar generation has a drift test; hand-edits to generated grammars fail CI",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T22:45:36.663Z"
+        }
+      ],
+      "refs": [
+        "docs/proposals/marker-plane-first-principles.md"
+      ],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-05T22:45:08.611Z",
+      "updated": "2026-08-05T22:45:51.915Z",
+      "updatedBy": "claude-fable"
+    },
+    {
+      "id": "c0v3yofo",
+      "num": 1461,
+      "title": "Marker ballot outcomes migration (form law, repeat law, Impure, SQL, HTML)",
+      "body": "",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-language-coherence",
+      "phase": "ready",
+      "priority": "P2",
+      "plan": "Apply the ratified outcomes of D-MARK-FORM1, D-MARK-REPEAT1, D-IMPURE-REASON1, D-SQL-ARG1, and D-HTML-NAME1 as one registry, spec, formatter, grammar, example, and snapshot migration. Every retired spelling gets one teaching fix. Blocked until the slate on card #1455 is ratified.",
+      "blockedBy": [
+        "#1455"
+      ],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Each ratified outcome lands as one registry, spec, formatter, grammar, example, and snapshot migration with a teaching fix per retired spelling",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-05T22:45:37.178Z"
+        }
+      ],
+      "refs": [
+        "docs/proposals/marker-plane-first-principles.md",
+        "docs/spec/syntax-decisions.md"
+      ],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-05T22:45:08.920Z",
+      "updated": "2026-08-05T22:45:52.291Z",
+      "updatedBy": "claude-fable"
     }
   ],
   "decisions": [
@@ -106022,6 +106426,392 @@
       "draft": false,
       "status": "open",
       "created": "2026-08-05T20:48:28.447Z"
+    },
+    {
+      "id": "D-VERDICT-1455-1",
+      "cardId": "c0t5khxi",
+      "group": "verdict",
+      "title": "Markers must live in the registry — no drift, no exceptions",
+      "gist": "",
+      "lesson": "",
+      "explainer": "",
+      "story": "",
+      "inWild": "",
+      "detail": "",
+      "options": [],
+      "comparisons": [],
+      "rec": null,
+      "recommendation": null,
+      "hybrid": null,
+      "ballotMode": null,
+      "shortAuthorizedBy": null,
+      "reviewPasses": null,
+      "draft": false,
+      "status": "ratified",
+      "outcome": "D-MARK-REG1 — mandatory registration: a marker exists if and only if it is a registry row. No marker may be parsed, checked, formatted, highlighted, or reflected outside Policy::APPLIED_RULES; every active row must be fully implemented end to end or retired. Drift in either direction is a defect enforced by CI guards (name-literal scan, per-row end-to-end coverage, generated editor grammars). Owner words (2026-08-05): 'We must make all markers REQUIRED to be registered in the registry, no exceptions for drift, no tolerance. Not acceptable to have marker drift from registry.'",
+      "comment": "D-MARK-REG1 — mandatory registration: a marker exists if and only if it is a registry row. No marker may be parsed, checked, formatted, highlighted, or reflected outside Policy::APPLIED_RULES; every active row must be fully implemented end to end or retired. Drift in either direction is a defect enforced by CI guards (name-literal scan, per-row end-to-end coverage, generated editor grammars). Owner words (2026-08-05): 'We must make all markers REQUIRED to be registered in the registry, no exceptions for drift, no tolerance. Not acceptable to have marker drift from registry.'",
+      "created": "2026-08-05T22:40:36.609Z",
+      "ratifiedAt": "2026-08-05"
+    },
+    {
+      "id": "D-IMPURE-REASON1",
+      "cardId": "c0t5khxi",
+      "group": "safety",
+      "title": "Impure joins the reason law",
+      "gist": "Whether an Impure block must say why.",
+      "lesson": "Three block markers unlock checked power: Unsafe, Nondeterministic, and Impure. The first two demand a written reason. Impure's reason is optional today, which contradicts the block-plane ruling that names it beside the other two. This ballot settles Impure's obligation.",
+      "explainer": "",
+      "story": "An auditor sweeps a service for authority blocks before a release. Every Unsafe block explains itself in one line. A bare Impure block says nothing, so the auditor must reconstruct intent from diff history.",
+      "inWild": "#Impure {                       // legal today: no reason given\n    now := time.now()\n}\n\n#Nondeterministic(\"hardware entropy\") {   // reason required today\n    seed := rng.raw()\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Reason required",
+          "detail": "Every Impure block carries a written reason, exactly like Unsafe and Nondeterministic. A bare block becomes an error whose fix asks for the reason. All three authority gates then read identically.",
+          "technical": "The registry signature becomes reason: String with no default. Existing bare blocks migrate with a one-line reason added.",
+          "code": "#Impure(\"reads the wall clock during folding\") {\n    now := time.now()\n}\n\n#Impure { }   // error: an authority block explains itself — add a reason"
+        },
+        {
+          "key": "B",
+          "name": "Reason stays optional",
+          "detail": "The signature keeps its optional reason. The spec records Impure as a lighter gate than the other two, and audit sweeps accept bare blocks.",
+          "code": "#Impure {              // stays legal\n    now := time.now()\n}"
+        },
+        {
+          "key": "C",
+          "name": "No reason parameter at all",
+          "detail": "Impure becomes a plain switch with no reason slot. Writers who want to explain themselves use an ordinary comment; the gate stops pretending to collect audit text.",
+          "code": "// folding is off here because this reads the wall clock\n#Impure {\n    now := time.now()\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust (Clippy)",
+          "note": "The undocumented_unsafe_blocks lint makes every unsafe block carry a SAFETY comment. Teams enable it because bare unsafe rots.",
+          "code": "// SAFETY: the pointer is live for this call\nunsafe { ptr.read() }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "One law for all three authority gates is easier to teach and to audit, and it matches the block-plane ruling already on the books.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A lighter gate splits the authority story into two rules and leaves audit sweeps blind on one of three gates."
+          },
+          {
+            "key": "C",
+            "reason": "Removing the slot forbids even willing writers from explaining themselves where the gate is, and comments are invisible to tooling."
+          }
+        ],
+        "tradeoff": "Existing bare Impure blocks need a one-line reason added during migration."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared requiring the reason with keeping it optional and recommended requiring it, for one authority law.",
+        "boilOcean": "The breadth pass tested reason-required-under-policy-only and a lint-level nudge. Both re-create the split rule this ballot exists to close, so option C was added instead as the honest opposite.",
+        "hybrid": "The hybrid pass tried optional-with-audit-flag, where bare blocks pass but audits list them. That is B with extra machinery, so it was folded into B.",
+        "cooperative": "The cooperative pass strengthened C: comments are cheaper and the block already draws the eye. It still loses tooling visibility.",
+        "adversarial": "The adversarial pass attacked A with reason fatigue producing copy-paste reasons. The same risk already exists for Unsafe and has not materialized in the examples, so the recommendation stands."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-05T22:43:52.909Z"
+    },
+    {
+      "id": "D-SQL-ARG1",
+      "cardId": "c0t5khxi",
+      "group": "syntax",
+      "title": "How a SQL block names its row type",
+      "gist": "The lawful spelling for the row type on an inline SQL block.",
+      "lesson": "An inline SQL block can name the row type it produces. Today that is written with angle brackets, the only marker in the language that takes them. The registry row declares no parameters, so the spelling is typeable but never ratified. This ballot picks the lawful spelling.",
+      "explainer": "",
+      "story": "Ana writes a dashboard query and wants each row typed. She copies the angle-bracket spelling from the one existing example, and nothing in the spec says whether that spelling is law.",
+      "inWild": "rows := #SQL<Row> {           // parses today; no ruling ever blessed it\n    SELECT id, name FROM users\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Ordinary call argument",
+          "detail": "The row type rides the one marker call grammar: SQL takes the type name as its argument. The angle spelling retires with a teaching fix. No new grammar anywhere.",
+          "technical": "Registry signature: SQL(row: Type = none). Type-valued marker arguments follow the ratified argument-type ruling; the compiler checks the query's columns against the named type.",
+          "code": "rows := #SQL(Row) {\n    SELECT id, name FROM users\n}\n\nrows := #SQL<Row> { SELECT id FROM users }\n// error: marker arguments use parentheses — write #SQL(Row)"
+        },
+        {
+          "key": "B",
+          "name": "Ratify angle brackets",
+          "detail": "Markers gain a type-parameter feature and the angle spelling becomes law. SQL reads like a generic call from host languages, and the signature schema grows to carry it.",
+          "code": "rows := #SQL<Row> {\n    SELECT id, name FROM users\n}"
+        },
+        {
+          "key": "C",
+          "name": "No argument; the binding's declared type decides",
+          "detail": "The block takes no type at all. The row type flows from the declared binding type. An unannotated binding in expression position is an error that asks for one.",
+          "code": "rows: [Row] := #SQL {\n    SELECT id, name FROM users\n}\n\nother := #SQL { SELECT id FROM users }\n// error: this SQL block needs a declared row type on its binding"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust (sqlx)",
+          "note": "The row type is a generic argument on the query call.",
+          "code": "let rows = sqlx::query_as::<_, Row>(\"SELECT id, name FROM users\");"
+        },
+        {
+          "lang": "C# (Dapper)",
+          "note": "The row type is the ordinary generic argument of Query.",
+          "code": "var rows = conn.Query<Row>(\"SELECT id, name FROM users\");"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The one call grammar already carries every other marker argument, and a type name is an ordinary argument under the ratified argument-type ruling. It works in every position with no new grammar.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A type-parameter feature for exactly one marker is a second grammar bought for one registry row."
+          },
+          {
+            "key": "C",
+            "reason": "Context typing fails in positions without a declared type, so a beginner hits an error the explicit argument never causes."
+          }
+        ],
+        "tradeoff": "SQL blocks read slightly less like generic calls from host languages that use angle brackets."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared the call-argument spelling with ratifying angle brackets and recommended the call argument for grammar economy.",
+        "boilOcean": "The breadth pass tested a named argument, a scope member inside the block, and full inference. The first two are spellings of A and were folded in; inference became option C.",
+        "hybrid": "The hybrid pass tried the call argument with inference as a fallback when the argument is omitted. Two ways to say one thing violates the one-mechanism rule, so it was rejected.",
+        "cooperative": "The cooperative pass strengthened B with its host-language familiarity and C with its zero-ceremony reading on annotated bindings.",
+        "adversarial": "The adversarial pass attacked A with type-versus-value ambiguity in the argument slot. The argument-type ruling already gives type names a lawful value form there, so the recommendation stands."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-05T22:43:53.450Z"
+    },
+    {
+      "id": "D-MARK-FORM1",
+      "cardId": "c0t5khxi",
+      "group": "syntax",
+      "title": "One placement law for markers; the five forms retire",
+      "gist": "One rule for where a marker sits.",
+      "lesson": "The compiler's marker table gives every marker one of five written forms: Bare, Call, BareOrCall, Block, and Prefix. The audit found the five forms describe one shape. A marker sits right before the code it rules. This ballot decides whether the spec keeps five categories or one law. No current spelling changes under any option.",
+      "explainer": "",
+      "story": "Sam adds a new marker row to the compiler. Under five forms, Sam must first pick a category, and that pick quietly invents grammar. Under one law, Sam declares a name, a signature, and legal targets. The written shape then follows on its own.",
+      "inWild": "#Known limit :: 32           // registered form: Prefix\n#Track speed :: sensor()     // registered form: Bare — same written shape\n\n#Inline\nfn hot(a: Int) => Int = a * limit   // Bare again, line above\n\nfn read_device(p: *Int) => Int {\n    #Unsafe(\"p is a live MMIO register\") {   // form: Block — still marker, then target\n        = mem.volatile_read(p)\n    }\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "One placement law",
+          "detail": "A marker, or one bracket group, sits right before its target. Parentheses appear exactly when arguments are written. Empty parentheses are an error the formatter fixes. The form column leaves the registry. Every current spelling stays legal.",
+          "technical": "The registry row schema becomes: name, signature, legal targets, repeatable, status, inheritance. Formatter layout rule: own line above types, functions, and methods; inline before fields, parameters, bindings, statements, and blocks. S82 is rewritten to the one law.",
+          "code": "// every current spelling is unchanged:\n#Known limit :: 32\n#Unsafe(\"mmio read\") { = mem.volatile_read(p) }\n#Inline\nfn hot(a: Int) => Int = a * limit\n\n#Inline() fn wrong() {}   // error: remove the empty parentheses (formatter fixes)"
+        },
+        {
+          "key": "B",
+          "name": "Keep the five forms",
+          "detail": "The spec keeps Bare, Call, BareOrCall, Block, and Prefix as documented law. Every new marker picks one category. Nothing changes today, and the category stays a coarse reading aid in the registry.",
+          "code": "// same program compiles under B.\n// The difference is the rulebook: five grammar categories stay,\n// and each new marker must be filed under one of them.\n#Known limit :: 32        // stays filed as Prefix\n#Track speed :: sensor()  // stays filed as Bare"
+        },
+        {
+          "key": "C",
+          "name": "Two grammars: attached and scoped",
+          "detail": "Attached markers get the one placement law. Scoped block markers keep a separate grammar section because a brace body follows them. Two rules replace five.",
+          "code": "// attached: one law\n#Inline\nfn hot(a: Int) => Int = a * limit\n\n// scoped: its own grammar section\n#Unsafe(\"mmio read\") {\n    = mem.volatile_read(p)\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "One attribute grammar covers every attribute. Placement legality is per-attribute data, never a grammar class.",
+          "code": "#[inline]\n#[repr(C)]\nstruct P { x: u8 }"
+        },
+        {
+          "lang": "C#",
+          "note": "Attributes declare their legal targets in data (AttributeUsage), not through written-form categories.",
+          "code": "[Obsolete(\"use Fetch\")]\npublic void Get() {}"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "One sentence teaches the whole plane, and every future marker is a data row instead of a grammar decision. The audit showed the categories already collapsed: Known is filed Prefix while Track is filed Bare for the same written shape.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Five categories describe one shape, so each category names a difference that does not exist, and the table already holds contradictory filings."
+          },
+          {
+            "key": "C",
+            "reason": "A scoped rule differs only in what its target is, not in where the marker sits. A second grammar section rebuilds the split this rebuild removes."
+          }
+        ],
+        "tradeoff": "The registry loses a coarse hint about how each marker is usually written. The signature and legal-target columns carry that information with more precision."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared one placement law against the current five forms and recommended the law because every form reduces to marker-before-target.",
+        "boilOcean": "The breadth pass tested postfix pragmas, always-bracketed lists, and keyword-per-marker designs, all rejected as respellings that break ratified stacking or casing law. Option C was added as the strongest genuine split.",
+        "hybrid": "The hybrid pass tried the one law plus a dedicated scoped-block appendix. That is option A with clearer spec prose, so it was folded into A's technical detail.",
+        "cooperative": "The cooperative pass strengthened B: the form column does feed tooling menus today. A keeps that value because completion menus read the legal-target column instead.",
+        "adversarial": "The adversarial pass attacked A with empty-parentheses ambiguity and same-line declaration markers. Both resolved as formatter rules, so the recommendation stands."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-05T22:44:19.272Z"
+    },
+    {
+      "id": "D-MARK-REPEAT1",
+      "cardId": "c0t5khxi",
+      "group": "syntax",
+      "title": "Repeating one marker on one target",
+      "gist": "What happens when the same marker is written twice on one target.",
+      "lesson": "Today the same marker can be attached twice to one declaration, and the compiler accepts it silently. Some markers repeat with real meaning: a function can state several Pre contracts. This ballot decides the default rule and how meaningful repeats are declared.",
+      "explainer": "",
+      "story": "Riley merges two branches. Both branches added Inline to the same function, so the merged file carries it twice. Nothing warns, and the duplicate ships as noise the next reader must puzzle over.",
+      "inWild": "#[Inline, Inline]              // merge artifact — accepted silently today\nfn price(cents: Int) => Int = cents * 3\n\n#[Pre(n > 0, \"n must be positive\"), Pre(n < 100, \"n must stay small\")]\nfn take(n: Int) => Int = n     // two contracts — repetition with meaning",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Error by default; the registry marks repeatable rows",
+          "detail": "Writing one marker twice on one target is an error with a remove-the-repeat fix. Rows where repetition carries meaning are marked repeatable in the registry: Pre, Post, and allow.",
+          "technical": "The check joins the E0999 family and runs in the shared validation pipeline, so it covers every site. The repeatable column is ordinary registry data under D-MARK-REG1.",
+          "code": "#[Pre(n > 0, \"n must be positive\"), Pre(n < 100, \"n must stay small\")]\nfn take(n: Int) => Int = n      // legal: Pre is repeatable\n\n#[Inline, Inline]\nfn price(cents: Int) => Int = cents * 3\n// error: `#Inline` is already applied to this function — remove the repeat"
+        },
+        {
+          "key": "B",
+          "name": "Keep silent acceptance",
+          "detail": "The duplicate stays legal and the last copy wins. No new error, no new registry column. A lint could flag it later without a ballot.",
+          "code": "#[Inline, Inline]     // compiles clean; the second copy wins\nfn price(cents: Int) => Int = cents * 3"
+        },
+        {
+          "key": "C",
+          "name": "Error for every marker; no repeatable rows",
+          "detail": "All repeats are errors with no exception column. Several contracts combine into one condition with and, carrying one combined message.",
+          "code": "#Pre(n > 0 and n < 100, \"n must be between 1 and 99\")\nfn take(n: Int) => Int = n   // one contract, one blunt message"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Java",
+          "note": "Repeating is an explicit opt-in on the annotation declaration; unmarked annotations cannot repeat.",
+          "code": "@Repeatable(Schedules.class)\npublic @interface Schedule { String at(); }"
+        },
+        {
+          "lang": "C#",
+          "note": "AllowMultiple is false by default on every attribute; repeats are opt-in per attribute.",
+          "code": "[AttributeUsage(AttributeTargets.Method, AllowMultiple = true)]\nclass CheckAttribute : Attribute {}"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A silent duplicate is nearly always a typo or a merge artifact, and the registry already owns per-row facts. Meaningful repetition stays first-class for contracts.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Silence hides mistakes today and lets two copies quietly disagree later when one of them gains arguments."
+          },
+          {
+            "key": "C",
+            "reason": "Merging contracts into one condition produces one blunt failure message where separate contracts each explain their own violation."
+          }
+        ],
+        "tradeoff": "One more registry column, and every future row must state whether it repeats."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared erroring with today's silent acceptance and recommended the error because duplicates are almost always accidents.",
+        "boilOcean": "The breadth pass tested a warning-only rule and a formatter-dedupe rule, folding both into B since neither stops the copies from diverging. Option C was added as the strict alternative.",
+        "hybrid": "The hybrid pass tried error-by-default with a formatter auto-remove fix. That is option A's fix-it text, so it was folded into A.",
+        "cooperative": "The cooperative pass strengthened B with a future lint and strengthened C with its one-law simplicity and zero new columns.",
+        "adversarial": "The adversarial pass attacked A with repeated Doc lines and several allow lints on one declaration. Marking allow repeatable resolves it, so the recommendation stands."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-05T22:44:19.589Z"
+    },
+    {
+      "id": "D-HTML-NAME1",
+      "cardId": "c0t5khxi",
+      "group": "web-ui",
+      "title": "Two mechanisms share the name HTML",
+      "gist": "Separate names for the page-pairing marker and the inline HTML block.",
+      "lesson": "A file-level marker pairs a Jet web file with its host page. A block marker embeds inline HTML. Both are spelled HTML today, and the block form has no registry row. One name for two mechanisms breaks the one-name-one-meaning rule the marker renames established.",
+      "explainer": "",
+      "story": "Kim reads a teammate's web module. The top of the file says HTML with a path, and the middle of a function says HTML with a brace body. Kim assumes they are one feature and hunts for a connection that does not exist.",
+      "inWild": "#HTML(\"dashboard.html\")      // file: pair with this host page\n\nfn view() => Node {\n    = #HTML { <h1>Hi</h1> }    // block: inline HTML — an unrelated mechanism\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Block keeps HTML; the pairing marker gets its own name",
+          "detail": "Inline HTML keeps the name that says what the block contains. The file-pairing marker takes a name that says what it does. Candidate names, owner picks one at ratification: Page, Hosts, Mount, Serves.",
+          "technical": "Both mechanisms get registered rows with full signatures. The old file-level HTML spelling retires with a teaching fix to the chosen name.",
+          "code": "#Page(\"dashboard.html\")       // file: this Jet file pairs with that page\n\nfn view() => Node {\n    = #HTML { <h1>Hi</h1> }    // block: literally HTML — the name is the content\n}"
+        },
+        {
+          "key": "B",
+          "name": "Register both under one name",
+          "detail": "Two rows share the name HTML with site-dependent signatures. On a file it means pairing; on a block it means inline HTML. Nothing renames, and readers carry the double meaning.",
+          "code": "#HTML(\"dashboard.html\")       // file site: pairing\n\nfn view() => Node {\n    = #HTML { <h1>Hi</h1> }    // block site: inline HTML\n}"
+        },
+        {
+          "key": "C",
+          "name": "Retire the pairing marker",
+          "detail": "Page pairing moves to the package manifest. Source files stop naming their host page, and HTML means only the inline block.",
+          "code": "// package.jet\npages: .{ dashboard: .{ source: \"ui/dashboard.jet\", page: \"dashboard.html\" } }\n\n// ui/dashboard.jet — no pairing marker at all\nfn view() => Node = #HTML { <h1>Hi</h1> }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Svelte",
+          "note": "The file format owns the pairing, and the embedded template block has its own name. Two jobs, two names.",
+          "code": "<script> let n = 1 </script>\n<template><h1>Hi</h1></template>"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Each name then says exactly one true thing: the block contains HTML, and the file marker names the page it serves. The rename is one teaching fix.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "One name meaning two things at two sites is exactly the confusion the marker hygiene ruling paid to remove."
+          },
+          {
+            "key": "C",
+            "reason": "The manifest is far from the code it describes, and a reader at the top of the file loses the pairing information they want most."
+          }
+        ],
+        "tradeoff": "One rename with a teaching fix for existing files."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared renaming the pairing marker with registering the shared name twice and recommended the rename for one-name-one-meaning.",
+        "boilOcean": "The breadth pass tested renaming the block instead and folding pairing into Target, rejecting both because the block's name is its content and Target rules build partitions. Option C was added from this pass.",
+        "hybrid": "The hybrid pass tried the rename plus manifest pairing as an override for generated sites. That is a future manifest feature independent of this naming choice, so it was set aside.",
+        "cooperative": "The cooperative pass strengthened B, since site-dependent signatures become expressible after the registry rebuild, and strengthened C's single-source-of-truth story.",
+        "adversarial": "The adversarial pass attacked A over churn in existing web examples and candidate-name collisions. The sweep found few files, and none of the candidate names collide with registry rows or traits, so the recommendation stands."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-05T22:44:19.897Z"
     }
   ],
   "questions": [
@@ -107466,6 +108256,587 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-05T23:32:57.701Z",
+      "by": "bd-exp",
+      "action": "card.update",
+      "ref": "c0v2fuet",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-05T23:32:57.322Z",
+      "by": "bd-exp",
+      "action": "card.update",
+      "ref": "c0v2fuet",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-05T23:32:56.955Z",
+      "by": "bd-exp",
+      "action": "card.criteria-meet",
+      "ref": "c0v2fuet",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-05T23:32:56.646Z",
+      "by": "bd-exp",
+      "action": "card.criteria-meet",
+      "ref": "c0v2fuet",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-05T23:32:56.338Z",
+      "by": "bd-exp",
+      "action": "card.criteria-meet",
+      "ref": "c0v2fuet",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-05T23:32:56.017Z",
+      "by": "bd-exp",
+      "action": "card.criteria-meet",
+      "ref": "c0v2fuet",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-05T23:32:55.704Z",
+      "by": "bd-exp",
+      "action": "card.criteria-meet",
+      "ref": "c0v2fuet",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-05T23:32:55.393Z",
+      "by": "bd-exp",
+      "action": "card.criteria-meet",
+      "ref": "c0v2fuet",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-05T23:32:55.072Z",
+      "by": "bd-exp",
+      "action": "card.criteria-meet",
+      "ref": "c0v2fuet",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-05T23:32:36.179Z",
+      "by": "bd-exp",
+      "action": "card.update",
+      "ref": "c0q2s3u5",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-05T23:32:35.813Z",
+      "by": "bd-exp",
+      "action": "card.update",
+      "ref": "c0q2s3u5",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-05T23:32:35.448Z",
+      "by": "bd-exp",
+      "action": "card.criteria-meet",
+      "ref": "c0q2s3u5",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-05T23:32:35.138Z",
+      "by": "bd-exp",
+      "action": "card.criteria-meet",
+      "ref": "c0q2s3u5",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-05T23:32:34.825Z",
+      "by": "bd-exp",
+      "action": "card.criteria-meet",
+      "ref": "c0q2s3u5",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-05T23:32:34.521Z",
+      "by": "bd-exp",
+      "action": "card.criteria-meet",
+      "ref": "c0q2s3u5",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-05T23:32:34.216Z",
+      "by": "bd-exp",
+      "action": "card.criteria-meet",
+      "ref": "c0q2s3u5",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-05T23:32:33.900Z",
+      "by": "bd-exp",
+      "action": "card.criteria-meet",
+      "ref": "c0q2s3u5",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-05T23:32:33.589Z",
+      "by": "bd-exp",
+      "action": "card.criteria-meet",
+      "ref": "c0q2s3u5",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-05T23:32:14.627Z",
+      "by": "bd-exp",
+      "action": "card.update",
+      "ref": "c0v2fuet",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-05T23:32:14.264Z",
+      "by": "bd-exp",
+      "action": "card.claim",
+      "ref": "c0v2fuet",
+      "note": ""
+    },
+    {
+      "at": "2026-08-05T23:32:13.937Z",
+      "by": "bd-exp",
+      "action": "card.update",
+      "ref": "c0q2s3u5",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-05T23:32:13.572Z",
+      "by": "bd-exp",
+      "action": "card.claim",
+      "ref": "c0q2s3u5",
+      "note": ""
+    },
+    {
+      "at": "2026-08-05T23:32:05.831Z",
+      "by": "bd-exp",
+      "action": "card.update",
+      "ref": "c0kw5dh0",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-05T23:32:05.463Z",
+      "by": "bd-exp",
+      "action": "card.update",
+      "ref": "c0kw5dh0",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-05T23:31:00.021Z",
+      "by": "bd-exp",
+      "action": "card.update",
+      "ref": "c0kw5dh0",
+      "note": ""
+    },
+    {
+      "at": "2026-08-05T23:30:39.471Z",
+      "by": "bd-exp",
+      "action": "card.criteria-meet",
+      "ref": "c0kw5dh0",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-05T23:30:39.157Z",
+      "by": "bd-exp",
+      "action": "card.criteria-meet",
+      "ref": "c0kw5dh0",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-05T23:30:38.850Z",
+      "by": "bd-exp",
+      "action": "card.criteria-meet",
+      "ref": "c0kw5dh0",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-05T23:30:38.536Z",
+      "by": "bd-exp",
+      "action": "card.criteria-meet",
+      "ref": "c0kw5dh0",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-05T23:30:23.254Z",
+      "by": "bd-exp",
+      "action": "card.criteria-meet",
+      "ref": "c0kw5dh0",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-05T23:30:22.951Z",
+      "by": "bd-exp",
+      "action": "card.criteria-meet",
+      "ref": "c0kw5dh0",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-05T23:30:22.640Z",
+      "by": "bd-exp",
+      "action": "card.criteria-meet",
+      "ref": "c0kw5dh0",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-05T23:30:22.322Z",
+      "by": "bd-exp",
+      "action": "card.criteria-meet",
+      "ref": "c0kw5dh0",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-05T23:02:15.310Z",
+      "by": "bd-exp",
+      "action": "papercut.add",
+      "ref": "pc0dpkt1m",
+      "note": ""
+    },
+    {
+      "at": "2026-08-05T22:57:12.233Z",
+      "by": "bd-exp",
+      "action": "papercut.add",
+      "ref": "pc05dezr3",
+      "note": ""
+    },
+    {
+      "at": "2026-08-05T22:45:52.674Z",
+      "by": "claude-fable",
+      "action": "card.update",
+      "ref": "c0t5khxi",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-05T22:45:52.292Z",
+      "by": "claude-fable",
+      "action": "card.update",
+      "ref": "c0v3yofo",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-05T22:45:51.916Z",
+      "by": "claude-fable",
+      "action": "card.update",
+      "ref": "c0pzumap",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-05T22:45:51.540Z",
+      "by": "claude-fable",
+      "action": "card.update",
+      "ref": "c0kydt2i",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-05T22:45:51.171Z",
+      "by": "claude-fable",
+      "action": "card.update",
+      "ref": "c0fsjhdc",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-05T22:45:50.809Z",
+      "by": "claude-fable",
+      "action": "card.update",
+      "ref": "c0ai0h4w",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-05T22:45:50.440Z",
+      "by": "claude-fable",
+      "action": "card.update",
+      "ref": "c0556cxe",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-05T22:45:37.178Z",
+      "by": "claude-fable",
+      "action": "card.criteria-add",
+      "ref": "c0v3yofo",
+      "note": "#1 Each ratified outcome lands as one registry, spec, formatter"
+    },
+    {
+      "at": "2026-08-05T22:45:36.663Z",
+      "by": "claude-fable",
+      "action": "card.criteria-add",
+      "ref": "c0pzumap",
+      "note": "#3 Editor grammar generation has a drift test; hand-edits to ge"
+    },
+    {
+      "at": "2026-08-05T22:45:36.137Z",
+      "by": "claude-fable",
+      "action": "card.criteria-add",
+      "ref": "c0pzumap",
+      "note": "#2 The per-row coverage test walks every registry row through p"
+    },
+    {
+      "at": "2026-08-05T22:45:35.587Z",
+      "by": "claude-fable",
+      "action": "card.criteria-add",
+      "ref": "c0pzumap",
+      "note": "#1 The name-literal scan test is in CI, green, and fails when s"
+    },
+    {
+      "at": "2026-08-05T22:45:35.268Z",
+      "by": "claude-fable",
+      "action": "card.criteria-add",
+      "ref": "c0kydt2i",
+      "note": "#3 Owned menus, path-segment handling, and the Doc-with-Job cou"
+    },
+    {
+      "at": "2026-08-05T22:45:34.952Z",
+      "by": "claude-fable",
+      "action": "card.criteria-add",
+      "ref": "c0kydt2i",
+      "note": "#2 Retired rows diagnose without applying effects; Pure and Inl"
+    },
+    {
+      "at": "2026-08-05T22:45:34.646Z",
+      "by": "claude-fable",
+      "action": "card.criteria-add",
+      "ref": "c0kydt2i",
+      "note": "#1 No registered row lacks end-to-end behavior: Authority and S"
+    },
+    {
+      "at": "2026-08-05T22:45:34.342Z",
+      "by": "claude-fable",
+      "action": "card.criteria-add",
+      "ref": "c0fsjhdc",
+      "note": "#3 MethodInfo.markers returns real data with a reflection test;"
+    },
+    {
+      "at": "2026-08-05T22:45:34.031Z",
+      "by": "claude-fable",
+      "action": "card.criteria-add",
+      "ref": "c0fsjhdc",
+      "note": "#2 Tree-sitter parses signed markers and lowercase rows, reject"
+    },
+    {
+      "at": "2026-08-05T22:45:33.723Z",
+      "by": "claude-fable",
+      "action": "card.criteria-add",
+      "ref": "c0fsjhdc",
+      "note": "#1 Formatter prints retained marker nodes; flag reconstruction "
+    },
+    {
+      "at": "2026-08-05T22:45:33.421Z",
+      "by": "claude-fable",
+      "action": "card.criteria-add",
+      "ref": "c0ai0h4w",
+      "note": "#4 Per-marker special cases inside the shared binder are delete"
+    },
+    {
+      "at": "2026-08-05T22:45:33.113Z",
+      "by": "claude-fable",
+      "action": "card.criteria-add",
+      "ref": "c0ai0h4w",
+      "note": "#3 Static resolution binds every registered site; comptime argu"
+    },
+    {
+      "at": "2026-08-05T22:45:32.802Z",
+      "by": "claude-fable",
+      "action": "card.criteria-add",
+      "ref": "c0ai0h4w",
+      "note": "#2 Wrong-site errors are one E0355 family naming the rule's leg"
+    },
+    {
+      "at": "2026-08-05T22:45:32.447Z",
+      "by": "claude-fable",
+      "action": "card.criteria-add",
+      "ref": "c0ai0h4w",
+      "note": "#1 An unknown marker yields the one E0927 family at every site "
+    },
+    {
+      "at": "2026-08-05T22:45:32.027Z",
+      "by": "claude-fable",
+      "action": "card.criteria-add",
+      "ref": "c0556cxe",
+      "note": "#4 Foundation, parser, sema, marker, and grammar targeted suite"
+    },
+    {
+      "at": "2026-08-05T22:45:31.548Z",
+      "by": "claude-fable",
+      "action": "card.criteria-add",
+      "ref": "c0556cxe",
+      "note": "#3 Marker nodes are retained on every AST target site and reach"
+    },
+    {
+      "at": "2026-08-05T22:45:31.089Z",
+      "by": "claude-fable",
+      "action": "card.criteria-add",
+      "ref": "c0556cxe",
+      "note": "#2 Keyword-named markers need zero special cases; the six Unsaf"
+    },
+    {
+      "at": "2026-08-05T22:45:30.769Z",
+      "by": "claude-fable",
+      "action": "card.criteria-add",
+      "ref": "c0556cxe",
+      "note": "#1 The shared reader is the only marker parse path; a search pr"
+    },
+    {
+      "at": "2026-08-05T22:45:30.439Z",
+      "by": "claude-fable",
+      "action": "card.update",
+      "ref": "c0v3yofo",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-08-05T22:45:30.065Z",
+      "by": "claude-fable",
+      "action": "card.update",
+      "ref": "c0pzumap",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-08-05T22:45:29.688Z",
+      "by": "claude-fable",
+      "action": "card.update",
+      "ref": "c0fsjhdc",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-08-05T22:45:29.312Z",
+      "by": "claude-fable",
+      "action": "card.update",
+      "ref": "c0ai0h4w",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-08-05T22:45:08.921Z",
+      "by": "claude-fable",
+      "action": "card.add",
+      "ref": "c0v3yofo",
+      "note": "Marker ballot outcomes migration (form law, repeat law, Impure, SQL, HTML)"
+    },
+    {
+      "at": "2026-08-05T22:45:08.612Z",
+      "by": "claude-fable",
+      "action": "card.add",
+      "ref": "c0pzumap",
+      "note": "Law-zero drift guards: name-literal scan, per-row coverage, generated grammars"
+    },
+    {
+      "at": "2026-08-05T22:45:08.307Z",
+      "by": "claude-fable",
+      "action": "card.add",
+      "ref": "c0kydt2i",
+      "note": "Marker row debt: dead rows, retired effects, menu special cases"
+    },
+    {
+      "at": "2026-08-05T22:45:07.995Z",
+      "by": "claude-fable",
+      "action": "card.add",
+      "ref": "c0fsjhdc",
+      "note": "Marker consumers read registry rows: formatter, tree-sitter, reflection, explain"
+    },
+    {
+      "at": "2026-08-05T22:45:07.675Z",
+      "by": "claude-fable",
+      "action": "card.add",
+      "ref": "c0ai0h4w",
+      "note": "Marker validation: one registry pipeline at every site"
+    },
+    {
+      "at": "2026-08-05T22:45:07.351Z",
+      "by": "claude-fable",
+      "action": "card.add",
+      "ref": "c0556cxe",
+      "note": "Marker uniform attachment: one parse path, markers retained on AST"
+    },
+    {
+      "at": "2026-08-05T22:44:19.897Z",
+      "by": "claude-fable",
+      "action": "decision.add",
+      "ref": "D-HTML-NAME1",
+      "note": "Two mechanisms share the name HTML"
+    },
+    {
+      "at": "2026-08-05T22:44:19.589Z",
+      "by": "claude-fable",
+      "action": "decision.add",
+      "ref": "D-MARK-REPEAT1",
+      "note": "Repeating one marker on one target"
+    },
+    {
+      "at": "2026-08-05T22:44:19.273Z",
+      "by": "claude-fable",
+      "action": "decision.add",
+      "ref": "D-MARK-FORM1",
+      "note": "One placement law for markers; the five forms retire"
+    },
+    {
+      "at": "2026-08-05T22:43:53.450Z",
+      "by": "claude-fable",
+      "action": "decision.add",
+      "ref": "D-SQL-ARG1",
+      "note": "How a SQL block names its row type"
+    },
+    {
+      "at": "2026-08-05T22:43:52.909Z",
+      "by": "claude-fable",
+      "action": "decision.add",
+      "ref": "D-IMPURE-REASON1",
+      "note": "Impure joins the reason law"
+    },
+    {
+      "at": "2026-08-05T22:40:36.609Z",
+      "by": "owner",
+      "action": "decision.verdict",
+      "ref": "D-VERDICT-1455-1",
+      "note": "D-MARK-REG1 — mandatory registration: a marker exists if and only if it is a registry row. No marker may be parsed, checked, formatted, highlighted, or reflected outside Policy::APPLIED_RULES; every active row must be fully implemented end to end or retired. Drift in either direction is a defect enforced by CI guards (name-literal scan, per-row end-to-end coverage, generated editor grammars). Owner words (2026-08-05): 'We must make all markers REQUIRED to be registered in the registry, no exceptions for drift, no tolerance. Not acceptable to have marker drift from registry.'"
+    },
+    {
+      "at": "2026-08-05T22:40:19.723Z",
+      "by": "claude-fable",
+      "action": "card.update",
+      "ref": "c0t5khxi",
+      "note": "milestoneId"
+    },
+    {
+      "at": "2026-08-05T22:40:12.760Z",
+      "by": "claude-fable",
+      "action": "card.add",
+      "ref": "c0t5khxi",
+      "note": "Marker plane first-principles rebuild: ballot slate + law zero"
+    },
+    {
+      "at": "2026-08-05T22:19:49.278Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c00ms1om",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-05T22:19:48.905Z",
+      "by": "bd-ledger",
+      "action": "card.release",
+      "ref": "c00ms1om",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-08-05T22:19:21.143Z",
+      "by": "bd-exp",
+      "action": "card.claim",
+      "ref": "c0v2fuet",
+      "note": ""
+    },
+    {
+      "at": "2026-08-05T22:19:20.810Z",
+      "by": "bd-exp",
+      "action": "card.claim",
+      "ref": "c0q2s3u5",
+      "note": ""
+    },
+    {
+      "at": "2026-08-05T22:19:14.852Z",
+      "by": "bd-exp",
+      "action": "card.claim",
+      "ref": "c0kw5dh0",
+      "note": ""
+    },
     {
       "at": "2026-08-05T22:17:27.439Z",
       "by": "bd-ledger",
@@ -110384,587 +111755,6 @@
       "action": "card.criteria-meet",
       "ref": "c0hylqrr",
       "note": "#1"
-    },
-    {
-      "at": "2026-08-05T01:03:50.792Z",
-      "by": "codex-e5",
-      "action": "card.update",
-      "ref": "c0hylqrr",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-05T00:59:59.226Z",
-      "by": "codex-e5",
-      "action": "card.claim",
-      "ref": "c0hylqrr",
-      "note": ""
-    },
-    {
-      "at": "2026-08-05T00:57:57.372Z",
-      "by": "codex-e5",
-      "action": "card.release",
-      "ref": "c0w7297z",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-08-05T00:55:12.296Z",
-      "by": "codex-e5",
-      "action": "card.claim",
-      "ref": "c0w7297z",
-      "note": ""
-    },
-    {
-      "at": "2026-08-05T00:54:24.648Z",
-      "by": "codex-e5",
-      "action": "card.release",
-      "ref": "c0wbxcvq",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-08-05T00:54:24.290Z",
-      "by": "codex-e5",
-      "action": "card.release",
-      "ref": "c0yl347q",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-08-04T23:59:46.707Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-04T23:59:46.707Z"
-    },
-    {
-      "at": "2026-08-04T23:57:27.773Z",
-      "by": "codex-e3-main",
-      "action": "card.update",
-      "ref": "c0a2mcjv",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-04T23:53:41.472Z",
-      "by": "codex-e3-main",
-      "action": "card.claim",
-      "ref": "c0a2mcjv",
-      "note": ""
-    },
-    {
-      "at": "2026-08-04T23:53:09.665Z",
-      "by": "codex-e3-main",
-      "action": "card.update",
-      "ref": "c0mfulbb",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-04T23:53:05.043Z",
-      "by": "codex-e3-review",
-      "action": "card.update",
-      "ref": "c0mfulbb",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-04T23:53:04.656Z",
-      "by": "codex-e3-main",
-      "action": "card.update",
-      "ref": "c0mfulbb",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-04T22:58:14.877Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-04T22:58:14.877Z"
-    },
-    {
-      "at": "2026-08-04T22:58:12.734Z",
-      "by": "owner",
-      "action": "acceptance.resolve",
-      "ref": "D-ACCEPT-1078",
-      "note": "owner-ui session=Rs1jQZ6pacQ challenge=2-xUvPMvceo outcome=accept"
-    },
-    {
-      "at": "2026-08-04T22:58:10.187Z",
-      "by": "owner",
-      "action": "acceptance.resolve",
-      "ref": "D-ACCEPT-923",
-      "note": "owner-ui session=Rs1jQZ6pacQ challenge=GVjjlQNR8eg outcome=accept"
-    },
-    {
-      "at": "2026-08-04T22:52:07.626Z",
-      "by": "fable-papercut",
-      "action": "card.update",
-      "ref": "c08j7uxj",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-04T22:52:07.626Z",
-      "by": "agent",
-      "action": "decision.add",
-      "ref": "D-ACCEPT-1078",
-      "note": "Accept #1078 — Service supervisor: service and task dependency order"
-    },
-    {
-      "at": "2026-08-04T22:52:07.247Z",
-      "by": "fable-papercut",
-      "action": "card.update",
-      "ref": "c0daklaf",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-04T22:52:07.247Z",
-      "by": "agent",
-      "action": "decision.add",
-      "ref": "D-ACCEPT-923",
-      "note": "Accept #923 — Closure DB: optional secure multi-user broker boundary"
-    },
-    {
-      "at": "2026-08-04T22:49:09.439Z",
-      "by": "codex-e3-main",
-      "action": "card.update",
-      "ref": "c0mfulbb",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-04T22:47:53.573Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-04T22:47:53.573Z"
-    },
-    {
-      "at": "2026-08-04T22:39:46.368Z",
-      "by": "codex-e3-main",
-      "action": "card.claim",
-      "ref": "c0mfulbb",
-      "note": ""
-    },
-    {
-      "at": "2026-08-04T22:39:43.722Z",
-      "by": "codex-e3-main",
-      "action": "card.release",
-      "ref": "c0rfgh4h",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-08-04T22:38:50.639Z",
-      "by": "codex-e3-main",
-      "action": "card.claim",
-      "ref": "c0rfgh4h",
-      "note": ""
-    },
-    {
-      "at": "2026-08-04T22:37:06.976Z",
-      "by": "codex-e3-main",
-      "action": "card.update",
-      "ref": "c08zpu6m",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-04T22:37:02.364Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c08zpu6m",
-      "note": "#8"
-    },
-    {
-      "at": "2026-08-04T22:37:02.027Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c08zpu6m",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-04T22:37:01.693Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c08zpu6m",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-04T22:37:01.376Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c08zpu6m",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-04T22:37:01.049Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c08zpu6m",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-04T22:37:00.715Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c08zpu6m",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-04T22:37:00.394Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c08zpu6m",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-04T22:37:00.059Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c08zpu6m",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-04T22:36:45.475Z",
-      "by": "codex-e3-main",
-      "action": "card.update",
-      "ref": "c08zpu6m",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-04T22:36:33.720Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c08zpu6m",
-      "note": "#8"
-    },
-    {
-      "at": "2026-08-04T22:36:33.391Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c08zpu6m",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-04T22:36:33.069Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c08zpu6m",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-04T22:36:32.745Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c08zpu6m",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-04T22:36:32.430Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c08zpu6m",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-04T22:36:32.091Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c08zpu6m",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-04T22:36:31.769Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c08zpu6m",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-04T22:36:31.429Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c08zpu6m",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-04T22:36:12.893Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c08zpu6m",
-      "note": "#8"
-    },
-    {
-      "at": "2026-08-04T22:36:12.564Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c08zpu6m",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-04T22:36:12.235Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c08zpu6m",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-04T22:36:11.922Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c08zpu6m",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-04T22:36:11.593Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c08zpu6m",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-04T22:36:11.275Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c08zpu6m",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-04T22:36:10.936Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c08zpu6m",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-04T22:36:10.589Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c08zpu6m",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-04T22:35:59.886Z",
-      "by": "codex-e3-main",
-      "action": "card.update",
-      "ref": "c08zpu6m",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-04T22:26:54.638Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-04T22:26:54.638Z"
-    },
-    {
-      "at": "2026-08-04T22:26:29.575Z",
-      "by": "owner",
-      "action": "papercut.resolve",
-      "ref": "pc00pgfyt",
-      "note": ""
-    },
-    {
-      "at": "2026-08-04T22:11:36.540Z",
-      "by": "codex-e3-main",
-      "action": "card.claim",
-      "ref": "c08zpu6m",
-      "note": ""
-    },
-    {
-      "at": "2026-08-04T22:06:35.029Z",
-      "by": "codex-e3-review",
-      "action": "card.update",
-      "ref": "c0090v5u",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-04T22:04:57.630Z",
-      "by": "codex-e3-review",
-      "action": "card.update",
-      "ref": "c05hy7lo",
-      "note": "logEntry,blockedBy"
-    },
-    {
-      "at": "2026-08-04T21:59:23.928Z",
-      "by": "codex-e3-main",
-      "action": "card.update",
-      "ref": "c0uwxdq4",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-04T21:59:23.545Z",
-      "by": "codex-e3-review",
-      "action": "card.update",
-      "ref": "c0uwxdq4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-04T21:56:31.177Z",
-      "by": "codex-e3-main",
-      "action": "card.update",
-      "ref": "c0kwbiks",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-04T21:56:27.245Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c0kwbiks",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-04T21:56:26.921Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c0kwbiks",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-04T21:56:26.599Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c0kwbiks",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-04T21:56:26.282Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c0kwbiks",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-04T21:56:25.936Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c0kwbiks",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-04T21:56:19.063Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c0kwbiks",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-04T21:56:18.736Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c0kwbiks",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-04T21:56:18.388Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c0kwbiks",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-04T21:56:18.063Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c0kwbiks",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-04T21:56:17.730Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c0kwbiks",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-04T21:55:57.682Z",
-      "by": "codex-e3-main",
-      "action": "card.update",
-      "ref": "c09uofoj",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-04T21:55:53.769Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c09uofoj",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-04T21:55:53.444Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c09uofoj",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-04T21:55:53.120Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c09uofoj",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-04T21:55:52.788Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c09uofoj",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-04T21:55:52.438Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c09uofoj",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-04T21:55:45.381Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c09uofoj",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-04T21:55:45.040Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c09uofoj",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-04T21:55:44.729Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c09uofoj",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-04T21:55:44.412Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c09uofoj",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-04T21:55:44.068Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c09uofoj",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-04T21:55:16.648Z",
-      "by": "codex-e3-main",
-      "action": "card.update",
-      "ref": "c0090v5u",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-04T21:55:11.119Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c0090v5u",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-04T21:55:10.778Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c0090v5u",
-      "note": "#4"
     }
   ],
   "nextNum": 368,
@@ -111020,6 +111810,22 @@
       "text": "Shared-tree collision: another session was editing this working tree concurrently (AGENTS.md tower-serve rule, a leading-dot struct-literal parser fix referencing card #1441, field-audit renumbering to #1442, and six examples/features/types/*.jet migrated to value-dispatch form). Their uncommitted example edits made my golden run look like a regression, and my cleanup reverted them. Recovered every file from a dangling stash and restored their versions. Two of my commits (bbd8531f8, 02527858b) still carry the reverted content in history; the working tree now has theirs.",
       "cardId": null,
       "created": "2026-08-05T18:32:48.136Z",
+      "status": "open"
+    },
+    {
+      "id": "pc05dezr3",
+      "by": "bd-exp",
+      "text": "examples/features/expected/math/random_audit.out is stale: random.normal from the same seed prints false for a == b on both AOT and jet run; unrelated to the power/xor cards",
+      "cardId": null,
+      "created": "2026-08-05T22:57:12.233Z",
+      "status": "open"
+    },
+    {
+      "id": "pc0dpkt1m",
+      "by": "bd-exp",
+      "text": "examples/features/tooling/branch_dispatch_bench.jet stopped parsing at commit c3cbdc85b: value dispatch (return if n == { 0..9 -> 1 }) has no range arm head, so fmt_lossless fails; 18 example files carry pre-existing hard errors",
+      "cardId": null,
+      "created": "2026-08-05T23:02:15.310Z",
       "status": "open"
     }
   ]

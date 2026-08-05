@@ -439,7 +439,10 @@ manifest.
 Why A: it removes the only generic-argument grammar in the plane and the only
 name that means two things, at the cost of one rename.
 
-## Implementation cards (post-review)
+## Implementation cards
+
+Minted 2026-08-05: ballot slate + law-zero verdict (D-VERDICT-1455-1) on card
+#1455; the six cards below are #1456–#1461, with #1461 gated on the slate.
 
 1. **Uniform attachment** — one blind parse path, markers retained on every
    AST node, hand-bumps/dual applicators/shadow tables/lexer vocabulary
