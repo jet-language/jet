@@ -3,6 +3,32 @@
 use std::fs;
 
 #[test]
+fn package_transition_surface_formats_canonically_and_idempotently() {
+    let sources = [
+        "name: \"demo\"\noutputs: .{ app: .Executable.{ entry: run } }\n",
+        "pub development :: Config.{ environments: .{ development: .Environment.{ tools: [\"git\"] } } }\n",
+        "pub app :: Config.{ version: \"1\" }\n",
+    ];
+
+    for source in sources {
+        let once = jet::Package::format_source(source, "package.jet")
+            .expect("canonical package source should format");
+        let twice = jet::Package::format_source(&once, "package.jet")
+            .expect("formatted package source should reformat");
+        assert_eq!(once, twice, "canonical package formatting must be stable");
+        assert!(
+            once.contains("Executable") || once.contains("Config"),
+            "formatter dropped package contribution:\n{once}"
+        );
+    }
+
+    let formatted = jet::Package::format_source("name : \"demo\"\n", "package.jet")
+        .expect("package field spacing should format");
+    assert!(formatted.contains("name: \"demo\""), "{formatted}");
+    assert!(!formatted.contains("name :"), "{formatted}");
+}
+
+#[test]
 fn fixed_interpolation_selector_is_stable() {
     let src = "fn run(){price::1234.5\nprint(\"{price#Fixed(2)}\")}\n";
     let once = jet::format_source(src).expect("fixed interpolation should format");

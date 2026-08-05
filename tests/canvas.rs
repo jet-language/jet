@@ -609,10 +609,52 @@ fn canvas_rejects_ambiguous_package_facts_before_projection() {
 
     let diagnostics = jet::Canvas::graph_json_for_file(&entry)
         .expect_err("Canvas must reject ambiguous package facts");
+    assert!(diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E1206")
+        .is_some(), "{diagnostics:?}");
+}
+
+#[test]
+fn canvas_project_uses_shared_package_diagnostic() {
+    let dir = temp_dir("project_ambiguous_package");
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"canonical\"\nversion: \"0.1.0\"\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("pkg.jet"),
+        "payload: { name: \"legacy\", version: \"0.1.0\" }\n",
+    )
+    .unwrap();
+    let entry = dir.join("main.jet");
+    fs::write(&entry, "fn run() {}\n").unwrap();
+
+    let diagnostics = jet::Canvas::graph_json_for_file(&entry)
+        .expect_err("Canvas must reject ambiguous package facts");
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E1206")
+        .expect("ambiguous package facts must use the shared E1206 diagnostic");
+    let project = jet::Canvas::project_json_for_entry(&entry);
+    assert!(project.contains("\"code\":\"E1206\""), "{project}");
+    assert!(!project.contains("\"code\":\"package\""), "{project}");
     assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E1206"),
-        "{diagnostics:?}"
+        project.contains("one typed Package fact graph must own this projection"),
+        "{project}"
     );
+    for field in [
+        diagnostic.code.as_str(),
+        diagnostic.what.as_str(),
+        diagnostic.why.as_str(),
+        diagnostic.fix.as_str(),
+    ] {
+        assert!(
+            project.contains(field),
+            "project omitted diagnostic field: {field}\n{project}"
+        );
+    }
 }
 
 #[test]
@@ -2603,6 +2645,47 @@ fn canvas_project_json_projects_workspace_packages_and_files() {
     assert!(json.contains("\"source\":\"version:0.1.0\""), "{json}");
     assert!(json.contains("\"path\":\"packages/ranker/lib.jet\""), "{json}");
     assert!(json.contains("\"kind\":\"source\""), "{json}");
+}
+
+#[test]
+fn canvas_projects_typed_member_after_package_transition() {
+    let dir = temp_dir("package_transition_canvas_member");
+    fs::write(
+        dir.join("package.jet"),
+        "name: \"workspace\"\napp :: Config.{ version: \"1\" }\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("workspace.jet"),
+        "module workspace { members: [\"./packages/app\"] }\n",
+    )
+    .unwrap();
+    let entry = dir.join("main.jet");
+    fs::write(&entry, "fn run() {\n    print(\"workspace\")\n}\n").unwrap();
+    let member_entry = dir.join("packages/app/main.jet");
+    fs::create_dir_all(member_entry.parent().unwrap()).unwrap();
+    fs::write(&member_entry, "fn run() {\n    print(\"app\")\n}\n").unwrap();
+
+    jetpack::Transition::split(
+        &dir,
+        jetpack::Transition::SplitTarget::Package {
+            name: "app".to_string(),
+        },
+        false,
+    )
+    .expect("package transition");
+
+    let project = jet::Canvas::project_json_for_entry(&entry);
+    assert!(project.contains("\"mode\":\"workspace\""), "{project}");
+    assert!(project.contains("\"name\":\"app\""), "{project}");
+    assert!(project.contains("\"manifest\":\"packages/app/package.jet\""), "{project}");
+
+    jetpack::Transition::fold(&dir, PathBuf::from("packages/app/package.jet").as_path(), false)
+        .expect("package fold");
+    assert!(!dir.join("packages/app/package.jet").exists());
+    assert!(fs::read_to_string(dir.join("package.jet"))
+        .unwrap()
+        .contains("app :: Config"));
 }
 
 #[test]

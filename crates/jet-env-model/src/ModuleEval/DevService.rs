@@ -89,11 +89,6 @@ pub(super) fn evaluate_dev_service(
                 Some(names) => plan.after = names,
                 None => plan.extra.push((name.clone(), v.jet_show())),
             }
-        } else if name == Syntax::DEV_SERVICE_FIELD_DEPENDS_ON {
-            match strings_from(&v) {
-                Some(names) => plan.depends_on = names,
-                None => plan.extra.push((name.clone(), v.jet_show())),
-            }
         } else if name == Syntax::DEV_SERVICE_FIELD_BEFORE_START {
             match strings_from(&v) {
                 Some(names) => plan.before_start = names,

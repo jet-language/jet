@@ -238,7 +238,9 @@ pub const SERVICE_FIELD_ENABLE: &str = "enable";
 /// (the typed stop policy, else a bounded signal sequence), `data_dir` (its
 /// persisted-state directory, else `.jet/services/<name>/data`), and `ready`
 /// (a shell command polled until it exits 0 — the readiness contract, else a
-/// TCP probe on `ports[0]`, else a bare process-alive check).
+/// TCP probe on `ports[0]`, else a bare process-alive check). Dependencies use
+/// `after` only; retired `depends_on` declarations are rejected by the dev
+/// supervisor as E1262.
 pub const DEV_SERVICE_FIELD_PORTS: &str = "ports";
 pub const DEV_SERVICE_FIELD_RUN: &str = "run";
 pub const DEV_SERVICE_FIELD_SHUTDOWN: &str = "shutdown";
@@ -247,7 +249,6 @@ pub const DEV_SERVICE_FIELD_READY: &str = "ready";
 pub const DEV_SERVICE_FIELD_RESTART: &str = "restart";
 pub const DEV_SERVICE_FIELD_WATCH: &str = "watch";
 pub const DEV_SERVICE_FIELD_AFTER: &str = "after";
-pub const DEV_SERVICE_FIELD_DEPENDS_ON: &str = "depends_on";
 pub const DEV_SERVICE_FIELD_BEFORE_START: &str = "before_start";
 pub const DEV_SERVICE_FIELD_SOCKETS: &str = "sockets";
 

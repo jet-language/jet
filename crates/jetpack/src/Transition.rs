@@ -346,6 +346,14 @@ fn split_plan(root: &Path, target: SplitTarget) -> Result<TransitionPlan, Transi
         }
         SplitTarget::Package { name } => {
             validate_name(&name, "Package")?;
+            let existing_member_names = package
+                .member_names_in(&root)
+                .map_err(|error| TransitionError(error.to_string()))?;
+            if existing_member_names.iter().any(|existing| existing == &name) {
+                return Err(TransitionError(format!(
+                    "member Package name `{name}` is declared more than once"
+                )));
+            }
             let (entry, body) = required_inline_config(&entries, &name, &package_path)?;
             let destination = PathBuf::from(format!("packages/{name}/package.jet"));
             ensure_new_file(&root, &destination)?;
@@ -530,6 +538,7 @@ fn legacy_plan(root: &Path) -> Result<TransitionPlan, TransitionError> {
     let mut configs = root_facts.configs.clone();
     let mut changes = Vec::new();
 
+    let mut environment_names = BTreeSet::new();
     for (name, bytes) in &role_files {
         if *name == "pkg.jet" {
             continue;
@@ -555,10 +564,38 @@ fn legacy_plan(root: &Path) -> Result<TransitionPlan, TransitionError> {
             root_text = set_or_add_field(&root_text, "members", &members)?;
             continue;
         }
-        let (config_name, config_text) = if *name == "env.jet" {
-            let (module_name, body) = env_module(text)?;
-            (module_name.clone(), render_config(&module_name, "raw", body))
-        } else {
+        if *name == "env.jet" {
+            for (module_name, body) in env_modules(text)? {
+                if !environment_names.insert(module_name.clone()) {
+                    return Err(TransitionError(format!(
+                        "env.jet declares environment `{module_name}` more than once; migration stops before writing"
+                    )));
+                }
+                let environment = format!(
+                    "{{ {}: Environment.{{\n{}\n}} }}",
+                    module_name,
+                    body.trim()
+                );
+                let config_text = render_config(&module_name, "environments", &environment);
+                let destination = PathBuf::from(format!(
+                    "package/{}-{}.jet",
+                    name.trim_end_matches(".jet"),
+                    module_name
+                ));
+                ensure_new_file(&root, &destination)?;
+                ConfigFacts::parse(&config_text, destination.display().to_string())
+                    .map_err(|error| transition_parse_error(&destination, error))?;
+                root_text = add_config_reference(&root_text, &configs, &destination)?;
+                configs.push(destination.to_string_lossy().into_owned());
+                changes.push(FileChange {
+                    relative: destination,
+                    before: None,
+                    after: Some(config_text.into_bytes()),
+                });
+            }
+            continue;
+        }
+        let (config_name, config_text) = {
             let config_name = "config".to_string();
             let config_text = if ConfigFacts::parse(text, name.to_string()).is_ok() {
                 text.to_string()
@@ -609,10 +646,7 @@ fn legacy_plan(root: &Path) -> Result<TransitionPlan, TransitionError> {
             );
         }
     }
-    let mut before = before_facts.clone();
-    before
-        .compose(composed.clone())
-        .map_err(|error| TransitionError(error.to_string()))?;
+    let before = before_facts.clone();
     let mut after = before_facts;
     after
         .compose(composed)
@@ -1627,6 +1661,7 @@ fn render_member_package(name: &str, body: &str) -> String {
 }
 
 fn render_legacy_package_root(source: &str) -> Result<String, TransitionError> {
+    validate_legacy_manifest_fields(source)?;
     let manifest = crate::PackageManifest::parse(source)
         .map_err(|error| TransitionError(format!("cannot migrate pkg.jet into package.jet: {error:?}")))?;
     if !manifest.packages.is_empty()
@@ -1681,6 +1716,167 @@ fn render_legacy_package_root(source: &str) -> Result<String, TransitionError> {
     }
     output.push_str("}\n");
     Ok(output)
+}
+
+fn validate_legacy_manifest_fields(source: &str) -> Result<(), TransitionError> {
+    const IDENTITY_FIELDS: &[&str] = &[
+        "name",
+        "version",
+        "jet",
+        "edition",
+        "license",
+        "description",
+        "repository",
+        "target",
+        "runtime",
+    ];
+    const TOP_LEVEL_BLOCKS: &[&str] = &[
+        "payload",
+        "identity",
+        "deps",
+        "packages",
+        "build",
+        "effects",
+        "grants",
+        "policy",
+        "dev_deps",
+        "patch",
+        "workspace",
+    ];
+
+    let entries = source_entries(&strip_comments(source));
+    let mut identity_blocks = 0;
+    let mut seen_fields = BTreeSet::new();
+    let mut saw_top_level_identity = false;
+    for entry in &entries {
+        let Some(field) = entry.field.as_deref() else {
+            return Err(TransitionError(format!(
+                "pkg.jet contains an unrepresentable declaration `{}`; migration stops before writing",
+                entry.raw.trim()
+            )));
+        };
+        if !seen_fields.insert(field.to_string()) {
+            return Err(TransitionError(format!(
+                "pkg.jet declares field `{field}` more than once; migration stops before writing"
+            )));
+        }
+        if IDENTITY_FIELDS.contains(&field) {
+            if identity_blocks > 0 {
+                return Err(TransitionError(
+                    "pkg.jet mixes top-level identity fields with an identity block; migration stops before writing"
+                        .to_string(),
+                ));
+            }
+            saw_top_level_identity = true;
+            continue;
+        }
+        if !TOP_LEVEL_BLOCKS.contains(&field) {
+            return Err(TransitionError(format!(
+                "pkg.jet contains unknown field `{field}`; migration stops before writing"
+            )));
+        }
+        if matches!(field, "payload" | "identity") {
+            if saw_top_level_identity {
+                return Err(TransitionError(
+                    "pkg.jet mixes an identity block with top-level identity fields; migration stops before writing"
+                        .to_string(),
+                ));
+            }
+            if identity_blocks > 0 {
+                return Err(TransitionError(
+                    "pkg.jet declares more than one identity block; migration stops before writing"
+                        .to_string(),
+                ));
+            }
+            identity_blocks += 1;
+            let value = field_value(&entry.raw, field).ok_or_else(|| {
+                TransitionError(format!("{field} has no value; migration stops before writing"))
+            })?;
+            let body = record_body(&value).ok_or_else(|| {
+                TransitionError(format!("{field} is not a closed identity record; migration stops before writing"))
+            })?;
+            for nested in source_entries(body) {
+                let Some(nested_field) = nested.field.as_deref() else {
+                    return Err(TransitionError(format!(
+                        "pkg.jet identity contains an unrepresentable declaration `{}`; migration stops before writing",
+                        nested.raw.trim()
+                    )));
+                };
+                if !IDENTITY_FIELDS.contains(&nested_field) {
+                    return Err(TransitionError(format!(
+                        "pkg.jet identity contains unknown field `{nested_field}`; migration stops before writing"
+                    )));
+                }
+            }
+            validate_legacy_identity_body(body)?;
+        } else if field == "deps" {
+            let value = field_value(&entry.raw, field).ok_or_else(|| {
+                TransitionError("deps has no value; migration stops before writing".to_string())
+            })?;
+            validate_legacy_dependency_block(&value)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_legacy_identity_body(body: &str) -> Result<(), TransitionError> {
+    let mut seen = BTreeSet::new();
+    for entry in source_entries(body) {
+        let Some(field) = entry.field.as_deref() else {
+            return Err(TransitionError(format!(
+                "pkg.jet identity contains an unrepresentable declaration `{}`; migration stops before writing",
+                entry.raw.trim()
+            )));
+        };
+        if !seen.insert(field.to_string()) {
+            return Err(TransitionError(format!(
+                "pkg.jet identity declares field `{field}` more than once; migration stops before writing"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_legacy_dependency_block(value: &str) -> Result<(), TransitionError> {
+    let body = record_body(value).ok_or_else(|| {
+        TransitionError("pkg.jet deps is not a closed record; migration stops before writing".to_string())
+    })?;
+    for entry in source_entries(body) {
+        let Some(name) = entry.field.as_deref() else {
+            return Err(TransitionError(format!(
+                "pkg.jet deps contains an unrepresentable declaration `{}`; migration stops before writing",
+                entry.raw.trim()
+            )));
+        };
+        let value = field_value(&entry.raw, name).ok_or_else(|| {
+            TransitionError(format!(
+                "pkg.jet dependency `{name}` has no value; migration stops before writing"
+            ))
+        })?;
+        let Some(git_body) = record_body(&value) else {
+            continue;
+        };
+        let mut seen = BTreeSet::new();
+        for nested in source_entries(git_body) {
+            let Some(field) = nested.field.as_deref() else {
+                return Err(TransitionError(format!(
+                    "pkg.jet dependency `{name}` contains an unrepresentable declaration `{}`; migration stops before writing",
+                    nested.raw.trim()
+                )));
+            };
+            if !matches!(field, "git" | "tag" | "branch" | "rev") {
+                return Err(TransitionError(format!(
+                    "pkg.jet dependency `{name}` contains unknown field `{field}`; migration stops before writing"
+                )));
+            }
+            if !seen.insert(field.to_string()) {
+                return Err(TransitionError(format!(
+                    "pkg.jet dependency `{name}` declares field `{field}` more than once; migration stops before writing"
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn legacy_dependency_value(source: &crate::PackageManifest::DepSource) -> String {
@@ -1872,35 +2068,46 @@ fn module_body<'a>(
     Ok(Some(&source[absolute + 1..close]))
 }
 
-fn env_module(source: &str) -> Result<(String, &str), TransitionError> {
+fn env_modules<'a>(source: &'a str) -> Result<Vec<(String, &'a str)>, TransitionError> {
     let clean = mask_comments(source);
     let marker = "module env.";
-    let start = clean.match_indices(marker).find_map(|(start, _)| {
-        (start == 0
+    let mut modules = Vec::new();
+    let mut search_from = 0;
+    while let Some(relative) = clean[search_from..].find(marker) {
+        let start = search_from + relative;
+        let before_ok = start == 0
             || !clean[..start]
                 .chars()
                 .next_back()
-                .is_some_and(|character| character.is_ascii_alphanumeric() || character == '_'))
-            .then_some(start)
-    }).ok_or_else(|| {
-        TransitionError("env.jet has no module env.<name> declaration".to_string())
-    })?;
-    let name_start = start + marker.len();
-    let name_end = clean[name_start..]
-        .find(|ch: char| ch == '{' || ch.is_whitespace())
-        .map(|offset| name_start + offset)
-        .ok_or_else(|| TransitionError("env.jet has no environment name".to_string()))?;
-    let name = clean[name_start..name_end].trim().to_string();
-    validate_name(&name, "Environment")?;
-    let open = clean[name_end..]
-        .find('{')
-        .map(|offset| name_end + offset)
-        .ok_or_else(|| {
-            TransitionError("env.jet is missing its environment body".to_string())
-        })?;
-    let close = matching_delimiter(&clean, open, b'{', b'}')
-        .ok_or_else(|| TransitionError("env.jet has an unclosed environment body".to_string()))?;
-    Ok((name, &source[open + 1..close]))
+                .is_some_and(|character| character.is_ascii_alphanumeric() || character == '_');
+        if !before_ok {
+            search_from = start + marker.len();
+            continue;
+        }
+        let name_start = start + marker.len();
+        let name_end = clean[name_start..]
+            .find(|ch: char| ch == '{' || ch.is_whitespace())
+            .map(|offset| name_start + offset)
+            .ok_or_else(|| TransitionError("env.jet has no environment name".to_string()))?;
+        let name = clean[name_start..name_end].trim().to_string();
+        validate_name(&name, "Environment")?;
+        let open = clean[name_end..]
+            .find('{')
+            .map(|offset| name_end + offset)
+            .ok_or_else(|| {
+                TransitionError("env.jet is missing its environment body".to_string())
+            })?;
+        let close = matching_delimiter(&clean, open, b'{', b'}')
+            .ok_or_else(|| TransitionError("env.jet has an unclosed environment body".to_string()))?;
+        modules.push((name, &source[open + 1..close]));
+        search_from = close + 1;
+    }
+    if modules.is_empty() {
+        return Err(TransitionError(
+            "env.jet has no module env.<name> declaration".to_string(),
+        ));
+    }
+    Ok(modules)
 }
 
 fn semantic_fingerprint(package: &PackageFacts) -> String {
@@ -2008,6 +2215,93 @@ mod tests {
     }
 
     #[test]
+    fn package_split_rejects_duplicate_member_name_before_writes() {
+        let root = temp_root("member-duplicate");
+        fs::create_dir_all(root.join("packages/existing")).unwrap();
+        fs::write(
+            root.join("packages/existing/package.jet"),
+            "name: \"app\"\n",
+        )
+        .unwrap();
+        let original =
+            "name: \"workspace\"\nmembers: [\"packages/existing\"]\napp :: Config.{ version: \"1\" }\n";
+        fs::write(root.join(PACKAGE_FILE), original).unwrap();
+        let error = split(
+            &root,
+            SplitTarget::Package {
+                name: "app".to_string(),
+            },
+            false,
+        )
+        .unwrap_err();
+        assert!(error.0.contains("member Package name `app` is declared more than once"), "{error}");
+        assert_eq!(fs::read_to_string(root.join(PACKAGE_FILE)).unwrap(), original);
+        assert!(!root.join("packages/app/package.jet").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn hosts_split_and_fold_restore_exact_root() {
+        let root = temp_root("hosts");
+        let original =
+            b"name: \"demo\"\noutputs: .{ server: .System.{ name: \"server\" } }\n";
+        fs::write(root.join(PACKAGE_FILE), original).unwrap();
+        split(
+            &root,
+            SplitTarget::Hosts {
+                name: "server".to_string(),
+            },
+            false,
+        )
+        .unwrap();
+        let fleet = fs::read_to_string(root.join("package/fleet.jet")).unwrap();
+        assert!(fleet.contains("hosts: .{ server: systems.server }"), "{fleet}");
+        fold(&root, Path::new("package/fleet.jet"), false).unwrap();
+        assert_eq!(fs::read(root.join(PACKAGE_FILE)).unwrap(), original);
+        assert!(!root.join("package/fleet.jet").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn hosts_split_rejects_invalid_and_ambiguous_targets_before_writes() {
+        let invalid_root = temp_root("hosts-invalid");
+        fs::write(
+            invalid_root.join(PACKAGE_FILE),
+            "name: \"demo\"\noutputs: .{ server: .System.{ name: \"server\" } }\n",
+        )
+        .unwrap();
+        let invalid = split(
+            &invalid_root,
+            SplitTarget::Hosts {
+                name: "server/name".to_string(),
+            },
+            false,
+        )
+        .unwrap_err();
+        assert!(invalid.0.contains("invalid host name"), "{invalid}");
+        assert!(!invalid_root.join("package/fleet.jet").exists());
+        fs::remove_dir_all(invalid_root).unwrap();
+
+        let ambiguous_root = temp_root("hosts-ambiguous");
+        fs::write(
+            ambiguous_root.join(PACKAGE_FILE),
+            "name: \"demo\"\noutputs: .{ server: .Executable.{ name: \"server\", entry: run } }\n",
+        )
+        .unwrap();
+        let ambiguous = split(
+            &ambiguous_root,
+            SplitTarget::Hosts {
+                name: "server".to_string(),
+            },
+            false,
+        )
+        .unwrap_err();
+        assert!(ambiguous.0.contains("host extraction needs a System Output"), "{ambiguous}");
+        assert!(!ambiguous_root.join("package/fleet.jet").exists());
+        fs::remove_dir_all(ambiguous_root).unwrap();
+    }
+
+    #[test]
     fn legacy_open_role_file_is_rejected_before_writes() {
         let root = temp_root("legacy-open");
         fs::write(root.join("pkg.jet"), "name: \"demo\"\n").unwrap();
@@ -2015,6 +2309,148 @@ mod tests {
         let error = init(&root, false).unwrap_err();
         assert!(error.0.contains("open role fields"), "{}", error.0);
         assert!(!root.join(PACKAGE_FILE).exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn legacy_role_fold_restores_every_source_byte_identically() {
+        let root = temp_root("legacy-round-trip");
+        let originals = [
+            (
+                "pkg.jet",
+                "payload: { name: \"demo\", version: \"0.1.0\" }\n",
+            ),
+            (
+                "env.jet",
+                "module env.dev {\n    tools: [\"git@nixpkgs\"]\n}\n\nmodule env.ci {\n    tools: [\"cargo@nixpkgs\"]\n}\n",
+            ),
+            ("workspace.jet", "module workspace { members: [] }\n"),
+            ("config.jet", "Config.{ }\n"),
+        ];
+        for (name, source) in originals {
+            fs::write(root.join(name), source).unwrap();
+        }
+
+        let preview = init(&root, true).unwrap();
+        assert!(preview
+            .summary
+            .changes
+            .iter()
+            .any(|change| change.path == Path::new(PACKAGE_FILE)));
+        assert_ne!(
+            preview.summary.before_fingerprint,
+            preview.summary.after_fingerprint,
+            "migration must fingerprint distinct pre/post fact graphs"
+        );
+        init(&root, false).unwrap();
+        assert!(root.join(PACKAGE_FILE).is_file());
+        assert!(root.join("package/env-dev.jet").is_file());
+        assert!(root.join("package/env-ci.jet").is_file());
+        let migrated = PackageFacts::load(&root).unwrap().unwrap();
+        assert_eq!(migrated.name, "demo");
+        assert!(migrated.environments.contains_key("dev"));
+        assert!(migrated.environments.contains_key("ci"));
+        assert!(!root.join("pkg.jet").exists());
+        assert!(!root.join("env.jet").exists());
+        assert!(!root.join("workspace.jet").exists());
+        assert!(!root.join("config.jet").exists());
+        assert!(preview.summary.journal.is_file());
+
+        restore_role_files(&root, true).unwrap();
+        restore_role_files(&root, false).unwrap();
+        for (name, source) in originals {
+            assert_eq!(fs::read(root.join(name)).unwrap(), source.as_bytes());
+        }
+        assert!(!root.join(PACKAGE_FILE).exists());
+        assert!(!root.join("package/env-dev.jet").exists());
+        assert!(!root.join("package/env-ci.jet").exists());
+        assert!(!preview.summary.journal.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn legacy_unknown_identity_field_is_rejected_before_writes() {
+        let root = temp_root("legacy-unknown");
+        fs::write(
+            root.join("pkg.jet"),
+            "payload: { name: \"demo\", version: \"0.1.0\", future: \"lost\" }\n",
+        )
+        .unwrap();
+        let error = init(&root, false).unwrap_err();
+        assert!(error.0.contains("identity contains unknown field `future`"), "{error}");
+        assert!(!root.join(PACKAGE_FILE).exists());
+        assert!(!root.join(".jet/package-transition").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn legacy_unknown_nested_dependency_field_is_rejected_before_writes() {
+        let root = temp_root("legacy-unknown-dep");
+        fs::write(
+            root.join("pkg.jet"),
+            "payload: { name: \"demo\", version: \"0.1.0\" }\ndeps: { tool: { git: \"https://example.invalid/tool\", tag: \"v1\", future: \"lost\" } }\n",
+        )
+        .unwrap();
+        let error = init(&root, false).unwrap_err();
+        assert!(error.0.contains("dependency `tool` contains unknown field `future`"), "{error}");
+        assert!(!root.join(PACKAGE_FILE).exists());
+        assert!(!root.join(".jet/package-transition").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn legacy_ambiguous_identity_is_rejected_before_writes() {
+        for (label, source, expected) in [
+            (
+                "legacy-mixed-identity",
+                "payload: { name: \"demo\", version: \"0.1.0\" }\nname: \"other\"\n",
+                "mixes top-level identity fields with an identity block",
+            ),
+            (
+                "legacy-duplicate-identity",
+                "payload: { name: \"demo\", name: \"other\", version: \"0.1.0\" }\n",
+                "identity declares field `name` more than once",
+            ),
+        ] {
+            let root = temp_root(label);
+            fs::write(root.join("pkg.jet"), source).unwrap();
+            let error = init(&root, false).unwrap_err();
+            assert!(error.0.contains(expected), "{error}");
+            assert!(!root.join(PACKAGE_FILE).exists());
+            assert!(!root.join(".jet/package-transition").exists());
+            fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
+    fn legacy_restore_refuses_stale_root_without_mutation() {
+        let root = temp_root("legacy-stale-restore");
+        fs::write(root.join("pkg.jet"), "payload: { name: \"demo\", version: \"0.1.0\" }\n").unwrap();
+        let result = init(&root, false).unwrap();
+        let journal = result.summary.journal;
+        let package = root.join(PACKAGE_FILE);
+        fs::write(&package, "name: \"tampered\"\nversion: \"0.1.0\"\n").unwrap();
+        let error = restore_role_files(&root, false).unwrap_err();
+        assert!(error.0.contains("stale transition"), "{error}");
+        assert_eq!(fs::read_to_string(&package).unwrap(), "name: \"tampered\"\nversion: \"0.1.0\"\n");
+        assert!(journal.is_file());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn duplicate_legacy_environment_is_rejected_before_writes() {
+        let root = temp_root("legacy-duplicate-env");
+        fs::write(root.join("pkg.jet"), "payload: { name: \"demo\", version: \"0.1.0\" }\n")
+            .unwrap();
+        fs::write(
+            root.join("env.jet"),
+            "module env.dev { tools: [\"git@nixpkgs\"] }\nmodule env.dev { tools: [\"cargo@nixpkgs\"] }\n",
+        )
+        .unwrap();
+        let error = init(&root, false).unwrap_err();
+        assert!(error.0.contains("declares environment `dev` more than once"), "{error}");
+        assert!(!root.join(PACKAGE_FILE).exists());
+        assert!(!root.join("package/env-dev.jet").exists());
         fs::remove_dir_all(root).unwrap();
     }
 }

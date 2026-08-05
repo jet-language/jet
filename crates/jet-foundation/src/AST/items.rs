@@ -998,10 +998,47 @@ pub struct TaskMetadata {
     pub cwd: Option<String>,
     pub inputs: Vec<String>,
     pub outputs: Vec<String>,
-    pub skip: Option<String>,
+    pub skip: Option<TaskSkip>,
     pub cache: TaskCachePolicy,
     pub authority: Option<String>,
     pub limits: BTreeMap<String, String>,
+}
+
+/// D-TASK-META1=A: a task may be skipped unconditionally with an explicit
+/// reason, or only outside one closed host platform family.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TaskSkip {
+    Always(String),
+    UnlessPlatform { platform: String },
+}
+
+impl TaskSkip {
+    /// Return the explicit reason when this skip rule excludes `host`.
+    /// Platform names use the canonical Jet spellings (`Linux`, `MacOS`,
+    /// `Windows`, and `FreeBSD`) and the same host suffixes as the target
+    /// model. Keeping this fact on the typed rule lets every task consumer
+    /// apply one admission rule.
+    pub fn reason_for_host(&self, host: &str) -> Option<String> {
+        match self {
+            Self::Always(reason) => Some(reason.clone()),
+            Self::UnlessPlatform { platform }
+                if !matches_host_platform(platform, host) =>
+            {
+                Some(format!("host platform is not {platform}"))
+            }
+            Self::UnlessPlatform { .. } => None,
+        }
+    }
+}
+
+fn matches_host_platform(expected: &str, host: &str) -> bool {
+    match expected {
+        "Linux" => host.ends_with("-linux"),
+        "MacOS" => host.ends_with("-macos"),
+        "Windows" => host.ends_with("-windows"),
+        "FreeBSD" => host.ends_with("-freebsd"),
+        _ => false,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

@@ -2257,17 +2257,17 @@ fn caller(input: Int) => Int {
     }
 
     #[test]
-    fn does_not_reuse_affine_facts_after_a_non_call_expression() {
+    fn does_not_reuse_affine_facts_after_control_flow() {
         let source = r#"
 #Pre(value > 0, "positive")
 fn checked(value: Int) => Int { return value }
 
 #Pre(input > 0, "positive input")
-fn caller(input: Int) => Int {
-    shifted :: input
-    input + 1
-    return checked(shifted)
-}
+    fn caller(input: Int) => Int {
+        shifted :: input
+        if input > 0 { }
+        return checked(shifted)
+    }
 "#;
         let evidence = run_solver_producer(
             &[("calls-flow.jet".into(), source.into())],

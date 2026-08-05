@@ -847,6 +847,22 @@ pub(crate) fn run_task_entry(
         report_problems(mode, file, &src, &[diag]);
         exit(ExitCodes::USER_ERROR);
     }
+    if let Ok(tasks) = &declared {
+        if let Some(reason) = tasks
+            .iter()
+            .find(|item| item.name == task)
+            .and_then(|item| item.metadata.as_ref())
+            .and_then(|metadata| {
+                metadata
+                    .skip
+                    .as_ref()
+                    .and_then(|skip| skip.reason_for_host(&jetpack::Platform::host_key()))
+            })
+        {
+            println!("skipping task `{task}`: {reason}");
+            return;
+        }
+    }
     let out = match jet::compile_with_entry(file, task) {
         Ok(out) => out,
         Err(diags) => {
@@ -893,6 +909,7 @@ struct TaskListing {
     name: String,
     doc: Option<String>,
     schedule: Option<String>,
+    metadata: Option<jet::AST::TaskMetadata>,
 }
 
 fn marker_string(marker: &jet::AST::Marker) -> Option<String> {
@@ -948,6 +965,7 @@ fn list_task_names(src: &str) -> Result<Vec<TaskListing>, Vec<jet::Diagnostics::
                     name: f.name.clone(),
                     doc,
                     schedule: f.every.as_ref().and_then(schedule_text),
+                    metadata: f.task_metadata.clone(),
                 })
             }
             _ => None,
@@ -1648,7 +1666,8 @@ const IGNORED_DIRS: &[&str] = &[
 ];
 
 /// Recursively collect source `.jet` files under `dir`, skipping IGNORED_DIRS
-/// and reserved Package roots.
+/// and the retired payload manifest. Canonical Package and Config files use
+/// the typed package formatter in the preflight path below.
 /// Entries are sorted deterministically.
 fn walk_jet_files(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else { return };
@@ -1662,9 +1681,7 @@ fn walk_jet_files(dir: &Path, out: &mut Vec<PathBuf>) {
                 walk_jet_files(&path, out);
             }
         } else if path.extension().and_then(|e| e.to_str()) == Some(jet::Syntax::FILE_EXT)
-            && path.file_name().and_then(|name| name.to_str()) != Some(jet::Syntax::PACKAGE_FILE)
-            && path.file_name().and_then(|name| name.to_str())
-                != Some(jet::Syntax::PAYLOAD_FILE)
+            && path.file_name().and_then(|name| name.to_str()) != Some(jet::Syntax::PAYLOAD_FILE)
         {
             out.push(path);
         }
@@ -1794,7 +1811,7 @@ fn run_fmt_stdin(stdin_path: Option<&str>, mode: OutputMode) {
         exit(ExitCodes::USAGE);
     }
     let label = stdin_path.unwrap_or("<stdin>");
-    match jet::format_source(&src) {
+    match format_source_for_fmt(&src, stdin_path.unwrap_or("<stdin>")) {
         Ok(formatted) => {
             print!("{}", formatted);
         }
@@ -1807,6 +1824,43 @@ fn run_fmt_stdin(stdin_path: Option<&str>, mode: OutputMode) {
             exit(ExitCodes::USAGE);
         }
     }
+}
+
+fn format_source_for_fmt(
+    src: &str,
+    origin: &str,
+) -> Result<String, Vec<jet::Diagnostics::Diagnostic>> {
+    match jet::format_source(src) {
+        Ok(formatted) => Ok(formatted),
+        Err(diagnostics) if is_typed_package_source(src, origin) => {
+            match jet::Package::format_source(src, origin) {
+                Ok(formatted) => Ok(formatted),
+                Err(_) => Err(diagnostics),
+            }
+        }
+        Err(diagnostics) => Err(diagnostics),
+    }
+}
+
+fn is_typed_package_source(src: &str, origin: &str) -> bool {
+    if Path::new(origin).file_name().and_then(|name| name.to_str())
+        == Some(jet::Syntax::PACKAGE_FILE)
+    {
+        return true;
+    }
+    let trimmed = src.trim_start();
+    let value = trimmed
+        .strip_prefix("pub ")
+        .unwrap_or(trimmed)
+        .split_once("::")
+        .map(|(_, value)| value.trim_start())
+        .or_else(|| trimmed.strip_prefix("Config").map(str::trim_start));
+    let Some(value) = value else { return false };
+    let Some(value) = value.strip_prefix("Config") else {
+        return false;
+    };
+    let value = value.trim_start();
+    value.starts_with(".{") || value.starts_with('{')
 }
 
 /// D-FMTPROJECT1=D: the full project formatter.
@@ -1875,7 +1929,7 @@ pub(crate) fn run_fmt(
                 continue;
             }
         };
-        match jet::format_source(&src) {
+        match format_source_for_fmt(&src, &path.display().to_string()) {
             Ok(formatted) => {
                 let changed = formatted != src;
                 results.push(FileResult {

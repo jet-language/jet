@@ -728,7 +728,15 @@ impl<'a> Fmt<'a> {
                     ));
                 }
                 if let Some(skip) = &metadata.skip {
-                    fields.push(format!("skip: \"{}\"", escape_str_lit(skip)));
+                    let value = match skip {
+                        crate::AST::TaskSkip::Always(reason) => {
+                            format!("\"{}\"", escape_str_lit(reason))
+                        }
+                        crate::AST::TaskSkip::UnlessPlatform { platform } => {
+                            format!(".Unless(.Platform(.{platform}))")
+                        }
+                    };
+                    fields.push(format!("skip: {value}"));
                 }
                 let cache = match metadata.cache {
                     crate::AST::TaskCachePolicy::Uncached => ".Uncached",

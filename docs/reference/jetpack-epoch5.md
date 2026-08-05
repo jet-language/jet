@@ -30,6 +30,10 @@ Scalar conflicts name both contributing source files and their values. Successfu
 fields retain ordered contributor provenance for lock and explain projections;
 failed composition never mutates the Package facts.
 
+`jet fmt` formats both `package.jet` and declared Config files through this
+typed model. Ordinary source files continue through the compiler formatter.
+Running the command twice is a no-op after the first pass.
+
 ## Registry delivery and provider facts
 
 `jet registry publish` commits the immutable sparse index line and the matching
@@ -81,10 +85,29 @@ closed catalog into ordinary package references. Disabled records remain in
 the plan and in the trust fingerprint, but missing tools for a disabled pack do
 not block the environment.
 
-Each Rust and Python pack discloses its host kind, supported platform list,
-license summary, and required commands. An unsupported host or an enabled
-catalog pack with a missing required command fails during planning; it does not
-create a partial PATH or claim a tool that is absent.
+The built-in catalog covers 58 language families: Ansible, C, Clojure,
+Cplusplus, Crystal, Cue, Dart, Deno, Dotnet, Elixir, Elm, Erlang, Fortran,
+Gawk, Gleam, Go, Hare, Haskell, Helm, Idris, Java, JavaScript, Jsonnet, Julia,
+Kotlin, Lean4, Lobster, Lua, Nim, Nix, Ocaml, Odin, Opentofu, Pascal, Perl,
+Php, Pkl, Purescript, Python, R, Racket, Raku, Robotframework, Ruby, Rust,
+Scala, Shell, Solidity, Standardml, Swift, Terraform, Texlive, Typescript,
+Typst, Unison, V, Vala, and Zig. Each pack discloses its host kind, supported
+platform list, license summary, package facts, and required commands. An
+unsupported host or an enabled catalog pack with a missing required command
+fails during planning; it does not create a partial PATH or claim a tool that
+is absent.
+
+Contributors add a pack to the same typed `LanguagePackCatalog` used by the
+built-in entries. A contribution must declare its package and optional venv
+package references, command mappings, required commands, host/platform facts,
+and license. Expansion validates the required-command mapping before it adds
+packages, carries variables and commands into the ordinary environment plan,
+and includes the complete pack fingerprint in trust identity. Registration
+rejects duplicate names, empty package/host/platform/license/tool facts, empty
+command mappings, malformed venv package entries, invalid environment-variable
+names, and required tools without a command. Unsupported platforms and
+conflicting facts fail closed during expansion; a contribution does not create
+a second resolver or an untracked PATH shortcut.
 
 ```text
 module env.dev {
@@ -130,6 +153,22 @@ and rejects an untrusted hook with `E1329`. Hook working directories must stay
 inside the project, including after symlink resolution. A changed hook or
 lifecycle policy changes the environment trust identity, so the next entry
 needs a new trust decision.
+
+Task metadata stays on the `#Job` marker. Bare tasks use the current project
+directory and remain uncached. Typed fields can add task-local packages, a
+project-relative `cwd`, declared `inputs` and `outputs`, a typed skip reason,
+cache policy, authority, and limits. Platform skips use `Linux`, `MacOS`,
+`Windows`, or `FreeBSD` and report why the task did not run. Direct task runs
+and scheduled `jet dev` runs apply the same skip rule.
+
+Cached tasks require declared inputs and outputs. Their identity includes task
+arguments, locked package facts, policy, platform, compiler bytes, declared
+project inputs, and the composed values of allowed non-secret environment
+variables. `.env` files and secret-bearing paths are never cache inputs.
+Strict cached runs trace project file access and refuse to record a cache
+result when the task reads an undeclared project path. Tasks with declared
+secrets or secret-bearing environment variables fail closed; use
+`cache: .Uncached` when the task is intentionally dynamic.
 
 `jet env sync` resolves all sources first, prints the plan, writes content
 objects, and applies destination changes with rollback on failure.
@@ -208,17 +247,32 @@ mirror falls back to source realization; it never installs an unsigned or
 replayed result.
 
 `jet shared-store install` creates the optional administrator-installed shared
-Hangar configuration and socket-activation units. The administrator can add a
-capability record with `jet shared-store enroll <uid>`; peer credentials and
-that record authorize each read or write. The broker accepts one signed Hangar
-archive per request and re-verifies it before promotion. It never receives
-source or build commands. If the socket is absent, realization stays on the
-ordinary per-user Hangar path.
+Hangar configuration and socket-activation units. Each request runs as a
+short-lived non-root `DynamicUser` with a private state directory. The socket
+is public by mode only; Linux peer credentials and a root-owned per-uid grant
+authorize each read or write.
+
+A read grant is persistent. A write grant contains a short-lived credential,
+an expiry, and exact allowlists for `source=`, `builder=`, `action=`,
+`output=`, `platform=`, `sandbox=`, and `policy=`. The command creates the
+credential and expiry; an administrator must add every approved binding fact
+before the pending write grant can write. Until then, reads work and writes
+stay on the ordinary per-user Hangar path. The client sends
+an unsigned closure plus the binding facts for source, builder, action,
+output, platform, sandbox, and policy. The broker verifies those facts against
+the archived metadata, content-checks the closure in an ephemeral `.incoming`
+stage, signs it only after admission, and removes stale stages before
+accepting new work. It never receives source or build commands. If the socket
+or a write grant is absent or expired, realization also stays private.
 
 ## Services
 
-Services run as direct argument vectors. Readiness is separate from process
-start. A service can use `exec`, `http`, `notify`, or `tcp` readiness.
+Services run as direct argument vectors under the platform-owned supervisor.
+On Linux this is a transient systemd user scope with a delegated cgroup; on
+Windows it is a project-local guardian with a Job Object. macOS rejects a
+service before spawn when that authority is unavailable (E1332). Readiness is
+separate from process start. A service can use `exec`, `http`, `notify`, or
+`tcp` readiness, and every probe has a bounded per-attempt time limit.
 
 ```text
 module env.dev {
@@ -235,15 +289,19 @@ module env.dev {
 }
 ```
 
-`after` names a declared service dependency. Jetpack validates names, disabled
+`after` names a declared service dependency. It is the only dependency spelling;
+the retired `depends_on` spelling is rejected. Jetpack validates names, disabled
 dependencies, and cycles before spawning a process, starts dependencies before
 dependents, and stops the selected graph in reverse order. A failed task,
-startup, or readiness gate cleans up services started by that invocation and
-reports cleanup failures instead of leaving misleading health state.
+startup, readiness gate, or dependency stops the affected graph without
+leaving a dependent alive against a failed prerequisite.
 
 Jet reserves ports and socket paths before start. It checks process start
 identity before it sends a signal. It bounds restart count and backoff, and it
-stops dependent services before their dependencies.
+stops dependent services before their dependencies. Each service directory also
+persists the authority backend, generation, phase, containment, dependency
+list, and recovery reason in `lifecycle`; a post-Ready crash records its
+recovery generation before restart.
 
 ## Flake-class graph
 
@@ -292,8 +350,10 @@ reported as unsupported evaluator input; they are not empty or guessed values.
 The typed Package model owns one reversible transition journal. `jet init
 --check` previews migration from retired `pkg.jet`, `env.jet`, `workspace.jet`,
 or `config.jet` files; `jet init` applies only closed facts and refuses unknown
-or open fields before writing. `jet init --restore-role-files` reverses the
-last migration and restores the original bytes.
+or open fields before writing. An `env.<name>` module becomes a typed
+`environments.<name>` Config contribution; it is not copied as an unrelated
+top-level field. `jet init --restore-role-files` reverses the last migration
+and restores the original bytes.
 
 Growth uses the same journal: `jet split env`, `jet split package <name>`, and
 `jet split hosts <name>` preview by default when `--check` is present. A split

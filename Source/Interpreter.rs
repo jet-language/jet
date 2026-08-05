@@ -285,6 +285,14 @@ pub fn scheduled_tasks(bundle: &ProgramBundle) -> Vec<(String, crate::AST::Every
         .iter()
         .filter_map(|item| match item {
             Item::Func(f) if f.is_task => {
+                if f.task_metadata.as_ref().and_then(|metadata| {
+                    metadata
+                        .skip
+                        .as_ref()
+                        .and_then(|skip| skip.reason_for_host(&jetpack::Platform::host_key()))
+                }).is_some() {
+                    return None;
+                }
                 let schedule = f.every.as_ref()?.arg.resolve().ok()?;
                 Some((f.name.clone(), schedule))
             }
@@ -511,6 +519,22 @@ mod tests {
         let src = "use core.tasks as tasks\nfn job() => Int {\n    return 1\n}\nfn run() {\n    h :: tasks.spawn(() => job())\n    print(h.join())\n}\n";
         let b = bundle_from(src, "spawn");
         assert_eq!(detect_dev_mode(&b), DevMode::Resident);
+    }
+
+    #[test]
+    fn scheduled_tasks_filter_always_skipped_tasks() {
+        let src = "#Job(skip: \"disabled\") #Every(5min) fn skipped() {}\n#Job(skip: .Unless(.Platform(.MacOS))) #Every(5min) fn mac_only() {}\n#Job #Every(5min) fn active() {}\nfn run() {}\n";
+        let bundle = bundle_from(src, "scheduled_skip");
+        let mut names = scheduled_tasks(&bundle)
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect::<Vec<_>>();
+        names.sort();
+        let mut expected = vec!["active".to_string()];
+        if jetpack::Platform::host_key().ends_with("-macos") {
+            expected.push("mac_only".to_string());
+        }
+        assert_eq!(names, expected);
     }
 
     #[test]

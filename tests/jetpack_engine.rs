@@ -10,6 +10,7 @@
 //! `tests/support/jetpack_fixtures.rs` for shared helpers.
 
 use std::fs;
+use std::io::Write;
 use std::path::Path;
 use std::process::Command;
 
@@ -1862,7 +1863,8 @@ fn env_info_json_discloses_selected_environment_profile_and_language_projection(
         "user": .{ user: "epoch5-user" }
     ]
     languages: [
-        "rust": Lang.{ enable: true, channel: .Stable }
+        "rust": Lang.{ enable: true, channel: .Stable },
+        "zig": Lang.{ enable: true }
     ]
     packages: [nixpkgs.ripgrep]
 }
@@ -1898,6 +1900,8 @@ module env.full {
     assert!(stdout.contains("\"missing_tools\":[]"), "stdout: {stdout}");
     assert!(stdout.contains("\"included\""), "stdout: {stdout}");
     assert!(stdout.contains("\"omitted\""), "stdout: {stdout}");
+    assert!(stdout.contains("\"name\":\"Zig\""), "stdout: {stdout}");
+    assert!(stdout.contains("\"zig@nixpkgs\""), "stdout: {stdout}");
 
     let full = jetpack()
         .args(["enter", "info", "--json", "--no-color", "--env-profile", "full"])
@@ -1937,6 +1941,93 @@ module env.full {
         missing_stderr.contains("environment profile `missing` is not declared"),
         "stderr: {missing_stderr}"
     );
+}
+
+#[test]
+fn env_info_json_discloses_typed_integration_projection() {
+    let project = Scratch::new("env-info-integrations");
+    fs::write(
+        project.join("env.jet"),
+        r#"module env.dev {
+    imports: [
+        env.platform.android(api: 35, build_tools: "35.0.0", ndk: "27.1"),
+        env.security.certificates([dev_certificate]),
+        env.network.hosts(["api.local": "127.0.0.1"]),
+        env.agent.codex(mcp: [repo_server]),
+        env.editor.vscode()
+    ]
+}
+"#,
+    )
+    .unwrap();
+    let output = jetpack()
+        .args(["enter", "info", "--json", "--no-color"])
+        .current_dir(&project.path)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"integrations\":["), "stdout: {stdout}");
+    assert!(stdout.contains("\"kind\":\"android\""), "stdout: {stdout}");
+    assert!(stdout.contains("\"kind\":\"certificates\""), "stdout: {stdout}");
+    assert!(stdout.contains("\"kind\":\"hosts\""), "stdout: {stdout}");
+    assert!(stdout.contains("\"kind\":\"codex-agent\""), "stdout: {stdout}");
+    assert!(stdout.contains("\"kind\":\"editor\""), "stdout: {stdout}");
+    assert!(
+        stdout.contains("\"option_keys\":[\"api\",\"build_tools\",\"license\",\"ndk\"]"),
+        "stdout: {stdout}"
+    );
+    assert!(stdout.contains("\"host_checks\":["), "stdout: {stdout}");
+    assert!(stdout.contains("\"grants\":["), "stdout: {stdout}");
+    assert!(stdout.contains("\"secrets\":[\"dev_certificate\"]"), "stdout: {stdout}");
+}
+
+#[test]
+fn env_info_rejects_unredactable_integration_secret() {
+    let project = Scratch::new("env-info-integration-secret");
+    fs::write(
+        project.join("env.jet"),
+        r#"module env.dev {
+    imports: [env.security.certificates(42)]
+}
+"#,
+    )
+    .unwrap();
+    let output = jetpack()
+        .args(["enter", "info", "--no-color"])
+        .current_dir(&project.path)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("E1335"), "stderr: {stderr}");
+    assert!(!stderr.contains("42"), "stderr: {stderr}");
+}
+
+#[test]
+fn env_info_rejects_unsupported_apple_integration_target() {
+    let project = Scratch::new("env-info-apple-target");
+    fs::write(
+        project.join("env.jet"),
+        r#"module env.dev {
+    imports: [env.platform.apple(targets: [.IOS])]
+}
+"#,
+    )
+    .unwrap();
+    let output = jetpack()
+        .args(["enter", "info", "--no-color"])
+        .current_dir(&project.path)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("E1335"), "stderr: {stderr}");
+    assert!(stderr.contains("apple integration"), "stderr: {stderr}");
 }
 
 
@@ -2788,6 +2879,269 @@ fn jetpack_toml_sources_merge_into_cwd_table() {
         "stderr: {}",
         String::from_utf8_lossy(&out.stderr)
     );
+}
+
+#[test]
+fn package_transition_cli_covers_split_fold_init_restore_and_failures() {
+    let env_project = Scratch::new("transition-cli-env");
+    let env_original = "name: \"demo\"\nenvironments: .{ development: .Environment.{ tools: [\"git\"] } }\n";
+    fs::write(env_project.join("package.jet"), env_original).unwrap();
+
+    let checked = jet()
+        .args(["split", "env", "--check"])
+        .current_dir(&env_project.path)
+        .output()
+        .unwrap();
+    assert!(checked.status.success(), "stderr: {}", String::from_utf8_lossy(&checked.stderr));
+    assert!(String::from_utf8_lossy(&checked.stdout).contains("No files changed."));
+    assert!(!env_project.join("package/env.jet").exists());
+
+    let split = jet()
+        .args(["split", "env"])
+        .current_dir(&env_project.path)
+        .output()
+        .unwrap();
+    assert!(split.status.success(), "stderr: {}", String::from_utf8_lossy(&split.stderr));
+    assert!(env_project.join("package/env.jet").is_file());
+
+    let fold_check = jet()
+        .args(["fold", "package/env.jet", "--check"])
+        .current_dir(&env_project.path)
+        .output()
+        .unwrap();
+    assert!(fold_check.status.success(), "stderr: {}", String::from_utf8_lossy(&fold_check.stderr));
+    assert!(String::from_utf8_lossy(&fold_check.stdout).contains("No files changed."));
+
+    let fold = jet()
+        .args(["fold", "package/env.jet"])
+        .current_dir(&env_project.path)
+        .output()
+        .unwrap();
+    assert!(fold.status.success(), "stderr: {}", String::from_utf8_lossy(&fold.stderr));
+    assert_eq!(fs::read_to_string(env_project.join("package.jet")).unwrap(), env_original);
+    assert!(!env_project.join("package/env.jet").exists());
+
+    let package_project = Scratch::new("transition-cli-package");
+    let package_original = "name: \"workspace\"\napp :: Config.{ version: \"1\" }\n";
+    fs::write(package_project.join("package.jet"), package_original).unwrap();
+    let package_split = jet()
+        .args(["split", "package", "app", "--check"])
+        .current_dir(&package_project.path)
+        .output()
+        .unwrap();
+    assert!(package_split.status.success(), "stderr: {}", String::from_utf8_lossy(&package_split.stderr));
+    let package_json = jet()
+        .args(["split", "package", "app", "--check", "--json"])
+        .current_dir(&package_project.path)
+        .output()
+        .unwrap();
+    assert!(package_json.status.success(), "stderr: {}", String::from_utf8_lossy(&package_json.stderr));
+    let package_json = jetpack::JSON::parse(&String::from_utf8_lossy(&package_json.stdout)).unwrap();
+    assert_eq!(json_string(&package_json, "before"), json_string(&package_json, "after"));
+    let package_split = jet()
+        .args(["split", "package", "app"])
+        .current_dir(&package_project.path)
+        .output()
+        .unwrap();
+    assert!(package_split.status.success(), "stderr: {}", String::from_utf8_lossy(&package_split.stderr));
+    assert!(package_project.join("packages/app/package.jet").is_file());
+    let package_fold = jet()
+        .args(["fold", "packages/app/package.jet"])
+        .current_dir(&package_project.path)
+        .output()
+        .unwrap();
+    assert!(package_fold.status.success(), "stderr: {}", String::from_utf8_lossy(&package_fold.stderr));
+    assert_eq!(fs::read_to_string(package_project.join("package.jet")).unwrap(), package_original);
+
+    let stale_project = Scratch::new("transition-cli-stale-member");
+    fs::write(stale_project.join("package.jet"), package_original).unwrap();
+    let stale_split = jet()
+        .args(["split", "package", "app"])
+        .current_dir(&stale_project.path)
+        .output()
+        .unwrap();
+    assert!(stale_split.status.success(), "stderr: {}", String::from_utf8_lossy(&stale_split.stderr));
+    fs::OpenOptions::new()
+        .append(true)
+        .open(stale_project.join("packages/app/package.jet"))
+        .unwrap()
+        .write_all(b"// changed after the plan\n")
+        .unwrap();
+    let stale_fold = jet()
+        .args(["fold", "packages/app/package.jet"])
+        .current_dir(&stale_project.path)
+        .output()
+        .unwrap();
+    assert_eq!(stale_fold.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&stale_fold.stderr).contains("stale transition"));
+    assert!(stale_project.join("packages/app/package.jet").is_file());
+
+    let duplicate_project = Scratch::new("transition-cli-duplicate-member");
+    fs::create_dir_all(duplicate_project.join("packages/existing")).unwrap();
+    fs::write(
+        duplicate_project.join("packages/existing/package.jet"),
+        "name: \"app\"\n",
+    )
+    .unwrap();
+    let duplicate_original =
+        "name: \"workspace\"\nmembers: [\"packages/existing\"]\napp :: Config.{ version: \"1\" }\n";
+    fs::write(duplicate_project.join("package.jet"), duplicate_original).unwrap();
+    let duplicate = jet()
+        .args(["split", "package", "app"])
+        .current_dir(&duplicate_project.path)
+        .output()
+        .unwrap();
+    assert_eq!(duplicate.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&duplicate.stderr)
+        .contains("member Package name `app` is declared more than once"));
+    assert_eq!(fs::read_to_string(duplicate_project.join("package.jet")).unwrap(), duplicate_original);
+    assert!(!duplicate_project.join("packages/app/package.jet").exists());
+
+    let hosts_project = Scratch::new("transition-cli-hosts");
+    fs::write(
+        hosts_project.join("package.jet"),
+        "name: \"demo\"\noutputs: .{ server: .System.{ name: \"server\" } }\n",
+    )
+    .unwrap();
+    let hosts_split = jet()
+        .args(["split", "hosts", "server"])
+        .current_dir(&hosts_project.path)
+        .output()
+        .unwrap();
+    assert!(hosts_split.status.success(), "stderr: {}", String::from_utf8_lossy(&hosts_split.stderr));
+    assert!(hosts_project.join("package/fleet.jet").is_file());
+    let hosts_fold = jet()
+        .args(["fold", "package/fleet.jet"])
+        .current_dir(&hosts_project.path)
+        .output()
+        .unwrap();
+    assert!(hosts_fold.status.success(), "stderr: {}", String::from_utf8_lossy(&hosts_fold.stderr));
+
+    let unknown_hosts = Scratch::new("transition-cli-unknown-host");
+    fs::write(
+        unknown_hosts.join("package.jet"),
+        "name: \"demo\"\noutputs: .{ server: .System.{ name: \"server\" } }\n",
+    )
+    .unwrap();
+    let unknown = jet()
+        .args(["split", "hosts", "missing"])
+        .current_dir(&unknown_hosts.path)
+        .output()
+        .unwrap();
+    assert_eq!(unknown.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&unknown.stderr).contains("outputs.missing"));
+    assert!(!unknown_hosts.join("package/fleet.jet").exists());
+
+    let stale_hosts = Scratch::new("transition-cli-stale-host");
+    fs::write(
+        stale_hosts.join("package.jet"),
+        "name: \"demo\"\noutputs: .{ server: .System.{ name: \"server\" } }\n",
+    )
+    .unwrap();
+    let stale_split = jet()
+        .args(["split", "hosts", "server"])
+        .current_dir(&stale_hosts.path)
+        .output()
+        .unwrap();
+    assert!(stale_split.status.success(), "stderr: {}", String::from_utf8_lossy(&stale_split.stderr));
+    fs::OpenOptions::new()
+        .append(true)
+        .open(stale_hosts.join("package/fleet.jet"))
+        .unwrap()
+        .write_all(b"// changed after the plan\n")
+        .unwrap();
+    let stale_fold = jet()
+        .args(["fold", "package/fleet.jet"])
+        .current_dir(&stale_hosts.path)
+        .output()
+        .unwrap();
+    assert_eq!(stale_fold.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&stale_fold.stderr).contains("stale transition"));
+
+    let ambiguous_hosts = Scratch::new("transition-cli-ambiguous-host-journal");
+    fs::write(
+        ambiguous_hosts.join("package.jet"),
+        "name: \"demo\"\noutputs: .{ server: .System.{ name: \"server\" } }\n",
+    )
+    .unwrap();
+    let ambiguous_split = jet()
+        .args(["split", "hosts", "server"])
+        .current_dir(&ambiguous_hosts.path)
+        .output()
+        .unwrap();
+    assert!(ambiguous_split.status.success(), "stderr: {}", String::from_utf8_lossy(&ambiguous_split.stderr));
+    let journal_dir = ambiguous_hosts.join(".jet/package-transition");
+    let journal = fs::read_dir(&journal_dir)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    fs::copy(&journal, journal_dir.join("duplicate-journal")).unwrap();
+    let ambiguous_fold = jet()
+        .args(["fold", "package/fleet.jet"])
+        .current_dir(&ambiguous_hosts.path)
+        .output()
+        .unwrap();
+    assert_eq!(ambiguous_fold.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&ambiguous_fold.stderr).contains("found 2"));
+
+    let invalid_hosts = Scratch::new("transition-cli-invalid-host");
+    fs::write(
+        invalid_hosts.join("package.jet"),
+        "name: \"demo\"\noutputs: .{ server: .System.{ name: \"server\" } }\n",
+    )
+    .unwrap();
+    let invalid = jet()
+        .args(["split", "hosts", "server/name"])
+        .current_dir(&invalid_hosts.path)
+        .output()
+        .unwrap();
+    assert_eq!(invalid.status.code(), Some(1));
+    let invalid_stderr = String::from_utf8_lossy(&invalid.stderr);
+    assert!(invalid_stderr.contains("E1206"), "{invalid_stderr}");
+    assert!(!invalid_hosts.join("package/fleet.jet").exists());
+
+    let legacy_project = Scratch::new("transition-cli-legacy");
+    let originals = [
+        ("pkg.jet", "payload: { name: \"demo\", version: \"0.1.0\" }\n"),
+        ("env.jet", "module env.dev { tools: [\"git@nixpkgs\"] }\n"),
+        ("workspace.jet", "module workspace { members: [] }\n"),
+        ("config.jet", "Config.{ }\n"),
+    ];
+    for (name, source) in originals {
+        fs::write(legacy_project.join(name), source).unwrap();
+    }
+    let init_check = jet()
+        .args(["init", "--check"])
+        .current_dir(&legacy_project.path)
+        .output()
+        .unwrap();
+    assert!(init_check.status.success(), "stderr: {}", String::from_utf8_lossy(&init_check.stderr));
+    assert!(String::from_utf8_lossy(&init_check.stdout).contains("No files changed."));
+    let init = jet()
+        .args(["init"])
+        .current_dir(&legacy_project.path)
+        .output()
+        .unwrap();
+    assert!(init.status.success(), "stderr: {}", String::from_utf8_lossy(&init.stderr));
+    assert!(legacy_project.join("package.jet").is_file());
+    let restore_check = jet()
+        .args(["init", "--restore-role-files", "--check"])
+        .current_dir(&legacy_project.path)
+        .output()
+        .unwrap();
+    assert!(restore_check.status.success(), "stderr: {}", String::from_utf8_lossy(&restore_check.stderr));
+    let restore = jet()
+        .args(["init", "--restore-role-files"])
+        .current_dir(&legacy_project.path)
+        .output()
+        .unwrap();
+    assert!(restore.status.success(), "stderr: {}", String::from_utf8_lossy(&restore.stderr));
+    for (name, source) in originals {
+        assert_eq!(fs::read_to_string(legacy_project.join(name)).unwrap(), source);
+    }
+    assert!(!legacy_project.join("package.jet").exists());
 }
 
 

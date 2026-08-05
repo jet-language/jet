@@ -312,6 +312,7 @@ fn project_json_for_entry_inner(path: &Path) -> String {
     let workspace_json = workspace_project_json(&ctx.project_root, ctx.workspace_root.as_deref());
     let packages_json = packages_project_json(
         &ctx.project_root,
+        &ctx.entry_path,
         ctx.manifest_root.as_deref(),
         ctx.ecosystem_root.as_deref(),
         ctx.workspace_root.as_deref(),

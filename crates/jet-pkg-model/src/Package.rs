@@ -626,6 +626,17 @@ impl PackageFacts {
     /// validator above catches lexical escapes; this variant also rejects an
     /// escaping symlink before a workspace can realize the member.
     pub fn validate_members_in(&self, dir: &std::path::Path) -> Result<(), PackageParseError> {
+        self.member_names_in(dir).map(|_| ())
+    }
+
+    /// Validate member paths and return the canonical names discovered in the
+    /// physical Package root. Transition planners use the same checked
+    /// discovery result when they preview a new member, so name collisions do
+    /// not create a second member-validation mechanism.
+    pub fn member_names_in(
+        &self,
+        dir: &std::path::Path,
+    ) -> Result<Vec<String>, PackageParseError> {
         self.validate_members()
             .map_err(|error| PackageParseError::Composition(error.to_string()))?;
         let root = dir.canonicalize().map_err(|error| {
@@ -728,7 +739,7 @@ impl PackageFacts {
                 names.push(name);
             }
         }
-        Ok(())
+        Ok(names)
     }
 }
 
@@ -809,6 +820,222 @@ impl ConfigFacts {
             origin: facts.origin,
         })
     }
+}
+
+/// Format one canonical Package or Config source file.
+///
+/// These files use the typed ecosystem surface rather than the compiler's
+/// ordinary module grammar. Validate with the same Package model that loads
+/// them, then apply one deterministic record layout for `jet fmt` and editor
+/// callers. Commented files retain their authored text because this small
+/// model formatter must not discard comments it does not own.
+pub fn format_source(text: &str, origin: impl Into<String>) -> Result<String, String> {
+    let origin = origin.into();
+    let stripped = strip_comments(text);
+    let trimmed = stripped.trim();
+    if trimmed.is_empty() {
+        return Err("Package or Config source is empty".to_string());
+    }
+
+    let is_config = config_wrapper(trimmed)
+        .map_err(|error| error.to_string())?
+        .is_some()
+        || trimmed.starts_with("Config");
+    if is_config {
+        ConfigFacts::parse(text, origin)
+            .map_err(|error| error.to_string())?;
+    } else {
+        PackageFacts::parse(text, origin)
+            .map_err(|error| error.to_string())?;
+    }
+
+    if stripped != text {
+        let mut preserved = text.trim_end().to_string();
+        preserved.push('\n');
+        return Ok(preserved);
+    }
+
+    let entries = top_level_entries(text);
+    if entries.is_empty() {
+        return Err("Package or Config source has no fields".to_string());
+    }
+    let formatted = entries
+        .iter()
+        .map(|entry| format_package_entry(entry, 0))
+        .collect::<Vec<_>>();
+    let separator = if package_has_top_level_comma(text) {
+        ",\n"
+    } else {
+        "\n"
+    };
+    let mut formatted = formatted.join(separator);
+    if package_has_trailing_top_level_comma(text) {
+        formatted.push(',');
+    }
+    Ok(format!("{formatted}\n"))
+}
+
+fn format_package_entry(entry: &str, indent: usize) -> String {
+    let entry = entry.trim().trim_end_matches(',').trim_end_matches(';').trim();
+    let Some((left, operator, right)) = split_package_binding(entry) else {
+        return format_package_value(entry, indent);
+    };
+    let left = left.split_whitespace().collect::<Vec<_>>().join(" ");
+    let separator = if operator == ":" { ": " } else { " :: " };
+    format!("{left}{separator}{}", format_package_value(right, indent))
+}
+
+fn format_package_value(value: &str, indent: usize) -> String {
+    let value = value.trim().trim_end_matches(',').trim_end_matches(';').trim();
+    let Some((open, close)) = package_record_bounds(value) else {
+        return value.to_string();
+    };
+    let prefix = value[..open].trim_end();
+    let suffix = value[close + 1..].trim();
+    let entries = top_level_entries(&value[open + 1..close]);
+    if entries.is_empty() {
+        return format!("{prefix}{{}}{suffix}");
+    }
+    let body = entries
+        .iter()
+        .map(|entry| {
+            format!(
+                "{}{}",
+                " ".repeat(indent + 4),
+                format_package_entry(entry, indent + 4)
+            )
+        })
+        .collect::<Vec<_>>();
+    let separator = if package_has_top_level_comma(&value[open + 1..close]) {
+        ",\n"
+    } else {
+        "\n"
+    };
+    let mut body = body.join(separator);
+    if package_has_trailing_top_level_comma(&value[open + 1..close]) {
+        body.push(',');
+    }
+    let mut formatted = String::new();
+    formatted.push_str(prefix);
+    formatted.push_str("{\n");
+    formatted.push_str(&body);
+    formatted.push('\n');
+    formatted.push_str(&" ".repeat(indent));
+    formatted.push('}');
+    formatted.push_str(suffix);
+    formatted
+}
+
+fn package_has_top_level_comma(value: &str) -> bool {
+    package_top_level_comma(value).is_some()
+}
+
+fn package_has_trailing_top_level_comma(value: &str) -> bool {
+    package_top_level_comma(value)
+        .is_some_and(|comma| value[comma + 1..].trim().is_empty())
+}
+
+fn package_top_level_comma(value: &str) -> Option<usize> {
+    let mut depth = 0i32;
+    let mut quoted = false;
+    let mut escaped = false;
+    let mut comma = None;
+    for (index, ch) in value.char_indices() {
+        if quoted {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                quoted = false;
+            }
+            continue;
+        }
+        match ch {
+            '"' => quoted = true,
+            '{' | '[' | '(' => depth += 1,
+            '}' | ']' | ')' => depth -= 1,
+            ',' if depth == 0 => comma = Some(index),
+            _ => {}
+        }
+    }
+    comma
+}
+
+fn split_package_binding(entry: &str) -> Option<(&str, &str, &str)> {
+    let mut depth = 0i32;
+    let mut quoted = false;
+    let mut escaped = false;
+    let bytes = entry.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        let ch = bytes[index] as char;
+        if quoted {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                quoted = false;
+            }
+            index += 1;
+            continue;
+        }
+        match ch {
+            '"' => quoted = true,
+            '{' | '[' | '(' => depth += 1,
+            '}' | ']' | ')' => depth -= 1,
+            ':' if depth == 0 && index + 1 < bytes.len() && bytes[index + 1] as char == ':' => {
+                return Some((&entry[..index], "::", &entry[index + 2..]));
+            }
+            ':' if depth == 0 => {
+                return Some((&entry[..index], ":", &entry[index + 1..]));
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    None
+}
+
+fn package_record_bounds(value: &str) -> Option<(usize, usize)> {
+    let mut open = None;
+    let mut depth = 0i32;
+    let mut quoted = false;
+    let mut escaped = false;
+    for (index, ch) in value.char_indices() {
+        if quoted {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                quoted = false;
+            }
+            continue;
+        }
+        match ch {
+            '"' => quoted = true,
+            '{' => {
+                if open.is_none() {
+                    open = Some(index);
+                }
+                depth += 1;
+            }
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    let open = open?;
+                    if value[index + 1..].trim().is_empty() {
+                        return Some((open, index));
+                    }
+                    return None;
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn package_manifest_path(dir: &std::path::Path) -> Option<std::path::PathBuf> {

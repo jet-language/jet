@@ -13,6 +13,9 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::{Duration, Instant};
 
+#[cfg(target_os = "linux")]
+use std::sync::OnceLock;
+
 mod common;
 use common::jetpack_bin;
 
@@ -42,7 +45,111 @@ impl Drop for Scratch {
 }
 
 fn jetpack() -> Command {
-    Command::new(jetpack_bin())
+    let mut command = Command::new(jetpack_bin());
+    #[cfg(target_os = "linux")]
+    {
+        let fake = fake_systemd();
+        let current_path = std::env::var_os("PATH").unwrap_or_default();
+        let path = format!(
+            "{}:{}",
+            fake.bin.display(),
+            current_path.to_string_lossy()
+        );
+        command
+            .env("PATH", path)
+            .env("JETPACK_FAKE_SYSTEMD_STATE", &fake.state);
+    }
+    command
+}
+
+#[cfg(target_os = "linux")]
+struct FakeSystemd {
+    bin: PathBuf,
+    state: PathBuf,
+}
+
+#[cfg(target_os = "linux")]
+fn fake_systemd() -> &'static FakeSystemd {
+    static FAKE: OnceLock<FakeSystemd> = OnceLock::new();
+    FAKE.get_or_init(|| {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = std::env::temp_dir().join(format!(
+            "jpk-fake-systemd-{}",
+            std::process::id()
+        ));
+        let bin = root.join("bin");
+        let state = root.join("state");
+        fs::create_dir_all(&bin).unwrap();
+        fs::create_dir_all(&state).unwrap();
+        let systemd_run = r##"#!/bin/sh
+set -eu
+state=${JETPACK_FAKE_SYSTEMD_STATE:?}
+unit=
+workdir=
+saw_user=0
+saw_scope=0
+saw_collect=0
+saw_quiet=0
+saw_delegate=0
+saw_kill_mode=0
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --user) saw_user=1 ;;
+        --scope) saw_scope=1 ;;
+        --collect) saw_collect=1 ;;
+        --quiet) saw_quiet=1 ;;
+        --property=Delegate=yes) saw_delegate=1 ;;
+        --property=KillMode=control-group) saw_kill_mode=1 ;;
+        --unit=*) unit=${1#--unit=} ;;
+        --working-directory=*) workdir=${1#--working-directory=} ;;
+        --setenv=*) export "${1#--setenv=}" ;;
+        --unsetenv=*) unset "${1#--unsetenv=}" ;;
+        --) shift; break ;;
+    esac
+    shift
+done
+[ -n "$unit" ]
+[ "$saw_user" -eq 1 ]
+[ "$saw_scope" -eq 1 ]
+[ "$saw_collect" -eq 1 ]
+[ "$saw_quiet" -eq 1 ]
+[ "$saw_delegate" -eq 1 ]
+[ "$saw_kill_mode" -eq 1 ]
+mkdir -p "$state"
+printf '%s\n' "$$" > "$state/$unit.pid"
+[ -z "$workdir" ] || cd "$workdir"
+exec "$@"
+"##;
+        let systemd_run_path = bin.join("systemd-run");
+        fs::write(&systemd_run_path, systemd_run).unwrap();
+        let mut permissions = fs::metadata(&systemd_run_path).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&systemd_run_path, permissions).unwrap();
+
+        let systemctl = r##"#!/bin/sh
+set -eu
+state=${JETPACK_FAKE_SYSTEMD_STATE:?}
+signal=TERM
+unit=
+for arg in "$@"; do
+    case "$arg" in
+        --signal=*) signal=${arg#--signal=} ;;
+        *.scope) unit=$arg ;;
+    esac
+done
+[ -n "$unit" ]
+pid=$(cat "$state/$unit.pid")
+kill "-$signal" -- "-$pid" 2>/dev/null || kill "-$signal" "$pid" 2>/dev/null || true
+exit 0
+"##;
+        let systemctl_path = bin.join("systemctl");
+        fs::write(&systemctl_path, systemctl).unwrap();
+        let mut permissions = fs::metadata(&systemctl_path).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&systemctl_path, permissions).unwrap();
+        FakeSystemd { bin, state }
+    })
 }
 
 /// A packageless project (never trust-sensitive) declaring one dev service.
@@ -382,4 +489,164 @@ fn wait_for_missing(path: &std::path::Path) {
         );
         std::thread::sleep(Duration::from_millis(50));
     }
+}
+
+fn wait_for_file_contains(path: &std::path::Path, expected: &str) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if fs::read_to_string(path)
+            .map(|text| text.contains(expected))
+            .unwrap_or(false)
+        {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for `{expected}` in {}",
+            path.display()
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn production_path_persists_linux_authority_and_dependency_lifecycle() {
+    let proj = Scratch::new("authority-lifecycle");
+    let root = Scratch::new("authority-lifecycle-root");
+    let home = Scratch::new("authority-lifecycle-home");
+    write_project(
+        &proj.path,
+        r#"database: { run: ["sleep", "30"] }, api: { run: ["sleep", "30"], after: ["database"] }"#,
+        "fn run() {}\n",
+    );
+    let env = [
+        ("JETPACK_ROOT", root.path.display().to_string()),
+        ("HOME", home.path.display().to_string()),
+    ];
+
+    let up = jetpack()
+        .args(["services", "up", "--no-color"])
+        .current_dir(&proj.path)
+        .envs(env.clone())
+        .output()
+        .unwrap();
+    assert!(up.status.success(), "{}", String::from_utf8_lossy(&up.stderr));
+
+    let lifecycle = fs::read_to_string(proj.path.join(".jet/services/api/lifecycle")).unwrap();
+    assert!(lifecycle.contains("backend=linux-systemd-user"), "{lifecycle}");
+    assert!(lifecycle.contains("containment=delegated-cgroup"), "{lifecycle}");
+    assert!(lifecycle.contains("phase=ready"), "{lifecycle}");
+    assert!(lifecycle.contains("dependency=database"), "{lifecycle}");
+
+    let health = jetpack()
+        .args(["services", "health", "--json", "--no-color"])
+        .current_dir(&proj.path)
+        .envs(env.clone())
+        .output()
+        .unwrap();
+    assert!(health.status.success(), "{}", String::from_utf8_lossy(&health.stderr));
+    let json = String::from_utf8_lossy(&health.stdout);
+    assert!(json.contains("linux-systemd-user"), "{json}");
+    assert!(json.contains("\"after\":[\"database\"]"), "{json}");
+
+    let down = jetpack()
+        .args(["services", "down", "--no-color"])
+        .current_dir(&proj.path)
+        .envs(env)
+        .output()
+        .unwrap();
+    assert!(down.status.success(), "{}", String::from_utf8_lossy(&down.stderr));
+    let stopped = fs::read_to_string(proj.path.join(".jet/services/api/lifecycle")).unwrap();
+    assert!(stopped.contains("phase=stopped"), "{stopped}");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn production_path_rejects_retired_depends_on_field() {
+    let proj = Scratch::new("depends-on-rejected");
+    let root = Scratch::new("depends-on-rejected-root");
+    let home = Scratch::new("depends-on-rejected-home");
+    write_project(
+        &proj.path,
+        r#"database: { run: ["sleep", "30"] }, api: { run: ["sleep", "30"], depends_on: ["database"] }"#,
+        "fn run() {}\n",
+    );
+    let out = jetpack()
+        .args(["services", "up", "--no-color"])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("HOME", &home.path)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("E1262"), "{stderr}");
+    assert!(!proj.path.join(".jet/services/api/pid").exists());
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn production_path_bounds_readiness_probe_runtime() {
+    let proj = Scratch::new("bounded-readiness-production");
+    let root = Scratch::new("bounded-readiness-production-root");
+    let home = Scratch::new("bounded-readiness-production-home");
+    write_project(
+        &proj.path,
+        r#"fixture: { run: ["sleep", "30"], ready: "sleep 30" }"#,
+        "fn run() {}\n",
+    );
+    let started = Instant::now();
+    let out = jetpack()
+        .args(["services", "up", "--no-color"])
+        .current_dir(&proj.path)
+        .env("JETPACK_ROOT", &root.path)
+        .env("HOME", &home.path)
+        .env("JETPACK_SERVICE_HEALTH_TIMEOUT_MS", "200")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    assert!(started.elapsed() < Duration::from_secs(3), "readiness probe was not bounded: {:?}", started.elapsed());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("E1261"));
+    assert!(!proj.path.join(".jet/services/fixture/pid").exists());
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn production_path_stops_dependents_after_dependency_failure() {
+    let proj = Scratch::new("dependency-failure");
+    let root = Scratch::new("dependency-failure-root");
+    let home = Scratch::new("dependency-failure-home");
+    write_project(
+        &proj.path,
+        r#"database: { run: ["sh", "-c", "sleep 1"] }, api: { run: ["sleep", "30"], after: ["database"] }"#,
+        "fn run() {}\n",
+    );
+    let env = [
+        ("JETPACK_ROOT", root.path.display().to_string()),
+        ("HOME", home.path.display().to_string()),
+        ("JETPACK_SERVICE_HEALTH_TIMEOUT_MS", "1500".to_string()),
+    ];
+    let up = jetpack()
+        .args(["services", "up", "--no-color"])
+        .current_dir(&proj.path)
+        .envs(env.clone())
+        .output()
+        .unwrap();
+    assert!(up.status.success(), "{}", String::from_utf8_lossy(&up.stderr));
+    let api_pid = proj.path.join(".jet/services/api/pid");
+    assert!(api_pid.is_file());
+
+    wait_for_missing(&api_pid);
+    let error = proj.path.join(".jet/services/api/supervisor.error");
+    wait_for_file_contains(&error, "dependency `database` failed");
+    let lifecycle = fs::read_to_string(proj.path.join(".jet/services/api/lifecycle")).unwrap();
+    assert!(lifecycle.contains("recovery=dependency-failed"), "{lifecycle}");
+    let down = jetpack()
+        .args(["services", "down", "--no-color"])
+        .current_dir(&proj.path)
+        .envs(env)
+        .output()
+        .unwrap();
+    assert!(down.status.success(), "{}", String::from_utf8_lossy(&down.stderr));
 }
