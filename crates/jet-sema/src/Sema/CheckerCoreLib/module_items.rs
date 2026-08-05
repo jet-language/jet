@@ -944,6 +944,8 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "text_set",
             "text_merge",
             "text_show",
+            "text_edit",
+            "text_metadata",
             "counter_new",
             "counter_inc",
             "counter_merge",

@@ -2364,7 +2364,7 @@ pub(crate) fn emit_tir_core_call(
             arg(1)
         ),
         ("core.sync", "text_set") => format!(
-            "{}(({}), ({}).clone(), ({}).clone())",
+            "{}(({}).clone(), ({}).clone(), ({}).clone())",
             helper("jet_sync_text_set"),
             arg(0),
             arg(1),
@@ -2378,6 +2378,20 @@ pub(crate) fn emit_tir_core_call(
         ),
         ("core.sync", "text_show") => {
             format!("{}(&({}))", helper("jet_sync_text_show"), arg(0))
+        }
+        // These take the document by value but sema declares a read, so the
+        // caller keeps its own copy: a program may edit one base twice.
+        ("core.sync", "text_edit") => format!(
+            "{}(({}).clone(), ({}).clone(), {}, {}, ({}).clone())",
+            helper("jet_sync_text_edit"),
+            arg(0),
+            arg(1),
+            arg(2),
+            arg(3),
+            arg(4)
+        ),
+        ("core.sync", "text_metadata") => {
+            format!("{}(&({}))", helper("jet_sync_text_metadata"), arg(0))
         }
         ("core.sync", "counter_new") => format!(
             "{}(({}).clone(), {})",
