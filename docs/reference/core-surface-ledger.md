@@ -40,37 +40,37 @@ Generated on: 2026-08-06
 | Shared containers | 54 |
 | Core modules | 85 |
 | Module members | 1011 |
-| Collection method rows | 354 |
-| Jet-side rows | 1366 |
-| Total rows | 10141 |
+| Collection method rows | 419 |
+| Jet-side rows | 1431 |
+| Total rows | 10196 |
 
 ## Verdicts
 
 | Verdict | Rows |
 | --- | ---: |
-| Jet wins | 369 |
-| Equal | 442 |
-| Jet loses (two or more languages agree) | 603 |
-| Single witness (recorded, not scored) | 8172 |
+| Jet wins | 385 |
+| Equal | 455 |
+| Jet loses (two or more languages agree) | 596 |
+| Single witness (recorded, not scored) | 8169 |
 | Exported type, not an operation | 168 |
-| Not compared | 387 |
+| Not compared | 423 |
 | Deliberately declined | 0 |
 
 ## Competitors
 
 | Language | Surface read from | Recorded operations | Jet rows matched | Loss rows |
 | --- | --- | ---: | ---: | ---: |
-| Rust | standard-library source (rust-src component) | 997 | 230 | 97 |
-| Go | official frozen API files (GOROOT/api/go1*.txt) | 1878 | 218 | 227 |
-| Swift | official documentation JSON (developer.apple.com) | 505 | 98 | 82 |
-| Kotlin | official API reference (kotlinlang.org) | 1141 | 157 | 122 |
-| C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1267 | 192 | 133 |
-| TypeScript | runtime introspection | 360 | 128 | 39 |
-| Ruby | runtime introspection | 1294 | 201 | 192 |
-| Elixir | runtime introspection | 1270 | 231 | 157 |
-| Julia | official documentation search index (docs.julialang.org) | 1132 | 137 | 200 |
-| R | official R manual package index (stat.ethz.ch R-devel) | 1768 | 37 | 0 |
-| Python | runtime introspection | 2232 | 216 | 272 |
+| Rust | standard-library source (rust-src component) | 997 | 240 | 92 |
+| Go | official frozen API files (GOROOT/api/go1*.txt) | 1878 | 223 | 225 |
+| Swift | official documentation JSON (developer.apple.com) | 505 | 103 | 80 |
+| Kotlin | official API reference (kotlinlang.org) | 1141 | 158 | 122 |
+| C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1267 | 193 | 133 |
+| TypeScript | runtime introspection | 360 | 130 | 39 |
+| Ruby | runtime introspection | 1294 | 202 | 192 |
+| Elixir | runtime introspection | 1270 | 236 | 155 |
+| Julia | official documentation search index (docs.julialang.org) | 1132 | 144 | 195 |
+| R | official R manual package index (stat.ethz.ch R-devel) | 1768 | 42 | 0 |
+| Python | runtime introspection | 2232 | 219 | 271 |
 
 ## Loss clusters
 
@@ -82,7 +82,7 @@ while losses remain.
 
 | Container | Loss rows | Owner card | Card phase | State |
 | --- | ---: | --- | --- | --- |
-| core.math | 71 | #1464 | planning | live |
+| core.math | 64 | #1464 | planning | live |
 | String | 61 | #1476 | planning | live |
 | core.files | 51 | #288 | building | live |
 | ByteBuffer | 44 | #1467 | planning | live |

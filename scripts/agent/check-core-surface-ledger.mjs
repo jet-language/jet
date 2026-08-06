@@ -2,7 +2,7 @@
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -315,6 +315,48 @@ const MATCH_DOMAIN = {
   "core.text": "text",
 };
 
+// A Rust type token, or the value of the Syntax constant naming it, mapped to
+// the ledger container that owns it. Used for the tables that mix types in one
+// match: builtin_static_return and the arms written inline in
+// builtin_method_return.
+const TYPE_CONTAINER = {
+  Int: "core.math",
+  Float: "core.math",
+  Float32: "core.math",
+  BigInt: "core.math",
+  Decimal: "core.math",
+  String: "String",
+  Range: "Iter",
+  TypeInfo: "core.reflect",
+  ProgramInfo: "core.reflect",
+  FunctionInfo: "core.reflect",
+  PackageInfo: "core.reflect",
+  CompilerLexed: "core.compiler",
+  CompilerChecked: "core.compiler",
+  CompilerSourceMap: "core.compiler",
+  EffectInfo: "core.reflect",
+  Effect: "core.reflect",
+  CompilerSyntaxTree: "core.compiler",
+  CompilerNode: "core.compiler",
+  BuildContext: "core.compiler",
+  Solver: "core.solve",
+  Clock: "core.time",
+  Duration: "core.time",
+  ExpiringValue: "core.time.expiring",
+  Condition: "core.sync",
+  Secret: "core.vault",
+  WrappedVaultKey: "core.vault",
+  KeyUnlock: "core.vault",
+  SigningKey: "core.crypto",
+  VerifyKey: "core.crypto",
+  Signature: "core.crypto",
+  Sealed: "core.crypto",
+  WrappedKey: "core.crypto",
+  X25519SecretKey: "core.crypto",
+  X25519PublicKey: "core.crypto",
+  PasswordHash: "core.crypto",
+};
+
 const COLLECTION_METHOD_FUNCTIONS = {
   task_list_method_return: "TaskList",
   list_method_return: "List",
@@ -358,6 +400,11 @@ const COLLECTION_METHOD_FUNCTIONS = {
   byte_buffer_method_return: "ByteBuffer",
   bag_method_return: "Bag",
   deque_method_return: "Deque",
+  numeric_method_return: "core.math",
+  build_context_method_return: "core.compiler",
+  // builtin_static_return mixes types in one match, so its arms are attributed
+  // one at a time through TYPE_CONTAINER rather than to a single container.
+  builtin_static_return: null,
 };
 
 // The card that owns a container's losses. --check rejects a reference to a
@@ -564,7 +611,17 @@ function matchArms(source, needle) {
 
 function syntaxConstants() {
   const values = new Map();
-  for (const file of ["crates/jet-foundation/src/Syntax.rs", SYNTAX_PATH]) {
+  // Every Syntax module, not two of them. TYPE_RANGE lives in math_layout.rs,
+  // so naming files by hand left it unresolved and the arm that uses it
+  // unattributed.
+  const dir = "crates/jet-foundation/src/Syntax";
+  const files = ["crates/jet-foundation/src/Syntax.rs"].concat(
+    readdirSync(join(ROOT, dir))
+      .filter(function (name) { return name.endsWith(".rs"); })
+      .map(function (name) { return dir + "/" + name; })
+      .sort()
+  );
+  for (const file of files) {
     const source = read(file);
     for (const match of source.matchAll(/pub const ([A-Z][A-Z0-9_]*):\s*&str\s*=\s*"([^"]*)"/g)) {
       values.set(match[1], match[2]);
@@ -685,21 +742,163 @@ function fixedSignaturePairs(modules) {
   return Array.from(pairs).sort();
 }
 
+// Every method name a table decides. Tables are written three ways in
+// Collections.rs: a match on (method, nargs), an `if let "a" | "b" = method`,
+// and a bare `method == "x"`. Reading only the first missed count_ones,
+// is_infinite and to_string, and the ledger then scored them as gaps Jet had
+// to close.
+function methodNames(body) {
+  const methods = new Set();
+  try {
+    for (const arm of matchArms(body, "match (")) {
+      // A guard names types, not methods: `(Type::Named(n), "x", 1) if n == "Secret"`.
+      for (const name of quoted(arm.lhs.split(" if ")[0])) methods.add(name);
+    }
+  } catch (error) {
+    // Not every table is written as a match.
+  }
+  for (const hit of body.matchAll(/if let ((?:"[^"]+"\s*\|\s*)*"[^"]+")\s*=\s*method/g)) {
+    for (const name of quoted(hit[1])) methods.add(name);
+  }
+  for (const hit of body.matchAll(/method\s*==\s*"([^"]+)"/g)) methods.add(hit[1]);
+  return methods;
+}
+
+// Discover the tables instead of listing them. A hand-listed set silently
+// dropped numeric_method_return, builtin_static_return,
+// build_context_method_return and the arms written inline in
+// builtin_method_return, so those Jet capabilities read as missing.
+function discoverTables(source) {
+  const found = [];
+  for (const hit of source.matchAll(/\nfn ([a-z_][a-z0-9_]*_(?:method|static)_return)\s*\(/g)) {
+    found.push(hit[1]);
+  }
+  return found.sort();
+}
+
+// Arms of builtin_method_return that hold their own table instead of calling
+// one. Each names its type, so each is attributed on its own.
+function inlineTables(source, constants) {
+  const body = functionBody(source, "builtin_method_return");
+  const tables = [];
+  const unknown = [];
+  for (const arm of matchArms(body, "match recv_ty")) {
+    if (!arm.rhs.includes("match (method")) continue;
+    const names = new Set();
+    for (const name of quoted(arm.lhs)) names.add(name);
+    for (const hit of arm.lhs.matchAll(/\b(?:Syntax::|crate::Syntax::)([A-Z][A-Z0-9_]*)\b/g)) {
+      if (constants.has(hit[1])) names.add(constants.get(hit[1]));
+    }
+    const type = Array.from(names).find(function (name) { return TYPE_CONTAINER[name]; });
+    if (!type) {
+      unknown.push(Array.from(names).join("/") || arm.lhs.trim().slice(0, 60));
+      continue;
+    }
+    tables.push({
+      function: "builtin_method_return:" + type,
+      type: TYPE_CONTAINER[type],
+      methods: Array.from(methodNames(arm.rhs)).sort(),
+      sourceLine: lineAt(source, source.indexOf(arm.lhs.trim().slice(0, 40))),
+    });
+  }
+  if (unknown.length) {
+    throw new Error("builtin_method_return arms name types with no container: " +
+      unknown.join(", "));
+  }
+  return tables;
+}
+
 function collectionInventory() {
   const source = read(COLLECTIONS_PATH);
-  return Object.keys(COLLECTION_METHOD_FUNCTIONS).map(function (functionName) {
-    const body = functionBody(source, functionName);
-    const methods = new Set();
-    for (const arm of matchArms(body, "match (")) {
-      for (const method of quoted(arm.lhs)) methods.add(method);
-    }
-    return {
-      function: functionName,
-      type: COLLECTION_METHOD_FUNCTIONS[functionName],
-      methods: Array.from(methods).sort(),
-      sourceLine: lineAt(source, source.indexOf("fn " + functionName + "(")),
-    };
+  const constants = syntaxConstants();
+  const discovered = discoverTables(source);
+
+  // The gate that was missing. Deleting set_method_return removed a whole Jet
+  // collection and every fixture still passed, because nothing checked that the
+  // tables the compiler ships are the tables the ledger reads.
+  const unmapped = discovered.filter(function (name) {
+    return !Object.prototype.hasOwnProperty.call(COLLECTION_METHOD_FUNCTIONS, name);
   });
+  if (unmapped.length) {
+    throw new Error("Collections.rs ships a table the ledger does not read: " + unmapped.join(", "));
+  }
+  const missing = Object.keys(COLLECTION_METHOD_FUNCTIONS).filter(function (name) {
+    return !discovered.includes(name);
+  });
+  if (missing.length) {
+    throw new Error("the ledger reads a table Collections.rs no longer ships: " + missing.join(", "));
+  }
+
+  const tables = [];
+  for (const name of discovered) {
+    const container = COLLECTION_METHOD_FUNCTIONS[name];
+    const body = functionBody(source, name);
+    const sourceLine = lineAt(source, source.indexOf("fn " + name + "("));
+    if (container !== null) {
+      tables.push({
+        function: name,
+        type: container,
+        methods: Array.from(methodNames(body)).sort(),
+        sourceLine: sourceLine,
+      });
+      continue;
+    }
+    // A mixed table: attribute each arm to the container of the type it names.
+    const byContainer = new Map();
+    for (const arm of matchArms(body, "match (")) {
+      const names = new Set(quoted(arm.lhs));
+      for (const hit of arm.lhs.matchAll(/Type::([A-Z][A-Za-z0-9_]*)/g)) names.add(hit[1]);
+      for (const hit of arm.lhs.matchAll(/\b(?:crate::)?Syntax::([A-Z][A-Z0-9_]*)\b/g)) {
+        if (constants.has(hit[1])) names.add(constants.get(hit[1]));
+      }
+      let owner = null;
+      for (const candidate of names) {
+        if (TYPE_CONTAINER[candidate]) { owner = TYPE_CONTAINER[candidate]; break; }
+      }
+      if (!owner) continue;
+      if (!byContainer.has(owner)) byContainer.set(owner, new Set());
+      for (const method of quoted(arm.lhs.split(" if ")[0])) {
+        if (!TYPE_CONTAINER[method]) byContainer.get(owner).add(method);
+      }
+    }
+    for (const [owner, methods] of byContainer) {
+      tables.push({
+        function: name + ":" + owner,
+        type: owner,
+        methods: Array.from(methods).sort(),
+        sourceLine: sourceLine,
+      });
+    }
+  }
+  for (const table of inlineTables(source, constants)) tables.push(table);
+
+  // Several tables can own one container: core.compiler is spread across
+  // CompilerLexed, CompilerChecked, CompilerSyntaxTree and CompilerSourceMap,
+  // which share source and diagnostics. One container is one row set, so they
+  // merge and keep every table they came from as provenance.
+  const byContainer = new Map();
+  for (const table of tables) {
+    if (table.methods.length === 0) continue;
+    if (!byContainer.has(table.type)) {
+      byContainer.set(table.type, {
+        type: table.type,
+        functions: [],
+        methods: new Set(),
+        sourceLine: table.sourceLine,
+      });
+    }
+    const entry = byContainer.get(table.type);
+    entry.functions.push(table.function);
+    for (const method of table.methods) entry.methods.add(method);
+  }
+  return Array.from(byContainer.values()).map(function (entry) {
+    return {
+      function: entry.functions.sort().join(" + "),
+      type: entry.type,
+      methods: Array.from(entry.methods).sort(),
+      sourceLine: entry.sourceLine,
+    };
+  }).sort(function (left, right) { return left.type.localeCompare(right.type); });
 }
 
 // ---------------------------------------------------------------------------
@@ -1749,6 +1948,43 @@ function hostileFixtures() {
     for (const name of ["a", "b", "c", "d", "e"]) {
       if (!found.has(name)) {
         throw new Error("the match parser lost an arm after a block-bodied arm: " + name);
+      }
+    }
+  }));
+
+  // The defect that got through twice. Deleting set_method_return removed a
+  // whole Jet collection type and every fixture still passed, because nothing
+  // compared the tables the compiler ships against the tables the ledger reads.
+  results.push(rejects("a Jet method table is dropped from the ledger",
+    "Collections.rs ships a table the ledger does not read", function () {
+    const saved = COLLECTION_METHOD_FUNCTIONS.set_method_return;
+    delete COLLECTION_METHOD_FUNCTIONS.set_method_return;
+    try {
+      collectionInventory();
+    } finally {
+      COLLECTION_METHOD_FUNCTIONS.set_method_return = saved;
+    }
+  }));
+
+  results.push(rejects("the ledger reads a table the compiler no longer ships",
+    "the ledger reads a table Collections.rs no longer ships", function () {
+    COLLECTION_METHOD_FUNCTIONS.ledger_fixture_method_return = "LedgerFixture";
+    try {
+      collectionInventory();
+    } finally {
+      delete COLLECTION_METHOD_FUNCTIONS.ledger_fixture_method_return;
+    }
+  }));
+
+  results.push(holds("every Jet method table is mapped to a container", function () {
+    const source = read(COLLECTIONS_PATH);
+    const discovered = discoverTables(source);
+    if (discovered.length < 45) {
+      throw new Error("only " + discovered.length + " method tables were discovered in Collections.rs");
+    }
+    for (const name of discovered) {
+      if (!Object.prototype.hasOwnProperty.call(COLLECTION_METHOD_FUNCTIONS, name)) {
+        throw new Error("unmapped Jet method table: " + name);
       }
     }
   }));
