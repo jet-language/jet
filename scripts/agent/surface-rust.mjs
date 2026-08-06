@@ -80,12 +80,22 @@ const ABSENT = {
 function scan(text) {
   const stable = new Set();
   const unstable = new Set();
-  const lines = text.split("\n");
   let attributes = [];
-  for (const raw of lines) {
+  // An attribute can span lines: #[must_use = "long reason \ ... "]. Treating
+  // the continuation as code cleared the buffer, so a #[stable] written above
+  // one was lost and its function was dropped from the surface entirely. That
+  // is how saturating_add and wrapping_add went missing and became Jet wins.
+  let open = 0;
+  for (const raw of text.split("\n")) {
     const line = raw.trim();
+    if (open > 0) {
+      attributes.push(line);
+      open += (line.match(/\[/g) || []).length - (line.match(/\]/g) || []).length;
+      continue;
+    }
     if (line.startsWith("#[") || line.startsWith("#![")) {
       attributes.push(line);
+      open = (line.match(/\[/g) || []).length - (line.match(/\]/g) || []).length;
       continue;
     }
     if (line.startsWith("//") || line.length === 0) continue;
@@ -97,7 +107,7 @@ function scan(text) {
       const joined = attributes.join(" ");
       const isUnstable = joined.includes("#[unstable(") || joined.includes("rustc_const_unstable");
       const isStable = joined.includes("#[stable(");
-      if (isStable && !isUnstable) stable.add(fn[1]);
+      if (isStable) stable.add(fn[1]);
       else if (isUnstable) unstable.add(fn[1]);
     }
     attributes = [];

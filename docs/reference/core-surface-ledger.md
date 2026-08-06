@@ -35,16 +35,16 @@ Generated on: 2026-08-06
 | Module members | 1011 |
 | Collection method rows | 334 |
 | Jet-side rows | 1346 |
-| Total rows | 10457 |
+| Total rows | 10577 |
 
 ## Verdicts
 
 | Verdict | Rows |
 | --- | ---: |
-| Jet wins | 418 |
-| Equal | 343 |
-| Jet loses (two or more languages agree) | 675 |
-| Single witness (recorded, not scored) | 8436 |
+| Jet wins | 410 |
+| Equal | 351 |
+| Jet loses (two or more languages agree) | 687 |
+| Single witness (recorded, not scored) | 8544 |
 | Not compared | 585 |
 | Deliberately declined | 0 |
 
@@ -52,15 +52,15 @@ Generated on: 2026-08-06
 
 | Language | Surface read from | Recorded operations | Jet rows matched | Loss rows |
 | --- | --- | ---: | ---: | ---: |
-| Rust | standard-library source (rust-src component) | 831 | 129 | 122 |
+| Rust | standard-library source (rust-src component) | 980 | 146 | 134 |
 | Go | official frozen API files (GOROOT/api/go1*.txt) | 1681 | 133 | 235 |
 | Swift | official documentation JSON (developer.apple.com) | 505 | 65 | 88 |
-| Kotlin | official API reference (kotlinlang.org) | 1141 | 120 | 135 |
+| Kotlin | official API reference (kotlinlang.org) | 1141 | 120 | 136 |
 | C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1102 | 117 | 134 |
 | TypeScript | runtime introspection | 347 | 96 | 57 |
 | Ruby | runtime introspection | 1209 | 130 | 201 |
-| Elixir | runtime introspection | 1450 | 147 | 202 |
-| Julia | official documentation search index (docs.julialang.org) | 1132 | 98 | 187 |
+| Elixir | runtime introspection | 1450 | 147 | 203 |
+| Julia | official documentation search index (docs.julialang.org) | 1132 | 98 | 197 |
 | R | official R manual package index (stat.ethz.ch R-devel) | 3536 | 34 | 0 |
 | Python | runtime introspection | 2227 | 128 | 285 |
 
@@ -74,10 +74,10 @@ it is done while losses remain.
 
 | Container | Loss rows | Prior card | Card phase | Owner |
 | --- | ---: | --- | --- | --- |
-| String | 80 | #1409 | done | closed |
-| core.math | 65 | none | n/a | needs_card |
+| String | 81 | #1409 | done | closed |
+| core.math | 75 | none | n/a | needs_card |
 | core.os | 56 | none | n/a | needs_card |
-| List | 53 | #1410 | done | closed |
+| List | 54 | #1410 | done | closed |
 | core.time | 42 | none | n/a | needs_card |
 | core.tasks | 33 | none | n/a | needs_card |
 | Map | 30 | #1410 | done | closed |
