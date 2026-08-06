@@ -620,43 +620,10 @@ impl<'a> crate::Sema::Checker<'a> {
 }
 
 /// E0927: `name` isn't a registered applied rule. `vocab` supplies nearest
-/// spelling suggestions.
+/// spelling suggestions. The text itself lives in the registry so the parser's
+/// function-site check and this type-site check cannot drift apart.
 fn e0927_unknown_marker(name: &str, vocab: &[String], span: Span) -> Diagnostic {
-    if let Some(crate::Policy::AppliedRule {
-        status: crate::Policy::RuleStatus::Retired { replacement },
-        ..
-    }) = crate::Policy::applied_rule(name)
-    {
-        let fix = if replacement.starts_with('#') || replacement.starts_with('.') {
-            format!("write `{replacement}` instead")
-        } else {
-            replacement.to_string()
-        };
-        return Diagnostic::error(
-            "E0927",
-            format!("`#{name}` is retired"),
-            format!(
-                "the registry keeps this old spelling only to teach its replacement; \
-                 it no longer applies a rule"
-            ),
-            fix,
-            Some(span),
-        );
-    }
-    let fix = match crate::Sema::Diagnostics::suggest_field(name, vocab) {
-        Some(s) => format!("did you mean `#{s}`?"),
-        None => format!(
-            "check the spelling, or see docs/spec/syntax-decisions.md for the full applied-rule list."
-        ),
-    };
-    Diagnostic::error(
-        "E0927",
-        format!("`#{name}` isn't a known applied rule"),
-        format!("`{name}` isn't registered as an applied rule — Jet rules are a closed, \
-                 registered vocabulary (I7), not any PascalCase word."),
-        fix,
-        Some(span),
-    )
+    crate::Policy::marker_unknown_error(name, vocab, span)
 }
 
 /// True when `name` is a built-in rule or visible user derive.
@@ -676,10 +643,8 @@ fn check_one(m: &Marker, known_derive_names: &HashSet<String>) -> Option<Diagnos
     if e0922_owns_debug || is_legal_rule_name(&m.name, known_derive_names) {
         return None;
     }
-    let vocab: Vec<String> = crate::Policy::APPLIED_RULES
-        .iter()
-        .filter(|row| matches!(row.status, crate::Policy::RuleStatus::Active))
-        .map(|row| row.name.to_string())
+    let vocab: Vec<String> = crate::Policy::active_rule_names()
+        .into_iter()
         .chain(known_derive_names.iter().cloned())
         .collect();
     Some(e0927_unknown_marker(&m.name, &vocab, m.name_span))

@@ -1313,7 +1313,7 @@ package-off gives the explicit `Debug` marker a required job.
 
 `Debug` remains the dev-facing lens; `#Redact` carries the secrets story.
 Explicit opt-in markers for the other derive families remain
-`#Comparable`, `#Summarize`, and the codability family `#Codable`
+`#Comparable` and the codability family `#Codable`
 (≡ `#[Encode, Decode]`), `#Encode`, `#Decode` (D-SERDE4, D-MARKERMOVE3).
 `Serialize`/`Deserialize` are not Jet words. Field-level wire markers stay on
 the `#` plane (see Serde under Core library).
@@ -1362,7 +1362,7 @@ expansion, and `T.$layout` to the compiler-known layout projection.
 **D-MARKERMOVE1/2/3 — Plane assignments** *(spelling reconciled by
 D-VERDICT-732-1)*: on `#`: `MustUse`,
 `Codable`, `Encode`, `Decode`,
-`PublishedSchema`, `Redact`, `Numeric`, `Debug`, `Summarize`, `Comparable`
+`PublishedSchema`, `Redact`, `Numeric`, `Debug`, `Comparable`
 (user derives of the same names also use `#`). D-SHAPE8 later moved explicit
 purity to the empty function-effect row (`f: fn(Int) =[]=> Int`). Field-level wire markers
 use `#`: `Rename`, `Skip`, `Default`, `Flatten`, `RenameAll`,
@@ -5559,3 +5559,23 @@ Spellings live in Syntax.rs (`OP_CARET`, `OP_CARET_EQ`, `OP_TILDE_PIPE`,
 `OP_TILDE_PIPE_EQ`). Flagships: `examples/features/math/power_operator.jet`,
 `examples/features/math/power_semantics.jet`,
 `examples/features/math/xor_operator.jet`. Cards #1428, #1429, #1430.
+
+**D-VERDICT-1455-1 — Mandatory registration (law zero)** *(ratified
+2026-08-05, card #1455)*: a marker exists if and only if it is a row in
+`Policy::APPLIED_RULES`. No marker may be parsed, checked, formatted,
+highlighted, or reflected outside that registry, and every active row must be
+implemented end to end or retired. Drift in either direction is a defect.
+
+Two rows were resolved under this law. `#Authority` was registered but no
+parser ever read it, so it is removed; the name now reports the ordinary
+E0927 unknown-marker family. `#Summarize` was registered as a compiler derive,
+but no `Summarize` trait exists anywhere in the compiler or Core library —
+it only ever worked through an ordinary `derive T.Summarize { … }` provider
+(D-METADERIVE1=A). The compiler row is removed and the user-derive spelling is
+unchanged, so `#Summarize` on a type with no visible provider now reports
+E0927 instead of silently doing nothing.
+
+Retired rows also stop applying effects. `#Pure` set `is_pure` and
+`#InlineAlways` set `is_inline_always` *after* diagnosing, so both retired
+spellings kept working and the registry's status column lied about them. They
+now teach their replacement and apply nothing.

@@ -543,15 +543,10 @@ impl<'a> Parser<'a> {
                 }
                 // No autofix: deleting one entry of `#[A, A]` in place would
                 // leave a dangling comma. The writer removes the repeat.
-                self.diags.push(Diagnostic::error(
-                    "E0999",
-                    format!("`#{}` is already applied to this {noun}", marker.name),
-                    format!(
-                        "`#{}` is not a repeatable rule, so the second copy adds nothing and can only disagree with the first",
-                        marker.name
-                    ),
-                    "remove the repeated marker".to_string(),
-                    Some(marker.span),
+                self.diags.push(crate::Policy::marker_repeated_error(
+                    &marker.name,
+                    noun,
+                    marker.span,
                 ));
             }
         }
@@ -918,40 +913,32 @@ impl<'a> Parser<'a> {
                         },
                     ));
                 }
+                // D-VERDICT-1455-1: a retired row teaches its replacement and
+                // applies nothing. `#Pure` and `#InlineAlways` used to set
+                // their flags after diagnosing, so retired spellings kept
+                // working and the registry's status column lied.
                 if let Some(crate::Policy::RuleStatus::Retired { replacement }) =
                     crate::Policy::applied_rule(&marker.name).map(|rule| rule.status)
                 {
-                    match marker.name.as_str() {
-                        Syntax::KW_PURE => {
-                            self.diags.push(Self::retired_effect_syntax(Span::new(
-                                marker.span.start,
-                                marker.span.start + 1,
-                            )));
-                            function.is_pure = true;
-                        }
-                        "InlineAlways" => {
-                            self.diags.push(Diagnostic::error(
-                                "E0927",
-                                "`#InlineAlways` is retired".to_string(),
-                                "one `#Inline` marker carries both inline modes".to_string(),
-                                format!("write `{replacement}`"),
-                                Some(marker.span),
-                            ));
-                            function.is_inline_always = true;
-                            function.inline_span = Some(marker.span);
-                        }
-                        _ => {
-                            self.diags.push(Diagnostic::error(
-                                "E0927",
-                                format!("`#{}` is retired", marker.name),
-                                "the applied-rule registry owns retired spellings and replacements"
-                                    .to_string(),
-                                format!("write `{replacement}`"),
-                                Some(marker.span),
-                            ));
-                        }
-                    }
+                    self.diags.push(Diagnostic::error(
+                        "E0927",
+                        format!("`#{}` is retired", marker.name),
+                        "the applied-rule registry owns retired spellings and replacements"
+                            .to_string(),
+                        format!("write `{replacement}`"),
+                        Some(marker.span),
+                    ));
                     continue;
+                }
+                // D-VERDICT-1455-1: an unregistered name at a callable site is
+                // a typo, not a user derive (derives attach to types), so it
+                // gets the one E0927 vocabulary family instead of a site error.
+                if crate::Policy::applied_rule(&marker.name).is_none() {
+                    return Err(crate::Policy::marker_unknown_error(
+                        &marker.name,
+                        &crate::Policy::active_rule_names(),
+                        marker.name_span,
+                    ));
                 }
                 if !Self::function_marker_has_applicator(&marker.name) {
                     return Err(Diagnostic::error(

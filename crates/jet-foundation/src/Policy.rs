@@ -493,6 +493,87 @@ pub fn marker_argument_shape_error(
     )
 }
 
+/// The active registry vocabulary, plus any visible `derive T.Name { … }`
+/// providers, is the only list a "did you mean" suggestion may draw from.
+pub fn active_rule_names() -> Vec<String> {
+    APPLIED_RULES
+        .iter()
+        .filter(|row| matches!(row.status, RuleStatus::Active))
+        .map(|row| row.name.to_string())
+        .collect()
+}
+
+/// D-VERDICT-1455-1: one E0927 family for an unregistered or retired marker
+/// name, at every site. Parser and sema both call this; neither writes its own
+/// unknown-marker text, so a typo reads the same wherever it sits.
+pub fn marker_unknown_error(
+    name: &str,
+    vocabulary: &[String],
+    span: crate::Diagnostics::Span,
+) -> crate::Diagnostics::Diagnostic {
+    if let Some(AppliedRule {
+        status: RuleStatus::Retired { replacement },
+        ..
+    }) = applied_rule(name)
+    {
+        let fix = if replacement.starts_with('#') || replacement.starts_with('.') {
+            format!("write `{replacement}` instead")
+        } else {
+            replacement.to_string()
+        };
+        return crate::Diagnostics::Diagnostic::error(
+            "E0927",
+            format!("`#{name}` is retired"),
+            "the registry keeps this old spelling only to teach its replacement; \
+             it no longer applies a rule"
+                .to_string(),
+            fix,
+            Some(span),
+        );
+    }
+    let nearest = vocabulary
+        .iter()
+        .map(|candidate| (candidate, crate::Syntax::edit_distance(name, candidate)))
+        .filter(|(_, distance)| *distance <= 2)
+        .min_by_key(|(_, distance)| *distance)
+        .map(|(candidate, _)| candidate.clone());
+    crate::Diagnostics::Diagnostic::error(
+        "E0927",
+        format!("`#{name}` isn't a known applied rule"),
+        format!(
+            "`{name}` isn't registered as an applied rule — Jet rules are a closed, \
+             registered vocabulary (I7), not any PascalCase word."
+        ),
+        nearest.map_or_else(
+            || {
+                "check the spelling, or see docs/spec/syntax-decisions.md for the full applied-rule list."
+                    .to_string()
+            },
+            |nearest| format!("did you mean `#{nearest}`?"),
+        ),
+        Some(span),
+    )
+}
+
+/// D-MARK-REPEAT1=A: the one repeated-rule diagnostic. Every site calls this,
+/// so a duplicate reads the same on a file, a type, or a function; the
+/// per-marker duplicate codes E0416 and E0428 retired into it.
+pub fn marker_repeated_error(
+    name: &str,
+    noun: &str,
+    span: crate::Diagnostics::Span,
+) -> crate::Diagnostics::Diagnostic {
+    crate::Diagnostics::Diagnostic::error(
+        "E0999",
+        format!("`#{name}` is already applied to this {noun}"),
+        format!(
+            "`#{name}` is not a repeatable rule, so the second copy adds nothing and can only disagree with the first"
+        ),
+        "remove the repeated marker".to_string(),
+        Some(span),
+    )
+}
+
 /// D-MARK-FORM1=A: parentheses appear exactly when arguments are written, so an
 /// empty pair is always a leftover. `parens` covers `(` through `)` alone, so
 /// the autofix deletes exactly that and `jet fmt` can apply it.
@@ -724,7 +805,6 @@ pub const APPLIED_RULES: &[AppliedRule] = &[
     rule!("Encode", sig!(), TYPE_SITE),
     rule!("Decode", sig!(), TYPE_SITE),
     rule!("PublishedSchema", sig!(), TYPE_SITE),
-    rule!("Summarize", sig!(), TYPE_SITE),
     rule!("Comparable", sig!(), TYPE_SITE),
     rule!("Equatable", sig!(), TYPE_SITE),
     rule!("Debug", sig!(), TYPE_SITE),
@@ -785,7 +865,6 @@ pub const APPLIED_RULES: &[AppliedRule] = &[
     // D-MARK-REPEAT1=A: one target may silence several lints.
     rule!(repeatable "allow", sig!(param!("lint", Ident)), &[RuleSite::Declaration, RuleSite::Field, RuleSite::Statement]),
     rule!("Static", sig!(), CONST_SITE),
-    rule!("Authority", sig!(), &[RuleSite::Operation]),
     rule!("wire", sig!(), FIELD_SITE),
     rule!(retired "InlineAlways", sig!(), FUNCTION_SITE, "#Inline(Always)"),
     rule!(retired "static", sig!(), CONST_SITE, "#Static"),
@@ -823,7 +902,7 @@ pub fn rule_allows(name: &str, site: RuleSite) -> bool {
 }
 
 pub const DERIVE_RULES: &[&str] = &[
-    "Codable", "Encode", "Decode", "Summarize", "Comparable", "Equatable", "Debug",
+    "Codable", "Encode", "Decode", "Comparable", "Equatable", "Debug",
     "Numeric", "Printable", "CLI", "Patchable", "UnitFamily",
 ];
 
@@ -892,7 +971,7 @@ mod tests {
     #[test]
     fn authority_rows_are_site_bound_and_policy_is_lexical() {
         let rows = super::applied_rule_registry();
-        for name in ["Authority", "Unsafe", "Grant", "Scrub", "wire"] {
+        for name in ["Unsafe", "Grant", "Scrub", "wire"] {
             let row = rows.iter().find(|row| row.name == name).unwrap();
             assert_eq!(row.resolution, super::RuleResolution::SiteBound);
             assert!(row.policy_scopes.is_empty());

@@ -477,13 +477,10 @@ impl<'a> Parser<'a> {
                     TokKind::Hash if self.at_pub_file() && !self.file_marker_stack_starts_here() => {
                         if pub_file {
                             let span = self.peek().span;
-                            self.diags.push(Diagnostic::error(
-                                "E0416",
-                                "only one `#PubFile` marker is allowed per file".to_string(),
-                                "a file may declare at most one public-by-default visibility marker"
-                                    .to_string(),
-                                "remove the duplicate `#PubFile` marker".to_string(),
-                                Some(span),
+                            self.diags.push(crate::Policy::marker_repeated_error(
+                                Syntax::MARKER_PUB_FILE,
+                                "file",
+                                span,
                             ));
                             self.bump();
                             self.bump();
@@ -499,13 +496,10 @@ impl<'a> Parser<'a> {
                     TokKind::Hash if self.at_no_prelude() && !self.file_marker_stack_starts_here() => {
                         if no_prelude {
                             let span = self.peek().span;
-                            self.diags.push(Diagnostic::error(
-                                "E0428",
-                                "only one `#NoPrelude` marker is allowed per file".to_string(),
-                                "a file may opt out of the ambient prelude at most once"
-                                    .to_string(),
-                                "remove the duplicate `#NoPrelude` marker".to_string(),
-                                Some(span),
+                            self.diags.push(crate::Policy::marker_repeated_error(
+                                Syntax::MARKER_NO_PRELUDE,
+                                "file",
+                                span,
                             ));
                             self.bump();
                             self.bump();
@@ -538,13 +532,10 @@ impl<'a> Parser<'a> {
                             Some(span),
                         ));
                         if pub_file {
-                            self.diags.push(Diagnostic::error(
-                                "E0416",
-                                "only one `#PubFile` marker is allowed per file".to_string(),
-                                "a file may declare at most one public-by-default visibility marker"
-                                    .to_string(),
-                                "remove the duplicate marker".to_string(),
-                                Some(span),
+                            self.diags.push(crate::Policy::marker_repeated_error(
+                                Syntax::MARKER_PUB_FILE,
+                                "file",
+                                span,
                             ));
                         } else {
                             pub_file = true;
@@ -559,17 +550,23 @@ impl<'a> Parser<'a> {
                             Ok(markers) => {
                                 let mut failed = false;
                                 let ordered_markers = markers.clone();
+                                // A repeat *inside* this group was already
+                                // reported by the shared D-MARK-REPEAT1 check.
+                                // Only a repeat of a marker seen in an earlier
+                                // top-level group is news here.
+                                let had_pub_file = pub_file;
+                                let had_no_prelude = no_prelude;
                                 for marker in markers {
                                     match marker.name.as_str() {
                                         Syntax::MARKER_PUB_FILE => {
                                             if pub_file {
-                                                self.diags.push(Diagnostic::error(
-                                                    "E0416",
-                                                    "only one `#PubFile` marker is allowed per file".to_string(),
-                                                    "a file may declare at most one public-by-default visibility marker".to_string(),
-                                                    "remove the duplicate marker".to_string(),
-                                                    Some(marker.span),
-                                                ));
+                                                if had_pub_file {
+                                                    self.diags.push(crate::Policy::marker_repeated_error(
+                                                        Syntax::MARKER_PUB_FILE,
+                                                        "file",
+                                                        marker.span,
+                                                    ));
+                                                }
                                                 failed = true;
                                             } else {
                                                 pub_file = true;
@@ -578,13 +575,13 @@ impl<'a> Parser<'a> {
                                         }
                                         Syntax::MARKER_NO_PRELUDE => {
                                             if no_prelude {
-                                                self.diags.push(Diagnostic::error(
-                                                    "E0428",
-                                                    "only one `#NoPrelude` marker is allowed per file".to_string(),
-                                                    "a file may opt out of the ambient prelude at most once".to_string(),
-                                                    "remove the duplicate marker".to_string(),
-                                                    Some(marker.span),
-                                                ));
+                                                if had_no_prelude {
+                                                    self.diags.push(crate::Policy::marker_repeated_error(
+                                                        Syntax::MARKER_NO_PRELUDE,
+                                                        "file",
+                                                        marker.span,
+                                                    ));
+                                                }
                                                 failed = true;
                                             } else {
                                                 no_prelude = true;
