@@ -42,16 +42,16 @@ Generated on: 2026-08-06
 | Module members | 1011 |
 | Collection method rows | 334 |
 | Jet-side rows | 1346 |
-| Total rows | 10498 |
+| Total rows | 10493 |
 
 ## Verdicts
 
 | Verdict | Rows |
 | --- | ---: |
-| Jet wins | 393 |
-| Equal | 368 |
-| Jet loses (two or more languages agree) | 649 |
-| Single witness (recorded, not scored) | 8503 |
+| Jet wins | 391 |
+| Equal | 370 |
+| Jet loses (two or more languages agree) | 646 |
+| Single witness (recorded, not scored) | 8501 |
 | Not compared | 585 |
 | Deliberately declined | 0 |
 
@@ -59,14 +59,14 @@ Generated on: 2026-08-06
 
 | Language | Surface read from | Recorded operations | Jet rows matched | Loss rows |
 | --- | --- | ---: | ---: | ---: |
-| Rust | standard-library source (rust-src component) | 980 | 157 | 119 |
-| Go | official frozen API files (GOROOT/api/go1*.txt) | 1681 | 145 | 232 |
+| Rust | standard-library source (rust-src component) | 980 | 159 | 117 |
+| Go | official frozen API files (GOROOT/api/go1*.txt) | 1681 | 147 | 230 |
 | Swift | official documentation JSON (developer.apple.com) | 505 | 83 | 79 |
 | Kotlin | official API reference (kotlinlang.org) | 1141 | 147 | 121 |
-| C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1102 | 135 | 128 |
+| C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1102 | 136 | 127 |
 | TypeScript | runtime introspection | 347 | 112 | 47 |
 | Ruby | runtime introspection | 1209 | 149 | 186 |
-| Elixir | runtime introspection | 1450 | 173 | 184 |
+| Elixir | runtime introspection | 1450 | 175 | 183 |
 | Julia | official documentation search index (docs.julialang.org) | 1132 | 108 | 189 |
 | R | official R manual package index (stat.ethz.ch R-devel) | 3536 | 34 | 0 |
 | Python | runtime introspection | 2227 | 142 | 283 |
@@ -99,10 +99,10 @@ it is done while losses remain.
 | Iter | 14 | #1400 | done | closed |
 | core.log | 12 | none | n/a | needs_card |
 | core.process | 12 | none | n/a | needs_card |
-| Deque | 12 | none | n/a | needs_card |
 | core.crypto | 11 | none | n/a | needs_card |
 | core.regex | 11 | none | n/a | needs_card |
 | core.tls | 10 | none | n/a | needs_card |
+| Deque | 9 | none | n/a | needs_card |
 | core.testing | 7 | none | n/a | needs_card |
 | core.text | 7 | none | n/a | needs_card |
 | core.db | 6 | none | n/a | needs_card |
