@@ -385,6 +385,25 @@ const CLUSTER_OWNER = {
   "core.io": 1480,
   "core.files": 288,
   "core.path": 288,
+  // One sweep card owns the small clusters. Seventeen cards for seventy-five
+  // rows would cost more to track than to close.
+  "core.sync": 1481,
+  "core.encoding.xml": 1481,
+  "core.process": 1481,
+  "core.db": 1481,
+  "core.testing": 1481,
+  "core.reflect": 1481,
+  "core.http": 1481,
+  "core.tls": 1481,
+  "core.uuid": 1481,
+  "core.binary": 1481,
+  "core.encoding.csv": 1481,
+  "core.random": 1481,
+  PriorityQueue: 1481,
+  "core.args": 1481,
+  "core.encoding.json": 1481,
+  "core.mem": 1481,
+  "core.mime": 1481,
 };
 
 // ---------------------------------------------------------------------------
