@@ -37,6 +37,8 @@ containers = [
   {"core.tasks", [Task, Agent, GenServer, Process]},
   {"core.testing", [ExUnit, ExUnit.Assertions]},
   {"core.log", [Logger]},
+  {"core.args", [OptionParser]},
+  {"core.reflect", [Code, Module]},
   {"core.binary", [Bitwise]},
   {"core.archive", [:zip, :zlib]},
   {"core.io", [IO]},
@@ -45,6 +47,14 @@ containers = [
 ]
 
 absent = [
+  {"core.email", "no Elixir standard-library email support"},
+  {"core.sync", "Elixir coordinates with processes; it ships no lock module"},
+  {"core.mime", "no Elixir standard-library MIME database"},
+  {"core.encoding.xml", "no Elixir standard-library XML codec"},
+  {"core.encoding.yaml", "no Elixir standard-library YAML codec"},
+  {"core.mem", "the runtime manages memory; Elixir ships no memory module"},
+  {"core.term", "IO.ANSI colours output but Elixir ships no terminal control module"},
+  {"core.web", "Phoenix is a separate framework, not the Elixir standard library"},
   {"core.crypto.random", "cryptographic randomness lives in :crypto, recorded under core.crypto"},
   {"core.encoding.base32", "base32 lives in the Base module, recorded under core.encoding.base64"},
   {"core.encoding.hex", "hex lives in the Base module, recorded under core.encoding.base64"},

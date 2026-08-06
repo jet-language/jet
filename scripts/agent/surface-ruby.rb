@@ -27,6 +27,9 @@ require "zlib"
 require "stringio"
 require "logger"
 require "benchmark"
+require "optparse"
+require "rexml/document"
+require "objspace"
 
 # Canonical Jet-facing container names map to the Ruby class or module that
 # holds the same workflow. Instance methods and singleton methods are both
@@ -46,6 +49,9 @@ INSTANCE = {
   "core.path" => [Pathname],
   "core.net" => [Socket, TCPSocket],
   "core.log" => [Logger],
+  "core.args" => [OptionParser],
+  "core.sync" => [Thread::Mutex, ConditionVariable],
+  "core.encoding.xml" => [REXML::Document],
 }.freeze
 
 SINGLETON = {
@@ -68,6 +74,13 @@ SINGLETON = {
 
 ABSENT = {
   "core.fmt" => "formatting lives on Kernel#format and String#%, which Object and Kernel provide to every class",
+  "core.email" => "no Ruby standard-library email composer; Net::SMTP only sends",
+  "core.reflect" => "reflection lives on Object and Module, which every class inherits",
+  "core.mime" => "no Ruby standard-library MIME database",
+  "core.encoding.yaml" => "Psych ships with Ruby but is not part of the core library surface recorded here",
+  "core.mem" => "no Ruby standard-library memory module; ObjectSpace reports rather than manages",
+  "core.term" => "no Ruby standard-library terminal control",
+  "core.web" => "no Ruby standard-library web framework",
   "core.binary" => "binary reading lives on IO, recorded under core.io",
 
   "core.env" => "environment access lives on Process and ENV, recorded under core.os",

@@ -50,7 +50,13 @@ const CONTAINERS = {
   "core.http": ["net/http"],
   "core.url": ["net/url"],
   "core.db": ["database/sql"],
-  "core.tasks": ["sync", "context"],
+  "core.tasks": ["context"],
+  "core.sync": ["sync"],
+  "core.args": ["flag"],
+  "core.email": ["net/mail"],
+  "core.reflect": ["reflect"],
+  "core.mime": ["mime"],
+  "core.encoding.xml": ["encoding/xml"],
   "core.testing": ["testing"],
   "core.log": ["log", "log/slog"],
   "core.binary": ["encoding/binary", "io"],
@@ -61,6 +67,10 @@ const CONTAINERS = {
 };
 
 const ABSENT = {
+  "core.mem": "memory layout lives behind the unsafe package, which Go does not present as an ordinary API",
+  "core.encoding.yaml": "no Go standard-library YAML codec",
+  "core.term": "no Go standard-library terminal control",
+  "core.web": "net/http answers core.http; Go ships no web framework",
   "core.env": "environment access lives in the os package, recorded under core.os",
   "core.fmt": "formatting lives in the fmt package, recorded under core.io",
   "core.text": "text handling lives in the strings package, recorded under String",

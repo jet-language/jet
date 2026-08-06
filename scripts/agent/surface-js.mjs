@@ -27,12 +27,22 @@ const CONTAINERS = {
   "core.tasks": [Promise.prototype, Promise],
   "core.url": [URL.prototype, URL],
   "core.text": [String.prototype, Intl],
+  "core.reflect": [Reflect],
 };
 
 // TypeScript describes ECMAScript. A workflow that only Node or the DOM
 // answers is not part of the language, so it is recorded as absent with that
 // reason rather than omitted, and the gap stays countable.
 const ABSENT = {
+  "core.args": "argument parsing is a Node host API, not ECMAScript",
+  "core.email": "no ECMAScript email support",
+  "core.sync": "Atomics coordinate shared memory, but ECMAScript ships no lock or thread module",
+  "core.mime": "MIME types are a host concern, not ECMAScript",
+  "core.encoding.xml": "DOMParser is a browser host API, not ECMAScript",
+  "core.encoding.yaml": "no ECMAScript YAML codec",
+  "core.mem": "ECMAScript manages memory itself and exposes no memory module",
+  "core.term": "terminal control is a Node host API, not ECMAScript",
+  "core.web": "no ECMAScript web framework",
   SortedSet: "no ECMAScript built-in ordered set",
   Deque: "no ECMAScript built-in double-ended queue",
   PriorityQueue: "no ECMAScript built-in priority queue",

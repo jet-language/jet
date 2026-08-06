@@ -92,6 +92,16 @@ const SWIFT = {
 };
 
 const SWIFT_ABSENT = {
+  "core.args": "ArgumentParser is a separate package, not the Swift standard library",
+  "core.email": "no Swift standard-library email support",
+  "core.sync": "concurrency primitives live in Dispatch and Foundation, not the Swift standard library",
+  "core.reflect": "Mirror gives read-only structure; Swift ships no reflection module",
+  "core.mime": "no Swift standard-library MIME database",
+  "core.encoding.xml": "XMLParser belongs to Foundation, not the Swift standard library",
+  "core.encoding.yaml": "no Swift standard-library YAML codec",
+  "core.mem": "MemoryLayout describes layout; Swift ships no memory module",
+  "core.term": "no Swift standard-library terminal control",
+  "core.web": "no Swift standard-library web framework",
   "core.text": "text handling lives on String and Character, recorded under String",
   SortedSet: "no Swift standard-library ordered set; swift-collections is a separate package",
   Deque: "no Swift standard-library double-ended queue; swift-collections is a separate package",
@@ -179,12 +189,22 @@ const KOTLIN = {
   "core.time": ["kotlin.time"],
   "core.io": ["kotlin.io"],
   "core.files": ["kotlin.io.path"],
-  "core.tasks": ["kotlin.concurrent"],
+  "core.sync": ["kotlin.concurrent"],
   "core.uuid": ["kotlin.uuid"],
   "core.encoding.base64": ["kotlin.io.encoding"],
 };
 
 const KOTLIN_ABSENT = {
+  "core.tasks": "coroutines ship in kotlinx.coroutines, a separate library",
+  "core.args": "no Kotlin standard-library argument parser",
+  "core.email": "no Kotlin standard-library email support",
+  "core.reflect": "kotlin-reflect is a separate artifact from the standard library",
+  "core.mime": "no Kotlin standard-library MIME database",
+  "core.encoding.xml": "no Kotlin standard-library XML codec",
+  "core.encoding.yaml": "no Kotlin standard-library YAML codec",
+  "core.mem": "the JVM manages memory; Kotlin ships no memory module",
+  "core.term": "no Kotlin standard-library terminal control",
+  "core.web": "ktor is a separate library, not the Kotlin standard library",
   "core.text": "text handling lives in the kotlin.text package, recorded under String",
   SortedSet: "sortedSetOf returns a java.util.SortedSet; the Kotlin standard library declares no ordered set of its own",
   Deque: "ArrayDeque is a Kotlin class but the standard library declares no deque package surface of its own",
@@ -283,6 +303,12 @@ const CSHARP = {
   "core.uuid": ["System/Guid"],
   "core.db": ["System.Data.Common/DbConnection"],
   "core.tasks": ["System.Threading.Tasks/Task"],
+  "core.sync": ["System.Threading/Monitor"],
+  "core.email": ["System.Net.Mail/MailMessage"],
+  "core.reflect": ["System.Reflection/Assembly"],
+  "core.mime": ["System.Net.Mime/ContentType"],
+  "core.encoding.xml": ["System.Xml/XmlDocument"],
+  "core.mem": ["System/GC"],
   "core.archive": ["System.IO.Compression/ZipFile"],
   "core.binary": ["System.IO/BinaryReader"],
   "core.io": ["System/Console"],
@@ -290,6 +316,10 @@ const CSHARP = {
 };
 
 const CSHARP_ABSENT = {
+  "core.args": "System.CommandLine ships separately from the base class library",
+  "core.encoding.yaml": "no .NET base-class-library YAML codec",
+  "core.term": "console control lives on System.Console, recorded under core.io",
+  "core.web": "ASP.NET Core ships separately from the base class library",
   "core.env": "environment access lives on System.Environment, recorded under core.os",
   "core.fmt": "formatting lives on System.String, recorded under String",
   "core.text": "text handling lives on System.String, recorded under String",
@@ -354,7 +384,8 @@ const JULIA = {
   "core.files": ["base/file"],
   "core.io": ["base/io-network"],
   "core.os": ["base/base"],
-  "core.tasks": ["base/parallel", "base/multi-threading"],
+  "core.tasks": ["base/parallel"],
+  "core.sync": ["base/multi-threading"],
   "core.crypto": ["stdlib/SHA"],
   "core.uuid": ["stdlib/UUIDs"],
   "core.encoding.base64": ["stdlib/Base64"],
@@ -365,6 +396,15 @@ const JULIA = {
 };
 
 const JULIA_ABSENT = {
+  "core.args": "no Julia standard-library argument parser; ArgParse.jl is a package",
+  "core.email": "no Julia standard-library email support",
+  "core.reflect": "reflection is documented on the base manual page, recorded under core.os",
+  "core.mime": "no Julia standard-library MIME database beyond display types",
+  "core.encoding.xml": "no Julia standard-library XML codec",
+  "core.encoding.yaml": "no Julia standard-library YAML codec",
+  "core.mem": "the runtime manages memory; Julia ships no memory module",
+  "core.term": "no Julia standard-library terminal control",
+  "core.web": "no Julia standard-library web framework",
   "core.env": "environment access is documented on the base manual page, recorded under core.os",
   Set: "Set is documented on the collections manual page, recorded under Map",
   "core.path": "path handling is documented on the file manual page, recorded under core.files",
@@ -494,6 +534,16 @@ const R_ABSENT = {
   "core.tls": R_OUT_OF_CLAIM,
   "core.url": R_OUT_OF_CLAIM,
   "core.uuid": R_OUT_OF_CLAIM,
+  "core.args": R_OUT_OF_CLAIM,
+  "core.email": R_OUT_OF_CLAIM,
+  "core.sync": R_OUT_OF_CLAIM,
+  "core.reflect": R_OUT_OF_CLAIM,
+  "core.mime": R_OUT_OF_CLAIM,
+  "core.encoding.xml": R_OUT_OF_CLAIM,
+  "core.encoding.yaml": R_OUT_OF_CLAIM,
+  "core.mem": R_OUT_OF_CLAIM,
+  "core.term": R_OUT_OF_CLAIM,
+  "core.web": R_OUT_OF_CLAIM,
 };
 
 async function r() {

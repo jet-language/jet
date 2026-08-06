@@ -37,40 +37,40 @@ Generated on: 2026-08-06
 | Measure | Count |
 | --- | ---: |
 | Languages compared | 11 |
-| Shared containers | 44 |
+| Shared containers | 54 |
 | Core modules | 85 |
 | Module members | 1011 |
 | Collection method rows | 354 |
 | Jet-side rows | 1366 |
-| Total rows | 9414 |
+| Total rows | 10141 |
 
 ## Verdicts
 
 | Verdict | Rows |
 | --- | ---: |
-| Jet wins | 302 |
-| Equal | 432 |
-| Jet loses (two or more languages agree) | 585 |
-| Single witness (recorded, not scored) | 7463 |
+| Jet wins | 369 |
+| Equal | 442 |
+| Jet loses (two or more languages agree) | 603 |
+| Single witness (recorded, not scored) | 8172 |
 | Exported type, not an operation | 168 |
-| Not compared | 464 |
+| Not compared | 387 |
 | Deliberately declined | 0 |
 
 ## Competitors
 
 | Language | Surface read from | Recorded operations | Jet rows matched | Loss rows |
 | --- | --- | ---: | ---: | ---: |
-| Rust | standard-library source (rust-src component) | 980 | 230 | 96 |
-| Go | official frozen API files (GOROOT/api/go1*.txt) | 1681 | 210 | 221 |
+| Rust | standard-library source (rust-src component) | 997 | 230 | 97 |
+| Go | official frozen API files (GOROOT/api/go1*.txt) | 1878 | 218 | 227 |
 | Swift | official documentation JSON (developer.apple.com) | 505 | 98 | 82 |
-| Kotlin | official API reference (kotlinlang.org) | 1141 | 157 | 125 |
-| C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1102 | 192 | 125 |
-| TypeScript | runtime introspection | 347 | 128 | 37 |
-| Ruby | runtime introspection | 1209 | 199 | 180 |
-| Elixir | runtime introspection | 1192 | 231 | 156 |
-| Julia | official documentation search index (docs.julialang.org) | 1132 | 137 | 203 |
+| Kotlin | official API reference (kotlinlang.org) | 1141 | 157 | 122 |
+| C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1267 | 192 | 133 |
+| TypeScript | runtime introspection | 360 | 128 | 39 |
+| Ruby | runtime introspection | 1294 | 201 | 192 |
+| Elixir | runtime introspection | 1270 | 231 | 157 |
+| Julia | official documentation search index (docs.julialang.org) | 1132 | 137 | 200 |
 | R | official R manual package index (stat.ethz.ch R-devel) | 1768 | 37 | 0 |
-| Python | runtime introspection | 2012 | 210 | 262 |
+| Python | runtime introspection | 2232 | 216 | 272 |
 
 ## Loss clusters
 
@@ -88,9 +88,9 @@ it is done while losses remain.
 | ByteBuffer | 44 | none | n/a | needs_card |
 | core.os | 44 | none | n/a | needs_card |
 | core.time | 43 | none | n/a | needs_card |
-| core.tasks | 32 | none | n/a | needs_card |
 | List | 27 | #1410 | done | closed |
 | Map | 25 | #1410 | done | closed |
+| core.tasks | 22 | none | n/a | needs_card |
 | Set | 20 | #1404 | done | closed |
 | Iter | 19 | #1400 | done | closed |
 | core.net | 15 | none | n/a | needs_card |
@@ -99,12 +99,15 @@ it is done while losses remain.
 | core.url | 12 | none | n/a | needs_card |
 | core.crypto | 11 | none | n/a | needs_card |
 | core.log | 11 | none | n/a | needs_card |
+| core.sync | 11 | none | n/a | needs_card |
 | Deque | 10 | none | n/a | needs_card |
 | core.io | 9 | #1402 | done | closed |
+| core.encoding.xml | 8 | none | n/a | needs_card |
 | core.process | 8 | none | n/a | needs_card |
 | core.db | 7 | none | n/a | needs_card |
 | core.testing | 7 | none | n/a | needs_card |
 | core.path | 6 | #288 | building | live |
+| core.reflect | 6 | none | n/a | needs_card |
 | core.http | 5 | none | n/a | needs_card |
 | core.tls | 5 | none | n/a | needs_card |
 | core.uuid | 4 | none | n/a | needs_card |
@@ -112,7 +115,10 @@ it is done while losses remain.
 | core.encoding.csv | 3 | none | n/a | needs_card |
 | core.random | 2 | none | n/a | needs_card |
 | PriorityQueue | 2 | none | n/a | needs_card |
+| core.args | 1 | none | n/a | needs_card |
 | core.encoding.json | 1 | none | n/a | needs_card |
+| core.mem | 1 | none | n/a | needs_card |
+| core.mime | 1 | none | n/a | needs_card |
 | SortedSet | 1 | #1404 | done | closed |
 
 ## Containers indexed per package
@@ -134,7 +140,7 @@ No competitor surface records a container for these Core modules, so no
 row scores them. They are listed so the shortfall stays countable rather
 than invisible.
 
-`app`, `core.args`, `core.auth`, `core.browser`, `core.compiler`, `core.compute`, `core.email`, `core.encoding.cbor`, `core.encoding.jsonl`, `core.encoding.xml`, `core.encoding.yaml`, `core.event`, `core.game`, `core.lang`, `core.mem`, `core.mem.alloc`, `core.mime`, `core.perf`, `core.plugin`, `core.raylib`, `core.reactive`, `core.reactive.loadable`, `core.reflect`, `core.science.measurement`, `core.scope`, `core.services`, `core.sketch.cms`, `core.sketch.hll`, `core.sketch.reservoir`, `core.sketch.tdigest`, `core.solve`, `core.sync`, `core.term`, `core.ui`, `core.vault`, `core.vault.expert`, `core.watcher`, `core.web`, `core.web.devserver`, `core.web.storage`, `core.web.storage.local`, `core.web.storage.session`, `core.ws`
+`app`, `core.auth`, `core.browser`, `core.compiler`, `core.compute`, `core.encoding.cbor`, `core.encoding.jsonl`, `core.event`, `core.game`, `core.lang`, `core.mem.alloc`, `core.perf`, `core.plugin`, `core.raylib`, `core.reactive`, `core.reactive.loadable`, `core.science.measurement`, `core.scope`, `core.services`, `core.sketch.cms`, `core.sketch.hll`, `core.sketch.reservoir`, `core.sketch.tdigest`, `core.solve`, `core.ui`, `core.vault`, `core.vault.expert`, `core.watcher`, `core.web.devserver`, `core.web.storage`, `core.web.storage.local`, `core.web.storage.session`, `core.ws`
 
 ## Consumer
 

@@ -100,8 +100,14 @@ const PYTHON_SOURCE_CONTAINER = {
   "mod:uuid": "core.uuid",
   "mod:sqlite3": "core.db",
   "mod:asyncio": "core.tasks",
-  "mod:threading": "core.tasks",
-  "mod:queue": "core.tasks",
+  "mod:threading": "core.sync",
+  "mod:queue": "core.sync",
+  "mod:argparse": "core.args",
+  "mod:email": "core.email",
+  "mod:inspect": "core.reflect",
+  "mod:mimetypes": "core.mime",
+  "mod:xml.etree.ElementTree": "core.encoding.xml",
+  "mod:copy": "core.mem",
   "mod:unittest": "core.testing",
   "mod:logging": "core.log",
   "mod:struct": "core.binary",
@@ -116,12 +122,6 @@ const PYTHON_SOURCE_CONTAINER = {
 // A recorded Python module with no container yet. Listing it keeps the gap
 // countable; dropping it silently would hide a whole workflow.
 const PYTHON_UNASSIGNED = {
-  "mod:argparse": "Jet's core.args has no container in this ledger yet",
-  "mod:email": "Jet's core.email has no container in this ledger yet",
-  "mod:inspect": "Jet's core.reflect has no container in this ledger yet",
-  "mod:mimetypes": "Jet's core.mime has no container in this ledger yet",
-  "mod:xml.etree.ElementTree": "Jet's core.encoding.xml has no container in this ledger yet",
-  "mod:copy": "Jet's core.mem has no container in this ledger yet",
   "type:bool": "bool mirrors int, which is recorded under core.math",
 };
 
@@ -132,6 +132,9 @@ const PYTHON_ABSENT = {
   "core.encoding.base32": "base32 lives in the base64 module, recorded under core.encoding.base64",
   "core.fmt": "formatting lives on str.format, recorded under String",
   "core.text": "text handling lives on str, recorded under String",
+  "core.encoding.yaml": "no Python standard-library YAML codec",
+  "core.term": "curses is platform-conditional, so it is not recorded here",
+  "core.web": "http.server answers core.http; Python ships no web framework",
 };
 
 // A Jet module whose workflow is the one an existing container already

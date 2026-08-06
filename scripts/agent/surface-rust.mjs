@@ -43,10 +43,20 @@ const CONTAINERS = {
   "core.net": ["std/src/net/tcp.rs", "std/src/net/udp.rs"],
   "core.io": ["std/src/io/mod.rs"],
   "core.tasks": ["std/src/thread/mod.rs", "std/src/sync/mpsc.rs"],
+  "core.sync": ["std/src/sync/mod.rs"],
+  "core.mem": ["core/src/mem/mod.rs"],
   "core.fmt": ["core/src/fmt/mod.rs"],
 };
 
 const ABSENT = {
+  "core.args": "std::env::args yields the raw list; Rust ships no argument parser",
+  "core.email": "no Rust standard-library email support",
+  "core.reflect": "Rust has no runtime reflection; std::any carries only type identity",
+  "core.mime": "no Rust standard-library MIME database",
+  "core.encoding.xml": "no Rust standard-library XML codec",
+  "core.encoding.yaml": "no Rust standard-library YAML codec",
+  "core.term": "no Rust standard-library terminal control",
+  "core.web": "no Rust standard-library web framework",
   "core.env": "environment access lives in std::env, recorded under core.os",
   "core.binary": "binary reading lives in std::io, recorded under core.io",
   "core.text": "text handling lives on str and String, recorded under String",
