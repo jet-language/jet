@@ -77,6 +77,12 @@ where
             JitWaitStatus::Interrupted as i64
         }
         JetSchedulerWait::Panicked(message) => {
+            with_runtime_mut(|rt| {
+                let line = format!("panic: {message}\n");
+                if !rt.stderr.ends_with(&line) {
+                    rt.stderr.push_str(&line);
+                }
+            });
             trap_panic(&message);
             JitWaitStatus::Panicked as i64
         }
@@ -497,8 +503,14 @@ where
             let _deadline = inherited_deadline.map(jet_scheduler_push_deadline);
             let _ = take_pending_shield_exit();
             let out = f();
+            // Rich panic traps without Rust unwind (I1). Re-raise so g.all/join
+            // see Panicked; wait_status appends the AOT trailing line once.
+            let rich = with_runtime_mut(|rt| rt.trapped.as_deref() == Some("__jet_rich_panic__"));
             set_active_runtime(None);
             jet_scheduler_deliver_shield_exit(take_pending_shield_exit());
+            if rich {
+                panic!("a task panicked");
+            }
             out
         },
         control.clone(),

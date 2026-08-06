@@ -656,7 +656,6 @@ const BOUNDARY_CODES: &[&str] = &[
 
 const DEFAULT_BACKEND_EXPECTED_BOUNDARIES: &[&str] = &[
     "collections/list_bounds",
-    "concurrency/all_failfast",
 ];
 
 fn jit_gap_stem_set() -> std::collections::HashSet<String> {
@@ -1450,11 +1449,11 @@ fn caught_task_panics_keep_stderr_deterministic_under_parallel_repetition() {
         std::process::id()
     ));
     let file = "examples/features/concurrency/all_failfast.jet";
-    let expected = ProgramOutput::ran(
-        String::new(),
-        "panic: a task panicked\n".to_string(),
-        70,
-    );
+    // I9 / #1486: AOT prints the same rich panic + trailing line as the golden.
+    let expected_stderr =
+        fs::read_to_string("examples/features/expected/concurrency/all_failfast.err.out")
+            .expect("all_failfast.err.out");
+    let expected = ProgramOutput::ran(String::new(), expected_stderr, 70);
     let first = compiled_binary_output(&dir, "scheduler_panic_hook", 0, "all_failfast", file);
     assert_eq!(first, expected);
 
@@ -8061,16 +8060,36 @@ fn run() {
         panic!("joining a cancelled task must report a compiler-owned diagnostic")
     };
     assert!(join_diags.iter().any(|d| d.code == "E0953"));
-
-    let all_failfast = fs::read_to_string("examples/features/concurrency/all_failfast.jet")
-        .expect("read all_failfast example");
-    let RunOutcome::Problems(all_diags) =
-        run_cranelift_outcome_without_fallback(&all_failfast, "all_failfast_boundary")
-    else {
-        panic!("all fail-fast must report its failure without exiting the test process")
-    };
-    assert!(all_diags.iter().any(|d| d.code == "E0953"));
 }
+
+/// #1486 / I9: taskgroup rich panic under default jet run must match AOT golden
+/// stderr (full panic block + trailing `panic: a task panicked`), including after
+/// a warm re-invoke that reinstalls compile-time string handles.
+#[test]
+fn all_failfast_jit_stderr_matches_aot_golden() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let file = "examples/features/concurrency/all_failfast.jet";
+    let expected = fs::read_to_string("examples/features/expected/concurrency/all_failfast.err.out")
+        .expect("all_failfast.err.out");
+    // Two invokes: first compiles; second proves reset_run_heap still resolves
+    // rich-panic string handles on the same resident module.
+    for _ in 0..2 {
+        let got = match dev_iteration(file, false, false) {
+            RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            } => ProgramOutput::ran(stdout, stderr, exit_code),
+            RunOutcome::Problems(ds) => panic!("all_failfast must Ran via JIT, got: {ds:?}"),
+        };
+        assert_eq!(got.exit_code, 70, "exit");
+        assert_eq!(got.stderr, expected, "stderr");
+        assert!(got.stdout.is_empty(), "stdout");
+    }
+}
+
 /// c139 M3: checked integer arithmetic with overflow traps.
 #[test]
 fn cranelift_covers_checked_arithmetic() {

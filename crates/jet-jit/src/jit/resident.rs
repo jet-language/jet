@@ -16,6 +16,7 @@ pub(crate) fn fresh_runtime() -> JitRuntime {
         stdout: String::new(),
         stderr: String::new(),
         heap: jet_rt::JetArena::default(),
+        compile_strings: Vec::new(),
         invocations: 0,
         channels: Vec::new(),
         senders: Vec::new(),
@@ -98,7 +99,11 @@ pub(crate) fn fresh_runtime() -> JitRuntime {
 /// into the following one. `source_file`/`invocations` are run-loop
 /// bookkeeping, not per-run heap, and are left alone.
 fn reset_run_heap(rt: &mut JitRuntime) {
+    // Keep compile-time string slots: machine code still names those handles, and
+    // publish_capture reads the heap after this scrub for the warm-run artifact.
+    let compile_strings = rt.compile_strings.clone();
     rt.heap.clear();
+    rt.heap.install_string_slots(&compile_strings);
     crate::Data::clear_lazy_state();
     crate::Math::clear_math_values();
     let stream_consumers = std::mem::take(&mut rt.stream_consumers);
@@ -183,6 +188,7 @@ pub(crate) fn ensure_resident_module(program: &JitProgram) -> Result<(), String>
             .with(|slot| slot.borrow_mut().take())
             .unwrap_or_else(fresh_runtime);
         let main_id = compile_program(&mut module, &host, program, &mut runtime, None)?;
+        runtime.snapshot_compile_strings();
         RESIDENT_RUNTIME.with(|slot| *slot.borrow_mut() = Some(runtime));
         RESIDENT_MODULE.with(|slot| {
             *slot.borrow_mut() = Some(ResidentModule {
@@ -208,6 +214,7 @@ pub(crate) fn ensure_resident_module(program: &JitProgram) -> Result<(), String>
                 runtime,
                 Some(resident.main_id),
             )?;
+            runtime.snapshot_compile_strings();
             resident.main_returns_result = main_returns_result;
             Ok(())
         })
@@ -376,6 +383,7 @@ pub(crate) fn resident_run_mixed(program: &JitProgram, plan: &TierPlan) -> Resul
         None,
         &deopt_index,
     )?;
+    runtime.snapshot_compile_strings();
 
     for f in &program.funcs {
         if !plan.native.contains(&f.name) {
@@ -414,6 +422,7 @@ pub(crate) fn resident_hot_swap(program: &JitProgram) -> Result<RunOutcome, Stri
     RESIDENT_MODULE.with(|slot| *slot.borrow_mut() = None);
     let (mut module, host) = new_jit_module()?;
     let main_id = compile_program(&mut module, &host, program, &mut runtime, None)?;
+    runtime.snapshot_compile_strings();
     let main_returns_result = program.funcs.iter().any(|func| {
         func.name == program.entry && matches!(func.ret, Some(Type::Result { .. }))
     });

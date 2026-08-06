@@ -77,6 +77,10 @@ pub(crate) struct JitRuntime {
     pub(crate) stdout: String,
     pub(crate) stderr: String,
     pub(crate) heap: jet_rt::JetArena,
+    /// Compile-time string handles baked into Cranelift as `iconst` ids.
+    /// `reset_run_heap` and the run-cache artifact must preserve these — clearing
+    /// them leaves warm `jet run` hits with empty panic/require text (I9).
+    pub(crate) compile_strings: Vec<(usize, String)>,
     pub(crate) invocations: u64,
     pub(crate) channels: Vec<JetSchedulerChannel<i64>>,
     pub(crate) senders: Vec<Option<JetSchedulerSender<i64>>>,
@@ -195,6 +199,11 @@ pub(crate) struct JitRuntime {
 }
 
 impl JitRuntime {
+    /// Snapshot string handles allocated during lowering (baked into code).
+    pub(crate) fn snapshot_compile_strings(&mut self) {
+        self.compile_strings = self.heap.string_slots();
+    }
+
     /// Record a runtime panic. Keeps the first message (the unwind branch may
     /// re-enter trap sites with dummy values before the epilogue is reached).
     pub(crate) fn set_trap(&mut self, msg: &str) {
