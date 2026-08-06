@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1493,
-    "rev": 26114,
+    "nextNum": 1495,
+    "rev": 26185,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -21,7 +21,7 @@
         "board-ideas"
       ]
     },
-    "completionCursor": "2026-08-06T10:02:08.749Z"
+    "completionCursor": "2026-08-06T10:56:01.457Z"
   },
   "epochs": [
     {
@@ -81596,12 +81596,18 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P2",
       "plan": "Scope: D-ENTRY-VALUE1 outcome B. One entry, fn run. No return means a script that runs and exits. A return type that is the App-family program value (today spelled WebApp; #1447 renames it to App) means the runtime serves that value, and jet dev serves the same value with watch/reload. fn <command>() stays the one override hook (today only fn dev()). Delete the hidden fn app() name sniff, the source-text overlay that synthesizes fn run(){ app().serve() }, and the run/app/dev precedence table. Out of scope: renaming WebApp to App (#1447), CLI args into an App entry (#1450), job naming (#1448/#1449), test/bench overrides (#1451/#1452).\n\nApproach:\n1. crates/jet-sema/src/Sema/WebApp.rs: find_app_fn (:67-79) currently matches a function literally named \"app\". Change it to extract the builder graph from fn run's body when fn run's declared return type is the App-family type. Delete the \"app\" name convention.\n2. crates/jet-sema/src/Sema/Bundle.rs (:2279-2328, the CompileMode::Run/Eval entry gate) already requires a literal fn run; confirm it accepts fn run() => WebApp with no extra special-casing beyond the return type.\n3. Source/Interpreter.rs checked_bundle (:352-378): delete the has_app/has_run overlay synthesis entirely. jet run no longer injects a hidden fn run(){ app().serve() }; the file must declare fn run() => WebApp { ... } directly.\n4. Source/main.rs: delete has_web_app_entry_fn (:2379-2403) and the app-name sniff in dev dispatch (:1775-1794). fn dev() stays checked first as the override hook; otherwise jet dev inspects fn run's return type the same way jet run does. Delete has_dev_entry_fn's role in a three-way precedence table — only two cases remain: dev() override present, or not.\n5. AOT/JIT parity gap this closes (found during investigation, real I9 violation today): crates/jet-codegen/src/Codegen/Items.rs emit_cli_entry_if_needed (:680-724) and crates/jet-codegen/src/Codegen/TIR/mod.rs lower_jit_program (:924-964) already require a literal fn run, so no structural change, but the synthesized main must now call .serve() via crates/jet-codegen/src/Prelude/WebApp.rs when fn run's return type is App-family — this is what makes `jet build`/`jet emit --rust` work on a file that only has fn run() => WebApp (today those fail E0101 because there is no literal fn run and AOT never ran the JIT-only overlay).\n6. Source/CmdCompile.rs run_web_app_dev_entry (:770-793) / run_dev_entry (:696-766): keep the watch/reload re-exec mechanism, but trigger it off \"fn run returns an App-family type\" instead of \"fn app() exists\".\n7. Rewrite examples/features/web/web_app.jet to declare fn run() => WebApp { ... } directly (today it has no fn run() and relies on the overlay). Rewrite examples/features/web/app_hello.jet to delete its fn app() and keep only fn run() => WebApp.\n8. docs/spec/syntax-decisions.md: add a \"D-ENTRY-VALUE1=B — the entry returns the program\" entry in the same format as the existing D-WEBAPP1/D-WEBAUTHOR1 log entries (around :4831-4843). Syntax.rs gets a matching \"adds no token\" prose comment (same pattern as the D-CLIFLAG1-family comments already there) since this is a semantic rule change, not a new keyword or sigil.\n9. Sequencing: #1447 (App/WebApp unification) is blocked on this card — it renames the App-family type this card's return-type check looks for.\n\nProof:\n- scripts/agent/jet-env cargo test --test web_app\n- scripts/agent/jet-env cargo test --test web_app_graph\n- scripts/agent/jet-env cargo test --test dev\n- scripts/agent/jet-env jet run examples/features/web/web_app.jet (manual smoke: serves with no hidden overlay)\n- scripts/agent/jet-env jet build examples/features/web/web_app.jet\n- scripts/agent/jet-env jet emit --rust examples/features/web/web_app.jet (both must now succeed; today both fail E0101 on this file)\n- scripts/agent/jet-env rg \"fn app\\(\\)\" examples/ crates/ Source/ docs/ (zero hits)\n- scripts/agent/jet-env rg \"has_web_app_entry_fn|has_app\\b\" Source/ crates/ (zero hits)\n- scripts/agent/jet-env jet self devtools grammars (confirm no unexpected grammar diff, since no new token)\n\nOwned paths: crates/jet-sema/src/Sema/WebApp.rs, crates/jet-sema/src/Sema/Bundle.rs, Source/Interpreter.rs, Source/main.rs, Source/CmdCompile.rs, crates/jet-codegen/src/Codegen/Items.rs, crates/jet-codegen/src/Codegen/TIR/mod.rs, examples/features/web/web_app.jet, examples/features/web/app_hello.jet, tests/web_app.rs, tests/web_app_graph.rs, tests/dev.rs, docs/spec/syntax-decisions.md, crates/jet-foundation/src/Syntax.rs.\n",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-06",
+          "by": "prep-entry",
+          "text": "plan + criteria written; ready to implement"
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -81638,6 +81644,42 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-08-05T20:30:31.764Z"
+        },
+        {
+          "n": 5,
+          "text": "scripts/agent/jet-env cargo test --test web_app passes with examples/features/web/web_app.jet declaring fn run() => WebApp directly (no hidden overlay) and examples/features/web/app_hello.jet having no fn app()",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:40:41.165Z"
+        },
+        {
+          "n": 6,
+          "text": "scripts/agent/jet-env rg \"fn app\\(\\)\" examples/ crates/ Source/ docs/ and rg \"has_web_app_entry_fn|has_app\\b\" Source/ crates/ both return zero hits",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:40:45.889Z"
+        },
+        {
+          "n": 7,
+          "text": "scripts/agent/jet-env jet build examples/features/web/web_app.jet and scripts/agent/jet-env jet emit --rust examples/features/web/web_app.jet both succeed (today both fail E0101 on this file, proving the I9 AOT/JIT parity fix)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:40:49.832Z"
+        },
+        {
+          "n": 8,
+          "text": "scripts/agent/jet-env cargo test --test dev passes with jet dev precedence reduced to override-vs-not (fn dev() vs fn run return type), no three-way app/run/dev table",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:40:53.711Z"
         }
       ],
       "refs": [],
@@ -81648,7 +81690,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T20:15:42.731Z",
-      "updated": "2026-08-06T10:39:37.029Z",
+      "updated": "2026-08-06T10:44:08.001Z",
       "updatedBy": "prep-entry"
     },
     {
@@ -81660,13 +81702,67 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P2",
       "plan": "Scope: D-APP-UNIFY1 outcome B. One App type for every target, replacing WebApp. Platform comes from the existing #Target marker or the manifest target: field, never from the type name. Using a capability the resolved target cannot honor is a compile-time diagnostic naming the target. Delete WebApp and migrate every in-repo consumer in this change. Out of scope: the entry-detection redesign itself (#1446, this card builds on it), CLI args into the entry (#1450), job naming/subcommands (#1448/#1449), test/bench overrides (#1451/#1452).\n\nDepends on: #1446 (entry returns the program value). This card lands after #1446 so the rename targets the new single-fn-run, return-type-driven entry model instead of the old fn app() sniff.\n\nApproach:\n1. Rename the type: crates/jet-foundation/src/WebApp.rs (WebAppGraph and friends) and crates/jet-codegen/src/Prelude/WebApp.rs (JetWebApp builder impl, methods .route .page .layout .action .form .data .mount .routes .csr .ssr .ssg .stream/.streaming .island .hydration_dev .hydration_release .security .assets .split .code_split .cache .a11y .adapter .facts_json .serve .serve_on) from WebApp to App. Delete the old name; do not alias.\n2. crates/jet-sema/src/Sema/WebApp.rs (extract_web_app_graph, apply_method): update the return-type check from Named(\"WebApp\") to Named(\"App\") — this is the one line #1446 built the return-type check around.\n3. crates/jet-codegen/src/Codegen/TIR/eval/webapp.rs (eval_web_core_call, eval_web_app_method, run_web_app_server): rename types/calls to match; this stays the single I9 Prelude-backed marshalling adapter for JIT/interpreter, unchanged in structure.\n4. crates/jet-codegen/src/Codegen/TIR/subset/methods.rs and subset/types.rs: rename the recognized type/method table entries from WebApp to App.\n5. Target capability check (the new diagnostic this option requires): crates/jet-sema/src/Sema/OSTarget.rs check_os_target (:304) and crates/jet-sema/src/Sema/CheckerMarkers.rs (:118, #Target handling) — add a check that a capability method used on the App value (e.g. .csr()) is compatible with the resolved #Target (crates/jet-foundation/src/Policy.rs :268,730 for the ratified Target values Native/Web/Wasm/JS/Freestanding/OS). Register a new diagnostic code under docs/spec/diagnostics.md naming the capability, the target, and the fix (I4: needs code + what/why/fix + UI snapshot).\n6. crates/jet-sema/src/Sema/CheckerCoreLib/{process_ui.rs,fixed_sigs.rs,core_types.rs} and crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs: rename WebApp references to App in the type-checking tables.\n7. crates/jet-codegen/src/Codegen/Context.rs, crates/jet-codegen/src/Codegen/mod.rs, crates/jet-codegen/src/Codegen/TIR/emit/expressions.rs, crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs, crates/jet-codegen/src/Codegen/TIR/eval/handles.rs, eval/mod.rs, eval/exprs.rs, crates/jet-codegen/src/Codegen/TIR/subset/builtin_methods.rs: rename WebApp references.\n8. Migrate examples: grep -rl WebApp examples/ (currently examples/features/web/web_app.jet, examples/features/web/app_hello.jet, plus any others the grep finds) — rewrite each fn run() => WebApp to fn run() => App.\n9. Migrate tests: tests/web_app.rs, tests/web_app_graph.rs, tests/web_build.rs — rename fixture text and assertions from WebApp to App.\n10. docs/spec/syntax-decisions.md: add \"D-APP-UNIFY1=B — one App type, target by marker\" next to the D-ENTRY-VALUE1 entry. docs/spec/diagnostics.md: register the new target-capability-mismatch diagnostic with its UI snapshot under tests/ui/.\n11. Do not converge this with the separate jetpack \"package output\" mechanism (Item::Const / OutputKind Executable/Service/Environment/Image/System/Fleet in crates/jet-foundation/src/AST/patterns.rs :330-399, checked in Bundle.rs :2283,2334,2459) — that is an unrelated, already-ratified mechanism for package-level output kind, not the App value type. Leave it untouched.\n\nProof:\n- scripts/agent/jet-env cargo test --test web_app\n- scripts/agent/jet-env cargo test --test web_app_graph\n- scripts/agent/jet-env cargo test --test web_build\n- scripts/agent/jet-env jet run examples/features/web/web_app.jet\n- scripts/agent/jet-env jet build examples/features/web/web_app.jet && scripts/agent/jet-env jet emit --rust examples/features/web/web_app.jet\n- scripts/agent/jet-env rg \"\\bWebApp\\b\" crates/ Source/ examples/ docs/ tests/ (zero hits)\n- new UI snapshot for the target-capability-mismatch diagnostic under tests/ui/ (name TBD at implementation, e.g. app_capability_wrong_target.jet/.stderr), run via the tests/ui/*.stderr driver (tests/golden.rs or equivalent)\n\nOwned paths: crates/jet-foundation/src/WebApp.rs, crates/jet-codegen/src/Prelude/WebApp.rs, crates/jet-sema/src/Sema/WebApp.rs, crates/jet-sema/src/Sema/OSTarget.rs, crates/jet-sema/src/Sema/CheckerMarkers.rs, crates/jet-sema/src/Sema/CheckerCoreLib/*, crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs, crates/jet-codegen/src/Codegen/**, examples/features/web/*.jet, tests/web_app.rs, tests/web_app_graph.rs, tests/web_build.rs, tests/ui/, docs/spec/syntax-decisions.md, docs/spec/diagnostics.md.\n",
-      "blockedBy": [],
+      "blockedBy": [
+        "c0uq2h91"
+      ],
       "assignee": null,
-      "log": [],
-      "criteria": [],
+      "log": [
+        {
+          "at": "2026-08-06",
+          "by": "prep-entry",
+          "text": "plan + criteria written; blocked-by #1446 recorded; ready to implement once unblocked"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "named example examples/features/web/web_app.jet uses fn run() => App; scripts/agent/jet-env cargo test --test web_app and --test web_app_graph pass",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:41:01.061Z"
+        },
+        {
+          "n": 2,
+          "text": "scripts/agent/jet-env rg \"\\bWebApp\\b\" crates/ Source/ examples/ docs/ tests/ returns zero hits (greenfield deletion)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:41:06.889Z"
+        },
+        {
+          "n": 3,
+          "text": "I9 parity: scripts/agent/jet-env jet run, jet build, and jet emit --rust on examples/features/web/web_app.jet all serve/compile identically",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:41:14.117Z"
+        },
+        {
+          "n": 4,
+          "text": "target-capability-mismatch diagnostic registered in docs/spec/diagnostics.md with a new tests/ui/*.jet + .stderr snapshot, run via the existing tests/ui driver",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:41:18.093Z"
+        },
+        {
+          "n": 5,
+          "text": "docs/spec/syntax-decisions.md has a D-APP-UNIFY1=B log entry in the existing D-WEBAPP1-style format",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:41:23.696Z"
+        }
+      ],
       "refs": [],
       "tags": [
         "web-ui",
@@ -81675,8 +81771,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T20:15:43.042Z",
-      "updated": "2026-08-06T10:39:44.841Z",
-      "updatedBy": "prep-entry"
+      "updated": "2026-08-06T10:45:47.274Z",
+      "updatedBy": "fable"
     },
     {
       "id": "c04zqxw1",
@@ -81687,13 +81783,56 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P2",
       "plan": "Scope: D-JOB-NAME1 outcome A. Unify on job. The #Job marker keyword already matches; rename the CLI to match it: --task/--task= becomes --job/--job=, and jet tasks becomes jet jobs. No alias, no deprecated flag left behind. Out of scope: the typed scope enum and subcommand dispatch (#1449, sequenced after this card).\n\nApproach:\n1. Source/main.rs (:998-1019, --task/--task= flag parsing): rename to --job/--job=. Update the dispatch at :2246-2255 that calls run_task_entry accordingly (function itself can keep its Rust name or be renamed to run_job_entry — prefer renaming for clarity since D-JOB-NAME1 also settles internal vocabulary drift, not just the CLI surface).\n2. Source/main.rs (:1263-1270, jet tasks subcommand) and Source/CmdCompile.rs run_tasks (:976-1010) / list_task_names (:944-975, doc-tagged D-TASKS-LIST1=A): rename the subcommand from tasks to jobs. Update the D-TASKS-LIST1 doc comment to note it is now reached via jet jobs.\n3. Source/CmdCompile.rs run_task_entry (:804-897, doc-tagged D-JPK-TASKRUN1): rename references from \"task\" to \"job\" in comments and any user-facing strings (error text, --help), keep the doc-tag D-JPK-TASKRUN1 as historical provenance unless the mechanism itself changes under #1449.\n4. crates/jet-sema/src/Sema/CheckerSchedule.rs (:16,65-69, E0928 reserved-lifecycle-name guard): update diagnostic text if it says \"task\" anywhere; keep the reserved-name list (run/dev/build/test) as-is, this card does not touch job semantics.\n5. CLI help/completion goldens: tests/cli/completions_fish.txt, tests/cli/completions_zsh.txt, tests/cli/man.txt — regenerate for the --job/jet jobs rename.\n6. Grep every remaining \"--task\" / \"jet tasks\" / \"run_task\" / \"list_task_names\" mention across Source/, crates/, docs/, examples/, tests/ and migrate each one in this change; do not leave a --task alias.\n7. docs/spec/syntax-decisions.md: add \"D-JOB-NAME1=A — unify on job\" entry, same log format as the existing D-SCHEDULE1 entry (around :5059).\n\nProof:\n- scripts/agent/jet-env cargo test --test jetpack_tasks\n- scripts/agent/jet-env cargo test --test jetpack_tool\n- scripts/agent/jet-env cargo test --test cli\n- scripts/agent/jet-env jet run examples/features/devloop/task_runner.jet -- --job <name-from-fixture> (manual smoke of the renamed flag)\n- scripts/agent/jet-env jet jobs examples/features/devloop/task_runner.jet (manual smoke of the renamed subcommand)\n- scripts/agent/jet-env rg \"\\-\\-task\\b|jet tasks\\b\" Source/ crates/ docs/ examples/ tests/ (zero hits)\n\nOwned paths: Source/main.rs, Source/CmdCompile.rs, crates/jet-sema/src/Sema/CheckerSchedule.rs, tests/cli/completions_fish.txt, tests/cli/completions_zsh.txt, tests/cli/man.txt, tests/cli.rs, tests/jetpack_tasks.rs, tests/jetpack_tool.rs, docs/spec/syntax-decisions.md.\n",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
-      "criteria": [],
+      "log": [
+        {
+          "at": "2026-08-06",
+          "by": "prep-entry",
+          "text": "plan + criteria written; ready to implement"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "scripts/agent/jet-env cargo test --test jetpack_tasks and --test jetpack_tool pass with --job flag and jet jobs subcommand",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:41:31.381Z"
+        },
+        {
+          "n": 2,
+          "text": "scripts/agent/jet-env rg \"\\-\\-task\\b|jet tasks\\b\" Source/ crates/ docs/ examples/ tests/ returns zero hits",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:41:35.917Z"
+        },
+        {
+          "n": 3,
+          "text": "scripts/agent/jet-env cargo test --test cli passes with regenerated completions_fish.txt, completions_zsh.txt, man.txt reflecting --job / jet jobs",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:41:40.845Z"
+        },
+        {
+          "n": 4,
+          "text": "docs/spec/syntax-decisions.md has a D-JOB-NAME1=A log entry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:41:44.399Z"
+        }
+      ],
       "refs": [],
       "tags": [
         "tooling",
@@ -81702,7 +81841,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T20:15:43.352Z",
-      "updated": "2026-08-06T10:39:49.668Z",
+      "updated": "2026-08-06T10:44:08.580Z",
       "updatedBy": "prep-entry"
     },
     {
@@ -81714,13 +81853,67 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P2",
       "plan": "Scope: D-JOB-SUBCMD1 outcome C. Jobs become subcommands of the program itself on every tier: jet run app.jet -- migrate on plain source, and ./myapp migrate on a built binary, same argv contract, retiring the separate --job flag from #1448. The marker argument is a typed scope enum: .Ship, .Dev, or .Internal. A bare #Job means .Dev — a subcommand while developing (jet run/jet dev/debug builds dispatch every job), stripped from release builds unless marked #Job(.Ship). .Internal jobs are callable from code/scheduler only, never from argv. Release builds print what they stripped and name the fix (mark #Job(.Ship) to include). Out of scope: renaming the word job itself (#1448, must land first).\n\nDepends on: #1448 (unify job vs task naming). This card's dispatcher and marker vocabulary are spelled in terms of \"job\", so #1448 must land first.\n\nApproach:\n1. New Prelude-owned scope enum (I9: semantics live only in crates/jet-codegen/src/Prelude): add a JobScope enum (Ship/Dev/Internal) to crates/jet-codegen/src/Prelude/ alongside the existing WebApp/App Prelude file, so AOT emit, Cranelift JIT, and interpreter ambient all read the same enum rather than re-encoding the default.\n2. Marker AST field: crates/jet-foundation/src/AST/items.rs (:957-1016, Func.task_metadata / TaskMetadata) — add a scope: JobScope field, default JobScope::Dev when the marker carries no argument. Model the parsing exactly on the existing TaskCachePolicy enum pattern (:1058-1064, written today as #Job(cache: .Shared, ...)) and TaskSkip (:1013-1030) — enum-literal marker arguments (.Ship) already parse through the ordinary expression grammar via task_word (crates/jet-parser/src/Parser/Items/external_tests_ffi.rs :425-430); no new marker-argument machinery is needed, only a new field + enum + parse/match arms in the same shape as cache.\n3. crates/jet-parser/src/Parser/Items/external_tests_ffi.rs (task_metadata_from_marker, :236-260): parse the new scope argument.\n4. crates/jet-foundation/src/Policy.rs: register the #Job marker's new argument shape (scope enum) alongside its existing rule! entry, same pattern as the #Target rule at :730 with its allowed-values list at :268.\n5. Dispatcher unification (this replaces the --job flag from #1448 entirely): retire Source/CmdCompile.rs run_task_entry's flag-driven invocation; instead route argv[1] against the discovered job table the same way on every tier — jet run app.jet -- <job> <args...> for plain source (dev-tier: dispatches every #Job regardless of scope), and the AOT-emitted main (crates/jet-codegen/src/Codegen/Items.rs emit_cli_entry_if_needed, :680-724) for built binaries (release-tier: dispatches only .Ship jobs, reserves other job names as \"unknown command\"). Both call into the same Prelude job-dispatch table so behavior matches per I9.\n6. Release build summary: crates/jet-driver or Source/CmdCompile.rs build path — print \"stripped N dev job(s): <names> (mark #Job(.Ship) to include)\" when a release build drops non-Ship jobs.\n7. crates/jet-sema/src/Sema/CheckerSchedule.rs (:16,65-69, E0928): extend the reserved-lifecycle-name check so a job name can never collide with a real CLI flag or another job's name at the same scope; the dispatcher must reserve job names before flag parsing (adversarial-pass finding from the ratified ballot).\n8. jet jobs listing (Source/CmdCompile.rs run_tasks/list_task_names, renamed to run_jobs/list_job_names by #1448): show each job's resolved scope.\n9. Migrate examples/tests: examples/features/devloop/task_runner.jet, examples/features/devloop/schedule_every.jet — add explicit scopes where the story needs a non-default one; delete any remaining --job flag usage.\n10. docs/spec/syntax-decisions.md: add \"D-JOB-SUBCMD1=C — jobs as subcommands, typed scope\" entry. docs/spec/diagnostics.md: if a new diagnostic is needed for a job/flag name collision, register it with a UI snapshot.\n\nProof:\n- scripts/agent/jet-env cargo test --test jetpack_tasks\n- scripts/agent/jet-env cargo test --test jetpack_engine\n- scripts/agent/jet-env jet run examples/features/devloop/task_runner.jet -- <job-name> (manual smoke: dev-tier dispatches a .Dev job)\n- scripts/agent/jet-env jet build examples/features/devloop/task_runner.jet && ./target-built-binary <ship-job-name> (manual smoke: release binary dispatches only .Ship jobs; a .Dev job name is \"unknown command\")\n- scripts/agent/jet-env rg \"\\-\\-job\\b\" Source/ crates/ docs/ examples/ tests/ (zero hits — the flag is retired in favor of subcommand dispatch)\n- new tests/ui/*.jet + .stderr for the job/flag-name collision diagnostic if added in step 7\n\nOwned paths: crates/jet-codegen/src/Prelude/ (new JobScope file), crates/jet-foundation/src/AST/items.rs, crates/jet-foundation/src/Policy.rs, crates/jet-parser/src/Parser/Items/external_tests_ffi.rs, crates/jet-sema/src/Sema/CheckerSchedule.rs, crates/jet-codegen/src/Codegen/Items.rs, Source/CmdCompile.rs, Source/main.rs, examples/features/devloop/*.jet, tests/jetpack_tasks.rs, tests/jetpack_engine.rs, docs/spec/syntax-decisions.md, docs/spec/diagnostics.md.\n",
-      "blockedBy": [],
+      "blockedBy": [
+        "c04zqxw1"
+      ],
       "assignee": null,
-      "log": [],
-      "criteria": [],
+      "log": [
+        {
+          "at": "2026-08-06",
+          "by": "prep-entry",
+          "text": "plan + criteria written; blocked-by #1448 recorded; ready to implement once unblocked"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "named example examples/features/devloop/task_runner.jet uses #Job(.Ship), #Job(.Dev)/bare #Job, and #Job(.Internal); scripts/agent/jet-env cargo test --test jetpack_tasks and --test jetpack_engine pass",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:41:51.890Z"
+        },
+        {
+          "n": 2,
+          "text": "I9 parity: dev-tier jet run <file> -- <job> and a built release binary ./bin <ship-job> dispatch identically through the shared Prelude JobScope table; a .Dev job is unknown on the built binary",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:41:55.785Z"
+        },
+        {
+          "n": 3,
+          "text": "scripts/agent/jet-env rg \"\\-\\-job\\b\" Source/ crates/ docs/ examples/ tests/ returns zero hits (flag retired for subcommand dispatch)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:42:00.001Z"
+        },
+        {
+          "n": 4,
+          "text": "a release build with an unmarked (.Dev-default) job prints a stripped-jobs summary naming the job and the #Job(.Ship) fix, proven by a golden/UI snapshot",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:42:03.519Z"
+        },
+        {
+          "n": 5,
+          "text": "docs/spec/syntax-decisions.md has a D-JOB-SUBCMD1=C log entry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:42:08.876Z"
+        }
+      ],
       "refs": [],
       "tags": [
         "tooling",
@@ -81729,8 +81922,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T20:15:43.664Z",
-      "updated": "2026-08-06T10:39:55.654Z",
-      "updatedBy": "prep-entry"
+      "updated": "2026-08-06T10:45:47.660Z",
+      "updatedBy": "fable"
     },
     {
       "id": "c0f7fhoy",
@@ -81741,13 +81934,59 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P2",
       "plan": "Scope: D-APP-ARGS1 outcome A. One rule for every entry: parameters on an App-returning fn run become typed CLI flags exactly the way they already do on a script fn run, using the existing ratified #[CLI] field-marker mechanism (D-CLIFLAG1). An incompatible argument is a launch-time diagnostic naming the flag, the expected type, and the fix. No new mechanism — this card is \"make the App entry participate in the exact pipeline scripts already use,\" not a new argument system. Out of scope: the entry-return-value model itself (#1446), the App type rename (#1447) — both are prerequisites.\n\nDepends on: #1446 (entry returns the program value) and #1447 (one App type). This card only makes sense once fn run can return App.\n\nApproach:\n1. Confirm/generalize crates/jet-sema/src/Sema/Bundle/Outputs.rs cli_entry_param_shape (:27-56) and CLIEntryShape (:14-23): today this gate runs regardless of fn run's return type (it classifies the single parameter's shape into Struct/Enum/EnumBadVariants/Invalid via #[CLI] struct or enum-of-#[CLI]-structs). Verify no existing code path special-cases \"Unit-returning fn run only\" — if the entry gate in Bundle.rs (:2279-2328) currently only calls cli_entry_param_shape for the Unit-return branch, extend it to run identically when fn run returns App, so both branches share the exact same E1307/E1308 diagnostics.\n2. crates/jet-foundation/src/CLISchema.rs (entry_schema / entry_schema_for_bundle): confirm schema extraction does not assume a Unit return type; if it does, remove the assumption so an App-returning entry's #[CLI] parameter produces the same CLIInputSchema.\n3. AOT: crates/jet-codegen/src/Codegen/Items.rs emit_cli_entry_if_needed (:680-724) already synthesizes the __jet_cli_main wrapper from entry_schema; confirm/extend it to call the App-returning fn run and then .serve() the returned value (the #1446 change), instead of assuming the entry always just executes and exits.\n4. JIT: crates/jet-codegen/src/Codegen/TIR/mod.rs lower_jit_program (:924-964, entry_name resolution via CLISchema::entry_schema) and crates/jet-jit/src/jit/functions_compile.rs (:807-946, cli_entry / __jet_cli_main handling): same extension — the CLI-args-to-struct marshalling is identical, only what happens with the returned value differs (serve vs. discard), and that difference is already owned by #1446's Prelude .serve() call, not by this card.\n5. Interpreter/dev tier: Source/CmdDossier.rs (:152,242, CLIInputSchema JSON encode used by `jet explain`/dossier tooling) — confirm it already treats the schema uniformly; no App-specific branch should be needed since the schema doesn't encode the return type.\n6. Diagnostics: reuse crates/jet-sema/src/Sema/Bundle/Outputs.rs e1307/e1308 verbatim (I4 is already satisfied for these codes); no new diagnostic code needed unless testing surfaces an App-specific failure mode the existing text doesn't cover — if so, register it under docs/spec/diagnostics.md with a UI snapshot.\n7. New example: add examples/features/web/app_typed_args.jet (or extend web_app.jet) with fn run(args: ServeArgs) => App { ... } where ServeArgs is a #[CLI] struct with a port: Int field, modeled on examples/features/cli/typed_entry_args.jet's ServeArgs shape. Golden-test both the --help output and a successful --port=9000 run (I5).\n8. docs/spec/syntax-decisions.md: add \"D-APP-ARGS1=A — one rule for every entry\" log entry noting this reuses D-CLIFLAG1/D-CLI-POS1/D-CLI-FIELD-MARKERS1 verbatim.\n\nProof:\n- scripts/agent/jet-env cargo test --test web_app\n- scripts/agent/jet-env cargo test --test cli (existing #[CLI]-struct entry tests, must stay green)\n- scripts/agent/jet-env jet run examples/features/web/app_typed_args.jet -- --port=9000 (manual smoke, AOT and jet run tiers)\n- scripts/agent/jet-env jet build examples/features/web/app_typed_args.jet && scripts/agent/jet-env <built-binary> --port=9000 (I9 parity: same flag behavior on the built binary)\n- scripts/agent/jet-env jet run examples/features/web/app_typed_args.jet -- --port=nine (expects the existing E1308-family diagnostic, not a new one)\n\nOwned paths: crates/jet-sema/src/Sema/Bundle/Outputs.rs, crates/jet-sema/src/Sema/Bundle.rs, crates/jet-foundation/src/CLISchema.rs, crates/jet-codegen/src/Codegen/Items.rs, crates/jet-codegen/src/Codegen/TIR/mod.rs, crates/jet-jit/src/jit/functions_compile.rs, Source/CmdDossier.rs, examples/features/web/app_typed_args.jet (new), docs/spec/syntax-decisions.md.\n",
-      "blockedBy": [],
+      "blockedBy": [
+        "c0uq2h91",
+        "c0zvnp4f"
+      ],
       "assignee": null,
-      "log": [],
-      "criteria": [],
+      "log": [
+        {
+          "at": "2026-08-06",
+          "by": "prep-entry",
+          "text": "plan + criteria written; blocked-by #1446,#1447 recorded; ready to implement once unblocked"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "named example examples/features/web/app_typed_args.jet uses fn run(args: ServeArgs) => App; scripts/agent/jet-env cargo test --test web_app passes",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:42:15.978Z"
+        },
+        {
+          "n": 2,
+          "text": "I9 parity: scripts/agent/jet-env jet run examples/features/web/app_typed_args.jet -- --port=9000 and the jet build-produced binary with --port=9000 both succeed identically",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:42:20.644Z"
+        },
+        {
+          "n": 3,
+          "text": "an incompatible flag value (e.g. --port=nine) reuses the existing E1307/E1308-family diagnostic naming the flag, expected type, and fix; no new ad hoc error path",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:42:24.835Z"
+        },
+        {
+          "n": 4,
+          "text": "docs/spec/syntax-decisions.md has a D-APP-ARGS1=A log entry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:42:29.808Z"
+        }
+      ],
       "refs": [],
       "tags": [
         "tooling",
@@ -81756,8 +81995,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T20:15:43.969Z",
-      "updated": "2026-08-06T10:40:00.611Z",
-      "updatedBy": "prep-entry"
+      "updated": "2026-08-06T10:45:48.045Z",
+      "updatedBy": "fable"
     },
     {
       "id": "c0wk4xnv",
@@ -81768,12 +82007,18 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P2",
       "plan": "Scope: D-CMD-OVERRIDE1 outcome C. The override rule generalizes from dev-only to every command: fn test(suite: TestSuite) and fn bench(suite: BenchSuite) may replace jet test's/jet bench's default harness, receiving the compiler-discovered suite (after --filter) as an ordinary value with run()/iteration/result access. A no-parameter override fully replaces the default (same shape as today's fn dev()). jet test --default and jet bench --default force the stock harness and ignore any override; verification contexts (CI, this repo's own test/bench closeout) must pin --default so an override can never mint false green. Out of scope: bench's target/filter parity itself (#1452, recommended to land first since this card's suite discovery reuses whatever #1452 builds); the entry-value model (#1446) and job subcommands (#1448/#1449) are unrelated.\n\nSequencing note (soft, not a hard block): implement #1452 (bench target/filter parity) before wiring fn bench(suite: BenchSuite) here, so the BenchSuite discovery/filter pass in Source/CmdDevTools.rs is written once against the parity-complete run_bench rather than twice.\n\nApproach:\n1. New types (I9: semantics live only in the Prelude): add TestSuite and BenchSuite to crates/jet-codegen/src/Prelude/ — neither exists anywhere in the codebase today (confirmed by grep). Each type wraps the discovered blocks after --filter with run(), iteration, and result access per the ratified technical note. AOT emit, Cranelift JIT, and interpreter ambient must all construct the identical suite value from the identical Prelude constructor — no re-encoding discovery/filtering in an engine.\n2. Detection (model exactly on the existing fn dev() override): Source/main.rs has_dev_entry_fn (:2361-2377) is the pattern — add has_test_entry_fn / has_bench_entry_fn doing the same lex+parse scan for a top-level fn named \"test\" / \"bench\". Apply the same precedence lesson already documented at Source/main.rs :1761-1774 (check the override BEFORE any built-in default), since that file already records the bug class this ballot's option explicitly warns about.\n3. Test runner: Source/CmdCompile.rs run_test/run_test_opts/run_test_file (:1220-1397) — when has_test_entry_fn is true and --default is not passed, compile with the discovered TestSuite value and call the user fn test(suite) via the same compile_with_entry / swap_entry_point machinery crates/jet-driver/src/Driver/mod.rs already uses for fn dev() (:3616-3760), instead of running emit_bundle_tests_cov's built-in harness directly.\n4. Bench runner: Source/CmdDevTools.rs run_bench (:2447-2530) — same shape: when has_bench_entry_fn is true and --default is not passed, hand the discovered BenchSuite to fn bench(suite). Coordinate with #1452's rewrite of this same function (see sequencing note).\n5. --default flag (does not exist anywhere today, confirmed by grep): add to Source/main.rs's test and bench argument parsing (test's existing flag block is at :2069-2110; bench's is currently minimal per #1452's plan, this card and #1452 both touch it — implementer picks whichever card lands second to avoid a merge conflict, and notes the other card's number in its log).\n6. Verification-context pin: this repo's own scripts/agent/verify-full.sh and any CI test/bench invocation must pass --default explicitly, so a future in-repo fn test()/fn bench() override can never affect this repo's own closeout gate. Grep scripts/agent/ for existing jet test/jet bench invocations and add --default to each.\n7. Reserved-name guard: crates/jet-sema/src/Sema/CheckerSchedule.rs (:16,65-69, E0928) already reserves run/dev/build/test as lifecycle names a #Job can't reuse — confirm test and bench stay reserved (they already are) now that they are also override-entry names, not just built-in commands.\n8. Override notice: when an override runs (no --default), the CLI must print that it did (per the ratified adversarial-pass repair, so a skipped-suite override can't silently look identical to the real run) — add to Source/CmdCompile.rs / Source/CmdDevTools.rs output.\n9. New examples: add an example demonstrating fn test(suite: TestSuite) doing setup/teardown around suite.run() (the ballot's own db-start/db-stop story), and one for fn bench(suite: BenchSuite). Place under examples/features/devloop/ alongside the existing task_runner.jet.\n10. Syntax.rs / syntax-decisions.md: this generalizes an existing override convention (no new keyword — fn <command>() already exists for dev), so Syntax.rs gets an \"adds no token, extends existing override convention\" prose entry per the D-CLIFLAG1-style log pattern; syntax-decisions.md gets \"D-CMD-OVERRIDE1=C — every command overridable, suite handed in\".\n\nProof:\n- scripts/agent/jet-env cargo test --test jet_test\n- scripts/agent/jet-env cargo test --test dev (confirm the fn dev() precedence bug class doesn't reappear for test/bench)\n- scripts/agent/jet-env jet run examples/features/devloop/test_override.jet then scripts/agent/jet-env jet test examples/features/devloop/test_override.jet (manual smoke: override runs, prints override notice)\n- scripts/agent/jet-env jet test examples/features/devloop/test_override.jet --default (manual smoke: stock harness runs, override ignored)\n- scripts/agent/jet-env jet self devtools grammars (confirm no grammar diff — no new token)\n- scripts/agent/jet-env rg \"\\-\\-default\\b\" scripts/agent/verify-full.sh (confirms the verification-context pin from step 6)\n\nOwned paths: crates/jet-codegen/src/Prelude/ (new TestSuite/BenchSuite file), Source/main.rs, Source/CmdCompile.rs, Source/CmdDevTools.rs, crates/jet-sema/src/Sema/CheckerSchedule.rs, examples/features/devloop/ (new examples), scripts/agent/verify-full.sh, docs/spec/syntax-decisions.md, crates/jet-foundation/src/Syntax.rs.\n",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-06",
+          "by": "prep-entry",
+          "text": "plan + criteria written; ready to implement"
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -81810,6 +82055,51 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-08-05T20:36:56.527Z"
+        },
+        {
+          "n": 5,
+          "text": "new Prelude-owned TestSuite/BenchSuite types exist under crates/jet-codegen/src/Prelude/; scripts/agent/jet-env cargo test --test jet_test passes with the fn test(suite) override wired",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:42:36.430Z"
+        },
+        {
+          "n": 6,
+          "text": "named example under examples/features/devloop/ demonstrates fn test(suite: TestSuite) setup/teardown around suite.run(), golden-tested output",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:42:40.367Z"
+        },
+        {
+          "n": 7,
+          "text": "scripts/agent/jet-env rg \"\\-\\-default\\b\" scripts/agent/verify-full.sh shows this repos own jet test/jet bench invocations pinned to --default",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:42:47.749Z"
+        },
+        {
+          "n": 8,
+          "text": "docs/spec/syntax-decisions.md has a D-CMD-OVERRIDE1=C log entry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:42:52.267Z"
+        },
+        {
+          "n": 9,
+          "text": "a --default flag exists on jet test and jet bench and is honored: jet test <example> --default runs the stock harness and ignores the override, verified by a targeted test",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:43:08.607Z"
         }
       ],
       "refs": [],
@@ -81820,7 +82110,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T20:21:44.187Z",
-      "updated": "2026-08-06T10:40:05.013Z",
+      "updated": "2026-08-06T10:44:09.180Z",
       "updatedBy": "prep-entry"
     },
     {
@@ -81832,13 +82122,65 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P2",
-      "plan": null,
+      "plan": "Scope: D-BENCH-PARITY1 outcome B. jet bench accepts the same targets jet test already does: a file, a directory (walked recursively), or a project, plus --filter for region names by name. Benches still always run one at a time, serially, for timing integrity. Assertion-only test flags (--shuffle, --coverage, --update-snapshots) stay test-only. Multi-file output is one line per region plus a per-file heading; --json emits one record per region. A standing rule pins the two commands together going forward: future runner-surface changes apply to both or name an explicit carve-out. Out of scope: the fn bench(suite) override itself (#1451, recommended to land after this card so it reuses this card's discovery/filter pass instead of duplicating it).\n\nApproach:\n1. Port the existing TestRunOpts shape (Source/CmdCompile.rs :1207-1218: update_snapshots, coverage, filter: Option<String>, shuffle_seed: Option<u64>, serial: bool) into a bench-only options struct in Source/CmdDevTools.rs — only filter and an implicit always-serial flag apply to bench; coverage/update_snapshots/shuffle_seed are test-only per the ratified carve-out and must not appear on the bench struct.\n2. Port collect_test_files_recursive (Source/CmdCompile.rs :1273-1289, skips build/ and dot-dirs) into Source/CmdDevTools.rs (or a shared helper both files call, if that's the smaller diff — prefer a shared helper under Source/ so #1452's standing \"future changes apply to both\" rule has one place to change) and reuse it for bench's directory walk.\n3. Source/CmdDevTools.rs run_bench (:2447-2530): replace the single-file-only fn run_bench(file: &str, mode: OutputMode) with a directory/project-aware entry point mirroring Source/CmdCompile.rs run_test_opts's dir branch (:1242-1268) — p.is_dir() walks recursively via the shared helper, sorts paths, benches every file, aggregates a summary.\n4. Add --filter to Source/main.rs's bench argument parsing (today minimal, no flag-parsing block comparable to test's at :2069-2110) — thread it to jet::has_bench_blocks / run_bench_regions (Source/CmdDevTools.rs :2532-2551) the same way JET_TEST_FILTER threads to the generated test harness (Source/CmdCompile.rs :1367-1369), matching region names post-discovery.\n5. Bare-entry / project-root resolution: Source/main.rs (:1996-2010, resolve_bare_entry(\"test\",...) vs the partial bare_bench_entry) — extend bench's bare-entry path to the same directory/project walk as test's, not just a single resolved file.\n6. Multi-file output: one line per region plus a per-file heading (per the ratified technical note, to avoid filter-name collisions across files) — path-qualify region names in both human and --json output.\n7. --json: one record per region (mirror whatever shape jet test --json already emits per test, adjusted for bench's timing fields).\n8. Explicitly do NOT add --shuffle, --coverage, --update-snapshots to bench — these are named test-only in the ratified text; if the CLI flag parser is shared code, gate them behind the command (test vs bench) rather than deleting the parser.\n9. docs/spec/syntax-decisions.md: add \"D-BENCH-PARITY1=B — bench runner parity with test\" log entry documenting the standing pairing rule for future runner changes, so the next agent who touches jet test's target resolution knows to check bench too (and vice versa).\n\nProof:\n- scripts/agent/jet-env cargo test --test jet_test (must stay green — this card must not regress test's own behavior while sharing helpers)\n- new scripts/agent/jet-env cargo test --test jet_bench (add this test file mirroring tests/jet_test.rs's directory/filter coverage, since none exists today)\n- scripts/agent/jet-env jet bench examples/features/ (manual smoke: directory target, was previously an error)\n- scripts/agent/jet-env jet bench examples/features/ --filter=<a-real-region-name> (manual smoke: name selection, was previously unsupported)\n- scripts/agent/jet-env jet bench . --json (manual smoke: one record per region across the project)\n- scripts/agent/jet-env rg \"\\-\\-shuffle|\\-\\-coverage|\\-\\-update-snapshots\" Source/CmdDevTools.rs (zero hits — confirms the test-only carve-out held)\n\nOwned paths: Source/CmdDevTools.rs, Source/CmdCompile.rs (shared helper extraction only), Source/main.rs, tests/jet_bench.rs (new), docs/spec/syntax-decisions.md.\n",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
-      "criteria": [],
+      "log": [
+        {
+          "at": "2026-08-06",
+          "by": "prep-entry",
+          "text": "plan + criteria written; ready to implement"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "new tests/jet_bench.rs mirrors tests/jet_test.rs directory/filter coverage; scripts/agent/jet-env cargo test --test jet_bench passes",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:43:20.712Z"
+        },
+        {
+          "n": 2,
+          "text": "scripts/agent/jet-env jet bench examples/features/ (directory target) and jet bench examples/features/ --filter=<a-real-region-name> both succeed, where today both error/are unsupported",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:43:24.550Z"
+        },
+        {
+          "n": 3,
+          "text": "scripts/agent/jet-env rg \"\\-\\-shuffle|\\-\\-coverage|\\-\\-update-snapshots\" Source/CmdDevTools.rs returns zero hits, confirming the test-only flag carve-out held",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:43:29.092Z"
+        },
+        {
+          "n": 4,
+          "text": "scripts/agent/jet-env cargo test --test jet_test stays green after the shared-helper extraction (no regression to test target resolution)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:43:34.808Z"
+        },
+        {
+          "n": 5,
+          "text": "docs/spec/syntax-decisions.md has a D-BENCH-PARITY1=B log entry documenting the standing test/bench pairing rule",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:43:38.909Z"
+        }
+      ],
       "refs": [],
       "tags": [
         "tooling",
@@ -81847,8 +82189,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T20:21:44.499Z",
-      "updated": "2026-08-05T20:42:12.680Z",
-      "updatedBy": "owner"
+      "updated": "2026-08-06T10:44:09.592Z",
+      "updatedBy": "prep-entry"
     },
     {
       "id": "c0b6szun",
@@ -82057,12 +82399,12 @@
       "priority": "P1",
       "plan": "Scope: SLATE CLOSEOUT ONLY. This card does not implement anything itself -- it verifies the six ratified rulings from the slate are each carried by exactly one implementation child, none orphaned, and closes only after every child closes. Ratified ruling -> owning child mapping (verified against docs/proposals/marker-plane-first-principles.md and each child's current plan/criteria):\n  - D-VERDICT-1455-1 (law zero, mandatory registration, D-MARK-REG1): structural rebuild across #1456 (one parse path, marker nodes retained on AST -- in progress: callables done, statement/binding/expression sites and 6 remaining #Unsafe keyword special cases open per its 2026-08-06 log), #1457 (one registry validation pipeline at every site -- blocked by #1456, criteria 1/2/3/4 all open, one E0927 fixture landed for function sites), #1458 (formatter/tree-sitter/reflection/explain read registry rows -- formatter and reflection criteria met, tree-sitter grammar generation still open), #1459 (dead-row triage, retired-effect cleanup, menu columns -- all 3 criteria met per its 2026-08-06 log), #1460 (CI drift guards: name-literal scan, per-row coverage, generated grammars -- per-row coverage test tests/marker_registry_coverage.rs is green; the name-literal scan needs redesign against marker-dispatch positions per fable's 2026-08-06 note, not name-literal matching, because it cannot be written honestly until #1456's hand-bumped parsing is fully gone; generated-grammar drift test still open).\n  - D-IMPURE-REASON1=B (reason optional, auditable via tooling): owned by #1461. Per #1461's 2026-08-06 log this needs no code change -- #Impure's reason is already optional, matching B. Confirm the CI-auditability half (warn/error under build settings for a missing reason) is either already covered by an existing lint or gets one line added to #1461's scope; it is not yet proven done.\n  - D-SQL-ARG1=B (angle-bracket #SQL<Row>, giving markers a type-parameter feature): owned by #1461, not done -- needs a registry schema change (a typed-parameter column) plus parser/formatter/grammar support for '<...>' on a marker.\n  - D-MARK-FORM1=A (one placement law, RuleForm leaves the registry) and D-MARK-REPEAT1=A (duplicate markers error unless repeatable): both reported done end to end under #1461 per its 2026-08-06 log, though the structural work likely landed as a byproduct of #1456-#1459's registry rebuild -- verify at closeout that #1461's criteria/evidence actually cite this, not just the log prose, before treating it as closed.\n  - D-HTML-NAME1=B (one name, two site-dependent signatures for the file-pairing marker and the inline HTML block): owned by #1461, not done -- needs the same registry schema change as D-SQL-ARG1 (site-dependent signature column).\nNo ruling is orphaned; every ruling maps to at least one existing child. #1455 itself adds no code. At closeout, also confirm docs/spec/syntax-decisions.md carries one dated log entry per ratified decision id (D-VERDICT-1455-1, D-IMPURE-REASON1, D-SQL-ARG1, D-MARK-FORM1, D-MARK-REPEAT1, D-HTML-NAME1) -- none exist yet (grep confirmed zero hits), so this is outstanding work for whichever child lands last, most naturally #1461 for the five ballot ids and #1460 for the law-zero id since its drift guards are the structural proof law zero is real.\nApproach: none for this card besides periodic re-verification of the mapping above as children log progress; do not duplicate #1456-#1461 work here.\nProof: node plugins/tower/tower.mjs card show '#1456' / '#1457' / '#1458' / '#1459' / '#1460' / '#1461' each showing every criterion met and verified; grep docs/spec/syntax-decisions.md for all six decision ids returning one entry each.\nOwned paths: none (verification only); refs docs/proposals/marker-plane-first-principles.md.",
       "blockedBy": [
-        "#1456",
-        "#1457",
-        "#1458",
-        "#1459",
-        "#1460",
-        "#1461"
+        "c0556cxe",
+        "c0ai0h4w",
+        "c0fsjhdc",
+        "c0kydt2i",
+        "c0pzumap",
+        "c0v3yofo"
       ],
       "assignee": null,
       "log": [
@@ -82136,8 +82478,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T22:40:12.760Z",
-      "updated": "2026-08-06T10:24:30.887Z",
-      "updatedBy": "prep-syntax"
+      "updated": "2026-08-06T10:45:48.419Z",
+      "updatedBy": "fable"
     },
     {
       "id": "c0556cxe",
@@ -82230,7 +82572,7 @@
       "priority": "P1",
       "plan": "One sema pass runs vocabulary, site, signature, and duplicate checks for every marker at every site, reading only registry rows. E0990 and the E0733/E0003 marker fallbacks retire into the E0927/E0355/E0930 families with snapshots. Distinct types join the vocabulary check. Static resolution binds every registered site so comptime argument evaluation runs for block, statement, declaration, constant, and function markers.",
       "blockedBy": [
-        "#1456"
+        "c0556cxe"
       ],
       "assignee": "bd-markers",
       "log": [
@@ -82286,8 +82628,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T22:45:07.674Z",
-      "updated": "2026-08-06T02:05:02.239Z",
-      "updatedBy": "bd-markers",
+      "updated": "2026-08-06T10:45:48.796Z",
+      "updatedBy": "fable",
       "claimedAt": "2026-08-06T02:05:02.239Z"
     },
     {
@@ -82303,7 +82645,7 @@
       "priority": "P1",
       "plan": "The formatter prints retained marker nodes; the 16-flag reconstruction and hardcoded layout lists are deleted. The tree-sitter grammar and highlight lists are generated from the registry: lowercase rows, the signed form, no retired @ sigil, no unbounded stacking. MethodInfo.markers becomes real. jet explain reads the same rows.",
       "blockedBy": [
-        "#1456"
+        "c0556cxe"
       ],
       "assignee": "bd-markers",
       "log": [
@@ -82351,8 +82693,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T22:45:07.994Z",
-      "updated": "2026-08-06T03:00:24.558Z",
-      "updatedBy": "bd-markers",
+      "updated": "2026-08-06T10:45:49.172Z",
+      "updatedBy": "fable",
       "claimedAt": "2026-08-06T03:00:24.558Z"
     },
     {
@@ -82435,10 +82777,10 @@
       "priority": "P1",
       "plan": "Deterministic enforcement of D-VERDICT-1455-1. A CI test scans compiler sources for marker-name string literals outside the registry and its generated artifacts and fails on any hit. A coverage test walks every registry row end to end: parse, validate, format round-trip, highlight, reflect. Editor grammars are generated from the registry, never hand-edited. These guards gate the migration close.",
       "blockedBy": [
-        "#1456",
-        "#1457",
-        "#1458",
-        "#1459"
+        "c0556cxe",
+        "c0ai0h4w",
+        "c0fsjhdc",
+        "c0kydt2i"
       ],
       "assignee": "bd-markers",
       "log": [
@@ -82489,7 +82831,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T22:45:08.611Z",
-      "updated": "2026-08-06T10:11:21.096Z",
+      "updated": "2026-08-06T10:45:49.791Z",
       "updatedBy": "fable",
       "claimedAt": "2026-08-06T02:05:02.983Z"
     },
@@ -84159,12 +84501,22 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "Scope: ledger methodology only, not Core code. The witness count that decides jet_loses vs single_witness (scripts/agent/check-core-surface-ledger.mjs, verdict rule at line ~1460: languages.length >= 2 ? jet_loses : single_witness) is computed per container in isolation. A capability whose name recurs across many containers (e.g. \"close\") never pools its witnesses across containers, so every occurrence can get stuck at single_witness even when, pooled, 2+ languages clearly ship it — while other same-named rows (e.g. \"close\" on ByteBuffer vs \"close\" on core.db) are genuinely distinct operations that should stay separately scored. SYNONYM_GROUPS (same file, line ~187) already handles spelling variance within one workflow; it does not handle this cross-container name-reuse question. No mechanical separator exists (confirmed by the card body); this needs a per-name human classification. Re-derive the exact repeated-name count at start of work rather than trusting the card body's 465/1316/686 figures, since the ledger has moved since those were computed (the same drift pattern hit #1476-#1481).\n\nApproach:\n1. Re-run the probe: for every row currently verdict single_witness, pool by source.member across all containers (ignore container), and list every member name whose pooled distinct-language-witness count is >= 2. That is the current \"distinct repeated member names\" list; get its live count before doing anything else.\n2. For each name, read every row's competitors block (the actual language + operation + container triple) and classify:\n   - Same real capability, Jet lacks it wherever it applies -> this is a genuine pooled gap. Promote by having the scoring rule pool witnesses across containers for this name specifically (do not just hand-flip verdict strings in the generated JSON — docs/reference/core-surface-ledger.json is generated and --check rejects hand edits per the script's own header).\n   - Same real capability, but Jet already ships it somewhere under a different spelling that the matcher is not credited for -> this is a SYNONYM_GROUPS gap, fix there instead of in the witness-pooling logic.\n   - Coincidental name reuse across genuinely distinct operations (the card's own worked example: ByteBuffer.close vs core.db.close) -> leave single_witness, per container, and mark it as reviewed so a re-run does not re-flag it as unclassified.\n3. Implement the classification as data plus code in scripts/agent/check-core-surface-ledger.mjs, not as hand-edited JSON: add a table (e.g. CROSS_CONTAINER_CAPABILITIES, parallel in spirit to SYNONYM_GROUPS) naming every classified repeated name and its verdict (pool | distinct), and change the verdict rule so a name in the \"pool\" set counts witnesses across containers before applying the >=2 threshold, while a name in the \"distinct\" set (or any name not yet classified) keeps today's per-container behavior.\n4. Extend repeatedCapabilities() (same file, line ~1615) so pooled-and-promoted names show up there with their full cross-container evidence, matching the existing 35-entry report's shape.\n5. Add a hostile fixture to hostileFixtures() (same file, line ~2135) and its matching case in tests/core_surface_ledger.rs: introduce an unclassified repeated name and assert --check rejects it, so a future ledger refresh cannot silently reintroduce an unreviewed repeat.\n6. Run node scripts/agent/check-core-surface-ledger.mjs --refresh to regenerate docs/reference/core-surface-ledger.json and .md with the corrected pooled verdicts, then --check to confirm self-consistency.\n7. Document the pooling rule and the classification table's location in docs/reference/core-surface-ledger.md's methodology section.\n8. Flag, do not fix here: pooling may promote some single_witness rows to jet_loses for containers that currently have zero recorded losses, which would need a new or reopened lossCluster/owner card. That follow-on triage is separate work, not part of this card's scope.\n\nProof:\n- node scripts/agent/check-core-surface-ledger.mjs --check exits 0 against the refreshed ledger\n- scripts/agent/jet-env cargo test --test core_surface_ledger passes, including the new hostile fixture for an unclassified repeated name\n- A completeness check: every name in the live repeated-name list from step 1 appears in the classification table (pool or distinct) with zero unclassified names remaining\n\nOwned paths: scripts/agent/check-core-surface-ledger.mjs, docs/reference/core-surface-ledger.json, docs/reference/core-surface-ledger.md, tests/core_surface_ledger.rs.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-06",
+          "by": "bd-verify",
+          "text": "Closed. Pooling moved 58 rows from recorded to scored, taking losses from 625 to 683. A first attempt pooled into module namespaces and invented core.math.clear, core.os.hash and core.time.push; pooling is now restricted to container types. A separate defect in the synonym table, which folds Math.Truncate into clear and DateTime.Add into push, is card #1494."
+        },
+        {
+          "at": "2026-08-06",
+          "by": "fable",
+          "text": "Pooling moved 133 rows from recorded to scored, so losses went 625 to 758 and single witness 8406 to 8273. Three containers gained their first scored gaps and are carded as #1493."
+        },
         {
           "at": "2026-08-06",
           "by": "prep-core-c",
@@ -84175,38 +84527,38 @@
         {
           "n": 1,
           "text": "Every distinct repeated member name (pooled across containers from the current single_witness bucket, re-derived at implementation time, not the stale 465 in the card body) is classified as pool or distinct in scripts/agent/check-core-surface-ledger.mjs, with zero unclassified names remaining.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:25:28.990Z"
+          "status": "verified",
+          "metBy": "fable",
+          "verifiedBy": "bd-verify",
+          "evidence": "Verified on merged master. --refresh then --check exits 0 with clusters-needing-a-card=0; --hostile-fixtures exits 0 over 28 fixtures; cargo test --test core_surface_ledger passes 2 of 2. All 399 recurring names are classified with none left over, and the new fixture proves an unclassified name is rejected by name. Pooling is restricted to container types, so a module namespace no longer inherits a value protocol.",
+          "at": "2026-08-06T11:06:56.255Z"
         },
         {
           "n": 2,
           "text": "node scripts/agent/check-core-surface-ledger.mjs --refresh followed by --check exits 0, and docs/reference/core-surface-ledger.json/.md reflect the pooled verdicts with no hand edits.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:25:29.330Z"
+          "status": "verified",
+          "metBy": "fable",
+          "verifiedBy": "bd-verify",
+          "evidence": "Verified on merged master. --refresh then --check exits 0 with clusters-needing-a-card=0; --hostile-fixtures exits 0 over 28 fixtures; cargo test --test core_surface_ledger passes 2 of 2. All 399 recurring names are classified with none left over, and the new fixture proves an unclassified name is rejected by name. Pooling is restricted to container types, so a module namespace no longer inherits a value protocol.",
+          "at": "2026-08-06T11:06:56.577Z"
         },
         {
           "n": 3,
           "text": "scripts/agent/jet-env cargo test --test core_surface_ledger passes, including a new hostile fixture proving --check rejects an unclassified repeated name.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:25:29.684Z"
+          "status": "verified",
+          "metBy": "fable",
+          "verifiedBy": "bd-verify",
+          "evidence": "Verified on merged master. --refresh then --check exits 0 with clusters-needing-a-card=0; --hostile-fixtures exits 0 over 28 fixtures; cargo test --test core_surface_ledger passes 2 of 2. All 399 recurring names are classified with none left over, and the new fixture proves an unclassified name is rejected by name. Pooling is restricted to container types, so a module namespace no longer inherits a value protocol.",
+          "at": "2026-08-06T11:06:56.887Z"
         },
         {
           "n": 4,
           "text": "docs/reference/core-surface-ledger.md documents the cross-container pooling rule and where the classification table lives.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:25:30.024Z"
+          "status": "verified",
+          "metBy": "fable",
+          "verifiedBy": "bd-verify",
+          "evidence": "Verified on merged master. --refresh then --check exits 0 with clusters-needing-a-card=0; --hostile-fixtures exits 0 over 28 fixtures; cargo test --test core_surface_ledger passes 2 of 2. All 399 recurring names are classified with none left over, and the new fixture proves an unclassified name is rejected by name. Pooling is restricted to container types, so a module namespace no longer inherits a value protocol.",
+          "at": "2026-08-06T11:06:57.199Z"
         }
       ],
       "refs": [
@@ -84216,8 +84568,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T02:24:17.097Z",
-      "updated": "2026-08-06T10:25:30.411Z",
-      "updatedBy": "prep-core-c"
+      "updated": "2026-08-06T11:06:57.568Z",
+      "updatedBy": "bd-verify",
+      "completedAt": "2026-08-06T11:06:57.567Z"
     },
     {
       "id": "c0hp46qn",
@@ -84822,19 +85175,53 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P1",
       "plan": "1. Reproduce with a Codable struct whose field carries #Rename with a quoted string.\n2. Make the field-site signature gate accept what the type-site gate accepts.\n3. Prove the test passes and the diagnostic still fires on a genuinely non-literal argument.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
-      "criteria": [],
+      "log": [
+        {
+          "at": "2026-08-06",
+          "by": "fable",
+          "text": "criteria added; coordinate with #1457 (one registry pipeline) — if #1457 lands first this may collapse into its gate unification; ready to implement"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "scripts/agent/jet-env cargo test --test marker_rule_signatures -- static_type_and_field_strings_use_the_same_signature_gate passes",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:46:12.754Z"
+        },
+        {
+          "n": 2,
+          "text": "A Codable field with #Rename(\"quoted\") compiles clean; a genuinely non-literal argument still reports E2407 (UI snapshot covers both if text changed)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:46:13.147Z"
+        },
+        {
+          "n": 3,
+          "text": "The fix lands in the one shared signature gate, not a field-site special case (point to the single site as evidence)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:46:13.457Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T10:12:51.053Z",
-      "updated": "2026-08-06T10:12:51.054Z",
+      "updated": "2026-08-06T10:46:13.820Z",
       "updatedBy": "fable"
     },
     {
@@ -84846,19 +85233,105 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P2",
       "plan": "1. Route the trait-body marker path through the registry.\n2. Delete retired_s14_teaching_enabled and the dead FOREIGN_PURE branch.\n3. Prove #Pure reports E0927 at every site with the same fix text.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
-      "criteria": [],
+      "log": [
+        {
+          "at": "2026-08-06",
+          "by": "fable",
+          "text": "criteria added; routes trait-body markers through the registry — sequence after #1457's pipeline unification to avoid a parallel mechanism; ready to implement"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "#Pure reports the E0927 family with identical fix text at all three sites: callable site, one-line trait body, two-line trait body (UI snapshots for each)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:46:14.139Z"
+        },
+        {
+          "n": 2,
+          "text": "retired_s14_teaching_enabled (parser mod.rs:188) and the dead FOREIGN_PURE branch (type_methods_fields.rs:67) are deleted; grep returns zero hits",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:46:14.446Z"
+        },
+        {
+          "n": 3,
+          "text": "Targeted diagnostic_snapshots run for the touched snapshots is green; no other snapshot text changed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:46:14.757Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T10:32:56.217Z",
-      "updated": "2026-08-06T10:32:56.217Z",
+      "updated": "2026-08-06T10:46:15.136Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0x46oba",
+      "num": 1493,
+      "title": "Close the core.fmt, BitSet and core.text.unicode gaps the ledger scores",
+      "body": "Pooling the witnesses of a recurring capability across domains promoted 133 rows from single witness to scored losses, and three containers gained their first scored gaps as a result: core.fmt, BitSet and core.text.unicode. They had no owner before because nothing in them had ever reached two witnesses under per-domain scoring. Read the current cluster rows in docs/reference/core-surface-ledger.json for the list.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": "1. Read the three cluster rows from the ledger.\n2. Confirm each row against Jet's real member tables before building. A pooled row is scored on evidence from another domain, so check it applies here.\n3. Close the real gaps, and record a decline with an id for any row Jet deliberately does not answer.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/reference/core-surface-ledger.json"
+      ],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-06T10:59:09.702Z",
+      "updated": "2026-08-06T10:59:09.702Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c09riaeq",
+      "num": 1494,
+      "title": "Synonym groups cross domains and invent losses",
+      "body": "SYNONYM_GROUPS in scripts/agent/check-core-surface-ledger.mjs is one global table, so a collection verb folds a maths or time operation into itself. Proven rows: core.math.clear is scored from C# Math.Truncate and Kotlin truncate, because truncate sits in the clear group; core.time.push is scored from C# DateTime.Add, Elixir add and Go Add, because add sits in the push group; core.time.clear is scored from Elixir truncate and Go Reset. Rounding toward zero is not emptying a container, and date arithmetic is not appending. The table needs to be scoped by container kind, the same way witness pooling now is.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "1. Mark the collection-shaped groups as type-only.\n2. Give canonicalKey and synonymsFor the container, and skip a type-only group in a module container.\n3. Refresh and report how far the loss count moves.\n4. Add a hostile fixture that fails if a collection verb matches in a module container.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/reference/core-surface-ledger.json"
+      ],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-06T11:06:41.061Z",
+      "updated": "2026-08-06T11:06:41.061Z",
       "updatedBy": "fable"
     }
   ],
@@ -111416,6 +111889,503 @@
   ],
   "events": [
     {
+      "at": "2026-08-06T11:06:57.568Z",
+      "by": "bd-verify",
+      "action": "card.update",
+      "ref": "c01wl24t",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T11:06:57.200Z",
+      "by": "bd-verify",
+      "action": "card.criteria-verify",
+      "ref": "c01wl24t",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-06T11:06:56.887Z",
+      "by": "bd-verify",
+      "action": "card.criteria-verify",
+      "ref": "c01wl24t",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T11:06:56.577Z",
+      "by": "bd-verify",
+      "action": "card.criteria-verify",
+      "ref": "c01wl24t",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T11:06:56.256Z",
+      "by": "bd-verify",
+      "action": "card.criteria-verify",
+      "ref": "c01wl24t",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-06T11:06:41.061Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c09riaeq",
+      "note": "Synonym groups cross domains and invent losses"
+    },
+    {
+      "at": "2026-08-06T11:01:52.329Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c01wl24t",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T11:01:51.963Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c01wl24t",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-06T11:01:51.639Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c01wl24t",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T11:01:51.324Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c01wl24t",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T11:01:50.999Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c01wl24t",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-06T10:59:09.702Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0x46oba",
+      "note": "Close the core.fmt, BitSet and core.text.unicode gaps the ledger scores"
+    },
+    {
+      "at": "2026-08-06T10:56:01.457Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-06T10:56:01.457Z"
+    },
+    {
+      "at": "2026-08-06T10:46:15.136Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c02jtmll",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T10:46:14.757Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c02jtmll",
+      "note": "#3 Targeted diagnostic_snapshots run for the touched snapshots "
+    },
+    {
+      "at": "2026-08-06T10:46:14.446Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c02jtmll",
+      "note": "#2 retired_s14_teaching_enabled (parser mod.rs:188) and the dea"
+    },
+    {
+      "at": "2026-08-06T10:46:14.139Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c02jtmll",
+      "note": "#1 #Pure reports the E0927 family with identical fix text at al"
+    },
+    {
+      "at": "2026-08-06T10:46:13.820Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0fcnl50",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T10:46:13.458Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0fcnl50",
+      "note": "#3 The fix lands in the one shared signature gate, not a field-"
+    },
+    {
+      "at": "2026-08-06T10:46:13.148Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0fcnl50",
+      "note": "#2 A Codable field with #Rename(\"quoted\") compiles clean; a gen"
+    },
+    {
+      "at": "2026-08-06T10:46:12.755Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0fcnl50",
+      "note": "#1 scripts/agent/jet-env cargo test --test marker_rule_signatur"
+    },
+    {
+      "at": "2026-08-06T10:45:49.792Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0pzumap",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-08-06T10:45:49.173Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0fsjhdc",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-08-06T10:45:48.796Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0ai0h4w",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-08-06T10:45:48.419Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0t5khxi",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-08-06T10:45:48.045Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0f7fhoy",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-08-06T10:45:47.660Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0a5nr50",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-08-06T10:45:47.274Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0zvnp4f",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-08-06T10:44:17.990Z",
+      "by": "prep-entry",
+      "action": "card.update",
+      "ref": "c0f7fhoy",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T10:44:17.566Z",
+      "by": "prep-entry",
+      "action": "card.update",
+      "ref": "c0a5nr50",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T10:44:16.695Z",
+      "by": "prep-entry",
+      "action": "card.update",
+      "ref": "c0zvnp4f",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T10:44:09.592Z",
+      "by": "prep-entry",
+      "action": "card.update",
+      "ref": "c01pwyjw",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T10:44:09.180Z",
+      "by": "prep-entry",
+      "action": "card.update",
+      "ref": "c0wk4xnv",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T10:44:08.580Z",
+      "by": "prep-entry",
+      "action": "card.update",
+      "ref": "c04zqxw1",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T10:44:08.001Z",
+      "by": "prep-entry",
+      "action": "card.update",
+      "ref": "c0uq2h91",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T10:43:59.493Z",
+      "by": "prep-entry",
+      "action": "card.update",
+      "ref": "c0a5nr50",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-08-06T10:43:54.884Z",
+      "by": "prep-entry",
+      "action": "card.update",
+      "ref": "c0f7fhoy",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-08-06T10:43:50.710Z",
+      "by": "prep-entry",
+      "action": "card.update",
+      "ref": "c0zvnp4f",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-08-06T10:43:38.909Z",
+      "by": "prep-entry",
+      "action": "card.criteria-add",
+      "ref": "c01pwyjw",
+      "note": "#5 docs/spec/syntax-decisions.md has a D-BENCH-PARITY1=B log en"
+    },
+    {
+      "at": "2026-08-06T10:43:34.809Z",
+      "by": "prep-entry",
+      "action": "card.criteria-add",
+      "ref": "c01pwyjw",
+      "note": "#4 scripts/agent/jet-env cargo test --test jet_test stays green"
+    },
+    {
+      "at": "2026-08-06T10:43:29.092Z",
+      "by": "prep-entry",
+      "action": "card.criteria-add",
+      "ref": "c01pwyjw",
+      "note": "#3 scripts/agent/jet-env rg \"\\-\\-shuffle|\\-\\-coverage|\\-\\-updat"
+    },
+    {
+      "at": "2026-08-06T10:43:24.550Z",
+      "by": "prep-entry",
+      "action": "card.criteria-add",
+      "ref": "c01pwyjw",
+      "note": "#2 scripts/agent/jet-env jet bench examples/features/ (director"
+    },
+    {
+      "at": "2026-08-06T10:43:20.712Z",
+      "by": "prep-entry",
+      "action": "card.criteria-add",
+      "ref": "c01pwyjw",
+      "note": "#1 new tests/jet_bench.rs mirrors tests/jet_test.rs directory/f"
+    },
+    {
+      "at": "2026-08-06T10:43:08.607Z",
+      "by": "prep-entry",
+      "action": "card.criteria-add",
+      "ref": "c0wk4xnv",
+      "note": "#9 a --default flag exists on jet test and jet bench and is hon"
+    },
+    {
+      "at": "2026-08-06T10:42:52.267Z",
+      "by": "prep-entry",
+      "action": "card.criteria-add",
+      "ref": "c0wk4xnv",
+      "note": "#8 docs/spec/syntax-decisions.md has a D-CMD-OVERRIDE1=C log en"
+    },
+    {
+      "at": "2026-08-06T10:42:47.749Z",
+      "by": "prep-entry",
+      "action": "card.criteria-add",
+      "ref": "c0wk4xnv",
+      "note": "#7 scripts/agent/jet-env rg \"\\-\\-default\\b\" scripts/agent/verif"
+    },
+    {
+      "at": "2026-08-06T10:42:40.367Z",
+      "by": "prep-entry",
+      "action": "card.criteria-add",
+      "ref": "c0wk4xnv",
+      "note": "#6 named example under examples/features/devloop/ demonstrates "
+    },
+    {
+      "at": "2026-08-06T10:42:36.430Z",
+      "by": "prep-entry",
+      "action": "card.criteria-add",
+      "ref": "c0wk4xnv",
+      "note": "#5 new Prelude-owned TestSuite/BenchSuite types exist under cra"
+    },
+    {
+      "at": "2026-08-06T10:42:29.809Z",
+      "by": "prep-entry",
+      "action": "card.criteria-add",
+      "ref": "c0f7fhoy",
+      "note": "#4 docs/spec/syntax-decisions.md has a D-APP-ARGS1=A log entry"
+    },
+    {
+      "at": "2026-08-06T10:42:24.835Z",
+      "by": "prep-entry",
+      "action": "card.criteria-add",
+      "ref": "c0f7fhoy",
+      "note": "#3 an incompatible flag value (e.g. --port=nine) reuses the exi"
+    },
+    {
+      "at": "2026-08-06T10:42:20.644Z",
+      "by": "prep-entry",
+      "action": "card.criteria-add",
+      "ref": "c0f7fhoy",
+      "note": "#2 I9 parity: scripts/agent/jet-env jet run examples/features/w"
+    },
+    {
+      "at": "2026-08-06T10:42:15.978Z",
+      "by": "prep-entry",
+      "action": "card.criteria-add",
+      "ref": "c0f7fhoy",
+      "note": "#1 named example examples/features/web/app_typed_args.jet uses "
+    },
+    {
+      "at": "2026-08-06T10:42:08.876Z",
+      "by": "prep-entry",
+      "action": "card.criteria-add",
+      "ref": "c0a5nr50",
+      "note": "#5 docs/spec/syntax-decisions.md has a D-JOB-SUBCMD1=C log entr"
+    },
+    {
+      "at": "2026-08-06T10:42:03.519Z",
+      "by": "prep-entry",
+      "action": "card.criteria-add",
+      "ref": "c0a5nr50",
+      "note": "#4 a release build with an unmarked (.Dev-default) job prints a"
+    },
+    {
+      "at": "2026-08-06T10:42:00.001Z",
+      "by": "prep-entry",
+      "action": "card.criteria-add",
+      "ref": "c0a5nr50",
+      "note": "#3 scripts/agent/jet-env rg \"\\-\\-job\\b\" Source/ crates/ docs/ e"
+    },
+    {
+      "at": "2026-08-06T10:41:55.785Z",
+      "by": "prep-entry",
+      "action": "card.criteria-add",
+      "ref": "c0a5nr50",
+      "note": "#2 I9 parity: dev-tier jet run <file> -- <job> and a built rele"
+    },
+    {
+      "at": "2026-08-06T10:41:51.891Z",
+      "by": "prep-entry",
+      "action": "card.criteria-add",
+      "ref": "c0a5nr50",
+      "note": "#1 named example examples/features/devloop/task_runner.jet uses"
+    },
+    {
+      "at": "2026-08-06T10:41:44.399Z",
+      "by": "prep-entry",
+      "action": "card.criteria-add",
+      "ref": "c04zqxw1",
+      "note": "#4 docs/spec/syntax-decisions.md has a D-JOB-NAME1=A log entry"
+    },
+    {
+      "at": "2026-08-06T10:41:40.846Z",
+      "by": "prep-entry",
+      "action": "card.criteria-add",
+      "ref": "c04zqxw1",
+      "note": "#3 scripts/agent/jet-env cargo test --test cli passes with rege"
+    },
+    {
+      "at": "2026-08-06T10:41:35.917Z",
+      "by": "prep-entry",
+      "action": "card.criteria-add",
+      "ref": "c04zqxw1",
+      "note": "#2 scripts/agent/jet-env rg \"\\-\\-task\\b|jet tasks\\b\" Source/ cr"
+    },
+    {
+      "at": "2026-08-06T10:41:31.381Z",
+      "by": "prep-entry",
+      "action": "card.criteria-add",
+      "ref": "c04zqxw1",
+      "note": "#1 scripts/agent/jet-env cargo test --test jetpack_tasks and --"
+    },
+    {
+      "at": "2026-08-06T10:41:23.696Z",
+      "by": "prep-entry",
+      "action": "card.criteria-add",
+      "ref": "c0zvnp4f",
+      "note": "#5 docs/spec/syntax-decisions.md has a D-APP-UNIFY1=B log entry"
+    },
+    {
+      "at": "2026-08-06T10:41:18.093Z",
+      "by": "prep-entry",
+      "action": "card.criteria-add",
+      "ref": "c0zvnp4f",
+      "note": "#4 target-capability-mismatch diagnostic registered in docs/spe"
+    },
+    {
+      "at": "2026-08-06T10:41:14.117Z",
+      "by": "prep-entry",
+      "action": "card.criteria-add",
+      "ref": "c0zvnp4f",
+      "note": "#3 I9 parity: scripts/agent/jet-env jet run, jet build, and jet"
+    },
+    {
+      "at": "2026-08-06T10:41:06.889Z",
+      "by": "prep-entry",
+      "action": "card.criteria-add",
+      "ref": "c0zvnp4f",
+      "note": "#2 scripts/agent/jet-env rg \"\\bWebApp\\b\" crates/ Source/ exampl"
+    },
+    {
+      "at": "2026-08-06T10:41:01.061Z",
+      "by": "prep-entry",
+      "action": "card.criteria-add",
+      "ref": "c0zvnp4f",
+      "note": "#1 named example examples/features/web/web_app.jet uses fn run("
+    },
+    {
+      "at": "2026-08-06T10:40:53.712Z",
+      "by": "prep-entry",
+      "action": "card.criteria-add",
+      "ref": "c0uq2h91",
+      "note": "#8 scripts/agent/jet-env cargo test --test dev passes with jet "
+    },
+    {
+      "at": "2026-08-06T10:40:49.833Z",
+      "by": "prep-entry",
+      "action": "card.criteria-add",
+      "ref": "c0uq2h91",
+      "note": "#7 scripts/agent/jet-env jet build examples/features/web/web_ap"
+    },
+    {
+      "at": "2026-08-06T10:40:45.890Z",
+      "by": "prep-entry",
+      "action": "card.criteria-add",
+      "ref": "c0uq2h91",
+      "note": "#6 scripts/agent/jet-env rg \"fn app\\(\\)\" examples/ crates/ Sour"
+    },
+    {
+      "at": "2026-08-06T10:40:41.165Z",
+      "by": "prep-entry",
+      "action": "card.criteria-add",
+      "ref": "c0uq2h91",
+      "note": "#5 scripts/agent/jet-env cargo test --test web_app passes with "
+    },
+    {
+      "at": "2026-08-06T10:40:09.023Z",
+      "by": "prep-entry",
+      "action": "card.update",
+      "ref": "c01pwyjw",
+      "note": "plan"
+    },
+    {
       "at": "2026-08-06T10:40:06.558Z",
       "by": "bd-verify",
       "action": "card.update",
@@ -114417,503 +115387,6 @@
       "action": "card.criteria-meet",
       "ref": "c0kydt2i",
       "note": "#1"
-    },
-    {
-      "at": "2026-08-06T02:02:16.535Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c09ec4q7",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-06T02:02:16.177Z",
-      "by": "bd-review-ledger2",
-      "action": "card.criteria-verify",
-      "ref": "c00ms1om",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-06T02:02:15.875Z",
-      "by": "bd-review-ledger2",
-      "action": "card.criteria-verify",
-      "ref": "c00ms1om",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-06T02:02:15.559Z",
-      "by": "bd-review-ledger2",
-      "action": "card.update",
-      "ref": "c00ms1om",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-06T01:48:34.573Z",
-      "by": "fable",
-      "action": "card.add",
-      "ref": "c0shcqzl",
-      "note": "Full suite red: seven truthfulness checks fail on master"
-    },
-    {
-      "at": "2026-08-06T01:48:34.257Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0rwwvb3",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-06T01:48:21.447Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0rwwvb3",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-06T01:48:21.086Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0rwwvb3",
-      "note": "title"
-    },
-    {
-      "at": "2026-08-06T01:27:58.169Z",
-      "by": "bd-ledger",
-      "action": "card.update",
-      "ref": "c00ms1om",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T01:27:57.812Z",
-      "by": "bd-review-ledger",
-      "action": "card.criteria-meet",
-      "ref": "c00ms1om",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-06T01:27:57.501Z",
-      "by": "bd-review-ledger",
-      "action": "card.criteria-meet",
-      "ref": "c00ms1om",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-06T01:27:57.186Z",
-      "by": "bd-review-ledger",
-      "action": "card.criteria-meet",
-      "ref": "c00ms1om",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-06T01:18:09.026Z",
-      "by": "bd-ledger",
-      "action": "card.update",
-      "ref": "c00ms1om",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T01:18:08.659Z",
-      "by": "bd-ledger",
-      "action": "card.criteria-meet",
-      "ref": "c00ms1om",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-06T01:18:08.349Z",
-      "by": "bd-ledger",
-      "action": "card.criteria-meet",
-      "ref": "c00ms1om",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-06T01:18:08.042Z",
-      "by": "bd-ledger",
-      "action": "card.criteria-meet",
-      "ref": "c00ms1om",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-06T01:18:07.743Z",
-      "by": "bd-ledger",
-      "action": "card.criteria-meet",
-      "ref": "c00ms1om",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-06T01:18:07.441Z",
-      "by": "bd-ledger",
-      "action": "card.criteria-meet",
-      "ref": "c00ms1om",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-06T00:49:18.033Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-06T00:49:18.033Z"
-    },
-    {
-      "at": "2026-08-06T00:48:26.056Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0v2fuet",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-06T00:48:25.684Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0q2s3u5",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T00:48:25.301Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0kw5dh0",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T00:48:24.920Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0v2fuet",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-06T00:48:24.540Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0pkjxs2",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-06T00:48:24.161Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c00sqr4z",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-06T00:48:13.176Z",
-      "by": "bd-repl",
-      "action": "card.release",
-      "ref": "c0pkjxs2",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-08-06T00:48:12.696Z",
-      "by": "bd-json",
-      "action": "card.release",
-      "ref": "c00sqr4z",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-08-06T00:47:19.864Z",
-      "by": "owner",
-      "action": "papercut.resolve",
-      "ref": "pc09n9y05",
-      "note": ""
-    },
-    {
-      "at": "2026-08-06T00:13:07.119Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-EXPNEG1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-06T00:05:59.118Z",
-      "by": "fable",
-      "action": "decision.add",
-      "ref": "D-EXPNEG1",
-      "note": "Integer power when the exponent sign is unknown"
-    },
-    {
-      "at": "2026-08-06T00:00:26.128Z",
-      "by": "bd-review",
-      "action": "card.update",
-      "ref": "c0v2fuet",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-06T00:00:25.761Z",
-      "by": "bd-review",
-      "action": "card.update",
-      "ref": "c0q2s3u5",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-06T00:00:11.901Z",
-      "by": "bd-review",
-      "action": "card.update",
-      "ref": "c0kw5dh0",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-06T00:00:00.809Z",
-      "by": "bd-review",
-      "action": "card.update",
-      "ref": "c0kw5dh0",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-05T23:59:25.935Z",
-      "by": "bd-review",
-      "action": "card.criteria-verify",
-      "ref": "c0v2fuet",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-05T23:59:25.632Z",
-      "by": "bd-review",
-      "action": "card.criteria-verify",
-      "ref": "c0v2fuet",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-05T23:59:25.326Z",
-      "by": "bd-review",
-      "action": "card.criteria-verify",
-      "ref": "c0v2fuet",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-05T23:59:25.022Z",
-      "by": "bd-review",
-      "action": "card.criteria-verify",
-      "ref": "c0v2fuet",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-05T23:59:24.712Z",
-      "by": "bd-review",
-      "action": "card.criteria-verify",
-      "ref": "c0v2fuet",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-05T23:59:24.410Z",
-      "by": "bd-review",
-      "action": "card.criteria-verify",
-      "ref": "c0v2fuet",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-05T23:59:24.103Z",
-      "by": "bd-review",
-      "action": "card.criteria-verify",
-      "ref": "c0v2fuet",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-05T23:59:10.899Z",
-      "by": "bd-review",
-      "action": "card.criteria-verify",
-      "ref": "c0q2s3u5",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-05T23:59:10.592Z",
-      "by": "bd-review",
-      "action": "card.criteria-verify",
-      "ref": "c0q2s3u5",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-05T23:59:10.283Z",
-      "by": "bd-review",
-      "action": "card.criteria-verify",
-      "ref": "c0q2s3u5",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-05T23:59:09.973Z",
-      "by": "bd-review",
-      "action": "card.criteria-verify",
-      "ref": "c0q2s3u5",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-05T23:59:09.662Z",
-      "by": "bd-review",
-      "action": "card.criteria-verify",
-      "ref": "c0q2s3u5",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-05T23:59:09.357Z",
-      "by": "bd-review",
-      "action": "card.criteria-verify",
-      "ref": "c0q2s3u5",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-05T23:58:56.955Z",
-      "by": "bd-review",
-      "action": "card.criteria-verify",
-      "ref": "c0kw5dh0",
-      "note": "#8"
-    },
-    {
-      "at": "2026-08-05T23:58:56.657Z",
-      "by": "bd-review",
-      "action": "card.criteria-verify",
-      "ref": "c0kw5dh0",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-05T23:58:56.345Z",
-      "by": "bd-review",
-      "action": "card.criteria-verify",
-      "ref": "c0kw5dh0",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-05T23:58:47.396Z",
-      "by": "bd-review",
-      "action": "card.criteria-verify",
-      "ref": "c0kw5dh0",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-05T23:58:47.078Z",
-      "by": "bd-review",
-      "action": "card.criteria-verify",
-      "ref": "c0kw5dh0",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-05T23:58:46.760Z",
-      "by": "bd-review",
-      "action": "card.criteria-verify",
-      "ref": "c0kw5dh0",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-05T23:58:46.458Z",
-      "by": "bd-review",
-      "action": "card.criteria-verify",
-      "ref": "c0kw5dh0",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-05T23:57:58.249Z",
-      "by": "bd-markers",
-      "action": "card.update",
-      "ref": "c0v3yofo",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-05T23:57:57.717Z",
-      "by": "bd-markers",
-      "action": "card.claim",
-      "ref": "c0v3yofo",
-      "note": ""
-    },
-    {
-      "at": "2026-08-05T23:57:57.309Z",
-      "by": "bd-markers",
-      "action": "card.update",
-      "ref": "c0pzumap",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-05T23:57:56.949Z",
-      "by": "bd-markers",
-      "action": "card.claim",
-      "ref": "c0pzumap",
-      "note": ""
-    },
-    {
-      "at": "2026-08-05T23:57:56.637Z",
-      "by": "bd-markers",
-      "action": "card.update",
-      "ref": "c0kydt2i",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-05T23:57:56.288Z",
-      "by": "bd-markers",
-      "action": "card.claim",
-      "ref": "c0kydt2i",
-      "note": ""
-    },
-    {
-      "at": "2026-08-05T23:57:55.974Z",
-      "by": "bd-markers",
-      "action": "card.update",
-      "ref": "c0fsjhdc",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-05T23:57:55.611Z",
-      "by": "bd-markers",
-      "action": "card.claim",
-      "ref": "c0fsjhdc",
-      "note": ""
-    },
-    {
-      "at": "2026-08-05T23:57:55.293Z",
-      "by": "bd-markers",
-      "action": "card.update",
-      "ref": "c0ai0h4w",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-05T23:57:54.935Z",
-      "by": "bd-markers",
-      "action": "card.claim",
-      "ref": "c0ai0h4w",
-      "note": ""
-    },
-    {
-      "at": "2026-08-05T23:57:54.622Z",
-      "by": "bd-markers",
-      "action": "card.update",
-      "ref": "c0556cxe",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-05T23:57:54.265Z",
-      "by": "bd-markers",
-      "action": "card.claim",
-      "ref": "c0556cxe",
-      "note": ""
-    },
-    {
-      "at": "2026-08-05T23:56:53.155Z",
-      "by": "bd-ledger",
-      "action": "card.update",
-      "ref": "c00ms1om",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-05T23:56:52.790Z",
-      "by": "bd-ledger",
-      "action": "card.claim",
-      "ref": "c00ms1om",
-      "note": ""
-    },
-    {
-      "at": "2026-08-05T23:56:52.466Z",
-      "by": "bd-repl",
-      "action": "card.update",
-      "ref": "c0pkjxs2",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-05T23:56:51.896Z",
-      "by": "bd-repl",
-      "action": "card.claim",
-      "ref": "c0pkjxs2",
-      "note": ""
-    },
-    {
-      "at": "2026-08-05T23:56:51.412Z",
-      "by": "bd-json",
-      "action": "card.update",
-      "ref": "c00sqr4z",
-      "note": "phase"
     }
   ],
   "nextNum": 368,
