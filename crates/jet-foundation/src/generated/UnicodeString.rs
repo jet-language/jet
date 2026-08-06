@@ -111,6 +111,11 @@ pub fn jet_unicode_index_of(s: &String, needle: &String) -> Option<i64> {
         .map(|byte| s[..byte].chars().count() as i64)
 }
 
+pub fn jet_unicode_last_index_of(s: &String, needle: &String) -> Option<i64> {
+    s.rfind(needle)
+        .map(|byte| s[..byte].chars().count() as i64)
+}
+
 pub fn jet_unicode_count(s: &String, needle: &String) -> i64 {
     if needle.is_empty() {
         return 0;

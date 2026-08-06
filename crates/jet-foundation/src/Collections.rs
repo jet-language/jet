@@ -1176,6 +1176,16 @@ fn string_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
         ("is_alphabetic" | "is_numeric" | "is_whitespace" | "is_ascii", 0) => {
             Some(Some(Type::Bool))
         }
+        // #1476 remaining String surface.
+        ("is_lower" | "is_upper", 0) => Some(Some(Type::Bool)),
+        ("capitalize" | "swapcase" | "copy" | "reverse" | "normalize", 0) => {
+            Some(Some(Type::String))
+        }
+        ("remove_prefix" | "remove_suffix", 1) => Some(Some(Type::String)),
+        ("last_index_of", 1) => Some(Some(Type::Option(Box::new(Type::Int)))),
+        ("compare", 1) => Some(Some(Type::Int)),
+        ("equal", 1) => Some(Some(Type::Bool)),
+        ("rsplit", 1) => Some(Some(iter_ty(Type::String))),
         ("bytes", 0) => Some(Some(Type::List(Box::new(u8t())))),
         ("replace" | "slice", 2) => Some(Some(Type::String)),
         ("pad_start" | "pad_end", 2) => Some(Some(Type::String)),

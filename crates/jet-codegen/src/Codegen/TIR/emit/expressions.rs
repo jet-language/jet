@@ -1224,6 +1224,47 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TBuiltinOp::StringIsWhitespace => format!("{}jet_text_is_whitespace(&({}))", cx.root_prefix, recv),
                 TBuiltinOp::StringIsAscii => format!("{}jet_text_unicode_is_ascii(&({}))", cx.root_prefix, recv),
                 TBuiltinOp::StringToTitle => format!("{}jet_text_title(&({}))", cx.root_prefix, recv),
+                TBuiltinOp::StringMethod { method } => match method.as_str() {
+                    "last_index_of" => format!(
+                        "{}jet_unicode_last_index_of(&({}), &({}))",
+                        cx.root_prefix,
+                        recv,
+                        a(0)
+                    ),
+                    "is_lower" => format!("{}jet_text_is_lower(&({}))", cx.root_prefix, recv),
+                    "is_upper" => format!("{}jet_text_is_upper(&({}))", cx.root_prefix, recv),
+                    "capitalize" => format!("{}jet_text_capitalize(&({}))", cx.root_prefix, recv),
+                    "swapcase" => format!("{}jet_text_swapcase(&({}))", cx.root_prefix, recv),
+                    "remove_prefix" => format!(
+                        "{}jet_text_remove_prefix(&({}), &({}))",
+                        cx.root_prefix,
+                        recv,
+                        a(0)
+                    ),
+                    "remove_suffix" => format!(
+                        "{}jet_text_remove_suffix(&({}), &({}))",
+                        cx.root_prefix,
+                        recv,
+                        a(0)
+                    ),
+                    "compare" => format!(
+                        "{}jet_text_compare(&({}), &({}))",
+                        cx.root_prefix,
+                        recv,
+                        a(0)
+                    ),
+                    "equal" => format!("({}) == ({})", recv, a(0)),
+                    "copy" => format!("({}).clone()", recv),
+                    "reverse" => format!("{}jet_text_reverse(&({}))", cx.root_prefix, recv),
+                    "normalize" => {
+                        format!("{}jet_text_normalize_nfc(&({}))", cx.root_prefix, recv)
+                    }
+                    "rsplit" => format!("jet_iter_string_rsplit(&({}), &{})", recv, a(0)),
+                    other => format!(
+                        "compile_error!(\"unknown StringMethod: {}\")",
+                        other
+                    ),
+                },
                 TBuiltinOp::StringSplitOnce { tuple_struct } => format!(
                     "{}jet_unicode_split_once(&({}), &({})).map(|(__before, __after)| {} {{ user_before: __before, user_after: __after }})",
                     cx.root_prefix, recv, a(0), tuple_struct

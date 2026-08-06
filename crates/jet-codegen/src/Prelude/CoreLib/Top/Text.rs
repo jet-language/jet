@@ -733,6 +733,89 @@ fn jet_text_display_width(s: &String, policy: &jet_std::TextWidth) -> Result<i64
 fn jet_text_is_alphabetic(s: &String) -> bool { !s.is_empty() && s.chars().all(|c| jet_text_alphabetic(c as u32)) }
 fn jet_text_is_numeric(s: &String) -> bool { !s.is_empty() && s.chars().all(|c| jet_text_numeric(c as u32)) }
 fn jet_text_is_whitespace(s: &String) -> bool { !s.is_empty() && s.chars().all(|c| jet_text_whitespace(c as u32)) }
+// #1476: cased-char predicates (Python islower/isupper shape — at least one
+// cased scalar, every cased scalar has the named case). Uses pinned case maps.
+fn jet_text_char_is_lower(c: char) -> bool {
+    jet_unicode_contains(UNICODE_CASED, c as u32)
+        && jet_unicode_upper(&c.to_string()) != c.to_string()
+}
+fn jet_text_char_is_upper(c: char) -> bool {
+    jet_unicode_contains(UNICODE_CASED, c as u32)
+        && jet_unicode_lower(&c.to_string()) != c.to_string()
+}
+fn jet_text_is_lower(s: &String) -> bool {
+    let mut saw = false;
+    for c in s.chars() {
+        if jet_unicode_contains(UNICODE_CASED, c as u32) {
+            if !jet_text_char_is_lower(c) {
+                return false;
+            }
+            saw = true;
+        }
+    }
+    saw
+}
+fn jet_text_is_upper(s: &String) -> bool {
+    let mut saw = false;
+    for c in s.chars() {
+        if jet_unicode_contains(UNICODE_CASED, c as u32) {
+            if !jet_text_char_is_upper(c) {
+                return false;
+            }
+            saw = true;
+        }
+    }
+    saw
+}
+fn jet_text_capitalize(s: &String) -> String {
+    let mut chars = s.chars();
+    let Some(first) = chars.next() else {
+        return String::new();
+    };
+    let mut out = String::with_capacity(s.len());
+    jet_text_append_title_mapping(&mut out, first as u32);
+    let rest: String = chars.collect();
+    out.push_str(&jet_text_lower(&rest));
+    out
+}
+fn jet_text_swapcase(s: &String) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if jet_text_char_is_lower(c) {
+            out.push_str(&jet_unicode_upper(&c.to_string()));
+        } else if jet_text_char_is_upper(c) {
+            out.push_str(&jet_unicode_lower(&c.to_string()));
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+fn jet_text_remove_prefix(s: &String, prefix: &String) -> String {
+    match s.strip_prefix(prefix.as_str()) {
+        Some(rest) => rest.to_string(),
+        None => s.clone(),
+    }
+}
+fn jet_text_remove_suffix(s: &String, suffix: &String) -> String {
+    match s.strip_suffix(suffix.as_str()) {
+        Some(rest) => rest.to_string(),
+        None => s.clone(),
+    }
+}
+fn jet_text_compare(a: &String, b: &String) -> i64 {
+    match a.as_str().cmp(b.as_str()) {
+        std::cmp::Ordering::Less => -1,
+        std::cmp::Ordering::Equal => 0,
+        std::cmp::Ordering::Greater => 1,
+    }
+}
+fn jet_text_reverse(s: &String) -> String {
+    s.chars().rev().collect()
+}
+fn jet_text_normalize_nfc(s: &String) -> String {
+    jet_text_nfc(s)
+}
 fn jet_text_trim_start(s: &String) -> String { jet_unicode_trim_start(s) }
 fn jet_text_trim_end(s: &String) -> String { jet_unicode_trim_end(s) }
 fn jet_text_trim(s: &String) -> String { jet_unicode_trim(s) }

@@ -252,6 +252,7 @@ const CROSS_DOMAIN_DISTINCT = new Set([
   "getpid", "group", "groupby", "groups", "handle", "help", "hex", "id",
   "include", "indent", "indexed", "indexof", "init", "insertrange", "intern", "intersection",
   "isascii", "isatty", "iscontrol", "isdefined", "isdigit", "iselement", "isexecutable", "isexported",
+  "isalphabetic", "isnumeric", "iswhitespace", "chars",
   "isfifo", "ishexdigit", "isidentifier", "isless", "isletter", "isloopback", "islower", "isnormalized",
   "isnullorempty", "isnumber", "isprint", "ispunct", "isreadable", "isreadonly", "isset", "issigned",
   "issorted", "issortedby", "isspace", "issymbol", "issymlink", "istitle", "isupper", "isvalid",
@@ -293,7 +294,7 @@ const SYNONYM_GROUPS = [
   ["clear", "truncate", "remove_all", "reset", "empty_out"],
   ["contains", "includes", "has", "member", "has_key", "contains_key", "is_member", "in"],
   ["contains_value", "has_value"],
-  ["index_of", "index", "find_index", "position", "find_first", "search"],
+  ["index_of", "index", "find_index", "position", "find_first", "search", "find"],
   ["sort", "sorted", "sort_by", "order_by", "sort_with", "order", "sort_with_comparator"],
   ["reverse", "reversed", "rev"],
   ["map", "select", "convert", "map_values"],
@@ -319,7 +320,7 @@ const SYNONYM_GROUPS = [
   ["intersection", "intersect", "intersect_with"],
   ["union", "unite", "union_with"],
   ["concat", "chain", "extend", "append_all", "add_all"],
-  ["is_empty", "empty", "is_blank", "none"],
+  ["is_empty", "empty", "is_blank", "none", "isnullorempty"],
   ["keys", "key_set", "names"],
   ["values", "value_set"],
   ["join", "mk_string", "intercalate", "merge", "tostring", "inspect"],
@@ -333,13 +334,13 @@ const SYNONYM_GROUPS = [
   ["names", "keys", "named_captures"],
   ["warn", "warning"],
   ["split", "split_n"],
-  ["split_once", "split_at", "cut"],
+  ["split_once", "split_at", "cut", "partition"],
   ["replace", "sub", "gsub", "replace_all", "replacing"],
   ["read", "read_text", "read_all", "read_all_text", "read_to_string", "read_file"],
   ["write", "write_text", "write_all", "write_all_text", "write_file"],
   ["exists", "is_file", "is_dir", "file_exists", "is_path"],
   ["parse", "loads", "decode", "deserialize", "try_parse", "from_string"],
-  ["to_title", "title", "totitle"],
+  ["to_title", "title", "totitle", "titlecase"],
   ["to_string", "dumps", "encode", "serialize", "inspect", "format", "describe", "string", "tostring"],
   ["now", "now_utc", "utc_now", "today", "current_time", "system_time", "now_local"],
   ["sleep", "delay", "pause"],
@@ -365,14 +366,14 @@ const SYNONYM_GROUPS = [
   ["flatten", "flat"],
   ["group_by", "chunk_by", "partition_by"],
   ["to_list", "to_array", "to_vec", "collect_list", "entries", "clip", "iterator"],
-  ["slice", "sub_string", "substring", "sub_sequence"],
-  ["pad_start", "pad_left", "left_pad", "just_right"],
-  ["pad_end", "pad_right", "right_pad", "just_left"],
+  ["slice", "sub_string", "substring", "sub_sequence", "byteslice"],
+  ["pad_start", "pad_left", "left_pad", "just_right", "rjust"],
+  ["pad_end", "pad_right", "right_pad", "just_left", "ljust"],
   ["lines", "each_line", "split_lines", "read_lines"],
-  ["chars", "characters", "each_char", "code_points"],
+  ["chars", "characters", "each_char", "code_points", "tochararray"],
   ["repeat", "times", "cycle_n", "fill", "duplicate"],
   ["cycle", "cycled"],
-  ["compare", "cmp", "partial_cmp"],
+  ["compare", "cmp", "partial_cmp", "compareto"],
   ["lazy", "make_iterator", "makeiterator"],
   ["merge", "put_all", "update_all", "combine"],
   ["is_subset", "is_subset_of", "subset", "issubset"],
@@ -396,6 +397,16 @@ const SYNONYM_GROUPS = [
   ["extension", "get_extension", "suffix", "ext", "file_extension"],
   ["parent", "dirname", "parent_dir", "directory", "get_directory_name"],
   ["file_name", "basename", "get_file_name", "stem"],
+  // #1476 String surface synonyms.
+  ["is_alphabetic", "isletter", "is_alpha", "is_letter"],
+  ["is_numeric", "isdigit", "is_digit"],
+  ["is_whitespace", "isspace", "is_space"],
+  ["is_lower", "islowercase", "islower", "is_lowercase"],
+  ["is_upper", "isuppercase", "isupper", "is_uppercase"],
+  ["equal", "equals", "eq"],
+  ["copy", "clone"],
+  ["normalize", "nfc"],
+  ["rsplit", "rsplit_n"],
 ];
 
 // normalized name -> every normalized name it is interchangeable with, plus the
@@ -2458,15 +2469,17 @@ function hostileFixtures() {
 
   results.push(rejects("a recurring capability name nobody classified",
     "unclassified repeated capability name", function () {
-    const pooled = CROSS_DOMAIN_POOLED.has("clone");
-    const distinct = CROSS_DOMAIN_DISTINCT.has("clone");
-    CROSS_DOMAIN_POOLED.delete("clone");
-    CROSS_DOMAIN_DISTINCT.delete("clone");
+    // Use `clear` — always pooled, and still a multi-domain recurring key after
+    // synonym groups fold competitor spellings like `clone` into `copy`.
+    const pooled = CROSS_DOMAIN_POOLED.has("clear");
+    const distinct = CROSS_DOMAIN_DISTINCT.has("clear");
+    CROSS_DOMAIN_POOLED.delete("clear");
+    CROSS_DOMAIN_DISTINCT.delete("clear");
     try {
       validateRepeatedNames(ledger);
     } finally {
-      if (pooled) CROSS_DOMAIN_POOLED.add("clone");
-      if (distinct) CROSS_DOMAIN_DISTINCT.add("clone");
+      if (pooled) CROSS_DOMAIN_POOLED.add("clear");
+      if (distinct) CROSS_DOMAIN_DISTINCT.add("clear");
     }
   }));
 

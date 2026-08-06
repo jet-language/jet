@@ -949,6 +949,87 @@ pub(super) fn is_whitespace(s: &str) -> bool {
     !s.is_empty() && s.chars().all(|c| whitespace(c as u32))
 }
 
+fn char_is_lower(c: char) -> bool {
+    property(UNICODE_CASED, c as u32) && upper(&c.to_string()) != c.to_string()
+}
+fn char_is_upper(c: char) -> bool {
+    property(UNICODE_CASED, c as u32) && lower(&c.to_string()) != c.to_string()
+}
+pub(super) fn is_lower(s: &str) -> bool {
+    let mut saw = false;
+    for c in s.chars() {
+        if property(UNICODE_CASED, c as u32) {
+            if !char_is_lower(c) {
+                return false;
+            }
+            saw = true;
+        }
+    }
+    saw
+}
+pub(super) fn is_upper(s: &str) -> bool {
+    let mut saw = false;
+    for c in s.chars() {
+        if property(UNICODE_CASED, c as u32) {
+            if !char_is_upper(c) {
+                return false;
+            }
+            saw = true;
+        }
+    }
+    saw
+}
+pub(super) fn capitalize(s: &str) -> String {
+    let mut chars = s.chars();
+    let Some(first) = chars.next() else {
+        return String::new();
+    };
+    let mut out = String::with_capacity(s.len());
+    if let Some(mapped) = title_mapping(first as u32) {
+        out.extend(mapped.iter().filter_map(|&cp| char::from_u32(cp)));
+    } else {
+        out.push(first);
+    }
+    let rest: String = chars.collect();
+    out.push_str(&lower(&rest));
+    out
+}
+pub(super) fn swapcase(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if char_is_lower(c) {
+            out.push_str(&upper(&c.to_string()));
+        } else if char_is_upper(c) {
+            out.push_str(&lower(&c.to_string()));
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+pub(super) fn remove_prefix(s: &str, prefix: &str) -> String {
+    match s.strip_prefix(prefix) {
+        Some(rest) => rest.to_string(),
+        None => s.to_string(),
+    }
+}
+pub(super) fn remove_suffix(s: &str, suffix: &str) -> String {
+    match s.strip_suffix(suffix) {
+        Some(rest) => rest.to_string(),
+        None => s.to_string(),
+    }
+}
+pub(super) fn compare(a: &str, b: &str) -> i64 {
+    match a.cmp(b) {
+        std::cmp::Ordering::Less => -1,
+        std::cmp::Ordering::Equal => 0,
+        std::cmp::Ordering::Greater => 1,
+    }
+}
+pub(super) fn reverse(s: &str) -> String {
+    s.chars().rev().collect()
+}
+
 pub(super) fn trim_start(s: &str) -> String {
     jet_unicode_trim_start(s)
 }

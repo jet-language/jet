@@ -15967,6 +15967,50 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host, &[recv_val]);
                 Ok(self.b.inst_results(call)[0])
             }
+            TBuiltinOp::StringMethod { method } => {
+                let method_id = match method.as_str() {
+                    "last_index_of" => 0,
+                    "is_lower" => 1,
+                    "is_upper" => 2,
+                    "capitalize" => 3,
+                    "swapcase" => 4,
+                    "remove_prefix" => 5,
+                    "remove_suffix" => 6,
+                    "compare" => 7,
+                    "equal" => 8,
+                    "copy" => 9,
+                    "reverse" => 10,
+                    "normalize" => 11,
+                    "rsplit" => {
+                        let sep = self.lower_expr(&args[0])?;
+                        let host = self
+                            .module
+                            .declare_func_in_func(self.host.str_rsplit, self.b.func);
+                        let call = self.b.ins().call(host, &[recv_val, sep]);
+                        return Ok(self.b.inst_results(call)[0]);
+                    }
+                    other => {
+                        return Err(format!("jit string method unsupported: {other}"));
+                    }
+                };
+                let arg0 = if args.is_empty() {
+                    self.b.ins().iconst(types::I64, 0)
+                } else {
+                    self.lower_expr(&args[0])?
+                };
+                let method_v = self.b.ins().iconst(types::I64, method_id);
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.text.string_method, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val, method_v, arg0]);
+                let raw = self.b.inst_results(call)[0];
+                Ok(match method.as_str() {
+                    "is_lower" | "is_upper" | "equal" => {
+                        self.b.ins().ireduce(types::I8, raw)
+                    }
+                    _ => raw,
+                })
+            }
             TBuiltinOp::StringSplitOnce { .. } => {
                 let separator = self.lower_expr(&args[0])?;
                 let host = self
@@ -20595,6 +20639,19 @@ impl LowerCtx<'_, '_> {
                     | TBuiltinOp::ToUpper
                     | TBuiltinOp::ToLower
                     | TBuiltinOp::StringToTitle
+            ) || matches!(
+                op,
+                TBuiltinOp::StringMethod { method }
+                    if matches!(
+                        method.as_str(),
+                        "capitalize"
+                            | "swapcase"
+                            | "copy"
+                            | "reverse"
+                            | "normalize"
+                            | "remove_prefix"
+                            | "remove_suffix"
+                    )
             ) {
                 return Type::String;
             }

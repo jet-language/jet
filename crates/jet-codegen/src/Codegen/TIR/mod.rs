@@ -3926,6 +3926,10 @@ pub enum TBuiltinOp {
     StringIsWhitespace,
     StringIsAscii,
     StringToTitle,
+    /// #1476: remaining ambient String methods, dispatched by name.
+    StringMethod {
+        method: String,
+    },
     StringSplitOnce {
         tuple_struct: String,
     },
