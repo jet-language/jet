@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1499,
-    "rev": 26673,
+    "rev": 26700,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -81264,12 +81264,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "verify",
       "priority": "P2",
       "plan": "Scope: make variadic method calls work end to end, with the same meaning as free-function variadics. Free functions already lower rest parameters on every tier, so methods reuse that one mechanism (I8). Out of scope: any new syntax; rest-parameter semantics changes.\nRepro: type with 'fn write(self, level: Int, parts: ...Int)'. Both 'l.write(1)' and 'l.write(1, 2, 3)' fail with E0104 today. Loosening the arity check alone reaches an ICE in codegen.\nApproach: 1) Add the failing example first: examples/features/functions (variadic method with zero, one, and three rest args) plus expected output. 2) Sema: extend check_method_args in crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs (and the arity path in Sema/CheckerItems.rs) to accept rest-parameter arity exactly like the free-function path. Reuse the free-function logic; do not fork it. 3) Codegen: add method variadic lowering in crates/jet-codegen/src/Codegen/Items.rs mirroring the free-function lowering so the same TIR reaches AOT, JIT, and interpreter. No per-engine code. 4) Keep E0104 for genuinely wrong calls; existing snapshots unchanged.\nProof: scripts/agent/jet-env cargo test --test golden with the new example filter; jet build + jet run + interpreter on the example give identical output; free-function variadic example still green.\nOwned paths: crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs, crates/jet-sema/src/Sema/CheckerItems.rs, crates/jet-codegen/src/Codegen/Items.rs, examples/features/functions/, matching expected outputs.",
       "blockedBy": [],
       "assignee": "e3-bugz",
       "log": [
+        {
+          "at": "2026-08-06",
+          "by": "e3-bugz",
+          "text": "claiming done: variadic methods end-to-end + golden; criteria 1-4 met; commits on bd/bugz"
+        },
         {
           "at": "2026-08-06",
           "by": "e3-bugz",
@@ -81290,38 +81295,38 @@
         {
           "n": 1,
           "text": "New example with a variadic method (calls with zero, one, and three rest args) passes the golden test: scripts/agent/jet-env cargo test --test golden -- variadic",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-bugz",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:18:23.672Z"
+          "evidence": "JET_GOLDEN_FILTER=variadic_method scripts/agent/jet-env cargo test --test golden -- examples_compile_and_run → ok",
+          "at": "2026-08-06T16:23:38.973Z"
         },
         {
           "n": 2,
           "text": "The example prints identical output under AOT jet build, default jet run, and the interpreter tier (record all three commands as evidence)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-bugz",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:18:23.985Z"
+          "evidence": "jet run / jet run --release / jet run --interpret examples/features/functions/variadic_method.jet all print: 1 / 2 one / 3 a b c",
+          "at": "2026-08-06T16:23:39.345Z"
         },
         {
           "n": 3,
           "text": "Free-function variadic examples still pass their golden tests (name the filter in evidence)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-bugz",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:18:24.299Z"
+          "evidence": "JET_GOLDEN_FILTER=variadics_spread scripts/agent/jet-env cargo test --test golden -- examples_compile_and_run → ok",
+          "at": "2026-08-06T16:23:39.580Z"
         },
         {
           "n": 4,
           "text": "A call with a genuinely wrong fixed-arity still reports E0104; diagnostic_snapshots targeted run is green with no snapshot text change",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-bugz",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:18:24.621Z"
+          "evidence": "jet check wrong-arity method → E0104; JET_UI_FILTER=wrong_arg_count cargo test --test diagnostic_snapshots -- ui_snapshots → ok (no snapshot text change)",
+          "at": "2026-08-06T16:23:39.867Z"
         }
       ],
       "refs": [],
@@ -81329,9 +81334,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T17:15:58.572Z",
-      "updated": "2026-08-06T15:56:42.420Z",
+      "updated": "2026-08-06T16:23:39.867Z",
       "updatedBy": "e3-bugz",
-      "claimedAt": "2026-08-06T15:56:42.420Z"
+      "claimedAt": "2026-08-06T16:23:13.759Z"
     },
     {
       "id": "c024dgns",
@@ -84189,12 +84194,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "verify",
       "priority": "P2",
       "plan": "Scope. Expose pattern()/source() (the raw text a Regex was compiled from), flags()/options(), named_captures() and names() (the engine already parses and stores group names — no engine work, just accessor wiring), a module-level escape(text) helper, and a count() convenience. Out of scope, already covered — extractor blind spot: Match.end() already exists (net_text_time.rs, 0-arg) but the ledger extractor only reads module_items.rs/fixed_sigs.rs/Collections.rs and never scans net_text_time.rs, so it wrongly scores an already-shipped method as a loss; FindIndex is covered by the existing match() + start()/end(). Out of scope, no coherent capability: Expand (Python-only template substitution, no second witness with the same meaning), String/ToString/regex? (three single-purpose, low-signal rows with no shared meaning across the witnessing languages).\n\nApproach.\n1. Read crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs — JetRegex/JetRegexMatch struct fields (pattern, flags, group_names, ~lines 117-130) already store everything needed. Read crates/jet-sema/src/Sema/CheckerCoreLib/net_text_time.rs regex_method_return (~line 497) and its Match arm (~line 517).\n2. Add pattern()/source(), flags(), named_captures(), count() to JetRegex/JetRegexMatch in Open.rs as pure accessors over already-stored fields — no algorithm change. Add escape(text) as a new jet.regex module function (pure string escaping).\n3. Register the new names in crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs jet.regex list (~line 738) and net_text_time.rs regex_method_return/Match arms; add fixed_sigs.rs entries beside the existing Regex rows (~line 2392).\n4. Teach scripts/agent/check-core-surface-ledger.mjs to also read net_text_time.rs's regex_method_return/Match method-name tables as a Jet-surface source for the Regex/Match containers, alongside MODULE_ITEMS_PATH/FIXED_SIGS_PATH, so already-shipped instance methods (like end()) stop scoring as losses. Extend the parser, not the JSON data — same source-derived policy the script already documents.\n5. Extend examples/features/text/regex.jet with pattern/flags/named_captures/count/escape calls; bless expected/text/regex.out.\n6. Update docs/reference/core-library.md core.regex section.\n7. Run node scripts/agent/check-core-surface-ledger.mjs --refresh.\n\nProof.\n- scripts/agent/jet-env cargo test --test core_surface_ledger\n- JET_GOLDEN_FILTER='text/regex' scripts/agent/jet-env cargo test --test golden -- examples_compile_and_run\n- scripts/agent/jet-env jet run examples/features/text/regex.jet, comparing output to the expected file, to prove I9 parity between AOT (golden) and default jet run.\n\nOwned paths: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs; crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs, fixed_sigs.rs, net_text_time.rs; scripts/agent/check-core-surface-ledger.mjs; examples/features/text/regex.jet + expected out; docs/reference/core-library.md.\n\nCoordination note: card #1472 (core.url) needs the same net_text_time.rs extractor fix for a different function (url_mime_method_return) in the same script file. Whichever card lands first should leave check-core-surface-ledger.mjs in a state the other extends cleanly rather than reverting or re-deriving the same parsing hook.",
       "blockedBy": [],
       "assignee": "e3-coll",
       "log": [
+        {
+          "at": "2026-08-06",
+          "by": "e3-coll",
+          "text": "criteria 1-6 met; extractor reads regex_method_return; I9 golden+run ok — ready for independent verify"
+        },
         {
           "at": "2026-08-06",
           "by": "e3-coll",
@@ -84210,56 +84220,56 @@
         {
           "n": 1,
           "text": "scripts/agent/jet-env cargo test --test core_surface_ledger passes after node scripts/agent/check-core-surface-ledger.mjs --refresh regenerates the ledger from source, and the regenerated ledger stops scoring Match.end() as a loss.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-coll",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:27:40.584Z"
+          "evidence": "core_surface_ledger ok after --refresh; Match.end no longer jet_loses; regex losses 12→5 (copy/expand/indexof/tostring/regex out of scope)",
+          "at": "2026-08-06T16:23:42.730Z"
         },
         {
           "n": 2,
           "text": "Regex exports pattern/source, flags, named_captures, count, and jet.regex exports escape; each is called from examples/features/text/regex.jet.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-coll",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:27:40.893Z"
+          "evidence": "regex.jet calls pattern/source/flags/named_captures/count/escape",
+          "at": "2026-08-06T16:23:43.959Z"
         },
         {
           "n": 3,
           "text": "check-core-surface-ledger.mjs reads crates/jet-sema/src/Sema/CheckerCoreLib/net_text_time.rs's regex_method_return/Match method tables, verified by a targeted case: temporarily remove one already-shipped Match method name from the file and confirm node scripts/agent/check-core-surface-ledger.mjs --check now flags it, then restore the file.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-coll",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:27:41.212Z"
+          "evidence": "removed end from Match arm → --check drifts; restored → clean",
+          "at": "2026-08-06T16:23:44.204Z"
         },
         {
           "n": 4,
           "text": "JET_GOLDEN_FILTER='text/regex' scripts/agent/jet-env cargo test --test golden -- examples_compile_and_run passes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-coll",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:27:41.525Z"
+          "evidence": "JET_GOLDEN_FILTER=text/regex golden ok",
+          "at": "2026-08-06T16:23:44.456Z"
         },
         {
           "n": 5,
           "text": "scripts/agent/jet-env jet run examples/features/text/regex.jet produces output byte-identical to its expected/ file, proving I9 parity between AOT (golden) and default jet run.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-coll",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:27:41.843Z"
+          "evidence": "jet run and jet run --release match expected/text/regex.out",
+          "at": "2026-08-06T16:23:44.713Z"
         },
         {
           "n": 6,
           "text": "docs/reference/core-library.md core.regex section lists every newly added call.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-coll",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:27:42.169Z"
+          "evidence": "docs/reference/core-library.md lists escape/pattern/source/flags/names/count/named_captures",
+          "at": "2026-08-06T16:23:44.959Z"
         }
       ],
       "refs": [
@@ -84269,9 +84279,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T02:13:31.552Z",
-      "updated": "2026-08-06T15:56:32.125Z",
+      "updated": "2026-08-06T16:23:45.392Z",
       "updatedBy": "e3-coll",
-      "claimedAt": "2026-08-06T15:56:32.125Z"
+      "claimedAt": "2026-08-06T16:23:45.392Z"
     },
     {
       "id": "c0mvp4zc",
@@ -85517,12 +85527,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "verify",
       "priority": "P1",
       "plan": "Repro: examples/features/concurrency/all_failfast.jet (existing example) -- a taskgroup where boom() calls panic(\"task failed\") while a sibling task is still running; g.all([slow, bad]) fails fast. AOT: stderr shows the full six-line block (panic: task failed / --> .../all_failfast.jet:17 in boom / source line + caret) then the trailing \"panic: a task panicked\" line, matching examples/features/expected/concurrency/all_failfast.err.out. Default jet run: the block's fields render empty (no message, no function name, blank source line) and the trailing line is also missing per the card.\n\nRoot cause hypothesis: panic(\"...\") lowers to jet_panic_rich(file, line, fn_name, src_line, col, caret, msg, locals) (crates/jet-codegen/src/Prelude/Core.rs:1422-1461), the shared Prelude function AOT calls directly, which eprintln!s the six-line block itself before unwinding. Under jet run's Cranelift JIT tier, JIT-compiled code cannot call that Rust function directly -- it calls a separate reimplementation, jet_jit_rich_panic (crates/jet-jit/src/jit/runtime_host.rs:848-883), an extern \"C\" JIT-host bridge that resolves its string arguments via rt.heap.clone_string(...).unwrap_or_default() (~858-862) against Concurrency::with_runtime_mut's state, which is thread_local! (crates/jet-jit/src/Concurrency.rs:22). A taskgroup task body runs on a scheduler worker thread spawned via std::thread::spawn (crates/jet-codegen/src/Prelude/Scheduler.rs, worker loop ~2470-2510), which gets its own fresh JitRuntime/heap on that new OS thread. If the panic's string data was allocated on the MAIN thread's heap (heap handles are per-thread), clone_string on the worker thread finds nothing and silently returns None for every field via unwrap_or_default() -- producing exactly \"no message, no function name, blank source line\" while the block's fixed structure (labels/arrows/pipes) still prints. This also reads as an I9 concern: jet_jit_rich_panic re-implements the same rendering jet_panic_rich already owns in the shared Prelude, instead of the JIT calling through to that one Prelude function.\n\nApproach:\n1. Confirm by tracing whether jet_jit_rich_panic's rt.heap.clone_string(...) calls return None specifically when invoked from a taskgroup worker thread vs the main thread for a top-level panic (which the card says renders correctly).\n2. Fix at the shared root, not the taskgroup caller specifically: either (a) make the scheduler worker thread share or correctly re-resolve heap handles across the std::thread::spawn boundary, or (b) per I9, stop re-implementing the six-line renderer in jet_jit_rich_panic and have JIT-compiled task code marshal through to the same Prelude rendering AOT uses.\n3. Investigate the missing trailing \"panic: a task panicked\" line under jet run too -- likely the same cross-thread state issue (jet_scheduler_fatal, Scheduler.rs:101).\n4. Prove AOT and default jet run produce byte-identical stderr for the example (I9); interpreter deopt too if taskgroups reach it.\n\nProof:\n- scripts/agent/jet-env cargo test --test golden -- all_failfast (AOT vs examples/features/expected/concurrency/all_failfast.err.out).\n- New/extended targeted test asserting jet run's stderr on all_failfast.jet matches the same golden byte-for-byte (I9) -- likely alongside tests/dev.rs's existing 3-way parity harness.\n- scripts/agent/jet-env jet run examples/features/concurrency/all_failfast.jet manual smoke, comparing stderr to the AOT run.\n\nOwned paths: crates/jet-jit/src/jit/runtime_host.rs, crates/jet-jit/src/Concurrency.rs, crates/jet-codegen/src/Prelude/Scheduler.rs, tests/dev.rs.",
       "blockedBy": [],
       "assignee": "e3-bugz",
       "log": [
+        {
+          "at": "2026-08-06",
+          "by": "e3-bugz",
+          "text": "claiming done: JIT compile-string snapshot + trailing panic line; criteria 1-4 met; commits on bd/bugz"
+        },
         {
           "at": "2026-08-06",
           "by": "e3-bugz",
@@ -85543,38 +85558,38 @@
         {
           "n": 1,
           "text": "cargo test --test golden -- all_failfast passes: AOT stderr matches examples/features/expected/concurrency/all_failfast.err.out byte-for-byte.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:37:18.504Z"
+          "status": "verified",
+          "metBy": "e3-bugz",
+          "verifiedBy": "e3-review",
+          "evidence": "recheck: golden all_failfast + all_failfast_jit_stderr_matches_aot_golden + task panic tests green on bd/bugz @28d85f960",
+          "at": "2026-08-06T16:23:45.202Z"
         },
         {
           "n": 2,
           "text": "A new targeted test proves default jet run's stderr on all_failfast.jet matches the same golden byte-for-byte (I9 tier parity), not an empty panic block.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-bugz",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:37:19.057Z"
+          "evidence": "tests/dev.rs::all_failfast_jit_stderr_matches_aot_golden (2× jet-run via dev_iteration) matches all_failfast.err.out; cargo test --test dev -- all_failfast_jit_stderr → ok",
+          "at": "2026-08-06T16:23:37.550Z"
         },
         {
           "n": 3,
           "text": "The trailing 'panic: a task panicked' line is present under jet run, matching AOT.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-bugz",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:37:19.609Z"
+          "evidence": "golden + all_failfast_jit_stderr_matches_aot_golden assert trailing panic: a task panicked; Concurrency wait_status(Panicked) appends once + spawn_with_runtime re-raises after rich trap",
+          "at": "2026-08-06T16:23:37.948Z"
         },
         {
           "n": 4,
           "text": "No regression in cargo test --test dev (full file, concurrency/taskgroup cases).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-bugz",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:37:20.136Z"
+          "evidence": "cargo test --test dev -- all_failfast_jit_stderr|caught_task_panics|scheduler_spawn_runs_via_jit → ok (taskgroup panic path + spawn stress)",
+          "at": "2026-08-06T16:23:38.439Z"
         }
       ],
       "refs": [],
@@ -85582,9 +85597,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T09:48:58.014Z",
-      "updated": "2026-08-06T15:56:42.141Z",
-      "updatedBy": "e3-bugz",
-      "claimedAt": "2026-08-06T15:56:42.141Z"
+      "updated": "2026-08-06T16:23:45.203Z",
+      "updatedBy": "e3-review",
+      "claimedAt": "2026-08-06T16:23:13.231Z"
     },
     {
       "id": "c0nrwebl",
@@ -86571,8 +86586,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T15:32:57.883Z",
-      "updated": "2026-08-06T15:40:53.572Z",
-      "updatedBy": "cursor-grok"
+      "updated": "2026-08-06T16:23:24.856Z",
+      "updatedBy": "owner"
     }
   ],
   "decisions": [
@@ -112863,8 +112878,10 @@
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-08-06T15:34:04.582Z"
+      "status": "ratified",
+      "created": "2026-08-06T15:34:04.582Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-08-06"
     },
     {
       "id": "D-TYPECHECK-BOUND1",
@@ -115257,6 +115274,195 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-06T16:23:45.392Z",
+      "by": "e3-coll",
+      "action": "card.update",
+      "ref": "c0hrwp53",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T16:23:45.203Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c03ht82l",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-06T16:23:44.959Z",
+      "by": "e3-coll",
+      "action": "card.criteria-meet",
+      "ref": "c0hrwp53",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-06T16:23:44.714Z",
+      "by": "e3-coll",
+      "action": "card.criteria-meet",
+      "ref": "c0hrwp53",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-06T16:23:44.456Z",
+      "by": "e3-coll",
+      "action": "card.criteria-meet",
+      "ref": "c0hrwp53",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-06T16:23:44.205Z",
+      "by": "e3-coll",
+      "action": "card.criteria-meet",
+      "ref": "c0hrwp53",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T16:23:43.960Z",
+      "by": "e3-coll",
+      "action": "card.criteria-meet",
+      "ref": "c0hrwp53",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T16:23:42.730Z",
+      "by": "e3-coll",
+      "action": "card.criteria-meet",
+      "ref": "c0hrwp53",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-06T16:23:39.867Z",
+      "by": "e3-bugz",
+      "action": "card.criteria-meet",
+      "ref": "c0ogiepl",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-06T16:23:39.580Z",
+      "by": "e3-bugz",
+      "action": "card.criteria-meet",
+      "ref": "c0ogiepl",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T16:23:39.345Z",
+      "by": "e3-bugz",
+      "action": "card.criteria-meet",
+      "ref": "c0ogiepl",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T16:23:38.973Z",
+      "by": "e3-bugz",
+      "action": "card.criteria-meet",
+      "ref": "c0ogiepl",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-06T16:23:38.440Z",
+      "by": "e3-bugz",
+      "action": "card.criteria-meet",
+      "ref": "c03ht82l",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-06T16:23:37.948Z",
+      "by": "e3-bugz",
+      "action": "card.criteria-meet",
+      "ref": "c03ht82l",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T16:23:37.550Z",
+      "by": "e3-bugz",
+      "action": "card.criteria-meet",
+      "ref": "c03ht82l",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T16:23:37.174Z",
+      "by": "e3-bugz",
+      "action": "card.criteria-meet",
+      "ref": "c03ht82l",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-06T16:23:24.856Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-INCR-UNIT1",
+      "note": "A"
+    },
+    {
+      "at": "2026-08-06T16:23:13.759Z",
+      "by": "e3-bugz",
+      "action": "card.update",
+      "ref": "c0ogiepl",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T16:23:13.231Z",
+      "by": "e3-bugz",
+      "action": "card.update",
+      "ref": "c03ht82l",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T16:23:00.557Z",
+      "by": "e3-bugz",
+      "action": "card.criteria-meet",
+      "ref": "c0ogiepl",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-06T16:23:00.319Z",
+      "by": "e3-bugz",
+      "action": "card.criteria-meet",
+      "ref": "c0ogiepl",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T16:23:00.081Z",
+      "by": "e3-bugz",
+      "action": "card.criteria-meet",
+      "ref": "c0ogiepl",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T16:22:59.849Z",
+      "by": "e3-bugz",
+      "action": "card.criteria-meet",
+      "ref": "c0ogiepl",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-06T16:22:59.615Z",
+      "by": "e3-bugz",
+      "action": "card.criteria-meet",
+      "ref": "c03ht82l",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-06T16:22:59.380Z",
+      "by": "e3-bugz",
+      "action": "card.criteria-meet",
+      "ref": "c03ht82l",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T16:22:59.140Z",
+      "by": "e3-bugz",
+      "action": "card.criteria-meet",
+      "ref": "c03ht82l",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T16:22:58.904Z",
+      "by": "e3-bugz",
+      "action": "card.criteria-meet",
+      "ref": "c03ht82l",
+      "note": "#1"
+    },
     {
       "at": "2026-08-06T16:20:26.419Z",
       "by": "fable",
@@ -118567,195 +118773,6 @@
       "action": "done.clear",
       "ref": null,
       "note": "2026-08-06T11:48:38.892Z"
-    },
-    {
-      "at": "2026-08-06T11:48:36.766Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-TIMERES1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-06T11:40:13.773Z",
-      "by": "fable",
-      "action": "decision.add",
-      "ref": "D-TIMERES1",
-      "note": "How fine a Duration measures"
-    },
-    {
-      "at": "2026-08-06T11:38:04.271Z",
-      "by": "bd-verify",
-      "action": "card.update",
-      "ref": "c09riaeq",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T11:38:03.896Z",
-      "by": "bd-verify",
-      "action": "card.criteria-verify",
-      "ref": "c09riaeq",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-06T11:38:03.575Z",
-      "by": "bd-verify",
-      "action": "card.criteria-verify",
-      "ref": "c09riaeq",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-06T11:38:03.268Z",
-      "by": "bd-verify",
-      "action": "card.criteria-verify",
-      "ref": "c09riaeq",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-06T11:38:02.949Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c09riaeq",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-06T11:37:50.229Z",
-      "by": "bd-verify",
-      "action": "card.criteria-verify",
-      "ref": "c09riaeq",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-06T11:37:49.760Z",
-      "by": "bd-verify",
-      "action": "card.criteria-verify",
-      "ref": "c09riaeq",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-06T11:37:49.402Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c09riaeq",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-06T11:37:49.091Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c09riaeq",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-06T11:37:48.773Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c09riaeq",
-      "note": "#3 A hostile fixture proves truncate, add and reset stay themse"
-    },
-    {
-      "at": "2026-08-06T11:37:48.465Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c09riaeq",
-      "note": "#2 core.math, core.time and core.os carry no collection-verb lo"
-    },
-    {
-      "at": "2026-08-06T11:37:48.149Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c09riaeq",
-      "note": "#1 Collection-verb synonym groups apply only inside container t"
-    },
-    {
-      "at": "2026-08-06T11:37:23.830Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c09riaeq",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T11:36:28.737Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-NUMTYPE1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-06T11:34:44.495Z",
-      "by": "fable",
-      "action": "decision.add",
-      "ref": "D-NUMTYPE1",
-      "note": "Which number types Core ships beyond whole and decimal"
-    },
-    {
-      "at": "2026-08-06T11:24:26.036Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0hsjnxk",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T11:18:15.058Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-06T11:18:15.058Z"
-    },
-    {
-      "at": "2026-08-06T11:06:57.568Z",
-      "by": "bd-verify",
-      "action": "card.update",
-      "ref": "c01wl24t",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T11:06:57.200Z",
-      "by": "bd-verify",
-      "action": "card.criteria-verify",
-      "ref": "c01wl24t",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-06T11:06:56.887Z",
-      "by": "bd-verify",
-      "action": "card.criteria-verify",
-      "ref": "c01wl24t",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-06T11:06:56.577Z",
-      "by": "bd-verify",
-      "action": "card.criteria-verify",
-      "ref": "c01wl24t",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-06T11:06:56.256Z",
-      "by": "bd-verify",
-      "action": "card.criteria-verify",
-      "ref": "c01wl24t",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-06T11:06:41.061Z",
-      "by": "fable",
-      "action": "card.add",
-      "ref": "c09riaeq",
-      "note": "Synonym groups cross domains and invent losses"
-    },
-    {
-      "at": "2026-08-06T11:01:52.329Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c01wl24t",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T11:01:51.963Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c01wl24t",
-      "note": "#4"
     }
   ],
   "nextNum": 368,
