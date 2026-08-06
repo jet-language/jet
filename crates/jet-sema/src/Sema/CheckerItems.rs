@@ -603,12 +603,43 @@ impl<'a> Checker<'a> {
             });
         }
 
-        // A rest parameter on a *method* is still rejected here, exactly as
-        // before D-APILABEL1: codegen has no lowering for one, so accepting the
-        // call would reach an internal compiler error instead of a diagnostic
-        // (I2). Free-function variadics are unaffected and bind normally.
-        // The binder above already knows the parameter is variadic, so it does
-        // not additionally claim a missing argument before this fires.
+        // D-VARIADIC1: pack a method rest-parameter the same way free functions do
+        // (I8). After packing, arity is the fixed non-self count (last slot = list).
+        if sig.param_variadic.last().copied().unwrap_or(false) {
+            let self_offset = usize::from(sig.self_conv.is_some());
+            let mut packed = crate::AST::Call {
+                name: method.to_string(),
+                name_span: span,
+                type_args: Vec::new(),
+                args: std::mem::take(args),
+                resolved_ret: None,
+                range_checked: false,
+            };
+            let fake_sig = crate::AST::FuncSig {
+                params: sig.params[self_offset..].to_vec(),
+                root_param: false,
+                return_type: sig.return_type.clone(),
+                return_view_provenance: crate::AST::ViewProvenanceCell::new(),
+                is_extern: false,
+                is_unsafe: false,
+                is_pure: false,
+                is_foreign_thread_safe: false,
+                is_sanitizer: false,
+                is_must_use: sig.must_use,
+                is_c_abi: false,
+                c_abi_name: None,
+                foreign_effect_root: None,
+                param_info: sig.param_info.clone(),
+                param_call: sig.param_call.clone(),
+                defaults: sig.defaults.clone(),
+                param_variadic: sig.param_variadic.clone(),
+                variadic_bounds: None,
+                param_view_from_names: Vec::new(),
+            };
+            self.normalize_variadic_call(&mut packed, &fake_sig);
+            *args = packed.args;
+        }
+
         if args.len() != expected_args {
             self.diags.push(Diagnostic::error(
                 "E0104",

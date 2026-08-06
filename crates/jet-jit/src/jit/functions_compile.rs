@@ -946,6 +946,9 @@ pub(crate) fn compile_program_tiered(
         let code = module.get_finalized_function(run_id);
         crate::CLI::install_cli_run_ptr(code);
     }
+    // Snapshot before any run mutates/clears the arena so warm-run cache +
+    // reset_run_heap can reinstall the same handles Cranelift baked in.
+    runtime.snapshot_compile_strings();
     Ok(func_ids
         .get(&program.entry)
         .copied()

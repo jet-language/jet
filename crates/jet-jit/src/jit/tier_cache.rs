@@ -96,7 +96,13 @@ pub(crate) fn publish_capture() {
     let strings = RESIDENT_RUNTIME.with(|slot| {
         slot.borrow()
             .as_ref()
-            .map(|rt| rt.heap.string_slots())
+            .map(|rt| {
+                if rt.compile_strings.is_empty() {
+                    rt.heap.string_slots()
+                } else {
+                    rt.compile_strings.clone()
+                }
+            })
             .unwrap_or_default()
     });
     if let Some(fns) = fns {
@@ -419,6 +425,7 @@ pub fn run_cached_module(artifact: &[u8]) -> Result<RunOutcome, String> {
     RESIDENT_RUNTIME.with(|slot| {
         let mut rt = fresh_runtime();
         rt.heap.install_string_slots(&strings);
+        rt.compile_strings = strings.clone();
         *slot.borrow_mut() = Some(rt);
     });
 

@@ -424,6 +424,11 @@ pub(crate) fn lower_method_for_owner(
         let place = param_place(&p.name, p);
         // A `Self`-typed param resolves to the owning type for totality.
         let pty = resolve_self_ty(&p.ty, type_name);
+        let pty = if p.variadic {
+            Type::List(Box::new(pty))
+        } else {
+            pty
+        };
         bind_resource_param(
             &p.name,
             &pty,
