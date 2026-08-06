@@ -105,13 +105,21 @@ no theming. Structure, in order:
 4. **Evidence** — the shadow-systems table with file:line proof.
 5. **The model** — axes, planes, laws, with the "ohhh" connections spelled
    out explicitly as their own list.
-6. **Worked examples** — full real programs, not toys; drive the design from
-   a complete example the way the owner reasons.
-7. **What this unlocks** — domain by domain, extremes included.
-8. **What does not change** — spellings kept, walls kept, zero-cost kept.
-9. **Decisions for the owner** — a compact direction-level table mapping to
+6. **The surface** — first-principles spelling proposals, not just
+   architecture. State the spelling principles the model implies, then the
+   concrete syntax slate (marking each item ratified vs proposed). A rethink
+   that only reorganizes internals is half a rethink; the owner decides
+   surfaces, so give surfaces to decide.
+7. **What it looks like** — mandatory: complete example programs in real
+   syntax showing the whole model working together, spanning the beginner
+   default, the rich middle, and the expert opt-in extremes. A dry report
+   cannot be visualized; the owner needs to *see* it. Mark every
+   not-yet-ratified line "proposed" — the review pass checks this.
+8. **What this unlocks** — domain by domain, extremes included.
+9. **What does not change** — spellings kept, walls kept, zero-cost kept.
+10. **Decisions for the owner** — a compact direction-level table mapping to
    the ballot slate; each ballot stands alone so any subset can be adopted.
-10. **Implementation shape** — phased: (A) internal re-founding with no
+11. **Implementation shape** — phased: (A) internal re-founding with no
     surface change and all tests green; (B) land ratified-but-unbuilt work on
     the new substrate so it is built once; (C) balloted surface unifications,
     each a coherent greenfield migration that deletes the replaced form.
