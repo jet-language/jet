@@ -510,7 +510,15 @@ async function r() {
         if (/^[A-Za-z.][A-Za-z0-9._]*$/.test(entry)) operations.add(entry);
       }
     }
-    containers[name] = { present: true, packages: names, operations: Array.from(operations).sort() };
+    // The index answers "package base documents a function of this name". It
+    // cannot answer "this function belongs to the math surface", so this
+    // container may confirm a Jet match but may not mint a per-operation gap.
+    containers[name] = {
+      present: true,
+      attribution: "package",
+      packages: names,
+      operations: Array.from(operations).sort(),
+    };
   }
   emit({
     language: "R",
