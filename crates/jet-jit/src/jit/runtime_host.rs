@@ -241,12 +241,13 @@ fn with_runtime_result<R: Default, F: FnOnce(&mut JitRuntime) -> R>(default: R, 
 /// caller yields a dummy `0`); JIT code branches to its epilogue at the next
 /// `emit_trap_check`. Message text is unchanged from the old exit-70 path.
 fn jet_trap_overflow(op: &str) {
+    use jet_codegen::Comptime::MathLayout;
     let msg = match op {
         "add" => "this addition overflows the value's type (the result is outside its range)",
         "sub" => "this subtraction overflows the value's type (the result is outside its range)",
         "mul" => "this multiplication overflows the value's type (the result is outside its range)",
         "div" => "this division can't be done (dividing by zero, or overflow)",
-        "pow" => "this power overflows the value's type (the result is outside its range)",
+        "pow" => MathLayout::INTEGER_POWER_OVERFLOW,
         _ => "this operation overflows the value's type (the result is outside its range)",
     };
     with_runtime_mut(|rt| rt.set_trap(msg));
@@ -264,6 +265,8 @@ pub(crate) const INTN_OP_SHL: i64 = 8;
 pub(crate) const INTN_OP_SHR: i64 = 9;
 /// D-EXPSEM1=A: `^` on a fixed-width whole number.
 pub(crate) const INTN_OP_POW: i64 = 10;
+/// D-FLOORDIV1=A: `/%` on a fixed-width whole number.
+pub(crate) const INTN_OP_FLOOR_DIV: i64 = 11;
 pub(crate) const INTN_MODE_TRAP: i64 = 0;
 pub(crate) const INTN_MODE_WRAPPING: i64 = 1;
 pub(crate) const INTN_MODE_SATURATING: i64 = 2;
@@ -337,6 +340,28 @@ extern "C" fn jet_jit_pow_f64(a: f64, b: f64) -> f64 {
     a.powf(b)
 }
 
+/// D-FLOORDIV1=A: the same rounding-down division the Prelude runs
+/// (`Prelude/Core/Division.rs`), through the one shared rule.
+extern "C" fn jet_jit_floordiv_i64(a: i64, b: i64, _line: u32) -> i64 {
+    use jet_codegen::Comptime::MathLayout;
+    if b == 0 {
+        with_runtime_mut(|rt| rt.set_trap(MathLayout::INTEGER_DIVIDE_ZERO));
+        return 0;
+    }
+    match MathLayout::floor_div(a as i128, b as i128).and_then(|v| i64::try_from(v).ok()) {
+        Some(value) => value,
+        None => {
+            jet_trap_overflow("div");
+            0
+        }
+    }
+}
+
+/// D-FLOORDIV1=A: on floats `/%` divides and rounds the answer down.
+extern "C" fn jet_jit_floordiv_f64(a: f64, b: f64) -> f64 {
+    (a / b).floor()
+}
+
 extern "C" fn jet_jit_rem_i64(a: i64, b: i64, _line: u32) -> i64 {
     use jet_codegen::Comptime::MathLayout;
     if let Some(message) = MathLayout::integer_remainder_trap(a, b, true, 64) {
@@ -375,6 +400,7 @@ extern "C" fn jet_jit_intn_binop(
         INTN_OP_SHL => BinOp::Shl,
         INTN_OP_SHR => BinOp::Shr,
         INTN_OP_POW => BinOp::Pow,
+        INTN_OP_FLOOR_DIV => BinOp::FloorDiv,
         _ => {
             with_runtime_mut(|rt| rt.set_trap("unknown fixed-width integer operation"));
             return 0;
@@ -386,6 +412,12 @@ extern "C" fn jet_jit_intn_binop(
     let shift_count = MathLayout::integer_widen(right, right_signed);
     if let Some(message) = MathLayout::integer_shift_trap(op, shift_count, bits) {
         with_runtime_mut(|rt| rt.set_trap(&message));
+        return 0;
+    }
+    // D-FLOORDIV1=A: `/%` names a zero divisor exactly, rather than falling
+    // into the shared "this division can't be done" wording below.
+    if mode == INTN_MODE_TRAP && op == BinOp::FloorDiv && right == 0 {
+        with_runtime_mut(|rt| rt.set_trap(MathLayout::INTEGER_DIVIDE_ZERO));
         return 0;
     }
     if mode == INTN_MODE_TRAP && op == BinOp::Rem {
@@ -444,7 +476,7 @@ extern "C" fn jet_jit_intn_binop(
                 BinOp::Add => "add",
                 BinOp::Sub => "sub",
                 BinOp::Mul => "mul",
-                BinOp::Div | BinOp::Rem => "div",
+                BinOp::Div | BinOp::Rem | BinOp::FloorDiv => "div",
                 _ => "shift",
             };
             jet_trap_overflow(name);
@@ -1522,6 +1554,8 @@ pub(crate) struct HostFns {
     pub(crate) div_i64: FuncId,
     pub(crate) rem_i64: FuncId,
     pub(crate) pow_i64: FuncId,
+    pub(crate) floordiv_i64: FuncId,
+    pub(crate) floordiv_f64: FuncId,
     pub(crate) pow_f64: FuncId,
     pub(crate) intn_binop: FuncId,
     pub(crate) intn_to_string: FuncId,
@@ -1673,6 +1707,8 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     builder.symbol("jet_jit_rem_i64", jet_jit_rem_i64 as *const u8);
     builder.symbol("jet_jit_pow_i64", jet_jit_pow_i64 as *const u8);
     builder.symbol("jet_jit_pow_f64", jet_jit_pow_f64 as *const u8);
+    builder.symbol("jet_jit_floordiv_i64", jet_jit_floordiv_i64 as *const u8);
+    builder.symbol("jet_jit_floordiv_f64", jet_jit_floordiv_f64 as *const u8);
     builder.symbol("jet_jit_intn_binop", jet_jit_intn_binop as *const u8);
     builder.symbol(
         "jet_jit_intn_to_string",
@@ -2344,6 +2380,8 @@ fn declare_host_fns(
         rem_i64: import("jet_jit_rem_i64", &sig_bin_i64)?,
         pow_i64: import("jet_jit_pow_i64", &sig_bin_i64)?,
         pow_f64: import("jet_jit_pow_f64", &sig_pow_f64)?,
+        floordiv_i64: import("jet_jit_floordiv_i64", &sig_bin_i64)?,
+        floordiv_f64: import("jet_jit_floordiv_f64", &sig_pow_f64)?,
         intn_binop: import("jet_jit_intn_binop", &sig_intn_binop)?,
         intn_to_string: import("jet_jit_intn_to_string", &sig_i64_i64_i64)?,
         print_i64: import("jet_jit_print_i64", &sig_i64)?,

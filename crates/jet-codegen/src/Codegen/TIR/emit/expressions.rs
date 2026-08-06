@@ -1700,15 +1700,21 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         } => {
             let ls = emit_tir_expr(lhs, cx);
             let rs = emit_tir_expr(rhs, cx);
-            if *op == BinOp::Pow {
-                // D-EXPSEM1: Rust has no power operator, so `^` always calls the
-                // one Prelude helper. Whole numbers keep the exact, trapping
-                // rule; floats use the floating-point power.
+            if *op == BinOp::Pow || *op == BinOp::FloorDiv {
+                // D-EXPSEM1 / D-FLOORDIV1: Rust spells neither operator, so `^`
+                // and `/%` always call the one Prelude helper. Whole numbers
+                // keep the exact, trapping rule; floats use the float helper.
                 let (file, line) = (&cx.file, *line);
-                if matches!(e.ty, Type::Float | Type::Float32) {
-                    format!("({}).jet_pow({})", ls, rs)
-                } else {
-                    format!("({}).jet_pow(({}) as i128, {:?}, {})", ls, rs, file, line)
+                let float = matches!(e.ty, Type::Float | Type::Float32);
+                match (*op, float) {
+                    (BinOp::Pow, true) => format!("({}).jet_pow({})", ls, rs),
+                    (BinOp::Pow, false) => {
+                        format!("({}).jet_pow(({}) as i128, {:?}, {})", ls, rs, file, line)
+                    }
+                    (_, true) => format!("({}).jet_floordiv({})", ls, rs),
+                    (_, false) => {
+                        format!("({}).jet_floordiv({}, {:?}, {})", ls, rs, file, line)
+                    }
                 }
             } else if *overflow {
                 // Trapping helper: source location was resolved at lowering, so

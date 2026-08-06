@@ -13,7 +13,33 @@ use crate::Codegen::TIR::TForInMethod;
 use crate::Codegen::TIR::TIfCond;
 use crate::Codegen::TIR::TPlace;
 use crate::Codegen::TIR::TStmt;
+use crate::AST::BinOp;
 use crate::AST::Type;
+
+/// D-EXPSEM1=A / D-FLOORDIV1=A: `^` and `/%` have no Rust operator, so a
+/// compound assignment cannot become `place OP= value`. This builds the one
+/// Prelude call that replaces it. `None` means the operator is an ordinary
+/// Rust compound and the caller emits `place OP= value` as before.
+///
+/// The whole-number helpers carry the source position so their trap can name
+/// the line the author wrote; the float helpers never trap and take neither.
+fn prelude_compound_call(
+    op: BinOp,
+    place: &str,
+    value: &str,
+    ty: &Type,
+    file: &str,
+    line: u32,
+) -> Option<String> {
+    let float = matches!(ty, Type::Float | Type::Float32);
+    Some(match op {
+        BinOp::Pow if float => format!("({place}).jet_pow({value})"),
+        BinOp::Pow => format!("({place}).jet_pow(({value}) as i128, {file:?}, {line})"),
+        BinOp::FloorDiv if float => format!("({place}).jet_floordiv({value})"),
+        BinOp::FloorDiv => format!("({place}).jet_floordiv({value}, {file:?}, {line})"),
+        _ => return None,
+    })
+}
 
 #[derive(Clone)]
 enum ActiveCleanup {
@@ -565,26 +591,22 @@ fn emit_tir_stmt(
             } else {
                 v
             };
-            // D-EXPSEM1: Rust has no `**=`, so `^=` reads the place, calls the
-            // one Prelude power, and writes the result back.
-            let pow_of = |target: &str| {
-                if matches!(value.ty, Type::Float | Type::Float32) {
-                    format!("({}).jet_pow({})", target, v)
-                } else {
-                    format!(
-                        "({}).jet_pow(({}) as i128, {:?}, {})",
-                        target, v, cx.file, line
-                    )
-                }
+            // D-EXPSEM1 / D-FLOORDIV1: Rust has no `**=` and no `/%=`, so those
+            // compounds read the place, call the one Prelude helper, and write
+            // the result back.
+            let prelude_of = |target: &str| {
+                op.and_then(|op| {
+                    prelude_compound_call(op, target, &v, &value.ty, &cx.file, *line)
+                })
             };
-            let is_pow = *op == Some(crate::AST::BinOp::Pow);
             if let TPlace::Local(local) = place {
                 if local.uninit_scalar {
                     let place = local.rust_place();
+                    let read = format!("({}).read().clone()", place);
                     match op {
-                        Some(_) if is_pow => {
-                            let read = format!("({}).read().clone()", place);
-                            out.push_str(&format!("{}{}.write({});\n", pad, place, pow_of(&read)));
+                        Some(_) if prelude_of(&read).is_some() => {
+                            let call = prelude_of(&read).expect("checked just above");
+                            out.push_str(&format!("{}{}.write({});\n", pad, place, call));
                         }
                         Some(op) => out.push_str(&format!(
                             "{}{}.write(({}).read().clone() {} {});\n",
@@ -607,9 +629,9 @@ fn emit_tir_stmt(
             }
             let place = emit_tir_place(place, cx);
             match op {
-                Some(_) if is_pow => {
-                    let powered = pow_of(&place);
-                    out.push_str(&format!("{}{} = {};\n", pad, place, powered));
+                Some(_) if prelude_of(&place).is_some() => {
+                    let call = prelude_of(&place).expect("checked just above");
+                    out.push_str(&format!("{}{} = {};\n", pad, place, call));
                 }
                 Some(op) => out.push_str(&format!("{}{} {}= {};\n", pad, place, op.rust_spell(), v)),
                 None => out.push_str(&format!("{}{} = {};\n", pad, place, v)),
@@ -1065,18 +1087,42 @@ fn emit_tir_stmt(
             if assign.clone_value {
                 v = format!("({v}).clone()");
             }
-            let operator = assign.op.map_or("=".to_string(), |op| {
-                format!("{}=", op.rust_spell())
-            });
+            // D-EXPSEM1 / D-FLOORDIV1: `^` and `/%` have no Rust operator, so
+            // the place is borrowed once, read, and written back through the
+            // one Prelude helper. Borrowing keeps the indexed element a single
+            // evaluation, exactly as the plain compound operators get.
+            let mutate = |place: &str| -> String {
+                match assign.op.and_then(|op| {
+                    prelude_compound_call(
+                        op,
+                        "(*__jet_t)",
+                        "__jet_v",
+                        &assign.field_ty,
+                        &cx.file,
+                        assign.line as u32,
+                    )
+                }) {
+                    Some(call) => {
+                        format!("let __jet_t = &mut {place}; *__jet_t = {call};")
+                    }
+                    None => {
+                        let operator = assign
+                            .op
+                            .map_or("=".to_string(), |op| format!("{}=", op.rust_spell()));
+                        format!("{place} {operator} __jet_v;")
+                    }
+                }
+            };
+            let field = emit_field_rust(cx, &assign.base.ty, &assign.field);
             if assign.is_map {
                 out.push_str(&format!(
                     "{pad}{{ let __jet_v = {v}; let __jet_k = ({i}).clone(); \
                      let Some(__jet_item) = ({b}).get_mut(&__jet_k) else {{ \
                      jet_panic({file:?}, {line}, \"map key not found\"); }}; \
-                     __jet_item.{field} {operator} __jet_v; }}\n",
+                     {mutation} }}\n",
                     file = cx.file,
                     line = assign.line,
-                    field = emit_field_rust(cx, &assign.base.ty, &assign.field),
+                    mutation = mutate(&format!("__jet_item.{field}")),
                 ));
             } else {
                 let index = if assign.index_proven {
@@ -1085,8 +1131,8 @@ fn emit_tir_stmt(
                     format!("{i} as usize")
                 };
                 out.push_str(&format!(
-                    "{pad}{{ let __jet_v = {v}; ({b})[{index}].{field} {operator} __jet_v; }}\n",
-                    field = emit_field_rust(cx, &assign.base.ty, &assign.field),
+                    "{pad}{{ let __jet_v = {v}; {mutation} }}\n",
+                    mutation = mutate(&format!("({b})[{index}].{field}")),
                 ));
             }
         }

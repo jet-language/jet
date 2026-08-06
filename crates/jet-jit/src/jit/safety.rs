@@ -2276,13 +2276,19 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                         | BinOp::BitXor
                         | BinOp::Shl
                         | BinOp::Shr
-                        // D-EXPSEM1=A: `^=` calls the host power.
+                        // D-EXPSEM1=A / D-FLOORDIV1=A: `^=` and `/%=` call the host.
                         | BinOp::Pow
+                        | BinOp::FloorDiv
                 ),
                 Type::Float => {
                     matches!(
                         op,
-                        BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Pow
+                        BinOp::Add
+                            | BinOp::Sub
+                            | BinOp::Mul
+                            | BinOp::Div
+                            | BinOp::Pow
+                            | BinOp::FloorDiv
                     )
                 }
                 _ => false,

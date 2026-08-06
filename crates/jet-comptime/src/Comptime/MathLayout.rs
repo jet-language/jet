@@ -98,11 +98,32 @@ pub fn integer_remainder_overflows(
 }
 
 pub const INTEGER_REMAINDER_OVERFLOW: &str = "attempt to calculate the remainder with overflow";
-pub const INTEGER_REMAINDER_ZERO: &str = "divided by zero";
-/// D-EXPSEM1=A: same wording the Prelude power trap uses
-/// (`Prelude/Core/Power.rs`), so every tier says one thing.
+/// The one wording for a zero divisor, shared by `%` and by `/%`
+/// (D-FLOORDIV1=A). `Prelude/Core/Division.rs` carries the same text.
+pub const INTEGER_DIVIDE_ZERO: &str = "divided by zero";
+/// D-EXPSEM1=A: the two power traps. `Prelude/Core/Power.rs` is the one place
+/// the rule lives; these constants carry its exact wording to the tiers that
+/// cannot include that file — the comptime interpreter and the Cranelift host.
+/// `tests/power_and_exclusive_or.rs` proves the Prelude text still matches, so
+/// the wordings cannot drift apart.
 pub const INTEGER_POWER_NEGATIVE: &str =
     "a negative exponent has no whole-number result (make the base a Float to raise it to a negative power)";
+pub const INTEGER_POWER_OVERFLOW: &str =
+    "this power overflows the value's type (the result is outside its range)";
+
+/// D-FLOORDIV1=A: the `/%` rule, mirroring `Prelude/Core/Division.rs` for the
+/// tiers that cannot include that file. Rust's `/` rounds toward zero, so an
+/// answer whose remainder falls on the other side of zero from the divisor sat
+/// one step too high. `None` means the division itself overflowed.
+pub fn floor_div(left: i128, right: i128) -> Option<i128> {
+    let quotient = left.checked_div(right)?;
+    let remainder = left % right;
+    if remainder != 0 && (remainder < 0) != (right < 0) {
+        quotient.checked_sub(1)
+    } else {
+        Some(quotient)
+    }
+}
 
 pub fn integer_remainder_trap(
     left: i64,
@@ -111,7 +132,7 @@ pub fn integer_remainder_trap(
     bits: u8,
 ) -> Option<&'static str> {
     if right == 0 {
-        Some(INTEGER_REMAINDER_ZERO)
+        Some(INTEGER_DIVIDE_ZERO)
     } else if integer_remainder_overflows(left, right, signed, bits) {
         Some(INTEGER_REMAINDER_OVERFLOW)
     } else {
@@ -151,13 +172,20 @@ pub fn integer_binop(
         BinOp::Mul => checked(a.checked_mul(b), "multiply"),
         BinOp::Div if b == 0 => Err(unsupported("division by zero", span)),
         BinOp::Div => checked(a.checked_div(b), "divide"),
+        // D-FLOORDIV1=A: `/%` rounds down, in the same words `/` uses when the
+        // divisor is zero.
+        BinOp::FloorDiv if b == 0 => Err(comptime_panic(INTEGER_DIVIDE_ZERO, span)),
+        BinOp::FloorDiv => checked(floor_div(a, b), "divide"),
         BinOp::Rem => checked(a.checked_rem(b), "take the remainder of"),
-        // D-EXPSEM1=A: exact whole-number power, trapping outside the range.
+        // D-EXPSEM1=A: exact whole-number power, trapping outside the range,
+        // in the same words every other tier uses.
         BinOp::Pow if b < 0 => Err(comptime_panic(INTEGER_POWER_NEGATIVE, span)),
-        BinOp::Pow => checked(
-            u32::try_from(b).ok().and_then(|e| a.checked_pow(e)),
-            "raise to a power",
-        ),
+        BinOp::Pow => u32::try_from(b)
+            .ok()
+            .and_then(|e| a.checked_pow(e))
+            .filter(|value| (lo..=hi).contains(value))
+            .map(|value| CtValue::Int(integer_narrow(value, signed, bits)))
+            .ok_or_else(|| comptime_panic(INTEGER_POWER_OVERFLOW, span)),
         BinOp::BitAnd => Ok(CtValue::Int(integer_narrow(a & b, signed, bits))),
         BinOp::BitOr => Ok(CtValue::Int(integer_narrow(a | b, signed, bits))),
         BinOp::BitXor => Ok(CtValue::Int(integer_narrow(a ^ b, signed, bits))),
