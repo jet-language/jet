@@ -1194,7 +1194,26 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             else_body,
             else_value,
         } => {
-            matches!(cond.as_ref(), TIfCond::Plain(e) if matches!(&e.ty, Type::Bool) && resident_safe_expr(e, callees))
+            // #1444: expression-position union dispatch → Variant if-lets (same as stmt If).
+            let cond_ok = match cond.as_ref() {
+                TIfCond::Plain(e) => {
+                    matches!(&e.ty, Type::Bool) && resident_safe_expr(e, callees)
+                }
+                TIfCond::IfLet { pattern, subj } => {
+                    matches!(&pattern.pattern, Pattern::Variant { .. })
+                        && !matches!(
+                            &subj.ty,
+                            Type::Named(n)
+                                if matches!(
+                                    n.as_str(),
+                                    "DataTree" | "JSON" | "TOML" | "YAML" | "CSV"
+                                )
+                        )
+                        && resident_safe_expr(subj, callees)
+                }
+                TIfCond::IsNone { .. } | TIfCond::Matches { .. } | TIfCond::And { .. } => false,
+            };
+            cond_ok
                 && then_body.iter().all(|s| resident_safe_stmt(s, callees))
                 && resident_safe_expr(then_value, callees)
                 && else_body.iter().all(|s| resident_safe_stmt(s, callees))
