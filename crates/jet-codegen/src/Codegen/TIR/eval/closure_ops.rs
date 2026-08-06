@@ -831,6 +831,11 @@ impl<'a> EvalCtx<'a> {
                         .collect(),
                 ))
             }
+            // Accidental #1479 variants landed in #1478 commit; ambient routes
+            // through method eval until that card ships full hosts.
+            TClosureOp::DedupBy => Err(unsupported("dedup_by at comptime", self.span())),
+            TClosureOp::IsSortedBy => Err(unsupported("is_sorted_by at comptime", self.span())),
+            TClosureOp::ChunkWhile => Err(unsupported("chunk_while at comptime", self.span())),
         }
     }
 

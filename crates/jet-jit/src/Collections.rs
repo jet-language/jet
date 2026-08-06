@@ -1264,12 +1264,14 @@ extern "C" fn jet_jit_set_capacity(set: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_set_first(set: i64) -> i64 {
+    // Packed Option ABI (0 = None, value+1 = Some) so `let f := set.first()`
+    // then `f ?? …` works — result-arena Options break once bound to a local.
     Concurrency::with_runtime_mut(|rt| {
         let value = rt
             .sets
             .get((set as usize).wrapping_sub(1))
             .and_then(|existing| existing.iter().next().copied());
-        option_i64(rt, value)
+        option_packed(value)
     })
 }
 
