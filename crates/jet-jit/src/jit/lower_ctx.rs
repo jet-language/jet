@@ -10708,10 +10708,32 @@ impl LowerCtx<'_, '_> {
                             self.host.encoding.json_to_string_pretty,
                             vec![self.lower_expr(&args[0])?],
                         ),
-                        "canonical" if args.len() == 1 && datatree_arg => (
-                            self.host.encoding.json_canonical,
-                            vec![self.lower_expr(&args[0])?],
-                        ),
+                        "canonical"
+                            if args.len() == 1
+                                && datatree_arg
+                                && !jet_foundation::PackageEdition::package_edition_at_least("2027") =>
+                        {
+                            (
+                                self.host.encoding.json_canonical,
+                                vec![self.lower_expr(&args[0])?],
+                            )
+                        }
+                        "canonical"
+                            if (1..=2).contains(&args.len())
+                                && datatree_arg
+                                && jet_foundation::PackageEdition::package_edition_at_least("2027") =>
+                        {
+                            let tree = self.lower_expr(&args[0])?;
+                            let limits = if args.len() >= 2 {
+                                self.lower_expr(&args[1])?
+                            } else {
+                                self.b.ins().iconst(types::I64, 0)
+                            };
+                            (
+                                self.host.encoding.json_canonical_checked,
+                                vec![tree, limits],
+                            )
+                        }
                         "events" if args.len() == 1 && datatree_arg => (
                             self.host.encoding.json_events,
                             vec![self.lower_expr(&args[0])?],

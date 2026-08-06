@@ -1946,7 +1946,7 @@ test vectors, and edition migrations are normative in
 
 | Module | Surface | What it does |
 |--------|---------|--------------|
-| `core.encoding.json` | `canonical(data, limits)`, `reader`, `writer` | Edition-2027 RFC 8785 JCS; pull `DataEvent` streaming; shipped `events(DataTree) => String` remains separate until migration |
+| `core.encoding.json` | `canonical` (2026 prototype / 2027 JCS+limits), `reader`, `writer` | Edition-split whole-value canonical; pull `DataEvent` streaming; shipped `events(DataTree) => String` remains separate until migration |
 | `core.encoding.jsonl` | `parse(text)`, `to_string(rows)` | JSON Lines over `[DataTree]` |
 | `core.encoding.csv` | `parse(text)`, `decode<T>`, `to_string(rows)`, `reader`, `writer` | Whole-value and bounded pull records over the same CSV quoting and validation law |
 | `core.encoding.xml` | `parse`, `parse_bytes`, `decode<T>`, `decode_bytes<T>`, `root`, `expanded_name`, `attribute`, `content`, `to_string`, `to_bytes`, `canonical`, `reader`, `writer` | Exact tagged ordinary-`DataTree` tree/events with namespaces, token-local lexical evidence, safe entities/limits, W3C C14N, and D-ENCXML-PROJECTION1=A typed helpers |
@@ -1983,7 +1983,8 @@ Each adapter is a full serde equivalent, not a lossy subset:
   anchors/aliases (`&a`/`*a`). Explicit/custom tags (`!!str`, `!T`) are deferred.
 
 **Current implementation boundary:** JSONL, the lossless tagged XML engine and
-pull handles, base32/base64url, and an infallible key-sorting `json.canonical`
+pull handles, base32/base64url, and edition-split `json.canonical`
+(edition 2026: infallible prototype bytes; edition 2027: fallible RFC 8785 JCS)
 exist. XML whole and stream parsing enforce the exact XML 1.0 Fifth Edition
 `Char` production for literal scalars and numeric references, with identical
 typed errors across every byte split. XML attribute and namespace values apply

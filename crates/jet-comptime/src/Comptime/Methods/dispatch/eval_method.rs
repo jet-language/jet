@@ -69,7 +69,13 @@ impl<'a> Interp<'a> {
             }
         });
         // D-ENC-XML-SURFACE1=A: qualified safe whole-value XML constructors.
+        // D-JSONCANON1=A: EncodingLimits.safe() for edition-2027 defaults.
         if method == "safe" && args.is_empty() {
+            if let Expr::Ident(type_name, _) = receiver {
+                if type_name == "EncodingLimits" {
+                    return Ok(super::super::super::EncodingLite::encoding_limits_safe_value());
+                }
+            }
             if let Expr::Field(base, type_name, _) = receiver {
                 if let Expr::Ident(alias, _) = base.as_ref() {
                     if self.core_imports.get(alias).map(String::as_str) == Some("core.encoding.xml") {

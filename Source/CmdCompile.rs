@@ -1124,7 +1124,66 @@ fn apply_edition_2027_encoding_fixes(src: &str) -> String {
     let mut out = src.to_string();
     out = replace_untyped_call(&out, "cbor.encode(", "cbor.to_bytes(");
     out = replace_untyped_call(&out, "cbor.decode(", "cbor.parse(");
+    out = rewrite_json_canonical_calls(&out);
     out
+}
+
+fn rewrite_json_canonical_calls(src: &str) -> String {
+    let needle = "json.canonical(";
+    let mut out = String::with_capacity(src.len());
+    let mut rest = src;
+    while let Some(index) = rest.find(needle) {
+        out.push_str(&rest[..index]);
+        let after = &rest[index + needle.len()..];
+        let Some(end) = find_matching_paren(after) else {
+            out.push_str(needle);
+            rest = after;
+            continue;
+        };
+        let call = format!("{needle}{}", &after[..=end]);
+        let trailing = &after[end + 1..];
+        let already = trailing.starts_with('?') || trailing.starts_with("??");
+        if already {
+            out.push_str(&call);
+        } else {
+            out.push_str(&format!(
+                "{call} ?? panic(\"value is not canonical JSON\")"
+            ));
+        }
+        rest = trailing;
+    }
+    out.push_str(rest);
+    out
+}
+
+fn find_matching_paren(after_open: &str) -> Option<usize> {
+    let mut depth = 1usize;
+    let mut in_string = false;
+    let mut escape = false;
+    for (index, ch) in after_open.char_indices() {
+        if in_string {
+            if escape {
+                escape = false;
+            } else if ch == '\\' {
+                escape = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match ch {
+            '"' => in_string = true,
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(index);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn replace_untyped_call(src: &str, from: &str, to: &str) -> String {
@@ -1147,11 +1206,20 @@ fn replace_untyped_call(src: &str, from: &str, to: &str) -> String {
 fn edition_2027_encoding_audit(before: &str, after: &str) -> Vec<String> {
     let mut notes = Vec::new();
     if before.contains("json.canonical(") {
-        notes.push(
-            "review every `json.canonical(...)` call — edition 2027 requires fallible `json.canonical(data, limits)?` (or an explicit panic fallback)".to_string(),
-        );
+        if after.contains("?? panic(\"value is not canonical JSON\")")
+            || after.contains("json.canonical(") && after != before
+        {
+            notes.push(
+                "rewrote `json.canonical(...)` to fallible form; review hashing/signing fixtures"
+                    .to_string(),
+            );
+        } else {
+            notes.push(
+                "review every `json.canonical(...)` call — edition 2027 requires fallible `json.canonical(data, limits)?` (or an explicit panic fallback)".to_string(),
+            );
+        }
     }
-    if before != after {
+    if before != after && (before.contains("cbor.encode(") || before.contains("cbor.decode(")) {
         notes.push("rewrote deprecated CBOR forwarding calls (`encode`/`decode`)".to_string());
     }
     if notes.is_empty() {

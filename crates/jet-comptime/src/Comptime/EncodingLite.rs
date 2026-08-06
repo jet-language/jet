@@ -3538,16 +3538,519 @@ pub(super) fn jsonl_render(rows: &[CtValue]) -> String {
 }
 
 // ── core.encoding.json: canonical / events ─────────────────────────────────
-// Ported from `MathRandomTime.rs`'s `jet_std_json_render_canonical`/
-// `jet_std_json_events`. `render_json_pretty(v, false, 0)` already walks a
-// `BTreeMap`-backed `Object` (sorted by key) so it's already canonical for
-// object key order — the only remaining difference from a plain
-// `to_string()` on this tier is that AOT's canonical form is a distinct,
-// explicitly-sorting function (its plain `to_string` preserves original
-// `Vec`-based insertion order); comptime's single `Map` representation
-// makes the two calls coincide, which is a strict special case of the same
-// canonical text AOT produces for `canonical()`, so reusing it here is exact
-// for that call specifically.
+// Edition 2026: prototype sort+render (`jet_std_json_render_canonical`).
+// Edition 2027: RFC 8785 JCS (`jet_enc_json_canonical`) ported for CtValue.
+
+#[derive(Clone, Copy, Debug)]
+pub(super) struct EncodingLimitsLite {
+    pub max_depth: i64,
+    pub max_item_bytes: i64,
+    pub max_total_bytes: Option<i64>,
+    buffer_bytes: i64,
+    max_expansion_depth: i64,
+    max_expansion_bytes: i64,
+}
+
+impl EncodingLimitsLite {
+    pub(super) fn safe() -> Self {
+        Self {
+            buffer_bytes: 65536,
+            max_depth: 256,
+            max_item_bytes: 16777216,
+            max_total_bytes: None,
+            max_expansion_depth: 32,
+            max_expansion_bytes: 8388608,
+        }
+    }
+}
+
+pub(super) fn encoding_limits_safe_value() -> CtValue {
+    let lim = EncodingLimitsLite::safe();
+    CtValue::Struct {
+        type_name: "EncodingLimits".to_string(),
+        fields: vec![
+            ("buffer_bytes".to_string(), CtValue::Int(lim.buffer_bytes)),
+            ("max_depth".to_string(), CtValue::Int(lim.max_depth)),
+            ("max_item_bytes".to_string(), CtValue::Int(lim.max_item_bytes)),
+            ("max_total_bytes".to_string(), CtValue::None(crate::AST::Type::Int)),
+            (
+                "max_expansion_depth".to_string(),
+                CtValue::Int(lim.max_expansion_depth),
+            ),
+            (
+                "max_expansion_bytes".to_string(),
+                CtValue::Int(lim.max_expansion_bytes),
+            ),
+        ],
+    }
+}
+
+pub(super) fn encoding_limits_from_value(v: &CtValue) -> Result<EncodingLimitsLite, String> {
+    let CtValue::Struct { type_name, fields } = v else {
+        return Err("EncodingLimits expected".to_string());
+    };
+    if type_name != "EncodingLimits" {
+        return Err("EncodingLimits expected".to_string());
+    }
+    let mut lim = EncodingLimitsLite::safe();
+    for (name, value) in fields {
+        match (name.as_str(), value) {
+            ("buffer_bytes", CtValue::Int(n)) => lim.buffer_bytes = *n,
+            ("max_depth", CtValue::Int(n)) => lim.max_depth = *n,
+            ("max_item_bytes", CtValue::Int(n)) => lim.max_item_bytes = *n,
+            ("max_total_bytes", CtValue::None(_)) => lim.max_total_bytes = None,
+            ("max_total_bytes", CtValue::Some(inner)) => match inner.as_ref() {
+                CtValue::Int(n) => lim.max_total_bytes = Some(*n),
+                _ => return Err("max_total_bytes must be Int?".to_string()),
+            },
+            ("max_total_bytes", CtValue::Int(n)) => lim.max_total_bytes = Some(*n),
+            ("max_expansion_depth", CtValue::Int(n)) => lim.max_expansion_depth = *n,
+            ("max_expansion_bytes", CtValue::Int(n)) => lim.max_expansion_bytes = *n,
+            _ => {}
+        }
+    }
+    Ok(lim)
+}
+
+fn encoding_error_value(kind: &str, reason: impl Into<String>) -> CtValue {
+    CtValue::Struct {
+        type_name: "EncodingError".to_string(),
+        fields: vec![
+            (
+                "format".to_string(),
+                CtValue::Enum {
+                    type_name: "EncodingFormat".to_string(),
+                    variant: "JSON".to_string(),
+                    args: Vec::new(),
+                },
+            ),
+            (
+                "kind".to_string(),
+                CtValue::Enum {
+                    type_name: "EncodingErrorKind".to_string(),
+                    variant: kind.to_string(),
+                    args: Vec::new(),
+                },
+            ),
+            ("byte_offset".to_string(), CtValue::Int(0)),
+            ("line".to_string(), CtValue::Some(Box::new(CtValue::Int(1)))),
+            ("column".to_string(), CtValue::Some(Box::new(CtValue::Int(1)))),
+            ("path".to_string(), CtValue::Str(String::new())),
+            ("reason".to_string(), CtValue::Str(reason.into())),
+            (
+                "cause".to_string(),
+                CtValue::None(crate::AST::Type::Named("EncodingCause".to_string())),
+            ),
+        ],
+    }
+}
+
+fn validate_encoding_limits(limits: &EncodingLimitsLite) -> Result<(), CtValue> {
+    let invalid = if !(4096..=16777216).contains(&limits.buffer_bytes) {
+        Some(format!(
+            "buffer_bytes {} is outside 4096..16777216",
+            limits.buffer_bytes
+        ))
+    } else if !(1..=4096).contains(&limits.max_depth) {
+        Some(format!("max_depth {} is outside 1..4096", limits.max_depth))
+    } else if !(1..=1073741824).contains(&limits.max_item_bytes) {
+        Some(format!(
+            "max_item_bytes {} is outside 1..1073741824",
+            limits.max_item_bytes
+        ))
+    } else if limits.max_total_bytes.is_some_and(|n| n < 0) {
+        Some(format!(
+            "max_total_bytes {} is outside 0..Int.max",
+            limits.max_total_bytes.unwrap_or(0)
+        ))
+    } else if !(0..=256).contains(&limits.max_expansion_depth) {
+        Some(format!(
+            "max_expansion_depth {} is outside 0..256",
+            limits.max_expansion_depth
+        ))
+    } else if !(0..=1073741824).contains(&limits.max_expansion_bytes) {
+        Some(format!(
+            "max_expansion_bytes {} is outside 0..1073741824",
+            limits.max_expansion_bytes
+        ))
+    } else {
+        None
+    };
+    match invalid {
+        Some(reason) => Err(encoding_error_value("Limit", reason)),
+        None => Ok(()),
+    }
+}
+
+mod jcs_big {
+    include!("jet_bigint_snip.rs");
+}
+
+fn jcs_big_pow(mut base: jcs_big::JetBigInt, mut exponent: usize) -> jcs_big::JetBigInt {
+    let mut out = jcs_big::JetBigInt::from_int(1);
+    while exponent > 0 {
+        if exponent & 1 == 1 {
+            out = out.mul(&base);
+        }
+        base = base.mul(&base);
+        exponent >>= 1;
+    }
+    out
+}
+
+fn jcs_decimal_ratio(text: &str) -> (jcs_big::JetBigInt, jcs_big::JetBigInt) {
+    let (mantissa, exponent) = text
+        .split_once('e')
+        .map(|(m, e)| (m, e.parse::<i32>().expect("Rust float exponent")))
+        .unwrap_or((text, 0));
+    let decimal = mantissa.find('.').unwrap_or(mantissa.len()) as i32;
+    let digits: String = mantissa.chars().filter(|c| *c != '.').collect();
+    let mut numerator = jcs_big::JetBigInt::from_str(&digits).expect("Rust float digits");
+    let mut denominator = jcs_big::JetBigInt::from_int(1);
+    let decimal_exponent = exponent - ((digits.len() as i32) - decimal);
+    if decimal_exponent >= 0 {
+        numerator = numerator.mul(&jcs_big_pow(
+            jcs_big::JetBigInt::from_int(10),
+            decimal_exponent as usize,
+        ));
+    } else {
+        denominator = jcs_big_pow(
+            jcs_big::JetBigInt::from_int(10),
+            (-decimal_exponent) as usize,
+        );
+    }
+    (numerator, denominator)
+}
+
+fn jcs_float_ratio(value: f64) -> (jcs_big::JetBigInt, jcs_big::JetBigInt) {
+    let bits = value.to_bits();
+    let biased = ((bits >> 52) & 0x7ff) as i32;
+    let fraction = bits & ((1u64 << 52) - 1);
+    let (significand, exponent) = if biased == 0 {
+        (fraction, -1074)
+    } else {
+        ((1u64 << 52) | fraction, biased - 1023 - 52)
+    };
+    let mut numerator = jcs_big::JetBigInt::from_int(significand as i64);
+    let mut denominator = jcs_big::JetBigInt::from_int(1);
+    if exponent >= 0 {
+        numerator = numerator.mul(&jcs_big_pow(
+            jcs_big::JetBigInt::from_int(2),
+            exponent as usize,
+        ));
+    } else {
+        denominator = jcs_big_pow(jcs_big::JetBigInt::from_int(2), (-exponent) as usize);
+    }
+    (numerator, denominator)
+}
+
+fn jcs_decimal_distance(
+    text: &str,
+    exact: &(jcs_big::JetBigInt, jcs_big::JetBigInt),
+) -> jcs_big::JetBigInt {
+    let candidate = jcs_decimal_ratio(text);
+    let distance = candidate.0.mul(&exact.1).sub(&exact.0.mul(&candidate.1));
+    let rendered = distance.to_string_rep();
+    jcs_big::JetBigInt::from_str(rendered.strip_prefix('-').unwrap_or(&rendered))
+        .expect("absolute decimal distance")
+}
+
+fn jcs_positive_big_cmp(left: &jcs_big::JetBigInt, right: &jcs_big::JetBigInt) -> std::cmp::Ordering {
+    let left = left.to_string_rep();
+    let right = right.to_string_rep();
+    left.len().cmp(&right.len()).then_with(|| left.cmp(&right))
+}
+
+fn jcs_shortest(value: f64) -> String {
+    let shortest = format!("{:?}", value);
+    let mantissa_end = shortest.find('e').unwrap_or(shortest.len());
+    let Some(index) = shortest[..mantissa_end].rfind(|ch: char| ch.is_ascii_digit()) else {
+        return shortest;
+    };
+    let digit = shortest.as_bytes()[index] - b'0';
+    let mut candidates = vec![(shortest.clone(), digit)];
+    for replacement in [digit.checked_sub(1), digit.checked_add(1).filter(|next| *next < 10)]
+        .into_iter()
+        .flatten()
+    {
+        let mut candidate = shortest.clone().into_bytes();
+        candidate[index] = b'0' + replacement;
+        let candidate = String::from_utf8(candidate).expect("ASCII digit replacement");
+        if candidate
+            .parse::<f64>()
+            .is_ok_and(|parsed| parsed.to_bits() == value.to_bits())
+        {
+            candidates.push((candidate, replacement));
+        }
+    }
+    let exact = jcs_float_ratio(value);
+    candidates.sort_by(|(left, left_digit), (right, right_digit)| {
+        let left_distance = jcs_decimal_distance(left, &exact);
+        let right_distance = jcs_decimal_distance(right, &exact);
+        jcs_positive_big_cmp(&left_distance, &right_distance)
+            .then_with(|| left_digit.cmp(right_digit))
+            .then_with(|| left.cmp(right))
+    });
+    candidates
+        .into_iter()
+        .map(|(candidate, _)| candidate)
+        .next()
+        .expect("at least one shortest float")
+}
+
+fn jcs_number(value: f64) -> String {
+    if value == 0.0 {
+        return "0".to_string();
+    }
+    let negative = value.is_sign_negative();
+    let shortest = jcs_shortest(value.abs());
+    let (mantissa, exponent) = shortest
+        .split_once('e')
+        .map(|(mantissa, exponent)| (mantissa, exponent.parse::<i32>().expect("Rust float exponent")))
+        .unwrap_or((&shortest, 0));
+    let decimal = mantissa.find('.').unwrap_or(mantissa.len()) as i32;
+    let mut digits = mantissa.bytes().filter(|byte| *byte != b'.').collect::<Vec<_>>();
+    let leading = digits.iter().take_while(|byte| **byte == b'0').count();
+    digits.drain(..leading);
+    while digits.len() > 1 && digits.last() == Some(&b'0') {
+        digits.pop();
+    }
+    let n = decimal + exponent - leading as i32;
+    let mut out = String::new();
+    if negative {
+        out.push('-');
+    }
+    if n > 0 && n <= 21 {
+        if digits.len() <= n as usize {
+            out.extend(digits.iter().map(|byte| *byte as char));
+            out.extend(std::iter::repeat_n('0', n as usize - digits.len()));
+        } else {
+            let split = n as usize;
+            out.extend(digits[..split].iter().map(|byte| *byte as char));
+            out.push('.');
+            out.extend(digits[split..].iter().map(|byte| *byte as char));
+        }
+    } else if n > -6 && n <= 0 {
+        out.push_str("0.");
+        out.extend(std::iter::repeat_n('0', (-n) as usize));
+        out.extend(digits.iter().map(|byte| *byte as char));
+    } else {
+        out.push(digits[0] as char);
+        if digits.len() > 1 {
+            out.push('.');
+            out.extend(digits[1..].iter().map(|byte| *byte as char));
+        }
+        out.push('e');
+        let exponent = n - 1;
+        if exponent >= 0 {
+            out.push('+');
+        }
+        out.push_str(&exponent.to_string());
+    }
+    out
+}
+
+fn jcs_quote_text(text: &str) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.push(b'"');
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    for ch in text.chars() {
+        match ch {
+            '"' => out.extend_from_slice(b"\\\""),
+            '\\' => out.extend_from_slice(b"\\\\"),
+            '\n' => out.extend_from_slice(b"\\n"),
+            '\r' => out.extend_from_slice(b"\\r"),
+            '\t' => out.extend_from_slice(b"\\t"),
+            '\u{08}' => out.extend_from_slice(b"\\b"),
+            '\u{0c}' => out.extend_from_slice(b"\\f"),
+            c if c <= '\u{1f}' => {
+                let value = c as usize;
+                out.extend_from_slice(&[
+                    b'\\',
+                    b'u',
+                    HEX[(value >> 12) & 15],
+                    HEX[(value >> 8) & 15],
+                    HEX[(value >> 4) & 15],
+                    HEX[value & 15],
+                ]);
+            }
+            c => {
+                let mut encoded = [0u8; 4];
+                out.extend_from_slice(c.encode_utf8(&mut encoded).as_bytes());
+            }
+        }
+    }
+    out.push(b'"');
+    out
+}
+
+fn jcs_tree(
+    value: &CtValue,
+    limits: &EncodingLimitsLite,
+    depth: i64,
+) -> Result<Vec<u8>, CtValue> {
+    if depth > limits.max_depth {
+        return Err(encoding_error_value(
+            "Limit",
+            format!("max_depth {} exceeded", limits.max_depth),
+        ));
+    }
+    if let CtValue::Enum {
+        type_name,
+        variant,
+        args,
+    } = value
+    {
+        if type_name == "JSON" {
+            match variant.as_str() {
+                "Null" => return Ok(b"null".to_vec()),
+                "Bool" => {
+                    let b = match args.first().map(|(_, v)| v) {
+                        Some(CtValue::Bool(b)) => *b,
+                        _ => false,
+                    };
+                    return Ok(if b { b"true".to_vec() } else { b"false".to_vec() });
+                }
+                "Int" => {
+                    if let Some(CtValue::Int(n)) = args.first().map(|(_, v)| v) {
+                        if (*n as f64) as i128 != *n as i128 {
+                            return Err(encoding_error_value(
+                                "Unsupported",
+                                "JCS requires Int exactly representable as IEEE 754 binary64; encode this integer as Text",
+                            ));
+                        }
+                        return Ok(jcs_number(*n as f64).into_bytes());
+                    }
+                }
+                "Float" => {
+                    if let Some(CtValue::Float(f)) = args.first().map(|(_, v)| v) {
+                        let f = f.as_f64();
+                        if !f.is_finite() {
+                            return Err(encoding_error_value(
+                                "Unsupported",
+                                "JCS cannot encode a non-finite Float",
+                            ));
+                        }
+                        return Ok(jcs_number(f).into_bytes());
+                    }
+                }
+                "Text" => {
+                    if let Some(CtValue::Str(s)) = args.first().map(|(_, v)| v) {
+                        return Ok(jcs_quote_text(s));
+                    }
+                }
+                "Bytes" => {
+                    return Err(encoding_error_value(
+                        "Unsupported",
+                        "JSON cannot encode Bytes; encode bytes as Text explicitly",
+                    ));
+                }
+                "Array" => {
+                    let items = json_array_items(value).unwrap_or_default();
+                    let mut out = Vec::from(b"[");
+                    for (index, item) in items.iter().enumerate() {
+                        if index > 0 {
+                            out.push(b',');
+                        }
+                        out.extend_from_slice(&jcs_tree(item, limits, depth + 1)?);
+                    }
+                    out.push(b']');
+                    return Ok(out);
+                }
+                "Object" => {
+                    let mut sorted = json_object_entries(value).unwrap_or_default();
+                    sorted.sort_by(|left, right| left.0.encode_utf16().cmp(right.0.encode_utf16()));
+                    if sorted.windows(2).any(|pair| pair[0].0 == pair[1].0) {
+                        return Err(encoding_error_value(
+                            "Syntax",
+                            "JCS requires unique object keys",
+                        ));
+                    }
+                    let mut out = Vec::from(b"{");
+                    for (index, (key, item)) in sorted.iter().enumerate() {
+                        if index > 0 {
+                            out.push(b',');
+                        }
+                        out.extend_from_slice(&jcs_quote_text(key));
+                        out.push(b':');
+                        out.extend_from_slice(&jcs_tree(item, limits, depth + 1)?);
+                    }
+                    out.push(b'}');
+                    return Ok(out);
+                }
+                _ => {}
+            }
+        }
+    }
+    match value {
+        CtValue::Bool(b) => Ok(if *b { b"true".to_vec() } else { b"false".to_vec() }),
+        CtValue::Int(n) => {
+            if (*n as f64) as i128 != *n as i128 {
+                Err(encoding_error_value(
+                    "Unsupported",
+                    "JCS requires Int exactly representable as IEEE 754 binary64; encode this integer as Text",
+                ))
+            } else {
+                Ok(jcs_number(*n as f64).into_bytes())
+            }
+        }
+        CtValue::Float(f) => {
+            let f = f.as_f64();
+            if !f.is_finite() {
+                Err(encoding_error_value(
+                    "Unsupported",
+                    "JCS cannot encode a non-finite Float",
+                ))
+            } else {
+                Ok(jcs_number(f).into_bytes())
+            }
+        }
+        CtValue::Str(s) => Ok(jcs_quote_text(s)),
+        CtValue::Bytes(_) => Err(encoding_error_value(
+            "Unsupported",
+            "JSON cannot encode Bytes; encode bytes as Text explicitly",
+        )),
+        CtValue::List(items) => {
+            let mut out = Vec::from(b"[");
+            for (index, item) in items.iter().enumerate() {
+                if index > 0 {
+                    out.push(b',');
+                }
+                out.extend_from_slice(&jcs_tree(item, limits, depth + 1)?);
+            }
+            out.push(b']');
+            Ok(out)
+        }
+        _ => Err(encoding_error_value(
+            "Unsupported",
+            "JCS cannot encode this value",
+        )),
+    }
+}
+
+pub(super) fn json_canonical_jcs(
+    v: &CtValue,
+    limits: &EncodingLimitsLite,
+) -> Result<String, CtValue> {
+    validate_encoding_limits(limits)?;
+    let bytes = jcs_tree(v, limits, 1)?;
+    if limits
+        .max_total_bytes
+        .is_some_and(|max| bytes.len() as i64 > max)
+    {
+        return Err(encoding_error_value(
+            "Limit",
+            format!(
+                "max_total_bytes {} exceeded",
+                limits.max_total_bytes.unwrap_or(0)
+            ),
+        ));
+    }
+    String::from_utf8(bytes).map_err(|_| {
+        encoding_error_value("Unsupported", "canonical JSON output is not UTF-8")
+    })
+}
+
 pub(super) fn json_canonical(v: &CtValue) -> String {
     super::JSONInterp::render_json_pretty(v, false, 0)
 }

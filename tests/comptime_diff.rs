@@ -739,7 +739,7 @@ use core.encoding.hex as hex
 #Codable
 struct Packet { id: Int, payload: [U8] }
 
-#Known expected_map :: hex.encode(cbor.to_bytes_canonical(json.parse("{{\"aa\":1,\"b\":2}}") ?? panic("json")) ?? panic("canonical"))
+#Known expected_map :: hex.encode(cbor.to_bytes_canonical(json.parse("{{\"aa\":1,\"b\":2}}") ?? panic("value is not canonical JSON") ?? panic("json")) ?? panic("canonical"))
 #Known expected_floats :: hex.encode(cbor.to_bytes_canonical([1.5, 100000.0, -0.0]) ?? panic("canonical"))
 #Known expected_nan :: hex.encode(cbor.to_bytes_canonical(Float.NAN) ?? panic("canonical"))
 #Known expected_typed :: hex.encode(cbor.to_bytes_canonical(Packet.{ id: 7, payload: [222, 173] }) ?? panic("canonical"))

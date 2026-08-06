@@ -2928,6 +2928,7 @@ fn jet_enc_json_canonical(
     value: &jet_std::DataTree,
     limits: &jet_std::EncodingLimits,
 ) -> Result<String, jet_std::EncodingError> {
+    jet_encoding_validate_limits(limits)?;
     let bytes = jet_enc_json_canonical_tree(value, limits, 1)?;
     if limits.max_total_bytes.is_some_and(|max| bytes.len() as i64 > max) {
         return Err(jet_encoding_error(

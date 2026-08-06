@@ -1117,7 +1117,21 @@ pub(crate) fn emit_tir_core_call(
             }
         }
         ("core.encoding.json", "canonical") => {
-            format!("{}(&({}))", helper("jet_std_json_render_canonical"), arg(0))
+            if jet_foundation::PackageEdition::package_edition_at_least("2027") {
+                let limits = if args.len() > 1 {
+                    arg(1)
+                } else {
+                    format!("{}jet_std::EncodingLimits::safe()", cx.root_prefix)
+                };
+                format!(
+                    "{}(&({}), &({}))",
+                    helper("jet_enc_json_canonical"),
+                    arg(0),
+                    limits
+                )
+            } else {
+                format!("{}(&({}))", helper("jet_std_json_render_canonical"), arg(0))
+            }
         }
         ("core.encoding.json", "events") => {
             format!("{}(&({}))", helper("jet_std_json_events"), arg(0))

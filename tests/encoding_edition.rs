@@ -37,7 +37,7 @@ fn edition_2027_base64_strict_rejects_whitespace_without_allowance_surface() {
     let path = write_project(
         &root,
         "2027",
-        "use core.encoding.base64 as base64\n\nfn run() {\n    if base64.decode(\"Zg==\\n\") == {\n        Ok(_) -> print(\"accepted\")\n        Err(reason) -> print(reason)\n    }\n}\n",
+        "use core.encoding.base64 as base64\n\nfn run() {\n    if base64.decode(\"Zg==\\n\") == {\n        .Ok(_) -> print(\"accepted\")\n        .Err(reason) -> print(reason)\n    }\n}\n",
     );
     let diags = jet::check_with_path(path.to_str().unwrap());
     assert!(
@@ -73,6 +73,38 @@ fn edition_2026_base64_keeps_compatibility_union() {
     assert!(
         diags.is_empty(),
         "edition 2026 should keep compatibility decode:\n{}",
+        jet::render_diagnostics(path.to_str().unwrap(), "", &diags)
+    );
+}
+
+#[test]
+fn edition_2027_json_canonical_is_fallible_jcs() {
+    let root = scratch("2027_json_canon");
+    let path = write_project(
+        &root,
+        "2027",
+        "use core.encoding.json as json\n\nfn run() {\n    data := json.parse(\"{{\\\"b\\\":2,\\\"a\\\":1}}\") ?? panic(\"json\")\n    print(json.canonical(data) ?? panic(\"canon\"))\n}\n",
+    );
+    let diags = jet::check_with_path(path.to_str().unwrap());
+    assert!(
+        diags.is_empty(),
+        "edition 2027 json.canonical must type-check:\n{}",
+        jet::render_diagnostics(path.to_str().unwrap(), "", &diags)
+    );
+}
+
+#[test]
+fn edition_2026_json_canonical_stays_infallible() {
+    let root = scratch("2026_json_canon");
+    let path = write_project(
+        &root,
+        "2026",
+        "use core.encoding.json as json\n\nfn run() {\n    data := json.parse(\"{{\\\"b\\\":2,\\\"a\\\":1}}\") ?? panic(\"json\")\n    print(json.canonical(data))\n}\n",
+    );
+    let diags = jet::check_with_path(path.to_str().unwrap());
+    assert!(
+        diags.is_empty(),
+        "edition 2026 json.canonical must stay infallible:\n{}",
         jet::render_diagnostics(path.to_str().unwrap(), "", &diags)
     );
 }

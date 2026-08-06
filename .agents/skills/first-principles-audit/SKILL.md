@@ -32,9 +32,23 @@ does not produce those, the synthesis is not done.
 - **Support anything anyone would need in the domain** — from critical
   simulation to trivial one-liners. Test the model against the extremes, not
   the middle.
-- **Beginner magic, expert control** — run both passes on every element:
+- **Beginner magic, expert control is the governing philosophy, and the
+  proposal must show it, not claim it.** This is the owner's stated test —
+  "beginner magic out of the box and full expert control" — and it is the most
+  common thing a rethink under-serves. Run both passes on every element:
   invisible correct defaults with zero ceremony; full nameable, reflectable,
-  overridable control behind explicit opt-in.
+  overridable control behind explicit opt-in. Then prove it with a **mandatory
+  ladder section** (Phase 3 item 7): every rung from "the user types nothing"
+  to "the user controls the authority", each rung opt-in, each shown as real
+  code, and an explicit statement that no upper rung changes what the lowest
+  rung does. Two failure modes to check by name:
+  - **Ceremony creep** — a default that now needs a word it did not need
+    before. If the common case gained a marker, the rethink went backwards.
+  - **Magic without an exit** — a default with no way to refuse it, no way to
+    see what it did, and no project-level switch. Every default owes the user
+    all three.
+  Default to opt-out for anything the compiler can do correctly on its own.
+  Reserve opt-in for what the compiler genuinely cannot decide.
 - **The surface is the product.** A rethink that only re-founds internals is
   a failed rethink — the owner has rejected one for exactly this. The main
   deliverable is greatly improved syntax, APIs, and structure: simpler to
@@ -129,18 +143,21 @@ no theming. Structure, in order:
    makes code simpler to read and write. Present it as before/after pairs
    from real programs. Breaking changes are welcome; mark each item ratified,
    amended, or new.
-7. **What it looks like** — mandatory: complete example programs in real
+7. **Beginner magic, expert control** — mandatory: the ladder described in the
+   non-negotiables above, in real code, from zero ceremony to full authority
+   control. A proposal without this section is not finished.
+8. **What it looks like** — mandatory: complete example programs in real
    syntax showing the whole model working together, spanning the beginner
    default, the rich middle, and the expert opt-in extremes. Show today's
    code next to the proposed code for the same job. Mark every
    not-yet-ratified line "proposed" — the review pass checks this.
-8. **What this unlocks** — domain by domain, extremes included.
-9. **What stays** — only things that earn their place: walls kept on
+9. **What this unlocks** — domain by domain, extremes included.
+10. **What stays** — only things that earn their place: walls kept on
    purpose, zero-cost kept, spellings kept because they win on merit.
    Never "kept because shipped".
-10. **Decisions for the owner** — a compact direction-level table mapping to
+11. **Decisions for the owner** — a compact direction-level table mapping to
    the ballot slate; each ballot stands alone so any subset can be adopted.
-11. **Implementation shape** — phased: (A) internal re-founding with no
+12. **Implementation shape** — phased: (A) internal re-founding with no
     surface change and all tests green; (B) land ratified-but-unbuilt work on
     the new substrate so it is built once; (C) balloted surface unifications,
     each a coherent greenfield migration that deletes the replaced form.
@@ -161,7 +178,9 @@ no theming. Structure, in order:
 ## Phase 5 — review, fix, close
 
 - Fresh-context review that assumes the work is wrong. It must specifically
-  hunt: silent contradictions of ratified decisions, fabricated or misused
+  hunt: a missing or hand-waved magic-and-control ladder, ceremony added to a
+  common case, a new default with no refusal / no way to see it / no project
+  switch; silent contradictions of ratified decisions, fabricated or misused
   decision IDs, wrong code-level claims, exsum/body/ballot inconsistencies,
   invariant violations, strawman ballot options, worked code that breaks
   ratified syntax.

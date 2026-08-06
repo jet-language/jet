@@ -887,7 +887,7 @@ fn run() {{
         "z": DataTree.Array([DataTree.Int(1), DataTree.Object(["b": DataTree.Int(2), "a": DataTree.Text("x")])]),
         "a": DataTree.Bool(true),
     ])
-    print(json.canonical(data))
+    print(json.canonical(data) ?? panic("value is not canonical JSON"))
 
     duplicate_output :: files.create("{duplicate}") ?? panic("duplicate create")
     duplicate_writer :: json.writer(^duplicate_output, encoding.EncodingLimits.safe(), true) ?? panic("duplicate writer")
@@ -7758,7 +7758,7 @@ use core.encoding.base32 as base32
 
 fn run() {
     data := json.parse("{{\"b\":2,\"a\":1}}") ?? panic("json")
-    print(json.canonical(data))
+    print(json.canonical(data) ?? panic("value is not canonical JSON"))
     print(json.events(data).contains("object_start $"))
     rows := jsonl.parse("{{\"a\":1}}\n{{\"a\":2}}\n") ?? panic("jsonl")
     print(rows.len())
@@ -7782,7 +7782,7 @@ fn run() {
     encoded := cbor.to_bytes(data) ?? panic("cbor encode")
     print(encoded.len() > 0)
     decoded := cbor.parse(encoded) ?? panic("cbor parse")
-    print(json.canonical(decoded))
+    print(json.canonical(decoded) ?? panic("value is not canonical JSON"))
     bytes :: [U8].{ 104, 105 }
     u := base64.encode_url(bytes)
     print(u)

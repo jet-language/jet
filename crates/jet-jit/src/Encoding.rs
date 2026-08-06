@@ -926,6 +926,11 @@ extern "C" fn jet_jit_json_canonical(tree: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(rendered))
 }
 
+/// D-JSONCANON1=A edition 2027 — marshall to Prelude `jet_enc_json_canonical`.
+extern "C" fn jet_jit_json_canonical_checked(tree: i64, limits: i64) -> i64 {
+    crate::enc_stream::json_canonical_checked(tree, limits)
+}
+
 /// `core.encoding.json.events` — same walk as `jet_std_json_events`.
 fn json_events(t: &json_rt::DataTree) -> String {
     fn walk(path: String, t: &json_rt::DataTree, out: &mut Vec<String>) {
@@ -2066,6 +2071,7 @@ pub(crate) struct EncodingHostFns {
     pub json_to_string: cranelift_module::FuncId,
     pub json_to_string_pretty: cranelift_module::FuncId,
     pub json_canonical: cranelift_module::FuncId,
+    pub json_canonical_checked: cranelift_module::FuncId,
     pub json_events: cranelift_module::FuncId,
     pub jsonl_parse: cranelift_module::FuncId,
     pub jsonl_to_string: cranelift_module::FuncId,
@@ -2138,6 +2144,10 @@ pub(crate) fn register_encoding_symbols(builder: &mut cranelift_jit::JITBuilder)
         jet_jit_json_to_string_pretty as *const u8,
     );
     builder.symbol("jet_jit_json_canonical", jet_jit_json_canonical as *const u8);
+    builder.symbol(
+        "jet_jit_json_canonical_checked",
+        jet_jit_json_canonical_checked as *const u8,
+    );
     builder.symbol("jet_jit_json_events", jet_jit_json_events as *const u8);
     builder.symbol("jet_jit_jsonl_parse", jet_jit_jsonl_parse as *const u8);
     builder.symbol("jet_jit_jsonl_to_string", jet_jit_jsonl_to_string as *const u8);
@@ -2561,6 +2571,7 @@ pub(crate) fn declare_encoding_host_fns(
         json_to_string: import("jet_jit_json_to_string", &sig_unary)?,
         json_to_string_pretty: import("jet_jit_json_to_string_pretty", &sig_unary)?,
         json_canonical: import("jet_jit_json_canonical", &sig_unary)?,
+        json_canonical_checked: import("jet_jit_json_canonical_checked", &sig_binary)?,
         json_events: import("jet_jit_json_events", &sig_unary)?,
         jsonl_parse: import("jet_jit_jsonl_parse", &sig_unary)?,
         jsonl_to_string: import("jet_jit_jsonl_to_string", &sig_unary)?,

@@ -422,6 +422,12 @@ pub(crate) mod runtime {
     ) -> Result<jet_std::JSONWriter, jet_std::EncodingError> {
         jet_enc_json_writer(output, limits, canonical)
     }
+    pub(crate) fn enc_json_canonical(
+        value: &jet_std::DataTree,
+        limits: &jet_std::EncodingLimits,
+    ) -> Result<String, jet_std::EncodingError> {
+        jet_enc_json_canonical(value, limits)
+    }
     pub(crate) fn enc_json_reader(
         input: JetFileReader,
         limits: jet_std::EncodingLimits,
@@ -720,6 +726,65 @@ fn to_stream_tree(tree: &super::Encoding::json_rt::DataTree) -> runtime::jet_std
                 .map(|(k, v)| (k.clone(), to_stream_tree(v)))
                 .collect(),
         ),
+    }
+}
+
+fn result_err_encoding(error: &runtime::jet_std::EncodingError) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let format = match error.format {
+            runtime::jet_std::EncodingFormat::JSON => 0,
+            runtime::jet_std::EncodingFormat::JSONL => 1,
+            runtime::jet_std::EncodingFormat::CSV => 2,
+            runtime::jet_std::EncodingFormat::XML => 3,
+            runtime::jet_std::EncodingFormat::CBOR => 4,
+        };
+        let kind = match error.kind {
+            runtime::jet_std::EncodingErrorKind::Syntax => 0,
+            runtime::jet_std::EncodingErrorKind::Truncated => 1,
+            runtime::jet_std::EncodingErrorKind::Unsupported => 2,
+            runtime::jet_std::EncodingErrorKind::Limit => 3,
+            runtime::jet_std::EncodingErrorKind::IO => 4,
+            runtime::jet_std::EncodingErrorKind::State => 5,
+        };
+        let h = rt.heap.alloc_record(8);
+        let _ = rt.heap.record_set_int(h, 0, format);
+        let _ = rt.heap.record_set_int(h, 1, kind);
+        let _ = rt.heap.record_set_int(h, 2, error.byte_offset);
+        let _ = rt
+            .heap
+            .record_set_int(h, 3, error.line.map(|line| line + 1).unwrap_or(0));
+        let _ = rt
+            .heap
+            .record_set_int(h, 4, error.column.map(|column| column + 1).unwrap_or(0));
+        let path = rt.heap.alloc_string(error.path.clone());
+        let _ = rt.heap.record_set_string(h, 5, path);
+        let reason = rt.heap.alloc_string(error.reason.clone());
+        let _ = rt.heap.record_set_string(h, 6, reason);
+        let _ = rt.heap.record_set_int(h, 7, 0);
+        rt.results.push(super::JitResultValue {
+            ok: false,
+            bits: h as u64,
+        });
+        rt.results.len() as i64
+    })
+}
+
+/// D-JSONCANON1=A edition-2027 whole-value JCS — same `jet_enc_json_canonical`.
+pub(crate) fn json_canonical_checked(tree: i64, limits: i64) -> i64 {
+    let Some(tree) = read_datatree(tree) else {
+        return result_err_msg("bad DataTree");
+    };
+    let lim = if limits == 0 {
+        runtime::jet_std::EncodingLimits::safe()
+    } else {
+        read_limits(limits)
+    };
+    match runtime::enc_json_canonical(&to_stream_tree(&tree), &lim) {
+        Ok(text) => {
+            let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text));
+            result_ok_bits(sid as u64)
+        }
+        Err(error) => result_err_encoding(&error),
     }
 }
 

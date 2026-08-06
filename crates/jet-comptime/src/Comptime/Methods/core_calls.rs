@@ -1702,11 +1702,27 @@ pub fn apply_core_call(
                 v, true, 0,
             )))
         }
-        // --- card #392 pass 4: core.encoding.json.canonical/events (ported
-        // verbatim from AOT's `jet_std_json_render_canonical`/
-        // `jet_std_json_events`, `EncodingLite.rs`) ---
+        // --- card #392 pass 4 / #1394: core.encoding.json.canonical/events ---
         ("core.encoding.json", "canonical") => {
-            Ok(CtValue::Str(super::super::EncodingLite::json_canonical(one(0)?)))
+            let v = one(0)?;
+            if jet_foundation::PackageEdition::package_edition_at_least("2027") {
+                let limits = if args.len() >= 2 {
+                    match super::super::EncodingLite::encoding_limits_from_value(one(1)?) {
+                        Ok(limits) => limits,
+                        Err(message) => {
+                            return Err(unsupported(&message, span));
+                        }
+                    }
+                } else {
+                    super::super::EncodingLite::EncodingLimitsLite::safe()
+                };
+                match super::super::EncodingLite::json_canonical_jcs(v, &limits) {
+                    Ok(text) => Ok(CtValue::ResOk(Box::new(CtValue::Str(text)))),
+                    Err(error) => Ok(CtValue::ResErr(Box::new(error))),
+                }
+            } else {
+                Ok(CtValue::Str(super::super::EncodingLite::json_canonical(v)))
+            }
         }
         ("core.encoding.json", "events") => {
             Ok(CtValue::Str(super::super::EncodingLite::json_events(one(0)?)))

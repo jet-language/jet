@@ -449,12 +449,13 @@ pub fn cbor_decode_typed_for_tir(
     }
 }
 
-/// TIR static-call bridge for the three qualified XML safe constructors.
+/// TIR static-call bridge for shared EncodingLimits / XML safe constructors.
 pub fn xml_safe_static_for_tir(path: &str, method: &str) -> Option<CtValue> {
     if method != "safe" {
         return None;
     }
     match path {
+        "jet_std::EncodingLimits" => Some(EncodingLite::encoding_limits_safe_value()),
         "jet_std::XMLLimits" => Some(EncodingLite::xml_safe_limits_value()),
         "jet_std::XMLParseOptions" => Some(EncodingLite::xml_safe_options_value()),
         "jet_std::XMLRenderOptions" => Some(EncodingLite::xml_safe_render_options_value()),

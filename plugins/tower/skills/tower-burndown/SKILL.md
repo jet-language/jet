@@ -1,11 +1,12 @@
 ---
 name: tower-burndown
 description: >-
-  Orchestrate closing Tower cards in efficient 3–5-card batches with one-layer
-  implementers, one batch reviewer, one grouped verification, honest board
-  updates, and prompt worktree integration. Use when asked to burn down, close
-  out, work the backlog, or when invoked as /tower-burndown. Executes work;
-  ranking is tower-rank and prep is tower-prep.
+  Close Tower cards in 3–5-card batches of like items, with one batch reviewer,
+  blocking-only findings capped at two recheck rounds, targeted proof per
+  batch, and one full suite at end of scope. Implementation subagents only
+  when the invocation grants them (subagents N); otherwise inline. Use when
+  asked to burn down, close out, work the backlog, or when invoked as
+  /tower-burndown. Executes work; ranking is tower-rank and prep is tower-prep.
 ---
 
 # Tower — burn down cards
@@ -22,7 +23,7 @@ Orchestrate real closeout. Rank is **tower-rank**. Plans/ballots are
 /tower-burndown sidequests
 /tower-burndown epoch 3+sidequests
 /tower-burndown epoch 3 model gpt-5.6-sol
-/tower-burndown sidequests model grok max 5
+/tower-burndown sidequests model grok subagents 5
 ```
 
 | Arg | Meaning |
@@ -32,7 +33,13 @@ Orchestrate real closeout. Rank is **tower-rank**. Plans/ballots are
 | `sidequests` | Sidequest track only |
 | `epoch N+sidequests` | Named epoch plus sidequests |
 | `model <id>` | Pin every worker (and reviewer) to that model |
-| `max N` | Concurrent workers; default **3**, hard max **10** |
+| `subagents N` | Permit up to N concurrent implementation subagents; hard max **10** |
+
+**Subagent permission is invocation-granted.** The user says at invocation
+whether implementation subagents are allowed and how many. No grant means
+**zero implementation subagents**: the orchestrator implements every card
+inline. The **batch reviewer subagent is exempt** — one fresh-context reviewer
+per batch is always allowed and always used, granted or not.
 
 Also honor plain language: “burn down epoch 3”, “continue burndown”, “close
 the backlog”. Assume `workOrder` is already set unless the user also asks to
@@ -42,11 +49,12 @@ rank/prep or invokes those skills.
 
 **You are the orchestrator.** Keep context light.
 
-- Dispatch one-layer workers. **Workers must not spawn subagents.**
-- Do not implement large or multi-file cards yourself.
-- Exception: tiny mechanical work when spinning a worker would waste more
-  tokens than doing it inline (single-file typo, snapshot bless, log-only
-  board reconciliation). Still no stubs/facades.
+- With a subagent grant: dispatch one-layer workers up to the granted count.
+  **Workers must not spawn subagents.** Do not implement large or multi-file
+  cards yourself; tiny mechanical work stays inline (single-file typo,
+  snapshot bless, log-only board reconciliation).
+- Without a grant: implement every card yourself, inline, batch by batch.
+  Same quality bar; no stubs/facades either way.
 - Always keep at least one worker on the critical path (lowest ready
   `workOrder` / hardest blocker in scope).
 - Never hand-edit `plugins/tower/.tower/*.json`. Tower CLI only.
@@ -129,28 +137,53 @@ Strive for token efficiency without cutting substance:
 
 ## Batch loop
 
-Default to a declared batch of **3–5 cards in Tower work order**. Choose similar
-cards when that saves setup, compilation, review, or verification work.
+Default to a declared batch of **3–5 cards**. Compose the batch for shared
+cost, not just work order: like items, cards touching the same files or
+mechanism, cards proved by the same test target. One build, one review, one
+verification pass amortized across the batch. Never smear unrelated cards
+into one blob just to fill five slots.
 
-1. Name the 3–5 cards and their order before dispatch.
+1. Name the 3–5 cards and their order before any work.
 2. Implement every card in the batch before starting review.
-   - Parallelize only disjoint paths.
-   - Serialize shared mechanisms on stacked branches/worktrees in card order.
+   - With subagents: parallelize only disjoint paths; serialize shared
+     mechanisms in card order.
+   - Without subagents: implement sequentially inline, one shared tree.
    - A completed card may wait in `verify` for the batch reviewer. Do not start
      work beyond the declared batch while it waits.
-3. Spawn **one fresh reviewer agent for the whole batch**. That reviewer
-   reviews every card separately, then the composed stack. Do not spawn one
-   reviewer per card.
-4. Route findings to the original implementers. The same batch reviewer
-   rechecks material fixes and final conflict resolutions.
+3. Spawn **one fresh reviewer agent for the whole batch** (always permitted).
+   That reviewer reviews every card separately, then the composed stack. Do
+   not spawn one reviewer per card.
+4. Route blocking findings to the original implementer (or fix inline). The
+   same batch reviewer rechecks material fixes — see **Close discipline**.
 5. Integrate the reviewed cards in work order.
-6. Run **one grouped verification pass** for the batch. Do not repeat the same
-   targets in each worker, reviewer, and orchestrator.
+6. Run **one grouped targeted verification pass** for the batch. Do not repeat
+   the same targets in each worker, reviewer, and orchestrator.
 7. Verify criteria, close all proved cards, remove worktrees/branches, then
    declare the next 3–5-card batch.
 
 Use a smaller final batch only when fewer than three actionable cards remain or
-genuine owner gates prevent filling it. Never pad a batch with unrelated work.
+genuine owner gates prevent filling it.
+
+## Close discipline
+
+Closing cards is the product; an endless review cycle is a failure mode equal
+to shipping a stub.
+
+- **Blocking findings only hold a card open**: broken acceptance criteria,
+  invariant violations, correctness bugs, false-green tests. Style, taste,
+  refactor ideas, and "could also" never block close — apply them only if
+  trivial, otherwise drop them.
+- **Two recheck rounds maximum** per batch. Round 1: fix all blockers,
+  reviewer rechecks. Round 2: fix any remainder, reviewer rechecks the fixes
+  only. After round 2, the orchestrator settles remaining items itself: fix a
+  real blocker directly and close on targeted proof, or — only if it is
+  genuinely new scope beyond the card's criteria — file it as its own card and
+  close the original.
+- A card that meets its written exit criteria with passing targeted proof
+  **closes now**. Do not hold it for perfection, adjacent cleanups, or the
+  full suite.
+- If the same card bounces twice for the same root cause, stop cycling:
+  re-read the criteria, fix it yourself end to end, close it.
 
 ## Dispatch brief (every worker)
 
@@ -193,11 +226,11 @@ Put these constraints in every worker brief that runs compiler/test commands.
 
 ## Concurrency
 
-Safe parallelization is first-class. After the active sidequest is handled (or
-when scope is already an epoch/sidequest slice), run multiple concurrent card
-streams **only when write paths and tests are disjoint**.
+Concurrency exists only under a subagent grant. Without one, there is exactly
+one stream: the orchestrator, inline. With a grant, run multiple concurrent
+card streams **only when write paths and tests are disjoint**.
 
-- Default **3** live workers. User `max N` may raise up to **10**.
+- Live workers never exceed the granted `subagents N` (hard max **10**).
 - Record ownership before creating worktrees. Prefer in-repo worktrees
   (`.claude/worktrees/<name>`) for concurrent writers; one named close owner
   per stream. Never sibling folders beside the clone.
@@ -216,18 +249,21 @@ streams **only when write paths and tests are disjoint**.
 One fresh reviewer agent reviews **all cards in the 3–5-card batch**. The
 reviewer does not implement and does not rerun every implementer's tests.
 Review acceptance terms, diffs, invariants, false-green risk, generated files,
-and the composed stack. Fix findings; use the same reviewer for recheck.
+and the composed stack. Findings follow **Close discipline**: blocking-only,
+two recheck rounds.
 
 After review and integration, run the union of required proof **once**:
 
-- Prefer one grouped targeted command when it proves the batch.
-- At a 3–5-card or major-push boundary, run
-  `scripts/agent/jet-env full scripts/agent/verify-full.sh` once when required
-  by the host `verify` skill or project `AGENTS.md`.
+- Prefer one grouped targeted command when it proves the batch. Cards close
+  on that targeted proof.
+- **The full suite runs once at the end of the burndown scope**, after the
+  scoped cards are closed — not per batch, not per card. Run
+  `scripts/agent/jet-env full scripts/agent/verify-full.sh` once, then fix
+  what it surfaces: in-scope regressions get fixed immediately; unrelated
+  failures become their own cards and do not reopen proved closures.
 - Do not run targeted groups and then rerun the same groups through several
-  agents. Do not restart a broad suite “to be safe.” If it finds a concrete
-  failure, fix the cause and rerun only the failing group unless the host
-  verification policy explicitly requires another full pass.
+  agents. Do not restart a broad suite “to be safe.” If a run finds a concrete
+  failure, fix the cause and rerun only the failing group.
 
 Never trust worker greens alone. The batch reviewer checks evidence; the
 orchestrator checks final integration and grouped proof. Rebuild before `jet`

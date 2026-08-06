@@ -834,7 +834,22 @@ pub fn core_fixed_sig(
         ("core.encoding.json", "to_string" | "to_string_pretty") => {
             Some((vec![(read, json)], Some(Type::String)))
         }
-        ("core.encoding.json", "canonical" | "events") => {
+        // D-JSONCANON1=A: edition 2026 keeps the infallible prototype; 2027 is
+        // fallible RFC 8785 JCS with optional EncodingLimits.
+        ("core.encoding.json", "canonical") => {
+            if super::super::Edition::edition_at_least("2027") {
+                Some((
+                    vec![
+                        (read, json.clone()),
+                        (read, Type::Named("EncodingLimits".to_string())),
+                    ],
+                    Some(result_ty(Type::String, encoding_error_ty())),
+                ))
+            } else {
+                Some((vec![(read, json.clone())], Some(Type::String)))
+            }
+        }
+        ("core.encoding.json", "events") => {
             Some((vec![(read, json.clone())], Some(Type::String)))
         }
         ("core.encoding.json", "reader") => Some((
@@ -3202,6 +3217,14 @@ pub fn core_param_contract(module: &str, name: &str) -> Option<Vec<CoreParam>> {
             optional("limits", ENCODING_LIMITS_DEFAULT),
             optional("canonical", CoreDefault::Bool(false)),
         ]),
+        ("core.encoding.json", "canonical")
+            if super::super::Edition::edition_at_least("2027") =>
+        {
+            Some(vec![
+                required("data"),
+                optional("limits", ENCODING_LIMITS_DEFAULT),
+            ])
+        }
         ("core.encoding.jsonl" | "core.encoding.csv" | "core.encoding.cbor", "writer") => {
             Some(vec![
                 required("target"),
