@@ -836,7 +836,8 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
     }
     if needs_math {
         // Math and random helpers first — LinalgFns and the rest of the math
-        // surface call them.
+        // surface call them. MathLibPure is shared with JIT/comptime (I9).
+        out.push_str(include_str!("../Prelude/CoreLib/Top/MathLibPure.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/MathRandomFns.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/LinalgFns.rs"));
     }

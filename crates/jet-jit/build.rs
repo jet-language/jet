@@ -8,6 +8,19 @@ fn main() {
     write_reactive_rt(&manifest);
     write_time_rt(&manifest);
     write_regex_rt(&manifest);
+    write_math_rt(&manifest);
+}
+
+fn write_math_rt(manifest: &PathBuf) {
+    let src = manifest.join("../jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs");
+    println!("cargo:rerun-if-changed={}", src.display());
+    let raw = std::fs::read_to_string(&src).expect("read MathLibPure.rs");
+    // Pub crate-visible so CoreHost shims can call Prelude symbols by name.
+    let body = raw
+        .replace("\npub fn jet_std_math_", "\npub(crate) fn jet_std_math_")
+        .replace("\nfn jet_std_math_", "\npub(crate) fn jet_std_math_");
+    let out = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("math_rt.rs");
+    std::fs::write(&out, body).expect("write math_rt.rs");
 }
 
 fn write_reactive_rt(manifest: &PathBuf) {
