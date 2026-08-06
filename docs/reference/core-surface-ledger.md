@@ -95,7 +95,7 @@ while losses remain.
 | Container | Loss rows | Owner card | Card phase | State |
 | --- | ---: | --- | --- | --- |
 | core.files | 66 | #288 | building | live |
-| String | 34 | #1476 | verify | live |
+| String | 34 | #1580 | ready | live |
 | core.crypto | 17 | #1473 | ready | live |
 | core.archive | 16 | #1470 | ready | live |
 | Set | 16 | #1478 | verify | live |
@@ -122,7 +122,7 @@ while losses remain.
 | core.binary | 2 | #1481 | ready | live |
 | core.mem | 2 | #1481 | ready | live |
 | core.random | 2 | #1481 | ready | live |
-| BitSet | 1 | #1493 | planning | live |
+| BitSet | 1 | #1493 | ready | live |
 | core.encoding.json | 1 | #1481 | ready | live |
 | Deque | 1 | #1475 | done | closed |
 | PriorityQueue | 1 | #1481 | ready | live |
