@@ -1,8 +1,9 @@
 # Build and config: one plane of facts
 
-Status: proposal, 2026-08-06. Ballots D-CONF-* on the Tower card for this rethink.
-Companion proposals: type-system-v2 (carriers + knowledge), authority-one-model,
-concurrency (work is a value), corelib overhaul.
+Status: proposal v2, 2026-08-06. Ballots D-CONF-* on the Tower card for this
+rethink. Revised after owner feedback: `$` fact reads, manifest naming menu,
+the text-vs-function law, build entry discovery, the full scope ladder, and
+cross-references to the sibling rethinks.
 
 ## Executive summary
 
@@ -10,269 +11,281 @@ Jet has exactly one configuration fact a program can meet: `build.os`. It is
 typed, the compiler knows it, and `#Known if` folds on it with zero runtime
 cost. And it is caged: D-OSTARGET2 makes `build.os` legal in one dispatch
 position only, and D-CANVASSTATE1 hides `build.profile` from programs on
-purpose. The best mechanism on the whole plane exists — restricted to one fact
-in one position.
+purpose. The best mechanism on the whole plane exists — restricted to one
+fact in one position.
 
 Around that cage, the plane fragments. The manifest has two live parsers with
-two vocabularies: the compile path reads the old flat shape, and tooling reads
-the ratified role-typed shape (D-SHAPE5a/b). `Build.{ features: [...] }`
-reaches rustc as `--cfg` flags, but no Jet construct can read a feature, so
-the field configures nothing. `Build.{ env: {...} }` is a raw string table
-copied onto the compiler's process environment — a live security finding —
-and the program cannot read it either. A program cannot read its own
-`version:`; authors restate the string in source. jetos ratified a priority
-rule (`OptionValue`) for system options while D-MARK-SCOPE1 ratified
-nearest-wins for policy markers, and no rule at all covers config keys.
-Generic modules take Tier-0 value parameters that are configuration in all
-but name. Four ratified features share the word "profile".
+two vocabularies, and even the new one spells identity two ways. `Build.{
+features: [...] }` reaches rustc as `--cfg` flags no Jet code can read.
+`Build.{ env: {...} }` is a raw string table copied onto the compiler's
+process environment — a live security finding. A program cannot read its own
+`version:`. Facts live in text, but `fn build` can also set defaults, with no
+law saying which home owns what. Generic modules take Tier-0 value parameters
+that are configuration in all but name. Four ratified features share the word
+"profile".
 
 The one idea: **configuration is the program's knowledge about itself — one
-plane of typed compile-time facts with one contribution law.** This is the
-type-system-v2 model one level up. There, a type is a carrier plus knowledge
-about a value. Here, the build is a program plus knowledge about the program.
-The manifest declares facts. Profiles, the command line, and system config
-contribute values to facts. `#Known if` branches on facts and folds. One law
-turns many contributions into one effective value with one audit chain
-(`jet explain`).
+plane of typed compile-time facts with one contribution law.** The manifest
+declares facts. Profiles, the command line, and system config contribute
+values to facts. Programs read facts with the `$` sigil — the
+metaprogramming rethink's one splice, "read a compile-time value here" — so
+`$build.settings.tls` folds to a constant and `build` never becomes a
+reserved word. One law turns many contributions into one effective value
+with one audit chain (`jet explain`). One boundary law says what lives in
+manifest text (facts, for auditing) and what lives in `fn build` (actions,
+for computing).
 
 Why now. The landing zone is ratified and empty: D-ECO-DECL1 (the unified
 `Package` root) is stamped "not an executable spelling today," and the
 role-typed parser it needs is built but unwired from the compile path. The
-authority slate (D-AUTHORITY-*) is on the board asking for one manifest
-schema. Landing both on one fact plane builds the substrate once.
+type-v2 plane law (D-TYPE2-PLANE1) is now ratified: facts are registered,
+nameable, reflectable. The metaprogramming slate (D-META-REG1) asks for one
+registration table behind markers, planes, rights, and build facts. This
+proposal is that table's build column.
 
-What the ballots ask: adopt the model (one plane, one parser); open the cage —
-let programs read a real `build.*` record (this amends D-OSTARGET2's
-subject-only rule and D-CANVASSTATE1's hidden-profile rule, both named in the
-ballot); replace the `features:`/`env:` string tables with declared, typed,
-readable settings; ratify one contribution law from block scope to fleet
-scope (this amends the same-path-conflict rule of D-ECO-SLICENAME1, named in
-the ballot); unify settings with generic-module value parameters; add build
-provenance facts; give "profile" one meaning.
+Ten ballots: adopt the model (one plane, one parser); pick the manifest
+vocabulary (naming menu); read facts as `$build.*`; typed settings replace
+the `features:`/`env:` string tables; one contribution law across the full
+scope ladder (item → block → function → module → file → package → layers);
+the facts-in-text/actions-in-function boundary; build entry discovery (where
+`fn build` lives, how many, how the CLI finds one); settings and module
+value parameters as one substrate; provenance stamps; one meaning for
+"profile".
 
-What does not change: S26 stands — facts are values, never types, and never
-touch dispatch. No macros (D-METAMUTATE1). Secrets stay off the plane
-(E1265). Runtime data stays behind the `Env` effect. The D-ECO nouns and
-shape stay. The authority slate keeps ownership of what rights exist; this
-plane only gives rights the same scope and merge substrate as every other
-fact.
+What does not change: S26 stands — facts are values, never types. No macros
+(D-METAMUTATE1). Secrets stay off the plane (E1265). Runtime data stays
+behind the `Env` effect. The authority slate keeps ownership of what rights
+exist. The failure slate keeps ownership of how `fn build` errors report.
 
 ## Glossary
 
 - **Fact** — one named, typed thing the compiler knows about the program.
-  Example: `build.os`, `build.package.version`, `build.settings.tls`.
-- **Plane** — a family of knowledge with one algebra, as in type-system-v2.
-  This proposal adds the program's own plane.
-- **Scope (echelon)** — where a written value applies. Source scopes: block,
-  function, module, package. Contribution layers above the package
-  declaration: profile, workspace, environment, system, fleet, command line.
+  Example: `$build.os`, `$build.package.version`, `$build.settings.tls`.
+- **`$` (splice)** — the metaprogramming rethink's one sigil: read a
+  compile-time value here (its S4). Fact reads ride it.
+- **Plane** — a family of knowledge with one algebra (D-TYPE2-PLANE1,
+  ratified). This proposal adds the program's own plane.
+- **Scope** — where a written value applies in source: item, block,
+  function, module, file, package.
+- **Layer** — where a contribution comes from above the package
+  declaration: profile, workspace, environment, system, fleet, command
+  line.
 - **Contribution** — one written value for a fact at one scope or layer.
 - **Contribution law** — the rule that turns many contributions into one
   effective value, with `jet explain` showing the chain.
 - **Setting** — a config key the package declares: a name, a Tier-0 type,
-  and a default. (Spelled `settings:` to leave the ratified noun **Config**
-  — D-ECO-SLICENAME1's typed contribution value — untouched.)
-- **Moment** — when a fact's value is fixed: by the compiler (`build.os`),
-  by declaration (manifest), by contribution (profile, CLI, system), or by
-  computation (`fn build`, computed module fields).
-- **Output** — a typed projection of the package graph (D-ECO-OUTPUT-KINDS1).
+  and a default. (Spelled `settings:` so the ratified noun **Config** —
+  D-ECO-SLICENAME1's typed contribution value — keeps its meaning.)
+- **Action** — build work: probe a tool, run a step, generate code. Actions
+  live in `fn build`, never in manifest text.
+- **Output** — a typed projection of the package graph
+  (D-ECO-OUTPUT-KINDS1).
 
 ## The one idea
 
 **Configuration is the program's knowledge about itself: one plane of typed
 compile-time facts, declared once, merged by one contribution law, readable
-wherever the program can name them.**
+anywhere with `$`.**
 
-Type-system-v2 says a type is a carrier plus knowledge, and the knowledge
-erases before codegen. The build/config plane is the same model pointed at
-the whole program. Every fact has a name, a type, a scope, and a moment.
-Contributions merge by one law. The effective value is readable at comptime
-and erased into the built artifact. The beginner never writes any of this:
-`jet run` works with zero files, and the first fact a beginner meets is
-`build.package.version`, which is just there. The expert gets the full
-ledger: declare typed settings, contribute per profile or per fleet, compute
-contributions in `fn build`, and audit any effective value with
-`jet explain`.
+Type-system-v2 (ratified) says a type is a carrier plus knowledge, and the
+knowledge erases before codegen. The build/config plane is the same model
+pointed at the whole program. Every fact has a name, a type, a scope, and a
+moment. Contributions merge by one law. The effective value folds into the
+built artifact.
+
+The beginner never writes any of this: `jet run` works with zero files, and
+the first fact a beginner meets is `$build.package.version`, which is just
+there. The expert gets the full ledger: declare typed settings, contribute
+per profile or per fleet, compute contributions in `fn build`, and audit any
+effective value with `jet explain`.
 
 ## Evidence: the shadow systems
 
-Every row does the same underlying job — state a typed fact about the
-program — through a different mechanism.
-
 | # | Mechanism | Home | Defect |
 |---|-----------|------|--------|
-| 1 | `build.os` dispatch subject | `docs/spec/syntax-decisions.md:3423-3425` (D-OSTARGET2) | The right mechanism, caged: one fact, legal in one position; `build.profile` deliberately hidden (`docs/spec/spec.md:813`, D-CANVASSTATE1). |
+| 1 | `build.os` dispatch subject | `docs/spec/syntax-decisions.md:3423-3425` (D-OSTARGET2) | The right mechanism, caged: one fact, one position; `build.profile` deliberately hidden (`docs/spec/spec.md:813`, D-CANVASSTATE1). |
 | 2 | Legacy flat manifest parser (`payload:`, `effects:`, `build:`) | `crates/jet-pkg-model/src/PackageManifest/mod.rs` (1,645 lines); wired at `crates/jet-driver/src/Loader.rs:349` | What `jet build` reads from `package.jet` today. Pre-dates the ratified shape. |
-| 3 | Role-typed `Package` parser (`identity:`, `outputs:`, `policy: .{}`) | `crates/jet-pkg-model/src/Package.rs` (2,830 lines); D-SHAPE5a/b | Ratified shape; never called by the compile path. Tooling only. One file, two parsers. |
+| 3 | Role-typed `Package` parser (`identity:`, `outputs:`, `policy: .{}`) | `crates/jet-pkg-model/src/Package.rs` (2,830 lines); D-SHAPE5a/b | Ratified shape; never called by the compile path. Accepts identity two ways (`identity: .{ }` block and bare `name:`/`version:` — `examples/jetpack/epoch5/package.jet`). |
 | 4 | `policy:` governance namespace | both parsers (D-POLICY-WORD1=A) | The namespace is ratified; the defect is two spellings across two parsers for its keys. |
-| 5 | Build profiles (`Build.{ optimize: full }`) | `PackageManifest/mod.rs:55-108` (D-BUILDPROFILE1) | Sound — but "profile" also names rows 6, 7a, 7b. |
-| 6 | `TargetProfile` (board/triple identity) | `crates/jet-foundation/src/TargetProfile.rs:12`; driver use in `crates/jet-driver/src/Driver/mod.rs` | Internal only; its user surface is deliberately unbuilt ("until a follow-up surface ballot lands", `TargetProfile.rs:3-4`). Third meaning of "profile". |
-| 7 | Environment profiles (`profiles:` per D-ENV-PROFILE1; `--env-profile` and an env-namespace `--profile` per D-ENV-FACET1); package/user profiles | `crates/jet-foundation/src/Syntax/jetpack_config.rs:540-548`; `docs/proposals/ecosystem-shape.md:55` (D-JPK-PROFILE1) | Meanings three and four of "profile", across three flags. |
-| 8 | `Build.{ features: [...] }` | `crates/jet-foundation/src/Syntax/package_files.rs:508` → `Source/main.rs:267-269` | Reaches rustc as `--cfg`; zero Jet-side readers exist. Write-only config. |
-| 9 | `Build.{ env: {...} }` | `Source/main.rs:272-275` | Raw string table onto rustc's process env. Security finding (`docs/audits/security-deep-scan-2026-08-03-full.md:69724`). Unreadable by the program. |
-| 10 | Effect budget (`effects: { allow: [...] }`) | `crates/jet-pkg-model/src/EffectBudget.rs` (D-EFFBUDGET1) | Authority fact with its own schema; D-AUTHORITY-MANIFEST1 already targets it. |
-| 11 | `#Policy(...)` scope ladder | `crates/jet-foundation/src/Policy.rs` (D-MARK-SCOPE1) | The right source-scope law — applied only to memory facts. |
-| 12 | jetos module options (`OptionValue.{ value, priority }`) | `docs/plans/epoch-7/native-jetos.md:41-45` (D-JOS-PRIORITY-SURFACE2) | A second override rule, scoped to option contributions, beside row 11. |
-| 13 | Generic-module value params (`module retry<count: Int>`) | `docs/spec/spec.md:1867-1912` (D-GENMOD-VALUE1) | Tier-0 typed values configuring a module — configuration under another name. |
-| 14 | Computed module fields | `crates/jet-env-model/src/ModuleEval/Computed.rs` (D-MODCOMPUTE1) | Derived facts; pure dependency graph; no spec section of its own. |
-| 15 | `fn build(b: BuildContext)` | `crates/jet-comptime/src/Comptime/Build/` (D-BUILDENTRY1, built) | Computes plans and defaults; its results are not readable facts. |
-| 16 | CLI flags (`--profile`, `--release`, `--allow-*`) | `crates/jet-cli/src/CLI.rs` | Contributions with their own vocabulary, outside any declared record. |
-| 17 | Manifest `version:` | `identity:`/`payload:` block | The program cannot read it. Authors restate the string in source. |
-| 18 | `env.jet` dev shell | repo root `env.jet:1-6`; L0204 | Cannot express shell hooks; `flake.nix` stays a hand-synced shadow copy. |
-| 19 | GC ceilings (`MAX_OBJECTS` = 1,000,000 and friends) | `crates/jet-rt/src/__gc.rs:16-21` | Real limits with no declared fact and no dial. |
+| 5 | Build profiles (`Build.{ optimize: full }`) | `PackageManifest/mod.rs:55-108` (D-BUILDPROFILE1) | Sound — but "profile" also names rows 6, 7. |
+| 6 | `TargetProfile` (board/triple identity) | `crates/jet-foundation/src/TargetProfile.rs:12` | Internal; user surface deliberately unbuilt. Third meaning of "profile". |
+| 7 | Environment profiles (`profiles:` per D-ENV-PROFILE1; `--env-profile` and an env-namespace `--profile` per D-ENV-FACET1); package/user profiles (D-JPK-PROFILE1) | `crates/jet-foundation/src/Syntax/jetpack_config.rs:540-548`; `docs/proposals/ecosystem-shape.md:55` | Meanings three and four, across three flags. |
+| 8 | `Build.{ features: [...] }` | `package_files.rs:508` → `Source/main.rs:267-269` | Reaches rustc as `--cfg`; zero Jet-side readers. Write-only config. |
+| 9 | `Build.{ env: {...} }` | `Source/main.rs:272-275` | Raw string table onto rustc's process env. Security finding (`security-deep-scan-2026-08-03-full.md:69724`). |
+| 10 | Effect budget (`effects: { allow: [...] }`) | `crates/jet-pkg-model/src/EffectBudget.rs` (D-EFFBUDGET1) | Authority fact with its own schema; D-AUTHORITY-MANIFEST1 targets it. |
+| 11 | `#Policy(...)` scope ladder | `crates/jet-foundation/src/Policy.rs` (D-MARK-SCOPE1) | The right source-scope law — applied only to memory facts, on four of six scopes. |
+| 12 | jetos module options (`OptionValue.{ value, priority }`) | `docs/plans/epoch-7/native-jetos.md:41-45` (D-JOS-PRIORITY-SURFACE2) | A second override rule beside row 11. |
+| 13 | Generic-module value params (`module retry<count: Int>`) | `docs/spec/spec.md:1867-1912` (D-GENMOD-VALUE1) | Configuration under another name. |
+| 14 | Computed module fields | `crates/jet-env-model/src/ModuleEval/Computed.rs` (D-MODCOMPUTE1) | Derived facts; no spec section of its own. |
+| 15 | `fn build(b: BuildContext)` + BuildContext defaults | `crates/jet-comptime/src/Comptime/Build/` (D-BUILDENTRY1, built; D-BUILDCTX-FLAGS1) | Actions and fact-setting share one bag; no law says which home owns what. |
+| 16 | CLI flags (`--profile`, `--release`, `--allow-*`) | `crates/jet-cli/src/CLI.rs` | Contributions with their own vocabulary. |
+| 17 | Manifest `version:` | `identity:`/`payload:` block | The program cannot read it; authors restate the string. |
+| 18 | `env.jet` dev shell | repo root `env.jet:1-6`; L0204 | Cannot express shell hooks; `flake.nix` stays a shadow copy. |
+| 19 | GC ceilings (`MAX_OBJECTS` etc.) | `crates/jet-rt/src/__gc.rs:16-21` | Real limits with no declared fact and no dial. |
 
 ## The model
 
 ### Axes
 
-Three axes place every row of the table.
-
-- **Fact** — what is known. Identity (`name`, `version`), machine (`os`,
-  `arch`, board), profile, declared settings, policy keys, authority rights,
-  provenance (git commit, toolchain).
-- **Scope** — where a written value applies. Source scopes: block →
-  function → module → package (the ratified D-MARK-SCOPE1 ladder).
-  Contribution layers above the package declaration: profile → workspace →
-  environment → system → fleet → command line.
-- **Moment** — when the value is fixed. Fixed by the compiler (`build.os`),
-  declared in source (manifest field), contributed (profile, CLI, system
-  config), or computed (`fn build`, computed module fields). Runtime data is
-  off the plane by type: an environment variable read is `core.env.get`
-  behind the `Env` effect, and comptime denies it (E0951, E1265).
+- **Fact** — what is known. Identity, machine, profile, settings, policy
+  keys, authority rights, provenance.
+- **Scope** — where a written value applies in source. The full ladder:
+  item → block → function → module → file → package. D-MARK-SCOPE1 ratified
+  four rungs (block, function, module, package); this proposal adds **item**
+  (one declaration, the marker placement unit) and **file** (the `#PubFile`
+  precedent) as a named extension in D-CONF-MERGE1.
+- **Layer** — where a contribution comes from, above the package
+  declaration: profile → workspace → environment → system → fleet → command
+  line.
+- **Moment** — when the value is fixed. Fixed by the compiler (`$build.os`),
+  declared (manifest), contributed (profile, CLI, system), or computed
+  (`fn build`, computed module fields). Runtime data is off the plane by
+  type: `core.env.get` behind the `Env` effect; comptime denies it (E0951,
+  E1265).
 
 ### The contribution law
 
 **One fact, one type, one effective value, one visible chain.**
 
-The law has two halves, one per axis direction, plus one audited exception:
+- **In source scopes, the nearest scope wins.** An item beats its block, a
+  block its function, a function its module, a module its file, a file its
+  package. D-MARK-SCOPE1's rule, extended to all facts and all six rungs.
+- **Across layers, the most explicit writer wins.** A profile beats the
+  declared default; the environment beats the profile; a flag typed today
+  beats every standing file. Two writers at the same layer with different
+  values are an error naming both sources — the ratified Config composition
+  rule ("unequal scalar facts conflict", ecosystem-shape, D-ECO-COMPOSE2
+  escape) kept at each layer.
+- **`.Force` is the audited exception.** At system and fleet layers, the
+  ratified `OptionValue` override (D-JOS-PRIORITY-SURFACE2) pins a value
+  against later layers, including the command line, and `jet explain` names
+  the pin.
 
-- **In source scopes, the nearest scope wins.** A block beats its function,
-  a function beats its module, a module beats its package. This is
-  D-MARK-SCOPE1, word for word, extended from memory-policy keys to all
-  facts.
-- **Across contribution layers, the most explicit writer wins.** A profile
-  beats the declaration's default; the environment beats the profile; a flag
-  typed on the command line today beats every standing file. Two writers at
-  the same layer with different values are an error naming both sources —
-  the ratified Config composition rule ("unequal scalar facts conflict",
-  ecosystem-shape, with D-ECO-COMPOSE2 as the expert escape) kept at each
-  layer.
-- **`.Force` is the audited exception.** At system and fleet layers, an
-  expert override (`OptionValue.{ value, priority }`, the ratified
-  D-JOS-PRIORITY-SURFACE2 surface) pins a value against later layers,
-  including the command line. That is its job: a fleet operator pins a
-  canary, and `jet explain` names the pin.
+Safety facts only tighten, at every scope and layer. No contribution comes
+from the ambient environment. `jet explain <fact>` prints the whole chain.
 
-Safety facts only tighten, at every scope and layer. No contribution may
-come from the ambient environment — every contribution has a written home.
-`jet explain <fact>` prints the whole chain.
+### The boundary law (facts in text, actions in the function)
 
-Amendment note: introducing ranked layers (declaration < profile < ... <
-CLI) amends the Config composition conflict rule (the ecosystem-shape law
-that carries D-ECO-COMPOSE2's escape) for *setting* contributions across
-layers. Same-layer conflicts still error with provenance. The noun Config
-(D-ECO-SLICENAME1) is untouched. D-CONF-MERGE1 names this amendment; the
-owner decides there.
+**Manifest text declares facts. `fn build` performs actions. A computed
+contribution is a fact too — recorded, locked, and visible in the chain.**
 
-Ratified rules that become theorems of this law:
+The split exists for auditing: a reviewer reads the manifest and knows what
+the package *is* — its identity, settings, policy, dependencies — without
+executing anything. `fn build` holds what the build *does*: probes, actions,
+generated code, and computed contributions to declared facts. `fn build` may
+contribute a value to a declared fact (`b.contribute(...)`, recorded in
+`.jet/lock` and named by `jet explain`); it may never mint an undeclared
+fact, so the manifest stays the complete index of what is configurable.
+D-BUILDCTX-FLAGS1 (BuildContext default-setting, ratified) is scoped by this
+law and named in D-CONF-SPLIT1. Honest pushback, argued in the ballot: a
+flat "details in text only" rule fails, because some facts are only knowable
+by computation — a probed toolchain, a `find()` member list. The law keeps
+those as *computed contributions to declared facts* instead of banning them.
 
-- D-MARK-SCOPE1: "nearest declaration wins, unmentioned keys inherit,
-  `jet explain` reports the effective value plus every declaration it
-  overrode" — the source-scope half.
+### Ratified rules that become theorems
+
+- D-MARK-SCOPE1 — the source-scope half of the contribution law.
 - Package policy tighten-only ("can forbid unsafe code but can never
   authorize an unsafe operation") — the safety clause.
-- D-BUILDPROFILE1's "profiles are selected by explicit flag, never by
-  ambient environment" — the no-ambient clause.
-- D-JOS-PRIORITY-SURFACE2 (plain values for ordinary contributions; expert
-  overrides carry `.Default`/`.Force`/`.Priority(n)`) — the audited
-  exception, kept with its exact spelling.
-- E0951/E1265 (comptime purity; secrets denied at comptime) — the moment
-  boundary: runtime data cannot sneak onto the plane.
+- D-BUILDPROFILE1's "selected by explicit flag, never by ambient
+  environment" — the no-ambient clause.
+- D-JOS-PRIORITY-SURFACE2 — the audited exception, kept with its spelling.
+- E0951/E1265 — the moment boundary: runtime data cannot sneak onto the
+  plane.
+- D-MODCOMPUTE1 (computed module fields: pure, dependency-ordered, no
+  ambient authority) — the computed-contribution rules, already ratified.
 
 ### The connections
 
-- A setting and `build.os` are the same thing: a fact. Conditional
-  compilation on a setting needs no new construct — `#Known if` already
-  folds on closed values (D-OSTARGET2's mechanism, freed from its cage).
+- A setting and `$build.os` are the same thing: a fact. Conditional
+  compilation needs no new construct — `#Known if` folds on closed values.
 - A build profile and a `#Policy` scope are the same thing: a named bundle
-  of contributions at one home.
-- A package is a configured module. Generic-module value parameters
-  (D-GENMOD-VALUE1) and settings are one substrate: Tier-0 typed values
-  that specialize code before it runs.
+  of contributions.
+- A package is a configured module: value parameters and settings are one
+  Tier-0 substrate.
 - jetos option priorities and the marker scope ladder are two halves of one
-  contribution law, not two laws.
-- The manifest is Jet source, so config validation is type checking. CUE
-  proved this shape at industry scale: schema and value are one kind of
-  thing, and merging is checking. Jet gets it free because `package.jet` is
-  already typed source.
-- Elixir's compile-time/runtime config boundary — their unsolved newcomer
-  trap — is already a type in Jet: on the plane means comptime fact; off
-  the plane means `core.env` behind the `Env` effect. The boundary is an
-  effect, not a folder name.
+  contribution law.
+- The manifest is Jet source, so config validation is type checking (CUE's
+  lattice lesson, free of charge).
+- The compile-time/runtime config boundary is an effect, not a folder name
+  (the trap Elixir documents and cannot check).
+- Fact reads and splices are one sigil: `$build.settings.tls` in a source
+  file and `$tname` in a derive body are the same act — read a compile-time
+  value here (metaprogramming S4).
+
+## Relation to the sibling rethinks
+
+- **Metaprogramming (one compile-time program, #1508).** Three shared
+  seams, aligned by construction. (1) `$` is the one compile-time read;
+  fact reads adopt it (D-CONF-READ1 option A), so the build plane needs no
+  reserved word and no second spelling. (2) D-META-REG1 proposes one
+  registration table behind markers, planes, rights, and build facts; this
+  proposal's fact registry is that table's build column — if D-META-REG1 is
+  adopted, they are one table, not two. (3) `b.generate` writing real code
+  (its S6) is the action half of the boundary law.
+- **Type-system-v2 (ratified).** D-TYPE2-PLANE1 is now law: every plane
+  registered, nameable, reflectable, prelude-visible. The build plane
+  follows it exactly; facts erase like every other knowledge plane.
+- **Failure (one report, three routes, #1507).** `fn build` returns
+  `BuildPlan ?` — build failures are reports on the value route. Build
+  stops and exit codes ride D-FAIL-EXIT1's law. Nothing here invents an
+  error shape.
+- **Authority (one model, #1500).** Rights are one fact family on this
+  plane; D-AUTHORITY-MANIFEST1 owns the schema of what a package may do.
+  This plane supplies scope, merge, and explain.
+- **Concurrency (work is a value, #1505).** Schedule data (`Every(5min)`)
+  is typed values; nothing on this plane conflicts.
+- **Corelib overhaul (#1495).** D-CORE-DOCTRINE1's API rules (typed enums
+  over strings, zero-config defaults, named magic) are the yardstick the
+  naming ballot applies to the manifest vocabulary.
 
 ## The surface
 
-The heart of the proposal. Each item names its ballot and its status:
-ratified, amended, or new.
+### 1. One manifest, one parser (D-CONF-PLANE1)
 
-### 1. One manifest, one parser (D-CONF-PLANE1 — implements D-SHAPE5a/b and D-ECO-DECL1; deletes the legacy parser)
+Unchanged in substance from v1: the role-typed shape becomes the only
+vocabulary, the legacy parser (1,645 lines) is deleted, and a wrong field is
+a normal manifest diagnostic (E1206). Implements D-SHAPE5a/b and D-ECO-DECL1
+on the compile path.
 
-Today one file, `package.jet`, is read by two parsers. The compile path
-(`Loader.rs:349`) reads the legacy flat vocabulary. Tooling, Canvas, and
-migration read the ratified role-typed vocabulary. Fields from the ratified
-shape that the legacy parser has no vocabulary for — `outputs:`,
-`defaults:`, `members:` — never reach the build.
+### 2. The manifest vocabulary (D-CONF-NAME1 — new ballot, naming menu)
 
-Before — the flat vocabulary the compile path understands:
-
-```jet
-// package.jet — legacy vocabulary (what jet build reads)
-payload: { name: "aviary", version: "0.4.1", edition: "2026" }
-packages: { aviary: library }
-effects: { allow: [Net, FS] }
-build: {
-    release: Build.{ optimize: full },
-}
-```
-
-After — the ratified role-typed shape becomes the only shape (`proposed`
-for the compile path; the shape itself is ratified):
+The field names are judged as a coherent set, by the corelib doctrine, not
+inherited. Today three identity spellings coexist (`payload: { }`,
+`identity: .{ }`, bare `name:`/`version:`). The recommended scheme (`bare
+identity, ratified nouns`) — every line `proposed`:
 
 ```jet
 // package.jet
-identity: .{ name: "aviary", version: "0.4.1" }
-outputs: .{
-    app: .Executable.{ entry: run }
-}
-settings: .{ tls: Bool = true }            // proposed (D-CONF-KEY1)
-build: .{ release: .{ optimize: .Full } }  // proposed spelling; shipped form is Build.{ optimize: full }
+name: "birdfeed"
+version: "1.2.0"
+deps: .{ httpkit: "^2" }
+outputs: .{ serve: .Service.{ entry: run } }
+settings: .{ metrics: Bool = false }
+build: .{ release: .{ optimize: full, settings: .{ metrics: true } } }
+policy: .{ no_alloc: false }
+members: find("./packages")
 ```
 
-Spelling note: `docs/proposals/ecosystem-shape.md` (S4, proposed, not
-ratified) sketches the opposite assignment — optimize bundles under
-`profiles:` and `build:` reserved for execution knobs. D-CONF-KEY1 and
-D-CONF-PLANE1 settle the home; `profiles:` stays off the table either way
-because D-ENV-PROFILE1 owns it.
+Bare `name:`/`version:` kill the wrapper ceremony (the epoch5 example
+already writes them). The ballot's menu carries three genuine alternatives:
+keep the `identity: .{ }` wrapper; the one-literal `Package.{ ... }` root
+(implementing D-ECO-DECL1's normative-future spelling now); a verb scheme
+(`needs:`/`makes:`). Each option shows this same complete manifest.
 
-The legacy parser (1,645 lines) is deleted. One vocabulary, one schema —
-and the schema is a Jet record, so a wrong field is a normal manifest
-diagnostic (E1206). Authority fields (`effects:`, grants) keep their
-current law until D-AUTHORITY-MANIFEST1 lands its schema on this plane.
+### 3. Open the cage with `$` (D-CONF-READ1 — revised; amends D-OSTARGET2 and D-CANVASSTATE1)
 
-### 2. Open the cage: programs read their own facts (D-CONF-READ1 — new; amends D-OSTARGET2 and D-CANVASSTATE1)
-
-Today `build.os` is legal only as the subject of one dispatch form, `build`
-is otherwise an ordinary identifier (E0107 at runtime), and `build.profile`
-is ratified as "not a user-typeable comptime value" (`spec.md:813`,
-D-CANVASSTATE1). This ballot proposes the amendment by name: `build.*`
-becomes a real closed comptime record, readable in value position.
+Fact reads ride the metaprogramming splice: **`$build.*` — read a
+compile-time value here.** This replaces v1's bare `build.*` record and
+deletes its worst cost: `build` stays an ordinary identifier, because the
+`$` sigil carries the compile-time meaning. One spelling covers compiler
+facts, package identity, settings, and stamps.
 
 Before:
 
 ```jet
-// version.jet — the string is restated by hand on every release
 fn run() {
-    print("aviary 0.4.1")
+    print("birdfeed 0.3.0")        // restated by hand, drifts every release
 }
 ```
 
@@ -280,30 +293,21 @@ After (`proposed`):
 
 ```jet
 fn run() {
-    print("aviary {build.package.version}")
+    print("birdfeed {$build.package.version}")
 }
 ```
 
-The record covers `build.package.name`, `build.package.version`,
-`build.os`, `build.target.arch`, `build.profile`, `build.settings.<key>`,
-and `build.stamp.*` (D-CONF-STAMP1). Every fact is a comptime value; reads
-fold to constants; nothing survives to runtime. For a bare script with no
-manifest, identity facts fall back to the file name and `0.0.0`.
+The record: `$build.package.name`, `$build.package.version`, `$build.os`,
+`$build.target.arch`, `$build.profile`, `$build.settings.<key>`,
+`$build.stamp.*`. Reads fold to constants. Bare scripts read fallback
+identity (file name, `0.0.0`). The ratified dispatch subject respells
+`#Known if $build.os == { ... }` — named in the amendment. If the owner
+declines the metaprogramming `$` law, the ballot's fallback option is the
+reserved bare namespace.
 
-### 3. Declared settings replace the string tables (D-CONF-KEY1 — new; amends D-BUILDPROFILE1 by deleting `features:` and `env:`)
+### 4. Declared settings replace the string tables (D-CONF-KEY1)
 
-Before — write-only strings:
-
-```jet
-// package.jet
-build: {
-    release: Build.{ features: ["tls"], env: { "API_BASE": "https://api.example.com" } },
-}
-// No Jet code can read "tls" or API_BASE. The env table goes to
-// rustc's process environment instead — the audited injection hole.
-```
-
-After (`proposed`):
+As v1, with `$` spelling (`proposed`):
 
 ```jet
 // package.jet
@@ -315,252 +319,160 @@ build: .{ release: .{ settings: .{ tls: true } } }
 ```
 
 ```jet
-// source — branch folds at compile time, dead arm is not compiled
-#Known if build.settings.tls == {
+#Known if $build.settings.tls == {
     true -> use core.crypto.tls
     else -> {}
 }
 
-fn base_url() => String { return build.settings.api_base }
+fn base_url() => String { return $build.settings.api_base }
 ```
 
 ```sh
-jet build --set tls=false            # proposed: CLI contribution
-jet explain build.settings.tls       # proposed: CLI > profile > default
+jet build --set tls=false
+jet explain build.settings.tls     # chain: CLI > profile > default
 ```
 
-`Build.{ features }` and `Build.{ env }` are deleted. The security finding
-closes because no user string reaches the compiler's environment. The block
-is spelled `settings:`, not `config:`, so the ratified noun **Config**
-(D-ECO-SLICENAME1) and the `configs:` field keep their exact meaning.
+`Build.{ features }` and `Build.{ env }` are deleted; the audited injection
+hole closes.
 
-### 4. One contribution law from block to fleet (D-CONF-MERGE1 — extends D-MARK-SCOPE1; amends the Config composition conflict rule; keeps the D-JOS surface)
+### 5. One contribution law, full ladder (D-CONF-MERGE1 — revised)
 
-Before: three states. Nearest-wins for memory policy (D-MARK-SCOPE1).
-`OptionValue` priorities for jetos option contributions
-(D-JOS-PRIORITY-SURFACE2). Hard conflict with provenance for unequal
-same-path Config facts (the composition law, D-ECO-COMPOSE2 escape) — and
-no rule for settings.
+The source ladder gains its missing rungs: **item** (one declaration — where
+a marker already sits) and **file** (`#PubFile` precedent). Six rungs, then
+six layers, one law, one `jet explain` chain. Amendments unchanged from v1.
 
-After (`proposed`): the one law of the model — nearest wins in source
-scopes, most-explicit wins across layers, same-layer conflicts error with
-provenance, `.Force` pins from system/fleet, and `jet explain` prints every
-chain.
+### 6. Facts in text, actions in the function (D-CONF-SPLIT1 — new ballot)
 
-### 5. Settings and generic-module value params: one substrate (D-CONF-MODULE1 — unifies with D-GENMOD-VALUE1; amendments named in the ballot)
+The boundary law above, as an owner decision with real alternatives:
+everything-in-text (Cargo's failure: `build.rs` grew anyway),
+everything-in-function (Zig's failure: opaque to tools), or the split with
+recorded computed contributions (recommended). Scopes D-BUILDCTX-FLAGS1 by
+name.
 
-Today these are separate features over the identical Tier-0 value set:
+### 7. Build entry discovery (D-CONF-ENTRY1 — new ballot)
 
-```jet
-module cache<slots: Int> { pub fn capacity() => Int { return slots * 64 } }
-module small = cache<4>
-```
+Where `fn build` lives, how many exist, and how the CLI finds one. The
+recommended rule, mirroring `fn run`:
 
-After (`proposed`): one value substrate, one evaluator, one diagnostic
-family — and facts become legal value arguments:
+- One `fn build` per package, in any of the package's files; the compiler
+  discovers it the way it discovers `fn run`.
+- Two candidates in one package is a compile error naming both sites.
+- A workspace runs member builds in dependency order, root last — the
+  ratified D-BUILDENTRY1 order, kept.
+- `jet build <name>` resolves the package by name through the members
+  graph and runs its build. No pointer field is required; an explicit
+  `entry:` on an Output stays available for the rare override.
+- No `fn build` at all means the batteries pipeline — the beginner default.
 
-```jet
-module tuned = cache<build.settings.cache_slots>   // proposed
-```
+### 8. Settings and module value parameters: one substrate (D-CONF-MODULE1 — clarified)
 
-The parameter-list grammar of D-GENMOD-VALUE1 (no defaults, no named
-arguments) is unchanged; defaults and names live at the settings
-declaration only. Two touched rules are named in the ballot: the
-closed-expression rule (facts become legal arguments) and the
-`[T#capacity]` layout carve-out (a fact-fed `Int` may size a fixed array,
-exactly as a different literal instantiation does today).
-
-### 6. Provenance facts (D-CONF-STAMP1 — new; adds one Tier-1 locked input, amendment named in the ballot)
+What this means, plainly: Jet has two features that accept the same five
+value types (Bool, Int, Char, String, fieldless enum), evaluate them with
+the same purity rules, and reject the same expressions. One is module value
+parameters. The other is settings. Today they are checked by two code paths
+and cannot mix. The ballot makes them one substrate with one visible gain —
+a fact becomes a legal value argument:
 
 ```jet
-// proposed
-fn run() {
-    print("built from {build.stamp.git ?? "no-vcs"} with jet {build.stamp.toolchain}")
+// ratified today
+module cache<slots: Int> {
+    pub fn capacity() => Int { return slots * 64 }
 }
+module small = cache<4>              // a literal works
+
+// proposed — the same instantiation, fed by a fact
+module tuned = cache<$build.settings.cache_slots>
 ```
 
-`build.stamp.git` is a `String?` fact: the commit hash, `-dirty` suffixed
-for an unclean tree, absent (`None`) outside a repository. Reading it is a Tier-1
-locked input under D-CTEFFECT1 — recorded in `.jet/lock` like `find`
-results (D-CTFIND1/2), so `--locked` builds reprint the same stamp. A
-timestamp fact is deliberately absent: wall-clock time is not a fact about
-the source, and the lock cannot pin it.
+Nothing on the module page changes. Two D-GENMOD-VALUE1 clauses are amended
+by name (closed-expression rule; `[T#capacity]` layout carve-out). The
+metaprogramming proposal's S5 (instances expose members by name) composes:
+`tuned.Buffer`, never a mangled name.
 
-### 7. One meaning for "profile" (D-CONF-WORD1 — rename)
+### 9. Provenance facts (D-CONF-STAMP1)
 
-Four ratified features share the word: build optimize bundles
-(D-BUILDPROFILE1), the board identity `TargetProfile` (surface deliberately
-unbuilt), environment profiles (D-ENV-PROFILE1), and package/user profiles
-(D-JPK-PROFILE1). The ballot proposes: **profile** keeps one meaning — the
-optimize bundle behind `--profile`/`--release` — and the other three are
-renamed, each with its amendment named. The board identity is a machine
-description and joins the machine vocabulary (`--target`) before its
-surface ships, so the rename costs nothing.
+As v1: `$build.stamp.git` (`String?`, `-dirty` suffix, absent outside a
+repository), `$build.stamp.toolchain`; Tier-1 locked inputs under
+D-CTEFFECT1; no timestamp, ever.
 
-## What it looks like
+### 10. One meaning for "profile" (D-CONF-WORD1)
 
-### Beginner: zero files, then the first fact
+As v1: profile = optimize bundle; the board identity joins the machine
+vocabulary (`--target`); environment profiles become presets (D-ENV-PROFILE1
++ D-ENV-FACET1 amendments); package/user profiles take the generation word.
 
-```jet
-// hello.jet — no manifest anywhere
-fn run() {
-    print("hello")
-}
-```
+## Beginner magic, expert control — the rungs
 
-`jet run hello.jet` works today and keeps working. The first fact arrives
-with zero ceremony:
+Every rung keeps the rung below untouched. Nothing demands a manifest until
+a fact is written.
 
-```jet
-fn run() {
-    print("hello from {build.package.name} {build.package.version}")   // proposed
-}
-```
+| Rung | You write | You get |
+|------|-----------|---------|
+| Script | one `.jet` file, no manifest | `jet run` works; `$build.package.name` reads the file name |
+| First fact | `{$build.package.version}` in a print | the version, folded, no manifest required (fallback `0.0.0`) |
+| Package | `name:`, `version:` in `package.jet` | real identity; `jet build <name>` finds it |
+| Settings | `settings: .{ tls: Bool = true }` | typed switches; `--set`, profiles, `jet explain` |
+| Actions | `fn build(b) => BuildPlan ?` | probes, steps, generated code, computed contributions |
+| Fleet | option contributions with `.Force` | pinned facts across machines, one audit chain |
 
-For a bare script the identity facts fall back to the file name and
-`0.0.0`. No manifest is demanded.
-
-### The rich middle: a service with a setting and two profiles
-
-```jet
-// package.jet
-identity: .{ name: "birdfeed", version: "1.2.0" }
-outputs: .{ serve: .Service.{ entry: run } }
-settings: .{ metrics: Bool = false }                  // proposed
-build: .{
-    release: .{ optimize: .Full, settings: .{ metrics: true } },   // proposed
-}
-```
-
-```jet
-// main.jet
-#Known if build.settings.metrics == {                  // proposed
-    true -> use core.metrics
-    else -> {}
-}
-
-fn run() =[Net, Time, Log]=> {
-    #Known if build.settings.metrics == {              // proposed
-        true -> metrics.serve(port: 9100)
-        else -> {}
-    }
-    serve(port: 8080)
-}
-```
-
-```sh
-jet run                          # metrics off — the declared default
-jet build --release              # metrics on — the profile contributes true
-jet build --release --set metrics=false   # proposed: CLI wins — the most explicit writer
-jet explain build.settings.metrics        # proposed: the chain: CLI > profile > default
-```
-
-### Expert: computed contribution, pinned fleet, audited chain
-
-```jet
-// package.jet
-identity: .{ name: "relay", version: "3.0.0" }
-settings: .{ shard_count: Int = 4 }                    // proposed
-
-fn build(b: BuildContext) => BuildPlan ? {
-    // computed contribution: shard count follows the machine
-    #Known if build.target.arch == {                   // proposed read
-        .Arm64 -> b.contribute(shard_count, 8)?        // proposed API
-        else -> {}
-    }
-    return b.plan()
-}
-```
-
-```jet
-// fleet module (system scope) — option contribution, ratified D-JOS surface;
-// binding a package setting into it is proposed
-options: [
-    relay.settings.shard_count: OptionValue.{ value: 16, priority: .Force },
-]
-```
-
-```sh
-jet explain relay.settings.shard_count    # proposed
-# fleet prod        16   (.Force pin)       <- effective
-# fn build          8    (computed, arm64)
-# package.jet       4    (declaration)
-```
-
-Every value in the chain is typed, scoped, and written down. Nothing is
-ambient.
+Expert control at every rung: every fact is registered (nameable,
+reflectable per D-TYPE2-PLANE1), every contribution has a written home,
+every effective value answers `jet explain`, and every escape (`#Impure`,
+Tier-2 grants, `.Force`) is spelled and audited.
 
 ## What this unlocks
 
-- **Ordinary programs** print their own version and build provenance
-  without restating strings.
-- **Libraries** ship one package with a `tls`-style switch that downstream
-  profiles set — the Cargo-features use case — as a readable, typed
-  setting instead of a write-only string, with no cross-graph leakage
-  because contributions have homes and same-layer conflicts error.
-- **Embedded and firmware** declare board machines and tune real limits:
-  the GC ceilings in `crates/jet-rt/src/__gc.rs:16-21` can become declared
-  policy facts with a dial instead of hard faults.
-- **Simulation and science** parameterize a whole program the way
-  `module retry<count: Int>` parameterizes a module — same substrate, same
-  proofs, zero runtime cost.
-- **Fleets** pin one fact across a thousand machines with `.Force` and
-  audit it with one `jet explain` — the NixOS story with a typed chain.
-- **Security review** reads one ledger. The manifest injection hole closes
-  with the `env:` table; the authority slate lands its schema on the same
-  plane and inherits scope, merge, and explain for free.
+Unchanged from v1: self-describing programs; one-package libraries with
+typed switches; embedded boards with real dials (the GC ceilings gain a
+declared home); parameterized simulation; fleet pins with one audit chain;
+one security ledger, with the injection hole closed.
 
 ## What stays
 
-- **S26.** Comptime computes values only. A fact never creates,
-  parameterizes, or selects a type, and never affects dispatch. `#Known if`
-  folding on closed values is the ratified dispatch-free mechanism. The one
-  ratified value-to-layout carve-out (`[T#capacity]`, D-FIXARR1) is
-  extended to facts only if D-CONF-MODULE1 is adopted, and is named there.
+- **S26** — facts are values, never types; `#Known if` folding is the
+  dispatch-free mechanism; the `[T#capacity]` extension is named in
+  D-CONF-MODULE1.
 - **No macros, no AST mutation** (D-METAMUTATE1, D-METADEPTH1/2).
-- **Comptime I/O stays closed**: `embed_file`/`embed_bytes` (D-CTIO1) and
-  `find` (D-CTFIND1/2, Tier 1). D-CONF-STAMP1 proposes exactly one more
-  Tier-1 locked input and names the amendment.
-- **Secrets stay denied at comptime** (E1265). Runtime data lives behind
-  the `Env` effect — the plane's hard boundary.
-- **The D-ECO vocabulary and shape** (Package, Config, Output, flat
-  members, `jet split`/`jet fold`, `jet deploy`) — this proposal lands on
-  that substrate. The noun Config keeps its ratified meaning; the new block
-  is spelled `settings:`.
-- **`fn build(b: BuildContext)`** and the built action/target graph
-  (D-BUILDENTRY1 family) — unchanged; it gains the power to contribute
-  facts.
+- **Comptime I/O closed**: `embed_file`/`embed_bytes` (D-CTIO1), `find`
+  (D-CTFIND1/2); stamps add exactly one Tier-1 input, named in
+  D-CONF-STAMP1.
+- **Secrets denied at comptime** (E1265); runtime data behind `Env`.
+- **The D-ECO vocabulary and shape**; the noun Config keeps its ratified
+  meaning.
+- **`fn build` and the built action graph** (D-BUILDENTRY1 family), now
+  with a law for what belongs inside it.
 - **`policy:`** stays the one governance namespace (D-POLICY-WORD1).
-- **Authority ownership.** What rights exist, the rights tree, and gates
-  belong to D-AUTHORITY-*. This plane supplies scope + merge + explain.
-- **No-ambient rule.** Same flags plus same source means the same binary.
+- **Authority ownership** (D-AUTHORITY-*), **failure ownership**
+  (D-FAIL-*).
+- **No-ambient rule**: same flags plus same source means the same binary.
 
 ## Decisions for the owner
 
 | Ballot | Question | Recommends |
 |--------|----------|------------|
-| D-CONF-PLANE1 | Adopt the model: one fact plane, one contribution law, one manifest parser (delete the legacy parser) | adopt |
-| D-CONF-READ1 | Open the cage: `build.*` becomes a readable record (amends D-OSTARGET2, D-CANVASSTATE1) | adopt |
-| D-CONF-KEY1 | Declared typed settings; delete `features:`/`env:` string tables (amends D-BUILDPROFILE1) | adopt |
-| D-CONF-MERGE1 | One contribution law block→fleet (amends the Config composition conflict rule; keeps D-JOS surface) | adopt |
-| D-CONF-MODULE1 | Settings and generic-module value params: one substrate (amends two D-GENMOD-VALUE1 clauses, named) | adopt |
-| D-CONF-STAMP1 | Provenance facts (`build.stamp.*`), Tier-1 lock-recorded; no timestamp | adopt |
-| D-CONF-WORD1 | "Profile" = optimize bundle only; the other three meanings are renamed | adopt |
+| D-CONF-PLANE1 | Adopt the model: one fact plane, one parser | adopt |
+| D-CONF-NAME1 | The manifest vocabulary (naming menu; bare identity recommended) | A |
+| D-CONF-READ1 | `$build.*` fact reads (amends D-OSTARGET2, D-CANVASSTATE1; rides the metaprogramming `$` law) | A |
+| D-CONF-KEY1 | Typed settings; delete `features:`/`env:` (amends D-BUILDPROFILE1) | adopt |
+| D-CONF-MERGE1 | One contribution law, six scopes + six layers (extends D-MARK-SCOPE1; amends the composition conflict rule) | adopt |
+| D-CONF-SPLIT1 | Facts in text, actions in the function; computed contributions recorded (scopes D-BUILDCTX-FLAGS1) | adopt |
+| D-CONF-ENTRY1 | Build entry discovery: one per package, `fn run`-style, CLI by name | adopt |
+| D-CONF-MODULE1 | Settings and module value params: one substrate (amends two D-GENMOD-VALUE1 clauses) | adopt |
+| D-CONF-STAMP1 | Provenance facts, Tier-1 locked; no timestamp | adopt |
+| D-CONF-WORD1 | "Profile" = optimize bundle only; three renames | adopt |
 
-Each ballot stands alone. Any subset can be adopted.
+Each ballot stands alone. D-CONF-READ1's `$` spelling assumes the
+metaprogramming one-splice law; its fallback option covers a decline.
 
 ## Implementation shape
 
-- **Phase A — re-found, no surface change.** Wire the compile path to the
-  role-typed `Package` parser; delete the legacy parser; all tests green.
-  Register the fact plane internally; `build.os` becomes its first row.
-- **Phase B — land ratified-but-unbuilt work on the substrate.** D-ECO-DECL1
-  root, Hangar receipts, System/Fleet outputs, `jet deploy` — built once,
-  on the plane.
-- **Phase C — balloted surface work.** Each adopted D-CONF-* lands as one
-  coherent greenfield migration that deletes the replaced form: the
-  `build.*` record, settings (with `features:`/`env:` deletion), the
-  contribution law, module-param unification, stamps, the renames.
+- **Phase A — re-found, no surface change.** Compile path adopts the
+  role-typed parser; legacy parser deleted; fact registry lands (shared
+  with D-META-REG1 if adopted); `$build.os` is row one.
+- **Phase B — land ratified-but-unbuilt work on the substrate.**
+  D-ECO-DECL1 root, Hangar receipts, System/Fleet outputs, `jet deploy`.
+- **Phase C — balloted surface work**, each a coherent greenfield migration
+  deleting the replaced form.
 
-I9 note: fact reads fold at comptime, so every tier (AOT, JIT, interpreter,
-web) sees the same folded program. The plane adds no per-tier semantics.
+I9 note: fact reads fold at comptime; every tier sees one folded program.
+The plane adds no per-tier semantics.
