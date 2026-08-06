@@ -42,16 +42,16 @@ Generated on: 2026-08-06
 | Module members | 1011 |
 | Collection method rows | 354 |
 | Jet-side rows | 1366 |
-| Total rows | 10160 |
+| Total rows | 9777 |
 
 ## Verdicts
 
 | Verdict | Rows |
 | --- | ---: |
-| Jet wins | 334 |
-| Equal | 442 |
-| Jet loses (two or more languages agree) | 586 |
-| Single witness (recorded, not scored) | 8208 |
+| Jet wins | 339 |
+| Equal | 437 |
+| Jet loses (two or more languages agree) | 561 |
+| Single witness (recorded, not scored) | 7850 |
 | Not compared | 590 |
 | Deliberately declined | 0 |
 
@@ -60,16 +60,16 @@ Generated on: 2026-08-06
 | Language | Surface read from | Recorded operations | Jet rows matched | Loss rows |
 | --- | --- | ---: | ---: | ---: |
 | Rust | standard-library source (rust-src component) | 980 | 230 | 95 |
-| Go | official frozen API files (GOROOT/api/go1*.txt) | 1681 | 208 | 220 |
+| Go | official frozen API files (GOROOT/api/go1*.txt) | 1681 | 208 | 212 |
 | Swift | official documentation JSON (developer.apple.com) | 505 | 98 | 80 |
-| Kotlin | official API reference (kotlinlang.org) | 1141 | 157 | 118 |
-| C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1102 | 189 | 124 |
-| TypeScript | runtime introspection | 347 | 127 | 41 |
-| Ruby | runtime introspection | 1209 | 197 | 174 |
-| Elixir | runtime introspection | 1450 | 241 | 161 |
+| Kotlin | official API reference (kotlinlang.org) | 1141 | 157 | 117 |
+| C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1102 | 189 | 121 |
+| TypeScript | runtime introspection | 347 | 127 | 37 |
+| Ruby | runtime introspection | 1209 | 197 | 166 |
+| Elixir | runtime introspection | 1192 | 229 | 153 |
 | Julia | official documentation search index (docs.julialang.org) | 1132 | 136 | 189 |
-| R | official R manual package index (stat.ethz.ch R-devel) | 3536 | 41 | 0 |
-| Python | runtime introspection | 2227 | 213 | 257 |
+| R | official R manual package index (stat.ethz.ch R-devel) | 1768 | 36 | 0 |
+| Python | runtime introspection | 2012 | 210 | 235 |
 
 ## Loss clusters
 
@@ -87,29 +87,28 @@ it is done while losses remain.
 | core.time | 43 | none | n/a | needs_card |
 | List | 41 | #1410 | done | closed |
 | core.tasks | 32 | none | n/a | needs_card |
-| ByteBuffer | 29 | none | n/a | needs_card |
-| core.files | 26 | #288 | building | live |
+| ByteBuffer | 25 | none | n/a | needs_card |
 | core.io | 25 | #1402 | done | closed |
 | Map | 25 | #1410 | done | closed |
+| core.files | 22 | #288 | building | live |
 | Set | 20 | #1404 | done | closed |
-| core.archive | 16 | none | n/a | needs_card |
+| core.archive | 14 | none | n/a | needs_card |
 | core.path | 13 | #288 | building | live |
-| core.url | 13 | none | n/a | needs_card |
 | core.net | 12 | none | n/a | needs_card |
-| core.process | 12 | none | n/a | needs_card |
 | core.regex | 12 | none | n/a | needs_card |
+| core.url | 12 | none | n/a | needs_card |
 | core.crypto | 11 | none | n/a | needs_card |
 | core.log | 11 | none | n/a | needs_card |
 | Deque | 10 | none | n/a | needs_card |
-| core.http | 8 | none | n/a | needs_card |
-| core.tls | 8 | none | n/a | needs_card |
+| core.process | 8 | none | n/a | needs_card |
 | core.db | 7 | none | n/a | needs_card |
 | core.testing | 7 | none | n/a | needs_card |
 | Iter | 7 | #1400 | done | closed |
+| core.http | 5 | none | n/a | needs_card |
+| core.tls | 5 | none | n/a | needs_card |
 | core.uuid | 4 | none | n/a | needs_card |
-| core.binary | 3 | none | n/a | needs_card |
 | core.encoding.csv | 3 | none | n/a | needs_card |
-| core.text | 3 | none | n/a | needs_card |
+| core.binary | 2 | none | n/a | needs_card |
 | core.random | 2 | none | n/a | needs_card |
 | PriorityQueue | 2 | none | n/a | needs_card |
 | core.encoding.json | 1 | none | n/a | needs_card |
@@ -127,7 +126,6 @@ here. The skip is listed so it stays countable.
 | --- | --- | ---: |
 | R | core.data | 592 |
 | R | core.math | 1176 |
-| R | core.random | 1768 |
 
 ## Core domains not yet compared
 

@@ -52,6 +52,14 @@ STDLIB_MODULES = [
 # level name only.
 NO_TYPE_FLATTEN = {"builtins"}
 
+# These builtin types are compared as containers of their own, so counting them
+# again as builtins operations would score the same gap twice. Every other
+# builtins class stays an operation.
+PRIMITIVE_CONTAINERS = {
+    "bool", "bytes", "dict", "float", "int", "list", "range", "set", "str",
+    "tuple",
+}
+
 
 def public(names):
     return sorted(n for n in names if not n.startswith("_"))
@@ -104,19 +112,30 @@ def main():
             if not callable(value):
                 constants.append(member)
                 continue
-            # builtins' classes are the primitive types. They are compared in
-            # their own containers, so counting list, dict and str again as
-            # operations of the module scored one gap twice.
+            # A builtins class whose own container exists is compared there, so
+            # counting list, dict and str again would score one gap twice. The
+            # rest are ordinary calls in real code -- enumerate, zip, map,
+            # filter, range, reversed, frozenset, complex, memoryview -- and
+            # excluding them deleted real gaps.
             if is_class and name in NO_TYPE_FLATTEN:
-                type_names.append(member)
-                continue
+                if member in PRIMITIVE_CONTAINERS:
+                    type_names.append(member)
+                    continue
             operations.append(member)
             if is_class and name not in NO_TYPE_FLATTEN:
                 # Only a class's methods are operations. Its data attributes are
                 # fields: flattening them put os.terminal_size.columns and
                 # os.times_result.children_system into core.os as missing calls.
+                # Only what the class itself introduces. http.HTTPMethod is a
+                # StrEnum, so its inherited str members put istitle, isupper
+                # and capitalize into core.http as missing operations.
+                inherited = set()
+                for base in value.__mro__[1:]:
+                    inherited.update(dir(base))
                 types_members[member] = public(
-                    m for m in dir(value) if callable(getattr(value, m, None))
+                    m
+                    for m in dir(value)
+                    if callable(getattr(value, m, None)) and m not in inherited
                 )
         snapshot["stdlibModules"][name] = {
             "operations": operations,

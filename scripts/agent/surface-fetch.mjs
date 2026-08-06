@@ -444,7 +444,6 @@ async function julia() {
 const R_PACKAGES = {
   "core.math": ["base"],
   "core.data": ["stats"],
-  "core.random": ["stats", "base"],
 };
 
 const R_OUT_OF_CLAIM =
@@ -452,6 +451,8 @@ const R_OUT_OF_CLAIM =
   "and R's package-level function index cannot attribute a name to this container";
 
 const R_ABSENT = {
+  "core.random": R_OUT_OF_CLAIM,
+
   Iter: "no R base iterator protocol; the iterators package is separate",
   Set: "no R base set type; union and intersect operate on vectors",
   SortedSet: "no R base ordered set",

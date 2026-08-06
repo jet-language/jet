@@ -1253,6 +1253,23 @@ function validateSurfaces(ledger, surfaces) {
         !(entry.surface.officialReferences || []).length) {
       throw new Error("surface without recorded provenance: " + language);
     }
+    // One source feeds one container. This was asserted in prose and never
+    // enforced, and R's base package really did feed core.math and
+    // core.random, so one function minted two gaps.
+    const owner = new Map();
+    for (const [name, record] of Object.entries(entry.surface.containers)) {
+      if (!record.present) continue;
+      for (const key of ["packages", "files", "types", "manualPages", "modules", "pythonSources"]) {
+        for (const source of record[key] || []) {
+          const seen = owner.get(source);
+          if (seen && seen !== name) {
+            throw new Error("one source feeds two containers in " + language + ": " +
+              source + " is claimed by " + seen + " and " + name);
+          }
+          owner.set(source, name);
+        }
+      }
+    }
   }
   if (stable(ledger.canonicalContainers) !== stable(containers)) {
     throw new Error("ledger container set drifted from the recorded surfaces");
@@ -1314,6 +1331,24 @@ function validateOwners(ledger, board) {
       }
       if (card.phase === "done") {
         throw new Error("stale owner: " + cluster.container + " names closed card #" + cluster.priorCard);
+      }
+    }
+    // A closed cluster is a dead owner holding real losses. It was reported
+    // and never checked, so the card could be reopened, renumbered or deleted
+    // and the ledger would keep pointing at it.
+    if (cluster.ownerState === "closed") {
+      if (!cards) throw new Error("cluster names a closed owner but no board is readable: " + cluster.container);
+      const card = cards.get(cluster.priorCard);
+      if (!card) {
+        throw new Error("stale owner: " + cluster.container +
+          " reports closed card #" + cluster.priorCard + ", which is not on the board");
+      }
+      if (card.phase !== "done") {
+        throw new Error("stale owner: " + cluster.container + " reports card #" +
+          cluster.priorCard + " as closed, but the board has it in " + card.phase);
+      }
+      if (cluster.lossCount === 0) {
+        throw new Error("cluster " + cluster.container + " reports a closed owner with no losses");
       }
     }
     if (cluster.ownerState === "needs_card" && cluster.priorCard !== null) {
@@ -1689,6 +1724,19 @@ function hostileFixtures() {
     cluster.ownerState = "live";
     cluster.priorCard = 999999;
     validateOwners(broken, board);
+  }));
+
+  results.push(rejects("closed owner that the board has reopened",
+    "but the board has it in", function () {
+    const broken = clone(ledger);
+    const openBoard = clone(board);
+    const cluster = must(broken.lossClusters.find(function (item) {
+      return item.ownerState === "closed";
+    }), "no closed cluster to break");
+    const card = openBoard.cards.find(function (item) { return item.num === cluster.priorCard; });
+    must(card, "the closed cluster names a card the board does not have");
+    card.phase = "building";
+    validateOwners(broken, openBoard);
   }));
 
   results.push(rejects("cluster both names a card and claims to need one",
