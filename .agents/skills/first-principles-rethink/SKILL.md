@@ -34,6 +34,23 @@ does not produce those, the synthesis is not done.
 - **Beginner magic, expert control** — run both passes on every element:
   invisible correct defaults with zero ceremony; full nameable, reflectable,
   overridable control behind explicit opt-in.
+- **The surface is the product.** A rethink that only re-founds internals is
+  a failed rethink — the owner has rejected one for exactly this. The main
+  deliverable is greatly improved syntax, APIs, and structure: simpler to
+  use, easier to read, easier to write, easier to reason about. Every
+  unification must show up on the page as a before/after pair where the
+  after is visibly better. If the user-facing code looks the same as today,
+  the rethink is not done.
+- **Greenfield: breaking changes are welcome.** Shipped spellings and APIs
+  earn their place or they are replaced — never keep one because it is
+  shipped. Judge only the best final design; migration churn is not a
+  product tradeoff. Ratified decisions still need a named amendment in a
+  ballot, but the ballot should propose the break whenever the break is
+  better.
+- **Write everything with the `simple` skill.** Proposal, ballots, and chat
+  reports: short sentences, common words, one idea per sentence, no dense
+  jargon walls. The owner has rejected LLM-coded dense prose. Load `simple`
+  before writing any owner-facing text and follow it in every paragraph.
 - **Never silently contradict ratified law.** Every ratified decision the
   proposal touches is either respected or named as an explicit amendment in a
   ballot. Frozen walls (no top type, no HKT, no macros, comptime never
@@ -105,18 +122,21 @@ no theming. Structure, in order:
 4. **Evidence** — the shadow-systems table with file:line proof.
 5. **The model** — axes, planes, laws, with the "ohhh" connections spelled
    out explicitly as their own list.
-6. **The surface** — first-principles spelling proposals, not just
-   architecture. State the spelling principles the model implies, then the
-   concrete syntax slate (marking each item ratified vs proposed). A rethink
-   that only reorganizes internals is half a rethink; the owner decides
-   surfaces, so give surfaces to decide.
+6. **The surface** — the heart of the proposal, not an afterthought. A full
+   redesign of the syntax, APIs, and structure the model implies: what gets
+   renamed, what gets deleted, what gets a new spelling, and why each change
+   makes code simpler to read and write. Present it as before/after pairs
+   from real programs. Breaking changes are welcome; mark each item ratified,
+   amended, or new.
 7. **What it looks like** — mandatory: complete example programs in real
    syntax showing the whole model working together, spanning the beginner
-   default, the rich middle, and the expert opt-in extremes. A dry report
-   cannot be visualized; the owner needs to *see* it. Mark every
+   default, the rich middle, and the expert opt-in extremes. Show today's
+   code next to the proposed code for the same job. Mark every
    not-yet-ratified line "proposed" — the review pass checks this.
 8. **What this unlocks** — domain by domain, extremes included.
-9. **What does not change** — spellings kept, walls kept, zero-cost kept.
+9. **What stays** — only things that earn their place: walls kept on
+   purpose, zero-cost kept, spellings kept because they win on merit.
+   Never "kept because shipped".
 10. **Decisions for the owner** — a compact direction-level table mapping to
    the ballot slate; each ballot stands alone so any subset can be adopted.
 11. **Implementation shape** — phased: (A) internal re-founding with no
@@ -167,3 +187,11 @@ no theming. Structure, in order:
   it is.
 - New mechanisms. The score is mechanisms deleted, capabilities kept, and
   capabilities gained — in that order.
+- Shipping an internals-only rethink. The owner rejected one whole run
+  because the surface, syntax, and APIs did not improve. Machinery
+  unification is the means; better code on the page is the end.
+- Inventing a parallel concept where the type system already has one.
+  Check the live type-system proposals (and results/optionals, effects,
+  units) before adding any new enum, handle, or wrapper — a task failure
+  should ride the same rails as every other failure.
+- Dense prose. If a paragraph needs two reads, rewrite it with `simple`.

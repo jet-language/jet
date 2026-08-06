@@ -1,386 +1,415 @@
 # Concurrency — work is a value
 
-Status: proposal, 2026-08-06. Owner decisions: nine ballots on card #1505.
-Scope: tasks, taskgroups, channels, select, protocols, Shared/guards, `#Transact`/STM,
-`#Job`/`#Every`, streams/generators, cancellation, and the service plane. Design-only until
-S53 unfreezes; nothing here starts implementation. Sources: five research passes over spec,
-sema, prelude, runtime, examples, Tower, prior audits, and peer-language lessons.
+Status: proposal v2, 2026-08-06. Owner decisions: ten ballots on card #1505.
+Scope: tasks, groups, channels, select, shared state, transactions, schedules,
+streams, protocols, and the unbuilt service plane.
+Design-only until S53 unfreezes. Nothing here starts implementation.
 
 ## Executive summary
 
-**The finding.** Five research passes found that Jet already built the type theory its
-concurrency needs — and then did not use it. The unjoined-task check and the `#SingleUse`
-obligation check are two copies of the same pass, one a lint, one an error
-(`CheckerOwnership.rs:4141` vs `:4173`; the second's comment says "Mirrors the unjoined-task
-check"). E0140's own error text names "an unjoined task" as its example, yet `Task<T>` is not
-`#SingleUse`. The `protocol` feature already composes `#SingleUse` + `state` + `#Transition`
-into working session-typed concurrency. Five separate provers answer one question — "may this
-value travel to another executor?" — with five error vocabularies. The runtime knows a task
-ends in one of four ways; Jet users get that fact as a `String`.
+**The finding.** Jet's concurrency works, but it is harder to read and write
+than it needs to be. Spawning takes a module import and a lambda. Fan-out takes
+a block, a handle per task, and a list call. A worker pool takes 49 lines.
+Shared state takes a closure for every read. Task failure hides in strings.
+Under the surface, the compiler holds the same three facts about concurrent
+work that it already holds about other values — but with private copy-paste
+machinery instead of its own type system.
 
-**The idea.** **A unit of concurrent work is an ordinary value, and everything the compiler
-must know about it is three facts Jet already tracks for other values: what state it is in
-(typestate), what must still be done with it (obligation), and where it may travel (crossing
-knowledge).** Concurrency stops being a feature plane with private machinery and becomes three
-existing knowledge planes applied to a handful of value types, plus one scheduler.
+**The idea.** A unit of concurrent work is an ordinary value. The compiler
+holds three facts about it: its **state** (typestate), its **duty**
+(obligation), and its **reach** (may it cross to another worker). Jet already
+has one machine for each fact. When the machinery collapses into those
+machines, the surface collapses too: parallel code starts to read like plain
+code.
 
-**Why now.** The largest ratified-but-unbuilt block in the decision record is concurrency: the
-six-decision service plane (D-SERVICE1..UPGRADE1, cards #444/#1150-#1153), typed job scopes
-(D-JOB-SUBCMD1, #1448/#1449), and the reserved `#Async { }` block. Building them on today's
-five hand-rolled provers and four outcome vocabularies means building them twice. The
-type-system-v2 proposal (card #1497) is defining knowledge planes right now — and its
-inventory is missing exactly one obvious plane: sendability, today a stray `bool`.
+**The surface wins, before and after.**
 
-**The payoffs, concretely.**
-- The structured-concurrency guarantee becomes a theorem, not a special case: a taskgroup is a
-  borrow of its scope, so children cannot outlive it — E1110 is the escape rule wearing a
-  different code.
-- Dropping a task silently is no longer a lint loophole: the join duty becomes the same
-  obligation the language already enforces for every `#SingleUse` value, with `.detach()` as
-  its sanctioned discharge.
-- Task outcomes become a real enum (`Finished`/`Panicked`/`Cancelled`/`DeadlineBlown`) instead
-  of `trace()` strings; cancellation becomes queryable; select, dispatch, and `Loadable` speak
-  one vocabulary.
-- One crossing prover replaces five (task captures, `para_*`, GPU kernels, `Cell`/`#Local`,
-  fixed backings) — and new parallel surfaces become table rows, not new provers.
-- The service plane lands once, on structure that already proves child lifetimes: a supervisor
-  is a task that owns a group; a scheduled job is a task whose spawner is the runtime.
+| Job | Today | Proposed |
+|---|---|---|
+| Run two things at once | 5 lines, a group, two handles, a list call | `(a, b) :: all { f(), g() }` |
+| First result wins | group + handles + `g.race([slow, fast])` | `race { slow(), fast() }` |
+| One background task | `tasks.spawn(() => work())` | `task work()` |
+| Task failure | `h.exception() == "cancelled"` string test | `h.join() ?? fallback` — the normal `?` rail |
+| Bounded worker pool | 49 lines of hand-made channel tokens | `group g(limit: 4) { … }` |
+| Drain a channel | `loop { v :: rx.receive() ?? break … }` | `loop v, rx { … }` |
+| Wait on two channels | `g.select().recv(a).recv(b).after(ms: 100, value: -1).wait()` | `select { v, a -> …  v, b -> …  after 100ms -> … }` |
+| Read shared state | `config.read(c => c.name)` | `config.name` |
+| Change shared state | `config.edit(c => { c.hits += 1 })` | `config.hits += 1` |
 
-**What the ballots ask.** One direction ballot (adopt the model), then eight standalone
-choices: the join duty, spawn-authority spelling, typed outcomes, the one crossing plane,
-resolving the D-STM1 text/implementation drift, scheduling-as-data, streams-as-tasks, and
-completing the channel surface. Any subset can be adopted; each names the ratified decisions
-it amends.
+**Why this is safe to simplify.** Every removed word was ceremony around a
+fact the compiler already proves. Structure stays: a task can never outlive
+its scope. Data-race freedom stays: every crossing is checked. The magic is
+checked magic.
 
-**What does not change.** Every beginner spelling ships as-is: `taskgroup g { }`,
-`g.task =>`, `tasks.spawn`/`.join()`, `(tx, rx) :: tasks.channel<T>()`, `~tx`,
-`Shared.read/edit`, `#Transact`, `#Shield`, `#Context(deadline:)`, `#[Job, Every(5min)]`,
-`para_*`. No coloring, ever (E0040 stays law). No actors, no mutex surface, no new keywords.
-All knowledge erases before codegen — zero runtime cost, I9 untouched.
+**What the ballots ask.** Three machinery choices (one substrate, one crossing
+checker, one stream law), and seven surface choices (spawn shape, failure on
+the `?` rail, drop rule, channels and select, shared state, schedules, and the
+transaction law). The surface choices lead; a machinery ballot that a surface
+pick makes moot is withdrawn.
+
+**Breaking changes.** This is a greenfield redesign. `taskgroup`, `g.task =>`,
+`tasks.spawn(() => …)`, the select builder chain, and the `read`/`edit`
+closures are all replaced if their ballots pass. Each ballot names the
+ratified decisions it amends.
 
 ## Glossary
 
-- **Unit of work** — one thing that runs on its own: a spawned task, a taskgroup child, a
-  stream producer, a scheduled job, a service worker.
-- **Handle** — the ordinary value that stands for a unit of work in the program (`Task<T>`,
-  a protocol endpoint, a `Receiver<T>`).
-- **Typestate** — compile-time tracking of which named state a value is in, with operations
-  gated by state (`state` blocks + `#Transition`, D-STATE1). Erased before codegen.
-- **Obligation** — a duty the compiler enforces before a value may be dropped: use exactly
-  once (`#SingleUse`, D-LIN1), close a resource (`defer close`), join a task.
-- **Crossing knowledge** — the fact that a value may legally move to another executor (another
-  task, a parallel worker, a GPU kernel). Today spelled E1101/E1102/E1111/E1130 and the
-  `Cell`/`#Local` rules.
-- **Plane** — one kind of knowledge with its own combination rules, in the type-system-v2
-  sense: states, effects, units, obligations.
-- **Spawn authority** — the right to start a child inside a scope. Today: the `taskgroup`
-  handle `g`.
-- **Structured concurrency** — the law that a child never outlives the scope that spawned it
-  (D-NURSERY1).
-- **Scheduler** — the M:N green-thread runtime (D-ASYNCRT1). Tasks park at wait points;
-  no `async`/`await` coloring exists or ever will (E0040).
-- **STM plane** — `Shared<T>` reads/writes inside `#Transact` committing atomically (D-STM1).
+- **Task** — one unit of work that runs on its own. `task f()` starts one and
+  gives a `Task<T>` handle.
+- **Scope** — any block. Every task belongs to the scope that started it and
+  cannot outlive it.
+- **Group** — a scope you can name, pass, and give rules to (like a worker
+  limit). Needed only for dynamic fan-out.
+- **Duty** — a thing the compiler makes you finish before a value dies. A
+  bound task handle carries the duty "join or detach me".
+- **Reach** — the checked fact that a value may move to another worker.
+- **The `?` rail** — Jet's one error path: `T ? Err` returns, `?` to pass an
+  error up, `??` for fallbacks, arm tables to tell errors apart.
+- **Typestate** — compile-time tracking of a value's current state, with
+  operations gated by state.
+- **Arm table** — Jet's one branching shape: `{ head -> body }` (S68).
 
 ## The one idea
 
-**A unit of concurrent work is a value like any other; the compiler holds exactly three facts
-about it — its state, its duty, and its reach — and Jet already owns one machine for each.**
+**A unit of concurrent work is a value like any other. The compiler holds
+three facts about it — state, duty, reach — with the machines it already has.
+The surface then says only what the machines cannot infer.**
 
-The beginner story: nothing changes on the page. You write `taskgroup g { }` and `g.task =>`,
-and the compiler quietly knows your task is *running*, that somebody must *join* it, and that
-what it captures is *safe to send*. When you get it wrong, every error speaks one language:
-what state the value is in, what duty is undischarged, what boundary it cannot cross.
+For a beginner: write `task`, `all`, `race`, and plain field access on shared
+values. The compiler quietly proves that no work is lost, no child outlives
+its scope, and no data races. Every failure arrives on the same `?` rail as a
+file error.
 
-The expert story: every one of those facts is nameable, queryable, and reflectable. A task's
-outcome is an enum you can match. Cancellation is a state you can ask about. Sendability is a
-registered plane, not folklore. And when you build something new — a supervisor, a worker
-pool, a session protocol with more states — you add rows to existing planes, not mechanisms.
+For an expert: every fact is a value you can name, query, and reflect. Handles,
+groups, endpoints, and failures are ordinary typed values, so they compose
+with generics, tools, and tests.
 
-## Evidence — the shadow systems
+## Evidence — why the rethink is needed
 
-Every row is the same underlying job done twice under different names.
+Each row is one job the compiler does twice under different names. File and
+line references prove each claim.
 
-| # | Shadow system | Where it lives | The defect |
-|---|---|---|---|
-| 1 | Unjoined-task check vs `#SingleUse` check | `CheckerOwnership.rs:4141` / `:4173` | Byte-for-byte the same pass; one is lint L1101, the other error E0140. The doc comment admits the mirror. |
-| 2 | E0140's own copy | `CheckerOwnership.rs:5889` | Names "an unjoined task" as its canonical example — but `Task<T>` is not `#SingleUse`. |
-| 3 | No-clone rule for task handles | `Diagnostics.rs:1219` (`type_holds_task_handle`) | E0142's no-copy rule hand-rolled a second time for one type. |
-| 4 | Task lifecycle tracking | `LocalInfo.task_lint_span` (`mod.rs:762`), the `moved` map, `PendingTaskSpawn.consumed` (`CheckerTaskGroup.rs:12`) | A three-state automaton tracked by three ad-hoc fields while the typestate engine (`State.rs`, 861 lines) sits unused. |
-| 5 | `protocol` expansion | `Sema/Protocol.rs:13-80` | Proof the composite works: generates `#SingleUse` + `state` + `#Transition` source and re-parses it. Session concurrency is already typestate + obligation. |
-| 6 | Five crossing provers | Sendability `CheckerOwnership.rs:4229/:4463` (E1101/E1102); group-borrow disjointness `CheckerTaskGroup.rs:203-301`; `para_*` E1111; kernel proofs `AST/items.rs:832` (E1130); `Cell`/`#Local` `CheckerOwnership.rs:5117`; `ThreadConfined` `:4495` | One question — "may this cross?" — five vocabularies, no shared code. |
-| 7 | Sendability storage | `LocalInfo.sendable: bool` (`mod.rs:1124`) | A knowledge plane stored as a stray bool; absent from `FactRegistry` and from the type-system-v2 plane inventory. |
-| 8 | Four outcome vocabularies | `JetSchedulerResult{Value,Panicked,Cancelled,Deadline}` (`scheduler.rs:1223`), `JetSelectOutcome` (`Prelude/Scheduler.rs:1935`), `DispatchState` (`core_types.rs:1382`), and the user surface: a `String` (`StructuralDebug.rs:31`) | The same three terminal facts, four spellings; the one Jet users see is `"paused=false,cancel=true"`. |
-| 9 | Erased minted handles | `TaskGroup` (`effects_surface.rs:128`), `SelectBuilder` (`:147`), `Transaction` (`:263`), `Capability` (`:121`) | Phantom types users meet in errors but cannot write. `fn T.m(g: TaskGroup)` falls into raw E0119 (`CheckerItems.rs:1410`) — an undocumented hole. |
-| 10 | `Receiver<T>` unnameable | `type_assign.rs:284` lists `Task \| Channel \| Sender` | `Receiver` omitted; `Channel` is a dead entry for a handle D-TUPLE-DESTRUCT1 deleted. |
-| 11 | Three unwind doors | Cancel (D-CANCELMODEL1=C), deadline (E3003 via `#Context`), scope cleanup (`defer close`) | One unwind engine, three entrances; `#Shield` orders the first two, the third is unaware of both. |
-| 12 | Two scheduling planes | `#Job`/`#Every` registry rows (`Policy.rs:857/:867`) vs `taskgroup`/`spawn` keywords + hardcoded CoreLib recognition | "This work runs on its own," spelled once as marker data, once as compiler special cases — opposite sides of marker law zero (D-VERDICT-1455-1). |
-| 13 | Generators on the scheduler | D-STREAMYIELD1; drift in `field-audit-2026-08-03.md:194-236` (card #1392) | `Stream<T>` is a task joined by pulls, with the cancellation law rewritten independently — and the two copies have already diverged across tiers. |
-| 14 | Three timing spellings | `#Every` suffix table (`math_layout.rs:686`), deadline as bare epoch-ms `Int`, `after`/`interval` as bare ms `Int`, while `Duration` exists | Already flagged by type-system-v2 (D-TYPE2-TIME1); every concurrency timer picks a different one. |
-| 15 | STM law drift | `syntax-decisions.md:1828` says "retried on conflict"; `RuntimeControl.rs:115-140` ships canonical-order multi-lock, no retry | Ratified text and shipped semantics disagree; only the owner can pick which one is law. |
-
-Below the ledger, two I9 breaches hide under a green `jit_gaps` gate: `g.select()` returns
-`unsupported` for all five ops on the interpreter tier (`TIR/eval/exprs.rs:5139-5143`), and the
-`.read(stream)` select arm is silently dropped on every tier (`emit/helpers.rs:225`,
-`lower_ctx.rs:13031`). These are defects to fix (or delete) regardless of any ballot.
-
-## The model
-
-### The three planes
-
-Every concurrent value carries up to three facts. Each fact already has a machine.
-
-| Plane | The fact | Existing machine | Today's concurrency spelling |
-|---|---|---|---|
-| **State** | Where the value is in its lifecycle | Typestate (D-STATE1, `State.rs`) | Hand-rolled: `task_lint_span`, `PendingTaskSpawn`, `trace()` strings |
-| **Duty** | What must happen before drop | Obligations (D-LIN1 `#SingleUse`; `defer close`) | Hand-rolled: L1101 lint, `type_holds_task_handle`, detach special cases |
-| **Reach** | Which executor boundaries it may cross | Crossing knowledge (to be registered as a plane) | Hand-rolled five times: E1101/E1102, group disjointness, E1111, E1130, `Cell` rules |
-
-### The roster
-
-Each concurrency construct is a row — a value type whose cells come from the three planes.
-
-| Value | State | Duty | Reach |
-|---|---|---|---|
-| `Task<T>` | created → running → paused → done/cancelled | join, or detach explicitly | result must be sendable |
-| `TaskGroup` | open → closing | join all children at scope exit (D-NURSERY1) | borrow of its scope — never escapes (E1110) |
-| `Sender<T>` / `Receiver<T>` | open → closed | close (or drop-close) | payloads must be sendable |
-| Protocol `.Client`/`.Server` | the protocol's own states | `#SingleUse` — run to the end | endpoint crossing rules |
-| `Stream<T>` | producing → done/closed | drop-close cancels the producer | pulled values must be sendable |
-| `SharedGuard` | held | release (scope-bound) | never crosses |
-| `Transaction` handle | active → committed/rolled-back | commit or roll back at block exit | never crosses; no irreversible effects inside (E0746) |
-| `#Job fn` | a task whose spawner is the runtime | runtime joins it per run | entry-level: captures nothing |
-| Service worker (unbuilt) | supervisor = a task owning a group | restart policy is data on the group | same rules as any task |
-
-Protocols are the existence proof: their row is *already implemented* as generated typestate +
-obligation source (`Protocol.rs`). The proposal extends the same treatment to every other row.
-
-### The law
-
-> **Work is a value. Its lifecycle is state, its completion is a duty, its movement is
-> knowledge.**
-
-The ratified rules turn out to be theorems of it:
-
-- **D-NURSERY1** (children finish before the scope exits) — the group's join duty, discharged
-  at scope end like every obligation.
-- **Structured concurrency itself** — spawn authority (`g`) is a borrow of the scope, so no
-  child can outlive it. E1110's "call-stack-only spawn authority" is the borrow escape rule.
-- **D-DATARACE1=C** (a data race must fail to compile) — reach knowledge is total: every
-  boundary crossing consults the same plane.
-- **D-DETACH1** (`.detach()` consumes the handle) — obligation discharge by explicit
-  consumption; the exact analogue of `consume(x)` for `#SingleUse` values.
-- **D-CANCELMODEL1=C** (one unwind, preemptive at wait points) — cancel, deadline, and scope
-  cleanup are one engine with three triggers; `#Shield` is a scoped ordering rule on it.
-- **D-PROTO1/2** — session protocols are typestate + obligation on endpoint values. Already
-  shipped that way.
-
-### The "ohhh" connections, spelled out
-
-1. **A task is a `#SingleUse` value.** The compiler already contains the proof: two identical
-   passes, and E0140's error text describes an unjoined task.
-2. **A taskgroup is a borrow.** "Cannot be stored, cannot escape, dies with its scope" is not
-   a new rule — it is what a borrow is. The unnameable-type ceremony was hiding a loan.
-3. **Protocols already are the unified model.** `protocol` compiles to `#SingleUse` structs
-   with `state`/`#Transition` — typestate + obligation, generated. The rethink is finishing
-   what `Protocol.rs` started, for every handle.
-4. **Generators are tasks.** `yield` runs on the scheduler; dropping the iterator cancels the
-   producer — D-CANCELMODEL1 restated in another decision's words. Jet has coroutines; it
-   spells them `Stream<T>`.
-5. **A job is a task whose spawner is the runtime.** `#Job`/`#Every` describe *who starts the
-   work and when* — data about the same unit, not a second kind of thing.
-6. **The missing type-system-v2 plane is sendability.** The one obvious knowledge-about-a-
-   carrier fact the v2 inventory missed is sitting in `LocalInfo.sendable: bool`.
+| # | Same job, two names | Proof |
+|---|---|---|
+| 1 | The unjoined-task check is a copy of the `#SingleUse` check. One warns, one errors. | `CheckerOwnership.rs:4141` vs `:4173`; the comment says "Mirrors the unjoined-task check" |
+| 2 | E0140's own text names "an unjoined task" — but `Task<T>` is not `#SingleUse` | `CheckerOwnership.rs:5889` |
+| 3 | A task's lifecycle is tracked by three ad-hoc fields while the typestate engine sits unused | `mod.rs:762`, `CheckerTaskGroup.rs:12` vs `State.rs` |
+| 4 | `protocol` already compiles to `#SingleUse` + `state` + `#Transition`. The composite works. | `Sema/Protocol.rs:13-80` |
+| 5 | Five checkers ask "may this cross to another worker": tasks, `para_*`, kernels, cells, fixed backings | `CheckerOwnership.rs:4229/:4463/:5117/:4495`, `AST/items.rs:832` |
+| 6 | Send-safety is stored as a stray `bool`, outside the fact registry and the type-system-v2 plane list | `mod.rs:1124` |
+| 7 | The runtime knows a task ends four ways. Jet code gets a `String`. | `scheduler.rs:1223` vs `StructuralDebug.rs:31` |
+| 8 | Four handle types exist only in error messages: `TaskGroup`, `SelectBuilder`, `Transaction`, `Capability` | `effects_surface.rs:128/147/263/121` |
+| 9 | `Receiver<T>` cannot be written in a signature; a dead `Channel` entry can | `type_assign.rs:284` |
+| 10 | Streams run on the task scheduler with a separately written shutdown law — and the copies drifted | D-STREAMYIELD1 vs `field-audit-2026-08-03.md:194` |
+| 11 | `select` does not work on the interpreter tier; the `.read` arm is dropped on every tier | `TIR/eval/exprs.rs:5139`, `emit/helpers.rs:225` |
+| 12 | The STM law says "retried on conflict"; the runtime ships ordered locks with no retry | `syntax-decisions.md:1828` vs `RuntimeControl.rs:115-140` |
 
 ## The surface
 
-### Spelling principles the model implies
+This is the heart of the proposal. Each area shows today's code, the proposed
+code, and what gets deleted. Every proposed line is marked by its ballot.
 
-1. **Facts have names.** A terminal outcome is an enum, not a `String`. A queryable state is a
-   method returning a value, not a formatted trace.
-2. **Anything a user can receive is a type a user can write.** `Receiver<T>` in a signature;
-   `TaskGroup` in every legal borrow position, with a teaching error elsewhere.
-3. **One word per concept.** "Task" is the unit of work; "job" is a scheduled task
-   (aligns card #1448). No third word.
-4. **Configuration is data on the value.** Group limits, schedules, deadlines are typed
-   arguments, not markers or env vars — the marker rebuild (row data) already points here.
-5. **Delete before adding.** No new keywords, no new sigils, no second spawn form.
+### 1. Spawning and fan-out — D-CONC-SPAWN1
 
-### The concrete slate
-
-| Surface | Status |
-|---|---|
-| `taskgroup g { }`, `g.task =>`, `g.all/race/any`, `g.select().recv(..).after(ms:, value:).wait()` | ratified, unchanged |
-| `tasks.spawn/join/detach/cancel/pause/resume`, list twins (D-VERDICT-1323-1) | ratified, unchanged |
-| `(tx, rx) :: tasks.channel<T>(capacity: N)`, `~tx`, `send`/`receive`/`close` | ratified, unchanged |
-| `Shared.new/read/edit`, guards, `Condition`, `#Transact`, `#Shield`, `#Context(deadline:)` | ratified, unchanged |
-| `#[Job, Every(5min)] fn` | ratified, unchanged |
-| Unjoined `Task<T>` → obligation error (E0140 family), `.detach()` discharges | **proposed** (D-CONC-JOIN1) |
-| `task.outcome()` → `TaskOutcome` enum; `task.status()` → `TaskStatus`; `trace()`/`exception()` strings retire | **proposed** (D-CONC-OUTCOME1) |
-| `Receiver<T>` nameable; `loop v, rx { }` receives until closed; dead `Channel` table entry deleted | **proposed** (D-CONC-CHAN1) |
-| `TaskGroup` legal in method position (or a teaching error there); still never stored | **proposed** (D-CONC-GROUP1) |
-| `taskgroup g(limit: N) { }` — concurrency cap as group data | **proposed** (D-CONC-SCHED1) |
-| One registered sendability plane; E1101/E1102/E1111/E1130 become one error family | **proposed** (D-CONC-CROSS1) |
-| `#Every(...)` value becomes typed schedule data (literal spelling defers to D-TYPE2-TIME1) | **proposed** (D-CONC-SCHED1) |
-
-## What it looks like
-
-### Beginner — today's code, unchanged
+**Today.** Two spawn forms, one behind a module import and a lambda.
 
 ```jet
 use core.tasks as tasks
+taskgroup g {
+    a :: g.task => sum_range(1, 25)
+    b :: g.task => sum_range(26, 50)
+    results :: g.all([a, b])
+    print(results[0] + results[1])
+}
+h :: tasks.spawn(() => work())
+h.join()
+```
+
+**Proposed.** Four spellings cover everything. No import. No lambda wrapper.
+
+```jet
+(a, b) :: all { sum_range(1, 25), sum_range(26, 50) }   // run both, wait, get both
+print(a + b)
+
+winner :: race { slow(), fast() }        // first done wins; the loser is cancelled
+first  :: any  { try_eu(), try_us() }    // first Ok wins; errors wait for a winner
+
+h :: task work()                         // one child task, handle in hand
+h.join()
+
+group g(limit: 4) {                      // dynamic fan-out with a worker cap
+    loop url, urls { task fetch(url) }
+}                                        // the group joins every child here
+```
+
+The rules, in plain words:
+
+- `task f()` starts a child of the current scope. Bind the handle and the
+  duty to join or detach it is yours. Leave it unbound and the scope joins it
+  at the end.
+- `all` / `race` / `any` keep their ratified meanings (fail fast, cancel
+  losers, first Ok). They need no handles at all.
+- `group g(limit: N)` is for dynamic counts and caps. `g` is a value you can
+  pass to helpers (`fn drain(g: Group, rx: Receiver<Job>)`). It can never be
+  stored, so no child outlives its scope.
+
+**Deleted:** `taskgroup` blocks, `g.task =>`, `g.all([…])`, `g.race`, `g.any`,
+`tasks.spawn(() => …)`, `tasks.spawn_group`. Amends D-TASKSCOPE1,
+D-NURSERY1's spelling (not its law), D-CONCCOMB1's call shape, and
+D-TASKGROUP-PARAM1 (the group parameter rule carries over to `Group`).
+
+### 2. Task failure on the `?` rail — D-CONC-FAIL1
+
+**Today.** Failure facts hide in strings, and a child panic kills the process.
+
+```jet
+h.cancel()
+if h.exception() == "cancelled" { print("stopped") }
+print(h.trace())     // "paused=false,cancel=true"
+```
+
+**Proposed.** `join` is fallible like any other call. One rail for every error
+in the language.
+
+```jet
+score :: task compute()
+best  :: score.join() ?? 0               // fallback, like any ? call
+
+if slow.join() == {                      // tell the failures apart (S68 arm table)
+    .Ok(v)               -> print(v)
+    .Err(.Cancelled)     -> print("stopped early")
+    .Err(.Panicked(why)) -> print("worker failed: " + why)
+    else                 -> print("out of time")
+}
+```
+
+`join()` returns `T ? TaskFailure`. `TaskFailure` is a normal enum:
+`.Cancelled`, `.DeadlineBlown`, `.Panicked(reason)`. It converts up through
+`impl TaskFailure => AppErr` like every other error family (D-ERR-CONV).
+`all { }` returns its tuple on the same rail, so one failed branch is one
+`??` away from a fallback.
+
+There is no separate outcome type. A task failure is an error. This is the
+type-system-v2 answer: no parallel concept beside results.
+
+**Deleted:** `trace()`, `exception()`, and the panic-kills-process rule for
+joined children. Amends D-COROUTINE1's handle surface.
+
+### 3. Channels and select — D-CONC-CHAN1
+
+**Today.** A module call, a manual drain dance, and a builder chain.
+
+```jet
+(tx, rx) :: tasks.channel<Int>(capacity: 8)
+loop {
+    job :: rx.receive() ?? break
+    handle(job)
+}
+winner :: g.select().recv(ch1).recv(ch2).after(ms: 100, value: -1).wait()
+```
+
+**Proposed.** Channels are builtin values. Draining is a loop. Waiting on
+several sources is an arm table — the same `head -> body` shape as `if`.
+
+```jet
+(tx, rx) :: channel<Int>(capacity: 8)
+
+loop job, rx { handle(job) }             // receive until the channel closes
+
+select {
+    job, jobs    -> handle(job)          // arm binding mirrors `loop v, source`
+    msg, control -> obey(msg)
+    after 100ms  -> retry()              // unit literal, one time rail (D-TYPE2-TIME1)
+}
+```
+
+- `Receiver<T>` and `Sender<T>` become nameable in signatures.
+- `select` works anywhere in a task, on plain endpoints. It no longer needs a
+  group.
+- The dead `Channel` table entry and the `.read` arm (accepted today, silently
+  dropped on every tier) are deleted.
+
+**Deleted:** the `g.select()` builder, `tasks.channel`, the `.read` arm.
+Amends D-CONCSELECT1 and narrows D-TASKRUNTIME1's module surface.
+
+### 4. Shared state and transactions — D-CONC-SHARE1, D-CONC-STM1
+
+**Today.** A closure per touch.
+
+```jet
+config :: Shared.new(AppConfig.{name: "jet-server", hits: 0})
+label :: config.read(c => c.name)
+config.edit(c => { c.hits += 1 })
+```
+
+**Proposed.** A shared value reads and writes like a value. Each statement is
+one atomic step. Several statements commit together under `#Transact`.
+
+```jet
+config :: shared AppConfig.{name: "jet-server", hits: 0}   // Shared<AppConfig>
+
+label :: config.name                  // one locked read
+config.hits += 1                      // one locked write
+
+#Transact {                           // several steps, one commit
+    from.balance -= amount
+    to.balance += amount
+}
+```
+
+The lock story in one sentence: one statement is one step, one `#Transact` is
+one commit, and the compiler orders every lock, so programs cannot deadlock
+on shared values. Expert guards (`guard_read`, `guard_edit`, `Condition`)
+stay for manual control.
+
+D-CONC-STM1 settles a real drift in the same area: the ratified STM text says
+"retried on conflict", but the runtime takes locks in address order and runs
+the block exactly once. The ballot picks which one is law. The recommendation
+is the shipped behavior — your code runs once, logs print once.
+
+**Deleted (if SHARE1 passes):** the `read`/`edit` closure forms and the
+`#Transact(tx)` mandatory name (the name stays only for `on_commit` /
+`on_rollback` hooks). Amends D-SHARED-API1 and D-TXN2.
+
+### 5. Schedules, pools, and services — D-CONC-SCHED1
+
+**Today.** The schedule marker parses its own private duration table. There is
+no worker cap. The service plane is ratified but unbuilt.
+
+**Proposed.** Scheduling is data on the work.
+
+```jet
+#[Job, Every(5min)]                   // spelling stays; 5min is now the one
+fn prune_sessions() { … }             // Duration literal every API uses
+
+#[Job, Every("03:00")]
+fn nightly_backup() {
+    group g(limit: 4) {
+        loop shard, shards { task back_up(shard) }
+    }
+}
+```
+
+- One vocabulary: a **job** is a task the runtime starts. Card #1448's naming
+  cleanup lands inside this.
+- The schedule value becomes typed data behind the unchanged marker, so
+  `jet dev`, services, and jetos read one value.
+- The service plane (D-SERVICE1) then builds as: a supervisor is a task that
+  owns a group; a restart rule is data on that group. No new mechanism.
+
+### 6. Protocols — clearer, and on the same three facts
+
+Protocols already work the way this whole proposal wants: an endpoint is a
+value, its state is typestate, and "finish the conversation" is a duty. Here
+is the full picture in one example.
+
+```jet
+protocol Payment {
+    client: Charge(cents: Int)        // client speaks first
+    server: Receipt(id: Int)          // then the server answers
+}
 
 fn run() {
-    taskgroup g {
-        a :: g.task => sum_range(1, 25)
-        b :: g.task => sum_range(26, 50)
-        results :: g.all([a, b])
-        print(results[0] + results[1])
-    }
+    (c, s) :: Payment.pair()                  // proposed: both endpoints, one call
+    task serve(s)                             // hand the server end to a child
+
+    c1 :: c.Charge(1200) ?? return            // send; the endpoint moves to its next state
+    r  :: c1.recv_Receipt() ?? return         // receive; conversation complete
+    print(r.id)
+}
+
+fn serve(s: ^Payment.Server) {
+    q :: s.recv_Charge() ?? return
+    q.Receipt(41) ?? return
 }
 ```
 
-Every line is ratified surface. Under the proposal the compiler now *knows* `a` is a running
-task with a join duty discharged by `g.all` — but nothing on the page moves.
+What the compiler enforces, with no runtime cost:
 
-### The middle — a bounded worker pool
+- Send `Receipt` before `Charge` arrives → compile error (wrong state, E0150).
+- Drop `c1` without finishing → compile error (unfinished duty, E0140).
+- The endpoint moved to `serve` must be sendable → checked (reach).
 
-Today this is 49 lines of hand-rolled channel tokens
-(`examples/features/concurrency/bounded_workers.jet`). On the model:
+That is state, duty, and reach — the same three facts as every task. Today
+each endpoint is minted by string-generated code and the two ends are made
+separately. The proposed `pair()` constructor and honest generated types ride
+the same machinery ballot (D-CONC-UNIT1).
 
-```jet
-use core.tasks as tasks
+## How this uses type system v2
 
-fn run() {
-    (tx, rx) :: tasks.channel<Int>(capacity: 8)
-    taskgroup g(limit: 4) {              // proposed: limit is data on the group
-        g.task => {
-            loop id, 1..20 { tx.send(id) }
-            tx.close()
-        }
-        loop job, rx {                   // proposed: receive until closed
-            g.task => handle(job)        // ratified; the limit throttles admission
-        }
-    }
-}
-```
+Direct answers to the open questions:
 
-And a typed outcome instead of string forensics:
-
-```jet
-h :: tasks.spawn(() => risky_fetch(url))
-match h.outcome() {                      // proposed: consumes the handle, like join
-    .Finished(body)   => print(body)
-    .Cancelled        => print("stopped early")
-    .Panicked(reason) => print("worker failed: " + reason)
-    .DeadlineBlown    => print("out of time")
-}
-```
-
-Dropping `h` without joining, detaching, or taking its outcome is the same error as dropping
-any `#SingleUse` value — with the same fix text, naming `.detach()` for fire-and-forget.
-
-### Expert — sessions, supervision, schedules on one substrate
-
-```jet
-use core.tasks as tasks
-
-protocol Payment {                       // ratified: already typestate + obligation
-    client: Charge(cents: Int)
-    server: Receipt(id: Int)
-}
-
-fn drain(group: TaskGroup, rx: Receiver<Payment.Receipt>) {   // Receiver<T> proposed-nameable
-    loop receipt, rx {                   // proposed
-        group.task => archive(receipt)   // ratified: group param spawns own their captures
-    }
-}
-
-#[Job, Every("03:00")]                   // ratified: a job is a task the runtime spawns
-fn settle_accounts() {
-    taskgroup g {
-        h :: Payment.Client.client()
-        r :: h.Charge(1200) ?? panic("charge refused")
-        // typestate has already proven no message runs out of order
-    }
-}
-```
-
-The unbuilt service plane (D-SERVICE1=D) lands here without new mechanism: a supervisor is a
-task that owns a group; a restart policy is data on that group; a rolling upgrade is a state
-transition on the service value. The reserved `#Async { }` block, if it ever ships, is a
-scoped-effect row — not a second concurrency system.
+- **Results.** Task failure is not a new concept. `join` returns `T ?
+  TaskFailure`, an ordinary enum on the one error rail, with `??`, `?`,
+  declared conversions, and arm tables. Nothing overlaps with optionals or
+  results, because it *is* results.
+- **Time.** `after 100ms`, `Every(5min)`, and deadlines all read the one
+  Duration rail that D-TYPE2-TIME1 (card #1497) defines. The private schedule
+  suffix table dies.
+- **Knowledge planes.** State, duty, and reach become registered planes in
+  the v2 fact registry. Send-safety is the plane the v2 inventory missed; this
+  proposal adds it. Facts become nameable and reflectable like every other
+  plane.
+- **One branching engine.** `select` arms are S68 arm-table arms, not a
+  private grammar. The binding `v, source` mirrors `loop v, source`.
 
 ## What this unlocks
 
-- **Errors teach one lesson.** "Undischarged duty", "wrong state", "cannot cross" — three
-  sentences cover every concurrency error, with the same shapes beginners already met on
-  files and `#SingleUse` values.
-- **Cancellation becomes visible.** `task.status()` answers `is it cancelled?` — today's
-  answer is parsing `"paused=false,cancel=true"`.
-- **Worker pools become one line** (`limit:` on the group) instead of a 49-line token dance.
-- **Channel-driven services get `loop job, rx`** — the single most common concurrency shape in
-  real code (surface-frequency audit: channels hit 100% of Go projects).
-- **New parallel surfaces are rows, not provers.** A future `para_sort` or a second kernel
-  mode reuses the one crossing plane; today each would hand-roll prover number six.
-- **Streams inherit the cancel law by construction**, retiring the whole class of
-  generator-lifecycle drift (card #1392).
-- **The service plane, workflows, and typed job scopes** (the largest ratified-unbuilt block)
-  build once on values whose lifetimes are already proven.
-- **Extremes hold.** Trivial one-liner: `nums.para_map((n: Int) => n * 2)` — unchanged.
-  Critical simulation: deterministic scheduling, pool sizing, and priorities become data on
-  the group/scheduler value — expert knobs on existing types, not carve-outs.
+- **Parallel code reads like plain code.** `all { f(), g() }` says exactly
+  what happens. No handles, no lists, no group name for the common case.
+- **One error lesson.** A beginner who learned `?? 0` on file reads already
+  knows how to handle a task failure.
+- **Worker pools are one line.** `group g(limit: 4)` replaces the 49-line
+  token pattern the pragmatism audit flagged.
+- **Channel services are two lines.** `loop job, rx` plus `select` covers the
+  most common concurrency shape in real code.
+- **Shared state loses its closure tax.** Counters and config are field
+  reads and writes again, still race-free.
+- **The service plane builds once.** Supervisors, restarts, and typed job
+  scopes land on values whose lifetimes the compiler already proves.
+- **Experts lose nothing.** Handles, groups, endpoints, guards, and failures
+  are ordinary typed values — nameable, generic, reflectable.
 
-## What does not change
+## What stays, and why it earns its place
 
-- Every ratified spelling in the slate table above; all 25 concurrency examples still run
-  byte-identical.
-- **No coloring, ever.** E0040/E0041 teaching errors stay law; no `async`, no `await`, no
-  mutex surface, no actor syntax (ratified declines respected).
-- **Walls stay.** No top type, no HKT, no macros; comptime never creates types. Protocols stay
-  two-endpoint until a projection story exists. First-class storable `TaskGroup` stays
-  rejected (the Tower decline's reasoning — "the structured guarantee quietly dies" — is this
-  proposal's borrow law, agreed with and kept).
-- **Zero cost.** All three planes erase before codegen (I3); TIR, AOT, JIT, interpreter, and
-  web lowering see today's shapes. I9 parity is strengthened (the select/interp and
-  `.read`-arm breaches get fixed or deleted), never traded.
-- The M:N scheduler (D-ASYNCRT1), preemptive cancellation (D-CANCELMODEL1=C), and the STM
-  effect wall (E0746) remain exactly as ratified.
+- **No coloring, ever.** No `async`, no `await`, no function color. E0040
+  stays law. This is Jet's biggest ergonomic win and it is already ratified.
+- **Structure stays.** A child never outlives its scope. The spelling gets
+  lighter; the law does not move.
+- **Preemptive cancellation** (D-CANCELMODEL1=C), `#Shield`, and
+  `#Context(deadline:)` stay: one unwind engine, proven design.
+- **`para_map` and friends stay**: the one-word answer for data parallelism.
+- **Walls stay**: no actors, no mutex surface, no top type, protocols hold at
+  two endpoints. All knowledge erases before codegen — zero runtime cost, and
+  tier parity (I9) is repaired where it is broken today (select on the
+  interpreter, the `.read` arm).
 
 ## Decisions for the owner
 
-Each ballot stands alone; any subset can be adopted. Amendments to ratified decisions are
-named inside the ballot text.
+Surface ballots lead. A machinery ballot that a surface pick makes moot is
+withdrawn before ratification.
 
-| Ballot | Question | Direction options |
+| Ballot | Question | Kind |
 |---|---|---|
-| D-CONC-UNIT1 | Adopt "work is a value": re-found task lifecycle/duty/reach on the typestate, obligation, and crossing machinery (internal; no surface change) | adopt / adopt without the crossing merge / decline |
-| D-CONC-JOIN1 | What happens to a dropped `Task<T>`? (amends the L1101 lint choice) | obligation error, `.detach()` discharges / auto-join at scope exit / keep the lint |
-| D-CONC-GROUP1 | Spawn authority spelling (respects the decline of first-class groups; fixes the method-position E0119 hole) | formalize borrow-of-scope, param-only / extend to method receivers, still never stored / status quo |
-| D-CONC-OUTCOME1 | Typed outcomes and status (amends D-COROUTINE1's `trace()`/`exception()` strings) | shared `TaskOutcome`+`TaskStatus` enums / outcome enum only / keep strings |
-| D-CONC-CROSS1 | One crossing plane registered in the fact registry; one error family for E1101/E1102/E1111/E1130/`Cell` rules | full merge + one family / merge internals, keep codes / decline |
-| D-CONC-STM1 | Resolve D-STM1 drift: text says "retried on conflict", runtime ships ordered multi-lock | amend law to ordered commit / implement retry / amend now, retry as future card |
-| D-CONC-SCHED1 | Scheduling is data: typed schedule value, `limit:` on groups, jobs = runtime-spawned tasks (aligns #1448; literal spelling defers to D-TYPE2-TIME1) | adopt / typed values only, markers untouched / decline |
-| D-CONC-STREAM1 | One lifecycle law for `Stream<T>` = the task law (subsumes the #1392 drift class) | unify / keep separate laws |
-| D-CONC-CHAN1 | Complete the channel surface: `Receiver<T>` nameable, `loop v, rx`, delete the dead `Channel` entry, build-or-delete the `.read` select arm | full completion / nameable + cleanup only / decline |
+| D-CONC-SPAWN1 | Adopt `task` / `all` / `race` / `any` / `group(limit:)` and delete the old spawn surface? | surface |
+| D-CONC-FAIL1 | Put task failure on the `?` rail as `TaskFailure`? (owner direction 2026-08-06) | surface |
+| D-CONC-JOIN1 | A bound handle that is dropped: error, auto-join, or warning? | surface |
+| D-CONC-CHAN1 | Builtin channels, `loop v, rx`, arm-table `select`; delete the builder? | surface |
+| D-CONC-SHARE1 | Shared values read and write like values; statements lock; `#Transact` commits? | surface |
+| D-CONC-SCHED1 | Typed schedule data, one job vocabulary, service plane on the substrate? | surface |
+| D-CONC-STM1 | Transaction law: ordered one-run commit, or retry? | law |
+| D-CONC-UNIT1 | Re-found the internals on typestate + obligations + one fact registry? | machinery |
+| D-CONC-CROSS1 | One crossing checker and one error voice for every worker boundary? | machinery |
+| D-CONC-STREAM1 | One lifecycle law for streams and tasks? | machinery |
 
 ## Implementation shape
 
-Design-only until S53 unfreezes; phases begin only after that gate and ratification.
+Design-only until S53 unfreezes. After the gate and ratification:
 
-**Phase A — internal re-founding, no surface change.** Express the task lifecycle on the
-typestate engine and the join duty on the obligation pass (deleting `task_lint_span`,
-`type_holds_task_handle`, and the mirrored scope check); register sendability as a fact plane
-and fold the five provers into one; reify the outcome enum internally; delete the dead
-`Channel` table entry; turn the `TaskGroup` method-position hole into the E1110 teaching
-family; fix the interpreter select gap and delete or build the `.read` arm (I9). All existing
-tests and goldens stay green.
-
-**Phase B — land the ratified-unbuilt on the substrate.** Service plane
-(D-SERVICE1..UPGRADE1): supervisors as tasks owning groups, restart policy as group data.
-Typed job scopes (D-JOB-SUBCMD1) and the #1448 naming unification. Windows IOCP conformance
-(#527/#1001) is orthogonal and unaffected.
-
-**Phase C — balloted surface unifications**, each a coherent greenfield migration that deletes
-the replaced form: typed outcomes (strings die), the join obligation, channel completions,
-scheduling-as-data. Every migration updates spec, examples, goldens, snapshots, and docs in
-the same change.
+- **Phase A — machinery.** Land UNIT1/CROSS1/STREAM1 internals with today's
+  surface and every test green. Fix the interpreter select gap.
+- **Phase B — surface.** Land each ratified surface ballot as one greenfield
+  migration: new spelling in, old spelling deleted, spec, examples, goldens,
+  and docs updated in the same change.
+- **Phase C — build the owed features on the substrate.** Service plane,
+  typed job scopes, Windows IOCP conformance.
