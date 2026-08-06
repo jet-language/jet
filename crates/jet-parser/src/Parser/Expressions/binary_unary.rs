@@ -386,6 +386,9 @@ impl<'a> Parser<'a> {
                 let op = match &self.peek().kind {
                     TokKind::Star => BinOp::Mul,
                     TokKind::Slash => BinOp::Div,
+                    // D-FLOORDIV1=A: `/%` sits with the other division-family
+                    // operators, so `a /% b * c` groups left to right.
+                    TokKind::SlashPercent => BinOp::FloorDiv,
                     TokKind::Percent => BinOp::Rem,
                     _ => break,
                 };

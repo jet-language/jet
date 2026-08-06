@@ -571,6 +571,8 @@ impl<'a> Checker<'a> {
                 | BinOp::Sub
                 | BinOp::Mul
                 | BinOp::Div
+                // D-FLOORDIV1=A: `/%` takes the same operands as `/`.
+                | BinOp::FloorDiv
                 // D-EXPSEM1=A: any Float operand makes the power a Float.
                 | BinOp::Pow
                 | BinOp::Eq
@@ -950,6 +952,7 @@ impl<'a> Checker<'a> {
                     | BinOp::Sub
                     | BinOp::Mul
                     | BinOp::Div
+                    | BinOp::FloorDiv
                     | BinOp::Rem
                     | BinOp::BitAnd
                     | BinOp::BitOr
@@ -1148,6 +1151,28 @@ impl<'a> Checker<'a> {
         }
 
         match op {
+            // D-FLOORDIV1=A: `/%` divides and rounds down. It keeps the operand
+            // type — whole numbers stay whole, floats stay floats — so it is the
+            // operator that gives a whole-number quotient.
+            BinOp::FloorDiv => {
+                if lt == rt && lt.is_numeric() {
+                    Some(lt)
+                } else {
+                    self.diags.push(Diagnostic::error(
+                        "E0109",
+                        format!(
+                            "`{}` needs both sides to be the same number type, but this has {} and {}",
+                            op.spell(),
+                            lt.show(),
+                            rt.show()
+                        ),
+                        compound_why(op),
+                        "make both sides the same number type".to_string(),
+                        Some(span),
+                    ));
+                    None
+                }
+            }
             // D-EXPSEM1=A: a whole-number base raised to a whole-number power
             // stays exact. A written negative exponent gives a fraction, so
             // both sides move to Float first. Any Float operand already made

@@ -30,8 +30,9 @@ pub(crate) fn undeclared_value_tag(
 
 pub(crate) fn compound_why(op: BinOp) -> String {
     match op {
-        BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div => {
-            "`+ - * /` work on Int and Float".to_string()
+        // D-FLOORDIV1=A: `/%` rounds down on whole numbers and on floats alike.
+        BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::FloorDiv => {
+            "`+ - * / /%` work on Int and Float".to_string()
         }
         _ => format!("`{}` is a whole-number operation (Int only)", op.spell()),
     }

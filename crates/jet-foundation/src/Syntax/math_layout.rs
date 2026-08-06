@@ -288,6 +288,9 @@ pub const OP_PLUS: &str = "+";
 pub const OP_MINUS: &str = "-";
 pub const OP_STAR: &str = "*";
 pub const OP_SLASH: &str = "/";
+/// D-FLOORDIV1=A (ratified 2026-08-05): `/%` divides and rounds down, toward
+/// negative infinity. It is the whole-number companion of `/`.
+pub const OP_SLASH_PERCENT: &str = "/%";
 pub const OP_PERCENT: &str = "%";
 pub const OP_AMP: &str = "&";
 /// D-PATO / D-SHAPE-PIPE1=C (ratified 2026-07-15): peer alternatives only.
@@ -334,6 +337,8 @@ pub const OP_MINUS_EQ: &str = "-=";
 pub const OP_MINUS_MINUS: &str = "--";
 pub const OP_STAR_EQ: &str = "*=";
 pub const OP_SLASH_EQ: &str = "/=";
+/// D-FLOORDIV1=A (ratified 2026-08-05): floor-division-assign.
+pub const OP_SLASH_PERCENT_EQ: &str = "/%=";
 pub const OP_PERCENT_EQ: &str = "%=";
 pub const OP_AMP_EQ: &str = "&=";
 pub const OP_PIPE_EQ: &str = "|=";

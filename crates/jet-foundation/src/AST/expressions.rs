@@ -61,6 +61,9 @@ pub enum BinOp {
     Sub,
     Mul,
     Div,
+    /// D-FLOORDIV1=A: infix `/%` divides and rounds the answer down, toward
+    /// negative infinity, on whole numbers and on floats alike.
+    FloorDiv,
     Rem,
     /// D-EXPOP1=A / D-EXPSEM1=A: infix `^` raises the left side to the power of
     /// the right side. Right-associative, binds tighter than unary minus.
@@ -96,6 +99,7 @@ impl BinOp {
             BinOp::Sub => "-",
             BinOp::Mul => "*",
             BinOp::Div => "/",
+            BinOp::FloorDiv => "/%",
             BinOp::Rem => "%",
             BinOp::Pow => "^",
             BinOp::BitAnd => "&",
@@ -124,6 +128,11 @@ impl BinOp {
             BinOp::Pow => {
                 unreachable!("D-EXPSEM1: `^` emits a Prelude power call, not a Rust operator")
             }
+            BinOp::FloorDiv => {
+                unreachable!(
+                    "D-FLOORDIV1: `/%` emits a Prelude floor-division call, not a Rust operator"
+                )
+            }
             other => other.spell(),
         }
     }
@@ -135,6 +144,7 @@ impl BinOp {
             BinOp::Sub => Some("-="),
             BinOp::Mul => Some("*="),
             BinOp::Div => Some("/="),
+            BinOp::FloorDiv => Some("/%="),
             BinOp::Rem => Some("%="),
             BinOp::Pow => Some("^="),
             BinOp::BitAnd => Some("&="),
