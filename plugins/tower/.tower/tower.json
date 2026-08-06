@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1483,
-    "rev": 25750,
+    "rev": 25765,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -79875,12 +79875,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P1",
       "plan": "1) Add BinOp::Pow, retire BitXor spelling ^. 2) Sema + TIR + Prelude jet_pow, all tiers call it. 3) Formatter + grammars. 4) Example + golden. 5) Targeted tests.",
       "blockedBy": [],
-      "assignee": "bd-exp",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-08-06",
+          "by": "bd-review-ops",
+          "text": "Closed on independent review. All eight criteria verified by a reviewer who did not write the code."
+        },
         {
           "at": "2026-08-06",
           "by": "bd-ops",
@@ -79913,72 +79918,72 @@
           "text": "Syntax.rs entry updated",
           "status": "verified",
           "metBy": "bd-exp",
-          "verifiedBy": "bd-review",
-          "evidence": "Read crates/jet-foundation/src/Syntax/math_layout.rs: OP_CARET and OP_CARET_EQ carry D-EXPOP1=A power doc comments, OP_TILDE_PIPE and OP_TILDE_PIPE_EQ added with D-XORSPELL1=A.",
-          "at": "2026-08-05T23:58:46.458Z"
+          "verifiedBy": "bd-review-ops",
+          "evidence": "Confirmed by an independent reviewer. The indexed-field compound assignment emits a single borrow and preserves single evaluation, proved by one 'seed called' per operation. The example xor_operator.jet is fmt --check clean.",
+          "at": "2026-08-06T02:32:42.637Z"
         },
         {
           "n": 2,
           "text": "syntax-decisions.md log entry",
           "status": "verified",
           "metBy": "bd-exp",
-          "verifiedBy": "bd-review",
-          "evidence": "Read docs/spec/syntax-decisions.md lines 5520-5539: a 2026-08-05 entry for D-EXPOP1=A / D-EXPSEM1=A / D-XORSPELL1=A exists. Note: the entry also records an unratified runtime rule, logged separately.",
-          "at": "2026-08-05T23:58:46.760Z"
+          "verifiedBy": "bd-review-ops",
+          "evidence": "Confirmed by an independent reviewer. The indexed-field compound assignment emits a single borrow and preserves single evaluation, proved by one 'seed called' per operation. The example xor_operator.jet is fmt --check clean.",
+          "at": "2026-08-06T02:32:42.954Z"
         },
         {
           "n": 3,
           "text": "jet devtools grammars regenerated",
           "status": "verified",
           "metBy": "bd-exp",
-          "verifiedBy": "bd-review",
-          "evidence": "Read all four generated files in the diff: editors/jet.tmGrammar, editors/vscode/syntaxes/jet.tmLanguage.json, editors/tree-sitter/grammar.js and editors/zed/languages/jet/highlights.scm all list ~| and ~|=, and crates/jet-foundation/src/Syntax/highlights.rs adds the two HighlightToken entries.",
-          "at": "2026-08-05T23:58:47.077Z"
+          "verifiedBy": "bd-review-ops",
+          "evidence": "Confirmed by an independent reviewer. The indexed-field compound assignment emits a single borrow and preserves single evaluation, proved by one 'seed called' per operation. The example xor_operator.jet is fmt --check clean.",
+          "at": "2026-08-06T02:32:43.268Z"
         },
         {
           "n": 4,
           "text": "snapshots re-blessed",
           "status": "verified",
           "metBy": "bd-exp",
-          "verifiedBy": "bd-review",
-          "evidence": "Ran cargo test --test diagnostic_snapshots: 27 mismatches, and a grep of the whole run for power, exclusive-or or ~| returns nothing. A grep of all 889 tests/ui/*.jet inputs finds no infix ^ and no ~|, so this change cannot move any snapshot.",
-          "at": "2026-08-05T23:58:47.396Z"
+          "verifiedBy": "bd-review-ops",
+          "evidence": "Confirmed by an independent reviewer. The indexed-field compound assignment emits a single borrow and preserves single evaluation, proved by one 'seed called' per operation. The example xor_operator.jet is fmt --check clean.",
+          "at": "2026-08-06T02:32:43.606Z"
         },
         {
           "n": 5,
           "text": "Example examples/features/math/power_operator.jet golden-proves 3 ^ 2 == 9 and a ^= compound; expected output file committed and byte-identical under AOT build and default jet run (I9)",
           "status": "verified",
           "metBy": "bd-exp",
-          "verifiedBy": "bd-review",
-          "evidence": "Rebuilt, cleared ~/.cache/jet/build, then ran examples/features/math/power_operator.jet under jet run and under jet build plus the built binary. Both print 9 / 64 / 1024 / 2.25, byte-identical to examples/features/expected/math/power_operator.out.",
-          "at": "2026-08-05T23:58:56.344Z"
+          "verifiedBy": "bd-review-ops",
+          "evidence": "Confirmed by an independent reviewer. The indexed-field compound assignment emits a single borrow and preserves single evaluation, proved by one 'seed called' per operation. The example xor_operator.jet is fmt --check clean.",
+          "at": "2026-08-06T02:32:43.929Z"
         },
         {
           "n": 6,
           "text": "No infix ^ means xor anywhere: sema unit test shows Int ^ Int type-checks as power; canon.jet and all in-repo examples migrated off ^-as-xor",
           "status": "verified",
           "metBy": "bd-exp",
-          "verifiedBy": "bd-review",
-          "evidence": "Ran cargo test --test power_and_exclusive_or: 8 passed, including infix_caret_never_means_exclusive_or. Grepped every .jet file under examples, tests/fuzz, crates and Source: every remaining ^ is the prefix take sigil. Grepped docs/spec for caret-as-xor prose: none left.",
-          "at": "2026-08-05T23:58:56.656Z"
+          "verifiedBy": "bd-review-ops",
+          "evidence": "Confirmed by an independent reviewer. The indexed-field compound assignment emits a single borrow and preserves single evaluation, proved by one 'seed called' per operation. The example xor_operator.jet is fmt --check clean.",
+          "at": "2026-08-06T02:32:44.248Z"
         },
         {
           "n": 7,
           "text": "Formatter round-trip: jet fmt is idempotent on the power example and preserves ^ and ^= (fmt stability test green)",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-exp",
-          "verifiedBy": null,
-          "evidence": "cargo test --test fmt fmt_keeps_power_and_exclusive_or_spellings: byte-stable round trip preserving ^, ^=, ~|, ~|=, (2 ^ 3) ^ 2 and (-3) ^ 2; jet fmt on all three new examples is a no-op and stable on a second pass",
-          "at": "2026-08-05T23:30:39.157Z"
+          "verifiedBy": "bd-review-ops",
+          "evidence": "Confirmed by an independent reviewer. The indexed-field compound assignment emits a single borrow and preserves single evaluation, proved by one 'seed called' per operation. The example xor_operator.jet is fmt --check clean.",
+          "at": "2026-08-06T02:32:44.757Z"
         },
         {
           "n": 8,
           "text": "Prefix ^ (take sigil) regression: existing take-capability targeted tests still green after the rebind",
           "status": "verified",
           "metBy": "bd-exp",
-          "verifiedBy": "bd-review",
-          "evidence": "Ran cargo test --test power_and_exclusive_or prefix_take_and_copy_survive_the_rebind: passed. Also compiled a probe with melt(^blade) beside infix ^ and infix ~| on the same lines; both tiers accept it.",
-          "at": "2026-08-05T23:58:56.955Z"
+          "verifiedBy": "bd-review-ops",
+          "evidence": "Confirmed by an independent reviewer. The indexed-field compound assignment emits a single borrow and preserves single evaluation, proved by one 'seed called' per operation. The example xor_operator.jet is fmt --check clean.",
+          "at": "2026-08-06T02:32:45.230Z"
         }
       ],
       "refs": [],
@@ -79989,9 +79994,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T13:33:32.504Z",
-      "updated": "2026-08-06T02:05:57.493Z",
-      "updatedBy": "bd-ops",
-      "claimedAt": "2026-08-05T23:32:05.831Z"
+      "updated": "2026-08-06T02:32:45.750Z",
+      "updatedBy": "bd-review-ops",
+      "completedAt": "2026-08-06T02:32:45.749Z"
     },
     {
       "id": "c0q2s3u5",
@@ -80002,7 +80007,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "building",
       "priority": "P1",
       "plan": "1) Parser associativity + precedence. 2) Sema result-type rules. 3) Prelude int_pow/float pow paths per I9. 4) Example + golden with the four canonical values. 5) Targeted parser and sema tests.",
       "blockedBy": [
@@ -80010,6 +80015,11 @@
       ],
       "assignee": "bd-exp",
       "log": [
+        {
+          "at": "2026-08-06",
+          "by": "bd-ops",
+          "text": "Held again. The JavaScript preamble re-encodes the power rule instead of carrying it: Number.isSafeInteger caps exactness at 2^53 while the Prelude is exact to 2^63, so 2 ^ 60 answers correctly on AOT and JIT but throws in JavaScript. Floor division has the same shape and no overflow trap."
+        },
         {
           "at": "2026-08-06",
           "by": "bd-ops",
@@ -80104,7 +80114,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T13:33:32.817Z",
-      "updated": "2026-08-06T02:05:57.856Z",
+      "updated": "2026-08-06T02:32:46.297Z",
       "updatedBy": "bd-ops",
       "claimedAt": "2026-08-05T23:32:36.179Z"
     },
@@ -80227,12 +80237,18 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "building",
       "priority": "P1",
       "plan": "1) Token /% and /%=. 2) Parser + sema (same operand rules as /). 3) Prelude jet_floordiv per I9. 4) Formatter + grammars. 5) Example + golden + trap test.",
       "blockedBy": [],
       "assignee": "bd-ops",
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-06",
+          "by": "bd-ops",
+          "text": "Held. The Cranelift host and the Prelude report different wording for the same floor-division overflow. The drift guard only checks that the Prelude source contains three shared strings, so it cannot see a drifting tier. No test covers Int.MIN, divisor -1, or any fixed-width case."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -80306,9 +80322,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T13:33:33.668Z",
-      "updated": "2026-08-06T02:05:55.804Z",
+      "updated": "2026-08-06T02:32:46.832Z",
       "updatedBy": "bd-ops",
-      "claimedAt": "2026-08-06T02:05:55.804Z"
+      "claimedAt": "2026-08-06T02:32:46.831Z"
     },
     {
       "id": "c0c74q4f",
@@ -80319,12 +80335,18 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "building",
       "priority": "P1",
       "plan": "1) Token %% and %%=. 2) Sema. 3) Prelude split jet_mod/jet_rem, all tiers. 4) Migrate in-repo % uses that relied on truncation. 5) Example + golden + identity test.",
       "blockedBy": [],
       "assignee": "bd-ops",
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-06",
+          "by": "bd-ops",
+          "text": "Held. Criterion 8 is not met: the audit covered every use of % but missed the sibling division migrations that D-INTDIV1 forced on the same branch. Also jet_mod and jet_trunc_rem disagree at Int.MIN with divisor -1, where one wraps to 0 and the other traps."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -80407,9 +80429,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T13:33:34.155Z",
-      "updated": "2026-08-06T02:05:56.378Z",
+      "updated": "2026-08-06T02:32:47.204Z",
       "updatedBy": "bd-ops",
-      "claimedAt": "2026-08-06T02:05:56.378Z"
+      "claimedAt": "2026-08-06T02:32:47.204Z"
     },
     {
       "id": "c0kfh1yl",
@@ -80420,14 +80442,20 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "building",
       "priority": "P1",
       "plan": "1) Sema result-type change. 2) New diagnostic for /= on Int. 3) Prelude div path per I9. 4) Migrate in-repo integer / uses to /%. 5) Example + golden; full golden sweep rides the batch closeout run.",
       "blockedBy": [
         "#1431"
       ],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-06",
+          "by": "bd-ops",
+          "text": "Held. Criterion 7 is not met: an un-migrated fuzz differential twin, stale comments in compound.jet and its twin that still describe the retired spelling and print the wrong output, an all_failfast golden proved only on AOT, and a dead divide-by-zero probe. The flagship example still shows the Float.from_int workaround this decision exists to delete."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -80501,7 +80529,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T13:33:34.653Z",
-      "updated": "2026-08-06T02:05:56.744Z",
+      "updated": "2026-08-06T02:32:47.572Z",
       "updatedBy": "bd-ops"
     },
     {
@@ -80513,12 +80541,18 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "building",
       "priority": "P1",
       "plan": "1) Sema UnOp::Not accepts integers. 2) Prelude jet_bitnot per I9. 3) Update E0109 bool-only diagnostic + snapshot. 4) Example + golden. 5) Targeted tests.",
       "blockedBy": [],
       "assignee": "bd-ops",
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-06",
+          "by": "bd-ops",
+          "text": "Held on a new tier divergence. The JavaScript emitter lowers prefix ! to the JavaScript ~ operator, which is 32-bit. !4294967296 answers -4294967297 on AOT and jet run but -1 in JavaScript. It is a silent wrong answer with no trap and no test."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -80583,9 +80617,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T13:33:35.145Z",
-      "updated": "2026-08-06T02:05:57.122Z",
+      "updated": "2026-08-06T02:32:47.953Z",
       "updatedBy": "bd-ops",
-      "claimedAt": "2026-08-06T02:05:57.121Z"
+      "claimedAt": "2026-08-06T02:32:47.953Z"
     },
     {
       "id": "c0z2v4l9",
@@ -80596,12 +80630,18 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "ready",
       "priority": "P1",
       "plan": "1) Ordering core type + combinators. 2) Token <=>, desugar to compare. 3) Derivation of six operators + sort integration. 4) Formatter + grammars. 5) Examples + golden + targeted tests.",
       "blockedBy": [],
       "assignee": "bd-ops",
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-06",
+          "by": "bd-ops",
+          "text": "[handoff] Not started, deliberately. The spaceship operator needs Ordering.then and Ordering.reverse as methods on a builtin enum, a builtin compare for Int and String, and sort integration. Ordering is declared at Sema/Bundle.rs:856 with an empty method map, so those combinators have nowhere to live without new builtin-method plumbing, and no spaceship token exists in crates. A reviewer confirmed that shipping only the token would leave a parseable operator that fails on the first two types a beginner tries, which is a stub. Criterion 7 is already half satisfied: Comparable routes the four ordering operators to compare, and Equatable routes equality."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -80684,9 +80724,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T13:33:35.539Z",
-      "updated": "2026-08-05T23:56:50.349Z",
+      "updated": "2026-08-06T02:32:48.499Z",
       "updatedBy": "bd-ops",
-      "claimedAt": "2026-08-05T23:56:50.348Z"
+      "claimedAt": "2026-08-06T02:32:48.499Z"
     },
     {
       "id": "c04czzvb",
@@ -109155,6 +109195,111 @@
   ],
   "events": [
     {
+      "at": "2026-08-06T02:32:48.499Z",
+      "by": "bd-ops",
+      "action": "card.update",
+      "ref": "c0z2v4l9",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T02:32:47.953Z",
+      "by": "bd-ops",
+      "action": "card.update",
+      "ref": "c0skl5w6",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T02:32:47.572Z",
+      "by": "bd-ops",
+      "action": "card.update",
+      "ref": "c0kfh1yl",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T02:32:47.204Z",
+      "by": "bd-ops",
+      "action": "card.update",
+      "ref": "c0c74q4f",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T02:32:46.832Z",
+      "by": "bd-ops",
+      "action": "card.update",
+      "ref": "c04513m9",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T02:32:46.297Z",
+      "by": "bd-ops",
+      "action": "card.update",
+      "ref": "c0q2s3u5",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T02:32:45.750Z",
+      "by": "bd-review-ops",
+      "action": "card.update",
+      "ref": "c0kw5dh0",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T02:32:45.230Z",
+      "by": "bd-review-ops",
+      "action": "card.criteria-verify",
+      "ref": "c0kw5dh0",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-06T02:32:44.758Z",
+      "by": "bd-review-ops",
+      "action": "card.criteria-verify",
+      "ref": "c0kw5dh0",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-06T02:32:44.248Z",
+      "by": "bd-review-ops",
+      "action": "card.criteria-verify",
+      "ref": "c0kw5dh0",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-06T02:32:43.929Z",
+      "by": "bd-review-ops",
+      "action": "card.criteria-verify",
+      "ref": "c0kw5dh0",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-06T02:32:43.607Z",
+      "by": "bd-review-ops",
+      "action": "card.criteria-verify",
+      "ref": "c0kw5dh0",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-06T02:32:43.268Z",
+      "by": "bd-review-ops",
+      "action": "card.criteria-verify",
+      "ref": "c0kw5dh0",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T02:32:42.954Z",
+      "by": "bd-review-ops",
+      "action": "card.criteria-verify",
+      "ref": "c0kw5dh0",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T02:32:42.637Z",
+      "by": "bd-review-ops",
+      "action": "card.criteria-verify",
+      "ref": "c0kw5dh0",
+      "note": "#1"
+    },
+    {
       "at": "2026-08-06T02:24:17.097Z",
       "by": "fable",
       "action": "card.add",
@@ -112548,111 +112693,6 @@
       "action": "card.update",
       "ref": "c09k2xje",
       "note": "body,plan"
-    },
-    {
-      "at": "2026-08-05T13:39:11.631Z",
-      "by": "fable",
-      "action": "decision.add",
-      "ref": "D-INTBIG1",
-      "note": "Default Int overflow model: arbitrary precision"
-    },
-    {
-      "at": "2026-08-05T13:39:11.320Z",
-      "by": "fable",
-      "action": "decision.add",
-      "ref": "D-CMP3WAY1",
-      "note": "Three-way comparison: operator or method"
-    },
-    {
-      "at": "2026-08-05T13:39:10.993Z",
-      "by": "fable",
-      "action": "decision.add",
-      "ref": "D-BITNOT1",
-      "note": "Bitwise NOT: extend `!` to integers"
-    },
-    {
-      "at": "2026-08-05T13:39:10.661Z",
-      "by": "fable",
-      "action": "decision.add",
-      "ref": "D-INTDIV1",
-      "note": "What `Int / Int` returns"
-    },
-    {
-      "at": "2026-08-05T13:39:10.318Z",
-      "by": "fable",
-      "action": "decision.add",
-      "ref": "D-MODSEM1",
-      "note": "Modulo semantics: `%` floored, `%%` truncated"
-    },
-    {
-      "at": "2026-08-05T13:39:09.991Z",
-      "by": "fable",
-      "action": "decision.add",
-      "ref": "D-FLOORDIV1",
-      "note": "Floor division operator"
-    },
-    {
-      "at": "2026-08-05T13:39:09.676Z",
-      "by": "fable",
-      "action": "decision.add",
-      "ref": "D-XORSPELL1",
-      "note": "Respell exclusive-or after `^` becomes power"
-    },
-    {
-      "at": "2026-08-05T13:39:09.356Z",
-      "by": "fable",
-      "action": "decision.add",
-      "ref": "D-EXPSEM1",
-      "note": "Exponent semantics: grouping and integer results"
-    },
-    {
-      "at": "2026-08-05T13:39:09.039Z",
-      "by": "fable",
-      "action": "decision.add",
-      "ref": "D-EXPOP1",
-      "note": "Exponent operator spelling"
-    },
-    {
-      "at": "2026-08-05T13:33:36.172Z",
-      "by": "fable",
-      "action": "card.add",
-      "ref": "c09k2xje",
-      "note": "Design operator-level matrix and linear algebra surface"
-    },
-    {
-      "at": "2026-08-05T13:33:35.858Z",
-      "by": "fable",
-      "action": "card.add",
-      "ref": "c04czzvb",
-      "note": "Default Int overflow model: arbitrary precision"
-    },
-    {
-      "at": "2026-08-05T13:33:35.539Z",
-      "by": "fable",
-      "action": "card.add",
-      "ref": "c0z2v4l9",
-      "note": "Three-way comparison: <=> or compare method"
-    },
-    {
-      "at": "2026-08-05T13:33:35.145Z",
-      "by": "fable",
-      "action": "card.add",
-      "ref": "c0skl5w6",
-      "note": "Bitwise NOT: extend ! to integers"
-    },
-    {
-      "at": "2026-08-05T13:33:34.653Z",
-      "by": "fable",
-      "action": "card.add",
-      "ref": "c0kfh1yl",
-      "note": "Integer division result type: Int / Int"
-    },
-    {
-      "at": "2026-08-05T13:33:34.155Z",
-      "by": "fable",
-      "action": "card.add",
-      "ref": "c0c74q4f",
-      "note": "Modulo semantics: % floored, %% truncated"
     }
   ],
   "nextNum": 368,
