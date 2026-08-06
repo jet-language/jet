@@ -1,16 +1,17 @@
 ---
-name: first-principles-rethink
+name: first-principles-audit
 description: >-
   Completely rethink one Jet area from first principles: sweep the full corpus
   and its silhouette, find the one underlying idea that unifies the fragments,
   and deliver an exsum-led proposal plus a ballot slate that simplifies,
   streamlines, and powers up with no sacrifices. Use when the owner says
-  "rethink X from first principles", "first principles proposal/audit for X",
-  or "find the unifying idea behind X". Not a cosmetic audit — this produces a
-  re-founding proposal and owner decisions.
+  "first principles audit of X", "rethink X from first principles",
+  "first principles proposal for X", or "find the unifying idea behind X".
+  Not a cosmetic pass — this produces a re-founding proposal, a surface
+  redesign, and owner decisions.
 ---
 
-# First-principles rethink
+# First-principles audit
 
 Rethink one area of Jet from the ground up. The bar is three reader reactions,
 in this order: "duh, that makes perfect sense", "how did I not make that
