@@ -95,7 +95,7 @@ while losses remain.
 | Container | Loss rows | Owner card | Card phase | State |
 | --- | ---: | --- | --- | --- |
 | core.files | 66 | #288 | building | live |
-| String | 34 | #1580 | ready | live |
+| String | 34 | #1581 | ready | live |
 | core.crypto | 17 | #1473 | ready | live |
 | core.archive | 16 | #1470 | ready | live |
 | Set | 16 | #1478 | verify | live |
