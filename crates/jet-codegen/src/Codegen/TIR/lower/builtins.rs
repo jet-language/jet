@@ -335,6 +335,9 @@ pub(crate) fn resolve_builtin_op(
         ("index_of", 1) if is_string => TBuiltinOp::StringIndexOf,
         ("index_of", 1) => TBuiltinOp::IndexOf,
         ("reverse", 0) if is_deque => TBuiltinOp::DequeReverse,
+        ("reverse", 0) if is_string => TBuiltinOp::StringMethod {
+            method: "reverse".to_string(),
+        },
         ("reverse", 0) => TBuiltinOp::Reverse,
         ("sort", 0) => TBuiltinOp::Sort,
         ("join", 1) if is_deque => TBuiltinOp::DequeJoin,
@@ -365,9 +368,15 @@ pub(crate) fn resolve_builtin_op(
         ("drop_last", 1) => TBuiltinOp::IterDropLast,
         ("shuffle", 0) => TBuiltinOp::IterShuffle,
         ("is_sorted", 0) => TBuiltinOp::IterIsSorted,
+        ("last_index_of", 1) if is_string => TBuiltinOp::StringMethod {
+            method: "last_index_of".to_string(),
+        },
         ("last_index_of", 1) => TBuiltinOp::IterLastIndexOf,
         ("average", 0) => TBuiltinOp::IterAverage {
             float: is_float_sequence,
+        },
+        ("compare", 1) if is_string => TBuiltinOp::StringMethod {
+            method: "compare".to_string(),
         },
         ("compare", 1) => TBuiltinOp::IterCompare,
         ("to_set", 0) if is_set => TBuiltinOp::SetCopy,
@@ -408,6 +417,26 @@ pub(crate) fn resolve_builtin_op(
         ("is_whitespace", 0) if is_string => TBuiltinOp::StringIsWhitespace,
         ("is_ascii", 0) if is_string => TBuiltinOp::StringIsAscii,
         ("to_title", 0) if is_string => TBuiltinOp::StringToTitle,
+        (
+            "is_lower"
+                | "is_upper"
+                | "capitalize"
+                | "swapcase"
+                | "copy"
+                | "normalize",
+            0,
+        ) if is_string => TBuiltinOp::StringMethod {
+            method: method.to_string(),
+        },
+        (
+            "remove_prefix"
+                | "remove_suffix"
+                | "equal"
+                | "rsplit",
+            1,
+        ) if is_string => TBuiltinOp::StringMethod {
+            method: method.to_string(),
+        },
         ("split_once", 1) if is_string => {
             let fields = option_tuple_fields(resolved_ret).unwrap_or_else(|| {
                 vec![

@@ -193,6 +193,36 @@ pub(crate) mod text_rt {
     pub(crate) fn title(s: &str) -> String {
         jet_text_title(&s.to_string())
     }
+    pub(crate) fn is_lower(s: &str) -> bool {
+        jet_text_is_lower(&s.to_string())
+    }
+    pub(crate) fn is_upper(s: &str) -> bool {
+        jet_text_is_upper(&s.to_string())
+    }
+    pub(crate) fn capitalize(s: &str) -> String {
+        jet_text_capitalize(&s.to_string())
+    }
+    pub(crate) fn swapcase(s: &str) -> String {
+        jet_text_swapcase(&s.to_string())
+    }
+    pub(crate) fn remove_prefix(s: &str, prefix: &str) -> String {
+        jet_text_remove_prefix(&s.to_string(), &prefix.to_string())
+    }
+    pub(crate) fn remove_suffix(s: &str, suffix: &str) -> String {
+        jet_text_remove_suffix(&s.to_string(), &suffix.to_string())
+    }
+    pub(crate) fn compare(a: &str, b: &str) -> i64 {
+        jet_text_compare(&a.to_string(), &b.to_string())
+    }
+    pub(crate) fn reverse(s: &str) -> String {
+        jet_text_reverse(&s.to_string())
+    }
+    pub(crate) fn normalize_nfc(s: &str) -> String {
+        jet_text_normalize_nfc(&s.to_string())
+    }
+    pub(crate) fn last_index_of(s: &str, needle: &str) -> Option<i64> {
+        jet_unicode_last_index_of(&s.to_string(), &needle.to_string())
+    }
     pub(crate) fn split_once(s: &str, separator: &str) -> Option<(String, String)> {
         jet_unicode_split_once(&s.to_string(), &separator.to_string())
     }
@@ -363,6 +393,28 @@ extern "C" fn jet_jit_text_count(s: i64, needle: i64) -> i64 {
 
 extern "C" fn jet_jit_text_title(s: i64) -> i64 {
     alloc_str(text_rt::title(&clone_str(s)))
+}
+
+/// #1476 StringMethod dispatcher. method ids mirror lower_ctx match.
+/// Returns i64; bool methods use 0/1 and are narrowed to i8 by the caller.
+extern "C" fn jet_jit_string_method(recv: i64, method: i64, arg0: i64) -> i64 {
+    let s = clone_str(recv);
+    match method {
+        0 => text_rt::last_index_of(&s, &clone_str(arg0))
+            .map_or(0, |index| index.wrapping_add(1)),
+        1 => i64::from(text_rt::is_lower(&s)),
+        2 => i64::from(text_rt::is_upper(&s)),
+        3 => alloc_str(text_rt::capitalize(&s)),
+        4 => alloc_str(text_rt::swapcase(&s)),
+        5 => alloc_str(text_rt::remove_prefix(&s, &clone_str(arg0))),
+        6 => alloc_str(text_rt::remove_suffix(&s, &clone_str(arg0))),
+        7 => text_rt::compare(&s, &clone_str(arg0)),
+        8 => i64::from(s == clone_str(arg0)),
+        9 => alloc_str(s),
+        10 => alloc_str(text_rt::reverse(&s)),
+        11 => alloc_str(text_rt::normalize_nfc(&s)),
+        _ => 0,
+    }
 }
 
 extern "C" fn jet_jit_text_split_once(s: i64, separator: i64) -> i64 {
@@ -661,6 +713,7 @@ pub(crate) struct TextHostFns {
     pub count: FuncId,
     pub title: FuncId,
     pub split_once: FuncId,
+    pub string_method: FuncId,
     pub center: FuncId,
     pub starts_any: FuncId,
     pub char_indices: FuncId,
@@ -720,6 +773,7 @@ pub(crate) fn register_text_symbols(builder: &mut JITBuilder) {
     builder.symbol("jet_jit_text_index_of", jet_jit_text_index_of as *const u8);
     builder.symbol("jet_jit_text_count", jet_jit_text_count as *const u8);
     builder.symbol("jet_jit_text_title", jet_jit_text_title as *const u8);
+    builder.symbol("jet_jit_string_method", jet_jit_string_method as *const u8);
     builder.symbol(
         "jet_jit_text_split_once",
         jet_jit_text_split_once as *const u8,
@@ -798,6 +852,7 @@ pub(crate) fn declare_text_host_fns(module: &mut JITModule) -> Result<TextHostFn
         count: import("jet_jit_text_count", &binary)?,
         title: import("jet_jit_text_title", &unary)?,
         split_once: import("jet_jit_text_split_once", &binary)?,
+        string_method: import("jet_jit_string_method", &ternary)?,
         center: import("jet_jit_text_center", &ternary)?,
         starts_any: import("jet_jit_text_starts_any", &binary_i8)?,
         char_indices: import("jet_jit_text_char_indices", &unary)?,

@@ -1672,6 +1672,17 @@ comptime, and default `jet run`.
 | `.is_ascii()` | `Bool` | True when every byte is ASCII |
 | `.to_title()` | `String` | Word-start Unicode titlecase mapping; remaining letters are lowercase |
 | `.split_once(separator)` | `(before: String, after: String)?` | Split at the first separator |
+| `.last_index_of(needle)` | `Int?` | Unicode-scalar index of the last substring |
+| `.is_lower()` / `.is_upper()` | `Bool` | True when there is at least one cased scalar and every cased scalar has that case |
+| `.capitalize()` | `String` | Titlecase the first scalar; lowercase the rest |
+| `.swapcase()` | `String` | Swap cased scalars via the pinned upper/lower maps |
+| `.remove_prefix(p)` / `.remove_suffix(s)` | `String` | Strip an exact prefix/suffix, or return self unchanged |
+| `.compare(other)` | `Int` | Lexicographic `-1` / `0` / `1` |
+| `.equal(other)` | `Bool` | Same as `==` for text |
+| `.copy()` | `String` | Owned clone (value strings already copy on assign) |
+| `.reverse()` | `String` | Reverse Unicode scalar order |
+| `.normalize()` | `String` | NFC (same as `core.text.nfc`) |
+| `.rsplit(sep)` | `Iter<String>` | Split from the right; part order is left-to-right |
 
 Competitor accounting is explicit: Python `partition`/`count`, Rust
 `find`/`split_once`/`is_ascii`, Go `Cut`/`Count`, Swift `split`/`firstIndex`,
@@ -1680,6 +1691,16 @@ above or the existing `before`/`after`/`split` methods. Locale collation and
 locale-sensitive casing remain out of scope under `D-TEXTUNICODE1=A`; regex
 replacement remains owned by `D-REGEXENGINE1=A`. These explicit v1 decisions
 are not silently added to the ambient String surface.
+
+String declines (#1476): mutation verbs (`clear`/`push`/`pop`/`remove`/`write`/
+`copyto`) stay off immutable text — rebuild with `+` / `replace` / `slice`.
+Sequence adapters (`all`/`map`/`fold`/`skip`/`chunk`/…) and indexers
+(`get`/`first`/`last`/`codepointat`) live on `.chars()` / `.bytes()` then
+List/Iter (I8). `parse`/`tofloat` stay on destination types (`Int.parse` /
+`Float.parse`, E0311). `match`/`matches` stay on `core.regex`. Buffer-only
+names (`capacity`/`intern`/`isvalid`/`isprint`/`chop`/`replacerange`/
+`indexofany`/`lastindexofany`/`rpartition`) are declined; use the shipped
+surface or `core.text` helpers instead.
 
 ---
 

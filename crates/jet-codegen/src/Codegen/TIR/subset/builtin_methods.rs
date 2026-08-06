@@ -45,6 +45,10 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         | ("is_alphabetic", 0) | ("is_numeric", 0)
         | ("is_whitespace", 0) | ("is_ascii", 0)
         | ("to_title", 0) | ("split_once", 1)
+        | ("is_lower", 0) | ("is_upper", 0)
+        | ("capitalize", 0) | ("swapcase", 0) | ("normalize", 0)
+        | ("remove_prefix", 1) | ("remove_suffix", 1)
+        | ("rsplit", 1)
         | ("count", 1) | ("extend", 1) | ("concat", 1)
         // D-STR-AFTER1: first-occurrence substring split.
         | ("after", 1) | ("before", 1)

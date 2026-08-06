@@ -798,6 +798,32 @@ extern "C" fn jet_jit_str_split(id: i64, sep_id: i64) -> i64 {
     })
 }
 
+extern "C" fn jet_jit_str_rsplit(id: i64, sep_id: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let text = rt.heap.clone_string(id).unwrap_or_default();
+        let sep = rt.heap.clone_string(sep_id).unwrap_or_default();
+        let list = rt.heap.alloc_empty_list();
+        if sep.is_empty() {
+            for part in text.split(&sep) {
+                let sid = rt.heap.alloc_string(part.to_string());
+                rt.heap
+                    .list_push_int(list, sid)
+                    .expect("jit str rsplit: bad list handle");
+            }
+        } else {
+            let mut parts: Vec<String> = text.rsplit(&sep).map(|p| p.to_string()).collect();
+            parts.reverse();
+            for part in parts {
+                let sid = rt.heap.alloc_string(part);
+                rt.heap
+                    .list_push_int(list, sid)
+                    .expect("jit str rsplit: bad list handle");
+            }
+        }
+        list
+    })
+}
+
 extern "C" fn jet_jit_str_chars(id: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let text = rt.heap.clone_string(id).unwrap_or_default();
@@ -1653,6 +1679,7 @@ pub(crate) struct HostFns {
     pub(crate) str_replace: FuncId,
     pub(crate) str_lines: FuncId,
     pub(crate) str_split: FuncId,
+    pub(crate) str_rsplit: FuncId,
     pub(crate) str_chars: FuncId,
     pub(crate) str_bytes: FuncId,
     pub(crate) str_scalar_strings: FuncId,
@@ -1817,6 +1844,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     builder.symbol("jet_jit_str_replace", jet_jit_str_replace as *const u8);
     builder.symbol("jet_jit_str_lines", jet_jit_str_lines as *const u8);
     builder.symbol("jet_jit_str_split", jet_jit_str_split as *const u8);
+    builder.symbol("jet_jit_str_rsplit", jet_jit_str_rsplit as *const u8);
     builder.symbol("jet_jit_str_chars", jet_jit_str_chars as *const u8);
     builder.symbol("jet_jit_str_bytes", jet_jit_str_bytes as *const u8);
     builder.symbol("jet_jit_str_scalar_strings", jet_jit_str_scalar_strings as *const u8);
@@ -2502,6 +2530,7 @@ fn declare_host_fns(
         str_replace: import("jet_jit_str_replace", &sig_str_replace)?,
         str_lines: import("jet_jit_str_lines", &sig_str_unary_i64)?,
         str_split: import("jet_jit_str_split", &sig_str_binary_i64)?,
+        str_rsplit: import("jet_jit_str_rsplit", &sig_str_binary_i64)?,
         str_chars: import("jet_jit_str_chars", &sig_str_unary_i64)?,
         str_bytes: import("jet_jit_str_bytes", &sig_str_unary_i64)?,
         str_scalar_strings: import("jet_jit_str_scalar_strings", &sig_str_unary_i64)?,

@@ -1414,6 +1414,8 @@ pub(crate) fn is_intercepted_method_name(method: &str) -> bool {
         | "merge"
         | "to_string" | "map" | "filter" | "each" | "find" | "any" | "all"
         | "sort_by" | "reduce"
+        | "is_lower" | "is_upper" | "capitalize" | "swapcase" | "normalize"
+        | "remove_prefix" | "remove_suffix" | "rsplit" | "equal" | "copy"
         // D-ITER1: lazy iterator adapters.
         | "take" | "skip" | "step_by" | "dedup" | "chunks" | "windows"
         | "indexed" | "indexes" | "zip" | "zip_short" | "zip_pad"

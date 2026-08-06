@@ -777,6 +777,14 @@ pub(crate) fn collect_core_expr(
                     | "is_whitespace"
                     | "is_ascii"
                     | "to_title"
+                    | "is_lower"
+                    | "is_upper"
+                    | "capitalize"
+                    | "swapcase"
+                    | "normalize"
+                    | "last_index_of"
+                    | "remove_prefix"
+                    | "remove_suffix"
             )
             {
                 note_core_usage(

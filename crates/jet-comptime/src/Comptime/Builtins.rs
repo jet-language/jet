@@ -1263,6 +1263,51 @@ pub fn apply_method(
         (CtValue::Str(s), "is_whitespace") => Ok(CtValue::Bool(super::TextLite::is_whitespace(s))),
         (CtValue::Str(s), "is_ascii") => Ok(CtValue::Bool(s.is_ascii())),
         (CtValue::Str(s), "to_title") => Ok(CtValue::Str(super::TextLite::title(s))),
+        (CtValue::Str(s), "is_lower") => Ok(CtValue::Bool(super::TextLite::is_lower(s))),
+        (CtValue::Str(s), "is_upper") => Ok(CtValue::Bool(super::TextLite::is_upper(s))),
+        (CtValue::Str(s), "capitalize") => Ok(CtValue::Str(super::TextLite::capitalize(s))),
+        (CtValue::Str(s), "swapcase") => Ok(CtValue::Str(super::TextLite::swapcase(s))),
+        (CtValue::Str(s), "copy") => Ok(CtValue::Str(s.clone())),
+        (CtValue::Str(s), "reverse") => Ok(CtValue::Str(super::TextLite::reverse(s))),
+        (CtValue::Str(s), "normalize") => Ok(CtValue::Str(super::TextLite::nfc(s))),
+        (CtValue::Str(s), "remove_prefix") => match args.into_iter().next() {
+            Some(CtValue::Str(prefix)) => Ok(CtValue::Str(super::TextLite::remove_prefix(s, &prefix))),
+            _ => Err(unsupported("remove_prefix with a non-text argument", span)),
+        },
+        (CtValue::Str(s), "remove_suffix") => match args.into_iter().next() {
+            Some(CtValue::Str(suffix)) => Ok(CtValue::Str(super::TextLite::remove_suffix(s, &suffix))),
+            _ => Err(unsupported("remove_suffix with a non-text argument", span)),
+        },
+        (CtValue::Str(s), "last_index_of") => match args.into_iter().next() {
+            Some(CtValue::Str(needle)) => Ok(match s.rfind(&needle) {
+                Some(byte) => CtValue::Some(Box::new(CtValue::Int(s[..byte].chars().count() as i64))),
+                None => CtValue::None(Type::Int),
+            }),
+            _ => Err(unsupported("last_index_of with a non-text argument", span)),
+        },
+        (CtValue::Str(s), "compare") => match args.into_iter().next() {
+            Some(CtValue::Str(other)) => Ok(CtValue::Int(super::TextLite::compare(s, &other))),
+            _ => Err(unsupported("compare with a non-text argument", span)),
+        },
+        (CtValue::Str(s), "equal") => match args.into_iter().next() {
+            Some(CtValue::Str(other)) => Ok(CtValue::Bool(s == other.as_str())),
+            _ => Err(unsupported("equal with a non-text argument", span)),
+        },
+        (CtValue::Str(s), "rsplit") => match args.into_iter().next() {
+            Some(CtValue::Str(sep)) => {
+                let parts = if sep.is_empty() {
+                    s.split(sep.as_str()).map(|p| p.to_string()).collect::<Vec<_>>()
+                } else {
+                    let mut parts: Vec<String> = s.rsplit(sep.as_str()).map(|p| p.to_string()).collect();
+                    parts.reverse();
+                    parts
+                };
+                Ok(CtValue::List(
+                    parts.into_iter().map(CtValue::Str).collect(),
+                ))
+            }
+            _ => Err(unsupported("rsplit with a non-text argument", span)),
+        },
         (CtValue::Str(s), "split_once") => match args.into_iter().next() {
             Some(CtValue::Str(sep)) => Ok(match s.find(&sep) {
                 Some(at) => CtValue::Some(Box::new(CtValue::Struct {

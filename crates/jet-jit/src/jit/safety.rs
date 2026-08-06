@@ -2303,6 +2303,47 @@ fn resident_safe_builtin_op(
                 && resident_safe_expr(&args[0], callees)
                 && resident_safe_expr(&args[1], callees)
         }
+        // #1476 / #1409 ambient String surface — keep examples resident (I9).
+        TBuiltinOp::TrimStart | TBuiltinOp::TrimEnd | TBuiltinOp::StringToTitle => {
+            matches!(&recv.ty, Type::String) && args.is_empty()
+        }
+        TBuiltinOp::PadStart | TBuiltinOp::PadEnd => {
+            matches!(&recv.ty, Type::String)
+                && args.len() == 2
+                && matches!(&args[0].ty, Type::Int)
+                && matches!(&args[1].ty, Type::String)
+                && args.iter().all(|a| resident_safe_expr(a, callees))
+        }
+        TBuiltinOp::StringIndexOf | TBuiltinOp::StringCount => {
+            matches!(&recv.ty, Type::String)
+                && args.len() == 1
+                && matches!(&args[0].ty, Type::String)
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::StringIsAlphabetic
+        | TBuiltinOp::StringIsNumeric
+        | TBuiltinOp::StringIsWhitespace
+        | TBuiltinOp::StringIsAscii => matches!(&recv.ty, Type::String) && args.is_empty(),
+        TBuiltinOp::StringSplitOnce { .. } | TBuiltinOp::Split => {
+            matches!(&recv.ty, Type::String)
+                && args.len() == 1
+                && matches!(&args[0].ty, Type::String)
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::StringMethod { method } => {
+            matches!(&recv.ty, Type::String)
+                && match method.as_str() {
+                    "is_lower" | "is_upper" | "capitalize" | "swapcase" | "copy" | "reverse"
+                    | "normalize" => args.is_empty(),
+                    "last_index_of" | "remove_prefix" | "remove_suffix" | "compare" | "equal"
+                    | "rsplit" => {
+                        args.len() == 1
+                            && matches!(&args[0].ty, Type::String)
+                            && resident_safe_expr(&args[0], callees)
+                    }
+                    _ => false,
+                }
+        }
         _ => false,
     }
 }

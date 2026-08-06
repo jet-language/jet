@@ -52,18 +52,18 @@ Generated on: 2026-08-06
 | Shared containers | 54 |
 | Core modules | 85 |
 | Module members | 1137 |
-| Collection method rows | 655 |
-| Jet-side rows | 1793 |
-| Total rows | 10524 |
+| Collection method rows | 668 |
+| Jet-side rows | 1806 |
+| Total rows | 10487 |
 
 ## Verdicts
 
 | Verdict | Rows |
 | --- | ---: |
-| Jet wins | 404 |
-| Equal | 800 |
-| Jet loses (two or more languages agree) | 416 |
-| Single witness (recorded, not scored) | 8315 |
+| Jet wins | 403 |
+| Equal | 814 |
+| Jet loses (two or more languages agree) | 389 |
+| Single witness (recorded, not scored) | 8292 |
 | Exported type, not an operation | 169 |
 | Not compared | 420 |
 | Deliberately declined | 0 |
@@ -72,17 +72,17 @@ Generated on: 2026-08-06
 
 | Language | Surface read from | Recorded operations | Jet rows matched | Loss rows |
 | --- | --- | ---: | ---: | ---: |
-| Rust | standard-library source (rust-src component) | 1032 | 340 | 51 |
-| Go | official frozen API files (GOROOT/api/go1*.txt) | 1878 | 387 | 128 |
-| Swift | official documentation JSON (developer.apple.com) | 505 | 151 | 51 |
-| Kotlin | official API reference (kotlinlang.org) | 1141 | 197 | 95 |
-| C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1267 | 313 | 68 |
-| TypeScript | runtime introspection | 724 | 202 | 79 |
-| Ruby | runtime introspection | 1294 | 309 | 110 |
-| Elixir | runtime introspection | 1270 | 339 | 100 |
-| Julia | official documentation search index (docs.julialang.org) | 1132 | 248 | 110 |
+| Rust | standard-library source (rust-src component) | 1032 | 345 | 46 |
+| Go | official frozen API files (GOROOT/api/go1*.txt) | 1878 | 394 | 124 |
+| Swift | official documentation JSON (developer.apple.com) | 505 | 161 | 45 |
+| Kotlin | official API reference (kotlinlang.org) | 1141 | 210 | 80 |
+| C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1267 | 320 | 63 |
+| TypeScript | runtime introspection | 724 | 207 | 77 |
+| Ruby | runtime introspection | 1294 | 318 | 102 |
+| Elixir | runtime introspection | 1270 | 347 | 94 |
+| Julia | official documentation search index (docs.julialang.org) | 1132 | 259 | 100 |
 | R | official R manual package index (stat.ethz.ch R-devel) | 1768 | 51 | 0 |
-| Python | runtime introspection | 2232 | 391 | 175 |
+| Python | runtime introspection | 2232 | 408 | 163 |
 
 ## Loss clusters
 
@@ -95,11 +95,11 @@ while losses remain.
 | Container | Loss rows | Owner card | Card phase | State |
 | --- | ---: | --- | --- | --- |
 | core.files | 66 | #288 | building | live |
-| String | 62 | #1476 | ready | live |
-| List | 30 | #1477 | ready | live |
-| Map | 27 | #1477 | ready | live |
+| String | 36 | #1476 | building | live |
+| List | 28 | #1477 | building | live |
+| Map | 26 | #1477 | building | live |
 | core.crypto | 18 | #1473 | ready | live |
-| Set | 17 | #1478 | building | live |
+| Set | 17 | #1478 | verify | live |
 | core.archive | 16 | #1470 | ready | live |
 | core.time | 14 | #1466 | done | closed |
 | core.tasks | 13 | #1468 | done | closed |
@@ -111,14 +111,14 @@ while losses remain.
 | core.path | 10 | #288 | building | live |
 | core.encoding.xml | 9 | #1481 | ready | live |
 | core.process | 9 | #1481 | ready | live |
+| ByteBuffer | 8 | #1467 | done | closed |
 | core.db | 8 | #1481 | ready | live |
 | core.reflect | 8 | #1481 | ready | live |
 | core.testing | 8 | #1481 | ready | live |
-| ByteBuffer | 7 | #1467 | done | closed |
 | core.tls | 6 | #1481 | ready | live |
-| core.http | 5 | #1481 | ready | live |
-| core.regex | 5 | #1471 | done | closed |
-| core.uuid | 5 | #1481 | ready | live |
+| core.uuid | 6 | #1481 | ready | live |
+| core.http | 4 | #1481 | ready | live |
+| core.regex | 4 | #1471 | done | closed |
 | core.encoding.csv | 3 | #1481 | ready | live |
 | Deque | 3 | #1475 | done | closed |
 | BitSet | 2 | #1493 | planning | live |
@@ -128,8 +128,10 @@ while losses remain.
 | core.random | 2 | #1481 | ready | live |
 | PriorityQueue | 2 | #1481 | ready | live |
 | core.encoding.json | 1 | #1481 | ready | live |
+| core.mime | 1 | #1481 | ready | live |
 | core.url | 1 | #1472 | done | closed |
-| SortedSet | 1 | #1478 | building | live |
+| Iter | 1 | #1479 | building | live |
+| SortedSet | 1 | #1478 | verify | live |
 
 ## Containers indexed per package
 

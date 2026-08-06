@@ -238,6 +238,7 @@ pub(super) fn eval_builtin(
         TBuiltinOp::StringIsWhitespace => apply_method(recv, "is_whitespace", args, span),
         TBuiltinOp::StringIsAscii => apply_method(recv, "is_ascii", args, span),
         TBuiltinOp::StringToTitle => apply_method(recv, "to_title", args, span),
+        TBuiltinOp::StringMethod { method } => apply_method(recv, method, args, span),
         TBuiltinOp::StringSplitOnce { .. } => apply_method(recv, "split_once", args, span),
         TBuiltinOp::ToUpper => apply_method(recv, "to_upper", args, span),
         TBuiltinOp::ToLower => apply_method(recv, "to_lower", args, span),

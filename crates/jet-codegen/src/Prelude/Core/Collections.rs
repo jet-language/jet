@@ -405,6 +405,17 @@ fn jet_iter_string_split(s: &String, sep: &str) -> JetIter<String> {
     })))
 }
 
+/// Lazy `String.rsplit` — same left-to-right part order as Python `str.rsplit`
+/// without a limit (Rust's `rsplit` yields right-to-left; reverse after collect).
+fn jet_iter_string_rsplit(s: &String, sep: &str) -> JetIter<String> {
+    if sep.is_empty() {
+        return jet_iter_string_split(s, sep);
+    }
+    let mut parts: Vec<String> = s.rsplit(sep).map(|p| p.to_string()).collect();
+    parts.reverse();
+    jet_iter_from_vec(parts)
+}
+
 fn jet_iter_take<T: 'static>(it: JetIter<T>, n: i64) -> JetIter<T> {
     JetIter(Box::new(it.0.take(n.max(0) as usize)))
 }
