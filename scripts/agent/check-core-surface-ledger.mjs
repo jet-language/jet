@@ -220,6 +220,8 @@ const CROSS_DOMAIN_POOLED = new Set([
 // under-score, never invent a gap. Listing them is the record that each was
 // looked at rather than defaulted.
 const CROSS_DOMAIN_DISTINCT = new Set([
+  // Collection verbs that now keep their own spelling in a module namespace.
+  "append", "delete", "in", "length", "size", "truncate", "unlink",
   "abort", "abs", "absolutepath", "addcleanup", "addelement", "all", "and", "any",
   "appendtext", "args", "available", "average", "base", "big", "binarysearch", "binarysearchby",
   "breakpoint", "broadcast", "buffered", "bufferedreader", "bufferedwriter", "byteoffset", "bytes", "capitalize",
@@ -375,14 +377,36 @@ const SYNONYM_GROUPS = [
 // group's own first name. Groups are authored with the plainest spelling first,
 // which is what a gap should be called: naming one "applyeach" because that
 // sorts before "each" is accurate and useless.
+// A container is a type when it is one of Jet largest things you hold, not a
+// module namespace. Both witness pooling and the collection-verb synonym groups
+// read this: a module gains no clear because a List has one.
+function isTypeContainer(container) {
+  return !container.startsWith("core.") && container !== "app";
+}
+
+// Collection verbs. In a module namespace these are different operations that
+// merely share a spelling: Math.Truncate is rounding toward zero, not emptying
+// a container, and DateTime.Add is date arithmetic, not appending. Folding them
+// scored core.math.clear and core.time.push as real gaps.
+const TYPE_ONLY_GROUP_HEADS = new Set([
+  "push", "pop", "len", "get", "set", "remove", "clear", "contains",
+]);
+
 const SYNONYM_INDEX = new Map();
+const SYNONYM_INDEX_MODULE = new Map();
+const SYNONYM_CANONICAL_MODULE = new Map();
 const SYNONYM_CANONICAL = new Map();
 for (const group of SYNONYM_GROUPS) {
   const keys = group.map(function (name) { return name.toLowerCase().replace(/[_!?.\-]/g, ""); });
+  const typeOnly = TYPE_ONLY_GROUP_HEADS.has(keys[0]);
   for (const key of keys) {
     if (!SYNONYM_INDEX.has(key)) SYNONYM_INDEX.set(key, new Set());
     for (const other of keys) SYNONYM_INDEX.get(key).add(other);
     if (!SYNONYM_CANONICAL.has(key)) SYNONYM_CANONICAL.set(key, keys[0]);
+    if (typeOnly) continue;
+    if (!SYNONYM_INDEX_MODULE.has(key)) SYNONYM_INDEX_MODULE.set(key, new Set());
+    for (const other of keys) SYNONYM_INDEX_MODULE.get(key).add(other);
+    if (!SYNONYM_CANONICAL_MODULE.has(key)) SYNONYM_CANONICAL_MODULE.set(key, keys[0]);
   }
 }
 
@@ -1266,11 +1290,11 @@ function containerPrefixes(members) {
   return prefixes;
 }
 
-function keysForMember(member, prefixes) {
-  const keys = synonymsFor(member);
+function keysForMember(member, prefixes, container) {
+  const keys = synonymsFor(member, container);
   const cut = member.indexOf("_");
   if (cut > 0 && prefixes.has(member.slice(0, cut))) {
-    for (const key of synonymsFor(member.slice(cut + 1))) keys.add(key);
+    for (const key of synonymsFor(member.slice(cut + 1), container)) keys.add(key);
   }
   return keys;
 }
@@ -1299,15 +1323,21 @@ function qualifierBase(member, siblings) {
 
 // The canonical key of an operation is the first name of its synonym group, so
 // is_subset, is_subset_of and issubset are one gap rather than three.
-function canonicalKey(name) {
+function canonicalKey(name, container) {
   const base = normalize(name);
-  return SYNONYM_CANONICAL.get(base) || base;
+  const table = container && !isTypeContainer(container)
+    ? SYNONYM_CANONICAL_MODULE
+    : SYNONYM_CANONICAL;
+  return table.get(base) || base;
 }
 
-function synonymsFor(jetMember) {
+function synonymsFor(jetMember, container) {
   const base = normalize(jetMember);
   const keys = new Set([base]);
-  for (const alias of SYNONYM_INDEX.get(base) || []) keys.add(alias);
+  const table = container && !isTypeContainer(container)
+    ? SYNONYM_INDEX_MODULE
+    : SYNONYM_INDEX;
+  for (const alias of table.get(base) || []) keys.add(alias);
   return keys;
 }
 
@@ -1343,7 +1373,7 @@ function coveredKeys(jetMembersByContainer) {
     for (const member of members) {
       // A type name must not cover a competitor's operation.
       if (isTypeItem(member)) continue;
-      for (const key of keysForMember(member, prefixes.get(container))) into.add(key);
+      for (const key of keysForMember(member, prefixes.get(container), container)) into.add(key);
     }
   }
   return { byDomain: byDomain, prefixes: prefixes };
@@ -1486,7 +1516,7 @@ function competitorRows(surfaces, jetRows) {
         if (keys.has(normalize(operation))) continue;
         // One capability, one gap: is_subset, is_subset_of and issubset are
         // three spellings of the operation Jet would ship once.
-        const key = canonicalKey(operation);
+        const key = canonicalKey(operation, container);
         if (keys.has(key)) continue;
         // Merge on the matching domain, not the container. Python records
         // unlink under core.os and Ruby under core.path; they are one missing
@@ -1524,11 +1554,6 @@ function competitorRows(surfaces, jetRows) {
   // you hold; it does not transfer into a module namespace. `core.math` gains
   // no `clear` because a List has one, and reading it that way invented gaps
   // like `core.os.hash` and `core.time.push`.
-  const isTypeContainer = function (container) {
-    return Object.values(TYPE_CONTAINER).includes(container)
-      ? false
-      : !container.startsWith("core.") && container !== "app";
-  };
   const pooledWitnesses = new Map();
   for (const gap of gaps.values()) {
     if (!CROSS_DOMAIN_POOLED.has(gap.key)) continue;
@@ -1614,10 +1639,10 @@ function buildRows(modules, fixedPairs, collections, surfaces) {
   };
 
   const keysFor = function (container, member) {
-    const keys = keysForMember(member, covered.prefixes.get(container) || new Set());
+    const keys = keysForMember(member, covered.prefixes.get(container) || new Set(), container);
     const base = qualifierBase(member, membersByContainer.get(container) || []);
     if (base) {
-      for (const key of keysForMember(base, covered.prefixes.get(container) || new Set())) {
+      for (const key of keysForMember(base, covered.prefixes.get(container) || new Set(), container)) {
         keys.add(key);
       }
     }
@@ -2334,6 +2359,25 @@ function hostileFixtures() {
   // a refresh that introduces one would silently keep per-domain scoring, and
   // per-domain scoring is exactly what can hold a real gap at one witness
   // forever.
+  results.push(holds("a collection verb does not match in a module namespace", function () {
+    // Math.Truncate is rounding toward zero, not emptying a container, and
+    // DateTime.Add is date arithmetic, not appending. Both were scored as real
+    // gaps until the collection groups stopped applying outside container types.
+    for (const [operation, container] of [["truncate", "core.math"], ["add", "core.time"], ["reset", "core.time"]]) {
+      const key = canonicalKey(operation, container);
+      if (key !== normalize(operation)) {
+        throw new Error(
+          "a collection verb matched in a module namespace: " + operation +
+            " in " + container + " became " + key,
+        );
+      }
+    }
+    // The same verbs must still fold inside a container type.
+    if (canonicalKey("truncate", "List") !== "clear") {
+      throw new Error("truncate stopped folding into clear inside a container type");
+    }
+  }));
+
   results.push(rejects("a recurring capability name nobody classified",
     "unclassified repeated capability name", function () {
     const pooled = CROSS_DOMAIN_POOLED.has("clone");
