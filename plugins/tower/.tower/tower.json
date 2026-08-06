@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1499,
-    "rev": 26582,
+    "rev": 26606,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -81777,6 +81777,11 @@
         {
           "at": "2026-08-06",
           "by": "e3-bugs2",
+          "text": "claimed done: union if-let subset+lower+JIT; proofs green; awaiting independent verify"
+        },
+        {
+          "at": "2026-08-06",
+          "by": "e3-bugs2",
           "text": "implemented: union if-let subset+lower (DataTree tag collision fixed); proofs on JIT+AOT; commit a031bc5e4"
         },
         {
@@ -81802,8 +81807,8 @@
           "status": "met",
           "metBy": "e3-bugs2",
           "verifiedBy": null,
-          "evidence": "anonymous_unions: jet run + jet run --release + JET_GOLDEN_FILTER=anonymous_unions golden ok; describe/as_named expression-position union if-lets no ICE",
-          "at": "2026-08-06T15:39:17.681Z"
+          "evidence": "JET_1215_STEM=types/anonymous_unions RUST_MIN_STACK=8388608 cargo test --test dev language_callables_and_types_match_interpreter_jit_and_aot --exact: ok (interpreter/JIT/AOT agree). Commits a031bc5e4, 39028d56b, d2d1b91ad.",
+          "at": "2026-08-06T15:50:26.402Z"
         },
         {
           "n": 2,
@@ -81811,8 +81816,8 @@
           "status": "met",
           "metBy": "e3-bugs2",
           "verifiedBy": null,
-          "evidence": "JET_GOLDEN_FILTER=anonymous_unions cargo test --test golden examples_compile_and_run ok",
-          "at": "2026-08-06T15:39:18.105Z"
+          "evidence": "JET_GOLDEN_FILTER=types/anonymous_unions cargo test --test golden -- examples_compile_and_run: ok. Also jet run + jet run --release exit 0 with golden output.",
+          "at": "2026-08-06T15:50:26.885Z"
         },
         {
           "n": 3,
@@ -81820,8 +81825,8 @@
           "status": "met",
           "metBy": "e3-bugs2",
           "verifiedBy": null,
-          "evidence": "jet build examples/features/types/anonymous_unions.jet exits 0; no ICE",
-          "at": "2026-08-06T15:39:18.490Z"
+          "evidence": "jet build examples/features/types/anonymous_unions.jet: exit 0, built build/anonymous_unions, no ICE/exit 101.",
+          "at": "2026-08-06T15:50:27.361Z"
         },
         {
           "n": 4,
@@ -81829,8 +81834,8 @@
           "status": "met",
           "metBy": "e3-bugs2",
           "verifiedBy": null,
-          "evidence": "targeted golden/dev proofs green for anonymous_unions; types/traits JIT print gap pre-exists on base HEAD (not introduced)",
-          "at": "2026-08-06T15:39:18.946Z"
+          "evidence": "Owner speed gate: narrow proofs only (no full suite). Scoped: anonymous_unions golden + JET_1215_STEM three-way + syntax/fmt for sibling #1487 all green; unrelated stems in full language_callables (traits/patchable) pre-existing, out of scope.",
+          "at": "2026-08-06T15:50:27.604Z"
         }
       ],
       "refs": [],
@@ -81838,9 +81843,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T19:29:06.444Z",
-      "updated": "2026-08-06T15:39:19.265Z",
+      "updated": "2026-08-06T15:50:28.896Z",
       "updatedBy": "e3-bugs2",
-      "claimedAt": "2026-08-06T15:39:19.264Z"
+      "claimedAt": "2026-08-06T15:50:28.896Z"
     },
     {
       "id": "c0om3ozr",
@@ -84245,12 +84250,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "verify",
       "priority": "P2",
       "plan": "Scope. Add username()/password()/userinfo()/authority() accessors (requires parsing user:pass@ from the URL authority, which JetURL::parse currently drops entirely) and default_port() (scheme -> well-known port table). Out of scope, already covered — extractor blind spot: host(), the fragment accessor, scheme(), and port() already exist as Url instance methods in crates/jet-codegen/src/Prelude/CoreLib/JetStd/UrlMime.rs and crates/jet-sema/src/Sema/CheckerCoreLib/net_text_time.rs url_mime_method_return (~line 863); \"Hostname\" is the same capability as the existing host(). The ledger extractor only reads module_items.rs/fixed_sigs.rs/Collections.rs and never sees this file, so five already-shipped accessors score as losses. Out of scope, already covered by a different mechanism (I8, one mechanism): merge is RFC 3986 relative-URL resolution, already served by the existing join() method under a different name.\n\nApproach.\n1. Read crates/jet-codegen/src/Prelude/CoreLib/JetStd/UrlMime.rs JetURL struct and parse()/jet_url_parse_authority (~lines 8-140) — confirm there is no username/password field today.\n2. Add username/password fields to JetURL; extend jet_url_parse_authority to split a leading `user:pass@` (or `user@`) off the authority before host:port; percent-decode each part per RFC 3986.\n3. Add username()/password()/userinfo()/authority() accessor methods on JetURL in UrlMime.rs and register them in crates/jet-sema/src/Sema/CheckerCoreLib/net_text_time.rs url_mime_method_return (~line 863); add default_port() as a small scheme->port lookup table (http=80, https=443, ftp=21, ssh=22, ws=80, wss=443, etc.), std-only, no dependency.\n4. Teach scripts/agent/check-core-surface-ledger.mjs to also read net_text_time.rs's url_mime_method_return method-name table for the Url/Mime containers. Card #1471 (core.regex) needs the same net_text_time.rs extractor fix for a different function (regex_method_return) in the same script — coordinate so the two edits compose instead of colliding.\n5. Extend examples/features/net/url_mime.jet with username/password/userinfo/authority/default_port calls; bless expected/net/url_mime.out.\n6. Update docs/reference/core-library.md core.url section.\n7. Run node scripts/agent/check-core-surface-ledger.mjs --refresh.\n\nProof.\n- scripts/agent/jet-env cargo test --test core_surface_ledger\n- JET_GOLDEN_FILTER='net/url_mime' scripts/agent/jet-env cargo test --test golden -- examples_compile_and_run\n- scripts/agent/jet-env jet run examples/features/net/url_mime.jet, comparing output to the expected file, to prove I9 parity between AOT (golden) and default jet run.\n\nOwned paths: crates/jet-codegen/src/Prelude/CoreLib/JetStd/UrlMime.rs; crates/jet-sema/src/Sema/CheckerCoreLib/net_text_time.rs; scripts/agent/check-core-surface-ledger.mjs; examples/features/net/url_mime.jet + expected out; docs/reference/core-library.md.",
       "blockedBy": [],
       "assignee": "e3-coll",
       "log": [
+        {
+          "at": "2026-08-06",
+          "by": "e3-coll",
+          "text": "criteria 1-6 met; ledger url losses→1(compare); extractor fixed; I9 golden+run ok — ready for independent verify"
+        },
         {
           "at": "2026-08-06",
           "by": "e3-coll",
@@ -84266,56 +84276,56 @@
         {
           "n": 1,
           "text": "scripts/agent/jet-env cargo test --test core_surface_ledger passes after node scripts/agent/check-core-surface-ledger.mjs --refresh regenerates the ledger from source.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-coll",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:28:06.959Z"
+          "evidence": "core_surface_ledger test ok after --refresh; url collection extracts 18 Url methods; losses 13→1 (compare only, out of scope)",
+          "at": "2026-08-06T15:55:23.556Z"
         },
         {
           "n": 2,
           "text": "Url exports username, password, userinfo, authority, and default_port; each is called from examples/features/net/url_mime.jet, including a URL literal containing embedded user:pass@ credentials.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-coll",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:28:07.267Z"
+          "evidence": "url_mime.jet calls username/password/userinfo/authority/default_port on https://ada:s3cret@example.com:8443/…",
+          "at": "2026-08-06T15:55:23.783Z"
         },
         {
           "n": 3,
           "text": "check-core-surface-ledger.mjs reads crates/jet-sema/src/Sema/CheckerCoreLib/net_text_time.rs's url_mime_method_return method table, verified by a targeted case: temporarily remove one already-shipped Url method name from the file and confirm node scripts/agent/check-core-surface-ledger.mjs --check now flags it, then restore the file.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-coll",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:28:07.581Z"
+          "evidence": "removed host from url_mime_method_return → --check exit 1 'core surface ledger drifted'; restored → --check clean",
+          "at": "2026-08-06T15:55:24.026Z"
         },
         {
           "n": 4,
           "text": "JET_GOLDEN_FILTER='net/url_mime' scripts/agent/jet-env cargo test --test golden -- examples_compile_and_run passes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-coll",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:28:07.888Z"
+          "evidence": "JET_GOLDEN_FILTER=net/url_mime golden examples_compile_and_run ok",
+          "at": "2026-08-06T15:55:24.267Z"
         },
         {
           "n": 5,
           "text": "scripts/agent/jet-env jet run examples/features/net/url_mime.jet produces output byte-identical to its expected/ file, proving I9 parity between AOT (golden) and default jet run.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-coll",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:28:08.206Z"
+          "evidence": "jet run and jet run --release url_mime.jet both byte-identical to expected/net/url_mime.out",
+          "at": "2026-08-06T15:55:24.510Z"
         },
         {
           "n": 6,
           "text": "docs/reference/core-library.md core.url section lists every newly added accessor.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-coll",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:28:08.519Z"
+          "evidence": "docs/reference/core-library.md core.url table lists username/password/userinfo/authority/default_port",
+          "at": "2026-08-06T15:55:24.760Z"
         }
       ],
       "refs": [
@@ -84325,9 +84335,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T02:13:31.860Z",
-      "updated": "2026-08-06T15:40:05.440Z",
+      "updated": "2026-08-06T15:55:27.183Z",
       "updatedBy": "e3-coll",
-      "claimedAt": "2026-08-06T15:40:05.440Z"
+      "claimedAt": "2026-08-06T15:55:27.183Z"
     },
     {
       "id": "c0tyh6b4",
@@ -84425,12 +84435,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "verify",
       "priority": "P2",
       "plan": "Scope. Add critical and fatal severities (fatal logs then exits the process, matching Go's log.Fatal), disable()/flush() controls, and enabled?(level) (query whether a level is active given the existing set_level). All are thin wrappers around the existing crates/jet-codegen/src/Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs jet_log_emit(level, msg, fields) dispatcher. Out of scope, already covered by a different mechanism (I8, one mechanism): warning (alias of the existing warn); the generic log(level, msg) verb (Jet deliberately ships named severity verbs instead, D-LOGTRACE1=A); Group (already served by the existing span/enter/close nesting); Time (composable today from core.time + log.field, no new primitive needed); Add/Handle/Handler/Formatter (Jet's pluggable-sink model — set_sink/otlp_file — already serves the same \"route and format log output\" workflow as Python's Handler/Formatter classes; a competing OOP handler hierarchy would duplicate that mechanism).\n\nApproach.\n1. Read crates/jet-codegen/src/Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs jet_log_emit/jet_log_format_active (~lines 276-460) and the severity-ordering/filter table backing set_level.\n2. Add \"critical\" and \"fatal\" emission paths; fatal calls std::process::exit(1) after emitting. Insert both into the existing severity ordering used by set_level's filter.\n3. Add disable() (suppress all emission until re-enabled) and flush() (force the active sink to flush buffered output) beside the existing set_sink/otlp_file plumbing; add enabled?(level) as a query against the current set_level threshold.\n4. Register critical, fatal, disable, flush, enabled? in crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs \"jet.log\" list (~line 560) and fixed_sigs.rs (~line 1604 area).\n5. Extend examples/features/io/log.jet and log_structured.jet with critical/fatal/disable/flush/enabled? calls; bless expected outputs. fatal's process exit needs a subprocess-checked example — check tests/golden.rs for an existing exit-code-sensitive precedent before adding a new pattern.\n6. Update docs/reference/core-library.md core.log section.\n7. Run node scripts/agent/check-core-surface-ledger.mjs --refresh.\n\nProof.\n- scripts/agent/jet-env cargo test --test core_surface_ledger\n- JET_GOLDEN_FILTER='io/log' scripts/agent/jet-env cargo test --test golden -- examples_compile_and_run\n- JET_GOLDEN_FILTER='io/log_structured' scripts/agent/jet-env cargo test --test golden -- examples_compile_and_run\n- scripts/agent/jet-env jet run examples/features/io/log.jet, comparing output to the expected file, to prove I9 parity between AOT (golden) and default jet run.\n\nOwned paths: crates/jet-codegen/src/Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs; crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs, fixed_sigs.rs; examples/features/io/log.jet, log_structured.jet + expected outs; docs/reference/core-library.md.",
       "blockedBy": [],
       "assignee": "e3-coll",
       "log": [
+        {
+          "at": "2026-08-06",
+          "by": "e3-coll",
+          "text": "criteria 1-6 met; critical/fatal/disable/flush/enabled; fatal exit 1 both tiers; I9 golden+run ok — ready for independent verify"
+        },
         {
           "at": "2026-08-06",
           "by": "e3-coll",
@@ -84446,56 +84461,56 @@
         {
           "n": 1,
           "text": "scripts/agent/jet-env cargo test --test core_surface_ledger passes after node scripts/agent/check-core-surface-ledger.mjs --refresh regenerates the ledger from source.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-coll",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:29:02.776Z"
+          "evidence": "core_surface_ledger test ok; log losses closed critical/fatal/disable/flush/enabled/warning (11 remain out-of-scope I8)",
+          "at": "2026-08-06T15:55:25.011Z"
         },
         {
           "n": 2,
           "text": "jet.log exports critical, fatal, disable, flush, and enabled?; each is called from examples/features/io/log.jet or log_structured.jet, and fatal's process-exit(1) behavior is asserted by a subprocess-checked test or example, not just logged text.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-coll",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:29:03.087Z"
+          "evidence": "log.jet calls critical/flush/disable/enabled; log_fatal.jet asserts exit 1 on both JIT and AOT",
+          "at": "2026-08-06T15:55:25.262Z"
         },
         {
           "n": 3,
           "text": "enabled?(level) returns false for a level below the active set_level threshold and true at or above it, checked in the example output.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-coll",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:29:03.397Z"
+          "evidence": "log.out prints false/true/true for enabled(debug)/enabled(info)/enabled(critical) after set_level info",
+          "at": "2026-08-06T15:55:25.499Z"
         },
         {
           "n": 4,
           "text": "JET_GOLDEN_FILTER='io/log' scripts/agent/jet-env cargo test --test golden -- examples_compile_and_run passes, and JET_GOLDEN_FILTER='io/log_structured' scripts/agent/jet-env cargo test --test golden -- examples_compile_and_run passes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-coll",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:29:03.710Z"
+          "evidence": "JET_GOLDEN_FILTER=io/log and io/log_structured both pass",
+          "at": "2026-08-06T15:55:25.738Z"
         },
         {
           "n": 5,
           "text": "scripts/agent/jet-env jet run examples/features/io/log.jet produces output byte-identical to its expected/ file, proving I9 parity between AOT (golden) and default jet run.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-coll",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:29:04.035Z"
+          "evidence": "jet run and jet run --release log.jet both byte-identical to expected/io/log.out",
+          "at": "2026-08-06T15:55:26.223Z"
         },
         {
           "n": 6,
           "text": "docs/reference/core-library.md core.log section lists every newly added call.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-coll",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:29:04.350Z"
+          "evidence": "docs/reference/core-library.md core.log lists critical/fatal/disable/flush/enabled",
+          "at": "2026-08-06T15:55:26.732Z"
         }
       ],
       "refs": [
@@ -84505,9 +84520,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T02:13:32.720Z",
-      "updated": "2026-08-06T15:40:05.739Z",
+      "updated": "2026-08-06T15:55:27.664Z",
       "updatedBy": "e3-coll",
-      "claimedAt": "2026-08-06T15:40:05.739Z"
+      "claimedAt": "2026-08-06T15:55:27.664Z"
     },
     {
       "id": "c06egi60",
@@ -85531,6 +85546,11 @@
         {
           "at": "2026-08-06",
           "by": "e3-bugs2",
+          "text": "claimed done: shared range arm head in if_arm_head; fmt/syntax/golden green; #1489 already verify"
+        },
+        {
+          "at": "2026-08-06",
+          "by": "e3-bugs2",
           "text": "implemented: try_range_arm_head shared via if_arm_head; branch_dispatch_bench green JIT+AOT; fmt corpus green; commit a031bc5e4"
         },
         {
@@ -85561,8 +85581,8 @@
           "status": "met",
           "metBy": "e3-bugs2",
           "verifiedBy": null,
-          "evidence": "syntax_reconciliation::value_dispatch_accepts_range_arm_heads passes; return if n == { 0..9 -> ... } parses",
-          "at": "2026-08-06T15:39:35.542Z"
+          "evidence": "cargo test --test syntax_reconciliation value_dispatch_accepts_range_arm_heads --exact: ok (return if n == { 0..9 -> 1 else -> 0 }).",
+          "at": "2026-08-06T15:50:27.850Z"
         },
         {
           "n": 2,
@@ -85570,8 +85590,8 @@
           "status": "met",
           "metBy": "e3-bugs2",
           "verifiedBy": null,
-          "evidence": "jet build/run/run --release examples/features/tooling/branch_dispatch_bench.jet ok; JET_GOLDEN_FILTER=branch_dispatch_bench golden ok",
-          "at": "2026-08-06T15:39:35.970Z"
+          "evidence": "jet build + jet run + jet run --release examples/features/tooling/branch_dispatch_bench.jet exit 0; JET_GOLDEN_FILTER=tooling/branch_dispatch_bench golden ok; no E0003.",
+          "at": "2026-08-06T15:50:28.100Z"
         },
         {
           "n": 3,
@@ -85579,8 +85599,8 @@
           "status": "met",
           "metBy": "e3-bugs2",
           "verifiedBy": null,
-          "evidence": "cargo test --test fmt fmt_is_lossless_on_supported_source_corpus ok; branch_dispatch formats; UI_PARSE_INVALID re-pinned after unmask",
-          "at": "2026-08-06T15:39:36.203Z"
+          "evidence": "cargo test --test fmt fmt_is_idempotent_on_examples + fmt_lossless::fmt_is_lossless_on_supported_source_corpus: both ok (branch_dispatch_bench no longer sole lossless failure).",
+          "at": "2026-08-06T15:50:28.355Z"
         },
         {
           "n": 4,
@@ -85588,8 +85608,8 @@
           "status": "met",
           "metBy": "e3-bugs2",
           "verifiedBy": null,
-          "evidence": "closing #1489 as duplicate of this card (same range arm-head root cause; fix landed once in if_arm_head)",
-          "at": "2026-08-06T15:39:36.431Z"
+          "evidence": "Duplicate #1489 already assignee e3-bugs2 phase verify with criteria 1-6 met; fix landed once on bd/bugs2 (a031bc5e4 + JIT follow-ups). No second implementation.",
+          "at": "2026-08-06T15:50:28.605Z"
         }
       ],
       "refs": [],
@@ -85597,9 +85617,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T10:08:06.404Z",
-      "updated": "2026-08-06T15:39:36.710Z",
+      "updated": "2026-08-06T15:50:29.180Z",
       "updatedBy": "e3-bugs2",
-      "claimedAt": "2026-08-06T15:39:36.710Z"
+      "claimedAt": "2026-08-06T15:50:29.180Z"
     },
     {
       "id": "c08scee7",
@@ -114878,6 +114898,174 @@
   ],
   "events": [
     {
+      "at": "2026-08-06T15:55:27.664Z",
+      "by": "e3-coll",
+      "action": "card.update",
+      "ref": "c013k26w",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T15:55:27.183Z",
+      "by": "e3-coll",
+      "action": "card.update",
+      "ref": "c0mvp4zc",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T15:55:26.732Z",
+      "by": "e3-coll",
+      "action": "card.criteria-meet",
+      "ref": "c013k26w",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-06T15:55:26.223Z",
+      "by": "e3-coll",
+      "action": "card.criteria-meet",
+      "ref": "c013k26w",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-06T15:55:25.738Z",
+      "by": "e3-coll",
+      "action": "card.criteria-meet",
+      "ref": "c013k26w",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-06T15:55:25.499Z",
+      "by": "e3-coll",
+      "action": "card.criteria-meet",
+      "ref": "c013k26w",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T15:55:25.262Z",
+      "by": "e3-coll",
+      "action": "card.criteria-meet",
+      "ref": "c013k26w",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T15:55:25.012Z",
+      "by": "e3-coll",
+      "action": "card.criteria-meet",
+      "ref": "c013k26w",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-06T15:55:24.760Z",
+      "by": "e3-coll",
+      "action": "card.criteria-meet",
+      "ref": "c0mvp4zc",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-06T15:55:24.510Z",
+      "by": "e3-coll",
+      "action": "card.criteria-meet",
+      "ref": "c0mvp4zc",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-06T15:55:24.267Z",
+      "by": "e3-coll",
+      "action": "card.criteria-meet",
+      "ref": "c0mvp4zc",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-06T15:55:24.026Z",
+      "by": "e3-coll",
+      "action": "card.criteria-meet",
+      "ref": "c0mvp4zc",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T15:55:23.784Z",
+      "by": "e3-coll",
+      "action": "card.criteria-meet",
+      "ref": "c0mvp4zc",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T15:55:23.556Z",
+      "by": "e3-coll",
+      "action": "card.criteria-meet",
+      "ref": "c0mvp4zc",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-06T15:50:29.180Z",
+      "by": "e3-bugs2",
+      "action": "card.update",
+      "ref": "c0nrwebl",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T15:50:28.896Z",
+      "by": "e3-bugs2",
+      "action": "card.update",
+      "ref": "c0998ql8",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T15:50:28.606Z",
+      "by": "e3-bugs2",
+      "action": "card.criteria-meet",
+      "ref": "c0nrwebl",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-06T15:50:28.356Z",
+      "by": "e3-bugs2",
+      "action": "card.criteria-meet",
+      "ref": "c0nrwebl",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T15:50:28.100Z",
+      "by": "e3-bugs2",
+      "action": "card.criteria-meet",
+      "ref": "c0nrwebl",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T15:50:27.851Z",
+      "by": "e3-bugs2",
+      "action": "card.criteria-meet",
+      "ref": "c0nrwebl",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-06T15:50:27.605Z",
+      "by": "e3-bugs2",
+      "action": "card.criteria-meet",
+      "ref": "c0998ql8",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-06T15:50:27.361Z",
+      "by": "e3-bugs2",
+      "action": "card.criteria-meet",
+      "ref": "c0998ql8",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T15:50:26.885Z",
+      "by": "e3-bugs2",
+      "action": "card.criteria-meet",
+      "ref": "c0998ql8",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T15:50:26.402Z",
+      "by": "e3-bugs2",
+      "action": "card.criteria-meet",
+      "ref": "c0998ql8",
+      "note": "#1"
+    },
+    {
       "at": "2026-08-06T15:47:00.860Z",
       "by": "fable",
       "action": "card.update",
@@ -118208,174 +118396,6 @@
       "action": "card.criteria-verify",
       "ref": "c0iu2ebc",
       "note": "#3"
-    },
-    {
-      "at": "2026-08-06T10:40:05.013Z",
-      "by": "prep-entry",
-      "action": "card.update",
-      "ref": "c0wk4xnv",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-06T10:40:04.717Z",
-      "by": "bd-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0iu2ebc",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-06T10:40:04.393Z",
-      "by": "bd-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0iu2ebc",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-06T10:40:04.064Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0iu2ebc",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-06T10:40:03.737Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0iu2ebc",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-06T10:40:00.611Z",
-      "by": "prep-entry",
-      "action": "card.update",
-      "ref": "c0f7fhoy",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-06T10:39:55.654Z",
-      "by": "prep-entry",
-      "action": "card.update",
-      "ref": "c0a5nr50",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-06T10:39:49.668Z",
-      "by": "prep-entry",
-      "action": "card.update",
-      "ref": "c04zqxw1",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-06T10:39:44.841Z",
-      "by": "prep-entry",
-      "action": "card.update",
-      "ref": "c0zvnp4f",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-06T10:39:37.029Z",
-      "by": "prep-entry",
-      "action": "card.update",
-      "ref": "c0uq2h91",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-06T10:37:45.015Z",
-      "by": "prep-bugs-a",
-      "action": "card.update",
-      "ref": "c0nrwebl",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T10:37:44.153Z",
-      "by": "prep-bugs-a",
-      "action": "card.update",
-      "ref": "c03ht82l",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T10:37:43.575Z",
-      "by": "prep-bugs-a",
-      "action": "card.update",
-      "ref": "c0rujhlb",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T10:37:42.074Z",
-      "by": "prep-bugs-a",
-      "action": "card.update",
-      "ref": "c0mpupgd",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T10:37:41.397Z",
-      "by": "prep-bugs-a",
-      "action": "card.update",
-      "ref": "c0hp46qn",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T10:37:40.299Z",
-      "by": "prep-bugs-a",
-      "action": "card.update",
-      "ref": "c0998ql8",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T10:37:36.613Z",
-      "by": "prep-bugs-a",
-      "action": "card.criteria-add",
-      "ref": "c0rujhlb",
-      "note": "#4 No regression in cargo test --test power_and_exclusive_or or"
-    },
-    {
-      "at": "2026-08-06T10:37:36.289Z",
-      "by": "prep-bugs-a",
-      "action": "card.criteria-add",
-      "ref": "c0rujhlb",
-      "note": "#3 No new owner ballot is opened for this card -- confirmed via"
-    },
-    {
-      "at": "2026-08-06T10:37:35.480Z",
-      "by": "prep-bugs-a",
-      "action": "card.criteria-add",
-      "ref": "c0rujhlb",
-      "note": "#2 The web build (cargo test --test web_build or equivalent) pr"
-    },
-    {
-      "at": "2026-08-06T10:37:34.922Z",
-      "by": "prep-bugs-a",
-      "action": "card.criteria-add",
-      "ref": "c0rujhlb",
-      "note": "#1 cargo test --test power_and_exclusive_or passes with a new c"
-    },
-    {
-      "at": "2026-08-06T10:37:32.789Z",
-      "by": "prep-bugs-a",
-      "action": "card.criteria-add",
-      "ref": "c0hp46qn",
-      "note": "#5 No regression in cargo test --test floor_division or --test "
-    },
-    {
-      "at": "2026-08-06T10:37:32.464Z",
-      "by": "prep-bugs-a",
-      "action": "card.criteria-add",
-      "ref": "c0hp46qn",
-      "note": "#4 Coordinated with card #1488 (same concern, epoch e2) so the "
-    },
-    {
-      "at": "2026-08-06T10:37:32.111Z",
-      "by": "prep-bugs-a",
-      "action": "card.criteria-add",
-      "ref": "c0hp46qn",
-      "note": "#3 A program calling io.args(), env.get(), or files.read() on a"
-    },
-    {
-      "at": "2026-08-06T10:37:31.782Z",
-      "by": "prep-bugs-a",
-      "action": "card.criteria-add",
-      "ref": "c0hp46qn",
-      "note": "#2 A new golden example proves: jet run on a program dividing b"
     }
   ],
   "nextNum": 368,
