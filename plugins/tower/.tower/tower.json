@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1584,
-    "rev": 28129,
+    "rev": 28130,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -85691,8 +85691,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T02:13:47.049Z",
-      "updated": "2026-08-06T21:41:22.999Z",
-      "updatedBy": "audit-apply",
+      "updated": "2026-08-06T23:28:48.391Z",
+      "updatedBy": "bd2-set",
       "claimedAt": "2026-08-06T18:02:14.006Z",
       "workOrder": 20
     },
@@ -127764,6 +127764,71 @@
       "draft": false,
       "status": "open",
       "created": "2026-08-06T23:12:45.928Z"
+    },
+    {
+      "id": "D-SET-DECLINE1",
+      "cardId": "c0m2slnf",
+      "group": "stdlib",
+      "title": "Set's last 4 order-dependent methods: decline or ship with arbitrary order",
+      "gist": "Whether Jet's Set adds shuffle, sort, indexof, and indexed, when a Set has no position.",
+      "lesson": "Card #1478 shipped 11 more Set methods and closed most of the surface ledger. Four names remain: shuffle, sort, indexof, and indexed. A Set is a hash-backed collection with no position, so each of these four needs a real position or a stable order to mean anything. Every one already has a working answer today: call to_list, then use List's own shuffle, sort, index_of, or indexed. A fifth name, flatten, is not part of this choice. Jet requires every Set element to be Hash and Eq (Int, Bool, String, Char, or a named type), so no Set can ever hold a nested List or Set. flatten has no legal Set to run on either way, so it stays declined under this same decision.",
+      "explainer": "",
+      "story": "Sam is building a card-shuffling game in Jet. The deck lives in a Set so duplicate cards are impossible. Sam types deck.shuffle() expecting a shuffled hand back, the way deck.to_list().shuffle() already works, and wonders why Set itself has no shuffle.",
+      "inWild": "deck := Set.from([\"2H\", \"3H\", \"4H\", \"5H\"])\n\n// Sam's first instinct: shuffle directly on the Set.\n// hand := deck.shuffle()\n\n// Set has no position, so shuffle/sort/indexof/indexed\n// live on the list Set already knows how to become.\nhand := deck.to_list().shuffle()\nprint(hand)",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Decline all 4, route through to_list",
+          "detail": "None of the 4 names add a workflow Jet is missing. shuffle and sort already exist on List; calling to_list first and then shuffle or sort reaches the exact same result Set.shuffle or Set.sort would compute. indexof and indexed ask for a position, and a hash Set keeps no position for any element, so a direct answer would only expose an implementation detail, not a meaning a caller can rely on.",
+          "technical": "shuffle, sort: I8 says one canonical mechanism per capability. List.shuffle and List.sort already exist and Set.to_list already exists, so Set.shuffle and Set.sort would be a second spelling of the same List call, reached one method earlier.\n\nindexof, indexed: Rust's HashSet keeps no stable enumeration order across inserts and removals. A Set.indexof or Set.indexed would return a real Int, but that Int would carry no meaning a caller could act on beyond this one call, unlike List.index_of or List.indexed on a sequence with a real position.\n\nflatten: declined regardless of A or B. E0506 requires Set elements to implement Hash and Eq, so a Set element can never be a List or another Set. flatten needs a Set of nested containers to unpack, and Jet's type checker never allows that Set to exist.",
+          "code": "deck := Set.from([\"2H\", \"3H\", \"4H\", \"5H\"])\n\n// shuffle / sort: convert first, exactly like today.\nshuffled := deck.to_list().shuffle().to_list()\nsorted := deck.to_list()\nsorted.sort()\n\n// indexof / indexed: same route — position lives on the list.\ncards := deck.to_list()\nposition := cards.index_of(\"3H\")\nfor pair in cards.indexed() {\n    print(\"{pair.idx}: {pair.item}\")\n}"
+        },
+        {
+          "key": "B",
+          "name": "Ship all 4 on Set with a documented arbitrary order",
+          "detail": "Set gains shuffle, sort, indexof, and indexed directly. Each one runs by first walking the Set in whatever order Rust's HashSet currently keeps, then applying the same List logic. The docs would say the starting order before shuffle or sort is arbitrary, and that indexof or indexed answers that same arbitrary order.",
+          "technical": "Each of the 4 names ships as a set_method_return case in Collections.rs, routed through the same to_list()-then-List machinery already built for filter/map/fold/each/all/min/max. indexof and indexed additionally need a documented caveat: the position they return is only stable until the next add or remove on that Set.",
+          "code": "deck := Set.from([\"2H\", \"3H\", \"4H\", \"5H\"])\n\n// A new second spelling for each, mirrors List's directly.\nshuffled := deck.shuffle()\nsorted := deck.sort()\nposition := deck.indexof(\"3H\")   // arbitrary order, undocumented until now\nfor pair in deck.indexed() { print(\"{pair.idx}: {pair.item}\") }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Kotlin",
+          "note": "Kotlin's Set inherits Iterable, so sorted and withIndex exist on Set too, always over an unspecified encounter order.",
+          "code": "setOf(3, 1, 2).sorted()\nsetOf(3, 1, 2).withIndex()"
+        },
+        {
+          "lang": "Swift",
+          "note": "Swift's Set exposes sorted and enumerated the same way, both documented as running over the Set's undefined order.",
+          "code": "let s: Set = [3, 1, 2]\ns.sorted()\ns.enumerated()"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Every one of the 4 names already reaches a working answer through List, one call after to_list. Declining keeps one path per capability, which is what I8 asks for, and never hands a caller a position number that means nothing tomorrow.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Shipping shuffle and sort on Set gives every reader two spellings for the same result. Shipping indexof and indexed hands back a position that is not stable across the Set's own mutations, which reads as a real index but is not one."
+          }
+        ],
+        "tradeoff": "A programmer who expects Set.shuffle or Set.sort by muscle memory from Kotlin or Swift writes one extra call: to_list first."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft grouped shuffle/sort with indexof/indexed as one order-dependent family and recommended declining all four through to_list.",
+        "boilOcean": "The breadth pass checked whether sort deserves its own bucket, since a sorted result is deterministic regardless of a Set's internal order. It still declines: List already owns sort, and Set.to_list already exists, so shipping it on Set duplicates a mechanism rather than filling a gap.",
+        "hybrid": "A hybrid that ships only sort, since its output is deterministic, and declines shuffle/indexof/indexed was tested. Dropped because sort's own reason to decline is duplication, not disorder, and a single hybrid rule would need two different justifications for two of four names.",
+        "cooperative": "Steelmanning option B: shipping all four lets a newcomer from Kotlin or Swift type the name they already know without a to_list detour, and matches those two languages exactly.",
+        "adversarial": "The adversarial pass asked whether declining indexof/indexed hides a real bug class: code that silently relies on Set order today. Declining is the safer answer — it forces that code through to_list, where the arbitrary order is visible in the type, instead of shipping a Set-native index that quietly changes after every mutation."
+      },
+      "checkInstructions": null,
+      "draft": true,
+      "status": "open",
+      "created": "2026-08-06T23:28:48.391Z"
     }
   ],
   "questions": [
@@ -129305,6 +129370,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-06T23:28:48.391Z",
+      "by": "bd2-set",
+      "action": "decision.add",
+      "ref": "D-SET-DECLINE1",
+      "note": "Set's last 4 order-dependent methods: decline or ship with arbitrary order (draft)"
+    },
     {
       "at": "2026-08-06T23:28:20.681Z",
       "by": "bd2-orch",
@@ -132797,13 +132869,6 @@
       "action": "card.criteria-add",
       "ref": "c066jfg6",
       "note": "#5 The semantics of D-PARCAPTURE1 and the kernel decisions are "
-    },
-    {
-      "at": "2026-08-06T21:35:19.337Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c066jfg6",
-      "note": "#4 The same rejection sentence appears at every boundary: a sha"
     }
   ],
   "nextNum": 368,
