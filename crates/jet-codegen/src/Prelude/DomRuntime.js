@@ -9,6 +9,12 @@ export function print(value) {
   return text;
 }
 
+// Whole-number Jet values are BigInt on the JS tier (#1485). DOM layout math
+// and CSS pixel lengths still need ordinary numbers (safe for UI sizes).
+function jetNum(value) {
+  return typeof value === "bigint" ? Number(value) : value;
+}
+
 // D-DOMGEN1=A (Phase 7 extension): when a real `document` is available (the
 // generated app is running in a browser, not under `node`'s golden/roundtrip
 // tests), the DOM backend also mounts real elements under a fixed-id
@@ -125,8 +131,8 @@ export function measure(node, constraint) {
   const naturalHeight = node.kind === "box"
     ? node.children.reduce((height, child) => height + child.height, 0)
     : node.height;
-  const width = Math.min(Math.max(naturalWidth, constraint.minWidth), constraint.maxWidth);
-  const height = Math.min(Math.max(naturalHeight, constraint.minHeight), constraint.maxHeight);
+  const width = Math.min(Math.max(naturalWidth, jetNum(constraint.minWidth)), jetNum(constraint.maxWidth));
+  const height = Math.min(Math.max(naturalHeight, jetNum(constraint.minHeight)), jetNum(constraint.maxHeight));
   return { width, height };
 }
 
@@ -410,8 +416,8 @@ export function makeNode(label, width, height, color) {
   return {
     kind: "custom",
     label: String(label),
-    width,
-    height,
+    width: jetNum(width),
+    height: jetNum(height),
     color: color != null ? String(color) : undefined,
     role: color != null ? "label" : null,
     children: [],
@@ -419,7 +425,7 @@ export function makeNode(label, width, height, color) {
 }
 
 export function makeNodeRole(label, width, height, role) {
-  return { kind: role === "button" ? "button" : role === "textbox" ? "textInput" : "custom", label: String(label), width, height, role, children: [] };
+  return { kind: role === "button" ? "button" : role === "textbox" ? "textInput" : "custom", label: String(label), width: jetNum(width), height: jetNum(height), role, children: [] };
 }
 
 export function makeText(text) {

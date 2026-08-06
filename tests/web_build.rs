@@ -1395,6 +1395,38 @@ fn run() { print(classify(2)) }
     let _ = fs::remove_dir_all(dir);
 }
 
+/// I9 / #1485: whole numbers on the JS tier are BigInt, so powers (and
+/// follow-on arithmetic) stay exact above 2^53 — the same answers AOT prints.
+#[test]
+fn web_js_whole_numbers_stay_exact_above_two_to_the_fifty_three() {
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping JS BigInt exactness test (need rustc + node)");
+        return;
+    }
+    // File-level `#Target(JS)` puts `run` on the plain-JS path (no Wasm body).
+    let src = r#"#Target(JS)
+fn run() {
+    print(7 / 2)
+    print(2 ^ 60)
+    print(3 ^ 39)
+    print(2 ^ 60 > 2 ^ 53)
+    wide := 2 ^ 60
+    print(wide + 1)
+    print(wide /% 10)
+}
+"#;
+    let dir = build_web_fixture(
+        "js_bigint_exact",
+        src,
+        "tests/fixtures/web_js_bigint_exact.jet",
+    );
+    assert_eq!(
+        run_web_app(&dir),
+        "3.5\n1152921504606846976\n4052555153018976267\ntrue\n1152921504606846977\n115292150460684697\n",
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
 #[test]
 fn web_js_enum_match_break_targets_the_enclosing_loop() {
     if !have_tool("rustc") || !have_tool("node") {
@@ -1504,7 +1536,7 @@ fn run() {
     let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
     assert!(
-        js.contains("await (async () =>") && js.contains("let n = 6;"),
+        js.contains("await (async () =>") && js.contains("let n = 6n;"),
         "JS IfExpr must retain branch statements and await bridge calls:\n{js}"
     );
     assert!(

@@ -4086,6 +4086,17 @@ fn emit_tir_js_body(
                 // so those compounds read the place and call the JS preamble.
                 if let Some(call) = op.and_then(|op| js_prelude_call(op, &target, &v, &value.ty)) {
                     out.push_str(&format!("{pad}{target} = {call};\n"));
+                } else if matches!(value.ty, Type::Float | Type::Float32) {
+                    // Float compound assigns leave BigInt land (D-INTDIV1).
+                    match op {
+                        Some(o) => {
+                            let sym = binop(o).ok_or(())?;
+                            out.push_str(&format!(
+                                "{pad}{target} = Number({target}) {sym} Number({v});\n"
+                            ));
+                        }
+                        None => out.push_str(&format!("{pad}{target} = {v};\n")),
+                    }
                 } else {
                     let assign = match op {
                         Some(o) => format!("{}=", binop(o).ok_or(())?),
@@ -4114,7 +4125,10 @@ fn emit_tir_js_body(
                 )?;
             }
             TIR::TStmt::Range { var, start, end, step, exclusive, body, .. } => {
-                let step = match step { Some(e) => tir_js_expr(e, funcs, file_prefix)?, None => "1".to_string() };
+                let step = match step {
+                    Some(e) => tir_js_expr(e, funcs, file_prefix)?,
+                    None => "1n".to_string(),
+                };
                 let cmp = if *exclusive { "<" } else { "<=" };
                 out.push_str(&format!("{pad}for (let {} = {}; {} {cmp} {}; {} += {step}) {{\n", web_name(var), tir_js_expr(start, funcs, file_prefix)?, web_name(var), tir_js_expr(end, funcs, file_prefix)?, web_name(var)));
                 emit_tir_js_body(body, out, funcs, file_prefix, indent + 1)?;
@@ -4124,11 +4138,13 @@ fn emit_tir_js_body(
                 match var2 {
                     Some(v2) => {
                         // D-RANGE-EXCL1=C: sequence two-binding → index then item.
+                        // `.entries()` yields a Number index; whole-number locals
+                        // are BigInt on this tier, so lift the index once.
                         out.push_str(&format!(
-                            "{pad}for (const [{}, {}] of {}.entries()) {{\n",
-                            web_name(var),
+                            "{pad}for (const [__jet_i, {}] of {}.entries()) {{\n{pad}  let {} = BigInt(__jet_i);\n",
                             web_name(v2),
-                            tir_js_expr(collection, funcs, file_prefix)?
+                            tir_js_expr(collection, funcs, file_prefix)?,
+                            web_name(var),
                         ));
                     }
                     None => {
@@ -4233,7 +4249,7 @@ fn emit_tir_js_body(
                 if *is_map {
                     out.push_str(&format!("{pad}{b}.set({i}, {v});\n"));
                 } else {
-                    out.push_str(&format!("{pad}{b}[{i}] = {v};\n"));
+                    out.push_str(&format!("{pad}{b}[Number({i})] = {v};\n"));
                 }
             }
             TIR::TStmt::EnumMatch {
@@ -4428,7 +4444,9 @@ fn tir_js_abi_int_expr(
 fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) -> Result<String, ()> {
     use TIR::TExprKind as E;
     Ok(match &expr.kind {
-        E::IntLit(n, _) => n.to_string(),
+        // Whole numbers are JS BigInt on this tier (I9 / #1485): a plain
+        // numeric literal is only exact to 2^53.
+        E::IntLit(n, _) => format!("{n}n"),
         E::FloatLit(n) => n.to_string(),
         E::BoolLit(b) => b.to_string(),
         E::CharLit(c) => json_quote(&c.to_string()),
@@ -4458,6 +4476,18 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
             &expr.ty,
         )
         .expect("the match arm admits only Prelude-carried operators"),
+        // Float results (D-INTDIV1 `Int / Int` → Float, float arithmetic) leave
+        // BigInt land through `Number(...)` so JS does floating-point math.
+        E::Binary { op, lhs, rhs, .. }
+            if matches!(expr.ty, Type::Float | Type::Float32) =>
+        {
+            format!(
+                "(Number({}) {} Number({}))",
+                tir_js_expr(lhs, funcs, file_prefix)?,
+                binop(op).ok_or(())?,
+                tir_js_expr(rhs, funcs, file_prefix)?
+            )
+        }
         E::Binary { op, lhs, rhs, .. } => format!("({} {} {})", tir_js_expr(lhs, funcs, file_prefix)?, binop(op).ok_or(())?, tir_js_expr(rhs, funcs, file_prefix)?),
         E::Unary { op, operand } => js_unary_call(
             op,
@@ -4537,7 +4567,8 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
             if *is_map {
                 format!("{b}.get({i})")
             } else {
-                format!("{b}[{i}]")
+                // JS array indices are ordinary numbers; BigInt keys throw.
+                format!("{b}[Number({i})]")
             }
         },
         E::Call { name, args, .. } => {
@@ -4599,12 +4630,26 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
             }
         }
         E::NumericMethod { recv, op } => match op {
-            TIR::TNumericOp::CastAs { dst_rust } if dst_rust.contains("i") || dst_rust.contains("u") => format!("Math.trunc({})", tir_js_expr(recv, funcs, file_prefix)?),
-            TIR::TNumericOp::CastAs { .. } => tir_js_expr(recv, funcs, file_prefix)?,
-            TIR::TNumericOp::FloatToInt { lower, upper_exclusive, .. } => {
+            TIR::TNumericOp::CastAs { dst_rust }
+                if dst_rust.contains("i") || dst_rust.contains("u") =>
+            {
+                format!(
+                    "BigInt(Math.trunc(Number({})))",
+                    tir_js_expr(recv, funcs, file_prefix)?
+                )
+            }
+            // Float cast leaves BigInt land.
+            TIR::TNumericOp::CastAs { .. } => {
+                format!("Number({})", tir_js_expr(recv, funcs, file_prefix)?)
+            }
+            TIR::TNumericOp::FloatToInt {
+                lower,
+                upper_exclusive,
+                ..
+            } => {
                 let value = tir_js_expr(recv, funcs, file_prefix)?;
                 format!(
-                    "(() => {{ const __jet_value = {value}; return Number.isFinite(__jet_value) && __jet_value >= {lower} && __jet_value < {upper_exclusive} ? {{ tag: \"Some\", values: [Math.trunc(__jet_value)] }} : {{ tag: \"None\", values: [] }}; }})()"
+                    "(() => {{ const __jet_value = Number({value}); return Number.isFinite(__jet_value) && __jet_value >= {lower} && __jet_value < {upper_exclusive} ? {{ tag: \"Some\", values: [BigInt(Math.trunc(__jet_value))] }} : {{ tag: \"None\", values: [] }}; }})()"
                 )
             }
             _ => return Err(()),
@@ -4860,41 +4905,41 @@ const JS_POWER_PRELUDE: &str = concat!(
     // bits with `BigInt.asIntN`, because JavaScript's own number operators are
     // doubles (`*` stops being exact at 2^53) and its bitwise operators are
     // 32-bit. BigInt is the only way this tier can carry the Prelude's rule
-    // rather than approximate it.
+    // rather than approximate it. Results stay BigInt (D-INTBIG1 / I9): returning
+    // `Number(value)` silently rounded every answer above 2^53.
     "const JET_I64_MIN = -(2n ** 63n);\n",
     "const JET_I64_MAX = 2n ** 63n - 1n;\n",
     "function jet_i64(value, message) {\n",
     "  if (value < JET_I64_MIN || value > JET_I64_MAX) throw new Error(message);\n",
-    "  return Number(value);\n",
+    "  return value;\n",
     "}\n\n",
     "function jet_pow(base, exponent) {\n",
-    "  if (exponent < 0) {\n",
+    "  const e = BigInt(exponent);\n",
+    "  if (e < 0n) {\n",
     "    throw new Error(\"a negative exponent has no whole-number result ",
     "(make the base a Float to raise it to a negative power)\");\n",
     "  }\n",
     "  const overflow = \"this power overflows the value's type ",
     "(the result is outside its range)\";\n",
     "  const b = BigInt(base);\n",
-    "  if (b !== 0n && b !== 1n && b !== -1n && exponent > 63) {\n",
+    "  if (b !== 0n && b !== 1n && b !== -1n && e > 63n) {\n",
     "    throw new Error(overflow);\n",
     "  }\n",
-    "  return jet_i64(b ** BigInt(exponent), overflow);\n",
+    "  return jet_i64(b ** e, overflow);\n",
     "}\n\n",
     // D-BITNOT1=A: `!` on a whole number turns over every one of its 64 bits.
     // JavaScript's `~` works on 32 bits, so it is not the same operation.
     "function jet_bitnot(value, bits, signed) {\n",
     "  const flipped = ~BigInt(value);\n",
-    "  return Number(\n",
-    "    signed ? BigInt.asIntN(bits, flipped) : BigInt.asUintN(bits, flipped),\n",
-    "  );\n",
+    "  return signed ? BigInt.asIntN(bits, flipped) : BigInt.asUintN(bits, flipped);\n",
     "}\n\n",
     // D-FLOORDIV1=A: the JS tier's copy of the one floor-division rule
     // (`Prelude/Core/Division.rs`). Whole numbers trap on a zero divisor, the
     // same as `/`, and on the one pair whose quotient leaves the range.
     "function jet_floordiv(left, right) {\n",
-    "  if (right === 0) throw new Error(\"divided by zero\");\n",
     "  const a = BigInt(left);\n",
     "  const b = BigInt(right);\n",
+    "  if (b === 0n) throw new Error(\"divided by zero\");\n",
     "  let quotient = a / b;\n",
     "  if (a % b !== 0n && (a < 0n) !== (b < 0n)) quotient -= 1n;\n",
     "  return jet_i64(quotient, \"this division overflows the value's type ",
@@ -4903,24 +4948,25 @@ const JS_POWER_PRELUDE: &str = concat!(
     // Floats round down with no trap: a zero divisor gives an infinity, exactly
     // as `/` does.
     "function jet_floordiv_float(left, right) {\n",
-    "  return Math.floor(left / right);\n",
+    "  return Math.floor(Number(left) / Number(right));\n",
     "}\n\n",
     // D-MODSEM1=A: the floored modulo. JavaScript's `%` is the truncated
     // remainder, which Jet spells `%%`, so the answer is corrected onto the
     // divisor's side of zero.
     "function jet_mod(left, right) {\n",
-    "  if (right === 0) throw new Error(\"divided by zero\");\n",
     "  const a = BigInt(left);\n",
     "  const b = BigInt(right);\n",
+    "  if (b === 0n) throw new Error(\"divided by zero\");\n",
     "  let remainder = a % b;\n",
     "  if (remainder !== 0n && (remainder < 0n) !== (b < 0n)) remainder += b;\n",
-    "  return Number(BigInt.asIntN(64, remainder));\n",
+    "  return BigInt.asIntN(64, remainder);\n",
     "}\n\n",
     // D-MODSEM1=A: the truncated remainder, which is the sign JavaScript's own
     // `%` already gives — this adds the zero-divisor trap and the 64-bit range.
     "function jet_trunc_rem(left, right) {\n",
-    "  if (right === 0) throw new Error(\"divided by zero\");\n",
-    "  return Number(BigInt.asIntN(64, BigInt(left) % BigInt(right)));\n",
+    "  const b = BigInt(right);\n",
+    "  if (b === 0n) throw new Error(\"divided by zero\");\n",
+    "  return BigInt.asIntN(64, BigInt(left) % b);\n",
     "}\n\n"
 );
 
@@ -4931,7 +4977,7 @@ fn js_prelude_call(op: crate::AST::BinOp, lhs: &str, rhs: &str, ty: &Type) -> Op
     use crate::AST::BinOp;
     let float = matches!(ty, Type::Float | Type::Float32);
     Some(match op {
-        BinOp::Pow if float => format!("Math.pow({lhs}, {rhs})"),
+        BinOp::Pow if float => format!("Math.pow(Number({lhs}), Number({rhs}))"),
         BinOp::Pow => format!("jet_pow({lhs}, {rhs})"),
         // A float divisor of zero gives an infinity, exactly as `/` does, so
         // only the whole-number helper traps.

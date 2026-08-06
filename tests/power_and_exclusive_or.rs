@@ -4,7 +4,7 @@
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
-use tir_support::{build_and_run, have_rustc};
+use tir_support::{assert_tiers_agree, build_and_run, have_rustc};
 
 /// Compile a snippet from a real path on disk — the front end resolves
 /// imports against the file it is given, so an invented name fails E0603.
@@ -197,4 +197,23 @@ fn infix_caret_never_means_exclusive_or() {
     let (code, out) = build_and_run("caret_is_power", "fn run() {\n    print(12 ^ 2)\n}\n");
     assert_eq!(code, 0, "{out}");
     assert_eq!(out, "144\n", "{out}");
+}
+
+/// I9 / #1485: powers above 2^53 stay exact on every native tier. The JS tier
+/// is proved separately in `web_build` (needs node + wasm); here AOT and
+/// `jet run` must agree on the answers that used to round when the JS helper
+/// returned `Number(value)`.
+#[test]
+fn powers_above_two_to_the_fifty_three_stay_exact() {
+    let src = r#"
+fn run() {
+    print(2 ^ 60)
+    print(3 ^ 39)
+}
+"#;
+    assert_tiers_agree(
+        "power_above_53",
+        src,
+        "1152921504606846976\n4052555153018976267\n",
+    );
 }
