@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1483,
-    "rev": 25768,
+    "rev": 25772,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -81076,12 +81076,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-ul3-core",
-      "phase": "building",
+      "phase": "verify",
       "priority": "P0",
       "plan": "1. Generate a closed inventory from Collections.rs, module_items.rs, and fixed_sigs.rs. Do not trust prose as the source of shipped Jet methods.\n2. Select every Python builtin type and stdlib module Jet claims to cover. Use official Python docs to enumerate the matching public surface.\n3. Give every row a stable ID, Python member, Jet spelling, matched workflow, and one verdict: Jet wins, equal, Jet loses, or out of scope.\n4. Link every Jet-loses row to one live Tower card or open decision. Out-of-scope requires a ratified product-scope decision that explicitly says Jet does not compete for that workflow. A design decline does not remove a scored loss.\n5. Add deterministic checks for an unmapped shipped method, missing Python member, duplicate row, hidden exclusion, stale owner, source-table drift, or unratified scope exclusion.\n6. Store the durable ledger under docs and make #1398 consume it as its only workflow inventory. Do not create a second benchmark framework.\n7. A fresh reviewer checks closure against both source tables and official Python docs.\nblockedBy: none.",
       "blockedBy": [],
       "assignee": "bd-ledger",
       "log": [
+        {
+          "at": "2026-08-06",
+          "by": "bd-ledger",
+          "text": "Round four fixed. Losses moved up to 632, wins down to 332 and equals up to 508, which is the direction the review predicted. TypeScript now carries Node host modules and witnesses 102 loss rows where it previously witnessed none. The single-witness probes rose again to 1361 and 713, reported plainly rather than explained away."
+        },
         {
           "at": "2026-08-06",
           "by": "bd-ledger",
@@ -81120,8 +81125,8 @@
           "status": "met",
           "metBy": "bd-ledger",
           "verifiedBy": null,
-          "evidence": "55 Python modules and 10 builtin types, each assigned to exactly one container or listed in unassignedSources with a reason. 54 containers across 11 languages, 1366 Jet-side rows. 33 uncompared domains remain, all of them surfaces Jet owns alone, declared and gated so --check fails if one is dropped. The one-source-one-container gate now exists and caught real violations in R and Elixir.",
-          "at": "2026-08-06T02:24:16.460Z"
+          "evidence": "The Jet method tables are now discovered from Collections.rs rather than hand-listed: 60 tables instead of 42, and 1431 Jet-side rows. The reader handles all three ways a table is written in that file, attributes builtin_static_return arms to the type each names, and reads every Syntax module. All seven proven false losses are resolved and core.reflect went from 1 Jet member to 10. A bidirectional fixture fails by name when a table is dropped from the ledger or added to the compiler.",
+          "at": "2026-08-06T02:47:51.480Z"
         },
         {
           "n": 2,
@@ -81183,9 +81188,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T18:12:13.321Z",
-      "updated": "2026-08-06T02:37:56.096Z",
+      "updated": "2026-08-06T02:47:51.843Z",
       "updatedBy": "bd-ledger",
-      "claimedAt": "2026-08-06T02:37:56.096Z"
+      "claimedAt": "2026-08-06T02:47:51.843Z"
     },
     {
       "id": "c0fmfiwg",
@@ -82169,6 +82174,11 @@
         {
           "at": "2026-08-06",
           "by": "fable",
+          "text": "The corrected ledger resolves the seven false losses. This card's scope shrinks; size it from the current cluster row before starting."
+        },
+        {
+          "at": "2026-08-06",
+          "by": "fable",
           "text": "Hold before starting. A ledger review proved that count_ones, count_zeros, leading_zeros, trailing_zeros, is_infinite, to_string and parse are already shipped at Collections.rs:668 to :721 and were scored as gaps by a broken extractor. Wait for the corrected ledger before sizing this card."
         }
       ],
@@ -82180,7 +82190,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T02:13:29.376Z",
-      "updated": "2026-08-06T02:37:56.620Z",
+      "updated": "2026-08-06T02:47:52.213Z",
       "updatedBy": "fable"
     },
     {
@@ -82613,7 +82623,13 @@
       "plan": "1. Read the seventeen cluster rows from the ledger.\n2. Confirm each row against Jet's real member tables before building. Some rows are container-attribution artifacts.\n3. Close the real gaps, and record a decline with an id for any row Jet deliberately does not answer.\n4. Prove each addition on AOT and default jet run.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-06",
+          "by": "fable",
+          "text": "The corrected ledger raises core.reflect from 1 known Jet member to 10, so this card loses most of its core.reflect count. Size from the current cluster rows."
+        }
+      ],
       "criteria": [],
       "refs": [
         "docs/reference/core-surface-ledger.json"
@@ -82622,7 +82638,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T02:21:21.682Z",
-      "updated": "2026-08-06T02:21:21.682Z",
+      "updated": "2026-08-06T02:47:52.576Z",
       "updatedBy": "fable"
     },
     {
@@ -109206,6 +109222,34 @@
   ],
   "events": [
     {
+      "at": "2026-08-06T02:47:52.576Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0gv6ghj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-06T02:47:52.213Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0hsjnxk",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-06T02:47:51.843Z",
+      "by": "bd-ledger",
+      "action": "card.update",
+      "ref": "c00ms1om",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T02:47:51.480Z",
+      "by": "bd-ledger",
+      "action": "card.criteria-meet",
+      "ref": "c00ms1om",
+      "note": "#1"
+    },
+    {
       "at": "2026-08-06T02:37:56.620Z",
       "by": "fable",
       "action": "card.update",
@@ -112676,34 +112720,6 @@
       "action": "card.criteria-add",
       "ref": "c0kfh1yl",
       "note": "#2 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-08-05T13:49:57.463Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0kfh1yl",
-      "note": "#1 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-08-05T13:43:26.122Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-EXPOP1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-05T13:43:26.122Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0kw5dh0",
-      "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-08-05T13:43:26.122Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0kw5dh0",
-      "note": "#3 jet devtools grammars regenerated"
     }
   ],
   "nextNum": 368,
