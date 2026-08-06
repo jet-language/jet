@@ -1,103 +1,11 @@
 use super::super::{Diagnostic, Func, Parser, Span, StrTokPart, Syntax, TokKind, describe};
 
 impl<'a> Parser<'a> {
-        /// D-REACTCORE1: is the cursor at `#Reactive fn …` or `#Reactive pub fn …`?
-        pub(crate) fn at_reactive_fn(&self) -> bool {
-            matches!(self.peek().kind, TokKind::Hash)
-                && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_REACTIVE)
-                && matches!(self.peek3().kind, TokKind::KwFn | TokKind::KwPub)
-        }
     
     
     
-        /// D-REACTCORE1 (ratified 2026-06-27, opt D): parse `#Reactive fn …`. The body
-        /// lowers to a reactive effect scope at codegen; sema requires a unit return.
-        pub(crate) fn reactive_fn(&mut self) -> Result<Func, Diagnostic> {
-            self.expect(TokKind::Hash, "before `Reactive`")?;
-            self.expect_ident(&format!("`#{}`", Syntax::KW_REACTIVE))?;
-            let (is_pub, is_package_pub) = self.parse_item_visibility();
-            self.expect_kw(TokKind::KwFn, "after `#Reactive`")?;
-            self.func_after_fn(
-                is_pub,
-                is_package_pub,
-                false,
-                None,
-                None,
-                false,
-                false,
-                None,
-                None,
-                None,
-                true,
-                None,
-                false,
-                None,
-                None,
-                None,
-                false,
-                false,
-                None,
-                false,
-                None,
-            )
-        }
     
-        /// D-FFI-INLINE1=A (ratified 2026-07-11, card #501): is the cursor at
-        /// `#FFI(<lang>) fn …`, optionally preceded by an `#Unsafe("reason")`
-        /// gate (`#Unsafe("…") #FFI(asm) fn …`)? The unsafe-language gate is
-        /// enforced in sema; the parser only needs to route the item here.
-        pub(super) fn at_ffi_fn(&self) -> bool {
-            // Direct `#FFI(<lang>)`.
-            if matches!(self.peek().kind, TokKind::Hash)
-                && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_FFI)
-                && matches!(self.peek3().kind, TokKind::LParen)
-            {
-                return true;
-            }
-            // `#Unsafe(["reason"]) #FFI(<lang>)` — scan past the unsafe gate.
-            if matches!(self.peek().kind, TokKind::Hash)
-                && matches!(self.peek2().kind, TokKind::KwUnsafe)
-            {
-                let mut i = self.pos + 2;
-                if matches!(self.toks.get(i).map(|t| &t.kind), Some(TokKind::LParen)) {
-                    while i < self.toks.len()
-                        && !matches!(self.toks[i].kind, TokKind::RParen | TokKind::Eof)
-                    {
-                        i += 1;
-                    }
-                    i += 1; // past `)`
-                }
-                while matches!(self.toks.get(i).map(|t| &t.kind), Some(TokKind::Semi)) {
-                    i += 1;
-                }
-                return matches!(self.toks.get(i).map(|t| &t.kind), Some(TokKind::Hash))
-                    && matches!(self.toks.get(i + 1).map(|t| &t.kind), Some(TokKind::Ident(n)) if n == Syntax::ATTR_FFI)
-                    && matches!(self.toks.get(i + 2).map(|t| &t.kind), Some(TokKind::LParen));
-            }
-            false
-        }
 
-        /// D-FFI-INLINE1=A (card #501): parse `#FFI(<lang>) fn name(sig) => T {
-        /// """<foreign source>""" }` (the inline foreign tier), optionally
-        /// preceded by an `#Unsafe("reason")` gate. The Jet signature is parsed
-        /// as an ordinary function signature; the body must be a single
-        /// foreign-source string literal, captured into `Func::inline_foreign`
-        /// (the statement body is left empty). Language validity and the
-        /// unsafe-language gate are checked in sema (Names are validated in
-        /// sema, not the parser).
-        pub(super) fn ffi_fn(&mut self) -> Result<Func, Diagnostic> {
-            let mut markers = Vec::new();
-            if matches!(self.peek().kind, TokKind::Hash)
-                && matches!(self.peek2().kind, TokKind::KwUnsafe)
-            {
-                markers.push(self.parse_rule_marker()?);
-                while matches!(self.peek().kind, TokKind::Semi) {
-                    self.bump();
-                }
-            }
-            markers.push(self.parse_rule_marker()?);
-            self.ffi_fn_from_markers(markers)
-        }
 
         pub(super) fn ffi_fn_from_markers(
             &mut self,
@@ -258,76 +166,7 @@ impl<'a> Parser<'a> {
             }
         }
 
-        /// D-UNSAFE2: is the cursor at `#Unsafe fn …` or `#Unsafe("…") fn …`?
-        pub(super) fn at_unsafe_fn(&self) -> bool {
-            if !matches!(self.peek().kind, TokKind::Hash) {
-                return false;
-            }
-            if !matches!(self.peek2().kind, TokKind::KwUnsafe) {
-                return false;
-            }
-            // `#Unsafe fn` or `#Unsafe pub fn` (no reason arg)
-            if matches!(self.peek3().kind, TokKind::KwFn | TokKind::KwPub) {
-                return true;
-            }
-            if matches!(self.peek3().kind, TokKind::LParen) {
-                let mut depth = 0usize;
-                let mut index = self.pos + 2;
-                while let Some(token) = self.toks.get(index) {
-                    match token.kind {
-                        TokKind::LParen => depth += 1,
-                        TokKind::RParen => { depth -= 1; if depth == 0 { index += 1; break; } }
-                        _ => {}
-                    }
-                    index += 1;
-                }
-                if matches!(self.toks.get(index).map(|t| &t.kind), Some(TokKind::Semi)) { index += 1; }
-                return matches!(self.toks.get(index).map(|t| &t.kind), Some(TokKind::KwFn | TokKind::KwPub));
-            }
-            false
-        }
     
-        /// D-UNSAFE2 (ratified 2026-06-22, opt B): parse `#Unsafe("reason") fn …`
-        /// D-UNSAFE-REASON1=A: bare `#Unsafe fn …` is E3112. The body is
-        /// checked like any other fn; the contract is enforced at call sites (E3103).
-        pub(super) fn unsafe_fn(&mut self) -> Result<Func, Diagnostic> {
-            let marker = self.parse_rule_marker()?;
-            // S6-R: a marker on its own line gets a synthetic separator.
-            if matches!(self.peek().kind, TokKind::Semi) {
-                self.bump();
-            }
-            let (is_pub, is_package_pub) = self.parse_item_visibility();
-            self.expect_kw(TokKind::KwFn, "after `#Unsafe`")?;
-            let mut function = self.func_after_fn(
-                is_pub,
-                is_package_pub,
-                false,
-                None,
-                None,
-                false,
-                false,
-                None,
-                None,
-                None,
-                false,
-                None,
-                false,
-                None,
-                None,
-                None,
-                false,
-                false,
-                None,
-                false,
-                None,
-            )?;
-            if let Some(declaration) =
-                self.apply_unsafe_function_marker(&mut function, &marker)?
-            {
-                self.policy_declarations.push(declaration);
-            }
-            Ok(function)
-        }
     
         /// S59 (E2-M14): is the cursor at the start of a C FFI module — `#Extern
         /// module …` or `#Bindgen module …`? Retired lowercase markers are also

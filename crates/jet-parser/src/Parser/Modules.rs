@@ -780,8 +780,6 @@ impl<'a> Parser<'a> {
                     self.func().map(Item::Func)
                 }
             }
-            // D-REACTCORE1: `#Reactive fn` inside a module body.
-            TokKind::Hash if self.at_reactive_fn() => self.reactive_fn().map(Item::Func),
             // D-SHAPE2: `#[RenameAll(camel)]` / `#[Codable]` / `#Codable`
             // type rules inside a module body.
             TokKind::Hash if self.at_marker_list() || self.at_single_type_marker() =>
