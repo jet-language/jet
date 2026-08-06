@@ -252,6 +252,10 @@ const SYNONYM_GROUPS = [
   ["recv_from", "recvfrom", "receive_from"],
   ["shutdown", "close_write", "half_close"],
   ["send", "transmit", "write_bytes_to"],
+  ["ln", "log", "logarithm", "natural_log"],
+  ["extension", "get_extension", "suffix", "ext", "file_extension"],
+  ["parent", "dirname", "parent_dir", "directory", "get_directory_name"],
+  ["file_name", "basename", "get_file_name", "stem"],
 ];
 
 // normalized name -> every normalized name it is interchangeable with, plus the
