@@ -184,6 +184,91 @@ const CONTAINER_ALIASES = {
 //
 // Groups stay tight on purpose. Merging a name Jet lacks into a group Jet has
 // would hide a real gap, so is_subset is not a kind of contains.
+// A gap merges by domain, so `unlink` under core.os and under core.path is one
+// row. A name that recurs across *different* domains is a separate question,
+// and it has two different answers.
+//
+// `clone` on a List and `clone` on a Map are one capability asked twice: if two
+// languages ship it anywhere, Jet lacking it is a real gap, and scoring each
+// domain alone can hold every occurrence at one witness forever. Those names
+// pool their witnesses across domains before the two-witness threshold.
+//
+// `close` on a ByteBuffer and `close` on a database handle are different
+// operations that share a spelling. Pooling them would invent evidence, so they
+// keep the per-domain count.
+//
+// There is no mechanical separator — the difference is what the operation means,
+// not how it is spelled. Every recurring name is therefore listed here by hand,
+// and `--check` rejects a name that recurs without an entry, so a refresh cannot
+// quietly introduce an unreviewed one.
+const CROSS_DOMAIN_POOLED = new Set([
+  // Value protocols: duplication, comparison, hashing, conversion.
+  "clone", "copy", "deepcopy", "copyinto", "copyto",
+  "equal", "isequal", "deepequal", "cmp", "compare",
+  "hash", "tostring", "tostr",
+  // Container protocols: emptiness, membership, iteration.
+  "isempty", "clear", "contains", "iter", "iterator",
+  // Storage control: how much room a container holds.
+  "capacity", "reserve", "resize", "setlen", "sizehint",
+  "drain", "sizeof", "bytesize",
+]);
+
+// Every other recurring name: the spelling repeats but the operation does not.
+// A `read` on a socket, a file and a byte buffer are three different operations;
+// a `next` on an iterator and on a sequence generator are two. These keep the
+// per-domain witness count, which is the conservative reading — it can only
+// under-score, never invent a gap. Listing them is the record that each was
+// looked at rather than defaulted.
+const CROSS_DOMAIN_DISTINCT = new Set([
+  "abort", "abs", "absolutepath", "addcleanup", "addelement", "all", "and", "any",
+  "appendtext", "args", "available", "average", "base", "big", "binarysearch", "binarysearchby",
+  "breakpoint", "broadcast", "buffered", "bufferedreader", "bufferedwriter", "byteoffset", "bytes", "capitalize",
+  "casefold", "charset", "chdir", "chmod", "chown", "chr", "chunk", "classify",
+  "cleanup", "clockgetres", "clockgettime", "close", "closeread", "collect", "command", "compact",
+  "compareto", "complex", "components", "concat", "connect", "containsvalue", "context", "copyfile",
+  "create", "createconnection", "createserver", "ctime", "data", "datetimeformat", "decode", "deconstruct",
+  "dedup", "default", "deleteat", "detach", "difference", "dir", "display", "div",
+  "divide", "divmod", "droplast", "dump", "each", "enable", "encode", "endswith",
+  "entry", "eof", "equals", "error", "escape", "escapestring", "eval", "evalfile",
+  "exception", "exec", "exists", "exit", "exitcode", "exited", "expand", "fd",
+  "fdatasync", "fdopen", "feed", "filename", "fileno", "filetype", "fill", "filter",
+  "finalize", "find", "findlast", "first", "firstindex", "flatmap", "flatten", "flush",
+  "fold", "fork", "formatstring", "formatter", "from", "fromhex", "fromkeys", "fullname",
+  "get", "getattribute", "getbuffer", "getbytes", "getfield", "gethostname", "getint32", "getopts",
+  "getpid", "group", "groupby", "groups", "handle", "help", "hex", "id",
+  "include", "indent", "indexed", "indexof", "init", "insertrange", "intern", "intersection",
+  "isascii", "isatty", "iscontrol", "isdefined", "isdigit", "iselement", "isexecutable", "isexported",
+  "isfifo", "ishexdigit", "isidentifier", "isless", "isletter", "isloopback", "islower", "isnormalized",
+  "isnullorempty", "isnumber", "isprint", "ispunct", "isreadable", "isreadonly", "isset", "issigned",
+  "issorted", "issortedby", "isspace", "issymbol", "issymlink", "istitle", "isupper", "isvalid",
+  "iswritable", "join", "joinpath", "keepalive", "key", "keys", "kill", "kind",
+  "last", "lastindexof", "len", "lines", "link", "list", "ljust", "map",
+  "mapkeys", "mapof", "mapreduce", "match", "matches", "max", "merge", "metadata",
+  "methods", "min", "minmax", "minus", "mkdir", "mod", "move", "new",
+  "next", "normalize", "not", "now", "oct", "one", "only", "open",
+  "options", "or", "ord", "out", "parse", "parseaddress", "partition", "path",
+  "pathconf", "peercert", "perm", "permute", "pid", "pipe", "plus", "poll",
+  "pop", "popat", "popen", "popfirst", "posixpath", "pread", "prefix", "prepend",
+  "println", "processexited", "product", "push", "pwrite", "quote", "random", "range",
+  "raw", "read", "readbyte", "readbytes", "reader", "readexactly", "readline", "readuntil",
+  "recv", "reduceright", "register", "relative", "relativeto", "release", "remove", "removefirst",
+  "removeprefix", "removerange", "removesuffix", "repeat", "replace", "repr", "resolve", "reverse",
+  "rewind", "rjust", "rotate", "rotateleft", "round", "rpartition", "rsplit", "run",
+  "scan", "seek", "send", "sendfile", "server", "set", "setdefault", "setenv",
+  "setfloat64", "setlimit", "shift", "shuffle", "shutdown", "signal", "skip", "slice",
+  "socket", "sockettype", "sort", "span", "splice", "split", "splitonce", "stack",
+  "start", "startswith", "starttimer", "stats", "step", "sticky", "stop", "stoptimer",
+  "string", "stripprefix", "struct", "success", "sum", "swap", "swapcase", "sync",
+  "tail", "take", "tell", "throw", "time", "timens", "timeout", "timer",
+  "title", "toboolean", "tobyte", "tobytearray", "tochararray", "todouble", "tofloat", "tohexstring",
+  "tolist", "tolower", "topath", "toset", "toupper", "transcode", "trim", "trimend",
+  "trimstart", "trylock", "type", "typeassert", "typeof", "union", "unlock", "unquote",
+  "unwrap", "unzip", "update", "urandom", "use", "userinfo", "utime", "valid",
+  "validate", "value", "valueof", "values", "var", "verifyhostname", "verifymode", "version",
+  "wait", "with", "wrap", "write", "writebyte", "writelines", "writer", "writeto",
+  "xor", "zero", "zip",
+]);
+
 const SYNONYM_GROUPS = [
   ["push", "append", "add", "add_last", "push_back", "conj", "add_range", "insert"],
   ["pop", "remove_last", "pop_last", "pop_back"],
@@ -429,6 +514,11 @@ const COLLECTION_METHOD_FUNCTIONS = {
 // card that is closed or missing, which is how a stale owner surfaces instead
 // of quietly reading as covered.
 const CLUSTER_OWNER = {
+  // Pooling a recurring capability across domains gave these three their first
+  // scored gaps; nothing in them had ever reached two witnesses per-domain.
+  "core.fmt": 1493,
+  BitSet: 1493,
+  "core.text.unicode": 1493,
   "core.math": 1464,
   "core.os": 1465,
   "core.time": 1466,
@@ -1426,8 +1516,22 @@ function competitorRows(surfaces, jetRows) {
     }
   }
 
+  // Pool the witnesses of a classified capability across domains, so a name two
+  // languages ship is scored once as a gap rather than held at one witness in
+  // each domain that asks for it separately.
+  const pooledWitnesses = new Map();
+  for (const gap of gaps.values()) {
+    if (!CROSS_DOMAIN_POOLED.has(gap.key)) continue;
+    if (!pooledWitnesses.has(gap.key)) pooledWitnesses.set(gap.key, new Set());
+    for (const language of Object.keys(gap.spellings)) {
+      pooledWitnesses.get(gap.key).add(language);
+    }
+  }
+
   return Array.from(gaps.values()).map(function (gap) {
     const languages = Object.keys(gap.spellings).sort();
+    const pooled = pooledWitnesses.get(gap.key);
+    const scoredWitnesses = pooled ? pooled.size : languages.length;
     const containers = Array.from(gap.containers).sort();
     const competitors = {};
     for (const language of languages) {
@@ -1457,8 +1561,11 @@ function competitorRows(surfaces, jetRows) {
       // which a memory-safe language cannot and should not expose. A gap two
       // compared languages agree on is a real one. Single-witness rows stay in
       // the ledger and stay counted; they are recorded, not scored.
-      verdict: languages.length >= 2 ? "jet_loses" : "single_witness",
+      verdict: scoredWitnesses >= 2 ? "jet_loses" : "single_witness",
       witnessCount: languages.length,
+      // Present only where the two differ, so a reader can see at a glance that
+      // this row was scored on pooled evidence rather than its own.
+      pooledWitnessCount: pooled && pooled.size !== languages.length ? pooled.size : undefined,
       competitors: competitors,
       evidence: Array.from(gap.evidence).sort(),
     };
@@ -1562,6 +1669,9 @@ function lossClusters(rows, cards) {
     }
     const cluster = byContainer.get(row.container);
     cluster.lossCount += 1;
+    // A pooled row is scored on evidence gathered in another domain, so a
+    // reader sizing this cluster can see how much of it rests on that.
+    if (row.pooledWitnessCount) cluster.pooledCount = (cluster.pooledCount || 0) + 1;
     for (const language of row.source.languages || []) cluster.languages.add(language);
   }
   return Array.from(byContainer.values()).map(function (cluster) {
@@ -1575,6 +1685,7 @@ function lossClusters(rows, cards) {
     return {
       container: cluster.container,
       lossCount: cluster.lossCount,
+      pooledLossCount: cluster.pooledCount || 0,
       languages: Array.from(cluster.languages).sort(),
       ownerCard: card,
       ownerCardPhase: record ? record.phase : null,
@@ -1795,8 +1906,45 @@ function validateSurfaces(ledger, surfaces) {
   }
 }
 
+// A capability name that recurs across domains must be classified, because the
+// two answers score differently and neither is a safe default. This fails on a
+// recurring name that is in neither table, so a ledger refresh cannot introduce
+// an unreviewed repeat and have it quietly keep per-domain scoring.
+function validateRepeatedNames(ledger) {
+  const witnesses = new Map();
+  const domains = new Map();
+  for (const row of ledger.rows) {
+    if (row.source.kind !== "competitor_operation") continue;
+    const key = row.source.member;
+    if (!witnesses.has(key)) {
+      witnesses.set(key, new Set());
+      domains.set(key, new Set());
+    }
+    domains.get(key).add(row.id.split(".")[1]);
+    for (const [language, cell] of Object.entries(row.competitors || {})) {
+      if (cell.status === "has") witnesses.get(key).add(language);
+    }
+  }
+  const unclassified = [];
+  for (const [key, languages] of witnesses) {
+    // Recurring means it appears in more than one domain. A name confined to
+    // one domain is already scored on all the evidence there is.
+    if (domains.get(key).size < 2) continue;
+    if (languages.size < 2) continue;
+    if (CROSS_DOMAIN_POOLED.has(key) || CROSS_DOMAIN_DISTINCT.has(key)) continue;
+    unclassified.push(key);
+  }
+  if (unclassified.length) {
+    throw new Error(
+      "unclassified repeated capability name: " + unclassified.sort().join(", ") +
+        " — add each to CROSS_DOMAIN_POOLED or CROSS_DOMAIN_DISTINCT",
+    );
+  }
+}
+
 function validateRows(ledger, surfaces) {
   surfaces = surfaces || loadSurfaces();
+  validateRepeatedNames(ledger);
   const ids = new Set();
   const sourceKeys = new Set();
   const verdicts = new Set(["equal", "jet_wins", "jet_loses", "single_witness", "not_compared", "declined", "type_item"]);
@@ -1951,6 +2099,18 @@ function markdown(ledger) {
     "  language's own internals, such as Rust's `align_to` and `as_mut_ptr`,",
     "  which a memory-safe language must not expose. Those rows stay in the",
     "  ledger and stay counted, but they are recorded rather than scored.",
+    "- A gap merges by domain, so one name can still recur across domains, and",
+    "  that has two different answers. `clone` on a List and on a Map is one",
+    "  capability asked twice, so its witnesses pool across domains before the",
+    "  two-witness threshold; scoring each domain alone can hold a real gap at",
+    "  one witness forever. `close` on a byte buffer and on a database handle",
+    "  are different operations sharing a spelling, so they keep the per-domain",
+    "  count. There is no mechanical separator — the difference is what the",
+    "  operation means. Every recurring name is classified by hand in",
+    "  `scripts/agent/check-core-surface-ledger.mjs`, in `CROSS_DOMAIN_POOLED`",
+    "  or `CROSS_DOMAIN_DISTINCT`, and `--check` rejects a recurring name that",
+    "  is in neither. A row scored on pooled evidence records the pooled count",
+    "  in `pooledWitnessCount`, so it is never mistaken for its own.",
     "- `--check` rejects source drift, a competitor claim the recorded surface",
     "  does not support, a duplicate row, a container a language silently",
     "  skipped, an owner card that is closed or missing, and an unratified",
@@ -2155,6 +2315,24 @@ function hostileFixtures() {
       if (!found.has(name)) {
         throw new Error("the match parser lost an arm after a block-bodied arm: " + name);
       }
+    }
+  }));
+
+  // A recurring name that nobody classified must stop the run. Without this,
+  // a refresh that introduces one would silently keep per-domain scoring, and
+  // per-domain scoring is exactly what can hold a real gap at one witness
+  // forever.
+  results.push(rejects("a recurring capability name nobody classified",
+    "unclassified repeated capability name", function () {
+    const pooled = CROSS_DOMAIN_POOLED.has("clone");
+    const distinct = CROSS_DOMAIN_DISTINCT.has("clone");
+    CROSS_DOMAIN_POOLED.delete("clone");
+    CROSS_DOMAIN_DISTINCT.delete("clone");
+    try {
+      validateRepeatedNames(ledger);
+    } finally {
+      if (pooled) CROSS_DOMAIN_POOLED.add("clone");
+      if (distinct) CROSS_DOMAIN_DISTINCT.add("clone");
     }
   }));
 

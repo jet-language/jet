@@ -68,6 +68,11 @@ fn core_surface_ledger_checker_rejects_hostile_fixtures() {
         "hidden uncompared Core domain",
         "source-surface drift",
         "a competitor member is dropped from the ledger",
+        // A capability name that recurs across domains scores differently
+        // depending on whether it is one operation or several. Leaving one
+        // unclassified silently keeps per-domain scoring, which can hold a real
+        // gap at a single witness forever.
+        "unclassified repeated capability name",
     ] {
         assert!(
             stdout.contains(gate),
