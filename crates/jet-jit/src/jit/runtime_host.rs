@@ -1411,6 +1411,32 @@ extern "C" fn jet_jit_duration_in(value: i64, scale: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| alloc_jit_result(rt, true, (value / scale) as u64))
 }
 
+extern "C" fn jet_jit_duration_in_unit(value: i64, unit: i64) -> i64 {
+    // DurationUnit disc order matches Prelude CommonTypes.
+    let scale = match unit {
+        0 => 1i64,                     // Nanoseconds
+        1 => 1_000,                    // Microseconds
+        2 => 1_000_000,                // Milliseconds
+        3 => 1_000_000_000,            // Seconds
+        4 => 60_000_000_000,           // Minutes
+        5 => 3_600_000_000_000,        // Hours
+        _ => 1,
+    };
+    jet_jit_duration_in(value, scale)
+}
+
+extern "C" fn jet_jit_duration_is_zero(value: i64) -> i8 {
+    i8::from(value == 0)
+}
+
+extern "C" fn jet_jit_duration_total_seconds(value: i64) -> i64 {
+    value / 1_000_000_000
+}
+
+extern "C" fn jet_jit_duration_difference(a: i64, b: i64) -> i64 {
+    a.saturating_sub(b)
+}
+
 extern "C" fn jet_jit_result_new_f64(ok: i8, value: f64) -> i64 {
     Concurrency::with_runtime_mut(|rt| alloc_jit_result(rt, ok != 0, value.to_bits()))
 }
@@ -1678,6 +1704,10 @@ pub(crate) struct HostFns {
     pub(crate) duration_from_int: FuncId,
     pub(crate) duration_from_float: FuncId,
     pub(crate) duration_in: FuncId,
+    pub(crate) duration_in_unit: FuncId,
+    pub(crate) duration_is_zero: FuncId,
+    pub(crate) duration_total_seconds: FuncId,
+    pub(crate) duration_difference: FuncId,
     pub(crate) perf_fidelity: FuncId,
     pub(crate) perf_default_fidelity: FuncId,
     pub(crate) perf_override_fidelity: FuncId,
@@ -1726,6 +1756,7 @@ pub(crate) struct HostFns {
     pub(crate) io: crate::IO::IOHostFns,
     pub(crate) watcher: crate::Watcher::WatcherHostFns,
     pub(crate) math: crate::Math::MathHostFns,
+    pub(crate) math_extra: crate::MathExtra::MathExtraHostFns,
     pub(crate) ffi: crate::Ffi::FfiHostFns,
 }
 
@@ -1879,6 +1910,16 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     builder.symbol("jet_jit_duration_from_int", jet_jit_duration_from_int as *const u8);
     builder.symbol("jet_jit_duration_from_float", jet_jit_duration_from_float as *const u8);
     builder.symbol("jet_jit_duration_in", jet_jit_duration_in as *const u8);
+    builder.symbol("jet_jit_duration_in_unit", jet_jit_duration_in_unit as *const u8);
+    builder.symbol("jet_jit_duration_is_zero", jet_jit_duration_is_zero as *const u8);
+    builder.symbol(
+        "jet_jit_duration_total_seconds",
+        jet_jit_duration_total_seconds as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_duration_difference",
+        jet_jit_duration_difference as *const u8,
+    );
     builder.symbol("jet_jit_perf_fidelity", jet_jit_perf_fidelity as *const u8);
     builder.symbol(
         "jet_jit_perf_default_fidelity",
@@ -1938,6 +1979,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     crate::Watcher::register_watcher_symbols(&mut builder);
     crate::Net::register_net_symbols(&mut builder);
     crate::Math::register_math_host_symbols(&mut builder);
+    crate::MathExtra::register_math_extra_symbols(&mut builder);
     crate::Ffi::register_ffi_host_symbols(&mut builder);
     let mut module = JITModule::new(builder);
     let coll = Collections::declare_collections_host_fns(&mut module)?;
@@ -1973,6 +2015,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     let io = crate::IO::declare_io_host_fns(&mut module)?;
     let watcher = crate::Watcher::declare_watcher_host_fns(&mut module)?;
     let math = crate::Math::declare_math_host_fns(&mut module)?;
+    let math_extra = crate::MathExtra::declare_math_extra_host_fns(&mut module)?;
     let ffi = crate::Ffi::declare_ffi_host_fns(&mut module)?;
     let host = declare_host_fns(
         &mut module,
@@ -2009,6 +2052,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
         io,
         watcher,
         math,
+        math_extra,
         ffi,
     )?;
     Ok((module, host))
@@ -2177,6 +2221,7 @@ fn declare_host_fns(
     io: crate::IO::IOHostFns,
     watcher: crate::Watcher::WatcherHostFns,
     math: crate::Math::MathHostFns,
+    math_extra: crate::MathExtra::MathExtraHostFns,
     ffi: crate::Ffi::FfiHostFns,
 ) -> Result<HostFns, String> {
     let cc = module.target_config().default_call_conv;
@@ -2514,6 +2559,10 @@ fn declare_host_fns(
         duration_from_int: import("jet_jit_duration_from_int", &sig_duration_int)?,
         duration_from_float: import("jet_jit_duration_from_float", &sig_duration_float)?,
         duration_in: import("jet_jit_duration_in", &sig_duration_int)?,
+        duration_in_unit: import("jet_jit_duration_in_unit", &sig_duration_int)?,
+        duration_is_zero: import("jet_jit_duration_is_zero", &sig_result_query_i8)?,
+        duration_total_seconds: import("jet_jit_duration_total_seconds", &sig_result_query_i64)?,
+        duration_difference: import("jet_jit_duration_difference", &sig_duration_int)?,
         perf_fidelity: import("jet_jit_perf_fidelity", &sig_noarg_f64)?,
         perf_default_fidelity: import("jet_jit_perf_default_fidelity", &sig_noarg_f64)?,
         perf_override_fidelity: import("jet_jit_perf_override_fidelity", &sig_perf_override)?,
@@ -2562,6 +2611,7 @@ fn declare_host_fns(
         io,
         watcher,
         math,
+        math_extra,
         ffi,
     })
 }

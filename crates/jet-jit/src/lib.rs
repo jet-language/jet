@@ -30,6 +30,7 @@ mod Game;
 mod IO;
 mod Layout;
 mod Math;
+mod MathExtra;
 mod Ffi;
 mod Memory;
 mod net_http_rt;

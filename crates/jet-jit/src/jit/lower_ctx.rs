@@ -9800,6 +9800,37 @@ impl LowerCtx<'_, '_> {
                             self.host.core.os_mkfifo,
                             vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
                         ),
+                        "fork" if args.is_empty() => (self.host.core.os_fork, vec![]),
+                        "setuid" if args.len() == 1 => {
+                            (self.host.core.os_setuid, vec![self.lower_expr(&args[0])?])
+                        }
+                        "setgid" if args.len() == 1 => {
+                            (self.host.core.os_setgid, vec![self.lower_expr(&args[0])?])
+                        }
+                        "setsid" if args.is_empty() => (self.host.core.os_setsid, vec![]),
+                        "initgroups" if args.len() == 2 => (
+                            self.host.core.os_initgroups,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "wait" if args.is_empty() => (self.host.core.os_wait, vec![]),
+                        "waitpid" if args.len() == 2 => (
+                            self.host.core.os_waitpid,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "utime" if args.len() == 3 => (
+                            self.host.core.os_utime,
+                            vec![
+                                self.lower_expr(&args[0])?,
+                                self.lower_expr(&args[1])?,
+                                self.lower_expr(&args[2])?,
+                            ],
+                        ),
+                        "atexit" if args.len() == 1 => {
+                            (self.host.core.os_atexit, vec![self.lower_expr(&args[0])?])
+                        }
+                        "stop" if args.len() == 1 => {
+                            (self.host.core.os_stop, vec![self.lower_expr(&args[0])?])
+                        }
                         _ => return Err(format!("jit core call unsupported: {module}.{method}")),
                     };
                     let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
@@ -11580,7 +11611,215 @@ impl LowerCtx<'_, '_> {
                             self.host.num.fraction_new,
                             vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
                         ),
-                        _ => return Err("jit core call unsupported".to_string()),
+                        // #1464 / I9 — Prelude MathLibPure + AOT-inline f64/i64 methods.
+                        "erf" if args.len() == 1 => {
+                            (self.host.math_extra.erf, vec![self.lower_expr(&args[0])?])
+                        }
+                        "erfc" if args.len() == 1 => {
+                            (self.host.math_extra.erfc, vec![self.lower_expr(&args[0])?])
+                        }
+                        "gamma" if args.len() == 1 => {
+                            (self.host.math_extra.gamma, vec![self.lower_expr(&args[0])?])
+                        }
+                        "lgamma" if args.len() == 1 => {
+                            (self.host.math_extra.lgamma, vec![self.lower_expr(&args[0])?])
+                        }
+                        "ulp" if args.len() == 1 => {
+                            (self.host.math_extra.ulp, vec![self.lower_expr(&args[0])?])
+                        }
+                        "significand" if args.len() == 1 => (
+                            self.host.math_extra.significand,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "logb" if args.len() == 1 => {
+                            (self.host.math_extra.logb, vec![self.lower_expr(&args[0])?])
+                        }
+                        "ldexp" | "scaleb" if args.len() == 2 => (
+                            self.host.math_extra.ldexp,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "next_after" if args.len() == 2 => (
+                            self.host.math_extra.next_after,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "cmp" if args.len() == 2 => (
+                            self.host.math_extra.cmp,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "ilogb" if args.len() == 1 => {
+                            (self.host.math_extra.ilogb, vec![self.lower_expr(&args[0])?])
+                        }
+                        "isqrt" if args.len() == 1 => {
+                            (self.host.math_extra.isqrt, vec![self.lower_expr(&args[0])?])
+                        }
+                        "factorial" if args.len() == 1 => (
+                            self.host.math_extra.factorial,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "binomial" if args.len() == 2 => (
+                            self.host.math_extra.binomial,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "digits" if args.len() == 1 => {
+                            (self.host.math_extra.digits, vec![self.lower_expr(&args[0])?])
+                        }
+                        "leading_ones" if args.len() == 1 => (
+                            self.host.math_extra.leading_ones,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "trailing_ones" if args.len() == 1 => (
+                            self.host.math_extra.trailing_ones,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "asinh" if args.len() == 1 => {
+                            (self.host.math_extra.asinh, vec![self.lower_expr(&args[0])?])
+                        }
+                        "acosh" if args.len() == 1 => {
+                            (self.host.math_extra.acosh, vec![self.lower_expr(&args[0])?])
+                        }
+                        "atanh" if args.len() == 1 => {
+                            (self.host.math_extra.atanh, vec![self.lower_expr(&args[0])?])
+                        }
+                        "cbrt" if args.len() == 1 => {
+                            (self.host.math_extra.cbrt, vec![self.lower_expr(&args[0])?])
+                        }
+                        "exp2" if args.len() == 1 => {
+                            (self.host.math_extra.exp2, vec![self.lower_expr(&args[0])?])
+                        }
+                        "exp_m1" if args.len() == 1 => {
+                            (self.host.math_extra.exp_m1, vec![self.lower_expr(&args[0])?])
+                        }
+                        "ln_1p" if args.len() == 1 => {
+                            (self.host.math_extra.ln_1p, vec![self.lower_expr(&args[0])?])
+                        }
+                        "log" if args.len() == 2 => (
+                            self.host.math_extra.log,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "copysign" if args.len() == 2 => (
+                            self.host.math_extra.copysign,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "signum" if args.len() == 1 => {
+                            (self.host.math_extra.signum, vec![self.lower_expr(&args[0])?])
+                        }
+                        "fma" if args.len() == 3 => (
+                            self.host.math_extra.fma,
+                            vec![
+                                self.lower_expr(&args[0])?,
+                                self.lower_expr(&args[1])?,
+                                self.lower_expr(&args[2])?,
+                            ],
+                        ),
+                        "is_even" if args.len() == 1 => {
+                            (self.host.math_extra.is_even, vec![self.lower_expr(&args[0])?])
+                        }
+                        "is_odd" if args.len() == 1 => {
+                            (self.host.math_extra.is_odd, vec![self.lower_expr(&args[0])?])
+                        }
+                        "checked_abs" if args.len() == 1 => (
+                            self.host.math_extra.checked_abs,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "checked_neg" if args.len() == 1 => (
+                            self.host.math_extra.checked_neg,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "checked_div" if args.len() == 2 => (
+                            self.host.math_extra.checked_div,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "checked_rem" if args.len() == 2 => (
+                            self.host.math_extra.checked_rem,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "is_normal" if args.len() == 1 => (
+                            self.host.math_extra.is_normal,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "is_subnormal" if args.len() == 1 => (
+                            self.host.math_extra.is_subnormal,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "is_canonical" if args.len() == 1 => (
+                            self.host.math_extra.is_canonical,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "is_signed" | "sign_bit" if args.len() == 1 => (
+                            self.host.math_extra.is_signed,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "is_zero" if args.len() == 1 => (
+                            self.host.math_extra.is_zero_f,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "is_integer" if args.len() == 1 => (
+                            self.host.math_extra.is_integer,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "next_up" if args.len() == 1 => {
+                            (self.host.math_extra.next_up, vec![self.lower_expr(&args[0])?])
+                        }
+                        "next_down" if args.len() == 1 => (
+                            self.host.math_extra.next_down,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "cot" if args.len() == 1 => {
+                            (self.host.math_extra.cot, vec![self.lower_expr(&args[0])?])
+                        }
+                        "inv" if args.len() == 1 => {
+                            (self.host.math_extra.inv, vec![self.lower_expr(&args[0])?])
+                        }
+                        "copy" if args.len() == 1 => {
+                            return Ok(self.lower_expr(&args[0])?);
+                        }
+                        "zero" if args.is_empty() => {
+                            return Ok(self.b.ins().f64const(0.0));
+                        }
+                        "radix" if args.len() <= 1 => {
+                            return Ok(self.b.ins().iconst(types::I64, 2));
+                        }
+                        "sin_cos" if args.len() == 1 => {
+                            (self.host.math_extra.sin_cos, vec![self.lower_expr(&args[0])?])
+                        }
+                        "modf" if args.len() == 1 => {
+                            (self.host.math_extra.modf, vec![self.lower_expr(&args[0])?])
+                        }
+                        "frexp" if args.len() == 1 => {
+                            (self.host.math_extra.frexp, vec![self.lower_expr(&args[0])?])
+                        }
+                        "div_mod" if args.len() == 2 => (
+                            self.host.math_extra.div_mod,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "div_rem" if args.len() == 2 => (
+                            self.host.math_extra.div_rem,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "atan" if args.len() == 1 => {
+                            (self.host.math_extra.atan, vec![self.lower_expr(&args[0])?])
+                        }
+                        "asin" if args.len() == 1 => {
+                            (self.host.math_extra.asin, vec![self.lower_expr(&args[0])?])
+                        }
+                        "acos" if args.len() == 1 => {
+                            (self.host.math_extra.acos, vec![self.lower_expr(&args[0])?])
+                        }
+                        "tan" if args.len() == 1 => {
+                            (self.host.math_extra.tan, vec![self.lower_expr(&args[0])?])
+                        }
+                        "sinh" if args.len() == 1 => {
+                            (self.host.math_extra.sinh, vec![self.lower_expr(&args[0])?])
+                        }
+                        "cosh" if args.len() == 1 => {
+                            (self.host.math_extra.cosh, vec![self.lower_expr(&args[0])?])
+                        }
+                        "tanh" if args.len() == 1 => {
+                            (self.host.math_extra.tanh, vec![self.lower_expr(&args[0])?])
+                        }
+                        _ => {
+                            return Err(format!("jit core call unsupported: core.math.{method}"))
+                        }
                     };
                     let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
                     let call = self.b.ins().call(host_ref, &arg_vals);
@@ -11885,6 +12124,57 @@ impl LowerCtx<'_, '_> {
                         ("core.time", "zoned") if args.len() == 2 => (
                             self.host.time.zoned,
                             vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        ("core.time", "days_in_month") if args.len() == 2 => (
+                            self.host.time.days_in_month,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        ("core.time", "is_leap_year") if args.len() == 1 => (
+                            self.host.time.is_leap_year,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        ("core.time", "datetime") if args.len() == 6 => (
+                            self.host.time.datetime,
+                            vec![
+                                self.lower_expr(&args[0])?,
+                                self.lower_expr(&args[1])?,
+                                self.lower_expr(&args[2])?,
+                                self.lower_expr(&args[3])?,
+                                self.lower_expr(&args[4])?,
+                                self.lower_expr(&args[5])?,
+                            ],
+                        ),
+                        ("core.time", "time" | "local_time") if args.len() == 3 => (
+                            self.host.time.local_time,
+                            vec![
+                                self.lower_expr(&args[0])?,
+                                self.lower_expr(&args[1])?,
+                                self.lower_expr(&args[2])?,
+                            ],
+                        ),
+                        ("core.time", "nanoseconds") if args.len() == 1 => (
+                            self.host.time.duration_unit,
+                            vec![self.lower_expr(&args[0])?, self.b.ins().iconst(types::I64, 0)],
+                        ),
+                        ("core.time", "microseconds") if args.len() == 1 => (
+                            self.host.time.duration_unit,
+                            vec![self.lower_expr(&args[0])?, self.b.ins().iconst(types::I64, 1)],
+                        ),
+                        ("core.time", "milliseconds") if args.len() == 1 => (
+                            self.host.time.duration_unit,
+                            vec![self.lower_expr(&args[0])?, self.b.ins().iconst(types::I64, 2)],
+                        ),
+                        ("core.time", "seconds") if args.len() == 1 => (
+                            self.host.time.duration_unit,
+                            vec![self.lower_expr(&args[0])?, self.b.ins().iconst(types::I64, 3)],
+                        ),
+                        ("core.time", "minutes") if args.len() == 1 => (
+                            self.host.time.duration_unit,
+                            vec![self.lower_expr(&args[0])?, self.b.ins().iconst(types::I64, 4)],
+                        ),
+                        ("core.time", "hours") if args.len() == 1 => (
+                            self.host.time.duration_unit,
+                            vec![self.lower_expr(&args[0])?, self.b.ins().iconst(types::I64, 5)],
                         ),
                         _ => return Err(format!("jit core call unsupported: {module}.{method}")),
                     };
@@ -12589,8 +12879,9 @@ impl LowerCtx<'_, '_> {
                         let call = self.b.ins().call(is_ok, &[status]);
                         self.b.inst_results(call)[0]
                     } else {
+                        // Packed Option ABI: 0 = None, nonzero (incl. negative) = Some(bits-1).
                         let zero = self.b.ins().iconst(types::I64, 0);
-                        self.b.ins().icmp(IntCC::SignedGreaterThan, status, zero)
+                        self.b.ins().icmp(IntCC::NotEqual, status, zero)
                     };
                     self.b.ins().brif(present, ok_block, &[], fail_block, &[]);
                     self.b.switch_to_block(ok_block);
@@ -17640,10 +17931,34 @@ impl LowerCtx<'_, '_> {
                 Ok(self.b.inst_results(call)[0])
             }
             THandleOp::DurationIn { unit: None } => {
-                Err("jit dynamic DurationUnit falls back to AOT".to_string())
+                let unit_val = self.lower_expr(&args[0])?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.duration_in_unit, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val, unit_val]);
+                Ok(self.b.inst_results(call)[0])
             }
-            THandleOp::DurationIsZero | THandleOp::DurationTotalSeconds | THandleOp::DurationDifference => {
-                Err("jit Duration fact methods fall back to AOT".to_string())
+            THandleOp::DurationIsZero => {
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.duration_is_zero, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::DurationTotalSeconds => {
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.duration_total_seconds, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::DurationDifference => {
+                let other = self.lower_expr(&args[0])?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.duration_difference, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val, other]);
+                Ok(self.b.inst_results(call)[0])
             }
             // D-BIGINT1 / D-DECIMAL1: instance methods on precise numerics.
             THandleOp::PreciseMethod { type_name, method }
@@ -18479,7 +18794,13 @@ impl LowerCtx<'_, '_> {
                         arg_vals[5],
                     ],
                 );
-                Ok(self.b.inst_results(call)[0])
+                let raw = self.b.inst_results(call)[0];
+                // Host returns i64; Bool methods (is_leap_year / is_dst / …) need i8 ABI.
+                if matches!(ret_ty, Type::Bool) {
+                    Ok(self.b.ins().ireduce(types::I8, raw))
+                } else {
+                    Ok(raw)
+                }
             }
             THandleOp::UrlMimeMethod { method, .. } => {
                 let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {

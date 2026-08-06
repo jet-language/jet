@@ -125,6 +125,50 @@ extern "C" fn jet_jit_time_zoned(dt: i64, zone: i64) -> i64 {
     }
 }
 
+extern "C" fn jet_jit_time_days_in_month(year: i64, month: i64) -> i64 {
+    time_rt::JetDate::days_in_month_of(year, month.clamp(1, 12))
+}
+
+extern "C" fn jet_jit_time_is_leap_year(year: i64) -> i8 {
+    i8::from(time_rt::JetDate::is_leap(year))
+}
+
+extern "C" fn jet_jit_time_datetime(
+    year: i64,
+    month: i64,
+    day: i64,
+    hour: i64,
+    minute: i64,
+    second: i64,
+) -> i64 {
+    push(TimeValue::DateTime(time_rt::JetDateTime::from_parts(
+        year, month, day, hour, minute, second, 0,
+    )))
+}
+
+extern "C" fn jet_jit_time_local_time(hour: i64, minute: i64, second: i64) -> i64 {
+    push(TimeValue::LocalTime(time_rt::JetLocalTime::new(
+        hour, minute, second,
+    )))
+}
+
+/// `core.time.{nanoseconds,…}` — Result ok bits = Duration ns.
+extern "C" fn jet_jit_time_duration_unit(value: i64, unit: i64) -> i64 {
+    let scale = match unit {
+        0 => 1i64,
+        1 => 1_000,
+        2 => 1_000_000,
+        3 => 1_000_000_000,
+        4 => 60_000_000_000,
+        5 => 3_600_000_000_000,
+        _ => 1,
+    };
+    match value.checked_mul(scale) {
+        Some(ns) => result_ok(ns as u64),
+        None => result_err("duration must be finite and inside the supported range".into()),
+    }
+}
+
 /// Civil-time method dispatch. `kind`: 0=Date, 1=DateTime, 2=Period, 3=Instant, 4=Zone, 5=Zoned.
 /// `method` is a string handle; args packed as i64 list handle (or 0).
 extern "C" fn jet_jit_civil_time_method(
@@ -214,7 +258,20 @@ extern "C" fn jet_jit_civil_time_method(
             });
             zone.map(|z| push(TimeValue::Zoned(dt.in_zone(&z)))).unwrap_or(0)
         }
+        (TimeValue::DateTime(dt), "plus_duration") => {
+            // Duration is raw ns i64 after Result unwrap (I9 Duration ABI).
+            push(TimeValue::DateTime(dt.plus_duration_ns(arg0)))
+        }
+        (TimeValue::DateTime(dt), "difference") => {
+            let other = with_time(arg0, |o| match o {
+                TimeValue::DateTime(od) => Some(od.clone()),
+                _ => None,
+            });
+            other.map(|o| dt.difference_ns(&o)).unwrap_or(0)
+        }
         (TimeValue::Instant(i), "elapsed_millis") => i.elapsed_millis(),
+        (TimeValue::Instant(i), "elapsed") => i.elapsed_nanos(),
+        (TimeValue::LocalTime(t), "to_string") => alloc_str(t.to_string_fmt()),
         (TimeValue::Zoned(z), "format") => {
             alloc_str(z.format_pattern(&clone_str(arg0)))
         }
@@ -242,6 +299,11 @@ pub(crate) struct TimeHostFns {
     pub period_months: FuncId,
     pub instant: FuncId,
     pub zoned: FuncId,
+    pub days_in_month: FuncId,
+    pub is_leap_year: FuncId,
+    pub datetime: FuncId,
+    pub local_time: FuncId,
+    pub duration_unit: FuncId,
     pub civil_method: FuncId,
 }
 
@@ -270,6 +332,23 @@ pub(crate) fn register_time_symbols(builder: &mut JITBuilder) {
     builder.symbol("jet_jit_time_instant", jet_jit_time_instant as *const u8);
     builder.symbol("jet_jit_time_zoned", jet_jit_time_zoned as *const u8);
     builder.symbol(
+        "jet_jit_time_days_in_month",
+        jet_jit_time_days_in_month as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_time_is_leap_year",
+        jet_jit_time_is_leap_year as *const u8,
+    );
+    builder.symbol("jet_jit_time_datetime", jet_jit_time_datetime as *const u8);
+    builder.symbol(
+        "jet_jit_time_local_time",
+        jet_jit_time_local_time as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_time_duration_unit",
+        jet_jit_time_duration_unit as *const u8,
+    );
+    builder.symbol(
         "jet_jit_civil_time_method",
         jet_jit_civil_time_method as *const u8,
     );
@@ -296,6 +375,14 @@ pub(crate) fn declare_time_host_fns(module: &mut JITModule) -> Result<TimeHostFn
         quaternary.params.push(AbiParam::new(types::I64));
     }
     quaternary.returns.push(AbiParam::new(types::I64));
+    let mut hexary = Signature::new(cc);
+    for _ in 0..6 {
+        hexary.params.push(AbiParam::new(types::I64));
+    }
+    hexary.returns.push(AbiParam::new(types::I64));
+    let mut unary_i8 = Signature::new(cc);
+    unary_i8.params.push(AbiParam::new(types::I64));
+    unary_i8.returns.push(AbiParam::new(types::I8));
     let mut octonary = Signature::new(cc);
     for _ in 0..8 {
         octonary.params.push(AbiParam::new(types::I64));
@@ -318,6 +405,11 @@ pub(crate) fn declare_time_host_fns(module: &mut JITModule) -> Result<TimeHostFn
         period_months: import("jet_jit_time_period_months", &unary)?,
         instant: import("jet_jit_time_instant", &nullary)?,
         zoned: import("jet_jit_time_zoned", &binary)?,
+        days_in_month: import("jet_jit_time_days_in_month", &binary)?,
+        is_leap_year: import("jet_jit_time_is_leap_year", &unary_i8)?,
+        datetime: import("jet_jit_time_datetime", &hexary)?,
+        local_time: import("jet_jit_time_local_time", &ternary)?,
+        duration_unit: import("jet_jit_time_duration_unit", &binary)?,
         civil_method: import("jet_jit_civil_time_method", &octonary)?,
     })
 }
