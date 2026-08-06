@@ -65,7 +65,7 @@ impl<'a> Checker<'a> {
     
         /// D-VARIADIC1: pack trailing call arguments (and spreads) into the final list
         /// parameter so codegen sees a normal fixed-arity call.
-        pub(super) fn normalize_variadic_call(&mut self, call: &mut Call, sig: &crate::AST::FuncSig) {
+        pub(crate) fn normalize_variadic_call(&mut self, call: &mut Call, sig: &crate::AST::FuncSig) {
             let fixed = sig.params.len().saturating_sub(1);
             let Some((variadic_conv, variadic_ty)) = sig.params.last().cloned() else {
                 return;
@@ -178,13 +178,15 @@ impl<'a> Checker<'a> {
                 }
             }
     
-            let packed_expr = if packed_elems.len() == 1 {
-                match packed_elems.pop().unwrap() {
-                    Expr::Spread(inner, _span) => *inner,
-                    other => other,
-                }
-            } else if packed_elems.is_empty() {
+            let packed_expr = if packed_elems.is_empty() {
                 Expr::ListLit(Vec::new(), pack_span)
+            } else if packed_elems.len() == 1 {
+                match packed_elems.pop().unwrap() {
+                    // Spread already expands a list into the rest slot.
+                    Expr::Spread(inner, _span) => *inner,
+                    // One concrete rest arg still packs into a one-element list.
+                    other => Expr::ListLit(vec![other], pack_span),
+                }
             } else {
                 Expr::ListLit(packed_elems, pack_span)
             };

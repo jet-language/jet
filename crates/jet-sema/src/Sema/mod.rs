@@ -485,7 +485,14 @@ fn func_to_method_sig(f: &Func) -> MethodSig {
         params: f
             .params
             .iter()
-            .map(|p| (p.convention, p.ty.clone()))
+            .map(|p| {
+                let ty = if p.variadic {
+                    Type::List(Box::new(p.ty.clone()))
+                } else {
+                    p.ty.clone()
+                };
+                (p.convention, ty)
+            })
             .collect(),
         return_type: f.return_type.clone(),
         type_params: f.type_params.clone(),
