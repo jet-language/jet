@@ -11,16 +11,6 @@ impl<'a> Parser<'a> {
             self.diags.push(Self::retired_effect_syntax(span));
         }
     
-        pub(super) fn retired_inline_always(name: &str) -> bool {
-            crate::Policy::applied_rule(name).is_some_and(|row| {
-                matches!(
-                    row.status,
-                    crate::Policy::RuleStatus::Retired {
-                        replacement: "#Inline(Always)"
-                    }
-                )
-            })
-        }
 
     
     
@@ -31,12 +21,6 @@ impl<'a> Parser<'a> {
             self.func_with_modifiers(false, false)
         }
     
-        /// D-PREPOST1: is the cursor at `#Pre(`/`#Post(`?
-        pub(super) fn at_contract_clause_fn(&self, kw: &str) -> bool {
-            matches!(self.peek().kind, TokKind::Hash)
-                && matches!(&self.peek2().kind, TokKind::Ident(n) if n == kw)
-                && matches!(self.peek3().kind, TokKind::LParen)
-        }
     
     
         /// D-WASM1=A: is the cursor at `#Target(Wasm|JS)`?

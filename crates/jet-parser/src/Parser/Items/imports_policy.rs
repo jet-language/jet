@@ -805,37 +805,6 @@ impl<'a> Parser<'a> {
                             self.func().map(Item::Func)
                         }
                     }
-                    // S60 (D-CASING1 follow-on) / D-ARROW-CONTROL1: `fn name(…) =[]=>`
-                    // purity modifier (old `#Pure` spelling is E0062, taught in `func()`).
-                    TokKind::Hash if self.at_pure_fn() => self.func().map(Item::Func),
-                    // D-TAINT1: `#Sanitizer fn name(…)` taint-strip modifier.
-                    TokKind::Hash if self.at_sanitizer_fn() => self.func().map(Item::Func),
-                    // D-REPLAY1: `#Replayable fn name(…)` deterministic replay guard.
-                    TokKind::Hash if self.at_replayable_fn() => self.func().map(Item::Func),
-                    // D-SCHEDULE1 (card #505): `#Job fn name(…)` / `#Every(…) fn name(…)`
-                    // schedule-as-code markers on a free function.
-                    TokKind::Hash if self.at_task_fn() || self.at_every_fn() => {
-                        self.func().map(Item::Func)
-                    }
-                    // D-MUSTUSE1 / D-MARKERMOVE1: `#MustUse fn name(…)` — result cannot be
-                    // silently ignored (old `#MustUse` spelling is E0062, taught in `func()`).
-                    TokKind::Hash if self.at_must_use_fn() => self.func().map(Item::Func),
-                    // D-METHODMACRO1=A: `#Inline fn name(…)` / `#Inline(Always) fn name(…)`.
-                    TokKind::Hash if self.at_inline_fn() => self.func().map(Item::Func),
-                    // D-STATE1: `#State(S) fn` / `#Transition(From, To) fn` typestate
-                    // markers on a free function.
-                    TokKind::Hash if self.at_state_fn() || self.at_transition_fn() => {
-                        self.func().map(Item::Func)
-                    }
-                    // D-PREPOST1: `#Pre(cond, "msg")` / `#Post(cond, "msg")` before a
-                    // free function — parsed (and repeated/mixed) inside `func()`.
-                    TokKind::Hash
-                        if self.at_contract_clause_fn(Syntax::CONTRACT_PRE)
-                            || self.at_contract_clause_fn(Syntax::CONTRACT_POST) =>
-                    {
-                        self.func().map(Item::Func)
-                    }
-                    TokKind::Hash if self.at_web_partition_fn() => self.func().map(Item::Func),
                     // D-S14-PAUSE: bare lowercase `pure` teaching is paused.
                     TokKind::Ident(n)
                         if retired_s14_teaching_enabled()
