@@ -1808,12 +1808,22 @@ function hostileFixtures() {
     validateSurfaces(ledger, broken);
   }));
 
+  // The cluster is synthesised, not found. Once every cluster has a live card
+  // there is no closed one to break, and searching for one made the fixture
+  // fail on its own setup instead of proving the gate.
+  const doneCard = must((board.cards || []).find(function (item) { return item.phase === "done"; }),
+    "the board has no done card to build the fixture from");
+
   results.push(rejects("stale owner: cluster claims a closed card", "names closed card #", function () {
     const broken = clone(ledger);
-    const cluster = must(broken.lossClusters.find(function (item) {
-      return item.ownerState === "closed";
-    }), "no closed cluster to break");
-    cluster.ownerState = "live";
+    broken.lossClusters.push({
+      container: "LedgerFixtureClosed",
+      lossCount: 1,
+      languages: ["Rust"],
+      ownerCard: doneCard.num,
+      ownerCardPhase: "done",
+      ownerState: "live",
+    });
     validateOwners(broken, board);
   }));
 
@@ -1830,12 +1840,15 @@ function hostileFixtures() {
     "but the board has it in", function () {
     const broken = clone(ledger);
     const openBoard = clone(board);
-    const cluster = must(broken.lossClusters.find(function (item) {
-      return item.ownerState === "closed";
-    }), "no closed cluster to break");
-    const card = openBoard.cards.find(function (item) { return item.num === cluster.ownerCard; });
-    must(card, "the closed cluster names a card the board does not have");
-    card.phase = "building";
+    broken.lossClusters.push({
+      container: "LedgerFixtureReopened",
+      lossCount: 1,
+      languages: ["Rust"],
+      ownerCard: doneCard.num,
+      ownerCardPhase: "done",
+      ownerState: "closed",
+    });
+    openBoard.cards.find(function (item) { return item.num === doneCard.num; }).phase = "building";
     validateOwners(broken, openBoard);
   }));
 
