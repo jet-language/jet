@@ -84,15 +84,15 @@ const SWIFT = {
   Iter: ["sequence", "iteratorprotocol"],
   Map: ["dictionary"],
   Set: ["set"],
-  String: ["string", "stringprotocol"],
+  String: ["string", "stringprotocol", "character"],
   "core.math": ["double", "int"],
-  "core.text": ["string", "character"],
   "core.time": ["duration"],
   "core.tasks": ["task"],
   "core.regex": ["regex"],
 };
 
 const SWIFT_ABSENT = {
+  "core.text": "text handling lives on String and Character, recorded under String",
   SortedSet: "no Swift standard-library ordered set; swift-collections is a separate package",
   Deque: "no Swift standard-library double-ended queue; swift-collections is a separate package",
   PriorityQueue: "no Swift standard-library priority queue; swift-collections is a separate package",
@@ -169,12 +169,11 @@ async function swift() {
 // Kotlin user can actually call.
 
 const KOTLIN = {
-  List: ["kotlin.collections"],
+  List: ["kotlin.collections", "kotlin.collections/-list", "kotlin.collections/-mutable-list"],
   Iter: ["kotlin.sequences"],
-  Map: ["kotlin.collections"],
-  Set: ["kotlin.collections"],
+  Map: ["kotlin.collections/-map", "kotlin.collections/-mutable-map"],
+  Set: ["kotlin.collections/-set", "kotlin.collections/-mutable-set"],
   String: ["kotlin.text"],
-  "core.text": ["kotlin.text"],
   "core.math": ["kotlin.math"],
   "core.random": ["kotlin.random"],
   "core.time": ["kotlin.time"],
@@ -186,6 +185,7 @@ const KOTLIN = {
 };
 
 const KOTLIN_ABSENT = {
+  "core.text": "text handling lives in the kotlin.text package, recorded under String",
   SortedSet: "sortedSetOf returns a java.util.SortedSet; the Kotlin standard library declares no ordered set of its own",
   Deque: "ArrayDeque is a Kotlin class but the standard library declares no deque package surface of its own",
   PriorityQueue: "no Kotlin standard-library priority queue; java.util.PriorityQueue is a JDK type",
@@ -254,7 +254,7 @@ async function kotlin() {
 // reference is rendered from.
 
 const CSHARP = {
-  List: ["System.Collections.Generic/List`1", "System.Linq/Enumerable"],
+  List: ["System.Collections.Generic/List`1"],
   Iter: ["System.Linq/Enumerable"],
   Map: ["System.Collections.Generic/Dictionary`2"],
   Set: ["System.Collections.Generic/HashSet`1"],
@@ -274,7 +274,6 @@ const CSHARP = {
   "core.regex": ["System.Text.RegularExpressions/Regex"],
   "core.files": ["System.IO/File", "System.IO/Directory"],
   "core.path": ["System.IO/Path"],
-  "core.env": ["System/Environment"],
   "core.os": ["System/Environment"],
   "core.process": ["System.Diagnostics/Process"],
   "core.net": ["System.Net.Sockets/Socket"],
@@ -287,12 +286,13 @@ const CSHARP = {
   "core.archive": ["System.IO.Compression/ZipFile"],
   "core.binary": ["System.IO/BinaryReader"],
   "core.io": ["System/Console"],
-  "core.fmt": ["System/String"],
-  "core.text": ["System/String"],
   "core.text.unicode": ["System.Globalization/CharUnicodeInfo"],
 };
 
 const CSHARP_ABSENT = {
+  "core.env": "environment access lives on System.Environment, recorded under core.os",
+  "core.fmt": "formatting lives on System.String, recorded under String",
+  "core.text": "text handling lives on System.String, recorded under String",
   Cache: "MemoryCache ships in a separate NuGet package, not the base class library",
   "core.encoding.csv": "no .NET base-class-library CSV codec",
   "core.encoding.toml": "no .NET base-class-library TOML decoder",
@@ -343,23 +343,17 @@ async function csharp() {
 // every documented binding with the manual page that documents it.
 
 const JULIA = {
-  List: ["base/arrays", "base/collections"],
-  Iter: ["base/iterators", "base/collections"],
+  List: ["base/arrays"],
+  Iter: ["base/iterators"],
   Map: ["base/collections"],
-  Set: ["base/collections"],
   String: ["base/strings"],
   "core.math": ["base/math", "base/numbers"],
   "core.random": ["stdlib/Random"],
   "core.data": ["stdlib/Statistics"],
   "core.time": ["stdlib/Dates"],
   "core.files": ["base/file"],
-  "core.path": ["base/file"],
   "core.io": ["base/io-network"],
-  "core.net": ["base/io-network"],
-  "core.binary": ["base/io-network"],
-  "core.env": ["base/base"],
   "core.os": ["base/base"],
-  "core.process": ["base/base"],
   "core.tasks": ["base/parallel", "base/multi-threading"],
   "core.crypto": ["stdlib/SHA"],
   "core.uuid": ["stdlib/UUIDs"],
@@ -367,12 +361,18 @@ const JULIA = {
   "core.testing": ["stdlib/Test"],
   "core.log": ["stdlib/Logging"],
   "core.db": ["stdlib/LibGit2"],
-  "core.text": ["base/strings"],
-  "core.regex": ["base/strings"],
   "core.archive": ["stdlib/Tar"],
 };
 
 const JULIA_ABSENT = {
+  "core.env": "environment access is documented on the base manual page, recorded under core.os",
+  Set: "Set is documented on the collections manual page, recorded under Map",
+  "core.path": "path handling is documented on the file manual page, recorded under core.files",
+  "core.net": "networking is documented on the io-network manual page, recorded under core.io",
+  "core.binary": "binary reading is documented on the io-network manual page, recorded under core.io",
+  "core.process": "process control is documented on the base manual page, recorded under core.os",
+  "core.text": "text handling is documented on the strings manual page, recorded under String",
+  "core.regex": "regular expressions are documented on the strings manual page, recorded under String",
   SortedSet: "no Julia standard-library ordered set; DataStructures.jl is a package",
   Deque: "no Julia standard-library double-ended queue; DataStructures.jl is a package",
   PriorityQueue: "no Julia standard-library priority queue; DataStructures.jl is a package",

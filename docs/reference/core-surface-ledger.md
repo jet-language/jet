@@ -35,15 +35,16 @@ Generated on: 2026-08-06
 | Module members | 1011 |
 | Collection method rows | 334 |
 | Jet-side rows | 1346 |
-| Total rows | 16744 |
+| Total rows | 10457 |
 
 ## Verdicts
 
 | Verdict | Rows |
 | --- | ---: |
-| Jet wins | 395 |
-| Equal | 366 |
-| Jet loses | 15398 |
+| Jet wins | 418 |
+| Equal | 343 |
+| Jet loses (two or more languages agree) | 675 |
+| Single witness (recorded, not scored) | 8436 |
 | Not compared | 585 |
 | Deliberately declined | 0 |
 
@@ -51,17 +52,17 @@ Generated on: 2026-08-06
 
 | Language | Surface read from | Recorded operations | Jet rows matched | Loss rows |
 | --- | --- | ---: | ---: | ---: |
-| Rust | standard-library source (rust-src component) | 966 | 144 | 828 |
-| Go | official frozen API files (GOROOT/api/go1*.txt) | 2000 | 147 | 1865 |
-| Swift | official documentation JSON (developer.apple.com) | 588 | 67 | 527 |
-| Kotlin | official API reference (kotlinlang.org) | 1729 | 125 | 1608 |
-| C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1241 | 127 | 1122 |
-| TypeScript | runtime introspection | 347 | 96 | 257 |
-| Ruby | runtime introspection | 1641 | 140 | 1508 |
-| Elixir | runtime introspection | 1450 | 147 | 1312 |
-| Julia | official documentation search index (docs.julialang.org) | 2182 | 136 | 2056 |
+| Rust | standard-library source (rust-src component) | 831 | 129 | 122 |
+| Go | official frozen API files (GOROOT/api/go1*.txt) | 1681 | 133 | 235 |
+| Swift | official documentation JSON (developer.apple.com) | 505 | 65 | 88 |
+| Kotlin | official API reference (kotlinlang.org) | 1141 | 120 | 135 |
+| C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1102 | 117 | 134 |
+| TypeScript | runtime introspection | 347 | 96 | 57 |
+| Ruby | runtime introspection | 1209 | 130 | 201 |
+| Elixir | runtime introspection | 1450 | 147 | 202 |
+| Julia | official documentation search index (docs.julialang.org) | 1132 | 98 | 187 |
 | R | official R manual package index (stat.ethz.ch R-devel) | 3536 | 34 | 0 |
-| Python | runtime introspection | 4482 | 176 | 4315 |
+| Python | runtime introspection | 2227 | 128 | 285 |
 
 ## Loss clusters
 
@@ -73,50 +74,39 @@ it is done while losses remain.
 
 | Container | Loss rows | Prior card | Card phase | Owner |
 | --- | ---: | --- | --- | --- |
-| List | 1120 | #1410 | done | closed |
-| String | 928 | #1409 | done | closed |
-| core.text | 814 | none | n/a | needs_card |
-| core.files | 790 | #288 | building | live |
-| core.os | 785 | none | n/a | needs_card |
-| core.io | 711 | #1402 | done | closed |
-| core.env | 697 | none | n/a | needs_card |
-| Iter | 651 | #1400 | done | closed |
-| core.fmt | 617 | none | n/a | needs_card |
-| Map | 577 | #1410 | done | closed |
-| core.time | 572 | none | n/a | needs_card |
-| Set | 539 | #1404 | done | closed |
-| core.net | 536 | none | n/a | needs_card |
-| core.math | 497 | none | n/a | needs_card |
-| core.tasks | 477 | none | n/a | needs_card |
-| core.process | 452 | none | n/a | needs_card |
-| core.tls | 414 | none | n/a | needs_card |
-| core.http | 395 | none | n/a | needs_card |
-| ByteBuffer | 324 | none | n/a | needs_card |
-| core.path | 315 | #288 | building | live |
-| core.db | 310 | none | n/a | needs_card |
-| core.binary | 301 | none | n/a | needs_card |
-| core.regex | 267 | none | n/a | needs_card |
-| core.archive | 249 | none | n/a | needs_card |
-| core.url | 236 | none | n/a | needs_card |
-| core.testing | 231 | none | n/a | needs_card |
-| core.log | 212 | none | n/a | needs_card |
-| Deque | 206 | none | n/a | needs_card |
-| core.crypto | 157 | none | n/a | needs_card |
-| core.crypto.random | 123 | none | n/a | needs_card |
-| core.random | 114 | none | n/a | needs_card |
-| core.encoding.csv | 112 | none | n/a | needs_card |
-| core.uuid | 111 | none | n/a | needs_card |
-| core.encoding.base64 | 87 | none | n/a | needs_card |
-| core.encoding.json | 84 | none | n/a | needs_card |
-| SortedSet | 70 | #1404 | done | closed |
-| BitSet | 67 | none | n/a | needs_card |
-| core.text.unicode | 55 | none | n/a | needs_card |
-| core.encoding.base32 | 46 | none | n/a | needs_card |
-| PriorityQueue | 46 | none | n/a | needs_card |
-| core.encoding.hex | 43 | none | n/a | needs_card |
-| core.data | 39 | none | n/a | needs_card |
-| Cache | 16 | none | n/a | needs_card |
-| core.encoding.toml | 5 | none | n/a | needs_card |
+| String | 80 | #1409 | done | closed |
+| core.math | 65 | none | n/a | needs_card |
+| core.os | 56 | none | n/a | needs_card |
+| List | 53 | #1410 | done | closed |
+| core.time | 42 | none | n/a | needs_card |
+| core.tasks | 33 | none | n/a | needs_card |
+| Map | 30 | #1410 | done | closed |
+| Set | 30 | #1404 | done | closed |
+| core.io | 27 | #1402 | done | closed |
+| core.files | 26 | #288 | building | live |
+| core.net | 23 | none | n/a | needs_card |
+| core.path | 22 | #288 | building | live |
+| Iter | 21 | #1400 | done | closed |
+| ByteBuffer | 20 | none | n/a | needs_card |
+| core.archive | 15 | none | n/a | needs_card |
+| Deque | 15 | none | n/a | needs_card |
+| core.url | 14 | none | n/a | needs_card |
+| core.log | 12 | none | n/a | needs_card |
+| core.process | 12 | none | n/a | needs_card |
+| core.crypto | 11 | none | n/a | needs_card |
+| core.regex | 11 | none | n/a | needs_card |
+| core.tls | 10 | none | n/a | needs_card |
+| core.text | 8 | none | n/a | needs_card |
+| core.testing | 7 | none | n/a | needs_card |
+| core.db | 6 | none | n/a | needs_card |
+| core.http | 6 | none | n/a | needs_card |
+| SortedSet | 5 | #1404 | done | closed |
+| core.binary | 3 | none | n/a | needs_card |
+| core.encoding.csv | 3 | none | n/a | needs_card |
+| core.uuid | 3 | none | n/a | needs_card |
+| core.encoding.base64 | 2 | none | n/a | needs_card |
+| core.random | 2 | none | n/a | needs_card |
+| PriorityQueue | 2 | none | n/a | needs_card |
 
 ## Containers indexed per package
 

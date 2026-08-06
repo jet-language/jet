@@ -42,9 +42,8 @@ const CONTAINERS = {
   "core.encoding.base32": ["encoding/base32"],
   "core.encoding.hex": ["encoding/hex"],
   "core.regex": ["regexp"],
-  "core.files": ["os", "io/fs"],
+  "core.files": ["io/fs"],
   "core.path": ["path/filepath", "path"],
-  "core.env": ["os"],
   "core.process": ["os/exec"],
   "core.net": ["net"],
   "core.tls": ["crypto/tls", "crypto/x509"],
@@ -58,12 +57,13 @@ const CONTAINERS = {
   "core.archive": ["archive/zip", "archive/tar", "compress/gzip", "compress/flate"],
   "core.os": ["os", "runtime"],
   "core.io": ["fmt", "bufio"],
-  "core.fmt": ["fmt"],
   "core.text.unicode": ["unicode", "unicode/utf8"],
-  "core.text": ["strings", "text/template"],
 };
 
 const ABSENT = {
+  "core.env": "environment access lives in the os package, recorded under core.os",
+  "core.fmt": "formatting lives in the fmt package, recorded under core.io",
+  "core.text": "text handling lives in the strings package, recorded under String",
   Set: "no Go standard-library set type; the idiom is map[T]struct{}",
   SortedSet: "no Go standard-library ordered set",
   Cache: "no Go standard-library cache with an eviction policy",

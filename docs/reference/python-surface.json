@@ -221,8 +221,115 @@
   "officialIndex": "https://docs.python.org/3/library/index.html",
   "pythonVersion": "3.14.6",
   "schemaVersion": 1,
-  "scopeRule": "Comparison points are callables and types. Module-level constant values are excluded as configuration, not operations. Class members such as socket.socket.recv are recorded and can satisfy a Jet mapping, but they are not enumerated as gaps. Every excluded name stays counted so no exclusion is hidden.",
+  "scopeRule": "Comparison points are the operations a user calls. An exception class is a failure signal rather than an operation, and a module-level constant is configuration, so both are excluded and both stay counted. Class members such as socket.socket.recv are recorded because that is where most of a module's real surface lives; builtins is excluded from that flattening because its classes are the primitive types, which have containers already. Only a class's methods count; its data attributes are fields.",
   "stdlibModules": {
+    "argparse": {
+      "excludedConstantCount": 6,
+      "excludedConstants": [
+        "ONE_OR_MORE",
+        "OPTIONAL",
+        "PARSER",
+        "REMAINDER",
+        "SUPPRESS",
+        "ZERO_OR_MORE"
+      ],
+      "excludedExceptionCount": 2,
+      "excludedExceptions": [
+        "ArgumentError",
+        "ArgumentTypeError"
+      ],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
+      "operationCount": 10,
+      "operations": [
+        "Action",
+        "ArgumentDefaultsHelpFormatter",
+        "ArgumentParser",
+        "BooleanOptionalAction",
+        "FileType",
+        "HelpFormatter",
+        "MetavarTypeHelpFormatter",
+        "Namespace",
+        "RawDescriptionHelpFormatter",
+        "RawTextHelpFormatter"
+      ],
+      "typeMemberCount": 55,
+      "types": {
+        "Action": [
+          "format_usage"
+        ],
+        "ArgumentDefaultsHelpFormatter": [
+          "add_argument",
+          "add_arguments",
+          "add_text",
+          "add_usage",
+          "end_section",
+          "format_help",
+          "start_section"
+        ],
+        "ArgumentParser": [
+          "add_argument",
+          "add_argument_group",
+          "add_mutually_exclusive_group",
+          "add_subparsers",
+          "convert_arg_line_to_args",
+          "error",
+          "exit",
+          "format_help",
+          "format_usage",
+          "get_default",
+          "parse_args",
+          "parse_intermixed_args",
+          "parse_known_args",
+          "parse_known_intermixed_args",
+          "print_help",
+          "print_usage",
+          "register",
+          "set_defaults"
+        ],
+        "BooleanOptionalAction": [
+          "format_usage"
+        ],
+        "FileType": [],
+        "HelpFormatter": [
+          "add_argument",
+          "add_arguments",
+          "add_text",
+          "add_usage",
+          "end_section",
+          "format_help",
+          "start_section"
+        ],
+        "MetavarTypeHelpFormatter": [
+          "add_argument",
+          "add_arguments",
+          "add_text",
+          "add_usage",
+          "end_section",
+          "format_help",
+          "start_section"
+        ],
+        "Namespace": [],
+        "RawDescriptionHelpFormatter": [
+          "add_argument",
+          "add_arguments",
+          "add_text",
+          "add_usage",
+          "end_section",
+          "format_help",
+          "start_section"
+        ],
+        "RawTextHelpFormatter": [
+          "add_argument",
+          "add_arguments",
+          "add_text",
+          "add_usage",
+          "end_section",
+          "format_help",
+          "start_section"
+        ]
+      }
+    },
     "asyncio": {
       "excludedConstantCount": 3,
       "excludedConstants": [
@@ -230,7 +337,22 @@
         "FIRST_COMPLETED",
         "FIRST_EXCEPTION"
       ],
-      "operationCount": 86,
+      "excludedExceptionCount": 10,
+      "excludedExceptions": [
+        "BrokenBarrierError",
+        "CancelledError",
+        "IncompleteReadError",
+        "InvalidStateError",
+        "LimitOverrunError",
+        "QueueEmpty",
+        "QueueFull",
+        "QueueShutDown",
+        "SendfileNotAvailableError",
+        "TimeoutError"
+      ],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
+      "operationCount": 76,
       "operations": [
         "AbstractEventLoop",
         "AbstractServer",
@@ -239,9 +361,7 @@
         "BaseProtocol",
         "BaseTransport",
         "BoundedSemaphore",
-        "BrokenBarrierError",
         "BufferedProtocol",
-        "CancelledError",
         "Condition",
         "DatagramProtocol",
         "DatagramTransport",
@@ -251,22 +371,15 @@
         "Future",
         "FutureCallGraph",
         "Handle",
-        "IncompleteReadError",
-        "InvalidStateError",
         "LifoQueue",
-        "LimitOverrunError",
         "Lock",
         "PriorityQueue",
         "Protocol",
         "Queue",
-        "QueueEmpty",
-        "QueueFull",
-        "QueueShutDown",
         "ReadTransport",
         "Runner",
         "SelectorEventLoop",
         "Semaphore",
-        "SendfileNotAvailableError",
         "Server",
         "StreamReader",
         "StreamReaderProtocol",
@@ -276,7 +389,6 @@
         "Task",
         "TaskGroup",
         "Timeout",
-        "TimeoutError",
         "TimerHandle",
         "Transport",
         "WriteTransport",
@@ -319,7 +431,7 @@
         "wait_for",
         "wrap_future"
       ],
-      "typeMemberCount": 487,
+      "typeMemberCount": 440,
       "types": {
         "AbstractEventLoop": [
           "add_reader",
@@ -389,9 +501,6 @@
         ],
         "Barrier": [
           "abort",
-          "broken",
-          "n_waiting",
-          "parties",
           "reset",
           "wait"
         ],
@@ -469,11 +578,6 @@
           "locked",
           "release"
         ],
-        "BrokenBarrierError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
         "BufferedProtocol": [
           "buffer_updated",
           "connection_lost",
@@ -482,11 +586,6 @@
           "get_buffer",
           "pause_writing",
           "resume_writing"
-        ],
-        "CancelledError": [
-          "add_note",
-          "args",
-          "with_traceback"
         ],
         "Condition": [
           "notify",
@@ -573,9 +672,7 @@
           "subprocess_shell",
           "time"
         ],
-        "FrameCallGraphEntry": [
-          "frame"
-        ],
+        "FrameCallGraphEntry": [],
         "Future": [
           "add_done_callback",
           "cancel",
@@ -588,25 +685,11 @@
           "set_exception",
           "set_result"
         ],
-        "FutureCallGraph": [
-          "awaited_by",
-          "call_stack",
-          "future"
-        ],
+        "FutureCallGraph": [],
         "Handle": [
           "cancel",
           "cancelled",
           "get_context"
-        ],
-        "IncompleteReadError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "InvalidStateError": [
-          "add_note",
-          "args",
-          "with_traceback"
         ],
         "LifoQueue": [
           "empty",
@@ -614,17 +697,11 @@
           "get",
           "get_nowait",
           "join",
-          "maxsize",
           "put",
           "put_nowait",
           "qsize",
           "shutdown",
           "task_done"
-        ],
-        "LimitOverrunError": [
-          "add_note",
-          "args",
-          "with_traceback"
         ],
         "Lock": [
           "acquire",
@@ -637,7 +714,6 @@
           "get",
           "get_nowait",
           "join",
-          "maxsize",
           "put",
           "put_nowait",
           "qsize",
@@ -658,27 +734,11 @@
           "get",
           "get_nowait",
           "join",
-          "maxsize",
           "put",
           "put_nowait",
           "qsize",
           "shutdown",
           "task_done"
-        ],
-        "QueueEmpty": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "QueueFull": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "QueueShutDown": [
-          "add_note",
-          "args",
-          "with_traceback"
         ],
         "ReadTransport": [
           "close",
@@ -756,11 +816,6 @@
           "locked",
           "release"
         ],
-        "SendfileNotAvailableError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
         "Server": [
           "abort_clients",
           "close",
@@ -768,7 +823,6 @@
           "get_loop",
           "is_serving",
           "serve_forever",
-          "sockets",
           "start_serving",
           "wait_closed"
         ],
@@ -799,7 +853,6 @@
           "get_extra_info",
           "is_closing",
           "start_tls",
-          "transport",
           "wait_closed",
           "write",
           "write_eof",
@@ -855,16 +908,6 @@
           "reschedule",
           "when"
         ],
-        "TimeoutError": [
-          "add_note",
-          "args",
-          "characters_written",
-          "errno",
-          "filename",
-          "filename2",
-          "strerror",
-          "with_traceback"
-        ],
         "TimerHandle": [
           "cancel",
           "cancelled",
@@ -909,6 +952,10 @@
     "base64": {
       "excludedConstantCount": 0,
       "excludedConstants": [],
+      "excludedExceptionCount": 0,
+      "excludedExceptions": [],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
       "operationCount": 22,
       "operations": [
         "a85decode",
@@ -940,10 +987,15 @@
     "binascii": {
       "excludedConstantCount": 0,
       "excludedConstants": [],
-      "operationCount": 14,
-      "operations": [
+      "excludedExceptionCount": 2,
+      "excludedExceptions": [
         "Error",
-        "Incomplete",
+        "Incomplete"
+      ],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
+      "operationCount": 12,
+      "operations": [
         "a2b_base64",
         "a2b_hex",
         "a2b_qp",
@@ -957,19 +1009,8 @@
         "hexlify",
         "unhexlify"
       ],
-      "typeMemberCount": 6,
-      "types": {
-        "Error": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "Incomplete": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ]
-      }
+      "typeMemberCount": 0,
+      "types": {}
     },
     "builtins": {
       "excludedConstantCount": 5,
@@ -980,8 +1021,8 @@
         "NotImplemented",
         "True"
       ],
-      "operationCount": 145,
-      "operations": [
+      "excludedExceptionCount": 70,
+      "excludedExceptions": [
         "ArithmeticError",
         "AssertionError",
         "AttributeError",
@@ -1051,7 +1092,39 @@
         "UserWarning",
         "ValueError",
         "Warning",
-        "ZeroDivisionError",
+        "ZeroDivisionError"
+      ],
+      "excludedTypeCount": 26,
+      "excludedTypes": [
+        "bool",
+        "bytearray",
+        "bytes",
+        "classmethod",
+        "complex",
+        "dict",
+        "enumerate",
+        "filter",
+        "float",
+        "frozenset",
+        "int",
+        "list",
+        "map",
+        "memoryview",
+        "object",
+        "property",
+        "range",
+        "reversed",
+        "set",
+        "slice",
+        "staticmethod",
+        "str",
+        "super",
+        "tuple",
+        "type",
+        "zip"
+      ],
+      "operationCount": 49,
+      "operations": [
         "abs",
         "aiter",
         "all",
@@ -1059,29 +1132,19 @@
         "any",
         "ascii",
         "bin",
-        "bool",
         "breakpoint",
-        "bytearray",
-        "bytes",
         "callable",
         "chr",
-        "classmethod",
         "compile",
-        "complex",
         "copyright",
         "credits",
         "delattr",
-        "dict",
         "dir",
         "divmod",
-        "enumerate",
         "eval",
         "exec",
         "exit",
-        "filter",
-        "float",
         "format",
-        "frozenset",
         "getattr",
         "globals",
         "hasattr",
@@ -1090,856 +1153,38 @@
         "hex",
         "id",
         "input",
-        "int",
         "isinstance",
         "issubclass",
         "iter",
         "len",
         "license",
-        "list",
         "locals",
-        "map",
         "max",
-        "memoryview",
         "min",
         "next",
-        "object",
         "oct",
         "open",
         "ord",
         "pow",
         "print",
-        "property",
         "quit",
-        "range",
         "repr",
-        "reversed",
         "round",
-        "set",
         "setattr",
-        "slice",
         "sorted",
-        "staticmethod",
-        "str",
         "sum",
-        "super",
-        "tuple",
-        "type",
-        "vars",
-        "zip"
+        "vars"
       ],
-      "typeMemberCount": 622,
-      "types": {
-        "ArithmeticError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "AssertionError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "AttributeError": [
-          "add_note",
-          "args",
-          "name",
-          "obj",
-          "with_traceback"
-        ],
-        "BaseException": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "BaseExceptionGroup": [
-          "add_note",
-          "args",
-          "derive",
-          "exceptions",
-          "message",
-          "split",
-          "subgroup",
-          "with_traceback"
-        ],
-        "BlockingIOError": [
-          "add_note",
-          "args",
-          "characters_written",
-          "errno",
-          "filename",
-          "filename2",
-          "strerror",
-          "with_traceback"
-        ],
-        "BrokenPipeError": [
-          "add_note",
-          "args",
-          "characters_written",
-          "errno",
-          "filename",
-          "filename2",
-          "strerror",
-          "with_traceback"
-        ],
-        "BufferError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "BytesWarning": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "ChildProcessError": [
-          "add_note",
-          "args",
-          "characters_written",
-          "errno",
-          "filename",
-          "filename2",
-          "strerror",
-          "with_traceback"
-        ],
-        "ConnectionAbortedError": [
-          "add_note",
-          "args",
-          "characters_written",
-          "errno",
-          "filename",
-          "filename2",
-          "strerror",
-          "with_traceback"
-        ],
-        "ConnectionError": [
-          "add_note",
-          "args",
-          "characters_written",
-          "errno",
-          "filename",
-          "filename2",
-          "strerror",
-          "with_traceback"
-        ],
-        "ConnectionRefusedError": [
-          "add_note",
-          "args",
-          "characters_written",
-          "errno",
-          "filename",
-          "filename2",
-          "strerror",
-          "with_traceback"
-        ],
-        "ConnectionResetError": [
-          "add_note",
-          "args",
-          "characters_written",
-          "errno",
-          "filename",
-          "filename2",
-          "strerror",
-          "with_traceback"
-        ],
-        "DeprecationWarning": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "EOFError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "EncodingWarning": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "EnvironmentError": [
-          "add_note",
-          "args",
-          "characters_written",
-          "errno",
-          "filename",
-          "filename2",
-          "strerror",
-          "with_traceback"
-        ],
-        "Exception": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "ExceptionGroup": [
-          "add_note",
-          "args",
-          "derive",
-          "exceptions",
-          "message",
-          "split",
-          "subgroup",
-          "with_traceback"
-        ],
-        "FileExistsError": [
-          "add_note",
-          "args",
-          "characters_written",
-          "errno",
-          "filename",
-          "filename2",
-          "strerror",
-          "with_traceback"
-        ],
-        "FileNotFoundError": [
-          "add_note",
-          "args",
-          "characters_written",
-          "errno",
-          "filename",
-          "filename2",
-          "strerror",
-          "with_traceback"
-        ],
-        "FloatingPointError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "FutureWarning": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "GeneratorExit": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "IOError": [
-          "add_note",
-          "args",
-          "characters_written",
-          "errno",
-          "filename",
-          "filename2",
-          "strerror",
-          "with_traceback"
-        ],
-        "ImportError": [
-          "add_note",
-          "args",
-          "msg",
-          "name",
-          "name_from",
-          "path",
-          "with_traceback"
-        ],
-        "ImportWarning": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "IndentationError": [
-          "add_note",
-          "args",
-          "end_lineno",
-          "end_offset",
-          "filename",
-          "lineno",
-          "msg",
-          "offset",
-          "print_file_and_line",
-          "text",
-          "with_traceback"
-        ],
-        "IndexError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "InterruptedError": [
-          "add_note",
-          "args",
-          "characters_written",
-          "errno",
-          "filename",
-          "filename2",
-          "strerror",
-          "with_traceback"
-        ],
-        "IsADirectoryError": [
-          "add_note",
-          "args",
-          "characters_written",
-          "errno",
-          "filename",
-          "filename2",
-          "strerror",
-          "with_traceback"
-        ],
-        "KeyError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "KeyboardInterrupt": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "LookupError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "MemoryError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "ModuleNotFoundError": [
-          "add_note",
-          "args",
-          "msg",
-          "name",
-          "name_from",
-          "path",
-          "with_traceback"
-        ],
-        "NameError": [
-          "add_note",
-          "args",
-          "name",
-          "with_traceback"
-        ],
-        "NotADirectoryError": [
-          "add_note",
-          "args",
-          "characters_written",
-          "errno",
-          "filename",
-          "filename2",
-          "strerror",
-          "with_traceback"
-        ],
-        "NotImplementedError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "OSError": [
-          "add_note",
-          "args",
-          "characters_written",
-          "errno",
-          "filename",
-          "filename2",
-          "strerror",
-          "with_traceback"
-        ],
-        "OverflowError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "PendingDeprecationWarning": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "PermissionError": [
-          "add_note",
-          "args",
-          "characters_written",
-          "errno",
-          "filename",
-          "filename2",
-          "strerror",
-          "with_traceback"
-        ],
-        "ProcessLookupError": [
-          "add_note",
-          "args",
-          "characters_written",
-          "errno",
-          "filename",
-          "filename2",
-          "strerror",
-          "with_traceback"
-        ],
-        "PythonFinalizationError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "RecursionError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "ReferenceError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "ResourceWarning": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "RuntimeError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "RuntimeWarning": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "StopAsyncIteration": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "StopIteration": [
-          "add_note",
-          "args",
-          "value",
-          "with_traceback"
-        ],
-        "SyntaxError": [
-          "add_note",
-          "args",
-          "end_lineno",
-          "end_offset",
-          "filename",
-          "lineno",
-          "msg",
-          "offset",
-          "print_file_and_line",
-          "text",
-          "with_traceback"
-        ],
-        "SyntaxWarning": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "SystemError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "SystemExit": [
-          "add_note",
-          "args",
-          "code",
-          "with_traceback"
-        ],
-        "TabError": [
-          "add_note",
-          "args",
-          "end_lineno",
-          "end_offset",
-          "filename",
-          "lineno",
-          "msg",
-          "offset",
-          "print_file_and_line",
-          "text",
-          "with_traceback"
-        ],
-        "TimeoutError": [
-          "add_note",
-          "args",
-          "characters_written",
-          "errno",
-          "filename",
-          "filename2",
-          "strerror",
-          "with_traceback"
-        ],
-        "TypeError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "UnboundLocalError": [
-          "add_note",
-          "args",
-          "name",
-          "with_traceback"
-        ],
-        "UnicodeDecodeError": [
-          "add_note",
-          "args",
-          "encoding",
-          "end",
-          "object",
-          "reason",
-          "start",
-          "with_traceback"
-        ],
-        "UnicodeEncodeError": [
-          "add_note",
-          "args",
-          "encoding",
-          "end",
-          "object",
-          "reason",
-          "start",
-          "with_traceback"
-        ],
-        "UnicodeError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "UnicodeTranslateError": [
-          "add_note",
-          "args",
-          "encoding",
-          "end",
-          "object",
-          "reason",
-          "start",
-          "with_traceback"
-        ],
-        "UnicodeWarning": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "UserWarning": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "ValueError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "Warning": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "ZeroDivisionError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "bool": [
-          "as_integer_ratio",
-          "bit_count",
-          "bit_length",
-          "conjugate",
-          "denominator",
-          "from_bytes",
-          "imag",
-          "is_integer",
-          "numerator",
-          "real",
-          "to_bytes"
-        ],
-        "bytearray": [
-          "append",
-          "capitalize",
-          "center",
-          "clear",
-          "copy",
-          "count",
-          "decode",
-          "endswith",
-          "expandtabs",
-          "extend",
-          "find",
-          "fromhex",
-          "hex",
-          "index",
-          "insert",
-          "isalnum",
-          "isalpha",
-          "isascii",
-          "isdigit",
-          "islower",
-          "isspace",
-          "istitle",
-          "isupper",
-          "join",
-          "ljust",
-          "lower",
-          "lstrip",
-          "maketrans",
-          "partition",
-          "pop",
-          "remove",
-          "removeprefix",
-          "removesuffix",
-          "replace",
-          "resize",
-          "reverse",
-          "rfind",
-          "rindex",
-          "rjust",
-          "rpartition",
-          "rsplit",
-          "rstrip",
-          "split",
-          "splitlines",
-          "startswith",
-          "strip",
-          "swapcase",
-          "title",
-          "translate",
-          "upper",
-          "zfill"
-        ],
-        "bytes": [
-          "capitalize",
-          "center",
-          "count",
-          "decode",
-          "endswith",
-          "expandtabs",
-          "find",
-          "fromhex",
-          "hex",
-          "index",
-          "isalnum",
-          "isalpha",
-          "isascii",
-          "isdigit",
-          "islower",
-          "isspace",
-          "istitle",
-          "isupper",
-          "join",
-          "ljust",
-          "lower",
-          "lstrip",
-          "maketrans",
-          "partition",
-          "removeprefix",
-          "removesuffix",
-          "replace",
-          "rfind",
-          "rindex",
-          "rjust",
-          "rpartition",
-          "rsplit",
-          "rstrip",
-          "split",
-          "splitlines",
-          "startswith",
-          "strip",
-          "swapcase",
-          "title",
-          "translate",
-          "upper",
-          "zfill"
-        ],
-        "classmethod": [],
-        "complex": [
-          "conjugate",
-          "from_number",
-          "imag",
-          "real"
-        ],
-        "dict": [
-          "clear",
-          "copy",
-          "fromkeys",
-          "get",
-          "items",
-          "keys",
-          "pop",
-          "popitem",
-          "setdefault",
-          "update",
-          "values"
-        ],
-        "enumerate": [],
-        "filter": [],
-        "float": [
-          "as_integer_ratio",
-          "conjugate",
-          "from_number",
-          "fromhex",
-          "hex",
-          "imag",
-          "is_integer",
-          "real"
-        ],
-        "frozenset": [
-          "copy",
-          "difference",
-          "intersection",
-          "isdisjoint",
-          "issubset",
-          "issuperset",
-          "symmetric_difference",
-          "union"
-        ],
-        "int": [
-          "as_integer_ratio",
-          "bit_count",
-          "bit_length",
-          "conjugate",
-          "denominator",
-          "from_bytes",
-          "imag",
-          "is_integer",
-          "numerator",
-          "real",
-          "to_bytes"
-        ],
-        "list": [
-          "append",
-          "clear",
-          "copy",
-          "count",
-          "extend",
-          "index",
-          "insert",
-          "pop",
-          "remove",
-          "reverse",
-          "sort"
-        ],
-        "map": [],
-        "memoryview": [
-          "c_contiguous",
-          "cast",
-          "contiguous",
-          "count",
-          "f_contiguous",
-          "format",
-          "hex",
-          "index",
-          "itemsize",
-          "nbytes",
-          "ndim",
-          "obj",
-          "readonly",
-          "release",
-          "shape",
-          "strides",
-          "suboffsets",
-          "tobytes",
-          "tolist",
-          "toreadonly"
-        ],
-        "object": [],
-        "property": [
-          "deleter",
-          "fdel",
-          "fget",
-          "fset",
-          "getter",
-          "setter"
-        ],
-        "range": [
-          "count",
-          "index",
-          "start",
-          "step",
-          "stop"
-        ],
-        "reversed": [],
-        "set": [
-          "add",
-          "clear",
-          "copy",
-          "difference",
-          "difference_update",
-          "discard",
-          "intersection",
-          "intersection_update",
-          "isdisjoint",
-          "issubset",
-          "issuperset",
-          "pop",
-          "remove",
-          "symmetric_difference",
-          "symmetric_difference_update",
-          "union",
-          "update"
-        ],
-        "slice": [
-          "indices",
-          "start",
-          "step",
-          "stop"
-        ],
-        "staticmethod": [],
-        "str": [
-          "capitalize",
-          "casefold",
-          "center",
-          "count",
-          "encode",
-          "endswith",
-          "expandtabs",
-          "find",
-          "format",
-          "format_map",
-          "index",
-          "isalnum",
-          "isalpha",
-          "isascii",
-          "isdecimal",
-          "isdigit",
-          "isidentifier",
-          "islower",
-          "isnumeric",
-          "isprintable",
-          "isspace",
-          "istitle",
-          "isupper",
-          "join",
-          "ljust",
-          "lower",
-          "lstrip",
-          "maketrans",
-          "partition",
-          "removeprefix",
-          "removesuffix",
-          "replace",
-          "rfind",
-          "rindex",
-          "rjust",
-          "rpartition",
-          "rsplit",
-          "rstrip",
-          "split",
-          "splitlines",
-          "startswith",
-          "strip",
-          "swapcase",
-          "title",
-          "translate",
-          "upper",
-          "zfill"
-        ],
-        "super": [],
-        "tuple": [
-          "count",
-          "index"
-        ],
-        "type": [
-          "mro"
-        ],
-        "zip": []
-      }
+      "typeMemberCount": 0,
+      "types": {}
     },
     "collections": {
       "excludedConstantCount": 0,
       "excludedConstants": [],
+      "excludedExceptionCount": 0,
+      "excludedExceptions": [],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
       "operationCount": 9,
       "operations": [
         "ChainMap",
@@ -1952,7 +1197,7 @@
         "deque",
         "namedtuple"
       ],
-      "typeMemberCount": 136,
+      "typeMemberCount": 133,
       "types": {
         "ChainMap": [
           "clear",
@@ -1962,7 +1207,6 @@
           "items",
           "keys",
           "new_child",
-          "parents",
           "pop",
           "popitem",
           "setdefault",
@@ -2078,7 +1322,6 @@
         "defaultdict": [
           "clear",
           "copy",
-          "default_factory",
           "fromkeys",
           "get",
           "items",
@@ -2099,7 +1342,6 @@
           "extendleft",
           "index",
           "insert",
-          "maxlen",
           "pop",
           "popleft",
           "remove",
@@ -2107,6 +1349,24 @@
           "rotate"
         ]
       }
+    },
+    "copy": {
+      "excludedConstantCount": 0,
+      "excludedConstants": [],
+      "excludedExceptionCount": 1,
+      "excludedExceptions": [
+        "Error"
+      ],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
+      "operationCount": 3,
+      "operations": [
+        "copy",
+        "deepcopy",
+        "replace"
+      ],
+      "typeMemberCount": 0,
+      "types": {}
     },
     "csv": {
       "excludedConstantCount": 6,
@@ -2118,12 +1378,17 @@
         "QUOTE_NOTNULL",
         "QUOTE_STRINGS"
       ],
-      "operationCount": 15,
+      "excludedExceptionCount": 1,
+      "excludedExceptions": [
+        "Error"
+      ],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
+      "operationCount": 14,
       "operations": [
         "Dialect",
         "DictReader",
         "DictWriter",
-        "Error",
         "Sniffer",
         "excel",
         "excel_tab",
@@ -2136,61 +1401,22 @@
         "unregister_dialect",
         "writer"
       ],
-      "typeMemberCount": 37,
+      "typeMemberCount": 5,
       "types": {
-        "Dialect": [
-          "delimiter",
-          "doublequote",
-          "escapechar",
-          "lineterminator",
-          "quotechar",
-          "quoting",
-          "skipinitialspace"
-        ],
-        "DictReader": [
-          "fieldnames"
-        ],
+        "Dialect": [],
+        "DictReader": [],
         "DictWriter": [
           "writeheader",
           "writerow",
           "writerows"
         ],
-        "Error": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
         "Sniffer": [
           "has_header",
           "sniff"
         ],
-        "excel": [
-          "delimiter",
-          "doublequote",
-          "escapechar",
-          "lineterminator",
-          "quotechar",
-          "quoting",
-          "skipinitialspace"
-        ],
-        "excel_tab": [
-          "delimiter",
-          "doublequote",
-          "escapechar",
-          "lineterminator",
-          "quotechar",
-          "quoting",
-          "skipinitialspace"
-        ],
-        "unix_dialect": [
-          "delimiter",
-          "doublequote",
-          "escapechar",
-          "lineterminator",
-          "quotechar",
-          "quoting",
-          "skipinitialspace"
-        ]
+        "excel": [],
+        "excel_tab": [],
+        "unix_dialect": []
       }
     },
     "datetime": {
@@ -2200,6 +1426,10 @@
         "MINYEAR",
         "UTC"
       ],
+      "excludedExceptionCount": 0,
+      "excludedExceptions": [],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
       "operationCount": 6,
       "operations": [
         "date",
@@ -2209,11 +1439,10 @@
         "timezone",
         "tzinfo"
       ],
-      "typeMemberCount": 96,
+      "typeMemberCount": 60,
       "types": {
         "date": [
           "ctime",
-          "day",
           "fromisocalendar",
           "fromisoformat",
           "fromordinal",
@@ -2221,44 +1450,29 @@
           "isocalendar",
           "isoformat",
           "isoweekday",
-          "max",
-          "min",
-          "month",
           "replace",
-          "resolution",
           "strftime",
           "strptime",
           "timetuple",
           "today",
           "toordinal",
-          "weekday",
-          "year"
+          "weekday"
         ],
         "datetime": [
           "astimezone",
           "combine",
           "ctime",
           "date",
-          "day",
           "dst",
-          "fold",
           "fromisocalendar",
           "fromisoformat",
           "fromordinal",
           "fromtimestamp",
-          "hour",
           "isocalendar",
           "isoformat",
           "isoweekday",
-          "max",
-          "microsecond",
-          "min",
-          "minute",
-          "month",
           "now",
           "replace",
-          "resolution",
-          "second",
           "strftime",
           "strptime",
           "time",
@@ -2267,50 +1481,30 @@
           "timetz",
           "today",
           "toordinal",
-          "tzinfo",
           "tzname",
           "utcfromtimestamp",
           "utcnow",
           "utcoffset",
           "utctimetuple",
-          "weekday",
-          "year"
+          "weekday"
         ],
         "time": [
           "dst",
-          "fold",
           "fromisoformat",
-          "hour",
           "isoformat",
-          "max",
-          "microsecond",
-          "min",
-          "minute",
           "replace",
-          "resolution",
-          "second",
           "strftime",
           "strptime",
-          "tzinfo",
           "tzname",
           "utcoffset"
         ],
         "timedelta": [
-          "days",
-          "max",
-          "microseconds",
-          "min",
-          "resolution",
-          "seconds",
           "total_seconds"
         ],
         "timezone": [
           "dst",
           "fromutc",
-          "max",
-          "min",
           "tzname",
-          "utc",
           "utcoffset"
         ],
         "tzinfo": [
@@ -2321,6 +1515,246 @@
         ]
       }
     },
+    "decimal": {
+      "excludedConstantCount": 18,
+      "excludedConstants": [
+        "BasicContext",
+        "DefaultContext",
+        "ExtendedContext",
+        "HAVE_CONTEXTVAR",
+        "HAVE_THREADS",
+        "IEEE_CONTEXT_MAX_BITS",
+        "MAX_EMAX",
+        "MAX_PREC",
+        "MIN_EMIN",
+        "MIN_ETINY",
+        "ROUND_05UP",
+        "ROUND_CEILING",
+        "ROUND_DOWN",
+        "ROUND_FLOOR",
+        "ROUND_HALF_DOWN",
+        "ROUND_HALF_EVEN",
+        "ROUND_HALF_UP",
+        "ROUND_UP"
+      ],
+      "excludedExceptionCount": 14,
+      "excludedExceptions": [
+        "Clamped",
+        "ConversionSyntax",
+        "DecimalException",
+        "DivisionByZero",
+        "DivisionImpossible",
+        "DivisionUndefined",
+        "FloatOperation",
+        "Inexact",
+        "InvalidContext",
+        "InvalidOperation",
+        "Overflow",
+        "Rounded",
+        "Subnormal",
+        "Underflow"
+      ],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
+      "operationCount": 7,
+      "operations": [
+        "Context",
+        "Decimal",
+        "DecimalTuple",
+        "IEEEContext",
+        "getcontext",
+        "localcontext",
+        "setcontext"
+      ],
+      "typeMemberCount": 124,
+      "types": {
+        "Context": [
+          "Etiny",
+          "Etop",
+          "abs",
+          "add",
+          "canonical",
+          "clear_flags",
+          "clear_traps",
+          "compare",
+          "compare_signal",
+          "compare_total",
+          "compare_total_mag",
+          "copy",
+          "copy_abs",
+          "copy_decimal",
+          "copy_negate",
+          "copy_sign",
+          "create_decimal",
+          "create_decimal_from_float",
+          "divide",
+          "divide_int",
+          "divmod",
+          "exp",
+          "fma",
+          "is_canonical",
+          "is_finite",
+          "is_infinite",
+          "is_nan",
+          "is_normal",
+          "is_qnan",
+          "is_signed",
+          "is_snan",
+          "is_subnormal",
+          "is_zero",
+          "ln",
+          "log10",
+          "logb",
+          "logical_and",
+          "logical_invert",
+          "logical_or",
+          "logical_xor",
+          "max",
+          "max_mag",
+          "min",
+          "min_mag",
+          "minus",
+          "multiply",
+          "next_minus",
+          "next_plus",
+          "next_toward",
+          "normalize",
+          "number_class",
+          "plus",
+          "power",
+          "quantize",
+          "radix",
+          "remainder",
+          "remainder_near",
+          "rotate",
+          "same_quantum",
+          "scaleb",
+          "shift",
+          "sqrt",
+          "subtract",
+          "to_eng_string",
+          "to_integral",
+          "to_integral_exact",
+          "to_integral_value",
+          "to_sci_string"
+        ],
+        "Decimal": [
+          "adjusted",
+          "as_integer_ratio",
+          "as_tuple",
+          "canonical",
+          "compare",
+          "compare_signal",
+          "compare_total",
+          "compare_total_mag",
+          "conjugate",
+          "copy_abs",
+          "copy_negate",
+          "copy_sign",
+          "exp",
+          "fma",
+          "from_float",
+          "from_number",
+          "is_canonical",
+          "is_finite",
+          "is_infinite",
+          "is_nan",
+          "is_normal",
+          "is_qnan",
+          "is_signed",
+          "is_snan",
+          "is_subnormal",
+          "is_zero",
+          "ln",
+          "log10",
+          "logb",
+          "logical_and",
+          "logical_invert",
+          "logical_or",
+          "logical_xor",
+          "max",
+          "max_mag",
+          "min",
+          "min_mag",
+          "next_minus",
+          "next_plus",
+          "next_toward",
+          "normalize",
+          "number_class",
+          "quantize",
+          "radix",
+          "remainder_near",
+          "rotate",
+          "same_quantum",
+          "scaleb",
+          "shift",
+          "sqrt",
+          "to_eng_string",
+          "to_integral",
+          "to_integral_exact",
+          "to_integral_value"
+        ],
+        "DecimalTuple": [
+          "count",
+          "index"
+        ]
+      }
+    },
+    "email": {
+      "excludedConstantCount": 13,
+      "excludedConstants": [
+        "base64mime",
+        "charset",
+        "encoders",
+        "errors",
+        "feedparser",
+        "generator",
+        "header",
+        "iterators",
+        "message",
+        "mime",
+        "parser",
+        "quoprimime",
+        "utils"
+      ],
+      "excludedExceptionCount": 0,
+      "excludedExceptions": [],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
+      "operationCount": 4,
+      "operations": [
+        "message_from_binary_file",
+        "message_from_bytes",
+        "message_from_file",
+        "message_from_string"
+      ],
+      "typeMemberCount": 0,
+      "types": {}
+    },
+    "fractions": {
+      "excludedConstantCount": 0,
+      "excludedConstants": [],
+      "excludedExceptionCount": 0,
+      "excludedExceptions": [],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
+      "operationCount": 1,
+      "operations": [
+        "Fraction"
+      ],
+      "typeMemberCount": 7,
+      "types": {
+        "Fraction": [
+          "as_integer_ratio",
+          "conjugate",
+          "from_decimal",
+          "from_float",
+          "from_number",
+          "is_integer",
+          "limit_denominator"
+        ]
+      }
+    },
     "functools": {
       "excludedConstantCount": 3,
       "excludedConstants": [
@@ -2328,6 +1762,10 @@
         "WRAPPER_ASSIGNMENTS",
         "WRAPPER_UPDATES"
       ],
+      "excludedExceptionCount": 0,
+      "excludedExceptions": [],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
       "operationCount": 12,
       "operations": [
         "cache",
@@ -2343,23 +1781,129 @@
         "update_wrapper",
         "wraps"
       ],
-      "typeMemberCount": 4,
+      "typeMemberCount": 1,
       "types": {
         "cached_property": [],
-        "partial": [
-          "args",
-          "func",
-          "keywords"
-        ],
+        "partial": [],
         "partialmethod": [],
         "singledispatchmethod": [
           "register"
         ]
       }
     },
+    "glob": {
+      "excludedConstantCount": 0,
+      "excludedConstants": [],
+      "excludedExceptionCount": 0,
+      "excludedExceptions": [],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
+      "operationCount": 4,
+      "operations": [
+        "escape",
+        "glob",
+        "iglob",
+        "translate"
+      ],
+      "typeMemberCount": 0,
+      "types": {}
+    },
+    "gzip": {
+      "excludedConstantCount": 0,
+      "excludedConstants": [],
+      "excludedExceptionCount": 1,
+      "excludedExceptions": [
+        "BadGzipFile"
+      ],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
+      "operationCount": 4,
+      "operations": [
+        "GzipFile",
+        "compress",
+        "decompress",
+        "open"
+      ],
+      "typeMemberCount": 21,
+      "types": {
+        "GzipFile": [
+          "close",
+          "detach",
+          "fileno",
+          "flush",
+          "isatty",
+          "peek",
+          "read",
+          "read1",
+          "readable",
+          "readinto",
+          "readinto1",
+          "readline",
+          "readlines",
+          "rewind",
+          "seek",
+          "seekable",
+          "tell",
+          "truncate",
+          "writable",
+          "write",
+          "writelines"
+        ]
+      }
+    },
+    "hashlib": {
+      "excludedConstantCount": 2,
+      "excludedConstants": [
+        "algorithms_available",
+        "algorithms_guaranteed"
+      ],
+      "excludedExceptionCount": 0,
+      "excludedExceptions": [],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
+      "operationCount": 17,
+      "operations": [
+        "blake2b",
+        "blake2s",
+        "file_digest",
+        "md5",
+        "new",
+        "pbkdf2_hmac",
+        "sha1",
+        "sha224",
+        "sha256",
+        "sha384",
+        "sha3_224",
+        "sha3_256",
+        "sha3_384",
+        "sha3_512",
+        "sha512",
+        "shake_128",
+        "shake_256"
+      ],
+      "typeMemberCount": 8,
+      "types": {
+        "blake2b": [
+          "copy",
+          "digest",
+          "hexdigest",
+          "update"
+        ],
+        "blake2s": [
+          "copy",
+          "digest",
+          "hexdigest",
+          "update"
+        ]
+      }
+    },
     "heapq": {
       "excludedConstantCount": 0,
       "excludedConstants": [],
+      "excludedExceptionCount": 0,
+      "excludedExceptions": [],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
       "operationCount": 13,
       "operations": [
         "heapify",
@@ -2379,26 +1923,49 @@
       "typeMemberCount": 0,
       "types": {}
     },
+    "hmac": {
+      "excludedConstantCount": 3,
+      "excludedConstants": [
+        "digest_size",
+        "trans_36",
+        "trans_5C"
+      ],
+      "excludedExceptionCount": 0,
+      "excludedExceptions": [],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
+      "operationCount": 4,
+      "operations": [
+        "HMAC",
+        "compare_digest",
+        "digest",
+        "new"
+      ],
+      "typeMemberCount": 4,
+      "types": {
+        "HMAC": [
+          "copy",
+          "digest",
+          "hexdigest",
+          "update"
+        ]
+      }
+    },
     "http": {
       "excludedConstantCount": 0,
       "excludedConstants": [],
+      "excludedExceptionCount": 0,
+      "excludedExceptions": [],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
       "operationCount": 2,
       "operations": [
         "HTTPMethod",
         "HTTPStatus"
       ],
-      "typeMemberCount": 129,
+      "typeMemberCount": 54,
       "types": {
         "HTTPMethod": [
-          "CONNECT",
-          "DELETE",
-          "GET",
-          "HEAD",
-          "OPTIONS",
-          "PATCH",
-          "POST",
-          "PUT",
-          "TRACE",
           "capitalize",
           "casefold",
           "center",
@@ -2448,79 +2015,369 @@
           "zfill"
         ],
         "HTTPStatus": [
-          "ACCEPTED",
-          "ALREADY_REPORTED",
-          "BAD_GATEWAY",
-          "BAD_REQUEST",
-          "CONFLICT",
-          "CONTENT_TOO_LARGE",
-          "CONTINUE",
-          "CREATED",
-          "EARLY_HINTS",
-          "EXPECTATION_FAILED",
-          "FAILED_DEPENDENCY",
-          "FORBIDDEN",
-          "FOUND",
-          "GATEWAY_TIMEOUT",
-          "GONE",
-          "HTTP_VERSION_NOT_SUPPORTED",
-          "IM_A_TEAPOT",
-          "IM_USED",
-          "INSUFFICIENT_STORAGE",
-          "INTERNAL_SERVER_ERROR",
-          "LENGTH_REQUIRED",
-          "LOCKED",
-          "LOOP_DETECTED",
-          "METHOD_NOT_ALLOWED",
-          "MISDIRECTED_REQUEST",
-          "MOVED_PERMANENTLY",
-          "MULTIPLE_CHOICES",
-          "MULTI_STATUS",
-          "NETWORK_AUTHENTICATION_REQUIRED",
-          "NON_AUTHORITATIVE_INFORMATION",
-          "NOT_ACCEPTABLE",
-          "NOT_EXTENDED",
-          "NOT_FOUND",
-          "NOT_IMPLEMENTED",
-          "NOT_MODIFIED",
-          "NO_CONTENT",
-          "OK",
-          "PARTIAL_CONTENT",
-          "PAYMENT_REQUIRED",
-          "PERMANENT_REDIRECT",
-          "PRECONDITION_FAILED",
-          "PRECONDITION_REQUIRED",
-          "PROCESSING",
-          "PROXY_AUTHENTICATION_REQUIRED",
-          "RANGE_NOT_SATISFIABLE",
-          "REQUEST_HEADER_FIELDS_TOO_LARGE",
-          "REQUEST_TIMEOUT",
-          "RESET_CONTENT",
-          "SEE_OTHER",
-          "SERVICE_UNAVAILABLE",
-          "SWITCHING_PROTOCOLS",
-          "TEMPORARY_REDIRECT",
-          "TOO_EARLY",
-          "TOO_MANY_REQUESTS",
-          "UNAUTHORIZED",
-          "UNAVAILABLE_FOR_LEGAL_REASONS",
-          "UNPROCESSABLE_CONTENT",
-          "UNSUPPORTED_MEDIA_TYPE",
-          "UPGRADE_REQUIRED",
-          "URI_TOO_LONG",
-          "USE_PROXY",
-          "VARIANT_ALSO_NEGOTIATES",
           "as_integer_ratio",
           "bit_count",
           "bit_length",
           "conjugate",
-          "denominator",
           "from_bytes",
-          "imag",
           "is_integer",
-          "numerator",
-          "real",
           "to_bytes"
+        ]
+      }
+    },
+    "http.server": {
+      "excludedConstantCount": 0,
+      "excludedConstants": [],
+      "excludedExceptionCount": 0,
+      "excludedExceptions": [],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
+      "operationCount": 7,
+      "operations": [
+        "BaseHTTPRequestHandler",
+        "CGIHTTPRequestHandler",
+        "HTTPSServer",
+        "HTTPServer",
+        "SimpleHTTPRequestHandler",
+        "ThreadingHTTPSServer",
+        "ThreadingHTTPServer"
+      ],
+      "typeMemberCount": 145,
+      "types": {
+        "BaseHTTPRequestHandler": [
+          "MessageClass",
+          "address_string",
+          "date_time_string",
+          "end_headers",
+          "finish",
+          "flush_headers",
+          "handle",
+          "handle_expect_100",
+          "handle_one_request",
+          "log_date_time_string",
+          "log_error",
+          "log_message",
+          "log_request",
+          "parse_request",
+          "send_error",
+          "send_header",
+          "send_response",
+          "send_response_only",
+          "setup",
+          "version_string"
+        ],
+        "CGIHTTPRequestHandler": [
+          "MessageClass",
+          "address_string",
+          "copyfile",
+          "date_time_string",
+          "do_GET",
+          "do_HEAD",
+          "do_POST",
+          "end_headers",
+          "finish",
+          "flush_headers",
+          "guess_type",
+          "handle",
+          "handle_expect_100",
+          "handle_one_request",
+          "is_cgi",
+          "is_executable",
+          "is_python",
+          "list_directory",
+          "log_date_time_string",
+          "log_error",
+          "log_message",
+          "log_request",
+          "parse_request",
+          "run_cgi",
+          "send_error",
+          "send_head",
+          "send_header",
+          "send_response",
+          "send_response_only",
+          "setup",
+          "translate_path",
+          "version_string"
+        ],
+        "HTTPSServer": [
+          "close_request",
+          "fileno",
+          "finish_request",
+          "get_request",
+          "handle_error",
+          "handle_request",
+          "handle_timeout",
+          "process_request",
+          "serve_forever",
+          "server_activate",
+          "server_bind",
+          "server_close",
+          "service_actions",
+          "shutdown",
+          "shutdown_request",
+          "verify_request"
+        ],
+        "HTTPServer": [
+          "close_request",
+          "fileno",
+          "finish_request",
+          "get_request",
+          "handle_error",
+          "handle_request",
+          "handle_timeout",
+          "process_request",
+          "serve_forever",
+          "server_activate",
+          "server_bind",
+          "server_close",
+          "service_actions",
+          "shutdown",
+          "shutdown_request",
+          "verify_request"
+        ],
+        "SimpleHTTPRequestHandler": [
+          "MessageClass",
+          "address_string",
+          "copyfile",
+          "date_time_string",
+          "do_GET",
+          "do_HEAD",
+          "end_headers",
+          "finish",
+          "flush_headers",
+          "guess_type",
+          "handle",
+          "handle_expect_100",
+          "handle_one_request",
+          "list_directory",
+          "log_date_time_string",
+          "log_error",
+          "log_message",
+          "log_request",
+          "parse_request",
+          "send_error",
+          "send_head",
+          "send_header",
+          "send_response",
+          "send_response_only",
+          "setup",
+          "translate_path",
+          "version_string"
+        ],
+        "ThreadingHTTPSServer": [
+          "close_request",
+          "fileno",
+          "finish_request",
+          "get_request",
+          "handle_error",
+          "handle_request",
+          "handle_timeout",
+          "process_request",
+          "process_request_thread",
+          "serve_forever",
+          "server_activate",
+          "server_bind",
+          "server_close",
+          "service_actions",
+          "shutdown",
+          "shutdown_request",
+          "verify_request"
+        ],
+        "ThreadingHTTPServer": [
+          "close_request",
+          "fileno",
+          "finish_request",
+          "get_request",
+          "handle_error",
+          "handle_request",
+          "handle_timeout",
+          "process_request",
+          "process_request_thread",
+          "serve_forever",
+          "server_activate",
+          "server_bind",
+          "server_close",
+          "service_actions",
+          "shutdown",
+          "shutdown_request",
+          "verify_request"
+        ]
+      }
+    },
+    "inspect": {
+      "excludedConstantCount": 25,
+      "excludedConstants": [
+        "AGEN_CLOSED",
+        "AGEN_CREATED",
+        "AGEN_RUNNING",
+        "AGEN_SUSPENDED",
+        "CORO_CLOSED",
+        "CORO_CREATED",
+        "CORO_RUNNING",
+        "CORO_SUSPENDED",
+        "CO_ASYNC_GENERATOR",
+        "CO_COROUTINE",
+        "CO_GENERATOR",
+        "CO_HAS_DOCSTRING",
+        "CO_ITERABLE_COROUTINE",
+        "CO_METHOD",
+        "CO_NESTED",
+        "CO_NEWLOCALS",
+        "CO_NOFREE",
+        "CO_OPTIMIZED",
+        "CO_VARARGS",
+        "CO_VARKEYWORDS",
+        "GEN_CLOSED",
+        "GEN_CREATED",
+        "GEN_RUNNING",
+        "GEN_SUSPENDED",
+        "TPFLAGS_IS_ABSTRACT"
+      ],
+      "excludedExceptionCount": 2,
+      "excludedExceptions": [
+        "ClassFoundException",
+        "EndOfBlock"
+      ],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
+      "operationCount": 80,
+      "operations": [
+        "ArgInfo",
+        "Arguments",
+        "Attribute",
+        "BlockFinder",
+        "BoundArguments",
+        "BufferFlags",
+        "ClosureVars",
+        "FrameInfo",
+        "FullArgSpec",
+        "Parameter",
+        "Signature",
+        "Traceback",
+        "classify_class_attrs",
+        "cleandoc",
+        "currentframe",
+        "findsource",
+        "formatannotation",
+        "formatannotationrelativeto",
+        "formatargvalues",
+        "get_annotations",
+        "getabsfile",
+        "getargs",
+        "getargvalues",
+        "getasyncgenlocals",
+        "getasyncgenstate",
+        "getattr_static",
+        "getblock",
+        "getcallargs",
+        "getclasstree",
+        "getclosurevars",
+        "getcomments",
+        "getcoroutinelocals",
+        "getcoroutinestate",
+        "getdoc",
+        "getfile",
+        "getframeinfo",
+        "getfullargspec",
+        "getgeneratorlocals",
+        "getgeneratorstate",
+        "getinnerframes",
+        "getlineno",
+        "getmembers",
+        "getmembers_static",
+        "getmodule",
+        "getmodulename",
+        "getmro",
+        "getouterframes",
+        "getsource",
+        "getsourcefile",
+        "getsourcelines",
+        "indentsize",
+        "isabstract",
+        "isasyncgen",
+        "isasyncgenfunction",
+        "isawaitable",
+        "isbuiltin",
+        "isclass",
+        "iscode",
+        "iscoroutine",
+        "iscoroutinefunction",
+        "isdatadescriptor",
+        "isframe",
+        "isfunction",
+        "isgenerator",
+        "isgeneratorfunction",
+        "isgetsetdescriptor",
+        "ismemberdescriptor",
+        "ismethod",
+        "ismethoddescriptor",
+        "ismethodwrapper",
+        "ismodule",
+        "ispackage",
+        "isroutine",
+        "istraceback",
+        "markcoroutinefunction",
+        "signature",
+        "stack",
+        "trace",
+        "unwrap",
+        "walktree"
+      ],
+      "typeMemberCount": 29,
+      "types": {
+        "ArgInfo": [
+          "count",
+          "index"
+        ],
+        "Arguments": [
+          "count",
+          "index"
+        ],
+        "Attribute": [
+          "count",
+          "index"
+        ],
+        "BlockFinder": [
+          "tokeneater"
+        ],
+        "BoundArguments": [
+          "apply_defaults"
+        ],
+        "BufferFlags": [
+          "as_integer_ratio",
+          "bit_count",
+          "bit_length",
+          "conjugate",
+          "from_bytes",
+          "is_integer",
+          "to_bytes"
+        ],
+        "ClosureVars": [
+          "count",
+          "index"
+        ],
+        "FrameInfo": [
+          "count"
+        ],
+        "FullArgSpec": [
+          "count",
+          "index"
+        ],
+        "Parameter": [
+          "empty",
+          "replace"
+        ],
+        "Signature": [
+          "bind",
+          "bind_partial",
+          "empty",
+          "format",
+          "from_callable",
+          "replace"
+        ],
+        "Traceback": [
+          "count"
         ]
       }
     },
@@ -2532,9 +2389,15 @@
         "SEEK_END",
         "SEEK_SET"
       ],
-      "operationCount": 20,
-      "operations": [
+      "excludedExceptionCount": 2,
+      "excludedExceptions": [
         "BlockingIOError",
+        "UnsupportedOperation"
+      ],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
+      "operationCount": 18,
+      "operations": [
         "BufferedIOBase",
         "BufferedRWPair",
         "BufferedRandom",
@@ -2549,27 +2412,15 @@
         "StringIO",
         "TextIOBase",
         "TextIOWrapper",
-        "UnsupportedOperation",
         "Writer",
         "open",
         "open_code",
         "text_encoding"
       ],
-      "typeMemberCount": 276,
+      "typeMemberCount": 222,
       "types": {
-        "BlockingIOError": [
-          "add_note",
-          "args",
-          "characters_written",
-          "errno",
-          "filename",
-          "filename2",
-          "strerror",
-          "with_traceback"
-        ],
         "BufferedIOBase": [
           "close",
-          "closed",
           "detach",
           "fileno",
           "flush",
@@ -2591,7 +2442,6 @@
         ],
         "BufferedRWPair": [
           "close",
-          "closed",
           "detach",
           "fileno",
           "flush",
@@ -2614,15 +2464,11 @@
         ],
         "BufferedRandom": [
           "close",
-          "closed",
           "detach",
           "fileno",
           "flush",
           "isatty",
-          "mode",
-          "name",
           "peek",
-          "raw",
           "read",
           "read1",
           "readable",
@@ -2640,15 +2486,11 @@
         ],
         "BufferedReader": [
           "close",
-          "closed",
           "detach",
           "fileno",
           "flush",
           "isatty",
-          "mode",
-          "name",
           "peek",
-          "raw",
           "read",
           "read1",
           "readable",
@@ -2666,14 +2508,10 @@
         ],
         "BufferedWriter": [
           "close",
-          "closed",
           "detach",
           "fileno",
           "flush",
           "isatty",
-          "mode",
-          "name",
-          "raw",
           "read",
           "read1",
           "readable",
@@ -2691,7 +2529,6 @@
         ],
         "BytesIO": [
           "close",
-          "closed",
           "detach",
           "fileno",
           "flush",
@@ -2715,12 +2552,9 @@
         ],
         "FileIO": [
           "close",
-          "closed",
-          "closefd",
           "fileno",
           "flush",
           "isatty",
-          "mode",
           "read",
           "readable",
           "readall",
@@ -2737,7 +2571,6 @@
         ],
         "IOBase": [
           "close",
-          "closed",
           "fileno",
           "flush",
           "isatty",
@@ -2754,13 +2587,11 @@
         "IncrementalNewlineDecoder": [
           "decode",
           "getstate",
-          "newlines",
           "reset",
           "setstate"
         ],
         "RawIOBase": [
           "close",
-          "closed",
           "fileno",
           "flush",
           "isatty",
@@ -2783,16 +2614,11 @@
         ],
         "StringIO": [
           "close",
-          "closed",
           "detach",
-          "encoding",
-          "errors",
           "fileno",
           "flush",
           "getvalue",
           "isatty",
-          "line_buffering",
-          "newlines",
           "read",
           "readable",
           "readline",
@@ -2807,14 +2633,10 @@
         ],
         "TextIOBase": [
           "close",
-          "closed",
           "detach",
-          "encoding",
-          "errors",
           "fileno",
           "flush",
           "isatty",
-          "newlines",
           "read",
           "readable",
           "readline",
@@ -2828,18 +2650,11 @@
           "writelines"
         ],
         "TextIOWrapper": [
-          "buffer",
           "close",
-          "closed",
           "detach",
-          "encoding",
-          "errors",
           "fileno",
           "flush",
           "isatty",
-          "line_buffering",
-          "name",
-          "newlines",
           "read",
           "readable",
           "readline",
@@ -2851,18 +2666,7 @@
           "truncate",
           "writable",
           "write",
-          "write_through",
           "writelines"
-        ],
-        "UnsupportedOperation": [
-          "add_note",
-          "args",
-          "characters_written",
-          "errno",
-          "filename",
-          "filename2",
-          "strerror",
-          "with_traceback"
         ],
         "Writer": [
           "write"
@@ -2872,6 +2676,10 @@
     "itertools": {
       "excludedConstantCount": 0,
       "excludedConstants": [],
+      "excludedExceptionCount": 0,
+      "excludedExceptions": [],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
       "operationCount": 20,
       "operations": [
         "accumulate",
@@ -2923,9 +2731,14 @@
     "json": {
       "excludedConstantCount": 0,
       "excludedConstants": [],
-      "operationCount": 7,
+      "excludedExceptionCount": 1,
+      "excludedExceptions": [
+        "JSONDecodeError"
+      ],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
+      "operationCount": 6,
       "operations": [
-        "JSONDecodeError",
         "JSONDecoder",
         "JSONEncoder",
         "dump",
@@ -2933,13 +2746,8 @@
         "load",
         "loads"
       ],
-      "typeMemberCount": 10,
+      "typeMemberCount": 5,
       "types": {
-        "JSONDecodeError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
         "JSONDecoder": [
           "decode",
           "raw_decode"
@@ -2947,9 +2755,7 @@
         "JSONEncoder": [
           "default",
           "encode",
-          "item_separator",
-          "iterencode",
-          "key_separator"
+          "iterencode"
         ]
       }
     },
@@ -2968,6 +2774,10 @@
         "lastResort",
         "raiseExceptions"
       ],
+      "excludedExceptionCount": 0,
+      "excludedExceptions": [],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
       "operationCount": 34,
       "operations": [
         "BufferingFormatter",
@@ -3005,7 +2815,7 @@
         "warn",
         "warning"
       ],
-      "typeMemberCount": 127,
+      "typeMemberCount": 115,
       "types": {
         "BufferingFormatter": [
           "format",
@@ -3024,22 +2834,18 @@
           "get_name",
           "handle",
           "handleError",
-          "name",
           "release",
           "removeFilter",
           "setFormatter",
           "setLevel",
           "setStream",
-          "set_name",
-          "terminator"
+          "set_name"
         ],
         "Filter": [
           "filter"
         ],
         "Formatter": [
           "converter",
-          "default_msec_format",
-          "default_time_format",
           "format",
           "formatException",
           "formatMessage",
@@ -3059,7 +2865,6 @@
           "get_name",
           "handle",
           "handleError",
-          "name",
           "release",
           "removeFilter",
           "setFormatter",
@@ -3089,10 +2894,8 @@
           "isEnabledFor",
           "log",
           "makeRecord",
-          "manager",
           "removeFilter",
           "removeHandler",
-          "root",
           "setLevel",
           "warn",
           "warning"
@@ -3107,8 +2910,6 @@
           "info",
           "isEnabledFor",
           "log",
-          "manager",
-          "name",
           "process",
           "setLevel",
           "warn",
@@ -3126,7 +2927,6 @@
           "get_name",
           "handle",
           "handleError",
-          "name",
           "release",
           "removeFilter",
           "setFormatter",
@@ -3145,14 +2945,12 @@
           "get_name",
           "handle",
           "handleError",
-          "name",
           "release",
           "removeFilter",
           "setFormatter",
           "setLevel",
           "setStream",
-          "set_name",
-          "terminator"
+          "set_name"
         ]
       }
     },
@@ -3165,6 +2963,10 @@
         "pi",
         "tau"
       ],
+      "excludedExceptionCount": 0,
+      "excludedExceptions": [],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
       "operationCount": 57,
       "operations": [
         "acos",
@@ -3227,6 +3029,45 @@
       ],
       "typeMemberCount": 0,
       "types": {}
+    },
+    "mimetypes": {
+      "excludedConstantCount": 6,
+      "excludedConstants": [
+        "common_types",
+        "encodings_map",
+        "inited",
+        "knownfiles",
+        "suffix_map",
+        "types_map"
+      ],
+      "excludedExceptionCount": 0,
+      "excludedExceptions": [],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
+      "operationCount": 8,
+      "operations": [
+        "MimeTypes",
+        "add_type",
+        "guess_all_extensions",
+        "guess_extension",
+        "guess_file_type",
+        "guess_type",
+        "init",
+        "read_mime_types"
+      ],
+      "typeMemberCount": 8,
+      "types": {
+        "MimeTypes": [
+          "add_type",
+          "guess_all_extensions",
+          "guess_extension",
+          "guess_file_type",
+          "guess_type",
+          "read",
+          "read_windows_registry",
+          "readfp"
+        ]
+      }
     },
     "os": {
       "excludedConstantCount": 182,
@@ -3414,7 +3255,13 @@
         "supports_bytes_environ",
         "sysconf_names"
       ],
-      "operationCount": 210,
+      "excludedExceptionCount": 1,
+      "excludedExceptions": [
+        "error"
+      ],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
+      "operationCount": 209,
       "operations": [
         "DirEntry",
         "WCOREDUMP",
@@ -3440,7 +3287,6 @@
         "device_encoding",
         "dup",
         "dup2",
-        "error",
         "eventfd",
         "eventfd_read",
         "eventfd_write",
@@ -3627,7 +3473,7 @@
         "write",
         "writev"
       ],
-      "typeMemberCount": 96,
+      "typeMemberCount": 20,
       "types": {
         "DirEntry": [
           "inode",
@@ -3635,141 +3481,66 @@
           "is_file",
           "is_junction",
           "is_symlink",
-          "name",
-          "path",
           "stat"
-        ],
-        "error": [
-          "add_note",
-          "args",
-          "characters_written",
-          "errno",
-          "filename",
-          "filename2",
-          "strerror",
-          "with_traceback"
         ],
         "sched_param": [
           "count",
-          "index",
-          "n_fields",
-          "n_sequence_fields",
-          "n_unnamed_fields",
-          "sched_priority"
+          "index"
         ],
         "stat_result": [
           "count",
-          "index",
-          "n_fields",
-          "n_sequence_fields",
-          "n_unnamed_fields",
-          "st_atime",
-          "st_atime_ns",
-          "st_blksize",
-          "st_blocks",
-          "st_ctime",
-          "st_ctime_ns",
-          "st_dev",
-          "st_gid",
-          "st_ino",
-          "st_mode",
-          "st_mtime",
-          "st_mtime_ns",
-          "st_nlink",
-          "st_rdev",
-          "st_size",
-          "st_uid"
+          "index"
         ],
         "statvfs_result": [
           "count",
-          "f_bavail",
-          "f_bfree",
-          "f_blocks",
-          "f_bsize",
-          "f_favail",
-          "f_ffree",
-          "f_files",
-          "f_flag",
-          "f_frsize",
-          "f_fsid",
-          "f_namemax",
-          "index",
-          "n_fields",
-          "n_sequence_fields",
-          "n_unnamed_fields"
+          "index"
         ],
         "terminal_size": [
-          "columns",
           "count",
-          "index",
-          "lines",
-          "n_fields",
-          "n_sequence_fields",
-          "n_unnamed_fields"
+          "index"
         ],
         "times_result": [
-          "children_system",
-          "children_user",
           "count",
-          "elapsed",
-          "index",
-          "n_fields",
-          "n_sequence_fields",
-          "n_unnamed_fields",
-          "system",
-          "user"
+          "index"
         ],
         "uname_result": [
           "count",
-          "index",
-          "machine",
-          "n_fields",
-          "n_sequence_fields",
-          "n_unnamed_fields",
-          "nodename",
-          "release",
-          "sysname",
-          "version"
+          "index"
         ],
         "waitid_result": [
           "count",
-          "index",
-          "n_fields",
-          "n_sequence_fields",
-          "n_unnamed_fields",
-          "si_code",
-          "si_pid",
-          "si_signo",
-          "si_status",
-          "si_uid"
+          "index"
         ]
       }
     },
     "pathlib": {
       "excludedConstantCount": 0,
       "excludedConstants": [],
-      "operationCount": 7,
+      "excludedExceptionCount": 1,
+      "excludedExceptions": [
+        "UnsupportedOperation"
+      ],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
+      "operationCount": 6,
       "operations": [
         "Path",
         "PosixPath",
         "PurePath",
         "PurePosixPath",
         "PureWindowsPath",
-        "UnsupportedOperation",
         "WindowsPath"
       ],
-      "typeMemberCount": 285,
+      "typeMemberCount": 213,
       "types": {
         "Path": [
           "absolute",
-          "anchor",
           "as_posix",
           "as_uri",
           "chmod",
           "copy",
           "copy_into",
           "cwd",
-          "drive",
           "exists",
           "expanduser",
           "from_uri",
@@ -3778,7 +3549,6 @@
           "group",
           "hardlink_to",
           "home",
-          "info",
           "is_absolute",
           "is_block_device",
           "is_char_device",
@@ -3799,13 +3569,8 @@
           "mkdir",
           "move",
           "move_into",
-          "name",
           "open",
           "owner",
-          "parent",
-          "parents",
-          "parser",
-          "parts",
           "read_bytes",
           "read_text",
           "readlink",
@@ -3815,12 +3580,8 @@
           "resolve",
           "rglob",
           "rmdir",
-          "root",
           "samefile",
           "stat",
-          "stem",
-          "suffix",
-          "suffixes",
           "symlink_to",
           "touch",
           "unlink",
@@ -3834,14 +3595,12 @@
         ],
         "PosixPath": [
           "absolute",
-          "anchor",
           "as_posix",
           "as_uri",
           "chmod",
           "copy",
           "copy_into",
           "cwd",
-          "drive",
           "exists",
           "expanduser",
           "from_uri",
@@ -3850,7 +3609,6 @@
           "group",
           "hardlink_to",
           "home",
-          "info",
           "is_absolute",
           "is_block_device",
           "is_char_device",
@@ -3871,13 +3629,8 @@
           "mkdir",
           "move",
           "move_into",
-          "name",
           "open",
           "owner",
-          "parent",
-          "parents",
-          "parser",
-          "parts",
           "read_bytes",
           "read_text",
           "readlink",
@@ -3887,12 +3640,8 @@
           "resolve",
           "rglob",
           "rmdir",
-          "root",
           "samefile",
           "stat",
-          "stem",
-          "suffix",
-          "suffixes",
           "symlink_to",
           "touch",
           "unlink",
@@ -3905,98 +3654,58 @@
           "write_text"
         ],
         "PurePath": [
-          "anchor",
           "as_posix",
           "as_uri",
-          "drive",
           "full_match",
           "is_absolute",
           "is_relative_to",
           "is_reserved",
           "joinpath",
           "match",
-          "name",
-          "parent",
-          "parents",
-          "parser",
-          "parts",
           "relative_to",
-          "root",
-          "stem",
-          "suffix",
-          "suffixes",
           "with_name",
           "with_segments",
           "with_stem",
           "with_suffix"
         ],
         "PurePosixPath": [
-          "anchor",
           "as_posix",
           "as_uri",
-          "drive",
           "full_match",
           "is_absolute",
           "is_relative_to",
           "is_reserved",
           "joinpath",
           "match",
-          "name",
-          "parent",
-          "parents",
-          "parser",
-          "parts",
           "relative_to",
-          "root",
-          "stem",
-          "suffix",
-          "suffixes",
           "with_name",
           "with_segments",
           "with_stem",
           "with_suffix"
         ],
         "PureWindowsPath": [
-          "anchor",
           "as_posix",
           "as_uri",
-          "drive",
           "full_match",
           "is_absolute",
           "is_relative_to",
           "is_reserved",
           "joinpath",
           "match",
-          "name",
-          "parent",
-          "parents",
-          "parser",
-          "parts",
           "relative_to",
-          "root",
-          "stem",
-          "suffix",
-          "suffixes",
           "with_name",
           "with_segments",
           "with_stem",
           "with_suffix"
         ],
-        "UnsupportedOperation": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
         "WindowsPath": [
           "absolute",
-          "anchor",
           "as_posix",
           "as_uri",
           "chmod",
           "copy",
           "copy_into",
           "cwd",
-          "drive",
           "exists",
           "expanduser",
           "from_uri",
@@ -4005,7 +3714,6 @@
           "group",
           "hardlink_to",
           "home",
-          "info",
           "is_absolute",
           "is_block_device",
           "is_char_device",
@@ -4026,13 +3734,8 @@
           "mkdir",
           "move",
           "move_into",
-          "name",
           "open",
           "owner",
-          "parent",
-          "parents",
-          "parser",
-          "parts",
           "read_bytes",
           "read_text",
           "readlink",
@@ -4042,12 +3745,8 @@
           "resolve",
           "rglob",
           "rmdir",
-          "root",
           "samefile",
           "stat",
-          "stem",
-          "suffix",
-          "suffixes",
           "symlink_to",
           "touch",
           "unlink",
@@ -4061,9 +3760,79 @@
         ]
       }
     },
+    "queue": {
+      "excludedConstantCount": 0,
+      "excludedConstants": [],
+      "excludedExceptionCount": 3,
+      "excludedExceptions": [
+        "Empty",
+        "Full",
+        "ShutDown"
+      ],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
+      "operationCount": 4,
+      "operations": [
+        "LifoQueue",
+        "PriorityQueue",
+        "Queue",
+        "SimpleQueue"
+      ],
+      "typeMemberCount": 36,
+      "types": {
+        "LifoQueue": [
+          "empty",
+          "full",
+          "get",
+          "get_nowait",
+          "join",
+          "put",
+          "put_nowait",
+          "qsize",
+          "shutdown",
+          "task_done"
+        ],
+        "PriorityQueue": [
+          "empty",
+          "full",
+          "get",
+          "get_nowait",
+          "join",
+          "put",
+          "put_nowait",
+          "qsize",
+          "shutdown",
+          "task_done"
+        ],
+        "Queue": [
+          "empty",
+          "full",
+          "get",
+          "get_nowait",
+          "join",
+          "put",
+          "put_nowait",
+          "qsize",
+          "shutdown",
+          "task_done"
+        ],
+        "SimpleQueue": [
+          "empty",
+          "get",
+          "get_nowait",
+          "put",
+          "put_nowait",
+          "qsize"
+        ]
+      }
+    },
     "random": {
       "excludedConstantCount": 0,
       "excludedConstants": [],
+      "excludedExceptionCount": 0,
+      "excludedExceptions": [],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
       "operationCount": 26,
       "operations": [
         "Random",
@@ -4093,10 +3862,9 @@
         "vonmisesvariate",
         "weibullvariate"
       ],
-      "typeMemberCount": 50,
+      "typeMemberCount": 48,
       "types": {
         "Random": [
-          "VERSION",
           "betavariate",
           "binomialvariate",
           "choice",
@@ -4123,7 +3891,6 @@
           "weibullvariate"
         ],
         "SystemRandom": [
-          "VERSION",
           "betavariate",
           "binomialvariate",
           "choice",
@@ -4170,14 +3937,19 @@
         "VERBOSE",
         "X"
       ],
-      "operationCount": 16,
+      "excludedExceptionCount": 2,
+      "excludedExceptions": [
+        "PatternError",
+        "error"
+      ],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
+      "operationCount": 14,
       "operations": [
         "Match",
         "Pattern",
-        "PatternError",
         "RegexFlag",
         "compile",
-        "error",
         "escape",
         "findall",
         "finditer",
@@ -4189,75 +3961,46 @@
         "sub",
         "subn"
       ],
-      "typeMemberCount": 52,
+      "typeMemberCount": 23,
       "types": {
         "Match": [
           "end",
-          "endpos",
           "expand",
           "group",
           "groupdict",
           "groups",
-          "lastgroup",
-          "lastindex",
-          "pos",
-          "re",
-          "regs",
           "span",
-          "start",
-          "string"
+          "start"
         ],
         "Pattern": [
           "findall",
           "finditer",
-          "flags",
           "fullmatch",
-          "groupindex",
-          "groups",
           "match",
-          "pattern",
           "scanner",
           "search",
           "split",
           "sub",
           "subn"
         ],
-        "PatternError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
         "RegexFlag": [
-          "ASCII",
-          "DEBUG",
-          "DOTALL",
-          "IGNORECASE",
-          "LOCALE",
-          "MULTILINE",
-          "UNICODE",
-          "VERBOSE",
           "as_integer_ratio",
           "bit_count",
           "bit_length",
           "conjugate",
-          "denominator",
           "from_bytes",
-          "imag",
           "is_integer",
-          "numerator",
-          "real",
           "to_bytes"
-        ],
-        "error": [
-          "add_note",
-          "args",
-          "with_traceback"
         ]
       }
     },
     "secrets": {
       "excludedConstantCount": 0,
       "excludedConstants": [],
+      "excludedExceptionCount": 0,
+      "excludedExceptions": [],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
       "operationCount": 8,
       "operations": [
         "SystemRandom",
@@ -4269,10 +4012,9 @@
         "token_hex",
         "token_urlsafe"
       ],
-      "typeMemberCount": 25,
+      "typeMemberCount": 24,
       "types": {
         "SystemRandom": [
-          "VERSION",
           "betavariate",
           "binomialvariate",
           "choice",
@@ -4299,6 +4041,45 @@
           "weibullvariate"
         ]
       }
+    },
+    "shutil": {
+      "excludedConstantCount": 0,
+      "excludedConstants": [],
+      "excludedExceptionCount": 3,
+      "excludedExceptions": [
+        "Error",
+        "SameFileError",
+        "SpecialFileError"
+      ],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
+      "operationCount": 22,
+      "operations": [
+        "chown",
+        "copy",
+        "copy2",
+        "copyfile",
+        "copyfileobj",
+        "copymode",
+        "copystat",
+        "copytree",
+        "disk_usage",
+        "get_archive_formats",
+        "get_terminal_size",
+        "get_unpack_formats",
+        "ignore_patterns",
+        "make_archive",
+        "move",
+        "register_archive_format",
+        "register_unpack_format",
+        "rmtree",
+        "unpack_archive",
+        "unregister_archive_format",
+        "unregister_unpack_format",
+        "which"
+      ],
+      "typeMemberCount": 0,
+      "types": {}
     },
     "socket": {
       "excludedConstantCount": 460,
@@ -4764,7 +4545,16 @@
         "VM_SOCKETS_INVALID_VERSION",
         "has_ipv6"
       ],
-      "operationCount": 43,
+      "excludedExceptionCount": 4,
+      "excludedExceptions": [
+        "error",
+        "gaierror",
+        "herror",
+        "timeout"
+      ],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
+      "operationCount": 39,
       "operations": [
         "AddressFamily",
         "CMSG_LEN",
@@ -4775,9 +4565,7 @@
         "create_connection",
         "create_server",
         "dup",
-        "error",
         "fromfd",
-        "gaierror",
         "getaddrinfo",
         "getdefaulttimeout",
         "getfqdn",
@@ -4790,7 +4578,6 @@
         "getservbyname",
         "getservbyport",
         "has_dualstack_ipv6",
-        "herror",
         "htonl",
         "htons",
         "if_indextoname",
@@ -4807,74 +4594,26 @@
         "setdefaulttimeout",
         "sethostname",
         "socket",
-        "socketpair",
-        "timeout"
+        "socketpair"
       ],
-      "typeMemberCount": 161,
+      "typeMemberCount": 74,
       "types": {
         "AddressFamily": [
-          "AF_ALG",
-          "AF_APPLETALK",
-          "AF_ASH",
-          "AF_ATMPVC",
-          "AF_ATMSVC",
-          "AF_AX25",
-          "AF_BLUETOOTH",
-          "AF_BRIDGE",
-          "AF_CAN",
-          "AF_ECONET",
-          "AF_INET",
-          "AF_INET6",
-          "AF_IPX",
-          "AF_IRDA",
-          "AF_KEY",
-          "AF_LLC",
-          "AF_NETBEUI",
-          "AF_NETLINK",
-          "AF_NETROM",
-          "AF_PACKET",
-          "AF_PPPOX",
-          "AF_QIPCRTR",
-          "AF_RDS",
-          "AF_ROSE",
-          "AF_SECURITY",
-          "AF_SNA",
-          "AF_TIPC",
-          "AF_UNIX",
-          "AF_UNSPEC",
-          "AF_VSOCK",
-          "AF_WANPIPE",
-          "AF_X25",
           "as_integer_ratio",
           "bit_count",
           "bit_length",
           "conjugate",
-          "denominator",
           "from_bytes",
-          "imag",
           "is_integer",
-          "numerator",
-          "real",
           "to_bytes"
         ],
         "SocketKind": [
-          "SOCK_CLOEXEC",
-          "SOCK_DGRAM",
-          "SOCK_NONBLOCK",
-          "SOCK_RAW",
-          "SOCK_RDM",
-          "SOCK_SEQPACKET",
-          "SOCK_STREAM",
           "as_integer_ratio",
           "bit_count",
           "bit_length",
           "conjugate",
-          "denominator",
           "from_bytes",
-          "imag",
           "is_integer",
-          "numerator",
-          "real",
           "to_bytes"
         ],
         "SocketType": [
@@ -4883,7 +4622,6 @@
           "connect",
           "connect_ex",
           "detach",
-          "family",
           "fileno",
           "getblocking",
           "getpeername",
@@ -4891,7 +4629,6 @@
           "getsockopt",
           "gettimeout",
           "listen",
-          "proto",
           "recv",
           "recv_into",
           "recvfrom",
@@ -4906,39 +4643,7 @@
           "setblocking",
           "setsockopt",
           "settimeout",
-          "shutdown",
-          "timeout",
-          "type"
-        ],
-        "error": [
-          "add_note",
-          "args",
-          "characters_written",
-          "errno",
-          "filename",
-          "filename2",
-          "strerror",
-          "with_traceback"
-        ],
-        "gaierror": [
-          "add_note",
-          "args",
-          "characters_written",
-          "errno",
-          "filename",
-          "filename2",
-          "strerror",
-          "with_traceback"
-        ],
-        "herror": [
-          "add_note",
-          "args",
-          "characters_written",
-          "errno",
-          "filename",
-          "filename2",
-          "strerror",
-          "with_traceback"
+          "shutdown"
         ],
         "socket": [
           "accept",
@@ -4948,7 +4653,6 @@
           "connect_ex",
           "detach",
           "dup",
-          "family",
           "fileno",
           "get_inheritable",
           "getblocking",
@@ -4958,7 +4662,6 @@
           "gettimeout",
           "listen",
           "makefile",
-          "proto",
           "recv",
           "recv_into",
           "recvfrom",
@@ -4975,19 +4678,7 @@
           "setblocking",
           "setsockopt",
           "settimeout",
-          "shutdown",
-          "timeout",
-          "type"
-        ],
-        "timeout": [
-          "add_note",
-          "args",
-          "characters_written",
-          "errno",
-          "filename",
-          "filename2",
-          "strerror",
-          "with_traceback"
+          "shutdown"
         ]
       }
     },
@@ -5177,30 +4868,35 @@
         "threadsafety",
         "time"
       ],
-      "operationCount": 28,
-      "operations": [
-        "Binary",
-        "Blob",
-        "Connection",
-        "Cursor",
+      "excludedExceptionCount": 10,
+      "excludedExceptions": [
         "DataError",
         "DatabaseError",
-        "Date",
-        "DateFromTicks",
         "Error",
         "IntegrityError",
         "InterfaceError",
         "InternalError",
         "NotSupportedError",
         "OperationalError",
-        "PrepareProtocol",
         "ProgrammingError",
+        "Warning"
+      ],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
+      "operationCount": 18,
+      "operations": [
+        "Binary",
+        "Blob",
+        "Connection",
+        "Cursor",
+        "Date",
+        "DateFromTicks",
+        "PrepareProtocol",
         "Row",
         "Time",
         "TimeFromTicks",
         "Timestamp",
         "TimestampFromTicks",
-        "Warning",
         "adapt",
         "complete_statement",
         "connect",
@@ -5208,26 +4904,14 @@
         "register_adapter",
         "register_converter"
       ],
-      "typeMemberCount": 191,
+      "typeMemberCount": 100,
       "types": {
         "Binary": [
-          "c_contiguous",
           "cast",
-          "contiguous",
           "count",
-          "f_contiguous",
-          "format",
           "hex",
           "index",
-          "itemsize",
-          "nbytes",
-          "ndim",
-          "obj",
-          "readonly",
           "release",
-          "shape",
-          "strides",
-          "suboffsets",
           "tobytes",
           "tolist",
           "toreadonly"
@@ -5240,17 +4924,6 @@
           "write"
         ],
         "Connection": [
-          "DataError",
-          "DatabaseError",
-          "Error",
-          "IntegrityError",
-          "InterfaceError",
-          "InternalError",
-          "NotSupportedError",
-          "OperationalError",
-          "ProgrammingError",
-          "Warning",
-          "autocommit",
           "backup",
           "blobopen",
           "close",
@@ -5267,52 +4940,30 @@
           "executescript",
           "getconfig",
           "getlimit",
-          "in_transaction",
           "interrupt",
-          "isolation_level",
           "iterdump",
           "load_extension",
           "rollback",
-          "row_factory",
           "serialize",
           "set_authorizer",
           "set_progress_handler",
           "set_trace_callback",
           "setconfig",
-          "setlimit",
-          "text_factory",
-          "total_changes"
+          "setlimit"
         ],
         "Cursor": [
-          "arraysize",
           "close",
-          "connection",
-          "description",
           "execute",
           "executemany",
           "executescript",
           "fetchall",
           "fetchmany",
           "fetchone",
-          "lastrowid",
-          "row_factory",
-          "rowcount",
           "setinputsizes",
           "setoutputsize"
         ],
-        "DataError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "DatabaseError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
         "Date": [
           "ctime",
-          "day",
           "fromisocalendar",
           "fromisoformat",
           "fromordinal",
@@ -5320,74 +4971,25 @@
           "isocalendar",
           "isoformat",
           "isoweekday",
-          "max",
-          "min",
-          "month",
           "replace",
-          "resolution",
           "strftime",
           "strptime",
           "timetuple",
           "today",
           "toordinal",
-          "weekday",
-          "year"
-        ],
-        "Error": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "IntegrityError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "InterfaceError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "InternalError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "NotSupportedError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "OperationalError": [
-          "add_note",
-          "args",
-          "with_traceback"
+          "weekday"
         ],
         "PrepareProtocol": [],
-        "ProgrammingError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
         "Row": [
           "keys"
         ],
         "Time": [
           "dst",
-          "fold",
           "fromisoformat",
-          "hour",
           "isoformat",
-          "max",
-          "microsecond",
-          "min",
-          "minute",
           "replace",
-          "resolution",
-          "second",
           "strftime",
           "strptime",
-          "tzinfo",
           "tzname",
           "utcoffset"
         ],
@@ -5396,26 +4998,16 @@
           "combine",
           "ctime",
           "date",
-          "day",
           "dst",
-          "fold",
           "fromisocalendar",
           "fromisoformat",
           "fromordinal",
           "fromtimestamp",
-          "hour",
           "isocalendar",
           "isoformat",
           "isoweekday",
-          "max",
-          "microsecond",
-          "min",
-          "minute",
-          "month",
           "now",
           "replace",
-          "resolution",
-          "second",
           "strftime",
           "strptime",
           "time",
@@ -5424,19 +5016,12 @@
           "timetz",
           "today",
           "toordinal",
-          "tzinfo",
           "tzname",
           "utcfromtimestamp",
           "utcnow",
           "utcoffset",
           "utctimetuple",
-          "weekday",
-          "year"
-        ],
-        "Warning": [
-          "add_note",
-          "args",
-          "with_traceback"
+          "weekday"
         ]
       }
     },
@@ -5541,10 +5126,23 @@
         "sys",
         "warnings"
       ],
-      "operationCount": 35,
+      "excludedExceptionCount": 9,
+      "excludedExceptions": [
+        "CertificateError",
+        "SSLCertVerificationError",
+        "SSLEOFError",
+        "SSLError",
+        "SSLSyscallError",
+        "SSLWantReadError",
+        "SSLWantWriteError",
+        "SSLZeroReturnError",
+        "socket_error"
+      ],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
+      "operationCount": 26,
       "operations": [
         "AlertDescription",
-        "CertificateError",
         "DER_cert_to_PEM_cert",
         "DefaultVerifyPaths",
         "MemoryBIO",
@@ -5554,18 +5152,11 @@
         "RAND_add",
         "RAND_bytes",
         "RAND_status",
-        "SSLCertVerificationError",
         "SSLContext",
-        "SSLEOFError",
-        "SSLError",
         "SSLErrorNumber",
         "SSLObject",
         "SSLSession",
         "SSLSocket",
-        "SSLSyscallError",
-        "SSLWantReadError",
-        "SSLWantWriteError",
-        "SSLZeroReturnError",
         "TLSVersion",
         "VerifyFlags",
         "VerifyMode",
@@ -5576,144 +5167,51 @@
         "get_protocol_name",
         "get_server_certificate",
         "namedtuple",
-        "socket",
-        "socket_error"
+        "socket"
       ],
-      "typeMemberCount": 377,
+      "typeMemberCount": 169,
       "types": {
         "AlertDescription": [
-          "ALERT_DESCRIPTION_ACCESS_DENIED",
-          "ALERT_DESCRIPTION_BAD_CERTIFICATE",
-          "ALERT_DESCRIPTION_BAD_CERTIFICATE_HASH_VALUE",
-          "ALERT_DESCRIPTION_BAD_CERTIFICATE_STATUS_RESPONSE",
-          "ALERT_DESCRIPTION_BAD_RECORD_MAC",
-          "ALERT_DESCRIPTION_CERTIFICATE_EXPIRED",
-          "ALERT_DESCRIPTION_CERTIFICATE_REVOKED",
-          "ALERT_DESCRIPTION_CERTIFICATE_UNKNOWN",
-          "ALERT_DESCRIPTION_CERTIFICATE_UNOBTAINABLE",
-          "ALERT_DESCRIPTION_CLOSE_NOTIFY",
-          "ALERT_DESCRIPTION_DECODE_ERROR",
-          "ALERT_DESCRIPTION_DECOMPRESSION_FAILURE",
-          "ALERT_DESCRIPTION_DECRYPT_ERROR",
-          "ALERT_DESCRIPTION_HANDSHAKE_FAILURE",
-          "ALERT_DESCRIPTION_ILLEGAL_PARAMETER",
-          "ALERT_DESCRIPTION_INSUFFICIENT_SECURITY",
-          "ALERT_DESCRIPTION_INTERNAL_ERROR",
-          "ALERT_DESCRIPTION_NO_RENEGOTIATION",
-          "ALERT_DESCRIPTION_PROTOCOL_VERSION",
-          "ALERT_DESCRIPTION_RECORD_OVERFLOW",
-          "ALERT_DESCRIPTION_UNEXPECTED_MESSAGE",
-          "ALERT_DESCRIPTION_UNKNOWN_CA",
-          "ALERT_DESCRIPTION_UNKNOWN_PSK_IDENTITY",
-          "ALERT_DESCRIPTION_UNRECOGNIZED_NAME",
-          "ALERT_DESCRIPTION_UNSUPPORTED_CERTIFICATE",
-          "ALERT_DESCRIPTION_UNSUPPORTED_EXTENSION",
-          "ALERT_DESCRIPTION_USER_CANCELLED",
           "as_integer_ratio",
           "bit_count",
           "bit_length",
           "conjugate",
-          "denominator",
           "from_bytes",
-          "imag",
           "is_integer",
-          "numerator",
-          "real",
           "to_bytes"
         ],
-        "CertificateError": [
-          "add_note",
-          "args",
-          "characters_written",
-          "errno",
-          "filename",
-          "filename2",
-          "strerror",
-          "with_traceback"
-        ],
         "DefaultVerifyPaths": [
-          "cafile",
-          "capath",
           "count",
-          "index",
-          "openssl_cafile",
-          "openssl_cafile_env",
-          "openssl_capath",
-          "openssl_capath_env"
+          "index"
         ],
         "MemoryBIO": [
-          "eof",
-          "pending",
           "read",
           "write",
           "write_eof"
         ],
         "Options": [
-          "OP_CIPHER_SERVER_PREFERENCE",
-          "OP_ENABLE_KTLS",
-          "OP_ENABLE_MIDDLEBOX_COMPAT",
-          "OP_IGNORE_UNEXPECTED_EOF",
-          "OP_LEGACY_SERVER_CONNECT",
-          "OP_NO_COMPRESSION",
-          "OP_NO_RENEGOTIATION",
-          "OP_NO_SSLv3",
-          "OP_NO_TICKET",
-          "OP_NO_TLSv1",
-          "OP_NO_TLSv1_1",
-          "OP_NO_TLSv1_2",
-          "OP_NO_TLSv1_3",
           "as_integer_ratio",
           "bit_count",
           "bit_length",
           "conjugate",
-          "denominator",
           "from_bytes",
-          "imag",
           "is_integer",
-          "numerator",
-          "real",
           "to_bytes"
         ],
         "Purpose": [
-          "CLIENT_AUTH",
-          "SERVER_AUTH",
           "count",
           "fromname",
           "fromnid",
-          "index",
-          "longname",
-          "nid",
-          "oid",
-          "shortname"
-        ],
-        "SSLCertVerificationError": [
-          "add_note",
-          "args",
-          "characters_written",
-          "errno",
-          "filename",
-          "filename2",
-          "strerror",
-          "with_traceback"
+          "index"
         ],
         "SSLContext": [
           "cert_store_stats",
-          "check_hostname",
           "get_ca_certs",
           "get_ciphers",
-          "hostname_checks_common_name",
-          "keylog_filename",
           "load_cert_chain",
           "load_default_certs",
           "load_dh_params",
           "load_verify_locations",
-          "maximum_version",
-          "minimum_version",
-          "num_tickets",
-          "options",
-          "post_handshake_auth",
-          "protocol",
-          "security_level",
           "session_stats",
           "set_alpn_protocols",
           "set_ciphers",
@@ -5723,60 +5221,23 @@
           "set_psk_client_callback",
           "set_psk_server_callback",
           "set_servername_callback",
-          "sni_callback",
           "sslobject_class",
           "sslsocket_class",
-          "verify_flags",
-          "verify_mode",
           "wrap_bio",
           "wrap_socket"
         ],
-        "SSLEOFError": [
-          "add_note",
-          "args",
-          "characters_written",
-          "errno",
-          "filename",
-          "filename2",
-          "strerror",
-          "with_traceback"
-        ],
-        "SSLError": [
-          "add_note",
-          "args",
-          "characters_written",
-          "errno",
-          "filename",
-          "filename2",
-          "strerror",
-          "with_traceback"
-        ],
         "SSLErrorNumber": [
-          "SSL_ERROR_EOF",
-          "SSL_ERROR_INVALID_ERROR_CODE",
-          "SSL_ERROR_SSL",
-          "SSL_ERROR_SYSCALL",
-          "SSL_ERROR_WANT_CONNECT",
-          "SSL_ERROR_WANT_READ",
-          "SSL_ERROR_WANT_WRITE",
-          "SSL_ERROR_WANT_X509_LOOKUP",
-          "SSL_ERROR_ZERO_RETURN",
           "as_integer_ratio",
           "bit_count",
           "bit_length",
           "conjugate",
-          "denominator",
           "from_bytes",
-          "imag",
           "is_integer",
-          "numerator",
-          "real",
           "to_bytes"
         ],
         "SSLObject": [
           "cipher",
           "compression",
-          "context",
           "do_handshake",
           "get_channel_binding",
           "get_unverified_chain",
@@ -5786,23 +5247,13 @@
           "read",
           "selected_alpn_protocol",
           "selected_npn_protocol",
-          "server_hostname",
-          "server_side",
-          "session",
-          "session_reused",
           "shared_ciphers",
           "unwrap",
           "verify_client_post_handshake",
           "version",
           "write"
         ],
-        "SSLSession": [
-          "has_ticket",
-          "id",
-          "ticket_lifetime_hint",
-          "time",
-          "timeout"
-        ],
+        "SSLSession": [],
         "SSLSocket": [
           "accept",
           "bind",
@@ -5811,11 +5262,9 @@
           "compression",
           "connect",
           "connect_ex",
-          "context",
           "detach",
           "do_handshake",
           "dup",
-          "family",
           "fileno",
           "get_channel_binding",
           "get_inheritable",
@@ -5830,7 +5279,6 @@
           "listen",
           "makefile",
           "pending",
-          "proto",
           "read",
           "recv",
           "recv_into",
@@ -5846,113 +5294,42 @@
           "sendmsg",
           "sendmsg_afalg",
           "sendto",
-          "session",
-          "session_reused",
           "set_inheritable",
           "setblocking",
           "setsockopt",
           "settimeout",
           "shared_ciphers",
           "shutdown",
-          "timeout",
-          "type",
           "unwrap",
           "verify_client_post_handshake",
           "version",
           "write"
         ],
-        "SSLSyscallError": [
-          "add_note",
-          "args",
-          "characters_written",
-          "errno",
-          "filename",
-          "filename2",
-          "strerror",
-          "with_traceback"
-        ],
-        "SSLWantReadError": [
-          "add_note",
-          "args",
-          "characters_written",
-          "errno",
-          "filename",
-          "filename2",
-          "strerror",
-          "with_traceback"
-        ],
-        "SSLWantWriteError": [
-          "add_note",
-          "args",
-          "characters_written",
-          "errno",
-          "filename",
-          "filename2",
-          "strerror",
-          "with_traceback"
-        ],
-        "SSLZeroReturnError": [
-          "add_note",
-          "args",
-          "characters_written",
-          "errno",
-          "filename",
-          "filename2",
-          "strerror",
-          "with_traceback"
-        ],
         "TLSVersion": [
-          "MAXIMUM_SUPPORTED",
-          "MINIMUM_SUPPORTED",
-          "SSLv3",
-          "TLSv1",
-          "TLSv1_1",
-          "TLSv1_2",
-          "TLSv1_3",
           "as_integer_ratio",
           "bit_count",
           "bit_length",
           "conjugate",
-          "denominator",
           "from_bytes",
-          "imag",
           "is_integer",
-          "numerator",
-          "real",
           "to_bytes"
         ],
         "VerifyFlags": [
-          "VERIFY_ALLOW_PROXY_CERTS",
-          "VERIFY_CRL_CHECK_LEAF",
-          "VERIFY_X509_PARTIAL_CHAIN",
-          "VERIFY_X509_STRICT",
-          "VERIFY_X509_TRUSTED_FIRST",
           "as_integer_ratio",
           "bit_count",
           "bit_length",
           "conjugate",
-          "denominator",
           "from_bytes",
-          "imag",
           "is_integer",
-          "numerator",
-          "real",
           "to_bytes"
         ],
         "VerifyMode": [
-          "CERT_NONE",
-          "CERT_OPTIONAL",
-          "CERT_REQUIRED",
           "as_integer_ratio",
           "bit_count",
           "bit_length",
           "conjugate",
-          "denominator",
           "from_bytes",
-          "imag",
           "is_integer",
-          "numerator",
-          "real",
           "to_bytes"
         ],
         "socket": [
@@ -5963,7 +5340,6 @@
           "connect_ex",
           "detach",
           "dup",
-          "family",
           "fileno",
           "get_inheritable",
           "getblocking",
@@ -5973,7 +5349,6 @@
           "gettimeout",
           "listen",
           "makefile",
-          "proto",
           "recv",
           "recv_into",
           "recvfrom",
@@ -5990,29 +5365,22 @@
           "setblocking",
           "setsockopt",
           "settimeout",
-          "shutdown",
-          "timeout",
-          "type"
-        ],
-        "socket_error": [
-          "add_note",
-          "args",
-          "characters_written",
-          "errno",
-          "filename",
-          "filename2",
-          "strerror",
-          "with_traceback"
+          "shutdown"
         ]
       }
     },
     "statistics": {
       "excludedConstantCount": 0,
       "excludedConstants": [],
-      "operationCount": 22,
+      "excludedExceptionCount": 1,
+      "excludedExceptions": [
+        "StatisticsError"
+      ],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
+      "operationCount": 21,
       "operations": [
         "NormalDist",
-        "StatisticsError",
         "correlation",
         "covariance",
         "fmean",
@@ -6034,59 +5402,90 @@
         "stdev",
         "variance"
       ],
-      "typeMemberCount": 16,
+      "typeMemberCount": 8,
       "types": {
         "NormalDist": [
           "cdf",
           "from_samples",
           "inv_cdf",
-          "mean",
-          "median",
-          "mode",
           "overlap",
           "pdf",
           "quantiles",
           "samples",
-          "stdev",
-          "variance",
           "zscore"
+        ]
+      }
+    },
+    "string": {
+      "excludedConstantCount": 9,
+      "excludedConstants": [
+        "ascii_letters",
+        "ascii_lowercase",
+        "ascii_uppercase",
+        "digits",
+        "hexdigits",
+        "octdigits",
+        "printable",
+        "punctuation",
+        "whitespace"
+      ],
+      "excludedExceptionCount": 0,
+      "excludedExceptions": [],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
+      "operationCount": 3,
+      "operations": [
+        "Formatter",
+        "Template",
+        "capwords"
+      ],
+      "typeMemberCount": 12,
+      "types": {
+        "Formatter": [
+          "check_unused_args",
+          "convert_field",
+          "format",
+          "format_field",
+          "get_field",
+          "get_value",
+          "parse",
+          "vformat"
         ],
-        "StatisticsError": [
-          "add_note",
-          "args",
-          "with_traceback"
+        "Template": [
+          "get_identifiers",
+          "is_valid",
+          "safe_substitute",
+          "substitute"
         ]
       }
     },
     "struct": {
       "excludedConstantCount": 0,
       "excludedConstants": [],
-      "operationCount": 8,
+      "excludedExceptionCount": 1,
+      "excludedExceptions": [
+        "error"
+      ],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
+      "operationCount": 7,
       "operations": [
         "Struct",
         "calcsize",
-        "error",
         "iter_unpack",
         "pack",
         "pack_into",
         "unpack",
         "unpack_from"
       ],
-      "typeMemberCount": 10,
+      "typeMemberCount": 5,
       "types": {
         "Struct": [
-          "format",
           "iter_unpack",
           "pack",
           "pack_into",
-          "size",
           "unpack",
           "unpack_from"
-        ],
-        "error": [
-          "add_note",
-          "args",
-          "with_traceback"
         ]
       }
     },
@@ -6097,13 +5496,18 @@
         "PIPE",
         "STDOUT"
       ],
-      "operationCount": 11,
-      "operations": [
+      "excludedExceptionCount": 3,
+      "excludedExceptions": [
         "CalledProcessError",
+        "SubprocessError",
+        "TimeoutExpired"
+      ],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
+      "operationCount": 8,
+      "operations": [
         "CompletedProcess",
         "Popen",
-        "SubprocessError",
-        "TimeoutExpired",
         "call",
         "check_call",
         "check_output",
@@ -6111,14 +5515,8 @@
         "getstatusoutput",
         "run"
       ],
-      "typeMemberCount": 19,
+      "typeMemberCount": 7,
       "types": {
-        "CalledProcessError": [
-          "add_note",
-          "args",
-          "stdout",
-          "with_traceback"
-        ],
         "CompletedProcess": [
           "check_returncode"
         ],
@@ -6128,19 +5526,7 @@
           "poll",
           "send_signal",
           "terminate",
-          "universal_newlines",
           "wait"
-        ],
-        "SubprocessError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "TimeoutExpired": [
-          "add_note",
-          "args",
-          "stdout",
-          "with_traceback"
         ]
       }
     },
@@ -6187,6 +5573,10 @@
         "version_info",
         "warnoptions"
       ],
+      "excludedExceptionCount": 0,
+      "excludedExceptions": [],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
       "operationCount": 40,
       "operations": [
         "activate_stack_trampoline",
@@ -6242,8 +5632,8 @@
         "PAX_FORMAT",
         "USTAR_FORMAT"
       ],
-      "operationCount": 20,
-      "operations": [
+      "excludedExceptionCount": 13,
+      "excludedExceptions": [
         "AbsoluteLinkError",
         "AbsolutePathError",
         "CompressionError",
@@ -6256,7 +5646,12 @@
         "ReadError",
         "SpecialFileError",
         "StreamError",
-        "TarError",
+        "TarError"
+      ],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
+      "operationCount": 7,
+      "operations": [
         "TarFile",
         "TarInfo",
         "data_filter",
@@ -6265,98 +5660,24 @@
         "open",
         "tar_filter"
       ],
-      "typeMemberCount": 117,
+      "typeMemberCount": 49,
       "types": {
-        "AbsoluteLinkError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "AbsolutePathError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "CompressionError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "ExtractError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "FilterError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "HeaderError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "LinkFallbackError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "LinkOutsideDestinationError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "OutsideDestinationError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "ReadError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "SpecialFileError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "StreamError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "TarError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
         "TarFile": [
-          "OPEN_METH",
           "add",
           "addfile",
           "bz2open",
           "chmod",
           "chown",
           "close",
-          "debug",
-          "dereference",
-          "encoding",
-          "errorlevel",
-          "errors",
           "extract",
           "extractall",
           "extractfile",
-          "extraction_filter",
           "fileobject",
-          "format",
           "getmember",
           "getmembers",
           "getnames",
           "gettarinfo",
           "gzopen",
-          "ignore_zeros",
           "list",
           "makedev",
           "makedir",
@@ -6374,18 +5695,13 @@
           "zstopen"
         ],
         "TarInfo": [
-          "chksum",
           "create_gnu_header",
           "create_pax_global_header",
           "create_pax_header",
           "create_ustar_header",
-          "devmajor",
-          "devminor",
           "frombuf",
           "fromtarfile",
           "get_info",
-          "gid",
-          "gname",
           "isblk",
           "ischr",
           "isdev",
@@ -6396,23 +5712,8 @@
           "isreg",
           "issparse",
           "issym",
-          "linkname",
-          "linkpath",
-          "mode",
-          "mtime",
-          "name",
-          "offset",
-          "offset_data",
-          "path",
-          "pax_headers",
           "replace",
-          "size",
-          "sparse",
-          "tarfile",
-          "tobuf",
-          "type",
-          "uid",
-          "uname"
+          "tobuf"
         ]
       }
     },
@@ -6422,6 +5723,10 @@
         "TMP_MAX",
         "tempdir"
       ],
+      "excludedExceptionCount": 0,
+      "excludedExceptions": [],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
       "operationCount": 11,
       "operations": [
         "NamedTemporaryFile",
@@ -6436,20 +5741,14 @@
         "mkstemp",
         "mktemp"
       ],
-      "typeMemberCount": 27,
+      "typeMemberCount": 21,
       "types": {
         "SpooledTemporaryFile": [
           "close",
-          "closed",
           "detach",
-          "encoding",
-          "errors",
           "fileno",
           "flush",
           "isatty",
-          "mode",
-          "name",
-          "newlines",
           "read",
           "read1",
           "readable",
@@ -6471,6 +5770,135 @@
         ]
       }
     },
+    "textwrap": {
+      "excludedConstantCount": 0,
+      "excludedConstants": [],
+      "excludedExceptionCount": 0,
+      "excludedExceptions": [],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
+      "operationCount": 6,
+      "operations": [
+        "TextWrapper",
+        "dedent",
+        "fill",
+        "indent",
+        "shorten",
+        "wrap"
+      ],
+      "typeMemberCount": 2,
+      "types": {
+        "TextWrapper": [
+          "fill",
+          "wrap"
+        ]
+      }
+    },
+    "threading": {
+      "excludedConstantCount": 1,
+      "excludedConstants": [
+        "TIMEOUT_MAX"
+      ],
+      "excludedExceptionCount": 2,
+      "excludedExceptions": [
+        "BrokenBarrierError",
+        "ThreadError"
+      ],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
+      "operationCount": 25,
+      "operations": [
+        "Barrier",
+        "BoundedSemaphore",
+        "Condition",
+        "Event",
+        "ExceptHookArgs",
+        "Lock",
+        "RLock",
+        "Semaphore",
+        "Thread",
+        "Timer",
+        "active_count",
+        "current_thread",
+        "enumerate",
+        "excepthook",
+        "get_ident",
+        "get_native_id",
+        "getprofile",
+        "gettrace",
+        "local",
+        "main_thread",
+        "setprofile",
+        "setprofile_all_threads",
+        "settrace",
+        "settrace_all_threads",
+        "stack_size"
+      ],
+      "typeMemberCount": 42,
+      "types": {
+        "Barrier": [
+          "abort",
+          "reset",
+          "wait"
+        ],
+        "BoundedSemaphore": [
+          "acquire",
+          "release"
+        ],
+        "Condition": [
+          "notify",
+          "notifyAll",
+          "notify_all",
+          "wait",
+          "wait_for"
+        ],
+        "Event": [
+          "clear",
+          "isSet",
+          "is_set",
+          "set",
+          "wait"
+        ],
+        "ExceptHookArgs": [
+          "count",
+          "index"
+        ],
+        "Lock": [
+          "acquire",
+          "acquire_lock",
+          "locked",
+          "locked_lock",
+          "release",
+          "release_lock"
+        ],
+        "Semaphore": [
+          "acquire",
+          "release"
+        ],
+        "Thread": [
+          "getName",
+          "isDaemon",
+          "is_alive",
+          "join",
+          "run",
+          "setDaemon",
+          "setName",
+          "start"
+        ],
+        "Timer": [
+          "cancel",
+          "getName",
+          "isDaemon",
+          "is_alive",
+          "join",
+          "run",
+          "setDaemon",
+          "setName",
+          "start"
+        ],
+        "local": []
+      }
+    },
     "time": {
       "excludedConstantCount": 11,
       "excludedConstants": [
@@ -6486,6 +5914,10 @@
         "timezone",
         "tzname"
       ],
+      "excludedExceptionCount": 0,
+      "excludedExceptions": [],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
       "operationCount": 27,
       "operations": [
         "asctime",
@@ -6516,198 +5948,30 @@
         "time_ns",
         "tzset"
       ],
-      "typeMemberCount": 16,
+      "typeMemberCount": 2,
       "types": {
         "struct_time": [
           "count",
-          "index",
-          "n_fields",
-          "n_sequence_fields",
-          "n_unnamed_fields",
-          "tm_gmtoff",
-          "tm_hour",
-          "tm_isdst",
-          "tm_mday",
-          "tm_min",
-          "tm_mon",
-          "tm_sec",
-          "tm_wday",
-          "tm_yday",
-          "tm_year",
-          "tm_zone"
+          "index"
         ]
       }
     },
     "tomllib": {
       "excludedConstantCount": 0,
       "excludedConstants": [],
-      "operationCount": 3,
+      "excludedExceptionCount": 1,
+      "excludedExceptions": [
+        "TOMLDecodeError"
+      ],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
+      "operationCount": 2,
       "operations": [
-        "TOMLDecodeError",
         "load",
         "loads"
       ],
-      "typeMemberCount": 3,
-      "types": {
-        "TOMLDecodeError": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ]
-      }
-    },
-    "types": {
-      "excludedConstantCount": 0,
-      "excludedConstants": [],
-      "operationCount": 33,
-      "operations": [
-        "AsyncGeneratorType",
-        "BuiltinFunctionType",
-        "BuiltinMethodType",
-        "CapsuleType",
-        "CellType",
-        "ClassMethodDescriptorType",
-        "CodeType",
-        "CoroutineType",
-        "DynamicClassAttribute",
-        "EllipsisType",
-        "FrameType",
-        "FunctionType",
-        "GeneratorType",
-        "GenericAlias",
-        "GetSetDescriptorType",
-        "LambdaType",
-        "MappingProxyType",
-        "MemberDescriptorType",
-        "MethodDescriptorType",
-        "MethodType",
-        "MethodWrapperType",
-        "ModuleType",
-        "NoneType",
-        "NotImplementedType",
-        "SimpleNamespace",
-        "TracebackType",
-        "UnionType",
-        "WrapperDescriptorType",
-        "coroutine",
-        "get_original_bases",
-        "new_class",
-        "prepare_class",
-        "resolve_bases"
-      ],
-      "typeMemberCount": 73,
-      "types": {
-        "AsyncGeneratorType": [
-          "aclose",
-          "ag_await",
-          "ag_code",
-          "ag_frame",
-          "ag_running",
-          "ag_suspended",
-          "asend",
-          "athrow"
-        ],
-        "BuiltinFunctionType": [],
-        "BuiltinMethodType": [],
-        "CapsuleType": [],
-        "CellType": [
-          "cell_contents"
-        ],
-        "ClassMethodDescriptorType": [],
-        "CodeType": [
-          "co_argcount",
-          "co_branches",
-          "co_cellvars",
-          "co_code",
-          "co_consts",
-          "co_exceptiontable",
-          "co_filename",
-          "co_firstlineno",
-          "co_flags",
-          "co_freevars",
-          "co_kwonlyargcount",
-          "co_lines",
-          "co_linetable",
-          "co_lnotab",
-          "co_name",
-          "co_names",
-          "co_nlocals",
-          "co_positions",
-          "co_posonlyargcount",
-          "co_qualname",
-          "co_stacksize",
-          "co_varnames",
-          "replace"
-        ],
-        "CoroutineType": [
-          "close",
-          "cr_await",
-          "cr_code",
-          "cr_frame",
-          "cr_origin",
-          "cr_running",
-          "cr_suspended",
-          "send",
-          "throw"
-        ],
-        "DynamicClassAttribute": [
-          "deleter",
-          "getter",
-          "setter"
-        ],
-        "EllipsisType": [],
-        "FrameType": [
-          "clear",
-          "f_back",
-          "f_builtins",
-          "f_code",
-          "f_generator",
-          "f_globals",
-          "f_lasti",
-          "f_lineno",
-          "f_locals",
-          "f_trace",
-          "f_trace_lines",
-          "f_trace_opcodes"
-        ],
-        "FunctionType": [],
-        "GeneratorType": [
-          "close",
-          "gi_code",
-          "gi_frame",
-          "gi_running",
-          "gi_suspended",
-          "gi_yieldfrom",
-          "send",
-          "throw"
-        ],
-        "GenericAlias": [],
-        "GetSetDescriptorType": [],
-        "LambdaType": [],
-        "MappingProxyType": [
-          "copy",
-          "get",
-          "items",
-          "keys",
-          "values"
-        ],
-        "MemberDescriptorType": [],
-        "MethodDescriptorType": [],
-        "MethodType": [],
-        "MethodWrapperType": [],
-        "ModuleType": [],
-        "NoneType": [],
-        "NotImplementedType": [],
-        "SimpleNamespace": [],
-        "TracebackType": [
-          "tb_frame",
-          "tb_lasti",
-          "tb_lineno",
-          "tb_next"
-        ],
-        "UnionType": [],
-        "WrapperDescriptorType": []
-      }
+      "typeMemberCount": 0,
+      "types": {}
     },
     "unicodedata": {
       "excludedConstantCount": 2,
@@ -6715,6 +5979,10 @@
         "ucd_3_2_0",
         "unidata_version"
       ],
+      "excludedExceptionCount": 0,
+      "excludedExceptions": [],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
       "operationCount": 14,
       "operations": [
         "UCD",
@@ -6732,7 +6000,7 @@
         "normalize",
         "numeric"
       ],
-      "typeMemberCount": 14,
+      "typeMemberCount": 13,
       "types": {
         "UCD": [
           "bidirectional",
@@ -6747,8 +6015,7 @@
           "mirrored",
           "name",
           "normalize",
-          "numeric",
-          "unidata_version"
+          "numeric"
         ]
       }
     },
@@ -6757,11 +6024,16 @@
       "excludedConstants": [
         "defaultTestLoader"
       ],
-      "operationCount": 21,
+      "excludedExceptionCount": 1,
+      "excludedExceptions": [
+        "SkipTest"
+      ],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
+      "operationCount": 20,
       "operations": [
         "FunctionTestCase",
         "IsolatedAsyncioTestCase",
-        "SkipTest",
         "TestCase",
         "TestLoader",
         "TestResult",
@@ -6781,7 +6053,7 @@
         "skipIf",
         "skipUnless"
       ],
-      "typeMemberCount": 263,
+      "typeMemberCount": 241,
       "types": {
         "FunctionTestCase": [
           "addClassCleanup",
@@ -6838,8 +6110,6 @@
           "fail",
           "failureException",
           "id",
-          "longMessage",
-          "maxDiff",
           "run",
           "runTest",
           "setUp",
@@ -6909,9 +6179,6 @@
           "fail",
           "failureException",
           "id",
-          "longMessage",
-          "loop_factory",
-          "maxDiff",
           "run",
           "setUp",
           "setUpClass",
@@ -6920,11 +6187,6 @@
           "subTest",
           "tearDown",
           "tearDownClass"
-        ],
-        "SkipTest": [
-          "add_note",
-          "args",
-          "with_traceback"
         ],
         "TestCase": [
           "addClassCleanup",
@@ -6981,8 +6243,6 @@
           "fail",
           "failureException",
           "id",
-          "longMessage",
-          "maxDiff",
           "run",
           "setUp",
           "setUpClass",
@@ -7000,9 +6260,7 @@
           "loadTestsFromNames",
           "loadTestsFromTestCase",
           "sortTestMethodsUsing",
-          "suiteClass",
-          "testMethodPrefix",
-          "testNamePatterns"
+          "suiteClass"
         ],
         "TestResult": [
           "addDuration",
@@ -7040,8 +6298,6 @@
           "getDescription",
           "printErrorList",
           "printErrors",
-          "separator1",
-          "separator2",
           "startTest",
           "startTestRun",
           "stop",
@@ -7054,23 +6310,19 @@
           "run"
         ],
         "main": [
-          "buffer",
-          "catchbreak",
           "createTests",
-          "failfast",
-          "module",
           "parseArgs",
-          "progName",
-          "runTests",
-          "testNamePatterns",
-          "verbosity",
-          "warnings"
+          "runTests"
         ]
       }
     },
     "urllib.parse": {
       "excludedConstantCount": 0,
       "excludedConstants": [],
+      "excludedExceptionCount": 0,
+      "excludedExceptions": [],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
       "operationCount": 21,
       "operations": [
         "DefragResult",
@@ -7095,85 +6347,43 @@
         "urlunparse",
         "urlunsplit"
       ],
-      "typeMemberCount": 66,
+      "typeMemberCount": 24,
       "types": {
         "DefragResult": [
           "count",
           "encode",
-          "fragment",
           "geturl",
-          "index",
-          "url"
+          "index"
         ],
         "DefragResultBytes": [
           "count",
           "decode",
-          "fragment",
           "geturl",
-          "index",
-          "url"
+          "index"
         ],
         "ParseResult": [
           "count",
           "encode",
-          "fragment",
           "geturl",
-          "hostname",
-          "index",
-          "netloc",
-          "params",
-          "password",
-          "path",
-          "port",
-          "query",
-          "scheme",
-          "username"
+          "index"
         ],
         "ParseResultBytes": [
           "count",
           "decode",
-          "fragment",
           "geturl",
-          "hostname",
-          "index",
-          "netloc",
-          "params",
-          "password",
-          "path",
-          "port",
-          "query",
-          "scheme",
-          "username"
+          "index"
         ],
         "SplitResult": [
           "count",
           "encode",
-          "fragment",
           "geturl",
-          "hostname",
-          "index",
-          "netloc",
-          "password",
-          "path",
-          "port",
-          "query",
-          "scheme",
-          "username"
+          "index"
         ],
         "SplitResultBytes": [
           "count",
           "decode",
-          "fragment",
           "geturl",
-          "hostname",
-          "index",
-          "netloc",
-          "password",
-          "path",
-          "port",
-          "query",
-          "scheme",
-          "username"
+          "index"
         ]
       }
     },
@@ -7194,6 +6404,10 @@
         "sys",
         "time"
       ],
+      "excludedExceptionCount": 0,
+      "excludedExceptions": [],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
       "operationCount": 14,
       "operations": [
         "Enum",
@@ -7211,33 +6425,11 @@
         "uuid7",
         "uuid8"
       ],
-      "typeMemberCount": 73,
+      "typeMemberCount": 49,
       "types": {
         "Enum": [],
-        "SafeUUID": [
-          "safe",
-          "unknown",
-          "unsafe"
-        ],
-        "UUID": [
-          "bytes",
-          "bytes_le",
-          "clock_seq",
-          "clock_seq_hi_variant",
-          "clock_seq_low",
-          "fields",
-          "hex",
-          "int",
-          "is_safe",
-          "node",
-          "time",
-          "time_hi_version",
-          "time_low",
-          "time_mid",
-          "urn",
-          "variant",
-          "version"
-        ],
+        "SafeUUID": [],
+        "UUID": [],
         "bytes_": [
           "capitalize",
           "center",
@@ -7287,13 +6479,108 @@
           "bit_count",
           "bit_length",
           "conjugate",
-          "denominator",
           "from_bytes",
-          "imag",
           "is_integer",
-          "numerator",
-          "real",
           "to_bytes"
+        ]
+      }
+    },
+    "xml.etree.ElementTree": {
+      "excludedConstantCount": 1,
+      "excludedConstants": [
+        "VERSION"
+      ],
+      "excludedExceptionCount": 1,
+      "excludedExceptions": [
+        "ParseError"
+      ],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
+      "operationCount": 24,
+      "operations": [
+        "C14NWriterTarget",
+        "Comment",
+        "Element",
+        "ElementTree",
+        "PI",
+        "ProcessingInstruction",
+        "QName",
+        "SubElement",
+        "TreeBuilder",
+        "XML",
+        "XMLID",
+        "XMLParser",
+        "XMLPullParser",
+        "canonicalize",
+        "dump",
+        "fromstring",
+        "fromstringlist",
+        "indent",
+        "iselement",
+        "iterparse",
+        "parse",
+        "register_namespace",
+        "tostring",
+        "tostringlist"
+      ],
+      "typeMemberCount": 44,
+      "types": {
+        "C14NWriterTarget": [
+          "comment",
+          "data",
+          "end",
+          "pi",
+          "start",
+          "start_ns"
+        ],
+        "Element": [
+          "append",
+          "clear",
+          "extend",
+          "find",
+          "findall",
+          "findtext",
+          "get",
+          "insert",
+          "items",
+          "iter",
+          "iterfind",
+          "itertext",
+          "keys",
+          "makeelement",
+          "remove",
+          "set"
+        ],
+        "ElementTree": [
+          "find",
+          "findall",
+          "findtext",
+          "getroot",
+          "iter",
+          "iterfind",
+          "parse",
+          "write",
+          "write_c14n"
+        ],
+        "QName": [],
+        "TreeBuilder": [
+          "close",
+          "comment",
+          "data",
+          "end",
+          "pi",
+          "start"
+        ],
+        "XMLParser": [
+          "close",
+          "feed",
+          "flush"
+        ],
+        "XMLPullParser": [
+          "close",
+          "feed",
+          "flush",
+          "read_events"
         ]
       }
     },
@@ -7306,38 +6593,27 @@
         "ZIP_STORED",
         "ZIP_ZSTANDARD"
       ],
-      "operationCount": 9,
-      "operations": [
+      "excludedExceptionCount": 4,
+      "excludedExceptions": [
         "BadZipFile",
         "BadZipfile",
         "LargeZipFile",
+        "error"
+      ],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
+      "operationCount": 5,
+      "operations": [
         "Path",
         "PyZipFile",
         "ZipFile",
         "ZipInfo",
-        "error",
         "is_zipfile"
       ],
-      "typeMemberCount": 86,
+      "typeMemberCount": 45,
       "types": {
-        "BadZipFile": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "BadZipfile": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
-        "LargeZipFile": [
-          "add_note",
-          "args",
-          "with_traceback"
-        ],
         "Path": [
           "exists",
-          "filename",
           "glob",
           "is_dir",
           "is_file",
@@ -7345,23 +6621,16 @@
           "iterdir",
           "joinpath",
           "match",
-          "name",
           "open",
-          "parent",
           "read_bytes",
           "read_text",
           "relative_to",
-          "rglob",
-          "stem",
-          "suffix",
-          "suffixes"
+          "rglob"
         ],
         "PyZipFile": [
           "close",
-          "comment",
           "extract",
           "extractall",
-          "fp",
           "getinfo",
           "infolist",
           "mkdir",
@@ -7377,10 +6646,8 @@
         ],
         "ZipFile": [
           "close",
-          "comment",
           "extract",
           "extractall",
-          "fp",
           "getinfo",
           "infolist",
           "mkdir",
@@ -7394,43 +6661,65 @@
           "writestr"
         ],
         "ZipInfo": [
-          "CRC",
           "FileHeader",
-          "comment",
-          "compress_level",
-          "compress_size",
-          "compress_type",
-          "create_system",
-          "create_version",
-          "date_time",
-          "external_attr",
-          "extra",
-          "extract_version",
-          "file_size",
-          "filename",
-          "flag_bits",
           "from_file",
-          "header_offset",
-          "internal_attr",
-          "is_dir",
-          "orig_filename",
-          "reserved",
-          "volume"
-        ],
-        "error": [
-          "add_note",
-          "args",
-          "with_traceback"
+          "is_dir"
         ]
       }
+    },
+    "zlib": {
+      "excludedConstantCount": 22,
+      "excludedConstants": [
+        "DEFLATED",
+        "DEF_BUF_SIZE",
+        "DEF_MEM_LEVEL",
+        "MAX_WBITS",
+        "ZLIB_RUNTIME_VERSION",
+        "ZLIB_VERSION",
+        "Z_BEST_COMPRESSION",
+        "Z_BEST_SPEED",
+        "Z_BLOCK",
+        "Z_DEFAULT_COMPRESSION",
+        "Z_DEFAULT_STRATEGY",
+        "Z_FILTERED",
+        "Z_FINISH",
+        "Z_FIXED",
+        "Z_FULL_FLUSH",
+        "Z_HUFFMAN_ONLY",
+        "Z_NO_COMPRESSION",
+        "Z_NO_FLUSH",
+        "Z_PARTIAL_FLUSH",
+        "Z_RLE",
+        "Z_SYNC_FLUSH",
+        "Z_TREES"
+      ],
+      "excludedExceptionCount": 1,
+      "excludedExceptions": [
+        "error"
+      ],
+      "excludedTypeCount": 0,
+      "excludedTypes": [],
+      "operationCount": 6,
+      "operations": [
+        "adler32",
+        "compress",
+        "compressobj",
+        "crc32",
+        "decompress",
+        "decompressobj"
+      ],
+      "typeMemberCount": 0,
+      "types": {}
     }
   },
   "title": "Python comparison surface",
   "totals": {
     "builtinTypeMembers": 165,
-    "comparisonPoints": 1254,
-    "excludedConstants": 1057,
-    "moduleOperations": 1089,
-    "moduleTypeMembers": 3951
+    "comparisonPoints": 1297,
+    "excludedConstants": 1163,
+    "excludedExceptions": 167,
+    "excludedTypes": 26,
+    "moduleOperations": 1132,
+    "moduleTypeMembers": 2708
   }
 }

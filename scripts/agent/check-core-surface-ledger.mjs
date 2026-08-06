@@ -48,57 +48,90 @@ const SURFACE_FILES = {
   R: "docs/reference/surfaces/r-surface.json",
 };
 
-// Python's snapshot predates the container shape. It is projected onto the
-// shared containers here rather than re-read, so the interpreter record stays
-// the evidence and Python is compared exactly like the other ten.
-const PYTHON_CONTAINERS = {
-  List: { type: "list", modules: ["builtins"] },
-  Iter: { modules: ["itertools", "builtins"] },
-  Map: { type: "dict" },
-  Set: { type: "set" },
-  String: { type: "str" },
-  ByteBuffer: { type: "bytes", modules: ["io", "struct"] },
-  Deque: { modules: ["collections"] },
-  PriorityQueue: { modules: ["heapq"] },
-  Cache: { modules: ["functools"] },
-  "core.math": { modules: ["math"] },
-  "core.random": { modules: ["random"] },
-  "core.crypto.random": { modules: ["secrets"] },
-  "core.crypto": { modules: ["secrets"] },
-  "core.time": { modules: ["datetime", "time"] },
-  "core.encoding.json": { modules: ["json"] },
-  "core.encoding.csv": { modules: ["csv"] },
-  "core.encoding.toml": { modules: ["tomllib"] },
-  "core.encoding.base64": { modules: ["base64"] },
-  "core.encoding.base32": { modules: ["base64"] },
-  "core.encoding.hex": { modules: ["binascii"] },
-  "core.regex": { modules: ["re"] },
-  "core.files": { modules: ["pathlib", "os", "tempfile"] },
-  "core.path": { modules: ["pathlib"] },
-  "core.env": { modules: ["os"] },
-  "core.os": { modules: ["os", "sys"] },
-  "core.process": { modules: ["subprocess"] },
-  "core.net": { modules: ["socket"] },
-  "core.tls": { modules: ["ssl"] },
-  "core.http": { modules: ["http"] },
-  "core.url": { modules: ["urllib.parse"] },
-  "core.uuid": { modules: ["uuid"] },
-  "core.db": { modules: ["sqlite3"] },
-  "core.tasks": { modules: ["asyncio"] },
-  "core.testing": { modules: ["unittest"] },
-  "core.log": { modules: ["logging"] },
-  "core.binary": { modules: ["struct"] },
-  "core.archive": { modules: ["zipfile", "tarfile"] },
-  "core.io": { modules: ["builtins", "io"] },
-  "core.fmt": { modules: ["builtins"] },
-  "core.data": { modules: ["statistics"] },
-  "core.text": { type: "str" },
-  "core.text.unicode": { modules: ["unicodedata"] },
+// Python's snapshot predates the container shape, so it is projected onto the
+// shared containers rather than re-read. The map runs source to container, not
+// container to source: the earlier shape let one module feed three containers,
+// so every os function minted three separate gap rows.
+const PYTHON_SOURCE_CONTAINER = {
+  "type:list": "List",
+  "type:tuple": "List",
+  "type:range": "Iter",
+  "type:dict": "Map",
+  "type:set": "Set",
+  "type:str": "String",
+  "type:bytes": "ByteBuffer",
+  "type:int": "core.math",
+  "type:float": "core.math",
+  "mod:builtins": "core.io",
+  "mod:itertools": "Iter",
+  "mod:collections": "Deque",
+  "mod:heapq": "PriorityQueue",
+  "mod:functools": "Cache",
+  "mod:io": "ByteBuffer",
+  "mod:string": "String",
+  "mod:textwrap": "String",
+  "mod:math": "core.math",
+  "mod:decimal": "core.math",
+  "mod:fractions": "core.math",
+  "mod:random": "core.random",
+  "mod:secrets": "core.crypto.random",
+  "mod:hashlib": "core.crypto",
+  "mod:hmac": "core.crypto",
+  "mod:datetime": "core.time",
+  "mod:time": "core.time",
+  "mod:json": "core.encoding.json",
+  "mod:csv": "core.encoding.csv",
+  "mod:tomllib": "core.encoding.toml",
+  "mod:base64": "core.encoding.base64",
+  "mod:binascii": "core.encoding.hex",
+  "mod:re": "core.regex",
+  "mod:pathlib": "core.path",
+  "mod:os": "core.os",
+  "mod:sys": "core.os",
+  "mod:shutil": "core.files",
+  "mod:glob": "core.files",
+  "mod:tempfile": "core.files",
+  "mod:subprocess": "core.process",
+  "mod:socket": "core.net",
+  "mod:ssl": "core.tls",
+  "mod:http": "core.http",
+  "mod:http.server": "core.http",
+  "mod:urllib.parse": "core.url",
+  "mod:uuid": "core.uuid",
+  "mod:sqlite3": "core.db",
+  "mod:asyncio": "core.tasks",
+  "mod:threading": "core.tasks",
+  "mod:queue": "core.tasks",
+  "mod:unittest": "core.testing",
+  "mod:logging": "core.log",
+  "mod:struct": "core.binary",
+  "mod:zipfile": "core.archive",
+  "mod:tarfile": "core.archive",
+  "mod:gzip": "core.archive",
+  "mod:zlib": "core.archive",
+  "mod:statistics": "core.data",
+  "mod:unicodedata": "core.text.unicode",
+};
+
+// A recorded Python module with no container yet. Listing it keeps the gap
+// countable; dropping it silently would hide a whole workflow.
+const PYTHON_UNASSIGNED = {
+  "mod:argparse": "Jet's core.args has no container in this ledger yet",
+  "mod:email": "Jet's core.email has no container in this ledger yet",
+  "mod:inspect": "Jet's core.reflect has no container in this ledger yet",
+  "mod:mimetypes": "Jet's core.mime has no container in this ledger yet",
+  "mod:xml.etree.ElementTree": "Jet's core.encoding.xml has no container in this ledger yet",
+  "mod:copy": "Jet's core.mem has no container in this ledger yet",
+  "type:bool": "bool mirrors int, which is recorded under core.math",
 };
 
 const PYTHON_ABSENT = {
   SortedSet: "no Python standard-library ordered set",
   BitSet: "no Python standard-library bit set; int carries bit operations",
+  "core.env": "environment access lives in the os module, recorded under core.os",
+  "core.encoding.base32": "base32 lives in the base64 module, recorded under core.encoding.base64",
+  "core.fmt": "formatting lives on str.format, recorded under String",
+  "core.text": "text handling lives on str, recorded under String",
 };
 
 // A Jet module whose workflow is the one an existing container already
@@ -538,29 +571,35 @@ function collectionInventory() {
 
 function pythonSurface() {
   const snapshot = JSON.parse(readFileSync(PYTHON_SURFACE_PATH, "utf8"));
+  const byContainer = new Map();
+  const record = function (container, key) {
+    if (!byContainer.has(container)) byContainer.set(container, { operations: new Set(), sources: [] });
+    byContainer.get(container).sources.push(key);
+    return byContainer.get(container).operations;
+  };
+  for (const [key, container] of Object.entries(PYTHON_SOURCE_CONTAINER)) {
+    const name = key.slice(key.indexOf(":") + 1);
+    if (key.startsWith("type:")) {
+      const entry = snapshot.builtinTypes[name];
+      if (!entry) throw new Error("Python builtin type absent from the snapshot: " + name);
+      const into = record(container, key);
+      for (const member of entry.members) into.add(member);
+      continue;
+    }
+    const entry = snapshot.stdlibModules[name];
+    if (!entry) throw new Error("Python module absent from the snapshot: " + name);
+    const into = record(container, key);
+    for (const member of entry.operations) into.add(member);
+    for (const members of Object.values(entry.types || {})) {
+      for (const member of members) into.add(member);
+    }
+  }
   const containers = {};
-  for (const [name, spec] of Object.entries(PYTHON_CONTAINERS)) {
-    const operations = new Set();
-    const sources = [];
-    if (spec.type) {
-      const entry = snapshot.builtinTypes[spec.type];
-      if (!entry) throw new Error("Python builtin type absent from the snapshot: " + spec.type);
-      for (const member of entry.members) operations.add(member);
-      sources.push(spec.type);
-    }
-    for (const module of spec.modules || []) {
-      const entry = snapshot.stdlibModules[module];
-      if (!entry) throw new Error("Python module absent from the snapshot: " + module);
-      for (const member of entry.operations) operations.add(member);
-      for (const members of Object.values(entry.types || {})) {
-        for (const member of members) operations.add(member);
-      }
-      sources.push(module);
-    }
+  for (const [name, entry] of byContainer.entries()) {
     containers[name] = {
       present: true,
-      pythonSources: sources,
-      operations: Array.from(operations).sort(),
+      pythonSources: entry.sources.sort(),
+      operations: Array.from(entry.operations).sort(),
     };
   }
   for (const [name, reason] of Object.entries(PYTHON_ABSENT)) {
@@ -571,6 +610,7 @@ function pythonSurface() {
     sourceKind: "runtime introspection",
     runtime: "python " + snapshot.pythonVersion,
     scopeRule: snapshot.scopeRule,
+    unassignedSources: PYTHON_UNASSIGNED,
     officialReferences: [
       "https://docs.python.org/3/library/functions.html",
       "https://docs.python.org/3/library/stdtypes.html",
@@ -608,6 +648,13 @@ function canonicalContainers(surfaces) {
   return Array.from(names).sort();
 }
 
+// An operator is syntax, not a named operation. Ruby alone exposes %, *, +, +@,
+// <<, =~, [] and []= as String members; scoring them as missing calls compared
+// Jet's method surface against another language's punctuation.
+function isNamedOperation(name) {
+  return /^[A-Za-z_][A-Za-z0-9_]*[!?=]?$/.test(name);
+}
+
 function normalize(name) {
   return name.toLowerCase().replace(/[_!?.\-]/g, "");
 }
@@ -638,7 +685,10 @@ function competitorCells(surfaces, container, jetMember) {
       cells[language] = { status: "container_absent", operation: null, reason: record.reason };
       continue;
     }
+    const exact = normalize(jetMember);
     const hit = record.operations.find(function (operation) {
+      return normalize(operation) === exact;
+    }) || record.operations.find(function (operation) {
       return keys.has(normalize(operation));
     });
     cells[language] = hit ? { status: "has", operation: hit } : { status: "lacks", operation: null };
@@ -702,17 +752,23 @@ function rowForCollection(entry, method, surfaces) {
 // every recorded competitor operation that no Jet row matched becomes its own
 // visible row.
 function competitorRows(surfaces, jetRows) {
-  const matched = new Map();
+  // Matching is set to set, not one to one. Recording only the single operation
+  // each Jet member happened to match left every other spelling of the same
+  // workflow scored as a gap: List.push matched Rust append, and Rust push,
+  // Ruby push and Python append all still counted as separate losses.
+  const covered = new Map();
+  const jetContainers = new Set();
   for (const row of jetRows) {
-    for (const [language, cell] of Object.entries(row.competitors)) {
-      if (cell.status !== "has") continue;
-      const key = language + "\u0000" + row.container;
-      if (!matched.has(key)) matched.set(key, new Set());
-      matched.get(key).add(cell.operation);
-    }
+    jetContainers.add(row.container);
+    if (!covered.has(row.container)) covered.set(row.container, new Set());
+    const keys = covered.get(row.container);
+    for (const key of synonymsFor(row.source.member)) keys.add(key);
   }
-  const jetContainers = new Set(jetRows.map(function (row) { return row.container; }));
-  const rows = [];
+
+  // A gap is one workflow Jet lacks, not one row per language. Ten languages
+  // shipping sqrt is one missing operation with ten witnesses, and minting a
+  // row each multiplied the backlog by the size of the comparison set.
+  const gaps = new Map();
   for (const [language, entry] of Object.entries(surfaces)) {
     for (const [container, record] of Object.entries(entry.surface.containers)) {
       if (!record.present) continue;
@@ -725,29 +781,57 @@ function competitorRows(surfaces, jetRows) {
       // it would score Jet against operations the index never attributed here.
       // The skip is listed in packageAttributedContainers, never silent.
       if (record.attribution === "package") continue;
-      const hits = matched.get(language + "\u0000" + container) || new Set();
+      const keys = covered.get(container);
       for (const operation of record.operations) {
-        if (hits.has(operation)) continue;
-        rows.push({
-          id: "competitor." + language + "." + container + "." + operation,
-          source: {
-            kind: "competitor_operation",
-            language: language,
-            container: container,
-            member: operation,
-            sourceLine: null,
-          },
-          container: container,
-          jetSpelling: null,
-          workflow: "competitor operation in " + container + " with no matching Jet spelling",
-          verdict: "jet_loses",
-          competitors: { [language]: { status: "has", operation: operation } },
-          evidence: ["surface:" + entry.path],
-        });
+        // An operator is syntax, not a named operation. Ruby alone exposes %,
+        // *, +, +@, <<, =~, [] and []= as String members.
+        if (!isNamedOperation(operation)) continue;
+        const key = normalize(operation);
+        if (keys.has(key)) continue;
+        const id = "gap." + container + "." + key;
+        if (!gaps.has(id)) {
+          gaps.set(id, { id: id, container: container, key: key, spellings: {}, evidence: new Set() });
+        }
+        const gap = gaps.get(id);
+        // One row per distinct operation per language: Ruby ships chop and
+        // chop!, which are one workflow spelled twice.
+        if (!gap.spellings[language]) gap.spellings[language] = operation;
+        gap.evidence.add("surface:" + entry.path);
       }
     }
   }
-  return rows;
+
+  return Array.from(gaps.values()).map(function (gap) {
+    const languages = Object.keys(gap.spellings).sort();
+    const competitors = {};
+    for (const language of languages) {
+      competitors[language] = { status: "has", operation: gap.spellings[language] };
+    }
+    return {
+      id: gap.id,
+      source: {
+        kind: "competitor_operation",
+        container: gap.container,
+        member: gap.key,
+        languages: languages,
+        sourceLine: null,
+      },
+      container: gap.container,
+      jetSpelling: null,
+      workflow: "operation " + languages.length + " of " + Object.keys(surfaces).length +
+        " compared languages ship in " + gap.container + ", with no matching Jet spelling",
+      // One language shipping a name is not evidence that Jet is missing a
+      // workflow: 8446 of 9117 gaps had a single witness, and they are that
+      // language's own internals, such as Rust's align_to and as_mut_ptr,
+      // which a memory-safe language cannot and should not expose. A gap two
+      // compared languages agree on is a real one. Single-witness rows stay in
+      // the ledger and stay counted; they are recorded, not scored.
+      verdict: languages.length >= 2 ? "jet_loses" : "single_witness",
+      witnessCount: languages.length,
+      competitors: competitors,
+      evidence: Array.from(gap.evidence).sort(),
+    };
+  });
 }
 
 function buildRows(modules, fixedPairs, collections, surfaces) {
@@ -802,7 +886,7 @@ function lossClusters(rows, cards) {
     }
     const cluster = byContainer.get(row.container);
     cluster.lossCount += 1;
-    cluster.languages.add(row.source.language);
+    for (const language of row.source.languages || []) cluster.languages.add(language);
   }
   return Array.from(byContainer.values()).map(function (cluster) {
     const card = CLUSTER_OWNER_HISTORY[cluster.container] ?? null;
@@ -898,7 +982,7 @@ function buildLedger() {
         return row.competitors[language] && row.competitors[language].status === "has";
       }).length,
       lossRows: rows.filter(function (row) {
-        return row.verdict === "jet_loses" && row.source.language === language;
+        return row.verdict === "jet_loses" && (row.source.languages || []).includes(language);
       }).length,
       officialReferences: entry.surface.officialReferences,
     };
@@ -989,11 +1073,11 @@ function validateRows(ledger, surfaces) {
   surfaces = surfaces || loadSurfaces();
   const ids = new Set();
   const sourceKeys = new Set();
-  const verdicts = new Set(["equal", "jet_wins", "jet_loses", "not_compared", "declined"]);
+  const verdicts = new Set(["equal", "jet_wins", "jet_loses", "single_witness", "not_compared", "declined"]);
   for (const row of ledger.rows) {
     if (ids.has(row.id)) throw new Error("duplicate row id: " + row.id);
     ids.add(row.id);
-    const sourceKey = row.source.kind + ":" + (row.source.language || "") + ":" +
+    const sourceKey = row.source.kind + ":" +
       (row.source.module || row.source.type || row.source.container) + ":" + row.source.member;
     if (sourceKeys.has(sourceKey)) throw new Error("duplicate source row: " + sourceKey);
     sourceKeys.add(sourceKey);
@@ -1001,7 +1085,7 @@ function validateRows(ledger, surfaces) {
     if (!verdicts.has(row.verdict)) {
       throw new Error("invalid verdict in " + row.id + ": " + row.verdict);
     }
-    if (row.verdict !== "jet_loses" && !row.jetSpelling) {
+    if (row.verdict !== "jet_loses" && row.verdict !== "single_witness" && !row.jetSpelling) {
       throw new Error("row without a Jet spelling: " + row.id);
     }
     // A row may not assert an operation the recorded surface does not have.
@@ -1129,7 +1213,8 @@ function markdown(ledger) {
     "| --- | ---: |",
     "| Jet wins | " + (v.jet_wins || 0) + " |",
     "| Equal | " + (v.equal || 0) + " |",
-    "| Jet loses | " + (v.jet_loses || 0) + " |",
+    "| Jet loses (two or more languages agree) | " + (v.jet_loses || 0) + " |",
+    "| Single witness (recorded, not scored) | " + (v.single_witness || 0) + " |",
     "| Not compared | " + (v.not_compared || 0) + " |",
     "| Deliberately declined | " + (v.declined || 0) + " |",
     "",
@@ -1230,6 +1315,7 @@ function check() {
     " wins=" + (v.jet_wins || 0) +
     " equal=" + (v.equal || 0) +
     " loses=" + (v.jet_loses || 0) +
+    " single-witness=" + (v.single_witness || 0) +
     " not-compared=" + (v.not_compared || 0) +
     " clusters-needing-a-card=" + stored.summary.clustersNeedingCard + "\n");
 }

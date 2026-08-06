@@ -43,10 +43,9 @@ INSTANCE = {
   "core.time" => [Time, Date, DateTime],
   "core.regex" => [Regexp, MatchData],
   "core.url" => [URI::Generic],
-  "core.files" => [Pathname],
+  "core.path" => [Pathname],
   "core.net" => [Socket, TCPSocket],
   "core.log" => [Logger],
-  "core.binary" => [IO],
 }.freeze
 
 SINGLETON = {
@@ -58,18 +57,22 @@ SINGLETON = {
   "core.encoding.base64" => [Base64],
   "core.crypto" => [Digest],
   "core.os" => [Process],
-  "core.env" => [Dir],
-  "core.process" => [Process],
+  "core.files" => [Dir],
   "core.path" => [File],
   "core.archive" => [Zlib],
   "core.tls" => [OpenSSL::SSL],
   "core.http" => [Net::HTTP],
   "core.testing" => [Benchmark],
-  "core.fmt" => [Kernel],
-  "core.io" => [Kernel],
+  "core.io" => [IO],
 }.freeze
 
 ABSENT = {
+  "core.fmt" => "formatting lives on Kernel#format and String#%, which Object and Kernel provide to every class",
+  "core.binary" => "binary reading lives on IO, recorded under core.io",
+
+  "core.env" => "environment access lives on Process and ENV, recorded under core.os",
+  "core.process" => "process control lives on Process, recorded under core.os",
+
   "SortedSet" => "SortedSet left the Ruby standard library in Ruby 3.0",
   "PriorityQueue" => "no Ruby standard-library priority queue",
   "BitSet" => "no Ruby standard-library bit set; Integer carries bit operations",
@@ -85,13 +88,23 @@ ABSENT = {
   "core.uuid" => "SecureRandom.uuid exists, but Ruby ships no UUID module",
 }.freeze
 
+INHERITED = (
+  Object.instance_methods + Kernel.instance_methods +
+  Kernel.private_instance_methods + Object.private_instance_methods
+).map(&:to_s).to_set.freeze
+
+def strip_inherited(names)
+  names.reject { |n| INHERITED.include?(n) }
+end
+
 def instance_ops(mods)
-  mods.flat_map { |m| m.instance_methods(false) }.map(&:to_s).uniq.sort
+  strip_inherited(mods.flat_map { |m| m.instance_methods(false) }.map(&:to_s).uniq).sort
 end
 
 def singleton_ops(mods)
-  mods.flat_map { |m| m.singleton_methods(false) + (m.is_a?(Module) ? m.instance_methods(false) : []) }
-      .map(&:to_s).uniq.sort
+  names = mods.flat_map { |m| m.singleton_methods(false) + (m.is_a?(Module) ? m.instance_methods(false) : []) }
+              .map(&:to_s).uniq
+  strip_inherited(names).sort
 end
 
 containers = {}
@@ -106,7 +119,7 @@ puts JSON.pretty_generate({
   "language" => "Ruby",
   "sourceKind" => "runtime introspection",
   "runtime" => "ruby #{RUBY_VERSION}",
-  "scopeRule" => "Methods defined directly on the class or module that holds each workflow. Inherited Object/Kernel methods are excluded because they are not that container's operations.",
+  "scopeRule" => "Methods defined directly on the class or module that holds each workflow, minus every name Object and Kernel already provide. Ruby redefines dup, freeze, hash, inspect and eql? on many classes, so counting them scored one inherited protocol as a gap in every container that redefines it.",
   "officialReferences" => ["https://ruby-doc.org/3.4.1/"],
   "containers" => containers,
   "totals" => {
