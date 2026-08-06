@@ -13,6 +13,8 @@ mod runtime {
         #[derive(Clone, Debug, PartialEq)]
         pub struct JetURL {
             pub scheme: String,
+            pub username: Option<String>,
+            pub password: Option<String>,
             pub host: Option<String>,
             pub port: Option<i64>,
             pub path: String,
@@ -411,6 +413,58 @@ extern "C" fn jet_jit_url_fragment(recv: i64) -> i64 {
         NetValue::Url(u) => Some(u.fragment()),
         _ => None,
     }).flatten())
+}
+
+extern "C" fn jet_jit_url_username(recv: i64) -> i64 {
+    let Some(text) = with_net(recv, |v| match v {
+        NetValue::Url(u) => Some(u.username()),
+        _ => None,
+    }) else {
+        return alloc_string(String::new());
+    };
+    alloc_string(text)
+}
+
+extern "C" fn jet_jit_url_password(recv: i64) -> i64 {
+    let Some(text) = with_net(recv, |v| match v {
+        NetValue::Url(u) => Some(u.password()),
+        _ => None,
+    }) else {
+        return alloc_string(String::new());
+    };
+    alloc_string(text)
+}
+
+extern "C" fn jet_jit_url_userinfo(recv: i64) -> i64 {
+    let Some(text) = with_net(recv, |v| match v {
+        NetValue::Url(u) => Some(u.userinfo()),
+        _ => None,
+    }) else {
+        return alloc_string(String::new());
+    };
+    alloc_string(text)
+}
+
+extern "C" fn jet_jit_url_authority(recv: i64) -> i64 {
+    let Some(text) = with_net(recv, |v| match v {
+        NetValue::Url(u) => Some(u.authority()),
+        _ => None,
+    }) else {
+        return alloc_string(String::new());
+    };
+    alloc_string(text)
+}
+
+extern "C" fn jet_jit_url_default_port(recv: i64) -> i64 {
+    match with_net(recv, |v| match v {
+        NetValue::Url(u) => Some(u.default_port()),
+        _ => None,
+    })
+    .flatten()
+    {
+        Some(v) => v.wrapping_add(1),
+        None => 0,
+    }
 }
 
 extern "C" fn jet_jit_url_join(recv: i64, rel: i64) -> i64 {
@@ -833,6 +887,11 @@ pub(crate) struct NetHostFns {
     pub url_query_pairs: FuncId,
     pub url_path_segments: FuncId,
     pub url_fragment: FuncId,
+    pub url_username: FuncId,
+    pub url_password: FuncId,
+    pub url_userinfo: FuncId,
+    pub url_authority: FuncId,
+    pub url_default_port: FuncId,
     pub url_join: FuncId,
     pub mime_essence: FuncId,
     pub mime_param: FuncId,
@@ -879,6 +938,11 @@ pub(crate) fn register_net_symbols(builder: &mut JITBuilder) {
         jet_jit_url_path_segments as *const u8,
     );
     builder.symbol("jet_jit_url_fragment", jet_jit_url_fragment as *const u8);
+    builder.symbol("jet_jit_url_username", jet_jit_url_username as *const u8);
+    builder.symbol("jet_jit_url_password", jet_jit_url_password as *const u8);
+    builder.symbol("jet_jit_url_userinfo", jet_jit_url_userinfo as *const u8);
+    builder.symbol("jet_jit_url_authority", jet_jit_url_authority as *const u8);
+    builder.symbol("jet_jit_url_default_port", jet_jit_url_default_port as *const u8);
     builder.symbol("jet_jit_url_join", jet_jit_url_join as *const u8);
     builder.symbol("jet_jit_mime_essence", jet_jit_mime_essence as *const u8);
     builder.symbol("jet_jit_mime_param", jet_jit_mime_param as *const u8);
@@ -946,6 +1010,11 @@ pub(crate) fn declare_net_host_fns(module: &mut JITModule) -> Result<NetHostFns,
         url_query_pairs: import(module, "jet_jit_url_query_pairs", &sig1)?,
         url_path_segments: import(module, "jet_jit_url_path_segments", &sig1)?,
         url_fragment: import(module, "jet_jit_url_fragment", &sig1)?,
+        url_username: import(module, "jet_jit_url_username", &sig1)?,
+        url_password: import(module, "jet_jit_url_password", &sig1)?,
+        url_userinfo: import(module, "jet_jit_url_userinfo", &sig1)?,
+        url_authority: import(module, "jet_jit_url_authority", &sig1)?,
+        url_default_port: import(module, "jet_jit_url_default_port", &sig1)?,
         url_join: import(module, "jet_jit_url_join", &sig2)?,
         mime_essence: import(module, "jet_jit_mime_essence", &sig1)?,
         mime_param: import(module, "jet_jit_mime_param", &sig2)?,

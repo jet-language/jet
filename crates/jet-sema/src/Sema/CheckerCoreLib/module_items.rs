@@ -677,6 +677,8 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "warn",
             "error",
             "debug",
+            "critical",
+            "fatal",
             "field",
             "int",
             "float",
@@ -696,6 +698,9 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "set_level",
             "set_trace_id",
             "setup",
+            "disable",
+            "flush",
+            "enabled",
         ],
         "jet.crypto" => &[
             "Secret",

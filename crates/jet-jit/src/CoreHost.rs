@@ -816,6 +816,7 @@ extern "C" fn jet_jit_os_stop(code: i64) {
 
 thread_local! {
     static JIT_LOG_LEVEL: Cell<u8> = const { Cell::new(1) };
+    static JIT_LOG_DISABLED: Cell<bool> = const { Cell::new(false) };
     static JIT_LOG_FORMAT: Cell<u8> = const { Cell::new(0) };
     static JIT_LOG_TRACE_ID: RefCell<String> = const { RefCell::new(String::new()) };
     static JIT_LOG_SPANS: RefCell<Vec<(i64, String)>> = const { RefCell::new(Vec::new()) };
@@ -828,14 +829,20 @@ struct JitLogField {
     kind: String,
 }
 
+fn jit_log_level_rank(level: &str) -> Option<u8> {
+    match level {
+        "debug" => Some(0),
+        "info" => Some(1),
+        "warn" | "warning" => Some(2),
+        "error" => Some(3),
+        "critical" => Some(4),
+        "fatal" => Some(5),
+        _ => None,
+    }
+}
+
 fn jit_log_set_level_str(level: &str) {
-    let n: u8 = match level {
-        "debug" => 0,
-        "info" => 1,
-        "warn" => 2,
-        "error" => 3,
-        _ => 1,
-    };
+    let n: u8 = jit_log_level_rank(level).unwrap_or(1);
     JIT_LOG_LEVEL.with(|l| l.set(n));
 }
 
@@ -976,6 +983,9 @@ fn result_err_errno(op_disc: i64) -> i64 {
 }
 
 fn jit_log_emit(level: &str, msg: &str, fields: &[JitLogField]) {
+    if JIT_LOG_DISABLED.with(|d| d.get()) {
+        return;
+    }
     let ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -988,6 +998,8 @@ fn jit_log_emit(level: &str, msg: &str, fields: &[JitLogField]) {
             "info" => "INFO",
             "warn" => "WARN",
             "error" => "ERROR",
+            "critical" => "CRITICAL",
+            "fatal" => "FATAL",
             _ => level,
         };
         let mut line = format!("[{level_tag}] {y:04}-{mo:02}-{d:02}T{h:02}:{mi:02}:{s:02}Z | {msg}");
@@ -1079,6 +1091,42 @@ extern "C" fn jet_jit_log_warn(msg: i64) {
 extern "C" fn jet_jit_log_error(msg: i64) {
     if JIT_LOG_LEVEL.with(|l| l.get()) <= 3 {
         jit_log_emit("error", &clone_heap_string(msg), &[]);
+    }
+}
+
+extern "C" fn jet_jit_log_critical(msg: i64) {
+    if JIT_LOG_LEVEL.with(|l| l.get()) <= 4 {
+        jit_log_emit("critical", &clone_heap_string(msg), &[]);
+    }
+}
+
+extern "C" fn jet_jit_log_fatal(msg: i64) {
+    if JIT_LOG_LEVEL.with(|l| l.get()) <= 5 {
+        jit_log_emit("fatal", &clone_heap_string(msg), &[]);
+    }
+    let _ = std::io::Write::flush(&mut std::io::stderr());
+    std::process::exit(1);
+}
+
+extern "C" fn jet_jit_log_disable() {
+    JIT_LOG_DISABLED.with(|d| d.set(true));
+}
+
+extern "C" fn jet_jit_log_flush() {
+    let _ = std::io::Write::flush(&mut std::io::stderr());
+}
+
+extern "C" fn jet_jit_log_enabled(level: i64) -> i8 {
+    if JIT_LOG_DISABLED.with(|d| d.get()) {
+        return 0;
+    }
+    let Some(rank) = jit_log_level_rank(&clone_heap_string(level)) else {
+        return 0;
+    };
+    if JIT_LOG_LEVEL.with(|l| l.get()) <= rank {
+        1
+    } else {
+        0
     }
 }
 
@@ -2256,6 +2304,11 @@ pub(crate) struct CoreHostFns {
     pub log_info: cranelift_module::FuncId,
     pub log_warn: cranelift_module::FuncId,
     pub log_error: cranelift_module::FuncId,
+    pub log_critical: cranelift_module::FuncId,
+    pub log_fatal: cranelift_module::FuncId,
+    pub log_disable: cranelift_module::FuncId,
+    pub log_flush: cranelift_module::FuncId,
+    pub log_enabled: cranelift_module::FuncId,
     pub log_set_trace_id: cranelift_module::FuncId,
     pub log_field: cranelift_module::FuncId,
     pub log_int_field: cranelift_module::FuncId,
@@ -2386,6 +2439,11 @@ pub(crate) fn register_core_host_symbols(builder: &mut cranelift_jit::JITBuilder
     builder.symbol("jet_jit_log_info", jet_jit_log_info as *const u8);
     builder.symbol("jet_jit_log_warn", jet_jit_log_warn as *const u8);
     builder.symbol("jet_jit_log_error", jet_jit_log_error as *const u8);
+    builder.symbol("jet_jit_log_critical", jet_jit_log_critical as *const u8);
+    builder.symbol("jet_jit_log_fatal", jet_jit_log_fatal as *const u8);
+    builder.symbol("jet_jit_log_disable", jet_jit_log_disable as *const u8);
+    builder.symbol("jet_jit_log_flush", jet_jit_log_flush as *const u8);
+    builder.symbol("jet_jit_log_enabled", jet_jit_log_enabled as *const u8);
     builder.symbol(
         "jet_jit_log_set_trace_id",
         jet_jit_log_set_trace_id as *const u8,
@@ -2606,6 +2664,11 @@ pub(crate) fn declare_core_host_fns(
         log_info: import("jet_jit_log_info", &sig_void_str)?,
         log_warn: import("jet_jit_log_warn", &sig_void_str)?,
         log_error: import("jet_jit_log_error", &sig_void_str)?,
+        log_critical: import("jet_jit_log_critical", &sig_void_str)?,
+        log_fatal: import("jet_jit_log_fatal", &sig_void_str)?,
+        log_disable: import("jet_jit_log_disable", &sig_void)?,
+        log_flush: import("jet_jit_log_flush", &sig_void)?,
+        log_enabled: import("jet_jit_log_enabled", &sig_i64_i8)?,
         log_set_trace_id: import("jet_jit_log_set_trace_id", &sig_void_str)?,
         log_field: import("jet_jit_log_field", &sig_str_str_str)?,
         log_int_field: import("jet_jit_log_int_field", &sig_str_i64_str)?,

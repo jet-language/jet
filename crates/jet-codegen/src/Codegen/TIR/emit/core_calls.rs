@@ -2339,6 +2339,11 @@ pub(crate) fn emit_tir_core_call(
         ("jet.log", "warn") => format!("{}(&({}))", helper("jet_ring_log_warn"), arg(0)),
         ("jet.log", "error") => format!("{}(&({}))", helper("jet_ring_log_error"), arg(0)),
         ("jet.log", "debug") => format!("{}(&({}))", helper("jet_ring_log_debug"), arg(0)),
+        ("jet.log", "critical") => format!("{}(&({}))", helper("jet_ring_log_critical"), arg(0)),
+        ("jet.log", "fatal") => format!("{}(&({}))", helper("jet_ring_log_fatal"), arg(0)),
+        ("jet.log", "disable") => format!("{}()", helper("jet_ring_log_disable")),
+        ("jet.log", "flush") => format!("{}()", helper("jet_ring_log_flush")),
+        ("jet.log", "enabled") => format!("{}(&({}))", helper("jet_ring_log_enabled"), arg(0)),
         ("jet.log", "field") => {
             format!("{}(&({}), &({}))", helper("jet_ring_log_field"), arg(0), arg(1))
         }

@@ -137,10 +137,11 @@ fn jet_ring_csv_render(rows: &Vec<Vec<String>>) -> String {
 // Each log record is a JSON object on stderr:
 //   {"level":"info","body":"...","ts":<unix-ms>}
 // When a trace_id is set (log.set_trace_id), it appears as "trace_id":"...".
-// Log level: 0=debug, 1=info, 2=warn, 3=error. Default is info (1).
+// Log level: 0=debug, 1=info, 2=warn, 3=error, 4=critical, 5=fatal. Default is info (1).
 // D-LOGFMT1=A: format 0=auto (TTY→text, else JSON), 1=json, 2=text.
 thread_local! {
     static JET_LOG_LEVEL: std::cell::Cell<u8> = std::cell::Cell::new(1);
+    static JET_LOG_DISABLED: std::cell::Cell<bool> = std::cell::Cell::new(false);
     static JET_LOG_TRACE_ID: std::cell::RefCell<String> = std::cell::RefCell::new(String::new());
     static JET_LOG_FORMAT: std::cell::Cell<u8> = std::cell::Cell::new(0);
     static JET_LOG_SINK_PATH: std::cell::RefCell<String> = std::cell::RefCell::new(String::new());
@@ -150,15 +151,49 @@ thread_local! {
     static JET_LOG_NEXT_SPAN: std::cell::Cell<i64> = std::cell::Cell::new(1);
 }
 
+fn jet_log_level_rank(level: &str) -> Option<u8> {
+    match level {
+        "debug" => Some(0),
+        "info" => Some(1),
+        "warn" | "warning" => Some(2),
+        "error" => Some(3),
+        "critical" => Some(4),
+        "fatal" => Some(5),
+        _ => None,
+    }
+}
+
 fn jet_ring_log_set_level(level: &String) {
-    let n: u8 = match level.as_str() {
-        "debug" => 0,
-        "info" => 1,
-        "warn" => 2,
-        "error" => 3,
-        _ => 1,
-    };
+    let n: u8 = jet_log_level_rank(level).unwrap_or(1);
     JET_LOG_LEVEL.with(|l| l.set(n));
+}
+
+fn jet_ring_log_disable() {
+    JET_LOG_DISABLED.with(|d| d.set(true));
+}
+
+fn jet_ring_log_flush() {
+    let _ = std::io::Write::flush(&mut std::io::stderr());
+    JET_LOG_SINK_PATH.with(|path| {
+        let path = path.borrow();
+        if path.is_empty() {
+            return;
+        }
+        if let Ok(mut file) = std::fs::OpenOptions::new().append(true).create(true).open(path.as_str())
+        {
+            let _ = std::io::Write::flush(&mut file);
+        }
+    });
+}
+
+fn jet_ring_log_enabled(level: &String) -> bool {
+    if JET_LOG_DISABLED.with(|d| d.get()) {
+        return false;
+    }
+    let Some(rank) = jet_log_level_rank(level) else {
+        return false;
+    };
+    JET_LOG_LEVEL.with(|l| l.get() <= rank)
 }
 
 fn jet_ring_log_set_trace_id(id: &String) {
@@ -370,6 +405,8 @@ fn jet_log_emit_text(level: &str, msg: &str, ts: i64, fields: &[jet_std::LogFiel
         "info" => "INFO",
         "warn" => "WARN",
         "error" => "ERROR",
+        "critical" => "CRITICAL",
+        "fatal" => "FATAL",
         _ => level,
     };
     let trace = JET_LOG_TRACE_ID.with(|t| t.borrow().clone());
@@ -394,6 +431,9 @@ fn jet_log_emit_text(level: &str, msg: &str, ts: i64, fields: &[jet_std::LogFiel
 }
 
 fn jet_log_emit(level: &str, msg: &str, fields: &[jet_std::LogField]) {
+    if JET_LOG_DISABLED.with(|d| d.get()) {
+        return;
+    }
     let keep = JET_LOG_SAMPLE_EVERY.with(|every| {
         JET_LOG_SAMPLE_COUNT.with(|count| {
             let next = count.get() + 1;
@@ -434,6 +474,18 @@ fn jet_ring_log_error(msg: &String) {
     if JET_LOG_LEVEL.with(|l| l.get()) <= 3 {
         jet_log_emit("error", msg, &[]);
     }
+}
+fn jet_ring_log_critical(msg: &String) {
+    if JET_LOG_LEVEL.with(|l| l.get()) <= 4 {
+        jet_log_emit("critical", msg, &[]);
+    }
+}
+fn jet_ring_log_fatal(msg: &String) {
+    if JET_LOG_LEVEL.with(|l| l.get()) <= 5 {
+        jet_log_emit("fatal", msg, &[]);
+    }
+    jet_ring_log_flush();
+    std::process::exit(1);
 }
 
 fn jet_ring_log_debug_fields(msg: &String, fields: &Vec<jet_std::LogField>) {

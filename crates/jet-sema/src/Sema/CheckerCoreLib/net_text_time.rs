@@ -861,9 +861,16 @@ pub fn url_mime_method_return(
     let argc = args.len();
     match ty {
         Type::Named(n) if n == "Url" => match method {
-            "scheme" | "path" | "query" | "to_string" if argc == 0 => Some(Some(Type::String)),
+            "scheme" | "path" | "query" | "to_string" | "username" | "password" | "userinfo"
+            | "authority"
+                if argc == 0 =>
+            {
+                Some(Some(Type::String))
+            }
             "host" | "fragment" if argc == 0 => Some(Some(Type::Option(Box::new(Type::String)))),
-            "port" if argc == 0 => Some(Some(Type::Option(Box::new(Type::Int)))),
+            "port" | "default_port" if argc == 0 => {
+                Some(Some(Type::Option(Box::new(Type::Int))))
+            }
             "path_segments" if argc == 0 => Some(Some(Type::List(Box::new(Type::String)))),
             "query_pairs" if argc == 0 => Some(Some(Type::List(Box::new(Type::List(Box::new(
                 Type::String,

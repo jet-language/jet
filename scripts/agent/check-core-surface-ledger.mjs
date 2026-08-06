@@ -322,9 +322,13 @@ const SYNONYM_GROUPS = [
   ["is_empty", "empty", "is_blank", "none"],
   ["keys", "key_set", "names"],
   ["values", "value_set"],
-  ["join", "mk_string", "intercalate"],
+  ["join", "mk_string", "intercalate", "merge"],
   ["yield_now", "yield"],
   ["wait_any", "waitany", "when_any"],
+  ["host", "hostname"],
+  ["username", "user"],
+  ["default_port", "defaultport"],
+  ["warn", "warning"],
   ["split", "split_n"],
   ["split_once", "split_at", "cut"],
   ["replace", "sub", "gsub", "replace_all", "replacing"],
@@ -486,6 +490,8 @@ const TYPE_CONTAINER = {
   Period: "core.time",
   Zone: "core.time",
   ZonedDateTime: "core.time",
+  Url: "core.url",
+  Mime: "core.mime",
   ExpiringValue: "core.time.expiring",
   Condition: "core.sync",
   Secret: "core.vault",
@@ -1165,35 +1171,37 @@ function collectionInventory() {
   for (const table of inlineTables(dispatch.inlineArms, source, constants)) tables.push(table);
 
   // D-TIMEDEPTH1: civil-time methods are typed in net_text_time.rs, not Collections.
+  // D-URL1: Url/Mime methods live in the same file (url_mime_method_return).
   {
     const civilText = read(NET_TEXT_TIME_PATH);
     const civilSources = [{ path: NET_TEXT_TIME_PATH, text: civilText }];
-    const civilBody = tableBody("civil_time_method_return", civilSources);
-    if (!civilBody) {
-      throw new Error("civil_time_method_return missing from net_text_time.rs");
-    }
-    const civilLine = lineAt(civilText, civilText.indexOf("fn civil_time_method_return("));
-    for (const arm of matchArms(civilBody, "match ty")) {
-      const types = new Set();
-      for (const hit of arm.lhs.matchAll(/n\s*==\s*"([A-Za-z][A-Za-z0-9_]*)"/g)) {
-        types.add(hit[1]);
+    for (const tableName of ["civil_time_method_return", "url_mime_method_return"]) {
+      const civilBody = tableBody(tableName, civilSources);
+      if (!civilBody) {
+        throw new Error(tableName + " missing from net_text_time.rs");
       }
-      if (types.size === 0) continue;
-      // Nested `match method { "year" | "month" ... }` — quoted strings are
-      // the method names (methodNames looks for Collections-shaped tables).
-      const methods = new Set(
-        quoted(arm.rhs).filter(function (name) {
-          return /^[a-z][a-z0-9_]*$/.test(name);
-        })
-      );
-      for (const typeName of types) {
-        if (!TYPE_CONTAINER[typeName] && !CONTAINER_ALIASES[typeName]) continue;
-        tables.push({
-          function: "civil_time_method_return:" + typeName,
-          type: typeName,
-          methods: Array.from(methods).sort(),
-          sourceLine: civilLine,
-        });
+      const civilLine = lineAt(civilText, civilText.indexOf("fn " + tableName + "("));
+      for (const arm of matchArms(civilBody, "match ty")) {
+        const types = new Set();
+        for (const hit of arm.lhs.matchAll(/n\s*==\s*"([A-Za-z][A-Za-z0-9_]*)"/g)) {
+          types.add(hit[1]);
+        }
+        if (types.size === 0) continue;
+        const methods = new Set(
+          quoted(arm.rhs).filter(function (name) {
+            return /^[a-z][a-z0-9_]*$/.test(name);
+          })
+        );
+        for (const typeName of types) {
+          const owner = TYPE_CONTAINER[typeName] || CONTAINER_ALIASES[typeName];
+          if (!owner) continue;
+          tables.push({
+            function: tableName + ":" + typeName,
+            type: owner,
+            methods: Array.from(methods).sort(),
+            sourceLine: civilLine,
+          });
+        }
       }
     }
   }

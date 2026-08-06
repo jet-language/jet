@@ -362,6 +362,8 @@ fn run() {
 | `url.query(pairs)` | `String` | Encode repeated query pairs from `[[String]]` |
 | `url.percent_encode(text)` / `url.percent_decode(text)` | `String` / `String ? String` | Component percent encoding and decoding |
 | `u.scheme()` / `.host()` / `.port()` / `.path()` / `.fragment()` | mixed | Typed component accessors |
+| `u.username()` / `.password()` / `.userinfo()` / `.authority()` | `String` | Credential and authority accessors (empty when absent) |
+| `u.default_port()` | `Int?` | Well-known port for the scheme (`http`/`ws`→80, `https`/`wss`→443, …) |
 | `u.path_segments()` / `.query_pairs()` / `.query()` | `[String]` / `[[String]]` / `String` | Decoded path/query views plus encoded query text |
 | `u.normalize()` / `.join(relative)` | `Url` / `Url ? String` | Normalize or resolve a relative reference |
 | `u.set_query(k, v)` / `.add_query(k, v)` | `Url` | Return a new URL with query pairs changed; repeated keys are preserved by `add_query` |
@@ -2099,7 +2101,13 @@ fn run() {
 
 Core helpers include `field`, `int`, `float`, `bool`, `redact`, `counter`,
 `span`, `enter`, `close`, `set_sink`, `sample_every`, `otlp_file`, `set_level`,
-`set_trace_id`, and `setup`.
+`set_trace_id`, `setup`, `critical`, `fatal`, `disable`, `flush`, and
+`enabled(level)`.
+
+`critical` is a severity above `error`. `fatal` emits then exits the process
+with status 1. `disable` suppresses further emission until process end.
+`flush` forces the active sink to flush. `enabled(level)` reports whether the
+named severity would emit under the active `set_level` threshold.
 
 #### Typed (de)serialization — one derive, every format (D-SERDE1–8)
 

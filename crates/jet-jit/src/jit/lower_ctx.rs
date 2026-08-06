@@ -10313,6 +10313,17 @@ impl LowerCtx<'_, '_> {
                         "error" if args.len() == 1 => {
                             (self.host.core.log_error, vec![self.lower_expr(&args[0])?])
                         }
+                        "critical" if args.len() == 1 => {
+                            (self.host.core.log_critical, vec![self.lower_expr(&args[0])?])
+                        }
+                        "fatal" if args.len() == 1 => {
+                            (self.host.core.log_fatal, vec![self.lower_expr(&args[0])?])
+                        }
+                        "disable" if args.is_empty() => (self.host.core.log_disable, vec![]),
+                        "flush" if args.is_empty() => (self.host.core.log_flush, vec![]),
+                        "enabled" if args.len() == 1 => {
+                            (self.host.core.log_enabled, vec![self.lower_expr(&args[0])?])
+                        }
                         "set_trace_id" if args.len() == 1 => (
                             self.host.core.log_set_trace_id,
                             vec![self.lower_expr(&args[0])?],
@@ -19093,6 +19104,21 @@ impl LowerCtx<'_, '_> {
                     }
                     "fragment" if args.is_empty() => {
                         (self.host.net.url_fragment, vec![recv_val])
+                    }
+                    "username" if args.is_empty() => {
+                        (self.host.net.url_username, vec![recv_val])
+                    }
+                    "password" if args.is_empty() => {
+                        (self.host.net.url_password, vec![recv_val])
+                    }
+                    "userinfo" if args.is_empty() => {
+                        (self.host.net.url_userinfo, vec![recv_val])
+                    }
+                    "authority" if args.is_empty() => {
+                        (self.host.net.url_authority, vec![recv_val])
+                    }
+                    "default_port" if args.is_empty() => {
+                        (self.host.net.url_default_port, vec![recv_val])
                     }
                     "join" if args.len() == 1 => (
                         self.host.net.url_join,

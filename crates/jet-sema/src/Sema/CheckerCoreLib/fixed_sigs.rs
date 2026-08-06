@@ -1743,7 +1743,7 @@ pub fn core_fixed_sig(
             Some(Type::List(Box::new(Type::String))),
         )),
         // jet.log/core.log: structured logging, typed fields, spans, sinks.
-        ("jet.log", "info" | "warn" | "error" | "debug") => {
+        ("jet.log", "info" | "warn" | "error" | "debug" | "critical" | "fatal") => {
             Some((vec![(read, string.clone())], None))
         }
         ("jet.log", "field") => Some((
@@ -1790,6 +1790,8 @@ pub fn core_fixed_sig(
         )),
         ("jet.log", "otlp_file") => Some((vec![(read, string.clone())], None)),
         ("jet.log", "set_level") => Some((vec![(read, Type::String)], None)),
+        ("jet.log", "disable" | "flush") => Some((vec![], None)),
+        ("jet.log", "enabled") => Some((vec![(read, Type::String)], Some(bool_))),
         // D-OBS3: set OTel trace_id for all subsequent log entries on this thread.
         ("jet.log", "set_trace_id") => Some((vec![(read, Type::String)], None)),
         // D-LOGFMT1=A: override log output format ("json" | "text").

@@ -396,7 +396,8 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         (
             "Url",
             "scheme" | "host" | "port" | "path" | "path_segments" | "query" | "query_pairs"
-            | "fragment" | "normalize" | "to_string",
+            | "fragment" | "normalize" | "to_string" | "username" | "password" | "userinfo"
+            | "authority" | "default_port",
             0,
         ) => THandleOp::UrlMimeMethod {
             kind: "Url".to_string(),
@@ -605,9 +606,10 @@ pub(crate) fn handle_method_return_ty(handle: &str, method: &str, nargs: usize) 
             }
         })
         .or_else(|| match (handle, method, nargs) {
-            ("Url", "scheme" | "path" | "query" | "to_string", 0) => Some(Some(Type::String)),
+            ("Url", "scheme" | "path" | "query" | "to_string" | "username" | "password"
+            | "userinfo" | "authority", 0) => Some(Some(Type::String)),
             ("Url", "host" | "fragment", 0) => Some(Some(Type::Option(Box::new(Type::String)))),
-            ("Url", "port", 0) => Some(Some(Type::Option(Box::new(Type::Int)))),
+            ("Url", "port" | "default_port", 0) => Some(Some(Type::Option(Box::new(Type::Int)))),
             ("Url", "path_segments", 0) => Some(Some(Type::List(Box::new(Type::String)))),
             ("Url", "query_pairs", 0) => Some(Some(Type::List(Box::new(Type::List(Box::new(
                 Type::String,

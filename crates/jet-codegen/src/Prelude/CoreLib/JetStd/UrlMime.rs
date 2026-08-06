@@ -22,12 +22,16 @@
             }
             let mut host = None;
             let mut port = None;
+            let mut username = None;
+            let mut password = None;
             let path;
             if let Some(after_slashes) = rest.strip_prefix("//") {
                 let auth_end = after_slashes.find('/').unwrap_or(after_slashes.len());
                 let authority = &after_slashes[..auth_end];
                 let path_raw = &after_slashes[auth_end..];
-                let (h, p) = jet_url_parse_authority(authority)?;
+                let (user, pass, h, p) = jet_url_parse_authority(authority)?;
+                username = user;
+                password = pass;
                 host = Some(h);
                 port = p;
                 path = if path_raw.is_empty() {
@@ -44,6 +48,8 @@
             }
             let mut url = JetURL {
                 scheme,
+                username,
+                password,
                 host,
                 port,
                 path,
@@ -76,6 +82,8 @@
             };
             Ok(JetURL {
                 scheme: scheme.to_ascii_lowercase(),
+                username: None,
+                password: None,
                 host,
                 port: None,
                 path: path.clone(),
@@ -88,6 +96,8 @@
         pub fn file(path: &String) -> Self {
             JetURL {
                 scheme: "file".to_string(),
+                username: None,
+                password: None,
                 host: Some(String::new()),
                 port: None,
                 path: if path.starts_with('/') {
@@ -103,6 +113,8 @@
         pub fn data(mime: &JetMIME, text: &String) -> Self {
             JetURL {
                 scheme: "data".to_string(),
+                username: None,
+                password: None,
                 host: None,
                 port: None,
                 path: format!(
@@ -118,11 +130,54 @@
         pub fn scheme(&self) -> String {
             self.scheme.clone()
         }
+        pub fn username(&self) -> String {
+            self.username.clone().unwrap_or_default()
+        }
+        pub fn password(&self) -> String {
+            self.password.clone().unwrap_or_default()
+        }
+        pub fn userinfo(&self) -> String {
+            match (&self.username, &self.password) {
+                (None, None) => String::new(),
+                (Some(user), None) => user.clone(),
+                (Some(user), Some(pass)) => format!("{}:{}", user, pass),
+                (None, Some(pass)) => format!(":{}", pass),
+            }
+        }
+        pub fn authority(&self) -> String {
+            let Some(host) = self.host.as_ref().filter(|h| !h.is_empty()) else {
+                return String::new();
+            };
+            let mut out = String::new();
+            let info = self.userinfo();
+            if !info.is_empty() {
+                out.push_str(&info);
+                out.push('@');
+            }
+            out.push_str(host);
+            if let Some(port) = self.port {
+                out.push(':');
+                out.push_str(&port.to_string());
+            }
+            out
+        }
         pub fn host(&self) -> Option<String> {
             self.host.clone().filter(|h| !h.is_empty())
         }
         pub fn port(&self) -> Option<i64> {
             self.port
+        }
+        pub fn default_port(&self) -> Option<i64> {
+            match self.scheme.as_str() {
+                "http" | "ws" => Some(80),
+                "https" | "wss" => Some(443),
+                "ftp" => Some(21),
+                "ssh" => Some(22),
+                "smtp" => Some(25),
+                "pop3" => Some(110),
+                "imap" => Some(143),
+                _ => None,
+            }
         }
         pub fn path(&self) -> String {
             self.path.clone()
@@ -209,6 +264,18 @@
             let mut out = format!("{}:", self.scheme);
             if let Some(host) = &self.host {
                 out.push_str("//");
+                if let Some(user) = &self.username {
+                    out.push_str(&jet_url_percent_encode(user, false));
+                    if let Some(pass) = &self.password {
+                        out.push(':');
+                        out.push_str(&jet_url_percent_encode(pass, false));
+                    }
+                    out.push('@');
+                } else if let Some(pass) = &self.password {
+                    out.push(':');
+                    out.push_str(&jet_url_percent_encode(pass, false));
+                    out.push('@');
+                }
                 out.push_str(host);
                 if let Some(port) = self.port {
                     out.push(':');
@@ -314,8 +381,24 @@
             && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
     }
 
-    fn jet_url_parse_authority(authority: &str) -> Result<(String, Option<i64>), String> {
-        let host_port = authority.rsplit_once('@').map(|(_, h)| h).unwrap_or(authority);
+    fn jet_url_parse_authority(
+        authority: &str,
+    ) -> Result<(Option<String>, Option<String>, String, Option<i64>), String> {
+        let (userinfo, host_port) = match authority.rsplit_once('@') {
+            Some((ui, hp)) => (Some(ui), hp),
+            None => (None, authority),
+        };
+        let (username, password) = if let Some(ui) = userinfo {
+            match ui.split_once(':') {
+                Some((user, pass)) => (
+                    Some(jet_url_percent_decode_str(user)?),
+                    Some(jet_url_percent_decode_str(pass)?),
+                ),
+                None => (Some(jet_url_percent_decode_str(ui)?), None),
+            }
+        } else {
+            (None, None)
+        };
         if host_port.is_empty() {
             return Err("URL host is empty".to_string());
         }
@@ -329,7 +412,7 @@
             } else {
                 None
             };
-            return Ok((host, port));
+            return Ok((username, password, host, port));
         }
         let (host, port) = if let Some((h, p)) = host_port.rsplit_once(':') {
             if !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()) {
@@ -340,7 +423,7 @@
         } else {
             (host_port, None)
         };
-        Ok((jet_url_host_to_ascii(host)?, port))
+        Ok((username, password, jet_url_host_to_ascii(host)?, port))
     }
 
     fn jet_url_parse_port(p: &str) -> Result<i64, String> {

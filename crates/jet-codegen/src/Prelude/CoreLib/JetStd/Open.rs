@@ -94,6 +94,8 @@ mod jet_std {
     #[derive(Clone, Debug, PartialEq)]
     pub struct JetURL {
         pub scheme: String,
+        pub username: Option<String>,
+        pub password: Option<String>,
         pub host: Option<String>,
         pub port: Option<i64>,
         pub path: String,
