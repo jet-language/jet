@@ -188,8 +188,8 @@ conversion names and ratifies the law; whether the two spellings merge is a ball
 ## The planes
 
 Each plane: what it knows, its algebra, and what unifying it buys. All planes share four laws,
-extending marker law zero (D-MARK-REG1): **a plane exists iff registered; its facts are nameable;
-its facts are reflectable; its declarations ship as readable prelude source.**
+extending marker law zero (ratified inside D-VERDICT-1455-1): **a plane exists iff registered;
+its facts are nameable; its facts are reflectable; its declarations ship as readable prelude source.**
 
 ### Nominal plane — algebra: identity only
 `UserId :: distinct Int`. The degenerate plane: one fact, "this is a UserId", no combination rules.
@@ -207,14 +207,18 @@ three things:
 - **The affine pattern gets named.** `CelsiusPoint`/`CelsiusDelta`, `Instant`/`Duration`,
   and index/length are the same shape: a point on an axis versus a distance along it. Ratified
   D-QUANTITY-POINT1 already built the machinery; v2 reuses it instead of re-deriving it per domain.
-- **Quantities reach reflection and printing** everywhere (`TypeInfo.dimensions` exists; E0112 dies).
+- **Quantities reach reflection** everywhere: `TypeInfo.dimensions` becomes a real typed field,
+  completing what D-QUANTITY-PRINT1 already did for printing.
 
 ### Interval plane — algebra: interval arithmetic on measures
 One refinement story: `Severity :: distinct Int(0..10)`. The `#Invariant("...")` string form retires —
 the prover is interval-only today, so the string spelling provably adds nothing but a parser.
-Sized widths sit here too (above). Arithmetic folds intervals: `[0,10] + [0,10] = [0,20]`, so
-`a + b` of two `Severity` widens to the base carrier exactly as ratified. Index proofs
-(D-OOBPROOF1) read interval facts directly.
+Sized widths sit here too (above) for *checking and conversion*: the same interval facts drive
+containment widening and fit errors. Their *arithmetic* contracts do not change: a `distinct`
+refinement widens to its base carrier exactly as ratified (D-RANGETYPE1), while the sized widths
+keep trap-on-overflow plus `wrapping`/`saturating`/`checked`, exactly as D-INTBIG1 reaffirmed.
+Arithmetic folds intervals — `[0,10] + [0,10] = [0,20]` — which is how the widening result and
+the index proofs (D-OOBPROOF1) fall out of one prover.
 
 ### Measure plane — algebra: naturals with per-operation rules
 One substrate for every compile-time number in a type: `[T#N]` lengths, `Vec<N>`/`Matrix<M,N>`
@@ -286,7 +290,7 @@ Direction-level; each gets a full ballot on the card. Worked examples live in th
 | D-TYPE2-MEASURE1 | One measure substrate for lengths, shapes, lanes, and dimension exponents | adopt |
 | D-TYPE2-EXACT1 | Ratify the conservation law; keep `approx` and `from_*_rounded` as its two spelled demotions, or merge them into one word | ratify law, keep both spellings |
 | D-TYPE2-UNCERT1 | Uncertainty as an exactness-plane grade (revives D-UNCERTAIN1), opt-in | adopt as opt-in |
-| D-TYPE2-PLANE1 | All planes nameable + reflectable + prelude-source by law (extends D-MARK-REG1); `TypeInfo` gains `dimensions` and typed marker args at every level | adopt |
+| D-TYPE2-PLANE1 | All planes nameable + reflectable + prelude-source by law (extends the D-VERDICT-1455-1 registration law); `TypeInfo` gains `dimensions` and typed marker args at every level | adopt |
 
 ## Implementation shape
 
