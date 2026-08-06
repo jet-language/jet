@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1462,
-    "rev": 25673,
+    "rev": 25677,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -81011,12 +81011,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-ul3-core",
-      "phase": "verify",
+      "phase": "building",
       "priority": "P0",
       "plan": "1. Generate a closed inventory from Collections.rs, module_items.rs, and fixed_sigs.rs. Do not trust prose as the source of shipped Jet methods.\n2. Select every Python builtin type and stdlib module Jet claims to cover. Use official Python docs to enumerate the matching public surface.\n3. Give every row a stable ID, Python member, Jet spelling, matched workflow, and one verdict: Jet wins, equal, Jet loses, or out of scope.\n4. Link every Jet-loses row to one live Tower card or open decision. Out-of-scope requires a ratified product-scope decision that explicitly says Jet does not compete for that workflow. A design decline does not remove a scored loss.\n5. Add deterministic checks for an unmapped shipped method, missing Python member, duplicate row, hidden exclusion, stale owner, source-table drift, or unratified scope exclusion.\n6. Store the durable ledger under docs and make #1398 consume it as its only workflow inventory. Do not create a second benchmark framework.\n7. A fresh reviewer checks closure against both source tables and official Python docs.\nblockedBy: none.",
       "blockedBy": [],
       "assignee": "bd-ledger",
       "log": [
+        {
+          "at": "2026-08-06",
+          "by": "bd-ledger",
+          "text": "Independent review holds this card. The loss score of 15398 is inflated about 8 to 12 times, and the real actionable count is near 1200 to 2000. Three causes: members of one package are attributed to many containers, one capability mints a row per language, and matching is one to one so an identical name on both sides still scores a loss. Criteria 1, 3 and 5 are not met. No cards will be minted until the loss rule is tightened and the surface is scored again."
+        },
         {
           "at": "2026-08-06",
           "by": "bd-ledger",
@@ -81038,10 +81043,10 @@
           "n": 1,
           "text": "A source-derived closed inventory covers every Python builtin type and stdlib module Jet claims to compete with.",
           "status": "met",
-          "metBy": "bd-ledger",
+          "metBy": "bd-review-ledger",
           "verifiedBy": null,
-          "evidence": "Closed inventory generated from the real tables: modules=85, moduleMembers=1006, collectionMethods=334, drift-hashed against module_items.rs, fixed_sigs.rs, Collections.rs and all eleven competitor surfaces.",
-          "at": "2026-08-06T01:18:07.441Z"
+          "evidence": "REJECTED BY REVIEW. The Python snapshot holds only 37 modules and 10 builtin types. hashlib, hmac, decimal, fractions, argparse, email, threading, inspect, shutil, glob, gzip, queue, xml, mimetypes and textwrap are absent. core.crypto is compared against secrets alone, so hashing is uncompared. 43 Jet domains are parked as uncompared, and several have plain Python equivalents.",
+          "at": "2026-08-06T01:27:57.186Z"
         },
         {
           "n": 2,
@@ -81056,10 +81061,10 @@
           "n": 3,
           "text": "Every Jet-loses row links one live Tower owner. A design decline remains a loss; out-of-scope requires a ratified decision that narrows Jet's competition claim for that workflow.",
           "status": "met",
-          "metBy": "bd-ledger",
+          "metBy": "bd-review-ledger",
           "verifiedBy": null,
-          "evidence": "Owner linkage is per-container cluster and folds into existing cards. 2 of 44 clusters are live (core.files, core.path to card 288). The checker fails if the ledger ever names a closed card as a live owner. 42 clusters have no live owner and are reported for carding.",
-          "at": "2026-08-06T01:18:08.042Z"
+          "evidence": "REJECTED BY REVIEW. The criterion is per row. Only 2 of 44 clusters have a live owner, which covers 1105 of 15398 loss rows, or 7 percent. Cards 1410, 1409, 1402, 1400 and 1404 are done while losses remain against them.",
+          "at": "2026-08-06T01:27:57.501Z"
         },
         {
           "n": 4,
@@ -81074,10 +81079,10 @@
           "n": 5,
           "text": "The ledger is durable under docs and #1398 consumes it without a duplicate manual inventory.",
           "status": "met",
-          "metBy": "bd-ledger",
+          "metBy": "bd-review-ledger",
           "verifiedBy": null,
-          "evidence": "Ledger is durable at docs/reference/core-surface-ledger.json with a review index at core-surface-ledger.md. The JSON declares consumer card 1398 with manualWorkflowInventory false. No duplicate inventory exists in prior-art.md or the field audit.",
-          "at": "2026-08-06T01:18:08.658Z"
+          "evidence": "REJECTED BY REVIEW. Card 1398 was never updated to consume the ledger. Its plan still names the pre-restore card id, and its first criterion still reads as a Python-only gate, which contradicts the every-language ruling. tests/truthfulness.rs also duplicates the same check.",
+          "at": "2026-08-06T01:27:57.812Z"
         },
         {
           "n": 6,
@@ -81103,9 +81108,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T18:12:13.321Z",
-      "updated": "2026-08-06T01:18:09.026Z",
+      "updated": "2026-08-06T01:27:58.169Z",
       "updatedBy": "bd-ledger",
-      "claimedAt": "2026-08-06T01:18:09.026Z"
+      "claimedAt": "2026-08-06T01:27:58.169Z"
     },
     {
       "id": "c0fmfiwg",
@@ -108554,6 +108559,34 @@
   ],
   "events": [
     {
+      "at": "2026-08-06T01:27:58.169Z",
+      "by": "bd-ledger",
+      "action": "card.update",
+      "ref": "c00ms1om",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T01:27:57.812Z",
+      "by": "bd-review-ledger",
+      "action": "card.criteria-meet",
+      "ref": "c00ms1om",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-06T01:27:57.501Z",
+      "by": "bd-review-ledger",
+      "action": "card.criteria-meet",
+      "ref": "c00ms1om",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T01:27:57.186Z",
+      "by": "bd-review-ledger",
+      "action": "card.criteria-meet",
+      "ref": "c00ms1om",
+      "note": "#1"
+    },
+    {
       "at": "2026-08-06T01:18:09.026Z",
       "by": "bd-ledger",
       "action": "card.update",
@@ -112024,34 +112057,6 @@
       "action": "card.release",
       "ref": "c0rs9jy0",
       "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-08-05T01:53:50.547Z",
-      "by": "claude-e3-closeout",
-      "action": "card.update",
-      "ref": "c05hy7lo",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-05T01:53:40.241Z",
-      "by": "claude-e3-closeout",
-      "action": "card.update",
-      "ref": "c05hy7lo",
-      "note": "logEntry,blockedBy"
-    },
-    {
-      "at": "2026-08-05T01:53:39.861Z",
-      "by": "claude-e3-closeout",
-      "action": "card.update",
-      "ref": "c07dnjkm",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-05T01:53:33.231Z",
-      "by": "owner",
-      "action": "papercut.resolve",
-      "ref": "pc0qnij0i",
-      "note": ""
     }
   ],
   "nextNum": 368,
