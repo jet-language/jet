@@ -48,6 +48,14 @@ schema; adopt the audit law; reserve the word "capability". Each stands alone.
 What does not change: effect inference, erasure, every diagnostic families'
 meaning, the beginner's zero-annotation experience, and every frozen wall.
 
+The score, in order. **Deleted:** the `BuildEffect` fork, the second
+tighten-only lattice, the duplicate purity checker, three of four manifest
+schemas, the dead-end phantom types, and five of six meanings of one word.
+**Kept:** every capability, every ratified spelling, every diagnostic meaning,
+zero-cost erasure. **Gained:** a nameable authority value for processes,
+plugins, and sessions; one audit ledger; the build-time hole closed; one
+vocabulary at every checkpoint.
+
 ## Glossary
 
 - **Right** — permission to perform one kind of action, named as a path in one

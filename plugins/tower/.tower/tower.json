@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1506,
-    "rev": 26843,
+    "rev": 26851,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -84832,12 +84832,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "building",
       "priority": "P1",
       "plan": "Scope: List ships in list_method_return and Map ships in map_method_return (crates/jet-foundation/src/Collections.rs). Card #1410 closed the eager-view/count/extend/remove batch. The ledger now scores 27 remaining jet_loses rows for List and 25 for Map. Verified 2026-08-06 directly against both match tables: all 52 names are genuinely absent, none are extractor drift. One correction to the card body: \"List.contains is notable ... no membership test at all\" is stale — List.contains already ships (list_method_return line ~818) and scores verdict \"equal\" in the current ledger; it is not part of this remainder and needs no work.\n\nApproach:\n1. List gap families (docs/reference/core-surface-ledger.json, container=List, verdict=jet_loses), add to list_method_return + crates/jet-codegen/src/Prelude/Core/Collections.rs:\n   - Search: binarysearch, binarysearchby, findlastindex -> extend existing index_of/find family (List already has find, index_of).\n   - Slicing/splicing: slice, splice, copywithin, copyto -> extend the existing view()/split_write family; keep List value-copy semantics distinct from the View-based mutation family already shipped.\n   - Prefix/suffix: startswith, endswith -> mirror String's starts_with/ends_with naming exactly.\n   - Set-like ops on List: union, intersection, difference -> only add if this does not duplicate Set's algebra (#1404); if these exist elsewhere on List already as list-preserving-duplicates ops, keep the distinction explicit in naming/docs.\n   - Growth/capacity: capacity -> expose the existing Vec capacity if Jet's List is backed by one; otherwise decline with a reason (Jet's List may not expose capacity as a concept).\n   - Copy/replace: copy, replace -> extend copy semantics already used by Map.copy work below; check this does not collide with existing clone conventions.\n   - Random/order: random, minmax, minmaxby -> extend min/max family already shipped.\n   - Ends removal: removefirst, deleteat, shift, unshift -> extend existing remove/pop family; keep the D-LISTREMOVE1/F value-vs-position distinction (.Val/.Slot) consistent rather than adding a third removal spelling.\n   - Iteration helpers: eachindex, eachslice, values, keys, reduceright -> keep list_method_return returning Iter<T> per the existing D-ITERTOOLS1=A pattern (take/skip/chunks etc already return iter_ty); do not add an eager-copy variant that fights the lazy-view precedent from #1410.\n2. Map gap families (container=Map, verdict=jet_loses), add to map_method_return + Prelude:\n   - Constructors/factories: new, fromkeys -> these may already be answered by dot-construction syntax `[K:V].{}` (see examples/features/collections/map_merge.jet); if so, record as a decline pointing at that mechanism instead of adding a `.new()` method, matching how #1409 declined a second parse path.\n   - Ends removal: popfirst, pop -> Map is presently unordered/hash-based per has_key/get; confirm ordering semantics before promising a meaningful \"first\"/\"last\" pop, or decline with a reason.\n   - Aggregates/predicates: all, any, filter, map, fold, max, min, collect, first, firstindex, flatmap -> mirror the existing Iter surface: Map.keys()/values() already return Iter, so route these through .keys()/.values()/.to_list() plus the existing Iter methods rather than duplicating the whole Iter surface directly on Map, unless the ledger's competitor evidence specifically wants key+value pairs (entries-style iteration) that .keys()/.values() cannot express — in that case add one Map.entries()-equivalent lazy view, reusing the D-LISTREMOVE1/F lazy-view pattern.\n   - Copy/equality: copy, equal, containsvalue -> straightforward additions mirroring Set.has/List.contains naming.\n   - Mutation: set, replace, update -> reconcile with the existing add/add_new pair (map_method_return already has add/add_new); do not add a fourth insert spelling without a clear distinct contract (set = upsert without the Option return, update = transform-in-place).\n   - key, tolist, intersection -> tolist likely folds into to_list() already used elsewhere (keys/values already return Iter with .to_list()); intersection is a Map-keyed-by-Set operation, scope it narrowly (key-set intersection) or decline if it duplicates Set algebra.\n3. Rebuild jet after Prelude edits: scripts/agent/jet-env cargo build.\n4. Extend examples/features/collections/list_surface.jet with every shipped List addition; extend examples/features/collections/map_merge.jet (or add examples/features/collections/map_surface.jet if the file grows unwieldy) with every shipped Map addition. Regenerate the matching .out goldens under examples/features/expected/collections/.\n5. Record a decision id for every declined name (constructor sugar, capacity, ordering-dependent pop, redundant Iter duplication) rather than silently skipping it.\n6. Run node scripts/agent/check-core-surface-ledger.mjs --refresh then --check.\n7. Update docs/reference/core-library.md List and Map sections.\n\nProof:\n- scripts/agent/jet-env cargo test --test core_surface_ledger\n- scripts/agent/jet-env cargo test --test tir_collections_and_methods\n- scripts/agent/jet-env jet run examples/features/collections/list_surface.jet, diff against examples/features/expected/collections/list_surface.out\n- scripts/agent/jet-env jet run examples/features/collections/map_merge.jet (or new map_surface.jet), diff against its golden\n- AOT build of the same examples, diff against the same goldens, to prove I9 parity between AOT and default jet run\n- node scripts/agent/check-core-surface-ledger.mjs --check\n\nOwned paths: crates/jet-foundation/src/Collections.rs, crates/jet-codegen/src/Prelude/Core/Collections.rs, examples/features/collections/list_surface.jet, examples/features/collections/map_merge.jet (or new map_surface.jet + its golden), examples/features/expected/collections/*, docs/reference/core-library.md, docs/reference/core-surface-ledger.json, docs/reference/core-surface-ledger.md.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "e3-coll",
       "log": [
+        {
+          "at": "2026-08-06",
+          "by": "e3-coll",
+          "text": "reclaim after wipe; re-ship List/Map surface"
+        },
         {
           "at": "2026-08-06",
           "by": "prep-core-c",
@@ -84907,8 +84912,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T02:13:46.755Z",
-      "updated": "2026-08-06T10:18:03.036Z",
-      "updatedBy": "prep-core-c"
+      "updated": "2026-08-06T17:57:58.632Z",
+      "updatedBy": "e3-coll",
+      "claimedAt": "2026-08-06T17:57:58.632Z"
     },
     {
       "id": "c0m2slnf",
@@ -86783,16 +86789,22 @@
       "plan": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-06",
+          "by": "fable",
+          "text": "Review closed: 8 findings (1 blocker) fixed in proposal and NAME1 ballot; fixes grep-verified. Independent re-verify of criteria 2-4 was interrupted by usage limits — next session should re-verify before close. Exsum now carries the deleted/kept/gained score per the rethink skill."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "Seven D-AUTHORITY-* ballots minted (full profile) and validated on this card",
-          "status": "met",
+          "status": "verified",
           "metBy": "fable",
-          "verifiedBy": null,
-          "evidence": "tower decision add accepted all seven D-AUTHORITY-* ballots (full profile, validator-clean) on 2026-08-06; NAME1 updated post-review",
-          "at": "2026-08-06T17:25:05.039Z"
+          "verifiedBy": "reviewer",
+          "evidence": "Fresh-context reviewer confirmed card #1500 lane decide with exactly the seven D-AUTHORITY-* ballots attached, validator-clean",
+          "at": "2026-08-06T17:58:29.258Z"
         },
         {
           "n": 2,
@@ -86824,11 +86836,11 @@
         {
           "n": 5,
           "text": "Bug findings filed as cards: Capability core_type_known regression, E1221 ten-vs-28 text, stale root-count comments, D-FFI-PY1 missing root",
-          "status": "met",
+          "status": "verified",
           "metBy": "fable",
-          "verifiedBy": null,
-          "evidence": "cards #1501 (core_type_known regression), #1502 (E1221 text), #1503 (stale comments), #1504 (missing Py/Octave roots) filed with bodies",
-          "at": "2026-08-06T17:25:05.679Z"
+          "verifiedBy": "reviewer",
+          "evidence": "Fresh-context reviewer confirmed cards #1501-#1504 exist and accurately restate the four research findings",
+          "at": "2026-08-06T17:58:30.608Z"
         },
         {
           "n": 6,
@@ -86847,7 +86859,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T17:01:59.254Z",
-      "updated": "2026-08-06T17:26:45.302Z",
+      "updated": "2026-08-06T17:58:31.026Z",
       "updatedBy": "fable"
     },
     {
@@ -87017,7 +87029,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T17:14:30.623Z",
-      "updated": "2026-08-06T17:26:13.202Z",
+      "updated": "2026-08-06T17:56:49.638Z",
       "updatedBy": "fable"
     }
   ],
@@ -115407,6 +115419,76 @@
       "draft": false,
       "status": "open",
       "created": "2026-08-06T17:22:03.442Z"
+    },
+    {
+      "id": "D-CONC-SHARE1",
+      "cardId": "c0vzadss",
+      "group": "syntax",
+      "title": "Shared values read and write like values",
+      "gist": "Whether shared state drops its closure ceremony and becomes plain field access.",
+      "lesson": "Shared<T> is Jet's one shared-mutation cell. Every touch today takes a closure: read with a lambda, edit with a lambda. A counter bump is a closure call. The compiler already knows which statements touch shared values, and the transaction machinery already orders locks. This choice decides whether shared access becomes plain reads and writes, with each statement one atomic step and #Transact for multi-step commits.",
+      "explainer": "",
+      "story": "Noor keeps a hit counter and a config name in shared state. Her counter bump is config.edit(c => { c.hits += 1 }). She writes the closure dance so often she made an editor snippet for it.",
+      "inWild": "config :: Shared.new(AppConfig.{name: \"jet-server\", hits: 0})\nlabel :: config.read(c => c.name)\nconfig.edit(c => { c.hits += 1 })",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Plain access, statement steps",
+          "detail": "shared expr builds the cell. Reads and writes are plain field access. Each statement is one atomic step. Several statements commit together under #Transact. The closure forms are deleted. Expert guards and Condition stay for manual control. Race freedom does not move: the compiler still checks every crossing and orders every lock.",
+          "technical": "Amends D-SHARED-API1=A (read/edit closures deleted) and D-TXN2 (the #Transact name becomes optional, kept for on_commit and on_rollback). A statement touching several shared cells acquires locks in address order, the same engine as D-CONC-STM1. Guards from D-SHAREDGUARD1 stay.",
+          "code": "config :: shared AppConfig.{name: \"jet-server\", hits: 0}\n\nlabel :: config.name          // one locked read\nconfig.hits += 1              // one locked write\n\n#Transact {\n    from.balance -= amount\n    to.balance += amount\n}"
+        },
+        {
+          "key": "B",
+          "name": "Keep the closures",
+          "detail": "Status quo. The closure scopes the lock visibly, and nothing changes. Every read of one field stays a lambda, and the counter bump keeps its snippet.",
+          "code": "label :: config.read(c => c.name)\nconfig.edit(c => { c.hits += 1 })"
+        },
+        {
+          "key": "C",
+          "name": "Guards first",
+          "detail": "Delete the closures the other way: every access goes through an explicit guard binding whose scope is the lock. Most explicit, most lines. The beginner counter bump becomes three lines.",
+          "technical": "guard_read and guard_edit become the only access forms; read and edit are deleted.",
+          "code": "g :: config.guard_edit()\ng.hits += 1\n// lock releases when g dies"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Mutex access is explicit lock then plain field access on the guard. Explicit, but the lock call is the ceremony users complain about first.",
+          "code": "let mut c = config.lock().unwrap();\nc.hits += 1;"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Shared state is the beginner's first wall today. Plain access removes the wall while the compiler keeps every safety proof: checked crossings, ordered locks, one clear multi-step spelling.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "The closure tax on every touch is the single loudest ergonomic cost in this area, and it proves nothing the compiler does not already know."
+          },
+          {
+            "key": "C",
+            "reason": "It makes the simple case three lines to make the lock visible, which experts already have through the guards that stay."
+          }
+        ],
+        "tradeoff": "Lock scopes become implicit per statement, so a reader sees locking only at the shared binding and in #Transact blocks. The expert guards keep manual scoping available."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared plain access, the closure status quo, and guards-only. It recommended plain access because each statement maps to one atomic step the machinery already supports.",
+        "boilOcean": "The breadth review tested an actor-style mailbox and a software-transactional-everything design. Actors are a declined mechanism, and whole-program transactions break the effect wall, so neither entered.",
+        "hybrid": "A hybrid keeping read for multi-field snapshots was tested. A #Transact block already gives a consistent multi-field read, so the extra form died.",
+        "cooperative": "Option B was strengthened: the closure shows the lock scope on the page. That visibility survives in guards for experts, so the everyday tax still loses.",
+        "adversarial": "The attack hunted torn reads across two statements. Two statements are two steps by definition; the fix is the #Transact block, which the proposal teaches beside the feature."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-06T17:56:49.638Z"
     }
   ],
   "questions": [
@@ -116863,15 +116945,6 @@
       "created": "2026-08-05T19:47:55.297Z"
     },
     {
-      "id": "b0ipnwvi",
-      "text": "First-principles rethink: FAILURE. T ? E, error conversions, Fallible, validate blocks, #Pre/#Post, traps, panics, exit 101, parked transaction regions (#775). Three constraint layers ruled not to compose (D-VALIDATE1). Question: what is a failure - recoverable value, contract breach, or fault - and what does each owe the caller? Use first-principles-rethink skill.",
-      "note": "",
-      "level": null,
-      "tags": [],
-      "status": "open",
-      "created": "2026-08-06T15:59:06.467Z"
-    },
-    {
       "id": "b0o8fe4t",
       "text": "First-principles rethink: DATA AT BOUNDARIES. DataTree magic string, Codable, migrations, closed streaming format enum, XML algebra, exact JSON numbers (#1395), deferred typed-text heads. Question: what is a value crossing a trust or format boundary - schema, evolution, validation, provenance as one model, connected to the tag/taint plane. Use first-principles-rethink skill.",
       "note": "",
@@ -116890,15 +116963,6 @@
       "created": "2026-08-06T15:59:07.132Z"
     },
     {
-      "id": "b0zinpzp",
-      "text": "First-principles rethink: BUILD/CONFIG PLANE. package.jet, env.jet, computed modules, unshipped rung-4 fn build, generic-module value params, policy scopes. Question: what is configuration - compile-time knowledge about the program, plausibly a plane of the type-v2 carriers+knowledge model rather than a parallel world. Use first-principles-rethink skill.",
-      "note": "",
-      "level": null,
-      "tags": [],
-      "status": "open",
-      "created": "2026-08-06T15:59:07.483Z"
-    },
-    {
       "id": "b1d9uknk",
       "text": "COMPLETE Jet /first-principles-rethink",
       "note": "",
@@ -116909,6 +116973,62 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-06T17:58:31.026Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0pp8jfr",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-06T17:58:30.608Z",
+      "by": "reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0pp8jfr",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-06T17:58:29.258Z",
+      "by": "reviewer",
+      "action": "card.criteria-verify",
+      "ref": "c0pp8jfr",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-06T17:57:58.632Z",
+      "by": "e3-coll",
+      "action": "card.update",
+      "ref": "c0h7a8p6",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T17:57:56.447Z",
+      "by": "e3-coll",
+      "action": "card.claim",
+      "ref": "c0h7a8p6",
+      "note": ""
+    },
+    {
+      "at": "2026-08-06T17:57:50.720Z",
+      "by": "owner",
+      "action": "idea.delete",
+      "ref": "b0ipnwvi",
+      "note": ""
+    },
+    {
+      "at": "2026-08-06T17:57:46.606Z",
+      "by": "owner",
+      "action": "idea.delete",
+      "ref": "b0zinpzp",
+      "note": ""
+    },
+    {
+      "at": "2026-08-06T17:56:49.638Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-CONC-SHARE1",
+      "note": "Shared values read and write like values"
+    },
     {
       "at": "2026-08-06T17:26:45.302Z",
       "by": "fable",
@@ -120352,62 +120472,6 @@
       "action": "card.criteria-meet",
       "ref": "c0ky778n",
       "note": "#1"
-    },
-    {
-      "at": "2026-08-06T14:34:27.199Z",
-      "by": "e3-bugs",
-      "action": "card.release",
-      "ref": "c08scee7",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-08-06T14:34:22.036Z",
-      "by": "e3-bugs",
-      "action": "card.update",
-      "ref": "c08scee7",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-06T14:34:21.576Z",
-      "by": "e3-bugs",
-      "action": "card.update",
-      "ref": "c0mpupgd",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T14:34:21.297Z",
-      "by": "e3-bugs",
-      "action": "card.update",
-      "ref": "c0hp46qn",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T14:34:21.008Z",
-      "by": "e3-bugs",
-      "action": "card.update",
-      "ref": "c0ky778n",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T14:34:20.728Z",
-      "by": "e3-bugs",
-      "action": "card.criteria-meet",
-      "ref": "c0mpupgd",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-06T14:34:20.468Z",
-      "by": "e3-bugs",
-      "action": "card.criteria-meet",
-      "ref": "c0mpupgd",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-06T14:34:20.208Z",
-      "by": "e3-bugs",
-      "action": "card.criteria-meet",
-      "ref": "c0mpupgd",
-      "note": "#2"
     }
   ],
   "nextNum": 368,
