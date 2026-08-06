@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1483,
-    "rev": 25772,
+    "rev": 25775,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -81076,12 +81076,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-ul3-core",
-      "phase": "verify",
+      "phase": "building",
       "priority": "P0",
       "plan": "1. Generate a closed inventory from Collections.rs, module_items.rs, and fixed_sigs.rs. Do not trust prose as the source of shipped Jet methods.\n2. Select every Python builtin type and stdlib module Jet claims to cover. Use official Python docs to enumerate the matching public surface.\n3. Give every row a stable ID, Python member, Jet spelling, matched workflow, and one verdict: Jet wins, equal, Jet loses, or out of scope.\n4. Link every Jet-loses row to one live Tower card or open decision. Out-of-scope requires a ratified product-scope decision that explicitly says Jet does not compete for that workflow. A design decline does not remove a scored loss.\n5. Add deterministic checks for an unmapped shipped method, missing Python member, duplicate row, hidden exclusion, stale owner, source-table drift, or unratified scope exclusion.\n6. Store the durable ledger under docs and make #1398 consume it as its only workflow inventory. Do not create a second benchmark framework.\n7. A fresh reviewer checks closure against both source tables and official Python docs.\nblockedBy: none.",
       "blockedBy": [],
       "assignee": "bd-ledger",
       "log": [
+        {
+          "at": "2026-08-06",
+          "by": "bd-ledger",
+          "text": "A fourth review holds this card. The Jet-side inventory failed a third time, in a third function. methodNames reads only string literals, so any table that spells a method through a Syntax constant yields nothing. The Duration and TaskList containers vanish entirely, and Task records one member of seven. Table discovery is also scoped to one file and one name shape, so the real BigInt and Decimal tables in Numeric.rs are never read. About 39 shipped Jet members are missing from an inventory the card calls closed."
+        },
         {
           "at": "2026-08-06",
           "by": "bd-ledger",
@@ -81140,11 +81145,11 @@
         {
           "n": 3,
           "text": "Every Jet-loses row links one live Tower owner. A design decline remains a loss; out-of-scope requires a ratified decision that narrows Jet's competition claim for that workflow.",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-ledger",
-          "verifiedBy": null,
-          "evidence": "All 38 clusters name a live card, covering 603 of 603 loss rows. 'check --check' reports clusters-needing-a-card=0 and exits 0; cluster states are {live: 38} with zero needs_card, closed or missing. The checker resolves the canonical board from the main clone via git rev-parse --git-common-dir, so a stale worktree copy cannot make this look wired when it is not.",
-          "at": "2026-08-06T02:24:16.785Z"
+          "verifiedBy": "bd-review-ledger4",
+          "evidence": "Wiring confirmed by a fourth reviewer: 38 clusters, none needing a card, check exits 0. Substantively this must be re-run once the Jet-side inventory closes, because card #1468 currently owns three rows for operations Jet already ships.",
+          "at": "2026-08-06T02:58:33.991Z"
         },
         {
           "n": 4,
@@ -81188,9 +81193,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T18:12:13.321Z",
-      "updated": "2026-08-06T02:47:51.843Z",
-      "updatedBy": "bd-ledger",
-      "claimedAt": "2026-08-06T02:47:51.843Z"
+      "updated": "2026-08-06T02:58:33.991Z",
+      "updatedBy": "bd-review-ledger4",
+      "claimedAt": "2026-08-06T02:58:33.291Z"
     },
     {
       "id": "c0fmfiwg",
@@ -82285,7 +82290,13 @@
       "plan": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-06",
+          "by": "fable",
+          "text": "Hold before starting. A ledger review proved that Task.cancel, Task.wait and TaskList.wait_all already ship at Collections.rs:1202 and :802, with constants in Syntax/effects_surface.rs and working examples in task_controls.jet and task_group_helpers.jet. They were scored as gaps by a broken extractor. Wait for the corrected ledger."
+        }
+      ],
       "criteria": [],
       "refs": [
         "docs/reference/core-surface-ledger.json"
@@ -82294,7 +82305,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T02:13:30.630Z",
-      "updated": "2026-08-06T02:13:30.630Z",
+      "updated": "2026-08-06T02:58:33.668Z",
       "updatedBy": "fable"
     },
     {
@@ -109222,6 +109233,27 @@
   ],
   "events": [
     {
+      "at": "2026-08-06T02:58:33.991Z",
+      "by": "bd-review-ledger4",
+      "action": "card.criteria-verify",
+      "ref": "c00ms1om",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T02:58:33.668Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c02j5hzk",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-06T02:58:33.292Z",
+      "by": "bd-ledger",
+      "action": "card.update",
+      "ref": "c00ms1om",
+      "note": "phase,logEntry"
+    },
+    {
       "at": "2026-08-06T02:47:52.576Z",
       "by": "fable",
       "action": "card.update",
@@ -112699,27 +112731,6 @@
       "action": "decision.ratify",
       "ref": "D-INTDIV1",
       "note": "A"
-    },
-    {
-      "at": "2026-08-05T13:49:57.463Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0kfh1yl",
-      "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-08-05T13:49:57.463Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0kfh1yl",
-      "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-08-05T13:49:57.463Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0kfh1yl",
-      "note": "#2 syntax-decisions.md log entry"
     }
   ],
   "nextNum": 368,
