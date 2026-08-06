@@ -791,6 +791,15 @@ function synonymsFor(jetMember) {
   return keys;
 }
 
+// Jet spells operations in snake_case and types in PascalCase, so module_items
+// exports both: DataError, Digest256 and CryptoError sit beside describe and
+// blake3. A type is not an operation, and scoring one as a win inflated the
+// least audited number in the ledger. The rule is Jet-side only: Go exports
+// every function in PascalCase, so it cannot apply to a competitor surface.
+function isTypeItem(member) {
+  return /^[A-Z]/.test(member);
+}
+
 function containerFor(name) {
   return CONTAINER_ALIASES[name] || name;
 }
@@ -812,6 +821,8 @@ function coveredKeys(jetMembersByContainer) {
     if (!byDomain.has(domain)) byDomain.set(domain, new Set());
     const into = byDomain.get(domain);
     for (const member of members) {
+      // A type name must not cover a competitor's operation.
+      if (isTypeItem(member)) continue;
       for (const key of keysForMember(member, prefixes.get(container))) into.add(key);
     }
   }
@@ -886,8 +897,10 @@ function rowForModule(entry, member, fixedOnly, surfaces, keys) {
     },
     container: container,
     jetSpelling: entry.module + "." + member,
-    workflow: "Core module workflow for " + container,
-    verdict: verdictFor(cells),
+    workflow: isTypeItem(member)
+      ? "Core type exported by " + container
+      : "Core module workflow for " + container,
+    verdict: isTypeItem(member) ? "type_item" : verdictFor(cells),
     competitors: cells,
     evidence: ["source:" + MODULE_ITEMS_PATH, "source:" + FIXED_SIGS_PATH],
   };
@@ -907,8 +920,10 @@ function rowForCollection(entry, method, surfaces, keys) {
     },
     container: container,
     jetSpelling: entry.type + "." + method,
-    workflow: "Core type workflow for " + container,
-    verdict: verdictFor(cells),
+    workflow: isTypeItem(method)
+      ? "Core type exported by " + container
+      : "Core type workflow for " + container,
+    verdict: isTypeItem(method) ? "type_item" : verdictFor(cells),
     competitors: cells,
     evidence: ["source:" + COLLECTIONS_PATH],
   };
@@ -1331,7 +1346,7 @@ function validateRows(ledger, surfaces) {
   surfaces = surfaces || loadSurfaces();
   const ids = new Set();
   const sourceKeys = new Set();
-  const verdicts = new Set(["equal", "jet_wins", "jet_loses", "single_witness", "not_compared", "declined"]);
+  const verdicts = new Set(["equal", "jet_wins", "jet_loses", "single_witness", "not_compared", "declined", "type_item"]);
   for (const row of ledger.rows) {
     if (ids.has(row.id)) throw new Error("duplicate row id: " + row.id);
     ids.add(row.id);
@@ -1360,6 +1375,9 @@ function validateRows(ledger, surfaces) {
       if (!record || !record.present || !record.operations.includes(cell.operation)) {
         throw new Error("unverified competitor claim in " + row.id + ": " + language + " " + cell.operation);
       }
+    }
+    if (row.verdict === "type_item" && !isTypeItem(row.source.member)) {
+      throw new Error("row scored as a type but named like an operation: " + row.id);
     }
     if (row.verdict === "equal" &&
         !Object.values(row.competitors).some(function (cell) { return cell.status === "has"; })) {
@@ -1505,6 +1523,7 @@ function markdown(ledger) {
     "| Equal | " + (v.equal || 0) + " |",
     "| Jet loses (two or more languages agree) | " + (v.jet_loses || 0) + " |",
     "| Single witness (recorded, not scored) | " + (v.single_witness || 0) + " |",
+    "| Exported type, not an operation | " + (v.type_item || 0) + " |",
     "| Not compared | " + (v.not_compared || 0) + " |",
     "| Deliberately declined | " + (v.declined || 0) + " |",
     "",
@@ -1606,6 +1625,7 @@ function check() {
     " equal=" + (v.equal || 0) +
     " loses=" + (v.jet_loses || 0) +
     " single-witness=" + (v.single_witness || 0) +
+    " types=" + (v.type_item || 0) +
     " not-compared=" + (v.not_compared || 0) +
     " clusters-needing-a-card=" + stored.summary.clustersNeedingCard + "\n");
 }
