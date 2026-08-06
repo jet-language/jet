@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1506,
-    "rev": 26851,
+    "rev": 26872,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -84754,11 +84754,11 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "building",
       "priority": "P1",
       "plan": "Scope: String ships 30 methods in string_method_return (crates/jet-foundation/src/Collections.rs:1082). Card #1409 closed the earlier gap batch. The ledger now scores 61 remaining jet_loses rows for container String. Verified 2026-08-06 by reading string_method_return directly: none of the 61 names are present under any spelling, so all 61 are real gaps, not extractor drift.\n\nApproach:\n1. Group the 61 names (docs/reference/core-surface-ledger.json, rows where container=String and verdict=jet_loses) into families and add each as a case arm in string_method_return (crates/jet-foundation/src/Collections.rs) plus the matching Prelude implementation in crates/jet-codegen/src/Prelude/Core/UnicodeString.rs:\n   - Predicates: isdigit, islowercase, isuppercase, isletter, isprint, isspace, isvalid -> is_digit, is_lower, is_upper, is_alpha (already close to is_alphabetic), is_printable, is_space (folds into existing is_whitespace unless distinct), is_valid_utf8-style check. Reconcile naming against existing is_alphabetic/is_numeric/is_whitespace/is_ascii so Jet keeps one predicate family, not a duplicate is_x/isx pair.\n   - Search/index: find, lastindexof, indexofany, lastindexofany, matches, match -> extend the existing index_of/count/split_once family rather than adding a second one.\n   - Splitting/joining: rsplit, replacerange, join, concat, partition, rpartition, byteslice, chop -> extend split/replace/slice family.\n   - Case/format: titlecase, swapcase, capitalize, ljust, rjust, tochararray, codepointat, normalize -> extend to_upper/to_lower/to_title family; ljust/rjust likely fold into existing pad_start/pad_end (D-textunicode) rather than new names.\n   - Mutation-style verbs that don't fit an immutable String (clear, push, pop, remove, write): confirm String is immutable-value semantics in Jet (bytes()/chars() are the escape hatch); if so these are legitimate declines, record with a decision id rather than implementing mutation methods on String.\n   - Comparison/equality/misc: compare, compareto, equals, clone, intern, isnullorempty, tofloat, parse -> parse/tofloat likely already answered by destination-owned Int.parse/Float.parse (E0311, noted won in #1409); record as declines pointing at that mechanism, do not add a second parse path.\n   - Sequence-style ops borrowed from Iter/List vocabulary (all, skip, droplast, indexed, first, flatmap, each, last, max, min, fold, reverse, chunk, findlast, scan): confirm whether these should exist on String directly or only after .chars()/.bytes() converts to a List/Iter; if Jet's answer is \"convert first,\" record that as the decline mechanism instead of duplicating Iter's whole surface onto String.\n2. Update crates/jet-codegen/src/Prelude/Core/UnicodeString.rs with the corresponding jet_string_* Rust implementations; keep Unicode-table-driven predicates consistent with the existing D-TEXTUNICODE1 approach.\n3. Rebuild jet (prelude is include_str-embedded) after Prelude edits: scripts/agent/jet-env cargo build.\n4. Extend examples/features/text/strings.jet (and/or string_parse.jet) with cases for every shipped addition; regenerate examples/features/expected/text/strings.out (golden).\n5. For every name recorded as a decline instead of an addition, log a decision id (new D-STR-* ballot only if it is a genuine owner-facing naming/scope call; otherwise a plain implementer note is enough since #1409 already established the \"Jet already wins with a different mechanism\" pattern for parse/partition).\n6. Run node scripts/agent/check-core-surface-ledger.mjs --refresh to regenerate docs/reference/core-surface-ledger.json and .md from the updated source, then --check to confirm it is self-consistent.\n7. Update docs/reference/core-library.md String section to list the new methods.\n\nProof:\n- scripts/agent/jet-env cargo test --test core_surface_ledger\n- scripts/agent/jet-env cargo test --test tir_collections_and_methods (or the string-specific test module, confirm exact name before running) string\n- scripts/agent/jet-env jet run examples/features/text/strings.jet, diff against examples/features/expected/text/strings.out\n- scripts/agent/jet-env cargo build --release -p jet-cli (AOT) running the same example and diffing the same golden, to prove I9 parity between AOT and default jet run\n- node scripts/agent/check-core-surface-ledger.mjs --check\n\nOwned paths: crates/jet-foundation/src/Collections.rs, crates/jet-codegen/src/Prelude/Core/UnicodeString.rs, examples/features/text/strings.jet, examples/features/expected/text/strings.out, docs/reference/core-library.md, docs/reference/core-surface-ledger.json, docs/reference/core-surface-ledger.md.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "e3-fast",
       "log": [
         {
           "at": "2026-08-06",
@@ -84820,8 +84820,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T02:13:46.443Z",
-      "updated": "2026-08-06T10:16:52.991Z",
-      "updatedBy": "prep-core-c"
+      "updated": "2026-08-06T18:07:16.850Z",
+      "updatedBy": "e3-fast",
+      "claimedAt": "2026-08-06T18:07:16.850Z"
     },
     {
       "id": "c0h7a8p6",
@@ -84925,7 +84926,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "verify",
       "priority": "P1",
       "plan": "Scope: Set ships in set_method_return and SortedSet in sorted_set_method_return (crates/jet-foundation/src/Collections.rs:1534, :1552). Card #1404 correctly shipped union/intersection/difference/symmetric_difference/is_subset/is_superset/is_disjoint; an earlier ledger extractor bug had wrongly scored those as missing, which is already corrected in the current ledger and in #1404's log. The ledger now scores 20 genuine remaining jet_loses rows for Set plus 1 for SortedSet (\"new\"). Verified 2026-08-06 directly against both match tables: all 21 names are absent, none are the extractor bug pattern from #1404.\n\nApproach:\n1. SortedSet \"new\": Set.from([...]) / SortedSet.from([...]) already exist as the constructor (examples/features/collections/set.jet). Record this as a decline — Jet answers construction through .from() and dot-construction literals, not a bare .new(); no code change needed here, just note it in docs/reference/core-surface-ledger.md's decline list if the checker supports one, or as a log entry.\n2. Set gap families (container=Set, verdict=jet_loses), add to set_method_return + crates/jet-codegen/src/Prelude/Core/Collections.rs:\n   - Algebra-adjacent: replace, take, update -> extend the existing add/remove/clear family; update's contract needs to be distinct from the existing add (which already returns bool for \"was new\").\n   - Predicates/iteration: all, filter, first, each, indexof, max, min, fold, indexed -> Set is unordered by definition (hash-backed per the file header comment), so \"first\"/\"indexof\"/\"indexed\" need either a documented arbitrary-order contract or a decline; route the rest (all, filter, each, max, min, fold) through the same to_list()-then-Iter-methods path already used for union/intersection results, unless the ledger's competitor evidence specifically wants set-native laziness.\n   - Transform: flatmap, map, flatten -> map/flatmap on a Set risk producing duplicate or unhashable output; scope narrowly (e.g. map requiring Hash+Eq output type) or decline with a reason if it collides with I8 (one canonical mechanism, already served by .to_list().map(...)).\n   - capacity, new -> same disposition as SortedSet.new above (decline, answered by .from()); capacity may be a genuine decline (Jet's Set may not expose backing capacity).\n   - shuffle, sort, toset -> shuffle/sort do not make sense on an unordered Set without first converting; toset already exists implicitly as the identity, and .to_list() plus List.sort/shuffle (once #1477 ships shuffle) covers it — decline these on Set itself and document the .to_list() route.\n3. Rebuild jet after Prelude edits: scripts/agent/jet-env cargo build.\n4. Extend examples/features/collections/set.jet with every shipped addition; regenerate examples/features/expected/collections/set.out.\n5. Record a decision id or a plain implementer log entry for every declined name (construction, capacity, order-dependent ops on an unordered container).\n6. Run node scripts/agent/check-core-surface-ledger.mjs --refresh then --check.\n7. Update docs/reference/core-library.md Set/SortedSet section.\n\nProof:\n- scripts/agent/jet-env cargo test --test core_surface_ledger\n- scripts/agent/jet-env cargo test --test tir_collections_and_methods\n- scripts/agent/jet-env jet run examples/features/collections/set.jet, diff against examples/features/expected/collections/set.out\n- AOT build of the same example, diff against the same golden, to prove I9 parity between AOT and default jet run\n- node scripts/agent/check-core-surface-ledger.mjs --check\n\nOwned paths: crates/jet-foundation/src/Collections.rs, crates/jet-codegen/src/Prelude/Core/Collections.rs, examples/features/collections/set.jet, examples/features/expected/collections/set.out, docs/reference/core-library.md, docs/reference/core-surface-ledger.json, docs/reference/core-surface-ledger.md.",
       "blockedBy": [],
@@ -84946,47 +84947,47 @@
         {
           "n": 1,
           "text": "Every one of the 20 Set and 1 SortedSet gap rows in docs/reference/core-surface-ledger.json (verdict jet_loses) is either shipped as a set_method_return/sorted_set_method_return case with a working Prelude implementation, or recorded as a named decline with a reason (SortedSet/Set 'new' is expected to decline in favor of the existing .from() constructor).",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:18:37.979Z"
+          "status": "verified",
+          "metBy": "e3-fast",
+          "verifiedBy": "e3-review",
+          "evidence": "independent re-check after Set.first packed Option ABI fix; I9 OK; first_in_set true",
+          "at": "2026-08-06T18:02:12.733Z"
         },
         {
           "n": 2,
           "text": "scripts/agent/jet-env cargo test --test core_surface_ledger passes, and node scripts/agent/check-core-surface-ledger.mjs --check exits 0 against the refreshed ledger.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:18:38.301Z"
+          "status": "verified",
+          "metBy": "e3-fast",
+          "verifiedBy": "e3-review",
+          "evidence": "independent re-check after Set.first packed Option ABI fix; I9 OK; first_in_set true",
+          "at": "2026-08-06T18:02:12.978Z"
         },
         {
           "n": 3,
           "text": "examples/features/collections/set.jet exercises every shipped addition and scripts/agent/jet-env jet run examples/features/collections/set.jet matches examples/features/expected/collections/set.out exactly.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:18:38.607Z"
+          "status": "verified",
+          "metBy": "e3-fast",
+          "verifiedBy": "e3-review",
+          "evidence": "independent re-check after Set.first packed Option ABI fix; I9 OK; first_in_set true",
+          "at": "2026-08-06T18:02:13.221Z"
         },
         {
           "n": 4,
           "text": "The same example produces byte-identical output under AOT build and default jet run (I9 parity).",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:18:38.919Z"
+          "status": "verified",
+          "metBy": "e3-fast",
+          "verifiedBy": "e3-review",
+          "evidence": "independent re-check after Set.first packed Option ABI fix; I9 OK; first_in_set true",
+          "at": "2026-08-06T18:02:13.460Z"
         },
         {
           "n": 5,
           "text": "docs/reference/core-library.md Set/SortedSet section lists every newly shipped method and every declined name with its reason.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:18:39.231Z"
+          "status": "verified",
+          "metBy": "e3-fast",
+          "verifiedBy": "e3-review",
+          "evidence": "independent re-check after Set.first packed Option ABI fix; I9 OK; first_in_set true",
+          "at": "2026-08-06T18:02:13.708Z"
         }
       ],
       "refs": [
@@ -84996,9 +84997,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T02:13:47.049Z",
-      "updated": "2026-08-06T17:07:02.857Z",
+      "updated": "2026-08-06T18:02:14.007Z",
       "updatedBy": "e3-fast",
-      "claimedAt": "2026-08-06T17:07:02.857Z"
+      "claimedAt": "2026-08-06T18:02:14.006Z"
     },
     {
       "id": "c0r2dfxz",
@@ -86859,7 +86860,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T17:01:59.254Z",
-      "updated": "2026-08-06T17:58:31.026Z",
+      "updated": "2026-08-06T18:07:22.526Z",
       "updatedBy": "fable"
     },
     {
@@ -86976,6 +86977,11 @@
         {
           "at": "2026-08-06",
           "by": "fable",
+          "text": "v2 rework per owner feedback: proposal rewritten surface-first with before/after pairs and simple prose; OUTCOME1+GROUP1 deleted (superseded by surface picks); SPAWN1/FAIL1/SHARE1 minted; CHAN1/JOIN1/SCHED1 rewritten; final slate is 10 ballots (6 surface, 1 law, 3 machinery)"
+        },
+        {
+          "at": "2026-08-06",
+          "by": "fable",
           "text": "closed out per owner instruction (no re-review): proposal + nine ballots ready for owner in Focus Mode; criteria 3-4 open pending ratification outcomes"
         },
         {
@@ -86991,8 +86997,8 @@
           "status": "met",
           "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "nine full-profile ballots D-CONC-UNIT1/JOIN1/GROUP1/OUTCOME1/CROSS1/STM1/SCHED1/STREAM1/CHAN1 added and validator-accepted on #1505",
-          "at": "2026-08-06T17:22:28.696Z"
+          "evidence": "final cohesive slate of ten ballots: surface D-CONC-SPAWN1/FAIL1/JOIN1/CHAN1/SHARE1/SCHED1, law D-CONC-STM1, machinery D-CONC-UNIT1/CROSS1/STREAM1; OUTCOME1 and GROUP1 deleted as superseded; all validator-accepted",
+          "at": "2026-08-06T18:01:04.197Z"
         },
         {
           "n": 2,
@@ -87029,7 +87035,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T17:14:30.623Z",
-      "updated": "2026-08-06T17:56:49.638Z",
+      "updated": "2026-08-06T18:01:04.197Z",
       "updatedBy": "fable"
     }
   ],
@@ -114445,7 +114451,7 @@
       ],
       "rec": "A",
       "recommendation": {
-        "why": "One ladder gives embedded and certification work a single proof and deletes a duplicate lattice, while keeping the friendly floor spellings beginners and experts already ratified. The unsafe mode stays a gate setting, which keeps the model honest.",
+        "why": "One ladder gives embedded and certification work a single proof and deletes a duplicate lattice. The floor words stay because they read better than row noise, and the unsafe mode stays a gate setting, which keeps the model honest.",
         "whyNot": [
           {
             "key": "B",
@@ -114860,32 +114866,32 @@
       "cardId": "c0vzadss",
       "group": "safety",
       "title": "What happens to a dropped task handle",
-      "gist": "Whether dropping a task without joining it is an error, an automatic join, or a warning.",
-      "lesson": "A spawned task returns a handle. Joining waits for the task and collects its result. Dropping the handle today only prints warning L1101, and the program may exit while the task still runs. Jet already has a hard rule for values that carry unfinished work: a single-use value must be consumed, error E0140. That error's own text names the unjoined task as its example. This choice amends the shipped L1101 rule and decides which behavior becomes law.",
+      "gist": "Whether dropping a bound task handle without joining it is an error, an automatic join, or a warning.",
+      "lesson": "Under the proposed spawn surface, an unbound task joins at the end of its scope on its own. A bound handle is different: the writer took the handle, so the writer owns it. Today dropping it only prints warning L1101, and the program may exit while the task still runs. Jet already has a hard rule for values that carry unfinished work: a single-use value must be consumed, error E0140. That error names the unjoined task as its example. This choice amends the shipped L1101 rule.",
       "explainer": "",
-      "story": "Ben spawns a task that writes a report to disk, prints a status line, and returns. The warning scrolls past in test output. In production the process exits first, and the report is half-written.",
-      "inWild": "fn export(report: Report) {\n    h :: tasks.spawn(() => write_report(report))\n    print(\"export started\")\n}   // h dropped — today only L1101; the write may never finish",
+      "story": "Ben starts a task that writes a report to disk, binds the handle, prints a status line, and returns. The warning scrolls past in test output. In production the process exits first, and the report is half-written.",
+      "inWild": "fn export(report: Report) {\n    h :: task write_report(report)\n    print(\"export started\")\n}   // h dropped — today only warning L1101; the write may never finish",
       "detail": "",
       "options": [
         {
           "key": "A",
-          "name": "Dropping a task is an error",
-          "detail": "The join duty becomes the same obligation every single-use value carries. Dropping a handle fails to compile. The fix text names the three exits: join it, take its outcome, or call detach for fire-and-forget. No work is ever lost silently.",
-          "technical": "Extends D-LIN1 to Task<T> and the list twins from D-VERDICT-1323-1. Group children joined by g.all, race, or any discharge at those calls, as protocol handles already do. Amends the L1101 behavior documented in the spec's task section.",
-          "code": "h :: tasks.spawn(() => write_report(report))\nprint(\"export started\")\n// error: `h` must be used exactly once, but it is never used\n// fix: call .join(), take .outcome(), or .detach() for fire-and-forget"
+          "name": "Dropping a bound handle is an error",
+          "detail": "The join duty becomes the same rule every single-use value follows. Dropping a bound handle fails to compile. The fix text names the three exits: join it, use its result, or call detach for fire-and-forget. No work is ever lost silently, and the choice is always visible on the page.",
+          "technical": "Extends D-LIN1 to Task<T> and to the list forms from D-VERDICT-1323-1. Handles consumed by all, race, or any discharge at those calls. Amends the L1101 behavior in the spec's task section. Unbound spawns are untouched: the scope joins them per D-CONC-SPAWN1.",
+          "code": "h :: task write_report(report)\nprint(\"export started\")\n// error: `h` must be used exactly once, but it is never used\n// fix: join it with h.join(), or h.detach() for fire-and-forget"
         },
         {
           "key": "B",
-          "name": "Scope exit joins the task",
-          "detail": "Dropping a handle means the enclosing scope waits for the task at its end. No error, no lost work. The cost: a slow task turns a quick function into a stall with no mark on the page, and readers cannot see the wait.",
-          "technical": "Handle drop lowers to an implicit join at scope exit, after cleanups. detach remains the only fire-and-forget spelling. Panics from the child surface at the scope end.",
-          "code": "fn export(report: Report) {\n    h :: tasks.spawn(() => write_report(report))\n    print(\"export started\")\n}   // compiles; the function silently blocks here until the write ends"
+          "name": "Scope exit joins the bound handle too",
+          "detail": "Dropping a bound handle means the scope waits for it at the end, the same as an unbound spawn. No error, no lost work. The cost: binding a handle then ignoring it silently blocks the scope, and the reader cannot tell a joined handle from a forgotten one.",
+          "technical": "Bound and unbound handles behave the same at scope exit. detach remains the only fire-and-forget spelling. A failure from the implicit join reports at the scope end.",
+          "code": "fn export(report: Report) {\n    h :: task write_report(report)\n    print(\"export started\")\n}   // compiles; blocks here until the write ends"
         },
         {
           "key": "C",
           "name": "Keep the warning",
-          "detail": "Status quo. The warning stays advisory, and a dropped handle still races program exit. The same mistake on a protocol handle stays a hard error, so the two rules keep teaching opposite lessons.",
-          "code": "h :: tasks.spawn(() => write_report(report))\n// warning L1101: task `h` is dropped without `.join()`\n// the program may still exit before the write finishes"
+          "detail": "Status quo. The warning stays advisory, and a dropped bound handle still races program exit. The same mistake on a protocol handle stays a hard error, so the two rules keep teaching opposite lessons.",
+          "code": "h :: task write_report(report)\n// warning L1101: task `h` is dropped without `.join()`\n// the program may still exit before the write finishes"
         }
       ],
       "comparisons": [
@@ -114902,28 +114908,28 @@
       ],
       "rec": "A",
       "recommendation": {
-        "why": "It closes the last silent-loss door with a rule the language already enforces everywhere else, and the fix is always one visible call.",
+        "why": "Binding a handle is a claim of ownership, so silence is the one wrong answer. The error reuses a rule the language already enforces everywhere else, and the fix is one visible call.",
         "whyNot": [
           {
             "key": "B",
-            "reason": "The scope silently waits on work the reader cannot see. Structured waiting already has a visible spelling: the taskgroup."
+            "reason": "It erases the difference between a handled task and a forgotten one, and hides a wait the reader cannot see."
           },
           {
             "key": "C",
             "reason": "A warning lets real work vanish, and E0140 already names the unjoined task as the mistake it exists to stop."
           }
         ],
-        "tradeoff": "Existing fire-and-forget code must write .detach() once per spawn. That one visible call is the price of never losing work silently."
+        "tradeoff": "Fire-and-forget code must write .detach() once per spawn. That one visible call is the price of never losing work silently."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "reviewPasses": {
-        "base": "The first draft compared error, auto-join, and warning. It recommended the error because the obligation rule already exists and its text names this exact case.",
+        "base": "The first draft compared error, auto-join, and warning for a dropped bound handle. It recommended the error because the single-use rule already exists and names this case.",
         "boilOcean": "The breadth review added cancel-on-drop and process-exit-blocks-on-tasks as candidates. Both punish the common case to rescue the rare one, so they were folded into option B's discussion.",
-        "hybrid": "A hybrid making drop an error in libraries but a warning in the entry function was tested. Two severities for one mistake is the current defect restated, so it was rejected.",
-        "cooperative": "Option B was strengthened: auto-join is genuinely magic for beginners and loses nothing. Its silent stall with no page mark still contradicts explicit control flow.",
-        "adversarial": "The attack claimed the error punishes quick scripts. The one-word detach spelling answers it, and group children discharge through g.all as before, so the recommendation survives."
+        "hybrid": "A hybrid making the drop an error in libraries but a warning in the entry function was tested. Two severities for one mistake is the current defect restated, so it was rejected.",
+        "cooperative": "Option B was strengthened: with unbound spawns already scope-joined, joining bound ones too is consistent. Consistency loses to legibility here, because the binding is the reader's signal of intent.",
+        "adversarial": "The attack claimed the error punishes quick scripts. A quick script writes the unbound form and gets the scope join free, so the error only fires where the writer claimed the handle."
       },
       "checkInstructions": null,
       "draft": false,
@@ -115220,33 +115226,33 @@
       "id": "D-CONC-SCHED1",
       "cardId": "c0vzadss",
       "group": "syntax",
-      "title": "Schedules and limits as data on tasks and groups",
-      "gist": "Whether when-work-runs and how-much-runs-at-once become typed data on the work itself.",
-      "lesson": "A scheduled job and a spawned task are the same unit of work started by different hands. Today the schedule lives in a marker with its own private duration table, the concurrency limit does not exist, and bounding a worker pool takes a hand-built channel of tokens. This choice decides whether scheduling facts become typed data on the task and group values. The spelling of duration literals is decided separately by D-TYPE2-TIME1 and is not asked here.",
+      "title": "Typed schedules, one job vocabulary, services on the substrate",
+      "gist": "Whether schedules become typed data, jobs and tasks become one vocabulary, and services build on groups.",
+      "lesson": "A scheduled job and a spawned task are the same unit of work started by different hands. Today the schedule marker parses its own private duration table, the docs and CLI present jobs and tasks as different things, and the ratified service plane is unbuilt. This choice decides three linked things: the schedule value becomes typed data on the one time rail, the vocabulary collapses to one word, and services build as supervisor tasks that own groups. The worker cap moved to D-CONC-SPAWN1; literal spelling stays with D-TYPE2-TIME1.",
       "explainer": "",
-      "story": "Sofia builds a scraper: fetch twenty pages, at most four at a time, and rerun the whole job nightly. The nightly part is one marker line. The at-most-four part is a forty-nine line token dance with a channel she must seed, receive from, and refill by hand.",
-      "inWild": "// today: bounding active work means hand-rolled tokens\n(tokens_tx, tokens) :: tasks.channel<Int>(capacity: 4)\nloop t, 1..4 { tokens_tx.send(t) }\ntaskgroup g {\n    loop url, urls {\n        token :: tokens.receive() ?? break\n        g.task => { fetch(url); tokens_tx.send(token) }\n    }\n}",
+      "story": "Sofia ships a nightly scraper. Her schedule line works, but jet dev, the future service runtime, and jetos each need their own reading of it, and the spec admits only one reader exists. When she asks what a job is versus a task, the docs give two answers.",
+      "inWild": "#[Job, Every(5min)] fn prune_sessions() { print(\"pruning\") }\n// the 5min above parses through a private suffix table that\n// tops out at minutes: no 2h, no 1d\n#[Job, Every(\"03:00\")] fn nightly_backup() { … }\n// \"03:00\" is a raw string only jet dev ever reads",
       "detail": "",
       "options": [
         {
           "key": "A",
-          "name": "Data on the unit of work",
-          "detail": "The group takes a typed limit, so bounding active work is one argument. The schedule marker's value becomes the same typed data every other consumer reads. Naming aligns on one word: a job is a task the runtime spawns. Existing marker spellings stay.",
-          "technical": "taskgroup g(limit: N) admits at most N running children; further task starts wait at the group, a wait point under the cancel law. The Every value becomes typed schedule data behind the unchanged marker, per the marker-rebuild row-data direction. Aligns with the ratified job naming (D-TAG-SURFACE1, card 1448) and with D-TASK-META1's typed metadata. Duration literal spelling defers to D-TYPE2-TIME1.",
-          "code": "#[Job, Every(\"03:00\")]          // unchanged spelling, typed value behind it\nfn scrape_all() {\n    taskgroup g(limit: 4) {      // proposed: the whole token dance\n        loop url, urls { g.task => fetch(url) }\n    }\n}"
+          "name": "Typed data, one word, services on groups",
+          "detail": "The schedule value behind the unchanged marker becomes a typed value every consumer reads: jet dev, services, jetos timers. Hours and days work because the one time rail covers them. A job is a task the runtime starts — one vocabulary, finishing card 1448's cleanup. The service plane then builds as supervisor tasks owning groups, restart rules as data.",
+          "technical": "The private suffix table in the schedule checker dies; the marker's value type becomes Duration or wall-clock time on the D-TYPE2-TIME1 rail. Amends D-SCHEDULE1=A's value grammar, not its placement rules. D-SERVICE1=D and its five sibling decisions build on the group substrate with no new mechanism. Aligns D-TAG-SURFACE1 and D-TASK-META1.",
+          "code": "#[Job, Every(2h)]                 // now legal: one time rail\nfn refresh_cache() { … }\n\n#[Job, Every(\"03:00\")]\nfn nightly_backup() {\n    group g(limit: 4) {           // cap decided by D-CONC-SPAWN1\n        loop shard, shards { task back_up(shard) }\n    }\n}"
         },
         {
           "key": "B",
-          "name": "Typed values only",
-          "detail": "The schedule value and group limit become typed data, but the vocabulary stays split. Jobs and tasks remain presented as different kinds of thing. Marker checking keeps its private table until the marker rebuild reaches it.",
-          "technical": "Ships taskgroup limit and the typed Every value. No vocabulary or presentation change; the job-versus-task split in docs and CLI stays as card 1448 left it.",
-          "code": "taskgroup g(limit: 4) { loop url, urls { g.task => fetch(url) } }"
+          "name": "Typed value only",
+          "detail": "The schedule value becomes typed and every consumer can read it, but the vocabulary stays split and the service plane keeps waiting for its own separate design pass.",
+          "technical": "Only the value grammar of D-SCHEDULE1=A changes. Card 1448 and the service decisions proceed on their own paths.",
+          "code": "#[Job, Every(2h)] fn refresh_cache() { … }\n// docs still explain jobs twice; services still unplanned on the substrate"
         },
         {
           "key": "C",
           "name": "Decline",
-          "detail": "Status quo. Bounded work stays a hand-built token channel, the schedule stays a privately parsed marker value, and the limit proposal from the July research stays unballoted.",
-          "code": "// the forty-nine line token dance above remains the answer"
+          "detail": "Status quo. The private suffix table stays and tops out at minutes, the two vocabularies stay, and the service plane waits.",
+          "code": "#[Job, Every(120min)] fn refresh_cache() { … }   // 2h spelled the long way"
         }
       ],
       "comparisons": [
@@ -115258,28 +115264,28 @@
       ],
       "rec": "A",
       "recommendation": {
-        "why": "The most common real-world shapes, bounded fan-out and scheduled work, become one argument and one marker on the same value. One vocabulary removes the job-versus-task confusion the board already flagged.",
+        "why": "One typed value feeds every consumer the spec already promises, one word ends a documented confusion, and the largest unbuilt ratified block gets its foundation for free.",
         "whyNot": [
           {
             "key": "B",
-            "reason": "It ships the mechanics but keeps two words for one concept, so the naming confusion card 1448 exists to fix stays alive."
+            "reason": "It fixes the table but leaves the naming confusion alive and the service plane without a substrate decision."
           },
           {
             "key": "C",
-            "reason": "It leaves the single most common concurrency need behind a forty-nine line pattern the pragmatism audit already flagged as a teaching defect."
+            "reason": "It keeps a duration table that cannot spell two hours, in a language with a ratified time system."
           }
         ],
-        "tradeoff": "The group signature gains an optional argument, and its snapshot and formatter cases grow accordingly. Accepted: one argument replaces a whole pattern users currently copy by hand."
+        "tradeoff": "The schedule checker and its errors are rebuilt against the time rail, and that work waits on the D-TYPE2-TIME1 outcome. Accepted: building it twice is the alternative."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "reviewPasses": {
-        "base": "The first draft compared full adoption, mechanics-only, and decline. It recommended full adoption because limits and schedules are properties of the work, not separate systems.",
-        "boilOcean": "The breadth review tested priorities, deadlines-on-groups, and pool sizing as further data. Deadlines already live on Context by ratified decision, and the rest can join later without a new mechanism, so the menu stayed focused.",
-        "hybrid": "A hybrid putting the limit on spawn sites instead of the group was tested. Per-site limits cannot bound the group total, which is what users mean, so it was rejected.",
-        "cooperative": "Option C was strengthened: the token channel teaches backpressure honestly and stays fully general. It remains available for expert shapes; the limit covers the common case.",
-        "adversarial": "The attack asked whether a full group plus limit deadlocks child-spawns-child shapes. Admission waits are wait points, so cancellation and deadlines reach them, and nesting admits independently per group."
+        "base": "The first draft compared the full adoption, a value-only fix, and decline. It recommended full adoption because the three pieces reinforce each other.",
+        "boilOcean": "The breadth review tested cron strings, calendar rules, and per-job time zones. All are future value shapes the typed rail can add without new syntax, so the menu stayed small.",
+        "hybrid": "A hybrid shipping the vocabulary cleanup separately was tested. It is card 1448's existing path, so option B already covers it and no new option was needed.",
+        "cooperative": "Option C was strengthened: the private table is tiny and shipped. Tiny is not the bar; it cannot spell two hours, and every future consumer would re-read a raw string.",
+        "adversarial": "The attack asked whether typed schedules break the wall-clock string form. The daily form stays as a typed wall-clock value with the same spelling, so nothing user-visible breaks there."
       },
       "checkInstructions": null,
       "draft": false,
@@ -115353,67 +115359,67 @@
     {
       "id": "D-CONC-CHAN1",
       "cardId": "c0vzadss",
-      "group": "stdlib",
-      "title": "Channel endpoints as complete, ordinary values",
-      "gist": "Whether receivers become nameable, loopable values and the dead channel remnants go.",
-      "lesson": "A channel is created as a sender and receiver pair. The sender's type can be written in a function signature; the receiver's cannot, because it was left out of the nameable-type table. The idiomatic drain loop is a manual receive-or-break dance. The table also still lists a combined Channel handle that a ratified decision deleted, and the select builder accepts a read arm that every build silently drops. This choice decides how much of that surface becomes honest.",
+      "group": "syntax",
+      "title": "Channels, draining, and select",
+      "gist": "How Jet spells channels, draining them, and waiting on several sources at once.",
+      "lesson": "Channels today live behind a module import. The receiver's type cannot be written in a signature. Draining a channel is a manual receive-or-break line users copy between projects. Waiting on several sources is a builder chain hung off a group, and it accepts a read arm that every build silently drops. Jet already has one branching shape: the arm table. This choice decides whether channels become plain builtin values and select becomes an arm table.",
       "explainer": "",
-      "story": "Kofi writes a worker that drains a job queue. He tries to move the drain into a helper and cannot write the receiver's type in its signature. His loop body is a receive-or-break line he copies between projects.",
-      "inWild": "fn drain(rx: Receiver<Int>) {        // today: E0119, no type called Receiver\n    loop {\n        job :: rx.receive() ?? break     // the copied dance\n        handle(job)\n    }\n}",
+      "story": "Kofi writes a worker that drains a job queue and also listens for a control message. He cannot put the receiver's type in his helper's signature. His wait code is a builder chain he re-reads three times to trust.",
+      "inWild": "(tx, rx) :: tasks.channel<Int>(capacity: 8)\nloop {\n    job :: rx.receive() ?? break\n    handle(job)\n}\nwinner :: g.select().recv(ch1).recv(ch2).after(ms: 100, value: -1).wait()",
       "detail": "",
       "options": [
         {
           "key": "A",
-          "name": "Complete the surface",
-          "detail": "Receiver joins the nameable table beside Sender. A loop over a receiver receives until the channel closes. The dead combined-channel entry is deleted. The silently dropped read arm of select is removed until stream input genuinely lands, so nothing on the page lies.",
-          "technical": "Adds Receiver to the core-generic table and deletes the dead Channel entry, both consistent with the ratified pair-return decision. Receiver becomes a loop source under the lazy iterator-source rule; drop on break closes it, matching the stream law. Removing the read arm amends the ratified select builder's arm list until the stream case ships for real.",
-          "code": "fn drain(rx: Receiver<Int>) {   // proposed: nameable\n    loop job, rx {              // proposed: receive until closed\n        handle(job)\n    }\n}"
+          "name": "Builtin values, loop, arm-table select",
+          "detail": "channel<T>() is builtin, no import. Draining is loop job, rx until the channel closes. select is an arm table that works anywhere in a task, on plain endpoints, with the same head-arrow-body shape as if. The arm binding mirrors the loop binding. Receiver and Sender become nameable. The builder chain, the dead Channel table entry, and the silently dropped read arm are deleted.",
+          "technical": "Amends D-CONCSELECT1=A (the fluent builder and its read arm are replaced) and narrows D-TASKRUNTIME1's module surface. select arms are S68 arm-table arms. after takes a Duration literal on the D-TYPE2-TIME1 rail. Cancellation at a select wait follows D-CANCELMODEL1=C unchanged. Fixes the interpreter-tier select gap as part of the migration.",
+          "code": "(tx, rx) :: channel<Int>(capacity: 8)\n\nfn drain(rx: Receiver<Int>) {\n    loop job, rx { handle(job) }\n}\n\nselect {\n    job, jobs    -> handle(job)\n    msg, control -> obey(msg)\n    after 100ms  -> retry()\n}"
         },
         {
           "key": "B",
-          "name": "Name it and clean up only",
-          "detail": "Receiver becomes nameable and the dead table entry goes, but the drain loop stays the manual dance and the dropped read arm keeps parsing. The surface stops blocking helpers but keeps its dead weight.",
-          "technical": "Table changes only. No loop-source rule, no select change.",
-          "code": "fn drain(rx: Receiver<Int>) {\n    loop { job :: rx.receive() ?? break\n           handle(job) }\n}"
+          "name": "Fix the gaps, keep the builder",
+          "detail": "Receiver becomes nameable, the drain loop lands, and the dead entries go. The builder chain stays as the select surface, still hung off a group, still fluent.",
+          "technical": "Table and loop changes only. D-CONCSELECT1=A stands unamended; the read arm is deleted as a stub.",
+          "code": "fn drain(rx: Receiver<Int>) {\n    loop job, rx { handle(job) }\n}\nwinner :: g.select().recv(ch1).recv(ch2).after(ms: 100, value: -1).wait()"
         },
         {
           "key": "C",
           "name": "Leave as is",
-          "detail": "Status quo. Receivers stay unwritable in signatures, the drain dance stays idiomatic, the dead entry stays in the table, and select keeps accepting an arm that no build executes.",
-          "code": "// helper impossible; the dance continues; .read(stream) still a silent no-op"
+          "detail": "Status quo. Receivers stay unwritable in signatures, the drain dance stays idiomatic, and select keeps accepting an arm that no build runs.",
+          "code": "// the inWild example above remains the answer"
         }
       ],
       "comparisons": [
         {
           "lang": "Go",
-          "note": "Ranging over a channel until it closes is the language's single most common concurrency shape, hit in essentially every real project.",
-          "code": "for job := range jobs { handle(job) }"
+          "note": "Ranging over a channel and a select statement with case arms are the two shapes every Go program uses. Both read as control flow, not as method chains.",
+          "code": "for job := range jobs { handle(job) }\nselect {\ncase job := <-jobs: handle(job)\ncase msg := <-control: obey(msg)\ncase <-time.After(100 * time.Millisecond): retry()\n}"
         }
       ],
       "rec": "A",
       "recommendation": {
-        "why": "It makes the most common channel shape one honest line, lets helpers exist, and removes two places where the surface currently misleads: a deleted handle still listed, an accepted arm never run.",
+        "why": "The two most common channel shapes become one loop line and one arm table, in the branching shape users already know. The surface stops lying about a dead handle and a dead arm.",
         "whyNot": [
           {
             "key": "B",
-            "reason": "It unblocks helpers but leaves the everyday loop a copied dance and leaves select accepting an arm that silently does nothing."
+            "reason": "It keeps the least readable part: a wait that is control flow, spelled as a method chain, reachable only through a group."
           },
           {
             "key": "C",
-            "reason": "A signature position that rejects a value users hold daily, plus a silent no-op arm, fails both the honesty and the teaching bars."
+            "reason": "A signature that rejects a value users hold daily, plus a silent no-op arm, fails both the honesty and the teaching bars."
           }
         ],
-        "tradeoff": "Removing the read arm briefly narrows ratified select surface until stream input lands for real. Accepted: an arm that silently drops is worse than an arm that does not parse."
+        "tradeoff": "select becomes a reserved word and a new statement form, with parser, formatter, and snapshot work. Accepted: waiting on several sources is control flow and should read like it."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "reviewPasses": {
-        "base": "The first draft compared completion, minimal naming, and the status quo. It recommended completion because the drain loop is the most common real channel shape.",
-        "boilOcean": "The breadth review tested receiver cloning for fan-out and non-blocking try operations. Both are real gaps but separable surface, so they were noted for future cards rather than padded into this menu.",
-        "hybrid": "A hybrid landing the loop but keeping the read arm as a parse-time error was tested. That is exactly what removal means in practice, so it merged into option A.",
-        "cooperative": "Option C was strengthened: the explicit receive-or-break dance shows the closed case honestly. The loop keeps that honesty, closing on drop under the same law, so the advantage transfers.",
-        "adversarial": "The attack asked what a loop does on a cancelled task and a closed channel mid-iteration. Close ends the loop normally and cancel unwinds at the receive wait point, both already law."
+        "base": "The first draft compared the arm-table redesign, a minimal fix, and the status quo. It recommended the redesign because both common shapes collapse to known forms.",
+        "boilOcean": "The breadth review tested send arms, else arms, and receiver fan-out clones. All are real future extensions the arm-table shape admits cleanly, so they were noted for later cards, not packed into this menu.",
+        "hybrid": "A hybrid keeping the builder as sugar over the arm table was tested. Two spellings for one wait violates the one-mechanism rule, so it was rejected.",
+        "cooperative": "Option B was strengthened: the builder is expression-shaped and returns a value directly. The arm table is also an expression under S68 value arms, so the advantage transfers.",
+        "adversarial": "The attack asked how select interacts with cancellation and closed channels. A select wait is a wait point under the ratified cancel law, and a closed source arm stops matching, both already defined."
       },
       "checkInstructions": null,
       "draft": false,
@@ -115489,6 +115495,76 @@
       "draft": false,
       "status": "open",
       "created": "2026-08-06T17:56:49.638Z"
+    },
+    {
+      "id": "D-AUTHORITY-SCOPE1",
+      "cardId": "c0pp8jfr",
+      "group": "syntax",
+      "title": "One scope marker: #Caps absorbs #Grant",
+      "gist": "Whether one marker or two set the rights of a block.",
+      "lesson": "Two markers set what a block may do. #Caps(Net) narrows the block to a list of rights. #Grant(caps: FS) sets a list and binds a handle that ends with the block. Both check the same rule with the same names, but they use two spellings and two error families. This choice decides whether the two markers merge into one.",
+      "explainer": "",
+      "story": "Ines reviews a teammate’s service. One function narrows with #Caps, the next grants with #Grant, and she has to stop and ask why. The answer is history, not meaning. She wants one marker whose one difference — a named handle — is visible in its head.",
+      "inWild": "// Today, two spellings for one relation:\n#Caps(DB.Read) {\n    db.query(req.id)          // outside the list -> E0741\n}\n#Grant(caps: FS, Net) {\n    backup()                  // outside the list -> E0712\n}                             // handle escape -> E0711",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "One marker, optional handle head",
+          "detail": "#Caps does both jobs. A bare list narrows, as today. A name before the list binds the handle: #Caps(g: FS, Net). #Grant is deleted and every use migrates in one pass. One spelling, one error family, one thing to teach.",
+          "technical": "Amends D-EFF1 (region form), D-SCAP1 and D-ARROW-CONTROL1 (the caps: head moves to a name head on #Caps). The handle keeps S63 scope-end revoke and E0711/E0712 checks; E0741 merges into the same check. REPL host gating keys off the same marker.",
+          "code": "#Caps(DB.Read) { db.query(id) }      // narrow, unchanged\n#Caps(g: FS, Net) { backup() }       // narrow + handle g (proposed)\n// #Grant(...) no longer parses; the fix names the #Caps form"
+        },
+        {
+          "key": "B",
+          "name": "One marker, handle always bound",
+          "detail": "Same merge, but every #Caps block binds a handle, named or not: #Caps(_: DB.Read). One form with no optional part. The common narrow-only case pays a head it never uses.",
+          "technical": "Same amendments as option A. The anonymous head spelling follows the existing wildcard convention.",
+          "code": "#Caps(_: DB.Read) { db.query(id) }   // handle unused\n#Caps(g: FS, Net) { backup() }"
+        },
+        {
+          "key": "C",
+          "name": "Keep both markers",
+          "detail": "Decline. #Caps narrows and #Grant grants, and the two verbs teach the two directions. The cost stays: two spellings and two error families for one relation, and every reader must learn why.",
+          "code": "#Caps(DB.Read) { ... }\n#Grant(caps: FS, Net) { ... }        // unchanged"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Fuchsia",
+          "note": "One operation — duplicate a handle with fewer rights — serves every narrowing job in the OS. One verb, learned once.",
+          "code": "zx_handle_duplicate(h, subset_rights, &out)"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Under the one law both markers set the holds of a block, so one marker is the honest spelling. The optional name head keeps the narrow-only case clean and makes the handle case visible at a glance.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A forced anonymous head taxes the most common case for a symmetry no reader asked for."
+          },
+          {
+            "key": "C",
+            "reason": "Two spellings for one relation is exactly the surface debt this proposal exists to delete, and the grant-versus-narrow story dissolves once the attenuation law holds everywhere."
+          }
+        ],
+        "tradeoff": "The word Grant leaves the marker surface, so the grant idea lives in manifests, flags, and the trust store only. That is acceptable because the block form never granted beyond what the outer scope held."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft posed merge-with-optional-handle, merge-with-mandatory-handle, and keep-both, and recommended the optional-handle merge.",
+        "boilOcean": "The breadth pass tested a fourth shape: block-level effect rows (=[Net]=> on a block) instead of any marker. It was rejected because a row states a contract on a signature while a block sets a scope, and mixing the two spellings blurs where contracts live.",
+        "hybrid": "The hybrid pass tried keeping #Grant as sugar for the handle form of #Caps. Two spellings for one meaning is the drift this ballot deletes, so the hybrid died on its own test.",
+        "cooperative": "The cooperative pass strengthened C: two verbs can teach direction, and its detail now says so plainly. It also strengthened B with the wildcard-head convention so the forced head is at least familiar.",
+        "adversarial": "The adversarial pass attacked A on REPL gating, which today keys off #Grant, and on migration blast radius. The gate keys off the handle head with no behavior change, and the migration is one mechanical pass over a small marker population, so A holds."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-06T18:07:00.105Z"
     }
   ],
   "questions": [
@@ -116973,6 +117049,153 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-06T18:07:22.526Z",
+      "by": "fable",
+      "action": "decision.update",
+      "ref": "D-AUTHORITY-MEM1",
+      "note": ""
+    },
+    {
+      "at": "2026-08-06T18:07:16.850Z",
+      "by": "e3-fast",
+      "action": "card.update",
+      "ref": "c0c1x3xj",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-06T18:07:00.106Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-AUTHORITY-SCOPE1",
+      "note": "One scope marker: #Caps absorbs #Grant"
+    },
+    {
+      "at": "2026-08-06T18:04:27.750Z",
+      "by": "e3-fast",
+      "action": "card.claim",
+      "ref": "c0c1x3xj",
+      "note": ""
+    },
+    {
+      "at": "2026-08-06T18:02:32.529Z",
+      "by": "e3-fast",
+      "action": "card.claim",
+      "ref": "c0c1x3xj",
+      "note": ""
+    },
+    {
+      "at": "2026-08-06T18:02:14.007Z",
+      "by": "e3-fast",
+      "action": "card.update",
+      "ref": "c0m2slnf",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-06T18:02:13.708Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c0m2slnf",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-06T18:02:13.460Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c0m2slnf",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-06T18:02:13.221Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c0m2slnf",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T18:02:12.978Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c0m2slnf",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T18:02:12.733Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c0m2slnf",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-06T18:02:12.481Z",
+      "by": "e3-fast",
+      "action": "card.criteria-meet",
+      "ref": "c0m2slnf",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-06T18:02:12.231Z",
+      "by": "e3-fast",
+      "action": "card.criteria-meet",
+      "ref": "c0m2slnf",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-06T18:02:11.979Z",
+      "by": "e3-fast",
+      "action": "card.criteria-meet",
+      "ref": "c0m2slnf",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T18:02:11.745Z",
+      "by": "e3-fast",
+      "action": "card.criteria-meet",
+      "ref": "c0m2slnf",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T18:02:11.504Z",
+      "by": "e3-fast",
+      "action": "card.criteria-meet",
+      "ref": "c0m2slnf",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-06T18:01:04.197Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0vzadss",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-06T18:01:03.857Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0vzadss",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-06T18:00:50.922Z",
+      "by": "fable",
+      "action": "decision.update",
+      "ref": "D-CONC-SCHED1",
+      "note": ""
+    },
+    {
+      "at": "2026-08-06T18:00:10.829Z",
+      "by": "fable",
+      "action": "decision.update",
+      "ref": "D-CONC-JOIN1",
+      "note": ""
+    },
+    {
+      "at": "2026-08-06T17:59:34.500Z",
+      "by": "fable",
+      "action": "decision.update",
+      "ref": "D-CONC-CHAN1",
+      "note": ""
+    },
     {
       "at": "2026-08-06T17:58:31.026Z",
       "by": "fable",
@@ -120325,153 +120548,6 @@
       "action": "card.update",
       "ref": "c0556cxe",
       "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T14:47:53.755Z",
-      "by": "e3-orch",
-      "action": "card.update",
-      "ref": "c0vvhs7e",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T14:47:53.470Z",
-      "by": "e3-orch",
-      "action": "card.update",
-      "ref": "c0w38v39",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T14:47:53.188Z",
-      "by": "e3-orch",
-      "action": "card.update",
-      "ref": "c0todzv8",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T14:43:14.567Z",
-      "by": "e3-bugs",
-      "action": "card.update",
-      "ref": "c08scee7",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-06T14:43:14.278Z",
-      "by": "e3-bugs",
-      "action": "card.update",
-      "ref": "c0mpupgd",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T14:43:13.989Z",
-      "by": "e3-bugs",
-      "action": "card.criteria-meet",
-      "ref": "c0mpupgd",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-06T14:43:13.641Z",
-      "by": "e3-bugs",
-      "action": "card.criteria-meet",
-      "ref": "c0mpupgd",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-06T14:43:13.290Z",
-      "by": "e3-bugs",
-      "action": "card.criteria-meet",
-      "ref": "c0mpupgd",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-06T14:43:12.931Z",
-      "by": "e3-bugs",
-      "action": "card.criteria-meet",
-      "ref": "c0mpupgd",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-06T14:43:12.552Z",
-      "by": "e3-bugs",
-      "action": "card.update",
-      "ref": "c0hp46qn",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T14:43:12.040Z",
-      "by": "e3-bugs",
-      "action": "card.criteria-meet",
-      "ref": "c0hp46qn",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-06T14:43:11.619Z",
-      "by": "e3-bugs",
-      "action": "card.criteria-meet",
-      "ref": "c0hp46qn",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-06T14:43:11.383Z",
-      "by": "e3-bugs",
-      "action": "card.criteria-meet",
-      "ref": "c0hp46qn",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-06T14:43:11.136Z",
-      "by": "e3-bugs",
-      "action": "card.criteria-meet",
-      "ref": "c0hp46qn",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-06T14:43:10.904Z",
-      "by": "e3-bugs",
-      "action": "card.criteria-meet",
-      "ref": "c0hp46qn",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-06T14:43:10.672Z",
-      "by": "e3-bugs",
-      "action": "card.update",
-      "ref": "c0ky778n",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T14:43:10.401Z",
-      "by": "e3-bugs",
-      "action": "card.criteria-meet",
-      "ref": "c0ky778n",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-06T14:43:10.175Z",
-      "by": "e3-bugs",
-      "action": "card.criteria-meet",
-      "ref": "c0ky778n",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-06T14:43:09.942Z",
-      "by": "e3-bugs",
-      "action": "card.criteria-meet",
-      "ref": "c0ky778n",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-06T14:43:09.707Z",
-      "by": "e3-bugs",
-      "action": "card.criteria-meet",
-      "ref": "c0ky778n",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-06T14:43:09.470Z",
-      "by": "e3-bugs",
-      "action": "card.criteria-meet",
-      "ref": "c0ky778n",
-      "note": "#1"
     }
   ],
   "nextNum": 368,

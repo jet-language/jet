@@ -1,8 +1,8 @@
 # Authority: one model
 
 Proposal, 2026-08-06. Companion ballots: D-AUTHORITY-MODEL1, D-AUTHORITY-ROOTS1,
-D-AUTHORITY-MEM1, D-AUTHORITY-NAME1, D-AUTHORITY-MANIFEST1, D-AUTHORITY-GATE1,
-D-AUTHORITY-WORD1.
+D-AUTHORITY-MEM1, D-AUTHORITY-NAME1, D-AUTHORITY-SCOPE1, D-AUTHORITY-MANIFEST1,
+D-AUTHORITY-GATE1, D-AUTHORITY-WORD1.
 
 ## Executive summary
 
@@ -29,10 +29,11 @@ The finding: these are not nine features. They are one relation — **a scope
 holds a set of rights** — and one law — **rights only shrink as scope nests;
 every re-widening is a written, audited gate**. Every ratified rule in this
 area is already an instance of that law. The proposal names the relation, builds
-it once, and re-founds all nine mechanisms on it. No spelling that users type
-today changes unless a ballot says so. Every capability is kept. Several
-ratified-but-unbuilt decisions (D-AGENT-EXEC2, D-JOS-INSTALLTRUST1,
-D-JPK-SANDBOX2) land on the new substrate instead of adding a tenth copy.
+it once, re-founds all nine mechanisms on it, and redesigns the surface to
+match. Every surface break is shown as a before/after pair and decided by a
+ballot. Every capability is kept. Several ratified-but-unbuilt decisions
+(D-AGENT-EXEC2, D-JOS-INSTALLTRUST1, D-JPK-SANDBOX2) land on the new substrate
+instead of adding a tenth copy.
 
 Why now: the drift is already user-visible. `jet explain E1221` tells users the
 effect vocabulary has ten roots while the compiler accepts twenty-eight.
@@ -42,15 +43,17 @@ The agent executor and jetos install-trust work are ratified and about to be
 built — building them on a shared substrate is one-time work; building them as
 copies ten and eleven is permanent debt.
 
-The ballots ask seven direction-level questions: adopt the model; heal the root
-table; fold the memory floors in; name the authority value; unify the manifest
-schema; adopt the audit law; reserve the word "capability". Each stands alone.
+The ballots ask eight direction-level questions: adopt the model; heal the
+root table; fold the memory floors in; name the authority value; merge the two
+scope markers; unify the manifest schema; adopt the audit law; retire the word
+"capability". Each stands alone.
 What does not change: effect inference, erasure, every diagnostic families'
 meaning, the beginner's zero-annotation experience, and every frozen wall.
 
 The score, in order. **Deleted:** the `BuildEffect` fork, the second
-tighten-only lattice, the duplicate purity checker, three of four manifest
-schemas, the dead-end phantom types, and five of six meanings of one word.
+tighten-only lattice, the duplicate purity checker, one of two scope markers,
+three of four manifest schemas, the dead-end phantom types, and five of six
+meanings of one word.
 **Kept:** every capability, every ratified spelling, every diagnostic meaning,
 zero-cost erasure. **Gained:** a nameable authority value for processes,
 plugins, and sessions; one audit ledger; the build-time hole closed; one
@@ -225,23 +228,101 @@ What the model deliberately does **not** absorb (the walls):
 
 ## The surface
 
-Spelling principles the model implies:
+The surface is the product. Three rules for spellings, from the model:
 
-1. **What you type today stays.** `=[Net]=>`, `#Caps`, `#Grant`, `#Unsafe`,
-   `#Policy`, `effects:`, `grants:`, `--allow-*` all keep their meaning. The
-   re-founding is substrate-first; surface changes are separate ballots.
-2. **One name per idea.** The rights tree has one vocabulary everywhere: the
-   same name in a row, a `#Caps` list, a manifest, a flag, and a trust grant.
-3. **The authority value gets a name.** The opaque handle `#Grant` binds, the
-   value a process receives, and the set a plugin holds become one nameable
-   Prelude type (name balloted; the word "Capability" is either claimed for
-   exactly this or retired from it).
+1. **One name per idea.** A right has the same name in a row, a marker, a
+   manifest, a flag, and a trust grant.
+2. **One marker per job.** Two markers that set the same relation merge.
+3. **Kept spellings must win on merit.** Nothing stays because it shipped.
 
-Proposed syntax slate (each item marked; nothing here is typed until ratified):
+The redesign, as before/after pairs from real programs. Each pair names its
+ballot and what it amends.
+
+**Foreign calls get one root** (D-AUTHORITY-ROOTS1; amends D-EFF4/D-EFF5 and
+the D-FFI-*1 effect clauses):
+
+```jet
+// before — sixteen flat roots; forbidding all of them takes sixteen words
+fn score(row: Row) =[Java]=> Float { ... }
+fn pure_math(x: Float)
+  =[!Go, !Java, !DotNet, !Fortran, !Cobol, !Tcl, !Lua, !Ada,
+    !Pascal, !Dart, !PowerShell, !Perl, !Ruby, !Php, !R, !Com]=> Float
+
+// after (proposed) — one root, languages as leaves
+fn score(row: Row) =[FFI.Java]=> Float { ... }
+fn pure_math(x: Float) =[!FFI]=> Float { ... }
+```
+
+**The two scope markers become one** (D-AUTHORITY-SCOPE1; amends D-EFF1's
+`#Caps` region and D-SCAP1/D-ARROW-CONTROL1's `#Grant` head):
+
+```jet
+// before — two markers, one relation, two error families
+#Caps(DB.Read) { db.query(id) }          // narrow: E0741 outside the list
+#Grant(caps: FS, Net) { backup() }       // grant + handle: E0712 / E0711
+
+// after (proposed) — one marker; a name binds the handle when you want one
+#Caps(DB.Read) { db.query(id) }
+#Caps(g: FS, Net) { backup() }           // g is the Authority value
+```
+
+**The manifest reads top to bottom** (D-AUTHORITY-MANIFEST1; amends
+D-EFFBUDGET1 keys and D-JPK-POLICYSURFACE1/D-JPK-GRANTSCHEMA1 placement):
+
+```jet
+// before — four schemas in four shapes
+effects: { allow: [Net, DB.Read], deny: [Exec] }
+grants: { "image-codec": [FS.Read] }
+policy: .{ trust: { default: prompt }, providers: { nix: { ... } } }
+
+// after (proposed) — one block: what this package may do and delegate
+authority: .{
+  holds: { allow: [Net, DB.Read], deny: [Exec] },
+  grants: { "image-codec": [FS.Read] },
+  trust: { default: prompt },
+  providers: { nix: { ... } },
+}
+```
+
+**Boundaries take one value** (D-AUTHORITY-NAME1; amends D-AGENT-EXEC2
+naming):
+
+```jet
+// before — a bespoke type per boundary, ratified or planned:
+// ProcessAuthority for processes, plugin capability lists, REPL grant copies
+
+// after (proposed) — one value, one narrowing rule, three boundaries
+a :: Authority.workspace()
+process.run("jet build", a.with(FS.Write, "out/"))
+plugin.load("lint", a.without(FS.Write))
+```
+
+**The audit is one command** (D-AUTHORITY-GATE1; generalizes D-LINTPOLICY1's
+bypass law):
+
+```sh
+# before — four sources to assemble by hand
+jet unsafe && git diff jet.lock && cat ~/.jet/trust && history | grep allow
+
+# after (proposed) — one ledger, one reader
+jet inspect authority
+```
+
+**One word, one meaning** (D-AUTHORITY-WORD1):
+
+```text
+before: "the loop takes the write capability (&) for items"   <- borrowing
+        "the Capability handle escapes the #Grant region"     <- authority
+after:  "the loop takes write access (&) for items"
+        "the Authority handle escapes its region"
+```
+
+The slate, item by item:
 
 | Item | Status |
 |------|--------|
-| `=[Net, FS.Read]=>` rows, `#Caps`, `#Grant(caps: …)`, `#Unsafe("reason")`, `#Policy(…)` | ratified, unchanged |
+| `=[Net, FS.Read]=>` rows, `#Unsafe("reason")`, `#Policy(…)` | ratified, kept on merit: rows read as contracts, the reason is the audit, the floor words beat row noise |
+| `#Caps` absorbs `#Grant`; a `name:` head binds the handle | proposed (D-AUTHORITY-SCOPE1; amends D-EFF1, D-SCAP1, D-ARROW-CONTROL1) |
 | `effect FS.Read` leaf declaration | ratified (D-EFFECT-DECL1), unchanged |
 | Root table: thirteen closed roots — `Net FS IO DB Time Rand Env Exec Log GPU FFI Browser Secret`; FFI languages become `FFI.Go`, `FFI.Java`, … leaves; `Mem` joins as a fourteenth root only if D-AUTHORITY-MEM1 is adopted | proposed (D-AUTHORITY-ROOTS1; amends D-EFF4/D-EFF5 and the effect clauses of the D-FFI-*1 ballots) |
 | `Mem.Alloc`, `Mem.Rc`, `Mem.Gc` leaves; `#Policy(no_alloc)` desugars to a `Mem.Alloc` denial on the one ladder | proposed (D-AUTHORITY-MEM1; substrate change, spelling kept) |
@@ -283,12 +364,21 @@ fn handle(req: Request) =[Net, DB.Read]=> Response {
 }
 ```
 
-`pkg.jet` (ratified, D-EFFBUDGET1 / D-PACKAGE-POLICY-SCOPE1):
+`pkg.jet`, today (ratified, D-EFFBUDGET1 / D-PACKAGE-POLICY-SCOPE1) and the
+same job after D-AUTHORITY-MANIFEST1 (proposed):
 
 ```jet
+// today
 policy: .{ unsafe: .Forbid }
 effects: { allow: [Net, DB.Read, Log], deny: [Exec] }
 grants: { "image-codec": [FS.Read] }
+
+// proposed
+policy: .{ unsafe: .Forbid }
+authority: .{
+  holds: { allow: [Net, DB.Read, Log], deny: [Exec] },
+  grants: { "image-codec": [FS.Read] },
+}
 ```
 
 **Expert — boundaries and gates.** (Marked lines proposed.)
@@ -339,11 +429,17 @@ gates:
   only do what its scope holds, holds only shrink, and every exception is
   written down."
 
-## What does not change
+## What stays
 
-- Effect inference, erasure, and zero runtime cost (byte-identical Rust).
-- Every ratified spelling: rows, `#Caps`, `#Grant`, `#Unsafe("reason")`,
-  `#Policy(…)`, `effect` declarations, `effects:`/`grants:` keys, `jet trust`.
+Only what wins on merit; nothing stays because it shipped.
+
+- Effect inference, erasure, and zero runtime cost (byte-identical Rust) —
+  inference is the least-privilege magic, and erasure is the price of zero.
+- `=[Net]=>` rows and `effect` leaf declarations — a row reads as a contract.
+- `#Unsafe("reason")` — the written reason is the audit; no shorter form
+  carries it.
+- `#Policy(no_alloc)` floor words — `no_alloc` reads better than row noise
+  (balloted either way in D-AUTHORITY-MEM1).
 - All diagnostic meanings; codes stay (E0740/E0741/E0711/E0712/E1220/E3112…).
 - Frozen walls: no top type, no HKT, no macros, comptime never creates types,
   facts never select runtime types or dispatch (the reified authority value is
@@ -360,6 +456,7 @@ gates:
 | D-AUTHORITY-ROOTS1 | Heal the root table: thirteen closed roots with FFI languages as leaves; amend D-EFF4/5; fix E1221 text | yes |
 | D-AUTHORITY-MEM1 | Memory floors ride the rights tree (`Mem.*`); one ladder, spellings kept | needs MODEL1 |
 | D-AUTHORITY-NAME1 | Name and reify the authority value for boundaries (menu: Authority, Caps, Clearance, Warrant, Grant) | needs MODEL1 |
+| D-AUTHORITY-SCOPE1 | Merge `#Grant` into `#Caps`: one scope marker, optional handle head | yes |
 | D-AUTHORITY-MANIFEST1 | One manifest authority schema behind the existing keys | yes |
 | D-AUTHORITY-GATE1 | One audit ledger + `jet inspect authority`; generalize D-LINTPOLICY1's bypass law to every gate | yes |
 | D-AUTHORITY-WORD1 | Reserve "capability"; rename the five other uses | yes |
@@ -388,4 +485,5 @@ documents for "capability".
   recorded above.
 - **Phase C — balloted surface unifications**, each a coherent greenfield
   migration that deletes the replaced form: the root-table heal, the memory
-  fold, the authority value, the manifest schema, the ledger, the word.
+  fold, the authority value, the scope-marker merge, the manifest schema, the
+  ledger, the word.
