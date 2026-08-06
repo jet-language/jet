@@ -108,7 +108,7 @@ while losses remain.
 | core.net | 18 | #1469 | ready | live |
 | core.log | 17 | #1474 | ready | live |
 | core.archive | 16 | #1470 | ready | live |
-| core.time | 14 | #1466 | building | live |
+| core.time | 14 | #1466 | verify | live |
 | Deque | 14 | #1475 | ready | live |
 | core.regex | 13 | #1471 | ready | live |
 | core.url | 13 | #1472 | ready | live |
