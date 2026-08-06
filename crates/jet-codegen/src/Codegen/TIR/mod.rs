@@ -3651,6 +3651,14 @@ pub enum TClosureOp {
     EachRef,
     /// `each` on a map — `jet_map_each((recv).clone(), f)`.
     EachMap,
+    MapAny,
+    MapAll,
+    MapFilter,
+    MapMap,
+    MapFold,
+    MapFlatMap,
+    ListBinarySearchBy,
+    ListMinMaxBy { tuple_struct: String },
     /// `find` — `jet_list_find((recv).clone(), f)`.
     Find,
     /// `any` — `jet_list_any((recv).clone(), f)`.
@@ -4022,6 +4030,29 @@ pub enum TBuiltinOp {
     IterCompare,
     /// `split(n)` → `jet_iter_split_at({as_iter}, n, |l,r| Struct{…})`.
     IterSplit { tuple_struct: String },
+    // #1477 List/Map non-closure surface
+    ListSlice,
+    ListCopy,
+    ListEqual,
+    ListBinarySearch,
+    ListUnion,
+    ListIntersection,
+    ListDifference,
+    ListRandom,
+    ListMinMax { tuple_struct: String },
+    MapCopy,
+    MapEqual,
+    MapFirst,
+    MapToList { tuple_struct: String },
+    MapMin,
+    MapMax,
+    MapIntersection,
+    MapSliceKeys,
+    MapNew,
+    MapFromKeys,
+    MapContainsValue,
+    MapPopFirst,
+    ListReplace,
     /// `indexed()` → inline emit building `JetTup_<hash>` struct. The struct name
     /// is embedded here at lowering so emit is a pure formatter.
     Indexed {

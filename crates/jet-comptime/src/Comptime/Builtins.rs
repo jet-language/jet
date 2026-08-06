@@ -1180,6 +1180,93 @@ pub fn apply_method(
                 CtValue::Some(Box::new(CtValue::Int(bs[i as usize] as i64)))
             })
         }
+
+        (CtValue::List(xs), "starts_with") => {
+            let Some(CtValue::List(prefix)) = args.into_iter().next() else {
+                return Err(unsupported("starts_with needs a list", span));
+            };
+            Ok(CtValue::Bool(xs.starts_with(&prefix)))
+        }
+        (CtValue::List(xs), "ends_with") => {
+            let Some(CtValue::List(suffix)) = args.into_iter().next() else {
+                return Err(unsupported("ends_with needs a list", span));
+            };
+            Ok(CtValue::Bool(xs.ends_with(&suffix)))
+        }
+        (CtValue::List(xs), "copy") => Ok(CtValue::List(xs.clone())),
+        (CtValue::List(xs), "equal") => {
+            let Some(CtValue::List(other)) = args.into_iter().next() else {
+                return Err(unsupported("equal needs a list", span));
+            };
+            Ok(CtValue::Bool(xs == &other))
+        }
+        (CtValue::List(xs), "slice") => {
+            let start = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
+            let end = as_int(args.get(1).unwrap_or(&CtValue::Int(0)), span)?;
+            let len = xs.len() as i64;
+            let s = start.clamp(0, len) as usize;
+            let e = end.clamp(0, len) as usize;
+            Ok(CtValue::List(if e <= s { vec![] } else { xs[s..e].to_vec() }))
+        }
+        (CtValue::List(xs), "binary_search") => {
+            let needle = args.first().cloned().unwrap_or(CtValue::Int(0));
+            let idx = xs.iter().position(|x| x == &needle);
+            // only exact match path for eval (sorted assumed)
+            Ok(match idx {
+                Some(i) => CtValue::Some(Box::new(CtValue::Int(i as i64))),
+                None => CtValue::None(Type::Int),
+            })
+        }
+        (CtValue::List(xs), "union") => {
+            let Some(CtValue::List(other)) = args.into_iter().next() else {
+                return Err(unsupported("union needs a list", span));
+            };
+            let mut out = xs.clone();
+            for x in other { if !out.contains(&x) { out.push(x); } }
+            Ok(CtValue::List(out))
+        }
+        (CtValue::List(xs), "intersection") => {
+            let Some(CtValue::List(other)) = args.into_iter().next() else {
+                return Err(unsupported("intersection needs a list", span));
+            };
+            let mut out = Vec::new();
+            for x in xs { if other.contains(x) && !out.contains(x) { out.push(x.clone()); } }
+            Ok(CtValue::List(out))
+        }
+        (CtValue::List(xs), "difference") => {
+            let Some(CtValue::List(other)) = args.into_iter().next() else {
+                return Err(unsupported("difference needs a list", span));
+            };
+            Ok(CtValue::List(xs.iter().filter(|x| !other.contains(x)).cloned().collect()))
+        }
+        (CtValue::List(xs), "random") => {
+            if xs.is_empty() { return Ok(CtValue::None(Type::Int)); }
+            let mut state: u64 = 0xC0FF_EE42;
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            let i = ((state >> 33) as usize) % xs.len();
+            Ok(CtValue::Some(Box::new(xs[i].clone())))
+        }
+        (CtValue::List(xs), "replace") => {
+            let old = args.first().cloned().unwrap_or(CtValue::Int(0));
+            let new = args.get(1).cloned().unwrap_or(CtValue::Int(0));
+            Ok(CtValue::List(
+                xs.iter()
+                    .map(|x| if x == &old { new.clone() } else { x.clone() })
+                    .collect(),
+            ))
+        }
+        (CtValue::List(xs), "min_max") => {
+            if xs.is_empty() { return Ok(CtValue::None(Type::Int)); }
+            let min = xs.iter().min_by(|a,b| a.jet_show().cmp(&b.jet_show())).cloned().unwrap();
+            let max = xs.iter().max_by(|a,b| a.jet_show().cmp(&b.jet_show())).cloned().unwrap();
+            Ok(CtValue::Some(Box::new(CtValue::Struct {
+                type_name: String::new(),
+                fields: vec![
+                    ("min".into(), min),
+                    ("max".into(), max),
+                ],
+            })))
+        }
         // Map
         (CtValue::Map(m), "len") => Ok(CtValue::Int(m.len() as i64)),
         (CtValue::Map(m), "is_empty") => Ok(CtValue::Bool(m.is_empty())),
@@ -1216,6 +1303,70 @@ pub fn apply_method(
             }
             Ok(CtValue::Map(out))
         }
+        (CtValue::Map(m), "copy") => Ok(CtValue::Map(m.clone())),
+        (CtValue::Map(m), "equal") => {
+            let Some(CtValue::Map(other)) = args.into_iter().next() else {
+                return Err(unsupported("equal needs a map", span));
+            };
+            Ok(CtValue::Bool(m == &other))
+        }
+        (CtValue::Map(m), "first") => Ok(match m.keys().next() {
+            Some(k) => CtValue::Some(Box::new(k.to_value())),
+            None => CtValue::None(Type::Int),
+        }),
+        (CtValue::Map(m), "to_list") => Ok(CtValue::List(
+            m.iter().map(|(k,v)| CtValue::Struct {
+                type_name: String::new(),
+                fields: vec![
+                    ("key".into(), k.to_value()),
+                    ("value".into(), v.clone()),
+                ],
+            }).collect()
+        )),
+        (CtValue::Map(m), "min") => Ok(match m.values().min_by(|a,b| a.jet_show().cmp(&b.jet_show())) {
+            Some(v) => CtValue::Some(Box::new(v.clone())),
+            None => CtValue::None(Type::Int),
+        }),
+        (CtValue::Map(m), "max") => Ok(match m.values().max_by(|a,b| a.jet_show().cmp(&b.jet_show())) {
+            Some(v) => CtValue::Some(Box::new(v.clone())),
+            None => CtValue::None(Type::Int),
+        }),
+        (CtValue::Map(m), "intersection") => {
+            let Some(CtValue::Map(other)) = args.into_iter().next() else {
+                return Err(unsupported("intersection needs a map", span));
+            };
+            let mut out = std::collections::BTreeMap::new();
+            for (k,v) in m.iter() {
+                if other.contains_key(k) { out.insert(k.clone(), v.clone()); }
+            }
+            Ok(CtValue::Map(out))
+        }
+        (CtValue::Map(m), "slice") => {
+            let Some(CtValue::List(keys)) = args.into_iter().next() else {
+                return Err(unsupported("slice needs key list", span));
+            };
+            let mut out = std::collections::BTreeMap::new();
+            for k in keys {
+                let key = CtKey::from_value(k).ok_or_else(|| unsupported("map key", span))?;
+                if let Some(v) = m.get(&key) { out.insert(key, v.clone()); }
+            }
+            Ok(CtValue::Map(out))
+        }
+        (CtValue::Map(m), "contains_value") => {
+            let needle = args.into_iter().next().unwrap_or(CtValue::Unit);
+            Ok(CtValue::Bool(m.values().any(|v| v == &needle)))
+        }
+        (CtValue::Map(m), "pop_first") => {
+            let Some(key) = m.keys().next().cloned() else {
+                return Ok(CtValue::None(Type::Int));
+            };
+            // Comp-time maps are immutable values; pop_first returns the first value without mutating.
+            Ok(match m.get(&key) {
+                Some(v) => CtValue::Some(Box::new(v.clone())),
+                None => CtValue::None(Type::Int),
+            })
+        }
+
         // String (char-counted per S41)
         (CtValue::Str(s), "len") => Ok(CtValue::Int(s.chars().count() as i64)),
         (CtValue::Str(s), "is_empty") => Ok(CtValue::Bool(s.is_empty())),

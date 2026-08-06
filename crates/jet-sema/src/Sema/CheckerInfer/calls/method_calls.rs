@@ -1325,6 +1325,35 @@ impl<'a> Checker<'a> {
                     *resolved_ret_out = Some(ret.clone());
                     return Some(ret);
                 }
+                // #1477: `Map.new()` / `Map.from_keys(keys, default)`.
+                if type_name == Syntax::TYPE_MAP && method == "new" && args.is_empty() {
+                    let (key, value) = match &self.expected_type {
+                        Some(Type::Map { key, value, .. }) => ((**key).clone(), (**value).clone()),
+                        _ => (Type::Int, Type::Int),
+                    };
+                    let ret = Type::Map {
+                        key: Box::new(key),
+                        key_span: None,
+                        value: Box::new(value),
+                    };
+                    *resolved_ret_out = Some(ret.clone());
+                    return Some(ret);
+                }
+                if type_name == Syntax::TYPE_MAP && method == "from_keys" && args.len() == 2 {
+                    let keys_ty = self.infer(&mut args[0].expr);
+                    let key = match keys_ty {
+                        Some(Type::List(inner)) => *inner,
+                        _ => Type::Int,
+                    };
+                    let value = self.infer(&mut args[1].expr).unwrap_or(Type::Int);
+                    let ret = Type::Map {
+                        key: Box::new(key),
+                        key_span: None,
+                        value: Box::new(value),
+                    };
+                    *resolved_ret_out = Some(ret.clone());
+                    return Some(ret);
+                }
                 // D-ITERTOOLS1=A: `SortedSet.from([...])` → `SortedSet<T>`.
                 if type_name == Syntax::TYPE_SORTED_SET && method == "from" && args.len() == 1 {
                     let arg_ty = self.infer(&mut args[0].expr);

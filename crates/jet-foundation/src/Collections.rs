@@ -9,6 +9,7 @@ use crate::AST::Type;
 pub const RESERVED_TYPES: &[&str] = &[
     Syntax::TYPE_HASH_MAP,
     Syntax::TYPE_BTREE_MAP,
+    Syntax::TYPE_MAP,
     Syntax::TYPE_CHAR,
     Syntax::TYPE_BIT_SET,
     Syntax::TYPE_BYTE_BUFFER,
@@ -810,6 +811,17 @@ fn builtin_static_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
             name: Syntax::TYPE_SORTED_SET.to_string(),
             args: vec![Type::Int],
         })),
+        // #1477: Map constructors.
+        (Type::Named(n), "new", 0) if n == Syntax::TYPE_MAP => Some(Some(Type::Map {
+            key: Box::new(Type::Int),
+            key_span: None,
+            value: Box::new(Type::Int),
+        })),
+        (Type::Named(n), "from_keys", 2) if n == Syntax::TYPE_MAP => Some(Some(Type::Map {
+            key: Box::new(Type::Int),
+            key_span: None,
+            value: Box::new(Type::Int),
+        })),
         // D-SHAPE-CONVERT1=A: destination-owned numeric conversion.
         _ => numeric_conversion_return(ty, method, nargs),
     }
@@ -923,6 +935,26 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
         ]))),
         ("shuffle", 0) => Some(Some(iter_ty(inner.clone()))),
         ("chunk_while", 1) => Some(Some(iter_ty(Type::List(Box::new(inner.clone()))))),
+        // #1477: remaining List ledger surface.
+        ("starts_with" | "ends_with" | "equal", 1) => Some(Some(Type::Bool)),
+        ("copy", 0) => Some(Some(Type::List(Box::new(inner.clone())))),
+        ("slice", 2) => Some(Some(Type::List(Box::new(inner.clone())))),
+        ("binary_search", 1) => Some(Some(Type::Option(Box::new(Type::Int)))),
+        ("binary_search_by", 1) => Some(Some(Type::Option(Box::new(Type::Int)))),
+        ("union" | "intersection" | "difference", 1) => {
+            Some(Some(Type::List(Box::new(inner.clone()))))
+        }
+        ("random", 0) => Some(Some(Type::Option(Box::new(inner.clone())))),
+        ("min_max", 0) => Some(Some(Type::Option(Box::new(Type::Tuple(vec![
+            ("min".to_string(), Box::new(inner.clone())),
+            ("max".to_string(), Box::new(inner.clone())),
+        ]))))),
+        ("min_max_by", 1) => Some(Some(Type::Option(Box::new(Type::Tuple(vec![
+            ("min".to_string(), Box::new(inner.clone())),
+            ("max".to_string(), Box::new(inner.clone())),
+        ]))))),
+        // #1477: ledger `replace` — substitute every equal element.
+        ("replace", 2) => Some(Some(Type::List(Box::new(inner.clone())))),
         ("flatten", 0) => match inner {
             Type::List(elem) => Some(Some(iter_ty(*elem.clone()))),
             _ => Some(Some(iter_ty(Type::Int))),
@@ -1147,10 +1179,12 @@ fn map_method_return(key: &Type, value: &Type, method: &str, nargs: usize) -> Op
         ("len", 0) => Some(Some(Type::Int)),
         ("is_empty", 0) => Some(Some(Type::Bool)),
         ("clear", 0) => Some(None),
-        ("add", 2) => Some(Some(Type::Option(Box::new(value.clone())))),
+        ("add" | "replace", 2) => Some(Some(Type::Option(Box::new(value.clone())))),
         ("add_new", 2) => Some(Some(Type::Bool)),
-        ("get" | "remove", 1) => Some(Some(Type::Option(Box::new(value.clone())))),
+        ("get" | "remove" | "pop", 1) => Some(Some(Type::Option(Box::new(value.clone())))),
         ("has_key", 1) => Some(Some(Type::Bool)),
+        ("contains_value", 1) => Some(Some(Type::Bool)),
+        ("pop_first", 0) => Some(Some(Type::Option(Box::new(value.clone())))),
         // D-LISTREMOVE1/F: map projections are lazy Iter views, not eager copies.
         ("keys", 0) => Some(Some(iter_ty(key.clone()))),
         ("values", 0) => Some(Some(iter_ty(value.clone()))),
@@ -1161,6 +1195,36 @@ fn map_method_return(key: &Type, value: &Type, method: &str, nargs: usize) -> Op
             value: Box::new(value.clone()),
         })),
         ("each", 1) => Some(None),
+        // #1477: remaining Map ledger surface.
+        ("copy", 0) => Some(Some(Type::Map {
+            key: Box::new(key.clone()),
+            key_span: None,
+            value: Box::new(value.clone()),
+        })),
+        ("equal", 1) => Some(Some(Type::Bool)),
+        ("first", 0) => Some(Some(Type::Option(Box::new(key.clone())))),
+        ("to_list", 0) => Some(Some(Type::List(Box::new(Type::Tuple(vec![
+            ("key".to_string(), Box::new(key.clone())),
+            ("value".to_string(), Box::new(value.clone())),
+        ]))))),
+        ("any" | "all", 1) => Some(Some(Type::Bool)),
+        ("map", 1) => Some(Some(Type::Map {
+            key: Box::new(key.clone()),
+            key_span: None,
+            value: Box::new(Type::Int),
+        })),
+        ("filter" | "flat_map" | "intersection", 1) => Some(Some(Type::Map {
+            key: Box::new(key.clone()),
+            key_span: None,
+            value: Box::new(value.clone()),
+        })),
+        ("fold", 2) => Some(Some(Type::Int)),
+        ("max" | "min", 0) => Some(Some(Type::Option(Box::new(value.clone())))),
+        ("slice", 1) => Some(Some(Type::Map {
+            key: Box::new(key.clone()),
+            key_span: None,
+            value: Box::new(value.clone()),
+        })),
         _ => None,
     }
 }
@@ -1845,7 +1909,10 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
                 | "get_disjoint_write"
                 | "edit_disjoint"
         ),
-        Type::Map { .. } => matches!(method, "add" | "add_new" | "remove" | "clear"),
+        Type::Map { .. } => matches!(
+            method,
+            "add" | "add_new" | "replace" | "remove" | "pop" | "pop_first" | "clear"
+        ),
         // D-COLLBREADTH1=A: Set mutating methods.
         Type::Apply { name, .. } if name == "Set" => {
             matches!(method, "add" | "remove" | "clear")
@@ -2158,8 +2225,11 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             "take" | "skip" | "step_by" | "chunks" | "windows" | "repeat" | "drop_last" | "split" => {
                 Some(vec![Type::Int])
             }
-            "intersperse" | "last_index_of" => Some(vec![(**inner).clone()]),
-            "compare" => Some(vec![Type::List(Box::new((**inner).clone()))]),
+            "intersperse" | "last_index_of" | "binary_search" => Some(vec![(**inner).clone()]),
+            "replace" => Some(vec![(**inner).clone(), (**inner).clone()]),
+            "compare" | "starts_with" | "ends_with" | "equal" | "union" | "intersection"
+            | "difference" => Some(vec![Type::List(Box::new((**inner).clone()))]),
+            "slice" => Some(vec![Type::Int, Type::Int]),
             "zip" => Some(vec![]),
             "dedup"
             | "indexed"
@@ -2174,8 +2244,8 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             | "cycle"
             | "shuffle"
             | "average"
-            | "to_set" => Some(vec![]),
-            "dedup_by" | "is_sorted_by" => Some(vec![Type::Fn {
+            | "to_set" | "copy" | "random" | "min_max" => Some(vec![]),
+            "dedup_by" | "is_sorted_by" | "binary_search_by" | "min_max_by" => Some(vec![Type::Fn {
                 params: vec![(**inner).clone()],
                 ret: None,
                 effect_bound: None,
@@ -2195,14 +2265,39 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             _ => Some(vec![]),
         },
         Type::Map { key, value, .. } => match method {
-            "add" | "add_new" => Some(vec![(**key).clone(), (**value).clone()]),
-            "get" | "remove" | "has_key" => Some(vec![(**key).clone()]),
-            // D-MAP-MERGE1=E: other map; optional conflict (K, V, V) => V.
-            "merge" => Some(vec![Type::Map {
+            "add" | "add_new" | "replace" => Some(vec![(**key).clone(), (**value).clone()]),
+            "get" | "remove" | "pop" | "has_key" => Some(vec![(**key).clone()]),
+            "contains_value" => Some(vec![(**value).clone()]),
+            "merge" | "equal" | "intersection" => Some(vec![Type::Map {
                 key: Box::new((**key).clone()),
                 key_span: None,
                 value: Box::new((**value).clone()),
             }]),
+            "slice" => Some(vec![Type::List(Box::new((**key).clone()))]),
+            "any" | "all" | "filter" => Some(vec![Type::Fn {
+                params: vec![(**key).clone(), (**value).clone()],
+                ret: Some(Box::new(Type::Bool)),
+                effect_bound: None,
+                return_view_provenance: None,
+                param_contract: None,
+            }]),
+            "map" | "flat_map" => Some(vec![Type::Fn {
+                params: vec![(**key).clone(), (**value).clone()],
+                ret: None,
+                effect_bound: None,
+                return_view_provenance: None,
+                param_contract: None,
+            }]),
+            "fold" => Some(vec![
+                Type::Int,
+                Type::Fn {
+                    params: vec![Type::Int, (**key).clone(), (**value).clone()],
+                    ret: Some(Box::new(Type::Int)),
+                    effect_bound: None,
+                    return_view_provenance: None,
+                    param_contract: None,
+                },
+            ]),
             "each" => Some(vec![Type::Fn {
                 params: vec![(**key).clone(), (**value).clone()],
                 ret: None,

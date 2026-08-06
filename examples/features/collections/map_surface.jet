@@ -1,0 +1,36 @@
+// #1477: remaining Map surface after #1410.
+fn run() {
+    empty := Map.new()
+    print(empty.len())
+
+    m := Map.from_keys(["a", "b"], 1)
+    print(m.get("a") ?? 0)
+    print(m.get("b") ?? 0)
+
+    left := [String: Int].{ "a": 1, "b": 2, "c": 3 }
+    right := [String: Int].{ "b": 9, "c": 3, "d": 4 }
+    print(left.copy().equal(left))
+    print(left.first() ?? "")
+    print(left.min() ?? -1)
+    print(left.max() ?? -1)
+    inter := left.intersection(right)
+    print(inter.get("b") ?? 0)
+    print(inter.get("a") ?? -1)
+    sliced := left.slice(["a", "c"])
+    print(sliced.get("a") ?? 0)
+    print(sliced.get("b") ?? -1)
+    print(left.any((k: String, v: Int) => v > 2))
+    print(left.all((k: String, v: Int) => v > 0))
+    mapped := left.map((k: String, v: Int) => v * 10)
+    print(mapped.get("a") ?? 0)
+    filtered := left.filter((k: String, v: Int) => v >= 2)
+    print(filtered.len())
+    folded := left.fold(0, (acc: Int, k: String, v: Int) => acc + v)
+    print(folded)
+    entries := left.to_list()
+    print(entries.len())
+    print(left.contains_value(2))
+    print(left.replace("a", 100) ?? -1)
+    print(left.pop("b") ?? -1)
+    print(left.pop_first() ?? -1)
+}

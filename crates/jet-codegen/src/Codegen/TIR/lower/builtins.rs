@@ -284,10 +284,13 @@ pub(crate) fn resolve_builtin_op(
         ("push", 1) => TBuiltinOp::Push,
         ("pop", 0) => TBuiltinOp::Pop,
         ("insert", 2) => TBuiltinOp::InsertList,
-        ("add", 2) if is_map => TBuiltinOp::InsertMap,
+        ("add" | "replace", 2) if is_map => TBuiltinOp::InsertMap,
         ("add_new", 2) if is_map => TBuiltinOp::AddNewMap,
         ("merge", 1) if is_map => TBuiltinOp::MapMerge,
         ("merge", 2) if is_map => TBuiltinOp::MapMergeWith,
+        ("pop", 1) if is_map || is_lru => TBuiltinOp::RemoveMap,
+        ("pop_first", 0) if is_map => TBuiltinOp::MapPopFirst,
+        ("contains_value", 1) if is_map => TBuiltinOp::MapContainsValue,
         ("remove", 1 | 2) => {
             if is_set {
                 TBuiltinOp::SetRemove
@@ -324,6 +327,7 @@ pub(crate) fn resolve_builtin_op(
                 TBuiltinOp::GetList
             }
         }
+        ("first", 0) if is_map => TBuiltinOp::MapFirst,
         ("first", 0) if is_set => TBuiltinOp::SetFirst,
         ("first", 0) if is_sorted_set => TBuiltinOp::First,
         ("last", 0) if is_sorted_set => TBuiltinOp::Last,
@@ -387,6 +391,8 @@ pub(crate) fn resolve_builtin_op(
         ("product", 0) => TBuiltinOp::Product {
             float: matches!(resolved_ret, Some(Type::Float | Type::Float32)),
         },
+        ("min", 0) if is_map => TBuiltinOp::MapMin,
+        ("max", 0) if is_map => TBuiltinOp::MapMax,
         ("min", 0) => TBuiltinOp::Min {
             float: is_float_sequence,
         },
@@ -405,6 +411,8 @@ pub(crate) fn resolve_builtin_op(
         ("lines", 0) => TBuiltinOp::Lines,
         ("starts_with", 1) => TBuiltinOp::StartsWith,
         ("ends_with", 1) => TBuiltinOp::EndsWith,
+        ("replace", 2) if is_string => TBuiltinOp::Replace,
+        ("replace", 2) if is_list || rty.is_none() => TBuiltinOp::ListReplace,
         ("replace", 2) => TBuiltinOp::Replace,
         ("pad_start", 2) => TBuiltinOp::PadStart,
         ("pad_end", 2) => TBuiltinOp::PadEnd,
@@ -453,16 +461,57 @@ pub(crate) fn resolve_builtin_op(
         ("before", 1) => TBuiltinOp::Before,
         ("to_upper", 0) => TBuiltinOp::ToUpper,
         ("to_lower", 0) => TBuiltinOp::ToLower,
-        ("slice", 2) => {
-            // The string-slice form embeds the *receiver-span* line for its bounds panic.
+        ("slice", 2) if is_string => {
             let line = crate::Diagnostics::span_line_col(&cx.src, receiver.span().start).0;
             TBuiltinOp::Slice { line }
         }
-        // D-DYNARRAY1: `list.view(a..b)` — the string-slice line-number
-        // convention (`("slice", 2)` above) doesn't apply here: the receiver
-        // is always a plain value (never a chained view — `resolve_builtin_op`
-        // only fires when `recv_type.is_none()`), so the receiver-span line
-        // matches `emit_builtin_method`'s own panic-site convention.
+        ("slice", 2) => TBuiltinOp::ListSlice,
+        ("slice", 1) if is_map => TBuiltinOp::MapSliceKeys,
+        ("copy", 0) if is_map => TBuiltinOp::MapCopy,
+        ("copy", 0) if is_set => TBuiltinOp::SetCopy,
+        ("copy", 0) => TBuiltinOp::ListCopy,
+        ("equal", 1) if is_map => TBuiltinOp::MapEqual,
+        ("equal", 1) if is_set => TBuiltinOp::SetEqual,
+        ("equal", 1) => TBuiltinOp::ListEqual,
+        ("binary_search", 1) => TBuiltinOp::ListBinarySearch,
+        ("union", 1) if is_sorted_set => TBuiltinOp::SortedSetUnion,
+        ("union", 1) if is_set => TBuiltinOp::SetUnion,
+        ("union", 1) => TBuiltinOp::ListUnion,
+        ("intersection", 1) if is_sorted_set => TBuiltinOp::SortedSetIntersection,
+        ("intersection", 1) if is_set => TBuiltinOp::SetIntersection,
+        ("intersection", 1) if is_map => TBuiltinOp::MapIntersection,
+        ("intersection", 1) => TBuiltinOp::ListIntersection,
+        ("difference", 1) if is_sorted_set => TBuiltinOp::SortedSetDifference,
+        ("difference", 1) if is_set => TBuiltinOp::SetDifference,
+        ("difference", 1) => TBuiltinOp::ListDifference,
+        ("random", 0) => TBuiltinOp::ListRandom,
+        ("min_max", 0) => {
+            let fields = vec![
+                ("min".to_string(), Type::Int),
+                ("max".to_string(), Type::Int),
+            ];
+            TBuiltinOp::ListMinMax {
+                tuple_struct: crate::Codegen::Tuples::tuple_struct_name(&fields),
+            }
+        }
+        ("to_list", 0) if is_map => {
+            let fields = tuple_list_elem_fields(resolved_ret).unwrap_or_else(|| {
+                match &rty {
+                    Some(Type::Map { key, value, .. }) => vec![
+                        ("key".to_string(), (**key).clone()),
+                        ("value".to_string(), (**value).clone()),
+                    ],
+                    _ => vec![
+                        ("key".to_string(), Type::Int),
+                        ("value".to_string(), Type::Int),
+                    ],
+                }
+            });
+            TBuiltinOp::MapToList {
+                tuple_struct: crate::Codegen::Tuples::tuple_struct_name(&fields),
+            }
+        }
+        // D-DYNARRAY1: `list.view(a..b)`
         ("view", 2) => {
             let line = crate::Diagnostics::span_line_col(&cx.src, receiver.span().start).0;
             TBuiltinOp::ViewNew { line }
@@ -626,22 +675,20 @@ pub(crate) fn resolve_builtin_op(
         ("to_list", 0) if is_sorted_set => TBuiltinOp::SortedSetToList,
         ("to_list", 0) if is_bit_set => TBuiltinOp::BitSetToList,
         ("to_list", 0) => TBuiltinOp::SetToList,
-        ("union", 1) if is_sorted_set => TBuiltinOp::SortedSetUnion,
-        ("intersection", 1) if is_sorted_set => TBuiltinOp::SortedSetIntersection,
-        ("difference", 1) if is_sorted_set => TBuiltinOp::SortedSetDifference,
+// removed duplicate #1477
+
         ("symmetric_difference", 1) if is_sorted_set => TBuiltinOp::SortedSetSymmetricDifference,
         ("is_subset", 1) if is_sorted_set => TBuiltinOp::SortedSetIsSubset,
         ("is_superset", 1) if is_sorted_set => TBuiltinOp::SortedSetIsSuperset,
         ("is_disjoint", 1) if is_sorted_set => TBuiltinOp::SortedSetIsDisjoint,
-        ("intersection", 1) if is_set => TBuiltinOp::SetIntersection,
-        ("difference", 1) if is_set => TBuiltinOp::SetDifference,
+// removed duplicate #1477
+
         ("symmetric_difference", 1) if is_set => TBuiltinOp::SetSymmetricDifference,
         ("is_subset", 1) if is_set => TBuiltinOp::SetIsSubset,
         ("is_superset", 1) if is_set => TBuiltinOp::SetIsSuperset,
         ("is_disjoint", 1) if is_set => TBuiltinOp::SetIsDisjoint,
-        ("union", 1) => TBuiltinOp::SetUnion,
-        ("copy", 0) if is_set => TBuiltinOp::SetCopy,
-        ("equal", 1) if is_set => TBuiltinOp::SetEqual,
+// removed duplicate #1477
+
         ("capacity", 0) if is_set => TBuiltinOp::SetCapacity,
         ("add", 2) if is_lru => TBuiltinOp::LruPut,
         ("add_new", 2) if is_lru => TBuiltinOp::LruAddNew,
@@ -683,6 +730,7 @@ pub(crate) fn resolve_builtin_op(
             | TBuiltinOp::AddNewMap
             | TBuiltinOp::InsertList
             | TBuiltinOp::RemoveMap
+            | TBuiltinOp::MapPopFirst
             | TBuiltinOp::ExtendList
             | TBuiltinOp::Reverse
             | TBuiltinOp::Sort
@@ -758,6 +806,8 @@ pub(crate) fn resolve_closure_op(
             // never the mutable-list form.
             if matches!(recv_ty, Type::Option(_)) {
                 TClosureOp::OptionMap
+            } else if matches!(recv_ty, Type::Map { .. }) {
+                TClosureOp::MapMap
             } else if matches!(recv_ty, Type::Apply { name, .. } if matches!(name.as_str(), "View" | "ViewMut")) {
                 // D-DYNARRAY1: map-to-owned — never the `.clone()`-into-Vec form
                 // the other list ops use (`recv` is already a borrow, not owned).
@@ -768,6 +818,7 @@ pub(crate) fn resolve_closure_op(
                 TClosureOp::Map
             }
         }
+        "filter" if matches!(recv_ty, Type::Map { .. }) => TClosureOp::MapFilter,
         "filter" => TClosureOp::Filter,
         "each" => {
             // The AST: `match rty { Map => jet_map_each, _ => list_each }`, where
@@ -783,14 +834,24 @@ pub(crate) fn resolve_closure_op(
         "any" if matches!(recv_ty, Type::Apply { name, .. } if name == "Bag") => {
             TClosureOp::BagAny
         }
+        "any" if matches!(recv_ty, Type::Map { .. }) => TClosureOp::MapAny,
         "any" => TClosureOp::Any,
+        "all" if matches!(recv_ty, Type::Map { .. }) => TClosureOp::MapAll,
         "all" => TClosureOp::All,
         "sort_by" => TClosureOp::SortBy,
         "reduce" => TClosureOp::Reduce,
         // D-ITER1: new closure adapters.
         "take_while" => TClosureOp::TakeWhile,
         "skip_while" => TClosureOp::SkipWhile,
+        "flat_map" if matches!(recv_ty, Type::Map { .. }) => TClosureOp::MapFlatMap,
         "flat_map" => TClosureOp::FlatMap,
+        "binary_search_by" => TClosureOp::ListBinarySearchBy,
+        "min_max_by" => {
+            let fields = vec![("min".to_string(), Type::Int), ("max".to_string(), Type::Int)];
+            TClosureOp::ListMinMaxBy {
+                tuple_struct: crate::Codegen::Tuples::tuple_struct_name(&fields),
+            }
+        }
         "filter_map" => TClosureOp::FilterMap,
         "para_map" => TClosureOp::ParaMap,
         "para_filter" => TClosureOp::ParaFilter,
@@ -811,9 +872,9 @@ pub(crate) fn resolve_closure_op(
         }
         "scan" => TClosureOp::Scan,
         "fold" => {
-            // D-DYNARRAY1: a View's `recv` is already `&[T]` — fold it directly,
-            // no `.clone()`-to-owned-Vec step.
-            if matches!(recv_ty, Type::Apply { name, .. } if matches!(name.as_str(), "View" | "ViewMut")) {
+            if matches!(recv_ty, Type::Map { .. }) {
+                TClosureOp::MapFold
+            } else if matches!(recv_ty, Type::Apply { name, .. } if matches!(name.as_str(), "View" | "ViewMut")) {
                 TClosureOp::ViewFold
             } else {
                 TClosureOp::Fold

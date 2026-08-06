@@ -1606,6 +1606,34 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     a(0),
                     tuple_struct
                 ),
+                TBuiltinOp::ListSlice => format!("jet_list_slice(&({recv}), {}, {})", a(0), a(1)),
+                TBuiltinOp::ListCopy => format!("({recv}).clone()"),
+                TBuiltinOp::ListEqual => format!("({}) == ({})", recv, a(0)),
+                TBuiltinOp::ListBinarySearch => format!("jet_list_binary_search(&({recv}), &({}))", a(0)),
+                TBuiltinOp::ListUnion => format!("jet_list_union(&({recv}), &({}))", a(0)),
+                TBuiltinOp::ListIntersection => format!("jet_list_intersection(&({recv}), &({}))", a(0)),
+                TBuiltinOp::ListDifference => format!("jet_list_difference(&({recv}), &({}))", a(0)),
+                TBuiltinOp::ListRandom => format!("jet_list_random(&({recv}))"),
+                TBuiltinOp::ListMinMax { tuple_struct } => format!(
+                    "jet_list_min_max(&({recv}), |min, max| {} {{ user_min: min, user_max: max }})",
+                    tuple_struct
+                ),
+                TBuiltinOp::MapCopy => format!("jet_map_copy(&({recv}))"),
+                TBuiltinOp::MapEqual => format!("jet_map_equal(&({recv}), &({}))", a(0)),
+                TBuiltinOp::MapFirst => format!("jet_map_first_key(&({recv}))"),
+                TBuiltinOp::MapToList { tuple_struct } => format!(
+                    "jet_map_to_list(&({recv}), |key, value| {} {{ user_key: key, user_value: value }})",
+                    tuple_struct
+                ),
+                TBuiltinOp::MapMin => format!("jet_map_min_value(&({recv}))"),
+                TBuiltinOp::MapMax => format!("jet_map_max_value(&({recv}))"),
+                TBuiltinOp::MapIntersection => format!("jet_map_intersection(&({recv}), &({}))", a(0)),
+                TBuiltinOp::MapSliceKeys => format!("jet_map_slice_keys(&({recv}), ({}).clone())", a(0)),
+                TBuiltinOp::MapNew => "JetMap::new()".to_string(),
+                TBuiltinOp::MapFromKeys => format!("jet_map_from_keys(({recv}).clone(), ({}).clone())", a(0)),
+                TBuiltinOp::MapContainsValue => format!("jet_map_contains_value(&({recv}), &({}))", a(0)),
+                TBuiltinOp::MapPopFirst => format!("jet_map_pop_first(&mut ({recv}))"),
+                TBuiltinOp::ListReplace => format!("jet_list_replace(&({recv}), &({}), ({}).clone())", a(0), a(1)),
                 TBuiltinOp::Indexed { tuple_struct } => format!(
                     "jet_iter_enumerate({as_iter}, |i, x| {} {{ user_idx: i, user_item: x }})",
                     tuple_struct
@@ -2790,6 +2818,17 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TClosureOp::EachMut => format!("jet_list_each_mut({vec_src}, {})", a(0)),
                 TClosureOp::EachRef => format!("jet_list_each_ref(&({}), {})", recv, a(0)),
                 TClosureOp::EachMap => format!("jet_map_each(({}).clone(), {})", recv, a(0)),
+                TClosureOp::MapAny => format!("jet_map_any(({}).clone(), {})", recv, a(0)),
+                TClosureOp::MapAll => format!("jet_map_all(({}).clone(), {})", recv, a(0)),
+                TClosureOp::MapFilter => format!("jet_map_filter(({}).clone(), {})", recv, a(0)),
+                TClosureOp::MapMap => format!("jet_map_map_values(({}).clone(), {})", recv, a(0)),
+                TClosureOp::MapFold => format!("jet_map_fold(({}).clone(), {}, {})", recv, a(0), a(1)),
+                TClosureOp::MapFlatMap => format!("jet_map_flat_map(({}).clone(), {})", recv, a(0)),
+                TClosureOp::ListBinarySearchBy => format!("jet_list_binary_search_by(&({}), {})", recv, a(0)),
+                TClosureOp::ListMinMaxBy { tuple_struct } => format!(
+                    "jet_list_min_max_by(&({}), {}, |min, max| {} {{ user_min: min, user_max: max }})",
+                    recv, a(0), tuple_struct
+                ),
                 TClosureOp::Find => format!("jet_list_find({vec_src}, {})", a(0)),
                 TClosureOp::Any => format!("jet_list_any({vec_src}, {})", a(0)),
                 TClosureOp::BagAny => format!("({}).keys().any({})", recv, a(0)),

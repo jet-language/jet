@@ -16272,8 +16272,30 @@ impl LowerCtx<'_, '_> {
             | TBuiltinOp::IterLastIndexOf
             | TBuiltinOp::IterAverage { .. }
             | TBuiltinOp::IterCompare
-            | TBuiltinOp::IterSplit { .. } => {
-                Err("jit #1479 iter builtin pending host".to_string())
+            | TBuiltinOp::IterSplit { .. }
+            | TBuiltinOp::ListSlice
+            | TBuiltinOp::ListCopy
+            | TBuiltinOp::ListEqual
+            | TBuiltinOp::ListBinarySearch
+            | TBuiltinOp::ListUnion
+            | TBuiltinOp::ListIntersection
+            | TBuiltinOp::ListDifference
+            | TBuiltinOp::ListRandom
+            | TBuiltinOp::ListMinMax { .. }
+            | TBuiltinOp::MapCopy
+            | TBuiltinOp::MapEqual
+            | TBuiltinOp::MapFirst
+            | TBuiltinOp::MapToList { .. }
+            | TBuiltinOp::MapMin
+            | TBuiltinOp::MapMax
+            | TBuiltinOp::MapIntersection
+            | TBuiltinOp::MapSliceKeys
+            | TBuiltinOp::MapNew
+            | TBuiltinOp::MapFromKeys
+            | TBuiltinOp::MapContainsValue
+            | TBuiltinOp::MapPopFirst
+            | TBuiltinOp::ListReplace => {
+                Err("jit #1477 list/map builtin pending host".to_string())
             }
             TBuiltinOp::Indexes => {
                 // AOT: `jet_iter_indexes(recv.len())` — JIT materializes list.

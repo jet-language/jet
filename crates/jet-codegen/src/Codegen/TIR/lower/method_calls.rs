@@ -4473,6 +4473,47 @@ pub(crate) fn lower_method_call(
                 },
             };
         }
+        // #1477: `Map.new()` → empty JetMap; `Map.from_keys(keys, default)`.
+        if type_name == Syntax::TYPE_MAP && method == "new" && args.is_empty() {
+            let (key, value) = match resolved_ret {
+                Some(Type::Map { key, value, .. }) => ((**key).clone(), (**value).clone()),
+                _ => (Type::Int, Type::Int),
+            };
+            return TExpr {
+                ty: Type::Map {
+                    key: Box::new(key),
+                    key_span: None,
+                    value: Box::new(value),
+                },
+                kind: TExprKind::MapLit(Vec::new()),
+            };
+        }
+        if type_name == Syntax::TYPE_MAP && method == "from_keys" && args.len() == 2 {
+            let keys = lower_expr(&args[0].expr, cx, env);
+            let default = lower_expr(&args[1].expr, cx, env);
+            let (key, value) = match resolved_ret {
+                Some(Type::Map { key, value, .. }) => ((**key).clone(), (**value).clone()),
+                _ => (
+                    match &keys.ty {
+                        Type::List(inner) => *inner.clone(),
+                        _ => Type::Int,
+                    },
+                    default.ty.clone(),
+                ),
+            };
+            return TExpr {
+                ty: Type::Map {
+                    key: Box::new(key),
+                    key_span: None,
+                    value: Box::new(value),
+                },
+                kind: TExprKind::BuiltinMethod {
+                    recv: Box::new(keys),
+                    op: TBuiltinOp::MapFromKeys,
+                    args: vec![default],
+                },
+            };
+        }
         if type_name == crate::Syntax::TYPE_SORTED_SET && method == "from" && args.len() == 1 {
             let list_arg = lower_expr(&args[0].expr, cx, env);
             let elem_ty = match &list_arg.ty {

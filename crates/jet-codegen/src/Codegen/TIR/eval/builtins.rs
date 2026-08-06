@@ -1,5 +1,6 @@
 //! Exhaustive TBuiltinOp dispatch (#777).
 use crate::AST::{CtFloat, Type};
+use crate::AST::CtKey;
 use crate::Comptime::Builtins::{apply_method, apply_mutating, apply_static_type_method};
 use crate::Comptime::CollectionEval;
 use crate::Comptime::CtValue;
@@ -270,6 +271,40 @@ pub(super) fn eval_builtin(
         TBuiltinOp::IterAverage { .. } => apply_method(recv, "average", args, span),
         TBuiltinOp::IterCompare => apply_method(recv, "compare", args, span),
         TBuiltinOp::IterSplit { .. } => apply_method(recv, "split", args, span),
+        TBuiltinOp::ListSlice => apply_method(recv, "slice", args, span),
+        TBuiltinOp::ListCopy => apply_method(recv, "copy", args, span),
+        TBuiltinOp::ListEqual => apply_method(recv, "equal", args, span),
+        TBuiltinOp::ListBinarySearch => apply_method(recv, "binary_search", args, span),
+        TBuiltinOp::ListUnion => apply_method(recv, "union", args, span),
+        TBuiltinOp::ListIntersection => apply_method(recv, "intersection", args, span),
+        TBuiltinOp::ListDifference => apply_method(recv, "difference", args, span),
+        TBuiltinOp::ListRandom => apply_method(recv, "random", args, span),
+        TBuiltinOp::ListMinMax { .. } => apply_method(recv, "min_max", args, span),
+        TBuiltinOp::MapCopy => apply_method(recv, "copy", args, span),
+        TBuiltinOp::MapEqual => apply_method(recv, "equal", args, span),
+        TBuiltinOp::MapFirst => apply_method(recv, "first", args, span),
+        TBuiltinOp::MapToList { .. } => apply_method(recv, "to_list", args, span),
+        TBuiltinOp::MapMin => apply_method(recv, "min", args, span),
+        TBuiltinOp::MapMax => apply_method(recv, "max", args, span),
+        TBuiltinOp::MapIntersection => apply_method(recv, "intersection", args, span),
+        TBuiltinOp::MapSliceKeys => apply_method(recv, "slice", args, span),
+        TBuiltinOp::MapNew => Ok(CtValue::Map(Default::default())),
+        TBuiltinOp::MapFromKeys => {
+            let keys = match recv {
+                CtValue::List(xs) => xs.clone(),
+                _ => return Err(unsupported("Map.from_keys keys", span)),
+            };
+            let default = args.into_iter().next().unwrap_or(CtValue::Unit);
+            let mut out = std::collections::BTreeMap::new();
+            for k in keys {
+                let key = CtKey::from_value(k).ok_or_else(|| unsupported("map key", span))?;
+                out.insert(key, default.clone());
+            }
+            Ok(CtValue::Map(out))
+        }
+        TBuiltinOp::MapContainsValue => apply_method(recv, "contains_value", args, span),
+        TBuiltinOp::MapPopFirst => apply_method(recv, "pop_first", args, span),
+        TBuiltinOp::ListReplace => apply_method(recv, "replace", args, span),
         TBuiltinOp::Indexed { .. } => apply_method(recv, "indexed", args, span),
         TBuiltinOp::Indexes => apply_method(recv, "indexes", args, span),
         TBuiltinOp::Zip {

@@ -285,25 +285,24 @@ const CROSS_DOMAIN_DISTINCT = new Set([
 ]);
 
 const SYNONYM_GROUPS = [
-  ["push", "append", "add", "add_last", "push_back", "conj", "add_range", "insert"],
+  ["push", "append", "add", "add_last", "push_back", "conj", "add_range", "insert", "unshift", "prepend", "set", "put", "store", "set_value", "update"],
   ["pop", "remove_last", "pop_last", "pop_back"],
-  ["len", "size", "count", "length", "size_hint", "sizehint"],
+  ["len", "size", "count", "length", "size_hint", "sizehint", "capacity", "reserve", "resize", "setlen"],
   ["get", "at", "try_get", "item", "nth", "fetch", "get_value"],
-  ["set", "put", "store", "set_value"],
-  ["remove", "delete", "del", "discard", "erase", "unlink", "remove_at"],
+  ["remove", "delete", "del", "discard", "erase", "unlink", "remove_at", "removefirst", "remove_first", "shift", "deleteat", "delete_at"],
   ["clear", "truncate", "remove_all", "reset", "empty_out"],
   ["contains", "includes", "has", "member", "has_key", "contains_key", "is_member", "in"],
-  ["contains_value", "has_value"],
+  ["contains_value", "has_value", "containsvalue"],
   ["index_of", "index", "find_index", "position", "find_first", "search", "find"],
   ["sort", "sorted", "sort_by", "order_by", "sort_with", "order", "sort_with_comparator"],
   ["reverse", "reversed", "rev"],
   ["map", "select", "convert", "map_values"],
   ["filter", "where", "find_all", "reject", "compact"],
-  ["fold", "reduce", "inject", "aggregate", "foldl", "foldr", "accumulate"],
+  ["fold", "reduce", "inject", "aggregate", "foldl", "foldr", "accumulate", "reduceright", "reduce_right"],
   ["each", "for_each", "iterate", "apply_each"],
-  ["first", "head", "front", "peek", "first_or_null", "peek_front", "next"],
+  ["first", "head", "front", "peek", "first_or_null", "peek_front", "next", "firstindex", "first_index"],
   ["last", "back", "peek_last", "peek_back"],
-  ["indexed", "enumerate", "enumerated", "with_index"],
+  ["indexed", "enumerate", "enumerated", "with_index", "each_index", "eachindex"],
   ["skip", "drop"],
   ["skip_while", "drop_while"],
   ["take", "limit"],
@@ -314,15 +313,15 @@ const SYNONYM_GROUPS = [
   ["trim", "strip"],
   ["trim_start", "trim_left", "lstrip", "trim_leading"],
   ["trim_end", "trim_right", "rstrip", "chomp", "trim_trailing"],
-  ["starts_with", "has_prefix", "start_with"],
-  ["ends_with", "has_suffix", "end_with"],
+  ["starts_with", "has_prefix", "start_with", "startswith"],
+  ["ends_with", "has_suffix", "end_with", "endswith"],
   ["difference", "subtract", "diff", "except", "symmetric_difference_with"],
   ["intersection", "intersect", "intersect_with"],
   ["union", "unite", "union_with"],
   ["concat", "chain", "extend", "append_all", "add_all"],
   ["is_empty", "empty", "is_blank", "none", "isnullorempty"],
-  ["keys", "key_set", "names"],
-  ["values", "value_set"],
+  ["keys", "key_set", "names", "indexes", "key"],
+  ["values", "value_set", "lazy"],
   ["join", "mk_string", "intercalate", "merge", "tostring", "inspect"],
   ["yield_now", "yield"],
   ["wait_any", "waitany", "when_any"],
@@ -353,7 +352,7 @@ const SYNONYM_GROUPS = [
   ["random", "rand", "next_double", "next_float"],
   ["shuffle", "shuffled", "randomize"],
   ["zip", "zipped", "zip_with"],
-  ["chunk", "chunks", "chunked", "grouped", "batch"],
+  ["chunk", "chunks", "chunked", "grouped", "batch", "each_slice", "eachslice"],
   ["window", "windows", "windowed", "sliding"],
   ["min", "minimum", "min_by", "argmin"],
   ["max", "maximum", "max_by", "argmax"],
@@ -365,8 +364,8 @@ const SYNONYM_GROUPS = [
   ["flat_map", "collect_concat"],
   ["flatten", "flat"],
   ["group_by", "chunk_by", "partition_by"],
-  ["to_list", "to_array", "to_vec", "collect_list", "entries", "clip", "iterator"],
-  ["slice", "sub_string", "substring", "sub_sequence", "byteslice"],
+  ["to_list", "to_array", "to_vec", "collect_list", "collect", "entries", "clip", "iterator"],
+  ["slice", "sub_string", "substring", "sub_sequence", "byteslice", "splice", "copy_within", "copywithin", "copy_to", "copyto"],
   ["pad_start", "pad_left", "left_pad", "just_right", "rjust"],
   ["pad_end", "pad_right", "right_pad", "just_left", "ljust"],
   ["lines", "each_line", "split_lines", "read_lines"],
@@ -380,7 +379,8 @@ const SYNONYM_GROUPS = [
   ["is_superset", "is_superset_of", "superset", "issuperset"],
   ["is_disjoint", "is_disjoint_from", "disjoint", "overlaps"],
   ["pattern", "source", "pattern_string", "regex_source", "to_regex_string"],
-  ["last_index_of", "rindex", "rfind", "last_index", "search_last", "find_last", "findlast", "lastindexof"],
+  ["last_index_of", "rindex", "rfind", "last_index", "search_last", "find_last", "findlast", "lastindexof", "findlastindex", "find_last_index"],
+  ["copy", "clone", "deepcopy"],
   ["mod", "fmod", "rem", "remainder", "modulo", "rem_euclid"],
   ["encode", "encode64", "encode_to_string", "to_base64_string", "b64encode", "pack", "hexlify"],
   ["decode", "decode64", "decode_string", "from_base64_string", "b64decode", "unpack", "unhexlify"],
@@ -425,7 +425,7 @@ function isTypeContainer(container) {
 // a container, and DateTime.Add is date arithmetic, not appending. Folding them
 // scored core.math.clear and core.time.push as real gaps.
 const TYPE_ONLY_GROUP_HEADS = new Set([
-  "push", "pop", "len", "get", "set", "remove", "clear", "contains",
+  "push", "pop", "len", "get", "remove", "clear", "contains",
 ]);
 
 const SYNONYM_INDEX = new Map();
@@ -528,6 +528,7 @@ const TYPE_CONTAINER = {
   Deque: "Deque",
   Set: "Set",
   SortedSet: "SortedSet",
+  Map: "Map",
 };
 
 const COLLECTION_METHOD_FUNCTIONS = {
@@ -2469,17 +2470,18 @@ function hostileFixtures() {
 
   results.push(rejects("a recurring capability name nobody classified",
     "unclassified repeated capability name", function () {
-    // Use `clear` — always pooled, and still a multi-domain recurring key after
-    // synonym groups fold competitor spellings like `clone` into `copy`.
-    const pooled = CROSS_DOMAIN_POOLED.has("clear");
-    const distinct = CROSS_DOMAIN_DISTINCT.has("clear");
-    CROSS_DOMAIN_POOLED.delete("clear");
-    CROSS_DOMAIN_DISTINCT.delete("clear");
+    // Prefer a POOLED name that still has competitor_operation rows in 2+
+    // domains after synonym folds. `clone` collapsed to a single domain.
+    const name = "hash";
+    const pooled = CROSS_DOMAIN_POOLED.has(name);
+    const distinct = CROSS_DOMAIN_DISTINCT.has(name);
+    CROSS_DOMAIN_POOLED.delete(name);
+    CROSS_DOMAIN_DISTINCT.delete(name);
     try {
       validateRepeatedNames(ledger);
     } finally {
-      if (pooled) CROSS_DOMAIN_POOLED.add("clear");
-      if (distinct) CROSS_DOMAIN_DISTINCT.add("clear");
+      if (pooled) CROSS_DOMAIN_POOLED.add(name);
+      if (distinct) CROSS_DOMAIN_DISTINCT.add(name);
     }
   }));
 

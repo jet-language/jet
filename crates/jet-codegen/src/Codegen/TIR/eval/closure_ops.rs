@@ -773,6 +773,119 @@ impl<'a> EvalCtx<'a> {
                 }
                 Ok(CtValue::Unit)
             }
+            TClosureOp::MapAny => {
+                let CtValue::Map(entries) = recv_v else {
+                    return Err(unsupported("map any receiver", self.span()));
+                };
+                let f = args.first().ok_or_else(|| unsupported("map any arg", self.span()))?;
+                for (key, value) in entries {
+                    if as_bool(&self.apply_callable(f, vec![key.to_value(), value], scope)?, self.span())? {
+                        return Ok(CtValue::Bool(true));
+                    }
+                }
+                Ok(CtValue::Bool(false))
+            }
+            TClosureOp::MapAll => {
+                let CtValue::Map(entries) = recv_v else {
+                    return Err(unsupported("map all receiver", self.span()));
+                };
+                let f = args.first().ok_or_else(|| unsupported("map all arg", self.span()))?;
+                for (key, value) in entries {
+                    if !as_bool(&self.apply_callable(f, vec![key.to_value(), value], scope)?, self.span())? {
+                        return Ok(CtValue::Bool(false));
+                    }
+                }
+                Ok(CtValue::Bool(true))
+            }
+            TClosureOp::MapFilter => {
+                let CtValue::Map(entries) = recv_v else {
+                    return Err(unsupported("map filter receiver", self.span()));
+                };
+                let f = args.first().ok_or_else(|| unsupported("map filter arg", self.span()))?;
+                let mut out = std::collections::BTreeMap::new();
+                for (key, value) in entries {
+                    if as_bool(&self.apply_callable(f, vec![key.to_value(), value.clone()], scope)?, self.span())? {
+                        out.insert(key, value);
+                    }
+                }
+                Ok(CtValue::Map(out))
+            }
+            TClosureOp::MapMap => {
+                let CtValue::Map(entries) = recv_v else {
+                    return Err(unsupported("map map receiver", self.span()));
+                };
+                let f = args.first().ok_or_else(|| unsupported("map map arg", self.span()))?;
+                let mut out = std::collections::BTreeMap::new();
+                for (key, value) in entries {
+                    let mapped = self.apply_callable(f, vec![key.to_value(), value], scope)?;
+                    out.insert(key, mapped);
+                }
+                Ok(CtValue::Map(out))
+            }
+            TClosureOp::MapFold => {
+                if args.len() < 2 {
+                    return Err(unsupported("map fold arity", self.span()));
+                }
+                let CtValue::Map(entries) = recv_v else {
+                    return Err(unsupported("map fold receiver", self.span()));
+                };
+                let mut acc = self.eval_expr(&args[0], scope)?;
+                let f = &args[1];
+                for (key, value) in entries {
+                    acc = self.apply_callable(f, vec![acc, key.to_value(), value], scope)?;
+                }
+                Ok(acc)
+            }
+            TClosureOp::MapFlatMap => {
+                let CtValue::Map(entries) = recv_v else {
+                    return Err(unsupported("map flat_map receiver", self.span()));
+                };
+                let f = args.first().ok_or_else(|| unsupported("map flat_map arg", self.span()))?;
+                let mut out = std::collections::BTreeMap::new();
+                for (key, value) in entries {
+                    let part = self.apply_callable(f, vec![key.to_value(), value], scope)?;
+                    let CtValue::Map(part) = part else {
+                        return Err(unsupported("map flat_map must return map", self.span()));
+                    };
+                    for (k, v) in part { out.insert(k, v); }
+                }
+                Ok(CtValue::Map(out))
+            }
+            TClosureOp::ListBinarySearchBy => {
+                let CtValue::List(items) = recv_v else {
+                    return Err(unsupported("binary_search_by receiver", self.span()));
+                };
+                let f = args.first().ok_or_else(|| unsupported("binary_search_by arg", self.span()))?;
+                for (i, item) in items.into_iter().enumerate() {
+                    let ord = self.apply_callable(f, vec![item], scope)?;
+                    if matches!(ord, CtValue::Int(0)) {
+                        return Ok(CtValue::Some(Box::new(CtValue::Int(i as i64))));
+                    }
+                }
+                Ok(CtValue::None(crate::AST::Type::Int))
+            }
+            TClosureOp::ListMinMaxBy { .. } => {
+                let CtValue::List(items) = recv_v else {
+                    return Err(unsupported("min_max_by receiver", self.span()));
+                };
+                if items.is_empty() {
+                    return Ok(CtValue::None(crate::AST::Type::Int));
+                }
+                let f = args.first().ok_or_else(|| unsupported("min_max_by arg", self.span()))?;
+                let mut min_item = items[0].clone();
+                let mut max_item = items[0].clone();
+                let mut min_key = self.apply_callable(f, vec![min_item.clone()], scope)?.jet_show();
+                let mut max_key = min_key.clone();
+                for item in items.into_iter().skip(1) {
+                    let key = self.apply_callable(f, vec![item.clone()], scope)?.jet_show();
+                    if key < min_key { min_key = key.clone(); min_item = item.clone(); }
+                    if key > max_key { max_key = key; max_item = item; }
+                }
+                Ok(CtValue::Some(Box::new(CtValue::Struct {
+                    type_name: String::new(),
+                    fields: vec![("min".into(), min_item), ("max".into(), max_item)],
+                })))
+            }
             TClosureOp::Partition { .. } | TClosureOp::ParaPartition { .. } => {
                 let CtValue::List(items) = recv_v else {
                     return Err(unsupported("partition receiver", self.span()));

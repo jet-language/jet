@@ -28,7 +28,7 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         // List + map shared.
         ("len", 0) | ("is_empty", 0) | ("clear", 0)
         // List-only.
-        | ("push", 1) | ("pop", 0) | ("first", 0) | ("last", 0)
+        | ("push", 1) | ("pop", 0) | ("pop", 1) | ("first", 0) | ("last", 0)
         | ("index_of", 1) | ("reverse", 0) | ("sort", 0) | ("join", 1)
         // List + map: insert/remove/get (the Map vs List branch resolves at lowering).
         | ("insert", 2) | ("add", 2) | ("add_new", 2) | ("remove", 1 | 2) | ("get", 1)
@@ -85,6 +85,8 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         | ("read_byte", 0) | ("next", 0) | ("parse", 0)
         | ("seek", 1) | ("read_bytes", 1) | ("read_string", 1)
         | ("last_index_of", 1) | ("equal", 1) | ("compare", 1) | ("copy_to", 1)
+        | ("binary_search", 1) | ("random", 0) | ("min_max", 0) | ("slice", 1)
+        | ("contains_value", 1) | ("pop_first", 0)
         | ("write_to", 1)
         // D-TAG1: Bag<T> instance methods (add/remove share list/set arms above).
         | ("has", 1)

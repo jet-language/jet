@@ -943,3 +943,50 @@ where
 fn jet_iter_to_set<T: Eq + std::hash::Hash>(it: JetIter<T>) -> std::collections::HashSet<T> {
     it.into_iter().collect()
 }
+
+// #1477 List ledger surface
+fn jet_list_slice<T: Clone>(xs: &[T], start: i64, end: i64) -> Vec<T> {
+    let len = xs.len() as i64;
+    let s = start.clamp(0, len) as usize;
+    let e = end.clamp(0, len) as usize;
+    if e <= s { Vec::new() } else { xs[s..e].to_vec() }
+}
+fn jet_list_binary_search<T: Ord>(xs: &[T], needle: &T) -> Option<i64> {
+    xs.binary_search(needle).ok().map(|i| i as i64)
+}
+fn jet_list_binary_search_by<T, F>(xs: &[T], mut f: F) -> Option<i64>
+where F: FnMut(&T) -> std::cmp::Ordering {
+    xs.binary_search_by(|x| f(x)).ok().map(|i| i as i64)
+}
+fn jet_list_union<T: Clone + Eq>(left: &[T], right: &[T]) -> Vec<T> {
+    let mut out = left.to_vec();
+    for x in right { if !out.contains(x) { out.push(x.clone()); } }
+    out
+}
+fn jet_list_intersection<T: Clone + Eq>(left: &[T], right: &[T]) -> Vec<T> {
+    let mut out = Vec::new();
+    for x in left {
+        if right.contains(x) && !out.contains(x) { out.push(x.clone()); }
+    }
+    out
+}
+fn jet_list_difference<T: Clone + Eq>(left: &[T], right: &[T]) -> Vec<T> {
+    left.iter().filter(|x| !right.contains(x)).cloned().collect()
+}
+fn jet_list_random<T: Clone>(xs: &[T]) -> Option<T> {
+    if xs.is_empty() { return None; }
+    let mut state: u64 = 0xC0FF_EE42;
+    state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+    Some(xs[((state >> 33) as usize) % xs.len()].clone())
+}
+fn jet_list_replace<T: Clone + PartialEq>(xs: &[T], old: &T, new: T) -> Vec<T> {
+    xs.iter().map(|x| if x == old { new.clone() } else { x.clone() }).collect()
+}
+fn jet_list_min_max<T: Ord + Clone, R>(xs: &[T], build: impl FnOnce(T, T) -> R) -> Option<R> {
+    Some(build(xs.iter().min()?.clone(), xs.iter().max()?.clone()))
+}
+fn jet_list_min_max_by<T: Clone, K: Ord, F, R>(xs: &[T], mut f: F, build: impl FnOnce(T, T) -> R) -> Option<R>
+where F: FnMut(&T) -> K {
+    Some(build(xs.iter().min_by_key(|x| f(x))?.clone(), xs.iter().max_by_key(|x| f(x))?.clone()))
+}
+

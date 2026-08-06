@@ -525,6 +525,8 @@ pub(crate) fn method_call_in_subset(
                 match (type_name.as_str(), method, args.len()) {
                     ("Set", "from", 1)
                     | ("Set", "new", 0)
+                    | ("Map", "new", 0)
+                    | ("Map", "from_keys", 2)
                     | ("SortedSet", "from", 1)
                     | ("PriorityQueue", "from", 1)
                     | ("ByteBuffer", "from", 1)

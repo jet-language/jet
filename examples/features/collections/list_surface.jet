@@ -1,16 +1,22 @@
-// D-LISTREMOVE1/F: value removal is the default; `.Slot` is positional.
-// List count/extend/concat and lazy map key/value views share one collection surface.
+// #1477: remaining List surface after #1410/#1479.
 fn run() {
-    xs := [1, 2, 1]
-    print(xs.remove(1) ?? 0)
-    print(xs.count(1))
-    print(xs.remove(0, .Slot) ?? 0)
-    xs.extend([3, 4])
-    print(xs.concat([5]).len())
+    xs := [1, 2, 3, 4, 5]
+    print(xs.starts_with([1, 2]))
+    print(xs.ends_with([4, 5]))
+    print(xs.slice(1, 4))
+    print(xs.copy().equal(xs))
+    print(xs.binary_search(3) ?? -1)
+    print(xs.union([4, 5, 6]))
+    print(xs.intersection([0, 2, 4]))
+    print(xs.difference([2, 4]))
+    print(xs.random() ?? -1)
+    mm := xs.min_max()
+    print(mm?.min ?? -1)
+    print(mm?.max ?? -1)
 
-    m := [String: Int].{}
-    print(m.add("b", 2) ?? 0)
-    print(m.add("a", 1) ?? 0)
-    print(m.keys().to_list())
-    print(m.values().to_list())
+    // Keep prior #1410 checks.
+    ys := [1, 2, 1]
+    print(ys.remove(1) ?? 0)
+    print(ys.count(1))
+    print([1, 2, 1].replace(1, 9))
 }

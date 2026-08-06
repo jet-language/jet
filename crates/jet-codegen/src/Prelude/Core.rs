@@ -2275,3 +2275,66 @@ where
         f(k, v);
     }
 }
+
+// #1477 Map ledger surface
+fn jet_map_copy<K: Ord + Clone, V: Clone>(m: &JetMap<K, V>) -> JetMap<K, V> { m.clone() }
+fn jet_map_equal<K: Ord + PartialEq, V: PartialEq>(a: &JetMap<K, V>, b: &JetMap<K, V>) -> bool { a == b }
+fn jet_map_first_key<K: Ord + Clone, V>(m: &JetMap<K, V>) -> Option<K> { m.keys().next().cloned() }
+fn jet_map_to_list<K: Ord + Clone, V: Clone, R>(m: &JetMap<K, V>, build: impl Fn(K, V) -> R) -> Vec<R> {
+    m.iter().map(|(k, v)| build(k.clone(), v.clone())).collect()
+}
+fn jet_map_any<K: Ord, V, F>(m: JetMap<K, V>, mut f: F) -> bool where F: FnMut(&K, &V) -> bool {
+    m.iter().any(|(k, v)| f(k, v))
+}
+fn jet_map_all<K: Ord, V, F>(m: JetMap<K, V>, mut f: F) -> bool where F: FnMut(&K, &V) -> bool {
+    m.iter().all(|(k, v)| f(k, v))
+}
+fn jet_map_filter<K: Ord + Clone, V: Clone, F>(m: JetMap<K, V>, mut f: F) -> JetMap<K, V>
+where F: FnMut(&K, &V) -> bool {
+    JetMap(std::sync::Arc::new(m.iter().filter(|(k,v)| f(k,v)).map(|(k,v)|(k.clone(),v.clone())).collect()))
+}
+fn jet_map_map_values<K: Ord + Clone, V, U, F>(m: JetMap<K, V>, mut f: F) -> JetMap<K, U>
+where F: FnMut(&K, &V) -> U {
+    JetMap(std::sync::Arc::new(m.iter().map(|(k,v)|(k.clone(), f(k,v))).collect()))
+}
+fn jet_map_fold<K: Ord, V, U, F>(m: JetMap<K, V>, init: U, mut f: F) -> U
+where F: FnMut(&U, &K, &V) -> U {
+    let mut acc = init;
+    for (k, v) in &m {
+        acc = f(&acc, k, v);
+    }
+    acc
+}
+fn jet_map_flat_map<K: Ord + Clone, V: Clone, F>(m: JetMap<K, V>, mut f: F) -> JetMap<K, V>
+where F: FnMut(&K, &V) -> JetMap<K, V> {
+    let mut out = JetMap::new();
+    for (k, v) in &m {
+        for (ik, iv) in f(k, v).iter() {
+            out.insert(ik.clone(), iv.clone());
+        }
+    }
+    out
+}
+fn jet_map_max_value<K: Ord, V: Ord + Clone>(m: &JetMap<K, V>) -> Option<V> { m.values().max().cloned() }
+fn jet_map_min_value<K: Ord, V: Ord + Clone>(m: &JetMap<K, V>) -> Option<V> { m.values().min().cloned() }
+fn jet_map_intersection<K: Ord + Clone, V: Clone>(left: &JetMap<K, V>, right: &JetMap<K, V>) -> JetMap<K, V> {
+    JetMap(std::sync::Arc::new(left.iter().filter(|(k,_)| right.contains_key(k)).map(|(k,v)|(k.clone(),v.clone())).collect()))
+}
+fn jet_map_slice_keys<K: Ord + Clone, V: Clone>(m: &JetMap<K, V>, keys: Vec<K>) -> JetMap<K, V> {
+    let mut out = JetMap::new();
+    for k in keys { if let Some(v) = m.get(&k) { out.insert(k, v.clone()); } }
+    out
+}
+fn jet_map_from_keys<K: Ord + Clone, V: Clone>(keys: Vec<K>, default: V) -> JetMap<K, V> {
+    let mut out = JetMap::new();
+    for k in keys { out.insert(k, default.clone()); }
+    out
+}
+fn jet_map_contains_value<K: Ord, V: PartialEq>(m: &JetMap<K, V>, needle: &V) -> bool {
+    m.values().any(|v| v == needle)
+}
+fn jet_map_pop_first<K: Ord + Clone, V: Clone>(m: &mut JetMap<K, V>) -> Option<V> {
+    let key = m.keys().next()?.clone();
+    m.remove(&key)
+}
+
