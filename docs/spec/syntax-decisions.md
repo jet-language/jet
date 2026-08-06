@@ -5561,8 +5561,9 @@ the DIVISOR's sign, so `-7 % 2` is 1 — the answer stays in range for a positiv
 divisor, which is what clock and ring-buffer arithmetic wants, with no separate
 "if it went negative" branch. `%%` takes the DIVIDEND's sign, so `-7 %% 2` is
 -1, which is what "what is left over" wants when the original sign matters.
-Each pairs with a division so its identity holds: `a == b * (a /% b) + a % b`
-with floor division, and `a == b * (a / b) + a %% b` with truncating division.
+`%` pairs with `/%` so that `a == b * (a /% b) + a % b`. The two remainders
+are always exactly one divisor apart when they disagree, and equal when they
+agree.
 Both are whole-number only under the D-SG9 same-width rule, and both trap on a
 zero divisor rather than letting a Rust panic reach the user (I2) — so neither
 uses the bare Rust operator, and their traps do not depend on whether the
@@ -5591,3 +5592,20 @@ interpreter complements the value directly. The JS tier is the one that splits
 them: JavaScript's `!` is logical only, so a whole number there lowers to `~`.
 Spelling lives in Syntax.rs (`OP_BIT_NOT`, the same `!` as `OP_NOT`). Flagship:
 `examples/features/math/bit_not.jet`. Card #1434.
+
+**2026-08-05 — D-INTDIV1=A**: `/` answers the true quotient, so two whole
+numbers give a Float: `7 / 2` is 3.5, the Python 3 model. This removes the
+oldest arithmetic surprise in programming — an average that silently loses its
+fraction. `/%` (D-FLOORDIV1) is the whole-number path, and it is the operator to
+reach for when rounding down is what was meant. Because the result no longer
+fits back into a whole-number binding, `n /= 2` on an `Int` is a type error;
+compound assignment is desugared to `n = n / 2` before checking, so both
+spellings report the same E0108 and its fix names `/%`
+(`tests/ui/int_div_compound_on_int.stderr`). Sized widths are not touched: they
+keep the D-SG9 same-width rule, so `/` on `U8` still answers a `U8`. Both
+operands widen to Float in sema, so every tier runs one ordinary float
+division and no engine needed a new rule. In-repo migration: the comptime ratio
+in `comptime_block.jet` moved to `/%`; `all_failfast.jet` now panics outright,
+because its point is sibling cancellation and a divide-by-zero whose divisor
+the checker can see is caught at build time. Spelling is unchanged
+(`OP_SLASH`). Flagship: `examples/features/math/int_div.jet`. Card #1433.

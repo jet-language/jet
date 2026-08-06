@@ -66,11 +66,11 @@ pub fn eval_binop(
             .checked_mul(b)
             .map(Int)
             .ok_or_else(|| overflow("multiply", span)),
+        // D-INTDIV1=A: `/` answers the true quotient, so two whole numbers give
+        // a Float. Sema has already moved both sides to Float in ordinary code;
+        // this arm catches the comptime paths that reach the raw values.
         (BinOp::Div, Int(_), Int(0)) => Err(divide_by_zero(span)),
-        (BinOp::Div, Int(a), Int(b)) => a
-            .checked_div(b)
-            .map(Int)
-            .ok_or_else(|| overflow("divide", span)),
+        (BinOp::Div, Int(a), Int(b)) => Ok(Float(crate::AST::CtFloat::F64(a as f64 / b as f64))),
         // D-FLOORDIV1=A: `/%` rounds the answer down, so a signed answer that
         // came out one too high is corrected. Dividing by zero traps like `/`.
         (BinOp::FloorDiv, Int(_), Int(0)) => Err(divide_by_zero(span)),

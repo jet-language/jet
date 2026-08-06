@@ -212,17 +212,23 @@ fn run() {{
     }
 }
 
-/// D-MODSEM1=A: `%%` pairs with `/` the way `%` pairs with `/%`, so the other
-/// division identity holds too: `a == b * (a / b) + a %% b`.
+/// D-MODSEM1=A: the two remainders are exactly one divisor apart whenever they
+/// disagree, and equal when they agree. That is the whole relationship, and it
+/// is what makes `%` the one that stays on the divisor's side of zero.
+///
+/// The older identity `a == b * (a / b) + a %% b` no longer holds, because
+/// D-INTDIV1=A made `/` answer the exact quotient rather than truncating.
 #[test]
-fn truncated_remainder_satisfies_the_truncating_identity() {
+fn the_two_remainders_are_one_divisor_apart() {
     if !have_rustc() {
         return;
     }
     let src = format!(
         "{SEED}
 fn check(a: Int, b: Int) {{
-    print(b * (a / b) + a %% b == a)
+    floored :: a % b
+    truncated :: a %% b
+    print(floored == truncated || floored == truncated + b)
 }}
 
 fn run() {{
@@ -230,12 +236,14 @@ fn run() {{
     check(seed(-7), seed(2))
     check(seed(7), seed(-2))
     check(seed(-7), seed(-2))
+    check(seed(9), seed(3))
+    check(seed(-9), seed(3))
 }}
 "
     );
-    let (code, out) = build_and_run("remainder_identity", &src);
+    let (code, out) = build_and_run("remainder_relationship", &src);
     assert_eq!(code, 0, "{out}");
-    assert_eq!(out, "true\ntrue\ntrue\ntrue\n", "{out}");
+    assert_eq!(out, "true\ntrue\ntrue\ntrue\ntrue\ntrue\n", "{out}");
 }
 
 /// D-EXPSEM1=A / D-FLOORDIV1=A: the Prelude files are the one home for these

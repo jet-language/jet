@@ -1192,6 +1192,16 @@ impl<'a> Checker<'a> {
                 }
             }
             BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div => {
+                // D-INTDIV1=A: `/` always answers the true quotient, so
+                // `7 / 2` is 3.5 rather than 3. Both sides move to Float first
+                // and the result is a Float. `/%` is the whole-number path.
+                // Sized widths keep the D-SG9 same-width rule and are not
+                // touched here.
+                if op == BinOp::Div && lt == Type::Int && rt == Type::Int {
+                    self.widen_numeric_expr(lhs, &lt, &Type::Float);
+                    self.widen_numeric_expr(rhs, &rt, &Type::Float);
+                    return Some(Type::Float);
+                }
                 // D-VERDICT-1304-1: the widening join above rewrites both
                 // operands to one numeric type. Arithmetic keeps that type.
                 if lt == rt && lt.is_numeric() {
