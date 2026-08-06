@@ -1,0 +1,11 @@
+Error [E0101]: this program has no `run` function
+ Why: running a program starts at `fn run`, and the entry file doesn't define one
+ Fix: add `fn run() { ... }` to the entry file
+
+Error [E1130]: safe `#Kernel(.parallel)` cannot prove no reachable effects or opaque calls
+  --> tests/ui/E1130_kernel_proof.jet:1:1
+    |
+  1 | #Kernel(.parallel) fn noisy(value: Int) => Int {
+    | ^^^^^^^^^^^^^^^^^^
+ Why: a safe kernel needs a sema proof for bounds, aliasing, captures, races, barriers, and control flow before TIR
+ Fix: use a read-only effect-free expression over checked Core compute operations, or move provider/raw code behind its typed `#Unsafe` boundary

@@ -13,6 +13,7 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/binpat_multibyte_needs_endian.jet",
     "tests/ui/binpat_rest_not_final.jet",
     "tests/ui/binpat_take_pattern_bad_width.jet",
+    "tests/ui/build_entry_conflict/pkg.jet",
     "tests/ui/build_locked_drift.jet",
     "tests/ui/cbor_encode_deprecated/pkg.jet",
     "tests/ui/cbor_encode_removed/pkg.jet",
