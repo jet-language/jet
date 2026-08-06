@@ -55,7 +55,7 @@ tower lint [--json] [--docs] # durability sweeper over the live board (+
                               # docs/ballots/*.md scan with --docs); exit 1
                               # on any finding, 0 clean
 tower question list --open   # owner questions — answer these before building
-tower message list [--open]  # all durable card messages, or only open ones
+tower message list [--all]   # open card messages, or every one with --all
 tower papercut list [--open] # logged tooling friction, newest first (--open filters)
 tower card show '#12'        # one card, with computed lane + decisions
 tower card list --tag needs-triage --json   # triage / wayfinder tag filter
