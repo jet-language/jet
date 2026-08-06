@@ -1257,7 +1257,6 @@ fn semantic_token_type_for(tokens: &[Token], idx: usize, src: &str) -> Option<(u
         | TokKind::KwUse
         | TokKind::KwExtern
         | TokKind::KwLoop
-        | TokKind::KwUnsafe
         | TokKind::KwSelf
         | TokKind::KwNull
         | TokKind::KwIt
@@ -1377,7 +1376,6 @@ fn marker_kind_for(prefix: &Token, tokens: &[Token], name_idx: usize) -> Option<
 fn marker_name(tokens: &[Token], idx: usize) -> Option<&str> {
     match &tokens[idx].kind {
         TokKind::Ident(name) => Some(name.as_str()),
-        TokKind::KwUnsafe => Some(crate::Syntax::KW_UNSAFE),
         _ => None,
     }
 }

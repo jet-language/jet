@@ -362,7 +362,7 @@ renumbered, and no new `W` code may be allocated.
 | E0413 | parse | `priv` used outside a `#PubFile` file (D-VISDEFAULT2) |
 | E0414 | parse | redundant `pub` inside a `#PubFile` file (D-VISDEFAULT2) |
 | E0415 | parse | section visibility labels `pub:` / `priv:` rejected (D-VISDEFAULT2 option C) |
-| E0416 | parse | duplicate `#PubFile` marker in one file (D-VISDEFAULT2) |
+| E0416 | parse | *retired by D-MARK-REPEAT1=A* (was: duplicate `#PubFile` marker in one file) |
 | E0417 | parse | conflicting `pub` and `priv` on one item (D-VISDEFAULT2) |
 | E0418 | parse | teaching: `#PublicFile` → `#PubFile` (D-VISDEFAULT2) |
 | E0419 | sema  | `#MustUse` result ignored as a bare statement (D-MUSTUSE1) |
@@ -374,7 +374,7 @@ renumbered, and no new `W` code may be allocated.
 | E0425 | sema  | *reserved — rustc unresolved-name code; never a Jet diagnostic (I2)* |
 | E0426 | parse | teaching: retired `#Uninit name: Type` marker → `name := Type.{ uninit }` (D-UNINIT-SENTINEL2) |
 | E0427 | parse | *retired by D-MEM1/S3* (was: teaching retired `#Ref(owner) name: T` field form → `name: &T`, D-REF-SHORTHAND1; stored-ref fields no longer exist) |
-| E0428 | parse | duplicate `#NoPrelude` marker in one file (D-PRELUDEX1) |
+| E0428 | parse | *retired by D-MARK-REPEAT1=A* (was: duplicate `#NoPrelude` marker in one file) |
 | E0429 | sema  | ambient `print`/`input` used under `#NoPrelude` (D-PRELUDEX1) |
 | E0430 | parse | `#Shield` was given arguments; the cancellation shield is a bare block (D-SHIELDNAME1) |
 | E0431 | parse | retired `Void` result type; use `()` (D-VOID1) |
@@ -1319,7 +1319,6 @@ parse error (E0426) pointing at the new spelling —
 | E0423 | `` `uninit` needs a plain-data type ``. | The named type may own heap memory or need cleanup, so leaving it uninitialized is unsafe. | Use plain data — a number, `Bool`, `Char`, `U8`, or a fixed array of those (e.g. `[4096]U8`). |
 | E0424 | `` `uninit` needs the low-level memory tier ``. | `` `uninit` skips the automatic zero-fill — an expert-tier operation ``. | Add `use core.mem` at the top of this file to opt in. |
 | E0426 | `` `#Uninit` is retired ``. | Uninitialized storage is a fact about the value — it now reads `` `name := Type.{ uninit }` ``. | Write `` `{name} := <Type>.{ uninit }` ``. |
-| E0428 | only one `#NoPrelude` marker is allowed per file. | A file may opt out of the ambient prelude at most once. | Remove the duplicate `#NoPrelude` marker. |
 | E0429 | `` `{name}` is not ambient here — this file opted out with `#NoPrelude` ``. | `` `#NoPrelude` disables the curated prelude auto-imports (`print` / `input`) ``. | Write `use core.io as io` and call `io.{name}(…)`, or remove `#NoPrelude`. |
 | E0430 | `` `#Shield` takes no arguments ``. | A shield region protects whatever runs inside it; there is nothing to configure (D-SHIELDNAME1). | Write `#Shield { … }`. |
 | E0431 | `` `Void` is retired ``. | `()` is the one public no-information result type; non-returning paths are compiler facts under D-NEVER1. | Replace `Void` with `()`. |

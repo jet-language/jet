@@ -293,7 +293,10 @@ pub fn build_method_info(method: &Func) -> CtValue {
             ),
             ("params", ct_list(param_strs)),
             ("signature", ct_str(format_method_sig(method))),
-            ("markers", ct_list(Vec::new())),
+            // D-REFLECT1: the retained marker nodes, same source as every other
+            // consumer. This was hardcoded empty, so reflection reported that a
+            // method carried no markers no matter what was written on it.
+            ("markers", ct_list(marker_names(&method.markers))),
             ("is_pub", ct_bool(method.is_pub)),
             (
                 "span",

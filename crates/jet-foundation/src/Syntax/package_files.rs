@@ -305,7 +305,6 @@ pub const ATTR_DECODE: &str = "Decode"; // D-SERDE4
                                         // control beside Printable and Equatable. User derives (`derive T.Wire {
                                         // … }`, applied as `#[Wire]`) stay `#` — the built-in/user line is the
                                         // `@`/`#` plane line.
-pub const ATTR_SUMMARIZE: &str = "Summarize"; // D-MARKERMOVE3
 pub const ATTR_COMPARABLE: &str = "Comparable"; // D-MARKERMOVE3
                                                 // Per-field attributes (D-SERDE5 = A), written `#[…]` before a field.
 pub const ATTR_RENAME: &str = "Rename"; // D-SERDE5  #[Rename("wire_key")]

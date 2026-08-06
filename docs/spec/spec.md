@@ -2831,7 +2831,7 @@ ceiling, not a grant: the effects still happen and still count toward the
 enclosing function's set.
 
 ```ebnf
-caps_region = "#Caps" "(" [ effect { "," effect } ] ")" block ;
+caps_region = "#Caps" "(" effect { "," effect } ")" block ;
 ```
 
 ```jet

@@ -780,26 +780,6 @@ impl<'a> Parser<'a> {
                     self.func().map(Item::Func)
                 }
             }
-            // S60 (D-CASING1 follow-on) / D-MARKERMOVE2: `#Pure fn` inside a module
-            // body (old `#Pure fn` spelling is E0062, taught inside `func()`).
-            TokKind::Hash if self.at_pure_fn() => self.func().map(Item::Func),
-            // D-TAINT1: `#Sanitizer fn` inside a module body.
-            TokKind::Hash if self.at_sanitizer_fn() => self.func().map(Item::Func),
-            // D-REPLAY1: `#Replayable fn` inside a module body.
-            TokKind::Hash if self.at_replayable_fn() => self.func().map(Item::Func),
-            // D-SCHEDULE1 (card #505): `#Job fn` / `#Every(…) fn` inside a module body.
-            TokKind::Hash if self.at_task_fn() || self.at_every_fn() => self.func().map(Item::Func),
-            // D-MUSTUSE1 / D-MARKERMOVE1: `#MustUse fn` inside a module body (old
-            // `#MustUse fn` spelling is E0062, taught inside `func()`).
-            TokKind::Hash if self.at_must_use_fn() => self.func().map(Item::Func),
-            // D-STATE1: `#State(S) fn` / `#Transition(From, To) fn` in a module.
-            TokKind::Hash if self.at_state_fn() || self.at_transition_fn() => {
-                self.func().map(Item::Func)
-            }
-            // D-REACTCORE1: `#Reactive fn` inside a module body.
-            TokKind::Hash if self.at_reactive_fn() => self.reactive_fn().map(Item::Func),
-            // D-WASM1=A: `#Wasm` / `#JS` / `#WasmExport fn` inside a module body.
-            TokKind::Hash if self.at_web_partition_fn() => self.func().map(Item::Func),
             // D-SHAPE2: `#[RenameAll(camel)]` / `#[Codable]` / `#Codable`
             // type rules inside a module body.
             TokKind::Hash if self.at_marker_list() || self.at_single_type_marker() =>

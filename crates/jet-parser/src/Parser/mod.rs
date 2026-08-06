@@ -178,7 +178,6 @@ fn is_teaching_parse_diag(code: &str) -> bool {
             | "E0413"
             | "E0414"
             | "E0415"
-            | "E0416"
             | "E0417"
             | "E0418"
             | "E0998"

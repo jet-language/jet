@@ -3781,6 +3781,7 @@ fn swap_entry_point(bundle: &mut crate::AST::ProgramBundle, entry_fn: &str) {
         pre: Vec::new(),
         post: Vec::new(),
         inline_foreign: None,
+        markers: Vec::new(),
         body,
     }));
 }

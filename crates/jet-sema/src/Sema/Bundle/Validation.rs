@@ -1736,6 +1736,7 @@ pub(crate) fn check_module_bodies(
                     pre: Vec::new(),
                     post: Vec::new(),
                     inline_foreign: None,
+                    markers: Vec::new(),
                     body: std::mem::take(&mut t.body),
                 };
                 diags.extend(check_func_body_bundle(
@@ -1813,6 +1814,7 @@ pub(crate) fn check_module_bodies(
                     pre: Vec::new(),
                     post: Vec::new(),
                     inline_foreign: None,
+                    markers: Vec::new(),
                     body: std::mem::take(&mut b.body),
                 };
                 diags.extend(check_func_body_bundle(
@@ -1947,6 +1949,7 @@ pub(crate) fn check_module_bodies(
                     pre: Vec::new(),
                     post: Vec::new(),
                     inline_foreign: None,
+                    markers: Vec::new(),
                     body: std::mem::take(&mut ec.body),
                 };
                 // Error-conversion bodies are checked like functions, but they are

@@ -129,9 +129,18 @@ pub fn lookup(code: &str) -> Option<Explanation> {
                 code: row.name.to_string(),
                 stage: "rule applicability".to_string(),
                 meaning: format!("`#{}{}`", row.name, row.signature.render()),
+                // D-MARK-FORM1=A: there is no written-form column. The row's
+                // own signature says whether parentheses may and must appear.
                 what: Some(format!(
-                    "form: {:?}; status: {:?}; attachment sites: {:?}.{}",
-                    row.form,
+                    "arguments: {}; repeatable: {}; status: {:?}; attachment sites: {:?}.{}",
+                    if row.signature.arguments_required() {
+                        "required"
+                    } else if row.signature.accepts_arguments() {
+                        "optional"
+                    } else {
+                        "none"
+                    },
+                    row.repeatable,
                     row.status,
                     row.sites,
                     marker_argument_declarations(row)

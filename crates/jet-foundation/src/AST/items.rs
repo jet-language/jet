@@ -1003,6 +1003,11 @@ pub struct Func {
     /// the per-language binder compiles; `body` is empty and the Jet signature is
     /// the checked contract sema enforces at every call site.
     pub inline_foreign: Option<InlineForeign>,
+    /// D-VERDICT-1455-1: every marker written on this callable, in source
+    /// order, kept whole. The typed fields above are the decoded facts codegen
+    /// reads; this is the record every *consumer* reads — formatter, reflection,
+    /// and explain — so none of them has to rebuild a marker from flags.
+    pub markers: Vec<Marker>,
     pub body: Vec<Stmt>,
 }
 

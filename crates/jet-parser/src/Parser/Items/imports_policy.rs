@@ -477,13 +477,10 @@ impl<'a> Parser<'a> {
                     TokKind::Hash if self.at_pub_file() && !self.file_marker_stack_starts_here() => {
                         if pub_file {
                             let span = self.peek().span;
-                            self.diags.push(Diagnostic::error(
-                                "E0416",
-                                "only one `#PubFile` marker is allowed per file".to_string(),
-                                "a file may declare at most one public-by-default visibility marker"
-                                    .to_string(),
-                                "remove the duplicate `#PubFile` marker".to_string(),
-                                Some(span),
+                            self.diags.push(crate::Policy::marker_repeated_error(
+                                Syntax::MARKER_PUB_FILE,
+                                "file",
+                                span,
                             ));
                             self.bump();
                             self.bump();
@@ -499,13 +496,10 @@ impl<'a> Parser<'a> {
                     TokKind::Hash if self.at_no_prelude() && !self.file_marker_stack_starts_here() => {
                         if no_prelude {
                             let span = self.peek().span;
-                            self.diags.push(Diagnostic::error(
-                                "E0428",
-                                "only one `#NoPrelude` marker is allowed per file".to_string(),
-                                "a file may opt out of the ambient prelude at most once"
-                                    .to_string(),
-                                "remove the duplicate `#NoPrelude` marker".to_string(),
-                                Some(span),
+                            self.diags.push(crate::Policy::marker_repeated_error(
+                                Syntax::MARKER_NO_PRELUDE,
+                                "file",
+                                span,
                             ));
                             self.bump();
                             self.bump();
@@ -538,13 +532,10 @@ impl<'a> Parser<'a> {
                             Some(span),
                         ));
                         if pub_file {
-                            self.diags.push(Diagnostic::error(
-                                "E0416",
-                                "only one `#PubFile` marker is allowed per file".to_string(),
-                                "a file may declare at most one public-by-default visibility marker"
-                                    .to_string(),
-                                "remove the duplicate marker".to_string(),
-                                Some(span),
+                            self.diags.push(crate::Policy::marker_repeated_error(
+                                Syntax::MARKER_PUB_FILE,
+                                "file",
+                                span,
                             ));
                         } else {
                             pub_file = true;
@@ -559,17 +550,23 @@ impl<'a> Parser<'a> {
                             Ok(markers) => {
                                 let mut failed = false;
                                 let ordered_markers = markers.clone();
+                                // A repeat *inside* this group was already
+                                // reported by the shared D-MARK-REPEAT1 check.
+                                // Only a repeat of a marker seen in an earlier
+                                // top-level group is news here.
+                                let had_pub_file = pub_file;
+                                let had_no_prelude = no_prelude;
                                 for marker in markers {
                                     match marker.name.as_str() {
                                         Syntax::MARKER_PUB_FILE => {
                                             if pub_file {
-                                                self.diags.push(Diagnostic::error(
-                                                    "E0416",
-                                                    "only one `#PubFile` marker is allowed per file".to_string(),
-                                                    "a file may declare at most one public-by-default visibility marker".to_string(),
-                                                    "remove the duplicate marker".to_string(),
-                                                    Some(marker.span),
-                                                ));
+                                                if had_pub_file {
+                                                    self.diags.push(crate::Policy::marker_repeated_error(
+                                                        Syntax::MARKER_PUB_FILE,
+                                                        "file",
+                                                        marker.span,
+                                                    ));
+                                                }
                                                 failed = true;
                                             } else {
                                                 pub_file = true;
@@ -578,13 +575,13 @@ impl<'a> Parser<'a> {
                                         }
                                         Syntax::MARKER_NO_PRELUDE => {
                                             if no_prelude {
-                                                self.diags.push(Diagnostic::error(
-                                                    "E0428",
-                                                    "only one `#NoPrelude` marker is allowed per file".to_string(),
-                                                    "a file may opt out of the ambient prelude at most once".to_string(),
-                                                    "remove the duplicate marker".to_string(),
-                                                    Some(marker.span),
-                                                ));
+                                                if had_no_prelude {
+                                                    self.diags.push(crate::Policy::marker_repeated_error(
+                                                        Syntax::MARKER_NO_PRELUDE,
+                                                        "file",
+                                                        marker.span,
+                                                    ));
+                                                }
                                                 failed = true;
                                             } else {
                                                 no_prelude = true;
@@ -808,37 +805,6 @@ impl<'a> Parser<'a> {
                             self.func().map(Item::Func)
                         }
                     }
-                    // S60 (D-CASING1 follow-on) / D-ARROW-CONTROL1: `fn name(…) =[]=>`
-                    // purity modifier (old `#Pure` spelling is E0062, taught in `func()`).
-                    TokKind::Hash if self.at_pure_fn() => self.func().map(Item::Func),
-                    // D-TAINT1: `#Sanitizer fn name(…)` taint-strip modifier.
-                    TokKind::Hash if self.at_sanitizer_fn() => self.func().map(Item::Func),
-                    // D-REPLAY1: `#Replayable fn name(…)` deterministic replay guard.
-                    TokKind::Hash if self.at_replayable_fn() => self.func().map(Item::Func),
-                    // D-SCHEDULE1 (card #505): `#Job fn name(…)` / `#Every(…) fn name(…)`
-                    // schedule-as-code markers on a free function.
-                    TokKind::Hash if self.at_task_fn() || self.at_every_fn() => {
-                        self.func().map(Item::Func)
-                    }
-                    // D-MUSTUSE1 / D-MARKERMOVE1: `#MustUse fn name(…)` — result cannot be
-                    // silently ignored (old `#MustUse` spelling is E0062, taught in `func()`).
-                    TokKind::Hash if self.at_must_use_fn() => self.func().map(Item::Func),
-                    // D-METHODMACRO1=A: `#Inline fn name(…)` / `#Inline(Always) fn name(…)`.
-                    TokKind::Hash if self.at_inline_fn() => self.func().map(Item::Func),
-                    // D-STATE1: `#State(S) fn` / `#Transition(From, To) fn` typestate
-                    // markers on a free function.
-                    TokKind::Hash if self.at_state_fn() || self.at_transition_fn() => {
-                        self.func().map(Item::Func)
-                    }
-                    // D-PREPOST1: `#Pre(cond, "msg")` / `#Post(cond, "msg")` before a
-                    // free function — parsed (and repeated/mixed) inside `func()`.
-                    TokKind::Hash
-                        if self.at_contract_clause_fn(Syntax::CONTRACT_PRE)
-                            || self.at_contract_clause_fn(Syntax::CONTRACT_POST) =>
-                    {
-                        self.func().map(Item::Func)
-                    }
-                    TokKind::Hash if self.at_web_partition_fn() => self.func().map(Item::Func),
                     // D-S14-PAUSE: bare lowercase `pure` teaching is paused.
                     TokKind::Ident(n)
                         if retired_s14_teaching_enabled()
@@ -1100,13 +1066,6 @@ impl<'a> Parser<'a> {
                     TokKind::Hash if self.at_retired_at_c_module() => {
                         self.retired_at_c_module().map(Item::CModule)
                     }
-                    // D-FFI-INLINE1=A (card #501): `#FFI(<lang>) fn` inline
-                    // foreign tier, incl. the `#Unsafe("…") #FFI(asm) fn` gated
-                    // form. Checked before the unsafe arm so the gated form routes
-                    // here rather than to the plain `#Unsafe fn` path.
-                    TokKind::Hash if self.at_ffi_fn() => self.ffi_fn().map(Item::Func),
-                    TokKind::Hash if self.at_unsafe_fn() => self.unsafe_fn().map(Item::Func),
-                    TokKind::Hash if self.at_reactive_fn() => self.reactive_fn().map(Item::Func),
                     TokKind::Hash if self.at_unit_family_def() => {
                         let (is_pub, is_package_pub) = self.parse_item_visibility();
                         self.unit_family_def(is_pub, is_package_pub)

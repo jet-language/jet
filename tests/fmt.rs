@@ -3251,3 +3251,70 @@ fn fmt_keeps_the_division_family_spellings() {
     let twice = jet::format_source(&once).expect("the division family should re-fmt");
     assert_eq!(once, twice, "division formatting must be byte-stable");
 }
+
+/// D-MARK-FORM1=A: parentheses appear exactly when arguments are written, so
+/// `jet fmt` deletes an empty pair and the canonical spelling round-trips
+/// byte-for-byte (fmt STABILITY, not just accept-without-crash).
+#[test]
+fn fmt_empty_marker_parentheses_canonicalize_and_are_stable() {
+    let src = r#"#Inline()
+fn double(x: Int) => Int {
+    return x * 2
+}
+
+#Job()
+fn refresh() {
+    print("refresh")
+}
+"#;
+    let out = jet::format_source(src).expect("fmt should recover from empty marker parentheses");
+    assert!(
+        out.contains("#Inline fn double") || out.contains("#Inline\nfn double"),
+        "fmt kept empty parentheses on `#Inline`, got:\n{out}"
+    );
+    assert!(
+        !out.contains("#Inline()") && !out.contains("#Job()"),
+        "fmt kept an empty marker parameter list, got:\n{out}"
+    );
+    let twice = jet::format_source(&out).expect("canonical marker output should re-fmt");
+    assert_eq!(out, twice, "marker placement formatting must be stable");
+}
+
+/// D-MARK-FORM1=A: the canonical spellings of every placement the retired
+/// five forms used to distinguish are one shape, and each survives fmt
+/// unchanged.
+#[test]
+fn fmt_one_placement_law_round_trips_every_target_kind() {
+    let src = r#"#Codable
+struct Widget {
+    #Doc("display name") label: String
+}
+
+#Known limit :: 32
+
+#Inline
+fn hot(a: Int) => Int {
+    return a * limit
+}
+
+fn run() {
+    #Off print("off")
+    #Impure("reads the wall clock") {
+        print("now")
+    }
+}
+"#;
+    let out = jet::format_source(src).expect("fmt should accept every marker placement");
+    for needle in [
+        "#Codable",
+        "#Doc(\"display name\") label: String",
+        "#Known limit :: 32",
+        "#Inline",
+        "#Off print(\"off\")",
+        "#Impure(\"reads the wall clock\") {",
+    ] {
+        assert!(out.contains(needle), "fmt dropped `{needle}`, got:\n{out}");
+    }
+    let twice = jet::format_source(&out).expect("marker placements should re-fmt");
+    assert_eq!(out, twice, "marker placement formatting must be stable");
+}

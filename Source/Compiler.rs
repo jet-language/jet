@@ -1452,7 +1452,6 @@ fn token_kind_name(kind: &TokKind) -> &'static str {
         TokKind::KwReturn => "keyword.return",
         TokKind::KwLoop => "keyword.loop",
         TokKind::KwYield => "keyword.yield",
-        TokKind::KwUnsafe => "keyword.unsafe",
         TokKind::KwUse => "keyword.use",
         TokKind::KwExtern => "keyword.extern",
         TokKind::KwModule => "keyword.module",

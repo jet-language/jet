@@ -54,8 +54,7 @@ impl<'a> Lexer<'a> {
                 )
             })
             .collect::<Vec<_>>();
-        let is_marker_name =
-            |token: &&Token| matches!(token.kind, TokKind::Ident(_) | TokKind::KwUnsafe);
+        let is_marker_name = |token: &&Token| matches!(token.kind, TokKind::Ident(_));
         let is_ffi = |token: &&Token| {
             matches!(&token.kind, TokKind::Ident(name) if name == Syntax::ATTR_FFI)
         };

@@ -79,7 +79,6 @@ impl<'a> Parser<'a> {
             let name_token = self.bump();
             let (name, name_span) = match name_token.kind {
                 TokKind::Ident(name) => (name, name_token.span),
-                TokKind::KwUnsafe => (Syntax::KW_UNSAFE.to_string(), name_token.span),
                 _ => {
                     return Err(Diagnostic::error(
                         "E0003",
@@ -127,6 +126,7 @@ impl<'a> Parser<'a> {
             let mut arg_labels = Vec::new();
             let mut end = name_span.end;
             let parenthesized = matches!(self.peek().kind, TokKind::LParen);
+            let paren_start = self.peek().span.start;
             if parenthesized {
                 self.bump(); // `(`
                 if !matches!(self.peek().kind, TokKind::RParen) {
@@ -153,6 +153,19 @@ impl<'a> Parser<'a> {
                 ct: None,
             };
             self.validate_registered_rule_marker(&marker, parenthesized)?;
+            // D-MARK-FORM1=A: an empty pair is a leftover, not a different
+            // spelling. Report it and keep parsing so `jet fmt` can apply the
+            // delete edit — a hard stop would leave the file unformattable.
+            if parenthesized
+                && marker.args.is_empty()
+                && crate::Policy::applied_rule(&marker.name)
+                    .is_some_and(|rule| rule.signature.accepts_arguments())
+            {
+                self.diags.push(crate::Policy::marker_empty_arguments_error(
+                    &marker.name,
+                    Span::new(paren_start, end),
+                ));
+            }
             self.rule_facts.push(crate::AST::AppliedRuleApplication {
                 marker: marker.clone(),
                 target: None,
@@ -203,19 +216,19 @@ impl<'a> Parser<'a> {
             let Some(rule) = crate::Policy::applied_rule(&marker.name) else {
                 return Ok(());
             };
-            if marker.name == Syntax::KW_TEST && marker.args.is_empty() {
-                return Ok(());
-            }
-            use crate::Policy::RuleForm;
             if matches!(rule.status, crate::Policy::RuleStatus::Retired { .. }) {
                 return Ok(());
             }
-            let call_required = matches!(rule.form, RuleForm::Call)
-                || matches!(rule.form, RuleForm::Block) && rule.signature.required() > 0;
-            let bare_required = matches!(rule.form, RuleForm::Bare);
+            // D-MARK-FORM1=A, one placement law: the signature alone decides
+            // whether parentheses may and must appear. There is no written-form
+            // column and no per-marker grammar category.
+            if parenthesized && !rule.signature.accepts_arguments() {
+                return Err(crate::Policy::marker_argument_shape_error(&marker.name, marker.span));
+            }
             // `#Unsafe` keeps its product diagnostic E3112 for a missing reason.
-            if (call_required && !parenthesized && marker.name != Syntax::KW_UNSAFE)
-                || bare_required && parenthesized
+            if !parenthesized
+                && rule.signature.arguments_required()
+                && marker.name != Syntax::KW_UNSAFE
             {
                 return Err(crate::Policy::marker_argument_shape_error(&marker.name, marker.span));
             }
@@ -386,15 +399,13 @@ impl<'a> Parser<'a> {
             }
             let close = self.peek().span;
             self.expect(TokKind::RBracket, "to close an `#[…]` rule list")?;
-            let task_group = site == crate::Policy::RuleSite::Function
-                && group
-                    .iter()
-                    .any(|marker| marker.name == Syntax::KW_TASK);
             for marker in &group {
-                let task_doc = task_group && marker.name == Syntax::CONTRACT_DOC;
                 if crate::Policy::applied_rule(&marker.name).is_some()
-                    && !crate::Policy::rule_allows(&marker.name, site)
-                    && !task_doc
+                    && !crate::Policy::rule_allows_with_companions(
+                        &marker.name,
+                        site,
+                        group.iter().map(|other| other.name.as_str()),
+                    )
                 {
                     return Err(Self::wrong_rule_site(marker, site, noun));
                 }
@@ -502,7 +513,39 @@ impl<'a> Parser<'a> {
                 }
                 self.diags.push(diagnostic);
             }
+            self.diagnose_repeated_markers(&markers, noun);
             Ok(markers)
+        }
+
+        /// D-MARK-REPEAT1=A: one rule written twice on one target is an error
+        /// with a drop-the-repeat fix. Rows whose repetition carries meaning
+        /// carry `repeatable` in the registry; the check reads that column and
+        /// never a name list.
+        pub(in crate::Parser) fn diagnose_repeated_markers(
+            &mut self,
+            markers: &[Marker],
+            noun: &str,
+        ) {
+            for (index, marker) in markers.iter().enumerate() {
+                if crate::Policy::applied_rule(&marker.name)
+                    .is_none_or(|rule| rule.repeatable)
+                {
+                    continue;
+                }
+                if !markers[..index]
+                    .iter()
+                    .any(|earlier| earlier.name == marker.name)
+                {
+                    continue;
+                }
+                // No autofix: deleting one entry of `#[A, A]` in place would
+                // leave a dangling comma. The writer removes the repeat.
+                self.diags.push(crate::Policy::marker_repeated_error(
+                    &marker.name,
+                    noun,
+                    marker.span,
+                ));
+            }
         }
 
         /// D-SHAPE2: parse leading `#[…]` applied-rule groups before a
@@ -539,7 +582,6 @@ impl<'a> Parser<'a> {
                 };
             match self.toks.get(name_index).map(|token| &token.kind) {
                 Some(TokKind::Ident(name)) => Some(name),
-                Some(TokKind::KwUnsafe) => Some(Syntax::KW_UNSAFE),
                 _ => None,
             }
         }
@@ -625,7 +667,6 @@ impl<'a> Parser<'a> {
                 }
                 let name = match self.toks.get(cursor).map(|token| &token.kind) {
                     Some(TokKind::Ident(name)) => name.as_str(),
-                    Some(TokKind::KwUnsafe) => Syntax::KW_UNSAFE,
                     _ => return false,
                 };
                 if site == crate::Policy::RuleSite::Function
@@ -835,16 +876,14 @@ impl<'a> Parser<'a> {
             site: crate::Policy::RuleSite,
         ) -> Result<crate::AST::Func, Diagnostic> {
             let ordered_markers = markers.clone();
-            let task_group = site == crate::Policy::RuleSite::Function
-                && ordered_markers
-                    .iter()
-                    .any(|marker| marker.name == Syntax::KW_TASK);
             let mut policy = Vec::new();
             for marker in markers {
-                let task_doc = task_group && marker.name == Syntax::CONTRACT_DOC;
                 if crate::Policy::applied_rule(&marker.name).is_some()
-                    && !crate::Policy::rule_allows(&marker.name, site)
-                    && !task_doc
+                    && !crate::Policy::rule_allows_with_companions(
+                        &marker.name,
+                        site,
+                        ordered_markers.iter().map(|other| other.name.as_str()),
+                    )
                 {
                     if site == crate::Policy::RuleSite::Method
                         && matches!(marker.name.as_str(), Syntax::KW_TASK | Syntax::ATTR_EVERY)
@@ -867,40 +906,32 @@ impl<'a> Parser<'a> {
                         },
                     ));
                 }
+                // D-VERDICT-1455-1: a retired row teaches its replacement and
+                // applies nothing. `#Pure` and `#InlineAlways` used to set
+                // their flags after diagnosing, so retired spellings kept
+                // working and the registry's status column lied.
                 if let Some(crate::Policy::RuleStatus::Retired { replacement }) =
                     crate::Policy::applied_rule(&marker.name).map(|rule| rule.status)
                 {
-                    match marker.name.as_str() {
-                        Syntax::KW_PURE => {
-                            self.diags.push(Self::retired_effect_syntax(Span::new(
-                                marker.span.start,
-                                marker.span.start + 1,
-                            )));
-                            function.is_pure = true;
-                        }
-                        "InlineAlways" => {
-                            self.diags.push(Diagnostic::error(
-                                "E0927",
-                                "`#InlineAlways` is retired".to_string(),
-                                "one `#Inline` marker carries both inline modes".to_string(),
-                                format!("write `{replacement}`"),
-                                Some(marker.span),
-                            ));
-                            function.is_inline_always = true;
-                            function.inline_span = Some(marker.span);
-                        }
-                        _ => {
-                            self.diags.push(Diagnostic::error(
-                                "E0927",
-                                format!("`#{}` is retired", marker.name),
-                                "the applied-rule registry owns retired spellings and replacements"
-                                    .to_string(),
-                                format!("write `{replacement}`"),
-                                Some(marker.span),
-                            ));
-                        }
-                    }
+                    self.diags.push(Diagnostic::error(
+                        "E0927",
+                        format!("`#{}` is retired", marker.name),
+                        "the applied-rule registry owns retired spellings and replacements"
+                            .to_string(),
+                        format!("write `{replacement}`"),
+                        Some(marker.span),
+                    ));
                     continue;
+                }
+                // D-VERDICT-1455-1: an unregistered name at a callable site is
+                // a typo, not a user derive (derives attach to types), so it
+                // gets the one E0927 vocabulary family instead of a site error.
+                if crate::Policy::applied_rule(&marker.name).is_none() {
+                    return Err(crate::Policy::marker_unknown_error(
+                        &marker.name,
+                        &crate::Policy::active_rule_names(),
+                        marker.name_span,
+                    ));
                 }
                 if !Self::function_marker_has_applicator(&marker.name) {
                     return Err(Diagnostic::error(
@@ -1177,6 +1208,18 @@ impl<'a> Parser<'a> {
                 }
             }
             self.policy_declarations.extend(policy);
+            // D-VERDICT-1455-1: keep the marker nodes on the callable. The
+            // typed fields above stay for codegen; consumers read these instead
+            // of rebuilding a marker from flags.
+            function.markers = ordered_markers
+                .iter()
+                .filter(|marker| {
+                    crate::Policy::applied_rule(&marker.name).is_some_and(|rule| {
+                        matches!(rule.status, crate::Policy::RuleStatus::Active)
+                    })
+                })
+                .cloned()
+                .collect();
             for marker in &ordered_markers {
                 self.bind_rule_fact(
                     marker.name_span,

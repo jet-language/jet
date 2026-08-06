@@ -208,32 +208,8 @@ impl<'a> Parser<'a> {
                 && matches!(self.peek3().kind, TokKind::KwFn | TokKind::KwPub)
         }
     
-        /// D-TAINT1: true when the cursor is at `#Sanitizer fn`/`#Sanitizer pub fn`.
-        pub(in crate::Parser) fn at_sanitizer_fn(&self) -> bool {
-            matches!(self.peek().kind, TokKind::Hash)
-                && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_SANITIZER)
-                && matches!(self.peek3().kind, TokKind::KwFn | TokKind::KwPub)
-        }
     
-        /// D-REPLAY1: true when the cursor is at `#Replayable fn` /
-        /// `#Replayable pub fn`.
-        pub(in crate::Parser) fn at_replayable_fn(&self) -> bool {
-            matches!(self.peek().kind, TokKind::Hash)
-                && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_REPLAYABLE)
-                && matches!(self.peek3().kind, TokKind::KwFn | TokKind::KwPub)
-        }
 
-        /// D-SCHEDULE1 (card #505): true when the cursor is at `#Job` (a bare
-        /// schedule fn marker). Unlike `#Sanitizer`/`#Replayable`, this does
-        /// NOT require `fn`/`pub` immediately next — the ratified spelling
-        /// stacks `#Job` before `#Every(…)` (`#Job #Every(5min) fn …`), so
-        /// the marker after `#Job` is usually another marker, not `fn`
-        /// itself. Same looseness as `#State(`/`#Transition(`/`#Every(`,
-        /// which only look as far as their own shape.
-        pub(in crate::Parser) fn at_task_fn(&self) -> bool {
-            matches!(self.peek().kind, TokKind::Hash)
-                && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_TASK)
-        }
 
         /// D-TASK-META1=A: decode optional static fields on the existing task
         /// marker. Task execution remains an ordinary function call.
@@ -454,82 +430,10 @@ impl<'a> Parser<'a> {
             )
         }
 
-        /// D-SCHEDULE1: true when the cursor is at `#Every(…)` (a schedule fn
-        /// marker). Token stream: `# Every (`.
-        pub(in crate::Parser) fn at_every_fn(&self) -> bool {
-            matches!(self.peek().kind, TokKind::Hash)
-                && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_EVERY)
-                && matches!(self.peek3().kind, TokKind::LParen)
-        }
     
-        /// D-MUSTUSE1 (c18iwxqx) / D-MARKERMOVE1: true when the cursor is at
-        /// `#MustUse fn` / `#MustUse pub fn` — or the retired `#MustUse` spelling,
-        /// so `func()` can consume it and teach E0062.
-        pub(in crate::Parser) fn at_must_use_fn(&self) -> bool {
-            matches!(self.peek().kind, TokKind::Hash)
-                && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_MUST_USE)
-                && matches!(self.peek3().kind, TokKind::KwFn | TokKind::KwPub)
-        }
     
-        /// D-INLINE-PARAM1=A: `#Inline` or `#Inline(Always)` before a function.
-        /// The retired predecessor also reaches the parser for its registry fix.
-        pub(super) fn at_inline_fn(&self) -> bool {
-            if !matches!(self.peek().kind, TokKind::Hash) {
-                return false;
-            }
-            if matches!(&self.peek2().kind, TokKind::Ident(n) if Self::retired_inline_always(n))
-            {
-                return self.token_after_web_marker_is_fn(2);
-            }
-            if !matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::CONTRACT_INLINE) {
-                return false;
-            }
-            if matches!(self.peek3().kind, TokKind::KwFn | TokKind::KwPub) {
-                return true;
-            }
-            if matches!(self.peek3().kind, TokKind::LParen) {
-                let mut depth = 0usize;
-                let mut index = self.pos + 2;
-                while let Some(token) = self.toks.get(index) {
-                    match token.kind {
-                        TokKind::LParen => depth += 1,
-                        TokKind::RParen => {
-                            depth -= 1;
-                            if depth == 0 {
-                                index += 1;
-                                break;
-                            }
-                        }
-                        _ => {}
-                    }
-                    index += 1;
-                }
-                while matches!(self.toks.get(index).map(|token| &token.kind), Some(TokKind::Semi)) {
-                    index += 1;
-                }
-                return matches!(
-                    self.toks.get(index).map(|token| &token.kind),
-                    Some(TokKind::KwFn | TokKind::KwPub)
-                );
-            }
-            false
-        }
     
-        /// D-STATE1: true when the cursor is at `#State(…)` (a require-state fn marker).
-        /// Token stream: `# State (`.
-        pub(in crate::Parser) fn at_state_fn(&self) -> bool {
-            matches!(self.peek().kind, TokKind::Hash)
-                && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_STATE)
-                && matches!(self.peek3().kind, TokKind::LParen)
-        }
     
-        /// D-STATE1: true when the cursor is at `#Transition(…)` (a transition fn marker).
-        /// Token stream: `# Transition (`.
-        pub(in crate::Parser) fn at_transition_fn(&self) -> bool {
-            matches!(self.peek().kind, TokKind::Hash)
-                && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_TRANSITION)
-                && matches!(self.peek3().kind, TokKind::LParen)
-        }
     
         /// S14: bare lowercase `pure` introduces a function only when `fn`/`pub`
         /// follows (so an ordinary identifier named `pure` is unaffected).
