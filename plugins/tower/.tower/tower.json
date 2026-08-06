@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1581,
-    "rev": 28087,
+    "rev": 28103,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -78084,6 +78084,11 @@
       "log": [
         {
           "at": "2026-08-06",
+          "by": "bd2-rev2",
+          "text": "bd2-rev2 review: HOLD in verify. Two blocking findings.\n\n(1) Criterion 5 is false green. cargo test --test comptime_diff fails: comptime_module_calls_match_runtime, case 1030. The json.canonical entry in ENCODING_CASES (tests/comptime_diff.rs:209) still uses the infallible 2026 form. Under edition 2027 the call now returns String ? EncodingError, so print(\"{r}\") raises E0915 because that type has no Display. Migrate the case to the fallible form, or split it into a 2026 case and a 2027 case.\n\n(2) Criterion 3 is broken. jet fix --edition=2027 is not idempotent. rewrite_json_canonical_calls in Source/CmdCompile.rs tests the character after the closing parenthesis with starts_with('?'), so a call that already reads json.canonical(x) ?? panic(...) with a space is not detected. A second pass appends a second ?? panic(\"value is not canonical JSON\"). Reproduced: two passes over one file produce json.canonical(data) ?? panic(\"value is not canonical JSON\") ?? panic(\"value is not canonical JSON\"). The same bug already damaged tests/comptime_diff.rs:742, where a json.parse call now reads ?? panic(\"value is not canonical JSON\") ?? panic(\"json\") while its runtime twin at line 748 does not. Also, the rewriter always emits the ?? panic form. D-JSONCANON1 requires json.canonical(x)? when the enclosing function is fallible. No test covers the rewrite at all.\n\nAlso for the next pass: the RFC 8785 vector tests in tests/corelib.rs exercise only the stream writer. There is no whole-value json.canonical vector test at edition 2027.\n\nWhat holds: criteria 1 and 4 verified. Edition 2026 stays frozen. Edition 2027 sema, AOT emit, JIT lowering, and comptime all route to jet_enc_json_canonical or its comptime port, and the Prelude whole-value writer shares jet_json_jcs_number and jet_json_jcs_key_cmp with the stream writer, so I8 and the Prelude side of I9 hold. No new diagnostic, so I4 needs nothing. cargo build clean. cargo test --test encoding_edition passes 5 of 5. jet run and the AOT binary of examples/features/serde/encoding_breadth.jet both match the golden.\n\nUnrelated failures seen and not attributed to this card: comptime_diff cases 42 to 44 (Iter has no Display) and one linker error from a shared /tmp; corelib json_canonical_stream_* fail with E0956 because core.files.create is unsupported in quick-run mode."
+        },
+        {
+          "at": "2026-08-06",
           "by": "e3-review",
           "text": "e3-review: #1394 work UNCOMMITTED on master WT — do not verify/close. e3-coll own+commit these paths: Source/CmdCompile.rs; crates/jet-codegen/src/Codegen/TIR/emit/core_calls.rs; crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs; crates/jet-comptime/src/Comptime/{EncodingLite.rs,Methods/core_calls.rs,Methods/dispatch/eval_method.rs,mod.rs,jet_bigint_snip.rs}; crates/jet-jit/src/{Encoding.rs,enc_stream/mod.rs,jit/lower_ctx.rs}; crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs; docs/reference/core-library.md; examples/features/serde/encoding_breadth.jet; tests/{cli.rs,comptime_diff.rs,corelib.rs,encoding_edition.rs,fuzz/sema/valid/ex_serde_encoding_breadth.jet}. Also dirty interop examples (lua/perl/php/r/ruby) — confirm ownership before commit. After commit on master: e3-review --verify c1-6 then --phase done."
         },
@@ -78107,11 +78112,11 @@
         {
           "n": 1,
           "text": "Edition 2026 keeps the exact frozen JSON signatures and prototype bytes required by ratified compatibility law.",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-coll",
-          "verifiedBy": null,
-          "evidence": "edition 2026 json.canonical stays String; encoding_edition test green",
-          "at": "2026-08-06T19:03:13.088Z"
+          "verifiedBy": "bd2-rev2",
+          "evidence": "sema keeps (read data) -> String below 2027; AOT emit keeps jet_std_json_render_canonical; JIT keeps jet_jit_json_canonical; test edition_2026_json_canonical_stays_infallible passes",
+          "at": "2026-08-06T23:02:03.548Z"
         },
         {
           "n": 2,
@@ -78134,11 +78139,11 @@
         {
           "n": 4,
           "text": "Reference docs, examples, sema signatures, and Prelude behavior label each edition correctly and contain no unqualified conflict.",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-coll",
-          "verifiedBy": null,
-          "evidence": "core-library.md labels 2026 prototype vs 2027 JCS; events unchanged",
-          "at": "2026-08-06T19:03:48.077Z"
+          "verifiedBy": "bd2-rev2",
+          "evidence": "core-library.md labels 2026 prototype against 2027 JCS; fixed_sigs.rs and core_param_contract split by edition; encoding_breadth.jet uses the fallible form and matches its golden",
+          "at": "2026-08-06T23:02:03.904Z"
         },
         {
           "n": 5,
@@ -78177,8 +78182,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-03T20:21:49.285Z",
-      "updated": "2026-08-06T21:41:22.583Z",
-      "updatedBy": "audit-apply",
+      "updated": "2026-08-06T23:02:20.485Z",
+      "updatedBy": "bd2-rev2",
       "workOrder": 10
     },
     {
@@ -85774,12 +85779,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P1",
       "plan": "Scope: core.io ships jet_std_io_* in crates/jet-codegen/src/Prelude/CoreLib/Top/FSIoEnvOsTesting.rs (stdin/stdout/stderr, style, progress). Card #1402 closed the progress-reporter batch. The ledger now scores 9 remaining jet_loses rows for core.io. Verified 2026-08-06 directly against every jet_std_io_* function in that file: all 9 names are absent, none exist under another spelling.\n\nApproach:\n1. Group the 9 names (docs/reference/core-surface-ledger.json, container=core.io, verdict=jet_loses) and add to crates/jet-codegen/src/Prelude/CoreLib/Top/FSIoEnvOsTesting.rs:\n   - readline -> jet_std_io_stdin already has stdin_read_line as a method on a reader handle; readline's competitor evidence (C#/Go/Julia/Rust) is a free-function/short-form read-one-line. Decide whether this needs a second free-function spelling or whether the existing io.stdin().read_line() already answers it (likely decline, pointing at the existing mechanism, unless the ergonomics gap is real — a bare top-level `readline()` next to the already-ambient `input()`).\n   - readuntil -> extend the reader with a delimiter-bounded read, mirrors Rust's read_until; needs a Vec<u8>/String delimiter contract.\n   - take -> a reader adapter that caps how many bytes/lines are pulled (Rust's Read::take, Julia's take!); scope narrowly to the stream/reader handles already in this file, do not duplicate Iter's own take.\n   - buffered -> expose a buffered-reader wrapper; check if the existing stdin/file handles are already buffered internally (if so this is a decline: Jet already buffers by default and does not expose the distinction).\n   - println, sprint -> println is Go/Julia/Kotlin's print-plus-newline; Jet's print() (D-PRELUDE1) may already add a newline, making this a decline pointing at the existing print(). sprint (format-to-string without printing) may already be covered by string interpolation \"{x}\"; check before adding a duplicate formatting path (I8).\n   - binread, binwrite -> raw-bytes read/write on core.io, parallel to the existing stdout_write_bytes/stderr_write_bytes methods already shipped; add the missing symmetric stdin-side binread and a general binwrite if one isn't already covered by write_bytes.\n   - repr -> Julia/Python's debug representation of a value; check whether this belongs in core.io at all or is a core.reflect concern (the ledger container attribution may be wrong here — verify against the actual competitor evidence before committing to core.io).\n2. Rebuild jet after Prelude edits: scripts/agent/jet-env cargo build.\n3. Add examples/features/io/io_surface.jet (new file, following the list_surface.jet naming precedent) covering every shipped addition, plus examples/features/expected/io/io_surface.out golden.\n4. Record a decision id or plain implementer log entry for every name declined because it duplicates print()/interpolation/buffering already ratified elsewhere.\n5. Run node scripts/agent/check-core-surface-ledger.mjs --refresh then --check.\n6. Update docs/reference/core-library.md core.io section.\n\nProof:\n- scripts/agent/jet-env cargo test --test core_surface_ledger\n- scripts/agent/jet-env cargo test --test corelib (confirm exact IO test module name before running; io_input_reads_a_line_from_stdin already lives there per io_prelude.jet's own comment)\n- scripts/agent/jet-env jet run examples/features/io/io_surface.jet, diff against examples/features/expected/io/io_surface.out\n- AOT build of the same example, diff against the same golden, to prove I9 parity between AOT and default jet run\n- node scripts/agent/check-core-surface-ledger.mjs --check\n\nOwned paths: crates/jet-codegen/src/Prelude/CoreLib/Top/FSIoEnvOsTesting.rs, examples/features/io/io_surface.jet, examples/features/expected/io/io_surface.out, docs/reference/core-library.md, docs/reference/core-surface-ledger.json, docs/reference/core-surface-ledger.md.",
       "blockedBy": [],
-      "assignee": "e3-fast",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-08-06",
+          "by": "bd2-rev1",
+          "text": "Independent verify: HOLD cleared, confirmed by reading crates/jet-jit/src/IO.rs and lower_ctx.rs directly. IoLineStream.rs (Prelude) is include!'d verbatim into a new io_line_stream module in IO.rs; jet_jit_io_sprint/repr/take/read_until only marshal heap handles and call the included jet_std_io_* functions, no re-encoded logic. readline now has its own jet_jit_io_readline host calling jet_std_io_readline (lower_ctx.rs:9718-9725), no longer routed through io_input. c2: cargo test --test core_surface_ledger 2/2 ok, check-core-surface-ledger.mjs --check exit 0 (no stale String-cluster red). c3/c4: jet run and jet run --release (AOT) of io_surface.jet both byte-diff clean against the golden and byte-identical to each other (I9). c5: core-library.md core.io section lists all 9 shipped/declined names with rationale."
+        },
         {
           "at": "2026-08-06",
           "by": "bd2-io",
@@ -85819,38 +85829,38 @@
         {
           "n": 2,
           "text": "scripts/agent/jet-env cargo test --test core_surface_ledger passes, and node scripts/agent/check-core-surface-ledger.mjs --check exits 0 against the refreshed ledger.",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-fast",
-          "verifiedBy": null,
-          "evidence": "cargo test --test core_surface_ledger 2/2 ok; check-core-surface-ledger.mjs --check exit 0 after --refresh (0 core.io jet_loses remaining).",
-          "at": "2026-08-06T17:05:52.685Z"
+          "verifiedBy": "bd2-rev1",
+          "evidence": "cargo test --test core_surface_ledger: 2/2 ok (core_surface_ledger_matches_its_sources, core_surface_ledger_checker_rejects_hostile_fixtures); node scripts/agent/check-core-surface-ledger.mjs --check exit 0, clusters-needing-a-card=9 unrelated to core.io (0 core.io jet_loses)",
+          "at": "2026-08-06T23:00:39.861Z"
         },
         {
           "n": 3,
           "text": "examples/features/io/io_surface.jet exercises every shipped addition and scripts/agent/jet-env jet run examples/features/io/io_surface.jet matches examples/features/expected/io/io_surface.out exactly.",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-fast",
-          "verifiedBy": null,
-          "evidence": "examples/features/io/io_surface.jet; jet run matches expected/io/io_surface.out exactly (JIT_GOLDEN_OK).",
-          "at": "2026-08-06T17:05:52.919Z"
+          "verifiedBy": "bd2-rev1",
+          "evidence": "jet run examples/features/io/io_surface.jet output byte-diffed against examples/features/expected/io/io_surface.out: diff exit 0",
+          "at": "2026-08-06T23:00:40.211Z"
         },
         {
           "n": 4,
           "text": "The same example produces byte-identical output under AOT build and default jet run (I9 parity).",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-fast",
-          "verifiedBy": null,
-          "evidence": "jet run --release same golden byte-identical to default jet run (AOT_GOLDEN_OK / I9).",
-          "at": "2026-08-06T17:05:53.159Z"
+          "verifiedBy": "bd2-rev1",
+          "evidence": "jet run --release (AOT) of same example diffed against same golden: exit 0; AOT output also byte-identical to default jet run output (I9)",
+          "at": "2026-08-06T23:00:40.553Z"
         },
         {
           "n": 5,
           "text": "docs/reference/core-library.md core.io section lists every newly shipped function and every declined name with its reason.",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-fast",
-          "verifiedBy": null,
-          "evidence": "docs/reference/core-library.md core.io table lists readline/read_until/take/buffered/println/sprint/repr/binread/binwrite; prose notes sprint/repr String-only and buffered=stdin alias.",
-          "at": "2026-08-06T17:05:53.390Z"
+          "verifiedBy": "bd2-rev1",
+          "evidence": "docs/reference/core-library.md core.io section (lines 882-940) lists readline/read_until/take/buffered/println/sprint/repr/binread/binwrite with descriptions and decline rationale (buffered/println documented as peer spellings of existing stdin()/print())",
+          "at": "2026-08-06T23:00:40.911Z"
         }
       ],
       "refs": [
@@ -85860,10 +85870,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T02:13:47.648Z",
-      "updated": "2026-08-06T22:16:00.016Z",
-      "updatedBy": "bd2-io",
-      "claimedAt": "2026-08-06T17:05:53.671Z",
-      "workOrder": 40
+      "updated": "2026-08-06T23:01:11.556Z",
+      "updatedBy": "bd2-rev1",
+      "workOrder": 40,
+      "completedAt": "2026-08-06T23:01:11.556Z"
     },
     {
       "id": "c0gv6ghj",
@@ -86634,12 +86644,17 @@
       "track": "epoch",
       "epoch": "e2",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P1",
       "plan": "1) Move range-head parsing (lo..hi, E0318 ..=, E0319 step) into if_arm_head. 2) Delete the two inline copies. 3) Formatter emission plus fmt STABILITY round-trip for a value-form range arm. 4) Restore branch_dispatch_bench.jet with golden output and prove it on every tier (I9).",
       "blockedBy": [],
-      "assignee": "e3-bugs2",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-08-06",
+          "by": "bd2-rev1",
+          "text": "Independent verify: all 6 criteria hold on master (a031bc5e4). Range-head parsing lives once in try_range_arm_head, shared by if/value dispatch and switch. E0318/E0319 fire byte-identical in value-dispatch position. branch_dispatch_bench golden passes on jet run + AOT release; fmt --check clean. Note: fmt-lossless-corpus test currently fails on an unrelated pre-existing UI-manifest gap (tests/ui/E0927_retired_pure_callable.jet, from unrelated commit e122019c7) — not caused by this card and not blocking; branch_dispatch_bench itself formats losslessly."
+        },
         {
           "at": "2026-08-06",
           "by": "e3-bugs2",
@@ -86660,56 +86675,56 @@
         {
           "n": 1,
           "text": "return if n == { 0..9 -> 1  10..99 -> 2  else -> 3 } parses and evaluates correctly on AOT, jet run, and interpreter deopt",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-bugs2",
-          "verifiedBy": null,
-          "evidence": "same as #1487: branch_dispatch_bench ordered() value-dispatch ranges run on jet run + --release; golden ok",
-          "at": "2026-08-06T15:39:57.352Z"
+          "verifiedBy": "bd2-rev1",
+          "evidence": "jet run + jet run --release both print 'branch dispatch benchmarks' matching golden; TIR-eval interpreter path (Codegen/TIR/eval/stmts.rs:1719 Pattern::Range) shares the identical PatternTest{Range} AST node value-dispatch now produces via if_arm_head",
+          "at": "2026-08-06T23:00:07.272Z"
         },
         {
           "n": 2,
           "text": "E0318 (..=) and E0319 (step) fire identically in statement and value dispatch, with the existing UI snapshots unchanged",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-bugs2",
-          "verifiedBy": null,
-          "evidence": "JET_UI_FILTER=range_arm_dot_dot_eq and range_arm_step diagnostic_snapshots ui_snapshots ok (statement form unchanged; value path shares try_range_arm_head)",
-          "at": "2026-08-06T15:39:57.592Z"
+          "verifiedBy": "bd2-rev1",
+          "evidence": "cargo test --test diagnostic_snapshots ui_snapshots (statement fixtures range_arm_dot_dot_eq/range_arm_step) ok unchanged; manually confirmed value-dispatch position (return if x == {0..=59->...}) emits byte-identical E0318 text, and (0..10 step 2->...) emits byte-identical E0319 text",
+          "at": "2026-08-06T23:00:07.618Z"
         },
         {
           "n": 3,
           "text": "Range-head parsing exists in exactly one place; both inline copies in conditionals.rs are deleted",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-bugs2",
-          "verifiedBy": null,
-          "evidence": "try_range_arm_head in conditionals.rs; if_arms + switch call it; no inline copies remain",
-          "at": "2026-08-06T15:39:57.827Z"
+          "verifiedBy": "bd2-rev1",
+          "evidence": "conditionals.rs: try_range_arm_head defined once (line 486); if_arm_head (line 581) calls it at 589 and is the sole callee from value dispatch (line 1010) and if-arm parsing (line 459); statement switch also calls try_range_arm_head directly (line 1361) — no duplicate inline range-parsing logic anywhere",
+          "at": "2026-08-06T23:00:07.974Z"
         },
         {
           "n": 4,
           "text": "Formatter emits a value-form range arm and the fmt round-trip plus STABILITY test pass on it",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-bugs2",
-          "verifiedBy": null,
-          "evidence": "fmt lossless corpus green including branch_dispatch_bench; Bench arms fmt-expanded",
-          "at": "2026-08-06T15:39:58.062Z"
+          "verifiedBy": "bd2-rev1",
+          "evidence": "jet fmt --check examples/features/tooling/branch_dispatch_bench.jet exits 0 (already-canonical / round-trip stable); cargo test --test fmt fmt_is_lossless_on_supported_source_corpus formats this file successfully before failing later in an unrelated ui-manifest loop (see log)",
+          "at": "2026-08-06T23:00:10.688Z"
         },
         {
           "n": 5,
           "text": "examples/features/tooling/branch_dispatch_bench.jet parses, runs, and matches its golden output",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-bugs2",
-          "verifiedBy": null,
-          "evidence": "JET_GOLDEN_FILTER=branch_dispatch_bench cargo test --test golden ok",
-          "at": "2026-08-06T15:39:58.292Z"
+          "verifiedBy": "bd2-rev1",
+          "evidence": "JET_GOLDEN_FILTER=branch_dispatch_bench cargo test --test golden: examples_compile_and_run ok, 5 passed 0 failed",
+          "at": "2026-08-06T23:00:11.031Z"
         },
         {
           "n": 6,
           "text": "fmt-lossless corpus covers branch_dispatch_bench.jet with no manifest exemption",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-bugs2",
-          "verifiedBy": null,
-          "evidence": "fmt_is_lossless_on_supported_source_corpus ok; no exemption for branch_dispatch_bench",
-          "at": "2026-08-06T15:39:58.538Z"
+          "verifiedBy": "bd2-rev1",
+          "evidence": "grep branch_dispatch_bench tests/support/fmt_lossless.rs: no match; not in UI_PARSE_INVALID or any exemption list, so full-corpus loop covers it with none",
+          "at": "2026-08-06T23:00:11.372Z"
         }
       ],
       "refs": [],
@@ -86721,9 +86736,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T10:10:26.566Z",
-      "updated": "2026-08-06T15:39:58.837Z",
-      "updatedBy": "e3-bugs2",
-      "claimedAt": "2026-08-06T15:39:58.837Z"
+      "updated": "2026-08-06T23:00:54.914Z",
+      "updatedBy": "bd2-rev1",
+      "completedAt": "2026-08-06T23:00:18.989Z"
     },
     {
       "id": "c0zlv32v",
@@ -129116,6 +129131,118 @@
   ],
   "events": [
     {
+      "at": "2026-08-06T23:02:20.485Z",
+      "by": "bd2-rev2",
+      "action": "card.update",
+      "ref": "c00sqr4z",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-06T23:02:03.904Z",
+      "by": "bd2-rev2",
+      "action": "card.criteria-verify",
+      "ref": "c00sqr4z",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-06T23:02:03.548Z",
+      "by": "bd2-rev2",
+      "action": "card.criteria-verify",
+      "ref": "c00sqr4z",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-06T23:01:11.556Z",
+      "by": "bd2-rev1",
+      "action": "card.update",
+      "ref": "c0vzbf5f",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T23:00:54.914Z",
+      "by": "bd2-rev1",
+      "action": "card.update",
+      "ref": "c01ssx12",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-06T23:00:40.911Z",
+      "by": "bd2-rev1",
+      "action": "card.criteria-verify",
+      "ref": "c0vzbf5f",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-06T23:00:40.553Z",
+      "by": "bd2-rev1",
+      "action": "card.criteria-verify",
+      "ref": "c0vzbf5f",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-06T23:00:40.212Z",
+      "by": "bd2-rev1",
+      "action": "card.criteria-verify",
+      "ref": "c0vzbf5f",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T23:00:39.861Z",
+      "by": "bd2-rev1",
+      "action": "card.criteria-verify",
+      "ref": "c0vzbf5f",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T23:00:18.989Z",
+      "by": "bd2-rev1",
+      "action": "card.update",
+      "ref": "c01ssx12",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-06T23:00:11.372Z",
+      "by": "bd2-rev1",
+      "action": "card.criteria-verify",
+      "ref": "c01ssx12",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-06T23:00:11.032Z",
+      "by": "bd2-rev1",
+      "action": "card.criteria-verify",
+      "ref": "c01ssx12",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-06T23:00:10.688Z",
+      "by": "bd2-rev1",
+      "action": "card.criteria-verify",
+      "ref": "c01ssx12",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-06T23:00:07.974Z",
+      "by": "bd2-rev1",
+      "action": "card.criteria-verify",
+      "ref": "c01ssx12",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T23:00:07.618Z",
+      "by": "bd2-rev1",
+      "action": "card.criteria-verify",
+      "ref": "c01ssx12",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T23:00:07.273Z",
+      "by": "bd2-rev1",
+      "action": "card.criteria-verify",
+      "ref": "c01ssx12",
+      "note": "#1"
+    },
+    {
       "at": "2026-08-06T22:29:28.006Z",
       "by": "bd2-orch",
       "action": "card.criteria-add",
@@ -132502,118 +132629,6 @@
       "action": "card.criteria-add",
       "ref": "c0cu6duy",
       "note": "#2 An exact value is zero-uncertainty and mixes with a measured"
-    },
-    {
-      "at": "2026-08-06T21:35:10.000Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0cu6duy",
-      "note": "#1 measurement(12.0, uncertainty: 0.1) produces a measured valu"
-    },
-    {
-      "at": "2026-08-06T21:35:09.647Z",
-      "by": "audit-rethinks-b",
-      "action": "card.add",
-      "ref": "c0cu6duy",
-      "note": "Measured values: the uncertainty knowledge grade"
-    },
-    {
-      "at": "2026-08-06T21:35:09.298Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c08q9a90",
-      "note": "#6 Tier parity (I9) is proved inside this card: parser, sema, T"
-    },
-    {
-      "at": "2026-08-06T21:35:08.953Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c08q9a90",
-      "note": "#5 The check lives in sema, not in codegen (I3)"
-    },
-    {
-      "at": "2026-08-06T21:35:08.595Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c08q9a90",
-      "note": "#4 A test adds a lossy operation with no spelled step and shows"
-    },
-    {
-      "at": "2026-08-06T21:35:08.249Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c08q9a90",
-      "note": "#3 approx and the rounded conversion forms are grandfathered as"
-    },
-    {
-      "at": "2026-08-06T21:35:07.906Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c08q9a90",
-      "note": "#2 A sema check rejects any operation that discards range, exac"
-    },
-    {
-      "at": "2026-08-06T21:35:07.566Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c08q9a90",
-      "note": "#1 docs/spec/syntax-decisions.md carries the conservation law: "
-    },
-    {
-      "at": "2026-08-06T21:35:07.222Z",
-      "by": "audit-rethinks-b",
-      "action": "card.add",
-      "ref": "c08q9a90",
-      "note": "The precision conservation law and its sema gate"
-    },
-    {
-      "at": "2026-08-06T21:35:06.880Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0yzzaom",
-      "note": "#7 Tier parity (I9) is proved inside this card: parser, sema, T"
-    },
-    {
-      "at": "2026-08-06T21:35:06.532Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0yzzaom",
-      "note": "#6 docs/spec/syntax-decisions.md records that this amends the s"
-    },
-    {
-      "at": "2026-08-06T21:35:06.184Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0yzzaom",
-      "note": "#5 Measures accept only declared literals and module value para"
-    },
-    {
-      "at": "2026-08-06T21:35:05.835Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0yzzaom",
-      "note": "#4 The placeholder-zero sentinel for symbolic lengths is delete"
-    },
-    {
-      "at": "2026-08-06T21:35:05.487Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0yzzaom",
-      "note": "#3 Matrix<3, 4> * Matrix<4, 2> gives shape 3 by 2, and Matrix<3"
-    },
-    {
-      "at": "2026-08-06T21:35:05.144Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0yzzaom",
-      "note": "#2 Each measure use declares its combination rule, and fn join<"
-    },
-    {
-      "at": "2026-08-06T21:35:04.804Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0yzzaom",
-      "note": "#1 Lengths, shapes, lanes and dimension exponents share one mea"
     }
   ],
   "nextNum": 368,
