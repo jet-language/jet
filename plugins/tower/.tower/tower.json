@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1499,
-    "rev": 26531,
+    "rev": 26539,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -83825,12 +83825,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "verify",
       "priority": "P1",
       "plan": "Scope: close the core.tasks loss cluster in docs/reference/core-surface-ledger.json (18 rows in the corrected ledger -- the earlier 32-row figure in the card body predates the fix logged 2026-08-06). Verified against crates/jet-foundation/src/Collections.rs: Task has join/wait, detach, pause, resume, cancel, trace (task_method_return); Sender has send (sender_method_return); Receiver has receive (receiver_method_return); core.tasks module items are spawn, spawn_group, join_all, channel, after, interval. Exclude container-attribution duplicates already shipped under a different container: send (Sender.send already exists), get/set/clear (Julia/Python Queue put/get/clear map to Jet's Sender.send/Receiver.receive -- Jet has no separate Queue type, the channel is the queue). Exclude as a design decision, not this card's job: lock, acquire, release, notify -- OS mutex/condvar primitives; Jet's concurrency model is task-plus-channel (D-COROUTINE1) with no Mutex/Semaphore type today, and adding one is a second concurrency mechanism needing an I8 roadmap slot or owner approval, not a ledger-closure card. Also exclude shutdown, stop -- thread-pool/executor lifecycle; spawn has no persistent pool to shut down. That leaves 8 real gaps, 2 of which need a quick check first.\n\nReal gap families: yield (let a running task voluntarily yield control); exception (read the failure of a completed task -- today only join/wait, pause/resume/cancel/trace exist, no error accessor); waitany (wait for the first of several tasks to finish -- join_all already waits for all); currenttask (a handle to the currently running task, for self-cancel/self-trace); close (explicit close on Sender/Receiver beyond drop); verify-before-building (run, start -- check against spawn's existing signature first, likely already covered by spawn's synchronous vs detached forms, only add if a genuinely distinct workflow remains).\n\nApproach: 1) Confirm run/start against spawn/spawn_group; drop from scope if already covered, log the reconciliation either way. 2) Implement yield, exception, waitany, currenttask, close: extend crates/jet-foundation/src/Collections.rs (task_method_return / sender_method_return / receiver_method_return) and crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs, with I9 semantics in crates/jet-codegen/src/Prelude/Scheduler.rs. 3) Extend examples/features/concurrency/task_controls.jet and examples/features/concurrency/tasks.jet with the new capabilities, golden-test the output. 4) Rebuild jet; regenerate the ledger.\n\nProof: scripts/agent/jet-env cargo test --test core_surface_ledger; scripts/agent/jet-env jet build examples/features/concurrency/task_controls.jet && scripts/agent/jet-env jet run examples/features/concurrency/task_controls.jet; node scripts/agent/check-core-surface-ledger.mjs --check.\n\nOwned paths: crates/jet-foundation/src/Collections.rs, crates/jet-codegen/src/Prelude/Scheduler.rs, crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs, examples/features/concurrency/task_controls.jet, examples/features/concurrency/tasks.jet, examples/features/expected/concurrency/*, docs/reference/core-surface-ledger.json, docs/spec/spec.md.",
       "blockedBy": [],
       "assignee": "e3-coll",
       "log": [
+        {
+          "at": "2026-08-06",
+          "by": "e3-coll",
+          "text": "criteria met; commit ready for independent verify; core.tasks losses 19→13"
+        },
         {
           "at": "2026-08-06",
           "by": "e3-coll",
@@ -83902,9 +83907,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T02:13:30.630Z",
-      "updated": "2026-08-06T15:39:35.738Z",
+      "updated": "2026-08-06T15:39:52.864Z",
       "updatedBy": "e3-coll",
-      "claimedAt": "2026-08-06T15:39:33.796Z"
+      "claimedAt": "2026-08-06T15:39:52.864Z"
     },
     {
       "id": "c07p3bel",
@@ -85614,57 +85619,68 @@
       "track": "epoch",
       "epoch": "e2",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "building",
       "priority": "P1",
       "plan": "1) Move range-head parsing (lo..hi, E0318 ..=, E0319 step) into if_arm_head. 2) Delete the two inline copies. 3) Formatter emission plus fmt STABILITY round-trip for a value-form range arm. 4) Restore branch_dispatch_bench.jet with golden output and prove it on every tier (I9).",
       "blockedBy": [],
       "assignee": "e3-bugs2",
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-06",
+          "by": "e3-bugs2",
+          "text": "reconciling duplicate: applying #1487 proof"
+        },
+        {
+          "at": "2026-08-06",
+          "by": "e3-bugs2",
+          "text": "duplicate of #1487; fix landed on bd/bugs2 in a031bc5e4 via if_arm_head — closing through this card's criteria against that proof"
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "return if n == { 0..9 -> 1  10..99 -> 2  else -> 3 } parses and evaluates correctly on AOT, jet run, and interpreter deopt",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-bugs2",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:10:44.131Z"
+          "evidence": "same as #1487: branch_dispatch_bench ordered() value-dispatch ranges run on jet run + --release; golden ok",
+          "at": "2026-08-06T15:39:57.352Z"
         },
         {
           "n": 2,
           "text": "E0318 (..=) and E0319 (step) fire identically in statement and value dispatch, with the existing UI snapshots unchanged",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-bugs2",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:10:44.449Z"
+          "evidence": "JET_UI_FILTER=range_arm_dot_dot_eq and range_arm_step diagnostic_snapshots ui_snapshots ok (statement form unchanged; value path shares try_range_arm_head)",
+          "at": "2026-08-06T15:39:57.592Z"
         },
         {
           "n": 3,
           "text": "Range-head parsing exists in exactly one place; both inline copies in conditionals.rs are deleted",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-bugs2",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:10:44.762Z"
+          "evidence": "try_range_arm_head in conditionals.rs; if_arms + switch call it; no inline copies remain",
+          "at": "2026-08-06T15:39:57.827Z"
         },
         {
           "n": 4,
           "text": "Formatter emits a value-form range arm and the fmt round-trip plus STABILITY test pass on it",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-bugs2",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:10:45.079Z"
+          "evidence": "fmt lossless corpus green including branch_dispatch_bench; Bench arms fmt-expanded",
+          "at": "2026-08-06T15:39:58.062Z"
         },
         {
           "n": 5,
           "text": "examples/features/tooling/branch_dispatch_bench.jet parses, runs, and matches its golden output",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-bugs2",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:10:45.392Z"
+          "evidence": "JET_GOLDEN_FILTER=branch_dispatch_bench cargo test --test golden ok",
+          "at": "2026-08-06T15:39:58.292Z"
         },
         {
           "n": 6,
@@ -85685,9 +85701,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T10:10:26.566Z",
-      "updated": "2026-08-06T15:39:43.848Z",
+      "updated": "2026-08-06T15:39:58.293Z",
       "updatedBy": "e3-bugs2",
-      "claimedAt": "2026-08-06T15:39:43.847Z"
+      "claimedAt": "2026-08-06T15:39:57.070Z"
     },
     {
       "id": "c0zlv32v",
@@ -114737,6 +114753,62 @@
   ],
   "events": [
     {
+      "at": "2026-08-06T15:39:58.293Z",
+      "by": "e3-bugs2",
+      "action": "card.criteria-meet",
+      "ref": "c01ssx12",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-06T15:39:58.062Z",
+      "by": "e3-bugs2",
+      "action": "card.criteria-meet",
+      "ref": "c01ssx12",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-06T15:39:57.827Z",
+      "by": "e3-bugs2",
+      "action": "card.criteria-meet",
+      "ref": "c01ssx12",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T15:39:57.592Z",
+      "by": "e3-bugs2",
+      "action": "card.criteria-meet",
+      "ref": "c01ssx12",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T15:39:57.352Z",
+      "by": "e3-bugs2",
+      "action": "card.criteria-meet",
+      "ref": "c01ssx12",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-06T15:39:57.070Z",
+      "by": "e3-bugs2",
+      "action": "card.update",
+      "ref": "c01ssx12",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T15:39:56.721Z",
+      "by": "e3-bugs2",
+      "action": "card.update",
+      "ref": "c01ssx12",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T15:39:52.864Z",
+      "by": "e3-coll",
+      "action": "card.update",
+      "ref": "c02j5hzk",
+      "note": "phase,logEntry"
+    },
+    {
       "at": "2026-08-06T15:39:43.848Z",
       "by": "e3-bugs2",
       "action": "card.claim",
@@ -118178,62 +118250,6 @@
       "by": "prep-core-b",
       "action": "card.criteria-add",
       "ref": "c013k26w",
-      "note": "#1 scripts/agent/jet-env cargo test --test core_surface_ledger "
-    },
-    {
-      "at": "2026-08-06T10:28:49.800Z",
-      "by": "prep-core-b",
-      "action": "card.update",
-      "ref": "c013k26w",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-06T10:28:41.646Z",
-      "by": "prep-core-b",
-      "action": "card.update",
-      "ref": "c0tyh6b4",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T10:28:28.222Z",
-      "by": "prep-core-b",
-      "action": "card.criteria-add",
-      "ref": "c0tyh6b4",
-      "note": "#6 No new external dependency was added to any Cargo.toml under"
-    },
-    {
-      "at": "2026-08-06T10:28:27.915Z",
-      "by": "prep-core-b",
-      "action": "card.criteria-add",
-      "ref": "c0tyh6b4",
-      "note": "#5 scripts/agent/jet-env jet run examples/features/crypto/hash."
-    },
-    {
-      "at": "2026-08-06T10:28:27.614Z",
-      "by": "prep-core-b",
-      "action": "card.criteria-add",
-      "ref": "c0tyh6b4",
-      "note": "#4 JET_GOLDEN_FILTER='crypto/hash' scripts/agent/jet-env cargo "
-    },
-    {
-      "at": "2026-08-06T10:28:27.311Z",
-      "by": "prep-core-b",
-      "action": "card.criteria-add",
-      "ref": "c0tyh6b4",
-      "note": "#3 Each new hash function's output matches a known NIST test ve"
-    },
-    {
-      "at": "2026-08-06T10:28:27.003Z",
-      "by": "prep-core-b",
-      "action": "card.criteria-add",
-      "ref": "c0tyh6b4",
-      "note": "#2 jet.crypto exports sha1, sha224, sha384, sha3_224, sha3_256,"
-    },
-    {
-      "at": "2026-08-06T10:28:26.694Z",
-      "by": "prep-core-b",
-      "action": "card.criteria-add",
-      "ref": "c0tyh6b4",
       "note": "#1 scripts/agent/jet-env cargo test --test core_surface_ledger "
     }
   ],
