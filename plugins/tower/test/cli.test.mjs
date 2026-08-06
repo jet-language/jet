@@ -92,7 +92,8 @@ test('message CLI adds, lists, validates, and closes card-linked messages', () =
   assert.equal(message.kind, 'message');
   assert.equal(message.cardNum, 1);
 
-  const open = JSON.parse(run(cwd, ['message', 'list', '--open', '--json']).out);
+  // `message list` is open-only by default; `--all` is the widening flag.
+  const open = JSON.parse(run(cwd, ['message', 'list', '--json']).out);
   assert.deepEqual(open.map(item => item.id), [message.id]);
 
   const rejected = run(cwd, ['message', 'done', message.id, '--by', 'agent-x'], false);
@@ -100,7 +101,7 @@ test('message CLI adds, lists, validates, and closes card-linked messages', () =
   assert.match(rejected.out, /owner-only/);
 
   run(cwd, ['message', 'done', message.id, '--by', 'owner']);
-  assert.deepEqual(JSON.parse(run(cwd, ['message', 'list', '--open', '--json']).out), []);
+  assert.deepEqual(JSON.parse(run(cwd, ['message', 'list', '--json']).out), []);
 });
 
 test('status lists verification before building work', () => {
@@ -222,4 +223,26 @@ test('cli card tags, parent, and list filters', () => {
   const plain = JSON.parse(run(cwd, ['card', 'list', '--untagged', '--json']).out);
   assert.equal(plain.some(c => c.num === untagged.num), true);
   assert.equal(plain.some(c => c.num === map.num), false);
+});
+
+test('an unrecognized flag is a usage error, never a silently dropped value', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'tower-cli-flags-'));
+  run(cwd, ['init', '--name', 'Flags']);
+  run(cwd, ['epoch', 'update', 'e1', '--name', 'E1']);
+  run(cwd, ['epoch', 'current', 'e1']);
+
+  // The reported papercut: `--text` belongs to `papercut add`, not `card add`.
+  // It used to be dropped, leaving an empty card behind.
+  const bad = run(cwd, ['card', 'add', '--title', 'T', '--text', 'body?', '--by', 'tester'], false);
+  assert.equal(bad.code, 1);
+  assert.match(bad.out, /unknown flag for `tower card`: --text/);
+  assert.equal(JSON.parse(run(cwd, ['card', 'list', '--json']).out).length, 0, 'no card was created');
+
+  // Kebab-case is reported the way it was typed, and several are listed at once.
+  const two = run(cwd, ['card', 'update', '#1', '--work-oder', '1', '--phse', 'done'], false);
+  assert.match(two.out, /unknown flags for `tower card`: --work-oder, --phse/);
+
+  // Globals stay valid everywhere, and real flags still work.
+  const ok = JSON.parse(run(cwd, ['card', 'add', '--title', 'Real', '--json', '--by', 'tester']).out);
+  assert.equal(ok.num, 1);
 });
