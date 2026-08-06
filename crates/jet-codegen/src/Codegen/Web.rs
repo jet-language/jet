@@ -4882,8 +4882,11 @@ const JS_POWER_PRELUDE: &str = concat!(
     "}\n\n",
     // D-BITNOT1=A: `!` on a whole number turns over every one of its 64 bits.
     // JavaScript's `~` works on 32 bits, so it is not the same operation.
-    "function jet_bitnot(value) {\n",
-    "  return Number(BigInt.asIntN(64, ~BigInt(value)));\n",
+    "function jet_bitnot(value, bits, signed) {\n",
+    "  const flipped = ~BigInt(value);\n",
+    "  return Number(\n",
+    "    signed ? BigInt.asIntN(bits, flipped) : BigInt.asUintN(bits, flipped),\n",
+    "  );\n",
     "}\n\n",
     // D-FLOORDIV1=A: the JS tier's copy of the one floor-division rule
     // (`Prelude/Core/Division.rs`). Whole numbers trap on a zero divisor, the
@@ -4990,9 +4993,16 @@ fn js_unary_call(op: &crate::AST::UnOp, ty: &Type, operand: &str) -> String {
         Neg => format!("(-{operand})"),
         Not if matches!(ty, Type::Bool) => format!("(!{operand})"),
         // D-BITNOT1=A: JavaScript's `~` turns over 32 bits, so it answers -1
-        // where Jet answers -4294967297. The preamble helper carries the 64-bit
-        // rule the Prelude runs.
-        Not => format!("jet_bitnot({operand})"),
+        // where Jet answers -4294967297. The preamble helper carries the rule
+        // the Prelude runs, and it needs the operand's own width: `!U8.{5}` is
+        // 250, not -6.
+        Not => {
+            let (bits, signed) = match ty {
+                Type::IntN { bits, signed } => (*bits, *signed),
+                _ => (64, true),
+            };
+            format!("jet_bitnot({operand}, {bits}, {signed})")
+        }
     }
 }
 

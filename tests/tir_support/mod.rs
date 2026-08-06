@@ -56,18 +56,35 @@ pub fn build_and_run_full(prefix: &str, name: &str, src: &str) -> (i32, String, 
 ///
 /// Returns `(exit code, stdout, stderr)`.
 pub fn jit_run(name: &str, src: &str) -> (i32, String, String) {
+    jit_run_with_env(name, src, &[])
+}
+
+/// `jit_run` with environment variables the program can read back.
+///
+/// A trap test needs an operand the comptime evaluator cannot see. It folds
+/// literals, calls, and loops over literal lists, so a value that only exists
+/// in the process environment is the smallest thing that reaches the Cranelift
+/// host instead of stopping the build with a comptime diagnostic.
+pub fn jit_run_with_env(
+    name: &str,
+    src: &str,
+    vars: &[(&str, &str)],
+) -> (i32, String, String) {
     let dir = unique_tmp("jet_jit_run");
     fs::create_dir_all(&dir).unwrap();
     let jet_path = dir.join(format!("{name}.jet"));
     fs::write(&jet_path, src).unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_jet"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
+    command
         .arg("run")
         .arg(&jet_path)
         // Keep every run out of the shared build cache, which is keyed on the
         // AST hash and would otherwise serve a binary built before this change.
-        .env("JET_CACHE_DIR", dir.join("cache"))
-        .output()
-        .unwrap();
+        .env("JET_CACHE_DIR", dir.join("cache"));
+    for (key, value) in vars {
+        command.env(key, value);
+    }
+    let out = command.output().unwrap();
     let _ = fs::remove_dir_all(&dir);
     (
         out.status.code().unwrap_or(-1),

@@ -495,6 +495,9 @@ extern "C" fn jet_jit_intn_binop(
                 BinOp::FloorDiv | BinOp::Mod => {
                     with_runtime_mut(|rt| rt.set_trap(MathLayout::INTEGER_DIVIDE_OVERFLOW));
                 }
+                BinOp::Pow => {
+                    with_runtime_mut(|rt| rt.set_trap(MathLayout::INTEGER_POWER_OVERFLOW));
+                }
                 _ => {
                     let name = match op {
                         BinOp::Add => "add",
