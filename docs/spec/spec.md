@@ -2156,8 +2156,14 @@ D-COROUTINE1 keeps coroutine machinery internal and exposes expert control via
 task handles instead of new `coroutine` syntax. `task.wait()` aliases
 `task.join()`. `task.pause()`, `task.resume()`, and `task.cancel()` set
 control-plane state on the handle; `task.trace() => String` reports
-`paused=...,cancel=...`. Pause holds a running task at its next wait point until
-`resume()`; these are enforced by the M:N scheduler, not mere flags.
+`paused=...,cancel=...`. `task.exception() => String` reports `"cancelled"`
+after cancel (otherwise `""`). `tasks.yield_now()` cooperatively yields at a wait
+point; `tasks.current_task() => String` returns the running task's control
+trace (idle defaults outside a task). `tasks.wait_any(^handles) => T` (and
+`handles.wait_any()`) waits for the first finished task. `sender.close()` /
+`receiver.close()` close a channel end explicitly. Pause holds a running task
+at its next wait point until `resume()`; these are enforced by the M:N
+scheduler, not mere flags.
 
 D-CANCELMODEL1=C (ratified 2026-07-11): cancellation is **preemptive at wait
 points**. A cancelled task — a race loser, a fail-fast sibling, or an explicit

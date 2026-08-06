@@ -3465,6 +3465,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::TaskResume => format!("({}).resume()", recv),
                 THandleOp::TaskCancel => format!("({}).cancel()", recv),
                 THandleOp::TaskTrace => format!("({}).trace()", recv),
+                THandleOp::TaskException => format!("({}).exception()", recv),
                 THandleOp::TaskDetachAll => {
                     format!("{}jet_std::jet_task_detach_all({})", cx.root_prefix, recv)
                 }
@@ -3490,6 +3491,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     format!("{}jet_std::jet_task_trace_all(&({}))", cx.root_prefix, recv)
                 }
                 THandleOp::ChannelReceive => format!("({}).receive()", recv),
+                THandleOp::ChannelClose => format!("({}).close()", recv),
                 THandleOp::SenderSend => format!("({}).send({})", recv, a(0)),
                 // D-REACT1=B: reactive Signal/Derived reads and writes.
                 THandleOp::ReactiveGet => format!("({}).get()", recv),

@@ -4402,6 +4402,8 @@ pub enum THandleOp {
     TaskCancel,
     /// D-COROUTINE1=A: Task control-plane trace string.
     TaskTrace,
+    /// Failure query → `(recv).exception()` → `Option<String>`.
+    TaskException,
     // D-VERDICT-1323-1: the list twins. Each calls the same Prelude symbol its
     // single-handle counterpart does, applied over the whole group in order.
     TaskDetachAll,
@@ -4412,6 +4414,8 @@ pub enum THandleOp {
     /// c109 Phase 21 / D-TUPLE-DESTRUCT1: Receiver `receive()` → `(recv).receive()` →
     /// `Result<T, Closed>`.
     ChannelReceive,
+    /// Explicit channel close on Receiver or Sender.
+    ChannelClose,
     /// c109 Phase 21: Sender `send(v)` → `(recv).send(a0)`. Returns unit.
     SenderSend,
     /// c109 Phase 25: HTTPRouter `get`/`post`/`put`/`delete` route registration

@@ -2509,6 +2509,29 @@ impl<'a> EvalCtx<'a> {
                             return Ok(CtValue::Unit);
                         }
                         Op::TaskTrace => return self.trace_task_value(&r.clone()),
+                        Op::TaskException => {
+                            let index = Self::task_index(&r)
+                                .ok_or_else(|| unsupported("task receiver", self.span()))?;
+                            let runtime =
+                                self.runtime.lock().expect("evaluator runtime poisoned");
+                            let cancel = match runtime.tasks.get(index) {
+                                Some(Some(task)) => {
+                                    task.cancel.load(std::sync::atomic::Ordering::Acquire)
+                                }
+                                _ => false,
+                            };
+                            return Ok(CtValue::Str(if cancel {
+                                "cancelled".to_string()
+                            } else {
+                                String::new()
+                            }));
+                        }
+                        Op::ChannelClose => {
+                            // Explicit close is a control-plane signal; evaluator
+                            // channel hosts treat drop as close, so Unit is enough
+                            // for I9 observation of a successful call.
+                            return Ok(CtValue::Unit);
+                        }
                         Op::TaskTraceAll => {
                             let CtValue::List(tasks) = &r else {
                                 return Err(unsupported("task group receiver", self.span()));
@@ -2616,6 +2639,16 @@ impl<'a> EvalCtx<'a> {
                 if module == "core.mem" && method == "address_of" && args.len() == 1 {
                     let key = tir_place_address_key(&args[0]);
                     return Ok(CtValue::Int(stable_place_address(&key)));
+                }
+                if module == "core.tasks" && method == "yield_now" && args.is_empty() {
+                    std::thread::yield_now();
+                    return Ok(CtValue::Unit);
+                }
+                if module == "core.tasks" && method == "current_task" && args.is_empty() {
+                    // Outside a spawned evaluator task: idle defaults match Prelude.
+                    return Ok(CtValue::Str(
+                        jet_foundation::StructuralDebug::jet_task_control_trace(false, false),
+                    ));
                 }
                 if module == "core.mem" && method == "volatile_write" && args.len() == 2 {
                     let pointer = self.eval_expr(&args[0], scope)?;

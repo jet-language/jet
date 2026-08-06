@@ -27,7 +27,8 @@ use std::collections::HashSet;
 pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     // D-FANOUT3=C: direct `tasks.join_all` lowers to the existing
     // TaskGroupAll node and Prelude `jet_task_all` semantics.
-    if module == "core.tasks" && method == "join_all" {
+    if module == "core.tasks" && matches!(method, "join_all" | "wait_any" | "yield_now" | "current_task")
+    {
         return true;
     }
     // c109 Phase 18: the low-level `core.mem` pointer ops (`address_of`/`volatile_read`,

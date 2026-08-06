@@ -404,6 +404,19 @@
             // D-TASK-PAUSE-TIER1 / I9: same helper as TIR eval (StructuralDebug).
             crate::jet_task_control_trace(paused, cancel)
         }
+        /// Failure query: `"cancelled"` when cancel was requested; `""` otherwise.
+        pub fn exception(&self) -> String {
+            if self
+                .state
+                .control
+                .cancelled
+                .load(std::sync::atomic::Ordering::Relaxed)
+            {
+                "cancelled".to_string()
+            } else {
+                String::new()
+            }
+        }
         pub fn join(self) -> T {
             if !self.state.skip_join_deadline {
                 super::jet_deadline_check("task join");
@@ -520,6 +533,16 @@
     /// D-CONCCOMB1=A: first completed result (success or failure path — v1 propagates panic).
     pub fn jet_task_any<T: Send + 'static>(tasks: Vec<JetTask<T>>) -> T {
         super::jet_scheduler_any(jet_task_entries(tasks, "any"))
+    }
+
+    /// Cooperative yield — park at a wait point with a zero timeout.
+    pub fn jet_task_yield() {
+        super::jet_scheduler_yield_now();
+    }
+
+    /// Control-plane trace of the currently running task (or the idle defaults).
+    pub fn jet_task_current_trace() -> String {
+        super::jet_scheduler_current_task_trace()
     }
 
     /// D-CONCSELECT1=A: fluent select builder accumulated at compile time, executed at `.wait()`.
@@ -674,6 +697,11 @@
                 None => Err(Closed::Closed),
             }
         }
+
+        /// Explicitly close the channel (wakes waiters); same as dropping the last sender.
+        pub fn close(&self) {
+            self.inner.close();
+        }
     }
 
     pub struct JetSender<T> {
@@ -682,6 +710,11 @@
     impl<T: Send> JetSender<T> {
         pub fn send(&self, value: T) {
             let _ = self.tx.send(value);
+        }
+
+        /// Explicitly close the channel from the send side.
+        pub fn close(&self) {
+            self.tx.close();
         }
 
         /// D-STREAMYIELD1: unlike task-channel `send`, a Stream producer must

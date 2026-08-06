@@ -173,6 +173,8 @@ const CONTAINER_ALIASES = {
   // gaps Jet ships.
   Task: "core.tasks",
   TaskList: "core.tasks",
+  Sender: "core.tasks",
+  Receiver: "core.tasks",
   Duration: "core.time",
   // Civil-time types live in net_text_time.rs; their workflows are core.time.
   Date: "core.time",
@@ -321,6 +323,8 @@ const SYNONYM_GROUPS = [
   ["keys", "key_set", "names"],
   ["values", "value_set"],
   ["join", "mk_string", "intercalate"],
+  ["yield_now", "yield"],
+  ["wait_any", "waitany", "when_any"],
   ["split", "split_n"],
   ["split_once", "split_at", "cut"],
   ["replace", "sub", "gsub", "replace_all", "replacing"],

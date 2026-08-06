@@ -784,6 +784,7 @@ pub(super) fn eval_handle(
         | THandleOp::TaskResume
         | THandleOp::TaskCancel
         | THandleOp::TaskTrace
+        | THandleOp::TaskException
         | THandleOp::TaskDetachAll
         | THandleOp::TaskPauseAll
         | THandleOp::TaskResumeAll
@@ -793,6 +794,7 @@ pub(super) fn eval_handle(
         }
         THandleOp::ChannelReceive => Err(unsupported("handle `ChannelReceive`", span)),
         THandleOp::SenderSend => Err(unsupported("handle `SenderSend`", span)),
+        THandleOp::ChannelClose => Err(unsupported("handle `ChannelClose`", span)),
         THandleOp::HTTPRouterRegister { .. } => {
             Err(unsupported("handle `HTTPRouterRegister`", span))
         }

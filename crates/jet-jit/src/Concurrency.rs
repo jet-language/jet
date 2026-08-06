@@ -2,11 +2,12 @@
 
 use jet_codegen::scheduler::{
     jet_scheduler_all, jet_scheduler_any, jet_scheduler_ctx_deadline_ms,
-    jet_scheduler_push_deadline, jet_scheduler_race, jet_scheduler_select_int_channels_timed,
-    jet_scheduler_deliver_shield_exit, jet_scheduler_shield_enter,
-    jet_scheduler_shield_leave_status, jet_scheduler_sleep_ms, jet_scheduler_spawn_blocking_with_control,
-    jet_scheduler_wait_without_unwind, JetSchedulerChannel, JetSchedulerDeadlineGuard,
-    JetSchedulerJoin, JetSchedulerWait, JetShieldExit, JetTaskControl,
+    jet_scheduler_current_task_trace, jet_scheduler_push_deadline, jet_scheduler_race,
+    jet_scheduler_select_int_channels_timed, jet_scheduler_deliver_shield_exit,
+    jet_scheduler_shield_enter, jet_scheduler_shield_leave_status, jet_scheduler_sleep_ms,
+    jet_scheduler_spawn_blocking_with_control, jet_scheduler_wait_without_unwind,
+    jet_scheduler_yield_now, JetSchedulerChannel, JetSchedulerDeadlineGuard, JetSchedulerJoin,
+    JetSchedulerWait, JetShieldExit, JetTaskControl,
 };
 use std::cell::{Cell, RefCell};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -634,6 +635,30 @@ extern "C" fn jet_jit_task_trace(task: i64) -> i64 {
     })
 }
 
+extern "C" fn jet_jit_task_exception(task: i64) -> i64 {
+    with_runtime_mut(|rt| {
+        let ctrl = &rt.task_controls[task as usize];
+        let cancel = ctrl.cancelled.load(std::sync::atomic::Ordering::Relaxed);
+        let text = if cancel {
+            "cancelled".to_string()
+        } else {
+            String::new()
+        };
+        rt.heap.alloc_string(text)
+    })
+}
+
+extern "C" fn jet_jit_task_yield() {
+    jet_scheduler_yield_now();
+}
+
+extern "C" fn jet_jit_task_current_trace() -> i64 {
+    with_runtime_mut(|rt| {
+        let text = jet_scheduler_current_task_trace();
+        rt.heap.alloc_string(text)
+    })
+}
+
 extern "C" fn jet_jit_task_trace_all(task_list: i64) -> i64 {
     with_runtime_mut(|rt| {
         let ids = task_ids_from_list(rt, task_list);
@@ -881,6 +906,9 @@ pub(crate) struct ConcurrencyHostFns {
     pub task_pause: cranelift_module::FuncId,
     pub task_resume: cranelift_module::FuncId,
     pub task_trace: cranelift_module::FuncId,
+    pub task_exception: cranelift_module::FuncId,
+    pub task_yield: cranelift_module::FuncId,
+    pub task_current_trace: cranelift_module::FuncId,
     pub task_all: cranelift_module::FuncId,
     pub task_wait_all: cranelift_module::FuncId,
     pub task_trace_all: cranelift_module::FuncId,
@@ -960,6 +988,9 @@ pub(crate) fn register_concurrency_symbols(builder: &mut cranelift_jit::JITBuild
     builder.symbol("jet_jit_task_pause", jet_jit_task_pause as *const u8);
     builder.symbol("jet_jit_task_resume", jet_jit_task_resume as *const u8);
     builder.symbol("jet_jit_task_trace", jet_jit_task_trace as *const u8);
+    builder.symbol("jet_jit_task_exception", jet_jit_task_exception as *const u8);
+    builder.symbol("jet_jit_task_yield", jet_jit_task_yield as *const u8);
+    builder.symbol("jet_jit_task_current_trace", jet_jit_task_current_trace as *const u8);
     builder.symbol("jet_jit_task_all", jet_jit_task_all as *const u8);
     builder.symbol("jet_jit_task_wait_all", jet_jit_task_wait_all as *const u8);
     builder.symbol("jet_jit_task_trace_all", jet_jit_task_trace_all as *const u8);
@@ -1064,6 +1095,9 @@ pub(crate) fn declare_concurrency_host_fns(
         task_pause: import("jet_jit_task_pause", &sig_void_i64)?,
         task_resume: import("jet_jit_task_resume", &sig_void_i64)?,
         task_trace: import("jet_jit_task_trace", &sig_i64)?,
+        task_exception: import("jet_jit_task_exception", &sig_i64)?,
+        task_yield: import("jet_jit_task_yield", &sig_void)?,
+        task_current_trace: import("jet_jit_task_current_trace", &sig_noarg_i64)?,
         task_all: import("jet_jit_task_all", &sig_i64)?,
         task_wait_all: import("jet_jit_task_wait_all", &sig_i64)?,
         task_trace_all: import("jet_jit_task_trace_all", &sig_i64)?,

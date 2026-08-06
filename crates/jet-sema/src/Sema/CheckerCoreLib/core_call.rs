@@ -2918,6 +2918,81 @@ impl<'a> Checker<'a> {
                     }
                     return Some(Type::List(Box::new(elem)));
                 }
+                // First finished task wins (consumes the list). Runtime meaning
+                // reuses TaskGroupAny/jet_task_any — twin of join_all.
+                ("core.tasks", "wait_any") => {
+                    if args.len() != 1 {
+                        self.diags.push(wrong_core_arity(
+                            "wait_any",
+                            1,
+                            args.len(),
+                            span,
+                        ));
+                        for arg in args.iter_mut() {
+                            self.infer(&mut arg.expr);
+                        }
+                        return None;
+                    }
+                    let literal_handles = matches!(&args[0].expr, Expr::ListLit(..));
+                    if !literal_handles && args[0].convention != AccessConvention::Move {
+                        self.diags.push(Diagnostic::error(
+                            "E0201",
+                            "`tasks.wait_any` consumes its list of task handles".to_string(),
+                            "each task handle can be joined only once".to_string(),
+                            format!(
+                                "pass ownership of the list: `tasks.wait_any({}handles)`",
+                                Syntax::SIGIL_MOVE
+                            ),
+                            Some(args[0].span),
+                        ));
+                    }
+                    let elem = match self.infer(&mut args[0].expr) {
+                        Some(Type::List(inner)) => match *inner {
+                            Type::Apply {
+                                ref name,
+                                ref args,
+                                ..
+                            } if name == "Task" && args.len() == 1 => args[0].clone(),
+                            other => {
+                                self.diags.push(Diagnostic::error(
+                                    "E0112",
+                                    format!(
+                                        "`tasks.wait_any` needs a list of task handles, not `[{}]`",
+                                        other.show()
+                                    ),
+                                    "each element must be a `Task<T>` handle".to_string(),
+                                    "pass a list such as `[first, second]` where each value came from `tasks.spawn`".to_string(),
+                                    Some(args[0].expr.span()),
+                                ));
+                                return None;
+                            }
+                        },
+                        Some(other) => {
+                            self.diags.push(Diagnostic::error(
+                                "E0112",
+                                format!(
+                                    "`tasks.wait_any` needs a list of task handles, not {}",
+                                    other.show()
+                                ),
+                                "the call waits for the first finished `Task<T>` in one list"
+                                    .to_string(),
+                                "pass a `[Task<T>]` list".to_string(),
+                                Some(args[0].expr.span()),
+                            ));
+                            return None;
+                        }
+                        None => return None,
+                    };
+                    let mut names = std::collections::HashSet::new();
+                    collect_task_handles(&args[0].expr, &mut names);
+                    for name in names {
+                        self.mark_taskgroup_spawn_consumed(&name);
+                    }
+                    if let Expr::Ident(name, name_span) = &args[0].expr {
+                        self.mark_moved(name.clone(), *name_span);
+                    }
+                    return Some(elem);
+                }
                 // L2501 is reserved for "whole-file read advisory" but intentionally not
                 // emitted here: `fs.read` is kept as sugar (D-IO3) and firing on every call
                 // site is too noisy (breaks showcase golden tests via path-specific output).

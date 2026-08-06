@@ -826,6 +826,7 @@ fn task_list_method_return(args: &[Type], method: &str, nargs: usize) -> Option<
         (Syntax::METHOD_TASK_WAIT_ALL, 0) | (Syntax::METHOD_TASK_JOIN_ALL, 0) => {
             Some(Some(Type::List(Box::new(result))))
         }
+        ("wait_any", 0) => Some(Some(result)),
         (Syntax::METHOD_TASK_DETACH_ALL, 0)
         | (Syntax::METHOD_TASK_CANCEL_ALL, 0)
         | (Syntax::METHOD_TASK_PAUSE_ALL, 0)
@@ -1234,6 +1235,8 @@ fn task_method_return(args: &[Type], method: &str, nargs: usize) -> Option<Optio
         | (Syntax::METHOD_TASK_RESUME, 0)
         | (Syntax::METHOD_TASK_CANCEL, 0) => Some(None),
         (Syntax::METHOD_TASK_TRACE, 0) => Some(Some(Type::String)),
+        // Failure query: "cancelled" when cancel was requested; empty string otherwise.
+        ("exception", 0) => Some(Some(Type::String)),
         _ => None,
     }
 }
@@ -1249,6 +1252,7 @@ fn receiver_method_return(args: &[Type], method: &str, nargs: usize) -> Option<O
             ok: Box::new(t),
             err: Box::new(Type::Named("Closed".to_string())),
         })),
+        ("close", 0) => Some(None),
         _ => None,
     }
 }
@@ -1256,6 +1260,7 @@ fn receiver_method_return(args: &[Type], method: &str, nargs: usize) -> Option<O
 fn sender_method_return(_args: &[Type], method: &str, nargs: usize) -> Option<Option<Type>> {
     match (method, nargs) {
         ("send", 1) => Some(None),
+        ("close", 0) => Some(None),
         _ => None,
     }
 }

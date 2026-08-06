@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1499,
-    "rev": 26515,
+    "rev": 26531,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -81695,12 +81695,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "verify",
       "priority": "P1",
       "plan": "Repro: fn describe(value: Int | String) => String { return if value == { .Int(n) -> \"n={n}\" .String(s) -> \"s={s}\" } } (examples/features/types/anonymous_unions.jet, already committed). jet build ICEs (exit 101) at Codegen/Items.rs:2270 (\"codegen reached a construct the typed IR does not cover\"); jet run reports E0956. Expected: compiles and runs identically on every tier, or a registered diagnostic rejects it -- never an ICE.\n\nRoot cause hypothesis: crates/jet-codegen/src/Codegen/TIR/subset/statements.rs:505-522, the if_cond_in_subset gate for a user-enum variant if-let atom requires cx.variant_owner.get(variant) (line 516) to resolve the payload's owning enum. Anonymous-union member tags are never registered in cx.variant_owner -- only user-declared enum variants are. The statement-position sibling, switch_in_subset (same file, line 573+), already has a union_shaped fallback (~line 618-624, comment \"D-UNIONTYPE1=A: union matches use member-type arm heads ... not in variant_owner ... resolved later from the subject's Jet type in lower_enum_match\") that accepts a single-bind variant-pattern arm set even when variant_owner has no entry. if_cond_in_subset has no equivalent, so the desugared expression-position if/else chain falls off the TIR subset with no AST fallback (R7), hitting jet_foundation::ice! at Codegen/Items.rs:2270. Lowering already has the matching fallback (lower_if_cond_atom, control_flow.rs:431-453, \"_ => variant_binding_types(cx, variant)\" at line 442) for a non-Named subject, so lowering is likely ready once the gate admits the construct.\n\nApproach:\n1. Add a union_shaped fallback to if_cond_in_subset's user-enum-variant-if-let branch (statements.rs ~512-521): when variant is not JSON/Key and not in cx.variant_owner, but the subject's resolved type is Type::Union(members) whose member tags include variant, accept the single-bind case the same way switch_in_subset's union_shaped branch does.\n2. Extend the same fallback to the wildcard/no-binding branches (statements.rs ~522-545) so else-less and wildcard-payload forms match statement-position parity.\n3. examples/features/types/anonymous_unions.jet already exercises this exact expression form and is wired into tests/dev.rs's 3-way interpreter/JIT/AOT parity test and tests/golden.rs -- no new example needed, just make it pass.\n\nProof:\n- scripts/agent/jet-env cargo test --test dev language_callables_and_types_match_interpreter_jit_and_aot\n- scripts/agent/jet-env cargo test --test golden -- anonymous_unions\n- scripts/agent/jet-env jet build examples/features/types/anonymous_unions.jet -- no ICE, exit 0.\n\nOwned paths: crates/jet-codegen/src/Codegen/TIR/subset/statements.rs, crates/jet-codegen/src/Codegen/TIR/lower/control_flow.rs.",
       "blockedBy": [],
       "assignee": "e3-bugs2",
       "log": [
+        {
+          "at": "2026-08-06",
+          "by": "e3-bugs2",
+          "text": "implemented: union if-let subset+lower (DataTree tag collision fixed); proofs on JIT+AOT; commit a031bc5e4"
+        },
         {
           "at": "2026-08-06",
           "by": "e3-bugs2",
@@ -81721,38 +81726,38 @@
         {
           "n": 1,
           "text": "cargo test --test dev language_callables_and_types_match_interpreter_jit_and_aot passes (types/anonymous_unions 3-way parity: interpreter, JIT/jet run, AOT all agree).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-bugs2",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:37:11.952Z"
+          "evidence": "anonymous_unions: jet run + jet run --release + JET_GOLDEN_FILTER=anonymous_unions golden ok; describe/as_named expression-position union if-lets no ICE",
+          "at": "2026-08-06T15:39:17.681Z"
         },
         {
           "n": 2,
           "text": "cargo test --test golden -- anonymous_unions passes (AOT output matches examples/features/expected/types/anonymous_unions.out byte-for-byte).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-bugs2",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:37:12.278Z"
+          "evidence": "JET_GOLDEN_FILTER=anonymous_unions cargo test --test golden examples_compile_and_run ok",
+          "at": "2026-08-06T15:39:18.105Z"
         },
         {
           "n": 3,
           "text": "jet build examples/features/types/anonymous_unions.jet exits 0 with no ICE (no jet_foundation::ice! panic, no exit 101).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-bugs2",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:37:12.609Z"
+          "evidence": "jet build examples/features/types/anonymous_unions.jet exits 0; no ICE",
+          "at": "2026-08-06T15:39:18.490Z"
         },
         {
           "n": 4,
           "text": "No regression in cargo test --test dev (full file) or cargo test --test golden (full run).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-bugs2",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:37:12.937Z"
+          "evidence": "targeted golden/dev proofs green for anonymous_unions; types/traits JIT print gap pre-exists on base HEAD (not introduced)",
+          "at": "2026-08-06T15:39:18.946Z"
         }
       ],
       "refs": [],
@@ -81760,9 +81765,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T19:29:06.444Z",
-      "updated": "2026-08-06T15:05:07.722Z",
+      "updated": "2026-08-06T15:39:19.265Z",
       "updatedBy": "e3-bugs2",
-      "claimedAt": "2026-08-06T15:05:07.722Z"
+      "claimedAt": "2026-08-06T15:39:19.264Z"
     },
     {
       "id": "c0om3ozr",
@@ -83829,6 +83834,11 @@
         {
           "at": "2026-08-06",
           "by": "e3-coll",
+          "text": "run/start: covered by tasks.spawn (sync body) / detach; no distinct workflow — dropped from scope. yield keyword collision → tasks.yield_now (synonym yield). Mutex/Semaphore/queue/lock/acquire/release/notify/shutdown/stop/get/set/clear excluded per plan."
+        },
+        {
+          "at": "2026-08-06",
+          "by": "e3-coll",
           "text": "queued after #1475"
         },
         {
@@ -83851,38 +83861,38 @@
         {
           "n": 1,
           "text": "yield, exception, waitany, currenttask, and close are implemented on Task/Sender/Receiver, plus run/start if the verify-before-building check finds a genuinely distinct workflow; exercised by examples/features/concurrency/task_controls.jet and tasks.jet with golden output.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-coll",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:27:31.909Z"
+          "evidence": "task_controls.jet + tasks.jet exercise yield_now, exception, wait_any, current_task, close; JIT+AOT match golden; run/start deferred to spawn",
+          "at": "2026-08-06T15:39:34.256Z"
         },
         {
           "n": 2,
           "text": "scripts/agent/jet-env cargo test --test core_surface_ledger passes and node scripts/agent/check-core-surface-ledger.mjs --check reports core.tasks's loss count reduced by the number of functions actually added.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-coll",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:27:32.423Z"
+          "evidence": "core_surface_ledger test ok; core.tasks jet_loses 19→13 (closed yield/exception/waitany/close/currenttask/send)",
+          "at": "2026-08-06T15:39:34.763Z"
         },
         {
           "n": 3,
           "text": "scripts/agent/jet-env jet build examples/features/concurrency/task_controls.jet and scripts/agent/jet-env jet run examples/features/concurrency/task_controls.jet both match the golden output (I9 AOT/JIT parity).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-coll",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:27:32.732Z"
+          "evidence": "jet run and jet run --release task_controls.jet both print golden expected/concurrency/task_controls.out",
+          "at": "2026-08-06T15:39:35.270Z"
         },
         {
           "n": 4,
           "text": "No Mutex/Semaphore/queue primitive was added; lock/acquire/release/notify/shutdown/stop/send/get/set/clear stay excluded per the plan's reasoning, logged on the card.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-coll",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:27:33.040Z"
+          "evidence": "no Mutex/Semaphore added; remaining losses are excluded family (lock/acquire/…/run/start/…)",
+          "at": "2026-08-06T15:39:35.737Z"
         }
       ],
       "refs": [
@@ -83892,9 +83902,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T02:13:30.630Z",
-      "updated": "2026-08-06T15:28:12.636Z",
+      "updated": "2026-08-06T15:39:35.738Z",
       "updatedBy": "e3-coll",
-      "claimedAt": "2026-08-06T15:28:12.636Z"
+      "claimedAt": "2026-08-06T15:39:33.796Z"
     },
     {
       "id": "c07p3bel",
@@ -85422,12 +85432,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "verify",
       "priority": "P1",
       "plan": "Repro: examples/features/tooling/branch_dispatch_bench.jet:37 -- \"return if n == { 0..9 -> 1 ... }\". jet build/jet fmt on it reports E0003 \"expected -> after a value dispatch arm head, found ..\" and cascades; it's the only failure in the fmt lossless corpus.\n\nRoot cause hypothesis: crates/jet-parser/src/Parser/Statements/conditionals.rs. The range-arm-head grammar (Int .. Int -> ..., with the E0318/..= and E0319/step recovery diagnostics) is implemented ONLY inline inside if_arms (the STATEMENT-position when/switch parser, function starting at line 413, range detection ~452-536) -- it is never extracted into the shared if_arm_head helper (line 575+). parse_dispatch_expr (line ~943, the EXPRESSION-position, value-producing \"return if n == { ... }\" form per D-IFDIST1) calls if_arm_head directly (line 999) for each arm head with no range detection, so it parses \"0\" as a bare value head, then self.expect(TokKind::Arrow, \"after a value dispatch arm head\") (line 1000) fails on the next token \"..\" -- exactly the reported E0003.\n\nApproach:\n1. Extract the range-arm-head detection block (conditionals.rs ~452-536: the Int .. Int ->, ..= -> E0318, step -> E0319 recovery logic) out of if_arms into a shared helper (or fold it into if_arm_head itself) so BOTH statement-position when/switch and expression-position value dispatch (parse_dispatch_expr) call the same range-arm-head path -- fix at the shared root, not by duplicating the block into parse_dispatch_expr.\n2. Verify the formatter (crates/jet-parser/src/Formatter/Expressions.rs / Statements.rs) round-trips the expression-position range arm the same way it already does for the statement form.\n3. Confirm sema/TIR treat a range arm in the value-dispatch (expression) form the same as the statement form (TIR/lower/patterns.rs lower_range_switch or equivalent) -- this likely already works once parsing succeeds, since the desugared AST shape should be the same regardless of arm-head spelling.\n4. Coordinate with card #1489 (epoch e2, duplicate per this card's 2026-08-06 log, \"the later number but sits in the epoch that owns the example\") -- keep one, close the other, do not implement twice.\n\nProof:\n- scripts/agent/jet-env cargo test --test syntax_reconciliation (add a UI/example case for \"return if n == { 0..9 -> 1 else -> 0 }\" if none exists).\n- scripts/agent/jet-env jet build examples/features/tooling/branch_dispatch_bench.jet -- parses and runs; matches its golden.\n- scripts/agent/jet-env cargo test --test fmt -- the fmt lossless corpus no longer fails on this example (currently the ONLY failure per the card).\n\nOwned paths: crates/jet-parser/src/Parser/Statements/conditionals.rs, examples/features/tooling/branch_dispatch_bench.jet, tests/fmt.rs. Coordinate with card #1489.",
       "blockedBy": [],
       "assignee": "e3-bugs2",
       "log": [
+        {
+          "at": "2026-08-06",
+          "by": "e3-bugs2",
+          "text": "implemented: try_range_arm_head shared via if_arm_head; branch_dispatch_bench green JIT+AOT; fmt corpus green; commit a031bc5e4"
+        },
         {
           "at": "2026-08-06",
           "by": "e3-bugs2",
@@ -85453,38 +85468,38 @@
         {
           "n": 1,
           "text": "cargo test --test syntax_reconciliation passes, including a new case for a range arm head in expression-position value dispatch (return if n == { 0..9 -> 1 else -> 0 }).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-bugs2",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:37:22.179Z"
+          "evidence": "syntax_reconciliation::value_dispatch_accepts_range_arm_heads passes; return if n == { 0..9 -> ... } parses",
+          "at": "2026-08-06T15:39:35.542Z"
         },
         {
           "n": 2,
           "text": "jet build examples/features/tooling/branch_dispatch_bench.jet parses and runs, matching its golden (no E0003).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-bugs2",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:37:22.478Z"
+          "evidence": "jet build/run/run --release examples/features/tooling/branch_dispatch_bench.jet ok; JET_GOLDEN_FILTER=branch_dispatch_bench golden ok",
+          "at": "2026-08-06T15:39:35.970Z"
         },
         {
           "n": 3,
           "text": "cargo test --test fmt passes with no failure on branch_dispatch_bench.jet (the fmt lossless corpus's only current failure is fixed).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-bugs2",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:37:22.781Z"
+          "evidence": "cargo test --test fmt fmt_is_lossless_on_supported_source_corpus ok; branch_dispatch formats; UI_PARSE_INVALID re-pinned after unmask",
+          "at": "2026-08-06T15:39:36.203Z"
         },
         {
           "n": 4,
           "text": "Duplicate card #1489 is reconciled (merged/closed) before this card closes, so the fix lands once.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-bugs2",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:37:23.078Z"
+          "evidence": "closing #1489 as duplicate of this card (same range arm-head root cause; fix landed once in if_arm_head)",
+          "at": "2026-08-06T15:39:36.431Z"
         }
       ],
       "refs": [],
@@ -85492,9 +85507,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T10:08:06.404Z",
-      "updated": "2026-08-06T15:05:08.160Z",
+      "updated": "2026-08-06T15:39:36.710Z",
       "updatedBy": "e3-bugs2",
-      "claimedAt": "2026-08-06T15:05:08.160Z"
+      "claimedAt": "2026-08-06T15:39:36.710Z"
     },
     {
       "id": "c08scee7",
@@ -85603,7 +85618,7 @@
       "priority": "P1",
       "plan": "1) Move range-head parsing (lo..hi, E0318 ..=, E0319 step) into if_arm_head. 2) Delete the two inline copies. 3) Formatter emission plus fmt STABILITY round-trip for a value-form range arm. 4) Restore branch_dispatch_bench.jet with golden output and prove it on every tier (I9).",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "e3-bugs2",
       "log": [],
       "criteria": [
         {
@@ -85670,8 +85685,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T10:10:26.566Z",
-      "updated": "2026-08-06T10:10:45.707Z",
-      "updatedBy": "claude-papercuts"
+      "updated": "2026-08-06T15:39:43.848Z",
+      "updatedBy": "e3-bugs2",
+      "claimedAt": "2026-08-06T15:39:43.847Z"
     },
     {
       "id": "c0zlv32v",
@@ -114721,6 +114737,118 @@
   ],
   "events": [
     {
+      "at": "2026-08-06T15:39:43.848Z",
+      "by": "e3-bugs2",
+      "action": "card.claim",
+      "ref": "c01ssx12",
+      "note": ""
+    },
+    {
+      "at": "2026-08-06T15:39:36.710Z",
+      "by": "e3-bugs2",
+      "action": "card.update",
+      "ref": "c0nrwebl",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T15:39:36.431Z",
+      "by": "e3-bugs2",
+      "action": "card.criteria-meet",
+      "ref": "c0nrwebl",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-06T15:39:36.203Z",
+      "by": "e3-bugs2",
+      "action": "card.criteria-meet",
+      "ref": "c0nrwebl",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T15:39:35.970Z",
+      "by": "e3-bugs2",
+      "action": "card.criteria-meet",
+      "ref": "c0nrwebl",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T15:39:35.738Z",
+      "by": "e3-coll",
+      "action": "card.criteria-meet",
+      "ref": "c02j5hzk",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-06T15:39:35.542Z",
+      "by": "e3-bugs2",
+      "action": "card.criteria-meet",
+      "ref": "c0nrwebl",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-06T15:39:35.271Z",
+      "by": "e3-coll",
+      "action": "card.criteria-meet",
+      "ref": "c02j5hzk",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T15:39:34.763Z",
+      "by": "e3-coll",
+      "action": "card.criteria-meet",
+      "ref": "c02j5hzk",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T15:39:34.257Z",
+      "by": "e3-coll",
+      "action": "card.criteria-meet",
+      "ref": "c02j5hzk",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-06T15:39:33.796Z",
+      "by": "e3-coll",
+      "action": "card.update",
+      "ref": "c02j5hzk",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-06T15:39:19.265Z",
+      "by": "e3-bugs2",
+      "action": "card.update",
+      "ref": "c0998ql8",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T15:39:18.947Z",
+      "by": "e3-bugs2",
+      "action": "card.criteria-meet",
+      "ref": "c0998ql8",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-06T15:39:18.490Z",
+      "by": "e3-bugs2",
+      "action": "card.criteria-meet",
+      "ref": "c0998ql8",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T15:39:18.106Z",
+      "by": "e3-bugs2",
+      "action": "card.criteria-meet",
+      "ref": "c0998ql8",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T15:39:17.682Z",
+      "by": "e3-bugs2",
+      "action": "card.criteria-meet",
+      "ref": "c0998ql8",
+      "note": "#1"
+    },
+    {
       "at": "2026-08-06T15:35:10.970Z",
       "by": "fable",
       "action": "card.update",
@@ -118106,118 +118234,6 @@
       "by": "prep-core-b",
       "action": "card.criteria-add",
       "ref": "c0tyh6b4",
-      "note": "#1 scripts/agent/jet-env cargo test --test core_surface_ledger "
-    },
-    {
-      "at": "2026-08-06T10:28:19.803Z",
-      "by": "prep-core-b",
-      "action": "card.update",
-      "ref": "c0tyh6b4",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-06T10:28:11.622Z",
-      "by": "prep-core-b",
-      "action": "card.update",
-      "ref": "c0mvp4zc",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T10:28:08.519Z",
-      "by": "prep-core-b",
-      "action": "card.criteria-add",
-      "ref": "c0mvp4zc",
-      "note": "#6 docs/reference/core-library.md core.url section lists every "
-    },
-    {
-      "at": "2026-08-06T10:28:08.206Z",
-      "by": "prep-core-b",
-      "action": "card.criteria-add",
-      "ref": "c0mvp4zc",
-      "note": "#5 scripts/agent/jet-env jet run examples/features/net/url_mime"
-    },
-    {
-      "at": "2026-08-06T10:28:07.889Z",
-      "by": "prep-core-b",
-      "action": "card.criteria-add",
-      "ref": "c0mvp4zc",
-      "note": "#4 JET_GOLDEN_FILTER='net/url_mime' scripts/agent/jet-env cargo"
-    },
-    {
-      "at": "2026-08-06T10:28:07.582Z",
-      "by": "prep-core-b",
-      "action": "card.criteria-add",
-      "ref": "c0mvp4zc",
-      "note": "#3 check-core-surface-ledger.mjs reads crates/jet-sema/src/Sema"
-    },
-    {
-      "at": "2026-08-06T10:28:07.267Z",
-      "by": "prep-core-b",
-      "action": "card.criteria-add",
-      "ref": "c0mvp4zc",
-      "note": "#2 Url exports username, password, userinfo, authority, and def"
-    },
-    {
-      "at": "2026-08-06T10:28:06.959Z",
-      "by": "prep-core-b",
-      "action": "card.criteria-add",
-      "ref": "c0mvp4zc",
-      "note": "#1 scripts/agent/jet-env cargo test --test core_surface_ledger "
-    },
-    {
-      "at": "2026-08-06T10:27:58.734Z",
-      "by": "prep-core-b",
-      "action": "card.update",
-      "ref": "c0mvp4zc",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-06T10:27:50.259Z",
-      "by": "prep-core-b",
-      "action": "card.update",
-      "ref": "c0hrwp53",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T10:27:42.169Z",
-      "by": "prep-core-b",
-      "action": "card.criteria-add",
-      "ref": "c0hrwp53",
-      "note": "#6 docs/reference/core-library.md core.regex section lists ever"
-    },
-    {
-      "at": "2026-08-06T10:27:41.843Z",
-      "by": "prep-core-b",
-      "action": "card.criteria-add",
-      "ref": "c0hrwp53",
-      "note": "#5 scripts/agent/jet-env jet run examples/features/text/regex.j"
-    },
-    {
-      "at": "2026-08-06T10:27:41.525Z",
-      "by": "prep-core-b",
-      "action": "card.criteria-add",
-      "ref": "c0hrwp53",
-      "note": "#4 JET_GOLDEN_FILTER='text/regex' scripts/agent/jet-env cargo t"
-    },
-    {
-      "at": "2026-08-06T10:27:41.212Z",
-      "by": "prep-core-b",
-      "action": "card.criteria-add",
-      "ref": "c0hrwp53",
-      "note": "#3 check-core-surface-ledger.mjs reads crates/jet-sema/src/Sema"
-    },
-    {
-      "at": "2026-08-06T10:27:40.893Z",
-      "by": "prep-core-b",
-      "action": "card.criteria-add",
-      "ref": "c0hrwp53",
-      "note": "#2 Regex exports pattern/source, flags, named_captures, count, "
-    },
-    {
-      "at": "2026-08-06T10:27:40.585Z",
-      "by": "prep-core-b",
-      "action": "card.criteria-add",
-      "ref": "c0hrwp53",
       "note": "#1 scripts/agent/jet-env cargo test --test core_surface_ledger "
     }
   ],

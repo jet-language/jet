@@ -628,6 +628,18 @@ pub fn jet_scheduler_yield_now() {
     jet_scheduler_yield("task yield", &slot, Some(Duration::ZERO));
 }
 
+/// Control-plane trace for the TLS current task (idle defaults when none).
+pub fn jet_scheduler_current_task_trace() -> String {
+    match current_task_control() {
+        Some(ctrl) => {
+            let paused = ctrl.paused.load(std::sync::atomic::Ordering::Relaxed);
+            let cancel = ctrl.cancelled.load(std::sync::atomic::Ordering::Relaxed);
+            crate::jet_task_control_trace(paused, cancel)
+        }
+        None => crate::jet_task_control_trace(false, false),
+    }
+}
+
 // ── M2: IO poll substrate (native epoll on Linux; portable fallback elsewhere) ─
 
 struct IOInterest {
@@ -1851,6 +1863,22 @@ impl<T> Drop for JetSchedulerSender<T> {
 }
 
 impl<T: Send> JetSchedulerSender<T> {
+    pub fn close(&self) {
+        let (recv_waiters, send_waiters) = {
+            let mut st = self.inner.state.lock().unwrap();
+            st.closed = true;
+            let waiters = (
+                std::mem::take(&mut st.recv_waiters),
+                std::mem::take(&mut st.send_waiters),
+            );
+            jet_observe_channel_update(self.inner.observe_id, &st);
+            waiters
+        };
+        for w in recv_waiters.into_iter().chain(send_waiters) {
+            w.wake();
+        }
+    }
+
     pub fn send(&self, value: T) -> bool {
         let mut value = Some(value);
         loop {

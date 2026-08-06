@@ -3493,7 +3493,8 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         | THandleOp::TaskDetach
         | THandleOp::TaskPause
         | THandleOp::TaskResume
-        | THandleOp::TaskTrace => {
+        | THandleOp::TaskTrace
+        | THandleOp::TaskException => {
             args.is_empty() && jit_concurrency_type(&recv.ty)
         }
         // D-VERDICT-1323-1: the list twins take a list of task handles.
@@ -3508,6 +3509,13 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         }
         THandleOp::ChannelReceive => {
             args.is_empty() && matches!(&recv.ty, Type::Apply { name, .. } if name == "Receiver")
+        }
+        THandleOp::ChannelClose => {
+            args.is_empty()
+                && matches!(
+                    &recv.ty,
+                    Type::Apply { name, .. } if matches!(name.as_str(), "Receiver" | "Sender")
+                )
         }
         THandleOp::SenderSend => {
             args.len() == 1 && matches!(&recv.ty, Type::Apply { name, .. } if name == "Sender")

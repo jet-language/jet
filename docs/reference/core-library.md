@@ -2322,12 +2322,16 @@ there's no combined channel value).
 |-----------------|---------|--------------|
 | `tasks.spawn(lambda)` | `Task<T>` | Run a zero-parameter lambda on a new task |
 | `tasks.join_all(handles)` | `[T]` | Consume `[Task<T>]`, wait in list order, and return results in that order |
+| `tasks.wait_any(handles)` | `T` | Consume `[Task<T>]` and return the first finished result |
+| `tasks.yield_now()` | nothing | Cooperative yield at a scheduler wait point (`yield` is the stream keyword) |
+| `tasks.current_task()` | `String` | Control-plane trace of the running task (`paused=...,cancel=...`) |
 | `task.join()` | `T` | Wait for the task and consume the task handle |
 | `task.wait()` | `T` | Alias of `.join()` |
 | `task.pause()` | nothing | Request paused state on the task control plane (D-COROUTINE1) |
 | `task.resume()` | nothing | Clear paused state on the task control plane |
 | `task.cancel()` | nothing | Request cancellation on the task control plane |
 | `task.trace()` | `String` | Read control-plane state as `paused=...,cancel=...` |
+| `task.exception()` | `String` | `"cancelled"` after cancel; otherwise `""` |
 | `tasks.channel<T>()` | `(Sender<T>, Receiver<T>)` | Create an unbounded linked send/receive pair |
 | `tasks.channel<T>(capacity: N)` | `(Sender<T>, Receiver<T>)` | Create a bounded pair with real backpressure |
 | `tasks.after(ms: N)` | `Receiver<Unit>` | One-shot timer channel |
@@ -2335,7 +2339,9 @@ there's no combined channel value).
 | `tasks.interval(ms: N)` | `Receiver<Int>` | Interval timer channel sending `1`, `2`, ... |
 | `~sender` | `Sender<T>` | Create another send half with the copy sigil |
 | `sender.send(value)` | nothing | Move one value into the channel |
+| `sender.close()` | nothing | Close the send half explicitly |
 | `receiver.receive()` | `T ? Closed` | Block for a value, or return `Closed` when senders are gone |
+| `receiver.close()` | nothing | Close the receive half explicitly |
 
 Values crossing `spawn` or `send` must be sendable: no `View<T>` or string-view
 windows, no trait values, and no closure values with non-sendable captures.

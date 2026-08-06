@@ -612,6 +612,18 @@ pub fn jet_scheduler_yield_now() {
     jet_scheduler_yield("task yield", &slot, Some(Duration::ZERO));
 }
 
+/// Control-plane trace for the TLS current task (idle defaults when none).
+pub fn jet_scheduler_current_task_trace() -> String {
+    match current_task_control() {
+        Some(ctrl) => {
+            let paused = ctrl.paused.load(Ordering::Relaxed);
+            let cancel = ctrl.cancelled.load(Ordering::Relaxed);
+            jet_foundation::StructuralDebug::jet_task_control_trace(paused, cancel)
+        }
+        None => jet_foundation::StructuralDebug::jet_task_control_trace(false, false),
+    }
+}
+
 // ── M2: scheduler-integrated channel (wake-on-send) ────────────────────────────
 
 struct ChannelState<T> {

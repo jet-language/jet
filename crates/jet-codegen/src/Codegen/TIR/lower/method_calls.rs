@@ -1878,6 +1878,16 @@ pub(crate) fn lower_method_call(
                         },
                     };
                 }
+                if module == "core.tasks" && method == "wait_any" && args.len() == 1 {
+                    let tasks = lower_expr(&args[0].expr, cx, env);
+                    let elem = taskgroup_result_elem(&tasks);
+                    return TExpr {
+                        ty: elem,
+                        kind: TExprKind::TaskGroupAny {
+                            tasks: Box::new(tasks),
+                        },
+                    };
+                }
                 // D-PIN1=A: `mem.pin(&place)` IS the exclusive borrow of
                 // `place`. Sema proved the no-move contract before lowering
                 // (I3), so every tier emits exactly what `&place` emits and
@@ -3133,6 +3143,16 @@ pub(crate) fn lower_method_call(
                 },
             };
         }
+        if method == "wait_any" {
+            let tasks = lower_expr(receiver, cx, env);
+            let elem = taskgroup_result_elem(&tasks);
+            return TExpr {
+                ty: elem,
+                kind: TExprKind::TaskGroupAny {
+                    tasks: Box::new(tasks),
+                },
+            };
+        }
         let recv_t = lower_expr(receiver, cx, env);
         // The element type `T` from the receiver's `Apply<T>` (the first type arg).
         let elem = match &recv_t.ty {
@@ -3147,6 +3167,7 @@ pub(crate) fn lower_method_call(
             "resume" => (THandleOp::TaskResume, unit_type()),
             "cancel" => (THandleOp::TaskCancel, unit_type()),
             "trace" => (THandleOp::TaskTrace, Type::String),
+            "exception" => (THandleOp::TaskException, Type::String),
             "detach_all" => (THandleOp::TaskDetachAll, unit_type()),
             "cancel_all" => (THandleOp::TaskCancelAll, unit_type()),
             "pause_all" => (THandleOp::TaskPauseAll, unit_type()),
@@ -3159,6 +3180,7 @@ pub(crate) fn lower_method_call(
                     err: Box::new(Type::Named("Closed".to_string())),
                 },
             ),
+            "close" => (THandleOp::ChannelClose, unit_type()),
             "send" => (THandleOp::SenderSend, unit_type()),
             _ => unreachable!("is_concurrency_method_name admitted only these names"),
         };

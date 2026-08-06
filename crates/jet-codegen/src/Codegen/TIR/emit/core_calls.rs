@@ -229,6 +229,10 @@ pub(crate) fn emit_tir_core_call(
             }
         }
         ("core.tasks", "interval") => format!("{}jet_std::interval({})", cx.root_prefix, arg(0)),
+        ("core.tasks", "yield_now") => format!("{}jet_std::jet_task_yield()", cx.root_prefix),
+        ("core.tasks", "current_task") => {
+            format!("{}jet_std::jet_task_current_trace()", cx.root_prefix)
+        }
         // D-REACT1=B: `reactive.signal(initial)` producer → a `JetSignal<T>`.
         ("jet.reactive", "signal") => {
             format!("{}jet_std::JetSignal::new({})", cx.root_prefix, arg(0))

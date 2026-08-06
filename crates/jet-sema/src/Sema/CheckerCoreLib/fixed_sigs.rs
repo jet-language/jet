@@ -141,7 +141,7 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
             // D-TUPLE-DESTRUCT1: `tasks.channel<T>()` returns `(Sender<T>, Receiver<T>)`,
             // `T` read off the call-site turbofish — not in `core_fixed_sig`, so codegen
             // reads the whole tuple type from resolved_ret (I3).
-            | ("core.tasks", "channel" | "after" | "join_all")
+            | ("core.tasks", "channel" | "after" | "join_all" | "wait_any")
             | (
                 "core.data",
                 "csv" | "json" | "csv_reader" | "json_reader" | "count" | "table" | "rows"
@@ -720,6 +720,8 @@ pub fn core_fixed_sig(
                 args: vec![Type::Int],
             }),
         )),
+        ("core.tasks", "yield_now") => Some((vec![], Some(unit))),
+        ("core.tasks", "current_task") => Some((vec![], Some(string.clone()))),
         ("core.time", "start") => Some((vec![], Some(Type::Named("Stopwatch".to_string())))),
         ("core.time", "instant") => Some((vec![], Some(Type::Named("Instant".to_string())))),
         ("core.time", "now_utc") => Some((vec![], Some(Type::Named("DateTime".to_string())))),

@@ -11939,6 +11939,20 @@ impl LowerCtx<'_, '_> {
                     let call = self.b.ins().call(host_ref, &[ms]);
                     return Ok(self.b.inst_results(call)[0]);
                 }
+                if module == "core.tasks" && method == "yield_now" && args.is_empty() {
+                    let host_ref = self
+                        .module
+                        .declare_func_in_func(self.host.conc.task_yield, self.b.func);
+                    self.b.ins().call(host_ref, &[]);
+                    return Ok(self.b.ins().iconst(types::I8, 0));
+                }
+                if module == "core.tasks" && method == "current_task" && args.is_empty() {
+                    let host_ref = self
+                        .module
+                        .declare_func_in_func(self.host.conc.task_current_trace, self.b.func);
+                    let call = self.b.ins().call(host_ref, &[]);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
                 if module == "core.time" && method == "now" && args.is_empty() {
                     let host_ref = self
                         .module
@@ -17643,6 +17657,22 @@ impl LowerCtx<'_, '_> {
                 self.emit_trap_check()?;
                 Ok(result)
             }
+            THandleOp::ChannelClose => {
+                let is_sender = matches!(&recv.ty, Type::Apply { name, .. } if name == "Sender");
+                if is_sender {
+                    let zero = self.b.ins().iconst(types::I64, 0);
+                    let host_ref = self
+                        .module
+                        .declare_func_in_func(self.host.conc.sender_close, self.b.func);
+                    self.b.ins().call(host_ref, &[recv_val, zero]);
+                } else {
+                    let host_ref = self
+                        .module
+                        .declare_func_in_func(self.host.conc.channel_close, self.b.func);
+                    self.b.ins().call(host_ref, &[recv_val]);
+                }
+                Ok(self.b.ins().iconst(types::I8, 0))
+            }
             THandleOp::SenderSend => {
                 let val = self.lower_expr(&args[0])?;
                 let host_ref = self
@@ -18649,6 +18679,13 @@ impl LowerCtx<'_, '_> {
                 let host_ref = self
                     .module
                     .declare_func_in_func(self.host.conc.task_trace, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::TaskException => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.conc.task_exception, self.b.func);
                 let call = self.b.ins().call(host_ref, &[recv_val]);
                 Ok(self.b.inst_results(call)[0])
             }
