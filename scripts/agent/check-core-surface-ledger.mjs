@@ -443,8 +443,14 @@ function matchArms(source, needle) {
     if (char === "\"") { state = "string"; continue; }
     if (char === "{") { brace += 1; continue; }
     if (char === "}") {
-      if (brace === 1 && arrow >= 0) push(index);
       brace -= 1;
+      // A block-bodied arm ends at its own closing brace, not at a comma. The
+      // old order only pushed when the whole match closed, so `=> { ... }`
+      // never ended its arm: `arrow` stayed set, the next arm's `=>` was
+      // skipped by the arrow guard, and that arm was swallowed into this rhs.
+      // Set.is_subset, is_superset and is_disjoint were lost exactly this way,
+      // and the ledger then scored capabilities Jet already ships as missing.
+      if (arrow >= 0 && brace <= 1) push(index);
       if (brace === 0) break;
       continue;
     }
@@ -1395,7 +1401,15 @@ function rejects(name, expected, run) {
       "  expected the gate to say: " + expected + "\n" +
       "  actually failed with:     " + failed.split("\n")[0]);
   }
-  return name + " -> " + failed.split("\n")[0];
+  return "rejected: " + name + " -> " + failed.split("\n")[0];
+}
+
+// Some properties are positive: the parser must find every arm. A rejection
+// fixture cannot express that, and expressing it as one is how this check was
+// first written backwards.
+function holds(name, run) {
+  run();
+  return "held: " + name;
 }
 
 // A fixture that cannot be built is a broken fixture, not a passing one.
@@ -1411,6 +1425,26 @@ function hostileFixtures() {
   const surfaces = loadSurfaces();
   const board = towerBoard();
   const results = [];
+
+  results.push(holds("match parser keeps the arm after a block-bodied arm", function () {
+    const sample = 'match (name, arity) {\n' +
+      '  ("a" | "b", 0) => Some(One),\n' +
+      '  ("c", 1) => {\n' +
+      '      Some(Two)\n' +
+      '  }\n' +
+      '  ("d" | "e", 1) => Some(Three),\n' +
+      '  _ => None,\n' +
+      '}';
+    const found = new Set();
+    for (const arm of matchArms(sample, "match (name, arity)")) {
+      for (const value of quoted(arm.lhs)) found.add(value);
+    }
+    for (const name of ["a", "b", "c", "d", "e"]) {
+      if (!found.has(name)) {
+        throw new Error("the match parser lost an arm after a block-bodied arm: " + name);
+      }
+    }
+  }));
 
   const jetRow = must(ledger.rows.find(function (row) { return row.verdict === "equal"; }),
     "the ledger has no equal row");
@@ -1576,8 +1610,8 @@ function hostileFixtures() {
     compareLedger(broken, buildLedger());
   }));
 
-  for (const line of results) process.stdout.write("rejected: " + line + "\n");
-  process.stdout.write("core surface ledger: " + results.length + " hostile fixtures all rejected\n");
+  for (const line of results) process.stdout.write(line + "\n");
+  process.stdout.write("core surface ledger: " + results.length + " fixtures all held\n");
 }
 
 const args = process.argv.slice(2);
