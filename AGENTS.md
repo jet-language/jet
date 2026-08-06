@@ -84,10 +84,17 @@ wrong, report it and stop. Board data lives in `plugins/tower/.tower/` (main
 checkout only). Agents read and write board state through the non-serve CLI
 commands, which operate on the store directly.
 
-When tooling snags you mid-task — a dead-end command, a broken helper, a
+When agent tooling snags you mid-task — a dead-end command, a broken helper, a
 misleading doc, a stale cache — log it in one line and keep going:
 `node plugins/tower/tower.mjs papercut add --by <agent> --text "..."`. Do not
 silently push through, and do not derail the task to fix it.
+
+Papercuts record friction that will hit the next agent too: log one only when
+the same snag hit twice, or the cause is plainly deterministic for anyone who
+runs the same command. Do not log one-offs, self-inflicted state (dirty tree,
+stale binary, wrong cwd), collisions with another session, or a single flaky
+failure. A bug in Jet itself — compiler, stdlib, examples, tests — is a card,
+not a papercut.
 
 ## Invariants
 

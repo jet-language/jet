@@ -118,9 +118,12 @@ completed cards in the Now page does not clear messages.
 
 Agents log one-line tooling friction (dead-end commands, broken helpers,
 misleading docs, stale caches) with `tower papercut add --by agent-name --text
-"…"` instead of silently pushing through. It never fails on a card lane, so
-logging never derails the task. The **Papercuts** tab groups them by day; the
-owner clears a handled one with `tower papercut resolve <id> --by owner`.
+"…"` instead of silently pushing through. The bar is recurrence: the snag hit
+twice, or it is deterministic for anyone running the same command. One-offs,
+self-inflicted state, and session collisions are not papercuts, and a bug in Jet
+itself is a card. It never fails on a card lane, so logging never derails the
+task. The **Papercuts** tab groups them by day; the owner clears a handled one
+with `tower papercut resolve <id> --by owner`.
 
 `tower brief` is the one-shot agent work packet (#462): card, live blocker
 state, exit criteria, every linked decision copied verbatim, open questions,

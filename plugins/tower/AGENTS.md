@@ -106,7 +106,7 @@ tower card update '#12' --refs "docs/spec/foo.md,examples/features/bar.jet"  # e
 tower question answer <qid> --text "..." --by me
 tower message add '#12' --text "..." --by me
 tower message done <id> --by owner
-tower papercut add --by me --text "jet-env swallowed stderr" [--card '#12']  # log one-line tooling friction; never blocked by a card lane
+tower papercut add --by me --text "jet-env swallowed stderr" [--card '#12']  # recurring tooling friction only (hit twice, or deterministic for everyone); never blocked by a card lane
 tower papercut resolve <id> --by owner        # owner clears a handled papercut
 tower decision add --file ballot.json --by me # or --file - for stdin, --draft if unfinished
 tower card update '#12' --phase verify --log "claiming done: tests green" --by me
