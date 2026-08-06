@@ -9300,10 +9300,26 @@ impl LowerCtx<'_, '_> {
                 }
                 let cond_val = match cond.as_ref() {
                     TIfCond::Plain(cond) => self.lower_expr(cond)?,
-                    TIfCond::And { .. } => return Err("jit if-expression binding conjunction unsupported".to_string()),
-                    TIfCond::IfLet { .. } => return Err("jit if-expression if-let unsupported".to_string()),
-                    TIfCond::IsNone { .. } => return Err("jit if-expression is-none unsupported".to_string()),
-                    TIfCond::Matches { .. } => return Err("jit if-expression pattern match unsupported".to_string()),
+                    TIfCond::And { .. } => {
+                        return Err("jit if-expression binding conjunction unsupported".to_string())
+                    }
+                    TIfCond::IfLet { pattern, subj } => {
+                        return self.lower_if_let_expr(
+                            pattern,
+                            subj,
+                            then_body,
+                            then_value,
+                            else_body,
+                            else_value,
+                            &expr.ty,
+                        );
+                    }
+                    TIfCond::IsNone { .. } => {
+                        return Err("jit if-expression is-none unsupported".to_string())
+                    }
+                    TIfCond::Matches { .. } => {
+                        return Err("jit if-expression pattern match unsupported".to_string())
+                    }
                 };
                 let ret_ty = clif_ty(&expr.ty).ok_or("jit if-expr result type unsupported")?;
                 let then_block = self.b.create_block();
@@ -21727,6 +21743,151 @@ impl LowerCtx<'_, '_> {
     }
 
     /// `if k == .Char(c)` / `.F(n)` / `.Ctrl(c)` on user enums.
+    /// Expression-position Variant if-let (#1444 anonymous-union dispatch).
+    fn lower_if_let_expr(
+        &mut self,
+        pattern: &TPattern,
+        subj: &TExpr,
+        then_body: &[TStmt],
+        then_value: &TExpr,
+        else_body: &[TStmt],
+        else_value: &TExpr,
+        result_ty: &Type,
+    ) -> Result<Value, String> {
+        if matches!(&pattern.pattern, Pattern::Variant { .. })
+            && Self::is_datatree_value_ty(&subj.ty)
+        {
+            return Err("jit if-expression datatree if-let unsupported".to_string());
+        }
+        if matches!(&pattern.pattern, Pattern::Variant { .. }) {
+            return self.lower_enum_if_let_expr(
+                pattern,
+                subj,
+                then_body,
+                then_value,
+                else_body,
+                else_value,
+                result_ty,
+            );
+        }
+        Err("jit if-expression result/option if-let unsupported".to_string())
+    }
+
+    fn lower_enum_if_let_expr(
+        &mut self,
+        pattern: &TPattern,
+        subj: &TExpr,
+        then_body: &[TStmt],
+        then_value: &TExpr,
+        else_body: &[TStmt],
+        else_value: &TExpr,
+        result_ty: &Type,
+    ) -> Result<Value, String> {
+        let Pattern::Variant {
+            variant, bindings, ..
+        } = &pattern.pattern
+        else {
+            return Err("jit if-let pattern unsupported".to_string());
+        };
+        let enum_name = pattern
+            .enum_type
+            .as_deref()
+            .or_else(|| user_type_name(&subj.ty))
+            .ok_or("jit enum if-let missing type")?;
+        let f64_heap = self
+            .meta
+            .enum_variant_payload_types(enum_name, variant)
+            .and_then(|tys| tys.first().cloned())
+            .is_some_and(|ty| matches!(ty, Type::Float | Type::Float32));
+        let subject = self.lower_expr(subj)?;
+        let ret_ty = clif_ty(result_ty).ok_or("jit if-expr result type unsupported")?;
+        let then_block = self.b.create_block();
+        let else_block = self.b.create_block();
+        let merge_block = self.b.create_block();
+        self.b.append_block_param(merge_block, ret_ty);
+        let eq = self.lower_pattern_condition(
+            subject,
+            &pattern.pattern,
+            Some(enum_name),
+            f64_heap,
+        )?;
+        self.b
+            .ins()
+            .brif(eq, then_block, &[], else_block, &[]);
+
+        self.b.switch_to_block(then_block);
+        self.b.seal_block(then_block);
+        let bound = if let Some(name) = bindings.first().and_then(PatSlot::as_bind) {
+            let payload_ty = self
+                .meta
+                .enum_variant_payload_types(enum_name, variant)
+                .and_then(|tys| tys.first())
+                .cloned()
+                .unwrap_or(Type::Int);
+            let payload = if f64_heap {
+                self.unpack_enum_heap_payload(subject, &payload_ty)?
+            } else {
+                self.unpack_enum_scalar(subject, &payload_ty)?
+            };
+            let payload_clif = self.meta.clif_ty(&payload_ty).unwrap_or(types::I64);
+            let var = self.fresh_var(payload_clif);
+            self.b.def_var(var, payload);
+            let key = TIR::local_place(name);
+            let old_var = self.vars.insert(key.clone(), var);
+            let old_ty = self.var_tys.insert(key.clone(), payload_ty);
+            Some((key, old_var, old_ty))
+        } else {
+            None
+        };
+        self.lower_stmts_scoped(then_body)?;
+        let mut then_reaches_merge = !self.dead;
+        if then_reaches_merge {
+            let then_val = self.lower_expr(then_value)?;
+            if !self.dead {
+                self.b.ins().jump(merge_block, &[then_val]);
+            } else {
+                then_reaches_merge = false;
+            }
+        }
+        if let Some((key, old_var, old_ty)) = bound {
+            match old_var {
+                Some(var) => {
+                    self.vars.insert(key.clone(), var);
+                }
+                None => {
+                    self.vars.remove(&key);
+                }
+            }
+            match old_ty {
+                Some(ty) => {
+                    self.var_tys.insert(key, ty);
+                }
+                None => {
+                    self.var_tys.remove(&key);
+                }
+            }
+        }
+
+        self.b.switch_to_block(else_block);
+        self.b.seal_block(else_block);
+        self.dead = false;
+        self.lower_stmts_scoped(else_body)?;
+        let mut else_reaches_merge = !self.dead;
+        if else_reaches_merge {
+            let else_val = self.lower_expr(else_value)?;
+            if !self.dead {
+                self.b.ins().jump(merge_block, &[else_val]);
+            } else {
+                else_reaches_merge = false;
+            }
+        }
+
+        self.b.switch_to_block(merge_block);
+        self.b.seal_block(merge_block);
+        self.dead = !(then_reaches_merge || else_reaches_merge);
+        Ok(self.b.block_params(merge_block)[0])
+    }
+
     fn lower_enum_if_let(
         &mut self,
         pattern: &TPattern,

@@ -25,17 +25,29 @@ fn resident_safe_string_parts(parts: &[TStrPart], callees: &HashSet<String>) -> 
     })
 }
 
+fn resident_safe_ct_value(value: &jet_foundation::AST::CtValue) -> bool {
+    use jet_foundation::AST::CtValue;
+    match value {
+        CtValue::Int(_)
+        | CtValue::Float(_)
+        | CtValue::Bool(_)
+        | CtValue::Char(_)
+        | CtValue::Str(_)
+        | CtValue::Unit
+        | CtValue::None(_) => true,
+        CtValue::Some(inner) | CtValue::ResOk(inner) | CtValue::ResErr(inner) => {
+            resident_safe_ct_value(inner)
+        }
+        // Anonymous-union field payloads lower as CtValue::Enum (#1444 Box.{value: 9}).
+        CtValue::Enum { args, .. } => args.iter().all(|(_, v)| resident_safe_ct_value(v)),
+        CtValue::Struct { fields, .. } => fields.iter().all(|(_, v)| resident_safe_ct_value(v)),
+        CtValue::List(items) => items.iter().all(resident_safe_ct_value),
+        _ => false,
+    }
+}
+
 fn resident_safe_ct_struct_fields(fields: &[(String, jet_foundation::AST::CtValue)]) -> bool {
-    fields.iter().all(|(_, value)| {
-        matches!(
-            value,
-            jet_foundation::AST::CtValue::Int(_)
-                | jet_foundation::AST::CtValue::Float(_)
-                | jet_foundation::AST::CtValue::Bool(_)
-                | jet_foundation::AST::CtValue::Char(_)
-                | jet_foundation::AST::CtValue::Str(_)
-        )
-    })
+    fields.iter().all(|(_, value)| resident_safe_ct_value(value))
 }
 
 fn jit_scalar_type(ty: &Type) -> bool {
@@ -1194,7 +1206,26 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             else_body,
             else_value,
         } => {
-            matches!(cond.as_ref(), TIfCond::Plain(e) if matches!(&e.ty, Type::Bool) && resident_safe_expr(e, callees))
+            // #1444: expression-position union dispatch → Variant if-lets (same as stmt If).
+            let cond_ok = match cond.as_ref() {
+                TIfCond::Plain(e) => {
+                    matches!(&e.ty, Type::Bool) && resident_safe_expr(e, callees)
+                }
+                TIfCond::IfLet { pattern, subj } => {
+                    matches!(&pattern.pattern, Pattern::Variant { .. })
+                        && !matches!(
+                            &subj.ty,
+                            Type::Named(n)
+                                if matches!(
+                                    n.as_str(),
+                                    "DataTree" | "JSON" | "TOML" | "YAML" | "CSV"
+                                )
+                        )
+                        && resident_safe_expr(subj, callees)
+                }
+                TIfCond::IsNone { .. } | TIfCond::Matches { .. } | TIfCond::And { .. } => false,
+            };
+            cond_ok
                 && then_body.iter().all(|s| resident_safe_stmt(s, callees))
                 && resident_safe_expr(then_value, callees)
                 && else_body.iter().all(|s| resident_safe_stmt(s, callees))

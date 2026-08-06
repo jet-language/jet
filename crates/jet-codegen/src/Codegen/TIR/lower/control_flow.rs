@@ -366,6 +366,10 @@ fn lower_if_cond_atom(
     // `Vec<(String, DataTree)>`, but the user-facing payload is a `Map<String, Data>`, so
     // the pattern binds the pairs to a temp and a then-body prefix `let` collects them into
     // a `BTreeMap` (the value the body sees).
+    //
+    // D-UNIONTYPE1=A: anonymous-union member tags collide with DataTree (`Int`/`Float`/…).
+    // Resolve the subject first and prefer the generated `__JetUnion_*` if-let whenever
+    // the scrutinee is a union — same ownership fact `lower_enum_match` already uses.
     if let Expr::PatternTest {
         subject,
         pattern:
@@ -377,9 +381,37 @@ fn lower_if_cond_atom(
         ..
     } = cond
     {
+        let subj = lower_if_let_subject(subject, cx, env);
+        if let Type::Union(members) = &subj.ty {
+            let enum_name = crate::AST::union_enum_name(members);
+            if let Some(PatSlot::Bind { name, .. }) = bindings.first() {
+                if bindings.len() == 1 {
+                    let ty = members
+                        .iter()
+                        .find(|m| crate::AST::union_member_tag(m) == *variant)
+                        .cloned();
+                    return (
+                        TIfCond::IfLet {
+                            pattern: TPattern::arm(pattern.clone(), Some(enum_name)),
+                            subj,
+                        },
+                        Some((name.clone(), TLocal::user(name), ty)),
+                        Vec::new(),
+                    );
+                }
+            } else if bindings.len() == 1 && matches!(bindings.first(), Some(PatSlot::Wildcard)) {
+                return (
+                    TIfCond::IfLet {
+                        pattern: TPattern::arm(pattern.clone(), Some(enum_name)),
+                        subj,
+                    },
+                    None,
+                    Vec::new(),
+                );
+            }
+        }
         if is_json_variant(variant) {
             if let Some(PatSlot::Bind { name, .. }) = bindings.first() {
-                let subj = lower_if_let_subject(subject, cx, env);
                 let ty = crate::Sema::core_json_pattern_types(variant)
                     .and_then(|ts| ts.into_iter().next());
                 let place = TLocal::user(name);
@@ -430,7 +462,6 @@ fn lower_if_cond_atom(
         // (the same total fact `add_pattern_bindings` reads on the AST path).
         if !is_json_variant(variant) {
             if let Some(PatSlot::Bind { name, .. }) = bindings.first() {
-                let subj = lower_if_let_subject(subject, cx, env);
                 let ty = match &subj.ty {
                     Type::Named(enum_name) | Type::Apply { name: enum_name, .. } => {
                         let resolved = cx
@@ -455,7 +486,6 @@ fn lower_if_cond_atom(
             // nothing, so the if-let introduces NO then-branch binding; the pattern
             // renders the slot as `_` (`emit_if_let_pattern`), byte-for-byte the AST.
             if let Some(PatSlot::Wildcard) = bindings.first() {
-                let subj = lower_if_let_subject(subject, cx, env);
                 return (
                     TIfCond::IfLet {
                         pattern: TPattern::binding(pattern.clone()),
@@ -466,6 +496,58 @@ fn lower_if_cond_atom(
                 );
             }
         }
+    }
+    // D-PATR / D-IFDIST1: expression-position range arm → `subject >= lo && subject <= hi`.
+    if let Expr::PatternTest {
+        subject,
+        pattern: Pattern::Range { lo, hi, .. },
+        ..
+    } = cond
+    {
+        let lhs_ge = lower_expr(subject, cx, env);
+        let lhs_le = lower_expr(subject, cx, env);
+        let lo_e = TExpr {
+            ty: Type::Int,
+            kind: TExprKind::IntLit(*lo, None),
+        };
+        let hi_e = TExpr {
+            ty: Type::Int,
+            kind: TExprKind::IntLit(*hi, None),
+        };
+        let ge = TExpr {
+            ty: Type::Bool,
+            kind: TExprKind::Binary {
+                op: BinOp::Ge,
+                overflow: false,
+                line: 0,
+                lhs: Box::new(lhs_ge),
+                rhs: Box::new(lo_e),
+            },
+        };
+        let le = TExpr {
+            ty: Type::Bool,
+            kind: TExprKind::Binary {
+                op: BinOp::Le,
+                overflow: false,
+                line: 0,
+                lhs: Box::new(lhs_le),
+                rhs: Box::new(hi_e),
+            },
+        };
+        return (
+            TIfCond::Plain(TExpr {
+                ty: Type::Bool,
+                kind: TExprKind::Binary {
+                    op: BinOp::And,
+                    overflow: false,
+                    line: 0,
+                    lhs: Box::new(ge),
+                    rhs: Box::new(le),
+                },
+            }),
+            None,
+            Vec::new(),
+        );
     }
     if let Expr::PatternTest {
         subject, pattern, ..
