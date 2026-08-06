@@ -16,6 +16,12 @@ use crate::Codegen::TIR::TStmt;
 use crate::AST::BinOp;
 use crate::AST::Type;
 
+/// Every caller has already routed the Prelude-carried operators (`^`, `/%`,
+/// and the floored `%`) through `prelude_compound_call`, so a `None` from
+/// `rust_spell` would mean one of those slipped past that branch.
+pub(crate) const PRELUDE_CARRIED: &str =
+    "this operator has no Rust spelling and is emitted as a Prelude call";
+
 /// D-EXPSEM1=A / D-FLOORDIV1=A: `^` and `/%` have no Rust operator, so a
 /// compound assignment cannot become `place OP= value`. This builds the one
 /// Prelude call that replaces it. `None` means the operator is an ordinary
@@ -615,7 +621,7 @@ fn emit_tir_stmt(
                             pad,
                             place,
                             place,
-                            op.rust_spell(),
+                            op.rust_spell().expect(PRELUDE_CARRIED),
                             v
                         )),
                         None => out.push_str(&format!("{}{}.write({});\n", pad, place, v)),
@@ -635,7 +641,7 @@ fn emit_tir_stmt(
                     let call = prelude_of(&place).expect("checked just above");
                     out.push_str(&format!("{}{} = {};\n", pad, place, call));
                 }
-                Some(op) => out.push_str(&format!("{}{} {}= {};\n", pad, place, op.rust_spell(), v)),
+                Some(op) => out.push_str(&format!("{}{} {}= {};\n", pad, place, op.rust_spell().expect(PRELUDE_CARRIED), v)),
                 None => out.push_str(&format!("{}{} = {};\n", pad, place, v)),
             }
         }
@@ -1110,7 +1116,7 @@ fn emit_tir_stmt(
                     None => {
                         let operator = assign
                             .op
-                            .map_or("=".to_string(), |op| format!("{}=", op.rust_spell()));
+                            .map_or("=".to_string(), |op| format!("{}=", op.rust_spell().expect(PRELUDE_CARRIED)));
                         format!("{place} {operator} __jet_v;")
                     }
                 }

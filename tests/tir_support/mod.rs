@@ -49,6 +49,52 @@ pub fn build_and_run_full(prefix: &str, name: &str, src: &str) -> (i32, String, 
     build_and_run_full_inner(prefix, name, src, None)
 }
 
+/// Run a snippet the way `jet run` does — through the Cranelift host, with the
+/// interpreter picking up whatever the host deopts on. `build_and_run*` above
+/// only ever proves AOT, so a rule re-encoded in an engine would pass every one
+/// of those and still be wrong (I9). Needs no rustc.
+///
+/// Returns `(exit code, stdout, stderr)`.
+pub fn jit_run(name: &str, src: &str) -> (i32, String, String) {
+    let dir = unique_tmp("jet_jit_run");
+    fs::create_dir_all(&dir).unwrap();
+    let jet_path = dir.join(format!("{name}.jet"));
+    fs::write(&jet_path, src).unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .arg("run")
+        .arg(&jet_path)
+        // Keep every run out of the shared build cache, which is keyed on the
+        // AST hash and would otherwise serve a binary built before this change.
+        .env("JET_CACHE_DIR", dir.join("cache"))
+        .output()
+        .unwrap();
+    let _ = fs::remove_dir_all(&dir);
+    (
+        out.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+/// The same snippet on both tiers, asserting they agree. This is the shape I9
+/// actually asks for: not "AOT prints X", but "every tier prints the same X".
+pub fn assert_tiers_agree(name: &str, src: &str, expected_stdout: &str) {
+    let (jit_code, jit_out, jit_err) = jit_run(name, src);
+    assert_eq!(jit_code, 0, "`jet run` failed:\n{jit_err}");
+    assert_eq!(
+        jit_out, expected_stdout,
+        "`jet run` (Cranelift/interpreter) disagreed:\n{jit_err}"
+    );
+    if have_rustc() {
+        let (aot_code, aot_out) = build_and_run(name, src);
+        assert_eq!(aot_code, 0, "AOT run failed:\n{aot_out}");
+        assert_eq!(
+            aot_out, jit_out,
+            "AOT and `jet run` disagree — one tier re-encoded the rule (I9)"
+        );
+    }
+}
+
 pub fn build_and_run_full_with_cfg(
     prefix: &str,
     name: &str,

@@ -13,9 +13,7 @@ struct Probe {
 }
 
 impl Vec2.Add {
-    fn add(self, rhs: Vec2) => Vec2 {
-        return Vec2.{x: self.x + rhs.x, y: self.y + rhs.y}
-    }
+    fn add(self, rhs: Vec2) => Vec2 { return Vec2.{x: self.x + rhs.x, y: self.y + rhs.y} }
 }
 
 impl Vec2.Equatable {
@@ -34,7 +32,9 @@ impl Probe.Comparable {
     fn compare(self, rhs: Probe) => Ordering {
         if rhs.value == 99 {
             zero :: rhs.value - 99
-            _boom :: 1 / zero
+            // `/%` is the whole-number division, so this still traps on a zero
+            // divisor. `/` would answer a Float infinity (D-INTDIV1).
+            _boom :: 1 /% zero
         }
         if self.value < rhs.value { return Ordering.Less }
         if self.value > rhs.value { return Ordering.Greater }

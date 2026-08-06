@@ -6,7 +6,7 @@
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
-use tir_support::{build_and_run, build_and_run_full, have_rustc};
+use tir_support::{assert_tiers_agree, build_and_run, build_and_run_full, have_rustc, jit_run};
 
 /// A function the checker cannot see through, so its result is a runtime value
 /// and the operator below is really evaluated by the built program.
@@ -246,23 +246,182 @@ fn run() {{
     assert_eq!(out, "true\ntrue\ntrue\ntrue\ntrue\ntrue\n", "{out}");
 }
 
-/// D-EXPSEM1=A / D-FLOORDIV1=A: the Prelude files are the one home for these
-/// rules, but the comptime interpreter and the Cranelift host cannot include
-/// them, so they carry the trap wordings as constants. This proves the two
-/// copies still say the same thing — the wordings cannot drift apart silently.
+/// I9: every case above is proved through `build_and_run`, which is AOT only.
+/// This runs the same arithmetic under `jet run` — the Cranelift host, with the
+/// interpreter taking whatever it deopts on — and asserts both tiers print the
+/// same thing. A rounding rule re-encoded in an engine passes every AOT test
+/// and fails here.
 #[test]
-fn prelude_trap_wordings_match_the_shared_constants() {
+fn the_division_family_agrees_on_every_tier() {
+    let src = format!(
+        "{SEED}
+fn run() {{
+    two :: seed(2)
+    print(seed(7) /% two)
+    print(seed(-7) /% two)
+    print(seed(7) /% seed(-2))
+    print(seed(-7) /% seed(-2))
+    print(seed(7) % two)
+    print(seed(-7) % two)
+    print(seed(7) %% two)
+    print(seed(-7) %% two)
+    print(7.5 /% 2.0)
+    print(-7.5 /% 2.0)
+    running := seed(9)
+    running /%= seed(2)
+    print(running)
+    slot := seed(-3)
+    slot %= seed(5)
+    print(slot)
+    debt := seed(-7)
+    debt %%= seed(5)
+    print(debt)
+}}
+"
+    );
+    assert_tiers_agree(
+        "division_family_tiers",
+        &src,
+        "3\n-4\n-4\n3\n1\n1\n1\n-1\n3.0\n-4.0\n4\n2\n-2\n",
+    );
+}
+
+/// D-MODSEM1=A: the smallest signed value with a divisor of -1. The quotient
+/// leaves the width, but both remainders are 0, which every width holds — so
+/// neither `%` nor `%%` may trap there, and they must agree. This is the pair
+/// the two implementations most easily disagree on, because one uses a checked
+/// remainder and the other a wrapping one.
+#[test]
+fn the_two_remainders_agree_at_the_smallest_value() {
+    let src = format!(
+        "{SEED}
+fn run() {{
+    smallest :: seed(-9223372036854775807) - seed(1)
+    minus_one :: seed(-1)
+    print(smallest % minus_one)
+    print(smallest %% minus_one)
+}}
+"
+    );
+    assert_tiers_agree("remainder_smallest", &src, "0\n0\n");
+}
+
+/// D-FLOORDIV1=A / D-MODSEM1=A: fixed widths run the same rules, on both tiers.
+/// Nothing else covers `/%` or `%` on a sized type, and the fixed-width path is
+/// a different host table from the default `Int` one.
+#[test]
+fn the_division_family_holds_at_fixed_widths() {
+    let src = "
+fn run() {
+    a :: I8.{-7}
+    b :: I8.{2}
+    print(a /% b)
+    print(a % b)
+    print(a %% b)
+    c :: U8.{200}
+    d :: U8.{7}
+    print(c /% d)
+    print(c % d)
+}
+";
+    assert_tiers_agree("division_family_widths", src, "-4\n1\n-1\n28\n4\n");
+}
+
+/// D-FLOORDIV1=A: the zero-divisor trap must stop the program on `jet run` too,
+/// with the same wording, not only in the AOT binary.
+#[test]
+fn dividing_by_zero_traps_on_the_jit_tier() {
+    for (name, op) in [
+        ("jit_floordiv_zero", "/%"),
+        ("jit_modulo_zero", "%"),
+        ("jit_remainder_zero", "%%"),
+    ] {
+        let src = format!(
+            "{SEED}
+fn run() {{
+    print(seed(7) {op} seed(0))
+}}
+"
+        );
+        let (code, out, err) = jit_run(name, &src);
+        assert_ne!(code, 0, "`{op}` by zero must stop `jet run`: {out}{err}");
+        assert!(
+            err.contains("divided by zero"),
+            "`{op}` by zero on `jet run`: expected the divided-by-zero wording, got: {err}"
+        );
+    }
+}
+
+/// D-EXPSEM1=A / D-FLOORDIV1=A / D-MODSEM1=A: the Prelude files are the one
+/// home for these rules, but three tiers cannot include them — the comptime
+/// interpreter, the Cranelift host, and the JS preamble. Each carries the trap
+/// wording separately, so each is a place the wording can drift.
+///
+/// This pins all four copies to the same strings at once. It fails if any
+/// Prelude file drops a wording, if the JS preamble drifts, or if a tier stops
+/// reading the shared constant and inlines its own literal — the JIT host is
+/// checked by grep because its strings are compiled into a different crate.
+#[test]
+fn every_tier_reports_one_trap_wording() {
     use jet::Comptime::MathLayout;
     let power = include_str!("../crates/jet-codegen/src/Prelude/Core/Power.rs");
     let division = include_str!("../crates/jet-codegen/src/Prelude/Core/Division.rs");
+    let web = include_str!("../crates/jet-codegen/src/Codegen/Web.rs");
+    let jit_host = include_str!("../crates/jet-jit/src/jit/runtime_host.rs");
+
+    // 1. Each Prelude file still spells every wording its operators can report.
     for (source, name, wording) in [
         (power, "Power.rs", MathLayout::INTEGER_POWER_NEGATIVE),
         (power, "Power.rs", MathLayout::INTEGER_POWER_OVERFLOW),
         (division, "Division.rs", MathLayout::INTEGER_DIVIDE_ZERO),
+        (division, "Division.rs", MathLayout::INTEGER_DIVIDE_OVERFLOW),
     ] {
         assert!(
             source.contains(wording),
-            "Prelude/Core/{name} no longer carries the wording the other tiers report: {wording}"
+            "Prelude/Core/{name} no longer carries a wording other tiers report: {wording}"
+        );
+    }
+
+    // 2. The JS preamble carries the same four, since it cannot include either
+    //    Prelude file and re-states them as JavaScript string literals.
+    for wording in [
+        MathLayout::INTEGER_POWER_NEGATIVE,
+        MathLayout::INTEGER_POWER_OVERFLOW,
+        MathLayout::INTEGER_DIVIDE_ZERO,
+        MathLayout::INTEGER_DIVIDE_OVERFLOW,
+    ] {
+        // The JS source is emitted in pieces, so compare on the longest run
+        // that survives concatenation rather than the whole sentence.
+        let anchor = wording.split(" (").next().expect("non-empty wording");
+        assert!(
+            web.contains(anchor),
+            "the JS preamble no longer reports this trap the way every other tier does: {wording}"
+        );
+    }
+
+    // 3. The Cranelift host reads the shared constants rather than inlining a
+    //    sentence of its own. A literal quote of any wording here would mean a
+    //    fourth copy that nothing keeps in step.
+    for wording in [
+        MathLayout::INTEGER_POWER_OVERFLOW,
+        MathLayout::INTEGER_DIVIDE_ZERO,
+        MathLayout::INTEGER_DIVIDE_OVERFLOW,
+    ] {
+        assert!(
+            !jit_host.contains(&format!("{wording:?}")),
+            "the Cranelift host inlined a trap wording instead of reading the shared \
+             constant, so the two can now drift: {wording}"
+        );
+    }
+    for symbol in [
+        "INTEGER_POWER_NEGATIVE",
+        "INTEGER_POWER_OVERFLOW",
+        "INTEGER_DIVIDE_ZERO",
+        "INTEGER_DIVIDE_OVERFLOW",
+    ] {
+        assert!(
+            jit_host.contains(symbol),
+            "the Cranelift host no longer reports {symbol}, so that trap can drift"
         );
     }
 }

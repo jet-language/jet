@@ -2003,8 +2003,24 @@ impl<'a> EvalCtx<'a> {
                     (UnOp::Neg, CtValue::Float(n)) => Ok(CtValue::Float(n.neg())),
                     (UnOp::Neg, CtValue::BigInt(n)) => Ok(CtValue::BigInt(n.neg())),
                     (UnOp::Not, CtValue::Bool(b)) => Ok(CtValue::Bool(!b)),
-                    // D-BITNOT1=A: on a whole number `!` turns over every bit,
-                    // which on the width-free default `Int` is `-x - 1`.
+                    // D-BITNOT1=A: on a whole number `!` turns over every bit.
+                    // A sized type flips exactly its own width, so the result
+                    // is narrowed back to it, the same way `-` is above; the
+                    // width-free default `Int` keeps all 64, which is `-x - 1`.
+                    (UnOp::Not, CtValue::Int(n))
+                        if matches!(&operand.ty, Type::IntN { .. }) =>
+                    {
+                        let (signed, bits) =
+                            crate::Comptime::MathLayout::integer_type_layout(&operand.ty)
+                                .expect("IntN layout");
+                        Ok(CtValue::Int(
+                            crate::Comptime::MathLayout::integer_narrow(
+                                !(n as i128),
+                                signed,
+                                bits,
+                            ),
+                        ))
+                    }
                     (UnOp::Not, CtValue::Int(n)) => Ok(CtValue::Int(!n)),
                     _ => Err(unsupported("unary form", self.span())),
                 }

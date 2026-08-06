@@ -353,7 +353,7 @@ extern "C" fn jet_jit_floordiv_i64(a: i64, b: i64, _line: u32) -> i64 {
     match MathLayout::floor_div(a as i128, b as i128).and_then(|v| i64::try_from(v).ok()) {
         Some(value) => value,
         None => {
-            jet_trap_overflow("div");
+            with_runtime_mut(|rt| rt.set_trap(MathLayout::INTEGER_DIVIDE_OVERFLOW));
             0
         }
     }
@@ -375,7 +375,7 @@ extern "C" fn jet_jit_mod_i64(a: i64, b: i64, _line: u32) -> i64 {
     match MathLayout::floored_mod(a as i128, b as i128).and_then(|v| i64::try_from(v).ok()) {
         Some(value) => value,
         None => {
-            jet_trap_overflow("div");
+            with_runtime_mut(|rt| rt.set_trap(MathLayout::INTEGER_DIVIDE_OVERFLOW));
             0
         }
     }
@@ -383,17 +383,12 @@ extern "C" fn jet_jit_mod_i64(a: i64, b: i64, _line: u32) -> i64 {
 
 extern "C" fn jet_jit_rem_i64(a: i64, b: i64, _line: u32) -> i64 {
     use jet_codegen::Comptime::MathLayout;
-    if let Some(message) = MathLayout::integer_remainder_trap(a, b, true, 64) {
+    if let Some(message) = MathLayout::integer_remainder_trap(b) {
         with_runtime_mut(|rt| rt.set_trap(message));
         return 0;
     }
-    match a.checked_rem(b) {
-        Some(value) => value,
-        None => {
-            with_runtime_mut(|rt| rt.set_trap(MathLayout::INTEGER_REMAINDER_OVERFLOW));
-            0
-        }
-    }
+    // D-MODSEM1=A: `MIN %% -1` is 0, the same answer `%` gives.
+    a.wrapping_rem(b)
 }
 
 extern "C" fn jet_jit_intn_binop(
@@ -441,7 +436,7 @@ extern "C" fn jet_jit_intn_binop(
         return 0;
     }
     if mode == INTN_MODE_TRAP && op == BinOp::Rem {
-        if let Some(message) = MathLayout::integer_remainder_trap(left, right, signed, bits) {
+        if let Some(message) = MathLayout::integer_remainder_trap(right) {
             with_runtime_mut(|rt| rt.set_trap(message));
             return 0;
         }
@@ -492,14 +487,25 @@ extern "C" fn jet_jit_intn_binop(
         Ok(_) => 0,
         Err(_) if mode == INTN_MODE_CHECKED => 0,
         Err(_) => {
-            let name = match op {
-                BinOp::Add => "add",
-                BinOp::Sub => "sub",
-                BinOp::Mul => "mul",
-                BinOp::Div | BinOp::Rem | BinOp::FloorDiv | BinOp::Mod => "div",
-                _ => "shift",
-            };
-            jet_trap_overflow(name);
+            // D-FLOORDIV1=A / D-MODSEM1=A: `/%` and `%` report the Prelude's own
+            // overflow wording, not the shared "this division can't be done"
+            // sentence `/` uses, so a fixed-width width overflow reads the same
+            // here as it does on every other tier.
+            match op {
+                BinOp::FloorDiv | BinOp::Mod => {
+                    with_runtime_mut(|rt| rt.set_trap(MathLayout::INTEGER_DIVIDE_OVERFLOW));
+                }
+                _ => {
+                    let name = match op {
+                        BinOp::Add => "add",
+                        BinOp::Sub => "sub",
+                        BinOp::Mul => "mul",
+                        BinOp::Div => "div",
+                        _ => "shift",
+                    };
+                    jet_trap_overflow(name);
+                }
+            }
             0
         }
     }

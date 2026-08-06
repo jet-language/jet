@@ -13,7 +13,6 @@
 const JET_FLOORDIV_ZERO: &str = "divided by zero";
 const JET_FLOORDIV_OVERFLOW: &str =
     "this division overflows the value's type (the result is outside its range)";
-const JET_TRUNC_REM_OVERFLOW: &str = "attempt to calculate the remainder with overflow";
 
 trait JetFloorDiv: Copy {
     fn jet_floordiv(self, rhs: Self, file: &str, line: u32) -> Self;
@@ -73,6 +72,9 @@ macro_rules! jet_mod_signed {
                 if rhs == 0 {
                     jet_panic(file, line, JET_FLOORDIV_ZERO);
                 }
+                // `MIN % -1` is 0 and fits, so it must answer rather than trap —
+                // `%%` answers 0 there too, and D-MODSEM1 says the two agree
+                // whenever they can.
                 let remainder = self.wrapping_rem(rhs);
                 if remainder != 0 && (remainder < 0) != (rhs < 0) {
                     remainder.wrapping_add(rhs)
@@ -112,10 +114,9 @@ macro_rules! jet_trunc_rem_impl {
                 if rhs == 0 {
                     jet_panic(file, line, JET_FLOORDIV_ZERO);
                 }
-                match self.checked_rem(rhs) {
-                    Some(remainder) => remainder,
-                    None => jet_panic(file, line, JET_TRUNC_REM_OVERFLOW),
-                }
+                // `MIN %% -1` is 0 and fits, so it answers rather than trapping —
+                // the same value `%` gives, which is what D-MODSEM1 asks for.
+                self.wrapping_rem(rhs)
             }
         }
     )* };

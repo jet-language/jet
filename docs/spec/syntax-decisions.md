@@ -5604,8 +5604,12 @@ spellings report the same E0108 and its fix names `/%`
 (`tests/ui/int_div_compound_on_int.stderr`). Sized widths are not touched: they
 keep the D-SG9 same-width rule, so `/` on `U8` still answers a `U8`. Both
 operands widen to Float in sema, so every tier runs one ordinary float
-division and no engine needed a new rule. In-repo migration: the comptime ratio
-in `comptime_block.jet` moved to `/%`; `all_failfast.jet` now panics outright,
-because its point is sibling cancellation and a divide-by-zero whose divisor
-the checker can see is caught at build time. Spelling is unchanged
+division and no engine needed a new rule. In-repo migration: the compound-assignment example and its two fuzz twins moved
+to `/%=`; the comptime ratio in `comptime_block.jet` and its differential twin
+moved to `/%`; the divide-by-zero probe in `user_defined.jet` moved to `/%`,
+which still traps where `/` would now answer a Float infinity.
+`all_failfast.jet` panics outright instead: `return 1 / zero` in a `=> Int`
+function is a type error under this decision, and `/%` was not a drop-in there
+because the comptime evaluator folds a divisor it can see and stops the build.
+The example is about sibling cancellation, so it says so directly. Spelling is unchanged
 (`OP_SLASH`). Flagship: `examples/features/math/int_div.jet`. Card #1433.

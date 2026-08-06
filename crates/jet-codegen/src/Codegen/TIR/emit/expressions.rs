@@ -1,4 +1,5 @@
 use crate::AST::{BinOp, CtFloat, Type, UnOp};
+use crate::Codegen::TIR::emit::statements::PRELUDE_CARRIED;
 use crate::Codegen::Cx;
 use crate::Codegen::mangle;
 use crate::Codegen::user_type_rust;
@@ -1748,7 +1749,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     }
                 }
             } else {
-                format!("(({}) {} ({}))", ls, op.rust_spell(), rs)
+                format!("(({}) {} ({}))", ls, op.rust_spell().expect(PRELUDE_CARRIED), rs)
             }
         }
         // D-CHAINCMP1: `0 <= sev < 10` — a Rust block expression binds each
@@ -1786,7 +1787,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                             variant
                         )
                     } else {
-                        format!("(__jcc{} {} __jcc{})", i, op.rust_spell(), i + 1)
+                        format!("(__jcc{} {} __jcc{})", i, op.rust_spell().expect(PRELUDE_CARRIED), i + 1)
                     }
                 })
                 .collect();

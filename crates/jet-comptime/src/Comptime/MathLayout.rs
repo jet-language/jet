@@ -88,16 +88,14 @@ pub fn integer_shift_trap(op: BinOp, count: i128, bits: u8) -> Option<String> {
     ))
 }
 
-pub fn integer_remainder_overflows(
-    left: i64,
-    right: i64,
-    signed: bool,
-    bits: u8,
-) -> bool {
-    signed && left == integer_bound(true, bits, false) && right == -1
+/// D-MODSEM1=A: the smallest value of a signed width divided by -1 leaves the
+/// width, but its REMAINDER is 0, which every width holds. Both `%` and `%%`
+/// answer 0 there — the decision says the two agree whenever they can, and a
+/// trap on one but not the other would break that. Only a zero divisor stops
+/// the program.
+pub fn integer_remainder_trap(right: i64) -> Option<&'static str> {
+    (right == 0).then_some(INTEGER_DIVIDE_ZERO)
 }
-
-pub const INTEGER_REMAINDER_OVERFLOW: &str = "attempt to calculate the remainder with overflow";
 /// The one wording for a zero divisor, shared by `%` and by `/%`
 /// (D-FLOORDIV1=A). `Prelude/Core/Division.rs` carries the same text.
 pub const INTEGER_DIVIDE_ZERO: &str = "divided by zero";
@@ -110,6 +108,12 @@ pub const INTEGER_POWER_NEGATIVE: &str =
     "a negative exponent has no whole-number result (make the base a Float to raise it to a negative power)";
 pub const INTEGER_POWER_OVERFLOW: &str =
     "this power overflows the value's type (the result is outside its range)";
+/// D-FLOORDIV1=A / D-MODSEM1=A: the division-family traps. Same contract as the
+/// power ones above — `Prelude/Core/Division.rs` owns the rule, these carry its
+/// exact wording to the tiers that cannot include that file, and
+/// `tests/floor_division.rs` proves every tier still reports them.
+pub const INTEGER_DIVIDE_OVERFLOW: &str =
+    "this division overflows the value's type (the result is outside its range)";
 
 /// D-FLOORDIV1=A: the `/%` rule, mirroring `Prelude/Core/Division.rs` for the
 /// tiers that cannot include that file. Rust's `/` rounds toward zero, so an
@@ -130,26 +134,15 @@ pub fn floor_div(left: i128, right: i128) -> Option<i128> {
 /// divisor's, so the answer is moved across when the two disagree. `None`
 /// means the remainder itself overflowed.
 pub fn floored_mod(left: i128, right: i128) -> Option<i128> {
-    let remainder = left.checked_rem(right)?;
+    if right == 0 {
+        return None;
+    }
+    // `MIN % -1` is 0 and fits every width, so it answers rather than trapping.
+    let remainder = left.wrapping_rem(right);
     if remainder != 0 && (remainder < 0) != (right < 0) {
         remainder.checked_add(right)
     } else {
         Some(remainder)
-    }
-}
-
-pub fn integer_remainder_trap(
-    left: i64,
-    right: i64,
-    signed: bool,
-    bits: u8,
-) -> Option<&'static str> {
-    if right == 0 {
-        Some(INTEGER_DIVIDE_ZERO)
-    } else if integer_remainder_overflows(left, right, signed, bits) {
-        Some(INTEGER_REMAINDER_OVERFLOW)
-    } else {
-        None
     }
 }
 
@@ -175,7 +168,7 @@ pub fn integer_binop(
         return Err(comptime_panic(&message, span));
     }
     if op == BinOp::Rem {
-        if let Some(message) = integer_remainder_trap(left, right, signed, bits) {
+        if let Some(message) = integer_remainder_trap(right) {
             return Err(comptime_panic(message, span));
         }
     }
@@ -192,7 +185,8 @@ pub fn integer_binop(
         // D-MODSEM1=A: `%` is the floored modulo.
         BinOp::Mod if b == 0 => Err(comptime_panic(INTEGER_DIVIDE_ZERO, span)),
         BinOp::Mod => checked(floored_mod(a, b), "take the remainder of"),
-        BinOp::Rem => checked(a.checked_rem(b), "take the remainder of"),
+        // D-MODSEM1=A: `MIN %% -1` is 0, which fits every width.
+        BinOp::Rem => Ok(CtValue::Int(integer_narrow(a.wrapping_rem(b), signed, bits))),
         // D-EXPSEM1=A: exact whole-number power, trapping outside the range,
         // in the same words every other tier uses.
         BinOp::Pow if b < 0 => Err(comptime_panic(INTEGER_POWER_NEGATIVE, span)),

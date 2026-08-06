@@ -5,7 +5,7 @@
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
-use tir_support::{build_and_run, have_rustc};
+use tir_support::{assert_tiers_agree, build_and_run, have_rustc};
 
 const SEED: &str = "fn score(n: Int) => Int {\n    return n\n}\n";
 
@@ -105,4 +105,29 @@ fn run() {{
     let (code, out) = build_and_run("intdiv_floor_still_int", &src);
     assert_eq!(code, 0, "{out}");
     assert_eq!(out, "8\n4\n", "{out}");
+}
+
+/// I9: the cases above are AOT only. This runs the same divisions under
+/// `jet run` and asserts both tiers agree, so a quotient rule re-encoded in an
+/// engine cannot pass.
+#[test]
+fn int_division_agrees_on_every_tier() {
+    let src = format!(
+        "{SEED}
+fn run() {{
+    print(score(7) / score(2))
+    print(score(6) / score(2))
+    print(score(-7) / score(2))
+    print(score(1) / score(4))
+    total :: score(8) + score(9)
+    print(total / score(2))
+    print(score(17) /% score(2))
+}}
+"
+    );
+    assert_tiers_agree(
+        "intdiv_tiers",
+        &src,
+        "3.5\n3.0\n-3.5\n0.25\n8.5\n8\n",
+    );
 }

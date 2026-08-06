@@ -126,28 +126,20 @@ impl BinOp {
 
     /// The Rust operator that carries this operation, for generated code.
     /// It matches `spell` everywhere the two languages agree; `~|`
-    /// (D-XORSPELL1) is Rust's `^`, and `^` (D-EXPOP1) has no Rust operator
-    /// at all — codegen calls the Prelude power instead of asking here.
-    pub fn rust_spell(self) -> &'static str {
-        match self {
+    /// (D-XORSPELL1) is Rust's `^`, and Jet's `%%` is Rust's `%` — both
+    /// truncate.
+    ///
+    /// `None` means Rust has no operator for it and codegen must call the
+    /// Prelude instead: `^` (D-EXPSEM1), `/%` (D-FLOORDIV1), and the floored
+    /// `%` (D-MODSEM1) are all shaped that way. Returning `None` rather than
+    /// panicking keeps the answer a value the caller has to handle.
+    pub fn rust_spell(self) -> Option<&'static str> {
+        Some(match self {
             BinOp::BitXor => "^",
-            // D-MODSEM1=A: Jet's `%%` is Rust's `%` — both truncate.
             BinOp::Rem => "%",
-            BinOp::Pow => {
-                unreachable!("D-EXPSEM1: `^` emits a Prelude power call, not a Rust operator")
-            }
-            BinOp::FloorDiv => {
-                unreachable!(
-                    "D-FLOORDIV1: `/%` emits a Prelude floor-division call, not a Rust operator"
-                )
-            }
-            // D-MODSEM1=A: Rust's `%` is the truncated remainder, which is Jet's
-            // `%%`. Jet's `%` is the floored modulo and has no Rust operator.
-            BinOp::Mod => {
-                unreachable!("D-MODSEM1: `%` emits a Prelude modulo call, not a Rust operator")
-            }
+            BinOp::Pow | BinOp::FloorDiv | BinOp::Mod => return None,
             other => other.spell(),
-        }
+        })
     }
 
     /// S17 compound-assignment spelling for this binary op, when one exists.

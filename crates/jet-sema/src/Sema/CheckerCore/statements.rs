@@ -26,7 +26,11 @@ fn division_fix_hint(want: &Type, got: &Type, value: &Expr) -> String {
         Expr::Binary(crate::AST::BinOp::Div, _, _, _)
     );
     if divides && *want == Type::Int && matches!(got, Type::Float | Type::Float32) {
-        return "use `/%` to divide and round down, or make the binding a Float".to_string();
+        // `n /= 2` and `n = n / 2` both reach here, and the two spellings want
+        // different repairs, so name each one.
+        return "use `/%` to divide and round down (`/%=` in place), \
+                or make the binding a Float"
+            .to_string();
     }
     type_fix_hint(want, got)
 }

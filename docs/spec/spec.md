@@ -128,7 +128,7 @@ value-block = "{" { stmt } expr "}" ;
 expr     = precedence climbing over:
            "||"  >  "&&"  >  "==" "!=" "<" ">" "<=" ">="
            >  "|"  >  "~|"  >  "&"  >  "<<" ">>"      // D-XORSPELL1: "~|" is xor
-           >  "+" "-"  >  "*" "/" "%"  >  unary "-" "!"
+           >  "+" "-"  >  "*" "/" "/%" "%" "%%"  >  unary "-" "!"
            >  "^"                                     // D-EXPSEM1: power, groups right
            >  call | ident | literal | "(" expr ")" ;
 ```

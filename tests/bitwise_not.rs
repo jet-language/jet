@@ -5,7 +5,7 @@
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
-use tir_support::{build_and_run, have_rustc};
+use tir_support::{assert_tiers_agree, build_and_run, have_rustc};
 
 const SEED: &str = "fn bits(n: Int) => Int {\n    return n\n}\n";
 
@@ -111,4 +111,36 @@ fn run() {
     let (code, out) = build_and_run("bitnot_bool", src);
     assert_eq!(code, 0, "{out}");
     assert_eq!(out, "false\ntrue\nfalse\n", "{out}");
+}
+
+/// I9: every case above is AOT only. This runs the same flips under `jet run`
+/// — the Cranelift host, with the interpreter taking whatever it deopts on —
+/// and asserts both tiers agree. The width-clamping is the part most likely to
+/// differ, so each sized type is checked, and the value above 2^32 is the one
+/// that catches a tier doing 32-bit work.
+#[test]
+fn bit_not_agrees_on_every_tier() {
+    let src = format!(
+        "{SEED}
+fn run() {{
+    print(!bits(0))
+    print(!bits(5))
+    print(!bits(-6))
+    print(!bits(4294967296))
+    print(bits(15) & !bits(4))
+    print(!true)
+    a :: U8.{{5}}
+    print(!a)
+    b :: I16.{{5}}
+    print(!b)
+    c :: U32.{{5}}
+    print(!c)
+}}
+"
+    );
+    assert_tiers_agree(
+        "bitnot_tiers",
+        &src,
+        "-1\n-6\n5\n-4294967297\n11\nfalse\n250\n-6\n4294967290\n",
+    );
 }
