@@ -2279,6 +2279,7 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                         // D-EXPSEM1=A / D-FLOORDIV1=A: `^=` and `/%=` call the host.
                         | BinOp::Pow
                         | BinOp::FloorDiv
+                        | BinOp::Mod
                 ),
                 Type::Float => {
                     matches!(

@@ -3168,7 +3168,10 @@ fn wasm_emit_expr(
         // helpers (Prelude/Core/Power.rs, Prelude/Core/Division.rs) — the same
         // source the native build runs — because Rust spells neither operator.
         TIR::TExprKind::Binary {
-            op: op @ (crate::AST::BinOp::Pow | crate::AST::BinOp::FloorDiv),
+            op: op @ (crate::AST::BinOp::Pow
+                | crate::AST::BinOp::FloorDiv
+                | crate::AST::BinOp::Mod
+                | crate::AST::BinOp::Rem),
             lhs,
             rhs,
             line,
@@ -4393,7 +4396,13 @@ fn tir_js_abi_int_expr(
         // — they fall through to the wrapper below, which wraps the ordinary
         // JS-tier result.
         E::Binary { op, lhs, rhs, .. }
-            if !matches!(op, crate::AST::BinOp::Pow | crate::AST::BinOp::FloorDiv) =>
+            if !matches!(
+                op,
+                crate::AST::BinOp::Pow
+                    | crate::AST::BinOp::FloorDiv
+                    | crate::AST::BinOp::Mod
+                    | crate::AST::BinOp::Rem
+            ) =>
         {
             Ok(format!(
                 "({} {} {})",
@@ -4431,7 +4440,10 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
         // D-EXPSEM1=A / D-FLOORDIV1=A: `^` and `/%` call the JS preamble, which
         // carries the same rules the Prelude helpers do.
         E::Binary {
-            op: op @ (crate::AST::BinOp::Pow | crate::AST::BinOp::FloorDiv),
+            op: op @ (crate::AST::BinOp::Pow
+                | crate::AST::BinOp::FloorDiv
+                | crate::AST::BinOp::Mod
+                | crate::AST::BinOp::Rem),
             lhs,
             rhs,
             ..
@@ -4821,6 +4833,8 @@ fn wasm_prelude_call(
         BinOp::Pow => format!("({lhs}).jet_pow(({rhs}) as i128, {file:?}, {line})"),
         BinOp::FloorDiv if float => format!("({lhs}).jet_floordiv({rhs})"),
         BinOp::FloorDiv => format!("({lhs}).jet_floordiv({rhs}, {file:?}, {line})"),
+        BinOp::Mod => format!("({lhs}).jet_mod({rhs}, {file:?}, {line})"),
+        BinOp::Rem => format!("({lhs}).jet_trunc_rem({rhs}, {file:?}, {line})"),
         _ => return None,
     })
 }
@@ -4860,6 +4874,21 @@ const JS_POWER_PRELUDE: &str = concat!(
     "}\n\n",
     "function jet_floordiv_float(left, right) {\n",
     "  return Math.floor(left / right);\n",
+    "}\n\n",
+    // D-MODSEM1=A: the floored modulo. JavaScript's `%` is the truncated
+    // remainder, which Jet spells `%%`, so the answer is corrected onto the
+    // divisor's side of zero.
+    "function jet_mod(left, right) {\n",
+    "  if (right === 0) throw new Error(\"divided by zero\");\n",
+    "  const remainder = left % right;\n",
+    "  if (remainder !== 0 && (remainder < 0) !== (right < 0)) return remainder + right;\n",
+    "  return remainder;\n",
+    "}\n\n",
+    // D-MODSEM1=A: the truncated remainder. JavaScript's `%` already truncates,
+    // so this only adds the zero-divisor trap.
+    "function jet_trunc_rem(left, right) {\n",
+    "  if (right === 0) throw new Error(\"divided by zero\");\n",
+    "  return left % right;\n",
     "}\n\n"
 );
 
@@ -4876,6 +4905,8 @@ fn js_prelude_call(op: crate::AST::BinOp, lhs: &str, rhs: &str, ty: &Type) -> Op
         // only the whole-number helper traps.
         BinOp::FloorDiv if float => format!("jet_floordiv_float({lhs}, {rhs})"),
         BinOp::FloorDiv => format!("jet_floordiv({lhs}, {rhs})"),
+        BinOp::Mod => format!("jet_mod({lhs}, {rhs})"),
+        BinOp::Rem => format!("jet_trunc_rem({lhs}, {rhs})"),
         _ => return None,
     })
 }
@@ -4899,6 +4930,9 @@ fn binop(op: &crate::AST::BinOp) -> &'static str {
         FloorDiv => {
             unreachable!("D-FLOORDIV1: `/%` emits a jet_floordiv call, not a JS operator")
         }
+        // D-MODSEM1=A: JavaScript's `%` is the truncated remainder, which is
+        // Jet's `%%` (`Rem` above). The floored `%` calls the preamble.
+        Mod => unreachable!("D-MODSEM1: `%` emits a jet_mod call, not a JS operator"),
         BitAnd => "&",
         BitOr => "|",
         BitXor => "^",

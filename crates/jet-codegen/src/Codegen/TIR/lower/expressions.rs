@@ -871,7 +871,10 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // never the count.
             let arith_overflow = matches!(
                 op,
-                BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Rem
+                // D-MODSEM1=A: `%` and `%%` are no longer here — both always
+                // call their Prelude helper, so their traps never depend on
+                // whether the checker could see through the operands.
+                BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div
             ) && (ast_operand_is_integer(l, env) == Some(true)
                 || ast_operand_is_integer(r, env) == Some(true));
             let shift_overflow = matches!(op, BinOp::Shl | BinOp::Shr)

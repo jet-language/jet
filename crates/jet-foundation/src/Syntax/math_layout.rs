@@ -291,7 +291,12 @@ pub const OP_SLASH: &str = "/";
 /// D-FLOORDIV1=A (ratified 2026-08-05): `/%` divides and rounds down, toward
 /// negative infinity. It is the whole-number companion of `/`.
 pub const OP_SLASH_PERCENT: &str = "/%";
+/// D-MODSEM1=A (ratified 2026-08-05): `%` is the floored modulo — its answer
+/// takes the divisor's sign, so `-7 % 2` is 1. It is the partner of `/%`.
 pub const OP_PERCENT: &str = "%";
+/// D-MODSEM1=A (ratified 2026-08-05): `%%` is the truncated remainder — its
+/// answer takes the dividend's sign, so `-7 %% 2` is -1. It partners `/`.
+pub const OP_PERCENT_PERCENT: &str = "%%";
 pub const OP_AMP: &str = "&";
 /// D-PATO / D-SHAPE-PIPE1=C (ratified 2026-07-15): peer alternatives only.
 /// General expressions and reusable flows do not use a single bar.
@@ -340,6 +345,8 @@ pub const OP_SLASH_EQ: &str = "/=";
 /// D-FLOORDIV1=A (ratified 2026-08-05): floor-division-assign.
 pub const OP_SLASH_PERCENT_EQ: &str = "/%=";
 pub const OP_PERCENT_EQ: &str = "%=";
+/// D-MODSEM1=A (ratified 2026-08-05): truncated-remainder-assign.
+pub const OP_PERCENT_PERCENT_EQ: &str = "%%=";
 pub const OP_AMP_EQ: &str = "&=";
 pub const OP_PIPE_EQ: &str = "|=";
 /// D-EXPOP1=A (ratified 2026-08-05): power-assign.

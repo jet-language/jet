@@ -117,6 +117,8 @@ pub enum TokKind {
     /// D-FLOORDIV1=A: `a /% b` divides and rounds down.
     SlashPercent,
     Percent,
+    /// D-MODSEM1=A: `a %% b` is the truncated remainder.
+    PercentPercent,
     Amp,
     Pipe,
     Caret,
@@ -155,6 +157,8 @@ pub enum TokKind {
     /// D-FLOORDIV1=A: `a /%= b` divides in place and rounds down.
     SlashPercentEq,
     PercentEq,
+    /// D-MODSEM1=A: `a %%= b` is truncated-remainder-assign.
+    PercentPercentEq,
     AmpEq,
     PipeEq,
     CaretEq,
@@ -181,7 +185,8 @@ impl TokKind {
             TokKind::StarEq => Some(BinOp::Mul),
             TokKind::SlashEq => Some(BinOp::Div),
             TokKind::SlashPercentEq => Some(BinOp::FloorDiv),
-            TokKind::PercentEq => Some(BinOp::Rem),
+            TokKind::PercentEq => Some(BinOp::Mod),
+            TokKind::PercentPercentEq => Some(BinOp::Rem),
             TokKind::AmpEq => Some(BinOp::BitAnd),
             TokKind::PipeEq => Some(BinOp::BitOr),
             TokKind::CaretEq => Some(BinOp::Pow),
@@ -272,6 +277,7 @@ pub fn describe(kind: &TokKind) -> String {
         TokKind::Slash => "`/`".to_string(),
         TokKind::SlashPercent => "`/%`".to_string(),
         TokKind::Percent => "`%`".to_string(),
+        TokKind::PercentPercent => "`%%`".to_string(),
         TokKind::Amp => "`&`".to_string(),
         TokKind::Pipe => "`|`".to_string(),
         TokKind::Caret => "`^`".to_string(),
@@ -298,6 +304,7 @@ pub fn describe(kind: &TokKind) -> String {
         TokKind::SlashEq => "`/=`".to_string(),
         TokKind::SlashPercentEq => "`/%=`".to_string(),
         TokKind::PercentEq => "`%=`".to_string(),
+        TokKind::PercentPercentEq => "`%%=`".to_string(),
         TokKind::AmpEq => "`&=`".to_string(),
         TokKind::PipeEq => "`|=`".to_string(),
         TokKind::CaretEq => "`^=`".to_string(),

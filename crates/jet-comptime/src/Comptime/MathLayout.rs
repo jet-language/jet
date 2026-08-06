@@ -125,6 +125,19 @@ pub fn floor_div(left: i128, right: i128) -> Option<i128> {
     }
 }
 
+/// D-MODSEM1=A: the `%` rule, mirroring `Prelude/Core/Division.rs`. Rust's `%`
+/// gives the remainder the dividend's sign; the floored modulo takes the
+/// divisor's, so the answer is moved across when the two disagree. `None`
+/// means the remainder itself overflowed.
+pub fn floored_mod(left: i128, right: i128) -> Option<i128> {
+    let remainder = left.checked_rem(right)?;
+    if remainder != 0 && (remainder < 0) != (right < 0) {
+        remainder.checked_add(right)
+    } else {
+        Some(remainder)
+    }
+}
+
 pub fn integer_remainder_trap(
     left: i64,
     right: i64,
@@ -176,6 +189,9 @@ pub fn integer_binop(
         // divisor is zero.
         BinOp::FloorDiv if b == 0 => Err(comptime_panic(INTEGER_DIVIDE_ZERO, span)),
         BinOp::FloorDiv => checked(floor_div(a, b), "divide"),
+        // D-MODSEM1=A: `%` is the floored modulo.
+        BinOp::Mod if b == 0 => Err(comptime_panic(INTEGER_DIVIDE_ZERO, span)),
+        BinOp::Mod => checked(floored_mod(a, b), "take the remainder of"),
         BinOp::Rem => checked(a.checked_rem(b), "take the remainder of"),
         // D-EXPSEM1=A: exact whole-number power, trapping outside the range,
         // in the same words every other tier uses.

@@ -1700,7 +1700,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         } => {
             let ls = emit_tir_expr(lhs, cx);
             let rs = emit_tir_expr(rhs, cx);
-            if *op == BinOp::Pow || *op == BinOp::FloorDiv {
+            if matches!(op, BinOp::Pow | BinOp::FloorDiv | BinOp::Mod | BinOp::Rem) {
                 // D-EXPSEM1 / D-FLOORDIV1: Rust spells neither operator, so `^`
                 // and `/%` always call the one Prelude helper. Whole numbers
                 // keep the exact, trapping rule; floats use the float helper.
@@ -1711,10 +1711,16 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     (BinOp::Pow, false) => {
                         format!("({}).jet_pow(({}) as i128, {:?}, {})", ls, rs, file, line)
                     }
-                    (_, true) => format!("({}).jet_floordiv({})", ls, rs),
-                    (_, false) => {
+                    (BinOp::FloorDiv, true) => format!("({}).jet_floordiv({})", ls, rs),
+                    (BinOp::FloorDiv, false) => {
                         format!("({}).jet_floordiv({}, {:?}, {})", ls, rs, file, line)
                     }
+                    // D-MODSEM1=A: both remainders are whole-number only, so
+                    // there is no float shape to choose between. Each traps on
+                    // a zero divisor rather than letting Rust's own panic out
+                    // (I2), so neither can use the bare Rust operator.
+                    (BinOp::Mod, _) => format!("({}).jet_mod({}, {:?}, {})", ls, rs, file, line),
+                    _ => format!("({}).jet_trunc_rem({}, {:?}, {})", ls, rs, file, line),
                 }
             } else if *overflow {
                 // Trapping helper: source location was resolved at lowering, so

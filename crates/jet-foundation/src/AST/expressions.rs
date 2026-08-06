@@ -64,6 +64,11 @@ pub enum BinOp {
     /// D-FLOORDIV1=A: infix `/%` divides and rounds the answer down, toward
     /// negative infinity, on whole numbers and on floats alike.
     FloorDiv,
+    /// D-MODSEM1=A: infix `%` is the floored modulo — its answer takes the
+    /// divisor's sign, so `-7 % 2` is 1. It pairs with `/%`.
+    Mod,
+    /// D-MODSEM1=A: infix `%%` is the truncated remainder — its answer takes
+    /// the dividend's sign, so `-7 %% 2` is -1. It pairs with `/`.
     Rem,
     /// D-EXPOP1=A / D-EXPSEM1=A: infix `^` raises the left side to the power of
     /// the right side. Right-associative, binds tighter than unary minus.
@@ -100,7 +105,8 @@ impl BinOp {
             BinOp::Mul => "*",
             BinOp::Div => "/",
             BinOp::FloorDiv => "/%",
-            BinOp::Rem => "%",
+            BinOp::Mod => "%",
+            BinOp::Rem => "%%",
             BinOp::Pow => "^",
             BinOp::BitAnd => "&",
             BinOp::BitOr => "|",
@@ -125,6 +131,8 @@ impl BinOp {
     pub fn rust_spell(self) -> &'static str {
         match self {
             BinOp::BitXor => "^",
+            // D-MODSEM1=A: Jet's `%%` is Rust's `%` — both truncate.
+            BinOp::Rem => "%",
             BinOp::Pow => {
                 unreachable!("D-EXPSEM1: `^` emits a Prelude power call, not a Rust operator")
             }
@@ -132,6 +140,11 @@ impl BinOp {
                 unreachable!(
                     "D-FLOORDIV1: `/%` emits a Prelude floor-division call, not a Rust operator"
                 )
+            }
+            // D-MODSEM1=A: Rust's `%` is the truncated remainder, which is Jet's
+            // `%%`. Jet's `%` is the floored modulo and has no Rust operator.
+            BinOp::Mod => {
+                unreachable!("D-MODSEM1: `%` emits a Prelude modulo call, not a Rust operator")
             }
             other => other.spell(),
         }
@@ -145,7 +158,8 @@ impl BinOp {
             BinOp::Mul => Some("*="),
             BinOp::Div => Some("/="),
             BinOp::FloorDiv => Some("/%="),
-            BinOp::Rem => Some("%="),
+            BinOp::Mod => Some("%="),
+            BinOp::Rem => Some("%%="),
             BinOp::Pow => Some("^="),
             BinOp::BitAnd => Some("&="),
             BinOp::BitOr => Some("|="),

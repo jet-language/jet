@@ -3224,3 +3224,30 @@ fn fmt_keeps_power_and_exclusive_or_spellings() {
     let twice = jet::format_source(&once).expect("power and exclusive-or should re-fmt");
     assert_eq!(once, twice, "power formatting must be byte-stable");
 }
+
+#[test]
+fn fmt_keeps_the_division_family_spellings() {
+    // D-FLOORDIV1=A / D-MODSEM1=A: `/%` rounds down, `%` is the floored modulo,
+    // `%%` is the truncated remainder, and each has a compound. All six must
+    // survive a round trip byte-for-byte (fmt STABILITY — idempotence alone
+    // would not notice a dropped sigil, because a dropped one stays dropped on
+    // the second pass, and `/%` in particular could silently degrade to `/`).
+    let src = "fn run() {\n    a :: 7 /% 2\n    b :: -7 /% 2\n    c :: 7.5 /% 2.0\n    d :: -7 % 2\n    e :: -7 %% 2\n    f :: 20 /% 3 /% 2\n    g :: 2 * 7 /% 4\n    h := 9\n    h /%= 2\n    i := -3\n    i %= 5\n    j := -7\n    j %%= 5\n    print(\"{a}{b}{c}{d}{e}{f}{g}{h}{i}{j}\")\n}\n";
+    let once = jet::format_source(src).expect("fmt should accept the division family");
+    for token in [
+        "7 /% 2",
+        "-7 /% 2",
+        "7.5 /% 2.0",
+        "-7 % 2",
+        "-7 %% 2",
+        "20 /% 3 /% 2",
+        "2 * 7 /% 4",
+        "h /%= 2",
+        "i %= 5",
+        "j %%= 5",
+    ] {
+        assert!(once.contains(token), "fmt dropped `{token}`:\n{once}");
+    }
+    let twice = jet::format_source(&once).expect("the division family should re-fmt");
+    assert_eq!(once, twice, "division formatting must be byte-stable");
+}

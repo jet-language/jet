@@ -5537,3 +5537,40 @@ Spellings live in Syntax.rs (`OP_CARET`, `OP_CARET_EQ`, `OP_TILDE_PIPE`,
 `OP_TILDE_PIPE_EQ`). Flagships: `examples/features/math/power_operator.jet`,
 `examples/features/math/power_semantics.jet`,
 `examples/features/math/xor_operator.jet`. Cards #1428, #1429, #1430.
+
+**2026-08-05 — D-FLOORDIV1=A**: infix `/%` divides and rounds the answer down,
+toward negative infinity, with compound `/%=`. It rounds down on whole numbers
+and on floats alike, so `7 /% 2` is 3, `-7 /% 2` is -4, and `7.5 /% 2.0` is
+3.0. Rounding down rather than toward zero means the answer does not jump up as
+it crosses zero, which is what wrap-around and bucketing arithmetic wants. `/%`
+sits with the other division-family operators, so a chain groups left to right
+and `*` does not bind tighter. Dividing by zero traps, exactly as `/` does, and
+reports "divided by zero". `/%` is the whole-number companion of `/`, which
+gives a Float (D-INTDIV1). Semantics live in one Prelude file
+(`crates/jet-codegen/src/Prelude/Core/Division.rs`), shared verbatim by the
+native and wasm Rust tiers; the comptime interpreter and the Cranelift host call
+one shared rounding rule in `MathLayout`, and the JS tier calls a preamble
+helper carrying the same rule. Spellings live in Syntax.rs
+(`OP_SLASH_PERCENT`, `OP_SLASH_PERCENT_EQ`). Flagship:
+`examples/features/math/floor_div.jet`. Card #1431.
+
+**2026-08-05 — D-MODSEM1=A**: `%` is the floored modulo and `%%` is the
+truncated remainder, with compounds `%=` and `%%=`. The two differ only when
+the operands straddle zero, and that difference is why both exist. `%` takes
+the DIVISOR's sign, so `-7 % 2` is 1 — the answer stays in range for a positive
+divisor, which is what clock and ring-buffer arithmetic wants, with no separate
+"if it went negative" branch. `%%` takes the DIVIDEND's sign, so `-7 %% 2` is
+-1, which is what "what is left over" wants when the original sign matters.
+Each pairs with a division so its identity holds: `a == b * (a /% b) + a % b`
+with floor division, and `a == b * (a / b) + a %% b` with truncating division.
+Both are whole-number only under the D-SG9 same-width rule, and both trap on a
+zero divisor rather than letting a Rust panic reach the user (I2) — so neither
+uses the bare Rust operator, and their traps do not depend on whether the
+checker could see through the operands. Semantics live in the same one Prelude
+file as `/%` (`Prelude/Core/Division.rs`), shared verbatim by the native and
+wasm Rust tiers; the comptime interpreter and the Cranelift host call one
+shared rule in `MathLayout`, and the JS tier calls preamble helpers carrying it.
+No in-repo use of `%` relied on truncation — every operand was already
+non-negative, where the two agree. Spellings live in Syntax.rs (`OP_PERCENT`,
+`OP_PERCENT_EQ`, `OP_PERCENT_PERCENT`, `OP_PERCENT_PERCENT_EQ`). Flagship:
+`examples/features/math/modulo.jet`. Card #1432.

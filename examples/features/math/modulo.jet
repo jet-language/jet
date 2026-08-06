@@ -1,0 +1,35 @@
+// Two remainders (D-MODSEM1=A). They differ only when the two sides straddle
+// zero, and that difference is the whole reason both exist.
+//
+// `%` is the floored modulo: its answer takes the DIVISOR's sign, so it never
+// goes negative for a positive divisor. That is what clock and wrap-around
+// arithmetic wants — `-7 % 2` is 1, the hour on the dial.
+//
+// `%%` is the truncated remainder: its answer takes the DIVIDEND's sign, so
+// `-7 %% 2` is -1. That is what "what is left over" wants when the sign of the
+// original value matters.
+//
+// `%` pairs with `/%` and `%%` pairs with `/`, each so that
+// `a == b * (a /% b) + a % b` and `a == b * (a / b) + a %% b`.
+//
+// Both trap on a zero divisor.
+fn tick(n: Int) => Int { return n }
+
+fn run() {
+    two :: tick(2)
+    // Above zero the two agree.
+    print(tick(7) % two)
+    print(tick(7) %% two)
+    // Below zero they part: the floored answer stays on the divisor's side.
+    print(tick(-7) % two)
+    print(tick(-7) %% two)
+    // `%=` wraps in place — an index walking backwards around a ring stays in
+    // range without a separate "if it went negative" branch.
+    slot := tick(-3)
+    slot %= tick(5)
+    print(slot)
+    // `%%=` keeps the sign of the value it started from.
+    debt := tick(-7)
+    debt %%= tick(5)
+    print(debt)
+}

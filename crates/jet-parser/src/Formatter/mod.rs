@@ -316,7 +316,7 @@ impl Prec {
             BinOp::BitAnd => Prec::BitAnd,
             BinOp::Shl | BinOp::Shr => Prec::Shift,
             BinOp::Add | BinOp::Sub => Prec::Add,
-            BinOp::Mul | BinOp::Div | BinOp::FloorDiv | BinOp::Rem => Prec::Mul,
+            BinOp::Mul | BinOp::Div | BinOp::FloorDiv | BinOp::Mod | BinOp::Rem => Prec::Mul,
             BinOp::Pow => Prec::Pow,
         }
     }
@@ -996,7 +996,8 @@ fn compound_spell(op: BinOp) -> &'static str {
         BinOp::Mul => "*=",
         BinOp::Div => "/=",
         BinOp::FloorDiv => "/%=",
-        BinOp::Rem => "%=",
+        BinOp::Mod => "%=",
+        BinOp::Rem => "%%=",
         BinOp::Pow => "^=",
         BinOp::BitAnd => "&=",
         BinOp::BitOr => "|=",

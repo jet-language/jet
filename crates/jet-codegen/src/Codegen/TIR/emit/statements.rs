@@ -37,6 +37,8 @@ fn prelude_compound_call(
         BinOp::Pow => format!("({place}).jet_pow(({value}) as i128, {file:?}, {line})"),
         BinOp::FloorDiv if float => format!("({place}).jet_floordiv({value})"),
         BinOp::FloorDiv => format!("({place}).jet_floordiv({value}, {file:?}, {line})"),
+        BinOp::Mod => format!("({place}).jet_mod({value}, {file:?}, {line})"),
+        BinOp::Rem => format!("({place}).jet_trunc_rem({value}, {file:?}, {line})"),
         _ => return None,
     })
 }

@@ -21,7 +21,7 @@ use std::collections::HashMap;
 use super::runtime_host::{
     HostFns, INTN_MODE_CHECKED, INTN_MODE_SATURATING, INTN_MODE_TRAP, INTN_MODE_WRAPPING,
     INTN_OP_ADD, INTN_OP_BIT_AND, INTN_OP_BIT_OR, INTN_OP_BIT_XOR, INTN_OP_DIV, INTN_OP_MUL,
-    INTN_OP_FLOOR_DIV, INTN_OP_POW, INTN_OP_REM, INTN_OP_SHL, INTN_OP_SHR, INTN_OP_SUB,
+    INTN_OP_FLOOR_DIV, INTN_OP_MOD, INTN_OP_POW, INTN_OP_REM, INTN_OP_SHL, INTN_OP_SHR, INTN_OP_SUB,
 };
 use super::safety::{
     collect_select_arms_jit, flatten_string, jit_closure_elem_type, jit_list_float_type,
@@ -7221,6 +7221,9 @@ impl LowerCtx<'_, '_> {
             (BinOp::Pow, Type::Int) => Some(self.host.pow_i64),
             (BinOp::Pow, Type::Float | Type::Float32) => Some(self.host.pow_f64),
             (BinOp::FloorDiv, Type::Int) => Some(self.host.floordiv_i64),
+            // D-MODSEM1=A: `%` is whole-number only, so there is no float host.
+            (BinOp::Mod, Type::Int) => Some(self.host.mod_i64),
+            (BinOp::Rem, Type::Int) => Some(self.host.rem_i64),
             (BinOp::FloorDiv, Type::Float | Type::Float32) => Some(self.host.floordiv_f64),
             _ => None,
         }
@@ -7284,7 +7287,7 @@ impl LowerCtx<'_, '_> {
                 signed,
             );
         }
-        if matches!(op, BinOp::Pow | BinOp::FloorDiv) {
+        if matches!(op, BinOp::Pow | BinOp::FloorDiv | BinOp::Mod | BinOp::Rem) {
             return self.lower_prelude_binop(op, &rhs_ty, current, rhs, line);
         }
         Ok(match (op, &rhs_ty) {
@@ -19690,6 +19693,7 @@ impl LowerCtx<'_, '_> {
             BinOp::Shr => INTN_OP_SHR,
             BinOp::Pow => INTN_OP_POW,
             BinOp::FloorDiv => INTN_OP_FLOOR_DIV,
+            BinOp::Mod => INTN_OP_MOD,
             _ => return Err("jit fixed-width integer operation unsupported".to_string()),
         };
         let args = [
@@ -19964,7 +19968,7 @@ impl LowerCtx<'_, '_> {
                 self.b.ins().isub(one, eq)
             });
         }
-        if matches!(op, BinOp::Pow | BinOp::FloorDiv) {
+        if matches!(op, BinOp::Pow | BinOp::FloorDiv | BinOp::Mod | BinOp::Rem) {
             return self.lower_prelude_binop(op, &lhs_ty, l, r, line);
         }
         Ok(match (&lhs_ty, op) {

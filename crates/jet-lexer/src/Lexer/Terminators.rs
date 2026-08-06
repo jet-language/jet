@@ -132,6 +132,7 @@ fn suppresses_terminator(kind: &TokKind) -> bool {
             | TokKind::Slash
             | TokKind::SlashPercent
             | TokKind::Percent
+            | TokKind::PercentPercent
             | TokKind::EqEq
             | TokKind::NotEq
             | TokKind::Lt

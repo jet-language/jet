@@ -13,6 +13,7 @@
 const JET_FLOORDIV_ZERO: &str = "divided by zero";
 const JET_FLOORDIV_OVERFLOW: &str =
     "this division overflows the value's type (the result is outside its range)";
+const JET_TRUNC_REM_OVERFLOW: &str = "attempt to calculate the remainder with overflow";
 
 trait JetFloorDiv: Copy {
     fn jet_floordiv(self, rhs: Self, file: &str, line: u32) -> Self;
@@ -55,6 +56,71 @@ macro_rules! jet_floordiv_unsigned {
 }
 jet_floordiv_signed!(i8, i16, i32, i64);
 jet_floordiv_unsigned!(u8, u16, u32, u64);
+
+// D-MODSEM1=A: `%` is the floored modulo, the partner of `/%`. Its answer
+// takes the divisor's sign, so `-7 % 2` is 1, and for every pair of whole
+// numbers `a == b * (a /% b) + a % b`. Rust's `%` is the truncated remainder,
+// which Jet spells `%%`, so the floored one is built here.
+trait JetMod: Copy {
+    fn jet_mod(self, rhs: Self, file: &str, line: u32) -> Self;
+}
+// Signed: the remainder comes back with the dividend's sign, so add the
+// divisor whenever the two signs disagree.
+macro_rules! jet_mod_signed {
+    ($($t:ty),*) => { $(
+        impl JetMod for $t {
+            fn jet_mod(self, rhs: Self, file: &str, line: u32) -> Self {
+                if rhs == 0 {
+                    jet_panic(file, line, JET_FLOORDIV_ZERO);
+                }
+                let remainder = self.wrapping_rem(rhs);
+                if remainder != 0 && (remainder < 0) != (rhs < 0) {
+                    remainder.wrapping_add(rhs)
+                } else {
+                    remainder
+                }
+            }
+        }
+    )* };
+}
+// Unsigned: nothing is ever below zero, so the two remainders agree.
+macro_rules! jet_mod_unsigned {
+    ($($t:ty),*) => { $(
+        impl JetMod for $t {
+            fn jet_mod(self, rhs: Self, file: &str, line: u32) -> Self {
+                if rhs == 0 {
+                    jet_panic(file, line, JET_FLOORDIV_ZERO);
+                }
+                self % rhs
+            }
+        }
+    )* };
+}
+jet_mod_signed!(i8, i16, i32, i64);
+jet_mod_unsigned!(u8, u16, u32, u64);
+
+// D-MODSEM1=A: `%%` is the truncated remainder, the partner of `/`. Rust's `%`
+// already truncates, so this only adds the traps: a zero divisor, and the one
+// signed pair whose remainder overflows.
+trait JetTruncRem: Copy {
+    fn jet_trunc_rem(self, rhs: Self, file: &str, line: u32) -> Self;
+}
+macro_rules! jet_trunc_rem_impl {
+    ($($t:ty),*) => { $(
+        impl JetTruncRem for $t {
+            fn jet_trunc_rem(self, rhs: Self, file: &str, line: u32) -> Self {
+                if rhs == 0 {
+                    jet_panic(file, line, JET_FLOORDIV_ZERO);
+                }
+                match self.checked_rem(rhs) {
+                    Some(remainder) => remainder,
+                    None => jet_panic(file, line, JET_TRUNC_REM_OVERFLOW),
+                }
+            }
+        }
+    )* };
+}
+jet_trunc_rem_impl!(i8, i16, i32, i64, u8, u16, u32, u64);
 
 trait JetFloorDivFloat: Copy {
     fn jet_floordiv(self, rhs: Self) -> Self;

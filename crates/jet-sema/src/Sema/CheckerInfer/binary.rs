@@ -581,7 +581,7 @@ impl<'a> Checker<'a> {
                 | BinOp::Le
                 | BinOp::Gt
                 | BinOp::Ge
-        ) || (matches!(op, BinOp::Rem | BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor)
+        ) || (matches!(op, BinOp::Mod | BinOp::Rem | BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor)
             && lt.is_integer()
             && rt.is_integer());
         if joins_numeric && lt != rt {
@@ -953,6 +953,7 @@ impl<'a> Checker<'a> {
                     | BinOp::Mul
                     | BinOp::Div
                     | BinOp::FloorDiv
+                    | BinOp::Mod
                     | BinOp::Rem
                     | BinOp::BitAnd
                     | BinOp::BitOr
@@ -1267,8 +1268,9 @@ impl<'a> Checker<'a> {
                     None
                 }
             }
-            BinOp::Rem | BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor => {
-                // D-SG9: remainder and the bitwise ops work on any integer width,
+            BinOp::Mod | BinOp::Rem | BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor => {
+                // D-SG9/D-MODSEM1: both remainders and the bitwise ops work on any
+                // integer width,
                 // both sides the same width, and keep it.
                 if lt == rt && lt.is_integer() {
                     Some(lt)

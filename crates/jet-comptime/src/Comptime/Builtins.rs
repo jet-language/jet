@@ -80,6 +80,15 @@ pub fn eval_binop(
                 .map(Int)
                 .ok_or_else(|| overflow("divide", span))
         }
+        // D-MODSEM1=A: `%` is the floored modulo, whose answer takes the
+        // divisor's sign; `%%` below is Rust's truncated remainder.
+        (BinOp::Mod, Int(_), Int(0)) => Err(divide_by_zero(span)),
+        (BinOp::Mod, Int(a), Int(b)) => {
+            crate::Comptime::MathLayout::floored_mod(a as i128, b as i128)
+                .and_then(|value| i64::try_from(value).ok())
+                .map(Int)
+                .ok_or_else(|| overflow("take the remainder of", span))
+        }
         (BinOp::Rem, Int(_), Int(0)) => Err(divide_by_zero(span)),
         (BinOp::Rem, Int(a), Int(b)) => a
             .checked_rem(b)

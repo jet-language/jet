@@ -643,6 +643,15 @@ pub const JET_HIGHLIGHT_TOKENS: &[HighlightToken] = &[
         text: OP_PERCENT,
         class: HighlightClass::Operator,
     },
+    // D-MODSEM1=A: the truncated remainder and its compound.
+    HighlightToken {
+        text: OP_PERCENT_PERCENT,
+        class: HighlightClass::Operator,
+    },
+    HighlightToken {
+        text: OP_PERCENT_PERCENT_EQ,
+        class: HighlightClass::Operator,
+    },
     HighlightToken {
         text: OP_PIPE,
         class: HighlightClass::Operator,
@@ -1067,7 +1076,7 @@ use super::{
     LIT_FALSE, LIT_NULL, LIT_TRUE, LIT_VALUE, OP_AMP_EQ, OP_AND, OP_ARM_ARROW,
     OP_CARET_EQ, OP_EQ, OP_FALLBACK, OP_GE, OP_GT,     OP_LAMBDA_ARROW, OP_LE, OP_LT,
     OP_MEMBER_SPREAD, OP_MINUS, OP_MINUS_EQ, OP_MINUS_MINUS, OP_NAMED_CTOR, OP_NE, OP_NOT, OP_OPTIONAL_CHAIN,
-    OP_OR, OP_PERCENT, OP_PERCENT_EQ, OP_PIPE, OP_PIPE_EQ, OP_PLUS, OP_PLUS_EQ, OP_PLUS_PLUS,
+    OP_OR, OP_PERCENT, OP_PERCENT_EQ, OP_PERCENT_PERCENT, OP_PERCENT_PERCENT_EQ, OP_PIPE, OP_PIPE_EQ, OP_PLUS, OP_PLUS_EQ, OP_PLUS_PLUS,
     OP_RANGE, OP_RANGE_EXCLUSIVE, OP_SHL, OP_SHL_EQ, OP_SHR, OP_SHR_EQ, OP_SLASH, OP_SLASH_EQ, OP_SLASH_PERCENT, OP_SLASH_PERCENT_EQ, OP_STAR,
     OP_STAR_EQ, OP_TILDE_PIPE, OP_TILDE_PIPE_EQ, OP_TRY_SUFFIX, PROTO_CLIENT, PROTO_SERVER, SIGIL_BIND_IMMUT, SIGIL_BIND_MUT,
     SIGIL_COPY, SIGIL_FENCE_CLOSE, SIGIL_FENCE_OPEN, SIGIL_MOVE, SIGIL_SPREAD, SIGIL_WRITE,
