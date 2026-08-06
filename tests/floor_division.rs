@@ -6,7 +6,7 @@
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
-use tir_support::{assert_tiers_agree, build_and_run, build_and_run_full, have_rustc, jit_run, jit_run_with_env};
+use tir_support::{assert_tiers_agree, build_and_run, build_and_run_full, have_rustc, jit_run_with_env};
 
 /// A function the checker cannot see through, so its result is a runtime value
 /// and the operator below is really evaluated by the built program.
@@ -328,16 +328,11 @@ fn run() {
 }
 
 /// D-FLOORDIV1=A: dividing by zero must stop the program on `jet run` too, and
-/// say the same sentence the AOT binary says.
+/// say the same sentence the AOT binary says — as a runtime trap (exit 70 +
+/// `panic:`), never E0953 "comptime stopped the build" (#1483).
 ///
-/// Read what this does and does not prove. It proves one wording across tiers.
-/// It does **not** reach the Cranelift host's zero-divisor branch, because the
-/// comptime evaluator folds the operands first and stops the build with E0953.
-/// Nothing written in Jet source reaches that branch today: the evaluator folds
-/// through `seed`, and it also folds `io.args()`, `env.get()` and
-/// `files.read()` on a path that does not exist, taking the `??` fallback as a
-/// constant. That is card #1483, and the host's own branches stay covered by
-/// `every_tier_reports_one_trap_wording` below until it is fixed.
+/// The divisor comes from the process environment so the Cranelift / deopt
+/// host really executes the trap instead of folding a literal away first.
 #[test]
 fn dividing_by_zero_traps_on_the_jit_tier() {
     for (name, op) in [
@@ -346,17 +341,26 @@ fn dividing_by_zero_traps_on_the_jit_tier() {
         ("jit_remainder_zero", "%%"),
     ] {
         let src = format!(
-            "{SEED}
+            "use core.env as env
+{SEED}
 fn run() {{
-    print(seed(7) {op} seed(0))
+    zero :: Int.parse(env.get(\"JET_TRAP_DIVISOR\") ?? \"0\") ?? 0
+    print(seed(7) {op} zero)
 }}
 "
         );
         let (code, out, err) = jit_run_with_env(name, &src, &[("JET_TRAP_DIVISOR", "0")]);
-        assert_ne!(code, 0, "`{op}` by zero must stop `jet run`: {out}{err}");
+        assert_eq!(
+            code, 70,
+            "`{op}` by zero must exit 70 under `jet run`: out={out} err={err}"
+        );
         assert!(
-            err.contains("divided by zero"),
-            "`{op}` by zero on `jet run`: expected the divided-by-zero wording, got: {err}"
+            err.contains("panic:") && err.contains("divided by zero"),
+            "`{op}` by zero on `jet run`: expected runtime panic wording, got: {err}"
+        );
+        assert!(
+            !err.contains("E0953") && !err.contains("comptime"),
+            "`{op}` by zero must not speak in comptime voice, got: {err}"
         );
     }
 }

@@ -1,5 +1,5 @@
 use jet_codegen::Codegen::TIR::JitProgram;
-use jet_foundation::{Diagnostics::Diagnostic, JitBackend::RunOutcome, AST::Type};
+use jet_foundation::{JitBackend::RunOutcome, AST::Type};
 use std::collections::HashMap;
 
 use super::deopt::{
@@ -90,31 +90,6 @@ pub(crate) fn fresh_runtime() -> JitRuntime {
         ui: crate::Ui::UiState::default(),
         web: crate::Web::WebState::default(),
     }
-}
-
-/// Build the E0953 diagnostic for a trapped run, matching the tier-0
-/// interpreter's own voice for the identical panic (the dev interpreter IS the
-/// comptime tree-walker, so its runtime panics already render this way — see
-/// `crates/jet-comptime/src/Comptime/Diagnostics.rs::comptime_panic`). The JIT
-/// tier must report the SAME code/voice, not a new one, for parity.
-fn jit_panic_diag(msg: &str) -> Diagnostic {
-    if let Some(message) = msg.strip_prefix("E0123: ") {
-        return Diagnostic::error(
-            "E0123",
-            message.to_string(),
-            "the stride is checked before the first source item is pulled".to_string(),
-            "use a stride of 1 or more".to_string(),
-            None,
-        );
-    }
-    Diagnostic::error(
-        "E0953",
-        "your comptime code stopped the build".to_string(),
-        format!("while computing this value at compile time, the program panicked: {msg}"),
-        "this is the sanctioned way to validate at compile time — fix the input the check rejects"
-            .to_string(),
-        None,
-    )
 }
 
 /// Scrub heap state a trapped (partial) run created, so the NEXT resident
@@ -305,13 +280,23 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
                 });
             }
 
-            // A runtime panic unwound to `main`'s epilogue via the trapped-flag
-            // branches (no Rust panic crossed a JIT frame — I1). Report it exactly
-            // as the tier-0 interpreter reports the same panic (E0953), and scrub
-            // the partial run's heap so the next hot-reload iteration in this
-            // resident process starts clean.
+            // Runtime arithmetic / host traps: same exit 70 + `panic:` wording
+            // as AOT `jet_panic` (I2 / I9). Never reclassify a live-program trap
+            // as E0953 "comptime stopped the build" (#1483).
+            let mut stderr = runtime.stderr.clone();
+            if !stderr.is_empty() && !stderr.ends_with('\n') {
+                stderr.push('\n');
+            }
+            stderr.push_str("panic: ");
+            stderr.push_str(&msg);
+            stderr.push('\n');
+            let stdout = runtime.stdout.clone();
             reset_run_heap(runtime);
-            return Ok(RunOutcome::Problems(vec![jit_panic_diag(&msg)]));
+            return Ok(RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code: 70,
+            });
         }
         if let Some(handle) = entry_result {
             let result = jit_result(runtime, handle)

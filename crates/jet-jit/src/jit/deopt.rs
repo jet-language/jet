@@ -315,6 +315,27 @@ pub(crate) fn run_whole_interp(bundle: &ProgramBundle, plan: &TierPlan) -> RunOu
                     .exit_code
                     .unwrap_or_else(|| d.what.parse().unwrap_or(0)),
             },
+            // Evaluator traps under whole-program deopt are live-program panics
+            // (I9), not comptime build failures — match AOT exit 70 + wording.
+            Err(d) if d.code == "E0953" => {
+                let msg = d
+                    .why
+                    .strip_prefix(
+                        "while computing this value at compile time, the program panicked: ",
+                    )
+                    .unwrap_or(d.why.as_str());
+                if !sink.stderr.is_empty() && !sink.stderr.ends_with('\n') {
+                    sink.stderr.push('\n');
+                }
+                sink.stderr.push_str("panic: ");
+                sink.stderr.push_str(msg);
+                sink.stderr.push('\n');
+                RunOutcome::Ran {
+                    stdout: sink.stdout,
+                    stderr: sink.stderr,
+                    exit_code: 70,
+                }
+            }
             Err(d) => RunOutcome::Problems(vec![rewrite_runtime_tier_diag(d)]),
         },
     );

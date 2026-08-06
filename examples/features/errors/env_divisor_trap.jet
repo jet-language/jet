@@ -1,0 +1,9 @@
+// #1483: dividing by an env-derived value traps at runtime with the Prelude
+// wording — never E0953 "your comptime code stopped the build".
+use core.env as env
+
+fn run() {
+    raw :: env.get("JET_EXAMPLE_DIVISOR") ?? "0"
+    n :: 10 /% (Int.parse(raw) ?? 0)
+    print(n)
+}
