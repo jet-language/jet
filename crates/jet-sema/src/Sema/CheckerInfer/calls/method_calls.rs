@@ -1301,6 +1301,30 @@ impl<'a> Checker<'a> {
                         args: vec![elem_ty],
                     });
                 }
+                // #1478: `Set.new()` → empty HashSet; elem from annotation/expected.
+                if type_name == "Set" && method == "new" && args.is_empty() {
+                    let elem_ty = match &self.expected_type {
+                        Some(Type::Apply { name, args, .. }) if name == "Set" && !args.is_empty() => {
+                            args[0].clone()
+                        }
+                        _ => Type::Int,
+                    };
+                    if !Collections::is_hashable_type(&elem_ty) {
+                        self.diags.push(Diagnostic::error(
+                            "E0506",
+                            format!("`Set<{}>` is not valid — `{}` is not hashable", elem_ty.name(), elem_ty.name()),
+                            "Set elements must implement Hash and Eq; use Int, Bool, String, Char, or a named type".to_string(),
+                            format!("change the element type to a hashable type, or use a `[{}]` list instead", elem_ty.name()),
+                            Some(span),
+                        ));
+                    }
+                    let ret = Type::Apply {
+                        name: "Set".to_string(),
+                        args: vec![elem_ty],
+                    };
+                    *resolved_ret_out = Some(ret.clone());
+                    return Some(ret);
+                }
                 // D-ITERTOOLS1=A: `SortedSet.from([...])` → `SortedSet<T>`.
                 if type_name == Syntax::TYPE_SORTED_SET && method == "from" && args.len() == 1 {
                     let arg_ty = self.infer(&mut args[0].expr);

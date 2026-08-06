@@ -1859,7 +1859,14 @@ fn resident_safe_builtin_op(
                 || jit_list_native_type(&recv.ty)
                 || jit_list_iter_elem_type(&recv.ty).is_some()
                 || jit_closure_elem_type(&recv.ty).is_some()
-                || matches!(&recv.ty, Type::Apply { name, .. } if matches!(name.as_str(), "Set" | "Deque"))
+                || matches!(
+                    &recv.ty,
+                    Type::Apply { name, .. }
+                        if matches!(
+                            name.as_str(),
+                            "Set" | "Deque" | "SortedSet" | "PriorityQueue"
+                        )
+                )
                 || matches!(&recv.ty, Type::Named(name) if name == "BitSet"))
                 && args.is_empty()
         }
@@ -1916,7 +1923,14 @@ fn resident_safe_builtin_op(
                 || jit_list_iter_elem_type(&recv.ty).is_some()
                 || jit_list_record_type(&recv.ty)
                 || matches!(&recv.ty, Type::List(elem) | Type::FixedList { elem, .. } if jit_value_type(elem))
-                || matches!(&recv.ty, Type::Apply { name, .. } if matches!(name.as_str(), "Set" | "Deque")))
+                || matches!(
+                    &recv.ty,
+                    Type::Apply { name, .. }
+                        if matches!(
+                            name.as_str(),
+                            "Set" | "Deque" | "SortedSet" | "PriorityQueue"
+                        )
+                ))
                 && args.is_empty()
         }
         TBuiltinOp::ParseInt | TBuiltinOp::ParseFloat => {
@@ -2063,6 +2077,19 @@ fn resident_safe_builtin_op(
                 if name == "Set" && targs.len() == 1 && matches!(&targs[0], Type::Int | Type::String))
                 && args.is_empty()
         }
+        TBuiltinOp::SetCopy | TBuiltinOp::SetCapacity | TBuiltinOp::SetFirst => {
+            matches!(&recv.ty, Type::Apply { name, args: targs }
+                if name == "Set" && targs.len() == 1 && matches!(&targs[0], Type::Int | Type::String))
+                && args.is_empty()
+        }
+        TBuiltinOp::SetEqual => {
+            matches!(&recv.ty, Type::Apply { name, args: targs }
+                if name == "Set" && targs.len() == 1 && matches!(&targs[0], Type::Int | Type::String))
+                && args.len() == 1
+                && matches!(&args[0].ty, Type::Apply { name, args: targs }
+                    if name == "Set" && targs.len() == 1 && matches!(&targs[0], Type::Int | Type::String))
+                && resident_safe_expr(&args[0], callees)
+        }
         TBuiltinOp::SetUnion
         | TBuiltinOp::SetIntersection
         | TBuiltinOp::SetDifference
@@ -2182,7 +2209,7 @@ fn resident_safe_builtin_op(
         }
         TBuiltinOp::Contains
             if matches!(&recv.ty, Type::Apply { name, args: targs }
-                if name == "Set"
+                if matches!(name.as_str(), "Set" | "SortedSet")
                     && targs.len() == 1
                     && matches!(&targs[0], Type::Int | Type::String)) =>
         {

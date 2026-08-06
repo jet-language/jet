@@ -324,6 +324,7 @@ pub(crate) fn resolve_builtin_op(
                 TBuiltinOp::GetList
             }
         }
+        ("first", 0) if is_set => TBuiltinOp::SetFirst,
         ("first", 0) if is_sorted_set => TBuiltinOp::First,
         ("last", 0) if is_sorted_set => TBuiltinOp::Last,
         ("first", 0) => TBuiltinOp::First,
@@ -339,7 +340,38 @@ pub(crate) fn resolve_builtin_op(
         ("join", 1) if is_deque => TBuiltinOp::DequeJoin,
         ("join", 1) => TBuiltinOp::JoinSep,
         ("split", 1) if is_deque => TBuiltinOp::DequeSplit,
-        ("split", 1) => TBuiltinOp::Split,
+        ("split", 1) if is_string => TBuiltinOp::Split,
+        ("split", 1) => {
+            let elem = match &rty {
+                Some(Type::List(inner)) => (**inner).clone(),
+                Some(ty) if crate::Collections::is_iter_type(ty) => crate::Collections::iter_elem(ty)
+                    .cloned()
+                    .unwrap_or(Type::Int),
+                _ => Type::Int,
+            };
+            let list_ty = Type::List(Box::new(elem));
+            let fields = vec![
+                ("left".to_string(), list_ty.clone()),
+                ("right".to_string(), list_ty),
+            ];
+            TBuiltinOp::IterSplit {
+                tuple_struct: crate::Codegen::Tuples::tuple_struct_name(&fields),
+            }
+        }
+        ("repeat", 1) if is_string => TBuiltinOp::Repeat,
+        // List literals leave `rty` None — same pattern as Take/Dedup.
+        ("repeat", 1) => TBuiltinOp::IterRepeat,
+        ("cycle", 0) => TBuiltinOp::IterCycle,
+        ("drop_last", 1) => TBuiltinOp::IterDropLast,
+        ("shuffle", 0) => TBuiltinOp::IterShuffle,
+        ("is_sorted", 0) => TBuiltinOp::IterIsSorted,
+        ("last_index_of", 1) => TBuiltinOp::IterLastIndexOf,
+        ("average", 0) => TBuiltinOp::IterAverage {
+            float: is_float_sequence,
+        },
+        ("compare", 1) => TBuiltinOp::IterCompare,
+        ("to_set", 0) if is_set => TBuiltinOp::SetCopy,
+        ("to_set", 0) => TBuiltinOp::SetFrom,
         ("sum", 0) => TBuiltinOp::Sum {
             float: matches!(resolved_ret, Some(Type::Float | Type::Float32)),
         },
@@ -392,7 +424,6 @@ pub(crate) fn resolve_builtin_op(
         ("before", 1) => TBuiltinOp::Before,
         ("to_upper", 0) => TBuiltinOp::ToUpper,
         ("to_lower", 0) => TBuiltinOp::ToLower,
-        ("repeat", 1) => TBuiltinOp::Repeat,
         ("slice", 2) => {
             // The string-slice form embeds the *receiver-span* line for its bounds panic.
             let line = crate::Diagnostics::span_line_col(&cx.src, receiver.span().start).0;
@@ -580,6 +611,9 @@ pub(crate) fn resolve_builtin_op(
         ("is_superset", 1) if is_set => TBuiltinOp::SetIsSuperset,
         ("is_disjoint", 1) if is_set => TBuiltinOp::SetIsDisjoint,
         ("union", 1) => TBuiltinOp::SetUnion,
+        ("copy", 0) if is_set => TBuiltinOp::SetCopy,
+        ("equal", 1) if is_set => TBuiltinOp::SetEqual,
+        ("capacity", 0) if is_set => TBuiltinOp::SetCapacity,
         ("add", 2) if is_lru => TBuiltinOp::LruPut,
         ("add_new", 2) if is_lru => TBuiltinOp::LruAddNew,
         ("capacity", 0) if is_lru => TBuiltinOp::LruCapacity,
@@ -761,6 +795,9 @@ pub(crate) fn resolve_closure_op(
         "max_by" => TClosureOp::MaxBy,
         "group_by" => TClosureOp::GroupBy,
         "count_by" => TClosureOp::CountBy,
+        "dedup_by" => TClosureOp::DedupBy,
+        "is_sorted_by" => TClosureOp::IsSortedBy,
+        "chunk_while" => TClosureOp::ChunkWhile,
         "partition" => {
             // Compute the tuple struct name from the receiver element type.
             // recv = List<T>; partition returns (false_: [T], true_: [T]).

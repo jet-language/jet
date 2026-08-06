@@ -59,6 +59,9 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         | ("indexed", 0) | ("indexes", 0) | ("zip", 1)
         | ("sum", 0) | ("product", 0) | ("min", 0) | ("max", 0)
         | ("flatten", 0) | ("intersperse", 1) | ("unzip", 0)
+        // #1479 Iter ledger surface (non-closure).
+        | ("cycle", 0) | ("drop_last", 1) | ("shuffle", 0)
+        | ("is_sorted", 0) | ("average", 0)
         // D-LOOPMAP1=B: enter the lazy pipeline plane from an in-memory list.
         | ("lazy", 0)
         // D-COLLBREADTH1=A: Set<T> instance methods.
@@ -66,6 +69,7 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         | ("intersection", 1) | ("difference", 1)
         | ("symmetric_difference", 1)
         | ("is_subset", 1) | ("is_superset", 1) | ("is_disjoint", 1)
+        | ("to_set", 0)
         | ("peek", 0) | ("to_sorted_list", 0)
         | ("capacity", 0) | ("count", 0) | ("to_bytes", 0)
         | ("write_u8", 1) | ("write_byte", 1) | ("write_u16_le", 1) | ("write_u16_be", 1)

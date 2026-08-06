@@ -260,6 +260,15 @@ pub(super) fn eval_builtin(
         TBuiltinOp::Dedup => apply_method(recv, "dedup", args, span),
         TBuiltinOp::Chunks => apply_method(recv, "chunks", args, span),
         TBuiltinOp::Windows => apply_method(recv, "windows", args, span),
+        TBuiltinOp::IterRepeat => apply_method(recv, "repeat", args, span),
+        TBuiltinOp::IterCycle => apply_method(recv, "cycle", args, span),
+        TBuiltinOp::IterDropLast => apply_method(recv, "drop_last", args, span),
+        TBuiltinOp::IterShuffle => apply_method(recv, "shuffle", args, span),
+        TBuiltinOp::IterIsSorted => apply_method(recv, "is_sorted", args, span),
+        TBuiltinOp::IterLastIndexOf => apply_method(recv, "last_index_of", args, span),
+        TBuiltinOp::IterAverage { .. } => apply_method(recv, "average", args, span),
+        TBuiltinOp::IterCompare => apply_method(recv, "compare", args, span),
+        TBuiltinOp::IterSplit { .. } => apply_method(recv, "split", args, span),
         TBuiltinOp::Indexed { .. } => apply_method(recv, "indexed", args, span),
         TBuiltinOp::Indexes => apply_method(recv, "indexes", args, span),
         TBuiltinOp::Zip {
@@ -303,6 +312,10 @@ pub(super) fn eval_builtin(
         TBuiltinOp::SetIsSubset => apply_method(recv, "is_subset", args, span),
         TBuiltinOp::SetIsSuperset => apply_method(recv, "is_superset", args, span),
         TBuiltinOp::SetIsDisjoint => apply_method(recv, "is_disjoint", args, span),
+        TBuiltinOp::SetCopy => apply_method(recv, "copy", args, span),
+        TBuiltinOp::SetEqual => apply_method(recv, "equal", args, span),
+        TBuiltinOp::SetCapacity => apply_method(recv, "capacity", args, span),
+        TBuiltinOp::SetFirst => apply_method(recv, "first", args, span),
         TBuiltinOp::SortedSetFrom => {
             CollectionEval::from_list(Syntax::TYPE_SORTED_SET, recv, span)
         }

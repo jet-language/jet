@@ -13602,6 +13602,30 @@ impl LowerCtx<'_, '_> {
                     let call = self.b.ins().call(host_ref, &[]);
                     return Ok(self.b.inst_results(call)[0]);
                 }
+                // #1478: `Set.new()` → empty HashSet handle.
+                let is_set_new = method.name == "new"
+                    && args.is_empty()
+                    && matches!(
+                        owner,
+                        TStaticOwner::Prelude { path, .. }
+                            if path == "std::collections::HashSet"
+                                || path.ends_with("::HashSet")
+                                || path.ends_with(".HashSet")
+                    );
+                if is_set_new {
+                    let host_ref = self
+                        .module
+                        .declare_func_in_func(self.host.coll.set_new, self.b.func);
+                    let string_kind = matches!(
+                        &expr.ty,
+                        Type::Apply { name, args }
+                            if name == "Set"
+                                && args.first().is_some_and(|ty| matches!(ty, Type::String))
+                    );
+                    let kind = self.b.ins().iconst(types::I64, i64::from(string_kind));
+                    let call = self.b.ins().call(host_ref, &[kind]);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
                 let is_bag_new = method.name == "new"
                     && args.is_empty()
                     && matches!(
@@ -13664,6 +13688,9 @@ impl LowerCtx<'_, '_> {
                 }
                 if method.name == "new" && args.is_empty() {
                     let host_id = match prelude_path {
+                        Some(path) if path.ends_with("HashSet") => {
+                            Some(self.host.coll.set_new)
+                        }
                         Some(path) if path.ends_with("BTreeSet") => {
                             Some(self.host.coll.sorted_set_new)
                         }
@@ -13680,11 +13707,15 @@ impl LowerCtx<'_, '_> {
                     };
                     if let Some(host_id) = host_id {
                         let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                        let call = if matches!(prelude_path, Some(path) if path.ends_with("BTreeSet")) {
+                        let call = if matches!(
+                            prelude_path,
+                            Some(path) if path.ends_with("BTreeSet") || path.ends_with("HashSet")
+                        ) {
                             let string_kind = matches!(
                                 &expr.ty,
                                 Type::Apply { name, args }
-                                    if name == jet_foundation::Syntax::TYPE_SORTED_SET
+                                    if (name == "Set"
+                                        || name == jet_foundation::Syntax::TYPE_SORTED_SET)
                                         && args.first().is_some_and(|ty| matches!(ty, Type::String))
                             );
                             let kind = self.b.ins().iconst(types::I64, i64::from(string_kind));
@@ -15456,6 +15487,10 @@ impl LowerCtx<'_, '_> {
                     self.host.coll.set_len
                 } else if matches!(&recv.ty, Type::Apply { name, .. } if name == "Deque") {
                     self.host.coll.deque_len
+                } else if matches!(&recv.ty, Type::Apply { name, .. } if name == "SortedSet") {
+                    self.host.coll.sorted_set_len
+                } else if matches!(&recv.ty, Type::Apply { name, .. } if name == "PriorityQueue") {
+                    self.host.coll.priority_queue_len
                 } else if matches!(&recv.ty, Type::Named(name) if name == "BitSet") {
                     self.host.coll.bit_set_len
                 } else {
@@ -15499,6 +15534,10 @@ impl LowerCtx<'_, '_> {
                     self.host.coll.set_len
                 } else if matches!(&recv.ty, Type::Apply { name, .. } if name == "Deque") {
                     self.host.coll.deque_len
+                } else if matches!(&recv.ty, Type::Apply { name, .. } if name == "SortedSet") {
+                    self.host.coll.sorted_set_len
+                } else if matches!(&recv.ty, Type::Apply { name, .. } if name == "PriorityQueue") {
+                    self.host.coll.priority_queue_len
                 } else {
                     self.host.coll.list_len
                 };
@@ -15814,12 +15853,20 @@ impl LowerCtx<'_, '_> {
                 }
             }
             TBuiltinOp::Contains => {
-                // Set.has(x) / SortedSet.has — Int elems.
+                // Set.has(x) / SortedSet.has — Int/String elems.
                 if matches!(&recv.ty, Type::Apply { name, .. } if name == "Set") {
                     let needle = self.lower_expr(&args[0])?;
                     let host_ref = self
                         .module
                         .declare_func_in_func(self.host.coll.set_has, self.b.func);
+                    let call = self.b.ins().call(host_ref, &[recv_val, needle]);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
+                if matches!(&recv.ty, Type::Apply { name, .. } if name == "SortedSet") {
+                    let needle = self.lower_expr(&args[0])?;
+                    let host_ref = self
+                        .module
+                        .declare_func_in_func(self.host.coll.sorted_set_has, self.b.func);
                     let call = self.b.ins().call(host_ref, &[recv_val, needle]);
                     return Ok(self.b.inst_results(call)[0]);
                 }
@@ -16173,6 +16220,17 @@ impl LowerCtx<'_, '_> {
             TBuiltinOp::Windows => {
                 self.lower_iter_adapter(self.host.coll.iter_windows, recv_val, Some(&args[0]), None)
             }
+            TBuiltinOp::IterRepeat
+            | TBuiltinOp::IterCycle
+            | TBuiltinOp::IterDropLast
+            | TBuiltinOp::IterShuffle
+            | TBuiltinOp::IterIsSorted
+            | TBuiltinOp::IterLastIndexOf
+            | TBuiltinOp::IterAverage { .. }
+            | TBuiltinOp::IterCompare
+            | TBuiltinOp::IterSplit { .. } => {
+                Err("jit #1479 iter builtin pending host".to_string())
+            }
             TBuiltinOp::Indexes => {
                 // AOT: `jet_iter_indexes(recv.len())` — JIT materializes list.
                 let len_ref = self
@@ -16234,6 +16292,35 @@ impl LowerCtx<'_, '_> {
                 let host_ref = self
                     .module
                     .declare_func_in_func(self.host.coll.set_to_list, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            TBuiltinOp::SetCopy => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.set_copy, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            TBuiltinOp::SetEqual => {
+                let other = self.lower_expr(&args[0])?;
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.set_equal, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val, other]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            TBuiltinOp::SetCapacity => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.set_capacity, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            TBuiltinOp::SetFirst => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.set_first, self.b.func);
                 let call = self.b.ins().call(host_ref, &[recv_val]);
                 Ok(self.b.inst_results(call)[0])
             }

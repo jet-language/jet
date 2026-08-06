@@ -524,6 +524,7 @@ pub(crate) fn method_call_in_subset(
             if !locals.contains(type_name.as_str()) {
                 match (type_name.as_str(), method, args.len()) {
                     ("Set", "from", 1)
+                    | ("Set", "new", 0)
                     | ("SortedSet", "from", 1)
                     | ("PriorityQueue", "from", 1)
                     | ("ByteBuffer", "from", 1)
@@ -1419,6 +1420,10 @@ pub(crate) fn is_intercepted_method_name(method: &str) -> bool {
         | "take_while" | "skip_while" | "flat_map" | "scan"
         | "position" | "min_by" | "max_by" | "fold" | "group_by" | "count_by" | "partition"
         | "para_map" | "para_filter" | "para_partition" | "para_fold"
+        // #1479
+        | "cycle" | "drop_last" | "shuffle" | "is_sorted" | "is_sorted_by"
+        | "dedup_by" | "average" | "chunk_while" | "last_index_of" | "compare"
+        | "to_set"
         // Numeric predicates / bit ops (D-NUMOPS1).
         | "is_nan" | "is_infinite" | "is_finite"
         | "count_ones" | "count_zeros" | "leading_zeros" | "trailing_zeros"

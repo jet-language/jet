@@ -1259,10 +1259,14 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 }
                 // D-COLLBREADTH1=A: Set<T> operations.
                 TBuiltinOp::SetFrom => {
-                    format!(
-                        "({}).into_iter().collect::<std::collections::HashSet<_>>()",
-                        recv
-                    )
+                    if recv_is_iter {
+                        format!("jet_iter_to_set({recv})")
+                    } else {
+                        format!(
+                            "({}).into_iter().collect::<std::collections::HashSet<_>>()",
+                            recv
+                        )
+                    }
                 }
                 TBuiltinOp::SetInsert => format!("({}).insert({})", recv, a(0)),
                 TBuiltinOp::SetRemove => format!("{{({}).remove(&{});}}", recv, a(0)),
@@ -1291,6 +1295,10 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TBuiltinOp::SetIsDisjoint => {
                     format!("jet_set_is_disjoint(&({}), &({}))", recv, a(0))
                 }
+                TBuiltinOp::SetCopy => format!("({}).clone()", recv),
+                TBuiltinOp::SetEqual => format!("({}) == ({})", recv, a(0)),
+                TBuiltinOp::SetCapacity => format!("({}).capacity() as i64", recv),
+                TBuiltinOp::SetFirst => format!("({}).iter().next().cloned()", recv),
                 TBuiltinOp::SortedSetFrom => {
                     format!(
                         "({}).into_iter().collect::<std::collections::BTreeSet<_>>()",
@@ -1535,6 +1543,28 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TBuiltinOp::Dedup => format!("jet_iter_dedup({as_iter})"),
                 TBuiltinOp::Chunks => format!("jet_iter_chunks({as_iter}, {})", a(0)),
                 TBuiltinOp::Windows => format!("jet_iter_windows({as_iter}, {})", a(0)),
+                TBuiltinOp::IterRepeat => format!("jet_iter_repeat({as_iter}, {})", a(0)),
+                TBuiltinOp::IterCycle => format!("jet_iter_cycle({as_iter})"),
+                TBuiltinOp::IterDropLast => format!("jet_iter_drop_last({as_iter}, {})", a(0)),
+                TBuiltinOp::IterShuffle => format!("jet_iter_shuffle({as_iter})"),
+                TBuiltinOp::IterIsSorted => format!("jet_iter_is_sorted({as_iter})"),
+                TBuiltinOp::IterLastIndexOf => {
+                    format!("jet_iter_last_index_of({as_iter}, {})", a(0))
+                }
+                TBuiltinOp::IterAverage { float: false } => {
+                    format!("jet_iter_average_int({as_iter})")
+                }
+                TBuiltinOp::IterAverage { float: true } => {
+                    format!("jet_iter_average_float({as_iter})")
+                }
+                TBuiltinOp::IterCompare => {
+                    format!("jet_iter_compare({as_iter}, ({}).clone())", a(0))
+                }
+                TBuiltinOp::IterSplit { tuple_struct } => format!(
+                    "jet_iter_split_at({as_iter}, {}, |left, right| {} {{ user_left: left, user_right: right }})",
+                    a(0),
+                    tuple_struct
+                ),
                 TBuiltinOp::Indexed { tuple_struct } => format!(
                     "jet_iter_enumerate({as_iter}, |i, x| {} {{ user_idx: i, user_item: x }})",
                     tuple_struct
@@ -2790,6 +2820,15 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 }
                 TClosureOp::CountBy => {
                     format!("jet_list_count_by({vec_src}, {})", a(0))
+                }
+                TClosureOp::DedupBy => {
+                    format!("jet_iter_dedup_by({as_iter}, {})", a(0))
+                }
+                TClosureOp::IsSortedBy => {
+                    format!("jet_iter_is_sorted_by({as_iter}, {})", a(0))
+                }
+                TClosureOp::ChunkWhile => {
+                    format!("jet_iter_chunk_while({as_iter}, {})", a(0))
                 }
                 TClosureOp::Partition { tuple_struct } => {
                     // `partition` passes each element by value (T: Clone).

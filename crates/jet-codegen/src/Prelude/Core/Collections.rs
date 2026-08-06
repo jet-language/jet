@@ -798,3 +798,137 @@ where
     }
     build(yes, no)
 }
+
+// ── #1479: remaining Iter ledger surface ─────────────────────────────────────
+fn jet_iter_repeat<T: 'static + Clone>(it: JetIter<T>, n: i64) -> JetIter<T> {
+    let xs = it.to_list();
+    let n = n.max(0) as usize;
+    JetIter(Box::new((0..n).flat_map(move |_| xs.clone().into_iter())))
+}
+
+fn jet_iter_cycle<T: 'static + Clone>(it: JetIter<T>) -> JetIter<T> {
+    let xs = it.to_list();
+    JetIter(Box::new(xs.into_iter().cycle()))
+}
+
+fn jet_iter_drop_last<T: 'static>(it: JetIter<T>, n: i64) -> JetIter<T> {
+    let mut xs = it.to_list();
+    let n = n.max(0) as usize;
+    if n >= xs.len() {
+        xs.clear();
+    } else {
+        xs.truncate(xs.len() - n);
+    }
+    jet_iter_from_vec(xs)
+}
+
+fn jet_iter_shuffle<T: 'static>(it: JetIter<T>) -> JetIter<T> {
+    let mut xs = it.to_list();
+    // Stable demo shuffle (not crypto). Seeded LCG so goldens are deterministic.
+    let mut state: u64 = 0xC0FF_EE42;
+    for i in (1..xs.len()).rev() {
+        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+        let j = ((state >> 33) as usize) % (i + 1);
+        xs.swap(i, j);
+    }
+    jet_iter_from_vec(xs)
+}
+
+fn jet_iter_is_sorted<T: 'static + Ord>(it: JetIter<T>) -> bool {
+    let xs = it.to_list();
+    xs.windows(2).all(|w| w[0] <= w[1])
+}
+
+fn jet_iter_is_sorted_by<T: 'static, K: Ord, F>(it: JetIter<T>, mut f: F) -> bool
+where
+    F: FnMut(&T) -> K,
+{
+    let xs = it.to_list();
+    xs.windows(2).all(|w| f(&w[0]) <= f(&w[1]))
+}
+
+fn jet_iter_dedup_by<T: 'static + Clone, K: PartialEq, F>(it: JetIter<T>, mut f: F) -> JetIter<T>
+where
+    F: 'static + FnMut(&T) -> K,
+{
+    let xs = it.to_list();
+    let mut out: Vec<T> = Vec::new();
+    let mut prev_key: Option<K> = None;
+    for x in xs {
+        let key = f(&x);
+        if prev_key.as_ref() == Some(&key) {
+            continue;
+        }
+        prev_key = Some(key);
+        out.push(x);
+    }
+    jet_iter_from_vec(out)
+}
+
+fn jet_iter_last_index_of<T: 'static + PartialEq>(it: JetIter<T>, needle: T) -> Option<i64> {
+    let xs = it.to_list();
+    xs.iter().rposition(|x| x == &needle).map(|i| i as i64)
+}
+
+fn jet_iter_average_int(it: JetIter<i64>) -> f64 {
+    let xs = it.to_list();
+    if xs.is_empty() {
+        0.0
+    } else {
+        xs.iter().sum::<i64>() as f64 / xs.len() as f64
+    }
+}
+
+fn jet_iter_average_float(it: JetIter<f64>) -> f64 {
+    let xs = it.to_list();
+    if xs.is_empty() {
+        0.0
+    } else {
+        xs.iter().sum::<f64>() / xs.len() as f64
+    }
+}
+
+fn jet_iter_compare<T: 'static + Ord>(it: JetIter<T>, other: Vec<T>) -> i64 {
+    match it.to_list().as_slice().cmp(other.as_slice()) {
+        std::cmp::Ordering::Less => -1,
+        std::cmp::Ordering::Equal => 0,
+        std::cmp::Ordering::Greater => 1,
+    }
+}
+
+fn jet_iter_split_at<T: 'static, R>(
+    it: JetIter<T>,
+    n: i64,
+    build: impl FnOnce(Vec<T>, Vec<T>) -> R,
+) -> R {
+    let mut xs = it.to_list();
+    let n = n.max(0) as usize;
+    if n >= xs.len() {
+        build(xs, Vec::new())
+    } else {
+        let right = xs.split_off(n);
+        build(xs, right)
+    }
+}
+
+fn jet_iter_chunk_while<T: 'static + Clone, F>(it: JetIter<T>, mut f: F) -> JetIter<Vec<T>>
+where
+    F: 'static + FnMut(&T, &T) -> bool,
+{
+    let xs = it.to_list();
+    let mut chunks: Vec<Vec<T>> = Vec::new();
+    for x in xs {
+        if let Some(last) = chunks.last_mut() {
+            if f(last.last().unwrap(), &x) {
+                last.push(x);
+                continue;
+            }
+        }
+        chunks.push(vec![x]);
+    }
+    jet_iter_from_vec(chunks)
+}
+
+fn jet_iter_to_set<T: Eq + std::hash::Hash>(it: JetIter<T>) -> std::collections::HashSet<T> {
+    it.into_iter().collect()
+}

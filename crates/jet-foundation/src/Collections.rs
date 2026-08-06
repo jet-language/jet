@@ -87,6 +87,8 @@ pub fn is_closure_method(method: &str) -> bool {
         | "partition"
         // D-FAILCOMP1: failure-aware adapters
         | "filter_map"
+        // #1479
+        | "is_sorted_by" | "dedup_by" | "chunk_while"
         // D-PARCAPTURE1=D: explicit parallel adapters, consistently `para_`.
         | "para_map" | "para_filter" | "para_partition" | "para_fold"
         | "edit_disjoint"
@@ -103,8 +105,10 @@ pub fn is_lazy_adapter(method: &str) -> bool {
             | "skip"
             | "step_by"
             | "dedup"
+            | "dedup_by"
             | "chunks"
             | "windows"
+            | "chunk_while"
             | "flatten"
             | "intersperse"
             | "indexed"
@@ -117,6 +121,10 @@ pub fn is_lazy_adapter(method: &str) -> bool {
             | "flat_map"
             | "filter_map"
             | "scan"
+            | "cycle"
+            | "repeat"
+            | "drop_last"
+            | "shuffle"
     )
 }
 
@@ -146,6 +154,13 @@ pub fn is_iter_terminal(method: &str) -> bool {
             | "unzip"
             | "try_collect"
             | "join"
+            | "is_sorted"
+            | "is_sorted_by"
+            | "last_index_of"
+            | "average"
+            | "to_set"
+            | "compare"
+            | "split"
     )
 }
 
@@ -786,6 +801,15 @@ fn builtin_static_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
             name: "Deque".to_string(),
             args: vec![Type::Int],
         })),
+        // #1478: Set/SortedSet empty constructors (ledger + static return table).
+        (Type::Named(n), "new", 0) if n == "Set" => Some(Some(Type::Apply {
+            name: "Set".to_string(),
+            args: vec![Type::Int],
+        })),
+        (Type::Named(n), "new", 0) if n == Syntax::TYPE_SORTED_SET => Some(Some(Type::Apply {
+            name: Syntax::TYPE_SORTED_SET.to_string(),
+            args: vec![Type::Int],
+        })),
         // D-SHAPE-CONVERT1=A: destination-owned numeric conversion.
         _ => numeric_conversion_return(ty, method, nargs),
     }
@@ -879,6 +903,26 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
         ("take" | "skip" | "step_by", 1) => Some(Some(iter_ty(inner.clone()))),
         ("dedup", 0) => Some(Some(iter_ty(inner.clone()))),
         ("chunks" | "windows", 1) => Some(Some(iter_ty(Type::List(Box::new(inner.clone()))))),
+        // #1479: List shares Iter surface (I8).
+        ("repeat", 1) => Some(Some(iter_ty(inner.clone()))),
+        ("compare", 1) => Some(Some(Type::Int)),
+        ("is_sorted", 0) => Some(Some(Type::Bool)),
+        ("is_sorted_by", 1) => Some(Some(Type::Bool)),
+        ("dedup_by", 1) => Some(Some(iter_ty(inner.clone()))),
+        ("cycle", 0) => Some(Some(iter_ty(inner.clone()))),
+        ("drop_last", 1) => Some(Some(iter_ty(inner.clone()))),
+        ("last_index_of", 1) => Some(Some(Type::Option(Box::new(Type::Int)))),
+        ("average", 0) => Some(Some(Type::Float)),
+        ("to_set", 0) => Some(Some(Type::Apply {
+            name: Syntax::TYPE_SET.to_string(),
+            args: vec![inner.clone()],
+        })),
+        ("split", 1) => Some(Some(Type::Tuple(vec![
+            ("left".to_string(), Box::new(Type::List(Box::new(inner.clone())))),
+            ("right".to_string(), Box::new(Type::List(Box::new(inner.clone())))),
+        ]))),
+        ("shuffle", 0) => Some(Some(iter_ty(inner.clone()))),
+        ("chunk_while", 1) => Some(Some(iter_ty(Type::List(Box::new(inner.clone()))))),
         ("flatten", 0) => match inner {
             Type::List(elem) => Some(Some(iter_ty(*elem.clone()))),
             _ => Some(Some(iter_ty(Type::Int))),
@@ -1038,6 +1082,26 @@ fn iter_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
             value: Box::new(Type::Int),
         })),
         ("join", 1) => Some(Some(Type::String)),
+        // #1479: remaining Iter ledger surface
+        ("is_sorted", 0) => Some(Some(Type::Bool)),
+        ("is_sorted_by", 1) => Some(Some(Type::Bool)),
+        ("dedup_by", 1) => Some(Some(iter_ty(inner.clone()))),
+        ("cycle", 0) => Some(Some(iter_ty(inner.clone()))),
+        ("repeat", 1) => Some(Some(iter_ty(inner.clone()))),
+        ("drop_last", 1) => Some(Some(iter_ty(inner.clone()))),
+        ("last_index_of", 1) => Some(Some(Type::Option(Box::new(Type::Int)))),
+        ("average", 0) => Some(Some(Type::Float)),
+        ("to_set", 0) => Some(Some(Type::Apply {
+            name: Syntax::TYPE_SET.to_string(),
+            args: vec![inner.clone()],
+        })),
+        ("compare", 1) => Some(Some(Type::Int)),
+        ("split", 1) => Some(Some(Type::Tuple(vec![
+            ("left".to_string(), Box::new(Type::List(Box::new(inner.clone())))),
+            ("right".to_string(), Box::new(Type::List(Box::new(inner.clone())))),
+        ]))),
+        ("shuffle", 0) => Some(Some(iter_ty(inner.clone()))),
+        ("chunk_while", 1) => Some(Some(iter_ty(Type::List(Box::new(inner.clone()))))),
         _ => None,
     }
 }
@@ -1599,6 +1663,11 @@ fn set_method_return(elem: &Type, method: &str, nargs: usize) -> Option<Option<T
         }
         ("is_subset" | "is_superset" | "is_disjoint", 1) => Some(Some(Type::Bool)),
         ("to_list", 0) => Some(Some(Type::List(Box::new(elem.clone())))),
+        // #1478: remaining Set surface (non-closure).
+        ("copy" | "to_set", 0) => Some(Some(set_of_elem())),
+        ("equal", 1) => Some(Some(Type::Bool)),
+        ("capacity", 0) => Some(Some(Type::Int)),
+        ("first", 0) => Some(Some(Type::Option(Box::new(elem.clone())))),
         _ => None,
     }
 }
@@ -2076,12 +2145,40 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                 },
             ]),
             // D-ITER1: non-closure adapters.
-            "take" | "skip" | "step_by" | "chunks" | "windows" => Some(vec![Type::Int]),
-            "intersperse" => Some(vec![(**inner).clone()]),
-            "zip" => Some(vec![]),
-            "dedup" | "indexed" | "indexes" | "sum" | "product" | "min" | "max" | "flatten" | "unzip" => {
-                Some(vec![])
+            "take" | "skip" | "step_by" | "chunks" | "windows" | "repeat" | "drop_last" | "split" => {
+                Some(vec![Type::Int])
             }
+            "intersperse" | "last_index_of" => Some(vec![(**inner).clone()]),
+            "compare" => Some(vec![Type::List(Box::new((**inner).clone()))]),
+            "zip" => Some(vec![]),
+            "dedup"
+            | "indexed"
+            | "indexes"
+            | "sum"
+            | "product"
+            | "min"
+            | "max"
+            | "flatten"
+            | "unzip"
+            | "is_sorted"
+            | "cycle"
+            | "shuffle"
+            | "average"
+            | "to_set" => Some(vec![]),
+            "dedup_by" | "is_sorted_by" => Some(vec![Type::Fn {
+                params: vec![(**inner).clone()],
+                ret: None,
+                effect_bound: None,
+                return_view_provenance: None,
+                param_contract: None,
+            }]),
+            "chunk_while" => Some(vec![Type::Fn {
+                params: vec![(**inner).clone(), (**inner).clone()],
+                ret: Some(Box::new(Type::Bool)),
+                effect_bound: None,
+                return_view_provenance: None,
+                param_contract: None,
+            }]),
             // D-DYNARRAY1: `.view(a..b)` — both range ends are Int (parsed
             // specially; always arrives as exactly 2 args).
             "view" => Some(vec![Type::Int, Type::Int]),
@@ -2382,7 +2479,11 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
         Type::Apply { name, args } if name == "Set" => {
             let elem = args.first().cloned().unwrap_or(Type::Int);
             match method {
-                "add" | "has" | "remove" => Some(vec![elem]),
+                "add" | "has" | "remove" => Some(vec![elem.clone()]),
+                "equal" => Some(vec![Type::Apply {
+                    name: "Set".to_string(),
+                    args: vec![elem.clone()],
+                }]),
                 "union" | "intersection" | "difference" | "symmetric_difference"
                 | "is_subset" | "is_superset" | "is_disjoint" => Some(vec![Type::Apply {
                     name: "Set".to_string(),

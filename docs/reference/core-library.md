@@ -182,9 +182,9 @@ lazy. An expected type never changes the collector or evaluation time.
 
 | Type | Constructors | Main methods |
 | --- | --- | --- |
-| `[T]` | list literal `[a, b]` | `map`, `filter`, `each`, `find`, `any`, `all`, `sort_by`, `reduce`, `take`, `skip`, `step_by`, `dedup`, `chunks`, `windows`, `indexed`, `indexes`, `zip`, `zip_short`, `zip_pad`, `unzip`, `take_while`, `skip_while`, `flat_map`, `filter_map`, `scan`, `fold`, `sum`, `product`, `min`, `max`, `min_by`, `max_by`, `group_by`, `count_by`, `count`, `extend`, `concat`, `partition`, `flatten`, `intersperse` |
+| `[T]` | list literal `[a, b]` | `map`, `filter`, `each`, `find`, `any`, `all`, `sort_by`, `reduce`, `take`, `skip`, `step_by`, `dedup`, `dedup_by`, `chunks`, `windows`, `chunk_while`, `indexed`, `indexes`, `zip`, `zip_short`, `zip_pad`, `unzip`, `take_while`, `skip_while`, `flat_map`, `filter_map`, `scan`, `fold`, `sum`, `product`, `min`, `max`, `min_by`, `max_by`, `group_by`, `count_by`, `count`, `extend`, `concat`, `partition`, `flatten`, `intersperse`, `repeat`, `cycle`, `drop_last`, `shuffle`, `is_sorted`, `is_sorted_by`, `last_index_of`, `average`, `compare`, `split`, `to_set`, `join`, `to_list`/`collect`, `lazy` |
 | `[K: V]` | map literal `["a": 1]` | `keys`/`values` (lazy `Iter` views), `has_key`, `get`, `add`, `add_new`, `remove`, `merge`, `len`, `is_empty`, `clear` |
-| `Set<T>` | `Set.new()`, `Set.from(xs)` | `add`, `remove`, `has`, `union`, `intersection`, `difference`, `symmetric_difference`, `is_subset`, `is_superset`, `is_disjoint`, `to_list`, `len`, `is_empty`, `clear` |
+| `Set<T>` | `Set.new()`, `Set.from(xs)` | `add`, `remove`, `has`, `union`, `intersection`, `difference`, `symmetric_difference`, `is_subset`, `is_superset`, `is_disjoint`, `copy`, `to_set`, `equal`, `capacity`, `first`, `to_list`, `len`, `is_empty`, `clear` |
 | `SortedSet<T>` | `SortedSet.new()`, `SortedSet.from(xs)` | `add`, `remove`, `has`, `first`, `last`, `union`, `intersection`, `difference`, `symmetric_difference`, `is_subset`, `is_superset`, `is_disjoint`, `to_list`, `len`, `is_empty`, `clear` |
 | `Deque<T>` | `Deque.new()`, `Deque.init(xs)` | `push_front`, `push_back`, `pop_front`, `pop_back`, `peek_front`, `peek_back`, `capacity`, `contains`, `get`, `delete`, `to_list`, `join`, `reverse`, `split`, `len`, `is_empty`, `clear` |
 | `PriorityQueue<T>` | `PriorityQueue.new()`, `PriorityQueue.from(xs)` | `push`, `pop`, `peek`, `to_sorted_list`, `len`, `is_empty`, `clear` |
@@ -193,7 +193,24 @@ lazy. An expected type never changes the collector or evaluation time.
 | `BitSet` | `BitSet.new()` | `add`, `remove`, `has`, `count`, `to_list`, `len`, `clear` |
 | `ByteBuffer` | `ByteBuffer.new()`, `ByteBuffer.with_capacity(n)`, `ByteBuffer.from(bytes)` | write: `write_u8`/`write_byte`, `write_u16_le`/`be`, `write_u32_le`/`be`, `write_u64_le`/`be`, `write_bytes`/`write`, `write_to`; cursor: `position`, `eof`, `seek`, `rewind`, `read`, `read_byte`/`next`, `read_bytes`, `read_string`, `get`, `first`; string-like: `contains`, `starts_with`, `ends_with`, `trim`/`trim_start`/`trim_end`, `to_lower`/`to_upper`/`to_title`/`title`, `replace`, `split`, `join`, `lines`, `index_of`/`last_index_of`, `is_ascii`, `to_string`/`string`, `parse`; lifecycle: `flush`, `close`, `shutdown`, `copy`/`clone`, `copy_to`, `equal`, `compare`, `capacity`, `get_buffer`/`buffer`, `to_bytes`, `len`, `is_empty`, `clear` |
 
-Example: `examples/features/collections/iter_tools_audit.jet` covers the
+`Set` / `SortedSet` declines (#1478): closure and sequence adapters (`all`,
+`each`, `filter`, `flatmap`, `flatten`, `fold`, `map`, `indexed`, `take`,
+`update`, `replace`) stay on `to_list()` / `Iter` — one mechanism (I8), not a
+parallel set-native lazy surface. Order ops (`sort`, `shuffle`, `indexof`,
+`max`, `min` as position-bearing APIs) and `copyto` are declined on unordered
+`Set` (and `copyto` on `SortedSet`); use `to_list()` then list/iter methods.
+`first` on `Set` is shipped with arbitrary hash-order semantics.
+
+Example: `examples/features/collections/iter_adapters.jet` covers adapters
+including the #1479 surface (`repeat`, `cycle`, `drop_last`, `shuffle`,
+`is_sorted`/`is_sorted_by`, `dedup_by`, `last_index_of`, `average`, `compare`,
+`split`, `chunk_while`, `to_set`). `cycle` is infinite — call `.take(n)` (or
+another finite adapter) before `to_list`. `shuffle` uses a fixed demo seed so
+examples stay deterministic; use `Rng` when you need a real random shuffle.
+Synonyms in the Core surface ledger map competitor spellings such as `fill`→
+`repeat`, `cmp`→`compare`, `next`→`first`, `size_hint`→`len`, `compact`→
+`filter`, `tostring`→`join`, and `clip`/`iterator`→`to_list`.
+Also: `examples/features/collections/iter_tools_audit.jet` covers the
 adapter and specialized-container surface. Lazy protocol:
 `examples/features/collections/lazy_iter.jet`.
 

@@ -911,6 +911,106 @@ pub fn apply_method(
             }
             Ok(CtValue::List(out))
         }
+        (CtValue::List(xs), "repeat") => {
+            let n = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?.max(0) as usize;
+            let mut out = Vec::with_capacity(xs.len().saturating_mul(n));
+            for _ in 0..n {
+                out.extend(xs.iter().cloned());
+            }
+            Ok(CtValue::List(out))
+        }
+        (CtValue::List(xs), "cycle") => {
+            // Finite materialization for eval/deopt: one copy (callers must take()).
+            Ok(CtValue::List(xs.clone()))
+        }
+        (CtValue::List(xs), "drop_last") => {
+            let n = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?.max(0) as usize;
+            Ok(CtValue::List(if n >= xs.len() {
+                Vec::new()
+            } else {
+                xs[..xs.len() - n].to_vec()
+            }))
+        }
+        (CtValue::List(xs), "shuffle") => {
+            let mut out = xs.clone();
+            let mut state: u64 = 0xC0FF_EE42;
+            for i in (1..out.len()).rev() {
+                state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+                let j = ((state >> 33) as usize) % (i + 1);
+                out.swap(i, j);
+            }
+            Ok(CtValue::List(out))
+        }
+        (CtValue::List(xs), "is_sorted") => {
+            let ok = xs.windows(2).all(|w| match (&w[0], &w[1]) {
+                (CtValue::Int(a), CtValue::Int(b)) => a <= b,
+                (CtValue::Str(a), CtValue::Str(b)) => a <= b,
+                _ => w[0].jet_show() <= w[1].jet_show(),
+            });
+            Ok(CtValue::Bool(ok))
+        }
+        (CtValue::List(xs), "last_index_of") => {
+            let needle = args.first().cloned().unwrap_or(CtValue::Int(0));
+            let idx = xs.iter().rposition(|x| x == &needle);
+            Ok(match idx {
+                Some(i) => CtValue::Some(Box::new(CtValue::Int(i as i64))),
+                None => CtValue::None(Type::Int),
+            })
+        }
+        (CtValue::List(xs), "average") => {
+            if xs.is_empty() {
+                return Ok(CtValue::Float(CtFloat::f64(0.0)));
+            }
+            let mut sum = 0.0f64;
+            for x in xs {
+                sum += match x {
+                    CtValue::Int(n) => *n as f64,
+                    CtValue::Float(n) => n.as_f64(),
+                    _ => return Err(unsupported("average on non-numeric list", span)),
+                };
+            }
+            Ok(CtValue::Float(CtFloat::f64(sum / xs.len() as f64)))
+        }
+        (CtValue::List(xs), "compare") => {
+            let other = match args.first() {
+                Some(CtValue::List(ys)) => ys,
+                _ => return Err(unsupported("compare needs a list argument", span)),
+            };
+            let ord = xs
+                .iter()
+                .map(|x| x.jet_show())
+                .cmp(other.iter().map(|x| x.jet_show()));
+            Ok(CtValue::Int(match ord {
+                std::cmp::Ordering::Less => -1,
+                std::cmp::Ordering::Equal => 0,
+                std::cmp::Ordering::Greater => 1,
+            }))
+        }
+        (CtValue::List(xs), "split") => {
+            let n = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?.max(0) as usize;
+            let (left, right) = if n >= xs.len() {
+                (xs.clone(), Vec::new())
+            } else {
+                (xs[..n].to_vec(), xs[n..].to_vec())
+            };
+            Ok(CtValue::Struct {
+                type_name: String::new(),
+                fields: vec![
+                    ("left".to_string(), CtValue::List(left)),
+                    ("right".to_string(), CtValue::List(right)),
+                ],
+            })
+        }
+        (CtValue::List(xs), "to_set") => {
+            let mut out = std::collections::BTreeMap::new();
+            for x in xs {
+                let key = crate::AST::CtKey::from_value(x.clone())
+                    .ok_or_else(|| unsupported("to_set element type", span))?;
+                out.insert(key, CtValue::Bool(true));
+            }
+            // Represent as Map for comptime; AOT uses HashSet.
+            Ok(CtValue::Map(out))
+        }
         (CtValue::List(xs), "chunks") => {
             let n = as_int(args.first().unwrap_or(&CtValue::Int(1)), span)?.max(1) as usize;
             Ok(CtValue::List(

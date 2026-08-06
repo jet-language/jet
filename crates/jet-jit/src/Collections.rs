@@ -1216,6 +1216,63 @@ extern "C" fn jet_jit_set_from_list(list: i64, string_kind: i64) -> i64 {
     })
 }
 
+// #1478: empty Set constructor + remaining non-closure surface.
+extern "C" fn jet_jit_set_new(string_kind: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| set_handle(rt, HashSet::new(), string_kind != 0))
+}
+
+extern "C" fn jet_jit_set_copy(set: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let idx = (set as usize).wrapping_sub(1);
+        let existing = rt.sets.get(idx).cloned().unwrap_or_default();
+        let string_kind = set_is_string(rt, set);
+        set_handle(rt, existing, string_kind)
+    })
+}
+
+extern "C" fn jet_jit_set_equal(a: i64, b: i64) -> i8 {
+    Concurrency::with_runtime_mut(|rt| {
+        let left = rt
+            .sets
+            .get((a as usize).wrapping_sub(1))
+            .cloned()
+            .unwrap_or_default();
+        let right = rt
+            .sets
+            .get((b as usize).wrapping_sub(1))
+            .cloned()
+            .unwrap_or_default();
+        let string_kind = set_is_string(rt, a) || set_is_string(rt, b);
+        let eq = if string_kind {
+            let left_values = set_string_values(rt, &left);
+            let right_values = set_string_values(rt, &right);
+            left_values == right_values
+        } else {
+            left == right
+        };
+        i8::from(eq)
+    })
+}
+
+extern "C" fn jet_jit_set_capacity(set: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.sets
+            .get((set as usize).wrapping_sub(1))
+            .map(|s| s.capacity() as i64)
+            .unwrap_or(0)
+    })
+}
+
+extern "C" fn jet_jit_set_first(set: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let value = rt
+            .sets
+            .get((set as usize).wrapping_sub(1))
+            .and_then(|existing| existing.iter().next().copied());
+        option_i64(rt, value)
+    })
+}
+
 extern "C" fn jet_jit_set_insert(set: i64, v: i64) -> i8 {
     Concurrency::with_runtime_mut(|rt| {
         let idx = (set as usize).wrapping_sub(1);
@@ -1678,6 +1735,33 @@ extern "C" fn jet_jit_sorted_set_new(string_kind: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| sorted_set_handle(rt, BTreeSet::new(), string_kind != 0))
 }
 
+extern "C" fn jet_jit_sorted_set_len(handle: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.sorted_sets
+            .get((handle as usize).wrapping_sub(1))
+            .map(|s| s.len() as i64)
+            .unwrap_or(0)
+    })
+}
+
+extern "C" fn jet_jit_sorted_set_has(handle: i64, v: i64) -> i8 {
+    Concurrency::with_runtime_mut(|rt| {
+        let idx = (handle as usize).wrapping_sub(1);
+        let Some(existing) = rt.sorted_sets.get(idx) else {
+            return 0;
+        };
+        if sorted_set_is_string(rt, handle) {
+            let needle = rt.heap.clone_string(v).unwrap_or_default();
+            return i8::from(
+                existing
+                    .iter()
+                    .any(|id| rt.heap.clone_string(*id).as_deref() == Some(needle.as_str())),
+            );
+        }
+        i8::from(existing.contains(&v))
+    })
+}
+
 extern "C" fn jet_jit_sorted_set_from(list: i64, string_kind: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let xs = rt.heap.clone_int_list(list).unwrap_or_default();
@@ -1920,6 +2004,15 @@ extern "C" fn jet_jit_priority_queue_new() -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         rt.priority_queues.push(BinaryHeap::new());
         rt.priority_queues.len() as i64
+    })
+}
+
+extern "C" fn jet_jit_priority_queue_len(handle: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.priority_queues
+            .get((handle as usize).wrapping_sub(1))
+            .map(|heap| heap.len() as i64)
+            .unwrap_or(0)
     })
 }
 
@@ -2638,11 +2731,16 @@ pub(crate) struct CollectionsHostFns {
     pub list_pop: cranelift_module::FuncId,
     pub list_insert: cranelift_module::FuncId,
     pub set_from_list: cranelift_module::FuncId,
+    pub set_new: cranelift_module::FuncId,
     pub set_insert: cranelift_module::FuncId,
     pub set_remove: cranelift_module::FuncId,
     pub set_has: cranelift_module::FuncId,
     pub set_len: cranelift_module::FuncId,
     pub set_to_list: cranelift_module::FuncId,
+    pub set_copy: cranelift_module::FuncId,
+    pub set_equal: cranelift_module::FuncId,
+    pub set_capacity: cranelift_module::FuncId,
+    pub set_first: cranelift_module::FuncId,
     pub set_union: cranelift_module::FuncId,
     pub set_intersection: cranelift_module::FuncId,
     pub set_difference: cranelift_module::FuncId,
@@ -2674,6 +2772,8 @@ pub(crate) struct CollectionsHostFns {
     pub bag_count: cranelift_module::FuncId,
     pub bag_len: cranelift_module::FuncId,
     pub sorted_set_new: cranelift_module::FuncId,
+    pub sorted_set_len: cranelift_module::FuncId,
+    pub sorted_set_has: cranelift_module::FuncId,
     pub sorted_set_from: cranelift_module::FuncId,
     pub sorted_set_insert: cranelift_module::FuncId,
     pub sorted_set_remove: cranelift_module::FuncId,
@@ -2688,6 +2788,7 @@ pub(crate) struct CollectionsHostFns {
     pub sorted_set_is_superset: cranelift_module::FuncId,
     pub sorted_set_is_disjoint: cranelift_module::FuncId,
     pub priority_queue_new: cranelift_module::FuncId,
+    pub priority_queue_len: cranelift_module::FuncId,
     pub priority_queue_from: cranelift_module::FuncId,
     pub priority_queue_push: cranelift_module::FuncId,
     pub priority_queue_peek: cranelift_module::FuncId,
@@ -2801,11 +2902,16 @@ pub(crate) fn register_collections_symbols(builder: &mut cranelift_jit::JITBuild
     builder.symbol("jet_jit_list_pop", jet_jit_list_pop as *const u8);
     builder.symbol("jet_jit_list_insert", jet_jit_list_insert as *const u8);
     builder.symbol("jet_jit_set_from_list", jet_jit_set_from_list as *const u8);
+    builder.symbol("jet_jit_set_new", jet_jit_set_new as *const u8);
     builder.symbol("jet_jit_set_insert", jet_jit_set_insert as *const u8);
     builder.symbol("jet_jit_set_remove", jet_jit_set_remove as *const u8);
     builder.symbol("jet_jit_set_has", jet_jit_set_has as *const u8);
     builder.symbol("jet_jit_set_len", jet_jit_set_len as *const u8);
     builder.symbol("jet_jit_set_to_list", jet_jit_set_to_list as *const u8);
+    builder.symbol("jet_jit_set_copy", jet_jit_set_copy as *const u8);
+    builder.symbol("jet_jit_set_equal", jet_jit_set_equal as *const u8);
+    builder.symbol("jet_jit_set_capacity", jet_jit_set_capacity as *const u8);
+    builder.symbol("jet_jit_set_first", jet_jit_set_first as *const u8);
     builder.symbol("jet_jit_set_union", jet_jit_set_union as *const u8);
     builder.symbol(
         "jet_jit_set_intersection",
@@ -2843,6 +2949,8 @@ pub(crate) fn register_collections_symbols(builder: &mut cranelift_jit::JITBuild
     builder.symbol("jet_jit_bag_count", jet_jit_bag_count as *const u8);
     builder.symbol("jet_jit_bag_len", jet_jit_bag_len as *const u8);
     builder.symbol("jet_jit_sorted_set_new", jet_jit_sorted_set_new as *const u8);
+    builder.symbol("jet_jit_sorted_set_len", jet_jit_sorted_set_len as *const u8);
+    builder.symbol("jet_jit_sorted_set_has", jet_jit_sorted_set_has as *const u8);
     builder.symbol("jet_jit_sorted_set_from", jet_jit_sorted_set_from as *const u8);
     builder.symbol("jet_jit_sorted_set_insert", jet_jit_sorted_set_insert as *const u8);
     builder.symbol("jet_jit_sorted_set_remove", jet_jit_sorted_set_remove as *const u8);
@@ -2878,6 +2986,7 @@ pub(crate) fn register_collections_symbols(builder: &mut cranelift_jit::JITBuild
         jet_jit_sorted_set_is_disjoint as *const u8,
     );
     builder.symbol("jet_jit_priority_queue_new", jet_jit_priority_queue_new as *const u8);
+    builder.symbol("jet_jit_priority_queue_len", jet_jit_priority_queue_len as *const u8);
     builder.symbol("jet_jit_priority_queue_from", jet_jit_priority_queue_from as *const u8);
     builder.symbol("jet_jit_priority_queue_push", jet_jit_priority_queue_push as *const u8);
     builder.symbol("jet_jit_priority_queue_peek", jet_jit_priority_queue_peek as *const u8);
@@ -3113,11 +3222,16 @@ pub(crate) fn declare_collections_host_fns(
         list_pop: import("jet_jit_list_pop", &sig_len)?,
         list_insert: import("jet_jit_list_insert", &sig_map_insert)?,
         set_from_list: import("jet_jit_set_from_list", &sig_set_from)?,
+        set_new: import("jet_jit_set_new", &sig_sorted_set_new)?,
         set_insert: import("jet_jit_set_insert", &sig_list_eq)?,
         set_remove: import("jet_jit_set_remove", &sig_push)?,
         set_has: import("jet_jit_set_has", &sig_list_eq)?,
         set_len: import("jet_jit_set_len", &sig_len)?,
         set_to_list: import("jet_jit_set_to_list", &sig_len)?,
+        set_copy: import("jet_jit_set_copy", &sig_len)?,
+        set_equal: import("jet_jit_set_equal", &sig_list_eq)?,
+        set_capacity: import("jet_jit_set_capacity", &sig_len)?,
+        set_first: import("jet_jit_set_first", &sig_len)?,
         set_union: import("jet_jit_set_union", &sig_get_opt)?,
         set_intersection: import("jet_jit_set_intersection", &sig_get_opt)?,
         set_difference: import("jet_jit_set_difference", &sig_get_opt)?,
@@ -3149,6 +3263,8 @@ pub(crate) fn declare_collections_host_fns(
         bag_count: import("jet_jit_bag_count", &sig_get_opt)?,
         bag_len: import("jet_jit_bag_len", &sig_len)?,
         sorted_set_new: import("jet_jit_sorted_set_new", &sig_sorted_set_new)?,
+        sorted_set_len: import("jet_jit_sorted_set_len", &sig_len)?,
+        sorted_set_has: import("jet_jit_sorted_set_has", &sig_list_eq)?,
         sorted_set_from: import("jet_jit_sorted_set_from", &sig_set_from)?,
         sorted_set_insert: import("jet_jit_sorted_set_insert", &sig_list_eq)?,
         sorted_set_remove: import("jet_jit_sorted_set_remove", &sig_push)?,
@@ -3166,6 +3282,7 @@ pub(crate) fn declare_collections_host_fns(
         sorted_set_is_superset: import("jet_jit_sorted_set_is_superset", &sig_list_eq)?,
         sorted_set_is_disjoint: import("jet_jit_sorted_set_is_disjoint", &sig_list_eq)?,
         priority_queue_new: import("jet_jit_priority_queue_new", &sig_new)?,
+        priority_queue_len: import("jet_jit_priority_queue_len", &sig_len)?,
         priority_queue_from: import("jet_jit_priority_queue_from", &sig_len)?,
         priority_queue_push: import("jet_jit_priority_queue_push", &sig_push)?,
         priority_queue_peek: import("jet_jit_priority_queue_peek", &sig_len)?,

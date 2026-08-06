@@ -466,7 +466,33 @@ fn set_method(
             items.contains(args.first().unwrap_or(&CtValue::Unit)),
         )),
         "to_list" => Ok(CtValue::List(items)),
-        "first" if sorted => Ok(items
+        "copy" | "to_set" => Ok(set_struct(type_name, items)),
+        "capacity" => Ok(CtValue::Int(items.len() as i64)),
+        "equal" => {
+            let other = args.first().ok_or_else(|| {
+                unsupported(&format!("{type_name}.equal missing argument"), span)
+            })?;
+            let CtValue::Struct {
+                type_name: other_type,
+                fields: other_fields,
+            } = other
+            else {
+                return Err(unsupported(
+                    &format!("{type_name}.equal with a non-set"),
+                    span,
+                ));
+            };
+            if other_type != type_name {
+                return Ok(CtValue::Bool(false));
+            }
+            let other_items = list_field(other_fields, "items");
+            Ok(CtValue::Bool(set_semantics::jet_set_is_subset_by(
+                &items, &other_items, |a, b| a == b,
+            ) && set_semantics::jet_set_is_subset_by(
+                &other_items, &items, |a, b| a == b,
+            )))
+        }
+        "first" => Ok(items
             .first()
             .cloned()
             .map_or_else(option_none, |v| CtValue::Some(Box::new(v)))),

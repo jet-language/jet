@@ -1,6 +1,10 @@
 // D-COLLBREADTH1=A: Set<T> — hash-backed unordered set.
-// Construct with Set.from([...]), mutate with add/remove, query with contains/len.
+// Construct with Set.from([...]) / Set.new(), mutate with add/remove, query with has/len.
+// #1478: copy/equal/to_set/capacity/first close remaining non-closure ledger gaps.
 fn run() {
+    empty := Set.new()
+    print("new_empty: {empty.len()} cap={empty.capacity()}")
+
     s := Set.from([1, 2, 3, 2, 1])  // deduplication on construction
     s.add(4)
     s.add(3)  // duplicate — no effect
@@ -26,6 +30,13 @@ fn run() {
     print("subset: {s.is_subset(Set.from([1, 3, 4, 5]))}")
     print("superset: {s.is_superset(Set.from([1, 3]))}")
     print("disjoint: {s.is_disjoint(Set.from([8]))}")
+
+    c := s.copy()
+    print("copy_equal: {s.equal(c)}")
+    print("to_set_equal: {s.to_set().equal(s)}")
+    print("first_some: {(s.first() ?? -1) >= 0}")
+    print("capacity_ok: {s.capacity() >= s.len()}")
+
     ordered_a := SortedSet.from([1, 2, 3])
     ordered_b := SortedSet.from([3, 4])
     print("sorted intersection: {ordered_a.intersection(ordered_b).to_list()}")
@@ -34,5 +45,7 @@ fn run() {
     print("sorted subset: {ordered_a.is_subset(SortedSet.from([1, 2, 3, 4]))}")
     print("sorted superset: {ordered_a.is_superset(SortedSet.from([1, 2]))}")
     print("sorted disjoint: {ordered_a.is_disjoint(SortedSet.from([8]))}")
+    empty_sorted := SortedSet.new()
+    print("sorted_new_empty: {empty_sorted.len()}")
     print("is_empty: {s.is_empty()}")
 }

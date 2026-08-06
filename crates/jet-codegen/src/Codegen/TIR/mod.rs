@@ -3686,6 +3686,13 @@ pub enum TClosureOp {
     CountBy,
     /// `partition(f)` — inline emit; struct name embedded. `TupleStruct` is `JetTup_<hash>`.
     Partition { tuple_struct: String },
+    // #1479
+    /// `dedup_by(f)` — `jet_iter_dedup_by({as_iter}, f)`.
+    DedupBy,
+    /// `is_sorted_by(f)` — `jet_iter_is_sorted_by({as_iter}, f)`.
+    IsSortedBy,
+    /// `chunk_while(f)` — `jet_iter_chunk_while({as_iter}, f)`.
+    ChunkWhile,
     // D-FAILCOMP1: failure-aware adapters.
     /// `filter_map(f)` — `jet_list_filter_map((recv).clone(), f)`.
     FilterMap,
@@ -3986,12 +3993,31 @@ pub enum TBuiltinOp {
     ListLazy,
     /// `step_by(n)` → `jet_list_step_by((recv).clone(), a0)`.
     StepBy,
-    /// `dedup()` → `jet_list_dedup((recv).clone())`.
+    /// `dedup()` → `jet_iter_dedup(...)`.
     Dedup,
-    /// `chunks(n)` → `jet_list_chunks((recv).clone(), a0)`.
+    /// `chunks(n)` → `jet_iter_chunks(...)`.
     Chunks,
-    /// `windows(n)` → `jet_list_windows((recv).clone(), a0)`.
+    /// `windows(n)` → `jet_iter_windows(...)`.
     Windows,
+    // #1479: remaining Iter ledger surface (non-closure).
+    /// `repeat(n)` → `jet_iter_repeat({as_iter}, n)`.
+    IterRepeat,
+    /// `cycle()` → `jet_iter_cycle({as_iter})`.
+    IterCycle,
+    /// `drop_last(n)` → `jet_iter_drop_last({as_iter}, n)`.
+    IterDropLast,
+    /// `shuffle()` → `jet_iter_shuffle({as_iter})`.
+    IterShuffle,
+    /// `is_sorted()` → `jet_iter_is_sorted({as_iter})`.
+    IterIsSorted,
+    /// `last_index_of(v)` → `jet_iter_last_index_of({as_iter}, v)`.
+    IterLastIndexOf,
+    /// `average()` → `jet_iter_average_{int,float}({as_iter})`.
+    IterAverage { float: bool },
+    /// `compare(other)` → `jet_iter_compare({as_iter}, other)`.
+    IterCompare,
+    /// `split(n)` → `jet_iter_split_at({as_iter}, n, |l,r| Struct{…})`.
+    IterSplit { tuple_struct: String },
     /// `indexed()` → inline emit building `JetTup_<hash>` struct. The struct name
     /// is embedded here at lowering so emit is a pure formatter.
     Indexed {
@@ -4040,6 +4066,14 @@ pub enum TBuiltinOp {
     SetIsSubset,
     SetIsSuperset,
     SetIsDisjoint,
+    /// #1478: `set.copy()` / `set.to_set()` → clone.
+    SetCopy,
+    /// #1478: `set.equal(other)` → `recv == other`.
+    SetEqual,
+    /// #1478: `set.capacity()` → `recv.capacity() as i64`.
+    SetCapacity,
+    /// #1478: `set.first()` → arbitrary element (unordered).
+    SetFirst,
     SortedSetFrom,
     SortedSetInsert,
     SortedSetRemove,

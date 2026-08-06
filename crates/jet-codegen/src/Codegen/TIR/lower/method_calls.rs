@@ -4450,6 +4450,29 @@ pub(crate) fn lower_method_call(
                 },
             };
         }
+        // #1478: `Set.new()` → empty HashSet with elem type from sema.
+        if type_name == "Set" && method == "new" && args.is_empty() {
+            let elem_ty = match resolved_ret {
+                Some(Type::Apply { args: targs, .. }) if !targs.is_empty() => targs[0].clone(),
+                _ => Type::Int,
+            };
+            return TExpr {
+                ty: Type::Apply {
+                    name: "Set".to_string(),
+                    args: vec![elem_ty.clone()],
+                },
+                kind: TExprKind::StaticCall {
+                    owner: host_generic_owner(
+                        "std::collections::HashSet",
+                        vec![TPreludeArg::Jet(elem_ty)],
+                    ),
+                    owner_type: None,
+                    method: TMethodRef::bare("new"),
+                    type_args: Vec::new(),
+                    args: vec![],
+                },
+            };
+        }
         if type_name == crate::Syntax::TYPE_SORTED_SET && method == "from" && args.len() == 1 {
             let list_arg = lower_expr(&args[0].expr, cx, env);
             let elem_ty = match &list_arg.ty {
