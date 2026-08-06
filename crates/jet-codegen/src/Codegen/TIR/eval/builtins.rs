@@ -364,6 +364,15 @@ pub(super) fn eval_builtin(
         TBuiltinOp::DequePopBack => apply_mutating(recv, "pop_back", args, span),
         TBuiltinOp::DequePeekFront => apply_method(recv, "peek_front", args, span),
         TBuiltinOp::DequePeekBack => apply_method(recv, "peek_back", args, span),
+        TBuiltinOp::DequeCapacity => apply_method(recv, "capacity", args, span),
+        TBuiltinOp::DequeContains => apply_method(recv, "contains", args, span),
+        TBuiltinOp::DequeGet => apply_method(recv, "get", args, span),
+        TBuiltinOp::DequeDelete => apply_mutating(recv, "delete", args, span),
+        TBuiltinOp::DequeToList => apply_method(recv, "to_list", args, span),
+        TBuiltinOp::DequeJoin => apply_method(recv, "join", args, span),
+        TBuiltinOp::DequeReverse => apply_mutating(recv, "reverse", args, span),
+        TBuiltinOp::DequeSplit => apply_mutating(recv, "split", args, span),
+        TBuiltinOp::DequeFrom => CollectionEval::from_list(Syntax::TYPE_DEQUE, recv, span),
         // D-FAILCOMP1 / D-ITERTOOLS1: materialize Iter<T?E> / [T?E] → T?E.
         TBuiltinOp::TryCollect => {
             let CtValue::List(xs) = recv else {

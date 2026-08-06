@@ -777,6 +777,15 @@ fn builtin_static_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
         (Type::Named(n), "from", 1) if n == crate::Syntax::TYPE_BYTE_BUFFER => {
             Some(Some(Type::Named(crate::Syntax::TYPE_BYTE_BUFFER.to_string())))
         }
+        // D-COLLBREADTH1=A: Deque static constructors (ledger + static return table).
+        (Type::Named(n), "new", 0) if n == "Deque" => Some(Some(Type::Apply {
+            name: "Deque".to_string(),
+            args: vec![Type::Int],
+        })),
+        (Type::Named(n), "init", 1) if n == "Deque" => Some(Some(Type::Apply {
+            name: "Deque".to_string(),
+            args: vec![Type::Int],
+        })),
         // D-SHAPE-CONVERT1=A: destination-owned numeric conversion.
         _ => numeric_conversion_return(ty, method, nargs),
     }
@@ -1711,13 +1720,22 @@ fn bag_method_return(_elem: &Type, method: &str, nargs: usize) -> Option<Option<
 
 /// D-COLLBREADTH1=A: `Deque<T>` methods (ring-buffer double-ended queue).
 fn deque_method_return(elem: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
+    let deque = || Type::Apply {
+        name: "Deque".to_string(),
+        args: vec![elem.clone()],
+    };
     match (method, nargs) {
-        ("len", 0) => Some(Some(Type::Int)),
+        ("len" | "capacity", 0) => Some(Some(Type::Int)),
         ("is_empty", 0) => Some(Some(Type::Bool)),
-        ("push_front" | "push_back" | "clear", _) => Some(None),
+        ("push_front" | "push_back" | "clear" | "delete" | "reverse", _) => Some(None),
         ("pop_front" | "pop_back" | "peek_front" | "peek_back", 0) => {
             Some(Some(Type::Option(Box::new(elem.clone()))))
         }
+        ("get", 1) => Some(Some(Type::Option(Box::new(elem.clone())))),
+        ("contains", 1) => Some(Some(Type::Bool)),
+        ("to_list", 0) => Some(Some(Type::List(Box::new(elem.clone())))),
+        ("join", 1) => Some(Some(Type::String)),
+        ("split", 1) => Some(Some(deque())),
         _ => None,
     }
 }
@@ -1794,7 +1812,14 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
         Type::Apply { name, .. } if name == "Deque" => {
             matches!(
                 method,
-                "push_front" | "push_back" | "pop_front" | "pop_back" | "clear"
+                "push_front"
+                    | "push_back"
+                    | "pop_front"
+                    | "pop_back"
+                    | "clear"
+                    | "delete"
+                    | "reverse"
+                    | "split"
             )
         }
         // D-DET1/D-DET-CAPAPI: `clock.tick`/`advance`/`wait` move the clock; every
@@ -2391,7 +2416,9 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
         Type::Apply { name, args } if name == "Deque" => {
             let elem = args.first().cloned().unwrap_or(Type::Int);
             match method {
-                "push_front" | "push_back" => Some(vec![elem]),
+                "push_front" | "push_back" | "contains" | "delete" => Some(vec![elem]),
+                "get" | "split" => Some(vec![Type::Int]),
+                "join" => Some(vec![Type::String]),
                 _ => Some(vec![]),
             }
         }

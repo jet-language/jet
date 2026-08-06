@@ -1402,6 +1402,18 @@ impl<'a> Checker<'a> {
                 }
                 // D-COLLBREADTH1=A: `Deque.new()` → `Deque<T>`.
                 // T is inferred from the type annotation's expected type.
+                // D-COLLBREADTH1=A: `Deque.init([...])` → collect list into VecDeque.
+                if type_name == "Deque" && method == "init" && args.len() == 1 {
+                    let arg_ty = self.infer(&mut args[0].expr);
+                    let elem_ty = match arg_ty {
+                        Some(Type::List(inner)) => *inner,
+                        _ => Type::Int,
+                    };
+                    return Some(Type::Apply {
+                        name: "Deque".to_string(),
+                        args: vec![elem_ty],
+                    });
+                }
                 if type_name == "Deque" && method == "new" && args.is_empty() {
                     let elem_ty = match &self.expected_type {
                         Some(Type::Apply { name, args, .. }) if name == "Deque" && !args.is_empty() => {

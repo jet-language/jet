@@ -84,6 +84,7 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         | ("push_front", 1) | ("push_back", 1)
         | ("pop_front", 0) | ("pop_back", 0)
         | ("peek_front", 0) | ("peek_back", 0)
+        | ("delete", 1)
         // D-FAILCOMP1: failure-aware list adapter.
         | ("try_collect", 0)
         // D-DYNARRAY1: `list.view(a..b)` — zero-copy window constructor. The

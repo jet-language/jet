@@ -1,15 +1,30 @@
 // D-COLLBREADTH1=A: Deque<T> — ring-buffer double-ended queue.
-// Construct with Deque.new(), push/pop from both ends.
+// Construct with Deque.new() / Deque.init([...]); push/pop both ends.
 fn run() {
     d := Deque.new()
     d.push_back($[1, 2, 3]$)
     d.push_front(0)
     print("len: {d.len()}")
     print("is_empty: {d.is_empty()}")
+    print("cap_ok: {d.capacity() >= d.len()}")
     if d.peek_front() == .Val(n) { print("front: {n}") }
     if d.peek_back() == .Val(n) { print("back: {n}") }
     if d.pop_front() == .Val(n) { print("popped front: {n}") }
     print("len after pop: {d.len()}")
     if d.pop_back() == .Val(n) { print("popped back: {n}") }
     print("len after two pops: {d.len()}")
+
+    e := Deque.init([10, 20, 30, 40])
+    print("init len: {e.len()}")
+    print("contains 20: {e.contains(20)}")
+    print("contains 99: {e.contains(99)}")
+    if e.get(1) == .Val(n) { print("get1: {n}") }
+    print("join: {e.join(",")}")
+    e.delete(20)
+    print("after delete: {e.to_list()}")
+    e.reverse()
+    print("after reverse: {e.to_list()}")
+    rest := e.split(1)
+    print("after split left: {e.to_list()}")
+    print("after split right: {rest.to_list()}")
 }

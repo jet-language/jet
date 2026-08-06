@@ -4585,6 +4585,25 @@ pub(crate) fn lower_method_call(
                 },
             };
         }
+        // D-COLLBREADTH1=A: `Deque.init([...])` → collect list into VecDeque.
+        if type_name == "Deque" && method == "init" && args.len() == 1 {
+            let list_arg = lower_expr(&args[0].expr, cx, env);
+            let elem_ty = match &list_arg.ty {
+                Type::List(inner) => *inner.clone(),
+                _ => Type::Int,
+            };
+            return TExpr {
+                ty: Type::Apply {
+                    name: "Deque".to_string(),
+                    args: vec![elem_ty],
+                },
+                kind: TExprKind::BuiltinMethod {
+                    recv: Box::new(list_arg),
+                    op: TBuiltinOp::DequeFrom,
+                    args: vec![],
+                },
+            };
+        }
         // D-COLLBREADTH1=A: `Deque.new()` → empty VecDeque with elem type from sema.
         // The element type comes from `resolved_ret` (sema filled it from the annotation).
         if type_name == "Deque" && method == "new" && args.is_empty() {

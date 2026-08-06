@@ -529,6 +529,7 @@ pub(crate) fn method_call_in_subset(
                     | ("ByteBuffer", "from", 1)
                     | ("Bag", "new", 0)
                     | ("Deque", "new", 0)
+                    | ("Deque", "init", 1)
                     | ("SortedSet", "new", 0)
                     | ("PriorityQueue", "new", 0)
                     | ("Cache", "new", 1)
@@ -1429,9 +1430,11 @@ pub(crate) fn is_intercepted_method_name(method: &str) -> bool {
         // D-COLLBREADTH1=A: Set<T> and Deque<T> methods.
         | "union" | "to_list" | "collect" | "count"
         | "push_front" | "push_back" | "pop_front" | "pop_back" | "peek_front" | "peek_back"
+        | "capacity"
         // `from` is the static constructor for Set — admitted here so the static-call
         // shape below can claim it before `is_intercepted_method_name` blocks it.
-        | "from"
+        // `init` is Deque's list constructor (same surface role).
+        | "from" | "init"
         // D-HOLE1: `zip` is already listed above (D-ITER1); `lift2` is `Option`'s
         // static combinator, admitted the same way `from`/`new` are.
         | "lift2"

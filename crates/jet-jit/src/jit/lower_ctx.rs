@@ -16513,6 +16513,74 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host_ref, &[recv_val]);
                 Ok(self.b.inst_results(call)[0])
             }
+            TBuiltinOp::DequeCapacity => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.deque_capacity, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            TBuiltinOp::DequeContains => {
+                let v = self.lower_expr(&args[0])?;
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.deque_contains, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val, v]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            TBuiltinOp::DequeGet => {
+                let idx = self.lower_expr(&args[0])?;
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.deque_get, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val, idx]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            TBuiltinOp::DequeDelete => {
+                let v = self.lower_expr(&args[0])?;
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.deque_delete, self.b.func);
+                self.b.ins().call(host_ref, &[recv_val, v]);
+                Ok(self.b.ins().iconst(types::I8, 0))
+            }
+            TBuiltinOp::DequeToList => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.deque_to_list, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            TBuiltinOp::DequeJoin => {
+                let sep = self.lower_expr(&args[0])?;
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.deque_join, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val, sep]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            TBuiltinOp::DequeReverse => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.deque_reverse, self.b.func);
+                self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.ins().iconst(types::I8, 0))
+            }
+            TBuiltinOp::DequeSplit => {
+                let idx = self.lower_expr(&args[0])?;
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.deque_split, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val, idx]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            TBuiltinOp::DequeFrom => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.deque_from, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
             TBuiltinOp::TryCollect => self.lower_try_collect(recv),
             TBuiltinOp::ViewNew { line } => {
                 // Inclusive window → exclusive list_slice end. Materialized list

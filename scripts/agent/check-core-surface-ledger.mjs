@@ -496,6 +496,7 @@ const TYPE_CONTAINER = {
   X25519PublicKey: "core.crypto",
   PasswordHash: "core.crypto",
   ByteBuffer: "ByteBuffer",
+  Deque: "Deque",
 };
 
 const COLLECTION_METHOD_FUNCTIONS = {

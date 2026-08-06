@@ -208,6 +208,7 @@ pub(crate) fn resolve_builtin_op(
     let is_lru = matches!(&rty, Some(Type::Apply { name, .. }) if name == crate::Syntax::TYPE_LRU);
     let is_bag = matches!(&rty, Some(Type::Apply { name, .. }) if name == "Bag");
     let is_bit_set = matches!(&rty, Some(Type::Named(name)) if name == crate::Syntax::TYPE_BIT_SET);
+    let is_deque = matches!(&rty, Some(Type::Apply { name, .. }) if name == "Deque");
     let is_iter = matches!(
         &rty,
         Some(ty) if crate::Collections::is_iter_type(ty)
@@ -313,7 +314,9 @@ pub(crate) fn resolve_builtin_op(
             }
         }
         ("get", 1) => {
-            if is_lru {
+            if is_deque {
+                TBuiltinOp::DequeGet
+            } else if is_lru {
                 TBuiltinOp::LruGet
             } else if is_map {
                 TBuiltinOp::GetMap
@@ -325,13 +328,18 @@ pub(crate) fn resolve_builtin_op(
         ("last", 0) if is_sorted_set => TBuiltinOp::Last,
         ("first", 0) => TBuiltinOp::First,
         ("last", 0) => TBuiltinOp::Last,
+        ("contains", 1) if is_deque => TBuiltinOp::DequeContains,
         ("contains", 1) => TBuiltinOp::Contains,
         ("has", 1) if is_set || is_sorted_set || is_bit_set => TBuiltinOp::Contains,
         ("index_of", 1) if is_string => TBuiltinOp::StringIndexOf,
         ("index_of", 1) => TBuiltinOp::IndexOf,
+        ("reverse", 0) if is_deque => TBuiltinOp::DequeReverse,
         ("reverse", 0) => TBuiltinOp::Reverse,
         ("sort", 0) => TBuiltinOp::Sort,
+        ("join", 1) if is_deque => TBuiltinOp::DequeJoin,
         ("join", 1) => TBuiltinOp::JoinSep,
+        ("split", 1) if is_deque => TBuiltinOp::DequeSplit,
+        ("split", 1) => TBuiltinOp::Split,
         ("sum", 0) => TBuiltinOp::Sum {
             float: matches!(resolved_ret, Some(Type::Float | Type::Float32)),
         },
@@ -352,7 +360,6 @@ pub(crate) fn resolve_builtin_op(
         ("trim", 0) => TBuiltinOp::Trim,
         ("trim_start", 0) => TBuiltinOp::TrimStart,
         ("trim_end", 0) => TBuiltinOp::TrimEnd,
-        ("split", 1) => TBuiltinOp::Split,
         // c97/D-STRPARSE1: String-only `lines`; parsing stays `Type.parse`.
         ("lines", 0) => TBuiltinOp::Lines,
         ("starts_with", 1) => TBuiltinOp::StartsWith,
@@ -555,6 +562,7 @@ pub(crate) fn resolve_builtin_op(
         ("lazy", 0) if is_list || matches!(rty, Some(Type::FixedList { .. })) => {
             TBuiltinOp::ListLazy
         }
+        ("to_list", 0) if is_deque => TBuiltinOp::DequeToList,
         ("to_list", 0) if is_sorted_set => TBuiltinOp::SortedSetToList,
         ("to_list", 0) if is_bit_set => TBuiltinOp::BitSetToList,
         ("to_list", 0) => TBuiltinOp::SetToList,
@@ -593,6 +601,8 @@ pub(crate) fn resolve_builtin_op(
         ("pop_back", 0) => TBuiltinOp::DequePopBack,
         ("peek_front", 0) => TBuiltinOp::DequePeekFront,
         ("peek_back", 0) => TBuiltinOp::DequePeekBack,
+        ("capacity", 0) if is_deque => TBuiltinOp::DequeCapacity,
+        ("delete", 1) if is_deque => TBuiltinOp::DequeDelete,
         _ => return None,
     };
     let emitted_borrow = if is_iter {
@@ -630,6 +640,9 @@ pub(crate) fn resolve_builtin_op(
             | TBuiltinOp::DequePushBack
             | TBuiltinOp::DequePopFront
             | TBuiltinOp::DequePopBack
+            | TBuiltinOp::DequeDelete
+            | TBuiltinOp::DequeReverse
+            | TBuiltinOp::DequeSplit
             | TBuiltinOp::SplitWrite { .. }
             | TBuiltinOp::GetDisjointWrite => {
                 crate::Collections::BuiltinReceiverBorrow::TwoPhaseWrite

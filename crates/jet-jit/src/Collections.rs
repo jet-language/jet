@@ -1484,6 +1484,113 @@ extern "C" fn jet_jit_deque_len(dq: i64) -> i64 {
     })
 }
 
+extern "C" fn jet_jit_deque_capacity(dq: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.deques
+            .get((dq as usize).wrapping_sub(1))
+            .map(|d| d.capacity() as i64)
+            .unwrap_or(0)
+    })
+}
+
+extern "C" fn jet_jit_deque_contains(dq: i64, v: i64) -> i8 {
+    Concurrency::with_runtime_mut(|rt| {
+        i8::from(
+            rt.deques
+                .get((dq as usize).wrapping_sub(1))
+                .is_some_and(|d| d.contains(&v)),
+        )
+    })
+}
+
+extern "C" fn jet_jit_deque_get(dq: i64, idx: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        if idx < 0 {
+            return 0;
+        }
+        match rt
+            .deques
+            .get((dq as usize).wrapping_sub(1))
+            .and_then(|d| d.get(idx as usize).copied())
+        {
+            Some(v) => v + 1,
+            None => 0,
+        }
+    })
+}
+
+extern "C" fn jet_jit_deque_delete(dq: i64, v: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        if let Some(d) = rt.deques.get_mut((dq as usize).wrapping_sub(1)) {
+            if let Some(i) = d.iter().position(|x| *x == v) {
+                d.remove(i);
+            }
+        }
+    });
+}
+
+extern "C" fn jet_jit_deque_to_list(dq: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let xs: Vec<i64> = rt
+            .deques
+            .get((dq as usize).wrapping_sub(1))
+            .map(|d| d.iter().copied().collect())
+            .unwrap_or_default();
+        rt.heap.alloc_int_list(xs)
+    })
+}
+
+extern "C" fn jet_jit_deque_join(dq: i64, sep_id: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(xs) = rt
+            .deques
+            .get((dq as usize).wrapping_sub(1))
+            .map(|d| d.iter().copied().collect::<Vec<_>>())
+        else {
+            rt.set_trap("deque join received an invalid deque");
+            return 0;
+        };
+        let Some(sep) = rt.heap.clone_string(sep_id) else {
+            rt.set_trap("deque join received an invalid separator");
+            return 0;
+        };
+        let parts: Vec<String> = xs.iter().map(|id| id.to_string()).collect();
+        let joined = parts.join(&sep);
+        rt.heap.alloc_string(joined)
+    })
+}
+
+extern "C" fn jet_jit_deque_reverse(dq: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        if let Some(d) = rt.deques.get_mut((dq as usize).wrapping_sub(1)) {
+            d.make_contiguous().reverse();
+        }
+        0
+    })
+}
+
+extern "C" fn jet_jit_deque_split(dq: i64, idx: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(d) = rt.deques.get_mut((dq as usize).wrapping_sub(1)) else {
+            return 0;
+        };
+        let at = if idx < 0 {
+            0
+        } else {
+            (idx as usize).min(d.len())
+        };
+        let rest = d.split_off(at);
+        deque_handle(rt, rest)
+    })
+}
+
+extern "C" fn jet_jit_deque_from(list: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let xs = rt.heap.clone_int_list(list).unwrap_or_default();
+        deque_handle(rt, xs.into_iter().collect())
+    })
+}
+
 fn bag_handle(rt: &mut crate::JitRuntime, bag: HashMap<i64, usize>) -> i64 {
     rt.bags.push(bag);
     rt.bags.len() as i64
@@ -2551,6 +2658,15 @@ pub(crate) struct CollectionsHostFns {
     pub deque_peek_front: cranelift_module::FuncId,
     pub deque_peek_back: cranelift_module::FuncId,
     pub deque_len: cranelift_module::FuncId,
+    pub deque_capacity: cranelift_module::FuncId,
+    pub deque_contains: cranelift_module::FuncId,
+    pub deque_get: cranelift_module::FuncId,
+    pub deque_delete: cranelift_module::FuncId,
+    pub deque_to_list: cranelift_module::FuncId,
+    pub deque_join: cranelift_module::FuncId,
+    pub deque_reverse: cranelift_module::FuncId,
+    pub deque_split: cranelift_module::FuncId,
+    pub deque_from: cranelift_module::FuncId,
     pub bag_new: cranelift_module::FuncId,
     pub bag_add: cranelift_module::FuncId,
     pub bag_remove: cranelift_module::FuncId,
@@ -2711,6 +2827,15 @@ pub(crate) fn register_collections_symbols(builder: &mut cranelift_jit::JITBuild
     builder.symbol("jet_jit_deque_peek_front", jet_jit_deque_peek_front as *const u8);
     builder.symbol("jet_jit_deque_peek_back", jet_jit_deque_peek_back as *const u8);
     builder.symbol("jet_jit_deque_len", jet_jit_deque_len as *const u8);
+    builder.symbol("jet_jit_deque_capacity", jet_jit_deque_capacity as *const u8);
+    builder.symbol("jet_jit_deque_contains", jet_jit_deque_contains as *const u8);
+    builder.symbol("jet_jit_deque_get", jet_jit_deque_get as *const u8);
+    builder.symbol("jet_jit_deque_delete", jet_jit_deque_delete as *const u8);
+    builder.symbol("jet_jit_deque_to_list", jet_jit_deque_to_list as *const u8);
+    builder.symbol("jet_jit_deque_join", jet_jit_deque_join as *const u8);
+    builder.symbol("jet_jit_deque_reverse", jet_jit_deque_reverse as *const u8);
+    builder.symbol("jet_jit_deque_split", jet_jit_deque_split as *const u8);
+    builder.symbol("jet_jit_deque_from", jet_jit_deque_from as *const u8);
     builder.symbol("jet_jit_bag_new", jet_jit_bag_new as *const u8);
     builder.symbol("jet_jit_bag_add", jet_jit_bag_add as *const u8);
     builder.symbol("jet_jit_bag_remove", jet_jit_bag_remove as *const u8);
@@ -3008,6 +3133,15 @@ pub(crate) fn declare_collections_host_fns(
         deque_peek_front: import("jet_jit_deque_peek_front", &sig_len)?,
         deque_peek_back: import("jet_jit_deque_peek_back", &sig_len)?,
         deque_len: import("jet_jit_deque_len", &sig_len)?,
+        deque_capacity: import("jet_jit_deque_capacity", &sig_len)?,
+        deque_contains: import("jet_jit_deque_contains", &sig_list_eq)?,
+        deque_get: import("jet_jit_deque_get", &sig_get_opt)?,
+        deque_delete: import("jet_jit_deque_delete", &sig_push)?,
+        deque_to_list: import("jet_jit_deque_to_list", &sig_len)?,
+        deque_join: import("jet_jit_deque_join", &sig_join)?,
+        deque_reverse: import("jet_jit_deque_reverse", &sig_len)?,
+        deque_split: import("jet_jit_deque_split", &sig_get_opt)?,
+        deque_from: import("jet_jit_deque_from", &sig_len)?,
         bag_new: import("jet_jit_bag_new", &sig_new)?,
         bag_add: import("jet_jit_bag_add", &sig_list_eq)?,
         bag_remove: import("jet_jit_bag_remove", &sig_push)?,

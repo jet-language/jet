@@ -1402,6 +1402,33 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TBuiltinOp::DequePopBack => format!("({}).pop_back()", recv),
                 TBuiltinOp::DequePeekFront => format!("({}).front().cloned()", recv),
                 TBuiltinOp::DequePeekBack => format!("({}).back().cloned()", recv),
+                TBuiltinOp::DequeCapacity => format!("({}).capacity() as i64", recv),
+                TBuiltinOp::DequeContains => {
+                    format!("({}).iter().any(|__x| *__x == ({}))", recv, a(0))
+                }
+                TBuiltinOp::DequeGet => {
+                    format!("({}).get(({}) as usize).cloned()", recv, a(0))
+                }
+                TBuiltinOp::DequeDelete => format!(
+                    "{{ let __dq = &mut ({}); let __v = ({}); if let Some(__i) = __dq.iter().position(|__x| *__x == __v) {{ __dq.remove(__i); }} }}",
+                    recv,
+                    a(0)
+                ),
+                TBuiltinOp::DequeToList => {
+                    format!("({}).iter().cloned().collect::<Vec<_>>()", recv)
+                }
+                TBuiltinOp::DequeJoin => format!(
+                    "({}).iter().map(|x| x.jet_show()).collect::<Vec<_>>().join(({}).as_str())",
+                    recv,
+                    a(0)
+                ),
+                TBuiltinOp::DequeReverse => format!("({}).make_contiguous().reverse()", recv),
+                TBuiltinOp::DequeSplit => {
+                    format!("({}).split_off(({}) as usize)", recv, a(0))
+                }
+                TBuiltinOp::DequeFrom => {
+                    format!("({}).into_iter().collect::<std::collections::VecDeque<_>>()", recv)
+                }
                 TBuiltinOp::TryCollect => format!("jet_list_try_collect({vec_src})"),
                 // D-DYNARRAY1: `list.view(a..b)` — zero-copy window constructor.
                 // `&(recv)` (not `.clone()`): the window borrows the list's OWN

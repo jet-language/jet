@@ -164,8 +164,8 @@ fn pool_struct() -> CtValue {
     }
 }
 
-/// `Set.from(list)` / `SortedSet.from(list)` / `PriorityQueue.from(list)` —
-/// recv is the list (TIR lowering).
+/// `Set.from(list)` / `SortedSet.from(list)` / `PriorityQueue.from(list)` /
+/// `Deque.init(list)` — recv is the list (TIR lowering).
 pub fn from_list(type_name: &str, list: &CtValue, span: Span) -> Result<CtValue, Diagnostic> {
     let CtValue::List(items) = list else {
         return Err(unsupported(
@@ -182,6 +182,7 @@ pub fn from_list(type_name: &str, list: &CtValue, span: Span) -> Result<CtValue,
         name if name == crate::Syntax::TYPE_PRIORITY_QUEUE => {
             Ok(set_struct(name, sorted_descending(items, span)?))
         }
+        name if name == crate::Syntax::TYPE_DEQUE => Ok(deque_struct(items)),
         _ => Err(unsupported(
             &format!("{type_name}.from at compile time"),
             span,
@@ -723,12 +724,12 @@ fn bitset_mutating(
 fn deque_method(
     fields: &[(String, CtValue)],
     method: &str,
-    _args: &[CtValue],
+    args: &[CtValue],
     span: Span,
 ) -> Result<CtValue, Diagnostic> {
     let items = list_field(fields, "items");
     match method {
-        "len" => Ok(CtValue::Int(items.len() as i64)),
+        "len" | "capacity" => Ok(CtValue::Int(items.len() as i64)),
         "is_empty" => Ok(CtValue::Bool(items.is_empty())),
         "peek_front" => Ok(items
             .first()
@@ -738,6 +739,29 @@ fn deque_method(
             .last()
             .cloned()
             .map_or_else(option_none, |v| CtValue::Some(Box::new(v)))),
+        "get" => {
+            let idx = match args.first() {
+                Some(CtValue::Int(i)) if *i >= 0 => *i as usize,
+                _ => return Ok(option_none()),
+            };
+            Ok(items
+                .get(idx)
+                .cloned()
+                .map_or_else(option_none, |v| CtValue::Some(Box::new(v))))
+        }
+        "contains" => {
+            let needle = args.first().cloned().unwrap_or(CtValue::Unit);
+            Ok(CtValue::Bool(items.iter().any(|x| x == &needle)))
+        }
+        "to_list" => Ok(CtValue::List(items)),
+        "join" => {
+            let sep = match args.first() {
+                Some(CtValue::Str(s)) => s.as_str(),
+                _ => "",
+            };
+            let parts: Vec<String> = items.iter().map(|x| x.jet_show()).collect();
+            Ok(CtValue::Str(parts.join(sep)))
+        }
         _ => Err(unsupported(
             &format!("Deque.{} at compile time", method),
             span,
@@ -772,6 +796,26 @@ fn deque_mutating(
             Some(value) => CtValue::Some(Box::new(value)),
             None => option_none(),
         },
+        "delete" => {
+            let needle = args.first().cloned().unwrap_or(CtValue::Unit);
+            if let Some(i) = items.iter().position(|x| x == &needle) {
+                items.remove(i);
+            }
+            CtValue::Unit
+        }
+        "reverse" => {
+            items.reverse();
+            CtValue::Unit
+        }
+        "split" => {
+            let idx = match args.first() {
+                Some(CtValue::Int(i)) if *i >= 0 => (*i as usize).min(items.len()),
+                _ => items.len(),
+            };
+            let rest = items.split_off(idx);
+            *recv = deque_struct(items);
+            return Ok(deque_struct(rest));
+        }
         _ => {
             return Err(unsupported(
                 &format!("Deque.{} at compile time", method),

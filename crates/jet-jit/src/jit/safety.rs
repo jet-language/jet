@@ -2199,10 +2199,40 @@ fn resident_safe_builtin_op(
         TBuiltinOp::DequePopFront
         | TBuiltinOp::DequePopBack
         | TBuiltinOp::DequePeekFront
-        | TBuiltinOp::DequePeekBack => {
+        | TBuiltinOp::DequePeekBack
+        | TBuiltinOp::DequeCapacity
+        | TBuiltinOp::DequeToList
+        | TBuiltinOp::DequeReverse => {
             matches!(&recv.ty, Type::Apply { name, args: targs }
                 if name == "Deque" && targs.len() == 1 && matches!(&targs[0], Type::Int))
                 && args.is_empty()
+        }
+        TBuiltinOp::DequeContains | TBuiltinOp::DequeDelete => {
+            matches!(&recv.ty, Type::Apply { name, args: targs }
+                if name == "Deque" && targs.len() == 1 && matches!(&targs[0], Type::Int))
+                && args.len() == 1
+                && matches!(&args[0].ty, Type::Int)
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::DequeGet | TBuiltinOp::DequeSplit => {
+            matches!(&recv.ty, Type::Apply { name, args: targs }
+                if name == "Deque" && targs.len() == 1 && matches!(&targs[0], Type::Int))
+                && args.len() == 1
+                && matches!(&args[0].ty, Type::Int)
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::DequeJoin => {
+            matches!(&recv.ty, Type::Apply { name, args: targs }
+                if name == "Deque" && targs.len() == 1 && matches!(&targs[0], Type::Int))
+                && args.len() == 1
+                && matches!(&args[0].ty, Type::String)
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::DequeFrom => {
+            matches!(
+                &recv.ty,
+                Type::List(inner) if matches!(inner.as_ref(), Type::Int)
+            ) && args.is_empty()
         }
         TBuiltinOp::InsertList => {
             jit_list_int_type(&recv.ty)

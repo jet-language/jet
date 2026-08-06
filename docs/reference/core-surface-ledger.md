@@ -52,8 +52,8 @@ Generated on: 2026-08-06
 | Shared containers | 54 |
 | Core modules | 85 |
 | Module members | 1110 |
-| Collection method rows | 592 |
-| Jet-side rows | 1703 |
+| Collection method rows | 602 |
+| Jet-side rows | 1713 |
 | Total rows | 10563 |
 
 ## Verdicts
@@ -61,9 +61,9 @@ Generated on: 2026-08-06
 | Verdict | Rows |
 | --- | ---: |
 | Jet wins | 393 |
-| Equal | 719 |
-| Jet loses (two or more languages agree) | 527 |
-| Single witness (recorded, not scored) | 8333 |
+| Equal | 729 |
+| Jet loses (two or more languages agree) | 515 |
+| Single witness (recorded, not scored) | 8335 |
 | Exported type, not an operation | 169 |
 | Not compared | 422 |
 | Deliberately declined | 0 |
@@ -72,17 +72,17 @@ Generated on: 2026-08-06
 
 | Language | Surface read from | Recorded operations | Jet rows matched | Loss rows |
 | --- | --- | ---: | ---: | ---: |
-| Rust | standard-library source (rust-src component) | 1032 | 307 | 76 |
-| Go | official frozen API files (GOROOT/api/go1*.txt) | 1878 | 373 | 161 |
-| Swift | official documentation JSON (developer.apple.com) | 505 | 133 | 66 |
+| Rust | standard-library source (rust-src component) | 1032 | 312 | 71 |
+| Go | official frozen API files (GOROOT/api/go1*.txt) | 1878 | 376 | 157 |
+| Swift | official documentation JSON (developer.apple.com) | 505 | 133 | 65 |
 | Kotlin | official API reference (kotlinlang.org) | 1141 | 175 | 114 |
-| C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1267 | 290 | 95 |
+| C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1267 | 293 | 92 |
 | TypeScript | runtime introspection | 724 | 194 | 92 |
 | Ruby | runtime introspection | 1294 | 272 | 138 |
-| Elixir | runtime introspection | 1270 | 299 | 137 |
+| Elixir | runtime introspection | 1270 | 308 | 128 |
 | Julia | official documentation search index (docs.julialang.org) | 1132 | 253 | 126 |
 | R | official R manual package index (stat.ethz.ch R-devel) | 1768 | 51 | 0 |
-| Python | runtime introspection | 2232 | 353 | 204 |
+| Python | runtime introspection | 2232 | 357 | 200 |
 
 ## Loss clusters
 
@@ -102,15 +102,14 @@ while losses remain.
 | Iter | 22 | #1479 | ready | live |
 | core.crypto | 19 | #1473 | ready | live |
 | core.tasks | 19 | #1468 | building | live |
-| core.net | 18 | #1469 | ready | live |
 | core.archive | 17 | #1470 | ready | live |
 | core.log | 17 | #1474 | ready | live |
+| core.net | 17 | #1469 | ready | live |
 | core.time | 14 | #1466 | done | closed |
-| Deque | 14 | #1475 | building | live |
 | core.url | 13 | #1472 | ready | live |
-| core.regex | 12 | #1471 | ready | live |
 | core.sync | 12 | #1481 | ready | live |
 | core.math | 11 | #1464 | done | closed |
+| core.regex | 11 | #1471 | ready | live |
 | core.io | 10 | #1480 | ready | live |
 | core.os | 10 | #1465 | done | closed |
 | core.path | 10 | #288 | building | live |
@@ -119,10 +118,11 @@ while losses remain.
 | core.encoding.xml | 9 | #1481 | ready | live |
 | core.reflect | 9 | #1481 | ready | live |
 | core.testing | 9 | #1481 | ready | live |
-| ByteBuffer | 6 | #1467 | building | live |
+| ByteBuffer | 6 | #1467 | verify | live |
 | core.http | 6 | #1481 | ready | live |
 | core.tls | 6 | #1481 | ready | live |
 | core.uuid | 5 | #1481 | ready | live |
+| Deque | 4 | #1475 | building | live |
 | core.args | 3 | #1481 | ready | live |
 | core.encoding.csv | 3 | #1481 | ready | live |
 | SortedSet | 3 | #1478 | ready | live |

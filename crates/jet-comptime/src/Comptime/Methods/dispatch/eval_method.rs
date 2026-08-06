@@ -198,6 +198,16 @@ impl<'a> Interp<'a> {
                     fields: vec![("items".to_string(), CtValue::List(Vec::new()))],
                 });
             }
+            if type_name == crate::Syntax::TYPE_DEQUE && method == "init" {
+                let items = match self.eval(&args[0].expr, scope)? {
+                    CtValue::List(items) => items,
+                    _ => return Err(unsupported("Deque.init with a non-list", span)),
+                };
+                return Ok(CtValue::Struct {
+                    type_name: crate::Syntax::TYPE_DEQUE.to_string(),
+                    fields: vec![("items".to_string(), CtValue::List(items))],
+                });
+            }
             if type_name == crate::Syntax::TYPE_BIT_SET && method == "new" {
                 return Ok(CtValue::Struct {
                     type_name: crate::Syntax::TYPE_BIT_SET.to_string(),
@@ -1509,7 +1519,15 @@ impl<'a> Interp<'a> {
                         | "peek_back"
                         | "len"
                         | "is_empty"
-                        | "clear"),
+                        | "clear"
+                        | "capacity"
+                        | "contains"
+                        | "get"
+                        | "delete"
+                        | "to_list"
+                        | "join"
+                        | "reverse"
+                        | "split"),
                 ) if type_name == crate::Syntax::TYPE_DEQUE => {
                     let mut items = fields
                         .iter()
@@ -1530,7 +1548,7 @@ impl<'a> Interp<'a> {
                     };
                     let mut changed = false;
                     let result = match method {
-                        "len" => CtValue::Int(items.len() as i64),
+                        "len" | "capacity" => CtValue::Int(items.len() as i64),
                         "is_empty" => CtValue::Bool(items.is_empty()),
                         "peek_front" => items
                             .first()
@@ -1540,6 +1558,29 @@ impl<'a> Interp<'a> {
                             .last()
                             .cloned()
                             .map_or_else(option_none, |value| CtValue::Some(Box::new(value))),
+                        "get" => {
+                            let idx = match argv.first() {
+                                Some(CtValue::Int(i)) if *i >= 0 => *i as usize,
+                                _ => return Ok(option_none()),
+                            };
+                            items
+                                .get(idx)
+                                .cloned()
+                                .map_or_else(option_none, |value| CtValue::Some(Box::new(value)))
+                        }
+                        "contains" => {
+                            let needle = argv.first().cloned().unwrap_or(CtValue::Unit);
+                            CtValue::Bool(items.iter().any(|x| x == &needle))
+                        }
+                        "to_list" => CtValue::List(items.clone()),
+                        "join" => {
+                            let sep = match argv.first() {
+                                Some(CtValue::Str(s)) => s.as_str(),
+                                _ => "",
+                            };
+                            let parts: Vec<String> = items.iter().map(|x| x.jet_show()).collect();
+                            CtValue::Str(parts.join(sep))
+                        }
                         "push_front" => {
                             items.insert(0, argv[0].clone());
                             changed = true;
@@ -1566,6 +1607,31 @@ impl<'a> Interp<'a> {
                             items.clear();
                             changed = true;
                             CtValue::Unit
+                        }
+                        "delete" => {
+                            let needle = argv.first().cloned().unwrap_or(CtValue::Unit);
+                            if let Some(i) = items.iter().position(|x| x == &needle) {
+                                items.remove(i);
+                                changed = true;
+                            }
+                            CtValue::Unit
+                        }
+                        "reverse" => {
+                            items.reverse();
+                            changed = true;
+                            CtValue::Unit
+                        }
+                        "split" => {
+                            let idx = match argv.first() {
+                                Some(CtValue::Int(i)) if *i >= 0 => (*i as usize).min(items.len()),
+                                _ => items.len(),
+                            };
+                            let rest = items.split_off(idx);
+                            changed = true;
+                            CtValue::Struct {
+                                type_name: crate::Syntax::TYPE_DEQUE.to_string(),
+                                fields: vec![("items".to_string(), CtValue::List(rest))],
+                            }
                         }
                         _ => unreachable!("Deque method set is closed"),
                     };

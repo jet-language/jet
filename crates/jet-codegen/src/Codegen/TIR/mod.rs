@@ -4094,6 +4094,24 @@ pub enum TBuiltinOp {
     DequePeekFront,
     /// `deque.peek_back()` → `(recv).back().cloned()` (returns `Option<T>`).
     DequePeekBack,
+    /// `deque.capacity()` → `(recv).capacity() as i64`.
+    DequeCapacity,
+    /// `deque.contains(v)` → `(recv).iter().any(|x| x == &v)`.
+    DequeContains,
+    /// `deque.get(i)` → `(recv).get(i as usize).cloned()`.
+    DequeGet,
+    /// `deque.delete(v)` — remove first equal element (unit).
+    DequeDelete,
+    /// `deque.to_list()` → `(recv).iter().cloned().collect::<Vec<_>>()`.
+    DequeToList,
+    /// `deque.join(sep)` — string-join of elements via jet_show.
+    DequeJoin,
+    /// `deque.reverse()` — reverse in place via make_contiguous.
+    DequeReverse,
+    /// `deque.split(i)` → `(recv).split_off(i as usize)` (returns other half).
+    DequeSplit,
+    /// `Deque.from(xs)` / `Deque.init(xs)` — build from a list.
+    DequeFrom,
     // D-FAILCOMP1: failure-aware list adapters.
     /// `try_collect()` on `[Result<T,E>]` → `jet_list_try_collect((recv).clone())`.
     TryCollect,
