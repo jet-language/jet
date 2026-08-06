@@ -365,6 +365,24 @@ fn run() {{
     }
 }
 
+/// #1483: `env.get` under `jet run` reads the live process environment — not a
+/// value frozen at build time (I9 with AOT).
+#[test]
+fn env_divisor_uses_live_process_environment() {
+    let src = format!(
+        "use core.env as env
+{SEED}
+fn run() {{
+    d :: Int.parse(env.get(\"JET_TRAP_DIVISOR\") ?? \"0\") ?? 0
+    print(seed(10) /% d)
+}}
+"
+    );
+    let (code, out, err) = jit_run_with_env("jit_env_live_divisor", &src, &[("JET_TRAP_DIVISOR", "2")]);
+    assert_eq!(code, 0, "live env divisor must run: out={out} err={err}");
+    assert_eq!(out, "5\n", "10 /% 2 from live env, got: {out}");
+}
+
 /// D-EXPSEM1=A / D-FLOORDIV1=A / D-MODSEM1=A: the Prelude files are the one
 /// home for these rules, but three tiers cannot include them — the comptime
 /// interpreter, the Cranelift host, and the JS preamble. Each carries the trap

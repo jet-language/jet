@@ -809,6 +809,11 @@ fn strip_vetted_prelude_modules(rust_code: &str) -> String {
     );
     s = strip_region(
         &s,
+        "// JET_VETTED_UNSAFE_BEGIN: jet_os_extra",
+        "// JET_VETTED_UNSAFE_END: jet_os_extra",
+    );
+    s = strip_region(
+        &s,
         "// JET_VETTED_UNSAFE_BEGIN: jet_env_windows",
         "// JET_VETTED_UNSAFE_END: jet_env_windows",
     );
