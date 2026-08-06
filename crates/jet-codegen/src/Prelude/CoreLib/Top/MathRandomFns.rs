@@ -41,6 +41,40 @@ fn jet_std_math_int_pow(base: i64, exp: i64) -> i64 {
     }
     base.saturating_pow(exp as u32)
 }
+/// The largest whole number whose square is at most `value`, or absent when
+/// there is none. A negative number has no whole square root.
+fn jet_std_math_isqrt(value: i64) -> Option<i64> {
+    if value < 0 {
+        return None;
+    }
+    let mut root = (value as f64).sqrt() as i64;
+    // The float square root can land either side on large values, so walk back
+    // to the exact answer.
+    while root > 0 && root.saturating_mul(root) > value {
+        root -= 1;
+    }
+    while (root + 1).saturating_mul(root + 1) <= value {
+        root += 1;
+    }
+    Some(root)
+}
+
+/// The product of every whole number from 1 to `value`, or absent when there is
+/// no answer: a negative input, or a result past the range. 21 factorial is
+/// already too big.
+fn jet_std_math_factorial(value: i64) -> Option<i64> {
+    if value < 0 {
+        return None;
+    }
+    let mut total: i64 = 1;
+    let mut step: i64 = 2;
+    while step <= value {
+        total = total.checked_mul(step)?;
+        step += 1;
+    }
+    Some(total)
+}
+
 fn jet_std_math_gcd(mut a: i64, mut b: i64) -> i64 {
     a = a.abs();
     b = b.abs();

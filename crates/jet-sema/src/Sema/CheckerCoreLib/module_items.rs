@@ -117,6 +117,12 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "fma",
             "is_even",
             "is_odd",
+            "isqrt",
+            "factorial",
+            "checked_abs",
+            "checked_neg",
+            "checked_div",
+            "checked_rem",
         ],
         // D-DET1: `rng` builds a deterministic injected RNG capability.
         // D-RANDSPLIT1=A: `bytes(n)` returns n PRNG bytes — fast, NOT crypto-safe.

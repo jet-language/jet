@@ -645,6 +645,12 @@ pub(crate) fn emit_tir_core_call(
         ("core.math", "fma") => {
             format!("({}).mul_add({}, {})", arg(0), arg(1), arg(2))
         }
+        ("core.math", "isqrt") => format!("{}({})", helper("jet_std_math_isqrt"), arg(0)),
+        ("core.math", "factorial") => format!("{}({})", helper("jet_std_math_factorial"), arg(0)),
+        ("core.math", "checked_abs") => format!("({}).checked_abs()", arg(0)),
+        ("core.math", "checked_neg") => format!("({}).checked_neg()", arg(0)),
+        ("core.math", "checked_div") => format!("({}).checked_div({})", arg(0), arg(1)),
+        ("core.math", "checked_rem") => format!("({}).checked_rem({})", arg(0), arg(1)),
         ("core.math", "is_even") => format!("(({}) % 2 == 0)", arg(0)),
         ("core.math", "is_odd") => format!("(({}) % 2 != 0)", arg(0)),
         ("core.math", "degrees") => format!("({}).to_degrees()", arg(0)),

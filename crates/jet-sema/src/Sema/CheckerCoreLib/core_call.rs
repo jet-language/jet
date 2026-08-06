@@ -2119,13 +2119,34 @@ impl<'a> Checker<'a> {
                 }
                 (
                     "core.math",
-                    "checked_add" | "checked_sub" | "checked_mul" | "checked_pow",
+                    "checked_add" | "checked_sub" | "checked_mul" | "checked_pow"
+                    | "checked_div" | "checked_rem",
                 ) => {
                     if args.len() != 2 {
                         self.diags.push(wrong_core_arity(name, 2, args.len(), span));
                     }
                     for (idx, arg) in args.iter_mut().enumerate() {
                         self.expect_core_arg(name, idx, &Type::Int, arg);
+                    }
+                    return Some(Type::Option(Box::new(Type::Int)));
+                }
+                // One whole number in, one optional whole number out: the answer
+                // is absent exactly where it would leave the range.
+                ("core.math", "checked_abs" | "checked_neg") => {
+                    if args.len() != 1 {
+                        self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                    }
+                    if let Some(arg) = args.get_mut(0) {
+                        self.expect_core_arg(name, 0, &Type::Int, arg);
+                    }
+                    return Some(Type::Option(Box::new(Type::Int)));
+                }
+                ("core.math", "isqrt" | "factorial") => {
+                    if args.len() != 1 {
+                        self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                    }
+                    if let Some(arg) = args.get_mut(0) {
+                        self.expect_core_arg(name, 0, &Type::Int, arg);
                     }
                     return Some(Type::Option(Box::new(Type::Int)));
                 }

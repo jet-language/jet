@@ -1076,6 +1076,46 @@ pub fn apply_core_call(
                 unsupported("mixing float widths", span)
             })?))
         }
+        ("core.math", "isqrt" | "factorial" | "checked_abs" | "checked_neg") => {
+            let value = match one(0)? {
+                CtValue::Int(value) => *value,
+                _ => return Err(unsupported("this operation on a value that is not a whole number", span)),
+            };
+            match method {
+                "isqrt" => {
+                    if value < 0 {
+                        return Ok(CtValue::None(Type::Int));
+                    }
+                    let mut root = (value as f64).sqrt() as i64;
+                    while root > 0 && root.saturating_mul(root) > value { root -= 1; }
+                    while (root + 1).saturating_mul(root + 1) <= value { root += 1; }
+                    Ok(CtValue::Some(Box::new(CtValue::Int(root))))
+                }
+                "factorial" => {
+                    if value < 0 {
+                        return Ok(CtValue::None(Type::Int));
+                    }
+                    let mut total: i64 = 1;
+                    let mut step: i64 = 2;
+                    while step <= value {
+                        total = match total.checked_mul(step) {
+                            Some(next) => next,
+                            None => return Ok(CtValue::None(Type::Int)),
+                        };
+                        step += 1;
+                    }
+                    Ok(CtValue::Some(Box::new(CtValue::Int(total))))
+                }
+                "checked_abs" => Ok(match value.checked_abs() {
+                    Some(answer) => CtValue::Some(Box::new(CtValue::Int(answer))),
+                    None => CtValue::None(Type::Int),
+                }),
+                _ => Ok(match value.checked_neg() {
+                    Some(answer) => CtValue::Some(Box::new(CtValue::Int(answer))),
+                    None => CtValue::None(Type::Int),
+                }),
+            }
+        }
         ("core.math", "is_even" | "is_odd") => {
             let value = match one(0)? {
                 CtValue::Int(value) => *value,
@@ -1114,6 +1154,22 @@ pub fn apply_core_call(
             let a = as_int(one(0)?, span)?;
             let b = as_int(one(1)?, span)?;
             Ok(match a.checked_add(b) {
+                Some(n) => CtValue::Some(Box::new(CtValue::Int(n))),
+                None => CtValue::None(Type::Int),
+            })
+        }
+        ("core.math", "checked_div") => {
+            let a = as_int(one(0)?, span)?;
+            let b = as_int(one(1)?, span)?;
+            Ok(match a.checked_div(b) {
+                Some(n) => CtValue::Some(Box::new(CtValue::Int(n))),
+                None => CtValue::None(Type::Int),
+            })
+        }
+        ("core.math", "checked_rem") => {
+            let a = as_int(one(0)?, span)?;
+            let b = as_int(one(1)?, span)?;
+            Ok(match a.checked_rem(b) {
                 Some(n) => CtValue::Some(Box::new(CtValue::Int(n))),
                 None => CtValue::None(Type::Int),
             })
