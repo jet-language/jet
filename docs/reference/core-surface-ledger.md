@@ -77,31 +77,31 @@ Generated on: 2026-08-06
 A cluster is one container's losses. Owning a gap per container is what
 the existing cards already do, so the ledger folds into them rather than
 opening a second owner for the same surface. `needs_card` means no card
-owns that container today, and `closed` means the card that used to owns
-it is done while losses remain.
+owns that container today, and `closed` means the owning card is done
+while losses remain.
 
-| Container | Loss rows | Prior card | Card phase | Owner |
+| Container | Loss rows | Owner card | Card phase | State |
 | --- | ---: | --- | --- | --- |
-| core.math | 71 | none | n/a | needs_card |
-| String | 61 | #1409 | done | closed |
+| core.math | 71 | #1464 | planning | live |
+| String | 61 | #1476 | planning | live |
 | core.files | 51 | #288 | building | live |
-| ByteBuffer | 44 | none | n/a | needs_card |
-| core.os | 44 | none | n/a | needs_card |
-| core.time | 43 | none | n/a | needs_card |
-| List | 27 | #1410 | done | closed |
-| Map | 25 | #1410 | done | closed |
-| core.tasks | 22 | none | n/a | needs_card |
-| Set | 20 | #1404 | done | closed |
-| Iter | 19 | #1400 | done | closed |
-| core.net | 15 | none | n/a | needs_card |
-| core.archive | 14 | none | n/a | needs_card |
-| core.regex | 12 | none | n/a | needs_card |
-| core.url | 12 | none | n/a | needs_card |
-| core.crypto | 11 | none | n/a | needs_card |
-| core.log | 11 | none | n/a | needs_card |
+| ByteBuffer | 44 | #1467 | planning | live |
+| core.os | 44 | #1465 | planning | live |
+| core.time | 43 | #1466 | planning | live |
+| List | 27 | #1477 | planning | live |
+| Map | 25 | #1477 | planning | live |
+| core.tasks | 22 | #1468 | planning | live |
+| Set | 20 | #1478 | planning | live |
+| Iter | 19 | #1479 | planning | live |
+| core.net | 15 | #1469 | planning | live |
+| core.archive | 14 | #1470 | planning | live |
+| core.regex | 12 | #1471 | planning | live |
+| core.url | 12 | #1472 | planning | live |
+| core.crypto | 11 | #1473 | planning | live |
+| core.log | 11 | #1474 | planning | live |
 | core.sync | 11 | none | n/a | needs_card |
-| Deque | 10 | none | n/a | needs_card |
-| core.io | 9 | #1402 | done | closed |
+| Deque | 10 | #1475 | planning | live |
+| core.io | 9 | #1480 | planning | live |
 | core.encoding.xml | 8 | none | n/a | needs_card |
 | core.process | 8 | none | n/a | needs_card |
 | core.db | 7 | none | n/a | needs_card |
@@ -119,7 +119,7 @@ it is done while losses remain.
 | core.encoding.json | 1 | none | n/a | needs_card |
 | core.mem | 1 | none | n/a | needs_card |
 | core.mime | 1 | none | n/a | needs_card |
-| SortedSet | 1 | #1404 | done | closed |
+| SortedSet | 1 | #1478 | planning | live |
 
 ## Containers indexed per package
 

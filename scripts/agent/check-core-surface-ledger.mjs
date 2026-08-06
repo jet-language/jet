@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -23,7 +24,21 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const LEDGER_PATH = join(ROOT, "docs/reference/core-surface-ledger.json");
 const README_PATH = join(ROOT, "docs/reference/core-surface-ledger.md");
 const PYTHON_SURFACE_PATH = join(ROOT, "docs/reference/python-surface.json");
-const TOWER_PATH = join(ROOT, "plugins/tower/.tower/tower.json");
+// The canonical board lives in the main checkout. A worktree carries its own
+// committed copy, which goes stale the moment a card is minted, and reading it
+// reported every new owner as missing. Resolve the main checkout through git
+// and fall back to this tree only when that fails. Read-only either way.
+const TOWER_PATH = (function () {
+  try {
+    const commonDir = execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+      { cwd: ROOT, encoding: "utf8" }).trim();
+    const candidate = join(dirname(commonDir), "plugins/tower/.tower/tower.json");
+    if (existsSync(candidate)) return candidate;
+  } catch (error) {
+    // Not a git checkout, or git is unavailable; use the in-tree copy.
+  }
+  return join(ROOT, "plugins/tower/.tower/tower.json");
+})();
 const MODULE_ITEMS_PATH = "crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs";
 const FIXED_SIGS_PATH = "crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs";
 const COLLECTIONS_PATH = "crates/jet-foundation/src/Collections.rs";
@@ -345,18 +360,29 @@ const COLLECTION_METHOD_FUNCTIONS = {
   deque_method_return: "Deque",
 };
 
-// A container whose losses were carded before this ledger existed. The card is
-// recorded so the same gap is not carded twice; --check rejects a reference to
-// a card that is closed or missing, which is how a stale owner surfaces
-// instead of quietly reading as covered.
-const CLUSTER_OWNER_HISTORY = {
-  Set: 1404,
-  SortedSet: 1404,
-  String: 1409,
-  List: 1410,
-  Map: 1410,
-  Iter: 1400,
-  "core.io": 1402,
+// The card that owns a container's losses. --check rejects a reference to a
+// card that is closed or missing, which is how a stale owner surfaces instead
+// of quietly reading as covered.
+const CLUSTER_OWNER = {
+  "core.math": 1464,
+  "core.os": 1465,
+  "core.time": 1466,
+  ByteBuffer: 1467,
+  "core.tasks": 1468,
+  "core.net": 1469,
+  "core.archive": 1470,
+  "core.regex": 1471,
+  "core.url": 1472,
+  "core.crypto": 1473,
+  "core.log": 1474,
+  Deque: 1475,
+  String: 1476,
+  List: 1477,
+  Map: 1477,
+  Set: 1478,
+  SortedSet: 1478,
+  Iter: 1479,
+  "core.io": 1480,
   "core.files": 288,
   "core.path": 288,
 };
@@ -1122,7 +1148,7 @@ function lossClusters(rows, cards) {
     for (const language of row.source.languages || []) cluster.languages.add(language);
   }
   return Array.from(byContainer.values()).map(function (cluster) {
-    const card = CLUSTER_OWNER_HISTORY[cluster.container] ?? null;
+    const card = CLUSTER_OWNER[cluster.container] ?? null;
     const record = card !== null && cards ? cards.get(card) : null;
     let ownerState = "needs_card";
     if (card !== null && !cards) ownerState = "unverified";
@@ -1133,8 +1159,8 @@ function lossClusters(rows, cards) {
       container: cluster.container,
       lossCount: cluster.lossCount,
       languages: Array.from(cluster.languages).sort(),
-      priorCard: card,
-      priorCardPhase: record ? record.phase : null,
+      ownerCard: card,
+      ownerCardPhase: record ? record.phase : null,
       ownerState: ownerState,
     };
   }).sort(function (left, right) {
@@ -1397,12 +1423,12 @@ function validateOwners(ledger, board) {
   for (const cluster of ledger.lossClusters) {
     if (cluster.ownerState === "live") {
       if (!cards) throw new Error("cluster claims a live owner but no board is readable: " + cluster.container);
-      const card = cards.get(cluster.priorCard);
+      const card = cards.get(cluster.ownerCard);
       if (!card) {
-        throw new Error("stale owner: " + cluster.container + " names missing card #" + cluster.priorCard);
+        throw new Error("stale owner: " + cluster.container + " names missing card #" + cluster.ownerCard);
       }
       if (card.phase === "done") {
-        throw new Error("stale owner: " + cluster.container + " names closed card #" + cluster.priorCard);
+        throw new Error("stale owner: " + cluster.container + " names closed card #" + cluster.ownerCard);
       }
     }
     // A closed cluster is a dead owner holding real losses. It was reported
@@ -1410,22 +1436,22 @@ function validateOwners(ledger, board) {
     // and the ledger would keep pointing at it.
     if (cluster.ownerState === "closed") {
       if (!cards) throw new Error("cluster names a closed owner but no board is readable: " + cluster.container);
-      const card = cards.get(cluster.priorCard);
+      const card = cards.get(cluster.ownerCard);
       if (!card) {
         throw new Error("stale owner: " + cluster.container +
-          " reports closed card #" + cluster.priorCard + ", which is not on the board");
+          " reports closed card #" + cluster.ownerCard + ", which is not on the board");
       }
       if (card.phase !== "done") {
         throw new Error("stale owner: " + cluster.container + " reports card #" +
-          cluster.priorCard + " as closed, but the board has it in " + card.phase);
+          cluster.ownerCard + " as closed, but the board has it in " + card.phase);
       }
       if (cluster.lossCount === 0) {
         throw new Error("cluster " + cluster.container + " reports a closed owner with no losses");
       }
     }
-    if (cluster.ownerState === "needs_card" && cluster.priorCard !== null) {
+    if (cluster.ownerState === "needs_card" && cluster.ownerCard !== null) {
       throw new Error("cluster " + cluster.container + " both names card #" +
-        cluster.priorCard + " and claims to need one");
+        cluster.ownerCard + " and claims to need one");
     }
   }
   for (const row of ledger.rows) {
@@ -1546,16 +1572,16 @@ function markdown(ledger) {
     "A cluster is one container's losses. Owning a gap per container is what",
     "the existing cards already do, so the ledger folds into them rather than",
     "opening a second owner for the same surface. `needs_card` means no card",
-    "owns that container today, and `closed` means the card that used to owns",
-    "it is done while losses remain.",
+    "owns that container today, and `closed` means the owning card is done",
+    "while losses remain.",
     "",
-    "| Container | Loss rows | Prior card | Card phase | Owner |",
+    "| Container | Loss rows | Owner card | Card phase | State |",
     "| --- | ---: | --- | --- | --- |",
   );
   for (const cluster of ledger.lossClusters) {
     lines.push("| " + cluster.container + " | " + cluster.lossCount + " | " +
-      (cluster.priorCard ? "#" + cluster.priorCard : "none") + " | " +
-      (cluster.priorCardPhase || "n/a") + " | " + cluster.ownerState + " |");
+      (cluster.ownerCard ? "#" + cluster.ownerCard : "none") + " | " +
+      (cluster.ownerCardPhase || "n/a") + " | " + cluster.ownerState + " |");
   }
   lines.push(
     "",
@@ -1796,7 +1822,7 @@ function hostileFixtures() {
     const broken = clone(ledger);
     const cluster = must(broken.lossClusters[0], "the ledger has no loss cluster");
     cluster.ownerState = "live";
-    cluster.priorCard = 999999;
+    cluster.ownerCard = 999999;
     validateOwners(broken, board);
   }));
 
@@ -1807,7 +1833,7 @@ function hostileFixtures() {
     const cluster = must(broken.lossClusters.find(function (item) {
       return item.ownerState === "closed";
     }), "no closed cluster to break");
-    const card = openBoard.cards.find(function (item) { return item.num === cluster.priorCard; });
+    const card = openBoard.cards.find(function (item) { return item.num === cluster.ownerCard; });
     must(card, "the closed cluster names a card the board does not have");
     card.phase = "building";
     validateOwners(broken, openBoard);
