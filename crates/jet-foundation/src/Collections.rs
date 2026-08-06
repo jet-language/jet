@@ -921,7 +921,11 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
         ("is_sorted", 0) => Some(Some(Type::Bool)),
         ("is_sorted_by", 1) => Some(Some(Type::Bool)),
         ("dedup_by", 1) => Some(Some(iter_ty(inner.clone()))),
-        ("cycle", 0) => Some(Some(iter_ty(inner.clone()))),
+        // D-ITER1: bounded — cycles the sequence, producing exactly `n`
+        // items (not `n` loops; `repeat(n)` already covers "loop n times").
+        // A 0-arg infinite `cycle()` has no safe representation across
+        // AOT/JIT/interpreter without unbounded materialization risk (I9).
+        ("cycle", 1) => Some(Some(iter_ty(inner.clone()))),
         ("drop_last", 1) => Some(Some(iter_ty(inner.clone()))),
         ("last_index_of", 1) => Some(Some(Type::Option(Box::new(Type::Int)))),
         ("average", 0) => Some(Some(Type::Float)),
@@ -1118,7 +1122,11 @@ fn iter_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
         ("is_sorted", 0) => Some(Some(Type::Bool)),
         ("is_sorted_by", 1) => Some(Some(Type::Bool)),
         ("dedup_by", 1) => Some(Some(iter_ty(inner.clone()))),
-        ("cycle", 0) => Some(Some(iter_ty(inner.clone()))),
+        // D-ITER1: bounded — cycles the sequence, producing exactly `n`
+        // items (not `n` loops; `repeat(n)` already covers "loop n times").
+        // A 0-arg infinite `cycle()` has no safe representation across
+        // AOT/JIT/interpreter without unbounded materialization risk (I9).
+        ("cycle", 1) => Some(Some(iter_ty(inner.clone()))),
         ("repeat", 1) => Some(Some(iter_ty(inner.clone()))),
         ("drop_last", 1) => Some(Some(iter_ty(inner.clone()))),
         ("last_index_of", 1) => Some(Some(Type::Option(Box::new(Type::Int)))),
@@ -2222,7 +2230,8 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                 },
             ]),
             // D-ITER1: non-closure adapters.
-            "take" | "skip" | "step_by" | "chunks" | "windows" | "repeat" | "drop_last" | "split" => {
+            "take" | "skip" | "step_by" | "chunks" | "windows" | "repeat" | "drop_last" | "split"
+            | "cycle" => {
                 Some(vec![Type::Int])
             }
             "intersperse" | "last_index_of" | "binary_search" => Some(vec![(**inner).clone()]),
@@ -2241,7 +2250,6 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             | "flatten"
             | "unzip"
             | "is_sorted"
-            | "cycle"
             | "shuffle"
             | "average"
             | "to_set" | "copy" | "random" | "min_max" => Some(vec![]),

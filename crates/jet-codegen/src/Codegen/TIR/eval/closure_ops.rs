@@ -944,11 +944,75 @@ impl<'a> EvalCtx<'a> {
                         .collect(),
                 ))
             }
-            // Accidental #1479 variants landed in #1478 commit; ambient routes
-            // through method eval until that card ships full hosts.
-            TClosureOp::DedupBy => Err(unsupported("dedup_by at comptime", self.span())),
-            TClosureOp::IsSortedBy => Err(unsupported("is_sorted_by at comptime", self.span())),
-            TClosureOp::ChunkWhile => Err(unsupported("chunk_while at comptime", self.span())),
+            // #1479: mirrors `jet_iter_dedup_by` (Prelude/Core/Collections.rs)
+            // — keeps the first item of each consecutive run sharing a key.
+            TClosureOp::DedupBy => {
+                let CtValue::List(items) = recv_v else {
+                    return Err(unsupported("dedup_by receiver", self.span()));
+                };
+                let mut out = Vec::new();
+                let mut prev_key: Option<CtValue> = None;
+                for item in items {
+                    let key = call1(self, item.clone())?;
+                    if prev_key.as_ref() == Some(&key) {
+                        continue;
+                    }
+                    prev_key = Some(key);
+                    out.push(item);
+                }
+                let (pulls, tail) = progress_passthrough(&progress, out.len());
+                Ok(wrap_list(out, pulls, tail))
+            }
+            // #1479: mirrors `jet_iter_is_sorted_by` — non-decreasing key
+            // order across consecutive elements.
+            TClosureOp::IsSortedBy => {
+                let CtValue::List(items) = recv_v else {
+                    return Err(unsupported("is_sorted_by receiver", self.span()));
+                };
+                let mut prev_key: Option<CtValue> = None;
+                for item in items {
+                    let key = call1(self, item.clone())?;
+                    if let Some(prev) = prev_key {
+                        if cmp(prev, key.clone(), self.span())? == std::cmp::Ordering::Greater {
+                            return Ok(CtValue::Bool(false));
+                        }
+                    }
+                    prev_key = Some(key);
+                }
+                Ok(CtValue::Bool(true))
+            }
+            // #1479: mirrors `jet_iter_chunk_while` — groups runs where
+            // `f(prev, next)` holds between the chunk's last element and the
+            // next candidate.
+            TClosureOp::ChunkWhile => {
+                let CtValue::List(items) = recv_v else {
+                    return Err(unsupported("chunk_while receiver", self.span()));
+                };
+                let f = args
+                    .first()
+                    .ok_or_else(|| unsupported("chunk_while arg", self.span()))?;
+                let mut chunks: Vec<Vec<CtValue>> = Vec::new();
+                for item in items {
+                    let start_new = match chunks.last() {
+                        Some(chunk) => {
+                            let last = chunk.last().cloned().unwrap();
+                            !as_bool(
+                                &self.apply_callable(f, vec![last, item.clone()], scope)?,
+                                self.span(),
+                            )?
+                        }
+                        None => true,
+                    };
+                    if start_new {
+                        chunks.push(vec![item]);
+                    } else {
+                        chunks.last_mut().unwrap().push(item);
+                    }
+                }
+                let out: Vec<CtValue> = chunks.into_iter().map(CtValue::List).collect();
+                let (pulls, tail) = progress_passthrough(&progress, out.len());
+                Ok(wrap_list(out, pulls, tail))
+            }
         }
     }
 

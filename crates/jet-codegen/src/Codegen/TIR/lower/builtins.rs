@@ -368,7 +368,7 @@ pub(crate) fn resolve_builtin_op(
         ("repeat", 1) if is_string => TBuiltinOp::Repeat,
         // List literals leave `rty` None — same pattern as Take/Dedup.
         ("repeat", 1) => TBuiltinOp::IterRepeat,
-        ("cycle", 0) => TBuiltinOp::IterCycle,
+        ("cycle", 1) => TBuiltinOp::IterCycle,
         ("drop_last", 1) => TBuiltinOp::IterDropLast,
         ("shuffle", 0) => TBuiltinOp::IterShuffle,
         ("is_sorted", 0) => TBuiltinOp::IterIsSorted,

@@ -919,9 +919,15 @@ pub fn apply_method(
             }
             Ok(CtValue::List(out))
         }
+        // D-ITER1: bounded cycle — mirrors `jet_iter_cycle`, exactly `n`
+        // items produced by looping the source.
         (CtValue::List(xs), "cycle") => {
-            // Finite materialization for eval/deopt: one copy (callers must take()).
-            Ok(CtValue::List(xs.clone()))
+            let n = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?.max(0) as usize;
+            if xs.is_empty() || n == 0 {
+                Ok(CtValue::List(Vec::new()))
+            } else {
+                Ok(CtValue::List(xs.iter().cloned().cycle().take(n).collect()))
+            }
         }
         (CtValue::List(xs), "drop_last") => {
             let n = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?.max(0) as usize;
@@ -972,14 +978,23 @@ pub fn apply_method(
             Ok(CtValue::Float(CtFloat::f64(sum / xs.len() as f64)))
         }
         (CtValue::List(xs), "compare") => {
+            // Mirrors `jet_iter_compare`'s `Ord`-based slice comparison —
+            // element-wise, not by rendered text (a text compare would sort
+            // "10" before "9").
             let other = match args.first() {
                 Some(CtValue::List(ys)) => ys,
                 _ => return Err(unsupported("compare needs a list argument", span)),
             };
-            let ord = xs
-                .iter()
-                .map(|x| x.jet_show())
-                .cmp(other.iter().map(|x| x.jet_show()));
+            let mut ord = std::cmp::Ordering::Equal;
+            for (a, b) in xs.iter().zip(other.iter()) {
+                ord = cmp(a.clone(), b.clone(), span)?;
+                if ord != std::cmp::Ordering::Equal {
+                    break;
+                }
+            }
+            if ord == std::cmp::Ordering::Equal {
+                ord = xs.len().cmp(&other.len());
+            }
             Ok(CtValue::Int(match ord {
                 std::cmp::Ordering::Less => -1,
                 std::cmp::Ordering::Equal => 0,

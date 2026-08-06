@@ -52,15 +52,15 @@ Generated on: 2026-08-06
 | Shared containers | 54 |
 | Core modules | 85 |
 | Module members | 1137 |
-| Collection method rows | 702 |
-| Jet-side rows | 1840 |
-| Total rows | 10432 |
+| Collection method rows | 704 |
+| Jet-side rows | 1842 |
+| Total rows | 10434 |
 
 ## Verdicts
 
 | Verdict | Rows |
 | --- | ---: |
-| Jet wins | 401 |
+| Jet wins | 403 |
 | Equal | 850 |
 | Jet loses (two or more languages agree) | 318 |
 | Single witness (recorded, not scored) | 8274 |
@@ -98,7 +98,7 @@ while losses remain.
 | String | 34 | #1581 | ready | live |
 | core.crypto | 17 | #1473 | ready | live |
 | core.archive | 16 | #1470 | ready | live |
-| Set | 16 | #1478 | verify | live |
+| Set | 16 | #1478 | done | closed |
 | core.time | 14 | #1466 | done | closed |
 | core.tasks | 13 | #1468 | done | closed |
 | core.sync | 12 | #1481 | ready | live |

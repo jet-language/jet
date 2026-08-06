@@ -64,7 +64,7 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         | ("sum", 0) | ("product", 0) | ("min", 0) | ("max", 0)
         | ("flatten", 0) | ("intersperse", 1) | ("unzip", 0)
         // #1479 Iter ledger surface (non-closure).
-        | ("cycle", 0) | ("drop_last", 1) | ("shuffle", 0)
+        | ("cycle", 1) | ("drop_last", 1) | ("shuffle", 0)
         | ("is_sorted", 0) | ("average", 0)
         // D-LOOPMAP1=B: enter the lazy pipeline plane from an in-memory list.
         | ("lazy", 0)
