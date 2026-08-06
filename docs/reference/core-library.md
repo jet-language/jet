@@ -1694,15 +1694,22 @@ locale-sensitive casing remain out of scope under `D-TEXTUNICODE1=A`; regex
 replacement remains owned by `D-REGEXENGINE1=A`. These explicit v1 decisions
 are not silently added to the ambient String surface.
 
-String declines (#1476): mutation verbs (`clear`/`push`/`pop`/`remove`/`write`/
-`copyto`) stay off immutable text — rebuild with `+` / `replace` / `slice`.
-Sequence adapters (`all`/`map`/`fold`/`skip`/`chunk`/…) and indexers
+String declines (#1476, #1580): mutation verbs (`clear`/`push`/`pop`/`remove`/
+`write`/`copyto`) stay off immutable text — rebuild with `+` / `replace` /
+`slice`. Sequence adapters (`all`/`map`/`fold`/`skip`/`chunk`/…) and indexers
 (`get`/`first`/`last`/`codepointat`) live on `.chars()` / `.bytes()` then
 List/Iter (I8). `parse`/`tofloat` stay on destination types (`Int.parse` /
-`Float.parse`, E0311). `match`/`matches` stay on `core.regex`. Buffer-only
-names (`capacity`/`intern`/`isvalid`/`isprint`/`chop`/`replacerange`/
-`indexofany`/`lastindexofany`/`rpartition`) are declined; use the shipped
-surface or `core.text` helpers instead.
+`Float.parse`, E0311). `match`/`matches` stay on `core.regex`. `concat` stays
+on `+` / interpolation, the same join Jet already ships. Buffer-only names
+(`capacity`/`intern`/`isvalid`/`isprint`/`chop`/`replacerange`/`indexofany`/
+`lastindexofany`/`rpartition`) are declined; use the shipped surface or
+`core.text` helpers instead. Card #1580's 34-row batch (`clear`/`get`/`push`/
+`matches`/`parse`/`pop`/`remove`/`replacerange`/`isprint`/`map`/`write`/`all`/
+`skip`/`droplast`/`indexed`/`first`/`flatmap`/`each`/`last`/`max`/`min`/`fold`/
+`chunk`/`codepointat`/`indexofany`/`intern`/`lastindexofany`/`scan`/`tofloat`/
+`concat`/`match`/`chop`/`rpartition`/`isvalid`) restates this same reasoning
+as ballot `D-STR-DECLINE1`, pending owner ratification; card #1581 applies the
+ratified outcome to the ledger.
 
 ---
 

@@ -609,7 +609,7 @@ const CLUSTER_OWNER = {
   "core.crypto": 1473,
   "core.log": 1474,
   Deque: 1475,
-  String: 1580,
+  String: 1581,
   List: 1477,
   Map: 1477,
   Set: 1478,
