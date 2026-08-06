@@ -224,7 +224,7 @@ const SYNONYM_GROUPS = [
   ["exists", "is_file", "is_dir", "file_exists", "is_path"],
   ["parse", "loads", "decode", "deserialize", "try_parse", "from_string"],
   ["to_string", "dumps", "encode", "serialize", "inspect", "format", "describe"],
-  ["now", "today", "current_time", "utc_now", "system_time"],
+  ["now", "now_utc", "utc_now", "today", "current_time", "system_time", "now_local"],
   ["sleep", "delay", "pause"],
   ["abs", "fabs", "magnitude"],
   ["round", "rint"],
@@ -1024,6 +1024,21 @@ function keysForMember(member, prefixes) {
   return keys;
 }
 
+// A Jet member that only qualifies another member of the same container is the
+// same workflow spelled longer: sha256_bytes beside sha256, tcp_read_bytes
+// beside tcp_read, dns_srv_port beside dns_srv, now_utc beside now. Scoring the
+// qualified form separately produced a win for every suffix of a member that
+// already matched. It reports the verdict of the member it qualifies.
+function qualifierBase(member, siblings) {
+  let best = null;
+  for (const other of siblings) {
+    if (other === member) continue;
+    if (!member.startsWith(other + "_")) continue;
+    if (best === null || other.length > best.length) best = other;
+  }
+  return best;
+}
+
 // The canonical key of an operation is the first name of its synonym group, so
 // is_subset, is_subset_of and issubset are one gap rather than three.
 function canonicalKey(name) {
@@ -1131,7 +1146,7 @@ function verdictFor(cells) {
   return values.some(function (cell) { return cell.status === "has"; }) ? "equal" : "jet_wins";
 }
 
-function rowForModule(entry, member, fixedOnly, surfaces, keys) {
+function rowForModule(entry, member, fixedOnly, surfaces, keys, qualifiedBy) {
   const container = containerFor(entry.module);
   const cells = competitorCells(surfaces, container, member, keys);
   return {
@@ -1153,7 +1168,7 @@ function rowForModule(entry, member, fixedOnly, surfaces, keys) {
   };
 }
 
-function rowForCollection(entry, method, surfaces, keys) {
+function rowForCollection(entry, method, surfaces, keys, qualifiedBy) {
   const container = containerFor(entry.type);
   const cells = competitorCells(surfaces, container, method, keys);
   return {
@@ -1165,6 +1180,7 @@ function rowForCollection(entry, method, surfaces, keys) {
       member: method,
       sourceLine: entry.sourceLine,
     },
+    qualifies: qualifiedBy || undefined,
     container: container,
     jetSpelling: entry.type + "." + method,
     workflow: isTypeItem(method)
@@ -1305,15 +1321,27 @@ function buildRows(modules, fixedPairs, collections, surfaces) {
   }
   const covered = coveredKeys(membersByContainer);
 
+  const qualifierFor = function (container, member) {
+    return qualifierBase(member, membersByContainer.get(container) || []);
+  };
+
   const keysFor = function (container, member) {
-    return keysForMember(member, covered.prefixes.get(container) || new Set());
+    const keys = keysForMember(member, covered.prefixes.get(container) || new Set());
+    const base = qualifierBase(member, membersByContainer.get(container) || []);
+    if (base) {
+      for (const key of keysForMember(base, covered.prefixes.get(container) || new Set())) {
+        keys.add(key);
+      }
+    }
+    return keys;
   };
 
   const rows = [];
   for (const entry of modules) {
     for (const member of entry.members) {
+      const container = containerFor(entry.module);
       rows.push(rowForModule(entry, member, false, surfaces,
-        keysFor(containerFor(entry.module), member)));
+        keysFor(container, member), qualifierFor(container, member)));
     }
   }
   for (const pair of fixedPairs) {
@@ -1323,12 +1351,14 @@ function buildRows(modules, fixedPairs, collections, surfaces) {
     const member = pair.slice(split + 1);
     const entry = modules.find(function (item) { return item.module === module; });
     if (!entry) throw new Error("fixed signature module missing from inventory: " + module);
-    rows.push(rowForModule(entry, member, true, surfaces, keysFor(containerFor(module), member)));
+    rows.push(rowForModule(entry, member, true, surfaces,
+      keysFor(containerFor(module), member), qualifierFor(containerFor(module), member)));
   }
   for (const entry of collections) {
     for (const method of entry.methods) {
       rows.push(rowForCollection(entry, method, surfaces,
-        keysFor(containerFor(entry.type), method)));
+        keysFor(containerFor(entry.type), method),
+        qualifierFor(containerFor(entry.type), method)));
     }
   }
   rows.sort(function (left, right) { return left.id.localeCompare(right.id); });
@@ -1529,6 +1559,12 @@ function buildLedger() {
       lossClusterCount: clusters.length,
       clustersNeedingCard: clusters.filter(function (c) { return c.ownerState !== "live"; }).length,
       uncomparedDomainCount: uncompared.length,
+      // A win on a qualified spelling is the same capability as the member it
+      // qualifies: dns_srv_port beside dns_srv. Counted so wins can be read
+      // either way.
+      qualifiedWinCount: rows.filter(function (row) {
+        return row.verdict === "jet_wins" && row.qualifies;
+      }).length,
       repeatedCapabilityCount: repeatedCapabilities(rows).length,
       repeatedCapabilityRowCount: repeatedCapabilities(rows).reduce(function (n, item) {
         return n + item.rowCount;

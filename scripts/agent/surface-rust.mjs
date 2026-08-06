@@ -34,7 +34,9 @@ const CONTAINERS = {
   PriorityQueue: ["alloc/src/collections/binary_heap/mod.rs"],
   String: ["alloc/src/string.rs", "core/src/str/mod.rs", "alloc/src/str.rs", "core/src/char/methods.rs"],
   ByteBuffer: ["std/src/io/cursor.rs"],
-  "core.math": ["core/src/num/f64.rs", "core/src/num/int_macros.rs"],
+  // std/src/f64.rs and f32.rs hold sqrt, floor, ceil, round, sin, exp, ln,
+  // hypot and atan2. Reading only core made Rust look as if it lacked them.
+  "core.math": ["core/src/num/f64.rs", "core/src/num/int_macros.rs", "std/src/num/f64.rs", "std/src/num/f32.rs"],
   "core.time": ["core/src/time.rs", "std/src/time.rs"],
   "core.files": ["std/src/fs.rs"],
   "core.path": ["std/src/path.rs"],

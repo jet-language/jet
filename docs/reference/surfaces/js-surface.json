@@ -1,17 +1,583 @@
 {
   "language": "TypeScript",
   "alsoCovers": [
-    "JavaScript"
+    "JavaScript",
+    "Node"
   ],
   "sourceKind": "runtime introspection",
   "runtime": "node 22.23.2 (V8 12.4.254.21-node.56)",
-  "scopeRule": "Callable own properties of the ECMAScript objects that hold each workflow. Non-callable data properties are configuration, not operations; they stay counted in excludedProperties so the exclusion cannot hide a gap.",
+  "scopeRule": "Callable own properties of the ECMAScript objects that hold each workflow, plus the exported callables of the Node host modules that answer the rest. TypeScript ships types for both and a user calls them the same way. Non-callable data properties are configuration, not operations; they stay counted in excludedProperties so the exclusion cannot hide a gap.",
   "officialReferences": [
     "https://www.typescriptlang.org/tsconfig/lib.html",
     "https://tc39.es/ecma262/",
     "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects"
   ],
   "containers": {
+    "core.files": {
+      "present": true,
+      "hostModules": [
+        "node:fs"
+      ],
+      "operations": [
+        "Dir",
+        "Dirent",
+        "FileReadStream",
+        "FileWriteStream",
+        "ReadStream",
+        "Stats",
+        "WriteStream",
+        "_toUnixTimestamp",
+        "access",
+        "accessSync",
+        "appendFile",
+        "appendFileSync",
+        "chmod",
+        "chmodSync",
+        "chown",
+        "chownSync",
+        "close",
+        "closeSync",
+        "copyFile",
+        "copyFileSync",
+        "cp",
+        "cpSync",
+        "createReadStream",
+        "createWriteStream",
+        "exists",
+        "existsSync",
+        "fchmod",
+        "fchmodSync",
+        "fchown",
+        "fchownSync",
+        "fdatasync",
+        "fdatasyncSync",
+        "fstat",
+        "fstatSync",
+        "fsync",
+        "fsyncSync",
+        "ftruncate",
+        "ftruncateSync",
+        "futimes",
+        "futimesSync",
+        "glob",
+        "globSync",
+        "lchown",
+        "lchownSync",
+        "link",
+        "linkSync",
+        "lstat",
+        "lstatSync",
+        "lutimes",
+        "lutimesSync",
+        "mkdir",
+        "mkdirSync",
+        "mkdtemp",
+        "mkdtempSync",
+        "open",
+        "openAsBlob",
+        "openSync",
+        "opendir",
+        "opendirSync",
+        "read",
+        "readFile",
+        "readFileSync",
+        "readSync",
+        "readdir",
+        "readdirSync",
+        "readlink",
+        "readlinkSync",
+        "readv",
+        "readvSync",
+        "realpath",
+        "realpathSync",
+        "rename",
+        "renameSync",
+        "rm",
+        "rmSync",
+        "rmdir",
+        "rmdirSync",
+        "stat",
+        "statSync",
+        "statfs",
+        "statfsSync",
+        "symlink",
+        "symlinkSync",
+        "truncate",
+        "truncateSync",
+        "unlink",
+        "unlinkSync",
+        "unwatchFile",
+        "utimes",
+        "utimesSync",
+        "watch",
+        "watchFile",
+        "write",
+        "writeFile",
+        "writeFileSync",
+        "writeSync",
+        "writev",
+        "writevSync"
+      ],
+      "excludedProperties": []
+    },
+    "core.path": {
+      "present": true,
+      "hostModules": [
+        "node:path"
+      ],
+      "operations": [
+        "_makeLong",
+        "basename",
+        "dirname",
+        "extname",
+        "format",
+        "isAbsolute",
+        "join",
+        "matchesGlob",
+        "normalize",
+        "parse",
+        "relative",
+        "resolve",
+        "toNamespacedPath"
+      ],
+      "excludedProperties": []
+    },
+    "core.os": {
+      "present": true,
+      "hostModules": [
+        "node:os"
+      ],
+      "operations": [
+        "arch",
+        "availableParallelism",
+        "cpus",
+        "endianness",
+        "freemem",
+        "getPriority",
+        "homedir",
+        "hostname",
+        "loadavg",
+        "machine",
+        "networkInterfaces",
+        "platform",
+        "release",
+        "setPriority",
+        "tmpdir",
+        "totalmem",
+        "type",
+        "uptime",
+        "userInfo",
+        "version"
+      ],
+      "excludedProperties": []
+    },
+    "core.process": {
+      "present": true,
+      "hostModules": [
+        "node:child_process"
+      ],
+      "operations": [
+        "ChildProcess",
+        "_forkChild",
+        "exec",
+        "execFile",
+        "execFileSync",
+        "execSync",
+        "fork",
+        "spawn",
+        "spawnSync"
+      ],
+      "excludedProperties": []
+    },
+    "core.net": {
+      "present": true,
+      "hostModules": [
+        "node:net"
+      ],
+      "operations": [
+        "BlockList",
+        "Server",
+        "Socket",
+        "SocketAddress",
+        "Stream",
+        "_createServerHandle",
+        "_normalizeArgs",
+        "_setSimultaneousAccepts",
+        "connect",
+        "createConnection",
+        "createServer",
+        "getDefaultAutoSelectFamily",
+        "getDefaultAutoSelectFamilyAttemptTimeout",
+        "isIP",
+        "isIPv4",
+        "isIPv6",
+        "setDefaultAutoSelectFamily",
+        "setDefaultAutoSelectFamilyAttemptTimeout"
+      ],
+      "excludedProperties": []
+    },
+    "core.tls": {
+      "present": true,
+      "hostModules": [
+        "node:tls"
+      ],
+      "operations": [
+        "SecureContext",
+        "Server",
+        "TLSSocket",
+        "checkServerIdentity",
+        "connect",
+        "convertALPNProtocols",
+        "createSecureContext",
+        "createSecurePair",
+        "createServer",
+        "getCACertificates",
+        "getCiphers",
+        "setDefaultCACertificates"
+      ],
+      "excludedProperties": []
+    },
+    "core.http": {
+      "present": true,
+      "hostModules": [
+        "node:http"
+      ],
+      "operations": [
+        "Agent",
+        "ClientRequest",
+        "CloseEvent",
+        "IncomingMessage",
+        "MessageEvent",
+        "OutgoingMessage",
+        "Server",
+        "ServerResponse",
+        "WebSocket",
+        "_connectionListener",
+        "createServer",
+        "get",
+        "request",
+        "setMaxIdleHTTPParsers",
+        "validateHeaderName",
+        "validateHeaderValue"
+      ],
+      "excludedProperties": []
+    },
+    "core.crypto": {
+      "present": true,
+      "hostModules": [
+        "node:crypto"
+      ],
+      "operations": [
+        "Certificate",
+        "Cipheriv",
+        "Decipheriv",
+        "DiffieHellman",
+        "DiffieHellmanGroup",
+        "ECDH",
+        "Hash",
+        "Hmac",
+        "KeyObject",
+        "Sign",
+        "Verify",
+        "X509Certificate",
+        "checkPrime",
+        "checkPrimeSync",
+        "createCipheriv",
+        "createDecipheriv",
+        "createDiffieHellman",
+        "createDiffieHellmanGroup",
+        "createECDH",
+        "createHash",
+        "createHmac",
+        "createPrivateKey",
+        "createPublicKey",
+        "createSecretKey",
+        "createSign",
+        "createVerify",
+        "diffieHellman",
+        "generateKey",
+        "generateKeyPair",
+        "generateKeyPairSync",
+        "generateKeySync",
+        "generatePrime",
+        "generatePrimeSync",
+        "getCipherInfo",
+        "getCiphers",
+        "getCurves",
+        "getDiffieHellman",
+        "getFips",
+        "getHashes",
+        "getRandomValues",
+        "hash",
+        "hkdf",
+        "hkdfSync",
+        "pbkdf2",
+        "pbkdf2Sync",
+        "privateDecrypt",
+        "privateEncrypt",
+        "publicDecrypt",
+        "publicEncrypt",
+        "randomBytes",
+        "randomFill",
+        "randomFillSync",
+        "randomInt",
+        "randomUUID",
+        "scrypt",
+        "scryptSync",
+        "secureHeapUsed",
+        "setEngine",
+        "setFips",
+        "sign",
+        "timingSafeEqual",
+        "verify"
+      ],
+      "excludedProperties": []
+    },
+    "core.archive": {
+      "present": true,
+      "hostModules": [
+        "node:zlib"
+      ],
+      "operations": [
+        "BrotliCompress",
+        "BrotliDecompress",
+        "Deflate",
+        "DeflateRaw",
+        "Gunzip",
+        "Gzip",
+        "Inflate",
+        "InflateRaw",
+        "Unzip",
+        "ZstdCompress",
+        "ZstdDecompress",
+        "brotliCompress",
+        "brotliCompressSync",
+        "brotliDecompress",
+        "brotliDecompressSync",
+        "crc32",
+        "createBrotliCompress",
+        "createBrotliDecompress",
+        "createDeflate",
+        "createDeflateRaw",
+        "createGunzip",
+        "createGzip",
+        "createInflate",
+        "createInflateRaw",
+        "createUnzip",
+        "createZstdCompress",
+        "createZstdDecompress",
+        "deflate",
+        "deflateRaw",
+        "deflateRawSync",
+        "deflateSync",
+        "gunzip",
+        "gunzipSync",
+        "gzip",
+        "gzipSync",
+        "inflate",
+        "inflateRaw",
+        "inflateRawSync",
+        "inflateSync",
+        "unzip",
+        "unzipSync",
+        "zstdCompress",
+        "zstdCompressSync",
+        "zstdDecompress",
+        "zstdDecompressSync"
+      ],
+      "excludedProperties": []
+    },
+    "core.binary": {
+      "present": true,
+      "hostModules": [
+        "node:buffer"
+      ],
+      "operations": [
+        "Blob",
+        "Buffer",
+        "File",
+        "SlowBuffer",
+        "atob",
+        "btoa",
+        "isAscii",
+        "isUtf8",
+        "resolveObjectURL",
+        "transcode"
+      ],
+      "excludedProperties": []
+    },
+    "core.sync": {
+      "present": true,
+      "hostModules": [
+        "node:worker_threads"
+      ],
+      "operations": [
+        "BroadcastChannel",
+        "MessageChannel",
+        "MessagePort",
+        "Worker",
+        "getEnvironmentData",
+        "isMarkedAsUntransferable",
+        "markAsUncloneable",
+        "markAsUntransferable",
+        "moveMessagePortToContext",
+        "postMessageToThread",
+        "receiveMessageOnPort",
+        "setEnvironmentData"
+      ],
+      "excludedProperties": []
+    },
+    "core.testing": {
+      "present": true,
+      "hostModules": [
+        "node:test",
+        "node:assert"
+      ],
+      "operations": [
+        "Assert",
+        "AssertionError",
+        "CallTracker",
+        "after",
+        "afterEach",
+        "before",
+        "beforeEach",
+        "deepEqual",
+        "deepStrictEqual",
+        "describe",
+        "doesNotMatch",
+        "doesNotReject",
+        "doesNotThrow",
+        "equal",
+        "fail",
+        "ifError",
+        "it",
+        "match",
+        "notDeepEqual",
+        "notDeepStrictEqual",
+        "notEqual",
+        "notStrictEqual",
+        "ok",
+        "only",
+        "partialDeepStrictEqual",
+        "rejects",
+        "run",
+        "skip",
+        "strict",
+        "strictEqual",
+        "suite",
+        "test",
+        "throws",
+        "todo"
+      ],
+      "excludedProperties": []
+    },
+    "core.log": {
+      "present": true,
+      "hostModules": [
+        "node:console"
+      ],
+      "operations": [
+        "Console",
+        "assert",
+        "clear",
+        "context",
+        "count",
+        "countReset",
+        "createTask",
+        "debug",
+        "dir",
+        "dirxml",
+        "error",
+        "group",
+        "groupCollapsed",
+        "groupEnd",
+        "info",
+        "log",
+        "profile",
+        "profileEnd",
+        "table",
+        "time",
+        "timeEnd",
+        "timeLog",
+        "timeStamp",
+        "trace",
+        "warn"
+      ],
+      "excludedProperties": []
+    },
+    "core.io": {
+      "present": true,
+      "hostModules": [
+        "node:readline"
+      ],
+      "operations": [
+        "Interface",
+        "clearLine",
+        "clearScreenDown",
+        "createInterface",
+        "cursorTo",
+        "emitKeypressEvents",
+        "moveCursor"
+      ],
+      "excludedProperties": []
+    },
+    "core.args": {
+      "present": true,
+      "hostModules": [
+        "node:util"
+      ],
+      "operations": [
+        "MIMEParams",
+        "MIMEType",
+        "TextDecoder",
+        "TextEncoder",
+        "_errnoException",
+        "_exceptionWithHostPort",
+        "_extend",
+        "aborted",
+        "callbackify",
+        "debug",
+        "debuglog",
+        "deprecate",
+        "diff",
+        "format",
+        "formatWithOptions",
+        "getCallSite",
+        "getCallSites",
+        "getSystemErrorMap",
+        "getSystemErrorMessage",
+        "getSystemErrorName",
+        "inherits",
+        "inspect",
+        "isArray",
+        "isBoolean",
+        "isBuffer",
+        "isDate",
+        "isDeepStrictEqual",
+        "isError",
+        "isFunction",
+        "isNull",
+        "isNullOrUndefined",
+        "isNumber",
+        "isObject",
+        "isPrimitive",
+        "isRegExp",
+        "isString",
+        "isSymbol",
+        "isUndefined",
+        "log",
+        "parseArgs",
+        "parseEnv",
+        "promisify",
+        "setTraceSigInt",
+        "stripVTControlCharacters",
+        "styleText",
+        "toUSVString",
+        "transferableAbortController",
+        "transferableAbortSignal"
+      ],
+      "excludedProperties": []
+    },
     "List": {
       "present": true,
       "operations": [
@@ -500,21 +1066,9 @@
       ],
       "excludedProperties": []
     },
-    "core.args": {
-      "present": false,
-      "reason": "argument parsing is a Node host API, not ECMAScript",
-      "operations": [],
-      "excludedProperties": []
-    },
     "core.email": {
       "present": false,
       "reason": "no ECMAScript email support",
-      "operations": [],
-      "excludedProperties": []
-    },
-    "core.sync": {
-      "present": false,
-      "reason": "Atomics coordinate shared memory, but ECMAScript ships no lock or thread module",
       "operations": [],
       "excludedProperties": []
     },
@@ -596,12 +1150,6 @@
       "operations": [],
       "excludedProperties": []
     },
-    "core.crypto": {
-      "present": false,
-      "reason": "SubtleCrypto is a Web Crypto host API, not ECMAScript",
-      "operations": [],
-      "excludedProperties": []
-    },
     "core.encoding.csv": {
       "present": false,
       "reason": "no ECMAScript CSV codec",
@@ -632,51 +1180,9 @@
       "operations": [],
       "excludedProperties": []
     },
-    "core.files": {
-      "present": false,
-      "reason": "file access is a Node or browser host API, not ECMAScript",
-      "operations": [],
-      "excludedProperties": []
-    },
-    "core.path": {
-      "present": false,
-      "reason": "path handling is a Node host API, not ECMAScript",
-      "operations": [],
-      "excludedProperties": []
-    },
     "core.env": {
       "present": false,
       "reason": "environment access is a Node host API, not ECMAScript",
-      "operations": [],
-      "excludedProperties": []
-    },
-    "core.os": {
-      "present": false,
-      "reason": "operating-system access is a Node host API, not ECMAScript",
-      "operations": [],
-      "excludedProperties": []
-    },
-    "core.process": {
-      "present": false,
-      "reason": "process control is a Node host API, not ECMAScript",
-      "operations": [],
-      "excludedProperties": []
-    },
-    "core.net": {
-      "present": false,
-      "reason": "sockets are a Node host API, not ECMAScript",
-      "operations": [],
-      "excludedProperties": []
-    },
-    "core.tls": {
-      "present": false,
-      "reason": "TLS is a Node host API, not ECMAScript",
-      "operations": [],
-      "excludedProperties": []
-    },
-    "core.http": {
-      "present": false,
-      "reason": "fetch is a host API, not ECMAScript",
       "operations": [],
       "excludedProperties": []
     },
@@ -692,45 +1198,15 @@
       "operations": [],
       "excludedProperties": []
     },
-    "core.log": {
-      "present": false,
-      "reason": "console is a host API, not ECMAScript",
-      "operations": [],
-      "excludedProperties": []
-    },
-    "core.io": {
-      "present": false,
-      "reason": "console and stdio are host APIs, not ECMAScript",
-      "operations": [],
-      "excludedProperties": []
-    },
     "core.fmt": {
       "present": false,
       "reason": "template literals are syntax; ECMAScript ships no formatting module",
       "operations": [],
       "excludedProperties": []
     },
-    "core.archive": {
-      "present": false,
-      "reason": "compression streams are a host API, not ECMAScript",
-      "operations": [],
-      "excludedProperties": []
-    },
-    "core.binary": {
-      "present": false,
-      "reason": "no ECMAScript binary reader beyond DataView, which is recorded under ByteBuffer",
-      "operations": [],
-      "excludedProperties": []
-    },
     "core.data": {
       "present": false,
       "reason": "no ECMAScript statistics",
-      "operations": [],
-      "excludedProperties": []
-    },
-    "core.testing": {
-      "present": false,
-      "reason": "no ECMAScript test harness",
       "operations": [],
       "excludedProperties": []
     },
@@ -743,8 +1219,8 @@
   },
   "totals": {
     "containers": 54,
-    "presentContainers": 14,
-    "operations": 360,
+    "presentContainers": 29,
+    "operations": 789,
     "excludedProperties": 34
   }
 }

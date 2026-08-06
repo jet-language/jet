@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+
 /*
  * Emit the JavaScript/TypeScript comparison surface for the Core surface ledger.
  *
@@ -13,6 +17,29 @@
 // Canonical Jet-facing container names map to the ECMAScript objects that hold
 // the same workflow. A container with no ECMAScript counterpart is recorded as
 // absent rather than omitted, so the gap stays countable.
+// Node's host modules. TypeScript ships types for all of them, and a
+// TypeScript user calls them exactly like any other API. Recording only
+// ECMAScript declared fs, path, os, net, http and crypto absent, so the column
+// could never witness a gap in the containers where most gaps live.
+const HOST_MODULES = {
+  "core.files": ["node:fs"],
+  "core.path": ["node:path"],
+  "core.os": ["node:os"],
+  "core.process": ["node:child_process"],
+  "core.net": ["node:net"],
+  "core.tls": ["node:tls"],
+  "core.http": ["node:http"],
+  "core.crypto": ["node:crypto"],
+  "core.archive": ["node:zlib"],
+  "core.binary": ["node:buffer"],
+  "core.sync": ["node:worker_threads"],
+  "core.testing": ["node:test", "node:assert"],
+  "core.log": ["node:console"],
+  "core.io": ["node:readline"],
+  "core.args": ["node:util"],
+  "core.encoding.csv": [],
+};
+
 const CONTAINERS = {
   List: [Array.prototype, Array],
   Iter: [Object.getPrototypeOf(Object.getPrototypeOf([][Symbol.iterator]()))],
@@ -94,7 +121,29 @@ function members(target) {
 const containers = {};
 let operationCount = 0;
 let excludedCount = 0;
+
+// A host module's exported callables are its operations, exactly like a
+// built-in object's callable properties.
+for (const [name, specifiers] of Object.entries(HOST_MODULES)) {
+  if (specifiers.length === 0) continue;
+  const operations = new Set();
+  for (const specifier of specifiers) {
+    const loaded = require(specifier);
+    for (const key of Object.keys(loaded)) {
+      if (typeof loaded[key] === "function") operations.add(key);
+    }
+  }
+  if (operations.size === 0) throw new Error("no operations found in " + specifiers.join(", "));
+  containers[name] = {
+    present: true,
+    hostModules: specifiers,
+    operations: Array.from(operations).sort(),
+    excludedProperties: [],
+  };
+  operationCount += operations.size;
+}
 for (const [name, targets] of Object.entries(CONTAINERS)) {
+  if (containers[name]) throw new Error("container claimed twice: " + name);
   const operations = new Set();
   const excluded = new Set();
   for (const target of targets) {
@@ -112,15 +161,18 @@ for (const [name, targets] of Object.entries(CONTAINERS)) {
   excludedCount += excluded.size;
 }
 for (const [name, reason] of Object.entries(ABSENT)) {
+  // A host module already answered this container; the ECMAScript-only reason
+  // no longer applies.
+  if (containers[name]) continue;
   containers[name] = { present: false, reason: reason, operations: [], excludedProperties: [] };
 }
 
 process.stdout.write(JSON.stringify({
   language: "TypeScript",
-  alsoCovers: ["JavaScript"],
+  alsoCovers: ["JavaScript", "Node"],
   sourceKind: "runtime introspection",
   runtime: "node " + process.versions.node + " (V8 " + process.versions.v8 + ")",
-  scopeRule: "Callable own properties of the ECMAScript objects that hold each workflow. Non-callable data properties are configuration, not operations; they stay counted in excludedProperties so the exclusion cannot hide a gap.",
+  scopeRule: "Callable own properties of the ECMAScript objects that hold each workflow, plus the exported callables of the Node host modules that answer the rest. TypeScript ships types for both and a user calls them the same way. Non-callable data properties are configuration, not operations; they stay counted in excludedProperties so the exclusion cannot hide a gap.",
   officialReferences: [
     "https://www.typescriptlang.org/tsconfig/lib.html",
     "https://tc39.es/ecma262/",
