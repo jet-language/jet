@@ -1,146 +1,158 @@
 # Jet Core surface ledger
 
-Generated from the compiler's Core source tables. The JSON file is the
-machine-readable source consumed by #1398; this page is the durable
-review index. Do not maintain a second hand-written workflow inventory.
+Owner ruling 2026-08-03: the bar is not Python. It is every language Jet
+competes with, and a missing feature is not acceptable.
 
-Generated on: 2026-08-05
+This page is the durable review index. The JSON file beside it is the
+machine-readable source that card #1398 reads. Do not keep a second
+hand-written workflow inventory.
 
-## Source contract
+Generated on: 2026-08-06
 
-- Module members come from module_items.rs, including its dynamic
-  core.lang policy registry and resolved Syntax constants.
-- Fixed call signatures come from fixed_sigs.rs.
-- Built-in type method returns come from Collections.rs.
-- The Python side comes from docs/reference/python-surface.json, read from
-  a real interpreter. A constructed member name is never evidence.
-- --check rejects source drift, an unverified Python member, an equal
-  verdict without a member, duplicate rows, hidden exclusions, stale gap
-  owners, and unratified deliberate declines.
+## What decides a row
+
+- What Jet ships comes from the compiler tables: module_items.rs,
+  fixed_sigs.rs, and Collections.rs.
+- What a competitor ships comes from that language's own recorded surface,
+  read from a runtime, from standard-library source, or from official
+  machine-readable documentation.
+- A row carries one verdict. `equal` means at least one recorded competitor
+  answers the same workflow. `jet_wins` means none does. `jet_loses` is an
+  operation two or more compared languages ship and Jet has no spelling for.
+  `single_witness` is an operation exactly one language ships.
+  `not_compared` means no surface records that container yet.
+- A gap is one workflow, not one row per language. Ten languages shipping
+  `sqrt` is one missing operation with ten witnesses.
+- One language is not evidence. A single-witness row is almost always that
+  language's own internals, such as Rust's `align_to` and `as_mut_ptr`,
+  which a memory-safe language must not expose. Those rows stay in the
+  ledger and stay counted, but they are recorded rather than scored.
+- `--check` rejects source drift, a competitor claim the recorded surface
+  does not support, a duplicate row, a container a language silently
+  skipped, an owner card that is closed or missing, and an unratified
+  scope exclusion.
 
 ## Inventory
 
 | Measure | Count |
 | --- | ---: |
+| Languages compared | 11 |
+| Shared containers | 54 |
 | Core modules | 85 |
-| Module members | 1006 |
-| Fixed-signature-only rows | 1 |
-| Collection method-return functions | 42 |
-| Collection method rows | 334 |
-| Jet-side rows | 1341 |
-| Total rows | 2492 |
-| Jet-loses rows | 37 |
+| Module members | 1011 |
+| Collection method rows | 458 |
+| Jet-side rows | 1470 |
+| Total rows | 10501 |
 
-Jet-loses rows currently reference: #288.
+## Verdicts
 
-## Coverage
-
-Walking only Jet's own tables cannot surface a feature Jet is missing, so
-the ledger also walks the Python surface. Each Python comparison point with
-no matching Jet row is a visible row, not an omission.
-
-This is a report. It records what is true today; it does not track work.
-Turn a row that matters into a card by hand.
-
-| Measure | Count |
+| Verdict | Rows |
 | --- | ---: |
-| Python comparison points | 1254 |
-| Matched by a Jet row | 131 |
-| No matching Jet row | 1151 |
+| Jet wins | 386 |
+| Equal | 493 |
+| Jet loses (two or more languages agree) | 625 |
+| Single witness (recorded, not scored) | 8406 |
+| Exported type, not an operation | 169 |
+| Not compared | 422 |
+| Deliberately declined | 0 |
 
-Per-container counts:
+## Competitors
 
-| Container | No Jet match |
-| --- | ---: |
-| os | 203 |
-| builtins | 141 |
-| asyncio | 86 |
-| bytes | 42 |
-| str | 41 |
-| socket | 40 |
-| sys | 39 |
-| math | 34 |
-| ssl | 33 |
-| types | 33 |
-| logging | 30 |
-| sqlite3 | 28 |
-| time | 27 |
-| random | 23 |
-| unittest | 21 |
-| urllib.parse | 21 |
-| tarfile | 20 |
-| io | 19 |
-| itertools | 19 |
-| statistics | 19 |
-| base64 | 18 |
-| unicodedata | 14 |
-| csv | 13 |
-| re | 13 |
-| binascii | 12 |
-| functools | 12 |
-| uuid | 12 |
-| bool | 11 |
-| heapq | 11 |
-| int | 11 |
-| set | 10 |
-| collections | 9 |
-| subprocess | 9 |
-| tempfile | 9 |
-| float | 8 |
-| struct | 8 |
-| zipfile | 8 |
-| pathlib | 7 |
-| secrets | 7 |
-| datetime | 6 |
-| dict | 6 |
-| json | 5 |
-| range | 5 |
-| http | 2 |
-| list | 2 |
-| tomllib | 2 |
-| tuple | 2 |
+| Language | Surface read from | Recorded operations | Jet rows matched | Loss rows |
+| --- | --- | ---: | ---: | ---: |
+| Rust | standard-library source (rust-src component) | 1032 | 270 | 103 |
+| Go | official frozen API files (GOROOT/api/go1*.txt) | 1878 | 241 | 229 |
+| Swift | official documentation JSON (developer.apple.com) | 505 | 114 | 78 |
+| Kotlin | official API reference (kotlinlang.org) | 1141 | 165 | 124 |
+| C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1267 | 210 | 131 |
+| TypeScript | runtime introspection | 724 | 171 | 99 |
+| Ruby | runtime introspection | 1294 | 208 | 193 |
+| Elixir | runtime introspection | 1270 | 246 | 163 |
+| Julia | official documentation search index (docs.julialang.org) | 1132 | 159 | 197 |
+| R | official R manual package index (stat.ethz.ch R-devel) | 1768 | 43 | 0 |
+| Python | runtime introspection | 2232 | 242 | 284 |
 
-Only the Python surface has been read. Operations for the other competitor
-languages are recorded as unverified rather than guessed.
+## Loss clusters
 
-## Python claim boundary
+A cluster is one container's losses. Owning a gap per container is what
+the existing cards already do, so the ledger folds into them rather than
+opening a second owner for the same surface. `needs_card` means no card
+owns that container today, and `closed` means the owning card is done
+while losses remain.
 
-The claim covers the built-in types and standard-library modules listed in
-the JSON pythonScope, at Python 3.14.6. 1057 module-level constants are
-excluded by the recorded scope rule and stay counted so the exclusion
-cannot hide a gap.
+| Container | Loss rows | Owner card | Card phase | State |
+| --- | ---: | --- | --- | --- |
+| core.math | 67 | #1464 | planning | live |
+| core.files | 63 | #288 | building | live |
+| String | 61 | #1476 | planning | live |
+| core.os | 47 | #1465 | planning | live |
+| ByteBuffer | 45 | #1467 | planning | live |
+| core.time | 43 | #1466 | planning | live |
+| List | 27 | #1477 | planning | live |
+| Map | 25 | #1477 | planning | live |
+| Set | 20 | #1478 | planning | live |
+| Iter | 19 | #1479 | planning | live |
+| core.tasks | 18 | #1468 | planning | live |
+| core.net | 17 | #1469 | planning | live |
+| core.crypto | 16 | #1473 | planning | live |
+| core.archive | 15 | #1470 | planning | live |
+| core.log | 13 | #1474 | planning | live |
+| core.regex | 12 | #1471 | planning | live |
+| core.url | 12 | #1472 | planning | live |
+| core.sync | 11 | #1481 | planning | live |
+| Deque | 10 | #1475 | planning | live |
+| core.io | 9 | #1480 | planning | live |
+| core.process | 9 | #1481 | planning | live |
+| core.encoding.xml | 8 | #1481 | planning | live |
+| core.path | 8 | #288 | building | live |
+| core.db | 7 | #1481 | planning | live |
+| core.testing | 7 | #1481 | planning | live |
+| core.reflect | 6 | #1481 | planning | live |
+| core.http | 5 | #1481 | planning | live |
+| core.tls | 5 | #1481 | planning | live |
+| core.uuid | 4 | #1481 | planning | live |
+| core.binary | 3 | #1481 | planning | live |
+| core.encoding.csv | 3 | #1481 | planning | live |
+| core.args | 2 | #1481 | planning | live |
+| core.random | 2 | #1481 | planning | live |
+| PriorityQueue | 2 | #1481 | planning | live |
+| core.encoding.json | 1 | #1481 | planning | live |
+| core.mem | 1 | #1481 | planning | live |
+| core.mime | 1 | #1481 | planning | live |
+| SortedSet | 1 | #1478 | planning | live |
 
-Primary Python references:
+## Containers indexed per package
 
-- Python library index: https://docs.python.org/3/library/index.html
-- Python built-in functions and types: https://docs.python.org/3/library/functions.html
+These surfaces are indexed a whole package at a time, so the index can
+confirm that the language documents a name but cannot place that name in
+one container. They still confirm a Jet match; they do not mint a gap row,
+because that would score Jet against operations the index never attributed
+here. The skip is listed so it stays countable.
 
-## Competitor references
+| Language | Container | Recorded operations |
+| --- | --- | ---: |
+| R | core.data | 592 |
+| R | core.math | 1176 |
 
-- Python: https://docs.python.org/3/library/functions.html, https://docs.python.org/3/library/stdtypes.html, https://docs.python.org/3/library/index.html
-- Rust: https://doc.rust-lang.org/std/collections/, https://doc.rust-lang.org/std/iter/
-- Go: https://pkg.go.dev/std
-- Swift: https://developer.apple.com/documentation/swift/sequence-and-collection-protocols
-- Kotlin: https://kotlinlang.org/api/core/kotlin-stdlib/
-- C#: https://learn.microsoft.com/en-us/dotnet/standard/linq/
-- TypeScript: https://www.typescriptlang.org/tsconfig/lib.html
-- Ruby: https://ruby-doc.org/3.4.1/
-- Elixir: https://hexdocs.pm/elixir/Enum.html
-- Julia: https://docs.julialang.org/en/v1/base/collections/
-- R: https://stat.ethz.ch/R-manual/R-devel/library/base/html/00Index.html
+## Core domains not yet compared
+
+No competitor surface records a container for these Core modules, so no
+row scores them. They are listed so the shortfall stays countable rather
+than invisible.
+
+`app`, `core.auth`, `core.browser`, `core.compiler`, `core.compute`, `core.encoding.cbor`, `core.encoding.jsonl`, `core.event`, `core.game`, `core.lang`, `core.mem.alloc`, `core.perf`, `core.plugin`, `core.raylib`, `core.reactive`, `core.reactive.loadable`, `core.science.measurement`, `core.scope`, `core.services`, `core.sketch.cms`, `core.sketch.hll`, `core.sketch.reservoir`, `core.sketch.tdigest`, `core.solve`, `core.ui`, `core.vault`, `core.vault.expert`, `core.watcher`, `core.web.devserver`, `core.web.storage`, `core.web.storage.local`, `core.web.storage.session`, `core.ws`
 
 ## Consumer
 
 Card #1398 reads docs/reference/core-surface-ledger.json as its only
-workflow inventory. The ledger contains stable row IDs, a verified Python
-member or an explicit reason, Jet spelling, workflow, verdict, gap owner,
-source provenance, and evidence links.
+workflow inventory.
 
-Run the focused guard from the repository root:
+Regenerate and check from the repository root:
 
 ~~~sh
-node scripts/agent/check-core-surface-ledger.mjs --check --tower plugins/tower/.tower/tower.json
+node scripts/agent/check-core-surface-ledger.mjs --refresh
+node scripts/agent/check-core-surface-ledger.mjs --check
 ~~~
 
-Full rows are intentionally kept in the JSON artifact so the release
-rubric can consume structured data without duplicating this inventory.
+Full rows stay in the JSON artifact so the release rubric can read
+structured data without duplicating this inventory.
