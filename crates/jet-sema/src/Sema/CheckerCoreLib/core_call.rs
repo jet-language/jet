@@ -2150,6 +2150,254 @@ impl<'a> Checker<'a> {
                     }
                     return Some(Type::Option(Box::new(Type::Int)));
                 }
+                ("core.math", "binomial") => {
+                    if args.len() != 2 {
+                        self.diags.push(wrong_core_arity(name, 2, args.len(), span));
+                    }
+                    for (idx, arg) in args.iter_mut().enumerate() {
+                        self.expect_core_arg(name, idx, &Type::Int, arg);
+                    }
+                    return Some(Type::Option(Box::new(Type::Int)));
+                }
+                (
+                    "core.math",
+                    "leading_ones" | "trailing_ones" | "digits" | "radix",
+                ) => {
+                    if args.len() != 1 {
+                        self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                    }
+                    if let Some(arg) = args.get_mut(0) {
+                        if name == "radix" {
+                            let ty = self.infer(&mut arg.expr)?;
+                            if !matches!(ty, Type::Float | Type::Float32 | Type::Int | Type::IntN { .. }) {
+                                self.diags.push(Diagnostic::error(
+                                    "E0112",
+                                    format!("`radix` needs a number, not {}", ty.show()),
+                                    "radix reports the base of a numeric type".to_string(),
+                                    "pass a Float or Int".to_string(),
+                                    Some(arg.expr.span()),
+                                ));
+                                return None;
+                            }
+                        } else {
+                            self.expect_core_arg(name, 0, &Type::Int, arg);
+                        }
+                    }
+                    return Some(Type::Int);
+                }
+                (
+                    "core.math",
+                    "is_normal"
+                        | "is_subnormal"
+                        | "is_canonical"
+                        | "is_signed"
+                        | "is_zero"
+                        | "is_integer"
+                        | "sign_bit",
+                ) => {
+                    if args.len() != 1 {
+                        self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                    }
+                    let Some(arg) = args.get_mut(0) else {
+                        return Some(Type::Bool);
+                    };
+                    let ty = self.infer(&mut arg.expr)?;
+                    if !matches!(ty, Type::Float | Type::Float32) {
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            format!("`{}` needs Float or F32, not {}", name, ty.show()),
+                            "floating-point classification only applies to floats".to_string(),
+                            "pass a Float or F32 value".to_string(),
+                            Some(arg.expr.span()),
+                        ));
+                        return None;
+                    }
+                    return Some(Type::Bool);
+                }
+                (
+                    "core.math",
+                    "next_up"
+                        | "next_down"
+                        | "copy"
+                        | "cot"
+                        | "inv"
+                        | "erf"
+                        | "erfc"
+                        | "gamma"
+                        | "lgamma"
+                        | "logb"
+                        | "significand"
+                        | "ulp",
+                ) => {
+                    if args.len() != 1 {
+                        self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                    }
+                    let Some(arg) = args.get_mut(0) else {
+                        return Some(Type::Float);
+                    };
+                    let ty = self.infer(&mut arg.expr)?;
+                    if !matches!(ty, Type::Float | Type::Float32) {
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            format!("`{}` needs Float or F32, not {}", name, ty.show()),
+                            "this math function operates on floating-point numbers".to_string(),
+                            "pass a Float or F32 value".to_string(),
+                            Some(arg.expr.span()),
+                        ));
+                        return None;
+                    }
+                    return Some(ty);
+                }
+                ("core.math", "zero") => {
+                    if !args.is_empty() {
+                        self.diags.push(wrong_core_arity(name, 0, args.len(), span));
+                    }
+                    return Some(Type::Float);
+                }
+                ("core.math", "cmp" | "next_after" | "ldexp" | "scaleb") => {
+                    let wanted = 2;
+                    if args.len() != wanted {
+                        self.diags.push(wrong_core_arity(name, wanted, args.len(), span));
+                    }
+                    if name == "cmp" || name == "next_after" {
+                        let Some(first) = args.get_mut(0).and_then(|a| self.infer(&mut a.expr)) else {
+                            for a in args.iter_mut().skip(1) {
+                                self.infer(&mut a.expr);
+                            }
+                            return Some(if name == "cmp" { Type::Int } else { Type::Float });
+                        };
+                        if !matches!(first, Type::Float | Type::Float32) {
+                            self.diags.push(Diagnostic::error(
+                                "E0112",
+                                format!("`{}` needs Float or F32, not {}", name, first.show()),
+                                "this math function operates on floating-point numbers".to_string(),
+                                "pass Float or F32 values".to_string(),
+                                Some(args[0].expr.span()),
+                            ));
+                            return None;
+                        }
+                        if let Some(got) = args.get_mut(1).and_then(|a| self.infer(&mut a.expr)) {
+                            if got != first {
+                                self.diags.push(Diagnostic::error(
+                                    "E0112",
+                                    format!("`{}` needs all arguments to have the same float type", name),
+                                    "D-FLOATW1: mixing float widths is not allowed".to_string(),
+                                    "convert the arguments to the same float width".to_string(),
+                                    Some(args[1].expr.span()),
+                                ));
+                            }
+                        }
+                        return Some(if name == "cmp" { Type::Int } else { first });
+                    }
+                    // ldexp / scaleb: float, then whole-number exponent.
+                    if let Some(arg) = args.get_mut(0) {
+                        let ty = self.infer(&mut arg.expr)?;
+                        if !matches!(ty, Type::Float | Type::Float32) {
+                            self.diags.push(Diagnostic::error(
+                                "E0112",
+                                format!("`{}` needs Float or F32, not {}", name, ty.show()),
+                                "this math function operates on floating-point numbers".to_string(),
+                                "pass a Float or F32 value".to_string(),
+                                Some(arg.expr.span()),
+                            ));
+                            return None;
+                        }
+                        if let Some(exp) = args.get_mut(1) {
+                            self.expect_core_arg(name, 1, &Type::Int, exp);
+                        }
+                        return Some(ty);
+                    }
+                    return Some(Type::Float);
+                }
+                ("core.math", "ilogb") => {
+                    if args.len() != 1 {
+                        self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                    }
+                    if let Some(arg) = args.get_mut(0) {
+                        let ty = self.infer(&mut arg.expr)?;
+                        if !matches!(ty, Type::Float | Type::Float32) {
+                            self.diags.push(Diagnostic::error(
+                                "E0112",
+                                format!("`ilogb` needs Float or F32, not {}", ty.show()),
+                                "ilogb reads the exponent of a floating-point value".to_string(),
+                                "pass a Float or F32 value".to_string(),
+                                Some(arg.expr.span()),
+                            ));
+                            return None;
+                        }
+                    }
+                    return Some(Type::Option(Box::new(Type::Int)));
+                }
+                ("core.math", "sin_cos" | "modf") => {
+                    if args.len() != 1 {
+                        self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                    }
+                    let float_ty = if let Some(arg) = args.get_mut(0) {
+                        let ty = self.infer(&mut arg.expr)?;
+                        if !matches!(ty, Type::Float | Type::Float32) {
+                            self.diags.push(Diagnostic::error(
+                                "E0112",
+                                format!("`{}` needs Float or F32, not {}", name, ty.show()),
+                                "this math function operates on floating-point numbers".to_string(),
+                                "pass a Float or F32 value".to_string(),
+                                Some(arg.expr.span()),
+                            ));
+                            return None;
+                        }
+                        ty
+                    } else {
+                        Type::Float
+                    };
+                    let fields = if name == "sin_cos" {
+                        vec![
+                            ("sin".to_string(), Box::new(float_ty.clone())),
+                            ("cos".to_string(), Box::new(float_ty)),
+                        ]
+                    } else {
+                        vec![
+                            ("fract".to_string(), Box::new(float_ty.clone())),
+                            ("whole".to_string(), Box::new(float_ty)),
+                        ]
+                    };
+                    return Some(Type::Tuple(fields));
+                }
+                ("core.math", "frexp") => {
+                    if args.len() != 1 {
+                        self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                    }
+                    let float_ty = if let Some(arg) = args.get_mut(0) {
+                        let ty = self.infer(&mut arg.expr)?;
+                        if !matches!(ty, Type::Float | Type::Float32) {
+                            self.diags.push(Diagnostic::error(
+                                "E0112",
+                                format!("`frexp` needs Float or F32, not {}", ty.show()),
+                                "frexp splits a float into fraction and exponent".to_string(),
+                                "pass a Float or F32 value".to_string(),
+                                Some(arg.expr.span()),
+                            ));
+                            return None;
+                        }
+                        ty
+                    } else {
+                        Type::Float
+                    };
+                    return Some(Type::Tuple(vec![
+                        ("frac".to_string(), Box::new(float_ty)),
+                        ("exp".to_string(), Box::new(Type::Int)),
+                    ]));
+                }
+                ("core.math", "div_mod" | "div_rem") => {
+                    if args.len() != 2 {
+                        self.diags.push(wrong_core_arity(name, 2, args.len(), span));
+                    }
+                    for (idx, arg) in args.iter_mut().enumerate() {
+                        self.expect_core_arg(name, idx, &Type::Int, arg);
+                    }
+                    return Some(Type::Tuple(vec![
+                        ("quot".to_string(), Box::new(Type::Int)),
+                        ("rem".to_string(), Box::new(Type::Int)),
+                    ]));
+                }
                 (
                     "core.math",
                     "saturating_add" | "saturating_sub" | "saturating_mul" | "wrapping_add"

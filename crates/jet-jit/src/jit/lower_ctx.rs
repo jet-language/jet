@@ -11518,6 +11518,10 @@ impl LowerCtx<'_, '_> {
                             self.host.num.decimal_from_str,
                             vec![self.lower_expr(&args[0])?],
                         ),
+                        "fraction" if args.len() == 2 => (
+                            self.host.num.fraction_new,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
                         _ => return Err("jit core call unsupported".to_string()),
                     };
                     let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
@@ -13643,7 +13647,7 @@ impl LowerCtx<'_, '_> {
                 type_name,
                 func,
                 args,
-            } if type_name == "BigInt" || type_name == "Decimal" => {
+            } if type_name == "BigInt" || type_name == "Decimal" || type_name == "Fraction" => {
                 let host_fn = match (type_name.as_str(), func.as_str()) {
                     ("BigInt", "from_int") => self.host.num.bigint_from_int,
                     ("BigInt", "from_str") => self.host.num.bigint_from_str,
@@ -13656,14 +13660,30 @@ impl LowerCtx<'_, '_> {
                     ("Decimal", "sub") => self.host.num.decimal_sub,
                     ("Decimal", "mul") => self.host.num.decimal_mul,
                     ("Decimal", "to_string") => self.host.num.decimal_to_string,
-                    _ => return Err(format!("jit precise numeric builtin unsupported: {type_name}.{func}")),
+                    ("Fraction", "add") => self.host.num.fraction_add,
+                    ("Fraction", "sub") => self.host.num.fraction_sub,
+                    ("Fraction", "mul") => self.host.num.fraction_mul,
+                    ("Fraction", "div") => self.host.num.fraction_div,
+                    ("Fraction", "equal") => self.host.num.fraction_equal,
+                    ("Fraction", "numerator") => self.host.num.fraction_numerator,
+                    ("Fraction", "denominator") => self.host.num.fraction_denominator,
+                    ("Fraction", "to_string") => self.host.num.fraction_to_string,
+                    ("Fraction", "to_float") => self.host.num.fraction_to_float,
+                    ("Fraction", "is_zero") => self.host.num.fraction_is_zero,
+                    _ => {
+                        return Err(format!(
+                            "jit precise numeric builtin unsupported: {type_name}.{func}"
+                        ))
+                    }
                 };
                 let arg_vals: Result<Vec<_>, _> = args.iter().map(|a| self.lower_expr(a)).collect();
                 let arg_vals = arg_vals?;
                 let host_ref = self.module.declare_func_in_func(host_fn, self.b.func);
                 let call = self.b.ins().call(host_ref, &arg_vals);
                 let result = self.b.inst_results(call)[0];
-                if func == "from_str" {
+                if func == "from_str" || matches!(func.as_str(), "add" | "sub" | "mul" | "div")
+                    && type_name == "Fraction"
+                {
                     self.emit_trap_check()?;
                 }
                 Ok(result)
@@ -17562,7 +17582,7 @@ impl LowerCtx<'_, '_> {
             }
             // D-BIGINT1 / D-DECIMAL1: instance methods on precise numerics.
             THandleOp::PreciseMethod { type_name, method }
-                if type_name == "BigInt" || type_name == "Decimal" =>
+                if type_name == "BigInt" || type_name == "Decimal" || type_name == "Fraction" =>
             {
                 let (host_fn, extra_args) = match (type_name.as_str(), method.as_str()) {
                     ("BigInt", "add") => (self.host.num.bigint_add, 1),
@@ -17574,6 +17594,16 @@ impl LowerCtx<'_, '_> {
                     ("Decimal", "sub") => (self.host.num.decimal_sub, 1),
                     ("Decimal", "mul") => (self.host.num.decimal_mul, 1),
                     ("Decimal", "to_string") => (self.host.num.decimal_to_string, 0),
+                    ("Fraction", "add") => (self.host.num.fraction_add, 1),
+                    ("Fraction", "sub") => (self.host.num.fraction_sub, 1),
+                    ("Fraction", "mul") => (self.host.num.fraction_mul, 1),
+                    ("Fraction", "div") => (self.host.num.fraction_div, 1),
+                    ("Fraction", "equal") => (self.host.num.fraction_equal, 1),
+                    ("Fraction", "numerator") => (self.host.num.fraction_numerator, 0),
+                    ("Fraction", "denominator") => (self.host.num.fraction_denominator, 0),
+                    ("Fraction", "to_string") => (self.host.num.fraction_to_string, 0),
+                    ("Fraction", "to_float") => (self.host.num.fraction_to_float, 0),
+                    ("Fraction", "is_zero") => (self.host.num.fraction_is_zero, 0),
                     _ => {
                         return Err(format!(
                             "jit handle method unsupported: {type_name}::{method}"
@@ -17586,7 +17616,13 @@ impl LowerCtx<'_, '_> {
                 }
                 let host_ref = self.module.declare_func_in_func(host_fn, self.b.func);
                 let call = self.b.ins().call(host_ref, &arg_vals);
-                Ok(self.b.inst_results(call)[0])
+                let result = self.b.inst_results(call)[0];
+                if type_name == "Fraction"
+                    && matches!(method.as_str(), "add" | "sub" | "mul" | "div")
+                {
+                    self.emit_trap_check()?;
+                }
+                Ok(result)
             }
             THandleOp::PreciseMethod { .. } => Err("jit handle method unsupported".to_string()),
             THandleOp::TcpListenerAccept => {

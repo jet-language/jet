@@ -98,6 +98,188 @@ fn as_ct_float(v: &CtValue, span: Span) -> Result<CtFloat, Diagnostic> {
     }
 }
 
+fn named_tuple(fields: &[(&str, CtValue)]) -> CtValue {
+    CtValue::Struct {
+        type_name: format!(
+            "({})",
+            fields.iter().map(|(n, _)| *n).collect::<Vec<_>>().join(",")
+        ),
+        fields: fields
+            .iter()
+            .map(|(n, v)| ((*n).to_string(), v.clone()))
+            .collect(),
+    }
+}
+
+fn math_binomial(n: i64, k: i64) -> Option<i64> {
+    if n < 0 || k < 0 || k > n {
+        return None;
+    }
+    let k = k.min(n - k);
+    let mut out: i64 = 1;
+    let mut i: i64 = 1;
+    while i <= k {
+        out = out.checked_mul(n - k + i)?.checked_div(i)?;
+        i += 1;
+    }
+    Some(out)
+}
+
+fn math_cmp(a: f64, b: f64) -> i64 {
+    match a.partial_cmp(&b) {
+        Some(std::cmp::Ordering::Less) => -1,
+        Some(std::cmp::Ordering::Equal) => 0,
+        Some(std::cmp::Ordering::Greater) => 1,
+        None => {
+            if a.is_nan() && b.is_nan() {
+                0
+            } else if a.is_nan() {
+                1
+            } else {
+                -1
+            }
+        }
+    }
+}
+
+fn math_ilogb(x: f64) -> Option<i64> {
+    if x == 0.0 || !x.is_finite() {
+        None
+    } else {
+        Some(x.abs().log2().floor() as i64)
+    }
+}
+
+fn math_logb(x: f64) -> f64 {
+    match math_ilogb(x) {
+        Some(e) => e as f64,
+        None if x == 0.0 => f64::NEG_INFINITY,
+        None => f64::INFINITY,
+    }
+}
+
+fn math_ldexp(x: f64, exp: i64) -> f64 {
+    if !x.is_finite() || x == 0.0 || exp == 0 {
+        x
+    } else {
+        x * 2f64.powi(exp.clamp(-2099, 2099) as i32)
+    }
+}
+
+fn math_next_after(x: f64, toward: f64) -> f64 {
+    if x.is_nan() || toward.is_nan() {
+        return f64::NAN;
+    }
+    if x == toward {
+        return toward;
+    }
+    if x == 0.0 {
+        return if toward > 0.0 {
+            f64::from_bits(1)
+        } else {
+            -f64::from_bits(1)
+        };
+    }
+    let bits = x.to_bits();
+    let next = if (toward > x) == x.is_sign_positive() {
+        bits + 1
+    } else {
+        bits - 1
+    };
+    f64::from_bits(next)
+}
+
+fn math_ulp(x: f64) -> f64 {
+    if x.is_nan() {
+        return f64::NAN;
+    }
+    if x.is_infinite() {
+        return f64::INFINITY;
+    }
+    let x = x.abs();
+    if x == 0.0 {
+        return f64::from_bits(1);
+    }
+    let bits = x.to_bits();
+    f64::from_bits(bits + 1) - x
+}
+
+fn math_significand(x: f64) -> f64 {
+    if x == 0.0 || !x.is_finite() {
+        return x;
+    }
+    let bits = x.to_bits();
+    let exp = ((bits >> 52) & 0x7ff) as i32;
+    if exp == 0 {
+        let mut v = x.abs();
+        while v < 1.0 {
+            v *= 2.0;
+        }
+        return if x.is_sign_negative() { -v } else { v };
+    }
+    let frac_bits = bits & ((1u64 << 52) - 1);
+    let sig = f64::from_bits((0x3ffu64 << 52) | frac_bits);
+    if x.is_sign_negative() {
+        -sig
+    } else {
+        sig
+    }
+}
+
+fn math_erf(x: f64) -> f64 {
+    if x.is_nan() {
+        return f64::NAN;
+    }
+    if x.is_infinite() {
+        return x.signum();
+    }
+    let sign = if x < 0.0 { -1.0 } else { 1.0 };
+    let ax = x.abs();
+    let t = 1.0 / (1.0 + 0.3275911 * ax);
+    let poly = t
+        * (0.254829592
+            + t * (-0.284496736
+                + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429))));
+    sign * (1.0 - poly * (-ax * ax).exp())
+}
+
+fn math_gamma(x: f64) -> f64 {
+    if x.is_nan() {
+        return f64::NAN;
+    }
+    if x <= 0.0 {
+        if x == x.floor() {
+            return f64::NAN;
+        }
+        return std::f64::consts::PI
+            / ((std::f64::consts::PI * x).sin() * math_gamma(1.0 - x));
+    }
+    const G: f64 = 7.0;
+    const C: [f64; 9] = [
+        0.99999999999980993,
+        676.5203681218851,
+        -1259.1392167224028,
+        771.32342877765313,
+        -176.61502916214059,
+        12.507343278686905,
+        -0.13857109526572012,
+        9.984369654078991e-6,
+        1.5056327351493116e-7,
+    ];
+    let mut z = x;
+    if z < 0.5 {
+        return std::f64::consts::PI
+            / ((std::f64::consts::PI * z).sin() * math_gamma(1.0 - z));
+    }
+    z -= 1.0;
+    let mut xacc = C[0];
+    for i in 1..9 {
+        xacc += C[i] / (z + i as f64);
+    }
+    let t = z + G + 0.5;
+    (2.0 * std::f64::consts::PI).sqrt() * t.powf(z + 0.5) * (-t).exp() * xacc
+}
+
 pub(in super::super) fn as_string(v: &CtValue, span: Span) -> Result<&str, Diagnostic> {
     match v {
         CtValue::Str(s) => Ok(s.as_str()),
@@ -1126,6 +1308,200 @@ pub fn apply_core_call(
             } else {
                 value % 2 != 0
             }))
+        }
+        ("core.math", "is_normal") => {
+            Ok(CtValue::Bool(as_ct_float(one(0)?, span)?.as_f64().is_normal()))
+        }
+        ("core.math", "is_subnormal") => {
+            Ok(CtValue::Bool(as_ct_float(one(0)?, span)?.as_f64().is_subnormal()))
+        }
+        ("core.math", "is_canonical") => {
+            let x = as_ct_float(one(0)?, span)?;
+            Ok(CtValue::Bool(x.is_finite() || x.is_nan()))
+        }
+        ("core.math", "is_signed" | "sign_bit") => {
+            Ok(CtValue::Bool(as_ct_float(one(0)?, span)?.as_f64().is_sign_negative()))
+        }
+        ("core.math", "is_zero") => {
+            Ok(CtValue::Bool(as_ct_float(one(0)?, span)?.as_f64() == 0.0))
+        }
+        ("core.math", "is_integer") => {
+            let x = as_ct_float(one(0)?, span)?;
+            Ok(CtValue::Bool(x.is_finite() && x.as_f64().fract() == 0.0))
+        }
+        ("core.math", "next_up") => {
+            Ok(CtValue::Float(CtFloat::f64(as_ct_float(one(0)?, span)?.as_f64().next_up())))
+        }
+        ("core.math", "next_down") => {
+            Ok(CtValue::Float(CtFloat::f64(
+                as_ct_float(one(0)?, span)?.as_f64().next_down(),
+            )))
+        }
+        ("core.math", "copy") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?)),
+        ("core.math", "cot") => {
+            let x = as_ct_float(one(0)?, span)?.as_f64();
+            Ok(CtValue::Float(CtFloat::f64(1.0 / x.tan())))
+        }
+        ("core.math", "inv") => {
+            let x = as_ct_float(one(0)?, span)?.as_f64();
+            Ok(CtValue::Float(CtFloat::f64(1.0 / x)))
+        }
+        ("core.math", "zero") => Ok(CtValue::Float(CtFloat::f64(0.0))),
+        ("core.math", "radix") => Ok(CtValue::Int(2)),
+        ("core.math", "leading_ones") => {
+            let value = match one(0)? {
+                CtValue::Int(v) => *v,
+                _ => return Err(unsupported("leading_ones needs a whole number", span)),
+            };
+            Ok(CtValue::Int((value as u64).leading_ones() as i64))
+        }
+        ("core.math", "trailing_ones") => {
+            let value = match one(0)? {
+                CtValue::Int(v) => *v,
+                _ => return Err(unsupported("trailing_ones needs a whole number", span)),
+            };
+            Ok(CtValue::Int((value as u64).trailing_ones() as i64))
+        }
+        ("core.math", "digits") => {
+            let value = match one(0)? {
+                CtValue::Int(v) => *v,
+                _ => return Err(unsupported("digits needs a whole number", span)),
+            };
+            Ok(CtValue::Int(if value == 0 {
+                1
+            } else {
+                let mut n = value.unsigned_abs();
+                let mut count = 0i64;
+                while n > 0 {
+                    count += 1;
+                    n /= 10;
+                }
+                count
+            }))
+        }
+        ("core.math", "binomial") => {
+            let n = match one(0)? {
+                CtValue::Int(v) => *v,
+                _ => return Err(unsupported("binomial needs whole numbers", span)),
+            };
+            let k = match one(1)? {
+                CtValue::Int(v) => *v,
+                _ => return Err(unsupported("binomial needs whole numbers", span)),
+            };
+            Ok(match math_binomial(n, k) {
+                Some(v) => CtValue::Some(Box::new(CtValue::Int(v))),
+                None => CtValue::None(Type::Int),
+            })
+        }
+        ("core.math", "cmp") => {
+            let a = as_ct_float(one(0)?, span)?.as_f64();
+            let b = as_ct_float(one(1)?, span)?.as_f64();
+            Ok(CtValue::Int(math_cmp(a, b)))
+        }
+        ("core.math", "next_after") => {
+            let a = as_ct_float(one(0)?, span)?.as_f64();
+            let b = as_ct_float(one(1)?, span)?.as_f64();
+            Ok(CtValue::Float(CtFloat::f64(math_next_after(a, b))))
+        }
+        ("core.math", "ldexp" | "scaleb") => {
+            let x = as_ct_float(one(0)?, span)?.as_f64();
+            let exp = match one(1)? {
+                CtValue::Int(v) => *v,
+                _ => return Err(unsupported("ldexp needs a whole-number exponent", span)),
+            };
+            Ok(CtValue::Float(CtFloat::f64(math_ldexp(x, exp))))
+        }
+        ("core.math", "ilogb") => {
+            let x = as_ct_float(one(0)?, span)?.as_f64();
+            Ok(match math_ilogb(x) {
+                Some(e) => CtValue::Some(Box::new(CtValue::Int(e))),
+                None => CtValue::None(Type::Int),
+            })
+        }
+        ("core.math", "logb") => {
+            Ok(CtValue::Float(CtFloat::f64(math_logb(
+                as_ct_float(one(0)?, span)?.as_f64(),
+            ))))
+        }
+        ("core.math", "significand") => {
+            Ok(CtValue::Float(CtFloat::f64(math_significand(
+                as_ct_float(one(0)?, span)?.as_f64(),
+            ))))
+        }
+        ("core.math", "ulp") => {
+            Ok(CtValue::Float(CtFloat::f64(math_ulp(
+                as_ct_float(one(0)?, span)?.as_f64(),
+            ))))
+        }
+        ("core.math", "erf") => {
+            Ok(CtValue::Float(CtFloat::f64(math_erf(
+                as_ct_float(one(0)?, span)?.as_f64(),
+            ))))
+        }
+        ("core.math", "erfc") => {
+            Ok(CtValue::Float(CtFloat::f64(
+                1.0 - math_erf(as_ct_float(one(0)?, span)?.as_f64()),
+            )))
+        }
+        ("core.math", "gamma") => {
+            Ok(CtValue::Float(CtFloat::f64(math_gamma(
+                as_ct_float(one(0)?, span)?.as_f64(),
+            ))))
+        }
+        ("core.math", "lgamma") => {
+            let g = math_gamma(as_ct_float(one(0)?, span)?.as_f64());
+            Ok(CtValue::Float(CtFloat::f64(if g.is_nan() || g <= 0.0 {
+                f64::NAN
+            } else {
+                g.ln()
+            })))
+        }
+        ("core.math", "sin_cos") => {
+            let x = as_ct_float(one(0)?, span)?.as_f64();
+            let (s, c) = x.sin_cos();
+            Ok(named_tuple(&[
+                ("sin", CtValue::Float(CtFloat::f64(s))),
+                ("cos", CtValue::Float(CtFloat::f64(c))),
+            ]))
+        }
+        ("core.math", "modf") => {
+            let x = as_ct_float(one(0)?, span)?;
+            Ok(named_tuple(&[
+                ("fract", CtValue::Float(x.fract())),
+                ("whole", CtValue::Float(x.trunc())),
+            ]))
+        }
+        ("core.math", "frexp") => {
+            let x = as_ct_float(one(0)?, span)?.as_f64();
+            let exp = math_ilogb(x).unwrap_or(0);
+            let frac = if x == 0.0 || !x.is_finite() {
+                x
+            } else {
+                math_ldexp(x, -exp)
+            };
+            Ok(named_tuple(&[
+                ("frac", CtValue::Float(CtFloat::f64(frac))),
+                ("exp", CtValue::Int(exp)),
+            ]))
+        }
+        ("core.math", "div_mod" | "div_rem") => {
+            let a = match one(0)? {
+                CtValue::Int(v) => *v,
+                _ => return Err(unsupported("div_mod needs whole numbers", span)),
+            };
+            let b = match one(1)? {
+                CtValue::Int(v) => *v,
+                _ => return Err(unsupported("div_mod needs whole numbers", span)),
+            };
+            if b == 0 {
+                return Err(unsupported("division by zero", span));
+            }
+            let (q, r) = if method == "div_mod" {
+                (a.div_euclid(b), a.rem_euclid(b))
+            } else {
+                (a / b, a % b)
+            };
+            Ok(named_tuple(&[("quot", CtValue::Int(q)), ("rem", CtValue::Int(r))]))
         }
         ("core.math", "hypot") => {
             let left = as_ct_float(one(0)?, span)?;

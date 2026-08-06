@@ -1017,6 +1017,14 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                     && matches!(
                         (func.as_str(), args.len()),
                         ("from_str" | "to_string", 1) | ("add" | "sub" | "mul", 2)
+                    ))
+                || (type_name == "Fraction"
+                    && matches!(
+                        (func.as_str(), args.len()),
+                        (
+                            "to_string" | "numerator" | "denominator" | "to_float" | "is_zero",
+                            1
+                        ) | ("add" | "sub" | "mul" | "div" | "equal", 2)
                     )))
                 && args.iter().all(|arg| resident_safe_expr(arg, callees))
         }
@@ -3487,6 +3495,20 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
                     && matches!(
                         (method.as_str(), args.len()),
                         ("add" | "sub" | "mul", 1) | ("to_string", 0)
+                    ))
+                || (type_name == "Fraction"
+                    && recv.ty == Type::Named("Fraction".into())
+                    && matches!(
+                        (method.as_str(), args.len()),
+                        ("add" | "sub" | "mul" | "div" | "equal", 1)
+                            | (
+                                "numerator"
+                                    | "denominator"
+                                    | "to_string"
+                                    | "to_float"
+                                    | "is_zero",
+                                0
+                            )
                     )))
         }
         THandleOp::CivilTimeMethod { method, .. } => {

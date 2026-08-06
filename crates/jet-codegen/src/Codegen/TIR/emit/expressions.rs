@@ -3029,13 +3029,19 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::PreciseMethod { type_name, method } => {
                     let prefix = if type_name == "BigInt" {
                         "jet_bigint"
+                    } else if type_name == "Fraction" {
+                        "jet_fraction"
                     } else {
                         "jet_decimal"
                     };
-                    if method == "to_string" {
-                        format!("{}{}_to_string(&({}))", root, prefix, recv)
-                    } else if method == "neg" {
-                        format!("{}{}_neg(&({}))", root, prefix, recv)
+                    if method == "to_string"
+                        || method == "neg"
+                        || method == "numerator"
+                        || method == "denominator"
+                        || method == "to_float"
+                        || method == "is_zero"
+                    {
+                        format!("{}{}_{}(&({}))", root, prefix, method, recv)
                     } else {
                         format!(
                             "{}{}_{}(&({}), &({}))",

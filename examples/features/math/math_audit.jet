@@ -1,4 +1,5 @@
-// D-MATHLIB2: core.math owns libm breadth plus explicit integer-safety families.
+// D-MATHLIB2 + D-CORESURFACE1 (#1464): core.math owns libm breadth, integer
+// safety, and the remaining high-witness float/decompose gaps.
 use core.math as math
 
 fn run() {
@@ -16,4 +17,59 @@ fn run() {
     print(math.int_pow(2, 10))
     print(math.gcd(54, 24))
     print(math.lcm(6, 8))
+
+    // Classify and sign.
+    print(math.is_normal(1.0))
+    print(math.is_subnormal(1e-320))
+    print(math.is_canonical(1.0))
+    print(math.is_signed(-1.0))
+    print(math.is_zero(0.0))
+    print(math.is_integer(3.0))
+    print(math.sign_bit(-2.0))
+
+    // Neighboring floats and scale.
+    print(math.next_up(1.0) > 1.0)
+    print(math.next_down(1.0) < 1.0)
+    print(math.next_after(1.0, 2.0) > 1.0)
+    print(math.ldexp(0.5, 3))
+    print(math.scaleb(0.5, 3))
+    print(math.logb(8.0))
+    print(math.ilogb(8.0) ?? -1)
+    print(math.significand(12.0))
+    print(math.ulp(1.0) > 0.0)
+    print(math.radix(1.0))
+    print(math.zero())
+
+    // Trig helpers and specials.
+    print(math.copy(-4.5))
+    print(math.inv(4.0))
+    print(math.cot(math.atan(1.0)))
+    print(math.erf(0.0))
+    print(math.erfc(0.0))
+    print(math.gamma(5.0))
+    print(math.lgamma(5.0) > 3.0)
+    print(math.cmp(1.0, 2.0))
+
+    // Pairs.
+    sc :: math.sin_cos(0.0)
+    print(sc.sin)
+    print(sc.cos)
+    mf :: math.modf(3.25)
+    print(mf.fract)
+    print(mf.whole)
+    fr :: math.frexp(8.0)
+    print(fr.frac)
+    print(fr.exp)
+    dm :: math.div_mod(-7, 3)
+    print(dm.quot)
+    print(dm.rem)
+    dr :: math.div_rem(-7, 3)
+    print(dr.quot)
+    print(dr.rem)
+
+    // Whole-number helpers.
+    print(math.leading_ones(-1))
+    print(math.trailing_ones(7))
+    print(math.digits(12345))
+    print(math.binomial(5, 2) ?? -1)
 }

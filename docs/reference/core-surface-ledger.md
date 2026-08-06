@@ -51,19 +51,19 @@ Generated on: 2026-08-06
 | Languages compared | 11 |
 | Shared containers | 54 |
 | Core modules | 85 |
-| Module members | 1030 |
-| Collection method rows | 458 |
-| Jet-side rows | 1489 |
-| Total rows | 10528 |
+| Module members | 1066 |
+| Collection method rows | 464 |
+| Jet-side rows | 1531 |
+| Total rows | 10530 |
 
 ## Verdicts
 
 | Verdict | Rows |
 | --- | ---: |
-| Jet wins | 387 |
-| Equal | 511 |
-| Jet loses (two or more languages agree) | 673 |
-| Single witness (recorded, not scored) | 8366 |
+| Jet wins | 388 |
+| Equal | 552 |
+| Jet loses (two or more languages agree) | 636 |
+| Single witness (recorded, not scored) | 8363 |
 | Exported type, not an operation | 169 |
 | Not compared | 422 |
 | Deliberately declined | 0 |
@@ -72,17 +72,17 @@ Generated on: 2026-08-06
 
 | Language | Surface read from | Recorded operations | Jet rows matched | Loss rows |
 | --- | --- | ---: | ---: | ---: |
-| Rust | standard-library source (rust-src component) | 1032 | 284 | 94 |
-| Go | official frozen API files (GOROOT/api/go1*.txt) | 1878 | 251 | 237 |
-| Swift | official documentation JSON (developer.apple.com) | 505 | 117 | 79 |
-| Kotlin | official API reference (kotlinlang.org) | 1141 | 173 | 123 |
-| C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1267 | 215 | 134 |
+| Rust | standard-library source (rust-src component) | 1032 | 291 | 87 |
+| Go | official frozen API files (GOROOT/api/go1*.txt) | 1878 | 270 | 219 |
+| Swift | official documentation JSON (developer.apple.com) | 505 | 129 | 68 |
+| Kotlin | official API reference (kotlinlang.org) | 1141 | 175 | 121 |
+| C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1267 | 219 | 130 |
 | TypeScript | runtime introspection | 724 | 176 | 100 |
-| Ruby | runtime introspection | 1294 | 211 | 187 |
-| Elixir | runtime introspection | 1270 | 253 | 159 |
-| Julia | official documentation search index (docs.julialang.org) | 1132 | 173 | 182 |
-| R | official R manual package index (stat.ethz.ch R-devel) | 1768 | 47 | 0 |
-| Python | runtime introspection | 2232 | 255 | 284 |
+| Ruby | runtime introspection | 1294 | 217 | 181 |
+| Elixir | runtime introspection | 1270 | 256 | 156 |
+| Julia | official documentation search index (docs.julialang.org) | 1132 | 197 | 162 |
+| R | official R manual package index (stat.ethz.ch R-devel) | 1768 | 51 | 0 |
+| Python | runtime introspection | 2232 | 279 | 262 |
 
 ## Loss clusters
 
@@ -97,9 +97,8 @@ while losses remain.
 | core.files | 66 | #288 | building | live |
 | String | 66 | #1476 | ready | live |
 | ByteBuffer | 49 | #1467 | ready | live |
-| core.math | 48 | #1464 | building | live |
-| core.os | 47 | #1465 | ready | live |
-| core.time | 44 | #1466 | ready | live |
+| core.os | 47 | #1465 | building | live |
+| core.time | 44 | #1466 | building | live |
 | List | 30 | #1477 | ready | live |
 | Map | 30 | #1477 | ready | live |
 | Set | 25 | #1478 | ready | live |
@@ -113,6 +112,7 @@ while losses remain.
 | core.regex | 13 | #1471 | ready | live |
 | core.url | 13 | #1472 | ready | live |
 | core.sync | 12 | #1481 | ready | live |
+| core.math | 11 | #1464 | building | live |
 | core.path | 11 | #288 | building | live |
 | core.io | 10 | #1480 | ready | live |
 | core.process | 10 | #1481 | ready | live |

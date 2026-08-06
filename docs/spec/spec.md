@@ -2005,6 +2005,30 @@ module is free (R10) — codegen only emits the helpers a program actually
 calls. See core-library.md for the full module list, signatures, and
 examples; UI snapshots: `tests/ui/core_*`, teaching errors **E0037**–**E0039**.
 
+### `core.math`
+
+Callable surface for floating-point and whole-number helpers (D-MATHLIB2,
+D-CORESURFACE1, D-NUMTYPE1). Beyond the base libm set (`sin`/`cos`/`exp`/`ln`/…),
+Jet ships:
+
+- inverse hyperbolics and accurate near-zero forms: `acosh`, `asinh`, `atanh`,
+  `cbrt`, `exp2`, `exp_m1`, `ln_1p`, `log(x, base)`, `signum`, `fma`, `copysign`
+- float classification and neighbors: `is_normal`, `is_subnormal`,
+  `is_canonical`, `is_signed`, `is_zero`, `is_integer`, `sign_bit`, `next_up`,
+  `next_down`, `next_after`, `ldexp`, `scaleb`, `logb`, `ilogb`, `significand`,
+  `ulp`, `radix`, `zero`
+- decomposition pairs (named tuples): `sin_cos`, `modf`, `frexp`, `div_mod`,
+  `div_rem`
+- specials: `erf`, `erfc`, `gamma`, `lgamma`, `inv`, `cot`, `copy`, `cmp`
+- whole-number helpers: `is_even`, `is_odd`, `isqrt`, `factorial`, `binomial`,
+  `digits`, `leading_ones`, `trailing_ones`, plus checked/saturating/wrapping
+  integer families
+- exact ratios: `fraction(n, d) => Fraction?` with `.numerator()`,
+  `.denominator()`, `.to_string()`, `.to_float()`, `.is_zero()`, and arithmetic
+
+Examples: `examples/features/math/math_audit.jet`,
+`examples/features/math/more_math.jet`, `examples/features/math/fraction.jet`.
+
 D-CORE-COMPRESS1=A splits compression by job. `core.compress.gzip` and
 `core.compress.zstd` are the only byte-stream codec homes; both expose
 `compress` and fallible `decompress`. `core.archive` exposes zip/tar container

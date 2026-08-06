@@ -657,6 +657,132 @@ pub(crate) fn emit_tir_core_call(
         ("core.math", "checked_rem") => format!("({}).checked_rem({})", arg(0), arg(1)),
         ("core.math", "is_even") => format!("(({}) % 2 == 0)", arg(0)),
         ("core.math", "is_odd") => format!("(({}) % 2 != 0)", arg(0)),
+        ("core.math", "is_normal") => format!("({}).is_normal()", arg(0)),
+        ("core.math", "is_subnormal") => format!("({}).is_subnormal()", arg(0)),
+        ("core.math", "is_canonical") => {
+            format!("(({}).is_finite() || ({}).is_nan())", arg(0), arg(0))
+        }
+        ("core.math", "is_signed" | "sign_bit") => format!("({}).is_sign_negative()", arg(0)),
+        ("core.math", "is_zero") => format!("({} == 0.0)", arg(0)),
+        ("core.math", "is_integer") => {
+            format!("(({}).is_finite() && ({}).fract() == 0.0)", arg(0), arg(0))
+        }
+        ("core.math", "next_up") => format!("({}).next_up()", arg(0)),
+        ("core.math", "next_down") => format!("({}).next_down()", arg(0)),
+        ("core.math", "copy") => format!("({})", arg(0)),
+        ("core.math", "cot") => format!("(1.0 / ({}).tan())", arg(0)),
+        ("core.math", "inv") => format!("(1.0 / ({}))", arg(0)),
+        ("core.math", "zero") => "0.0_f64".to_string(),
+        ("core.math", "radix") => "2i64".to_string(),
+        ("core.math", "erf") => format!("{}({})", helper("jet_std_math_erf"), arg(0)),
+        ("core.math", "erfc") => format!("{}({})", helper("jet_std_math_erfc"), arg(0)),
+        ("core.math", "gamma") => format!("{}({})", helper("jet_std_math_gamma"), arg(0)),
+        ("core.math", "lgamma") => format!("{}({})", helper("jet_std_math_lgamma"), arg(0)),
+        ("core.math", "logb") => format!("{}({})", helper("jet_std_math_logb"), arg(0)),
+        ("core.math", "significand") => {
+            format!("{}({})", helper("jet_std_math_significand"), arg(0))
+        }
+        ("core.math", "ulp") => format!("{}({})", helper("jet_std_math_ulp"), arg(0)),
+        ("core.math", "cmp") => format!("{}({}, {})", helper("jet_std_math_cmp"), arg(0), arg(1)),
+        ("core.math", "next_after") => {
+            format!("{}({}, {})", helper("jet_std_math_next_after"), arg(0), arg(1))
+        }
+        ("core.math", "ldexp" | "scaleb") => {
+            format!("{}({}, {})", helper("jet_std_math_ldexp"), arg(0), arg(1))
+        }
+        ("core.math", "ilogb") => format!("{}({})", helper("jet_std_math_ilogb"), arg(0)),
+        ("core.math", "leading_ones") => {
+            format!("{}({})", helper("jet_std_math_leading_ones"), arg(0))
+        }
+        ("core.math", "trailing_ones") => {
+            format!("{}({})", helper("jet_std_math_trailing_ones"), arg(0))
+        }
+        ("core.math", "digits") => format!("{}({})", helper("jet_std_math_digits"), arg(0)),
+        ("core.math", "binomial") => {
+            format!("{}({}, {})", helper("jet_std_math_binomial"), arg(0), arg(1))
+        }
+        ("core.math", "sin_cos") => {
+            let fields = match ret_ty {
+                Type::Tuple(fields) => crate::Codegen::Tuples::tuple_fields_plain(fields),
+                _ => vec![
+                    ("sin".to_string(), Type::Float),
+                    ("cos".to_string(), Type::Float),
+                ],
+            };
+            let struct_name = crate::Codegen::Tuples::tuple_struct_name(&fields);
+            format!(
+                "{{ let __jet_sc = ({}).sin_cos(); {} {{ {}: __jet_sc.0, {}: __jet_sc.1 }} }}",
+                arg(0),
+                struct_name,
+                mangle("sin"),
+                mangle("cos"),
+            )
+        }
+        ("core.math", "modf") => {
+            let fields = match ret_ty {
+                Type::Tuple(fields) => crate::Codegen::Tuples::tuple_fields_plain(fields),
+                _ => vec![
+                    ("fract".to_string(), Type::Float),
+                    ("whole".to_string(), Type::Float),
+                ],
+            };
+            let struct_name = crate::Codegen::Tuples::tuple_struct_name(&fields);
+            format!(
+                "{{ let __jet_x = ({0}); {1} {{ {2}: __jet_x.fract(), {3}: __jet_x.trunc() }} }}",
+                arg(0),
+                struct_name,
+                mangle("fract"),
+                mangle("whole"),
+            )
+        }
+        ("core.math", "frexp") => {
+            let fields = match ret_ty {
+                Type::Tuple(fields) => crate::Codegen::Tuples::tuple_fields_plain(fields),
+                _ => vec![
+                    ("frac".to_string(), Type::Float),
+                    ("exp".to_string(), Type::Int),
+                ],
+            };
+            let struct_name = crate::Codegen::Tuples::tuple_struct_name(&fields);
+            format!(
+                "{{ let __jet_x = ({0}); let __jet_e = {1}jet_std_math_ilogb(__jet_x).unwrap_or(0); let __jet_f = if __jet_x == 0.0 || !__jet_x.is_finite() {{ __jet_x }} else {{ {1}jet_std_math_ldexp(__jet_x, -__jet_e) }}; {2} {{ {3}: __jet_f, {4}: __jet_e }} }}",
+                arg(0),
+                cx.root_prefix,
+                struct_name,
+                mangle("frac"),
+                mangle("exp"),
+            )
+        }
+        ("core.math", "div_mod" | "div_rem") => {
+            let fields = match ret_ty {
+                Type::Tuple(fields) => crate::Codegen::Tuples::tuple_fields_plain(fields),
+                _ => vec![
+                    ("quot".to_string(), Type::Int),
+                    ("rem".to_string(), Type::Int),
+                ],
+            };
+            let struct_name = crate::Codegen::Tuples::tuple_struct_name(&fields);
+            let op = if method == "div_mod" {
+                // Floor division + matching remainder (Python divmod).
+                format!(
+                    "let __jet_a = ({0}); let __jet_b = ({1}); let __jet_q = __jet_a.div_euclid(__jet_b); let __jet_r = __jet_a.rem_euclid(__jet_b);",
+                    arg(0),
+                    arg(1)
+                )
+            } else {
+                // Truncating division + remainder (Rust /, %).
+                format!(
+                    "let __jet_a = ({0}); let __jet_b = ({1}); let __jet_q = __jet_a / __jet_b; let __jet_r = __jet_a % __jet_b;",
+                    arg(0),
+                    arg(1)
+                )
+            };
+            format!(
+                "{{ {op} {struct_name} {{ {}: __jet_q, {}: __jet_r }} }}",
+                mangle("quot"),
+                mangle("rem"),
+            )
+        }
         ("core.math", "degrees") => format!("({}).to_degrees()", arg(0)),
         ("core.math", "radians") => format!("({}).to_radians()", arg(0)),
         ("core.math", "atan2" | "hypot") => format!("({}).{}({})", arg(0), method, arg(1)),

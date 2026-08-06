@@ -525,6 +525,7 @@ const COLLECTION_METHOD_FUNCTIONS = {
   numeric_conversion_return: "core.math",
   bigint_method_return: "core.math",
   decimal_method_return: "core.math",
+  fraction_method_return: "core.math",
   is_closure_method: "Iter",
   is_lazy_adapter: "Iter",
   is_iter_terminal: "Iter",
@@ -2436,7 +2437,7 @@ function hostileFixtures() {
       { path: NUMERIC_PATH, text: read(NUMERIC_PATH) },
     ];
     const found = discoverTables(sources).functions;
-    for (const name of ["bigint_method_return", "decimal_method_return", "builtin_static_return"]) {
+    for (const name of ["bigint_method_return", "decimal_method_return", "fraction_method_return", "builtin_static_return"]) {
       if (!found.includes(name)) {
         throw new Error("dispatch discovery missed " + name);
       }

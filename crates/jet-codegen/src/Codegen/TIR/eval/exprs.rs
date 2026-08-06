@@ -5962,7 +5962,11 @@ fn eval_precise_builtin(
                 .map_err(|_| unsupported(&format!("`Decimal(\"{s}\")`"), span)),
             _ => Err(unsupported("`Decimal.from_str`", span)),
         },
-        ("BigInt" | "Decimal", "add" | "sub" | "mul" | "neg" | "to_string") => {
+        ("BigInt" | "Decimal" | "Fraction", "add" | "sub" | "mul" | "neg" | "to_string")
+        | (
+            "Fraction",
+            "div" | "equal" | "numerator" | "denominator" | "to_float" | "is_zero",
+        ) => {
             let mut it = args.into_iter();
             let Some(recv) = it.next() else {
                 return Err(unsupported(&format!("`{type_name}.{func}`"), span));

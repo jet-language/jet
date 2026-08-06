@@ -164,6 +164,8 @@ pub(crate) struct JitRuntime {
     pub(crate) regex_values: Vec<Option<Text::RegexValue>>,
     /// Decimal handles for D-DECIMAL1 (#1219) — side table of CtDecimal.
     pub(crate) decimal_values: Vec<Option<jet_foundation::Numeric::CtDecimal>>,
+    /// Fraction handles for D-NUMTYPE1 (#1464) — side table of CtFraction.
+    pub(crate) fraction_values: Vec<Option<jet_foundation::Numeric::CtFraction>>,
     /// Set by a host shim when the user program hits a runtime panic (overflow,
     /// list index/slice OOB, a couple of concurrency panics). Non-`None` makes
     /// JIT-generated code branch to its epilogue on the next `emit_trap_check`,

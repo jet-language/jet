@@ -1288,8 +1288,17 @@ fn run() {
 | `saturating_add/sub/mul` | Integer operations clamping on overflow |
 | `wrapping_add/sub/mul` | Integer operations wrapping on overflow |
 | `int_pow`, `gcd`, `lcm` | Integer power and number theory helpers |
+| `acosh`, `asinh`, `atanh`, `cbrt`, `exp2`, `exp_m1`, `ln_1p`, `log`, `signum`, `fma` | Extended float family (D-CORESURFACE1) |
+| `is_even`, `is_odd`, `isqrt`, `factorial`, `binomial`, `digits`, `leading_ones`, `trailing_ones` | Whole-number helpers |
+| `checked_abs`, `checked_neg`, `checked_div`, `checked_rem` | More checked integer ops |
+| `fraction` | Exact ratio of two whole numbers (`Fraction?`) |
+| `is_normal`, `is_subnormal`, `is_canonical`, `is_signed`, `is_zero`, `is_integer`, `sign_bit` | Float classification |
+| `next_up`, `next_down`, `next_after`, `ldexp`, `scaleb`, `logb`, `ilogb`, `significand`, `ulp`, `radix`, `zero` | Float scale and neighbors |
+| `copy`, `inv`, `cot`, `cmp`, `erf`, `erfc`, `gamma`, `lgamma` | Misc float helpers |
+| `sin_cos`, `modf`, `frexp`, `div_mod`, `div_rem` | Named-tuple pairs |
 
-Example: `examples/features/math/math_audit.jet`.
+Example: `examples/features/math/math_audit.jet`, `examples/features/math/more_math.jet`,
+`examples/features/math/fraction.jet`.
 
 ---
 
