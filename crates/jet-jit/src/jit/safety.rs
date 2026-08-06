@@ -25,17 +25,29 @@ fn resident_safe_string_parts(parts: &[TStrPart], callees: &HashSet<String>) -> 
     })
 }
 
+fn resident_safe_ct_value(value: &jet_foundation::AST::CtValue) -> bool {
+    use jet_foundation::AST::CtValue;
+    match value {
+        CtValue::Int(_)
+        | CtValue::Float(_)
+        | CtValue::Bool(_)
+        | CtValue::Char(_)
+        | CtValue::Str(_)
+        | CtValue::Unit
+        | CtValue::None(_) => true,
+        CtValue::Some(inner) | CtValue::ResOk(inner) | CtValue::ResErr(inner) => {
+            resident_safe_ct_value(inner)
+        }
+        // Anonymous-union field payloads lower as CtValue::Enum (#1444 Box.{value: 9}).
+        CtValue::Enum { args, .. } => args.iter().all(|(_, v)| resident_safe_ct_value(v)),
+        CtValue::Struct { fields, .. } => fields.iter().all(|(_, v)| resident_safe_ct_value(v)),
+        CtValue::List(items) => items.iter().all(resident_safe_ct_value),
+        _ => false,
+    }
+}
+
 fn resident_safe_ct_struct_fields(fields: &[(String, jet_foundation::AST::CtValue)]) -> bool {
-    fields.iter().all(|(_, value)| {
-        matches!(
-            value,
-            jet_foundation::AST::CtValue::Int(_)
-                | jet_foundation::AST::CtValue::Float(_)
-                | jet_foundation::AST::CtValue::Bool(_)
-                | jet_foundation::AST::CtValue::Char(_)
-                | jet_foundation::AST::CtValue::Str(_)
-        )
-    })
+    fields.iter().all(|(_, value)| resident_safe_ct_value(value))
 }
 
 fn jit_scalar_type(ty: &Type) -> bool {
