@@ -509,7 +509,13 @@ pub(crate) fn if_cond_in_subset(
             // above; require the owning enum to be covered so the prefix/payload are
             // total. Multi-bind / unit variants stay on the AST path (the single-bind
             // shape mirrors the JSON-variant if-let exactly).
+            //
+            // D-UNIONTYPE1=A: anonymous-union member tags are not in `variant_owner`
+            // (they collide with DataTree/etc.), same as `switch_in_subset`'s
+            // `union_shaped` fallback — accept the single-bind case and resolve the
+            // generated `__JetUnion_*` enum from the subject's type at lowering.
             if !is_json_variant(variant)
+                && !is_key_variant(variant)
                 && bindings.len() == 1
                 && matches!(bindings[0], PatSlot::Bind { .. })
             {
@@ -519,6 +525,8 @@ pub(crate) fn if_cond_in_subset(
                             return Some(vec![name.clone()]);
                         }
                     }
+                } else if let PatSlot::Bind { name, .. } = &bindings[0] {
+                    return Some(vec![name.clone()]);
                 }
             }
             // c109 (D-PATW): a USER-enum variant if-let with a WILDCARD payload slot
@@ -529,6 +537,7 @@ pub(crate) fn if_cond_in_subset(
             // subset, introducing NO binding (empty bindings vec). (The recently-covered
             // user-variant if-let bound a name; this binds `_`.)
             if !is_json_variant(variant)
+                && !is_key_variant(variant)
                 && bindings.len() == 1
                 && matches!(bindings[0], PatSlot::Wildcard)
             {
@@ -536,6 +545,8 @@ pub(crate) fn if_cond_in_subset(
                     if enum_is_covered(owner, cx) {
                         return Some(Vec::new());
                     }
+                } else {
+                    return Some(Vec::new());
                 }
             }
             // D-TAG1: a binding-free variant/group test (`if d == .Fire { … }`)
@@ -548,6 +559,11 @@ pub(crate) fn if_cond_in_subset(
                 return Some(Vec::new());
             }
             return None;
+        }
+        // D-PATR / D-IFDIST1: expression-position range arm heads
+        // (`return if n == { 0..9 -> 1 }`) desugar to `PatternTest` Range conds.
+        if let Pattern::Range { .. } = pattern {
+            return Some(Vec::new());
         }
         return match pattern {
             Pattern::Present { binding, .. }

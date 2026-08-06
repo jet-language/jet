@@ -511,6 +511,31 @@ fn marker_plane_matrix_covers_current_marker_families() {
 }
 
 #[test]
+fn value_dispatch_accepts_range_arm_heads() {
+    // #1487 / D-IFDIST1: expression-position value dispatch must parse the same
+    // `lo..hi ->` range arm heads statement dispatch already accepts.
+    let source = r#"
+fn ordered(n: Int) => Int {
+    return if n == {
+        0..9 -> 1
+        10..99 -> 2
+        else -> 3
+    }
+}
+fn run() {
+    print("{ordered(40)}")
+}
+"#;
+    let (tokens, lex_diags) = jet::Lexer::lex(source);
+    assert!(lex_diags.is_empty(), "{lex_diags:#?}");
+    let program = jet::Parser::parse(&tokens).expect("value-dispatch range arms must parse");
+    assert!(
+        !program.items.is_empty(),
+        "parsed program should retain the ordered fn"
+    );
+}
+
+#[test]
 fn card_511_census_matches_current_law() {
     let core = fs::read_to_string("crates/jet-foundation/src/Syntax/core_surface.rs")
         .expect("read core surface registry");
