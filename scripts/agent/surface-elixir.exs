@@ -5,8 +5,10 @@
 # modules reachable from Elixir are included where Elixir ships no module of
 # its own for that workflow; the recorded container names which one answered.
 #
-# Regenerate:
+# Regenerate (Elixir's JSON encoder emits one line, so the output is indented
+# for review; the bytes are otherwise exactly what the runtime reported):
 #   nix shell nixpkgs#elixir --command elixir scripts/agent/surface-elixir.exs \
+#       | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.stringify(JSON.parse(s),null,2)))' \
 #       > docs/reference/surfaces/elixir-surface.json
 
 containers = [
