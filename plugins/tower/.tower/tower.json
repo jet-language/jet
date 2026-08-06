@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1495,
-    "rev": 26185,
+    "rev": 26187,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -21,7 +21,7 @@
         "board-ideas"
       ]
     },
-    "completionCursor": "2026-08-06T10:56:01.457Z"
+    "completionCursor": "2026-08-06T11:18:15.058Z"
   },
   "epochs": [
     {
@@ -83027,12 +83027,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "building",
       "priority": "P1",
       "plan": "Scope: close the core.math loss cluster in docs/reference/core-surface-ledger.json (67 rows as of the 2026-08-06 corrected ledger). Verified against crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs (core.math list) and crates/jet-foundation/src/Collections.rs: none of the 67 are already shipped, except gap.core.math.clear (witnesses C#:Truncate, Kotlin:truncate) which duplicates the existing free function trunc -- exclude it as an extractor false positive. Also exclude gap.core.math.imag, gap.core.math.real, gap.core.math.numerator, gap.core.math.denominator: they decompose a Complex or Rational number and Jet has no such type; do not add standalone accessor functions with nothing to accessor. That leaves 62 real capabilities. Out of scope: any new numeric type (Complex/Rational), any second logarithm/rounding spelling that duplicates an existing function or the ratified math-operator slate.\n\nReal gap families (62): inverse hyperbolic (acosh, asinh, atanh); power/root (cbrt, isqrt, exp2, expm1, log1p/ln1p pick one spelling, muladd/fma, sincos, log(x, base) two-arg arbitrary-base log distinct from ln/log2/log10); float classification/bit ops (is_normal, is_subnormal, signbit, iszero, iscanonical, issigned, isinteger, radix, significand, ulp, zero, nextup, nextdown, nextafter, leadingones, trailingones); checked/overflow ints (checked_abs, checked_div, checked_neg, checked_rem, divrem); decomposition/rounding (modf, frexp, ldexp, scaleb, logb, ilogb, copysign, mod floor-mod distinct from % and %%); misc (binomial, cmp, copy, cot, div, divmod, erf, erfc, gamma, lgamma, inv, digits, iseven, isodd, factorial, xor, signum); verify-before-building (random -- check core.random module; float32/float64 -- check as Float32/as Float64 casts in examples/features/lowlevel/sized_floats.jet).\n\nApproach: 1) Confirm the verify-before-building rows against core.random and the sized-float cast syntax; drop from scope if already covered. 2) Implement each real function: signature in crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs, module listing in crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs, I9 semantics in crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs (Prelude is include_str-embedded; rebuild jet after every edit). 3) Extend examples/features/math/math_audit.jet to call every new function; update examples/features/expected/math/math_audit.out. 4) Regenerate the ledger: node scripts/agent/check-core-surface-ledger.mjs --refresh then --check; confirm core.math's loss count drops by the count implemented.\n\nProof: scripts/agent/jet-env cargo test --test core_surface_ledger; scripts/agent/jet-env jet build examples/features/math/math_audit.jet; scripts/agent/jet-env jet run examples/features/math/math_audit.jet; node scripts/agent/check-core-surface-ledger.mjs --check.\n\nOwned paths: crates/jet-foundation/src/Collections.rs, crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs, crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs, crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs, examples/features/math/math_audit.jet, examples/features/expected/math/math_audit.out, docs/reference/core-surface-ledger.json, docs/spec/spec.md.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-06",
+          "by": "fable",
+          "text": "Twenty operations shipped across all five layers, with the example examples/features/math/more_math.jet proving every one byte-identical on AOT and default jet run. core.math scored gaps fell from 67 to 46. Shipped: acosh, asinh, atanh, cbrt, exp2, exp_m1, ln_1p, log with a base, copysign, signum, fma, is_even, is_odd, isqrt, factorial, checked_abs, checked_neg, checked_div, checked_rem. The remainder splits into three groups: operations with no Rust standard-library backing such as erf, gamma, frexp and nextafter; operations that need a type Jet does not have, such as real, imag, numerator and denominator; and rows that are synonym-table artifacts, which card #1494 covers."
+        },
         {
           "at": "2026-08-06",
           "by": "prep-core-a",
@@ -83094,8 +83099,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T02:13:29.376Z",
-      "updated": "2026-08-06T10:27:37.658Z",
-      "updatedBy": "prep-core-a"
+      "updated": "2026-08-06T11:24:26.036Z",
+      "updatedBy": "fable"
     },
     {
       "id": "c0mvkfyc",
@@ -111889,6 +111894,20 @@
   ],
   "events": [
     {
+      "at": "2026-08-06T11:24:26.036Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0hsjnxk",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T11:18:15.058Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-06T11:18:15.058Z"
+    },
+    {
       "at": "2026-08-06T11:06:57.568Z",
       "by": "bd-verify",
       "action": "card.update",
@@ -115373,20 +115392,6 @@
       "action": "card.criteria-meet",
       "ref": "c0kydt2i",
       "note": "#3"
-    },
-    {
-      "at": "2026-08-06T02:05:00.895Z",
-      "by": "bd-markers",
-      "action": "card.criteria-meet",
-      "ref": "c0kydt2i",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-06T02:05:00.580Z",
-      "by": "bd-markers",
-      "action": "card.criteria-meet",
-      "ref": "c0kydt2i",
-      "note": "#1"
     }
   ],
   "nextNum": 368,
