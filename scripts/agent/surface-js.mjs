@@ -29,12 +29,41 @@ const CONTAINERS = {
   "core.text": [String.prototype, Intl],
 };
 
+// TypeScript describes ECMAScript. A workflow that only Node or the DOM
+// answers is not part of the language, so it is recorded as absent with that
+// reason rather than omitted, and the gap stays countable.
 const ABSENT = {
   SortedSet: "no ECMAScript built-in ordered set",
   Deque: "no ECMAScript built-in double-ended queue",
   PriorityQueue: "no ECMAScript built-in priority queue",
   BitSet: "no ECMAScript built-in bit set; integers carry bit operations",
   Cache: "no ECMAScript built-in cache with an eviction policy",
+  "core.random": "Math.random seeds randomness, but ECMAScript ships no random module",
+  "core.crypto.random": "crypto.getRandomValues is a Web Crypto host API, not ECMAScript",
+  "core.crypto": "SubtleCrypto is a Web Crypto host API, not ECMAScript",
+  "core.encoding.csv": "no ECMAScript CSV codec",
+  "core.encoding.toml": "no ECMAScript TOML decoder",
+  "core.encoding.base64": "atob and btoa are host APIs, not ECMAScript",
+  "core.encoding.base32": "no ECMAScript base32 codec",
+  "core.encoding.hex": "no ECMAScript hex codec",
+  "core.files": "file access is a Node or browser host API, not ECMAScript",
+  "core.path": "path handling is a Node host API, not ECMAScript",
+  "core.env": "environment access is a Node host API, not ECMAScript",
+  "core.os": "operating-system access is a Node host API, not ECMAScript",
+  "core.process": "process control is a Node host API, not ECMAScript",
+  "core.net": "sockets are a Node host API, not ECMAScript",
+  "core.tls": "TLS is a Node host API, not ECMAScript",
+  "core.http": "fetch is a host API, not ECMAScript",
+  "core.uuid": "randomUUID is a Web Crypto host API, not ECMAScript",
+  "core.db": "no ECMAScript database client",
+  "core.log": "console is a host API, not ECMAScript",
+  "core.io": "console and stdio are host APIs, not ECMAScript",
+  "core.fmt": "template literals are syntax; ECMAScript ships no formatting module",
+  "core.archive": "compression streams are a host API, not ECMAScript",
+  "core.binary": "no ECMAScript binary reader beyond DataView, which is recorded under ByteBuffer",
+  "core.data": "no ECMAScript statistics",
+  "core.testing": "no ECMAScript test harness",
+  "core.text.unicode": "Intl exposes locale data, but ECMAScript ships no Unicode property database",
 };
 
 // Operations only. `Symbol.*` keys and non-callable data properties are

@@ -74,6 +74,15 @@ ABSENT = {
   "PriorityQueue" => "no Ruby standard-library priority queue",
   "BitSet" => "no Ruby standard-library bit set; Integer carries bit operations",
   "Cache" => "no Ruby standard-library cache with an eviction policy",
+  "core.data" => "no Ruby standard-library statistics",
+  "core.db" => "no Ruby standard-library database client",
+  "core.encoding.base32" => "no Ruby standard-library base32 codec",
+  "core.encoding.hex" => "pack and unpack carry hex, but Ruby ships no hex codec module",
+  "core.encoding.toml" => "no Ruby standard-library TOML decoder",
+  "core.tasks" => "Thread and Fiber are core classes, but Ruby ships no task or async module",
+  "core.text" => "String carries text handling; Ruby ships no separate text module",
+  "core.text.unicode" => "no Ruby standard-library Unicode property database",
+  "core.uuid" => "SecureRandom.uuid exists, but Ruby ships no UUID module",
 }.freeze
 
 def instance_ops(mods)
