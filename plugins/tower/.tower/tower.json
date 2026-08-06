@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1582,
-    "rev": 28118,
+    "nextNum": 1584,
+    "rev": 28129,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -78076,12 +78076,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-ul3-core",
-      "phase": "verify",
+      "phase": "done",
       "priority": "P0",
       "plan": "1. Inventory each JSON entry point by edition across sema, Prelude, examples, docs, and migration tests.\n2. Keep edition 2026 signatures and prototype bytes frozen. Do not backport strict behavior.\n3. Implement the ratified edition 2027 DataTree, Codable, EncodingError, limits, canonical writer, and whole-value surface. Reuse one Prelude codec.\n4. Implement and test jet fix rewrites and the explicit edition upgrade.\n5. Label every reference signature and example by edition. Remove misleading unqualified JSON descriptions.\n6. Prove hostile inputs, bounds, canonical vectors, migration, and interpreter, JIT, AOT, comptime, stream, and whole-value parity. A fresh reviewer checks all ratified encoding decisions.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-06",
+          "by": "bd2-rev2",
+          "text": "bd2-rev2 close: both blocking findings fixed on master in 9075684a3 and rechecked.\n\njet fix --edition=2027 now trims whitespace before testing for an existing ? or ??, so re-runs are byte-identical. It emits json.canonical(x)? inside a fallible function and the panic fallback otherwise, per D-JSONCANON1. Confirmed independently: three passes over a file holding one fallible and one infallible caller produce the two correct forms and no drift. The damaged corpus line in tests/comptime_diff.rs is repaired and the json.canonical case is migrated to the 2027 form.\n\nProof: tests/cli.rs::jet_fix_edition_2027_rewrites_json_canonical_and_is_idempotent passes; comptime_module_calls_match_runtime and cbor_canonical_typed_corpus_matches_comptime_and_aot pass; encoding_edition passes 5 of 5; jet run and the AOT binary of examples/features/serde/encoding_breadth.jet both match the golden.\n\nAll six criteria verified. Invariants hold: no new diagnostic for I4; example plus golden for I5; one JCS codec shared by the whole-value and stream writers for I8; AOT emit, JIT host, and comptime all marshal to jet_enc_json_canonical for I9.\n\nStill open elsewhere, not this card: comptime_diff cases 42 to 44 fail because Iter has no Display, and corelib json_canonical_stream_* fail with E0956 because core.files.create is unsupported in quick-run mode."
+        },
         {
           "at": "2026-08-06",
           "by": "bd2-json",
@@ -78126,20 +78131,20 @@
         {
           "n": 2,
           "text": "Edition 2027 exposes the ratified DataTree, Codable, EncodingError, limits, canonical writer, and whole-value contracts.",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-coll",
-          "verifiedBy": null,
-          "evidence": "2027 canonical(data, limits=safe) => String ? EncodingError; AOT+JIT call jet_enc_json_canonical",
-          "at": "2026-08-06T19:03:13.327Z"
+          "verifiedBy": "bd2-rev2",
+          "evidence": "sema gives canonical(data, limits=EncodingLimits.safe()) -> String ? EncodingError at 2027; Prelude jet_enc_json_canonical validates limits and shares jet_json_jcs_number and jet_json_jcs_key_cmp with the stream writer; AOT emit, JIT host, and comptime all route to it",
+          "at": "2026-08-06T23:26:45.279Z"
         },
         {
           "n": 3,
           "text": "jet fix and explicit edition upgrade rewrite every changed JSON call and report hashing or signing fixtures for review.",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd2-json",
-          "verifiedBy": null,
-          "evidence": "rewrite_json_canonical_calls fixed: idempotent (trim_start before starts_with('?')) and emits D-JSONCANON1's ratified form -- bare ? inside a fallible enclosing fn (new enclosing_fn_is_fallible scan), ?? panic(\"value is not canonical JSON\") otherwise. Covered by tests/cli.rs::jet_fix_edition_2027_rewrites_json_canonical_and_is_idempotent (fresh 2026->2027 rewrite of both forms + byte-identical second run) -- cargo test --test cli jet_fix_edition_2027 passes.",
-          "at": "2026-08-06T23:21:40.697Z"
+          "verifiedBy": "bd2-rev2",
+          "evidence": "jet fix --edition=2027 now emits json.canonical(x)? inside a fallible fn and the panic fallback otherwise, and is byte-identical across three passes; tests/cli.rs::jet_fix_edition_2027_rewrites_json_canonical_and_is_idempotent passes",
+          "at": "2026-08-06T23:26:44.169Z"
         },
         {
           "n": 4,
@@ -78153,20 +78158,20 @@
         {
           "n": 5,
           "text": "Hostile corpus, limit, canonical, whole-value, stream, comptime, interpreter, JIT, and AOT tests prove the ratified behavior.",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd2-json",
-          "verifiedBy": null,
-          "evidence": "Damaged corpus repaired: comptime_diff.rs:742 json.parse call matches its runtime twin at :748; comptime_diff.rs:209 (case 1030) migrated from stale 2026 infallible json.canonical to the ratified 2027 fallback form. cargo test --test comptime_diff: 24 passed, 1 failed (comptime_matches_runtime cases 42-44, Iter-has-no-Display, pre-existing and unrelated); comptime_module_calls_match_runtime (case 1030) and cbor_canonical_typed_corpus_matches_comptime_and_aot (:742 pair) both pass. cargo test --test encoding_edition: 5/5 pass.",
-          "at": "2026-08-06T23:21:41.197Z"
+          "verifiedBy": "bd2-rev2",
+          "evidence": "comptime_module_calls_match_runtime and cbor_canonical_typed_corpus_matches_comptime_and_aot both pass after the corpus repair; encoding_edition passes 5 of 5; jet run and the AOT binary of encoding_breadth.jet both match the golden",
+          "at": "2026-08-06T23:26:44.929Z"
         },
         {
           "n": 6,
           "text": "A fresh reviewer verifies D-JSONCANON1, the encoding migration law, I4, I5, I8, and I9.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-03T20:22:33.336Z"
+          "status": "verified",
+          "metBy": "bd2-json",
+          "verifiedBy": "bd2-rev2",
+          "evidence": "No blocking violation remains. D-JSONCANON1=A migration forms and idempotency correct; I4 needs nothing because no new diagnostic; I5 example plus golden green; I8 one JCS codec shared by whole-value and stream; I9 AOT, JIT, and comptime all marshal to the same Prelude symbol and the example matches its golden on both tiers",
+          "at": "2026-08-06T23:27:21.856Z"
         }
       ],
       "refs": [
@@ -78187,9 +78192,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-03T20:21:49.285Z",
-      "updated": "2026-08-06T23:21:41.197Z",
-      "updatedBy": "bd2-json",
-      "workOrder": 10
+      "updated": "2026-08-06T23:27:32.600Z",
+      "updatedBy": "bd2-rev2",
+      "workOrder": 10,
+      "completedAt": "2026-08-06T23:27:32.600Z"
     },
     {
       "id": "c05y3gfw",
@@ -85703,8 +85709,13 @@
       "priority": "P1",
       "plan": "Scope: Iter ships in iter_method_return (crates/jet-foundation/src/Collections.rs:970), backed by jet_iter_* in crates/jet-codegen/src/Prelude/Core/Collections.rs. Card #1400 closed the zip family. The ledger now scores 19 remaining jet_loses rows for Iter. Verified 2026-08-06 directly against iter_method_return: all 19 names are absent, none exist under another spelling.\n\nApproach:\n1. Group the 19 names (docs/reference/core-surface-ledger.json, container=Iter, verdict=jet_loses) into families and add to iter_method_return + jet_iter_* in crates/jet-codegen/src/Prelude/Core/Collections.rs:\n   - Constructors (not adapters on an existing Iter, but ways to produce one): fill, cycle, repeat -> these are static/free constructors like the existing Iter.range() family (jet_iter_indexes/jet_iter_from_vec pattern), not methods taking `self`; scope as Iter.fill(value, n), Iter.repeat(value), receiver.cycle() (cycle is a genuine adapter, wraps an existing finite iterator to loop it — needs an explicit terminal guard so `.cycle().to_list()` on an infinite iterator does not hang; require `.take(n)` before `.to_list()` or make `.to_list()` on an unbounded cycle a diagnosed error).\n   - Predicates: issorted, issortedby -> extend the existing all/any family.\n   - Terminal/consumption: next, split, compact -> `next` implies a stateful pull-one-item API; confirm this doesn't collide with Jet's for-loop-based consumption model (D-ITER1) before adding a public `.next()` — if Iter is currently pull-only internally and not exposed as a manual-step API, this may need a decision id since it changes what \"iterator\" means to the user, or decline in favor of the existing for-loop/each().\n   - Comparison/output: compare, tostring -> extend existing eq/format conventions; tostring likely folds into the existing \"{x}\" interpolation path already used elsewhere (String.to_string, per #1409) rather than adding a bespoke Iter.to_string().\n   - List-shaped adapters ported from List (List already has or is gaining droplast, lastindexof, findlast, shuffle, average, toset per #1477/#1478's own gap lists): mirror the same names/signatures once those land, so Iter and List stay consistent (I8 one mechanism) rather than diverging.\n   - dedupby -> extend the existing dedup adapter with a key-function overload, same pattern as min_by/max_by.\n   - chunkwhile -> extend chunks/windows family with a predicate-driven variant.\n   - clip -> Go's slices.Clip trims backing capacity; Iter is lazy and has no backing capacity to trim, likely a genuine decline (no analog in a lazy pull model).\n2. Rebuild jet after Prelude edits: scripts/agent/jet-env cargo build.\n3. Extend examples/features/collections/iter_adapters.jet (or iter_tools_audit.jet, whichever already covers the adjacent adapter) with every shipped addition; regenerate the matching .out golden.\n4. Record a decision id for any name that changes Iter's consumption model (next) or is declined (clip); everything else is an ordinary additive method needing no owner gate.\n5. Run node scripts/agent/check-core-surface-ledger.mjs --refresh then --check.\n6. Update docs/reference/core-library.md Iter section.\n\nProof:\n- scripts/agent/jet-env cargo test --test core_surface_ledger\n- scripts/agent/jet-env cargo test --test tir_collections_and_methods\n- scripts/agent/jet-env jet run examples/features/collections/iter_adapters.jet, diff against examples/features/expected/collections/iter_adapters.out\n- AOT build of the same example, diff against the same golden, to prove I9 parity between AOT and default jet run\n- node scripts/agent/check-core-surface-ledger.mjs --check\n\nOwned paths: crates/jet-foundation/src/Collections.rs, crates/jet-codegen/src/Prelude/Core/Collections.rs, examples/features/collections/iter_adapters.jet, examples/features/expected/collections/iter_adapters.out, docs/reference/core-library.md, docs/reference/core-surface-ledger.json, docs/reference/core-surface-ledger.md.",
       "blockedBy": [],
-      "assignee": "e3-coll",
+      "assignee": "bd2-iter",
       "log": [
+        {
+          "at": "2026-08-06",
+          "by": "e3-coll",
+          "text": "[handoff] reclaimed by bd2-iter, dead session"
+        },
         {
           "at": "2026-08-06",
           "by": "e3-coll",
@@ -85770,10 +85781,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T02:13:47.351Z",
-      "updated": "2026-08-06T21:41:23.401Z",
-      "updatedBy": "audit-apply",
-      "claimedAt": "2026-08-06T17:07:10.331Z",
-      "workOrder": 30
+      "updated": "2026-08-06T23:23:43.192Z",
+      "updatedBy": "bd2-iter",
+      "workOrder": 30,
+      "claimedAt": "2026-08-06T23:23:43.191Z"
     },
     {
       "id": "c0vzbf5f",
@@ -95537,6 +95548,54 @@
       "created": "2026-08-06T23:13:19.231Z",
       "updated": "2026-08-06T23:13:23.116Z",
       "updatedBy": "bd2-str"
+    },
+    {
+      "id": "c0y2ybsv",
+      "num": 1582,
+      "title": "comptime_diff: Iter values have no Display in comptime cases 42-44",
+      "body": "comptime_matches_runtime cases 42-44 fail: an Iter value reaches print formatting and raises E0915 (no Display). Decide the ratified behavior (Display for lazy Iter, or the cases rewritten) and make comptime_diff green.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-06T23:28:20.316Z",
+      "updated": "2026-08-06T23:28:20.316Z",
+      "updatedBy": "bd2-orch"
+    },
+    {
+      "id": "c044atit",
+      "num": 1583,
+      "title": "corelib json_canonical_stream tests fail under quick-run E0956",
+      "body": "corelib json_canonical_stream_* tests fail with E0956 because core.files.create is unsupported in quick-run mode. Either support file creation in quick-run or move the tests to a tier that owns file IO.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-06T23:28:20.681Z",
+      "updated": "2026-08-06T23:28:20.681Z",
+      "updatedBy": "bd2-orch"
     }
   ],
   "decisions": [
@@ -129247,6 +129306,83 @@
   ],
   "events": [
     {
+      "at": "2026-08-06T23:28:20.681Z",
+      "by": "bd2-orch",
+      "action": "card.add",
+      "ref": "c044atit",
+      "note": "corelib json_canonical_stream tests fail under quick-run E0956"
+    },
+    {
+      "at": "2026-08-06T23:28:20.316Z",
+      "by": "bd2-orch",
+      "action": "card.add",
+      "ref": "c0y2ybsv",
+      "note": "comptime_diff: Iter values have no Display in comptime cases 42-44"
+    },
+    {
+      "at": "2026-08-06T23:27:32.600Z",
+      "by": "bd2-rev2",
+      "action": "card.update",
+      "ref": "c00sqr4z",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T23:27:21.857Z",
+      "by": "bd2-rev2",
+      "action": "card.criteria-verify",
+      "ref": "c00sqr4z",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-06T23:27:16.663Z",
+      "by": "bd2-json",
+      "action": "card.criteria-meet",
+      "ref": "c00sqr4z",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-06T23:26:52.678Z",
+      "by": "bd2-rev2",
+      "action": "card.criteria-meet",
+      "ref": "c00sqr4z",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-06T23:26:45.279Z",
+      "by": "bd2-rev2",
+      "action": "card.criteria-verify",
+      "ref": "c00sqr4z",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T23:26:44.929Z",
+      "by": "bd2-rev2",
+      "action": "card.criteria-verify",
+      "ref": "c00sqr4z",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-06T23:26:44.169Z",
+      "by": "bd2-rev2",
+      "action": "card.criteria-verify",
+      "ref": "c00sqr4z",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T23:23:43.192Z",
+      "by": "bd2-iter",
+      "action": "card.claim",
+      "ref": "c0r2dfxz",
+      "note": ""
+    },
+    {
+      "at": "2026-08-06T23:23:42.523Z",
+      "by": "e3-coll",
+      "action": "card.release",
+      "ref": "c0r2dfxz",
+      "note": "[handoff] logged"
+    },
+    {
       "at": "2026-08-06T23:22:03.211Z",
       "by": "bd2-orch",
       "action": "card.update",
@@ -132668,83 +132804,6 @@
       "action": "card.criteria-add",
       "ref": "c066jfg6",
       "note": "#4 The same rejection sentence appears at every boundary: a sha"
-    },
-    {
-      "at": "2026-08-06T21:35:18.992Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c066jfg6",
-      "note": "#3 E1111 and the kernel wording are absorbed into the E1101 and"
-    },
-    {
-      "at": "2026-08-06T21:35:18.643Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c066jfg6",
-      "note": "#2 The task, parallel-adapter, kernel, cell and fixed-backing p"
-    },
-    {
-      "at": "2026-08-06T21:35:18.300Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c066jfg6",
-      "note": "#1 Sendability is a registered plane in the fact registry, not "
-    },
-    {
-      "at": "2026-08-06T21:35:17.952Z",
-      "by": "audit-rethinks-b",
-      "action": "card.add",
-      "ref": "c066jfg6",
-      "note": "One crossing plane: may this value move to another worker"
-    },
-    {
-      "at": "2026-08-06T21:35:17.597Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c023xgxf",
-      "note": "#6 Tier parity (I9) is proved inside this card: parser, sema, T"
-    },
-    {
-      "at": "2026-08-06T21:35:17.248Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c023xgxf",
-      "note": "#5 No user-visible surface changes in this card"
-    },
-    {
-      "at": "2026-08-06T21:35:16.915Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c023xgxf",
-      "note": "#4 Generated Rust for the existing concurrency corpus is byte-i"
-    },
-    {
-      "at": "2026-08-06T21:35:16.568Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c023xgxf",
-      "note": "#3 The join duty is checked by the D-LIN1 obligation pass, not "
-    },
-    {
-      "at": "2026-08-06T21:35:16.225Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c023xgxf",
-      "note": "#2 Task lifecycle is a typestate row on the State.rs automaton "
-    },
-    {
-      "at": "2026-08-06T21:35:15.878Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c023xgxf",
-      "note": "#1 task_lint_span, type_holds_task_handle and PendingTaskSpawn."
-    },
-    {
-      "at": "2026-08-06T21:35:15.529Z",
-      "by": "audit-rethinks-b",
-      "action": "card.add",
-      "ref": "c023xgxf",
-      "note": "Concurrency substrate: task state and join duty on the shared engines"
     }
   ],
   "nextNum": 368,
