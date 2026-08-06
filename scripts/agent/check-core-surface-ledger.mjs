@@ -42,6 +42,7 @@ const TOWER_PATH = (function () {
 const MODULE_ITEMS_PATH = "crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs";
 const FIXED_SIGS_PATH = "crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs";
 const COLLECTIONS_PATH = "crates/jet-foundation/src/Collections.rs";
+const NUMERIC_PATH = "crates/jet-foundation/src/Numeric.rs";
 const PREDICATES_PATH = "crates/jet-foundation/src/Syntax/predicates.rs";
 const POLICY_PATH = "crates/jet-foundation/src/Policy.rs";
 const SYNTAX_PATH = "crates/jet-foundation/src/Syntax/core_surface.rs";
@@ -165,6 +166,13 @@ const CONTAINER_ALIASES = {
   "core.compress.zstd": "core.archive",
   "core.encoding": "core.encoding.json",
   "core.crypto.expert": "core.crypto",
+  // Task, TaskList and Duration are Jet types, but their workflow is the Core
+  // module a competitor answers with. Without these, a correctly read
+  // Task.cancel could never defend core.tasks and the ledger accused #1468 of
+  // gaps Jet ships.
+  Task: "core.tasks",
+  TaskList: "core.tasks",
+  Duration: "core.time",
 };
 
 // Interchangeable spellings of one operation. This was keyed by an idealised
@@ -270,7 +278,9 @@ const SYNONYM_GROUPS = [
   ["recv_from", "recvfrom", "receive_from"],
   ["shutdown", "close_write", "half_close"],
   ["send", "transmit", "write_bytes_to"],
-  ["ln", "log", "logarithm", "natural_log"],
+  // "log" only means logarithm in a maths container; elsewhere it writes a log
+  // line, and merging them produced a natural-logarithm gap in core.log.
+  ["ln", "logarithm", "natural_log"],
   ["extension", "get_extension", "suffix", "ext", "file_extension"],
   ["parent", "dirname", "parent_dir", "directory", "get_directory_name"],
   ["file_name", "basename", "get_file_name", "stem"],
@@ -340,6 +350,8 @@ const TYPE_CONTAINER = {
   CompilerNode: "core.compiler",
   BuildContext: "core.compiler",
   Solver: "core.solve",
+  Digest256: "core.crypto",
+  Digest512: "core.crypto",
   Clock: "core.time",
   Duration: "core.time",
   ExpiringValue: "core.time.expiring",
@@ -401,6 +413,12 @@ const COLLECTION_METHOD_FUNCTIONS = {
   bag_method_return: "Bag",
   deque_method_return: "Deque",
   numeric_method_return: "core.math",
+  numeric_conversion_return: "core.math",
+  bigint_method_return: "core.math",
+  decimal_method_return: "core.math",
+  is_closure_method: "Iter",
+  is_lazy_adapter: "Iter",
+  is_iter_terminal: "Iter",
   build_context_method_return: "core.compiler",
   // builtin_static_return mixes types in one match, so its arms are attributed
   // one at a time through TYPE_CONTAINER rather than to a single container.
@@ -630,6 +648,41 @@ function syntaxConstants() {
   return values;
 }
 
+// Some tables name their methods through a constant array rather than inline:
+// numeric_conversion_return reads NUMERIC_CONVERSION_SOURCES, and the duration
+// constructors come from DURATION_CONSTRUCTORS. A table that yields nothing is
+// a reader that cannot read it, so those lists are resolved too.
+function syntaxSourceFiles() {
+  const dir = "crates/jet-foundation/src/Syntax";
+  return ["crates/jet-foundation/src/Syntax.rs"].concat(
+    readdirSync(join(ROOT, dir))
+      .filter(function (name) { return name.endsWith(".rs"); })
+      .map(function (name) { return dir + "/" + name; })
+      .sort()
+  );
+}
+
+function constantLists() {
+  const lists = new Map();
+  const files = syntaxSourceFiles();
+  for (const file of files) {
+    const text = read(file);
+    for (const hit of text.matchAll(/pub const ([A-Z][A-Z0-9_]*)\s*:\s*[^=]*=\s*&?\[([\s\S]*?)\];/g)) {
+      const body = hit[2];
+      const names = [];
+      // A tuple list pairs a method with something else; the method is first.
+      const tuples = Array.from(body.matchAll(/\(\s*"([^"]+)"\s*,/g));
+      if (tuples.length) {
+        for (const tuple of tuples) names.push(tuple[1]);
+      } else {
+        for (const value of quoted(body)) names.push(value);
+      }
+      if (names.length) lists.set(hit[1], names);
+    }
+  }
+  return lists;
+}
+
 function resolveItems(body, constants) {
   const result = new Set(quoted(body));
   for (const match of body.matchAll(/\b(?:Syntax::)?([A-Z][A-Z0-9_]*)\b/g)) {
@@ -742,51 +795,131 @@ function fixedSignaturePairs(modules) {
   return Array.from(pairs).sort();
 }
 
-// Every method name a table decides. Tables are written three ways in
-// Collections.rs: a match on (method, nargs), an `if let "a" | "b" = method`,
-// and a bare `method == "x"`. Reading only the first missed count_ones,
-// is_infinite and to_string, and the ledger then scored them as gaps Jet had
-// to close.
-function methodNames(body) {
+// Every method name a table decides. Collections.rs writes a table five ways:
+// a match on (method, nargs), an `if let "a" | "b" = method`, a bare
+// `method == "x"`, a `matches!(method, "a" | "b")`, and a name given as a
+// Syntax constant. Reading only string literals returned nothing at all for
+// duration_method_return and task_list_method_return, whose arms are entirely
+// constants, so Duration and TaskList vanished from the inventory while the
+// compiler shipped them.
+function methodNames(body, constants) {
   const methods = new Set();
+  const lists = constantLists();
+  const addResolved = function (text) {
+    for (const name of quoted(text)) methods.add(name);
+    for (const hit of text.matchAll(/\b(?:crate::)?Syntax::([A-Z][A-Z0-9_]*)\b/g)) {
+      if (constants.has(hit[1])) methods.add(constants.get(hit[1]));
+    }
+  };
+  const harvest = function (text) {
+    for (const hit of text.matchAll(/\b([A-Z][A-Z0-9_]{2,})\b/g)) {
+      if (lists.has(hit[1])) {
+        for (const name of lists.get(hit[1])) methods.add(name);
+      }
+    }
+  };
+  harvest(body);
+  // A table can reach its names through a helper rather than naming the list:
+  // numeric_conversion_return calls Syntax::numeric_conversion_source(method).
+  for (const hit of body.matchAll(/\b(?:crate::)?Syntax::([a-z_][a-z0-9_]*)\s*\(/g)) {
+    for (const file of syntaxSourceFiles()) {
+      try {
+        harvest(functionBody(read(file), hit[1]));
+        break;
+      } catch (error) {
+        // Not in this file.
+      }
+    }
+  }
   try {
     for (const arm of matchArms(body, "match (")) {
       // A guard names types, not methods: `(Type::Named(n), "x", 1) if n == "Secret"`.
-      for (const name of quoted(arm.lhs.split(" if ")[0])) methods.add(name);
+      addResolved(arm.lhs.split(" if ")[0]);
     }
   } catch (error) {
     // Not every table is written as a match.
   }
-  for (const hit of body.matchAll(/if let ((?:"[^"]+"\s*\|\s*)*"[^"]+")\s*=\s*method/g)) {
-    for (const name of quoted(hit[1])) methods.add(name);
+  for (const hit of body.matchAll(/if let ((?:(?:"[^"]+"|[A-Za-z_:]+)\s*\|\s*)*(?:"[^"]+"|[A-Za-z_:]+))\s*=\s*method/g)) {
+    addResolved(hit[1]);
   }
-  for (const hit of body.matchAll(/method\s*==\s*"([^"]+)"/g)) methods.add(hit[1]);
+  for (const hit of body.matchAll(/method\s*==\s*("([^"]+)"|(?:crate::)?Syntax::[A-Z][A-Z0-9_]*)/g)) {
+    addResolved(hit[1]);
+  }
+  for (const hit of body.matchAll(/matches!\s*\(\s*method\s*,([\s\S]*?)\)\s*\n/g)) {
+    addResolved(hit[1]);
+  }
   return methods;
 }
 
-// Discover the tables instead of listing them. A hand-listed set silently
-// dropped numeric_method_return, builtin_static_return,
-// build_context_method_return and the arms written inline in
-// builtin_method_return, so those Jet capabilities read as missing.
-function discoverTables(source) {
-  const found = [];
-  for (const hit of source.matchAll(/\nfn ([a-z_][a-z0-9_]*_(?:method|static)_return)\s*\(/g)) {
-    found.push(hit[1]);
+// Discovery keyed on dispatch, not on a name. A name-suffix scan cannot see a
+// `pub fn` table, a table in another module, or a table called anything else,
+// and all three ship: Numeric.rs holds the real BigInt and Decimal tables. This
+// walks out from builtin_method_return, follows every call it dispatches, and
+// keeps following tail calls, so a new reader cannot be missed by forgetting to
+// name it.
+function tableBody(name, sources) {
+  for (const source of sources) {
+    try {
+      return functionBody(source.text, name);
+    } catch (error) {
+      // Not in this file.
+    }
   }
-  return found.sort();
+  return null;
+}
+
+function discoverTables(sources) {
+  const entry = sources[0].text;
+  const found = new Set();
+  const unknown = [];
+  const queue = [];
+
+  // The static path is dispatched before the match.
+  queue.push("builtin_static_return");
+
+  const inlineArms = [];
+  for (const arm of matchArms(functionBody(entry, "builtin_method_return"), "match recv_ty")) {
+    const rhs = arm.rhs.trim();
+    if (arm.lhs.trim() === "_" || rhs === "None") continue;
+    if (rhs.includes("match (method")) { inlineArms.push(arm); continue; }
+    // Anchored: an unanchored scan matched "ome" inside Some(...).
+    const inner = rhs.replace(/^\{\s*/, "").trim();
+    const call = /^(?:crate::)?(?:[A-Za-z_][A-Za-z0-9_]*::)*([a-z_][a-z0-9_]*)\s*\(/.exec(inner);
+    if (call && call[1] !== "builtin_method_return") { queue.push(call[1]); continue; }
+    if (call || /^Some\s*\(/.test(inner)) continue;
+    unknown.push(arm.lhs.trim().slice(0, 60));
+  }
+  if (unknown.length) {
+    throw new Error("builtin_method_return dispatches somewhere this reader does not follow: " +
+      unknown.join(", "));
+  }
+
+  while (queue.length) {
+    const name = queue.shift();
+    if (found.has(name)) continue;
+    const body = tableBody(name, sources);
+    if (body === null) {
+      throw new Error("builtin_method_return dispatches to a table this reader cannot find: " + name);
+    }
+    found.add(name);
+    // A table can fall through to another: builtin_static_return ends in
+    // numeric_conversion_return.
+    for (const hit of body.matchAll(/=>\s*(?:crate::)?(?:[A-Za-z_][A-Za-z0-9_]*::)?([a-z_][a-z0-9_]*_return)\s*\(/g)) {
+      queue.push(hit[1]);
+    }
+  }
+  return { functions: Array.from(found).sort(), inlineArms: inlineArms };
 }
 
 // Arms of builtin_method_return that hold their own table instead of calling
 // one. Each names its type, so each is attributed on its own.
-function inlineTables(source, constants) {
-  const body = functionBody(source, "builtin_method_return");
+function inlineTables(arms, source, constants) {
   const tables = [];
   const unknown = [];
-  for (const arm of matchArms(body, "match recv_ty")) {
-    if (!arm.rhs.includes("match (method")) continue;
+  for (const arm of arms) {
     const names = new Set();
     for (const name of quoted(arm.lhs)) names.add(name);
-    for (const hit of arm.lhs.matchAll(/\b(?:Syntax::|crate::Syntax::)([A-Z][A-Z0-9_]*)\b/g)) {
+    for (const hit of arm.lhs.matchAll(/\b(?:crate::)?Syntax::([A-Z][A-Z0-9_]*)\b/g)) {
       if (constants.has(hit[1])) names.add(constants.get(hit[1]));
     }
     const type = Array.from(names).find(function (name) { return TYPE_CONTAINER[name]; });
@@ -797,53 +930,56 @@ function inlineTables(source, constants) {
     tables.push({
       function: "builtin_method_return:" + type,
       type: TYPE_CONTAINER[type],
-      methods: Array.from(methodNames(arm.rhs)).sort(),
+      methods: Array.from(methodNames(arm.rhs, constants)).sort(),
       sourceLine: lineAt(source, source.indexOf(arm.lhs.trim().slice(0, 40))),
     });
   }
   if (unknown.length) {
-    throw new Error("builtin_method_return arms name types with no container: " +
-      unknown.join(", "));
+    throw new Error("builtin_method_return arms name types with no container: " + unknown.join(", "));
   }
   return tables;
 }
 
 function collectionInventory() {
   const source = read(COLLECTIONS_PATH);
+  const numeric = read(NUMERIC_PATH);
   const constants = syntaxConstants();
-  const discovered = discoverTables(source);
+  const lists = constantLists();
+  const sources = [{ path: COLLECTIONS_PATH, text: source }, { path: NUMERIC_PATH, text: numeric }];
+  const dispatch = discoverTables(sources);
 
-  // The gate that was missing. Deleting set_method_return removed a whole Jet
-  // collection and every fixture still passed, because nothing checked that the
-  // tables the compiler ships are the tables the ledger reads.
-  const unmapped = discovered.filter(function (name) {
+  // Every table the compiler dispatches must be one the ledger reads.
+  const unmapped = dispatch.functions.filter(function (name) {
     return !Object.prototype.hasOwnProperty.call(COLLECTION_METHOD_FUNCTIONS, name);
   });
   if (unmapped.length) {
     throw new Error("Collections.rs ships a table the ledger does not read: " + unmapped.join(", "));
   }
-  const missing = Object.keys(COLLECTION_METHOD_FUNCTIONS).filter(function (name) {
-    return !discovered.includes(name);
+  const mapped = Object.keys(COLLECTION_METHOD_FUNCTIONS);
+  const missing = mapped.filter(function (name) {
+    return tableBody(name, sources) === null;
   });
   if (missing.length) {
     throw new Error("the ledger reads a table Collections.rs no longer ships: " + missing.join(", "));
   }
 
   const tables = [];
-  for (const name of discovered) {
+  for (const name of mapped) {
     const container = COLLECTION_METHOD_FUNCTIONS[name];
-    const body = functionBody(source, name);
+    const body = tableBody(name, sources);
     const sourceLine = lineAt(source, source.indexOf("fn " + name + "("));
     if (container !== null) {
-      tables.push({
-        function: name,
-        type: container,
-        methods: Array.from(methodNames(body)).sort(),
-        sourceLine: sourceLine,
-      });
+      const methods = Array.from(methodNames(body, constants)).sort();
+      // A table that yields nothing is a reader that cannot read it. This is
+      // the state that shipped while every fixture passed: duration and
+      // task_list spell their methods as constants and returned zero.
+      if (methods.length === 0) {
+        throw new Error("the ledger reads no methods from " + name +
+          "; the compiler ships that table, so the reader is wrong");
+      }
+      tables.push({ function: name, type: container, methods: methods, sourceLine: sourceLine });
       continue;
     }
-    // A mixed table: attribute each arm to the container of the type it names.
     const byContainer = new Map();
     for (const arm of matchArms(body, "match (")) {
       const names = new Set(quoted(arm.lhs));
@@ -857,9 +993,25 @@ function collectionInventory() {
       }
       if (!owner) continue;
       if (!byContainer.has(owner)) byContainer.set(owner, new Set());
-      for (const method of quoted(arm.lhs.split(" if ")[0])) {
+      // A bare arm pattern is not a match body, so it is resolved directly:
+      // methodNames only reads text it recognises as a table.
+      const pattern = arm.lhs.split(" if ")[0];
+      const direct = new Set(quoted(pattern));
+      for (const hit of pattern.matchAll(/\b(?:crate::)?Syntax::([A-Z][A-Z0-9_]*)\b/g)) {
+        if (constants.has(hit[1])) direct.add(constants.get(hit[1]));
+      }
+      // A guard can name the whole method set: DURATION_CONSTRUCTORS.
+      for (const hit of arm.lhs.matchAll(/\b([A-Z][A-Z0-9_]{2,})\b/g)) {
+        if (lists.has(hit[1])) {
+          for (const name of lists.get(hit[1])) direct.add(name);
+        }
+      }
+      for (const method of direct) {
         if (!TYPE_CONTAINER[method]) byContainer.get(owner).add(method);
       }
+    }
+    if (byContainer.size === 0) {
+      throw new Error("the ledger reads no methods from the mixed table " + name);
     }
     for (const [owner, methods] of byContainer) {
       tables.push({
@@ -870,7 +1022,7 @@ function collectionInventory() {
       });
     }
   }
-  for (const table of inlineTables(source, constants)) tables.push(table);
+  for (const table of inlineTables(dispatch.inlineArms, source, constants)) tables.push(table);
 
   // Several tables can own one container: core.compiler is spread across
   // CompilerLexed, CompilerChecked, CompilerSyntaxTree and CompilerSourceMap,
@@ -891,6 +1043,15 @@ function collectionInventory() {
     entry.functions.push(table.function);
     for (const method of table.methods) entry.methods.add(method);
   }
+
+  // Every container the maps name must actually receive methods.
+  const declared = new Set(Object.values(COLLECTION_METHOD_FUNCTIONS).filter(Boolean)
+    .concat(Object.values(TYPE_CONTAINER)));
+  const empty = Array.from(declared).filter(function (name) { return !byContainer.has(name); });
+  if (empty.length) {
+    throw new Error("a declared Jet container received no methods: " + empty.join(", "));
+  }
+
   return Array.from(byContainer.values()).map(function (entry) {
     return {
       function: entry.functions.sort().join(" + "),
@@ -1029,11 +1190,18 @@ function keysForMember(member, prefixes) {
 // beside tcp_read, dns_srv_port beside dns_srv, now_utc beside now. Scoring the
 // qualified form separately produced a win for every suffix of a member that
 // already matched. It reports the verdict of the member it qualifies.
+// A suffix that only restates the same workflow in another representation.
+// Anything else is a distinct capability: zip_pad is not zip, count_by is not
+// len, and crediting them to the base manufactured equals.
+const RESTATING_SUFFIXES = ["bytes", "utc", "hex", "text", "str", "string", "at", "all"];
+
 function qualifierBase(member, siblings) {
   let best = null;
   for (const other of siblings) {
     if (other === member) continue;
     if (!member.startsWith(other + "_")) continue;
+    const suffix = member.slice(other.length + 1);
+    if (!RESTATING_SUFFIXES.includes(suffix)) continue;
     if (best === null || other.length > best.length) best = other;
   }
   return best;
@@ -1157,6 +1325,7 @@ function rowForModule(entry, member, fixedOnly, surfaces, keys, qualifiedBy) {
       member: member,
       sourceLine: entry.sourceLine,
     },
+    qualifies: qualifiedBy || undefined,
     container: container,
     jetSpelling: entry.module + "." + member,
     workflow: isTypeItem(member)
@@ -1476,6 +1645,7 @@ function sourceFiles() {
     POLICY_PATH,
     "crates/jet-foundation/src/Syntax.rs",
     SYNTAX_PATH,
+    NUMERIC_PATH,
     "docs/reference/python-surface.json",
   ].concat(Object.values(SURFACE_FILES)).map(function (path) {
     const source = read(path);
@@ -2012,11 +2182,41 @@ function hostileFixtures() {
     }
   }));
 
-  results.push(holds("every Jet method table is mapped to a container", function () {
-    const source = read(COLLECTIONS_PATH);
-    const discovered = discoverTables(source);
-    if (discovered.length < 45) {
-      throw new Error("only " + discovered.length + " method tables were discovered in Collections.rs");
+  results.push(rejects("a mapped table the reader cannot read",
+    "the ledger reads no methods from", function () {
+    // build_result is a helper with no method names. Mapping it stands in for
+    // the shipped state this gate was blind to: duration_method_return and
+    // task_list_method_return spell every method as a constant and returned
+    // nothing at all while every fixture passed.
+    COLLECTION_METHOD_FUNCTIONS.build_result = "LedgerFixture";
+    try {
+      collectionInventory();
+    } finally {
+      delete COLLECTION_METHOD_FUNCTIONS.build_result;
+    }
+  }));
+
+  results.push(holds("discovery reaches a pub fn table in another module", function () {
+    const sources = [
+      { path: COLLECTIONS_PATH, text: read(COLLECTIONS_PATH) },
+      { path: NUMERIC_PATH, text: read(NUMERIC_PATH) },
+    ];
+    const found = discoverTables(sources).functions;
+    for (const name of ["bigint_method_return", "decimal_method_return", "builtin_static_return"]) {
+      if (!found.includes(name)) {
+        throw new Error("dispatch discovery missed " + name);
+      }
+    }
+  }));
+
+  results.push(holds("every dispatched Jet method table is mapped to a container", function () {
+    const sources = [
+      { path: COLLECTIONS_PATH, text: read(COLLECTIONS_PATH) },
+      { path: NUMERIC_PATH, text: read(NUMERIC_PATH) },
+    ];
+    const discovered = discoverTables(sources).functions;
+    if (discovered.length < 40) {
+      throw new Error("only " + discovered.length + " method tables were reached by dispatch");
     }
     for (const name of discovered) {
       if (!Object.prototype.hasOwnProperty.call(COLLECTION_METHOD_FUNCTIONS, name)) {

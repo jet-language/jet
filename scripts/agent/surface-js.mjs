@@ -37,7 +37,6 @@ const HOST_MODULES = {
   "core.log": ["node:console"],
   "core.io": ["node:readline"],
   "core.args": ["node:util"],
-  "core.encoding.csv": [],
 };
 
 const CONTAINERS = {
@@ -130,7 +129,12 @@ for (const [name, specifiers] of Object.entries(HOST_MODULES)) {
   for (const specifier of specifiers) {
     const loaded = require(specifier);
     for (const key of Object.keys(loaded)) {
-      if (typeof loaded[key] === "function") operations.add(key);
+      if (typeof loaded[key] !== "function") continue;
+      // An exported class is a type, not an operation: node:net exports Server
+      // and node:buffer exports Buffer, and counting them scored Jet as
+      // missing types it ships.
+      if (/^[A-Z]/.test(key)) continue;
+      operations.add(key);
     }
   }
   if (operations.size === 0) throw new Error("no operations found in " + specifiers.join(", "));

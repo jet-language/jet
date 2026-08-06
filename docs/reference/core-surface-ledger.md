@@ -40,37 +40,37 @@ Generated on: 2026-08-06
 | Shared containers | 54 |
 | Core modules | 85 |
 | Module members | 1011 |
-| Collection method rows | 419 |
-| Jet-side rows | 1431 |
-| Total rows | 10514 |
+| Collection method rows | 458 |
+| Jet-side rows | 1470 |
+| Total rows | 10501 |
 
 ## Verdicts
 
 | Verdict | Rows |
 | --- | ---: |
-| Jet wins | 332 |
-| Equal | 508 |
-| Jet loses (two or more languages agree) | 632 |
-| Single witness (recorded, not scored) | 8451 |
-| Exported type, not an operation | 168 |
-| Not compared | 423 |
+| Jet wins | 386 |
+| Equal | 493 |
+| Jet loses (two or more languages agree) | 625 |
+| Single witness (recorded, not scored) | 8406 |
+| Exported type, not an operation | 169 |
+| Not compared | 422 |
 | Deliberately declined | 0 |
 
 ## Competitors
 
 | Language | Surface read from | Recorded operations | Jet rows matched | Loss rows |
 | --- | --- | ---: | ---: | ---: |
-| Rust | standard-library source (rust-src component) | 1032 | 278 | 102 |
-| Go | official frozen API files (GOROOT/api/go1*.txt) | 1878 | 253 | 229 |
-| Swift | official documentation JSON (developer.apple.com) | 505 | 109 | 80 |
-| Kotlin | official API reference (kotlinlang.org) | 1141 | 171 | 123 |
-| C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1267 | 227 | 133 |
-| TypeScript | runtime introspection | 789 | 193 | 102 |
-| Ruby | runtime introspection | 1294 | 225 | 192 |
-| Elixir | runtime introspection | 1270 | 265 | 164 |
-| Julia | official documentation search index (docs.julialang.org) | 1132 | 164 | 199 |
-| R | official R manual package index (stat.ethz.ch R-devel) | 1768 | 42 | 0 |
-| Python | runtime introspection | 2232 | 254 | 288 |
+| Rust | standard-library source (rust-src component) | 1032 | 270 | 103 |
+| Go | official frozen API files (GOROOT/api/go1*.txt) | 1878 | 241 | 229 |
+| Swift | official documentation JSON (developer.apple.com) | 505 | 114 | 78 |
+| Kotlin | official API reference (kotlinlang.org) | 1141 | 165 | 124 |
+| C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1267 | 210 | 131 |
+| TypeScript | runtime introspection | 724 | 171 | 99 |
+| Ruby | runtime introspection | 1294 | 208 | 193 |
+| Elixir | runtime introspection | 1270 | 246 | 163 |
+| Julia | official documentation search index (docs.julialang.org) | 1132 | 159 | 197 |
+| R | official R manual package index (stat.ethz.ch R-devel) | 1768 | 43 | 0 |
+| Python | runtime introspection | 2232 | 242 | 284 |
 
 ## Loss clusters
 
@@ -82,7 +82,7 @@ while losses remain.
 
 | Container | Loss rows | Owner card | Card phase | State |
 | --- | ---: | --- | --- | --- |
-| core.math | 66 | #1464 | planning | live |
+| core.math | 67 | #1464 | planning | live |
 | core.files | 63 | #288 | building | live |
 | String | 61 | #1476 | planning | live |
 | core.os | 47 | #1465 | planning | live |
@@ -90,11 +90,11 @@ while losses remain.
 | core.time | 43 | #1466 | planning | live |
 | List | 27 | #1477 | planning | live |
 | Map | 25 | #1477 | planning | live |
-| core.tasks | 22 | #1468 | planning | live |
 | Set | 20 | #1478 | planning | live |
-| core.net | 19 | #1469 | planning | live |
 | Iter | 19 | #1479 | planning | live |
-| core.crypto | 17 | #1473 | planning | live |
+| core.tasks | 18 | #1468 | planning | live |
+| core.net | 17 | #1469 | planning | live |
+| core.crypto | 16 | #1473 | planning | live |
 | core.archive | 15 | #1470 | planning | live |
 | core.log | 13 | #1474 | planning | live |
 | core.regex | 12 | #1471 | planning | live |
@@ -105,8 +105,8 @@ while losses remain.
 | core.process | 9 | #1481 | planning | live |
 | core.encoding.xml | 8 | #1481 | planning | live |
 | core.path | 8 | #288 | building | live |
-| core.testing | 8 | #1481 | planning | live |
 | core.db | 7 | #1481 | planning | live |
+| core.testing | 7 | #1481 | planning | live |
 | core.reflect | 6 | #1481 | planning | live |
 | core.http | 5 | #1481 | planning | live |
 | core.tls | 5 | #1481 | planning | live |
