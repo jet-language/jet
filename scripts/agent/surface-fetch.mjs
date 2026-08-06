@@ -230,9 +230,11 @@ async function kotlin() {
       // A declaration in this package is linked by a sibling relative page.
       // Links that climb out of the package, or point at the index itself,
       // name something declared elsewhere.
-      for (const match of pages.get(pkg).matchAll(/<a href="([a-z0-9.\-]+)\.html">([A-Za-z][A-Za-z0-9_]*)<\/a>/g)) {
-        if (match[1] === "index") continue;
-        operations.add(match[2]);
+      // The index renders a declaration's own name inside a `token function`
+      // span. Reading the surrounding links instead would collect the type
+      // parameters and parameter names that make up the rest of the signature.
+      for (const match of pages.get(pkg).matchAll(/<span class="token function">([A-Za-z][A-Za-z0-9_]*)<\/span>/g)) {
+        operations.add(match[1]);
       }
     }
     containers[name] = { present: true, packages: packages, operations: Array.from(operations).sort() };
