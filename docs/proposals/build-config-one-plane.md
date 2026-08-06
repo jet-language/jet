@@ -389,6 +389,30 @@ by name (closed-expression rule; `[T#capacity]` layout carve-out). The
 metaprogramming proposal's S5 (instances expose members by name) composes:
 `tuned.Buffer`, never a mangled name.
 
+### 8b. The module spelling mirrors functions (D-CONF-GENSPELL1 — new ballot)
+
+Owner question, made a decision: generic modules are the only place where
+types and values share one angle list, and the only static binding spelled
+`=`. Functions already have the house shape. The recommended mirror —
+every line `proposed`:
+
+```jet
+// today (D-GENMOD2=A)
+module cache<K, capacity: Int> { ... }
+module int_cache = cache<Int, 64>
+
+// proposed — the function shape, exactly
+module cache<K>(capacity: Int) { ... }
+module int_cache :: cache<Int>(64)
+module tuned :: cache<Int>($build.settings.cache_slots)
+```
+
+`<>` means types, `()` means typed values, `::` means bound once — one rule,
+already learned from `fn largest<T: Comparable>(items: [T])` and
+`call<Int>(64)` (D-GENERIC-CALL1). Value-parameter semantics move nowhere;
+only punctuation does. The menu carries the binding-only fix, the status
+quo, and a keyword-free variant.
+
 ### 9. Provenance facts (D-CONF-STAMP1)
 
 As v1: `$build.stamp.git` (`String?`, `-dirty` suffix, absent outside a
@@ -458,6 +482,7 @@ one security ledger, with the injection hole closed.
 | D-CONF-SPLIT1 | Facts in text, actions in the function; computed contributions recorded (scopes D-BUILDCTX-FLAGS1) | adopt |
 | D-CONF-ENTRY1 | Build entry discovery: one per package, `fn run`-style, CLI by name | adopt |
 | D-CONF-MODULE1 | Settings and module value params: one substrate (amends two D-GENMOD-VALUE1 clauses) | adopt |
+| D-CONF-GENSPELL1 | Generic modules spell like functions: `<types>(values)`, `::` binds (amends D-GENMOD2) | A |
 | D-CONF-STAMP1 | Provenance facts, Tier-1 locked; no timestamp | adopt |
 | D-CONF-WORD1 | "Profile" = optimize bundle only; three renames | adopt |
 
