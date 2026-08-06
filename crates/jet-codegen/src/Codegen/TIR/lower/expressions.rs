@@ -855,30 +855,29 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     }
                 }
             }
-            // Overflow decision, computed here once — this is the fact today's
-            // `operand_is_integer` re-derives in codegen. It must mirror that
-            // function EXACTLY (Codegen/Expression.rs): only a *resolvable*
-            // integer operand traps. A struct-field read resolves to `None` in the
-            // AST path (`expr_jet_ty` has no `Field` arm), so it does NOT trap —
-            // hence we can't just inspect `TExpr.ty`, which is total even for a
-            // field. We instead replay `operand_is_integer` on the AST operands.
-            // `operand_is_integer` inspects only the LEFT spine of nested
-            // arithmetic, so check the left operand first, then the right.
-            // D-NUMOPS1: `+`/`-`/`*`/`/`/`%` trap on value overflow; `<<`/`>>`
+            // Overflow decision for trapping JetArith helpers. Prefer the
+            // resolved TIR operand types so call results, fields, and other
+            // shapes the AST replay cannot see still trap (I2 / #1484). The
+            // AST replay remains for cases where lowering types are not yet
+            // integer-shaped but the source operand structurally is.
+            // D-NUMOPS1: `+`/`-`/`*`/`/` trap on value overflow; `<<`/`>>`
             // trap on a bit-count out of the type's width (both via the `JetArith`
             // helpers, so no raw Rust overflow panic leaks — I2). A shift's
             // overflow is governed by its LEFT operand's integer-ness (the value),
             // never the count.
+            // D-INTDIV1=A: `Int / Int` is widened to Float before lowering, so
+            // those operands are not `is_integer()` here and keep bare `/`.
+            // Fixed-width `IntN` keeps same-width `/` and must trap via jet_div.
+            // D-MODSEM1=A: `%` and `%%` always call their Prelude helper above.
+            let tir_integer = lhs.ty.is_integer() || rhs.ty.is_integer();
             let arith_overflow = matches!(
                 op,
-                // D-MODSEM1=A: `%` and `%%` are no longer here — both always
-                // call their Prelude helper, so their traps never depend on
-                // whether the checker could see through the operands.
                 BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div
-            ) && (ast_operand_is_integer(l, env) == Some(true)
+            ) && (tir_integer
+                || ast_operand_is_integer(l, env) == Some(true)
                 || ast_operand_is_integer(r, env) == Some(true));
             let shift_overflow = matches!(op, BinOp::Shl | BinOp::Shr)
-                && ast_operand_is_integer(l, env) == Some(true);
+                && (lhs.ty.is_integer() || ast_operand_is_integer(l, env) == Some(true));
             let overflow = arith_overflow || shift_overflow;
             let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0 as u32;
             // A comparison/logical op yields Bool; arithmetic keeps the operand type.
