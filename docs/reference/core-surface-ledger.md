@@ -51,9 +51,9 @@ Generated on: 2026-08-06
 | Languages compared | 11 |
 | Shared containers | 54 |
 | Core modules | 85 |
-| Module members | 1011 |
+| Module members | 1024 |
 | Collection method rows | 458 |
-| Jet-side rows | 1470 |
+| Jet-side rows | 1483 |
 | Total rows | 10501 |
 
 ## Verdicts
@@ -61,8 +61,8 @@ Generated on: 2026-08-06
 | Verdict | Rows |
 | --- | ---: |
 | Jet wins | 386 |
-| Equal | 493 |
-| Jet loses (two or more languages agree) | 683 |
+| Equal | 506 |
+| Jet loses (two or more languages agree) | 670 |
 | Single witness (recorded, not scored) | 8348 |
 | Exported type, not an operation | 169 |
 | Not compared | 422 |
@@ -72,17 +72,17 @@ Generated on: 2026-08-06
 
 | Language | Surface read from | Recorded operations | Jet rows matched | Loss rows |
 | --- | --- | ---: | ---: | ---: |
-| Rust | standard-library source (rust-src component) | 1032 | 270 | 107 |
-| Go | official frozen API files (GOROOT/api/go1*.txt) | 1878 | 241 | 246 |
-| Swift | official documentation JSON (developer.apple.com) | 505 | 114 | 79 |
-| Kotlin | official API reference (kotlinlang.org) | 1141 | 165 | 130 |
-| C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1267 | 210 | 139 |
-| TypeScript | runtime introspection | 724 | 171 | 103 |
-| Ruby | runtime introspection | 1294 | 208 | 194 |
-| Elixir | runtime introspection | 1270 | 246 | 166 |
-| Julia | official documentation search index (docs.julialang.org) | 1132 | 159 | 199 |
-| R | official R manual package index (stat.ethz.ch R-devel) | 1768 | 43 | 0 |
-| Python | runtime introspection | 2232 | 242 | 291 |
+| Rust | standard-library source (rust-src component) | 1032 | 280 | 97 |
+| Go | official frozen API files (GOROOT/api/go1*.txt) | 1878 | 250 | 237 |
+| Swift | official documentation JSON (developer.apple.com) | 505 | 115 | 78 |
+| Kotlin | official API reference (kotlinlang.org) | 1141 | 172 | 123 |
+| C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1267 | 216 | 133 |
+| TypeScript | runtime introspection | 724 | 177 | 97 |
+| Ruby | runtime introspection | 1294 | 213 | 189 |
+| Elixir | runtime introspection | 1270 | 252 | 160 |
+| Julia | official documentation search index (docs.julialang.org) | 1132 | 170 | 188 |
+| R | official R manual package index (stat.ethz.ch R-devel) | 1768 | 48 | 0 |
+| Python | runtime introspection | 2232 | 251 | 282 |
 
 ## Loss clusters
 
@@ -94,9 +94,9 @@ while losses remain.
 
 | Container | Loss rows | Owner card | Card phase | State |
 | --- | ---: | --- | --- | --- |
-| core.math | 67 | #1464 | ready | live |
 | core.files | 64 | #288 | building | live |
 | String | 64 | #1476 | ready | live |
+| core.math | 54 | #1464 | ready | live |
 | ByteBuffer | 48 | #1467 | ready | live |
 | core.os | 47 | #1465 | ready | live |
 | core.time | 43 | #1466 | ready | live |

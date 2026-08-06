@@ -635,8 +635,18 @@ pub(crate) fn emit_tir_core_call(
         (
             "core.math",
             "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "sinh" | "cosh" | "tanh"
-            | "exp" | "ln" | "log2" | "log10" | "trunc" | "fract",
+            | "exp" | "ln" | "log2" | "log10" | "trunc" | "fract"
+            | "acosh" | "asinh" | "atanh" | "cbrt" | "exp2" | "signum",
         ) => format!("({}).{}()", arg(0), method),
+        // Rust spells these exp_m1 and ln_1p; Jet keeps the same names, so the
+        // call is the identity.
+        ("core.math", "exp_m1" | "ln_1p") => format!("({}).{}()", arg(0), method),
+        ("core.math", "copysign" | "log") => format!("({}).{}({})", arg(0), method, arg(1)),
+        ("core.math", "fma") => {
+            format!("({}).mul_add({}, {})", arg(0), arg(1), arg(2))
+        }
+        ("core.math", "is_even") => format!("(({}) % 2 == 0)", arg(0)),
+        ("core.math", "is_odd") => format!("(({}) % 2 != 0)", arg(0)),
         ("core.math", "degrees") => format!("({}).to_degrees()", arg(0)),
         ("core.math", "radians") => format!("({}).to_radians()", arg(0)),
         ("core.math", "atan2" | "hypot") => format!("({}).{}({})", arg(0), method, arg(1)),

@@ -102,6 +102,21 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "int_pow",
             "gcd",
             "lcm",
+            // D-CORESURFACE1: operations the surface ledger scored against two
+            // or more compared languages.
+            "acosh",
+            "asinh",
+            "atanh",
+            "cbrt",
+            "copysign",
+            "exp2",
+            "exp_m1",
+            "ln_1p",
+            "log",
+            "signum",
+            "fma",
+            "is_even",
+            "is_odd",
         ],
         // D-DET1: `rng` builds a deterministic injected RNG capability.
         // D-RANDSPLIT1=A: `bytes(n)` returns n PRNG bytes — fast, NOT crypto-safe.

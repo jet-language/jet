@@ -393,6 +393,14 @@ impl CtFloat {
     pub fn ln(self) -> Self { unary_math!(self, ln) }
     pub fn trunc(self) -> Self { unary_math!(self, trunc) }
     pub fn fract(self) -> Self { unary_math!(self, fract) }
+    pub fn acosh(self) -> Self { unary_math!(self, acosh) }
+    pub fn asinh(self) -> Self { unary_math!(self, asinh) }
+    pub fn atanh(self) -> Self { unary_math!(self, atanh) }
+    pub fn cbrt(self) -> Self { unary_math!(self, cbrt) }
+    pub fn exp2(self) -> Self { unary_math!(self, exp2) }
+    pub fn exp_m1(self) -> Self { unary_math!(self, exp_m1) }
+    pub fn ln_1p(self) -> Self { unary_math!(self, ln_1p) }
+    pub fn signum(self) -> Self { unary_math!(self, signum) }
     pub fn to_degrees(self) -> Self { unary_math!(self, to_degrees) }
     pub fn to_radians(self) -> Self { unary_math!(self, to_radians) }
 
@@ -401,6 +409,19 @@ impl CtFloat {
     pub fn max(self, other: Self) -> Option<Self> { binary_math!(self, other, max) }
     pub fn atan2(self, other: Self) -> Option<Self> { binary_math!(self, other, atan2) }
     pub fn hypot(self, other: Self) -> Option<Self> { binary_math!(self, other, hypot) }
+    pub fn copysign(self, other: Self) -> Option<Self> { binary_math!(self, other, copysign) }
+    pub fn log(self, other: Self) -> Option<Self> { binary_math!(self, other, log) }
+
+    /// One rounding for a multiply and an add together, so the product keeps
+    /// its full width before the sum. Mixing widths is refused, as it is for
+    /// every other width-generic operation.
+    pub fn mul_add(self, factor: Self, addend: Self) -> Option<Self> {
+        match (self, factor, addend) {
+            (CtFloat::F64(a), CtFloat::F64(b), CtFloat::F64(c)) => Some(CtFloat::F64(a.mul_add(b, c))),
+            (CtFloat::F32(a), CtFloat::F32(b), CtFloat::F32(c)) => Some(CtFloat::F32(a.mul_add(b, c))),
+            _ => None,
+        }
+    }
 
     pub fn clamp(self, low: Self, high: Self) -> Option<Self> {
         match (self, low, high) {

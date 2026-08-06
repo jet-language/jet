@@ -1964,6 +1964,26 @@ impl<'a> Checker<'a> {
                     }
                     return Some(result_ty(Type::String, io_error_ty()));
                 }
+                // Parity of a whole number.
+                ("core.math", "is_even" | "is_odd") => {
+                    if args.len() != 1 {
+                        self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                    }
+                    if let Some(arg) = args.get_mut(0) {
+                        let ty = self.infer(&mut arg.expr)?;
+                        if !matches!(ty, Type::Int | Type::IntN { .. }) {
+                            self.diags.push(Diagnostic::error(
+                                "E0112",
+                                format!("`{}` needs a whole number, not {}", name, ty.show()),
+                                "parity is a property of whole numbers".to_string(),
+                                "pass an Int or a sized integer".to_string(),
+                                Some(arg.expr.span()),
+                            ));
+                            return None;
+                        }
+                    }
+                    return Some(Type::Bool);
+                }
                 // D-FLOATW1 (ratified 2026-06-22): sqrt/floor/ceil/pow are width-generic —
                 // they return the same float width they receive (Float→Float, F32→F32).
                 // Mixing widths is a compile error; destination-owned conversion is explicit.
@@ -1971,6 +1991,8 @@ impl<'a> Checker<'a> {
                     "core.math",
                     "sqrt" | "floor" | "ceil" | "sin" | "cos" | "tan" | "asin" | "acos"
                     | "atan" | "sinh" | "cosh" | "tanh" | "exp" | "ln" | "log2" | "log10"
+                    | "acosh" | "asinh" | "atanh" | "cbrt" | "exp2" | "exp_m1"
+                    | "ln_1p" | "signum"
                     | "trunc" | "fract" | "degrees" | "radians",
                 ) => {
                     if args.len() != 1 {
@@ -1992,14 +2014,10 @@ impl<'a> Checker<'a> {
                     }
                     return Some(ty);
                 }
-                ("core.math", "atan2" | "hypot" | "lerp") => {
-                    if args.len() != if name == "lerp" { 3 } else { 2 } {
-                        self.diags.push(wrong_core_arity(
-                            name,
-                            if name == "lerp" { 3 } else { 2 },
-                            args.len(),
-                            span,
-                        ));
+                ("core.math", "atan2" | "hypot" | "lerp" | "copysign" | "log" | "fma") => {
+                    let wanted = if name == "lerp" || name == "fma" { 3 } else { 2 };
+                    if args.len() != wanted {
+                        self.diags.push(wrong_core_arity(name, wanted, args.len(), span));
                     }
                     let Some(first) = args.get_mut(0).and_then(|a| self.infer(&mut a.expr)) else {
                         for a in args.iter_mut().skip(1) {

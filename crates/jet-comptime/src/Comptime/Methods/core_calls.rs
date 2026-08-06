@@ -1035,6 +1035,14 @@ pub fn apply_core_call(
         ("core.math", "tanh") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.tanh())),
         ("core.math", "exp") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.exp())),
         ("core.math", "ln") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.ln())),
+        ("core.math", "acosh") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.acosh())),
+        ("core.math", "asinh") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.asinh())),
+        ("core.math", "atanh") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.atanh())),
+        ("core.math", "cbrt") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.cbrt())),
+        ("core.math", "exp2") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.exp2())),
+        ("core.math", "exp_m1") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.exp_m1())),
+        ("core.math", "ln_1p") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.ln_1p())),
+        ("core.math", "signum") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.signum())),
         ("core.math", "trunc") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.trunc())),
         ("core.math", "fract") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.fract())),
         ("core.math", "degrees") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.to_degrees())),
@@ -1045,6 +1053,39 @@ pub fn apply_core_call(
             Ok(CtValue::Float(left.atan2(right).ok_or_else(|| {
                 unsupported("mixing float widths", span)
             })?))
+        }
+        ("core.math", "copysign") => {
+            let left = as_ct_float(one(0)?, span)?;
+            let right = as_ct_float(one(1)?, span)?;
+            Ok(CtValue::Float(left.copysign(right).ok_or_else(|| {
+                unsupported("mixing float widths", span)
+            })?))
+        }
+        ("core.math", "log") => {
+            let left = as_ct_float(one(0)?, span)?;
+            let right = as_ct_float(one(1)?, span)?;
+            Ok(CtValue::Float(left.log(right).ok_or_else(|| {
+                unsupported("mixing float widths", span)
+            })?))
+        }
+        ("core.math", "fma") => {
+            let a = as_ct_float(one(0)?, span)?;
+            let b = as_ct_float(one(1)?, span)?;
+            let c = as_ct_float(one(2)?, span)?;
+            Ok(CtValue::Float(a.mul_add(b, c).ok_or_else(|| {
+                unsupported("mixing float widths", span)
+            })?))
+        }
+        ("core.math", "is_even" | "is_odd") => {
+            let value = match one(0)? {
+                CtValue::Int(value) => *value,
+                _ => return Err(unsupported("parity of a value that is not a whole number", span)),
+            };
+            Ok(CtValue::Bool(if method == "is_even" {
+                value % 2 == 0
+            } else {
+                value % 2 != 0
+            }))
         }
         ("core.math", "hypot") => {
             let left = as_ct_float(one(0)?, span)?;
