@@ -9066,12 +9066,34 @@ impl LowerCtx<'_, '_> {
                             return Err(format!("jit unary neg unsupported type: {other:?}"));
                         }
                     },
-                    UnOp::Not => {
-                        let zero = self.b.ins().iconst(types::I8, 0);
-                        let one = self.b.ins().iconst(types::I8, 1);
-                        let cmp = self.b.ins().icmp(IntCC::Equal, inner, zero);
-                        self.b.ins().select(cmp, one, zero)
-                    }
+                    // D-BITNOT1=A: `!` turns over every bit it is given. On a
+                    // Bool that is the one bit; on a whole number it is the
+                    // bitwise complement, which Cranelift spells `bnot`.
+                    UnOp::Not => match &operand.ty {
+                        Type::Int => self.b.ins().bnot(inner),
+                        // Turning over every bit is exclusive-or with a value
+                        // whose bits are all set, so the fixed-width path
+                        // reuses the host table that already narrows to the
+                        // declared width.
+                        Type::IntN { signed, bits } => {
+                            let ones = self.b.ins().iconst(types::I64, -1);
+                            self.lower_intn_values(
+                                BinOp::BitXor,
+                                INTN_MODE_TRAP,
+                                inner,
+                                ones,
+                                *signed,
+                                *bits,
+                                true,
+                            )?
+                        }
+                        _ => {
+                            let zero = self.b.ins().iconst(types::I8, 0);
+                            let one = self.b.ins().iconst(types::I8, 1);
+                            let cmp = self.b.ins().icmp(IntCC::Equal, inner, zero);
+                            self.b.ins().select(cmp, one, zero)
+                        }
+                    },
                 })
             }
             TExprKind::IncDec {

@@ -307,6 +307,9 @@ pub const OP_CARET: &str = "^";
 /// D-XORSPELL1=A (ratified 2026-08-05): bitwise exclusive-or, the exclusive
 /// variant of `|`. Prefix `~` stays the copy sigil (D-SHAPE-COPY1).
 pub const OP_TILDE_PIPE: &str = "~|";
+/// D-BITNOT1=A (ratified 2026-08-05): prefix `!` turns over every bit it is
+/// given — the one bit of a `Bool`, or every bit of a whole number.
+pub const OP_BIT_NOT: &str = OP_NOT;
 pub const OP_SHL: &str = "<<";
 pub const OP_SHR: &str = ">>";
 

@@ -5574,3 +5574,20 @@ No in-repo use of `%` relied on truncation — every operand was already
 non-negative, where the two agree. Spellings live in Syntax.rs (`OP_PERCENT`,
 `OP_PERCENT_EQ`, `OP_PERCENT_PERCENT`, `OP_PERCENT_PERCENT_EQ`). Flagship:
 `examples/features/math/modulo.jet`. Card #1432.
+
+**2026-08-05 — D-BITNOT1=A**: prefix `!` turns over every bit it is given. On a
+`Bool` there is one bit, so a yes becomes a no and that meaning is unchanged.
+On a whole number it is the bitwise complement — the missing partner of `&`,
+`|`, and `~|` — and the width comes back unchanged. On the default `Int`, which
+carries no fixed width, turning over every bit is the same as `-x - 1`; on a
+sized type the exact bits of that width flip, so `!U8.{5}` is 250. Clearing
+bits is the everyday use: `flags & !mask` keeps everything except the bits the
+mask names. No new sigil — `!` already existed, and this widens what it accepts,
+so E0109 now says `!` needs a Bool or a whole number
+(`tests/ui/bit_not_wrong_type.stderr`). Rust's `!` is already both operations,
+so the native and wasm tiers need no helper; the Cranelift host uses `bnot` for
+`Int` and reuses the fixed-width exclusive-or table for a sized type, and the
+interpreter complements the value directly. The JS tier is the one that splits
+them: JavaScript's `!` is logical only, so a whole number there lowers to `~`.
+Spelling lives in Syntax.rs (`OP_BIT_NOT`, the same `!` as `OP_NOT`). Flagship:
+`examples/features/math/bit_not.jet`. Card #1434.

@@ -4389,7 +4389,7 @@ fn tir_js_abi_int_expr(
         E::IntLit(n, _) => Ok(format!("{n}n")),
         E::Unary { op, operand } => Ok(format!(
             "({}{})",
-            unop(op),
+            js_unop(op, &operand.ty),
             tir_js_abi_int_expr(operand, funcs, file_prefix)?
         )),
         // D-EXPSEM1=A / D-FLOORDIV1=A: `^` and `/%` have no BigInt operator here
@@ -4455,7 +4455,11 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
         )
         .expect("the match arm admits only Prelude-carried operators"),
         E::Binary { op, lhs, rhs, .. } => format!("({} {} {})", tir_js_expr(lhs, funcs, file_prefix)?, binop(op), tir_js_expr(rhs, funcs, file_prefix)?),
-        E::Unary { op, operand } => format!("({}{})", unop(op), tir_js_expr(operand, funcs, file_prefix)?),
+        E::Unary { op, operand } => format!(
+            "({}{})",
+            js_unop(op, &operand.ty),
+            tir_js_expr(operand, funcs, file_prefix)?
+        ),
         E::Clone(inner) | E::MaterializeView(inner) | E::DistinctRaw(inner) => tir_js_expr(inner, funcs, file_prefix)?,
         E::Borrow { place, .. } => tir_js_expr(place, funcs, file_prefix)?,
         E::DistinctCtor { arg, .. } => tir_js_expr(arg, funcs, file_prefix)?,
@@ -4948,11 +4952,26 @@ fn binop(op: &crate::AST::BinOp) -> &'static str {
         Or => "||",
     }
 }
+/// The Rust spelling. Rust's `!` is already the bitwise complement on whole
+/// numbers and the logical one on `Bool` (D-BITNOT1=A), so one symbol covers
+/// both there.
 fn unop(op: &crate::AST::UnOp) -> &'static str {
     use crate::AST::UnOp::*;
     match op {
         Neg => "-",
         Not => "!",
+    }
+}
+
+/// D-BITNOT1=A: JavaScript splits what Rust joins. `!` there is the logical
+/// negation only — on a number it asks "is this zero", which is not what `!`
+/// means in Jet. The bitwise complement is `~`.
+fn js_unop(op: &crate::AST::UnOp, ty: &Type) -> &'static str {
+    use crate::AST::UnOp::*;
+    match op {
+        Neg => "-",
+        Not if matches!(ty, Type::Bool) => "!",
+        Not => "~",
     }
 }
 

@@ -1,0 +1,28 @@
+// Bitwise NOT (D-BITNOT1=A): prefix `!` turns over every bit it is given.
+//
+// On a `Bool` there is one bit, so a yes becomes a no — the `!` everyone
+// already knows. On a whole number it turns over every bit, which is the
+// missing partner of `&`, `|`, and `~|`.
+//
+// On the default `Int`, which carries no fixed width, turning over every bit
+// is the same as `-x - 1`. On a sized type the exact bits of that width flip,
+// so `!U8.{5}` is 250.
+//
+// Clearing bits is the everyday use: `flags & !mask` keeps everything except
+// the bits the mask names.
+fn bits(n: Int) => Int { return n }
+
+fn run() {
+    // Every bit of zero turned over is every bit set, which reads as -1.
+    print(!bits(0))
+    print(!bits(5))
+    // Bit-clear: keep every flag except the ones the mask names.
+    flags :: bits(15)
+    mask :: bits(4)
+    print(flags & !mask)
+    // The Bool meaning is unchanged.
+    print(!true)
+    // A sized type flips exactly its own width.
+    small :: U8.{5}
+    print(!small)
+}

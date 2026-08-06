@@ -1232,18 +1232,24 @@ impl<'a> Checker<'a> {
                             None
                         }
                     }
+                    // D-BITNOT1=A: `!` flips every bit it is given. On a Bool
+                    // that is the one bit, so a yes becomes a no. On a whole
+                    // number it is the bitwise complement, and the width comes
+                    // back unchanged.
                     UnOp::Not => {
-                        if t == Type::Bool {
-                            Some(Type::Bool)
+                        if t == Type::Bool || t.is_integer() {
+                            Some(t)
                         } else {
                             self.diags.push(Diagnostic::error(
                                 "E0109",
                                 format!(
-                                    "`!` needs {}, but this is {}",
+                                    "`!` needs {} or a whole number, but this is {}",
                                     Type::Bool.show(),
                                     t.show()
                                 ),
-                                "`!` flips a yes to a no and back".to_string(),
+                                "`!` flips bits: a yes becomes a no, and a whole number \
+                                 gets every bit turned over"
+                                    .to_string(),
                                 "compare the value to something first, e.g. `!(x > 0)`".to_string(),
                                 Some(*span),
                             ));

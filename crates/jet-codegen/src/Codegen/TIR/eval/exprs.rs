@@ -2003,6 +2003,9 @@ impl<'a> EvalCtx<'a> {
                     (UnOp::Neg, CtValue::Float(n)) => Ok(CtValue::Float(n.neg())),
                     (UnOp::Neg, CtValue::BigInt(n)) => Ok(CtValue::BigInt(n.neg())),
                     (UnOp::Not, CtValue::Bool(b)) => Ok(CtValue::Bool(!b)),
+                    // D-BITNOT1=A: on a whole number `!` turns over every bit,
+                    // which on the width-free default `Int` is `-x - 1`.
+                    (UnOp::Not, CtValue::Int(n)) => Ok(CtValue::Int(!n)),
                     _ => Err(unsupported("unary form", self.span())),
                 }
             }
