@@ -693,6 +693,14 @@ pub fn core_fixed_sig(
             vec![(read, Type::Int)],
             Some(result_ty(Type::Named("Duration".to_string()), Type::Named("RangeError".to_string()))),
         )),
+        ("core.time", "nanoseconds") => Some((
+            vec![(read, Type::Int)],
+            Some(result_ty(Type::Named("Duration".to_string()), Type::Named("RangeError".to_string()))),
+        )),
+        ("core.time", "microseconds") => Some((
+            vec![(read, Type::Int)],
+            Some(result_ty(Type::Named("Duration".to_string()), Type::Named("RangeError".to_string()))),
+        )),
         ("core.time", "seconds") => Some((
             vec![(read, Type::Int)],
             Some(result_ty(Type::Named("Duration".to_string()), Type::Named("RangeError".to_string()))),
@@ -724,9 +732,28 @@ pub fn core_fixed_sig(
             vec![(read, Type::String)],
             Some(result_ty(Type::Named("DateTime".to_string()), Type::String)),
         )),
-        ("core.time", "local_time") => Some((
+        ("core.time", "datetime") => Some((
+            vec![
+                (read, Type::Int),
+                (read, Type::Int),
+                (read, Type::Int),
+                (read, Type::Int),
+                (read, Type::Int),
+                (read, Type::Int),
+            ],
+            Some(Type::Named("DateTime".to_string())),
+        )),
+        ("core.time", "time") | ("core.time", "local_time") => Some((
             vec![(read, Type::Int), (read, Type::Int), (read, Type::Int)],
             Some(Type::Named("LocalTime".to_string())),
+        )),
+        ("core.time", "days_in_month") => Some((
+            vec![(read, Type::Int), (read, Type::Int)],
+            Some(Type::Int),
+        )),
+        ("core.time", "is_leap_year") => Some((
+            vec![(read, Type::Int)],
+            Some(Type::Bool),
         )),
         ("core.time", "parse_time") => Some((
             vec![(read, Type::String)],

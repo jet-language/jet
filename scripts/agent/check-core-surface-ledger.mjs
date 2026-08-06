@@ -43,6 +43,7 @@ const MODULE_ITEMS_PATH = "crates/jet-sema/src/Sema/CheckerCoreLib/module_items.
 const FIXED_SIGS_PATH = "crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs";
 const COLLECTIONS_PATH = "crates/jet-foundation/src/Collections.rs";
 const NUMERIC_PATH = "crates/jet-foundation/src/Numeric.rs";
+const NET_TEXT_TIME_PATH = "crates/jet-sema/src/Sema/CheckerCoreLib/net_text_time.rs";
 const PREDICATES_PATH = "crates/jet-foundation/src/Syntax/predicates.rs";
 const POLICY_PATH = "crates/jet-foundation/src/Policy.rs";
 const SYNTAX_PATH = "crates/jet-foundation/src/Syntax/core_surface.rs";
@@ -173,6 +174,15 @@ const CONTAINER_ALIASES = {
   Task: "core.tasks",
   TaskList: "core.tasks",
   Duration: "core.time",
+  // Civil-time types live in net_text_time.rs; their workflows are core.time.
+  Date: "core.time",
+  LocalDate: "core.time",
+  LocalTime: "core.time",
+  DateTime: "core.time",
+  Instant: "core.time",
+  Period: "core.time",
+  Zone: "core.time",
+  ZonedDateTime: "core.time",
 };
 
 // Interchangeable spellings of one operation. This was keyed by an idealised
@@ -463,6 +473,14 @@ const TYPE_CONTAINER = {
   Digest512: "core.crypto",
   Clock: "core.time",
   Duration: "core.time",
+  Date: "core.time",
+  LocalDate: "core.time",
+  LocalTime: "core.time",
+  DateTime: "core.time",
+  Instant: "core.time",
+  Period: "core.time",
+  Zone: "core.time",
+  ZonedDateTime: "core.time",
   ExpiringValue: "core.time.expiring",
   Condition: "core.sync",
   Secret: "core.vault",
@@ -1138,6 +1156,40 @@ function collectionInventory() {
     }
   }
   for (const table of inlineTables(dispatch.inlineArms, source, constants)) tables.push(table);
+
+  // D-TIMEDEPTH1: civil-time methods are typed in net_text_time.rs, not Collections.
+  {
+    const civilText = read(NET_TEXT_TIME_PATH);
+    const civilSources = [{ path: NET_TEXT_TIME_PATH, text: civilText }];
+    const civilBody = tableBody("civil_time_method_return", civilSources);
+    if (!civilBody) {
+      throw new Error("civil_time_method_return missing from net_text_time.rs");
+    }
+    const civilLine = lineAt(civilText, civilText.indexOf("fn civil_time_method_return("));
+    for (const arm of matchArms(civilBody, "match ty")) {
+      const types = new Set();
+      for (const hit of arm.lhs.matchAll(/n\s*==\s*"([A-Za-z][A-Za-z0-9_]*)"/g)) {
+        types.add(hit[1]);
+      }
+      if (types.size === 0) continue;
+      // Nested `match method { "year" | "month" ... }` — quoted strings are
+      // the method names (methodNames looks for Collections-shaped tables).
+      const methods = new Set(
+        quoted(arm.rhs).filter(function (name) {
+          return /^[a-z][a-z0-9_]*$/.test(name);
+        })
+      );
+      for (const typeName of types) {
+        if (!TYPE_CONTAINER[typeName] && !CONTAINER_ALIASES[typeName]) continue;
+        tables.push({
+          function: "civil_time_method_return:" + typeName,
+          type: typeName,
+          methods: Array.from(methods).sort(),
+          sourceLine: civilLine,
+        });
+      }
+    }
+  }
 
   // Several tables can own one container: core.compiler is spread across
   // CompilerLexed, CompilerChecked, CompilerSyntaxTree and CompilerSourceMap,

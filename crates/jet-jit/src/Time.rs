@@ -127,7 +127,16 @@ extern "C" fn jet_jit_time_zoned(dt: i64, zone: i64) -> i64 {
 
 /// Civil-time method dispatch. `kind`: 0=Date, 1=DateTime, 2=Period, 3=Instant, 4=Zone, 5=Zoned.
 /// `method` is a string handle; args packed as i64 list handle (or 0).
-extern "C" fn jet_jit_civil_time_method(recv: i64, method: i64, arg0: i64, arg1: i64) -> i64 {
+extern "C" fn jet_jit_civil_time_method(
+    recv: i64,
+    method: i64,
+    arg0: i64,
+    arg1: i64,
+    arg2: i64,
+    arg3: i64,
+    arg4: i64,
+    arg5: i64,
+) -> i64 {
     let method = clone_str(method);
     with_time(recv, |v| match (v, method.as_str()) {
         (TimeValue::Date(d), "year") => d.year(),
@@ -147,6 +156,18 @@ extern "C" fn jet_jit_civil_time_method(recv: i64, method: i64, arg0: i64, arg1:
         (TimeValue::Date(d), "day_of_year") => d.day_of_year(),
         (TimeValue::Date(d), "iso_weekday") => d.iso_weekday(),
         (TimeValue::Date(d), "iso_week") => d.iso_week(),
+        (TimeValue::Date(d), "quarter_of_year") => d.quarter_of_year(),
+        (TimeValue::Date(d), "days_in_month") => d.days_in_month(),
+        (TimeValue::Date(d), "is_leap_year") => {
+            if d.is_leap_year() {
+                1
+            } else {
+                0
+            }
+        }
+        (TimeValue::Date(d), "replace") => {
+            push(TimeValue::Date(d.replace(arg0, arg1, arg2)))
+        }
         (TimeValue::Date(d), "add_period") => {
             let period = with_time(arg0, |o| match o {
                 TimeValue::Period(p) => Some(p.clone()),
@@ -161,20 +182,50 @@ extern "C" fn jet_jit_civil_time_method(recv: i64, method: i64, arg0: i64, arg1:
         }
         (TimeValue::DateTime(dt), "to_timestamp") => dt.to_timestamp(),
         (TimeValue::DateTime(dt), "date") => push(TimeValue::Date(dt.date())),
+        (TimeValue::DateTime(dt), "time") => push(TimeValue::LocalTime(dt.time())),
         (TimeValue::DateTime(dt), "hour") => dt.hour(),
         (TimeValue::DateTime(dt), "minute") => dt.minute(),
         (TimeValue::DateTime(dt), "second") => dt.second(),
+        (TimeValue::DateTime(dt), "millisecond") => dt.millisecond(),
+        (TimeValue::DateTime(dt), "microsecond") => dt.microsecond(),
+        (TimeValue::DateTime(dt), "nanosecond") => dt.nanosecond(),
         (TimeValue::DateTime(dt), "to_string") => alloc_str(dt.to_string_fmt()),
         (TimeValue::DateTime(dt), "format_rfc3339") => alloc_str(dt.format_rfc3339()),
         (TimeValue::DateTime(dt), "to_unix_ms") => dt.to_unix_ms(),
         (TimeValue::DateTime(dt), "format") => {
             alloc_str(dt.format_pattern(&clone_str(arg0)))
         }
+        (TimeValue::DateTime(dt), "truncate" | "floor") => {
+            push(TimeValue::DateTime(dt.floor(&clone_str(arg0))))
+        }
+        (TimeValue::DateTime(dt), "ceil") => {
+            push(TimeValue::DateTime(dt.ceil(&clone_str(arg0))))
+        }
+        (TimeValue::DateTime(dt), "round") => {
+            push(TimeValue::DateTime(dt.round(&clone_str(arg0))))
+        }
+        (TimeValue::DateTime(dt), "replace") => push(TimeValue::DateTime(dt.replace(
+            arg0, arg1, arg2, arg3, arg4, arg5,
+        ))),
+        (TimeValue::DateTime(dt), "in_zone") => {
+            let zone = with_time(arg0, |o| match o {
+                TimeValue::Zone(z) => Some(z.clone()),
+                _ => None,
+            });
+            zone.map(|z| push(TimeValue::Zoned(dt.in_zone(&z)))).unwrap_or(0)
+        }
         (TimeValue::Instant(i), "elapsed_millis") => i.elapsed_millis(),
         (TimeValue::Zoned(z), "format") => {
             alloc_str(z.format_pattern(&clone_str(arg0)))
         }
         (TimeValue::Zoned(z), "offset_seconds") => z.offset_seconds(),
+        (TimeValue::Zoned(z), "is_dst") => {
+            if z.is_dst() {
+                1
+            } else {
+                0
+            }
+        }
         _ => 0,
     })
 }
@@ -245,6 +296,11 @@ pub(crate) fn declare_time_host_fns(module: &mut JITModule) -> Result<TimeHostFn
         quaternary.params.push(AbiParam::new(types::I64));
     }
     quaternary.returns.push(AbiParam::new(types::I64));
+    let mut octonary = Signature::new(cc);
+    for _ in 0..8 {
+        octonary.params.push(AbiParam::new(types::I64));
+    }
+    octonary.returns.push(AbiParam::new(types::I64));
     let mut import = |name: &str, sig: &Signature| {
         module
             .declare_function(name, Linkage::Import, sig)
@@ -262,6 +318,6 @@ pub(crate) fn declare_time_host_fns(module: &mut JITModule) -> Result<TimeHostFn
         period_months: import("jet_jit_time_period_months", &unary)?,
         instant: import("jet_jit_time_instant", &nullary)?,
         zoned: import("jet_jit_time_zoned", &binary)?,
-        civil_method: import("jet_jit_civil_time_method", &quaternary)?,
+        civil_method: import("jet_jit_civil_time_method", &octonary)?,
     })
 }

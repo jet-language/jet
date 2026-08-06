@@ -4238,6 +4238,10 @@ pub enum THandleOp {
     DurationIn {
         unit: Option<&'static str>,
     },
+    /// D-TIMERES1=A: duration facts.
+    DurationIsZero,
+    DurationTotalSeconds,
+    DurationDifference,
     /// D-BIGINT1 / D-DECIMAL1: instance methods on precise numeric types.
     PreciseMethod {
         type_name: String,

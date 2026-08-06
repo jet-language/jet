@@ -2,7 +2,7 @@ fn jet_process_spec_timeout(
     mut spec: jet_std::ProcessSpec,
     timeout: &jet_std::Duration,
 ) -> jet_std::ProcessSpec {
-    spec.timeout_ms = Some(timeout.ms.max(0));
+    spec.timeout_ms = Some(timeout.as_millis().max(0));
     spec
 }
 fn jet_process_spec_output_limit(

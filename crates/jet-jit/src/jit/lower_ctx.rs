@@ -17606,10 +17606,12 @@ impl LowerCtx<'_, '_> {
             }
             THandleOp::DurationNew { unit, float } => {
                 let scale = match *unit {
-                    "Milliseconds" => 1,
-                    "Seconds" => 1_000,
-                    "Minutes" => 60_000,
-                    "Hours" => 3_600_000,
+                    "Nanoseconds" => 1,
+                    "Microseconds" => 1_000,
+                    "Milliseconds" => 1_000_000,
+                    "Seconds" => 1_000_000_000,
+                    "Minutes" => 60_000_000_000,
+                    "Hours" => 3_600_000_000_000,
                     _ => return Err("jit duration unit unsupported".to_string()),
                 };
                 let scale = self.b.ins().iconst(types::I64, scale);
@@ -17624,10 +17626,12 @@ impl LowerCtx<'_, '_> {
             }
             THandleOp::DurationIn { unit: Some(unit) } => {
                 let scale = match *unit {
-                    "Milliseconds" => 1,
-                    "Seconds" => 1_000,
-                    "Minutes" => 60_000,
-                    "Hours" => 3_600_000,
+                    "Nanoseconds" => 1,
+                    "Microseconds" => 1_000,
+                    "Milliseconds" => 1_000_000,
+                    "Seconds" => 1_000_000_000,
+                    "Minutes" => 60_000_000_000,
+                    "Hours" => 3_600_000_000_000,
                     _ => return Err("jit duration unit unsupported".to_string()),
                 };
                 let scale = self.b.ins().iconst(types::I64, scale);
@@ -17637,6 +17641,9 @@ impl LowerCtx<'_, '_> {
             }
             THandleOp::DurationIn { unit: None } => {
                 Err("jit dynamic DurationUnit falls back to AOT".to_string())
+            }
+            THandleOp::DurationIsZero | THandleOp::DurationTotalSeconds | THandleOp::DurationDifference => {
+                Err("jit Duration fact methods fall back to AOT".to_string())
             }
             // D-BIGINT1 / D-DECIMAL1: instance methods on precise numerics.
             THandleOp::PreciseMethod { type_name, method }
@@ -18447,20 +18454,31 @@ impl LowerCtx<'_, '_> {
                 let recv_v = self.lower_expr(recv)?;
                 let method_id = self.runtime.heap.alloc_string(method.clone());
                 let method_val = self.b.ins().iconst(types::I64, method_id);
-                let a0 = if let Some(a) = args.first() {
-                    self.lower_expr(a)?
-                } else {
-                    self.b.ins().iconst(types::I64, 0)
-                };
-                let a1 = if let Some(a) = args.get(1) {
-                    self.lower_expr(a)?
-                } else {
-                    self.b.ins().iconst(types::I64, 0)
-                };
+                let mut arg_vals = Vec::with_capacity(6);
+                for i in 0..6 {
+                    let v = if let Some(a) = args.get(i) {
+                        self.lower_expr(a)?
+                    } else {
+                        self.b.ins().iconst(types::I64, 0)
+                    };
+                    arg_vals.push(v);
+                }
                 let host = self
                     .module
                     .declare_func_in_func(self.host.time.civil_method, self.b.func);
-                let call = self.b.ins().call(host, &[recv_v, method_val, a0, a1]);
+                let call = self.b.ins().call(
+                    host,
+                    &[
+                        recv_v,
+                        method_val,
+                        arg_vals[0],
+                        arg_vals[1],
+                        arg_vals[2],
+                        arg_vals[3],
+                        arg_vals[4],
+                        arg_vals[5],
+                    ],
+                );
                 Ok(self.b.inst_results(call)[0])
             }
             THandleOp::UrlMimeMethod { method, .. } => {

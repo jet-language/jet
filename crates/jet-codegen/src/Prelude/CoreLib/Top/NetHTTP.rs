@@ -706,10 +706,10 @@ fn jet_net_operation_deadline(timeout_ms: Option<i64>) -> Option<JetDeadlineGuar
 }
 
 fn jet_net_explicit_deadline(deadline: &jet_std::Duration, operation: &str) -> Result<Option<JetDeadlineGuard>, JetNetError> {
-    jet_net_timeout(deadline.ms).map_err(|message| {
+    jet_net_timeout(deadline.as_millis()).map_err(|message| {
         JetNetError::InvalidInput(jet_net_detail(operation, None, None, message, None))
     })?;
-    Ok(jet_net_operation_deadline(Some(deadline.ms)))
+    Ok(jet_net_operation_deadline(Some(deadline.as_millis())))
 }
 
 fn jet_net_deadline_timeout(operation: &str) -> JetNetError {
@@ -1506,7 +1506,7 @@ fn jet_net_tcp_accept(listener: &JetTCPListener) -> Result<JetTCPStream, JetNetE
 }
 
 fn jet_net_tcp_accept_deadline(listener: &JetTCPListener, deadline: &jet_std::Duration) -> Result<JetTCPStream, JetNetError> {
-    let deadline_ms = deadline.ms;
+    let deadline_ms = deadline.as_millis();
     jet_net_timeout(deadline_ms).map_err(|message| {
         JetNetError::InvalidInput(jet_net_detail("tcp accept", None, None, message, None))
     })?;
@@ -1564,7 +1564,7 @@ fn jet_net_tcp_read_bytes(stream: &mut JetTCPStream, limit: i64) -> Result<Vec<u
 }
 
 fn jet_net_tcp_read_bytes_deadline(stream: &mut JetTCPStream, limit: i64, deadline: &jet_std::Duration) -> Result<Vec<u8>, JetNetError> {
-    let deadline_ms = deadline.ms;
+    let deadline_ms = deadline.as_millis();
     jet_net_timeout(deadline_ms).map_err(|message| {
         JetNetError::InvalidInput(jet_net_detail("tcp read", None, None, message, None))
     })?;
@@ -1618,7 +1618,7 @@ fn jet_net_tcp_write_bytes(stream: &mut JetTCPStream, data: &Vec<u8>) -> Result<
 }
 
 fn jet_net_tcp_write_bytes_deadline(stream: &mut JetTCPStream, data: &Vec<u8>, deadline: &jet_std::Duration) -> Result<i64, JetNetError> {
-    let deadline_ms = deadline.ms;
+    let deadline_ms = deadline.as_millis();
     jet_net_timeout(deadline_ms).map_err(|message| {
         JetNetError::InvalidInput(jet_net_detail("tcp write", None, None, message, None))
     })?;
@@ -1646,7 +1646,7 @@ fn jet_net_tcp_write_all_bytes(stream: &mut JetTCPStream, data: &Vec<u8>) -> Res
 }
 
 fn jet_net_tcp_write_all_bytes_deadline(stream: &mut JetTCPStream, data: &Vec<u8>, deadline: &jet_std::Duration) -> Result<(), JetNetError> {
-    let deadline_ms = deadline.ms;
+    let deadline_ms = deadline.as_millis();
     jet_net_timeout(deadline_ms).map_err(|message| {
         JetNetError::InvalidInput(jet_net_detail("tcp write all", None, None, message, None))
     })?;
@@ -1722,7 +1722,7 @@ fn jet_net_tcp_ready_deadline(
     interest: JetNetReadyInterest,
     deadline: &jet_std::Duration,
 ) -> Result<JetNetReady, JetNetError> {
-    jet_net_tcp_ready(stream, interest, deadline.ms)
+    jet_net_tcp_ready(stream, interest, deadline.as_millis())
 }
 
 fn jet_net_ready_readable(ready: &JetNetReady) -> bool {
@@ -1940,10 +1940,10 @@ fn jet_net_udp_ready(
     deadline: &jet_std::Duration,
 ) -> Result<JetNetReady, JetNetError> {
     jet_net_udp_open(socket, "udp ready")?;
-    jet_net_timeout(deadline.ms).map_err(|message| {
+    jet_net_timeout(deadline.as_millis()).map_err(|message| {
         JetNetError::InvalidInput(jet_net_detail("udp ready", None, None, message, None))
     })?;
-    let _deadline = jet_net_operation_deadline(Some(deadline.ms));
+    let _deadline = jet_net_operation_deadline(Some(deadline.as_millis()));
     if matches!(jet_deadline_remaining_ms(), Some(ms) if ms <= 0) {
         return Err(jet_net_deadline_timeout("udp ready"));
     }
@@ -2248,11 +2248,11 @@ fn jet_net_unix_close(_stream: &mut JetUnixStream) -> Result<(), JetNetError> {
 
 #[cfg(unix)]
 fn jet_net_unix_set_timeout(stream: &mut JetUnixStream, timeout: &jet_std::Duration) -> Result<(), JetNetError> {
-    jet_net_timeout(timeout.ms).map_err(|message| JetNetError::InvalidInput(jet_net_detail(
+    jet_net_timeout(timeout.as_millis()).map_err(|message| JetNetError::InvalidInput(jet_net_detail(
         "set unix timeout", None, None, message, None,
     )))?;
-    stream.read_timeout_ms = Some(timeout.ms);
-    stream.write_timeout_ms = Some(timeout.ms);
+    stream.read_timeout_ms = Some(timeout.as_millis());
+    stream.write_timeout_ms = Some(timeout.as_millis());
     Ok(())
 }
 

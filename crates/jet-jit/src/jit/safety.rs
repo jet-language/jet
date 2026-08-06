@@ -3513,7 +3513,7 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         }
         THandleOp::CivilTimeMethod { method, .. } => {
             // Civil date/time/zoned methods are host-backed; arity is checked in lower.
-            matches!(args.len(), 0 | 1 | 2)
+            matches!(args.len(), 0..=6)
                 && matches!(
                     method.as_str(),
                     "year"
@@ -3522,9 +3522,15 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
                         | "hour"
                         | "minute"
                         | "second"
+                        | "millisecond"
+                        | "microsecond"
+                        | "nanosecond"
                         | "to_string"
                         | "weekday"
                         | "day_of_year"
+                        | "quarter_of_year"
+                        | "days_in_month"
+                        | "is_leap_year"
                         | "timestamp"
                         | "to_timestamp"
                         | "to_unix_ms"
@@ -3535,12 +3541,25 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
                         | "iso_weekday"
                         | "iso_week"
                         | "offset_seconds"
+                        | "is_dst"
                         | "elapsed_millis"
+                        | "elapsed"
                         | "add_days"
                         | "add_months"
                         | "add_years"
                         | "add_period"
+                        | "add_duration"
                         | "diff_days"
+                        | "difference"
+                        | "plus_duration"
+                        | "truncate"
+                        | "round"
+                        | "floor"
+                        | "ceil"
+                        | "replace"
+                        | "in_zone"
+                        | "to_datetime"
+                        | "zone"
                         | "with_time"
                 )
         }
@@ -3601,6 +3620,8 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         }
         THandleOp::DurationNew { .. } => args.is_empty(),
         THandleOp::DurationIn { .. } => args.len() <= 1,
+        THandleOp::DurationIsZero | THandleOp::DurationTotalSeconds => args.is_empty(),
+        THandleOp::DurationDifference => args.len() == 1,
         THandleOp::AllocAlloc => args.len() == 1,
         THandleOp::AllocReset | THandleOp::ClockNow | THandleOp::RngBool => args.is_empty(),
         THandleOp::RngInt => args.len() == 2,

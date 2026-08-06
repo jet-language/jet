@@ -870,7 +870,7 @@ fn core_boundary(module: &str, method: &str) -> Option<&'static str> {
     {
         return Some("named I/O handle boundary");
     }
-    if module == "core.time" && matches!(method, "now" | "now_utc" | "today" | "local_time" | "instant" | "sleep" | "start") {
+    if module == "core.time" && matches!(method, "now" | "now_utc" | "today" | "time" | "instant" | "sleep" | "start") {
         return Some("named clock boundary");
     }
     if module == "core.auth" && matches!(method, "verify_jwt" | "verify_paseto") {

@@ -1,0 +1,16 @@
+use core.time as time
+
+fn run() {
+    exact :: Duration.seconds(2) ?? panic("duration")
+    fine :: Duration.microseconds(400) ?? panic("duration")
+    nano :: Duration.nanoseconds(250) ?? panic("duration")
+    print(exact.in(.Milliseconds) ?? panic("duration read"))
+    print(fine.in(.Nanoseconds) ?? panic("duration read"))
+    print(nano.in(.Nanoseconds) ?? panic("duration read"))
+    print(exact.total_seconds())
+    print(exact.is_zero())
+    print((Duration.milliseconds(0) ?? panic("zero")).is_zero())
+    via_mod :: time.nanoseconds(1_000_000) ?? panic("mod duration")
+    print(via_mod.in(.Milliseconds) ?? panic("duration read"))
+    if Duration.hours(9223372036854775807) == .Err(_) { print("range") }
+}

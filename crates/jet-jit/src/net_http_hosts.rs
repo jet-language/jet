@@ -873,7 +873,9 @@ extern "C" fn jet_jit_http_server_serve(server: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_http_server_shutdown(server: i64, grace_ms: i64) -> i64 {
-    let grace = jet_std::Duration { ms: grace_ms };
+    let grace = jet_std::Duration {
+        ns: grace_ms.saturating_mul(1_000_000),
+    };
     let Some(server) = http_server(server) else {
         return result_err("invalid HTTPServer".into());
     };

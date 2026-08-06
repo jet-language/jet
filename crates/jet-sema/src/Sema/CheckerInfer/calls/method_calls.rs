@@ -2893,6 +2893,11 @@ impl<'a> Checker<'a> {
                     ("Date" | "LocalDate", "truncate" | "format", 1) => {
                         self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
                     }
+                    ("Date" | "LocalDate", "replace", 3) => {
+                        for i in 0..3 {
+                            self.expect_core_arg(method, i, &Type::Int, &mut args[i]);
+                        }
+                    }
                     ("DateTime", "plus_duration", 1) => {
                         self.expect_core_arg(
                             method,
@@ -2901,11 +2906,24 @@ impl<'a> Checker<'a> {
                             &mut args[0],
                         );
                     }
+                    ("DateTime", "difference", 1) => {
+                        self.expect_core_arg(
+                            method,
+                            0,
+                            &Type::Named("DateTime".to_string()),
+                            &mut args[0],
+                        );
+                    }
                     ("DateTime", "in_zone", 1) => {
                         self.expect_core_arg(method, 0, &Type::Named("Zone".to_string()), &mut args[0]);
                     }
-                    ("DateTime", "truncate" | "round" | "format", 1) => {
+                    ("DateTime", "truncate" | "round" | "floor" | "ceil" | "format", 1) => {
                         self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
+                    }
+                    ("DateTime", "replace", 6) => {
+                        for i in 0..6 {
+                            self.expect_core_arg(method, i, &Type::Int, &mut args[i]);
+                        }
                     }
                     ("ZonedDateTime", "add_duration", 1) => {
                         self.expect_core_arg(

@@ -150,7 +150,14 @@ pub mod jet_std {
 
     #[derive(Clone, Copy, Debug, PartialEq)]
     pub struct Duration {
-        pub ms: i64,
+        pub ns: i64,
+    }
+
+    impl Duration {
+        #[inline]
+        pub fn as_millis(self) -> i64 {
+            self.ns / 1_000_000
+        }
     }
 
     #[derive(Clone, Debug, PartialEq)]

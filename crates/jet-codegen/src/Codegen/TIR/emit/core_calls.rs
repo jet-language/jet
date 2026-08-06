@@ -918,6 +918,16 @@ pub(crate) fn emit_tir_core_call(
             helper("jet_duration_from_int"),
             arg(0)
         ),
+        ("core.time", "nanoseconds") => format!(
+            "{}({}, jet_std::DurationUnit::Nanoseconds)",
+            helper("jet_duration_from_int"),
+            arg(0)
+        ),
+        ("core.time", "microseconds") => format!(
+            "{}({}, jet_std::DurationUnit::Microseconds)",
+            helper("jet_duration_from_int"),
+            arg(0)
+        ),
         ("core.time", "seconds") => format!(
             "{}({}, jet_std::DurationUnit::Seconds)",
             helper("jet_duration_from_int"),
@@ -940,8 +950,24 @@ pub(crate) fn emit_tir_core_call(
         ("core.time", "parse_rfc3339") => {
             format!("{}(&({}))", helper("jet_time_parse_rfc3339"), arg(0))
         }
-        ("core.time", "local_time") => {
+        ("core.time", "datetime") => format!(
+            "{}({}, {}, {}, {}, {}, {})",
+            helper("jet_time_datetime"),
+            arg(0),
+            arg(1),
+            arg(2),
+            arg(3),
+            arg(4),
+            arg(5)
+        ),
+        ("core.time", "time") | ("core.time", "local_time") => {
             format!("JetLocalTime::new({}, {}, {})", arg(0), arg(1), arg(2))
+        }
+        ("core.time", "days_in_month") => {
+            format!("{}({}, {})", helper("jet_time_days_in_month"), arg(0), arg(1))
+        }
+        ("core.time", "is_leap_year") => {
+            format!("{}({})", helper("jet_time_is_leap_year"), arg(0))
         }
         ("core.time", "parse_time") => {
             format!("JetLocalTime::parse(&({})).map_err(|e| e)", arg(0))
@@ -1325,7 +1351,7 @@ pub(crate) fn emit_tir_core_call(
         }
         ("core.compute", "profile_show") => format!("{}()", helper("jet_compute_profile_show")),
         ("core.services", "runtime") => format!(
-            "{}(({}).clone(), ({}).ms)",
+            "{}(({}).clone(), ({}).as_millis())",
             helper("jet_services_runtime"),
             arg(0),
             arg(1)

@@ -863,7 +863,7 @@ fn jet_http_server_shutdown(server: &JetHTTPServer, grace: &jet_std::Duration) -
     use std::sync::atomic::Ordering;
     if server.inner.shutdown_called.swap(true, Ordering::AcqRel) { return Err("HTTP server shutdown was already requested".to_string()); }
     if server.inner.lifecycle.load(Ordering::Acquire) != 1 { return Err("HTTP server is not serving".to_string()); }
-    let grace_ms = grace.ms.max(0) as u64;
+    let grace_ms = grace.as_millis().max(0) as u64;
     // Publish the absolute drain deadline before the shutdown flag so H2 and the
     // accept loop share one clock instead of each computing now+grace.
     let deadline_ms = jet_http_unix_now_ms().saturating_add(grace_ms);
@@ -4555,7 +4555,7 @@ fn jet_http_cors_allow_origin(policy: &JetHTTPCorsPolicy, origin: &str) -> Optio
 }
 
 fn jet_http_mw_timeout(duration: &jet_std::Duration, next: JetHTTPHandler) -> JetHTTPHandler {
-    let budget = std::time::Duration::from_millis(duration.ms.max(0) as u64);
+    let budget = std::time::Duration::from_millis(duration.as_millis().max(0) as u64);
     std::sync::Arc::new(move |req| {
         let control = JetTaskControl::new();
         let cancel = control.clone();

@@ -3027,8 +3027,11 @@ pub(crate) fn lower_method_call(
             | ("Date" | "LocalDate", "weekday")
             | ("Date" | "LocalDate", "iso_weekday")
             | ("Date" | "LocalDate", "day_of_year")
-            | ("Date" | "LocalDate", "iso_week") => Type::Int,
-            ("Date" | "LocalDate", "add_days" | "add_months" | "add_period" | "truncate") => {
+            | ("Date" | "LocalDate", "iso_week")
+            | ("Date" | "LocalDate", "quarter_of_year")
+            | ("Date" | "LocalDate", "days_in_month") => Type::Int,
+            ("Date" | "LocalDate", "is_leap_year") => Type::Bool,
+            ("Date" | "LocalDate", "add_days" | "add_months" | "add_period" | "truncate" | "replace") => {
                 Type::Named("LocalDate".to_string())
             }
             ("Date" | "LocalDate", "to_string" | "format") => Type::String,
@@ -3037,21 +3040,27 @@ pub(crate) fn lower_method_call(
             ("DateTime", "hour")
             | ("DateTime", "minute")
             | ("DateTime", "second")
+            | ("DateTime", "millisecond")
+            | ("DateTime", "microsecond")
+            | ("DateTime", "nanosecond")
             | ("DateTime", "to_timestamp")
             | ("DateTime", "to_unix_ms") => Type::Int,
             ("DateTime", "date") => Type::Named("LocalDate".to_string()),
             ("DateTime", "time") => Type::Named("LocalTime".to_string()),
-            ("DateTime", "plus_duration" | "truncate" | "round") => {
+            ("DateTime", "plus_duration" | "truncate" | "round" | "floor" | "ceil" | "replace") => {
                 Type::Named("DateTime".to_string())
             }
+            ("DateTime", "difference") => Type::Named("Duration".to_string()),
             ("DateTime", "in_zone") => Type::Named("ZonedDateTime".to_string()),
             ("DateTime", "to_string" | "format_rfc3339" | "format") => Type::String,
             ("Instant", "elapsed_millis") => Type::Int,
+            ("Instant", "elapsed") => Type::Named("Duration".to_string()),
             ("Period", "to_string") => Type::String,
             ("Zone", "name") => Type::String,
             ("ZonedDateTime", "date") => Type::Named("LocalDate".to_string()),
             ("ZonedDateTime", "time") => Type::Named("LocalTime".to_string()),
             ("ZonedDateTime", "offset_seconds") => Type::Int,
+            ("ZonedDateTime", "is_dst") => Type::Bool,
             ("ZonedDateTime", "to_datetime") => Type::Named("DateTime".to_string()),
             ("ZonedDateTime", "zone") => Type::Named("Zone".to_string()),
             ("ZonedDateTime", "add_duration" | "add_period") => {

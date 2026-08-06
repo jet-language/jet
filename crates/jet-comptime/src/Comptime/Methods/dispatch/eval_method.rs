@@ -277,15 +277,18 @@ impl<'a> Interp<'a> {
                         span,
                     ));
                 };
+                // D-TIMERES1=A: constructors produce an i64 nanosecond count.
                 let scale = match unit {
-                    "Milliseconds" => 1,
-                    "Seconds" => 1_000,
-                    "Minutes" => 60_000,
-                    "Hours" => 3_600_000,
+                    "Nanoseconds" => 1_i64,
+                    "Microseconds" => 1_000,
+                    "Milliseconds" => 1_000_000,
+                    "Seconds" => 1_000_000_000,
+                    "Minutes" => 60_000_000_000,
+                    "Hours" => 3_600_000_000_000,
                     _ => unreachable!("Syntax returned a closed duration unit"),
                 };
                 let value = self.eval(&args[0].expr, scope)?;
-                let ms = match value {
+                let ns = match value {
                     CtValue::Int(n) => n.checked_mul(scale),
                     CtValue::Float(n) => {
                         let scaled = n.as_f64() * scale as f64;
@@ -296,10 +299,10 @@ impl<'a> Interp<'a> {
                     }
                     _ => None,
                 };
-                return Ok(match ms {
-                    Some(ms) => CtValue::ResOk(Box::new(CtValue::Struct {
+                return Ok(match ns {
+                    Some(ns) => CtValue::ResOk(Box::new(CtValue::Struct {
                         type_name: crate::Syntax::DURATION_TYPE.to_string(),
-                        fields: vec![("ms".to_string(), CtValue::Int(ms))],
+                        fields: vec![("ns".to_string(), CtValue::Int(ns))],
                     })),
                     None => CtValue::ResErr(Box::new(CtValue::Struct {
                         type_name: crate::Syntax::DURATION_RANGE_ERROR_TYPE.to_string(),
@@ -1861,6 +1864,7 @@ impl<'a> Interp<'a> {
                             let millis = fields
                                 .iter()
                                 .find_map(|(name, value)| match (name.as_str(), value) {
+                                    ("ns", CtValue::Int(ns)) => Some(ns.div_euclid(1_000_000)),
                                     ("ms", CtValue::Int(millis)) => Some(*millis),
                                     _ => None,
                                 })

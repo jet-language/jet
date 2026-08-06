@@ -48,11 +48,22 @@ the spec and a passing example disagree, the spec is wrong — fix the spec.
   D-NUMWIDEN-CROSS1. Numeric-backed distinct and unit types use the same
   source-kind names. Text interpretation remains `Target.parse(text)`.
   Source-owned `to_*`, casts, and a neutral `convert` helper are absent.
-- Runtime durations (D-SHAPE-DURATION1=A, D-SHAPE-DURATIONCONVERT1=A) use
-  `Duration.milliseconds|seconds|minutes|hours(number)?`; non-finite and
-  out-of-range values fail with `RangeError`. `duration.in(.Unit)?` reads a
-  whole `Int` unit, truncating toward zero. Compile-time duration literals are
-  unchanged.
+- Runtime durations (D-SHAPE-DURATION1=A, D-SHAPE-DURATIONCONVERT1=A,
+  D-TIMERES1=A) use
+  `Duration.nanoseconds|microseconds|milliseconds|seconds|minutes|hours(number)?`;
+  non-finite and
+  out-of-range values fail with `RangeError`. A Duration stores a whole-nanosecond
+  count. `duration.in(.Unit)?` reads a whole `Int` unit, truncating toward zero.
+  `is_zero()`, `total_seconds()`, and `difference(other)` are Duration facts.
+  Compile-time duration literals are unchanged.
+- Civil time (D-TIMEDEPTH1 / D-TIME-CALENDAR1): `LocalDate` adds
+  `quarter_of_year`, `days_in_month`, `is_leap_year`, and `replace(y, m, d)`.
+  `DateTime` adds sub-second accessors (`millisecond` / `microsecond` /
+  `nanosecond`), `floor` / `ceil` beside `truncate` / `round`, `replace(...)`,
+  and `difference(other) => Duration`. `ZonedDateTime` adds `is_dst()`.
+  `core.time.datetime(...)`, `core.time.time(...)` / `local_time(...)`,
+  `days_in_month(y, m)`, and `is_leap_year(y)` construct or query the same
+  values. `Instant.elapsed()` returns a `Duration`.
 - `true` and `false` are `Bool` literals.
 - Source has no visible statement separators. The lexer inserts internal
   terminators at line ends after statement-ending tokens (S6-R).

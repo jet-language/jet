@@ -1,3 +1,4 @@
+use core.time as time
 use core.time.date as date
 
 fn run() {
@@ -15,6 +16,36 @@ fn run() {
     print(diff)
     print(d.weekday())
     print(d.day_of_year())
+    print(d.quarter_of_year())
+    print(d.days_in_month())
+    print(d.is_leap_year())
+    print(time.days_in_month(2023, 2))
+    print(time.is_leap_year(2023))
+    replaced :: d.replace(2025, 7, 4)
+    print(replaced.to_string())
     today :: date.today()
     print(today.year() > 2023)
+
+    dt :: time.datetime(2024, 3, 15, 12, 30, 45)
+    print(dt.hour())
+    print(dt.minute())
+    print(dt.second())
+    print(dt.millisecond())
+    print(dt.date().to_string())
+    print(dt.time().to_string())
+    print(dt.floor("hour").to_string())
+    print(dt.ceil("hour").to_string())
+    swapped :: dt.replace(2024, 3, 15, 18, 0, 0)
+    print(swapped.to_string())
+    later :: dt.plus_duration(Duration.hours(2) ?? panic("duration"))
+    gap :: later.difference(dt)
+    print(gap.total_seconds())
+
+    t :: time.time(9, 15, 30)
+    print(t.to_string())
+
+    utc :: time.utc()
+    z :: time.zoned(dt, utc)
+    print(z.is_dst())
+    print(z.offset_seconds())
 }

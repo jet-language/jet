@@ -489,6 +489,7 @@ pub fn apply_mutating(
                         let millis = dfields
                             .iter()
                             .find_map(|(name, value)| match (name.as_str(), value) {
+                                ("ns", CtValue::Int(ns)) => Some(ns.div_euclid(1_000_000)),
                                 ("ms", CtValue::Int(millis)) => Some(*millis),
                                 _ => None,
                             })
@@ -1460,26 +1461,31 @@ pub fn apply_method(
         (CtValue::Struct { type_name, fields }, "in")
             if type_name == crate::Syntax::DURATION_TYPE =>
         {
-            let ms = fields
+            // D-TIMERES1=A: Duration stores whole nanoseconds.
+            let ns = fields
                 .iter()
-                .find(|(n, _)| n == "ms")
-                .and_then(|(_, value)| match value {
-                    CtValue::Int(value) => Some(*value),
+                .find(|(n, _)| n == "ns" || n == "ms")
+                .and_then(|(name, value)| match (name.as_str(), value) {
+                    ("ns", CtValue::Int(value)) => Some(*value),
+                    // Transitional: ms-era values scale into ns.
+                    ("ms", CtValue::Int(value)) => Some(value.saturating_mul(1_000_000)),
                     _ => None,
                 })
                 .unwrap_or(0);
             let scale = match args.first() {
                 Some(CtValue::Enum { type_name, variant, .. })
                     if type_name == crate::Syntax::DURATION_UNIT_TYPE => match variant.as_str() {
-                        "Milliseconds" => 1,
-                        "Seconds" => 1_000,
-                        "Minutes" => 60_000,
-                        "Hours" => 3_600_000,
+                        "Nanoseconds" => 1_i64,
+                        "Microseconds" => 1_000,
+                        "Milliseconds" => 1_000_000,
+                        "Seconds" => 1_000_000_000,
+                        "Minutes" => 60_000_000_000,
+                        "Hours" => 3_600_000_000_000,
                         _ => return Err(unsupported("this duration unit", span)),
                     },
                 _ => return Err(unsupported("Duration.in expects a DurationUnit", span)),
             };
-            Ok(CtValue::ResOk(Box::new(CtValue::Int(ms / scale))))
+            Ok(CtValue::ResOk(Box::new(CtValue::Int(ns / scale))))
         }
         _ => Err(unsupported(
             &format!("the method `.{}` at compile time", method),
