@@ -39,12 +39,23 @@ building them twice.
 - Matrix shapes (card #1437), uncertainty propagation (deferred D-UNCERTAIN1), and full
   reflection stop being new features — they are new planes on the same substrate.
 
-**What the ballots ask.** Eight direction-level choices on card #1497: adopt the foundation
+**Precise by default.** The model's own conclusion, taken all the way: the default numeric world
+is fully exact — whole numbers, decimals, and fractions never lose a digit, so math, money,
+science, analytics, and modeling are correct out of the box. Approximation becomes the
+*restriction*: `Float`, `F32`, `U8` are expert opt-ins that read as restrictions, chosen for
+memory, speed, or hardware — never suffered by default. `0.1 + 0.2 == 0.3` is true in Jet.
+
+**What the ballots ask.** Eleven direction-level choices on card #1497: adopt the foundation
 (FOUND1); adopt the number grid and retire `BigInt` (NUM1); one refinement spelling (REFINE1);
 time joins the unit plane (TIME1); one substrate for compile-time numbers (MEASURE1); ratify the
 conservation law (EXACT1); opt-in uncertainty propagation (UNCERT1); extend marker law zero to
-every plane (PLANE1). Each ballot stands alone — any subset can be adopted, though FOUND1 is the
-foundation the others build on.
+every plane (PLANE1); make exact the default numeric world (DEFAULT1); inline refinements in
+type position (SPELL1); imaginary literals via the unit-literal path (IMAG1). Each ballot stands
+alone — any subset can be adopted, though FOUND1 is the foundation the others build on.
+
+**See it, not just read it.** The "What it looks like" section near the end is three complete
+Jet programs — beginner analytics, a measured simulation, and expert systems code — showing the
+whole model in working syntax.
 
 **What does not change.** All ratified surface spellings stay unless a ballot says otherwise.
 The walls stay: no top type, no HKT, no macros, no dependent types, comptime never creates
@@ -167,6 +178,35 @@ The eleven ratified-but-unbuilt number decisions (bigint `Int`, `Complex`, `Frac
 `<=>`/`Ordering`, ns `Duration`, the operator slate remnants) all land *on* this grid. Building
 them as grid instances means building them once.
 
+## Precise by default: approximation is the restriction
+
+The grid has a second conclusion the first draft stopped short of. D-INTBIG1 already made the
+*whole-number* default exact — overflow stopped existing for beginners. The same move is
+available for the rest of the tower: **make the whole default numeric world exact, and make
+approximation an expert restriction you opt into, exactly like `U8`.**
+
+- `0.1` is an exact `Decimal`, so `0.1 + 0.2 == 0.3` is **true**. The single most famous
+  beginner footgun in programming dies.
+- `7 / 2` is exactly `3.5`; `1 / 3` is exactly one third, printed `1/3` (a value with no finite
+  decimal prints as a fraction; a finite one prints as a decimal). `third * 3 == 1` is true.
+- Money, statistics, unit conversions, and long simulations accumulate **zero** representation
+  error by default. Precision loss happens only where the conservation law demands a spelling.
+- Approximation enters in exactly two ways, both visible: an expert writes a restricted type
+  (`Float`, `F32`) for speed, memory, or hardware; or a function that mathematically leaves ℚ
+  (`sqrt`, `sin`, `pi`) answers approximate — documented in its signature, the one honest
+  boundary no exact system can cross.
+- Performance keeps the D-INTBIG1 playbook: machine-word fast paths for small values, and the
+  expert escape is one word at the declaration site. Hot loops that want raw floats say `Float`
+  and get exactly today's machine arithmetic.
+
+This amends three ratified rules, and the ballot names all three explicitly: D-INTDIV1's
+`/`-lands-in-`Float` (the landing world becomes exact ℚ), the D-EXPSEM1/D-EXPNEG1 rule that a
+written negative exponent lands in `Float` (same amendment, same reason), and D-NUMTYPE1's
+"Fraction is opt-in by naming it" clause (an exact ratio can now arrive from plain division).
+The worlds don't move — `/` and `2 ^ -3` still leave ℤ for ℚ exactly as ratified; only the ℚ
+default flips from approximate to exact. "Which world does the answer live in" was always the
+real decision, and it stands.
+
 ## One law: knowledge is conserved
 
 Every exactness rule Jet has ratified is an instance of one unstated law. V2 states it:
@@ -277,6 +317,132 @@ contracted types that are unequal to each other — `types.rs:305-391`.)
 - The marker registry, law zero, and the mid-flight #1455–#1461 rebuild are the pattern v2
   extends, not competes with.
 
+## The surface: spellings from first principles
+
+Three spelling principles fall out of the model, and each yields concrete surface proposals:
+
+**1. The default spelling is the mathematical name; restrictions read as restrictions.**
+`Int` means ℤ. The exact ℚ world needs no name in daily code — it is just what numbers do.
+`Float`, `F32`, `U8`, `I16` are restrictions and *look* like restrictions: terse, technical,
+machine-flavored. A beginner who never needs them never sees them; an expert scanning code sees
+every restriction at a glance. No spelling changes needed — the existing names already obey the
+principle once the defaults flip.
+
+**2. Knowledge you can state inline, you should be able to state inline.** Today a checked range
+requires minting a named type first. The general form lets the type position carry the fact
+directly:
+
+```jet
+fn set_brightness(level: Int(0..100)) { ... }     // proposed: inline refinement
+volume: Int(0..11) = dial.read()?                  // fallible where unproven
+UserId :: distinct Int                             // naming is still there when identity matters
+```
+
+`U8` is then revealed as exactly `Int(0..255)` plus a one-byte layout — the alias teaches the
+model. The same inline position accepts unit and exactness knowledge later without new grammar.
+
+**3. Literals reuse one literal machinery.** The lexer already turns `500ms` and `12.5usd` into
+unit literals. Two more number worlds fit the identical path, with no new grammar:
+
+```jet
+z :: 3 + 4i                       // proposed: imaginary literal — `i` rides the unit-suffix path
+g :: 9.80665 ± 0.00001            // proposed: measured literal (plain form: measurement(...))
+```
+
+`4i` is a unit literal whose family is ℂ's imaginary axis — the "same underlying thing" made
+literal. `±` makes a measured value cost one keystroke more than a guess, which is the whole
+adoption battle for honest numbers.
+
+Worth future ballots, listed but not minted now: compound unit suffixes (`9.8m/s^2` instead of
+declaring a derived family member), and exponent-aware unit printing. Both are surface sugar
+over machinery this proposal already builds.
+
+## What it looks like
+
+Three complete programs. Everything not marked *proposed* is ratified syntax; the semantic
+differences from today are the ballots of this slate in action.
+
+### P1 — a beginner's first analytics script (nothing opted in, everything exact)
+
+```jet
+fn main() {
+    price :: 19.99                    // exact Decimal — not a Float
+    total :: price * 3
+    print("total: {total}")           // total: 59.97   — exactly
+
+    print(0.1 + 0.2 == 0.3)          // true — the classic footgun is gone
+
+    share :: 7 / 2
+    print(share)                      // 3.5    (finite decimal prints as a decimal)
+    third :: 1 / 3
+    print(third)                      // 1/3    (no finite decimal — prints exactly)
+    print(third * 3 == 1)            // true
+
+    n :: 2 ^ 200
+    print(n)                          // 1606938044258990275541962092341162602522202993782792835301376
+    print(factorial(25))              // 15511210043330985984000000 — Int is ℤ, full stop
+}
+```
+
+### P2 — a measured simulation (units + uncertainty + shapes, all checked, all zero-cost)
+
+```jet
+fn main() {
+    h :: 100meter                             // a Length quantity
+    g :: 9.80665 ± 0.00001                    // proposed ± literal: a measured value
+
+    t :: sqrt(2 * h.raw() / g)                // sqrt leaves ℚ — result is approximate,
+    print("fall time: {t}")                   // and carries the propagated uncertainty:
+                                              // fall time: 4.51600 ± 0.0000023
+
+    later :: now() + 5min                     // point + delta = point (Time joins units)
+    task.timeout(500ms)                       // same literal, same meaning, everywhere
+
+    a :: Matrix<3, 4>.{ ... }                 // proposed surface — matrix design is card #1437;
+    b :: Matrix<4, 2>.{ ... }                 // the measure plane is what makes it checkable
+    c :: a * b                                // Matrix<3, 2> — shapes compose at compile time
+    // a * a                                  // error: inner sides 4 and 3 do not match
+
+    k :: 293.15kelvin
+    c2 :: Celsius.from_kelvin(k)              // exact conversion: silent and free
+    f :: Fahrenheit.from_celsius_rounded(c2, .NearestEven, digits: 1)
+                                              // inexact: the loss is spelled, per the law
+}
+```
+
+### P3 — expert systems code (restrictions where they pay, each one visible)
+
+```jet
+struct Packet {
+    kind: U8                                  // one byte on the wire — a restriction, spelled as one
+    len: U16
+    body: [U8#1024]                           // length is a compile-time measure
+}
+
+fn checksum(bytes: [U8]) => U8 {
+    sum: U8 = 0
+    for b in bytes { sum = wrapping(sum + b) }   // overflow behavior chosen, not suffered
+    return sum
+}
+
+#Kernel fn blend(a: F32x4, b: F32x4) => F32x4 =
+    a * 0.5 + b * 0.5                         // approximate and fast — on purpose, and it shows
+
+fn set_brightness(level: Int(0..100)) { ... }  // proposed inline refinement
+fn on_dial(raw: Int) {
+    level :: Int(0..100).from_int(raw) ?? return   // unproven → fallible, same as U8 today
+    set_brightness(level)
+}
+
+fn to_wire(reading: Float) => F32 {
+    return approx(reading)                    // precision loss exists — so it is spelled
+}
+```
+
+The through-line: the beginner program contains zero annotations and zero surprises; the expert
+program contains only visible, chosen restrictions; and every line in between is the
+conservation law doing its job.
+
 ## Decisions for the owner
 
 Direction-level; each gets a full ballot on the card. Worked examples live in the sections above.
@@ -291,6 +457,9 @@ Direction-level; each gets a full ballot on the card. Worked examples live in th
 | D-TYPE2-EXACT1 | Ratify the conservation law; keep `approx` and `from_*_rounded` as its two spelled demotions, or merge them into one word | ratify law, keep both spellings |
 | D-TYPE2-UNCERT1 | Uncertainty as an exactness-plane grade (revives D-UNCERTAIN1), opt-in | adopt as opt-in |
 | D-TYPE2-PLANE1 | All planes nameable + reflectable + prelude-source by law (extends the D-VERDICT-1455-1 registration law); `TypeInfo` gains `dimensions` and typed marker args at every level | adopt |
+| D-TYPE2-DEFAULT1 | The default numeric world is exact: decimal literals are `Decimal`, `/` lands in exact ℚ (amends D-INTDIV1's landing type), approximation is opt-in | adopt |
+| D-TYPE2-SPELL1 | Inline refinements in type position: `Int(0..100)` wherever a type is written; sized widths become teachable aliases | adopt |
+| D-TYPE2-IMAG1 | Imaginary literals `4i` ride the existing unit-literal path | adopt |
 
 ## Implementation shape
 

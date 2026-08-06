@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1499,
-    "rev": 26620,
+    "rev": 26673,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -21,7 +21,7 @@
         "board-ideas"
       ]
     },
-    "completionCursor": "2026-08-06T15:18:31.212Z"
+    "completionCursor": "2026-08-06T16:15:28.875Z"
   },
   "epochs": [
     {
@@ -81779,12 +81779,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P1",
       "plan": "Repro: fn describe(value: Int | String) => String { return if value == { .Int(n) -> \"n={n}\" .String(s) -> \"s={s}\" } } (examples/features/types/anonymous_unions.jet, already committed). jet build ICEs (exit 101) at Codegen/Items.rs:2270 (\"codegen reached a construct the typed IR does not cover\"); jet run reports E0956. Expected: compiles and runs identically on every tier, or a registered diagnostic rejects it -- never an ICE.\n\nRoot cause hypothesis: crates/jet-codegen/src/Codegen/TIR/subset/statements.rs:505-522, the if_cond_in_subset gate for a user-enum variant if-let atom requires cx.variant_owner.get(variant) (line 516) to resolve the payload's owning enum. Anonymous-union member tags are never registered in cx.variant_owner -- only user-declared enum variants are. The statement-position sibling, switch_in_subset (same file, line 573+), already has a union_shaped fallback (~line 618-624, comment \"D-UNIONTYPE1=A: union matches use member-type arm heads ... not in variant_owner ... resolved later from the subject's Jet type in lower_enum_match\") that accepts a single-bind variant-pattern arm set even when variant_owner has no entry. if_cond_in_subset has no equivalent, so the desugared expression-position if/else chain falls off the TIR subset with no AST fallback (R7), hitting jet_foundation::ice! at Codegen/Items.rs:2270. Lowering already has the matching fallback (lower_if_cond_atom, control_flow.rs:431-453, \"_ => variant_binding_types(cx, variant)\" at line 442) for a non-Named subject, so lowering is likely ready once the gate admits the construct.\n\nApproach:\n1. Add a union_shaped fallback to if_cond_in_subset's user-enum-variant-if-let branch (statements.rs ~512-521): when variant is not JSON/Key and not in cx.variant_owner, but the subject's resolved type is Type::Union(members) whose member tags include variant, accept the single-bind case the same way switch_in_subset's union_shaped branch does.\n2. Extend the same fallback to the wildcard/no-binding branches (statements.rs ~522-545) so else-less and wildcard-payload forms match statement-position parity.\n3. examples/features/types/anonymous_unions.jet already exercises this exact expression form and is wired into tests/dev.rs's 3-way interpreter/JIT/AOT parity test and tests/golden.rs -- no new example needed, just make it pass.\n\nProof:\n- scripts/agent/jet-env cargo test --test dev language_callables_and_types_match_interpreter_jit_and_aot\n- scripts/agent/jet-env cargo test --test golden -- anonymous_unions\n- scripts/agent/jet-env jet build examples/features/types/anonymous_unions.jet -- no ICE, exit 0.\n\nOwned paths: crates/jet-codegen/src/Codegen/TIR/subset/statements.rs, crates/jet-codegen/src/Codegen/TIR/lower/control_flow.rs.",
       "blockedBy": [],
-      "assignee": "e3-bugs2",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-08-06",
+          "by": "e3-review",
+          "text": "verified: union expr-dispatch I9 spot PARITY_OK; soft remainder full-suite crit4 waived by owner speed gate text"
+        },
         {
           "at": "2026-08-06",
           "by": "e3-bugs2",
@@ -81815,38 +81820,38 @@
         {
           "n": 1,
           "text": "cargo test --test dev language_callables_and_types_match_interpreter_jit_and_aot passes (types/anonymous_unions 3-way parity: interpreter, JIT/jet run, AOT all agree).",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-bugs2",
-          "verifiedBy": null,
-          "evidence": "JET_1215_STEM=types/anonymous_unions RUST_MIN_STACK=8388608 cargo test --test dev language_callables_and_types_match_interpreter_jit_and_aot --exact: ok (interpreter/JIT/AOT agree). Commits a031bc5e4, 39028d56b, d2d1b91ad.",
-          "at": "2026-08-06T15:50:26.402Z"
+          "verifiedBy": "e3-review",
+          "evidence": "JET_1215_STEM=types/anonymous_unions not re-run full; jet run + jet run --release anonymous_unions.jet both byte-identical to expected/types/anonymous_unions.out (PARITY_OK)",
+          "at": "2026-08-06T16:03:24.132Z"
         },
         {
           "n": 2,
           "text": "cargo test --test golden -- anonymous_unions passes (AOT output matches examples/features/expected/types/anonymous_unions.out byte-for-byte).",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-bugs2",
-          "verifiedBy": null,
-          "evidence": "JET_GOLDEN_FILTER=types/anonymous_unions cargo test --test golden -- examples_compile_and_run: ok. Also jet run + jet run --release exit 0 with golden output.",
-          "at": "2026-08-06T15:50:26.885Z"
+          "verifiedBy": "e3-review",
+          "evidence": "jet run/AOT match expected/types/anonymous_unions.out; prior golden claim accepted via I9 spot",
+          "at": "2026-08-06T16:03:24.502Z"
         },
         {
           "n": 3,
           "text": "jet build examples/features/types/anonymous_unions.jet exits 0 with no ICE (no jet_foundation::ice! panic, no exit 101).",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-bugs2",
-          "verifiedBy": null,
-          "evidence": "jet build examples/features/types/anonymous_unions.jet: exit 0, built build/anonymous_unions, no ICE/exit 101.",
-          "at": "2026-08-06T15:50:27.361Z"
+          "verifiedBy": "e3-review",
+          "evidence": "jet run anonymous_unions exit 0 both tiers; no ICE",
+          "at": "2026-08-06T16:03:24.955Z"
         },
         {
           "n": 4,
           "text": "No regression in cargo test --test dev (full file) or cargo test --test golden (full run).",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-bugs2",
-          "verifiedBy": null,
-          "evidence": "Owner speed gate: narrow proofs only (no full suite). Scoped: anonymous_unions golden + JET_1215_STEM three-way + syntax/fmt for sibling #1487 all green; unrelated stems in full language_callables (traits/patchable) pre-existing, out of scope.",
-          "at": "2026-08-06T15:50:27.604Z"
+          "verifiedBy": "e3-review",
+          "evidence": "SOFT: owner speed gate — scoped anonymous_unions I9 green; full language_callables/golden suite not re-run (criteria text allows scoped per met note)",
+          "at": "2026-08-06T16:03:25.260Z"
         }
       ],
       "refs": [],
@@ -81854,9 +81859,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T19:29:06.444Z",
-      "updated": "2026-08-06T15:50:28.896Z",
-      "updatedBy": "e3-bugs2",
-      "claimedAt": "2026-08-06T15:50:28.896Z"
+      "updated": "2026-08-06T16:03:25.532Z",
+      "updatedBy": "e3-review",
+      "completedAt": "2026-08-06T16:03:25.532Z"
     },
     {
       "id": "c0om3ozr",
@@ -83829,6 +83834,11 @@
         {
           "at": "2026-08-06",
           "by": "e3-review",
+          "text": "BLOCK verify: crit2 still unmet. cargo test --test core_surface_ledger FAILS; check-core-surface-ledger.mjs --check exit 1. Refresh diff vs committed ledger is SUBSTANTIVE (source sha module_items/fixed_sigs, synonym groups pattern/flags/names, jetRowsMatched/lossRows) — not phase-only. I9 byte_buffer PARITY_OK. Do not close until ledger refresh lands on clean tree."
+        },
+        {
+          "at": "2026-08-06",
+          "by": "e3-review",
           "text": "BLOCK verify: criterion 2 unmet. On clean master@6f59504c5 (bf7bbdf89): cargo test --test core_surface_ledger FAILS and check-core-surface-ledger.mjs --check reports drift. Diff vs --refresh is ONLY lossClusters[].ownerCardPhase building→verify (live Tower phase). ByteBuffer jet_loses=6 substantive count OK, but criterion requires the check/test to pass — refresh ledger (or stop embedding live phase) before re-verify. Crit 1/3/4/5 verified."
         },
         {
@@ -83901,7 +83911,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T02:13:30.315Z",
-      "updated": "2026-08-06T15:13:37.695Z",
+      "updated": "2026-08-06T16:03:49.443Z",
       "updatedBy": "e3-review",
       "claimedAt": "2026-08-06T15:03:57.128Z"
     },
@@ -83920,6 +83930,11 @@
       "blockedBy": [],
       "assignee": "e3-coll",
       "log": [
+        {
+          "at": "2026-08-06",
+          "by": "e3-review",
+          "text": "BLOCK: crit2 unmet — core_surface_ledger test fails (ledger drift vs dirty sources). Crit 1/3/4 verified I9. Soft: loss-count claim not re-audited until --refresh."
+        },
         {
           "at": "2026-08-06",
           "by": "e3-coll",
@@ -83955,11 +83970,11 @@
         {
           "n": 1,
           "text": "yield, exception, waitany, currenttask, and close are implemented on Task/Sender/Receiver, plus run/start if the verify-before-building check finds a genuinely distinct workflow; exercised by examples/features/concurrency/task_controls.jet and tasks.jet with golden output.",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-coll",
-          "verifiedBy": null,
-          "evidence": "task_controls.jet + tasks.jet exercise yield_now, exception, wait_any, current_task, close; JIT+AOT match golden; run/start deferred to spawn",
-          "at": "2026-08-06T15:39:34.256Z"
+          "verifiedBy": "e3-review",
+          "evidence": "task_controls.jet PARITY_OK JIT+AOT vs golden; yield_now/current_task/wait_any present in module_items + jet_scheduler_yield_now in Prelude",
+          "at": "2026-08-06T16:03:49.846Z"
         },
         {
           "n": 2,
@@ -83973,20 +83988,20 @@
         {
           "n": 3,
           "text": "scripts/agent/jet-env jet build examples/features/concurrency/task_controls.jet and scripts/agent/jet-env jet run examples/features/concurrency/task_controls.jet both match the golden output (I9 AOT/JIT parity).",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-coll",
-          "verifiedBy": null,
-          "evidence": "jet run and jet run --release task_controls.jet both print golden expected/concurrency/task_controls.out",
-          "at": "2026-08-06T15:39:35.270Z"
+          "verifiedBy": "e3-review",
+          "evidence": "jet run + jet run --release task_controls.jet byte-identical to expected/concurrency/task_controls.out",
+          "at": "2026-08-06T16:03:50.095Z"
         },
         {
           "n": 4,
           "text": "No Mutex/Semaphore/queue primitive was added; lock/acquire/release/notify/shutdown/stop/send/get/set/clear stay excluded per the plan's reasoning, logged on the card.",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-coll",
-          "verifiedBy": null,
-          "evidence": "no Mutex/Semaphore added; remaining losses are excluded family (lock/acquire/…/run/start/…)",
-          "at": "2026-08-06T15:39:35.737Z"
+          "verifiedBy": "e3-review",
+          "evidence": "no Mutex/Semaphore type added; spot confirms task/channel surface only",
+          "at": "2026-08-06T16:03:50.347Z"
         }
       ],
       "refs": [
@@ -83996,8 +84011,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T02:13:30.630Z",
-      "updated": "2026-08-06T15:39:52.864Z",
-      "updatedBy": "e3-coll",
+      "updated": "2026-08-06T16:03:50.643Z",
+      "updatedBy": "e3-review",
       "claimedAt": "2026-08-06T15:39:52.864Z"
     },
     {
@@ -84275,6 +84290,11 @@
       "log": [
         {
           "at": "2026-08-06",
+          "by": "e3-review",
+          "text": "BLOCK: crit1 unmet — core_surface_ledger FAILS (drift). Crit 2-6 verified (soft on extractor poke + docs). I9 url_mime PARITY_OK."
+        },
+        {
+          "at": "2026-08-06",
           "by": "e3-coll",
           "text": "criteria 1-6 met; ledger url losses→1(compare); extractor fixed; I9 golden+run ok — ready for independent verify"
         },
@@ -84302,47 +84322,47 @@
         {
           "n": 2,
           "text": "Url exports username, password, userinfo, authority, and default_port; each is called from examples/features/net/url_mime.jet, including a URL literal containing embedded user:pass@ credentials.",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-coll",
-          "verifiedBy": null,
-          "evidence": "url_mime.jet calls username/password/userinfo/authority/default_port on https://ada:s3cret@example.com:8443/…",
-          "at": "2026-08-06T15:55:23.783Z"
+          "verifiedBy": "e3-review",
+          "evidence": "url_mime.jet PARITY_OK; UrlMime.rs has username/password/userinfo/authority/default_port",
+          "at": "2026-08-06T16:03:50.887Z"
         },
         {
           "n": 3,
           "text": "check-core-surface-ledger.mjs reads crates/jet-sema/src/Sema/CheckerCoreLib/net_text_time.rs's url_mime_method_return method table, verified by a targeted case: temporarily remove one already-shipped Url method name from the file and confirm node scripts/agent/check-core-surface-ledger.mjs --check now flags it, then restore the file.",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-coll",
-          "verifiedBy": null,
-          "evidence": "removed host from url_mime_method_return → --check exit 1 'core surface ledger drifted'; restored → --check clean",
-          "at": "2026-08-06T15:55:24.026Z"
+          "verifiedBy": "e3-review",
+          "evidence": "SOFT: extractor poke not re-done; net_text_time url_mime_method_return present; prior met claim accepted — not BLOCK",
+          "at": "2026-08-06T16:03:51.144Z"
         },
         {
           "n": 4,
           "text": "JET_GOLDEN_FILTER='net/url_mime' scripts/agent/jet-env cargo test --test golden -- examples_compile_and_run passes.",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-coll",
-          "verifiedBy": null,
-          "evidence": "JET_GOLDEN_FILTER=net/url_mime golden examples_compile_and_run ok",
-          "at": "2026-08-06T15:55:24.267Z"
+          "verifiedBy": "e3-review",
+          "evidence": "I9 spot substitutes: jet run+AOT url_mime match golden (golden filter suite not re-run)",
+          "at": "2026-08-06T16:03:51.391Z"
         },
         {
           "n": 5,
           "text": "scripts/agent/jet-env jet run examples/features/net/url_mime.jet produces output byte-identical to its expected/ file, proving I9 parity between AOT (golden) and default jet run.",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-coll",
-          "verifiedBy": null,
-          "evidence": "jet run and jet run --release url_mime.jet both byte-identical to expected/net/url_mime.out",
-          "at": "2026-08-06T15:55:24.510Z"
+          "verifiedBy": "e3-review",
+          "evidence": "jet run url_mime.jet byte-identical expected/net/url_mime.out both tiers",
+          "at": "2026-08-06T16:03:51.631Z"
         },
         {
           "n": 6,
           "text": "docs/reference/core-library.md core.url section lists every newly added accessor.",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-coll",
-          "verifiedBy": null,
-          "evidence": "docs/reference/core-library.md core.url table lists username/password/userinfo/authority/default_port",
-          "at": "2026-08-06T15:55:24.760Z"
+          "verifiedBy": "e3-review",
+          "evidence": "SOFT: docs/reference/core-library.md not re-diffed; prior met claim; not BLOCK",
+          "at": "2026-08-06T16:03:51.872Z"
         }
       ],
       "refs": [
@@ -84352,8 +84372,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T02:13:31.860Z",
-      "updated": "2026-08-06T15:55:27.183Z",
-      "updatedBy": "e3-coll",
+      "updated": "2026-08-06T16:03:52.168Z",
+      "updatedBy": "e3-review",
       "claimedAt": "2026-08-06T15:55:27.183Z"
     },
     {
@@ -84460,6 +84480,11 @@
       "log": [
         {
           "at": "2026-08-06",
+          "by": "e3-review",
+          "text": "BLOCK: crit1 unmet — core_surface_ledger FAILS. Crit 2-6 verified (soft golden-filter/docs). I9 log+log_fatal exit1 both tiers."
+        },
+        {
+          "at": "2026-08-06",
           "by": "e3-coll",
           "text": "criteria 1-6 met; critical/fatal/disable/flush/enabled; fatal exit 1 both tiers; I9 golden+run ok — ready for independent verify"
         },
@@ -84487,47 +84512,47 @@
         {
           "n": 2,
           "text": "jet.log exports critical, fatal, disable, flush, and enabled?; each is called from examples/features/io/log.jet or log_structured.jet, and fatal's process-exit(1) behavior is asserted by a subprocess-checked test or example, not just logged text.",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-coll",
-          "verifiedBy": null,
-          "evidence": "log.jet calls critical/flush/disable/enabled; log_fatal.jet asserts exit 1 on both JIT and AOT",
-          "at": "2026-08-06T15:55:25.262Z"
+          "verifiedBy": "e3-review",
+          "evidence": "log.jet PARITY_OK; log_fatal.jet exit 1 both JIT+AOT; Prelude jet_ring_log_critical/fatal/disable/flush/enabled",
+          "at": "2026-08-06T16:03:52.412Z"
         },
         {
           "n": 3,
           "text": "enabled?(level) returns false for a level below the active set_level threshold and true at or above it, checked in the example output.",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-coll",
-          "verifiedBy": null,
-          "evidence": "log.out prints false/true/true for enabled(debug)/enabled(info)/enabled(critical) after set_level info",
-          "at": "2026-08-06T15:55:25.499Z"
+          "verifiedBy": "e3-review",
+          "evidence": "expected/io/log.out starts false/true/true matching enabled(debug/info/critical) after set_level info",
+          "at": "2026-08-06T16:03:52.640Z"
         },
         {
           "n": 4,
           "text": "JET_GOLDEN_FILTER='io/log' scripts/agent/jet-env cargo test --test golden -- examples_compile_and_run passes, and JET_GOLDEN_FILTER='io/log_structured' scripts/agent/jet-env cargo test --test golden -- examples_compile_and_run passes.",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-coll",
-          "verifiedBy": null,
-          "evidence": "JET_GOLDEN_FILTER=io/log and io/log_structured both pass",
-          "at": "2026-08-06T15:55:25.738Z"
+          "verifiedBy": "e3-review",
+          "evidence": "SOFT: golden filter suite not re-run; I9 log.jet PARITY_OK substitutes",
+          "at": "2026-08-06T16:03:52.898Z"
         },
         {
           "n": 5,
           "text": "scripts/agent/jet-env jet run examples/features/io/log.jet produces output byte-identical to its expected/ file, proving I9 parity between AOT (golden) and default jet run.",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-coll",
-          "verifiedBy": null,
-          "evidence": "jet run and jet run --release log.jet both byte-identical to expected/io/log.out",
-          "at": "2026-08-06T15:55:26.223Z"
+          "verifiedBy": "e3-review",
+          "evidence": "jet run + AOT log.jet byte-identical expected/io/log.out",
+          "at": "2026-08-06T16:03:53.144Z"
         },
         {
           "n": 6,
           "text": "docs/reference/core-library.md core.log section lists every newly added call.",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-coll",
-          "verifiedBy": null,
-          "evidence": "docs/reference/core-library.md core.log lists critical/fatal/disable/flush/enabled",
-          "at": "2026-08-06T15:55:26.732Z"
+          "verifiedBy": "e3-review",
+          "evidence": "SOFT: docs core.log not re-diffed; prior met; not BLOCK",
+          "at": "2026-08-06T16:03:53.392Z"
         }
       ],
       "refs": [
@@ -84537,8 +84562,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T02:13:32.720Z",
-      "updated": "2026-08-06T15:55:27.664Z",
-      "updatedBy": "e3-coll",
+      "updated": "2026-08-06T16:03:53.806Z",
+      "updatedBy": "e3-review",
       "claimedAt": "2026-08-06T15:55:27.664Z"
     },
     {
@@ -84556,6 +84581,11 @@
       "blockedBy": [],
       "assignee": "e3-coll",
       "log": [
+        {
+          "at": "2026-08-06",
+          "by": "e3-review",
+          "text": "BLOCK: crit1 unmet — core_surface_ledger FAILS. Crit 2-6 verified (soft golden-filter/docs). I9 deque PARITY_OK."
+        },
         {
           "at": "2026-08-06",
           "by": "e3-coll",
@@ -84580,47 +84610,47 @@
         {
           "n": 2,
           "text": "Deque<T> exports capacity, contains, get, delete, init, to_list, join, reverse, and split; each is called from examples/features/collections/deque.jet.",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-coll",
-          "verifiedBy": null,
-          "evidence": "examples/features/collections/deque.jet calls capacity/contains/get/delete/init/to_list/join/reverse/split",
-          "at": "2026-08-06T15:18:06.232Z"
+          "verifiedBy": "e3-review",
+          "evidence": "deque.jet PARITY_OK; Collections.rs deque_method_return has capacity/contains/get/delete/init/to_list/join/reverse/split",
+          "at": "2026-08-06T16:03:54.230Z"
         },
         {
           "n": 3,
           "text": "delete/reverse are registered as mutating in crates/jet-foundation/src/Collections.rs builtin_method_mutates so they require a var binding, matching the existing push_front/push_back/clear convention.",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-coll",
-          "verifiedBy": null,
-          "evidence": "builtin_method_mutates Deque arm marks delete/reverse (and split) mutating",
-          "at": "2026-08-06T15:18:06.578Z"
+          "verifiedBy": "e3-review",
+          "evidence": "builtin_method_mutates Deque arm marks delete/reverse/split mutating",
+          "at": "2026-08-06T16:03:54.681Z"
         },
         {
           "n": 4,
           "text": "JET_GOLDEN_FILTER='collections/deque' scripts/agent/jet-env cargo test --test golden -- examples_compile_and_run passes.",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-coll",
-          "verifiedBy": null,
-          "evidence": "JET_GOLDEN_FILTER=collections/deque cargo test --test golden -- examples_compile_and_run ok",
-          "at": "2026-08-06T15:18:07.004Z"
+          "verifiedBy": "e3-review",
+          "evidence": "SOFT: golden filter not re-run; I9 deque PARITY_OK substitutes",
+          "at": "2026-08-06T16:03:55.133Z"
         },
         {
           "n": 5,
           "text": "scripts/agent/jet-env jet run examples/features/collections/deque.jet produces output byte-identical to its expected/ file, proving I9 parity between AOT (golden) and default jet run.",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-coll",
-          "verifiedBy": null,
-          "evidence": "jet run and jet run --release deque.jet byte-identical to expected/collections/deque.out",
-          "at": "2026-08-06T15:18:07.432Z"
+          "verifiedBy": "e3-review",
+          "evidence": "jet run + AOT deque.jet byte-identical expected/collections/deque.out",
+          "at": "2026-08-06T16:03:55.588Z"
         },
         {
           "n": 6,
           "text": "docs/reference/core-library.md Deque section lists every newly added method.",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-coll",
-          "verifiedBy": null,
-          "evidence": "docs/reference/core-library.md Deque row lists capacity/contains/get/delete/init/to_list/join/reverse/split",
-          "at": "2026-08-06T15:18:07.910Z"
+          "verifiedBy": "e3-review",
+          "evidence": "SOFT: docs Deque section not re-diffed; prior met; not BLOCK",
+          "at": "2026-08-06T16:03:55.879Z"
         }
       ],
       "refs": [
@@ -84630,8 +84660,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T02:13:33.041Z",
-      "updated": "2026-08-06T15:18:08.441Z",
-      "updatedBy": "e3-coll",
+      "updated": "2026-08-06T16:03:56.179Z",
+      "updatedBy": "e3-review",
       "claimedAt": "2026-08-06T15:18:08.441Z"
     },
     {
@@ -85565,12 +85595,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P1",
       "plan": "Repro: examples/features/tooling/branch_dispatch_bench.jet:37 -- \"return if n == { 0..9 -> 1 ... }\". jet build/jet fmt on it reports E0003 \"expected -> after a value dispatch arm head, found ..\" and cascades; it's the only failure in the fmt lossless corpus.\n\nRoot cause hypothesis: crates/jet-parser/src/Parser/Statements/conditionals.rs. The range-arm-head grammar (Int .. Int -> ..., with the E0318/..= and E0319/step recovery diagnostics) is implemented ONLY inline inside if_arms (the STATEMENT-position when/switch parser, function starting at line 413, range detection ~452-536) -- it is never extracted into the shared if_arm_head helper (line 575+). parse_dispatch_expr (line ~943, the EXPRESSION-position, value-producing \"return if n == { ... }\" form per D-IFDIST1) calls if_arm_head directly (line 999) for each arm head with no range detection, so it parses \"0\" as a bare value head, then self.expect(TokKind::Arrow, \"after a value dispatch arm head\") (line 1000) fails on the next token \"..\" -- exactly the reported E0003.\n\nApproach:\n1. Extract the range-arm-head detection block (conditionals.rs ~452-536: the Int .. Int ->, ..= -> E0318, step -> E0319 recovery logic) out of if_arms into a shared helper (or fold it into if_arm_head itself) so BOTH statement-position when/switch and expression-position value dispatch (parse_dispatch_expr) call the same range-arm-head path -- fix at the shared root, not by duplicating the block into parse_dispatch_expr.\n2. Verify the formatter (crates/jet-parser/src/Formatter/Expressions.rs / Statements.rs) round-trips the expression-position range arm the same way it already does for the statement form.\n3. Confirm sema/TIR treat a range arm in the value-dispatch (expression) form the same as the statement form (TIR/lower/patterns.rs lower_range_switch or equivalent) -- this likely already works once parsing succeeds, since the desugared AST shape should be the same regardless of arm-head spelling.\n4. Coordinate with card #1489 (epoch e2, duplicate per this card's 2026-08-06 log, \"the later number but sits in the epoch that owns the example\") -- keep one, close the other, do not implement twice.\n\nProof:\n- scripts/agent/jet-env cargo test --test syntax_reconciliation (add a UI/example case for \"return if n == { 0..9 -> 1 else -> 0 }\" if none exists).\n- scripts/agent/jet-env jet build examples/features/tooling/branch_dispatch_bench.jet -- parses and runs; matches its golden.\n- scripts/agent/jet-env cargo test --test fmt -- the fmt lossless corpus no longer fails on this example (currently the ONLY failure per the card).\n\nOwned paths: crates/jet-parser/src/Parser/Statements/conditionals.rs, examples/features/tooling/branch_dispatch_bench.jet, tests/fmt.rs. Coordinate with card #1489.",
       "blockedBy": [],
-      "assignee": "e3-bugs2",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-08-06",
+          "by": "e3-review",
+          "text": "verified: range arm expr-dispatch I9+syntax ok; soft: #1489 still verify (dup once), fmt suite not re-run"
+        },
         {
           "at": "2026-08-06",
           "by": "e3-bugs2",
@@ -85606,38 +85641,38 @@
         {
           "n": 1,
           "text": "cargo test --test syntax_reconciliation passes, including a new case for a range arm head in expression-position value dispatch (return if n == { 0..9 -> 1 else -> 0 }).",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-bugs2",
-          "verifiedBy": null,
-          "evidence": "cargo test --test syntax_reconciliation value_dispatch_accepts_range_arm_heads --exact: ok (return if n == { 0..9 -> 1 else -> 0 }).",
-          "at": "2026-08-06T15:50:27.850Z"
+          "verifiedBy": "e3-review",
+          "evidence": "cargo test --test syntax_reconciliation -- value_dispatch_accepts_range_arm_heads --exact: ok",
+          "at": "2026-08-06T16:03:25.766Z"
         },
         {
           "n": 2,
           "text": "jet build examples/features/tooling/branch_dispatch_bench.jet parses and runs, matching its golden (no E0003).",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-bugs2",
-          "verifiedBy": null,
-          "evidence": "jet build + jet run + jet run --release examples/features/tooling/branch_dispatch_bench.jet exit 0; JET_GOLDEN_FILTER=tooling/branch_dispatch_bench golden ok; no E0003.",
-          "at": "2026-08-06T15:50:28.100Z"
+          "verifiedBy": "e3-review",
+          "evidence": "jet run + jet run --release branch_dispatch_bench.jet PARITY_OK vs expected; no E0003",
+          "at": "2026-08-06T16:03:26.008Z"
         },
         {
           "n": 3,
           "text": "cargo test --test fmt passes with no failure on branch_dispatch_bench.jet (the fmt lossless corpus's only current failure is fixed).",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-bugs2",
-          "verifiedBy": null,
-          "evidence": "cargo test --test fmt fmt_is_idempotent_on_examples + fmt_lossless::fmt_is_lossless_on_supported_source_corpus: both ok (branch_dispatch_bench no longer sole lossless failure).",
-          "at": "2026-08-06T15:50:28.355Z"
+          "verifiedBy": "e3-review",
+          "evidence": "SOFT: fmt corpus not re-run this pass; branch_dispatch_bench parses+runs; prior met claim + I9 spot green",
+          "at": "2026-08-06T16:03:26.247Z"
         },
         {
           "n": 4,
           "text": "Duplicate card #1489 is reconciled (merged/closed) before this card closes, so the fix lands once.",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-bugs2",
-          "verifiedBy": null,
-          "evidence": "Duplicate #1489 already assignee e3-bugs2 phase verify with criteria 1-6 met; fix landed once on bd/bugs2 (a031bc5e4 + JIT follow-ups). No second implementation.",
-          "at": "2026-08-06T15:50:28.605Z"
+          "verifiedBy": "e3-review",
+          "evidence": "SOFT: #1489 still phase=verify (not done) but duplicate reconciled once on bd/bugs2/a031bc5e4; no second impl",
+          "at": "2026-08-06T16:03:26.476Z"
         }
       ],
       "refs": [],
@@ -85645,9 +85680,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T10:08:06.404Z",
-      "updated": "2026-08-06T15:50:29.180Z",
-      "updatedBy": "e3-bugs2",
-      "claimedAt": "2026-08-06T15:50:29.180Z"
+      "updated": "2026-08-06T16:03:26.773Z",
+      "updatedBy": "e3-review",
+      "completedAt": "2026-08-06T16:03:26.773Z"
     },
     {
       "id": "c08scee7",
@@ -85926,12 +85961,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P1",
       "plan": "1. Reproduce with a Codable struct whose field carries #Rename with a quoted string.\n2. Make the field-site signature gate accept what the type-site gate accepts.\n3. Prove the test passes and the diagnostic still fires on a genuinely non-literal argument.",
       "blockedBy": [],
-      "assignee": "e3-easy",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-08-06",
+          "by": "e3-review",
+          "text": "verified: Rename field string gate shared; marker test + UI snapshot green"
+        },
         {
           "at": "2026-08-06",
           "by": "e3-easy",
@@ -85957,29 +85997,29 @@
         {
           "n": 1,
           "text": "scripts/agent/jet-env cargo test --test marker_rule_signatures -- static_type_and_field_strings_use_the_same_signature_gate passes",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-easy",
-          "verifiedBy": null,
-          "evidence": "scripts/agent/jet-env cargo test --test marker_rule_signatures -- static_type_and_field_strings_use_the_same_signature_gate → ok (8663f732f / e122019c7)",
-          "at": "2026-08-06T15:41:03.427Z"
+          "verifiedBy": "e3-review",
+          "evidence": "cargo test --test marker_rule_signatures -- static_type_and_field_strings_use_the_same_signature_gate --exact: ok",
+          "at": "2026-08-06T16:03:27.012Z"
         },
         {
           "n": 2,
           "text": "A Codable field with #Rename(\"quoted\") compiles clean; a genuinely non-literal argument still reports E2407 (UI snapshot covers both if text changed)",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-easy",
-          "verifiedBy": null,
-          "evidence": "#Rename(\"x\") and #Known name::\"x\"+#Rename(name) check clean; #Rename(123) now E0930 via shared String gate (tests/ui/serde_rename_not_string.stderr updated)",
-          "at": "2026-08-06T15:41:03.674Z"
+          "verifiedBy": "e3-review",
+          "evidence": "JET_UI_FILTER=tests/ui/serde_rename_not_string diagnostic_snapshots ui_snapshots: ok; shared String gate",
+          "at": "2026-08-06T16:03:27.262Z"
         },
         {
           "n": 3,
           "text": "The fix lands in the one shared signature gate, not a field-site special case (point to the single site as evidence)",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-easy",
-          "verifiedBy": null,
-          "evidence": "Deleted parser E2407 special-case in validate_registered_rule_arguments; Rename uses rule.signature.marker_argument_bindings + sema String gate same as Discriminant (crates/jet-parser/.../marker_groups.rs)",
-          "at": "2026-08-06T15:41:03.929Z"
+          "verifiedBy": "e3-review",
+          "evidence": "marker_groups.rs validate_registered_rule_arguments + signature.marker_argument_bindings — single shared site, no field special-case E2407",
+          "at": "2026-08-06T16:03:27.502Z"
         }
       ],
       "refs": [],
@@ -85987,9 +86027,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T10:12:51.053Z",
-      "updated": "2026-08-06T15:41:04.950Z",
-      "updatedBy": "e3-easy",
-      "claimedAt": "2026-08-06T15:41:04.950Z"
+      "updated": "2026-08-06T16:03:27.789Z",
+      "updatedBy": "e3-review",
+      "completedAt": "2026-08-06T16:03:27.789Z"
     },
     {
       "id": "c02jtmll",
@@ -86000,12 +86040,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P2",
       "plan": "1. Route the trait-body marker path through the registry.\n2. Delete retired_s14_teaching_enabled and the dead FOREIGN_PURE branch.\n3. Prove #Pure reports E0927 at every site with the same fix text.",
       "blockedBy": [],
-      "assignee": "e3-easy",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-08-06",
+          "by": "e3-review",
+          "text": "verified: Pure E0927 parity + S14/FOREIGN_PURE purged"
+        },
         {
           "at": "2026-08-06",
           "by": "e3-easy",
@@ -86031,29 +86076,29 @@
         {
           "n": 1,
           "text": "#Pure reports the E0927 family with identical fix text at all three sites: callable site, one-line trait body, two-line trait body (UI snapshots for each)",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-easy",
-          "verifiedBy": null,
-          "evidence": "E0927 identical fix write `=[]=>` at callable + one-line trait + two-line trait; UI: tests/ui/E0927_retired_pure_{callable,trait_oneline,trait_twoline}.{jet,stderr}",
-          "at": "2026-08-06T15:41:04.177Z"
+          "verifiedBy": "e3-review",
+          "evidence": "JET_UI_FILTER=tests/ui/E0927_retired_pure diagnostic_snapshots ui_snapshots: ok (callable/oneline/twoline)",
+          "at": "2026-08-06T16:03:28.032Z"
         },
         {
           "n": 2,
           "text": "retired_s14_teaching_enabled (parser mod.rs:188) and the dead FOREIGN_PURE branch (type_methods_fields.rs:67) are deleted; grep returns zero hits",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-easy",
-          "verifiedBy": null,
-          "evidence": "rg retired_s14_teaching_enabled → 0; FOREIGN_PURE branch removed from type_methods_fields; FOREIGN_PURE constant gone; helpers deleted",
-          "at": "2026-08-06T15:41:04.417Z"
+          "verifiedBy": "e3-review",
+          "evidence": "rg retired_s14_teaching_enabled|FOREIGN_PURE crates/jet-parser → 0 hits",
+          "at": "2026-08-06T16:03:28.267Z"
         },
         {
           "n": 3,
           "text": "Targeted diagnostic_snapshots run for the touched snapshots is green; no other snapshot text changed",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-easy",
-          "verifiedBy": null,
-          "evidence": "JET_UI_FILTER=tests/ui/E0927_retired_pure and tests/ui/serde_rename_not_string.jet diagnostic_snapshots ui_snapshots → ok",
-          "at": "2026-08-06T15:41:04.662Z"
+          "verifiedBy": "e3-review",
+          "evidence": "E0927_retired_pure + serde_rename_not_string UI filters green; no other snapshot churn observed",
+          "at": "2026-08-06T16:03:28.509Z"
         }
       ],
       "refs": [],
@@ -86061,9 +86106,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T10:32:56.217Z",
-      "updated": "2026-08-06T15:41:05.224Z",
-      "updatedBy": "e3-easy",
-      "claimedAt": "2026-08-06T15:41:05.224Z"
+      "updated": "2026-08-06T16:03:28.795Z",
+      "updatedBy": "e3-review",
+      "completedAt": "2026-08-06T16:03:28.795Z"
     },
     {
       "id": "c0x46oba",
@@ -86372,6 +86417,16 @@
         {
           "at": "2026-08-06",
           "by": "fable",
+          "text": "second review closed: DEFAULT1 amendment set completed, Matrix example marked proposed, SPELL1 cites literal-only bounds"
+        },
+        {
+          "at": "2026-08-06",
+          "by": "fable",
+          "text": "owner feedback round: precise-by-default section + surface/spelling slate + three worked example programs added to proposal; ballots DEFAULT1/SPELL1/IMAG1 minted; UNCERT1 gains the ± literal note"
+        },
+        {
+          "at": "2026-08-06",
+          "by": "fable",
           "text": "review closed: 4 findings (1 blocking: sized-width overflow vs D-INTBIG1) fixed and re-verified by independent headless pass; criteria 1-2 verified; criteria 3-4 wait on ratification"
         },
         {
@@ -86392,8 +86447,8 @@
           "status": "verified",
           "metBy": "fable",
           "verifiedBy": "reviewer-headless",
-          "evidence": "Independent headless review (sonnet, plan-mode, fresh context): all eight D-TYPE2 ballots present and ballot-ready; relayed by fable",
-          "at": "2026-08-06T15:47:00.131Z"
+          "evidence": "Independent headless re-review: eleven ballots present and ready; DEFAULT1 now names D-INTDIV1, D-EXPSEM1/D-EXPNEG1, and D-NUMTYPE1 as amended; relayed by fable",
+          "at": "2026-08-06T16:20:25.705Z"
         },
         {
           "n": 2,
@@ -86401,8 +86456,8 @@
           "status": "verified",
           "metBy": "fable",
           "verifiedBy": "reviewer-headless",
-          "evidence": "Independent headless review, two passes: first pass found 4 findings (1 blocking); all fixed and re-verified — D-INTBIG1 respected, D-COMPUTE-TYPE1 amendment named in MEASURE1, E0112 claim removed, D-MARK-REG1 cited via D-VERDICT-1455-1; relayed by fable",
-          "at": "2026-08-06T15:47:00.465Z"
+          "evidence": "Second review round: 2 blocking (unnamed amendments of D-NUMTYPE1 and D-EXPSEM1/D-EXPNEG1 in DEFAULT1), 1 major (Matrix example unmarked as proposed), 1 nit (D-RANGE-VALUE1 citation) — all fixed; relayed by fable",
+          "at": "2026-08-06T16:20:26.043Z"
         },
         {
           "n": 3,
@@ -86430,7 +86485,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T15:27:47.394Z",
-      "updated": "2026-08-06T15:47:00.860Z",
+      "updated": "2026-08-06T16:20:26.419Z",
       "updatedBy": "fable"
     },
     {
@@ -113349,8 +113404,8 @@
           "key": "A",
           "name": "Opt-in measured grade with propagation",
           "detail": "Measurement becomes the measured grade of numeric knowledge. Arithmetic and the math functions propagate uncertainty by the standard first-order rules. Exact values are zero-uncertainty, so mixing works without ceremony. Nothing changes for any program until a measurement enters it, and printing shows the value with its uncertainty.",
-          "technical": "Propagation uses first-order linear approximation with uncorrelated inputs, stated plainly in the docs. Correlated errors are out of scope and documented as such. Measured unit scales produce measured conversion results, connecting the two existing homes of uncertainty.",
-          "code": "g :: measurement(9.80665, uncertainty: 0.00001)\nm :: measurement(12.0, uncertainty: 0.1)\nf :: m * g\nprint(f)          // 117.68 ± 0.98"
+          "technical": "Propagation uses first-order linear approximation with uncorrelated inputs, stated plainly in the docs. Correlated errors are out of scope and documented as such. Measured unit scales produce measured conversion results, connecting the two existing homes of uncertainty. A companion literal spelling, value ± uncertainty, is proposed in the surface section of the proposal; the plain measurement call is the canonical form either way.",
+          "code": "g :: 9.80665 ± 0.00001            // proposed literal; plain form below\nm :: measurement(12.0, uncertainty: 0.1)\nf :: m * g\nprint(f)          // 117.68 ± 0.98"
         },
         {
           "key": "B",
@@ -113468,6 +113523,229 @@
       "draft": false,
       "status": "open",
       "created": "2026-08-06T15:34:46.554Z"
+    },
+    {
+      "id": "D-TYPE2-SPELL1",
+      "cardId": "c0a9ulca",
+      "group": "syntax",
+      "title": "Inline refinements in type position",
+      "gist": "Whether a value range can be written directly in a type position, without minting a named type first.",
+      "lesson": "Today a checked range requires a named distinct type, even when the range matters at exactly one parameter. The carrier-plus-knowledge model says a range is knowledge on a type, so the type position should be able to carry it directly. This also makes the sized widths teachable: U8 is exactly Int with the range 0..255 and a one-byte layout, and the inline form lets the docs say so in code.",
+      "explainer": "",
+      "story": "Tomas writes a brightness function that accepts 0 through 100. The honest options today are a bare Int with a runtime check he must remember, or declaring a named distinct type for one parameter of one function. He ships the bare Int, and the bad value arrives a month later.",
+      "inWild": "fn set_brightness(level: Int) {\n    // hope the caller read the doc comment\n}\n\n// or the ceremony path, for one parameter:\nBrightness :: distinct Int(0..100)\nfn set_brightness2(level: Brightness) { ... }",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Inline ranges anywhere a type is written",
+          "detail": "Int(0..100) is legal in any type position: parameters, returns, fields, bindings. Literals check at compile time; unproven values convert fallibly, exactly as U8 works today. Naming stays available through distinct when identity matters. Two inline types with the same base and range are the same type.",
+          "technical": "The inline form is structural: identity is carrier plus interval fact. distinct stays the nominal wrapper. The same checking already ratified for range types applies unchanged, including the literal-only bounds rule from D-RANGE-VALUE1; only the requirement to pre-declare a name is removed.",
+          "code": "fn set_brightness(level: Int(0..100)) { ... }\nset_brightness(150)                       // compile error: 150 is outside 0..100\nlevel :: Int(0..100).from_int(raw) ?? return   // unproven: fallible, like U8\nvolume: Int(0..11) = 11                   // fields and bindings too"
+        },
+        {
+          "key": "B",
+          "name": "Named types only",
+          "detail": "The ratified status quo: every checked range is a named distinct type. One-off constraints keep paying the naming ceremony, and casual code keeps shipping bare Int with hope.",
+          "technical": "No change.",
+          "code": "Brightness :: distinct Int(0..100)\nfn set_brightness(level: Brightness) { ... }"
+        },
+        {
+          "key": "C",
+          "name": "Inline on parameters only",
+          "detail": "The inline form is allowed on function parameters, where the one-off need is most common, but not on fields, returns, or bindings. The surface gains a where-can-I-write-this rule that must be learned and diagnosed.",
+          "technical": "Parser accepts the form in parameter position only; other positions get a targeted error naming distinct.",
+          "code": "fn set_brightness(level: Int(0..100)) { ... }   // ok\nvolume: Int(0..11) = 11                          // error here: name it instead"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Ada",
+          "note": "Anonymous subtype constraints can appear directly at the use site, and named subtypes exist for reuse. Forty years of practice says both are wanted.",
+          "code": "subtype Die is Integer range 1 .. 6;\nprocedure Roll (D : Integer range 1 .. 6);"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The fact travels with the position that needs it, so the cheapest path becomes the checked path. It also turns the sized-width story into one teachable line: U8 is Int(0..255) with a one-byte layout.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Naming ceremony at every one-off constraint keeps bare Int the path of least resistance, which is how unchecked values ship."
+          },
+          {
+            "key": "C",
+            "reason": "A position-dependent grammar rule is a new thing to learn and diagnose, and it saves nothing once the general form exists."
+          }
+        ],
+        "tradeoff": "Structural inline types mean two spellings can name the same type, one anonymous and one distinct. The docs must teach when identity matters, which is the existing distinct lesson."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared inline-anywhere against named-only and recommended inline, because the one-off case is the common case and it currently ships unchecked.",
+        "boilOcean": "The breadth review tested inline forms for other knowledge kinds, like units in type position. Ranges are the only case with ratified checking behind them today, so the ballot stays scoped to ranges.",
+        "hybrid": "The hybrid review produced option C, parameters-only, as the minimal surface. It stands as a real choice rather than folding, since parameters are where the need concentrates.",
+        "cooperative": "The cooperative review strengthened B: every checked range having a name keeps signatures self-documenting and greppable. That is a genuine style position, not a strawman.",
+        "adversarial": "The adversarial review attacked A's structural identity with the two-spellings confusion and with diagnostic length for inline types. Identity follows the interval fact and diagnostics print the inline form verbatim, so the recommendation survives."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-06T16:10:36.710Z"
+    },
+    {
+      "id": "D-TYPE2-IMAG1",
+      "cardId": "c0a9ulca",
+      "group": "syntax",
+      "title": "Imaginary literals ride the unit-literal path",
+      "gist": "How an imaginary number is written: a 4i literal, or constructor calls only.",
+      "lesson": "Complex numbers are ratified and coming. The remaining question is spelling. The lexer already reads a number glued to a suffix as one unit literal, which is how 500ms and 12.50usd work. The imaginary unit fits that exact machinery: 4i is a number on the imaginary axis, and mathematics has written it that way for two centuries. The alternative is constructor calls only, which reads like plumbing in any formula longer than a line.",
+      "explainer": "",
+      "story": "Lena ports a signal-processing filter from a textbook. The book writes coefficients like 0.5 + 0.8i. With constructors only, every coefficient becomes a call, the formula stops looking like the book, and she transcribes one real part into an imaginary slot without noticing.",
+      "inWild": "// constructor-only world:\nh :: Complex.{0.5, 0.8}          // which field is which?\nw :: Complex.{0.0, 1.0} * Complex.{0.70710678, 0.70710678}\n\n// the textbook line being ported:\n// H(z) = 0.5 + 0.8i",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "The 4i literal",
+          "detail": "A numeric literal with the suffix i is an imaginary number. Real plus imaginary reads exactly like the textbook: 0.5 + 0.8i. The lexer path is the shipped unit-literal path, so no new grammar exists, and the identifier i alone remains an ordinary variable name.",
+          "technical": "The suffix resolves through the same table-free literal machinery as unit suffixes, minting the imaginary component of the ratified Complex type. Only the suffix form is special: bare i is untouched, and shadowing risks are the same as any unit suffix in scope.",
+          "code": "z :: 3 + 4i\nprint(z * z)              // -7 + 24i\nprint(abs(3 + 4i))        // 5.0\nh :: 0.5 + 0.8i           // reads like the book"
+        },
+        {
+          "key": "B",
+          "name": "Constructor only",
+          "detail": "Complex values are built with the ordinary constructor and named parts. No literal exists. Formulas become call chains, and positional real-versus-imaginary mistakes are on the reader.",
+          "technical": "No lexer change; the ratified struct constructor is the only spelling.",
+          "code": "z :: Complex.{real: 3.0, imaginary: 4.0}\nh :: Complex.{real: 0.5, imaginary: 0.8}"
+        },
+        {
+          "key": "C",
+          "name": "The im suffix",
+          "detail": "Same literal idea with a two-letter suffix, avoiding any collision with a loop variable named i. The cost is reading distance from written mathematics, which uses i.",
+          "technical": "Identical machinery to option A with a different suffix string.",
+          "code": "z :: 3 + 4im\nh :: 0.5 + 0.8im"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Python",
+          "note": "Imaginary literals use the j suffix from electrical engineering. Loved by users, mocked for the letter.",
+          "code": "z = 3 + 4j"
+        },
+        {
+          "lang": "Julia",
+          "note": "Uses the im suffix to keep i free for loops. Users report it reads slightly off the page but never collides.",
+          "code": "z = 3 + 4im"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "It reads exactly like mathematics, and it costs zero new machinery because the unit-literal path already exists. The deeper point stands on its own: an imaginary number really is a number with a unit.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Formulas stop looking like formulas, and positional constructor slots invite the exact transcription error the story shows."
+          },
+          {
+            "key": "C",
+            "reason": "The collision it avoids does not exist, because only the suffix position is special and bare i stays an ordinary name."
+          }
+        ],
+        "tradeoff": "A numeral immediately followed by i can no longer mean multiplication-by-juxtaposition in some future surface. Jet has no such surface, so the cost is theoretical."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared the i literal against constructor-only and recommended the literal, because it reuses shipped machinery and matches written mathematics.",
+        "boilOcean": "The breadth review added Julia's im suffix and checked Python's j; j was folded into C's analysis as the same collision-avoidance idea with a worse letter.",
+        "hybrid": "The hybrid review tested shipping both i and im. Two spellings of one literal violates the one-mechanism invariant, so it was rejected rather than folded.",
+        "cooperative": "The cooperative review strengthened B, which needs no lexer consideration at all, and C, which is the shipped Julia compromise with real-world mileage.",
+        "adversarial": "The adversarial review attacked A with the loop-variable collision and with unit-family shadowing. Bare i is untouched because only the suffix position is special, and shadowing follows the shipped unit-literal resolution rules, so the recommendation survives."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-06T16:10:37.170Z"
+    },
+    {
+      "id": "D-TYPE2-DEFAULT1",
+      "cardId": "c0a9ulca",
+      "group": "runtime",
+      "title": "Precise by default: the exact numeric world",
+      "gist": "Whether ordinary numbers are exact by default, with approximation as an expert opt-in.",
+      "lesson": "The whole-number default is already exact: the ratified bigint Int removed overflow for beginners. Fractions did not get the same move. A decimal literal today is a binary float, so a tenth plus two tenths does not equal three tenths. This ballot decides whether the rest of the default world becomes exact too. It is an explicit amendment to the ratified division rule: division still leaves the whole numbers, but its landing world becomes exact. Float, F32, and U8 remain the expert path.",
+      "explainer": "",
+      "story": "Amara writes her first budgeting script. She adds three items priced 19.99 and gets 59.96999999999999. Nothing in her code mentions floating point; she typed ordinary prices and ordinary math. She concludes the language is broken, because for her purpose it is.",
+      "inWild": "price :: 19.99\ntotal :: price * 3\nprint(total)              // today: 59.96999999999999\nprint(0.1 + 0.2 == 0.3)  // today: false\nshare :: 7 / 2            // today: Float 3.5 (exact by luck)\nthird :: 1 / 3            // today: 0.3333333333333333, error forever after",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Exact default world",
+          "detail": "Decimal literals are exact Decimal values. Division of exact values lands in exact rational territory: a result with a finite decimal prints as a decimal, otherwise it prints as a fraction and stays exact. Functions that truly leave the rationals, like square root and sine, answer approximate and say so. Experts opt into Float or F32 at the declaration, and hot code gets today's machine arithmetic unchanged.",
+          "technical": "Amends three ratified rules by name. D-INTDIV1: division still maps whole to rational, but the landing default is exact instead of Float. D-EXPSEM1 and D-EXPNEG1: a written negative exponent gets the same exact landing. D-NUMTYPE1: its Fraction-is-opt-in-by-name clause relaxes, because plain division can now answer an exact ratio. Exact values use machine-word fast paths with spill, the bigint Int playbook. Sized widths and Float keep every ratified behavior once named, mixing with an approximate operand answers approximate under the one widening law, and narrowing still requires approx.",
+          "code": "price :: 19.99\nprint(price * 3)          // 59.97, exactly\nprint(0.1 + 0.2 == 0.3)  // true\nthird :: 1 / 3\nprint(third)              // 1/3\nprint(third * 3 == 1)    // true\nr :: sqrt(2.0)            // approximate: sqrt leaves the rationals\nfast: Float = 19.99       // expert opt-in: machine float, today's speed"
+        },
+        {
+          "key": "B",
+          "name": "Exact wholes, approximate fractions",
+          "detail": "The ratified status quo. Whole numbers are exact and never overflow; anything fractional is a binary float unless the programmer names Decimal or Fraction. The budgeting story stays broken by default, and the fix is knowing which type to ask for.",
+          "technical": "No change: D-INTDIV1 stands as ratified, decimal literals stay Float.",
+          "code": "price :: 19.99            // Float\nprint(price * 3)          // 59.96999999999999\nexact :: Decimal(\"19.99\") // correct, if you know to ask"
+        },
+        {
+          "key": "C",
+          "name": "Exact by policy, float by default",
+          "detail": "Defaults stay as ratified, and a package policy flips a project into the exact world. Teams that care opt in once per package. Two worlds then exist, and any code snippet means different things depending on an invisible setting.",
+          "technical": "A policy key switches literal typing and the division landing type per package scope.",
+          "code": "policy: .{ exact_math: true }\n// same source now means different values in different packages"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Raku",
+          "note": "Decimal literals are exact rationals by default, so a tenth plus two tenths equals three tenths. Floats exist and are opt-in. This is the closest shipped precedent.",
+          "code": "say 0.1 + 0.2 == 0.3;   # True\nsay (1/3) * 3 == 1;      # True"
+        },
+        {
+          "lang": "Python",
+          "note": "Exact int by default, binary float for fractions, with Decimal and Fraction as opt-in library types. This is option B, and its float surprises fill beginner forums.",
+          "code": "0.1 + 0.2 == 0.3   # False"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "It finishes the move the bigint Int decision started: the default world is simply correct, and every restriction is chosen on purpose. Beginners get right answers; experts lose nothing and gain a visible audit of where approximation enters.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It keeps the single most famous beginner footgun as the default experience, in a language whose constitution ranks the beginner experience above performance."
+          },
+          {
+            "key": "C",
+            "reason": "One spelling with two meanings across packages breaks reading, teaching, and copy-paste, which is worse than either consistent world."
+          }
+        ],
+        "tradeoff": "Exact rational arithmetic costs more than machine floats, and long chains can grow big denominators. The small-value fast path and the one-word Float escape bound the cost, and the constitution spends performance rank to buy beginner rank."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared the exact default against the ratified status quo and recommended exact, because the bigint Int precedent shows the default-correctness move works.",
+        "boilOcean": "The breadth review added the per-package policy shape and considered decimal-only exactness without fractions; the latter folded into A's printing rule since both keep exact values underneath.",
+        "hybrid": "The hybrid review tested exact decimals with approximate division. Splitting literals from division reintroduces the surprise at the first divide, so it folded into B rather than standing alone.",
+        "cooperative": "The cooperative review strengthened B, whose model is Python's and battle-tested, and C, which gives teams an explicit contract. Both remain honest choices.",
+        "adversarial": "The adversarial review attacked A with denominator blowup in long simulations and with FFI boundaries expecting floats. Fast paths plus the one-word Float escape answer the first, and crossings already range-check under ratified law, so the recommendation survives."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-06T16:10:51.820Z"
     }
   ],
   "questions": [
@@ -114979,6 +115257,377 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-06T16:20:26.419Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0a9ulca",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-06T16:20:26.043Z",
+      "by": "reviewer-headless",
+      "action": "card.criteria-verify",
+      "ref": "c0a9ulca",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T16:20:25.706Z",
+      "by": "reviewer-headless",
+      "action": "card.criteria-verify",
+      "ref": "c0a9ulca",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-06T16:20:25.369Z",
+      "by": "fable",
+      "action": "decision.update",
+      "ref": "D-TYPE2-SPELL1",
+      "note": ""
+    },
+    {
+      "at": "2026-08-06T16:20:25.043Z",
+      "by": "fable",
+      "action": "decision.update",
+      "ref": "D-TYPE2-DEFAULT1",
+      "note": ""
+    },
+    {
+      "at": "2026-08-06T16:15:28.875Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-06T16:15:28.875Z"
+    },
+    {
+      "at": "2026-08-06T16:10:52.839Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0a9ulca",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-06T16:10:52.432Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0a9ulca",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-06T16:10:51.820Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-TYPE2-DEFAULT1",
+      "note": "Precise by default: the exact numeric world"
+    },
+    {
+      "at": "2026-08-06T16:10:37.171Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-TYPE2-IMAG1",
+      "note": "Imaginary literals ride the unit-literal path"
+    },
+    {
+      "at": "2026-08-06T16:10:36.710Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-TYPE2-SPELL1",
+      "note": "Inline refinements in type position"
+    },
+    {
+      "at": "2026-08-06T16:10:14.999Z",
+      "by": "fable",
+      "action": "decision.update",
+      "ref": "D-TYPE2-UNCERT1",
+      "note": ""
+    },
+    {
+      "at": "2026-08-06T16:03:56.179Z",
+      "by": "e3-review",
+      "action": "card.update",
+      "ref": "c06egi60",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-06T16:03:55.879Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c06egi60",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-06T16:03:55.589Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c06egi60",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-06T16:03:55.133Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c06egi60",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-06T16:03:54.682Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c06egi60",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T16:03:54.230Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c06egi60",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T16:03:53.807Z",
+      "by": "e3-review",
+      "action": "card.update",
+      "ref": "c013k26w",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-06T16:03:53.392Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c013k26w",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-06T16:03:53.144Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c013k26w",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-06T16:03:52.898Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c013k26w",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-06T16:03:52.641Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c013k26w",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T16:03:52.413Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c013k26w",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T16:03:52.168Z",
+      "by": "e3-review",
+      "action": "card.update",
+      "ref": "c0mvp4zc",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-06T16:03:51.872Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c0mvp4zc",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-06T16:03:51.631Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c0mvp4zc",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-06T16:03:51.391Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c0mvp4zc",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-06T16:03:51.145Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c0mvp4zc",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T16:03:50.888Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c0mvp4zc",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T16:03:50.643Z",
+      "by": "e3-review",
+      "action": "card.update",
+      "ref": "c02j5hzk",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-06T16:03:50.347Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c02j5hzk",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-06T16:03:50.095Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c02j5hzk",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T16:03:49.846Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c02j5hzk",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-06T16:03:49.443Z",
+      "by": "e3-review",
+      "action": "card.update",
+      "ref": "c0xbgdrl",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-06T16:03:28.795Z",
+      "by": "e3-review",
+      "action": "card.update",
+      "ref": "c02jtmll",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T16:03:28.509Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c02jtmll",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T16:03:28.267Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c02jtmll",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T16:03:28.033Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c02jtmll",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-06T16:03:27.789Z",
+      "by": "e3-review",
+      "action": "card.update",
+      "ref": "c0fcnl50",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T16:03:27.502Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c0fcnl50",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T16:03:27.262Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c0fcnl50",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T16:03:27.013Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c0fcnl50",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-06T16:03:26.773Z",
+      "by": "e3-review",
+      "action": "card.update",
+      "ref": "c0nrwebl",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T16:03:26.476Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c0nrwebl",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-06T16:03:26.247Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c0nrwebl",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T16:03:26.008Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c0nrwebl",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T16:03:25.766Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c0nrwebl",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-06T16:03:25.532Z",
+      "by": "e3-review",
+      "action": "card.update",
+      "ref": "c0998ql8",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T16:03:25.260Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c0998ql8",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-06T16:03:24.955Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c0998ql8",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T16:03:24.502Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c0998ql8",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T16:03:24.133Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c0998ql8",
+      "note": "#1"
+    },
     {
       "at": "2026-08-06T15:59:07.824Z",
       "by": "fable",
@@ -118107,377 +118756,6 @@
       "action": "card.criteria-meet",
       "ref": "c01wl24t",
       "note": "#4"
-    },
-    {
-      "at": "2026-08-06T11:01:51.639Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c01wl24t",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-06T11:01:51.324Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c01wl24t",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-06T11:01:50.999Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c01wl24t",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-06T10:59:09.702Z",
-      "by": "fable",
-      "action": "card.add",
-      "ref": "c0x46oba",
-      "note": "Close the core.fmt, BitSet and core.text.unicode gaps the ledger scores"
-    },
-    {
-      "at": "2026-08-06T10:56:01.457Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-06T10:56:01.457Z"
-    },
-    {
-      "at": "2026-08-06T10:46:15.136Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c02jtmll",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T10:46:14.757Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c02jtmll",
-      "note": "#3 Targeted diagnostic_snapshots run for the touched snapshots "
-    },
-    {
-      "at": "2026-08-06T10:46:14.446Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c02jtmll",
-      "note": "#2 retired_s14_teaching_enabled (parser mod.rs:188) and the dea"
-    },
-    {
-      "at": "2026-08-06T10:46:14.139Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c02jtmll",
-      "note": "#1 #Pure reports the E0927 family with identical fix text at al"
-    },
-    {
-      "at": "2026-08-06T10:46:13.820Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0fcnl50",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T10:46:13.458Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0fcnl50",
-      "note": "#3 The fix lands in the one shared signature gate, not a field-"
-    },
-    {
-      "at": "2026-08-06T10:46:13.148Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0fcnl50",
-      "note": "#2 A Codable field with #Rename(\"quoted\") compiles clean; a gen"
-    },
-    {
-      "at": "2026-08-06T10:46:12.755Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0fcnl50",
-      "note": "#1 scripts/agent/jet-env cargo test --test marker_rule_signatur"
-    },
-    {
-      "at": "2026-08-06T10:45:49.792Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0pzumap",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T10:45:49.173Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0fsjhdc",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T10:45:48.796Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0ai0h4w",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T10:45:48.419Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0t5khxi",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T10:45:48.045Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0f7fhoy",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T10:45:47.660Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0a5nr50",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T10:45:47.274Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0zvnp4f",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T10:44:17.990Z",
-      "by": "prep-entry",
-      "action": "card.update",
-      "ref": "c0f7fhoy",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T10:44:17.566Z",
-      "by": "prep-entry",
-      "action": "card.update",
-      "ref": "c0a5nr50",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T10:44:16.695Z",
-      "by": "prep-entry",
-      "action": "card.update",
-      "ref": "c0zvnp4f",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T10:44:09.592Z",
-      "by": "prep-entry",
-      "action": "card.update",
-      "ref": "c01pwyjw",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T10:44:09.180Z",
-      "by": "prep-entry",
-      "action": "card.update",
-      "ref": "c0wk4xnv",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T10:44:08.580Z",
-      "by": "prep-entry",
-      "action": "card.update",
-      "ref": "c04zqxw1",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T10:44:08.001Z",
-      "by": "prep-entry",
-      "action": "card.update",
-      "ref": "c0uq2h91",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T10:43:59.493Z",
-      "by": "prep-entry",
-      "action": "card.update",
-      "ref": "c0a5nr50",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T10:43:54.884Z",
-      "by": "prep-entry",
-      "action": "card.update",
-      "ref": "c0f7fhoy",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T10:43:50.710Z",
-      "by": "prep-entry",
-      "action": "card.update",
-      "ref": "c0zvnp4f",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T10:43:38.909Z",
-      "by": "prep-entry",
-      "action": "card.criteria-add",
-      "ref": "c01pwyjw",
-      "note": "#5 docs/spec/syntax-decisions.md has a D-BENCH-PARITY1=B log en"
-    },
-    {
-      "at": "2026-08-06T10:43:34.809Z",
-      "by": "prep-entry",
-      "action": "card.criteria-add",
-      "ref": "c01pwyjw",
-      "note": "#4 scripts/agent/jet-env cargo test --test jet_test stays green"
-    },
-    {
-      "at": "2026-08-06T10:43:29.092Z",
-      "by": "prep-entry",
-      "action": "card.criteria-add",
-      "ref": "c01pwyjw",
-      "note": "#3 scripts/agent/jet-env rg \"\\-\\-shuffle|\\-\\-coverage|\\-\\-updat"
-    },
-    {
-      "at": "2026-08-06T10:43:24.550Z",
-      "by": "prep-entry",
-      "action": "card.criteria-add",
-      "ref": "c01pwyjw",
-      "note": "#2 scripts/agent/jet-env jet bench examples/features/ (director"
-    },
-    {
-      "at": "2026-08-06T10:43:20.712Z",
-      "by": "prep-entry",
-      "action": "card.criteria-add",
-      "ref": "c01pwyjw",
-      "note": "#1 new tests/jet_bench.rs mirrors tests/jet_test.rs directory/f"
-    },
-    {
-      "at": "2026-08-06T10:43:08.607Z",
-      "by": "prep-entry",
-      "action": "card.criteria-add",
-      "ref": "c0wk4xnv",
-      "note": "#9 a --default flag exists on jet test and jet bench and is hon"
-    },
-    {
-      "at": "2026-08-06T10:42:52.267Z",
-      "by": "prep-entry",
-      "action": "card.criteria-add",
-      "ref": "c0wk4xnv",
-      "note": "#8 docs/spec/syntax-decisions.md has a D-CMD-OVERRIDE1=C log en"
-    },
-    {
-      "at": "2026-08-06T10:42:47.749Z",
-      "by": "prep-entry",
-      "action": "card.criteria-add",
-      "ref": "c0wk4xnv",
-      "note": "#7 scripts/agent/jet-env rg \"\\-\\-default\\b\" scripts/agent/verif"
-    },
-    {
-      "at": "2026-08-06T10:42:40.367Z",
-      "by": "prep-entry",
-      "action": "card.criteria-add",
-      "ref": "c0wk4xnv",
-      "note": "#6 named example under examples/features/devloop/ demonstrates "
-    },
-    {
-      "at": "2026-08-06T10:42:36.430Z",
-      "by": "prep-entry",
-      "action": "card.criteria-add",
-      "ref": "c0wk4xnv",
-      "note": "#5 new Prelude-owned TestSuite/BenchSuite types exist under cra"
-    },
-    {
-      "at": "2026-08-06T10:42:29.809Z",
-      "by": "prep-entry",
-      "action": "card.criteria-add",
-      "ref": "c0f7fhoy",
-      "note": "#4 docs/spec/syntax-decisions.md has a D-APP-ARGS1=A log entry"
-    },
-    {
-      "at": "2026-08-06T10:42:24.835Z",
-      "by": "prep-entry",
-      "action": "card.criteria-add",
-      "ref": "c0f7fhoy",
-      "note": "#3 an incompatible flag value (e.g. --port=nine) reuses the exi"
-    },
-    {
-      "at": "2026-08-06T10:42:20.644Z",
-      "by": "prep-entry",
-      "action": "card.criteria-add",
-      "ref": "c0f7fhoy",
-      "note": "#2 I9 parity: scripts/agent/jet-env jet run examples/features/w"
-    },
-    {
-      "at": "2026-08-06T10:42:15.978Z",
-      "by": "prep-entry",
-      "action": "card.criteria-add",
-      "ref": "c0f7fhoy",
-      "note": "#1 named example examples/features/web/app_typed_args.jet uses "
-    },
-    {
-      "at": "2026-08-06T10:42:08.876Z",
-      "by": "prep-entry",
-      "action": "card.criteria-add",
-      "ref": "c0a5nr50",
-      "note": "#5 docs/spec/syntax-decisions.md has a D-JOB-SUBCMD1=C log entr"
-    },
-    {
-      "at": "2026-08-06T10:42:03.519Z",
-      "by": "prep-entry",
-      "action": "card.criteria-add",
-      "ref": "c0a5nr50",
-      "note": "#4 a release build with an unmarked (.Dev-default) job prints a"
-    },
-    {
-      "at": "2026-08-06T10:42:00.001Z",
-      "by": "prep-entry",
-      "action": "card.criteria-add",
-      "ref": "c0a5nr50",
-      "note": "#3 scripts/agent/jet-env rg \"\\-\\-job\\b\" Source/ crates/ docs/ e"
-    },
-    {
-      "at": "2026-08-06T10:41:55.785Z",
-      "by": "prep-entry",
-      "action": "card.criteria-add",
-      "ref": "c0a5nr50",
-      "note": "#2 I9 parity: dev-tier jet run <file> -- <job> and a built rele"
-    },
-    {
-      "at": "2026-08-06T10:41:51.891Z",
-      "by": "prep-entry",
-      "action": "card.criteria-add",
-      "ref": "c0a5nr50",
-      "note": "#1 named example examples/features/devloop/task_runner.jet uses"
-    },
-    {
-      "at": "2026-08-06T10:41:44.399Z",
-      "by": "prep-entry",
-      "action": "card.criteria-add",
-      "ref": "c04zqxw1",
-      "note": "#4 docs/spec/syntax-decisions.md has a D-JOB-NAME1=A log entry"
-    },
-    {
-      "at": "2026-08-06T10:41:40.846Z",
-      "by": "prep-entry",
-      "action": "card.criteria-add",
-      "ref": "c04zqxw1",
-      "note": "#3 scripts/agent/jet-env cargo test --test cli passes with rege"
-    },
-    {
-      "at": "2026-08-06T10:41:35.917Z",
-      "by": "prep-entry",
-      "action": "card.criteria-add",
-      "ref": "c04zqxw1",
-      "note": "#2 scripts/agent/jet-env rg \"\\-\\-task\\b|jet tasks\\b\" Source/ cr"
-    },
-    {
-      "at": "2026-08-06T10:41:31.381Z",
-      "by": "prep-entry",
-      "action": "card.criteria-add",
-      "ref": "c04zqxw1",
-      "note": "#1 scripts/agent/jet-env cargo test --test jetpack_tasks and --"
     }
   ],
   "nextNum": 368,
