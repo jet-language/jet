@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1495,
-    "rev": 26202,
+    "rev": 26203,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -83255,8 +83255,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T02:13:30.006Z",
-      "updated": "2026-08-06T10:27:38.414Z",
-      "updatedBy": "prep-core-a"
+      "updated": "2026-08-06T11:40:13.773Z",
+      "updatedBy": "fable"
     },
     {
       "id": "c0xbgdrl",
@@ -110593,6 +110593,108 @@
       "created": "2026-08-06T11:34:44.495Z",
       "outcome": "A",
       "ratifiedAt": "2026-08-06"
+    },
+    {
+      "id": "D-TIMERES1",
+      "cardId": "c0s7isu9",
+      "group": "stdlib",
+      "title": "How fine a Duration measures",
+      "gist": "The smallest slice of time a Duration can hold.",
+      "lesson": "A Duration in Jet counts whole milliseconds. That is the smallest slice it can hold, so a Duration cannot say 250 microseconds, and `core.time` has no way to build one. Eleven compared languages all measure finer. This choice decides how fine Jet measures, and it cannot be changed later without changing every stored Duration.",
+      "explainer": "",
+      "story": "Mira times a database call to tune an index. The call takes 400 microseconds. Jet reports it as 0 milliseconds, so every run looks the same and she has nothing to tune against. She drops to raw integers and carries her own unit by hand.",
+      "inWild": "// Timing a fast operation. Every measurement lands on zero.\nfn probe() => Duration {\n    started :: time.start()\n    lookup(index, key)\n    return started.elapsed()   // 0ms for anything under a millisecond\n}\n\n// Today the workaround is to leave Duration behind entirely.\nelapsed_us :: started.elapsed().in(Unit.Milliseconds) ?? 0\n",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Nanoseconds, in a 64-bit count",
+          "detail": "A Duration counts whole nanoseconds. It reaches about 292 years, which covers timeouts, benchmarks and retry schedules, and it matches what an operating system clock actually reports. Gain: every measurement a program can take is representable, and no unit is lost on the way in. Loss: a Duration can no longer hold a span longer than 292 years, so calendar-scale arithmetic must use dates rather than durations.",
+          "technical": "`Duration` becomes an i64 nanosecond count. `DurationUnit` gains `Nanoseconds` and `Microseconds`. `core.time` gains `nanoseconds` and `microseconds` constructors beside the existing four. `in(unit)` keeps returning a whole number and keeps refusing a span that leaves the range. Existing millisecond values scale by 1_000_000 at construction; no stored format changes, because Duration is not serialized as a raw count.",
+          "code": "gap :: time.microseconds(400)\nprint(gap.in(Unit.Nanoseconds) ?? 0)   // 400000\nprint(gap.in(Unit.Milliseconds) ?? 0)  // 0, still whole\n\nbudget :: time.hours(2)\nprint(budget.in(Unit.Seconds) ?? 0)     // 7200"
+        },
+        {
+          "key": "B",
+          "name": "Microseconds, in a 64-bit count",
+          "detail": "A Duration counts whole microseconds. It reaches about 292 thousand years, so calendar-scale spans stay representable. Gain: fine enough for almost every measurement a program takes, with a range nobody will hit. Loss: nanosecond timing is still lost, which is the resolution a profiler and a hardware clock report, so benchmark work still rounds.",
+          "technical": "`Duration` becomes an i64 microsecond count. `DurationUnit` gains `Microseconds`. `core.time` gains a `microseconds` constructor. A nanosecond reading from the clock is rounded to the nearest microsecond on the way in, which is a lossy conversion the caller cannot see.",
+          "code": "gap :: time.microseconds(400)\nprint(gap.in(Unit.Microseconds) ?? 0)   // 400\n\n// A nanosecond reading rounds on the way in.\nprint(time.start().elapsed().in(Unit.Microseconds) ?? 0)"
+        },
+        {
+          "key": "C",
+          "name": "Two numbers: whole seconds and a nanosecond part",
+          "detail": "A Duration carries a whole-second count and a nanosecond remainder, the way an operating system reports time. Gain: full nanosecond resolution with no range limit worth worrying about, so both a benchmark and a century are exact. Loss: a Duration stops being one number, so comparing and adding cost more, and the type is harder to explain than a count.",
+          "technical": "`Duration` becomes a struct of an i64 second count and a u32 nanosecond remainder, matching the shape of a POSIX timespec. Arithmetic normalizes the remainder. `in(unit)` keeps its contract.",
+          "code": "gap :: time.nanoseconds(400)\nprint(gap.in(Unit.Nanoseconds) ?? 0)    // 400\n\nlong :: time.hours(1_000_000)\nprint(long.in(Unit.Hours) ?? 0)          // 1000000, still exact"
+        },
+        {
+          "key": "D",
+          "name": "Keep milliseconds, and record the decline",
+          "detail": "Duration stays a whole-millisecond count. Sub-millisecond timing is recorded as a deliberate decline with this decision id, so it stops being scored as a gap. Gain: nothing changes, and the type stays the simplest thing it could be. Loss: Jet cannot express a measurement that eleven compared languages can, and anyone timing a fast operation leaves the type behind and carries raw integers.",
+          "technical": "No change. `microseconds` and `nanoseconds` are marked declined against this decision id in the Core surface ledger.",
+          "code": "// Timing a fast call stays outside the type.\nstarted :: time.start()\nlookup(index, key)\nprint(started.elapsed().in(Unit.Milliseconds) ?? 0)   // 0"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "A duration is a 64-bit nanosecond count, reaching about 292 years.",
+          "code": "d := 400 * time.Microsecond"
+        },
+        {
+          "lang": "Rust",
+          "note": "A duration is whole seconds plus a nanosecond remainder, with no practical range limit.",
+          "code": "Duration::from_micros(400)"
+        },
+        {
+          "lang": "Python",
+          "note": "A timedelta stores days, seconds and microseconds, so microsecond is the finest slice.",
+          "code": "timedelta(microseconds=400)"
+        },
+        {
+          "lang": "Swift",
+          "note": "A duration carries seconds and attoseconds, finer than a nanosecond.",
+          "code": "Duration.microseconds(400)"
+        },
+        {
+          "lang": "C#",
+          "note": "A TimeSpan counts 100-nanosecond ticks.",
+          "code": "TimeSpan.FromMicroseconds(400)"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A nanosecond count is what the operating system clock reports, so nothing is lost between the clock and the type. It stays one number, which keeps comparison and arithmetic cheap and the type easy to explain. The 292-year reach covers every span a Duration is for; a longer span is a calendar question, and dates answer that.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It rounds the clock reading on the way in, and the caller cannot see it happen. Benchmark work is exactly where that matters."
+          },
+          {
+            "key": "C",
+            "reason": "It gives up one number for a range nobody reaches. Two fields cost more on every compare and add, and are harder to explain."
+          },
+          {
+            "key": "D",
+            "reason": "It leaves Jet unable to express a measurement all eleven compared languages can, and pushes timing work out of the type entirely."
+          }
+        ],
+        "tradeoff": "A Duration can no longer hold more than about 292 years. That is accepted because a span that long is a calendar question, and `Date` answers it exactly."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared nanosecond, microsecond and two-field representations against keeping milliseconds, and recommended nanoseconds for matching what the clock reports.",
+        "boilOcean": "The breadth review also tested a floating-point second count and a unit carried alongside the number. The float was dropped because it loses exactness at large spans, and the carried unit because it makes two durations of the same length compare unequal.",
+        "hybrid": "The hybrid review tested a nanosecond count that widens to two fields past its range. It was rejected because a type that changes shape at a threshold is harder to reason about than either shape alone.",
+        "cooperative": "The cooperative review strengthened every option, giving D an explicit decline id and giving C the timespec shape that makes it genuinely exact at both ends.",
+        "adversarial": "The adversarial review attacked the 292-year reach with scheduling and archival cases. Those are calendar spans measured between dates, not durations, so the limit survives."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-06T11:40:13.772Z"
     }
   ],
   "questions": [
@@ -112037,6 +112139,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-06T11:40:13.773Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-TIMERES1",
+      "note": "How fine a Duration measures"
+    },
     {
       "at": "2026-08-06T11:38:04.271Z",
       "by": "bd-verify",
@@ -115529,13 +115638,6 @@
       "action": "card.criteria-meet",
       "ref": "c0c74q4f",
       "note": "#3"
-    },
-    {
-      "at": "2026-08-06T02:05:46.722Z",
-      "by": "bd-ops",
-      "action": "card.criteria-meet",
-      "ref": "c0c74q4f",
-      "note": "#2"
     }
   ],
   "nextNum": 368,
