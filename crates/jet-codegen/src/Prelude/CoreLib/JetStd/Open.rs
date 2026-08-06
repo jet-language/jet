@@ -301,9 +301,56 @@ mod jet_std {
                 .flatten()
                 .map(|(_, end)| end as i64)
         }
+
+        /// Named capture pairs as `[[name, value], …]` (unnamed groups omitted).
+        pub fn named_captures(&self) -> Vec<Vec<String>> {
+            self.names
+                .iter()
+                .enumerate()
+                .filter_map(|(i, n)| {
+                    let name = n.as_ref()?.clone();
+                    let value = self.group(i as i64)?;
+                    Some(vec![name, value])
+                })
+                .collect()
+        }
     }
 
     impl JetRegex {
+        pub fn pattern(&self) -> String {
+            self.pattern.clone()
+        }
+
+        pub fn source(&self) -> String {
+            self.pattern.clone()
+        }
+
+        pub fn flags(&self) -> String {
+            let mut s = String::new();
+            if self.flags.case_insensitive {
+                s.push('i');
+            }
+            if self.flags.multiline {
+                s.push('m');
+            }
+            if self.flags.dotall {
+                s.push('s');
+            }
+            s
+        }
+
+        pub fn options(&self) -> String {
+            self.flags()
+        }
+
+        pub fn names(&self) -> Vec<String> {
+            self.group_names.iter().filter_map(|n| n.clone()).collect()
+        }
+
+        pub fn count(&self, text: &str) -> i64 {
+            self.matches(text).len() as i64
+        }
+
         pub fn is_match(&self, text: &str) -> bool {
             self.find_match(text).is_some()
         }
@@ -519,6 +566,21 @@ mod jet_std {
             multiline,
             dotall,
         }
+    }
+
+    /// Escape regex metacharacters so `text` matches literally.
+    pub fn jet_regex_escape(text: &str) -> String {
+        let mut out = String::with_capacity(text.len());
+        for ch in text.chars() {
+            if matches!(
+                ch,
+                '\\' | '.' | '+' | '*' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '^' | '$' | '|'
+            ) {
+                out.push('\\');
+            }
+            out.push(ch);
+        }
+        out
     }
 
     pub fn jet_regex_compile(pattern: &str) -> Result<JetRegex, String> {

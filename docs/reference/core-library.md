@@ -2498,6 +2498,7 @@ fn run() {
 | Call | Returns | Does |
 |------|---------|------|
 | `re.flags(case_insensitive, multiline, dotall)` | `RegexFlags` | typed flag set |
+| `re.escape(text)` | `String` | escape metacharacters for a literal match |
 | `re.compile(pat)` | `Regex ? String` | parse once with default flags |
 | `re.compile_with(pat, flags)` | `Regex ? String` | parse once with typed flags |
 | `re.is_match(pat, text)` | `Bool ? String` | whether `pat` occurs anywhere |
@@ -2512,9 +2513,14 @@ fn run() {
 | `rx.is_match(text)` | `Bool` | reuse a compiled regex |
 | `rx.match(text)` | `Match?` | first match with captures/spans |
 | `rx.matches(text)` | `[Match]` | all matches with captures/spans |
+| `rx.pattern()` / `rx.source()` | `String` | raw pattern text |
+| `rx.flags()` / `rx.options()` | `String` | active flag letters (`i`/`m`/`s`) |
+| `rx.names()` | `[String]` | named capture group names |
+| `rx.count(text)` | `Int` | number of non-overlapping matches |
 | `rx.replace_all_with(text, fn(Match) => String)` | `String` | replace every match with callback output |
 | `mat.group(n)` | `String?` | capture group `n` of a `Match` |
 | `mat.name(name)` | `String?` | capture group by name |
+| `mat.named_captures()` | `[[String]]` | named groups as `[name, value]` pairs |
 | `mat.start()` / `mat.end()` | `Int` | byte span of the whole match |
 | `mat.group_start(n)` / `mat.group_end(n)` | `Int?` | byte span of a capture |
 

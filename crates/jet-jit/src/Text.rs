@@ -600,12 +600,35 @@ extern "C" fn jet_jit_regex_method(recv: i64, method: i64, arg0: i64, arg1: i64)
             let s = rx.replace_all_with(&clone_string(arg0), |_m| "hit".to_string());
             Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s))
         }
+        (RegexValue::Regex(rx), "pattern" | "source") => {
+            Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(rx.pattern()))
+        }
+        (RegexValue::Regex(rx), "flags" | "options") => {
+            Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(rx.flags()))
+        }
+        (RegexValue::Regex(rx), "names") => list_strings(rx.names()),
+        (RegexValue::Regex(rx), "count") => rx.count(&clone_string(arg0)),
         (RegexValue::Match(m), "group") => option_string_bits(m.group(arg0)),
         (RegexValue::Match(m), "name") => option_string_bits(m.name(&clone_string(arg0))),
         (RegexValue::Match(m), "start") => m.start(),
         (RegexValue::Match(m), "end") => m.end(),
+        (RegexValue::Match(m), "named_captures") => {
+            let outer = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_empty_list());
+            for pair in m.named_captures() {
+                let inner = list_strings(pair);
+                Concurrency::with_runtime_mut(|rt| {
+                    let _ = rt.heap.list_push_int(outer, inner);
+                });
+            }
+            outer
+        }
         _ => 0,
     })
+}
+
+extern "C" fn jet_jit_regex_escape(text: i64) -> i64 {
+    let s = text_rt::jet_std::jet_regex_escape(&clone_string(text));
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s))
 }
 
 fn clone_string(id: i64) -> String {
@@ -642,6 +665,7 @@ pub(crate) struct TextHostFns {
     pub starts_any: FuncId,
     pub char_indices: FuncId,
     pub regex_flags: FuncId,
+    pub regex_escape: FuncId,
     pub regex_literal: FuncId,
     pub regex_is_match: FuncId,
     pub regex_find: FuncId,
@@ -707,6 +731,7 @@ pub(crate) fn register_text_symbols(builder: &mut JITBuilder) {
         jet_jit_text_char_indices as *const u8,
     );
     builder.symbol("jet_jit_regex_flags", jet_jit_regex_flags as *const u8);
+    builder.symbol("jet_jit_regex_escape", jet_jit_regex_escape as *const u8);
     builder.symbol("jet_jit_regex_literal", jet_jit_regex_literal as *const u8);
     builder.symbol("jet_jit_regex_is_match", jet_jit_regex_is_match as *const u8);
     builder.symbol("jet_jit_regex_find", jet_jit_regex_find as *const u8);
@@ -777,6 +802,7 @@ pub(crate) fn declare_text_host_fns(module: &mut JITModule) -> Result<TextHostFn
         starts_any: import("jet_jit_text_starts_any", &binary_i8)?,
         char_indices: import("jet_jit_text_char_indices", &unary)?,
         regex_flags: import("jet_jit_regex_flags", &ternary)?,
+        regex_escape: import("jet_jit_regex_escape", &unary)?,
         regex_literal: import("jet_jit_regex_literal", &unary)?,
         regex_is_match: import("jet_jit_regex_is_match", &binary_i8)?,
         regex_find: import("jet_jit_regex_find", &binary)?,

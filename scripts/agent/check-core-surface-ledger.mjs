@@ -246,7 +246,7 @@ const CROSS_DOMAIN_DISTINCT = new Set([
   "entry", "eof", "equals", "error", "escape", "escapestring", "eval", "evalfile",
   "exception", "exec", "exists", "exit", "exitcode", "exited", "expand", "fd",
   "fdatasync", "fdopen", "feed", "filename", "fileno", "filetype", "fill", "filter",
-  "finalize", "find", "findlast", "first", "firstindex", "flatmap", "flatten", "flush",
+  "finalize", "find", "findlast", "first", "firstindex", "flags", "flatmap", "flatten", "flush",
   "fold", "fork", "formatstring", "formatter", "from", "fromhex", "fromkeys", "fullname",
   "get", "getattribute", "getbuffer", "getbytes", "getfield", "gethostname", "getint32", "getopts",
   "getpid", "group", "groupby", "groups", "handle", "help", "hex", "id",
@@ -328,6 +328,9 @@ const SYNONYM_GROUPS = [
   ["host", "hostname"],
   ["username", "user"],
   ["default_port", "defaultport"],
+  ["pattern", "source"],
+  ["flags", "options"],
+  ["names", "keys", "named_captures"],
   ["warn", "warning"],
   ["split", "split_n"],
   ["split_once", "split_at", "cut"],
@@ -492,6 +495,8 @@ const TYPE_CONTAINER = {
   ZonedDateTime: "core.time",
   Url: "core.url",
   Mime: "core.mime",
+  Regex: "core.regex",
+  Match: "core.regex",
   ExpiringValue: "core.time.expiring",
   Condition: "core.sync",
   Secret: "core.vault",
@@ -1175,7 +1180,7 @@ function collectionInventory() {
   {
     const civilText = read(NET_TEXT_TIME_PATH);
     const civilSources = [{ path: NET_TEXT_TIME_PATH, text: civilText }];
-    for (const tableName of ["civil_time_method_return", "url_mime_method_return"]) {
+    for (const tableName of ["civil_time_method_return", "url_mime_method_return", "regex_method_return"]) {
       const civilBody = tableBody(tableName, civilSources);
       if (!civilBody) {
         throw new Error(tableName + " missing from net_text_time.rs");

@@ -851,6 +851,7 @@ pub fn core_module_items(module: &str) -> Vec<String> {
         // D-REGEXENGINE1=A: std-only linear regex package.
         "jet.regex" => &[
             "flags",
+            "escape",
             "compile",
             "compile_with",
             "is_match",

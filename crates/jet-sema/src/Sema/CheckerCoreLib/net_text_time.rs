@@ -503,6 +503,9 @@ pub fn regex_method_return(
     let argc = args.len();
     match ty {
         Type::Named(n) if n == "Regex" => match method {
+            "pattern" | "source" | "flags" | "options" if argc == 0 => Some(Some(Type::String)),
+            "names" if argc == 0 => Some(Some(Type::List(Box::new(Type::String)))),
+            "count" if argc == 1 => Some(Some(Type::Int)),
             "is_match" if argc == 1 => Some(Some(Type::Bool)),
             "match" if argc == 1 => Some(Some(Type::Option(Box::new(Type::Named(
                 "Match".to_string(),
@@ -520,6 +523,9 @@ pub fn regex_method_return(
         Type::Named(n) if n == "Match" => match method {
             "group" | "name" if argc == 1 => Some(Some(Type::Option(Box::new(Type::String)))),
             "start" | "end" if argc == 0 => Some(Some(Type::Int)),
+            "named_captures" if argc == 0 => Some(Some(Type::List(Box::new(Type::List(
+                Box::new(Type::String),
+            ))))),
             "group_start" | "group_end" if argc == 1 => {
                 Some(Some(Type::Option(Box::new(Type::Int))))
             }

@@ -3655,7 +3655,14 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
                         | "find_all"
                         | "split"
                         | "start"
-                        | "end",
+                        | "end"
+                        | "pattern"
+                        | "source"
+                        | "flags"
+                        | "options"
+                        | "names"
+                        | "named_captures"
+                        | "count",
                     0..=1
                 ) | ("group" | "name", 1)
                     | ("replace_all" | "split_limit" | "replace_all_with", 2)

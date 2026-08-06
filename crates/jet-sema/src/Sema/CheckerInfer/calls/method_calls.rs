@@ -2844,6 +2844,9 @@ impl<'a> Checker<'a> {
                     _ => "",
                 };
                 match (recv_name, method, args.len()) {
+                    ("Regex", "count", 1) => {
+                        self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
+                    }
                     ("Regex", "is_match" | "match" | "find" | "find_all" | "matches" | "split", 1) => {
                         self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
                     }

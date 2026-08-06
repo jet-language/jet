@@ -424,7 +424,13 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("Message", "envelope", 0) | ("Message", "with_envelope", 1) | ("Mailer", "send", 1) => THandleOp::EmailMethod {
             method: method.to_string(),
         },
-        ("Regex", "is_match" | "match" | "find" | "find_all" | "matches" | "split", 1) => {
+        ("Regex", "pattern" | "source" | "flags" | "options" | "names", 0) => {
+            THandleOp::RegexMethod {
+                kind: "Regex".to_string(),
+                method: method.to_string(),
+            }
+        }
+        ("Regex", "is_match" | "match" | "find" | "find_all" | "matches" | "split" | "count", 1) => {
             THandleOp::RegexMethod {
                 kind: "Regex".to_string(),
                 method: method.to_string(),
@@ -436,7 +442,7 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
                 method: method.to_string(),
             }
         }
-        ("Match", "start" | "end", 0) => THandleOp::RegexMethod {
+        ("Match", "start" | "end" | "named_captures", 0) => THandleOp::RegexMethod {
             kind: "Match".to_string(),
             method: method.to_string(),
         },
@@ -637,6 +643,9 @@ pub(crate) fn handle_method_return_ty(handle: &str, method: &str, nargs: usize) 
                 ok: Box::new(Type::Named("SendReport".to_string())),
                 err: Box::new(Type::Named("EmailError".to_string())),
             })),
+            ("Regex", "pattern" | "source" | "flags" | "options", 0) => Some(Some(Type::String)),
+            ("Regex", "names", 0) => Some(Some(Type::List(Box::new(Type::String)))),
+            ("Regex", "count", 1) => Some(Some(Type::Int)),
             ("Regex", "is_match", 1) => Some(Some(Type::Bool)),
             ("Regex", "match", 1) => Some(Some(Type::Option(Box::new(Type::Named(
                 "Match".to_string(),
@@ -652,6 +661,9 @@ pub(crate) fn handle_method_return_ty(handle: &str, method: &str, nargs: usize) 
             ("Regex", "split_limit", 2) => Some(Some(Type::List(Box::new(Type::String)))),
             ("Match", "group" | "name", 1) => Some(Some(Type::Option(Box::new(Type::String)))),
             ("Match", "start" | "end", 0) => Some(Some(Type::Int)),
+            ("Match", "named_captures", 0) => Some(Some(Type::List(Box::new(Type::List(
+                Box::new(Type::String),
+            ))))),
             ("Match", "group_start" | "group_end", 1) => {
                 Some(Some(Type::Option(Box::new(Type::Int))))
             }

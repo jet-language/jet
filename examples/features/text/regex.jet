@@ -4,47 +4,37 @@ use core.regex as re
 
 fn run() {
     text :: "order 42 shipped to zip 90210"
-    // is_match: does the pattern occur at all?
-    has_digits :: re.is_match(.{"\\d+"}, text)
-    print(has_digits)
-    // find: the first matched substring (an optional — `None` if no match).
-    first :: re.find(.{"\\d+"}, text)
-    if first == .Val(n) { print(n) }
-    // find_all: every match, left to right.
+    print(re.is_match(.{"\\d+"}, text))
     nums :: re.find_all(.{"\\d+"}, text)
+    print(nums[0])
     print(nums.len())
-    // match + capture groups: group(0) is the whole match, group(n) the n-th group.
     m :: re.match(.{"(\\d+) shipped"}, text)
     if m == .Val(mat) {
-        whole :: mat.group(0) ?? "none"
-        first_group :: mat.group(1) ?? "none"
-        print(whole)
-        print(first_group)
+        print(mat.group(0) ?? "none")
+        print(mat.group(1) ?? "none")
     }
-    // replace_all: rewrite every match.
-    masked :: re.replace_all(.{"\\d+"}, text, "#")
-    print(masked)
-    // split on whitespace runs.
-    words :: re.split(.{"\\s+"}, text)
-    print(words.len())
-    // An explicit typed literal names a checked pattern for reuse.
-    digits :: Regex.{"\\d+"}
-    print(digits.is_match(text))
-    // Runtime-built patterns use the fallible compile path.
-    flags :: re.flags(true, true, false)
-    rx :: re.compile_with("^(?<word>[a-z]+)", flags) ?? panic("bad pattern")
-    matches :: rx.matches("Ada\nlovelace")
-    print(matches.len())
-    first_named :: rx.match("Ada\nlovelace")
+    print(re.replace_all(.{"\\d+"}, text, "#"))
+    print(re.split(.{"\\s+"}, text).len())
+    print(Regex.{"\\d+"}.is_match(text))
+
+    flag_set :: re.flags(true, true, false)
+    rx :: re.compile_with("(?<word>[a-z]+)", flag_set) ?? panic("bad pattern")
+    print(rx.matches("Ada lovelace").len())
+    first_named :: rx.match("Ada lovelace")
     if first_named == .Val(mat) {
         print(mat.name("word") ?? "none")
         print(mat.start())
         print(mat.end())
+        print(mat.named_captures().len())
     }
-    // callback replacement and split limit.
     word :: re.compile("\\w+") ?? panic("bad word")
     print(word.replace_all_with("a b", (m: Match) => "hit"))
     sep :: re.compile(",\\s*") ?? panic("bad sep")
-    limited :: sep.split_limit("a, b, c", 2)
-    print(limited[1])
+    print(sep.split_limit("a, b, c", 2)[1])
+    print(rx.pattern())
+    print(rx.source())
+    print(rx.flags())
+    print(rx.names().len())
+    print(rx.count("Ada lovelace"))
+    print(re.escape("a+b?"))
 }

@@ -4460,7 +4460,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 },
                 THandleOp::RegexMethod { kind: _, method } => match method.as_str() {
                     "match" => format!("({}).match_value(&({}))", recv, a(0)),
-                    "is_match" | "find" | "find_all" | "matches" | "split" | "name" => {
+                    "is_match" | "find" | "find_all" | "matches" | "split" | "name" | "count" => {
                         format!("({}).{}(&({}))", recv, method, a(0))
                     }
                     "replace" | "replace_all" => {
@@ -4475,7 +4475,8 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     "group" | "group_start" | "group_end" => {
                         format!("({}).{}({})", recv, method, a(0))
                     }
-                    "start" | "end" => format!("({}).{}()", recv, method),
+                    "start" | "end" | "pattern" | "source" | "flags" | "options" | "names"
+                    | "named_captures" => format!("({}).{}()", recv, method),
                     _ => {
                         if args.is_empty() {
                             format!("({}).{}()", recv, method)

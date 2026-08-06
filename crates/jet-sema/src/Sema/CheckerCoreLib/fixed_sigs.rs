@@ -2538,6 +2538,7 @@ pub fn core_fixed_sig(
             vec![(read, Type::Bool), (read, Type::Bool), (read, Type::Bool)],
             Some(Type::Named("RegexFlags".to_string())),
         )),
+        ("jet.regex", "escape") => Some((vec![(read, Type::String)], Some(Type::String))),
         ("jet.regex", "compile") => Some((
             vec![(read, Type::String)],
             Some(result_ty(Type::Named("Regex".to_string()), Type::String)),

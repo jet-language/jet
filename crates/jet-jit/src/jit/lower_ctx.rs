@@ -12315,6 +12315,10 @@ impl LowerCtx<'_, '_> {
                                 widen_bool(self, &args[2])?,
                             ],
                         ),
+                        "escape" if args.len() == 1 => (
+                            self.host.text.regex_escape,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
                         "literal" if args.len() == 1 => (
                             self.host.text.regex_literal,
                             vec![self.lower_expr(&args[0])?],

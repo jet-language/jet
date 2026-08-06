@@ -3179,6 +3179,13 @@ pub(crate) fn emit_tir_core_call(
                 arg(2)
             )
         }
+        ("jet.regex", "escape") => {
+            format!(
+                "{}jet_std::jet_regex_escape(&({}))",
+                cx.root_prefix,
+                arg(0)
+            )
+        }
         ("jet.regex", "compile") => {
             format!(
                 "{}jet_std::jet_regex_compile(&({}))",
