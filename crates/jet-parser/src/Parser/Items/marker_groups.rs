@@ -400,15 +400,13 @@ impl<'a> Parser<'a> {
             }
             let close = self.peek().span;
             self.expect(TokKind::RBracket, "to close an `#[…]` rule list")?;
-            let task_group = site == crate::Policy::RuleSite::Function
-                && group
-                    .iter()
-                    .any(|marker| marker.name == Syntax::KW_TASK);
             for marker in &group {
-                let task_doc = task_group && marker.name == Syntax::CONTRACT_DOC;
                 if crate::Policy::applied_rule(&marker.name).is_some()
-                    && !crate::Policy::rule_allows(&marker.name, site)
-                    && !task_doc
+                    && !crate::Policy::rule_allows_with_companions(
+                        &marker.name,
+                        site,
+                        group.iter().map(|other| other.name.as_str()),
+                    )
                 {
                     return Err(Self::wrong_rule_site(marker, site, noun));
                 }
@@ -881,16 +879,14 @@ impl<'a> Parser<'a> {
             site: crate::Policy::RuleSite,
         ) -> Result<crate::AST::Func, Diagnostic> {
             let ordered_markers = markers.clone();
-            let task_group = site == crate::Policy::RuleSite::Function
-                && ordered_markers
-                    .iter()
-                    .any(|marker| marker.name == Syntax::KW_TASK);
             let mut policy = Vec::new();
             for marker in markers {
-                let task_doc = task_group && marker.name == Syntax::CONTRACT_DOC;
                 if crate::Policy::applied_rule(&marker.name).is_some()
-                    && !crate::Policy::rule_allows(&marker.name, site)
-                    && !task_doc
+                    && !crate::Policy::rule_allows_with_companions(
+                        &marker.name,
+                        site,
+                        ordered_markers.iter().map(|other| other.name.as_str()),
+                    )
                 {
                     if site == crate::Policy::RuleSite::Method
                         && matches!(marker.name.as_str(), Syntax::KW_TASK | Syntax::ATTR_EVERY)

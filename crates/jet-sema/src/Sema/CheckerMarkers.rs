@@ -115,18 +115,20 @@ fn validate_rule_arguments(
                     .and_then(|index| segments.get(index + 1..))
                     .filter(|segments| !segments.is_empty())
                     .unwrap_or(&segments);
-                if matches!(declaration.name, "Capability" | "Target") {
-                    variant_segments.first().copied().unwrap_or(path)
-                } else {
-                    variant_segments.last().copied().unwrap_or(path)
+                match declaration.variant_segment {
+                    crate::Policy::VariantSegment::First => {
+                        variant_segments.first().copied().unwrap_or(path)
+                    }
+                    crate::Policy::VariantSegment::Last => {
+                        variant_segments.last().copied().unwrap_or(path)
+                    }
                 }
             });
-            // `#FFI` and `#RenameAll` teach their own menus downstream (E3220 /
-            // E2409); a generic signature error here would preempt them.
-            let owns_its_menu = matches!(
-                marker_name.as_str(),
-                Syntax::ATTR_FFI | Syntax::ATTR_RENAME_ALL
-            );
+            // A rule that teaches its own menu downstream (E3220 / E2409) says
+            // so in its registry row; a generic signature error here would
+            // preempt the product diagnostic.
+            let owns_its_menu = crate::Policy::applied_rule(&marker_name)
+                .is_some_and(|row| row.owns_menu);
             if !owns_its_menu && !declaration.variants.is_empty() {
                 if let Some(written) =
                     candidate.filter(|candidate| !declaration.variants.contains(candidate))

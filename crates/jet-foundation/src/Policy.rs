@@ -199,6 +199,13 @@ pub struct AppliedRule {
     pub sites: &'static [RuleSite],
     /// D-MARK-REPEAT1=A: may this rule be written more than once on one target?
     pub repeatable: bool,
+    /// This rule teaches its own argument menu downstream, so the shared binder
+    /// stays quiet about an unknown variant and lets the rule's product
+    /// diagnostic explain it (`#FFI` → E3220, `#RenameAll` → E2409).
+    pub owns_menu: bool,
+    /// One extra legal site that opens only when a companion rule sits on the
+    /// same target. `#Doc` is a field rule that also describes a `#Job`.
+    pub companion_site: Option<CompanionSite>,
     pub status: RuleStatus,
     pub inherits: bool,
     pub resolution: RuleResolution,
@@ -230,6 +237,21 @@ pub enum RuleArgType {
 pub struct RuleArgDeclaration {
     pub name: &'static str,
     pub variants: &'static [&'static str],
+    /// Which segment of a written path names the variant. `core.lang.Target.Web`
+    /// and `Capability.FS` are read from the front because their variants own
+    /// nested names; every other menu reads the last segment.
+    pub variant_segment: VariantSegment,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VariantSegment { First, Last }
+
+/// An extra attachment site that a rule earns from a companion on the same
+/// target (D-TASKS-LIST1=A: `#Doc` describes a `#Job`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CompanionSite {
+    pub rule: &'static str,
+    pub site: RuleSite,
 }
 
 fn canonical_rule_arg_variants(name: &str) -> Option<&'static [&'static str]> {
@@ -279,11 +301,24 @@ pub static RULE_ARG_DECLARATIONS: LazyLock<Vec<RuleArgDeclaration>> = LazyLock::
     names
         .into_iter()
         .filter_map(|name| {
-            canonical_rule_arg_variants(name)
-                .map(|variants| RuleArgDeclaration { name, variants })
+            canonical_rule_arg_variants(name).map(|variants| RuleArgDeclaration {
+                name,
+                variants,
+                variant_segment: canonical_variant_segment(name),
+            })
         })
         .collect()
 });
+
+/// D-RULEARG-TYPES1=A: `Capability` and `Target` variants own nested names
+/// (`FS.read`, `Web.dom`), so the written path names its variant in the first
+/// segment after the enum. Every other menu names it in the last.
+const fn canonical_variant_segment(name: &str) -> VariantSegment {
+    match name.as_bytes() {
+        b"Capability" | b"Target" => VariantSegment::First,
+        _ => VariantSegment::Last,
+    }
+}
 
 pub fn rule_arg_declaration(name: &str) -> Option<&'static RuleArgDeclaration> {
     RULE_ARG_DECLARATIONS.iter().find(|declaration| declaration.name == name)
@@ -697,6 +732,8 @@ macro_rules! rule {
             policy_scopes: NO_POLICY_SCOPES,
             sites: $sites,
             repeatable: false,
+            owns_menu: false,
+            companion_site: None,
             status: RuleStatus::Active,
             inherits: false,
             resolution: RuleResolution::SiteBound,
@@ -709,6 +746,36 @@ macro_rules! rule {
             policy_scopes: NO_POLICY_SCOPES,
             sites: $sites,
             repeatable: true,
+            owns_menu: false,
+            companion_site: None,
+            status: RuleStatus::Active,
+            inherits: false,
+            resolution: RuleResolution::SiteBound,
+        }
+    };
+    (owns_menu $name:expr, $sig:expr, $sites:expr) => {
+        AppliedRule {
+            name: $name,
+            signature: $sig,
+            policy_scopes: NO_POLICY_SCOPES,
+            sites: $sites,
+            repeatable: false,
+            owns_menu: true,
+            companion_site: None,
+            status: RuleStatus::Active,
+            inherits: false,
+            resolution: RuleResolution::SiteBound,
+        }
+    };
+    (companion $name:expr, $sig:expr, $sites:expr, $companion:expr) => {
+        AppliedRule {
+            name: $name,
+            signature: $sig,
+            policy_scopes: NO_POLICY_SCOPES,
+            sites: $sites,
+            repeatable: false,
+            owns_menu: false,
+            companion_site: Some($companion),
             status: RuleStatus::Active,
             inherits: false,
             resolution: RuleResolution::SiteBound,
@@ -721,6 +788,8 @@ macro_rules! rule {
             policy_scopes: NO_POLICY_SCOPES,
             sites: $sites,
             repeatable: false,
+            owns_menu: false,
+            companion_site: None,
             status: RuleStatus::Retired { replacement: $replacement },
             inherits: false,
             resolution: RuleResolution::SiteBound,
@@ -768,6 +837,8 @@ pub const APPLIED_RULES: &[AppliedRule] = &[
         policy_scopes: ALL_SCOPES,
         sites: &[RuleSite::Package, RuleSite::Module, RuleSite::Function, RuleSite::Method, RuleSite::Block],
         repeatable: false,
+        owns_menu: false,
+        companion_site: None,
         status: RuleStatus::Active,
         inherits: true,
         resolution: RuleResolution::Tighten,
@@ -798,7 +869,8 @@ pub const APPLIED_RULES: &[AppliedRule] = &[
     rule!("WasmExport", sig!(), FUNCTION_SITE),
     rule!("State", sig!(param!("state", Ident => "State")), CALLABLE_SITE),
     rule!("Transition", sig!(param!("from", Ident => "State"), param!("to", Ident => "State")), CALLABLE_SITE),
-    rule!("FFI", sig!(param!("language", Ident => "FfiLanguage")), FUNCTION_SITE),
+    // E3220 teaches the FFI language menu itself.
+    rule!(owns_menu "FFI", sig!(param!("language", Ident => "FfiLanguage")), FUNCTION_SITE),
     rule!("ABI", sig!(param!("name", Ident => "ABI")), FUNCTION_SITE),
     rule!("MustUse", sig!(), &[RuleSite::Function, RuleSite::Method, RuleSite::Type]),
     rule!("Codable", sig!(), TYPE_SITE),
@@ -821,7 +893,8 @@ pub const APPLIED_RULES: &[AppliedRule] = &[
     rule!("SingleUse", sig!(), TYPE_SITE),
     rule!("Invariant", sig!(param!("condition", String)), TYPE_SITE),
     rule!("Layout", sig!(param!("kind", Ident => "Layout"), param!("tag", Ident => "IntType", "I32")), TYPE_SITE),
-    rule!("RenameAll", sig!(param!("case", Ident => "NamingCase")), TYPE_SITE),
+    // E2409 teaches the naming-case menu itself.
+    rule!(owns_menu "RenameAll", sig!(param!("case", Ident => "NamingCase")), TYPE_SITE),
     rule!("DenyUnknownFields", sig!(), TYPE_SITE),
     rule!("Discriminant", sig!(param!("field", String)), TYPE_SITE),
     rule!("Untagged", sig!(), TYPE_SITE),
@@ -830,7 +903,9 @@ pub const APPLIED_RULES: &[AppliedRule] = &[
     rule!("Skip", sig!(), FIELD_SITE),
     rule!("Default", sig!(param!("value", Any, "T.default")), FIELD_SITE),
     rule!("Flatten", sig!(), FIELD_SITE),
-    rule!("Doc", sig!(param!("text", String)), FIELD_SITE),
+    // D-TASKS-LIST1=A: a field rule that also describes a `#Job`.
+    rule!(companion "Doc", sig!(param!("text", String)), FIELD_SITE,
+        CompanionSite { rule: "Job", site: RuleSite::Function }),
     rule!("Flag", sig!(), FIELD_SITE),
     rule!("Short", sig!(param!("name", String)), FIELD_SITE),
     rule!("Env", sig!(param!("name", String)), FIELD_SITE),
@@ -899,6 +974,23 @@ pub fn applied_rule(name: &str) -> Option<&'static AppliedRule> {
 
 pub fn rule_allows(name: &str, site: RuleSite) -> bool {
     applied_rule(name).is_some_and(|row| row.sites.contains(&site))
+}
+
+/// `rule_allows`, plus the extra site a companion on the same target opens.
+/// `companions` is every rule name attached to that target, so `#Doc` is legal
+/// on a function exactly when `#Job` sits beside it (D-TASKS-LIST1=A).
+pub fn rule_allows_with_companions<'a>(
+    name: &str,
+    site: RuleSite,
+    companions: impl Iterator<Item = &'a str>,
+) -> bool {
+    if rule_allows(name, site) {
+        return true;
+    }
+    let Some(companion) = applied_rule(name).and_then(|row| row.companion_site) else {
+        return false;
+    };
+    companion.site == site && companions.into_iter().any(|other| other == companion.rule)
 }
 
 pub const DERIVE_RULES: &[&str] = &[
@@ -987,7 +1079,9 @@ mod tests {
 
     #[test]
     fn every_typed_marker_argument_has_one_core_lang_declaration() {
-        assert_eq!(super::RULE_ARG_DECLARATIONS.len(), 14);
+        // One declaration per typed marker-argument menu, plus the `Track`
+        // reflection enum retained by D-RULEARG-TYPES1.
+        assert_eq!(super::RULE_ARG_DECLARATIONS.len(), 15);
         let mut expected = std::collections::BTreeSet::from(["Track"]);
         for row in super::APPLIED_RULES {
             expected.extend(row.signature.params.iter().map(|parameter| parameter.source_type));
@@ -1052,6 +1146,68 @@ mod tests {
             &["camel", "snake", "pascal", "kebab", "screaming"]
         );
         assert_eq!(variants("Capability"), crate::Facts::EFFECT_ROOTS);
+    }
+
+    /// D-MARK-FORM1=A / D-MARK-REPEAT1=A / D-VERDICT-1455-1: the facts the
+    /// consumers used to hard-code by name are registry columns now.
+    #[test]
+    fn marker_behaviour_lives_in_columns_not_name_lists() {
+        let row = |name| super::applied_rule(name).unwrap();
+
+        // Repeatable is a column: contracts and lints repeat, nothing else does.
+        for name in ["Pre", "Post", "allow"] {
+            assert!(row(name).repeatable, "{name} must be repeatable");
+        }
+        for name in ["Inline", "Codable", "Job", "PubFile", "NoPrelude"] {
+            assert!(!row(name).repeatable, "{name} must not be repeatable");
+        }
+
+        // Owning a menu is a column, not a name match in the shared binder.
+        for name in ["FFI", "RenameAll"] {
+            assert!(row(name).owns_menu, "{name} teaches its own menu");
+        }
+        assert!(!row("Layout").owns_menu);
+
+        // The Doc-with-Job coupling is row data.
+        let companion = row("Doc").companion_site.expect("Doc declares a companion");
+        assert_eq!(companion.rule, "Job");
+        assert_eq!(companion.site, super::RuleSite::Function);
+        assert!(!super::rule_allows("Doc", super::RuleSite::Function));
+        assert!(super::rule_allows_with_companions(
+            "Doc",
+            super::RuleSite::Function,
+            ["Job", "Doc"].into_iter()
+        ));
+        assert!(!super::rule_allows_with_companions(
+            "Doc",
+            super::RuleSite::Function,
+            ["Doc"].into_iter()
+        ));
+        // A companion never opens a site the column did not name.
+        assert!(!super::rule_allows_with_companions(
+            "Doc",
+            super::RuleSite::Block,
+            ["Job", "Doc"].into_iter()
+        ));
+
+        // Which path segment names a variant is declaration data.
+        assert_eq!(
+            super::rule_arg_declaration("Capability").unwrap().variant_segment,
+            super::VariantSegment::First
+        );
+        assert_eq!(
+            super::rule_arg_declaration("Target").unwrap().variant_segment,
+            super::VariantSegment::First
+        );
+        assert_eq!(
+            super::rule_arg_declaration("NamingCase").unwrap().variant_segment,
+            super::VariantSegment::Last
+        );
+
+        // D-VERDICT-1455-1: the two ghost rows are gone for good.
+        assert!(super::applied_rule("Authority").is_none());
+        assert!(super::applied_rule("Summarize").is_none());
+        assert!(!super::DERIVE_RULES.contains(&"Summarize"));
     }
 
     #[test]
