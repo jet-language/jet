@@ -46,11 +46,21 @@ pub(super) fn evaluate(
         ("core.time", "zone") => zone_named(args, span),
         ("core.time", "zoned") => zoned_from_datetime(args, span),
         ("core.time", "zoned_local") => zoned_from_local(args, span),
+        ("core.time", "instant") => Ok(structure("Instant", vec![("start_ns", CtValue::Int(0))])),
+        ("core.time", "datetime") => datetime_parts(args, span),
+        ("core.time", "time" | "local_time") => local_time_parts(args, span),
+        ("core.time", "days_in_month") => time_days_in_month(args, span),
+        ("core.time", "is_leap_year") => time_is_leap_year(args, span),
+        ("core.time", "nanoseconds" | "microseconds" | "milliseconds" | "seconds" | "minutes" | "hours") => {
+            duration_ctor(method, args, span)
+        }
         ("core.math", "decimal") => decimal_from_str(args, span),
         ("core.math", "fraction") => fraction_new(args, span),
         ("core.science.measurement", "from") => measurement(args, span),
         ("core.time.date", "new") => date_new_call(args, span),
         ("core.time.date", "parse") => date_parse_call(args, span),
+        // Wall-clock read — same JetDate::today_utc as AOT/JIT hosts (I9).
+        ("core.time.date", "today") => Ok(Date::today_utc().value()),
         ("core.time.datetime", "from_timestamp") => datetime_from_timestamp(args, span),
         // D-APPROX1=A: sketch constructors — same algorithms as AOT Jet* sketches.
         ("core.sketch.hll", "new") => Ok(hll_new()),
@@ -188,6 +198,22 @@ pub(super) fn evaluate_method(
                     (thursday.day_number() - Date::new(thursday.year, 1, 1).day_number()) / 7 + 1,
                 )
             }),
+        ("Date" | "LocalDate", "quarter_of_year", 0) => date_from_value(recv, type_name, span)
+            .map(|date| CtValue::Int((date.month - 1) / 3 + 1)),
+        ("Date" | "LocalDate", "days_in_month", 0) => date_from_value(recv, type_name, span)
+            .map(|date| CtValue::Int(Date::days_in_month(date.year, date.month))),
+        ("Date" | "LocalDate", "is_leap_year", 0) => date_from_value(recv, type_name, span)
+            .map(|date| CtValue::Bool(Date::is_leap(date.year))),
+        ("Date" | "LocalDate", "replace", 3) => date_from_value(recv, type_name, span).and_then(
+            |_date| {
+                Ok(Date::new(
+                    as_int(&args[0], span)?,
+                    as_int(&args[1], span)?,
+                    as_int(&args[2], span)?,
+                )
+                .value())
+            },
+        ),
         ("Date" | "LocalDate", "add_days", 1) => date_from_value(recv, type_name, span)
             .and_then(|date| Ok(date.add_days(as_int(&args[0], span)?).value())),
         ("Date" | "LocalDate", "add_months", 1) => date_from_value(recv, type_name, span)
@@ -232,6 +258,12 @@ pub(super) fn evaluate_method(
             .map(|date_time| CtValue::Int(date_time.time().minute)),
         ("DateTime", "second", 0) => datetime_from_value(recv, span)
             .map(|date_time| CtValue::Int(date_time.seconds.rem_euclid(60))),
+        ("DateTime", "millisecond", 0) => datetime_from_value(recv, span)
+            .map(|date_time| CtValue::Int((date_time.nanos / 1_000_000) as i64)),
+        ("DateTime", "microsecond", 0) => datetime_from_value(recv, span)
+            .map(|date_time| CtValue::Int((date_time.nanos / 1_000) as i64)),
+        ("DateTime", "nanosecond", 0) => datetime_from_value(recv, span)
+            .map(|date_time| CtValue::Int(date_time.nanos as i64)),
         ("DateTime", "format_rfc3339", 0) => datetime_from_value(recv, span).map(
             |date_time| {
                 CtValue::Str(format!(
@@ -250,35 +282,31 @@ pub(super) fn evaluate_method(
         }),
         ("DateTime", "plus_duration", 1) => {
             datetime_from_value(recv, span).and_then(|date_time| {
-                let millis = int_field(&args[0], crate::Syntax::DURATION_TYPE, "ms", span)?;
-                Ok(DateTime {
-                    seconds: date_time
-                        .seconds
-                        .saturating_add(millis.div_euclid(1_000)),
-                }
-                .value())
+                let ns = duration_ns(&args[0], span)?;
+                Ok(date_time.plus_ns(ns).value())
             })
         }
-        ("DateTime", "truncate" | "round", 1) => {
+        ("DateTime", "difference", 1) => datetime_from_value(recv, span).and_then(|left| {
+            let right = datetime_from_value(&args[0], span)?;
+            Ok(duration_value(left.total_ns().saturating_sub(right.total_ns())))
+        }),
+        ("DateTime", "truncate" | "round" | "floor" | "ceil", 1) => {
             datetime_from_value(recv, span).and_then(|date_time| {
-                let size = match string_arg(args, 0, span)? {
-                    "day" => 86_400,
-                    "hour" => 3_600,
-                    "minute" => 60,
-                    _ => 1,
-                };
-                let seconds = if method == "round" {
-                    date_time
-                        .seconds
-                        .saturating_add(size / 2)
-                        .div_euclid(size)
-                        * size
-                } else {
-                    date_time.seconds.div_euclid(size) * size
-                };
-                Ok(DateTime { seconds }.value())
+                Ok(date_time.align(string_arg(args, 0, span)?, method).value())
             })
         }
+        ("DateTime", "replace", 6) => datetime_from_value(recv, span).and_then(|date_time| {
+            Ok(DateTime::from_parts(
+                as_int(&args[0], span)?,
+                as_int(&args[1], span)?,
+                as_int(&args[2], span)?,
+                as_int(&args[3], span)?,
+                as_int(&args[4], span)?,
+                as_int(&args[5], span)?,
+                date_time.nanos,
+            )
+            .value())
+        }),
         ("DateTime", "in_zone", 1) => datetime_from_value(recv, span).and_then(|date_time| {
             Ok(ZonedDateTime {
                 instant: date_time,
@@ -286,6 +314,8 @@ pub(super) fn evaluate_method(
             }
             .value())
         }),
+        ("Instant", "elapsed_millis", 0) => Ok(CtValue::Int(0)),
+        ("Instant", "elapsed", 0) => Ok(duration_value(0)),
         ("Zone", "name", 0) => string_field(recv, "Zone", "name", span),
         ("Fraction", "to_string", 0) => fraction_from_value(recv, span)
             .map(|f| CtValue::Str(f.to_string_rep())),
@@ -332,6 +362,9 @@ pub(super) fn evaluate_method(
         ("ZonedDateTime", "offset_seconds", 0) => {
             zoned_from_value(recv, span).map(|zoned| CtValue::Int(zoned.offset_seconds()))
         }
+        ("ZonedDateTime", "is_dst", 0) => {
+            zoned_from_value(recv, span).map(|zoned| CtValue::Bool(zoned.is_dst()))
+        }
         ("ZonedDateTime", "to_datetime", 0) => {
             zoned_from_value(recv, span).map(|zoned| zoned.instant.value())
         }
@@ -346,11 +379,9 @@ pub(super) fn evaluate_method(
             )))
         }),
         ("ZonedDateTime", "add_duration", 1) => zoned_from_value(recv, span).and_then(|zoned| {
-            let millis = int_field(&args[0], crate::Syntax::DURATION_TYPE, "ms", span)?;
+            let ns = duration_ns(&args[0], span)?;
             Ok(ZonedDateTime {
-                instant: DateTime {
-                    seconds: zoned.instant.seconds.saturating_add(millis.div_euclid(1_000)),
-                },
+                instant: zoned.instant.plus_ns(ns),
                 zone: zoned.zone,
             }
             .value())
@@ -1399,6 +1430,16 @@ impl Date {
         Self { year, month, day }
     }
 
+    fn today_utc() -> Self {
+        let secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0) as i64;
+        let days_since_1970 = secs / 86_400;
+        let epoch = Date::new(1970, 1, 1).day_number();
+        Date::from_day_number(epoch + days_since_1970)
+    }
+
     fn parse(value: &str) -> Result<Self, String> {
         let parts = value.splitn(3, '-').collect::<Vec<_>>();
         if parts.len() != 3 {
@@ -1545,9 +1586,27 @@ impl LocalTime {
 #[derive(Clone, Copy)]
 struct DateTime {
     seconds: i64,
+    nanos: u32,
 }
 
 impl DateTime {
+    fn from_parts(
+        year: i64,
+        month: i64,
+        day: i64,
+        hour: i64,
+        minute: i64,
+        second: i64,
+        nanos: u32,
+    ) -> Self {
+        let date = Date::new(year, month, day);
+        let time = LocalTime::new(hour, minute, second);
+        Self {
+            seconds: utc_seconds(date, time),
+            nanos: nanos % 1_000_000_000,
+        }
+    }
+
     fn date(self) -> Date {
         let epoch = Date::new(1970, 1, 1).day_number();
         Date::from_day_number(epoch + self.seconds.div_euclid(86_400))
@@ -1558,8 +1617,45 @@ impl DateTime {
         LocalTime::new(seconds / 3_600, (seconds / 60) % 60, seconds % 60)
     }
 
+    fn total_ns(self) -> i64 {
+        self.seconds
+            .saturating_mul(1_000_000_000)
+            .saturating_add(self.nanos as i64)
+    }
+
+    fn from_total_ns(total: i64) -> Self {
+        Self {
+            seconds: total.div_euclid(1_000_000_000),
+            nanos: total.rem_euclid(1_000_000_000) as u32,
+        }
+    }
+
+    fn plus_ns(self, ns: i64) -> Self {
+        Self::from_total_ns(self.total_ns().saturating_add(ns))
+    }
+
+    fn align(self, unit: &str, method: &str) -> Self {
+        let size_ns: i64 = match unit {
+            "day" => 86_400 * 1_000_000_000,
+            "hour" => 3_600 * 1_000_000_000,
+            "minute" => 60 * 1_000_000_000,
+            "second" => 1_000_000_000,
+            "millisecond" => 1_000_000,
+            "microsecond" => 1_000,
+            _ => return self,
+        };
+        let total = self.total_ns();
+        let floored = total.div_euclid(size_ns) * size_ns;
+        let aligned = match method {
+            "round" => (total + size_ns / 2).div_euclid(size_ns) * size_ns,
+            "ceil" if total != floored => floored.saturating_add(size_ns),
+            _ => floored, // truncate / floor
+        };
+        Self::from_total_ns(aligned)
+    }
+
     fn value(self) -> CtValue {
-        datetime_value(self.seconds)
+        datetime_value(self.seconds, self.nanos)
     }
 }
 
@@ -1609,6 +1705,7 @@ impl ZonedDateTime {
         Self {
             instant: DateTime {
                 seconds: local_secs.saturating_sub(zone.offset),
+                nanos: 0,
             },
             zone,
         }
@@ -1618,9 +1715,15 @@ impl ZonedDateTime {
         self.zone.offset
     }
 
+    fn is_dst(&self) -> bool {
+        // Comptime Zone is fixed-offset UTC-only; DST is always false there.
+        false
+    }
+
     fn local_instant(&self) -> DateTime {
         DateTime {
             seconds: self.instant.seconds.saturating_add(self.zone.offset),
+            nanos: self.instant.nanos,
         }
     }
 
@@ -1784,6 +1887,7 @@ fn local_time_from_value(value: &CtValue, span: Span) -> Result<LocalTime, Diagn
 fn datetime_from_value(value: &CtValue, span: Span) -> Result<DateTime, Diagnostic> {
     Ok(DateTime {
         seconds: int_field(value, "DateTime", "secs", span)?,
+        nanos: int_field(value, "DateTime", "nanos", span).unwrap_or(0) as u32,
     })
 }
 
@@ -1891,16 +1995,41 @@ fn period_unit(args: &[CtValue], span: Span, field_index: usize) -> EvalResult {
     Ok(period_value(fields[0], fields[1], fields[2]))
 }
 
-fn datetime_value(seconds: i64) -> CtValue {
-    structure("DateTime", vec![("secs", CtValue::Int(seconds))])
+fn datetime_value(seconds: i64, nanos: u32) -> CtValue {
+    structure(
+        "DateTime",
+        vec![
+            ("secs", CtValue::Int(seconds)),
+            ("nanos", CtValue::Int(nanos as i64)),
+        ],
+    )
+}
+
+fn duration_value(ns: i64) -> CtValue {
+    structure(
+        crate::Syntax::DURATION_TYPE,
+        vec![("ns", CtValue::Int(ns))],
+    )
+}
+
+fn duration_ns(value: &CtValue, span: Span) -> Result<i64, Diagnostic> {
+    match int_field(value, crate::Syntax::DURATION_TYPE, "ns", span) {
+        Ok(ns) => Ok(ns),
+        Err(_) => Ok(int_field(value, crate::Syntax::DURATION_TYPE, "ms", span)?
+            .saturating_mul(1_000_000)),
+    }
 }
 
 fn datetime_from_timestamp(args: &[CtValue], span: Span) -> EvalResult {
-    Ok(datetime_value(int_arg(args, 0, span)?))
+    Ok(datetime_value(int_arg(args, 0, span)?, 0))
 }
 
 fn datetime_from_unix_ms(args: &[CtValue], span: Span) -> EvalResult {
-    Ok(datetime_value(int_arg(args, 0, span)?.div_euclid(1000)))
+    let ms = int_arg(args, 0, span)?;
+    Ok(datetime_value(
+        ms.div_euclid(1_000),
+        (ms.rem_euclid(1_000) as u32).saturating_mul(1_000_000),
+    ))
 }
 
 fn utc_seconds(date: Date, time: LocalTime) -> i64 {
@@ -1942,8 +2071,78 @@ fn parse_datetime(value: &str) -> Result<i64, String> {
 
 fn datetime_parse(args: &[CtValue], span: Span) -> EvalResult {
     Ok(match parse_datetime(string_arg(args, 0, span)?) {
-        Ok(seconds) => CtValue::ResOk(Box::new(datetime_value(seconds))),
+        Ok(seconds) => CtValue::ResOk(Box::new(datetime_value(seconds, 0))),
         Err(error) => CtValue::ResErr(Box::new(CtValue::Str(error))),
+    })
+}
+
+fn datetime_parts(args: &[CtValue], span: Span) -> EvalResult {
+    Ok(DateTime::from_parts(
+        int_arg(args, 0, span)?,
+        int_arg(args, 1, span)?,
+        int_arg(args, 2, span)?,
+        int_arg(args, 3, span)?,
+        int_arg(args, 4, span)?,
+        int_arg(args, 5, span)?,
+        0,
+    )
+    .value())
+}
+
+fn local_time_parts(args: &[CtValue], span: Span) -> EvalResult {
+    Ok(LocalTime::new(
+        int_arg(args, 0, span)?,
+        int_arg(args, 1, span)?,
+        int_arg(args, 2, span)?,
+    )
+    .value())
+}
+
+fn time_days_in_month(args: &[CtValue], span: Span) -> EvalResult {
+    Ok(CtValue::Int(Date::days_in_month(
+        int_arg(args, 0, span)?,
+        int_arg(args, 1, span)?,
+    )))
+}
+
+fn time_is_leap_year(args: &[CtValue], span: Span) -> EvalResult {
+    Ok(CtValue::Bool(Date::is_leap(int_arg(args, 0, span)?)))
+}
+
+fn duration_ctor(method: &str, args: &[CtValue], span: Span) -> EvalResult {
+    let unit = crate::Syntax::duration_unit_for_constructor(method)
+        .ok_or_else(|| unsupported(&format!("unknown duration constructor `{method}`"), span))?;
+    let scale = match unit {
+        "Nanoseconds" => 1_i64,
+        "Microseconds" => 1_000,
+        "Milliseconds" => 1_000_000,
+        "Seconds" => 1_000_000_000,
+        "Minutes" => 60_000_000_000,
+        "Hours" => 3_600_000_000_000,
+        _ => unreachable!("closed duration unit set"),
+    };
+    let ns = match args.first() {
+        Some(CtValue::Int(n)) => n.checked_mul(scale),
+        Some(CtValue::Float(n)) => {
+            let scaled = n.as_f64() * scale as f64;
+            (scaled.is_finite()
+                && scaled >= i64::MIN as f64
+                && scaled < 9_223_372_036_854_775_808.0)
+                .then_some(scaled.trunc() as i64)
+        }
+        _ => None,
+    };
+    Ok(match ns {
+        Some(ns) => CtValue::ResOk(Box::new(duration_value(ns))),
+        None => CtValue::ResErr(Box::new(structure(
+            crate::Syntax::DURATION_RANGE_ERROR_TYPE,
+            vec![(
+                "reason",
+                CtValue::Str(
+                    "duration must be finite and inside the supported range".to_string(),
+                ),
+            )],
+        ))),
     })
 }
 

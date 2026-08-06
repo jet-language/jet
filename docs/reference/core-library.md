@@ -1682,7 +1682,10 @@ fn run() {
 | `from_unix_ms(ms)` | `DateTime` | Convert Unix milliseconds to UTC `DateTime` |
 | `parse_rfc3339(text)` | `DateTime ? String` | Parse RFC 3339 / ISO 8601 offset text |
 | `today()` | `LocalDate` | Current UTC date |
-| `local_time(h, m, s)` / `parse_time(text)` | `LocalTime` / `LocalTime ? String` | Local wall-clock time |
+| `time(h, m, s)` / `local_time(h, m, s)` / `parse_time(text)` | `LocalTime` / `LocalTime ? String` | Local wall-clock time |
+| `datetime(y, m, d, h, mi, s)` | `DateTime` | UTC date-time from civil components |
+| `days_in_month(y, m)` / `is_leap_year(y)` | `Int` / `Bool` | Calendar facts |
+| `nanoseconds`/`microseconds`/`milliseconds`/`seconds`/`minutes`/`hours`(n) | `Duration ? RangeError` | Checked elapsed-time spans (nanosecond storage, D-TIMERES1=A) |
 | `instant()` | `Instant` | Monotonic clock sample for elapsed-time measurement |
 | `zone(name)` / `utc()` | `Zone ? String` / `Zone` | IANA time zone from TZif zoneinfo, or UTC |
 | `zoned(dt, zone)` | `ZonedDateTime` | View a UTC `DateTime` in a zone |
@@ -1692,7 +1695,7 @@ fn run() {
 | `sw.elapsed_millis()` | `Int` | Milliseconds since `time.start()` |
 | `clock(seed)` | `Clock` | A **deterministic** clock capability starting at `seed` ms (D-DET1) |
 | `Clock.system()` | `Clock` | An explicit monotonic production clock capability; carries the `Time` effect |
-| `Duration.milliseconds/seconds/minutes/hours(n)` | `Duration ? RangeError` | Checked runtime elapsed-time span |
+| `Duration.nanoseconds/microseconds/milliseconds/seconds/minutes/hours(n)` | `Duration ? RangeError` | Checked runtime elapsed-time span (D-TIMERES1=A: nanosecond count) |
 | `period(years, months, days)` / `period_days(n)` / `period_months(n)` / `period_years(n)` | `Period` | Calendar span for local-date arithmetic |
 
 `DateTime` is an unambiguous UTC instant. `LocalDate` and `LocalTime` are civil
@@ -1711,12 +1714,12 @@ Useful methods:
 
 | Type | Methods |
 |------|---------|
-| `LocalDate` | `year()`, `month()`, `day()`, `add_days(n)`, `add_months(n)`, `add_period(p)`, `diff_days(other)`, `weekday()`, `iso_weekday()`, `day_of_year()`, `iso_week()`, `truncate(unit)`, `format(pattern)`, `to_string()` |
+| `LocalDate` | `year()`, `month()`, `day()`, `add_days(n)`, `add_months(n)`, `add_period(p)`, `diff_days(other)`, `weekday()`, `iso_weekday()`, `day_of_year()`, `iso_week()`, `quarter_of_year()`, `days_in_month()`, `is_leap_year()`, `truncate(unit)`, `replace(y, m, d)`, `format(pattern)`, `to_string()` |
 | `LocalTime` | `hour()`, `minute()`, `second()`, `to_string()` |
-| `DateTime` | `date()`, `time()`, `hour()`, `minute()`, `second()`, `to_timestamp()`, `to_unix_ms()`, `plus_duration(d)`, `truncate(unit)`, `round(unit)`, `in_zone(zone)`, `format_rfc3339()`, `format(pattern)`, `to_string()` |
-| `ZonedDateTime` | `date()`, `time()`, `offset_seconds()`, `to_datetime()`, `zone()`, `add_duration(d)`, `add_period(p)`, `format(pattern)`, `to_string()` |
-| `Instant` | `elapsed_millis()` |
-| `Duration` | `in(unit)` |
+| `DateTime` | `date()`, `time()`, `hour()`, `minute()`, `second()`, `millisecond()`, `microsecond()`, `nanosecond()`, `to_timestamp()`, `to_unix_ms()`, `plus_duration(d)`, `difference(other)`, `truncate(unit)`, `round(unit)`, `floor(unit)`, `ceil(unit)`, `replace(y, m, d, h, min, s)`, `in_zone(zone)`, `format_rfc3339()`, `format(pattern)`, `to_string()` |
+| `ZonedDateTime` | `date()`, `time()`, `offset_seconds()`, `is_dst()`, `to_datetime()`, `zone()`, `add_duration(d)`, `add_period(p)`, `format(pattern)`, `to_string()` |
+| `Instant` | `elapsed_millis()`, `elapsed()` |
+| `Duration` | `in(unit)`, `is_zero()`, `total_seconds()`, `difference(other)` |
 | `Zone` | `name()` |
 
 Format patterns are literal text plus `yyyy`, `MM`, `dd`, `HH`, `mm`, `ss`,
@@ -1760,14 +1763,18 @@ Copying a clock with `~clock` forks an independent timeline. A copied manual
 clock starts at the same value; a copied system clock keeps advancing from the
 same observed instant. Backward mutation never rewinds a system clock.
 
-A runtime `Duration` is built with checked type-owned unit methods such as
-`Duration.seconds(n)?`. Read a whole unit with `d.in(.Milliseconds)?`; the
-result truncates toward zero and reports `RangeError` on overflow. Static unit
-literals such as `5s` remain unchanged.
+A runtime `Duration` is an i64 nanosecond count (D-TIMERES1=A), built with
+checked type-owned unit methods such as `Duration.seconds(n)?` or
+`Duration.nanoseconds(n)?`. Read a whole unit with `d.in(.Nanoseconds)?` /
+`d.in(.Milliseconds)?`; the result truncates toward zero and reports
+`RangeError` on overflow. Static unit literals such as `5s` remain unchanged.
 
 | `Duration` method | Returns | What it does |
 |-------------------|---------|--------------|
-| `in(unit)` | `Int ? RangeError` | Whole milliseconds, seconds, minutes, or hours; truncates toward zero |
+| `in(unit)` | `Int ? RangeError` | Whole nanoseconds, microseconds, milliseconds, seconds, minutes, or hours; truncates toward zero |
+| `is_zero()` | `Bool` | Whether the span is exactly zero |
+| `total_seconds()` | `Int` | Whole seconds in the span (truncates toward zero) |
+| `difference(other)` | `Duration` | This span minus `other` (saturating) |
 
 **Expert escape — `assume_deterministic { … }`.** Inside a `fn … =[]=>`, a block
 written `assume_deterministic { … }` suspends the determinism check (E3401/E3403)

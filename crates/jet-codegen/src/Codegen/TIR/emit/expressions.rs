@@ -423,7 +423,7 @@ pub(crate) fn emit_host_call(call: &THostCall, recv_ty: Option<&Type>, cx: &Cx) 
                  let __jet_expiring_clock = &({}); \
                  let __jet_expiring_observer = __jet_expiring_clock.observer(); \
                  {}JetExpiringSecret::<{}>::new(\
-                     __jet_expiring_value, __jet_expiring_ttl.ms, \
+                     __jet_expiring_value, __jet_expiring_ttl.as_millis(), \
                      move || __jet_expiring_observer.now()) }}",
                 emit_tir_expr(value, cx),
                 emit_tir_expr(duration, cx),
@@ -3026,6 +3026,15 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     );
                     format!("{}jet_duration_in(&({}), &({}))", root, recv, unit)
                 }
+                THandleOp::DurationIsZero => {
+                    format!("{}jet_duration_is_zero(&({}))", root, recv)
+                }
+                THandleOp::DurationTotalSeconds => {
+                    format!("{}jet_duration_total_seconds(&({}))", root, recv)
+                }
+                THandleOp::DurationDifference => {
+                    format!("{}jet_duration_difference(&({}), &({}))", root, recv, a(0))
+                }
                 THandleOp::PreciseMethod { type_name, method } => {
                     let prefix = if type_name == "BigInt" {
                         "jet_bigint"
@@ -4337,9 +4346,34 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     "plus_duration" => {
                         format!("{}jet_datetime_plus_duration(&({}), &({}))", root, recv, a(0))
                     }
+                    "difference" => {
+                        format!("{}jet_datetime_difference(&({}), &({}))", root, recv, a(0))
+                    }
+                    "elapsed" => format!("{}jet_instant_elapsed(&({}))", root, recv),
                     "in_zone" => format!("({}).in_zone(&({}))", recv, a(0)),
-                    "truncate" | "round" => {
+                    "truncate" | "round" | "floor" | "ceil" => {
                         format!("({}).{}(&({}))", recv, method, a(0))
+                    }
+                    "replace" if args.len() == 3 => {
+                        format!(
+                            "({}).replace({}, {}, {})",
+                            recv,
+                            a(0),
+                            a(1),
+                            a(2)
+                        )
+                    }
+                    "replace" => {
+                        format!(
+                            "({}).replace({}, {}, {}, {}, {}, {})",
+                            recv,
+                            a(0),
+                            a(1),
+                            a(2),
+                            a(3),
+                            a(4),
+                            a(5)
+                        )
                     }
                     "format" => format!("({}).format_pattern(&({}))", recv, a(0)),
                     "to_string" => format!("({}).to_string_fmt()", recv),

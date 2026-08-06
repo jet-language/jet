@@ -260,6 +260,9 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("GameBackend", "should_continue", 0) => THandleOp::GameBackendShouldContinue,
         ("GameBackend", "present", 0) => THandleOp::GameBackendPresent,
         ("Duration", "in", 1) => THandleOp::DurationIn { unit: None },
+        ("Duration", "is_zero", 0) => THandleOp::DurationIsZero,
+        ("Duration", "total_seconds", 0) => THandleOp::DurationTotalSeconds,
+        ("Duration", "difference", 1) => THandleOp::DurationDifference,
         ("BigInt", "add" | "sub" | "mul", 1) => THandleOp::PreciseMethod {
             type_name: "BigInt".to_string(),
             method: method.to_string(),

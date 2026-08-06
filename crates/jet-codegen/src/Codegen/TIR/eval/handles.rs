@@ -530,6 +530,62 @@ pub(super) fn eval_handle(
             })
         }
         THandleOp::DurationIn { .. } => apply_method(recv, "in", args.to_vec(), span),
+        THandleOp::DurationIsZero => {
+            let ns = match recv {
+                CtValue::Struct { fields, .. } => fields
+                    .iter()
+                    .find(|(n, _)| n == "ns")
+                    .and_then(|(_, v)| match v {
+                        CtValue::Int(n) => Some(*n),
+                        _ => None,
+                    })
+                    .unwrap_or(0),
+                _ => 0,
+            };
+            Ok(CtValue::Bool(ns == 0))
+        }
+        THandleOp::DurationTotalSeconds => {
+            let ns = match recv {
+                CtValue::Struct { fields, .. } => fields
+                    .iter()
+                    .find(|(n, _)| n == "ns")
+                    .and_then(|(_, v)| match v {
+                        CtValue::Int(n) => Some(*n),
+                        _ => None,
+                    })
+                    .unwrap_or(0),
+                _ => 0,
+            };
+            Ok(CtValue::Int(ns / 1_000_000_000))
+        }
+        THandleOp::DurationDifference => {
+            let a = match recv {
+                CtValue::Struct { fields, .. } => fields
+                    .iter()
+                    .find(|(n, _)| n == "ns")
+                    .and_then(|(_, v)| match v {
+                        CtValue::Int(n) => Some(*n),
+                        _ => None,
+                    })
+                    .unwrap_or(0),
+                _ => 0,
+            };
+            let b = match args.first() {
+                Some(CtValue::Struct { fields, .. }) => fields
+                    .iter()
+                    .find(|(n, _)| n == "ns")
+                    .and_then(|(_, v)| match v {
+                        CtValue::Int(n) => Some(*n),
+                        _ => None,
+                    })
+                    .unwrap_or(0),
+                _ => 0,
+            };
+            Ok(CtValue::Struct {
+                type_name: "Duration".to_string(),
+                fields: vec![("ns".to_string(), CtValue::Int(a.saturating_sub(b)))],
+            })
+        }
         THandleOp::FileReaderReadLine => Err(unsupported("handle `FileReaderReadLine`", span)),
         THandleOp::FileWriterWriteLine => Err(unsupported("handle `FileWriterWriteLine`", span)),
         THandleOp::FileWriterFlush => Err(unsupported("handle `FileWriterFlush`", span)),
@@ -825,10 +881,12 @@ fn duration_new(
     span: Span,
 ) -> Result<CtValue, Diagnostic> {
     let scale = match unit {
-        "Milliseconds" => 1_i64,
-        "Seconds" => 1_000,
-        "Minutes" => 60_000,
-        "Hours" => 3_600_000,
+        "Nanoseconds" => 1_i64,
+        "Microseconds" => 1_000,
+        "Milliseconds" => 1_000_000,
+        "Seconds" => 1_000_000_000,
+        "Minutes" => 60_000_000_000,
+        "Hours" => 3_600_000_000_000,
         _ => return Err(unsupported(&format!("Duration unit `{unit}`"), span)),
     };
     let ms = if float {
@@ -856,7 +914,7 @@ fn duration_new(
     Ok(match ms {
         Some(ms) => CtValue::ResOk(Box::new(CtValue::Struct {
             type_name: crate::Syntax::DURATION_TYPE.to_string(),
-            fields: vec![("ms".to_string(), CtValue::Int(ms))],
+            fields: vec![("ns".to_string(), CtValue::Int(ms))],
         })),
         None => CtValue::ResErr(Box::new(CtValue::Struct {
             type_name: crate::Syntax::DURATION_RANGE_ERROR_TYPE.to_string(),

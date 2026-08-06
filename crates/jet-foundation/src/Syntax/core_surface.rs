@@ -651,14 +651,30 @@ pub const RNG_TYPE: &str = "Rng";
 pub const DURATION_TYPE: &str = "Duration";
 pub const DURATION_UNIT_TYPE: &str = "DurationUnit";
 pub const DURATION_RANGE_ERROR_TYPE: &str = "RangeError";
-pub const DURATION_CONSTRUCTORS: &[&str] =
-    &["milliseconds", "seconds", "minutes", "hours"];
-pub const DURATION_UNITS: &[&str] =
-    &["Milliseconds", "Seconds", "Minutes", "Hours"];
+pub const DURATION_CONSTRUCTORS: &[&str] = &[
+    "nanoseconds",
+    "microseconds",
+    "milliseconds",
+    "seconds",
+    "minutes",
+    "hours",
+];
+pub const DURATION_UNITS: &[&str] = &[
+    "Nanoseconds",
+    "Microseconds",
+    "Milliseconds",
+    "Seconds",
+    "Minutes",
+    "Hours",
+];
 pub const METHOD_DURATION_IN: &str = "in";
+pub const METHOD_DURATION_IS_ZERO: &str = "is_zero";
+pub const METHOD_DURATION_TOTAL_SECONDS: &str = "total_seconds";
 
 pub fn duration_unit_for_constructor(method: &str) -> Option<&'static str> {
     match method {
+        "nanoseconds" => Some("Nanoseconds"),
+        "microseconds" => Some("Microseconds"),
         "milliseconds" => Some("Milliseconds"),
         "seconds" => Some("Seconds"),
         "minutes" => Some("Minutes"),

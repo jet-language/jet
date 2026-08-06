@@ -764,15 +764,24 @@
         pub failures: i64,
     }
 
-    // D-SHAPE-DURATION1=A: a checked elapsed span stored canonically as whole
-    // milliseconds. Static unit literals keep their existing compile-time path.
+    // D-TIMERES1=A: a checked elapsed span stored as whole nanoseconds
+    // (about 292 years). Whole-unit reads stay truncating.
     #[derive(Clone, Copy, Debug, PartialEq)]
     pub struct Duration {
-        pub ms: i64,
+        pub ns: i64,
+    }
+
+    impl Duration {
+        #[inline]
+        pub fn as_millis(self) -> i64 {
+            self.ns / 1_000_000
+        }
     }
 
     #[derive(Clone, Copy, Debug, PartialEq)]
     pub enum DurationUnit {
+        Nanoseconds,
+        Microseconds,
         Milliseconds,
         Seconds,
         Minutes,
@@ -780,12 +789,14 @@
     }
 
     impl DurationUnit {
-        pub fn milliseconds(self) -> i64 {
+        pub fn nanoseconds(self) -> i64 {
             match self {
-                Self::Milliseconds => 1,
-                Self::Seconds => 1_000,
-                Self::Minutes => 60_000,
-                Self::Hours => 3_600_000,
+                Self::Nanoseconds => 1,
+                Self::Microseconds => 1_000,
+                Self::Milliseconds => 1_000_000,
+                Self::Seconds => 1_000_000_000,
+                Self::Minutes => 60_000_000_000,
+                Self::Hours => 3_600_000_000_000,
             }
         }
     }
@@ -1469,7 +1480,7 @@
     }
     impl super::JetShow for Duration {
         fn jet_show(&self) -> String {
-            format!("{}ms", self.ms)
+            format!("{}ns", self.ns)
         }
     }
     impl super::JetShow for JSONError {

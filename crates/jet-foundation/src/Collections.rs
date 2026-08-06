@@ -1198,6 +1198,9 @@ fn duration_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
                 crate::Syntax::DURATION_RANGE_ERROR_TYPE.to_string(),
             )),
         })),
+        (crate::Syntax::METHOD_DURATION_IS_ZERO, 0) => Some(Some(Type::Bool)),
+        (crate::Syntax::METHOD_DURATION_TOTAL_SECONDS, 0) => Some(Some(Type::Int)),
+        ("difference", 1) => Some(Some(Type::Named(crate::Syntax::DURATION_TYPE.to_string()))),
         _ => None,
     }
 }
@@ -1800,6 +1803,11 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             Some(vec![Type::Named(
                 crate::Syntax::DURATION_UNIT_TYPE.to_string(),
             )])
+        }
+        Type::Named(n)
+            if n == crate::Syntax::DURATION_TYPE && method == "difference" =>
+        {
+            Some(vec![Type::Named(crate::Syntax::DURATION_TYPE.to_string())])
         }
         Type::Named(n) if n == "X25519PublicKey" && method == "from_text" => Some(vec![Type::String]),
         Type::Named(n) if matches!(n.as_str(), "SigningKey" | "X25519SecretKey") && method == "new_random" => Some(vec![]),

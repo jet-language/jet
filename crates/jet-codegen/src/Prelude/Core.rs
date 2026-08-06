@@ -11,7 +11,7 @@ impl JetDate {
     fn is_leap(y: i64) -> bool {
         (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
     }
-    fn days_in_month(y: i64, m: i64) -> i64 {
+    fn days_in_month_of(y: i64, m: i64) -> i64 {
         match m {
             1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
             4 | 6 | 9 | 11 => 30,
@@ -27,7 +27,7 @@ impl JetDate {
     }
     fn new(y: i64, m: i64, d: i64) -> Self {
         let month = m.clamp(1, 12);
-        let day = d.clamp(1, Self::days_in_month(y, month));
+        let day = d.clamp(1, Self::days_in_month_of(y, month));
         JetDate {
             year: y,
             month,
@@ -64,8 +64,8 @@ impl JetDate {
         }
         n -= JetDate::new(y, 1, 1).to_day_number();
         let mut m = 1i64;
-        while m < 12 && n >= Self::days_in_month(y, m) {
-            n -= Self::days_in_month(y, m);
+        while m < 12 && n >= Self::days_in_month_of(y, m) {
+            n -= Self::days_in_month_of(y, m);
             m += 1;
         }
         JetDate::new(y, m, n + 1)
@@ -84,7 +84,7 @@ impl JetDate {
         let d = parts[2]
             .parse::<i64>()
             .map_err(|_| format!("bad day: {}", parts[2]))?;
-        if m < 1 || m > 12 || d < 1 || d > Self::days_in_month(y, m) {
+        if m < 1 || m > 12 || d < 1 || d > Self::days_in_month_of(y, m) {
             return Err(format!("date out of range: {}", s));
         }
         Ok(JetDate::new(y, m, d))
@@ -105,7 +105,7 @@ impl JetDate {
         let total = self.month - 1 + n;
         let y = self.year + total / 12;
         let m = total % 12 + 1;
-        let d = self.day.min(Self::days_in_month(y, m));
+        let d = self.day.min(Self::days_in_month_of(y, m));
         JetDate::new(y, m, d)
     }
     fn diff_days(&self, other: &JetDate) -> i64 {
@@ -121,6 +121,15 @@ impl JetDate {
     fn day_of_year(&self) -> i64 {
         self.to_day_number() - JetDate::new(self.year, 1, 1).to_day_number() + 1
     }
+    fn quarter_of_year(&self) -> i64 {
+        (self.month - 1) / 3 + 1
+    }
+    fn is_leap_year(&self) -> bool {
+        Self::is_leap(self.year)
+    }
+    fn days_in_month(&self) -> i64 {
+        Self::days_in_month_of(self.year, self.month)
+    }
     fn iso_week(&self) -> i64 {
         let thursday = self.add_days(4 - self.iso_weekday());
         ((thursday.to_day_number() - JetDate::new(thursday.year, 1, 1).to_day_number()) / 7) + 1
@@ -131,6 +140,9 @@ impl JetDate {
             "month" => JetDate::new(self.year, self.month, 1),
             _ => self.clone(),
         }
+    }
+    fn replace(&self, year: i64, month: i64, day: i64) -> JetDate {
+        JetDate::new(year, month, day)
     }
     fn add_period(&self, p: &JetPeriod) -> JetDate {
         self.add_months(p.years.saturating_mul(12).saturating_add(p.months))
@@ -260,6 +272,9 @@ impl JetInstant {
     fn elapsed_millis(&self) -> i64 {
         self.start.elapsed().as_millis() as i64
     }
+    fn elapsed_nanos(&self) -> i64 {
+        self.start.elapsed().as_nanos().min(i64::MAX as u128) as i64
+    }
 }
 impl PartialEq for JetInstant {
     fn eq(&self, other: &Self) -> bool {
@@ -275,17 +290,42 @@ impl JetShow for JetInstant {
 #[derive(Clone, Debug, PartialEq)]
 struct JetDateTime {
     secs: i64,
-} // seconds since Unix epoch (UTC)
+    nanos: u32,
+} // seconds + nanosecond remainder since Unix epoch (UTC)
 impl JetDateTime {
     fn from_timestamp(secs: i64) -> Self {
-        JetDateTime { secs }
+        JetDateTime { secs, nanos: 0 }
+    }
+    fn from_timestamp_ns(secs: i64, nanos: u32) -> Self {
+        let mut secs = secs;
+        let mut nanos = nanos;
+        if nanos >= 1_000_000_000 {
+            secs = secs.saturating_add((nanos / 1_000_000_000) as i64);
+            nanos %= 1_000_000_000;
+        }
+        JetDateTime { secs, nanos }
+    }
+    fn from_parts(
+        year: i64,
+        month: i64,
+        day: i64,
+        hour: i64,
+        minute: i64,
+        second: i64,
+        nanos: u32,
+    ) -> Self {
+        let date = JetDate::new(year, month, day);
+        let time = JetLocalTime::new(hour, minute, second);
+        Self::from_timestamp_ns(jet_time_utc_from_parts(&date, &time), nanos)
     }
     fn now() -> Self {
-        let s = std::time::SystemTime::now()
+        let d = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0) as i64;
-        JetDateTime { secs: s }
+            .unwrap_or_default();
+        JetDateTime {
+            secs: d.as_secs() as i64,
+            nanos: d.subsec_nanos(),
+        }
     }
     fn date(&self) -> JetDate {
         let days = self.secs.div_euclid(86400);
@@ -305,16 +345,27 @@ impl JetDateTime {
     fn second(&self) -> i64 {
         self.secs.rem_euclid(60)
     }
+    fn millisecond(&self) -> i64 {
+        (self.nanos / 1_000_000) as i64
+    }
+    fn microsecond(&self) -> i64 {
+        (self.nanos / 1_000) as i64
+    }
+    fn nanosecond(&self) -> i64 {
+        self.nanos as i64
+    }
     fn to_timestamp(&self) -> i64 {
         self.secs
     }
     fn to_unix_ms(&self) -> i64 {
-        self.secs.saturating_mul(1000)
+        self.secs
+            .saturating_mul(1000)
+            .saturating_add((self.nanos / 1_000_000) as i64)
     }
     fn from_unix_ms(ms: i64) -> Self {
-        JetDateTime {
-            secs: ms.div_euclid(1000),
-        }
+        let secs = ms.div_euclid(1000);
+        let nanos = (ms.rem_euclid(1000) as u32).saturating_mul(1_000_000);
+        JetDateTime { secs, nanos }
     }
     fn parse_rfc3339(s: &str) -> Result<Self, String> {
         let (date_part, rest) = s
@@ -330,8 +381,19 @@ impl JetDateTime {
             })
             .ok_or_else(|| format!("RFC3339 datetime needs Z or an offset: {}", s))?;
         let (time_part, zone_part) = rest.split_at(zone_pos);
-        let clean_time = time_part.split('.').next().unwrap_or(time_part);
+        let (clean_time, frac) = match time_part.split_once('.') {
+            Some((t, f)) => (t, Some(f)),
+            None => (time_part, None),
+        };
         let time = JetLocalTime::parse(clean_time)?;
+        let mut nanos = 0u32;
+        if let Some(f) = frac {
+            let digits: String = f.chars().take(9).filter(|c| c.is_ascii_digit()).collect();
+            if !digits.is_empty() {
+                let padded = format!("{:0<9}", digits);
+                nanos = padded.parse::<u32>().unwrap_or(0);
+            }
+        }
         let offset = if zone_part == "Z" {
             0
         } else {
@@ -350,42 +412,120 @@ impl JetDateTime {
         };
         Ok(JetDateTime {
             secs: jet_time_utc_from_parts(&date, &time) - offset,
+            nanos,
         })
     }
     fn format_rfc3339(&self) -> String {
         let d = self.date();
         let t = self.time();
-        format!("{}T{}Z", d.to_string_fmt(), t.to_string_fmt())
+        if self.nanos == 0 {
+            format!("{}T{}Z", d.to_string_fmt(), t.to_string_fmt())
+        } else {
+            format!(
+                "{}T{}.{:09}Z",
+                d.to_string_fmt(),
+                t.to_string_fmt(),
+                self.nanos
+            )
+        }
     }
     fn format_pattern(&self, pattern: &String) -> String {
         jet_time_format_pattern(pattern, &self.date(), &self.time(), None)
     }
-    fn plus_duration_ms(&self, ms: i64) -> JetDateTime {
-        JetDateTime {
-            secs: self.secs.saturating_add(ms.div_euclid(1000)),
-        }
+    fn plus_duration_ns(&self, ns: i64) -> JetDateTime {
+        let total = (self.secs as i128)
+            .saturating_mul(1_000_000_000)
+            .saturating_add(self.nanos as i128)
+            .saturating_add(ns as i128);
+        let secs = total.div_euclid(1_000_000_000) as i64;
+        let nanos = total.rem_euclid(1_000_000_000) as u32;
+        JetDateTime { secs, nanos }
+    }
+    fn difference_ns(&self, other: &JetDateTime) -> i64 {
+        let a = (self.secs as i128)
+            .saturating_mul(1_000_000_000)
+            .saturating_add(self.nanos as i128);
+        let b = (other.secs as i128)
+            .saturating_mul(1_000_000_000)
+            .saturating_add(other.nanos as i128);
+        (a - b).clamp(i64::MIN as i128, i64::MAX as i128) as i64
     }
     fn truncate(&self, unit: &String) -> JetDateTime {
-        let size = match unit.as_str() {
-            "day" => 86400,
-            "hour" => 3600,
-            "minute" => 60,
-            _ => 1,
-        };
-        JetDateTime {
-            secs: self.secs.div_euclid(size) * size,
+        match unit.as_str() {
+            "day" => JetDateTime {
+                secs: self.secs.div_euclid(86400) * 86400,
+                nanos: 0,
+            },
+            "hour" => JetDateTime {
+                secs: self.secs.div_euclid(3600) * 3600,
+                nanos: 0,
+            },
+            "minute" => JetDateTime {
+                secs: self.secs.div_euclid(60) * 60,
+                nanos: 0,
+            },
+            "second" => JetDateTime {
+                secs: self.secs,
+                nanos: 0,
+            },
+            "millisecond" => JetDateTime {
+                secs: self.secs,
+                nanos: (self.nanos / 1_000_000) * 1_000_000,
+            },
+            "microsecond" => JetDateTime {
+                secs: self.secs,
+                nanos: (self.nanos / 1_000) * 1_000,
+            },
+            _ => self.clone(),
+        }
+    }
+    fn floor(&self, unit: &String) -> JetDateTime {
+        self.truncate(unit)
+    }
+    fn ceil(&self, unit: &String) -> JetDateTime {
+        let floored = self.truncate(unit);
+        if &floored == self {
+            return floored;
+        }
+        match unit.as_str() {
+            "day" => floored.plus_duration_ns(86400 * 1_000_000_000),
+            "hour" => floored.plus_duration_ns(3600 * 1_000_000_000),
+            "minute" => floored.plus_duration_ns(60 * 1_000_000_000),
+            "second" => floored.plus_duration_ns(1_000_000_000),
+            "millisecond" => floored.plus_duration_ns(1_000_000),
+            "microsecond" => floored.plus_duration_ns(1_000),
+            _ => self.clone(),
         }
     }
     fn round(&self, unit: &String) -> JetDateTime {
-        let size = match unit.as_str() {
-            "day" => 86400,
-            "hour" => 3600,
-            "minute" => 60,
-            _ => 1,
+        let size_ns: i64 = match unit.as_str() {
+            "day" => 86400 * 1_000_000_000,
+            "hour" => 3600 * 1_000_000_000,
+            "minute" => 60 * 1_000_000_000,
+            "second" => 1_000_000_000,
+            "millisecond" => 1_000_000,
+            "microsecond" => 1_000,
+            _ => return self.clone(),
         };
-        JetDateTime {
-            secs: self.secs.saturating_add(size / 2).div_euclid(size) * size,
-        }
+        let total = (self.secs as i128)
+            .saturating_mul(1_000_000_000)
+            .saturating_add(self.nanos as i128);
+        let rounded = (total + (size_ns as i128) / 2).div_euclid(size_ns as i128)
+            * (size_ns as i128);
+        let secs = rounded.div_euclid(1_000_000_000) as i64;
+        let nanos = rounded.rem_euclid(1_000_000_000) as u32;
+        JetDateTime { secs, nanos }
+    }
+    fn replace(
+        &self,
+        year: i64,
+        month: i64,
+        day: i64,
+        hour: i64,
+        minute: i64,
+        second: i64,
+    ) -> JetDateTime {
+        Self::from_parts(year, month, day, hour, minute, second, self.nanos)
     }
     fn in_zone(&self, zone: &JetZone) -> JetZonedDateTime {
         JetZonedDateTime {
@@ -557,8 +697,11 @@ impl JetZone {
         self.name.clone()
     }
     fn offset_at_utc(&self, secs: i64) -> i64 {
+        self.info_at_utc(secs).offset
+    }
+    fn info_at_utc(&self, secs: i64) -> &JetTtInfo {
         if self.transitions.is_empty() {
-            return self.infos[0].offset;
+            return &self.infos[0];
         }
         let mut lo = 0usize;
         let mut hi = self.transitions.len();
@@ -575,7 +718,7 @@ impl JetZone {
         } else {
             self.transitions[lo - 1].1
         };
-        self.infos[idx].offset
+        &self.infos[idx]
     }
     fn local_parts(&self, secs: i64) -> (JetDate, JetLocalTime, i64) {
         let offset = self.offset_at_utc(secs);
@@ -625,15 +768,18 @@ impl JetZonedDateTime {
     fn offset_seconds(&self) -> i64 {
         self.zone.local_parts(self.instant.secs).2
     }
+    fn is_dst(&self) -> bool {
+        self.zone.info_at_utc(self.instant.secs).is_dst
+    }
     fn to_datetime(&self) -> JetDateTime {
         self.instant.clone()
     }
     fn zone(&self) -> JetZone {
         self.zone.clone()
     }
-    fn add_duration_ms(&self, ms: i64) -> JetZonedDateTime {
+    fn add_duration_ns(&self, ns: i64) -> JetZonedDateTime {
         JetZonedDateTime {
-            instant: self.instant.plus_duration_ms(ms),
+            instant: self.instant.plus_duration_ns(ns),
             zone: self.zone.clone(),
         }
     }

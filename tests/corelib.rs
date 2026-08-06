@@ -6123,7 +6123,7 @@ use core.time.date as date
 
 fn run() {
     zone :: time.zone("America/New_York") ?? panic("missing zone")
-    local :: time.zoned_local(date.new(2024, 3, 10), time.local_time(1, 30, 0), zone)
+    local :: time.zoned_local(date.new(2024, 3, 10), time.time(1, 30, 0), zone)
     print(local.format("yyyy-MM-dd HH:mm:ss VV XXX"))
     civil :: local.add_period(time.period_days(1))
     day :: Duration.hours(24) ?? panic("duration")

@@ -413,7 +413,11 @@ pub(crate) fn is_civil_time_method_name(recv_type: Option<&str>, method: &str) -
                 | "iso_weekday"
                 | "day_of_year"
                 | "iso_week"
+                | "quarter_of_year"
+                | "days_in_month"
+                | "is_leap_year"
                 | "truncate"
+                | "replace"
                 | "format"
                 | "to_string"
         ),
@@ -423,19 +427,26 @@ pub(crate) fn is_civil_time_method_name(recv_type: Option<&str>, method: &str) -
             "hour"
                 | "minute"
                 | "second"
+                | "millisecond"
+                | "microsecond"
+                | "nanosecond"
                 | "to_timestamp"
                 | "to_unix_ms"
                 | "date"
                 | "time"
                 | "plus_duration"
+                | "difference"
                 | "truncate"
                 | "round"
+                | "floor"
+                | "ceil"
+                | "replace"
                 | "in_zone"
                 | "format_rfc3339"
                 | "format"
                 | "to_string"
         ),
-        Some("Instant") => matches!(method, "elapsed_millis"),
+        Some("Instant") => matches!(method, "elapsed_millis" | "elapsed"),
         Some("Period") => matches!(method, "to_string"),
         Some("Zone") => matches!(method, "name"),
         Some("ZonedDateTime") => matches!(
@@ -443,6 +454,7 @@ pub(crate) fn is_civil_time_method_name(recv_type: Option<&str>, method: &str) -
             "date"
                 | "time"
                 | "offset_seconds"
+                | "is_dst"
                 | "to_datetime"
                 | "zone"
                 | "add_duration"

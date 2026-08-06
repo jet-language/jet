@@ -514,7 +514,7 @@ pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
         (
             "core.time",
             "clock"
-                | "local_time"
+                | "time"
                 | "parse_time"
                 | "period"
                 | "period_days"

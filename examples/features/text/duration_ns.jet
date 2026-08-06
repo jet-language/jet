@@ -1,0 +1,20 @@
+use core.time as time
+
+fn run() {
+    ns :: Duration.nanoseconds(400) ?? panic("ns")
+    us :: Duration.microseconds(400) ?? panic("us")
+    print(ns.in(.Nanoseconds) ?? panic("read"))
+    print(us.in(.Microseconds) ?? panic("read"))
+    print(us.in(.Nanoseconds) ?? panic("read"))
+    print(ns.is_zero())
+    print((Duration.milliseconds(0) ?? panic("zero")).is_zero())
+    print((Duration.seconds(2) ?? panic("sec")).total_seconds())
+    a :: Duration.milliseconds(1500) ?? panic("a")
+    b :: Duration.milliseconds(500) ?? panic("b")
+    print(a.difference(b).in(.Milliseconds) ?? panic("diff"))
+    print((time.nanoseconds(250) ?? panic("mod")).in(.Nanoseconds) ?? panic("mod read"))
+    print((time.microseconds(3) ?? panic("mod us")).in(.Microseconds) ?? panic("mod us read"))
+    inst :: time.instant()
+    elapsed :: inst.elapsed()
+    print(elapsed.total_seconds() >= 0)
+}

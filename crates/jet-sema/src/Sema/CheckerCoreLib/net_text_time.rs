@@ -900,14 +900,17 @@ pub fn civil_time_method_return(
     match ty {
         Type::Named(n) if n == "Date" || n == "LocalDate" => match method {
             "year" | "month" | "day" | "weekday" | "iso_weekday" | "day_of_year" | "iso_week"
+            | "quarter_of_year" | "days_in_month"
                 if argc == 0 =>
             {
                 Some(Some(Type::Int))
             }
+            "is_leap_year" if argc == 0 => Some(Some(Type::Bool)),
             "diff_days" if argc == 1 => Some(Some(Type::Int)),
             "add_days" | "add_months" | "truncate" if argc == 1 => {
                 Some(Some(Type::Named("LocalDate".to_string())))
             }
+            "replace" if argc == 3 => Some(Some(Type::Named("LocalDate".to_string()))),
             "add_period" if argc == 1 => Some(Some(Type::Named("LocalDate".to_string()))),
             "to_string" if argc == 0 => Some(Some(Type::String)),
             "format" if argc == 1 => Some(Some(Type::String)),
@@ -919,14 +922,19 @@ pub fn civil_time_method_return(
             _ => None,
         },
         Type::Named(n) if n == "DateTime" => match method {
-            "hour" | "minute" | "second" | "to_timestamp" | "to_unix_ms" if argc == 0 => {
+            "hour" | "minute" | "second" | "millisecond" | "microsecond" | "nanosecond"
+            | "to_timestamp" | "to_unix_ms"
+                if argc == 0 =>
+            {
                 Some(Some(Type::Int))
             }
             "date" if argc == 0 => Some(Some(Type::Named("LocalDate".to_string()))),
             "time" if argc == 0 => Some(Some(Type::Named("LocalTime".to_string()))),
-            "plus_duration" | "truncate" | "round" if argc == 1 => {
+            "plus_duration" | "truncate" | "round" | "floor" | "ceil" if argc == 1 => {
                 Some(Some(Type::Named("DateTime".to_string())))
             }
+            "difference" if argc == 1 => Some(Some(Type::Named("Duration".to_string()))),
+            "replace" if argc == 6 => Some(Some(Type::Named("DateTime".to_string()))),
             "in_zone" if argc == 1 => Some(Some(Type::Named("ZonedDateTime".to_string()))),
             "to_string" | "format_rfc3339" if argc == 0 => Some(Some(Type::String)),
             "format" if argc == 1 => Some(Some(Type::String)),
@@ -934,6 +942,7 @@ pub fn civil_time_method_return(
         },
         Type::Named(n) if n == "Instant" => match method {
             "elapsed_millis" if argc == 0 => Some(Some(Type::Int)),
+            "elapsed" if argc == 0 => Some(Some(Type::Named("Duration".to_string()))),
             _ => None,
         },
         Type::Named(n) if n == "Period" => match method {
@@ -948,6 +957,7 @@ pub fn civil_time_method_return(
             "date" if argc == 0 => Some(Some(Type::Named("LocalDate".to_string()))),
             "time" if argc == 0 => Some(Some(Type::Named("LocalTime".to_string()))),
             "offset_seconds" if argc == 0 => Some(Some(Type::Int)),
+            "is_dst" if argc == 0 => Some(Some(Type::Bool)),
             "to_datetime" if argc == 0 => Some(Some(Type::Named("DateTime".to_string()))),
             "zone" if argc == 0 => Some(Some(Type::Named("Zone".to_string()))),
             "add_duration" | "add_period" if argc == 1 => {

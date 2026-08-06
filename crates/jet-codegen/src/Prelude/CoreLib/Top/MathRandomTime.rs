@@ -110,7 +110,7 @@ fn jet_clock_advance(c: &mut jet_std::Clock, to_ms: i64) -> i64 {
     c.now()
 }
 fn jet_clock_wait(c: &mut jet_std::Clock, d: &jet_std::Duration) -> i64 {
-    let now = c.now().saturating_add(d.ms);
+    let now = c.now().saturating_add(d.as_millis());
     c.set(now);
     c.now()
 }
@@ -260,14 +260,14 @@ fn jet_solver_status(s: &jet_std::Solver) -> String {
         "failed".to_string()
     }
 }
-// D-SHAPE-DURATION1=A / D-SHAPE-DURATIONCONVERT1=A: one checked unit
+// D-TIMERES1=A / D-SHAPE-DURATIONCONVERT1=A: one checked nanosecond unit
 // model for every runtime constructor and whole-unit read.
 fn jet_duration_from_int(
     n: i64,
     unit: jet_std::DurationUnit,
 ) -> Result<jet_std::Duration, jet_std::RangeError> {
-    n.checked_mul(unit.milliseconds())
-        .map(|ms| jet_std::Duration { ms })
+    n.checked_mul(unit.nanoseconds())
+        .map(|ns| jet_std::Duration { ns })
         .ok_or_else(|| jet_std::RangeError {
             reason: "duration is outside the supported range".to_string(),
         })
@@ -276,22 +276,35 @@ fn jet_duration_from_float(
     n: f64,
     unit: jet_std::DurationUnit,
 ) -> Result<jet_std::Duration, jet_std::RangeError> {
-    let ms = n * unit.milliseconds() as f64;
-    if !ms.is_finite() || ms < i64::MIN as f64 || ms >= 9_223_372_036_854_775_808.0 {
+    let ns = n * unit.nanoseconds() as f64;
+    if !ns.is_finite() || ns < i64::MIN as f64 || ns >= 9_223_372_036_854_775_808.0 {
         return Err(jet_std::RangeError {
             reason: "duration must be finite and inside the supported range".to_string(),
         });
     }
-    Ok(jet_std::Duration { ms: ms.trunc() as i64 })
+    Ok(jet_std::Duration {
+        ns: ns.trunc() as i64,
+    })
 }
 fn jet_duration_in(
     d: &jet_std::Duration,
     unit: &jet_std::DurationUnit,
 ) -> Result<i64, jet_std::RangeError> {
-    Ok(d.ms / unit.milliseconds())
+    Ok(d.ns / unit.nanoseconds())
 }
 fn jet_duration_ms_value(d: &jet_std::Duration) -> i64 {
-    d.ms
+    d.as_millis()
+}
+fn jet_duration_is_zero(d: &jet_std::Duration) -> bool {
+    d.ns == 0
+}
+fn jet_duration_total_seconds(d: &jet_std::Duration) -> i64 {
+    d.ns / 1_000_000_000
+}
+fn jet_duration_difference(a: &jet_std::Duration, b: &jet_std::Duration) -> jet_std::Duration {
+    jet_std::Duration {
+        ns: a.ns.saturating_sub(b.ns),
+    }
 }
 
 fn jet_time_instant_now() -> JetInstant {
@@ -299,6 +312,11 @@ fn jet_time_instant_now() -> JetInstant {
 }
 fn jet_instant_elapsed_millis(i: &JetInstant) -> i64 {
     i.elapsed_millis()
+}
+fn jet_instant_elapsed(i: &JetInstant) -> jet_std::Duration {
+    jet_std::Duration {
+        ns: i.elapsed_nanos(),
+    }
 }
 fn jet_time_now_utc() -> JetDateTime {
     JetDateTime::now()
@@ -308,6 +326,25 @@ fn jet_time_today() -> JetDate {
 }
 fn jet_time_parse_rfc3339(s: &String) -> Result<JetDateTime, String> {
     JetDateTime::parse_rfc3339(s)
+}
+fn jet_time_datetime(
+    year: i64,
+    month: i64,
+    day: i64,
+    hour: i64,
+    minute: i64,
+    second: i64,
+) -> JetDateTime {
+    JetDateTime::from_parts(year, month, day, hour, minute, second, 0)
+}
+fn jet_time_time(hour: i64, minute: i64, second: i64) -> JetLocalTime {
+    JetLocalTime::new(hour, minute, second)
+}
+fn jet_time_days_in_month(year: i64, month: i64) -> i64 {
+    JetDate::days_in_month_of(year, month.clamp(1, 12))
+}
+fn jet_time_is_leap_year(year: i64) -> bool {
+    JetDate::is_leap(year)
 }
 fn jet_time_period(years: i64, months: i64, days: i64) -> JetPeriod {
     JetPeriod::new(years, months, days)
@@ -334,10 +371,15 @@ fn jet_time_zoned_local(date: &JetDate, time: &JetLocalTime, zone: &JetZone) -> 
     JetZonedDateTime::from_local(date, time, zone)
 }
 fn jet_datetime_plus_duration(dt: &JetDateTime, d: &crate::jet_std::Duration) -> JetDateTime {
-    dt.plus_duration_ms(d.ms)
+    dt.plus_duration_ns(d.ns)
+}
+fn jet_datetime_difference(a: &JetDateTime, b: &JetDateTime) -> crate::jet_std::Duration {
+    crate::jet_std::Duration {
+        ns: a.difference_ns(b),
+    }
 }
 fn jet_zoned_add_duration(z: &JetZonedDateTime, d: &crate::jet_std::Duration) -> JetZonedDateTime {
-    z.add_duration_ms(d.ms)
+    z.add_duration_ns(d.ns)
 }
 
 fn jet_url_parse(s: &String) -> Result<crate::jet_std::JetURL, String> {
