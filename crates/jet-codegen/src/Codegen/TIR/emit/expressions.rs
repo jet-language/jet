@@ -852,6 +852,8 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             let parts: Vec<String> = args.iter().map(|a| emit_tir_expr(a, cx)).collect();
             let prefix = if type_name == "BigInt" {
                 "jet_bigint"
+            } else if type_name == "Fraction" {
+                "jet_fraction"
             } else {
                 "jet_decimal"
             };

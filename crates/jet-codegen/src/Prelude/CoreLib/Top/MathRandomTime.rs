@@ -421,6 +421,41 @@ fn jet_bigint_to_string(a: &jet_std::JetBigInt) -> String {
 fn jet_decimal_from_str(s: &String) -> jet_std::JetDecimal {
     jet_std::JetDecimal::from_str(s).expect("invalid Decimal string")
 }
+// D-NUMTYPE1=A: exact ratios. Every answer is optional, because a zero bottom
+// has no value and a product can leave the range.
+fn jet_fraction_new(numerator: i64, denominator: i64) -> Option<jet_std::JetFraction> {
+    jet_std::JetFraction::new(numerator, denominator)
+}
+fn jet_fraction_add(a: &jet_std::JetFraction, b: &jet_std::JetFraction) -> jet_std::JetFraction {
+    a.add(b).expect("this sum of ratios overflows the value type")
+}
+fn jet_fraction_sub(a: &jet_std::JetFraction, b: &jet_std::JetFraction) -> jet_std::JetFraction {
+    a.sub(b).expect("this difference of ratios overflows the value type")
+}
+fn jet_fraction_mul(a: &jet_std::JetFraction, b: &jet_std::JetFraction) -> jet_std::JetFraction {
+    a.mul(b).expect("this product of ratios overflows the value type")
+}
+fn jet_fraction_div(a: &jet_std::JetFraction, b: &jet_std::JetFraction) -> jet_std::JetFraction {
+    a.div(b).expect("divided by zero")
+}
+fn jet_fraction_equal(a: &jet_std::JetFraction, b: &jet_std::JetFraction) -> bool {
+    a == b
+}
+fn jet_fraction_numerator(a: &jet_std::JetFraction) -> i64 {
+    a.numerator
+}
+fn jet_fraction_denominator(a: &jet_std::JetFraction) -> i64 {
+    a.denominator
+}
+fn jet_fraction_to_string(a: &jet_std::JetFraction) -> String {
+    a.to_string_rep()
+}
+fn jet_fraction_to_float(a: &jet_std::JetFraction) -> f64 {
+    a.to_float()
+}
+fn jet_fraction_is_zero(a: &jet_std::JetFraction) -> bool {
+    a.is_zero()
+}
 fn jet_decimal_add(a: &jet_std::JetDecimal, b: &jet_std::JetDecimal) -> jet_std::JetDecimal {
     a.add(b)
 }

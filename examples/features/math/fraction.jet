@@ -1,0 +1,31 @@
+use core.math as math
+
+// D-NUMTYPE1=A: an exact ratio of two whole numbers. A Float cannot hold a
+// third, so adding a third three times does not give one. A Fraction can.
+fn run() {
+    third :: math.fraction(1, 3) ?? panic("a third is a ratio")
+    print(third.to_string())
+
+    whole :: third.add(third)
+    all :: whole.add(third)
+    print(all.to_string())
+    print(all.equal(math.fraction(1, 1) ?? panic("one")))
+
+    // The Float answer to the same question, which does not land on 0.3.
+    print(0.1 + 0.2)
+
+    // Reduced on construction, with the sign carried on top.
+    print((math.fraction(6, -8) ?? panic("ratio")).to_string())
+
+    rate :: math.fraction(44100, 48000) ?? panic("rate")
+    print(rate.to_string())
+    print(rate.numerator())
+    print(rate.denominator())
+    print(rate.to_float())
+    print(rate.is_zero())
+
+    // A ratio over nothing has no value, so the fallback is taken.
+    fallback :: math.fraction(0, 1) ?? panic("zero is a ratio")
+    refused :: math.fraction(1, 0) ?? fallback
+    print(refused.to_string())
+}

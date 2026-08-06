@@ -47,6 +47,7 @@ pub(super) fn evaluate(
         ("core.time", "zoned") => zoned_from_datetime(args, span),
         ("core.time", "zoned_local") => zoned_from_local(args, span),
         ("core.math", "decimal") => decimal_from_str(args, span),
+        ("core.math", "fraction") => fraction_new(args, span),
         ("core.science.measurement", "from") => measurement(args, span),
         ("core.time.date", "new") => date_new_call(args, span),
         ("core.time.date", "parse") => date_parse_call(args, span),
@@ -286,6 +287,34 @@ pub(super) fn evaluate_method(
             .value())
         }),
         ("Zone", "name", 0) => string_field(recv, "Zone", "name", span),
+        ("Fraction", "to_string", 0) => fraction_from_value(recv, span)
+            .map(|f| CtValue::Str(f.to_string_rep())),
+        ("Fraction", "numerator", 0) => fraction_from_value(recv, span)
+            .map(|f| CtValue::Int(f.numerator)),
+        ("Fraction", "denominator", 0) => fraction_from_value(recv, span)
+            .map(|f| CtValue::Int(f.denominator)),
+        ("Fraction", "to_float", 0) => fraction_from_value(recv, span)
+            .map(|f| CtValue::Float(crate::AST::CtFloat::F64(f.numerator as f64 / f.denominator as f64))),
+        ("Fraction", "is_zero", 0) => fraction_from_value(recv, span)
+            .map(|f| CtValue::Bool(f.numerator == 0)),
+        ("Fraction", "equal", 1) => fraction_from_value(recv, span).and_then(|left| {
+            let right = fraction_from_value(&args[0], span)?;
+            Ok(CtValue::Bool(left == right))
+        }),
+        ("Fraction", "add" | "sub" | "mul" | "div", 1) => fraction_from_value(recv, span).and_then(|left| {
+            let right = fraction_from_value(&args[0], span)?;
+            let out = match method {
+                "add" => left.add(&right),
+                "sub" => left.sub(&right),
+                "mul" => left.mul(&right),
+                "div" => left.div(&right),
+                _ => unreachable!("fraction method guard"),
+            };
+            match out {
+                Some(value) => Ok(value.to_value()),
+                None => Err(unsupported("a ratio that leaves the range, or divided by zero", span)),
+            }
+        }),
         ("Decimal", "to_string", 0) => decimal_from_value(recv, span)
             .map(|decimal| CtValue::Str(decimal.to_string_rep())),
         ("Decimal", "add" | "sub" | "mul", 1) => decimal_from_value(recv, span).and_then(|left| {
@@ -1630,6 +1659,25 @@ fn decimal_from_str(args: &[CtValue], span: Span) -> EvalResult {
         Ok(decimal) => Ok(decimal.to_value()),
         Err(error) => Err(unsupported(&error, span)),
     }
+}
+
+fn fraction_new(args: &[CtValue], span: Span) -> EvalResult {
+    let numerator = match args.first() {
+        Some(CtValue::Int(n)) => *n,
+        _ => return Err(unsupported("a ratio top that is not a whole number", span)),
+    };
+    let denominator = match args.get(1) {
+        Some(CtValue::Int(n)) => *n,
+        _ => return Err(unsupported("a ratio bottom that is not a whole number", span)),
+    };
+    Ok(match crate::Numeric::CtFraction::new(numerator, denominator) {
+        Some(value) => CtValue::Some(Box::new(value.to_value())),
+        None => CtValue::None(crate::AST::Type::Named(crate::Syntax::TYPE_FRACTION.to_string())),
+    })
+}
+
+fn fraction_from_value(value: &CtValue, span: Span) -> Result<crate::Numeric::CtFraction, Diagnostic> {
+    crate::Numeric::CtFraction::from_value(value).map_err(|error| unsupported(&error, span))
 }
 
 fn decimal_from_value(value: &CtValue, span: Span) -> Result<crate::Numeric::CtDecimal, Diagnostic> {

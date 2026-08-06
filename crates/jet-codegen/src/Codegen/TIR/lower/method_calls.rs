@@ -3764,7 +3764,9 @@ pub(crate) fn lower_method_call(
     // jet_decimal_*). Fragment lowers (empty Cx) never see method_sigs, so this
     // must not fall through to the user-method Todo path.
     if let Some(handle) = recv_type {
-        if (handle == Syntax::TYPE_BIGINT || handle == Syntax::TYPE_DECIMAL)
+        if (handle == Syntax::TYPE_BIGINT
+            || handle == Syntax::TYPE_DECIMAL
+            || handle == Syntax::TYPE_FRACTION)
             && !cx.type_names.contains(handle)
         {
             let known = matches!(
@@ -3773,6 +3775,8 @@ pub(crate) fn lower_method_call(
                     | ("BigInt", "neg" | "to_string", 0)
                     | ("Decimal", "add" | "sub" | "mul", 1)
                     | ("Decimal", "to_string", 0)
+                    | ("Fraction", "add" | "sub" | "mul" | "div" | "equal", 1)
+                    | ("Fraction", "numerator" | "denominator" | "to_string" | "to_float" | "is_zero", 0)
             );
             if known {
                 let recv_t = lower_expr(receiver, cx, env);
@@ -3780,6 +3784,9 @@ pub(crate) fn lower_method_call(
                 value_args.extend(args.iter().map(|a| lower_expr(&a.expr, cx, env)));
                 let ty = match method {
                     "to_string" => Type::String,
+                    "numerator" | "denominator" => Type::Int,
+                    "to_float" => Type::Float,
+                    "is_zero" | "equal" => Type::Bool,
                     _ => Type::Named(handle.clone()),
                 };
                 return TExpr {
@@ -4960,7 +4967,9 @@ pub(crate) fn lower_method_call(
         // numeric methods from the lowered receiver type.
         let recv_lowered = lower_expr(receiver, cx, env);
         if let Type::Named(n) = &recv_lowered.ty {
-            if (n == Syntax::TYPE_BIGINT || n == Syntax::TYPE_DECIMAL)
+            if (n == Syntax::TYPE_BIGINT
+                || n == Syntax::TYPE_DECIMAL
+                || n == Syntax::TYPE_FRACTION)
                 && !cx.type_names.contains(n)
             {
                 let known = matches!(
@@ -4969,6 +4978,12 @@ pub(crate) fn lower_method_call(
                         | ("BigInt", "neg" | "to_string", 0)
                         | ("Decimal", "add" | "sub" | "mul", 1)
                         | ("Decimal", "to_string", 0)
+                        | ("Fraction", "add" | "sub" | "mul" | "div" | "equal", 1)
+                        | (
+                            "Fraction",
+                            "numerator" | "denominator" | "to_string" | "to_float" | "is_zero",
+                            0
+                        )
                 );
                 if known {
                     let type_name = n.clone();
@@ -4976,6 +4991,9 @@ pub(crate) fn lower_method_call(
                     value_args.extend(args.iter().map(|a| lower_expr(&a.expr, cx, env)));
                     let ty = match method {
                         "to_string" => Type::String,
+                        "numerator" | "denominator" => Type::Int,
+                        "to_float" => Type::Float,
+                        "is_zero" | "equal" => Type::Bool,
                         _ => Type::Named(type_name.clone()),
                     };
                     return TExpr {

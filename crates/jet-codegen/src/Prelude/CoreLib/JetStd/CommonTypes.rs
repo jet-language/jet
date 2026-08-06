@@ -1024,11 +1024,9 @@
         }
     }
 
-    // D-DECIMAL1: exact base-10 decimal (scaled integer + scale).
-    #[derive(Clone, Debug, PartialEq, Eq)]
-    /// D-NUMTYPE1=A: an exact ratio of two whole numbers, always reduced, with
-    /// the sign carried on the top. A zero bottom has no value, so building one
-    /// answers nothing rather than a wrong number.
+    // D-NUMTYPE1=A: an exact ratio of two whole numbers, always reduced, with
+    // the sign carried on the top. A zero bottom has no value, so building one
+    // answers nothing rather than a wrong number.
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub struct JetFraction {
         pub numerator: i64,
@@ -1053,19 +1051,28 @@
                 b = r;
             }
             let divisor = if a == 0 { 1 } else { a };
-            Some(Self { numerator: n / divisor, denominator: d / divisor })
+            Some(Self {
+                numerator: n / divisor,
+                denominator: d / divisor,
+            })
         }
 
         pub fn add(&self, other: &Self) -> Option<Self> {
             let left = self.numerator.checked_mul(other.denominator)?;
             let right = other.numerator.checked_mul(self.denominator)?;
-            Self::new(left.checked_add(right)?, self.denominator.checked_mul(other.denominator)?)
+            Self::new(
+                left.checked_add(right)?,
+                self.denominator.checked_mul(other.denominator)?,
+            )
         }
 
         pub fn sub(&self, other: &Self) -> Option<Self> {
             let left = self.numerator.checked_mul(other.denominator)?;
             let right = other.numerator.checked_mul(self.denominator)?;
-            Self::new(left.checked_sub(right)?, self.denominator.checked_mul(other.denominator)?)
+            Self::new(
+                left.checked_sub(right)?,
+                self.denominator.checked_mul(other.denominator)?,
+            )
         }
 
         pub fn mul(&self, other: &Self) -> Option<Self> {
@@ -1089,14 +1096,20 @@
         pub fn is_zero(&self) -> bool {
             self.numerator == 0
         }
-    }
 
-    impl std::fmt::Display for JetFraction {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(f, "{}/{}", self.numerator, self.denominator)
+        pub fn to_string_rep(&self) -> String {
+            format!("{}/{}", self.numerator, self.denominator)
         }
     }
 
+    impl super::JetShow for JetFraction {
+        fn jet_show(&self) -> String {
+            self.to_string_rep()
+        }
+    }
+
+    // D-DECIMAL1: exact base-10 decimal (scaled integer + scale).
+    #[derive(Clone, Debug, PartialEq, Eq)]
     pub struct JetDecimal {
         negative: bool,
         digits: Vec<u8>, // big-endian mantissa digits 0-9, no dot

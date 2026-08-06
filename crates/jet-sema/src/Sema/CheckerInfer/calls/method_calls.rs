@@ -3920,7 +3920,9 @@ impl<'a> Checker<'a> {
                 if matches!(
                     &recv_ty,
                     Type::Named(n)
-                        if n == crate::Syntax::TYPE_BIGINT || n == crate::Syntax::TYPE_DECIMAL
+                        if n == crate::Syntax::TYPE_BIGINT
+                            || n == crate::Syntax::TYPE_DECIMAL
+                            || n == crate::Syntax::TYPE_FRACTION
                 ) {
                     *recv_type_out = Some(recv_ty.name());
                 }

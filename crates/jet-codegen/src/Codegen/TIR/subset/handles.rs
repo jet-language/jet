@@ -276,6 +276,19 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
             type_name: "Decimal".to_string(),
             method: method.to_string(),
         },
+        // D-NUMTYPE1=A: exact ratios take the same precise-method path.
+        ("Fraction", "add" | "sub" | "mul" | "div" | "equal", 1) => THandleOp::PreciseMethod {
+            type_name: "Fraction".to_string(),
+            method: method.to_string(),
+        },
+        (
+            "Fraction",
+            "numerator" | "denominator" | "to_string" | "to_float" | "is_zero",
+            0,
+        ) => THandleOp::PreciseMethod {
+            type_name: "Fraction".to_string(),
+            method: method.to_string(),
+        },
         ("TcpListener", "accept", 0 | 1) => THandleOp::TcpListenerAccept,
         ("TcpListener", "local_addr", 0) => THandleOp::TcpListenerLocalAddr,
         ("TcpStream", "read", 0) => THandleOp::TcpStreamRead,
@@ -575,6 +588,7 @@ pub(crate) fn handle_method_return_ty(handle: &str, method: &str, nargs: usize) 
         .or_else(|| {
             if handle == crate::Syntax::TYPE_BIGINT
                 || handle == crate::Syntax::TYPE_DECIMAL
+                || handle == crate::Syntax::TYPE_FRACTION
                 || handle == crate::Syntax::DURATION_TYPE
             {
                 crate::Collections::builtin_method_return(

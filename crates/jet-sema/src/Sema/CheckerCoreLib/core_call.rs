@@ -4287,6 +4287,22 @@ impl<'a> Checker<'a> {
                         args: vec![Type::Float],
                     });
                 }
+                // D-NUMTYPE1=A: core.math.fraction(top, bottom) answers an exact
+                // ratio, or nothing when the bottom is zero.
+                ("core.math", "fraction") => {
+                    if args.len() != 2 {
+                        self.diags.push(wrong_core_arity("fraction", 2, args.len(), span));
+                        for a in args.iter_mut() {
+                            self.infer(&mut a.expr);
+                        }
+                        return None;
+                    }
+                    self.expect_core_arg("fraction", 0, &Type::Int, &mut args[0]);
+                    self.expect_core_arg("fraction", 1, &Type::Int, &mut args[1]);
+                    return Some(Type::Option(Box::new(Type::Named(
+                        crate::Syntax::TYPE_FRACTION.to_string(),
+                    ))));
+                }
                 // D-CORE-NUMERIC1=A: `core.math.decimal(s)` → `Decimal`.
                 ("core.math", "decimal") => {
                     if args.len() != 1 {

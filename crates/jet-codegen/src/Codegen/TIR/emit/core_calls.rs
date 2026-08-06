@@ -314,6 +314,10 @@ pub(crate) fn emit_tir_core_call(
             )
         }
         // D-CORE-NUMERIC1=A: `core.math.decimal(s)` → exact parse.
+        ("core.math", "fraction") => format!(
+            "{}jet_fraction_new({}, {})",
+            cx.root_prefix, arg(0), arg(1)
+        ),
         ("core.math", "decimal") => {
             format!("{}jet_decimal_from_str(&({}))", cx.root_prefix, arg(0))
         }

@@ -199,7 +199,9 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                 && crate::Sema::is_math_type(&c.name)
                 && !cx.type_names.contains(&c.name);
             let is_precise_ctor = !locals.contains(&c.name)
-                && (c.name == crate::Syntax::TYPE_BIGINT || c.name == crate::Syntax::TYPE_DECIMAL)
+                && (c.name == crate::Syntax::TYPE_BIGINT
+                    || c.name == crate::Syntax::TYPE_DECIMAL
+                    || c.name == crate::Syntax::TYPE_FRACTION)
                 && !cx.type_names.contains(&c.name);
             // D-TYPEDTEXT1=D: the synthetic `SQL`/`HTML` call sema rewrote a typed
             // text literal into (see `lower_expr`'s matching case).

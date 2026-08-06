@@ -87,6 +87,99 @@ pub fn fraction_method_return(method: &str, nargs: usize) -> Option<Option<Type>
     }
 }
 
+// ── CtFraction: comptime/REPL tier-0 exact ratio ────────────────────────────
+//
+// Mirrors `JetFraction` in the Prelude so a Fraction computed at comptime
+// prints byte-identical to the same expression run through the AOT path.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CtFraction {
+    pub numerator: i64,
+    pub denominator: i64,
+}
+
+impl CtFraction {
+    pub fn new(numerator: i64, denominator: i64) -> Option<Self> {
+        if denominator == 0 {
+            return None;
+        }
+        let (mut n, mut d) = (numerator, denominator);
+        if d < 0 {
+            n = n.checked_neg()?;
+            d = d.checked_neg()?;
+        }
+        let mut a = n.checked_abs()?;
+        let mut b = d;
+        while b != 0 {
+            let r = a % b;
+            a = b;
+            b = r;
+        }
+        let divisor = if a == 0 { 1 } else { a };
+        Some(Self { numerator: n / divisor, denominator: d / divisor })
+    }
+
+    pub fn add(&self, other: &Self) -> Option<Self> {
+        let left = self.numerator.checked_mul(other.denominator)?;
+        let right = other.numerator.checked_mul(self.denominator)?;
+        Self::new(left.checked_add(right)?, self.denominator.checked_mul(other.denominator)?)
+    }
+
+    pub fn sub(&self, other: &Self) -> Option<Self> {
+        let left = self.numerator.checked_mul(other.denominator)?;
+        let right = other.numerator.checked_mul(self.denominator)?;
+        Self::new(left.checked_sub(right)?, self.denominator.checked_mul(other.denominator)?)
+    }
+
+    pub fn mul(&self, other: &Self) -> Option<Self> {
+        Self::new(
+            self.numerator.checked_mul(other.numerator)?,
+            self.denominator.checked_mul(other.denominator)?,
+        )
+    }
+
+    pub fn div(&self, other: &Self) -> Option<Self> {
+        Self::new(
+            self.numerator.checked_mul(other.denominator)?,
+            self.denominator.checked_mul(other.numerator)?,
+        )
+    }
+
+    pub fn to_string_rep(&self) -> String {
+        format!("{}/{}", self.numerator, self.denominator)
+    }
+
+    pub fn to_value(&self) -> crate::AST::CtValue {
+        crate::AST::CtValue::Struct {
+            type_name: Syntax::TYPE_FRACTION.to_string(),
+            fields: vec![
+                ("numerator".to_string(), crate::AST::CtValue::Int(self.numerator)),
+                ("denominator".to_string(), crate::AST::CtValue::Int(self.denominator)),
+            ],
+        }
+    }
+
+    pub fn from_value(value: &crate::AST::CtValue) -> Result<Self, String> {
+        let crate::AST::CtValue::Struct { type_name, fields } = value else {
+            return Err("expected Fraction".to_string());
+        };
+        if type_name != Syntax::TYPE_FRACTION {
+            return Err(format!("expected Fraction, found {type_name}"));
+        }
+        let mut numerator = 0i64;
+        let mut denominator = 1i64;
+        for (name, field) in fields {
+            if let crate::AST::CtValue::Int(n) = field {
+                if name == "numerator" {
+                    numerator = *n;
+                } else if name == "denominator" {
+                    denominator = *n;
+                }
+            }
+        }
+        Ok(Self { numerator, denominator })
+    }
+}
+
 // ── CtBigInt: comptime/REPL tier-0 arbitrary-precision integer ──────────────
 //
 // Mirrors `JetBigInt` in

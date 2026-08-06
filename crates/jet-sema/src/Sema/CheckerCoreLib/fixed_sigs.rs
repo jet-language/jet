@@ -2728,6 +2728,13 @@ pub fn core_fixed_sig(
             vec![(read, string.clone())],
             Some(Type::Named(crate::Syntax::TYPE_DECIMAL.to_string())),
         )),
+        // D-NUMTYPE1=A: exact ratio, or nothing when the bottom is zero.
+        ("core.math", "fraction") => Some((
+            vec![(read, int.clone()), (read, int.clone())],
+            Some(Type::Option(Box::new(Type::Named(
+                crate::Syntax::TYPE_FRACTION.to_string(),
+            )))),
+        )),
         // D-RENDERTGT2=A (c133 M1): UI geometry constructors.
         ("core.ui", "null_backend") => Some((vec![], Some(Type::Named("NullBackend".to_string())))),
         ("core.ui", "tui_backend") => Some((vec![], Some(Type::Named("TuiBackend".to_string())))),
