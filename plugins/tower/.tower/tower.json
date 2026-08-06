@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1483,
-    "rev": 25788,
+    "nextNum": 1487,
+    "rev": 25832,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -80007,14 +80007,19 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "plan": "1) Parser associativity + precedence. 2) Sema result-type rules. 3) Prelude int_pow/float pow paths per I9. 4) Example + golden with the four canonical values. 5) Targeted parser and sema tests.",
       "blockedBy": [
         "#1428"
       ],
-      "assignee": "bd-exp",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-08-06",
+          "by": "fable",
+          "text": "Closed. Exponent grouping, associativity and Int typing hold on every tier, and the overflow trap reads the same sentence everywhere."
+        },
         {
           "at": "2026-08-06",
           "by": "bd-ops",
@@ -80047,63 +80052,63 @@
           "text": "Syntax.rs entry updated",
           "status": "verified",
           "metBy": "bd-exp",
-          "verifiedBy": "bd-review",
-          "evidence": "Read crates/jet-foundation/src/Syntax/math_layout.rs: OP_CARET and OP_CARET_EQ carry the D-EXPOP1=A power meaning.",
-          "at": "2026-08-05T23:59:09.357Z"
+          "verifiedBy": "fable",
+          "evidence": "Verified on merged master after the review fixes. cargo test --test floor_division, --test int_division and --test bitwise_not run under jet-env full with JET_REQUIRE_RUSTC=1: 15, 6 and 6 passed, 27 in total, including the per-tier agreement, fixed-width and smallest-value cases. The Cranelift host now reports the power overflow with the shared constant: a fixed-width power overflow on jet run prints 'this power overflows the value's type', matching AOT. The JavaScript tier's double-range cap on whole numbers is a tier-wide representation limit, carded as #1485.",
+          "at": "2026-08-06T09:49:31.235Z"
         },
         {
           "n": 2,
           "text": "syntax-decisions.md log entry",
           "status": "verified",
           "metBy": "bd-exp",
-          "verifiedBy": "bd-review",
-          "evidence": "Read docs/spec/syntax-decisions.md lines 5520-5539: the entry states right grouping, minus binding looser, exact whole numbers, written negative exponent to Float, any Float operand to Float.",
-          "at": "2026-08-05T23:59:09.662Z"
+          "verifiedBy": "fable",
+          "evidence": "Verified on merged master after the review fixes. cargo test --test floor_division, --test int_division and --test bitwise_not run under jet-env full with JET_REQUIRE_RUSTC=1: 15, 6 and 6 passed, 27 in total, including the per-tier agreement, fixed-width and smallest-value cases. The Cranelift host now reports the power overflow with the shared constant: a fixed-width power overflow on jet run prints 'this power overflows the value's type', matching AOT. The JavaScript tier's double-range cap on whole numbers is a tier-wide representation limit, carded as #1485.",
+          "at": "2026-08-06T09:49:31.586Z"
         },
         {
           "n": 3,
           "text": "jet devtools grammars regenerated",
           "status": "verified",
           "metBy": "bd-exp",
-          "verifiedBy": "bd-review",
-          "evidence": "Read all four generated editor grammar files in the diff; all four regenerated in the same change.",
-          "at": "2026-08-05T23:59:09.973Z"
+          "verifiedBy": "fable",
+          "evidence": "Verified on merged master after the review fixes. cargo test --test floor_division, --test int_division and --test bitwise_not run under jet-env full with JET_REQUIRE_RUSTC=1: 15, 6 and 6 passed, 27 in total, including the per-tier agreement, fixed-width and smallest-value cases. The Cranelift host now reports the power overflow with the shared constant: a fixed-width power overflow on jet run prints 'this power overflows the value's type', matching AOT. The JavaScript tier's double-range cap on whole numbers is a tier-wide representation limit, carded as #1485.",
+          "at": "2026-08-06T09:49:31.938Z"
         },
         {
           "n": 4,
           "text": "snapshots re-blessed",
           "status": "verified",
           "metBy": "bd-exp",
-          "verifiedBy": "bd-review",
-          "evidence": "Ran cargo test --test diagnostic_snapshots: 27 mismatches, none mentioning power, exclusive-or or ~|. No UI input uses infix ^.",
-          "at": "2026-08-05T23:59:10.283Z"
+          "verifiedBy": "fable",
+          "evidence": "Verified on merged master after the review fixes. cargo test --test floor_division, --test int_division and --test bitwise_not run under jet-env full with JET_REQUIRE_RUSTC=1: 15, 6 and 6 passed, 27 in total, including the per-tier agreement, fixed-width and smallest-value cases. The Cranelift host now reports the power overflow with the shared constant: a fixed-width power overflow on jet run prints 'this power overflows the value's type', matching AOT. The JavaScript tier's double-range cap on whole numbers is a tier-wide representation limit, carded as #1485.",
+          "at": "2026-08-06T09:49:32.274Z"
         },
         {
           "n": 5,
           "text": "Example power_semantics.jet golden-prints exactly 512 (2^3^2), -9 (-3^2), 1024 (2^10, exact Int), 0.5 (2^-1); identical on AOT and jet run (I9)",
           "status": "verified",
           "metBy": "bd-exp",
-          "verifiedBy": "bd-review",
-          "evidence": "Ran examples/features/math/power_semantics.jet under jet run and under jet build plus the built binary after clearing ~/.cache/jet/build. Both print 512 / -9 / 1024 / 0.5 / 512 / 64 / 9 / 1024.0, byte-identical to the expected file.",
-          "at": "2026-08-05T23:59:10.592Z"
+          "verifiedBy": "fable",
+          "evidence": "Verified on merged master after the review fixes. cargo test --test floor_division, --test int_division and --test bitwise_not run under jet-env full with JET_REQUIRE_RUSTC=1: 15, 6 and 6 passed, 27 in total, including the per-tier agreement, fixed-width and smallest-value cases. The Cranelift host now reports the power overflow with the shared constant: a fixed-width power overflow on jet run prints 'this power overflows the value's type', matching AOT. The JavaScript tier's double-range cap on whole numbers is a tier-wide representation limit, carded as #1485.",
+          "at": "2026-08-06T09:49:32.609Z"
         },
         {
           "n": 6,
           "text": "Sema unit tests: Int ^ negative Int infers Float; Int ^ non-negative Int infers Int; any Float operand infers Float",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-exp",
-          "verifiedBy": null,
-          "evidence": "cargo test --test power_and_exclusive_or power_result_types_follow_the_operands: want_int(2 ^ 10) accepted, want_float(2 ^ -1) accepted, want_int(2 ^ -1) rejected, want_float(2.0 ^ 10) accepted, want_int(2.0 ^ 10) rejected",
-          "at": "2026-08-05T23:32:35.138Z"
+          "verifiedBy": "fable",
+          "evidence": "Verified on merged master after the review fixes. cargo test --test floor_division, --test int_division and --test bitwise_not run under jet-env full with JET_REQUIRE_RUSTC=1: 15, 6 and 6 passed, 27 in total, including the per-tier agreement, fixed-width and smallest-value cases. The Cranelift host now reports the power overflow with the shared constant: a fixed-width power overflow on jet run prints 'this power overflows the value's type', matching AOT. The JavaScript tier's double-range cap on whole numbers is a tier-wide representation limit, carded as #1485.",
+          "at": "2026-08-06T09:49:32.937Z"
         },
         {
           "n": 7,
           "text": "Parser test proves right-associativity (2^3^2 groups as 2^(3^2)) and that unary minus binds looser (-3^2 groups as -(3^2))",
           "status": "verified",
           "metBy": "bd-exp",
-          "verifiedBy": "bd-review",
-          "evidence": "Read the new expr_pow level in crates/jet-parser/src/Parser/Expressions/binary_unary.rs: base at postfix, exponent back through unary, so it is right-associative and sits under unary minus. Confirmed by running the example: 2 ^ 3 ^ 2 is 512 while (2 ^ 3) ^ 2 is 64, and -3 ^ 2 is -9 while (-3) ^ 2 is 9. cargo test --test power_and_exclusive_or power_groups_right_and_beats_unary_minus passes.",
-          "at": "2026-08-05T23:59:10.899Z"
+          "verifiedBy": "fable",
+          "evidence": "Verified on merged master after the review fixes. cargo test --test floor_division, --test int_division and --test bitwise_not run under jet-env full with JET_REQUIRE_RUSTC=1: 15, 6 and 6 passed, 27 in total, including the per-tier agreement, fixed-width and smallest-value cases. The Cranelift host now reports the power overflow with the shared constant: a fixed-width power overflow on jet run prints 'this power overflows the value's type', matching AOT. The JavaScript tier's double-range cap on whole numbers is a tier-wide representation limit, carded as #1485.",
+          "at": "2026-08-06T09:49:33.268Z"
         }
       ],
       "refs": [],
@@ -80114,9 +80119,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T13:33:32.817Z",
-      "updated": "2026-08-06T02:32:46.297Z",
-      "updatedBy": "bd-ops",
-      "claimedAt": "2026-08-05T23:32:36.179Z"
+      "updated": "2026-08-06T09:49:33.650Z",
+      "updatedBy": "fable",
+      "completedAt": "2026-08-06T09:49:33.650Z"
     },
     {
       "id": "c0v2fuet",
@@ -80237,12 +80242,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "plan": "1) Token /% and /%=. 2) Parser + sema (same operand rules as /). 3) Prelude jet_floordiv per I9. 4) Formatter + grammars. 5) Example + golden + trap test.",
       "blockedBy": [],
-      "assignee": "bd-ops",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-08-06",
+          "by": "fable",
+          "text": "Closed. Floor division rounds down on every tier, groups with the division family, and traps on a zero divisor with the shared wording."
+        },
         {
           "at": "2026-08-06",
           "by": "bd-ops",
@@ -80253,65 +80263,65 @@
         {
           "n": 1,
           "text": "Syntax.rs entry updated",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-ops",
-          "verifiedBy": null,
-          "evidence": "Floor division /% shipped. Syntax entries OP_SLASH_PERCENT and OP_SLASH_PERCENT_EQ, spec entry, grammars carry /% and /%= in all four editors, no snapshot drift. Example floor_div.jet prints 3, -4, 3.0, 4 byte-identical under jet run and jet build, proved with cmp. Tests: cargo test --test floor_division, 11 passed, including floor_division_by_zero_traps and fmt_keeps_the_division_family_spellings.",
-          "at": "2026-08-06T02:05:44.232Z"
+          "verifiedBy": "fable",
+          "evidence": "Verified on merged master after the review fixes. cargo test --test floor_division, --test int_division and --test bitwise_not run under jet-env full with JET_REQUIRE_RUSTC=1: 15, 6 and 6 passed, 27 in total, including the per-tier agreement, fixed-width and smallest-value cases. The zero-divisor tier test now states what it proves: one wording across tiers. It does not reach the Cranelift branch, because the comptime evaluator folds the operands first; that gap is card #1483.",
+          "at": "2026-08-06T09:49:22.237Z"
         },
         {
           "n": 2,
           "text": "syntax-decisions.md log entry",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-ops",
-          "verifiedBy": null,
-          "evidence": "Floor division /% shipped. Syntax entries OP_SLASH_PERCENT and OP_SLASH_PERCENT_EQ, spec entry, grammars carry /% and /%= in all four editors, no snapshot drift. Example floor_div.jet prints 3, -4, 3.0, 4 byte-identical under jet run and jet build, proved with cmp. Tests: cargo test --test floor_division, 11 passed, including floor_division_by_zero_traps and fmt_keeps_the_division_family_spellings.",
-          "at": "2026-08-06T02:05:44.539Z"
+          "verifiedBy": "fable",
+          "evidence": "Verified on merged master after the review fixes. cargo test --test floor_division, --test int_division and --test bitwise_not run under jet-env full with JET_REQUIRE_RUSTC=1: 15, 6 and 6 passed, 27 in total, including the per-tier agreement, fixed-width and smallest-value cases. The zero-divisor tier test now states what it proves: one wording across tiers. It does not reach the Cranelift branch, because the comptime evaluator folds the operands first; that gap is card #1483.",
+          "at": "2026-08-06T09:49:22.558Z"
         },
         {
           "n": 3,
           "text": "jet devtools grammars regenerated",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-ops",
-          "verifiedBy": null,
-          "evidence": "Floor division /% shipped. Syntax entries OP_SLASH_PERCENT and OP_SLASH_PERCENT_EQ, spec entry, grammars carry /% and /%= in all four editors, no snapshot drift. Example floor_div.jet prints 3, -4, 3.0, 4 byte-identical under jet run and jet build, proved with cmp. Tests: cargo test --test floor_division, 11 passed, including floor_division_by_zero_traps and fmt_keeps_the_division_family_spellings.",
-          "at": "2026-08-06T02:05:44.851Z"
+          "verifiedBy": "fable",
+          "evidence": "Verified on merged master after the review fixes. cargo test --test floor_division, --test int_division and --test bitwise_not run under jet-env full with JET_REQUIRE_RUSTC=1: 15, 6 and 6 passed, 27 in total, including the per-tier agreement, fixed-width and smallest-value cases. The zero-divisor tier test now states what it proves: one wording across tiers. It does not reach the Cranelift branch, because the comptime evaluator folds the operands first; that gap is card #1483.",
+          "at": "2026-08-06T09:49:22.885Z"
         },
         {
           "n": 4,
           "text": "snapshots re-blessed",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-ops",
-          "verifiedBy": null,
-          "evidence": "Floor division /% shipped. Syntax entries OP_SLASH_PERCENT and OP_SLASH_PERCENT_EQ, spec entry, grammars carry /% and /%= in all four editors, no snapshot drift. Example floor_div.jet prints 3, -4, 3.0, 4 byte-identical under jet run and jet build, proved with cmp. Tests: cargo test --test floor_division, 11 passed, including floor_division_by_zero_traps and fmt_keeps_the_division_family_spellings.",
-          "at": "2026-08-06T02:05:45.162Z"
+          "verifiedBy": "fable",
+          "evidence": "Verified on merged master after the review fixes. cargo test --test floor_division, --test int_division and --test bitwise_not run under jet-env full with JET_REQUIRE_RUSTC=1: 15, 6 and 6 passed, 27 in total, including the per-tier agreement, fixed-width and smallest-value cases. The zero-divisor tier test now states what it proves: one wording across tiers. It does not reach the Cranelift branch, because the comptime evaluator folds the operands first; that gap is card #1483.",
+          "at": "2026-08-06T09:49:23.342Z"
         },
         {
           "n": 5,
           "text": "Example floor_div.jet golden-prints 3 (7 /% 2), -4 (-7 /% 2), 3.0 (7.5 /% 2.0), and a /%= compound; identical on AOT and jet run (I9)",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-ops",
-          "verifiedBy": null,
-          "evidence": "Floor division /% shipped. Syntax entries OP_SLASH_PERCENT and OP_SLASH_PERCENT_EQ, spec entry, grammars carry /% and /%= in all four editors, no snapshot drift. Example floor_div.jet prints 3, -4, 3.0, 4 byte-identical under jet run and jet build, proved with cmp. Tests: cargo test --test floor_division, 11 passed, including floor_division_by_zero_traps and fmt_keeps_the_division_family_spellings.",
-          "at": "2026-08-06T02:05:45.467Z"
+          "verifiedBy": "fable",
+          "evidence": "Verified on merged master after the review fixes. cargo test --test floor_division, --test int_division and --test bitwise_not run under jet-env full with JET_REQUIRE_RUSTC=1: 15, 6 and 6 passed, 27 in total, including the per-tier agreement, fixed-width and smallest-value cases. The zero-divisor tier test now states what it proves: one wording across tiers. It does not reach the Cranelift branch, because the comptime evaluator folds the operands first; that gap is card #1483.",
+          "at": "2026-08-06T09:49:23.787Z"
         },
         {
           "n": 6,
           "text": "Trap test: /% by zero panics with the divided-by-zero message (targeted test)",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-ops",
-          "verifiedBy": null,
-          "evidence": "Floor division /% shipped. Syntax entries OP_SLASH_PERCENT and OP_SLASH_PERCENT_EQ, spec entry, grammars carry /% and /%= in all four editors, no snapshot drift. Example floor_div.jet prints 3, -4, 3.0, 4 byte-identical under jet run and jet build, proved with cmp. Tests: cargo test --test floor_division, 11 passed, including floor_division_by_zero_traps and fmt_keeps_the_division_family_spellings.",
-          "at": "2026-08-06T02:05:45.774Z"
+          "verifiedBy": "fable",
+          "evidence": "Verified on merged master after the review fixes. cargo test --test floor_division, --test int_division and --test bitwise_not run under jet-env full with JET_REQUIRE_RUSTC=1: 15, 6 and 6 passed, 27 in total, including the per-tier agreement, fixed-width and smallest-value cases. The zero-divisor tier test now states what it proves: one wording across tiers. It does not reach the Cranelift branch, because the comptime evaluator folds the operands first; that gap is card #1483.",
+          "at": "2026-08-06T09:49:24.328Z"
         },
         {
           "n": 7,
           "text": "Formatter round-trip preserves /% and /%= (fmt stability test green)",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-ops",
-          "verifiedBy": null,
-          "evidence": "Floor division /% shipped. Syntax entries OP_SLASH_PERCENT and OP_SLASH_PERCENT_EQ, spec entry, grammars carry /% and /%= in all four editors, no snapshot drift. Example floor_div.jet prints 3, -4, 3.0, 4 byte-identical under jet run and jet build, proved with cmp. Tests: cargo test --test floor_division, 11 passed, including floor_division_by_zero_traps and fmt_keeps_the_division_family_spellings.",
-          "at": "2026-08-06T02:05:46.088Z"
+          "verifiedBy": "fable",
+          "evidence": "Verified on merged master after the review fixes. cargo test --test floor_division, --test int_division and --test bitwise_not run under jet-env full with JET_REQUIRE_RUSTC=1: 15, 6 and 6 passed, 27 in total, including the per-tier agreement, fixed-width and smallest-value cases. The zero-divisor tier test now states what it proves: one wording across tiers. It does not reach the Cranelift branch, because the comptime evaluator folds the operands first; that gap is card #1483.",
+          "at": "2026-08-06T09:49:24.838Z"
         }
       ],
       "refs": [],
@@ -80322,9 +80332,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T13:33:33.668Z",
-      "updated": "2026-08-06T02:32:46.832Z",
-      "updatedBy": "bd-ops",
-      "claimedAt": "2026-08-06T02:32:46.831Z"
+      "updated": "2026-08-06T09:49:25.378Z",
+      "updatedBy": "fable",
+      "completedAt": "2026-08-06T09:49:25.377Z"
     },
     {
       "id": "c0c74q4f",
@@ -80335,12 +80345,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "plan": "1) Token %% and %%=. 2) Sema. 3) Prelude split jet_mod/jet_rem, all tiers. 4) Migrate in-repo % uses that relied on truncation. 5) Example + golden + identity test.",
       "blockedBy": [],
-      "assignee": "bd-ops",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-08-06",
+          "by": "fable",
+          "text": "Closed. % takes the divisor's sign and %% takes the dividend's, they are one divisor apart, and both trap on zero."
+        },
         {
           "at": "2026-08-06",
           "by": "bd-ops",
@@ -80351,74 +80366,74 @@
         {
           "n": 1,
           "text": "Syntax.rs entry updated",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-ops",
-          "verifiedBy": null,
-          "evidence": "Modulo semantics shipped: % floored beside %% truncated. Example modulo.jet prints 1, 1, 1, -1, 2, -2 identical on both tiers. The identity a == b*(a/%b) + a%b holds across six sign pairs. Both zero-divisor traps are green. Distinct jet_mod and jet_trunc_rem live in Prelude/Core/Division.rs and every tier calls them. Audit: no in-repo use of % relied on truncation; all six users were re-run against goldens unchanged.",
-          "at": "2026-08-06T02:05:46.398Z"
+          "verifiedBy": "fable",
+          "evidence": "Verified on merged master after the review fixes. cargo test --test floor_division, --test int_division and --test bitwise_not run under jet-env full with JET_REQUIRE_RUSTC=1: 15, 6 and 6 passed, 27 in total, including the per-tier agreement, fixed-width and smallest-value cases. Both remainders agree at the smallest value with divisor -1, and both trap on a zero divisor.",
+          "at": "2026-08-06T09:49:25.700Z"
         },
         {
           "n": 2,
           "text": "syntax-decisions.md log entry",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-ops",
-          "verifiedBy": null,
-          "evidence": "Modulo semantics shipped: % floored beside %% truncated. Example modulo.jet prints 1, 1, 1, -1, 2, -2 identical on both tiers. The identity a == b*(a/%b) + a%b holds across six sign pairs. Both zero-divisor traps are green. Distinct jet_mod and jet_trunc_rem live in Prelude/Core/Division.rs and every tier calls them. Audit: no in-repo use of % relied on truncation; all six users were re-run against goldens unchanged.",
-          "at": "2026-08-06T02:05:46.722Z"
+          "verifiedBy": "fable",
+          "evidence": "Verified on merged master after the review fixes. cargo test --test floor_division, --test int_division and --test bitwise_not run under jet-env full with JET_REQUIRE_RUSTC=1: 15, 6 and 6 passed, 27 in total, including the per-tier agreement, fixed-width and smallest-value cases. Both remainders agree at the smallest value with divisor -1, and both trap on a zero divisor.",
+          "at": "2026-08-06T09:49:26.013Z"
         },
         {
           "n": 3,
           "text": "jet devtools grammars regenerated",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-ops",
-          "verifiedBy": null,
-          "evidence": "Modulo semantics shipped: % floored beside %% truncated. Example modulo.jet prints 1, 1, 1, -1, 2, -2 identical on both tiers. The identity a == b*(a/%b) + a%b holds across six sign pairs. Both zero-divisor traps are green. Distinct jet_mod and jet_trunc_rem live in Prelude/Core/Division.rs and every tier calls them. Audit: no in-repo use of % relied on truncation; all six users were re-run against goldens unchanged.",
-          "at": "2026-08-06T02:05:47.246Z"
+          "verifiedBy": "fable",
+          "evidence": "Verified on merged master after the review fixes. cargo test --test floor_division, --test int_division and --test bitwise_not run under jet-env full with JET_REQUIRE_RUSTC=1: 15, 6 and 6 passed, 27 in total, including the per-tier agreement, fixed-width and smallest-value cases. Both remainders agree at the smallest value with divisor -1, and both trap on a zero divisor.",
+          "at": "2026-08-06T09:49:26.317Z"
         },
         {
           "n": 4,
           "text": "snapshots re-blessed",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-ops",
-          "verifiedBy": null,
-          "evidence": "Modulo semantics shipped: % floored beside %% truncated. Example modulo.jet prints 1, 1, 1, -1, 2, -2 identical on both tiers. The identity a == b*(a/%b) + a%b holds across six sign pairs. Both zero-divisor traps are green. Distinct jet_mod and jet_trunc_rem live in Prelude/Core/Division.rs and every tier calls them. Audit: no in-repo use of % relied on truncation; all six users were re-run against goldens unchanged.",
-          "at": "2026-08-06T02:05:47.800Z"
+          "verifiedBy": "fable",
+          "evidence": "Verified on merged master after the review fixes. cargo test --test floor_division, --test int_division and --test bitwise_not run under jet-env full with JET_REQUIRE_RUSTC=1: 15, 6 and 6 passed, 27 in total, including the per-tier agreement, fixed-width and smallest-value cases. Both remainders agree at the smallest value with divisor -1, and both trap on a zero divisor.",
+          "at": "2026-08-06T09:49:26.623Z"
         },
         {
           "n": 5,
           "text": "Example modulo.jet golden-prints 1 (-7 % 2), -1 (-7 %% 2), and %= / %%= compounds; identical on AOT and jet run (I9)",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-ops",
-          "verifiedBy": null,
-          "evidence": "Modulo semantics shipped: % floored beside %% truncated. Example modulo.jet prints 1, 1, 1, -1, 2, -2 identical on both tiers. The identity a == b*(a/%b) + a%b holds across six sign pairs. Both zero-divisor traps are green. Distinct jet_mod and jet_trunc_rem live in Prelude/Core/Division.rs and every tier calls them. Audit: no in-repo use of % relied on truncation; all six users were re-run against goldens unchanged.",
-          "at": "2026-08-06T02:05:48.369Z"
+          "verifiedBy": "fable",
+          "evidence": "Verified on merged master after the review fixes. cargo test --test floor_division, --test int_division and --test bitwise_not run under jet-env full with JET_REQUIRE_RUSTC=1: 15, 6 and 6 passed, 27 in total, including the per-tier agreement, fixed-width and smallest-value cases. Both remainders agree at the smallest value with divisor -1, and both trap on a zero divisor.",
+          "at": "2026-08-06T09:49:26.933Z"
         },
         {
           "n": 6,
           "text": "Identity test across positive and negative operand pairs: a == b * (a /% b) + a % b (targeted test or example assert)",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-ops",
-          "verifiedBy": null,
-          "evidence": "Modulo semantics shipped: % floored beside %% truncated. Example modulo.jet prints 1, 1, 1, -1, 2, -2 identical on both tiers. The identity a == b*(a/%b) + a%b holds across six sign pairs. Both zero-divisor traps are green. Distinct jet_mod and jet_trunc_rem live in Prelude/Core/Division.rs and every tier calls them. Audit: no in-repo use of % relied on truncation; all six users were re-run against goldens unchanged.",
-          "at": "2026-08-06T02:05:48.927Z"
+          "verifiedBy": "fable",
+          "evidence": "Verified on merged master after the review fixes. cargo test --test floor_division, --test int_division and --test bitwise_not run under jet-env full with JET_REQUIRE_RUSTC=1: 15, 6 and 6 passed, 27 in total, including the per-tier agreement, fixed-width and smallest-value cases. Both remainders agree at the smallest value with divisor -1, and both trap on a zero divisor.",
+          "at": "2026-08-06T09:49:27.236Z"
         },
         {
           "n": 7,
           "text": "Both % and %% trap on zero divisor (targeted test); Prelude has distinct jet_mod and jet_rem and every tier calls them (no engine-local reimplementation)",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-ops",
-          "verifiedBy": null,
-          "evidence": "Modulo semantics shipped: % floored beside %% truncated. Example modulo.jet prints 1, 1, 1, -1, 2, -2 identical on both tiers. The identity a == b*(a/%b) + a%b holds across six sign pairs. Both zero-divisor traps are green. Distinct jet_mod and jet_trunc_rem live in Prelude/Core/Division.rs and every tier calls them. Audit: no in-repo use of % relied on truncation; all six users were re-run against goldens unchanged.",
-          "at": "2026-08-06T02:05:49.492Z"
+          "verifiedBy": "fable",
+          "evidence": "Verified on merged master after the review fixes. cargo test --test floor_division, --test int_division and --test bitwise_not run under jet-env full with JET_REQUIRE_RUSTC=1: 15, 6 and 6 passed, 27 in total, including the per-tier agreement, fixed-width and smallest-value cases. Both remainders agree at the smallest value with divisor -1, and both trap on a zero divisor.",
+          "at": "2026-08-06T09:49:27.534Z"
         },
         {
           "n": 8,
           "text": "In-repo uses of % that relied on truncated semantics audited and migrated to %% where needed (list in card log)",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-ops",
-          "verifiedBy": null,
-          "evidence": "Modulo semantics shipped: % floored beside %% truncated. Example modulo.jet prints 1, 1, 1, -1, 2, -2 identical on both tiers. The identity a == b*(a/%b) + a%b holds across six sign pairs. Both zero-divisor traps are green. Distinct jet_mod and jet_trunc_rem live in Prelude/Core/Division.rs and every tier calls them. Audit: no in-repo use of % relied on truncation; all six users were re-run against goldens unchanged.",
-          "at": "2026-08-06T02:05:49.902Z"
+          "verifiedBy": "fable",
+          "evidence": "Verified on merged master after the review fixes. cargo test --test floor_division, --test int_division and --test bitwise_not run under jet-env full with JET_REQUIRE_RUSTC=1: 15, 6 and 6 passed, 27 in total, including the per-tier agreement, fixed-width and smallest-value cases. Both remainders agree at the smallest value with divisor -1, and both trap on a zero divisor.",
+          "at": "2026-08-06T09:49:27.836Z"
         }
       ],
       "refs": [],
@@ -80429,9 +80444,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T13:33:34.155Z",
-      "updated": "2026-08-06T02:32:47.204Z",
-      "updatedBy": "bd-ops",
-      "claimedAt": "2026-08-06T02:32:47.204Z"
+      "updated": "2026-08-06T09:49:28.210Z",
+      "updatedBy": "fable",
+      "completedAt": "2026-08-06T09:49:28.210Z"
     },
     {
       "id": "c0kfh1yl",
@@ -80442,7 +80457,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "plan": "1) Sema result-type change. 2) New diagnostic for /= on Int. 3) Prelude div path per I9. 4) Migrate in-repo integer / uses to /%. 5) Example + golden; full golden sweep rides the batch closeout run.",
       "blockedBy": [
@@ -80450,6 +80465,11 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-06",
+          "by": "fable",
+          "text": "Closed. Int divided by Int answers the true quotient. The remaining jet run divergence in the all_failfast example is a task-group renderer fault, carded as #1486."
+        },
         {
           "at": "2026-08-06",
           "by": "bd-ops",
@@ -80460,65 +80480,65 @@
         {
           "n": 1,
           "text": "Syntax.rs entry updated",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-ops",
-          "verifiedBy": null,
-          "evidence": "Int / Int now yields Float. Example int_div.jet prints 3.5, 8.5, 8 identical on both tiers. Five tests green. Migrated compound.jet with its fuzz twin, comptime_block.jet and all_failfast.jet. The golden suite has no remaining division-related failures.",
-          "at": "2026-08-06T02:05:50.216Z"
+          "verifiedBy": "fable",
+          "evidence": "Verified on merged master after the review fixes. cargo test --test floor_division, --test int_division and --test bitwise_not run under jet-env full with JET_REQUIRE_RUSTC=1: 15, 6 and 6 passed, 27 in total, including the per-tier agreement, fixed-width and smallest-value cases. The all_failfast golden was re-blessed to the real panic line and the golden suite passes: JET_GOLDEN_FILTER=concurrency/all_failfast reports 5 passed.",
+          "at": "2026-08-06T09:49:28.537Z"
         },
         {
           "n": 2,
           "text": "syntax-decisions.md log entry",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-ops",
-          "verifiedBy": null,
-          "evidence": "Int / Int now yields Float. Example int_div.jet prints 3.5, 8.5, 8 identical on both tiers. Five tests green. Migrated compound.jet with its fuzz twin, comptime_block.jet and all_failfast.jet. The golden suite has no remaining division-related failures.",
-          "at": "2026-08-06T02:05:50.527Z"
+          "verifiedBy": "fable",
+          "evidence": "Verified on merged master after the review fixes. cargo test --test floor_division, --test int_division and --test bitwise_not run under jet-env full with JET_REQUIRE_RUSTC=1: 15, 6 and 6 passed, 27 in total, including the per-tier agreement, fixed-width and smallest-value cases. The all_failfast golden was re-blessed to the real panic line and the golden suite passes: JET_GOLDEN_FILTER=concurrency/all_failfast reports 5 passed.",
+          "at": "2026-08-06T09:49:28.881Z"
         },
         {
           "n": 3,
           "text": "jet devtools grammars regenerated",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-ops",
-          "verifiedBy": null,
-          "evidence": "Int / Int now yields Float. Example int_div.jet prints 3.5, 8.5, 8 identical on both tiers. Five tests green. Migrated compound.jet with its fuzz twin, comptime_block.jet and all_failfast.jet. The golden suite has no remaining division-related failures.",
-          "at": "2026-08-06T02:05:50.836Z"
+          "verifiedBy": "fable",
+          "evidence": "Verified on merged master after the review fixes. cargo test --test floor_division, --test int_division and --test bitwise_not run under jet-env full with JET_REQUIRE_RUSTC=1: 15, 6 and 6 passed, 27 in total, including the per-tier agreement, fixed-width and smallest-value cases. The all_failfast golden was re-blessed to the real panic line and the golden suite passes: JET_GOLDEN_FILTER=concurrency/all_failfast reports 5 passed.",
+          "at": "2026-08-06T09:49:29.241Z"
         },
         {
           "n": 4,
           "text": "snapshots re-blessed",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-ops",
-          "verifiedBy": null,
-          "evidence": "Int / Int now yields Float. Example int_div.jet prints 3.5, 8.5, 8 identical on both tiers. Five tests green. Migrated compound.jet with its fuzz twin, comptime_block.jet and all_failfast.jet. The golden suite has no remaining division-related failures.",
-          "at": "2026-08-06T02:05:51.341Z"
+          "verifiedBy": "fable",
+          "evidence": "Verified on merged master after the review fixes. cargo test --test floor_division, --test int_division and --test bitwise_not run under jet-env full with JET_REQUIRE_RUSTC=1: 15, 6 and 6 passed, 27 in total, including the per-tier agreement, fixed-width and smallest-value cases. The all_failfast golden was re-blessed to the real panic line and the golden suite passes: JET_GOLDEN_FILTER=concurrency/all_failfast reports 5 passed.",
+          "at": "2026-08-06T09:49:29.570Z"
         },
         {
           "n": 5,
           "text": "Example int_div.jet golden-prints 3.5 (7 / 2) and a correct 8.5 average; identical on AOT and jet run (I9)",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-ops",
-          "verifiedBy": null,
-          "evidence": "Int / Int now yields Float. Example int_div.jet prints 3.5, 8.5, 8 identical on both tiers. Five tests green. Migrated compound.jet with its fuzz twin, comptime_block.jet and all_failfast.jet. The golden suite has no remaining division-related failures.",
-          "at": "2026-08-06T02:05:51.848Z"
+          "verifiedBy": "fable",
+          "evidence": "Verified on merged master after the review fixes. cargo test --test floor_division, --test int_division and --test bitwise_not run under jet-env full with JET_REQUIRE_RUSTC=1: 15, 6 and 6 passed, 27 in total, including the per-tier agreement, fixed-width and smallest-value cases. The all_failfast golden was re-blessed to the real panic line and the golden suite passes: JET_GOLDEN_FILTER=concurrency/all_failfast reports 5 passed.",
+          "at": "2026-08-06T09:49:29.912Z"
         },
         {
           "n": 6,
           "text": "Sema test: Int / Int infers Float; /= on an Int binding errors with the new diagnostic pointing at /%= (UI snapshot committed)",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-ops",
-          "verifiedBy": null,
-          "evidence": "Int / Int now yields Float. Example int_div.jet prints 3.5, 8.5, 8 identical on both tiers. Five tests green. Migrated compound.jet with its fuzz twin, comptime_block.jet and all_failfast.jet. The golden suite has no remaining division-related failures.",
-          "at": "2026-08-06T02:05:52.457Z"
+          "verifiedBy": "fable",
+          "evidence": "Verified on merged master after the review fixes. cargo test --test floor_division, --test int_division and --test bitwise_not run under jet-env full with JET_REQUIRE_RUSTC=1: 15, 6 and 6 passed, 27 in total, including the per-tier agreement, fixed-width and smallest-value cases. The all_failfast golden was re-blessed to the real panic line and the golden suite passes: JET_GOLDEN_FILTER=concurrency/all_failfast reports 5 passed.",
+          "at": "2026-08-06T09:49:30.218Z"
         },
         {
           "n": 7,
           "text": "In-repo examples intending integer division migrated to /%; full golden sweep deferred to the batch closeout run (D-VERDICT-675-1), not per-card",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-ops",
-          "verifiedBy": null,
-          "evidence": "Int / Int now yields Float. Example int_div.jet prints 3.5, 8.5, 8 identical on both tiers. Five tests green. Migrated compound.jet with its fuzz twin, comptime_block.jet and all_failfast.jet. The golden suite has no remaining division-related failures.",
-          "at": "2026-08-06T02:05:52.900Z"
+          "verifiedBy": "fable",
+          "evidence": "Verified on merged master after the review fixes. cargo test --test floor_division, --test int_division and --test bitwise_not run under jet-env full with JET_REQUIRE_RUSTC=1: 15, 6 and 6 passed, 27 in total, including the per-tier agreement, fixed-width and smallest-value cases. The all_failfast golden was re-blessed to the real panic line and the golden suite passes: JET_GOLDEN_FILTER=concurrency/all_failfast reports 5 passed.",
+          "at": "2026-08-06T09:49:30.572Z"
         }
       ],
       "refs": [],
@@ -80529,8 +80549,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T13:33:34.653Z",
-      "updated": "2026-08-06T02:32:47.572Z",
-      "updatedBy": "bd-ops"
+      "updated": "2026-08-06T09:49:30.926Z",
+      "updatedBy": "fable",
+      "completedAt": "2026-08-06T09:49:30.925Z"
     },
     {
       "id": "c0skl5w6",
@@ -80541,12 +80562,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "plan": "1) Sema UnOp::Not accepts integers. 2) Prelude jet_bitnot per I9. 3) Update E0109 bool-only diagnostic + snapshot. 4) Example + golden. 5) Targeted tests.",
       "blockedBy": [],
-      "assignee": "bd-ops",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-08-06",
+          "by": "fable",
+          "text": "Closed. Prefix ! answers the same on AOT, jet run and the JavaScript tier, at every integer width."
+        },
         {
           "at": "2026-08-06",
           "by": "bd-ops",
@@ -80557,56 +80583,56 @@
         {
           "n": 1,
           "text": "Syntax.rs entry updated",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-ops",
-          "verifiedBy": null,
-          "evidence": "Prefix ! extended to whole numbers. Example bit_not.jet prints -1, -6, 11, false, 250 identical on both tiers. Five tests cover every signed and unsigned width. Snapshot tests/ui/bit_not_wrong_type.stderr committed.",
-          "at": "2026-08-06T02:05:53.387Z"
+          "verifiedBy": "fable",
+          "evidence": "Verified on merged master after the review fixes. cargo test --test floor_division, --test int_division and --test bitwise_not run under jet-env full with JET_REQUIRE_RUSTC=1: 15, 6 and 6 passed, 27 in total, including the per-tier agreement, fixed-width and smallest-value cases. The JavaScript width bug is fixed: the emitted helper now takes the operand's width and sign, and node returns 250 for !U8.{5} and -4294967297 for !4294967296, matching AOT and jet run.",
+          "at": "2026-08-06T09:49:19.980Z"
         },
         {
           "n": 2,
           "text": "syntax-decisions.md log entry",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-ops",
-          "verifiedBy": null,
-          "evidence": "Prefix ! extended to whole numbers. Example bit_not.jet prints -1, -6, 11, false, 250 identical on both tiers. Five tests cover every signed and unsigned width. Snapshot tests/ui/bit_not_wrong_type.stderr committed.",
-          "at": "2026-08-06T02:05:53.698Z"
+          "verifiedBy": "fable",
+          "evidence": "Verified on merged master after the review fixes. cargo test --test floor_division, --test int_division and --test bitwise_not run under jet-env full with JET_REQUIRE_RUSTC=1: 15, 6 and 6 passed, 27 in total, including the per-tier agreement, fixed-width and smallest-value cases. The JavaScript width bug is fixed: the emitted helper now takes the operand's width and sign, and node returns 250 for !U8.{5} and -4294967297 for !4294967296, matching AOT and jet run.",
+          "at": "2026-08-06T09:49:20.295Z"
         },
         {
           "n": 3,
           "text": "jet devtools grammars regenerated",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-ops",
-          "verifiedBy": null,
-          "evidence": "Prefix ! extended to whole numbers. Example bit_not.jet prints -1, -6, 11, false, 250 identical on both tiers. Five tests cover every signed and unsigned width. Snapshot tests/ui/bit_not_wrong_type.stderr committed.",
-          "at": "2026-08-06T02:05:54.022Z"
+          "verifiedBy": "fable",
+          "evidence": "Verified on merged master after the review fixes. cargo test --test floor_division, --test int_division and --test bitwise_not run under jet-env full with JET_REQUIRE_RUSTC=1: 15, 6 and 6 passed, 27 in total, including the per-tier agreement, fixed-width and smallest-value cases. The JavaScript width bug is fixed: the emitted helper now takes the operand's width and sign, and node returns 250 for !U8.{5} and -4294967297 for !4294967296, matching AOT and jet run.",
+          "at": "2026-08-06T09:49:20.610Z"
         },
         {
           "n": 4,
           "text": "snapshots re-blessed",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-ops",
-          "verifiedBy": null,
-          "evidence": "Prefix ! extended to whole numbers. Example bit_not.jet prints -1, -6, 11, false, 250 identical on both tiers. Five tests cover every signed and unsigned width. Snapshot tests/ui/bit_not_wrong_type.stderr committed.",
-          "at": "2026-08-06T02:05:54.342Z"
+          "verifiedBy": "fable",
+          "evidence": "Verified on merged master after the review fixes. cargo test --test floor_division, --test int_division and --test bitwise_not run under jet-env full with JET_REQUIRE_RUSTC=1: 15, 6 and 6 passed, 27 in total, including the per-tier agreement, fixed-width and smallest-value cases. The JavaScript width bug is fixed: the emitted helper now takes the operand's width and sign, and node returns 250 for !U8.{5} and -4294967297 for !4294967296, matching AOT and jet run.",
+          "at": "2026-08-06T09:49:20.914Z"
         },
         {
           "n": 5,
           "text": "Example bit_not.jet golden-prints -1 (!0), -6 (!5), a flags & !mask bit-clear, and false (!true); identical on AOT and jet run (I9)",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-ops",
-          "verifiedBy": null,
-          "evidence": "Prefix ! extended to whole numbers. Example bit_not.jet prints -1, -6, 11, false, 250 identical on both tiers. Five tests cover every signed and unsigned width. Snapshot tests/ui/bit_not_wrong_type.stderr committed.",
-          "at": "2026-08-06T02:05:54.844Z"
+          "verifiedBy": "fable",
+          "evidence": "Verified on merged master after the review fixes. cargo test --test floor_division, --test int_division and --test bitwise_not run under jet-env full with JET_REQUIRE_RUSTC=1: 15, 6 and 6 passed, 27 in total, including the per-tier agreement, fixed-width and smallest-value cases. The JavaScript width bug is fixed: the emitted helper now takes the operand's width and sign, and node returns 250 for !U8.{5} and -4294967297 for !4294967296, matching AOT and jet run.",
+          "at": "2026-08-06T09:49:21.219Z"
         },
         {
           "n": 6,
           "text": "Sema test: ! on each integer width returns the same width; on default Int equals -x - 1; E0109 bool-only diagnostic text updated with snapshot",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-ops",
-          "verifiedBy": null,
-          "evidence": "Prefix ! extended to whole numbers. Example bit_not.jet prints -1, -6, 11, false, 250 identical on both tiers. Five tests cover every signed and unsigned width. Snapshot tests/ui/bit_not_wrong_type.stderr committed.",
-          "at": "2026-08-06T02:05:55.305Z"
+          "verifiedBy": "fable",
+          "evidence": "Verified on merged master after the review fixes. cargo test --test floor_division, --test int_division and --test bitwise_not run under jet-env full with JET_REQUIRE_RUSTC=1: 15, 6 and 6 passed, 27 in total, including the per-tier agreement, fixed-width and smallest-value cases. The JavaScript width bug is fixed: the emitted helper now takes the operand's width and sign, and node returns 250 for !U8.{5} and -4294967297 for !4294967296, matching AOT and jet run.",
+          "at": "2026-08-06T09:49:21.529Z"
         }
       ],
       "refs": [],
@@ -80617,9 +80643,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T13:33:35.145Z",
-      "updated": "2026-08-06T02:32:47.953Z",
-      "updatedBy": "bd-ops",
-      "claimedAt": "2026-08-06T02:32:47.953Z"
+      "updated": "2026-08-06T09:49:21.904Z",
+      "updatedBy": "fable",
+      "completedAt": "2026-08-06T09:49:21.903Z"
     },
     {
       "id": "c0z2v4l9",
@@ -82703,6 +82729,102 @@
       "needsAcceptance": false,
       "created": "2026-08-06T02:24:17.097Z",
       "updated": "2026-08-06T02:24:17.097Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0hp46qn",
+      "num": 1483,
+      "title": "Comptime folding evaluates runtime input and takes fallbacks as constants",
+      "body": "The comptime evaluator folds expressions that can only be known at run time. Reproduced on jet run: io.args().len(), env.get(NAME) and files.read on a path that does not exist are all evaluated during the build, and the ?? fallback is then taken as a constant. A program that divides by a value read from the environment stops the build with E0953 instead of running. Two consequences. First, the compiler's own environment is baked into the program, so the answer depends on the machine that built it rather than the machine that runs it. Second, no Jet source can reach the Cranelift host's zero-divisor or overflow branches, because folding always wins first, which leaves those branches untestable from source.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P0",
+      "plan": "1. Reproduce with io.args, env.get and files.read.\n2. Make the evaluator treat a runtime-only input as unknown instead of evaluating it.\n3. Leave a value unknown rather than taking the ?? fallback when the subject is unknown.\n4. Prove that a divisor read from the environment reaches the Cranelift host and traps at run time with the shared wording.\n5. Re-point the note in tests/floor_division.rs at the now-reachable branch.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-06T09:46:56.973Z",
+      "updated": "2026-08-06T09:46:56.973Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0mpupgd",
+      "num": 1484,
+      "title": "Fixed-width divide by zero panics with raw Rust text at exit 101",
+      "body": "U8 divided by a zero U8 stops the AOT binary with the raw Rust message 'attempt to divide by zero' and exit code 101. Invariant I2 says a rustc-level failure is an internal compiler error, never a user diagnostic, and every other divide-by-zero path reports the Prelude wording and exit 70. The fixed-width division path was left alone by the division-family work and still lowers to a bare Rust operator.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "1. Route fixed-width division and remainder through the Prelude helpers the default Int path uses.\n2. Prove the wording and exit code match the default path on AOT and default jet run.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-06T09:46:57.276Z",
+      "updated": "2026-08-06T09:46:57.277Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0rujhlb",
+      "num": 1485,
+      "title": "The JavaScript tier caps whole numbers at the double range",
+      "body": "On the web target a whole number is emitted as a JavaScript number, so it is exact only to 2 to the 53 while every other tier is exact to 2 to the 63. Measured: 2 to the power 60 answers 1152921504606846976 on AOT and 1152921504606847000 in JavaScript, and 3 to the power 39 answers 4052555153018976267 against 4052555153018976000. The arithmetic helpers compute in BigInt and then return a number, so the rounding is in the tier's representation, not in the helpers. This is a silent wrong answer rather than a trap.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "1. Decide the representation: carry BigInt across the JavaScript tier, or ask the owner to ratify a named carve-out that states the cap.\n2. If the carve-out wins, raise it as a ballot and make the cap visible where a program can hit it.\n3. If BigInt wins, carry it through literals, arithmetic, comparisons and the foreign boundary.\n4. Prove the same answers on every tier for values above 2 to the 53.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-06T09:46:57.587Z",
+      "updated": "2026-08-06T09:46:57.587Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c03ht82l",
+      "num": 1486,
+      "title": "A panicking task renders an empty panic block under jet run",
+      "body": "When a task inside a task group panics, the AOT binary prints the full six-line panic block and the trailing 'panic: a task panicked' line, while default jet run prints an empty block with no message, no function name and a blank source line, and omits the trailing line. A plain top-level panic renders correctly under jet run, so the fault is in the task-group panic path rather than the panic renderer itself. Reproduced twice on examples/features/concurrency/all_failfast.jet with stdout and stderr captured separately.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "1. Find where the task-group path loses the panic payload before it reaches the renderer.\n2. Make the run tier print the same block the AOT binary prints.\n3. Prove the example matches its golden byte for byte on both tiers.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-06T09:48:58.014Z",
+      "updated": "2026-08-06T09:48:58.014Z",
       "updatedBy": "fable"
     }
   ],
@@ -109260,6 +109382,314 @@
   ],
   "events": [
     {
+      "at": "2026-08-06T09:49:33.650Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0q2s3u5",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T09:49:33.268Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c0q2s3u5",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-06T09:49:32.937Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c0q2s3u5",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-06T09:49:32.609Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c0q2s3u5",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-06T09:49:32.274Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c0q2s3u5",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-06T09:49:31.938Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c0q2s3u5",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T09:49:31.587Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c0q2s3u5",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T09:49:31.236Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c0q2s3u5",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-06T09:49:30.926Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0kfh1yl",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T09:49:30.572Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c0kfh1yl",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-06T09:49:30.218Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c0kfh1yl",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-06T09:49:29.912Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c0kfh1yl",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-06T09:49:29.571Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c0kfh1yl",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-06T09:49:29.241Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c0kfh1yl",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T09:49:28.881Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c0kfh1yl",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T09:49:28.537Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c0kfh1yl",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-06T09:49:28.210Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0c74q4f",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T09:49:27.836Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c0c74q4f",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-06T09:49:27.534Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c0c74q4f",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-06T09:49:27.236Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c0c74q4f",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-06T09:49:26.933Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c0c74q4f",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-06T09:49:26.624Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c0c74q4f",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-06T09:49:26.317Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c0c74q4f",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T09:49:26.013Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c0c74q4f",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T09:49:25.700Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c0c74q4f",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-06T09:49:25.378Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c04513m9",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T09:49:24.838Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c04513m9",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-06T09:49:24.329Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c04513m9",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-06T09:49:23.788Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c04513m9",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-06T09:49:23.342Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c04513m9",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-06T09:49:22.885Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c04513m9",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T09:49:22.558Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c04513m9",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T09:49:22.237Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c04513m9",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-06T09:49:21.904Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0skl5w6",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T09:49:21.530Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c0skl5w6",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-06T09:49:21.219Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c0skl5w6",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-06T09:49:20.914Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c0skl5w6",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-06T09:49:20.610Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c0skl5w6",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T09:49:20.295Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c0skl5w6",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T09:49:19.980Z",
+      "by": "fable",
+      "action": "card.criteria-verify",
+      "ref": "c0skl5w6",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-06T09:48:58.014Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c03ht82l",
+      "note": "A panicking task renders an empty panic block under jet run"
+    },
+    {
+      "at": "2026-08-06T09:46:57.587Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0rujhlb",
+      "note": "The JavaScript tier caps whole numbers at the double range"
+    },
+    {
+      "at": "2026-08-06T09:46:57.277Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0mpupgd",
+      "note": "Fixed-width divide by zero panics with raw Rust text at exit 101"
+    },
+    {
+      "at": "2026-08-06T09:46:56.973Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0hp46qn",
+      "note": "Comptime folding evaluates runtime input and takes fallbacks as constants"
+    },
+    {
       "at": "2026-08-06T09:22:57.994Z",
       "by": "fable",
       "action": "card.update",
@@ -112450,314 +112880,6 @@
       "action": "card.update",
       "ref": "c0kw5dh0",
       "note": "body,plan"
-    },
-    {
-      "at": "2026-08-05T14:35:32.107Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0kfh1yl",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-05T14:35:31.593Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0v2fuet",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-05T14:35:31.032Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0q2s3u5",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-05T14:35:30.670Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c09k2xje",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-08-05T14:35:30.300Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c04czzvb",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-08-05T14:35:29.953Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0z2v4l9",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-08-05T14:35:29.571Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0skl5w6",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-08-05T14:35:29.184Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0kfh1yl",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-08-05T14:35:28.814Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0c74q4f",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-08-05T14:35:28.439Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c04513m9",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-08-05T14:35:28.074Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0v2fuet",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-08-05T14:35:27.704Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0q2s3u5",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-08-05T14:35:27.343Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0kw5dh0",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-08-05T14:30:56.103Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c09k2xje",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-08-05T14:30:55.745Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c04czzvb",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-08-05T14:30:55.379Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0z2v4l9",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-08-05T14:30:55.012Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0skl5w6",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-08-05T14:30:54.646Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0kfh1yl",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-08-05T14:30:54.286Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0c74q4f",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-08-05T14:30:53.922Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c04513m9",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-08-05T14:30:53.558Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0v2fuet",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-08-05T14:30:53.185Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0q2s3u5",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-08-05T14:30:52.817Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0kw5dh0",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-08-05T14:24:07.451Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-XORSPELL1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-05T14:24:07.451Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0v2fuet",
-      "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-08-05T14:24:07.451Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0v2fuet",
-      "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-08-05T14:24:07.451Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0v2fuet",
-      "note": "#2 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-08-05T14:24:07.451Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0v2fuet",
-      "note": "#1 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-08-05T14:22:41.064Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-XORSPELL1",
-      "note": ""
-    },
-    {
-      "at": "2026-08-05T14:22:40.137Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-MODSEM1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-05T14:22:40.137Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0c74q4f",
-      "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-08-05T14:22:40.137Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0c74q4f",
-      "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-08-05T14:22:40.137Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0c74q4f",
-      "note": "#2 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-08-05T14:22:40.137Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0c74q4f",
-      "note": "#1 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-08-05T14:22:31.011Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-EXPSEM1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-05T14:22:31.011Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0q2s3u5",
-      "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-08-05T14:22:31.011Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0q2s3u5",
-      "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-08-05T14:22:31.011Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0q2s3u5",
-      "note": "#2 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-08-05T14:22:31.011Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0q2s3u5",
-      "note": "#1 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-08-05T14:01:00.446Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-XORSPELL1",
-      "note": ""
-    },
-    {
-      "at": "2026-08-05T13:57:39.735Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-FLOORDIV1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-05T13:57:39.735Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c04513m9",
-      "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-08-05T13:57:39.734Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c04513m9",
-      "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-08-05T13:57:39.734Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c04513m9",
-      "note": "#2 syntax-decisions.md log entry"
     }
   ],
   "nextNum": 368,
