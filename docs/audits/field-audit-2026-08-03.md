@@ -59,6 +59,12 @@ Every competing Core API workflow must appear in a maintained inventory, with
 beginner, expert-policy, failure, and lifecycle cases where they apply. Every
 inventoried workflow must pass all of these checks.
 
+That inventory is [the Core surface ledger](../reference/core-surface-ledger.md).
+It is generated from the compiler tables and from a recorded surface for each
+competitor language. Read it; do not start a second inventory. This audit
+predates the owner's 2026-08-03 ruling, which moved the bar from Python alone
+to every language Jet competes with, and the ledger scores all eleven.
+
 1. **Source and reasoning cost:** report lexical tokens, statements, calls,
    named temporary values, mandatory concepts, hidden facts, and nonlocal
    lookups. Do not use one fixed ratio. Each extra Jet construct must improve
