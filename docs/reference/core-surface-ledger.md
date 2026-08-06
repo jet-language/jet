@@ -112,7 +112,7 @@ while losses remain.
 | core.regex | 13 | #1471 | ready | live |
 | core.url | 13 | #1472 | ready | live |
 | core.sync | 12 | #1481 | ready | live |
-| core.math | 11 | #1464 | building | live |
+| core.math | 11 | #1464 | verify | live |
 | core.path | 11 | #288 | building | live |
 | core.io | 10 | #1480 | ready | live |
 | core.process | 10 | #1481 | ready | live |
