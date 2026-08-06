@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1463,
-    "rev": 25681,
+    "rev": 25685,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -78534,6 +78534,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-08-06",
+          "by": "fable",
+          "text": "A ledger review briefly reported this card as done without delivery. That is wrong. Source confirms is_subset, is_superset and is_disjoint at Collections.rs:1571 and :1593, shipped across AOT, comptime, JIT and interpreter and reviewed clean. The Core surface ledger was measuring wrong. This card stands as delivered."
+        },
+        {
           "at": "2026-08-03",
           "by": "codex",
           "text": "Independent fresh-context review (epoch3_review) clean through c0a5be68d; no concrete findings remain."
@@ -78563,8 +78568,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-03T20:28:43.394Z",
-      "updated": "2026-08-03T23:32:04.075Z",
-      "updatedBy": "codex",
+      "updated": "2026-08-06T02:02:16.535Z",
+      "updatedBy": "fable",
       "completedAt": "2026-08-03T23:32:04.074Z"
     },
     {
@@ -81024,6 +81029,11 @@
       "log": [
         {
           "at": "2026-08-06",
+          "by": "bd-review-ledger2",
+          "text": "Second independent review holds this card again. Root cause: the extractor function matchArms drops the match arm that follows any block-bodied arm, so the Jet member inventory is not closed. Proof: Jet ships Set.is_subset, is_superset and is_disjoint at Collections.rs:1571 and :1593, and the ledger scores all three as gaps. The score of 646 is wrong in both directions and the errors do not cancel. Criteria 1 and 3 are not met. Criteria 4 and 5 are met. No cards will be minted."
+        },
+        {
+          "at": "2026-08-06",
           "by": "bd-ledger",
           "text": "Independent review holds this card. The loss score of 15398 is inflated about 8 to 12 times, and the real actionable count is near 1200 to 2000. Three causes: members of one package are attributed to many containers, one capability mints a row per language, and matching is one to one so an identical name on both sides still scores a loss. Criteria 1, 3 and 5 are not met. No cards will be minted until the loss rule is tightened and the surface is scored again."
         },
@@ -81074,20 +81084,20 @@
         {
           "n": 4,
           "text": "Deterministic checks fail on source-surface drift, an unmapped member, duplicate row, hidden exclusion, stale owner, or unratified scope exclusion.",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-ledger",
-          "verifiedBy": null,
-          "evidence": "tests/core_surface_ledger.rs, two tests, run by 'cargo test --test core_surface_ledger' -> 2 passed. The second test drives 19 hostile fixtures that each break one thing, so a deleted gate fails instead of going quiet.",
-          "at": "2026-08-06T01:18:08.349Z"
+          "verifiedBy": "bd-review-ledger2",
+          "evidence": "Confirmed by a second reviewer. Four validators were neutered independently in scratchpad copies. Each one turns the suite red for its own reason and exits 1, while the base run exits 0. The wording assertion in rejects() carries the weight.",
+          "at": "2026-08-06T02:02:15.874Z"
         },
         {
           "n": 5,
           "text": "The ledger is durable under docs and #1398 consumes it without a duplicate manual inventory.",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-review-ledger",
-          "verifiedBy": null,
-          "evidence": "REJECTED BY REVIEW. Card 1398 was never updated to consume the ledger. Its plan still names the pre-restore card id, and its first criterion still reads as a Python-only gate, which contradicts the every-language ruling. tests/truthfulness.rs also duplicates the same check.",
-          "at": "2026-08-06T01:27:57.812Z"
+          "verifiedBy": "bd-review-ledger2",
+          "evidence": "Confirmed by a second reviewer. Card 1398 plan step 3 and refs name docs/reference/core-surface-ledger.json and card 1442. The residual wording in criterion 1 of card 1398 is logged on that card, not hidden.",
+          "at": "2026-08-06T02:02:16.177Z"
         },
         {
           "n": 6,
@@ -81113,8 +81123,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T18:12:13.321Z",
-      "updated": "2026-08-06T01:27:58.169Z",
-      "updatedBy": "bd-ledger",
+      "updated": "2026-08-06T02:02:16.177Z",
+      "updatedBy": "bd-review-ledger2",
       "claimedAt": "2026-08-06T01:27:58.169Z"
     },
     {
@@ -108588,6 +108598,34 @@
   ],
   "events": [
     {
+      "at": "2026-08-06T02:02:16.535Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c09ec4q7",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-06T02:02:16.177Z",
+      "by": "bd-review-ledger2",
+      "action": "card.criteria-verify",
+      "ref": "c00ms1om",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-06T02:02:15.875Z",
+      "by": "bd-review-ledger2",
+      "action": "card.criteria-verify",
+      "ref": "c00ms1om",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-06T02:02:15.559Z",
+      "by": "bd-review-ledger2",
+      "action": "card.update",
+      "ref": "c00ms1om",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-08-06T01:48:34.573Z",
       "by": "fable",
       "action": "card.add",
@@ -112058,34 +112096,6 @@
       "action": "card.update",
       "ref": "c0onk8jk",
       "note": "logEntry,blockedBy"
-    },
-    {
-      "at": "2026-08-05T02:15:34.994Z",
-      "by": "claude-e3-closeout",
-      "action": "card.update",
-      "ref": "c0fb7yl5",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-05T02:15:23.471Z",
-      "by": "claude-e3-closeout",
-      "action": "decision.add",
-      "ref": "D-AUTODIFF1",
-      "note": "General automatic differentiation in core.compute"
-    },
-    {
-      "at": "2026-08-05T02:06:06.604Z",
-      "by": "claude-e3-closeout",
-      "action": "card.update",
-      "ref": "c0rfgh4h",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-05T02:06:06.248Z",
-      "by": "claude-e3-closeout",
-      "action": "card.update",
-      "ref": "c0rfgh4h",
-      "note": "logEntry"
     }
   ],
   "nextNum": 368,
