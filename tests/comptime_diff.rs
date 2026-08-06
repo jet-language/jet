@@ -206,7 +206,10 @@ const MODULE_CASES: &[&str] = &[
     "use core.encoding.json as json\nuse core.encoding.cbor as cbor\nuse core.encoding.hex as hex\n#Known comptime_value :: hex.encode(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3],\\\"c\\\":-7}}\") ?? panic(\"bad\")) ?? panic(\"bad\"))\n\nfn run() {\n    r :: hex.encode(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3],\\\"c\\\":-7}}\") ?? panic(\"bad\")) ?? panic(\"bad\"))\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
     "use core.encoding.json as json\nuse core.encoding.cbor as cbor\n#Known comptime_value :: json.to_string(cbor.parse(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3]}}\") ?? panic(\"bad\")) ?? panic(\"bad\")) ?? panic(\"bad\"))\n\nfn run() {\n    r :: json.to_string(cbor.parse(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3]}}\") ?? panic(\"bad\")) ?? panic(\"bad\")) ?? panic(\"bad\"))\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
     "use core.encoding.jsonl as jsonl\n#Known comptime_value :: jsonl.to_string(jsonl.parse(\"{{\\\"a\\\":1}}\\n{{\\\"b\\\":2}}\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n\nfn run() {\n    r :: jsonl.to_string(jsonl.parse(\"{{\\\"a\\\":1}}\\n{{\\\"b\\\":2}}\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.encoding.json as json\n#Known comptime_value :: json.canonical(json.parse(\"{{\\\"b\\\":1,\\\"a\\\":2}}\") ?? panic(\"bad\"))\n\nfn run() {\n    r :: json.canonical(json.parse(\"{{\\\"b\\\":1,\\\"a\\\":2}}\") ?? panic(\"bad\"))\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
+    // D-JSONCANON1: edition 2027 `json.canonical` is fallible (`String ?
+    // encoding.EncodingError`); `run()` is infallible, so the ratified
+    // migration form is the panic fallback, not `?` propagation.
+    "use core.encoding.json as json\n#Known comptime_value :: json.canonical(json.parse(\"{{\\\"b\\\":1,\\\"a\\\":2}}\") ?? panic(\"bad\")) ?? panic(\"value is not canonical JSON\")\n\nfn run() {\n    r :: json.canonical(json.parse(\"{{\\\"b\\\":1,\\\"a\\\":2}}\") ?? panic(\"bad\")) ?? panic(\"value is not canonical JSON\")\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
     "use core.encoding.json as json\n#Known comptime_value :: json.events(json.parse(\"{{\\\"a\\\":[1,2]}}\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n\nfn run() {\n    r :: json.events(json.parse(\"{{\\\"a\\\":[1,2]}}\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
 ];
 
@@ -739,7 +742,7 @@ use core.encoding.hex as hex
 #Codable
 struct Packet { id: Int, payload: [U8] }
 
-#Known expected_map :: hex.encode(cbor.to_bytes_canonical(json.parse("{{\"aa\":1,\"b\":2}}") ?? panic("value is not canonical JSON") ?? panic("json")) ?? panic("canonical"))
+#Known expected_map :: hex.encode(cbor.to_bytes_canonical(json.parse("{{\"aa\":1,\"b\":2}}") ?? panic("json")) ?? panic("canonical"))
 #Known expected_floats :: hex.encode(cbor.to_bytes_canonical([1.5, 100000.0, -0.0]) ?? panic("canonical"))
 #Known expected_nan :: hex.encode(cbor.to_bytes_canonical(Float.NAN) ?? panic("canonical"))
 #Known expected_typed :: hex.encode(cbor.to_bytes_canonical(Packet.{ id: 7, payload: [222, 173] }) ?? panic("canonical"))

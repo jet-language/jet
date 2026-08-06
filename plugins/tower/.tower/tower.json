@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1581,
-    "rev": 28103,
+    "nextNum": 1582,
+    "rev": 28115,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -78084,6 +78084,11 @@
       "log": [
         {
           "at": "2026-08-06",
+          "by": "bd2-json",
+          "text": "bd2-json fix: (1) rewrite_json_canonical_calls now skips whitespace before testing for an already-migrated call (trim_start before starts_with('?')), so a space before ?? no longer defeats idempotency detection. (2) rewriter now checks the enclosing fn's fallibility (new enclosing_fn_is_fallible text scan of the nearest fn header, walking outward past if/for/match/struct-literal blocks): fallible enclosing fn gets bare ? propagation, infallible/top-level gets the ?? panic(...) fallback per D-JSONCANON1. Added tests/cli.rs::jet_fix_edition_2027_rewrites_json_canonical_and_is_idempotent covering both forms plus a byte-identical re-run. Repaired damaged corpus: comptime_diff.rs:742 json.parse call had a duplicated panic clause not matching its runtime twin at :748, now matches. comptime_diff.rs:209 (case 1030) migrated json.canonical from the stale 2026 infallible form to the ratified 2027 fallback form."
+        },
+        {
+          "at": "2026-08-06",
           "by": "bd2-rev2",
           "text": "bd2-rev2 review: HOLD in verify. Two blocking findings.\n\n(1) Criterion 5 is false green. cargo test --test comptime_diff fails: comptime_module_calls_match_runtime, case 1030. The json.canonical entry in ENCODING_CASES (tests/comptime_diff.rs:209) still uses the infallible 2026 form. Under edition 2027 the call now returns String ? EncodingError, so print(\"{r}\") raises E0915 because that type has no Display. Migrate the case to the fallible form, or split it into a 2026 case and a 2027 case.\n\n(2) Criterion 3 is broken. jet fix --edition=2027 is not idempotent. rewrite_json_canonical_calls in Source/CmdCompile.rs tests the character after the closing parenthesis with starts_with('?'), so a call that already reads json.canonical(x) ?? panic(...) with a space is not detected. A second pass appends a second ?? panic(\"value is not canonical JSON\"). Reproduced: two passes over one file produce json.canonical(data) ?? panic(\"value is not canonical JSON\") ?? panic(\"value is not canonical JSON\"). The same bug already damaged tests/comptime_diff.rs:742, where a json.parse call now reads ?? panic(\"value is not canonical JSON\") ?? panic(\"json\") while its runtime twin at line 748 does not. Also, the rewriter always emits the ?? panic form. D-JSONCANON1 requires json.canonical(x)? when the enclosing function is fallible. No test covers the rewrite at all.\n\nAlso for the next pass: the RFC 8785 vector tests in tests/corelib.rs exercise only the stream writer. There is no whole-value json.canonical vector test at edition 2027.\n\nWhat holds: criteria 1 and 4 verified. Edition 2026 stays frozen. Edition 2027 sema, AOT emit, JIT lowering, and comptime all route to jet_enc_json_canonical or its comptime port, and the Prelude whole-value writer shares jet_json_jcs_number and jet_json_jcs_key_cmp with the stream writer, so I8 and the Prelude side of I9 hold. No new diagnostic, so I4 needs nothing. cargo build clean. cargo test --test encoding_edition passes 5 of 5. jet run and the AOT binary of examples/features/serde/encoding_breadth.jet both match the golden.\n\nUnrelated failures seen and not attributed to this card: comptime_diff cases 42 to 44 (Iter has no Display) and one linker error from a shared /tmp; corelib json_canonical_stream_* fail with E0956 because core.files.create is unsupported in quick-run mode."
         },
@@ -78131,10 +78136,10 @@
           "n": 3,
           "text": "jet fix and explicit edition upgrade rewrite every changed JSON call and report hashing or signing fixtures for review.",
           "status": "met",
-          "metBy": "e3-coll",
+          "metBy": "bd2-json",
           "verifiedBy": null,
-          "evidence": "jet fix --edition 2027 rewrites json.canonical(x) to ?? panic(...); audit notes hashing fixtures",
-          "at": "2026-08-06T19:03:13.565Z"
+          "evidence": "rewrite_json_canonical_calls fixed: idempotent (trim_start before starts_with('?')) and emits D-JSONCANON1's ratified form -- bare ? inside a fallible enclosing fn (new enclosing_fn_is_fallible scan), ?? panic(\"value is not canonical JSON\") otherwise. Covered by tests/cli.rs::jet_fix_edition_2027_rewrites_json_canonical_and_is_idempotent (fresh 2026->2027 rewrite of both forms + byte-identical second run) -- cargo test --test cli jet_fix_edition_2027 passes.",
+          "at": "2026-08-06T23:21:40.697Z"
         },
         {
           "n": 4,
@@ -78149,10 +78154,10 @@
           "n": 5,
           "text": "Hostile corpus, limit, canonical, whole-value, stream, comptime, interpreter, JIT, and AOT tests prove the ratified behavior.",
           "status": "met",
-          "metBy": "e3-coll",
+          "metBy": "bd2-json",
           "verifiedBy": null,
-          "evidence": "encoding_edition tests; encoding_breadth JIT≡AOT golden; JIT host calls jet_enc_json_canonical",
-          "at": "2026-08-06T19:03:48.336Z"
+          "evidence": "Damaged corpus repaired: comptime_diff.rs:742 json.parse call matches its runtime twin at :748; comptime_diff.rs:209 (case 1030) migrated from stale 2026 infallible json.canonical to the ratified 2027 fallback form. cargo test --test comptime_diff: 24 passed, 1 failed (comptime_matches_runtime cases 42-44, Iter-has-no-Display, pre-existing and unrelated); comptime_module_calls_match_runtime (case 1030) and cbor_canonical_typed_corpus_matches_comptime_and_aot (:742 pair) both pass. cargo test --test encoding_edition: 5/5 pass.",
+          "at": "2026-08-06T23:21:41.197Z"
         },
         {
           "n": 6,
@@ -78182,8 +78187,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-03T20:21:49.285Z",
-      "updated": "2026-08-06T23:02:20.485Z",
-      "updatedBy": "bd2-rev2",
+      "updated": "2026-08-06T23:21:41.197Z",
+      "updatedBy": "bd2-json",
       "workOrder": 10
     },
     {
@@ -95453,30 +95458,36 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
-      "assignee": null,
-      "log": [],
+      "assignee": "bd2-str",
+      "log": [
+        {
+          "at": "2026-08-06",
+          "by": "bd2-str",
+          "text": "Read 34-row String jet_loses cluster; 33 restate #1476's unratified prose declines, +concat (duplicates +/interpolation). Determined 0 ships: every name already routed to an existing Jet mechanism (Iter/List via chars/bytes, core.regex, Int/Float.parse, +/interpolation, or a niche buffer op two langs ship). Authored+readied ballot D-STR-DECLINE1 (A=decline all 34, B=ship all 34; rec A). Minted follow-up card #1581 to apply the ratified outcome; repointed CLUSTER_OWNER String 1580->1581 in worktree script. Updated core-library.md decline paragraph with concat + ballot id."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "Every String jet_loses row in docs/reference/core-surface-ledger.json is shipped or recorded as a ratified decline, or this card hands the remainder to a named successor card with CLUSTER_OWNER updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd2-str",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T22:29:27.663Z"
+          "evidence": "34 String jet_loses rows evaluated: all 34 route to an existing Jet mechanism (immutable-String, chars/bytes->List/Iter, core.regex, Int/Float.parse, +/interpolation, or a niche 2-witness buffer op). 0 ships. Authored+readied ballot D-STR-DECLINE1 (A=decline all/named route, B=ship all; rec A), open on card #1580, pending owner vote. Minted follow-up card #1581 (e3/P2/ready) to apply the ratified outcome; CLUSTER_OWNER String repointed 1580->1581 in scripts/agent/check-core-surface-ledger.mjs. docs/reference/core-library.md String-declines paragraph updated with concat + all 34 names + ballot id.",
+          "at": "2026-08-06T23:19:49.014Z"
         },
         {
           "n": 2,
           "text": "node scripts/agent/check-core-surface-ledger.mjs --check exits 0 and scripts/agent/jet-env cargo test --test core_surface_ledger passes",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd2-str",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T22:29:28.006Z"
+          "evidence": "worktree .claude/worktrees/string: scripts/agent/jet-env cargo build (debug) ok; scripts/agent/jet-env cargo build --release --bin jet ok. examples/features/text/strings.jet run under both target/debug/jet and target/release/jet is byte-identical and matches examples/features/expected/text/strings.out (I9). node scripts/agent/check-core-surface-ledger.mjs --refresh then --check exit 0 (String cluster: 34 rows, ownerCard=1581, ownerState=live). scripts/agent/jet-env cargo test --test core_surface_ledger: 2 passed. cargo test -p jet-codegen covers_string_builtin_methods (TIR string-method coverage neighbor test): 1 passed.",
+          "at": "2026-08-06T23:19:49.366Z"
         }
       ],
       "refs": [],
@@ -95484,8 +95495,43 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T22:29:05.864Z",
-      "updated": "2026-08-06T22:29:28.006Z",
-      "updatedBy": "bd2-orch"
+      "updated": "2026-08-06T23:19:53.457Z",
+      "updatedBy": "bd2-str",
+      "claimedAt": "2026-08-06T23:19:53.457Z"
+    },
+    {
+      "id": "c0zsjsdx",
+      "num": 1581,
+      "title": "Apply the String ballot outcome to the ledger",
+      "body": "D-STR-DECLINE1 on card #1580 disposes String's remaining 34 core-surface-ledger gaps. Once the owner ratifies it, wire the outcome into the ledger: option A marks each of the 34 rows declined with the ratified decision id, or option B ships the named methods. Owns CLUSTER_OWNER for String.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Every String jet_loses row this card owns carries verdict declined with declinedBy=D-STR-DECLINE1 (or is shipped, if the owner picked option B); node scripts/agent/check-core-surface-ledger.mjs --refresh then --check exits 0",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T23:13:23.116Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-06T23:13:19.231Z",
+      "updated": "2026-08-06T23:13:23.116Z",
+      "updatedBy": "bd2-str"
     }
   ],
   "decisions": [
@@ -127589,6 +127635,71 @@
       "created": "2026-08-06T21:40:24.708Z",
       "outcome": "A",
       "ratifiedAt": "2026-08-06"
+    },
+    {
+      "id": "D-STR-DECLINE1",
+      "cardId": "c01y8s93",
+      "group": "stdlib",
+      "title": "String's remaining 34 ledger gaps: decline or ship",
+      "gist": "Whether Jet adds 34 more String methods that copy features it already has under a different name.",
+      "lesson": "Card #1476 gave String 30 methods. The surface ledger still lists 34 more names that other languages ship on their string type. Every one of those 34 already has a Jet answer somewhere else. Convert text to a list first, then use List or Iter. Match patterns with core.regex. Parse numbers with Int.parse or Float.parse. Build text with the plus operator or interpolation. Adding a second spelling on String for each name would give every text workflow two ways to reach the same result.",
+      "explainer": "",
+      "story": "Priya is writing a log cleaner in Jet. She wants to check whether each character is printable before the line ships to a file, the way Go's unicode.IsPrint works. She finds no isprint on String and wonders whether Jet forgot a basic text check or expects a different route.",
+      "inWild": "fn clean_log_line(line: String) => String {\n    // Priya first reaches for a method String does not have.\n    letters :: line.chars().filter(c => c != ' ')\n    return line.trim() + \" (\" + letters.len().to_string() + \" chars)\"\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Decline all 34, route each to what Jet already ships",
+          "detail": "None of the 34 names add a workflow Jet is missing. Mutation verbs like clear and push do not fit an immutable String. Sequence names like map, fold, and first already exist on List and Iter once text becomes a list of characters or bytes. parse, tofloat, match, and matches already live on Int, Float, and core.regex. concat duplicates the plus operator and interpolation. The rest are niche buffer operations two languages ship, covered today by slice, replace, and the shipped surface.",
+          "technical": "Immutable-string declines: clear, push, pop, remove, and write. String is an immutable value. Rebuild text with plus, replace, or slice instead of mutating it in place.\n\nIter and List declines: all, map, fold, skip, chunk, droplast, indexed, flatmap, each, max, min, scan, first, last, get, and codepointat. These are sequence operations, not text operations. Call chars or bytes first, then use the existing List or Iter method, per the one-mechanism rule.\n\nNumber-parsing declines: parse and tofloat. Int.parse and Float.parse already convert text to a number with one error type. A second parse path on String would duplicate that mechanism.\n\nPattern-matching declines: match and matches. core.regex already owns pattern matching under D-REGEXENGINE1. A match method on String would open a second matching mechanism.\n\nConcatenation decline: concat. The plus operator and string interpolation already join text. concat would spell the same operation a second way.\n\nValidity decline: isvalid. A live String is always valid UTF-8 by construction. String.from_bytes already reports invalid bytes as an error when text is built from a byte buffer.\n\nNiche buffer declines: replacerange, isprint, intern, indexofany, lastindexofany, chop, and rpartition. Each is a low-traffic operation only two of eleven compared languages ship. Slice, replace, and the shipped surface already cover the common cases.",
+          "code": "line := \"  Hello, World!  \"\n\n// Immutable text: rebuild instead of mutating.\ncleaned :: line.trim() + \"!\"\n\n// Sequence vocabulary: convert to chars, then use List/Iter.\nvowels :: line.chars().filter(c => c == 'e' || c == 'o')\nprint(vowels.len())\n\n// Number parsing: the destination type owns parse.\nn :: Int.parse(\"42\") ?? 0\n\n// Pattern matching: core.regex owns match.\nuse core.regex as re\nprint(re.is_match(\"[0-9]\", line) ?? panic(\"bad pattern\"))\n\n// Concatenation: plus and interpolation, not concat.\ngreeting :: \"{line.trim()}!\"\nprint(greeting)"
+        },
+        {
+          "key": "B",
+          "name": "Ship all 34 as new String methods",
+          "detail": "String grows a second copy of the Iter vocabulary, a second parse path, and a second match method, all living beside the mechanisms Jet already ships elsewhere. Every text tutorial now has to say which of two spellings to use for map, parse, or match, and the answer changes by container.",
+          "technical": "Each of the 34 names ships as a string_method_return case in Collections.rs plus a matching jet_str_* Prelude function in UnicodeString.rs. Sequence names like map, fold, and first duplicate the List/Iter case arms already registered for those same names. parse and tofloat duplicate Int.parse and Float.parse. match and matches duplicate core.regex.is_match and core.regex.matches. concat duplicates the existing plus operator lowering for String plus Add.",
+          "code": "line := \"  Hello, World!  \"\n\n// A second, String-only copy of the Iter vocabulary.\nvowels := line.filter(c => c == 'e' || c == 'o')\nfirst := line.first()\ntop := line.max()\n\n// A second parse path, now living on String too.\nn := line.tofloat() ?? 0.0\n\n// A second match mechanism, now living on String too.\nfound := line.match(\"[0-9]\")\n\n// A second way to join text, now living on String too.\ngreeting := line.concat(\"!\")"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Kotlin",
+          "note": "Kotlin's CharSequence mirrors most of Iterable, so all, map, and first exist twice: once as a sequence operation and once as a string operation.",
+          "code": "\"hello\".map { it.uppercaseChar() }\nlistOf('h', 'i').map { it }"
+        },
+        {
+          "lang": "Rust",
+          "note": "Rust keeps text parsing on the destination type through FromStr, the same split Jet already uses for Int.parse and Float.parse.",
+          "code": "let n: i32 = \"42\".parse().unwrap();"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Every one of the 34 names already reaches a working answer through a mechanism Jet ships today. Declining keeps one path per capability, which is what I8 asks for.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Shipping all 34 gives String a second copy of Iter, parse, and regex vocabulary. Every future reader has to learn which of two spellings to use."
+          }
+        ],
+        "tradeoff": "A programmer who expects isprint or indexofany by muscle memory from another language has to write one extra line: convert with chars or bytes, or reach for core.regex or slice."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft grouped the 34 names into six families, each already answered by an existing Jet mechanism, and recommended declining all of them.",
+        "boilOcean": "The breadth pass checked isprint and indexofany for a real gap instead of a duplicate. Both still routed to an existing mechanism or a two-witness niche buffer method.",
+        "hybrid": "A hybrid that ships only isprint and indexofany was tested. It was dropped because both still fit inside the existing predicate and slice mechanisms without a new code path.",
+        "cooperative": "Steelmanning option B: shipping the full 34 would let a newcomer type the name they already know without detouring through chars or bytes first.",
+        "adversarial": "The adversarial pass asked whether declining orphans a real workflow. Every declined name still reaches its answer in one extra call, so no workflow is left without a route."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-06T23:12:45.928Z"
     }
   ],
   "questions": [
@@ -129130,6 +129241,90 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-06T23:21:41.197Z",
+      "by": "bd2-json",
+      "action": "card.criteria-meet",
+      "ref": "c00sqr4z",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-06T23:21:40.697Z",
+      "by": "bd2-json",
+      "action": "card.criteria-meet",
+      "ref": "c00sqr4z",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T23:21:16.578Z",
+      "by": "bd2-json",
+      "action": "card.update",
+      "ref": "c00sqr4z",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-06T23:19:53.457Z",
+      "by": "bd2-str",
+      "action": "card.update",
+      "ref": "c01y8s93",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-06T23:19:49.366Z",
+      "by": "bd2-str",
+      "action": "card.criteria-meet",
+      "ref": "c01y8s93",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T23:19:49.014Z",
+      "by": "bd2-str",
+      "action": "card.criteria-meet",
+      "ref": "c01y8s93",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-06T23:14:35.267Z",
+      "by": "bd2-str",
+      "action": "card.update",
+      "ref": "c01y8s93",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-06T23:13:23.116Z",
+      "by": "bd2-str",
+      "action": "card.criteria-add",
+      "ref": "c0zsjsdx",
+      "note": "#1 Every String jet_loses row this card owns carries verdict de"
+    },
+    {
+      "at": "2026-08-06T23:13:19.231Z",
+      "by": "bd2-str",
+      "action": "card.add",
+      "ref": "c0zsjsdx",
+      "note": "Apply the String ballot outcome to the ledger"
+    },
+    {
+      "at": "2026-08-06T23:13:04.157Z",
+      "by": "bd2-str",
+      "action": "decision.update",
+      "ref": "D-STR-DECLINE1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-08-06T23:12:45.932Z",
+      "by": "bd2-str",
+      "action": "decision.add",
+      "ref": "D-STR-DECLINE1",
+      "note": "String's remaining 34 ledger gaps: decline or ship (draft)"
+    },
+    {
+      "at": "2026-08-06T23:05:14.716Z",
+      "by": "bd2-str",
+      "action": "card.claim",
+      "ref": "c01y8s93",
+      "note": ""
+    },
     {
       "at": "2026-08-06T23:02:20.485Z",
       "by": "bd2-rev2",
@@ -132545,90 +132740,6 @@
       "action": "card.criteria-add",
       "ref": "c0s536sj",
       "note": "#5 Shadowing a unit suffix named i behaves the same as shadowin"
-    },
-    {
-      "at": "2026-08-06T21:35:14.135Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0s536sj",
-      "note": "#4 The bare identifier i is still an ordinary variable name and"
-    },
-    {
-      "at": "2026-08-06T21:35:13.786Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0s536sj",
-      "note": "#3 The suffix resolves through the existing unit-literal lexer "
-    },
-    {
-      "at": "2026-08-06T21:35:13.443Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0s536sj",
-      "note": "#2 abs(3 + 4i) is 5.0"
-    },
-    {
-      "at": "2026-08-06T21:35:13.089Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0s536sj",
-      "note": "#1 3 + 4i is a Complex value and (3 + 4i) * (3 + 4i) prints -7 "
-    },
-    {
-      "at": "2026-08-06T21:35:12.749Z",
-      "by": "audit-rethinks-b",
-      "action": "card.add",
-      "ref": "c0s536sj",
-      "note": "The 4i imaginary literal on the unit-literal path"
-    },
-    {
-      "at": "2026-08-06T21:35:12.413Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0cu6duy",
-      "note": "#8 Tier parity (I9) is proved inside this card: parser, sema, T"
-    },
-    {
-      "at": "2026-08-06T21:35:12.070Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0cu6duy",
-      "note": "#7 The plus-or-minus literal is not built here: it is a propose"
-    },
-    {
-      "at": "2026-08-06T21:35:11.726Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0cu6duy",
-      "note": "#6 No existing program changes behavior until a measurement ent"
-    },
-    {
-      "at": "2026-08-06T21:35:11.387Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0cu6duy",
-      "note": "#5 The docs state plainly that propagation is first-order with "
-    },
-    {
-      "at": "2026-08-06T21:35:11.029Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0cu6duy",
-      "note": "#4 A measured unit scale produces a measured conversion result"
-    },
-    {
-      "at": "2026-08-06T21:35:10.688Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0cu6duy",
-      "note": "#3 Printing a measured value shows the value with its uncertain"
-    },
-    {
-      "at": "2026-08-06T21:35:10.341Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0cu6duy",
-      "note": "#2 An exact value is zero-uncertainty and mixes with a measured"
     }
   ],
   "nextNum": 368,

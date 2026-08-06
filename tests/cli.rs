@@ -5421,3 +5421,77 @@ fn run() {}
     };
     assert_eq!(samples.len(), 20, "ServiceProbe must produce exactly 20 samples");
 }
+
+// ── D-JSONCANON1 `jet fix --edition=2027` migration (card #1394) ──────────
+
+/// `jet fix --edition=2027` rewrites `json.canonical(x)` per D-JSONCANON1:
+/// `json.canonical(x)?` when the enclosing function is fallible, otherwise
+/// `json.canonical(x) ?? panic("value is not canonical JSON")`. A re-run
+/// must be a no-op (idempotent), including when the existing fallback
+/// already has a space before `??` (the bug that made `jet fix` double-
+/// append the panic fallback on every re-run).
+#[test]
+fn jet_fix_edition_2027_rewrites_json_canonical_and_is_idempotent() {
+    let dir = isolated_cwd("jsoncanon_fix");
+    let file = dir.join("run.jet");
+    fs::write(
+        &file,
+        r#"use core.encoding.json as json
+
+fn show() {
+    data := json.parse("{\"a\":1}") ?? panic("json")
+    r := json.canonical(data)
+    print(r)
+}
+
+fn sign() -> String ? {
+    data := json.parse("{\"a\":1}")?
+    r := json.canonical(data)
+    return r
+}
+
+fn already_migrated() {
+    data := json.parse("{\"a\":1}") ?? panic("json")
+    r := json.canonical(data) ?? panic("value is not canonical JSON")
+    print(r)
+}
+"#,
+    )
+    .unwrap();
+
+    let run_fix = |file: &Path| -> String {
+        let out = Command::new(jet())
+            .args(["fix", file.to_str().unwrap(), "--edition=2027"])
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "jet fix failed:\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        fs::read_to_string(file).unwrap()
+    };
+
+    let after_first = run_fix(&file);
+    assert!(
+        after_first.contains("json.canonical(data) ?? panic(\"value is not canonical JSON\")\n    print(r)\n}\n\nfn sign"),
+        "infallible fn `show` must get the panic fallback:\n{after_first}"
+    );
+    assert!(
+        after_first.contains("json.canonical(data)?\n    return r"),
+        "fallible fn `sign` must get bare `?` propagation, not a panic fallback:\n{after_first}"
+    );
+    assert!(
+        !after_first.contains("value is not canonical JSON\") ?? panic"),
+        "an already-migrated call must not be rewritten twice:\n{after_first}"
+    );
+
+    // Re-running the migration must be a byte-identical no-op — this is the
+    // idempotency the space-before-`??` bug broke.
+    let after_second = run_fix(&file);
+    assert_eq!(
+        after_first, after_second,
+        "`jet fix --edition=2027` must be idempotent on a re-run"
+    );
+}

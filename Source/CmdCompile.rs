@@ -1131,29 +1131,112 @@ fn apply_edition_2027_encoding_fixes(src: &str) -> String {
 fn rewrite_json_canonical_calls(src: &str) -> String {
     let needle = "json.canonical(";
     let mut out = String::with_capacity(src.len());
+    let mut base = 0usize; // byte offset into `src` of the start of `rest`
     let mut rest = src;
-    while let Some(index) = rest.find(needle) {
-        out.push_str(&rest[..index]);
-        let after = &rest[index + needle.len()..];
+    while let Some(rel) = rest.find(needle) {
+        let index = base + rel;
+        out.push_str(&rest[..rel]);
+        let after = &rest[rel + needle.len()..];
         let Some(end) = find_matching_paren(after) else {
             out.push_str(needle);
+            base = index + needle.len();
             rest = after;
             continue;
         };
         let call = format!("{needle}{}", &after[..=end]);
         let trailing = &after[end + 1..];
-        let already = trailing.starts_with('?') || trailing.starts_with("??");
+        // D-JSONCANON1 idempotency: skip whitespace before testing for an
+        // already-migrated `?` (fallible propagation) or `??` (panic
+        // fallback) — a space before `??` used to defeat `starts_with('?')`
+        // and cause `jet fix` to double-append the fallback on a re-run.
+        let already = trailing.trim_start().starts_with('?');
         if already {
             out.push_str(&call);
+        } else if enclosing_fn_is_fallible(src, index) {
+            // D-JSONCANON1: inside a fallible function, propagate with `?`.
+            out.push_str(&format!("{call}?"));
         } else {
+            // D-JSONCANON1: otherwise, the ratified panic fallback.
             out.push_str(&format!(
                 "{call} ?? panic(\"value is not canonical JSON\")"
             ));
         }
+        base = index + call.len();
         rest = trailing;
     }
     out.push_str(rest);
     out
+}
+
+/// D-JSONCANON1 migration: is the function enclosing byte offset `at` in
+/// `src` fallible (S34 `-> T ? E` / bare `T ?`)? Walks outward through
+/// nested `{ }` scopes — `if`/`for`/`match`/struct-literal bodies aren't
+/// functions — until a scope's header text parses as a `fn` signature, or
+/// there is no enclosing scope (top-level, e.g. a `#Known` initializer:
+/// not fallible, since `?` propagation requires an enclosing fallible fn).
+fn enclosing_fn_is_fallible(src: &str, at: usize) -> bool {
+    let mut scan_from = at;
+    while let Some(open) = innermost_open_brace(src, scan_from) {
+        if let Some(sig_start) = fn_header_before(src, open) {
+            return src[sig_start..open].contains('?');
+        }
+        scan_from = open;
+    }
+    false
+}
+
+/// Byte offset of the `{` that opens the innermost scope containing `before`
+/// (naive brace balancing; the same string/comment fidelity as the rest of
+/// this migration pass).
+fn innermost_open_brace(src: &str, before: usize) -> Option<usize> {
+    let bytes = src.as_bytes();
+    let mut depth = 0i32;
+    let mut idx = before;
+    while idx > 0 {
+        idx -= 1;
+        match bytes[idx] {
+            b'}' => depth += 1,
+            b'{' => {
+                if depth == 0 {
+                    return Some(idx);
+                }
+                depth -= 1;
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// If the `{` at `open` is a function body's opening brace, the byte offset
+/// where its `fn` header starts; otherwise `None` (the scope belongs to an
+/// `if`/`for`/`match`/struct-literal/other non-function block).
+fn fn_header_before(src: &str, open: usize) -> Option<usize> {
+    let prefix = &src[..open];
+    let mut search_end = prefix.len();
+    loop {
+        let fn_at = prefix[..search_end].rfind("fn ")?;
+        let boundary_ok = fn_at == 0 || {
+            let b = prefix.as_bytes()[fn_at - 1];
+            !(b.is_ascii_alphanumeric() || b == b'_')
+        };
+        if boundary_ok {
+            let after_fn = &prefix[fn_at + "fn ".len()..];
+            if let Some(paren) = after_fn.find('(') {
+                if let Some(close_rel) = find_matching_paren(&after_fn[paren + 1..]) {
+                    let close_abs = fn_at + "fn ".len() + paren + 1 + close_rel + 1;
+                    let tail = prefix[close_abs..].trim();
+                    // Only a return-type/effects clause between the params
+                    // and `open` — no stray braces or statement separators —
+                    // means this `fn` truly owns the `open` scope.
+                    if !tail.contains(['{', '}', ';']) {
+                        return Some(fn_at);
+                    }
+                }
+            }
+        }
+        search_end = fn_at;
+    }
 }
 
 fn find_matching_paren(after_open: &str) -> Option<usize> {
