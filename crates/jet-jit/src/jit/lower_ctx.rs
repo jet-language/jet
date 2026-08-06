@@ -9734,21 +9734,79 @@ impl LowerCtx<'_, '_> {
                     let call = self.b.ins().call(host_ref, &arg_vals);
                     return Ok(self.b.inst_results(call)[0]);
                 }
-                if module == "core.os" && args.is_empty() {
-                    let host_id = match method.as_str() {
-                        "name" => self.host.core.os_name,
-                        "family" => self.host.core.os_family,
-                        "arch" => self.host.core.os_arch,
-                        "cpu_count" => self.host.core.os_cpu_count,
-                        "temp_dir" => self.host.core.os_temp_dir,
-                        "executable" => self.host.core.os_executable,
-                        "pid" => self.host.core.os_pid,
-                        "hostname" => self.host.core.os_hostname,
-                        _ => return Err("jit core call unsupported".to_string()),
+                if module == "core.os" {
+                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                        "name" if args.is_empty() => (self.host.core.os_name, vec![]),
+                        "family" if args.is_empty() => (self.host.core.os_family, vec![]),
+                        "arch" if args.is_empty() => (self.host.core.os_arch, vec![]),
+                        "cpu_count" if args.is_empty() => (self.host.core.os_cpu_count, vec![]),
+                        "temp_dir" if args.is_empty() => (self.host.core.os_temp_dir, vec![]),
+                        "executable" if args.is_empty() => (self.host.core.os_executable, vec![]),
+                        "pid" | "getpid" if args.is_empty() => (self.host.core.os_pid, vec![]),
+                        "hostname" if args.is_empty() => (self.host.core.os_hostname, vec![]),
+                        "username" if args.is_empty() => (self.host.core.os_username, vec![]),
+                        "release" if args.is_empty() => (self.host.core.os_release, vec![]),
+                        "version" if args.is_empty() => (self.host.core.os_version, vec![]),
+                        "getppid" if args.is_empty() => (self.host.core.os_getppid, vec![]),
+                        "getuid" if args.is_empty() => (self.host.core.os_getuid, vec![]),
+                        "geteuid" if args.is_empty() => (self.host.core.os_geteuid, vec![]),
+                        "getgid" if args.is_empty() => (self.host.core.os_getgid, vec![]),
+                        "getegid" if args.is_empty() => (self.host.core.os_getegid, vec![]),
+                        "getpgrp" if args.is_empty() => (self.host.core.os_getpgrp, vec![]),
+                        "getgroups" if args.is_empty() => (self.host.core.os_getgroups, vec![]),
+                        "uptime" if args.is_empty() => (self.host.core.os_uptime, vec![]),
+                        "loadavg" if args.is_empty() => (self.host.core.os_loadavg, vec![]),
+                        "times" if args.is_empty() => (self.host.core.os_times, vec![]),
+                        "sync" if args.is_empty() => (self.host.core.os_sync, vec![]),
+                        "setpgrp" if args.is_empty() => (self.host.core.os_setpgrp, vec![]),
+                        "pipe" if args.is_empty() => (self.host.core.os_pipe, vec![]),
+                        "success" if args.len() == 1 => {
+                            (self.host.core.os_success, vec![self.lower_expr(&args[0])?])
+                        }
+                        "exitcode" if args.len() == 1 => {
+                            (self.host.core.os_exitcode, vec![self.lower_expr(&args[0])?])
+                        }
+                        "expand" if args.len() == 1 => {
+                            (self.host.core.os_expand, vec![self.lower_expr(&args[0])?])
+                        }
+                        "getpgid" if args.len() == 1 => {
+                            (self.host.core.os_getpgid, vec![self.lower_expr(&args[0])?])
+                        }
+                        "getsid" if args.len() == 1 => {
+                            (self.host.core.os_getsid, vec![self.lower_expr(&args[0])?])
+                        }
+                        "umask" if args.len() == 1 => {
+                            (self.host.core.os_umask, vec![self.lower_expr(&args[0])?])
+                        }
+                        "getpriority" if args.len() == 1 => {
+                            (self.host.core.os_getpriority, vec![self.lower_expr(&args[0])?])
+                        }
+                        "close_fd" if args.len() == 1 => {
+                            (self.host.core.os_close_fd, vec![self.lower_expr(&args[0])?])
+                        }
+                        "setpgid" if args.len() == 2 => (
+                            self.host.core.os_setpgid,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "setpriority" if args.len() == 2 => (
+                            self.host.core.os_setpriority,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "kill" if args.len() == 2 => (
+                            self.host.core.os_kill,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "mkfifo" if args.len() == 2 => (
+                            self.host.core.os_mkfifo,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        _ => return Err(format!("jit core call unsupported: {module}.{method}")),
                     };
                     let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host_ref, &[]);
-                    return Ok(self.b.inst_results(call)[0]);
+                    let call = self.b.ins().call(host_ref, &arg_vals);
+                    return Ok(clif_ty(&expr.ty)
+                        .map(|_| self.b.inst_results(call)[0])
+                        .unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)));
                 }
                 if module == "core.event" && method == "scope" && args.is_empty() {
                     let host_ref = self

@@ -1,4 +1,5 @@
 // D-OSFACTS1: system facts live in core.os; core.env stays environment vars.
+// #1465: identity accessors and OS release/version (no #Unsafe).
 use core.os as os
 
 fn run() {
@@ -9,5 +10,22 @@ fn run() {
     print(os.temp_dir().len() > 0)
     print(os.executable().len() > 0)
     print(os.pid() >= 1)
+    print(os.getpid() == os.pid())
     print(os.hostname().len() > 0)
+    print(os.username().len() >= 0)
+    print(os.release().len() > 0)
+    print(os.version().len() > 0)
+    print(os.getppid() >= 0)
+    print(os.getuid() >= 0)
+    print(os.geteuid() >= 0)
+    print(os.getgid() >= 0)
+    print(os.getegid() >= 0)
+    print(os.getgroups().len() >= 0)
+    print(os.getpgrp() >= 0)
+    print(os.uptime() >= 0.0)
+    print(os.loadavg().len() == 3)
+    print(os.times().len() == 5)
+    print(os.success(0))
+    print(os.exitcode(0) == 0)
+    print(os.expand("x${{HOME}}y").len() >= 2)
 }

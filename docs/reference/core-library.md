@@ -1106,11 +1106,44 @@ this process and machine.
 | `cpu_count()` | `Int` | Logical CPU count, at least 1 |
 | `temp_dir()` | `String` | Platform temp directory |
 | `executable()` | `String` | Current executable path, or empty if unavailable |
-| `pid()` | `Int` | Current process id |
+| `pid()` / `getpid()` | `Int` | Current process id |
 | `hostname()` | `String` | Hostname, falling back to `localhost` |
 | `username()` | `String` | Current username, or empty if unavailable |
+| `release()` | `String` | Kernel / OS release string |
+| `version()` | `String` | Human-readable OS version string |
+| `getppid()` | `Int` | Parent process id (0 when unavailable) |
+| `getuid()` / `geteuid()` | `Int` | Real / effective user id |
+| `getgid()` / `getegid()` | `Int` | Real / effective group id |
+| `getgroups()` | `List[Int]` | Supplementary group ids |
+| `getpgid(pid)` / `getsid(pid)` | `Int ? IOError` | Process group / session id |
+| `getpgrp()` | `Int` | Calling process group id |
+| `expand(template)` | `String` | Expand `$VAR` / `${VAR}` from the environment |
+| `uptime()` | `Float` | Seconds since boot when known, else `0.0` |
+| `loadavg()` | `List[Float]` | 1/5/15-minute load averages |
+| `times()` | `List[Float]` | Process CPU times (user, system, children, elapsed) |
+| `exitcode(status)` | `Int` | Exit code extracted from a wait status |
+| `success(status)` | `Bool` | Whether a wait status is a normal zero exit |
+| `sync()` | `()` | Flush filesystem buffers (POSIX no-op elsewhere) |
+| `umask(mask)` | `Int` | Set and return the previous file-creation mask |
+| `getpriority(who)` | `Int ? IOError` | Nice value for process `who` (`0` = self) |
+| `setpriority(who, prio)` | `() ? IOError` | Set nice value for process `who` |
+| `utime(path, atime, mtime)` | `() ? IOError` | Set access / modification times |
+| `stop(code)` | never returns | Exit this process with `code` |
+| `atexit(handler)` | `()` | Register a process-exit callback |
 | `set_current_dir(path)` | `() ? IOError` | Change process working directory |
 | `on_interrupt(handler)` | `()` | Register a process-lifetime handler for Ctrl-C / SIGINT on Unix and Windows |
+
+POSIX process/session control (requires `#Unsafe("…")` and an OS gate):
+
+| Function | Returns | What it does |
+|----------|---------|--------------|
+| `fork()` | `Int ? IOError` | Fork; `0` in the child, child pid in the parent |
+| `setuid` / `setgid` / `setpgid` / `setpgrp` / `setsid` / `initgroups` | fallible | Credential / session control |
+| `kill(pid, sig)` | `() ? IOError` | Send a signal |
+| `wait` / `waitpid` | `Int ? IOError` | Wait status |
+| `pipe()` | `List[Int] ? IOError` | `[read_fd, write_fd]` |
+| `close_fd(fd)` | `()` | Close a raw pipe/fifo descriptor |
+| `mkfifo(path, mode)` | `() ? IOError` | Create a named pipe |
 
 Interrupt handlers are additive. Each Ctrl-C runs every registered handler in
 registration order on Jet's interrupt dispatcher, never inside the operating
@@ -1119,7 +1152,8 @@ system callback. Registration is active before `on_interrupt` returns. The
 unregister/drop handle. Calling `on_interrupt` on a target without process
 interrupts fails explicitly instead of silently discarding the handler.
 
-Example: `examples/features/io/os_facts.jet`.
+Examples: `examples/features/io/os_facts.jet`,
+`examples/features/io/os_process_control.jet`.
 
 ---
 

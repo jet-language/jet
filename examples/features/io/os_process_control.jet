@@ -1,0 +1,84 @@
+// #1465: POSIX process/session control under `#Unsafe`, gated by build OS
+// (D-OSTARGET2). Beginner `os_facts.jet` stays fact-only.
+use core.os as os
+use core.files as files
+
+fn run() {
+    #Known if build.os == {
+        .Linux -> posix_control()
+        .MacOS -> posix_control()
+        .Windows -> {
+            print(true)
+            print(true)
+            print(true)
+            print(true)
+            print(true)
+            print(true)
+            print(true)
+            print(true)
+            print(true)
+        }
+    }
+}
+
+fn posix_control() {
+    #Unsafe("POSIX process and pipe control for the core.os surface") {
+        pg :: os.getpgid(0)
+        if pg == {
+            .Ok(v) -> { print(v >= 0) }
+            .Err(_) -> { print(false) }
+        }
+
+        setpg :: os.setpgid(0, 0)
+        if setpg == {
+            .Ok(_) -> { print(true) }
+            .Err(_) -> { print(false) }
+        }
+
+        setpgrp :: os.setpgrp()
+        if setpgrp == {
+            .Ok(_) -> { print(true) }
+            .Err(_) -> { print(false) }
+        }
+
+        old :: os.umask(18)
+        _ :: os.umask(old)
+        print(old >= 0)
+
+        os.sync()
+        print(true)
+
+        prio :: os.getpriority(0) ?? 0
+        setprio :: os.setpriority(0, prio)
+        if setprio == {
+            .Ok(_) -> { print(true) }
+            .Err(_) -> { print(false) }
+        }
+
+        killed :: os.kill(os.pid(), 0)
+        if killed == {
+            .Ok(_) -> { print(true) }
+            .Err(_) -> { print(false) }
+        }
+
+        piped :: os.pipe()
+        if piped == {
+            .Ok(fds) -> {
+                print(fds.len() == 2)
+                os.close_fd(fds[0])
+                os.close_fd(fds[1])
+            }
+            .Err(_) -> { print(false) }
+        }
+
+        // Prefer `os.temp_dir` so default `jet run` stays I9-parity without
+        // needing `files.temp_dir` host coverage.
+        path :: "{os.temp_dir()}/jet-os-fifo-{os.pid()}"
+        fifo :: os.mkfifo(path, 420)
+        if fifo == {
+            .Ok(_) -> { print(true) }
+            .Err(_) -> { print(false) }
+        }
+        _ :: files.remove(path)
+    }
+}

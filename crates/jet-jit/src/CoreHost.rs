@@ -69,6 +69,562 @@ extern "C" fn jet_jit_os_hostname() -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(host))
 }
 
+// ── core.os extras (#1465) — mirrors jet_std_os_* in OsExtra.rs / FSIoEnvOsTesting.rs
+
+#[cfg(unix)]
+#[repr(C)]
+struct JetJitOsTms {
+    tms_utime: i64,
+    tms_stime: i64,
+    tms_cutime: i64,
+    tms_cstime: i64,
+}
+
+#[cfg(unix)]
+mod jet_jit_os_sys {
+    use super::JetJitOsTms;
+    pub const _SC_CLK_TCK: i32 = 2;
+    extern "C" {
+        pub fn getppid() -> i32;
+        pub fn getuid() -> u32;
+        pub fn geteuid() -> u32;
+        pub fn getgid() -> u32;
+        pub fn getegid() -> u32;
+        pub fn getgroups(size: i32, list: *mut u32) -> i32;
+        pub fn getpgid(pid: i32) -> i32;
+        pub fn getpgrp() -> i32;
+        pub fn getsid(pid: i32) -> i32;
+        pub fn setpgid(pid: i32, pgid: i32) -> i32;
+        pub fn setpgrp() -> i32;
+        pub fn kill(pid: i32, sig: i32) -> i32;
+        pub fn pipe(fds: *mut i32) -> i32;
+        pub fn mkfifo(path: *const i8, mode: u32) -> i32;
+        pub fn sync();
+        pub fn umask(mask: u32) -> u32;
+        pub fn getpriority(which: i32, who: u32) -> i32;
+        pub fn setpriority(which: i32, who: u32, prio: i32) -> i32;
+        pub fn getloadavg(loadavg: *mut f64, nelem: i32) -> i32;
+        pub fn close(fd: i32) -> i32;
+        pub fn times(buf: *mut JetJitOsTms) -> i64;
+        pub fn sysconf(name: i32) -> i64;
+        #[cfg(target_os = "linux")]
+        pub fn __errno_location() -> *mut i32;
+        #[cfg(target_os = "macos")]
+        pub fn __error() -> *mut i32;
+    }
+    pub unsafe fn errno_ptr() -> *mut i32 {
+        #[cfg(target_os = "linux")]
+        {
+            __errno_location()
+        }
+        #[cfg(target_os = "macos")]
+        {
+            __error()
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        {
+            static mut FALLBACK: i32 = 0;
+            &raw mut FALLBACK
+        }
+    }
+}
+
+extern "C" fn jet_jit_os_username() -> i64 {
+    let name = std::env::var("USER")
+        .ok()
+        .or_else(|| std::env::var("USERNAME").ok())
+        .unwrap_or_default();
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(name))
+}
+
+fn jit_os_release_string() -> String {
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(text) = std::fs::read_to_string("/proc/sys/kernel/osrelease") {
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                return trimmed.to_string();
+            }
+        }
+        if let Ok(text) = std::fs::read_to_string("/etc/os-release") {
+            for line in text.lines() {
+                if let Some(value) = line.strip_prefix("VERSION_ID=") {
+                    return value.trim_matches('"').to_string();
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(output) = std::process::Command::new("uname").arg("-r").output() {
+            if let Ok(s) = String::from_utf8(output.stdout) {
+                let trimmed = s.trim();
+                if !trimmed.is_empty() {
+                    return trimmed.to_string();
+                }
+            }
+        }
+    }
+    #[cfg(windows)]
+    {
+        if let Ok(v) = std::env::var("OS") {
+            if !v.is_empty() {
+                return v;
+            }
+        }
+    }
+    String::new()
+}
+
+extern "C" fn jet_jit_os_release() -> i64 {
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(jit_os_release_string()))
+}
+
+extern "C" fn jet_jit_os_version() -> i64 {
+    let version = {
+        #[cfg(target_os = "linux")]
+        {
+            let mut found = None;
+            if let Ok(text) = std::fs::read_to_string("/etc/os-release") {
+                for line in text.lines() {
+                    if let Some(value) = line.strip_prefix("PRETTY_NAME=") {
+                        found = Some(value.trim_matches('"').to_string());
+                        break;
+                    }
+                }
+            }
+            found.unwrap_or_else(jit_os_release_string)
+        }
+        #[cfg(target_os = "macos")]
+        {
+            if let Ok(output) = std::process::Command::new("sw_vers")
+                .arg("-productVersion")
+                .output()
+            {
+                if let Ok(s) = String::from_utf8(output.stdout) {
+                    let trimmed = s.trim();
+                    if !trimmed.is_empty() {
+                        format!("macOS {trimmed}")
+                    } else {
+                        jit_os_release_string()
+                    }
+                } else {
+                    jit_os_release_string()
+                }
+            } else {
+                jit_os_release_string()
+            }
+        }
+        #[cfg(windows)]
+        {
+            std::env::var("OS").unwrap_or_default()
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+        {
+            String::new()
+        }
+    };
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(version))
+}
+
+fn alloc_i64_list(vals: &[i64]) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let list = rt.heap.alloc_empty_list();
+        for &v in vals {
+            let _ = rt.heap.list_push_int(list, v);
+        }
+        list
+    })
+}
+
+fn alloc_f64_list_os(vals: &[f64]) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let list = rt.heap.alloc_empty_list();
+        for &v in vals {
+            let _ = rt.heap.list_push_float(list, v);
+        }
+        list
+    })
+}
+
+extern "C" fn jet_jit_os_getppid() -> i64 {
+    #[cfg(unix)]
+    {
+        return unsafe { jet_jit_os_sys::getppid() as i64 };
+    }
+    #[cfg(not(unix))]
+    {
+        0
+    }
+}
+
+extern "C" fn jet_jit_os_getuid() -> i64 {
+    #[cfg(unix)]
+    {
+        return unsafe { jet_jit_os_sys::getuid() as i64 };
+    }
+    #[cfg(not(unix))]
+    {
+        0
+    }
+}
+
+extern "C" fn jet_jit_os_geteuid() -> i64 {
+    #[cfg(unix)]
+    {
+        return unsafe { jet_jit_os_sys::geteuid() as i64 };
+    }
+    #[cfg(not(unix))]
+    {
+        0
+    }
+}
+
+extern "C" fn jet_jit_os_getgid() -> i64 {
+    #[cfg(unix)]
+    {
+        return unsafe { jet_jit_os_sys::getgid() as i64 };
+    }
+    #[cfg(not(unix))]
+    {
+        0
+    }
+}
+
+extern "C" fn jet_jit_os_getegid() -> i64 {
+    #[cfg(unix)]
+    {
+        return unsafe { jet_jit_os_sys::getegid() as i64 };
+    }
+    #[cfg(not(unix))]
+    {
+        0
+    }
+}
+
+extern "C" fn jet_jit_os_getpgrp() -> i64 {
+    #[cfg(unix)]
+    {
+        return unsafe { jet_jit_os_sys::getpgrp() as i64 };
+    }
+    #[cfg(not(unix))]
+    {
+        0
+    }
+}
+
+extern "C" fn jet_jit_os_getgroups() -> i64 {
+    #[cfg(unix)]
+    {
+        let n = unsafe { jet_jit_os_sys::getgroups(0, std::ptr::null_mut()) };
+        if n < 0 {
+            return alloc_i64_list(&[]);
+        }
+        let mut buf = vec![0u32; n as usize];
+        let got = unsafe { jet_jit_os_sys::getgroups(n, buf.as_mut_ptr()) };
+        if got < 0 {
+            return alloc_i64_list(&[]);
+        }
+        let vals: Vec<i64> = buf[..got as usize].iter().map(|g| *g as i64).collect();
+        return alloc_i64_list(&vals);
+    }
+    #[cfg(not(unix))]
+    {
+        alloc_i64_list(&[])
+    }
+}
+
+extern "C" fn jet_jit_os_uptime() -> f64 {
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(text) = std::fs::read_to_string("/proc/uptime") {
+            if let Some(first) = text.split_whitespace().next() {
+                if let Ok(v) = first.parse::<f64>() {
+                    return v;
+                }
+            }
+        }
+    }
+    0.0
+}
+
+extern "C" fn jet_jit_os_loadavg() -> i64 {
+    #[cfg(unix)]
+    {
+        let mut avg = [0.0f64; 3];
+        let n = unsafe { jet_jit_os_sys::getloadavg(avg.as_mut_ptr(), 3) };
+        if n < 0 {
+            return alloc_f64_list_os(&[0.0, 0.0, 0.0]);
+        }
+        return alloc_f64_list_os(&avg[..n as usize]);
+    }
+    #[cfg(not(unix))]
+    {
+        alloc_f64_list_os(&[0.0, 0.0, 0.0])
+    }
+}
+
+extern "C" fn jet_jit_os_times() -> i64 {
+    #[cfg(unix)]
+    {
+        let mut t = unsafe { std::mem::zeroed::<JetJitOsTms>() };
+        let elapsed = unsafe { jet_jit_os_sys::times(&mut t) };
+        let ticks = unsafe { jet_jit_os_sys::sysconf(jet_jit_os_sys::_SC_CLK_TCK) }.max(1) as f64;
+        return alloc_f64_list_os(&[
+            t.tms_utime as f64 / ticks,
+            t.tms_stime as f64 / ticks,
+            t.tms_cutime as f64 / ticks,
+            t.tms_cstime as f64 / ticks,
+            if elapsed < 0 {
+                0.0
+            } else {
+                elapsed as f64 / ticks
+            },
+        ]);
+    }
+    #[cfg(not(unix))]
+    {
+        alloc_f64_list_os(&[0.0, 0.0, 0.0, 0.0, 0.0])
+    }
+}
+
+extern "C" fn jet_jit_os_success(status: i64) -> i8 {
+    #[cfg(unix)]
+    {
+        let s = status as i32;
+        return i8::from((s & 0x7f) == 0 && ((s >> 8) & 0xff) == 0);
+    }
+    #[cfg(not(unix))]
+    {
+        i8::from(status == 0)
+    }
+}
+
+extern "C" fn jet_jit_os_exitcode(status: i64) -> i64 {
+    #[cfg(unix)]
+    {
+        let s = status as i32;
+        if (s & 0x7f) == 0 {
+            return ((s >> 8) & 0xff) as i64;
+        }
+        return -1;
+    }
+    #[cfg(not(unix))]
+    {
+        status
+    }
+}
+
+extern "C" fn jet_jit_os_expand(template: i64) -> i64 {
+    let template = clone_heap_string(template);
+    let mut out = String::with_capacity(template.len());
+    let bytes = template.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'$' {
+            i += 1;
+            if i < bytes.len() && bytes[i] == b'{' {
+                i += 1;
+                let start = i;
+                while i < bytes.len() && bytes[i] != b'}' {
+                    i += 1;
+                }
+                let name = &template[start..i];
+                if i < bytes.len() {
+                    i += 1;
+                }
+                out.push_str(&std::env::var(name).unwrap_or_default());
+            } else {
+                let start = i;
+                while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                    i += 1;
+                }
+                let name = &template[start..i];
+                out.push_str(&std::env::var(name).unwrap_or_default());
+            }
+        } else {
+            out.push(bytes[i] as char);
+            i += 1;
+        }
+    }
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(out))
+}
+
+extern "C" fn jet_jit_os_getpgid(pid: i64) -> i64 {
+    #[cfg(unix)]
+    {
+        let got = unsafe { jet_jit_os_sys::getpgid(pid as i32) };
+        if got < 0 {
+            return result_err_msg("getpgid failed");
+        }
+        return result_ok_bits(got as u64);
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = pid;
+        result_err_msg("getpgid is POSIX-only")
+    }
+}
+
+extern "C" fn jet_jit_os_getsid(pid: i64) -> i64 {
+    #[cfg(unix)]
+    {
+        let got = unsafe { jet_jit_os_sys::getsid(pid as i32) };
+        if got < 0 {
+            return result_err_msg("getsid failed");
+        }
+        return result_ok_bits(got as u64);
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = pid;
+        result_err_msg("getsid is POSIX-only")
+    }
+}
+
+extern "C" fn jet_jit_os_setpgid(pid: i64, pgid: i64) -> i64 {
+    #[cfg(unix)]
+    {
+        if unsafe { jet_jit_os_sys::setpgid(pid as i32, pgid as i32) } == 0 {
+            return result_ok_bits(0);
+        }
+        return result_err_msg("setpgid failed");
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (pid, pgid);
+        result_err_msg("setpgid is POSIX-only")
+    }
+}
+
+extern "C" fn jet_jit_os_setpgrp() -> i64 {
+    #[cfg(unix)]
+    {
+        if unsafe { jet_jit_os_sys::setpgrp() } == 0 {
+            return result_ok_bits(0);
+        }
+        return result_err_msg("setpgrp failed");
+    }
+    #[cfg(not(unix))]
+    {
+        result_err_msg("setpgrp is POSIX-only")
+    }
+}
+
+extern "C" fn jet_jit_os_umask(mask: i64) -> i64 {
+    #[cfg(unix)]
+    {
+        return unsafe { jet_jit_os_sys::umask(mask as u32) as i64 };
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = mask;
+        0
+    }
+}
+
+extern "C" fn jet_jit_os_sync() {
+    #[cfg(unix)]
+    unsafe {
+        jet_jit_os_sys::sync();
+    }
+}
+
+extern "C" fn jet_jit_os_getpriority(who: i64) -> i64 {
+    #[cfg(unix)]
+    {
+        unsafe {
+            *jet_jit_os_sys::errno_ptr() = 0;
+            let got = jet_jit_os_sys::getpriority(0, who as u32);
+            if got == -1 && *jet_jit_os_sys::errno_ptr() != 0 {
+                return result_err_msg("getpriority failed");
+            }
+            return result_ok_bits(got as u64);
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = who;
+        result_err_msg("getpriority is POSIX-only")
+    }
+}
+
+extern "C" fn jet_jit_os_setpriority(who: i64, prio: i64) -> i64 {
+    #[cfg(unix)]
+    {
+        if unsafe { jet_jit_os_sys::setpriority(0, who as u32, prio as i32) } == 0 {
+            return result_ok_bits(0);
+        }
+        return result_err_msg("setpriority failed");
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (who, prio);
+        result_err_msg("setpriority is POSIX-only")
+    }
+}
+
+extern "C" fn jet_jit_os_kill(pid: i64, sig: i64) -> i64 {
+    #[cfg(unix)]
+    {
+        if unsafe { jet_jit_os_sys::kill(pid as i32, sig as i32) } == 0 {
+            return result_ok_bits(0);
+        }
+        return result_err_msg("kill failed");
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (pid, sig);
+        result_err_msg("kill is POSIX-only")
+    }
+}
+
+extern "C" fn jet_jit_os_pipe() -> i64 {
+    #[cfg(unix)]
+    {
+        let mut fds = [0i32; 2];
+        if unsafe { jet_jit_os_sys::pipe(fds.as_mut_ptr()) } != 0 {
+            return result_err_msg("pipe failed");
+        }
+        return result_ok_bits(alloc_i64_list(&[fds[0] as i64, fds[1] as i64]) as u64);
+    }
+    #[cfg(not(unix))]
+    {
+        result_err_msg("pipe is POSIX-only")
+    }
+}
+
+extern "C" fn jet_jit_os_close_fd(fd: i64) {
+    #[cfg(unix)]
+    unsafe {
+        let _ = jet_jit_os_sys::close(fd as i32);
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = fd;
+    }
+}
+
+extern "C" fn jet_jit_os_mkfifo(path: i64, mode: i64) -> i64 {
+    #[cfg(unix)]
+    {
+        let p = clone_heap_string(path);
+        let c_path = match std::ffi::CString::new(p.as_str()) {
+            Ok(c) => c,
+            Err(_) => return result_err_msg("mkfifo path contains NUL"),
+        };
+        if unsafe { jet_jit_os_sys::mkfifo(c_path.as_ptr(), mode as u32) } == 0 {
+            return result_ok_bits(0);
+        }
+        return result_err_msg("mkfifo failed");
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (path, mode);
+        result_err_msg("mkfifo is POSIX-only")
+    }
+}
+
 // ── jet.log (mirrors jet_ring_log_* in RingCsvLogTimeCrypto.rs) ───────────────
 // Level: 0=debug, 1=info, 2=warn, 3=error. Format: 0=auto, 1=json, 2=text.
 
@@ -1429,6 +1985,34 @@ pub(crate) struct CoreHostFns {
     pub os_executable: cranelift_module::FuncId,
     pub os_pid: cranelift_module::FuncId,
     pub os_hostname: cranelift_module::FuncId,
+    pub os_username: cranelift_module::FuncId,
+    pub os_release: cranelift_module::FuncId,
+    pub os_version: cranelift_module::FuncId,
+    pub os_getppid: cranelift_module::FuncId,
+    pub os_getuid: cranelift_module::FuncId,
+    pub os_geteuid: cranelift_module::FuncId,
+    pub os_getgid: cranelift_module::FuncId,
+    pub os_getegid: cranelift_module::FuncId,
+    pub os_getpgrp: cranelift_module::FuncId,
+    pub os_getgroups: cranelift_module::FuncId,
+    pub os_uptime: cranelift_module::FuncId,
+    pub os_loadavg: cranelift_module::FuncId,
+    pub os_times: cranelift_module::FuncId,
+    pub os_success: cranelift_module::FuncId,
+    pub os_exitcode: cranelift_module::FuncId,
+    pub os_expand: cranelift_module::FuncId,
+    pub os_getpgid: cranelift_module::FuncId,
+    pub os_getsid: cranelift_module::FuncId,
+    pub os_setpgid: cranelift_module::FuncId,
+    pub os_setpgrp: cranelift_module::FuncId,
+    pub os_umask: cranelift_module::FuncId,
+    pub os_sync: cranelift_module::FuncId,
+    pub os_getpriority: cranelift_module::FuncId,
+    pub os_setpriority: cranelift_module::FuncId,
+    pub os_kill: cranelift_module::FuncId,
+    pub os_pipe: cranelift_module::FuncId,
+    pub os_close_fd: cranelift_module::FuncId,
+    pub os_mkfifo: cranelift_module::FuncId,
     pub log_set_level: cranelift_module::FuncId,
     pub log_setup: cranelift_module::FuncId,
     pub log_debug: cranelift_module::FuncId,
@@ -1521,6 +2105,34 @@ pub(crate) fn register_core_host_symbols(builder: &mut cranelift_jit::JITBuilder
     builder.symbol("jet_jit_os_executable", jet_jit_os_executable as *const u8);
     builder.symbol("jet_jit_os_pid", jet_jit_os_pid as *const u8);
     builder.symbol("jet_jit_os_hostname", jet_jit_os_hostname as *const u8);
+    builder.symbol("jet_jit_os_username", jet_jit_os_username as *const u8);
+    builder.symbol("jet_jit_os_release", jet_jit_os_release as *const u8);
+    builder.symbol("jet_jit_os_version", jet_jit_os_version as *const u8);
+    builder.symbol("jet_jit_os_getppid", jet_jit_os_getppid as *const u8);
+    builder.symbol("jet_jit_os_getuid", jet_jit_os_getuid as *const u8);
+    builder.symbol("jet_jit_os_geteuid", jet_jit_os_geteuid as *const u8);
+    builder.symbol("jet_jit_os_getgid", jet_jit_os_getgid as *const u8);
+    builder.symbol("jet_jit_os_getegid", jet_jit_os_getegid as *const u8);
+    builder.symbol("jet_jit_os_getpgrp", jet_jit_os_getpgrp as *const u8);
+    builder.symbol("jet_jit_os_getgroups", jet_jit_os_getgroups as *const u8);
+    builder.symbol("jet_jit_os_uptime", jet_jit_os_uptime as *const u8);
+    builder.symbol("jet_jit_os_loadavg", jet_jit_os_loadavg as *const u8);
+    builder.symbol("jet_jit_os_times", jet_jit_os_times as *const u8);
+    builder.symbol("jet_jit_os_success", jet_jit_os_success as *const u8);
+    builder.symbol("jet_jit_os_exitcode", jet_jit_os_exitcode as *const u8);
+    builder.symbol("jet_jit_os_expand", jet_jit_os_expand as *const u8);
+    builder.symbol("jet_jit_os_getpgid", jet_jit_os_getpgid as *const u8);
+    builder.symbol("jet_jit_os_getsid", jet_jit_os_getsid as *const u8);
+    builder.symbol("jet_jit_os_setpgid", jet_jit_os_setpgid as *const u8);
+    builder.symbol("jet_jit_os_setpgrp", jet_jit_os_setpgrp as *const u8);
+    builder.symbol("jet_jit_os_umask", jet_jit_os_umask as *const u8);
+    builder.symbol("jet_jit_os_sync", jet_jit_os_sync as *const u8);
+    builder.symbol("jet_jit_os_getpriority", jet_jit_os_getpriority as *const u8);
+    builder.symbol("jet_jit_os_setpriority", jet_jit_os_setpriority as *const u8);
+    builder.symbol("jet_jit_os_kill", jet_jit_os_kill as *const u8);
+    builder.symbol("jet_jit_os_pipe", jet_jit_os_pipe as *const u8);
+    builder.symbol("jet_jit_os_close_fd", jet_jit_os_close_fd as *const u8);
+    builder.symbol("jet_jit_os_mkfifo", jet_jit_os_mkfifo as *const u8);
     builder.symbol("jet_jit_log_set_level", jet_jit_log_set_level as *const u8);
     builder.symbol("jet_jit_log_setup", jet_jit_log_setup as *const u8);
     builder.symbol("jet_jit_log_debug", jet_jit_log_debug as *const u8);
@@ -1627,6 +2239,9 @@ pub(crate) fn declare_core_host_fns(
     sig_str.returns.push(AbiParam::new(types::I64));
     let mut sig_i64 = Signature::new(cc);
     sig_i64.returns.push(AbiParam::new(types::I64));
+    let mut sig_f64 = Signature::new(cc);
+    sig_f64.returns.push(AbiParam::new(types::F64));
+    let mut sig_void = Signature::new(cc);
     let mut sig_void_str = Signature::new(cc);
     sig_void_str.params.push(AbiParam::new(types::I64));
     let mut sig_str_str_str = Signature::new(cc);
@@ -1700,6 +2315,34 @@ pub(crate) fn declare_core_host_fns(
         os_executable: import("jet_jit_os_executable", &sig_str)?,
         os_pid: import("jet_jit_os_pid", &sig_i64)?,
         os_hostname: import("jet_jit_os_hostname", &sig_str)?,
+        os_username: import("jet_jit_os_username", &sig_str)?,
+        os_release: import("jet_jit_os_release", &sig_str)?,
+        os_version: import("jet_jit_os_version", &sig_str)?,
+        os_getppid: import("jet_jit_os_getppid", &sig_i64)?,
+        os_getuid: import("jet_jit_os_getuid", &sig_i64)?,
+        os_geteuid: import("jet_jit_os_geteuid", &sig_i64)?,
+        os_getgid: import("jet_jit_os_getgid", &sig_i64)?,
+        os_getegid: import("jet_jit_os_getegid", &sig_i64)?,
+        os_getpgrp: import("jet_jit_os_getpgrp", &sig_i64)?,
+        os_getgroups: import("jet_jit_os_getgroups", &sig_i64)?,
+        os_uptime: import("jet_jit_os_uptime", &sig_f64)?,
+        os_loadavg: import("jet_jit_os_loadavg", &sig_i64)?,
+        os_times: import("jet_jit_os_times", &sig_i64)?,
+        os_success: import("jet_jit_os_success", &sig_i64_i8)?,
+        os_exitcode: import("jet_jit_os_exitcode", &sig_unary_i64)?,
+        os_expand: import("jet_jit_os_expand", &sig_unary_i64)?,
+        os_getpgid: import("jet_jit_os_getpgid", &sig_unary_i64)?,
+        os_getsid: import("jet_jit_os_getsid", &sig_unary_i64)?,
+        os_setpgid: import("jet_jit_os_setpgid", &sig_i64_i64_i64)?,
+        os_setpgrp: import("jet_jit_os_setpgrp", &sig_i64)?,
+        os_umask: import("jet_jit_os_umask", &sig_unary_i64)?,
+        os_sync: import("jet_jit_os_sync", &sig_void)?,
+        os_getpriority: import("jet_jit_os_getpriority", &sig_unary_i64)?,
+        os_setpriority: import("jet_jit_os_setpriority", &sig_i64_i64_i64)?,
+        os_kill: import("jet_jit_os_kill", &sig_i64_i64_i64)?,
+        os_pipe: import("jet_jit_os_pipe", &sig_i64)?,
+        os_close_fd: import("jet_jit_os_close_fd", &sig_void_i64)?,
+        os_mkfifo: import("jet_jit_os_mkfifo", &sig_i64_i64_i64)?,
         log_set_level: import("jet_jit_log_set_level", &sig_void_str)?,
         log_setup: import("jet_jit_log_setup", &sig_void_str)?,
         log_debug: import("jet_jit_log_debug", &sig_void_str)?,
