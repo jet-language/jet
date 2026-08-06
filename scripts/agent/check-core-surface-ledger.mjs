@@ -1281,7 +1281,14 @@ function validateRows(ledger, surfaces) {
     // A row may not assert an operation the recorded surface does not have.
     for (const [language, cell] of Object.entries(row.competitors)) {
       if (cell.status !== "has") continue;
-      const record = surfaces[language] && surfaces[language].surface.containers[row.container];
+      // A cell may cite a sibling container in the same matching domain, but
+      // it must name which one, and the operation must really be there.
+      const where = cell.foundIn || row.container;
+      if (where !== row.container && domainFor(where) !== domainFor(row.container)) {
+        throw new Error("competitor claim reaches outside its domain in " + row.id +
+          ": " + language + " " + cell.operation + " from " + where);
+      }
+      const record = surfaces[language] && surfaces[language].surface.containers[where];
       if (!record || !record.present || !record.operations.includes(cell.operation)) {
         throw new Error("unverified competitor claim in " + row.id + ": " + language + " " + cell.operation);
       }
