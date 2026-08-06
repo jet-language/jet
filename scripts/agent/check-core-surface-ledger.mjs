@@ -237,20 +237,61 @@ const SYNONYM_GROUPS = [
   ["chars", "characters", "each_char", "code_points"],
   ["repeat", "times", "cycle_n"],
   ["merge", "put_all", "update_all", "combine"],
+  ["is_subset", "is_subset_of", "subset", "issubset"],
+  ["is_superset", "is_superset_of", "superset", "issuperset"],
+  ["is_disjoint", "is_disjoint_from", "disjoint", "overlaps"],
+  ["pattern", "source", "pattern_string", "regex_source", "to_regex_string"],
+  ["last_index_of", "rindex", "rfind", "last_index", "search_last"],
+  ["mod", "fmod", "rem", "remainder", "modulo", "rem_euclid"],
+  ["encode", "encode64", "encode_to_string", "to_base64_string", "b64encode", "pack", "hexlify"],
+  ["decode", "decode64", "decode_string", "from_base64_string", "b64decode", "unpack", "unhexlify"],
+  ["local_addr", "local_address", "get_sock_name", "sock_name"],
+  ["peer_addr", "remote_address", "get_peer_name", "peer_name"],
+  ["recv", "receive", "read_from"],
+  ["send_to", "sendto"],
+  ["recv_from", "recvfrom", "receive_from"],
+  ["shutdown", "close_write", "half_close"],
+  ["send", "transmit", "write_bytes_to"],
 ];
 
-// normalized name -> every normalized name it is interchangeable with.
-const SYNONYM_INDEX = (function () {
-  const index = new Map();
-  for (const group of SYNONYM_GROUPS) {
-    const keys = group.map(function (name) { return name.toLowerCase().replace(/[_!?.\-]/g, ""); });
-    for (const key of keys) {
-      if (!index.has(key)) index.set(key, new Set());
-      for (const other of keys) index.get(key).add(other);
-    }
+// normalized name -> every normalized name it is interchangeable with, plus the
+// group's own first name. Groups are authored with the plainest spelling first,
+// which is what a gap should be called: naming one "applyeach" because that
+// sorts before "each" is accurate and useless.
+const SYNONYM_INDEX = new Map();
+const SYNONYM_CANONICAL = new Map();
+for (const group of SYNONYM_GROUPS) {
+  const keys = group.map(function (name) { return name.toLowerCase().replace(/[_!?.\-]/g, ""); });
+  for (const key of keys) {
+    if (!SYNONYM_INDEX.has(key)) SYNONYM_INDEX.set(key, new Set());
+    for (const other of keys) SYNONYM_INDEX.get(key).add(other);
+    if (!SYNONYM_CANONICAL.has(key)) SYNONYM_CANONICAL.set(key, keys[0]);
   }
-  return index;
-})();
+}
+
+// Jet splits some workflows across Core modules where another language keeps
+// them on one type, and the reverse. Matching a Jet member only inside its own
+// container then scored one capability twice in opposite directions: Python
+// unlink sat unmatched in core.os while core.path.unlink was a loss and
+// core.files.remove was equal.
+//
+// Matching looks across a domain. Minting a gap stays per container, so a
+// missing operation is still reported once, in one place.
+const MATCH_DOMAIN = {
+  "core.files": "filesystem",
+  "core.path": "filesystem",
+  "core.os": "filesystem",
+  "core.env": "filesystem",
+  ByteBuffer: "bytes",
+  "core.binary": "bytes",
+  "core.io": "bytes",
+  "core.net": "network",
+  "core.tls": "network",
+  List: "sequence",
+  Iter: "sequence",
+  String: "text",
+  "core.text": "text",
+};
 
 const COLLECTION_METHOD_FUNCTIONS = {
   task_list_method_return: "TaskList",
@@ -702,6 +743,43 @@ function normalize(name) {
   return name.toLowerCase().replace(/[_!?.\-]/g, "");
 }
 
+// Jet names free functions <protocol>_<verb>: tcp_connect, udp_send_to,
+// tls_close. Comparing the whole name meant connect, listen, accept and bind
+// all read as missing while Jet's own spellings read as wins. A qualifier is
+// stripped only when at least two members in the container share it and the
+// qualifier is not itself a member there, so zip_pad keeps its zip.
+function containerPrefixes(members) {
+  const counts = new Map();
+  for (const member of members) {
+    const cut = member.indexOf("_");
+    if (cut <= 0) continue;
+    const head = member.slice(0, cut);
+    counts.set(head, (counts.get(head) || 0) + 1);
+  }
+  const own = new Set(members);
+  const prefixes = new Set();
+  for (const [head, count] of counts) {
+    if (count >= 2 && !own.has(head)) prefixes.add(head);
+  }
+  return prefixes;
+}
+
+function keysForMember(member, prefixes) {
+  const keys = synonymsFor(member);
+  const cut = member.indexOf("_");
+  if (cut > 0 && prefixes.has(member.slice(0, cut))) {
+    for (const key of synonymsFor(member.slice(cut + 1))) keys.add(key);
+  }
+  return keys;
+}
+
+// The canonical key of an operation is the first name of its synonym group, so
+// is_subset, is_subset_of and issubset are one gap rather than three.
+function canonicalKey(name) {
+  const base = normalize(name);
+  return SYNONYM_CANONICAL.get(base) || base;
+}
+
 function synonymsFor(jetMember) {
   const base = normalize(jetMember);
   const keys = new Set([base]);
@@ -713,12 +791,39 @@ function containerFor(name) {
   return CONTAINER_ALIASES[name] || name;
 }
 
+function domainFor(container) {
+  return MATCH_DOMAIN[container] || container;
+}
+
+// Every key Jet covers, indexed by matching domain. Built once from the Jet
+// side so both the row verdicts and the gap walk read the same answer.
+function coveredKeys(jetMembersByContainer) {
+  const prefixes = new Map();
+  for (const [container, members] of jetMembersByContainer) {
+    prefixes.set(container, containerPrefixes(members));
+  }
+  const byDomain = new Map();
+  for (const [container, members] of jetMembersByContainer) {
+    const domain = domainFor(container);
+    if (!byDomain.has(domain)) byDomain.set(domain, new Set());
+    const into = byDomain.get(domain);
+    for (const member of members) {
+      for (const key of keysForMember(member, prefixes.get(container))) into.add(key);
+    }
+  }
+  return { byDomain: byDomain, prefixes: prefixes };
+}
+
 // ---------------------------------------------------------------------------
 // Rows.
 
-function competitorCells(surfaces, container, jetMember) {
-  const keys = synonymsFor(jetMember);
+function competitorCells(surfaces, container, jetMember, keys) {
   const cells = {};
+  const domain = domainFor(container);
+  const siblings = Object.keys(MATCH_DOMAIN).filter(function (name) {
+    return domainFor(name) === domain;
+  });
+  const lookIn = siblings.length ? siblings : [container];
   for (const [language, entry] of Object.entries(surfaces)) {
     const record = entry.surface.containers[container];
     if (!record) {
@@ -730,12 +835,25 @@ function competitorCells(surfaces, container, jetMember) {
       continue;
     }
     const exact = normalize(jetMember);
-    const hit = record.operations.find(function (operation) {
-      return normalize(operation) === exact;
-    }) || record.operations.find(function (operation) {
-      return keys.has(normalize(operation));
-    });
-    cells[language] = hit ? { status: "has", operation: hit } : { status: "lacks", operation: null };
+    // Look across the domain: Jet's core.files.remove is answered by Python's
+    // os.unlink, which the snapshot records under core.os.
+    let hit = null;
+    for (const name of lookIn) {
+      const sibling = entry.surface.containers[name];
+      if (!sibling || !sibling.present) continue;
+      const found = sibling.operations.find(function (operation) {
+        return normalize(operation) === exact;
+      }) || sibling.operations.find(function (operation) {
+        return keys.has(normalize(operation));
+      });
+      if (found) {
+        hit = { operation: found, container: name };
+        if (name === container) break;
+      }
+    }
+    cells[language] = hit
+      ? { status: "has", operation: hit.operation, foundIn: hit.container }
+      : { status: "lacks", operation: null };
   }
   return cells;
 }
@@ -751,9 +869,9 @@ function verdictFor(cells) {
   return values.some(function (cell) { return cell.status === "has"; }) ? "equal" : "jet_wins";
 }
 
-function rowForModule(entry, member, fixedOnly, surfaces) {
+function rowForModule(entry, member, fixedOnly, surfaces, keys) {
   const container = containerFor(entry.module);
-  const cells = competitorCells(surfaces, container, member);
+  const cells = competitorCells(surfaces, container, member, keys);
   return {
     id: "module." + entry.module + "." + member,
     source: {
@@ -771,9 +889,9 @@ function rowForModule(entry, member, fixedOnly, surfaces) {
   };
 }
 
-function rowForCollection(entry, method, surfaces) {
+function rowForCollection(entry, method, surfaces, keys) {
   const container = containerFor(entry.type);
-  const cells = competitorCells(surfaces, container, method);
+  const cells = competitorCells(surfaces, container, method, keys);
   return {
     id: "collection." + entry.type + "." + method,
     source: {
@@ -800,14 +918,8 @@ function competitorRows(surfaces, jetRows) {
   // each Jet member happened to match left every other spelling of the same
   // workflow scored as a gap: List.push matched Rust append, and Rust push,
   // Ruby push and Python append all still counted as separate losses.
-  const covered = new Map();
-  const jetContainers = new Set();
-  for (const row of jetRows) {
-    jetContainers.add(row.container);
-    if (!covered.has(row.container)) covered.set(row.container, new Set());
-    const keys = covered.get(row.container);
-    for (const key of synonymsFor(row.source.member)) keys.add(key);
-  }
+  const covered = jetRows.coveredKeys;
+  const jetContainers = new Set(jetRows.map(function (row) { return row.container; }));
 
   // A gap is one workflow Jet lacks, not one row per language. Ten languages
   // shipping sqrt is one missing operation with ten witnesses, and minting a
@@ -825,12 +937,15 @@ function competitorRows(surfaces, jetRows) {
       // it would score Jet against operations the index never attributed here.
       // The skip is listed in packageAttributedContainers, never silent.
       if (record.attribution === "package") continue;
-      const keys = covered.get(container);
+      const keys = covered.get(domainFor(container)) || new Set();
       for (const operation of record.operations) {
         // An operator is syntax, not a named operation. Ruby alone exposes %,
         // *, +, +@, <<, =~, [] and []= as String members.
         if (!isNamedOperation(operation)) continue;
-        const key = normalize(operation);
+        if (keys.has(normalize(operation))) continue;
+        // One capability, one gap: is_subset, is_subset_of and issubset are
+        // three spellings of the operation Jet would ship once.
+        const key = canonicalKey(operation);
         if (keys.has(key)) continue;
         const id = "gap." + container + "." + key;
         if (!gaps.has(id)) {
@@ -879,12 +994,39 @@ function competitorRows(surfaces, jetRows) {
 }
 
 function buildRows(modules, fixedPairs, collections, surfaces) {
-  const rows = [];
+  // Two passes: the Jet side decides which keys are covered before any verdict
+  // is taken, so a container's own naming pattern is known up front.
+  const membersByContainer = new Map();
+  const add = function (container, member) {
+    if (!membersByContainer.has(container)) membersByContainer.set(container, []);
+    membersByContainer.get(container).push(member);
+  };
   const moduleKeys = new Set();
   for (const entry of modules) {
     for (const member of entry.members) {
       moduleKeys.add(entry.module + "." + member);
-      rows.push(rowForModule(entry, member, false, surfaces));
+      add(containerFor(entry.module), member);
+    }
+  }
+  for (const pair of fixedPairs) {
+    if (moduleKeys.has(pair)) continue;
+    const split = pair.lastIndexOf(".");
+    add(containerFor(pair.slice(0, split)), pair.slice(split + 1));
+  }
+  for (const entry of collections) {
+    for (const method of entry.methods) add(containerFor(entry.type), method);
+  }
+  const covered = coveredKeys(membersByContainer);
+
+  const keysFor = function (container, member) {
+    return keysForMember(member, covered.prefixes.get(container) || new Set());
+  };
+
+  const rows = [];
+  for (const entry of modules) {
+    for (const member of entry.members) {
+      rows.push(rowForModule(entry, member, false, surfaces,
+        keysFor(containerFor(entry.module), member)));
     }
   }
   for (const pair of fixedPairs) {
@@ -894,12 +1036,16 @@ function buildRows(modules, fixedPairs, collections, surfaces) {
     const member = pair.slice(split + 1);
     const entry = modules.find(function (item) { return item.module === module; });
     if (!entry) throw new Error("fixed signature module missing from inventory: " + module);
-    rows.push(rowForModule(entry, member, true, surfaces));
+    rows.push(rowForModule(entry, member, true, surfaces, keysFor(containerFor(module), member)));
   }
   for (const entry of collections) {
-    for (const method of entry.methods) rows.push(rowForCollection(entry, method, surfaces));
+    for (const method of entry.methods) {
+      rows.push(rowForCollection(entry, method, surfaces,
+        keysFor(containerFor(entry.type), method)));
+    }
   }
   rows.sort(function (left, right) { return left.id.localeCompare(right.id); });
+  rows.coveredKeys = covered.byDomain;
   return rows;
 }
 
