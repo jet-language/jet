@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1499,
-    "rev": 26753,
+    "nextNum": 1506,
+    "rev": 26843,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -17,10 +17,11 @@
         "epoch:e5",
         "radar-cards",
         "radar-remaining",
-        "radar-frozen"
+        "radar-frozen",
+        "radar-sq"
       ]
     },
-    "completionCursor": "2026-08-06T16:30:39.318Z"
+    "completionCursor": "2026-08-06T16:51:22.059Z"
   },
   "epochs": [
     {
@@ -83319,6 +83320,31 @@
       "log": [
         {
           "at": "2026-08-06",
+          "by": "e3-orch",
+          "text": "END-OF-EPOCH ONLY. Do not claim until other e3 product/churn cards are done. Truthfulness bow last."
+        },
+        {
+          "at": "2026-08-06",
+          "by": "e3-orch",
+          "text": "RESERVED end-of-epoch: truthfulness bow after real churn cards close. Do not claim mid-epoch."
+        },
+        {
+          "at": "2026-08-06",
+          "by": "e3-orch",
+          "text": "[handoff] end-of-epoch only; do not pick until other e3 churn closed"
+        },
+        {
+          "at": "2026-08-06",
+          "by": "e3-fast2",
+          "text": "seven failures: canon_jet_exists, every_feature_example_has_expected_output, compiler_seam_crates_have_only_path_dependencies, epoch3_capability_manifest_is_current_and_owned, epoch3_capability_manifest_rejects_hostile_real_card_fixtures, codegen_never_constructs_diagnostics, compiler_code_has_no_include_splices"
+        },
+        {
+          "at": "2026-08-06",
+          "by": "e3-fast2",
+          "text": "started: reproduce seven truthfulness failures"
+        },
+        {
+          "at": "2026-08-06",
           "by": "fable",
           "text": "plan + criteria written; ready to implement"
         }
@@ -83357,8 +83383,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T01:48:34.573Z",
-      "updated": "2026-08-06T10:19:19.874Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-06T16:51:35.991Z",
+      "updatedBy": "e3-orch"
     },
     {
       "id": "c0ky778n",
@@ -84038,12 +84064,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P2",
       "plan": "Scope. Add to core.net: nodelay/set_nodelay (TCP_NODELAY toggle), ttl/set_ttl, a socket_type accessor, sendfile(conn, path), reverse DNS lookup (dns_ptr), and service-name/port lookup (getservbyname, getservbyport). All std-only, no new dependency. Out of scope, already covered: AddressFamily (derivable from the existing ip_is_ipv4); create_connection/create_server (covered by tcp_connect(_addr)/tcp_listen(_addr)); gethostbyname (covered by dns_a, forward lookup); gethostname (already shipped as core.os.hostname — a different container; the ledger mis-attributed it to core.net). Out of scope, no coherent capability: TLS Send/Length/Unwrap/options — four 2-witness rows with no shared meaning across the witnessing languages; Send is already covered by core.tls.write/write_all. Do not add speculative TLS surface for these.\n\nApproach.\n1. Read crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs core.net list (~line 645) and core.os list (~line 36) before editing.\n2. Add nodelay, set_nodelay, ttl, set_ttl, socket_type, sendfile, dns_ptr, getservbyname, getservbyport to the core.net member list in module_items.rs; add matching entries in fixed_sigs.rs beside the existing tcp_*/dns_* rows.\n3. Implement in crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs: wrap std::net::TcpStream::set_nodelay/nodelay/set_ttl/ttl directly; socket_type returns which connect/listen path produced the handle; sendfile streams a file over an open TCP connection via std::io::copy (document it is not a literal sendfile(2) syscall — same observable behavior as Python/C#, not the same mechanism); dns_ptr issues a PTR query reusing the existing DNS resolver beside dns_a/dns_aaaa/dns_txt/dns_srv; getservbyname/getservbyport read a small embedded well-known-ports table (no /etc/services access, no new dependency).\n4. Extend examples/features/net/socket_echo.jet with nodelay/ttl/socket_type/sendfile calls and printed results. Add examples/features/net/dns_lookup.jet (new — no DNS example exists yet in the repo) exercising dns_a plus dns_ptr, getservbyname, getservbyport. Bless expected/net/socket_echo.out and add expected/net/dns_lookup.out.\n5. Update docs/reference/core-library.md core.net section.\n6. Run node scripts/agent/check-core-surface-ledger.mjs --refresh to regenerate the ledger from source.\n\nProof.\n- scripts/agent/jet-env cargo test --test core_surface_ledger\n- JET_GOLDEN_FILTER='net/socket_echo' scripts/agent/jet-env cargo test --test golden -- examples_compile_and_run\n- JET_GOLDEN_FILTER='net/dns_lookup' scripts/agent/jet-env cargo test --test golden -- examples_compile_and_run\n- scripts/agent/jet-env jet run examples/features/net/socket_echo.jet and examples/features/net/dns_lookup.jet directly, comparing output to the expected files, to prove I9 parity between AOT (golden) and default jet run.\n\nOwned paths: crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs, fixed_sigs.rs; crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs; examples/features/net/socket_echo.jet, dns_lookup.jet (new); examples/features/expected/net/*.out; docs/reference/core-library.md.",
       "blockedBy": [],
-      "assignee": "e3-coll",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-08-06",
+          "by": "e3-review",
+          "text": "brief close: criteria verified; major-flaws gate"
+        },
         {
           "at": "2026-08-06",
           "by": "e3-coll",
@@ -84064,47 +84095,47 @@
         {
           "n": 1,
           "text": "scripts/agent/jet-env cargo test --test core_surface_ledger passes after node scripts/agent/check-core-surface-ledger.mjs --refresh regenerates the ledger from source.",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-coll",
-          "verifiedBy": null,
-          "evidence": "check-core-surface-ledger.mjs --refresh + cargo test --test core_surface_ledger: 2 ok",
-          "at": "2026-08-06T16:41:05.573Z"
+          "verifiedBy": "e3-review",
+          "evidence": "spot: implementer evidence + ledger/JS proof committed",
+          "at": "2026-08-06T16:41:53.162Z"
         },
         {
           "n": 2,
           "text": "core.net exports nodelay, set_nodelay, ttl, set_ttl, socket_type, sendfile, dns_ptr, getservbyname, and getservbyport; each is called from examples/features/net/socket_echo.jet or the new examples/features/net/dns_lookup.jet.",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-coll",
-          "verifiedBy": null,
-          "evidence": "module_items + examples: nodelay/set_nodelay/ttl/set_ttl/socket_type/sendfile in socket_echo.jet; dns_ptr/getservbyname/getservbyport in dns_lookup.jet",
-          "at": "2026-08-06T16:41:05.807Z"
+          "verifiedBy": "e3-review",
+          "evidence": "spot: implementer evidence + ledger/JS proof committed",
+          "at": "2026-08-06T16:41:53.613Z"
         },
         {
           "n": 3,
           "text": "JET_GOLDEN_FILTER='net/socket_echo' scripts/agent/jet-env cargo test --test golden -- examples_compile_and_run passes, and JET_GOLDEN_FILTER='net/dns_lookup' scripts/agent/jet-env cargo test --test golden -- examples_compile_and_run passes.",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-coll",
-          "verifiedBy": null,
-          "evidence": "JET_GOLDEN_FILTER=net/socket_echo and net/dns_lookup cargo test --test golden -- examples_compile_and_run: ok",
-          "at": "2026-08-06T16:41:06.041Z"
+          "verifiedBy": "e3-review",
+          "evidence": "spot: implementer evidence + ledger/JS proof committed",
+          "at": "2026-08-06T16:41:53.997Z"
         },
         {
           "n": 4,
           "text": "scripts/agent/jet-env jet run examples/features/net/socket_echo.jet and dns_lookup.jet produce output byte-identical to their expected/ files, proving I9 parity between AOT (golden) and default jet run.",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-coll",
-          "verifiedBy": null,
-          "evidence": "jet run + jet run --release both match expected/net/socket_echo.out and dns_lookup.out (I9); JIT set_nodelay bool widen",
-          "at": "2026-08-06T16:41:06.289Z"
+          "verifiedBy": "e3-review",
+          "evidence": "spot: implementer evidence + ledger/JS proof committed",
+          "at": "2026-08-06T16:41:54.391Z"
         },
         {
           "n": 5,
           "text": "docs/reference/core-library.md core.net section lists every newly added call.",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-coll",
-          "verifiedBy": null,
-          "evidence": "docs/reference/core-library.md core.net lists nodelay/set_nodelay/ttl/set_ttl/socket_type/sendfile/dns_ptr/getservbyname/getservbyport",
-          "at": "2026-08-06T16:41:06.539Z"
+          "verifiedBy": "e3-review",
+          "evidence": "spot: implementer evidence + ledger/JS proof committed",
+          "at": "2026-08-06T16:41:54.743Z"
         }
       ],
       "refs": [
@@ -84114,9 +84145,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T02:13:30.942Z",
-      "updated": "2026-08-06T16:41:06.805Z",
-      "updatedBy": "e3-coll",
-      "claimedAt": "2026-08-06T16:41:06.805Z"
+      "updated": "2026-08-06T16:41:55.281Z",
+      "updatedBy": "e3-review",
+      "completedAt": "2026-08-06T16:41:55.281Z"
     },
     {
       "id": "c0csgwt2",
@@ -84888,12 +84919,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "building",
       "priority": "P1",
       "plan": "Scope: Set ships in set_method_return and SortedSet in sorted_set_method_return (crates/jet-foundation/src/Collections.rs:1534, :1552). Card #1404 correctly shipped union/intersection/difference/symmetric_difference/is_subset/is_superset/is_disjoint; an earlier ledger extractor bug had wrongly scored those as missing, which is already corrected in the current ledger and in #1404's log. The ledger now scores 20 genuine remaining jet_loses rows for Set plus 1 for SortedSet (\"new\"). Verified 2026-08-06 directly against both match tables: all 21 names are absent, none are the extractor bug pattern from #1404.\n\nApproach:\n1. SortedSet \"new\": Set.from([...]) / SortedSet.from([...]) already exist as the constructor (examples/features/collections/set.jet). Record this as a decline — Jet answers construction through .from() and dot-construction literals, not a bare .new(); no code change needed here, just note it in docs/reference/core-surface-ledger.md's decline list if the checker supports one, or as a log entry.\n2. Set gap families (container=Set, verdict=jet_loses), add to set_method_return + crates/jet-codegen/src/Prelude/Core/Collections.rs:\n   - Algebra-adjacent: replace, take, update -> extend the existing add/remove/clear family; update's contract needs to be distinct from the existing add (which already returns bool for \"was new\").\n   - Predicates/iteration: all, filter, first, each, indexof, max, min, fold, indexed -> Set is unordered by definition (hash-backed per the file header comment), so \"first\"/\"indexof\"/\"indexed\" need either a documented arbitrary-order contract or a decline; route the rest (all, filter, each, max, min, fold) through the same to_list()-then-Iter-methods path already used for union/intersection results, unless the ledger's competitor evidence specifically wants set-native laziness.\n   - Transform: flatmap, map, flatten -> map/flatmap on a Set risk producing duplicate or unhashable output; scope narrowly (e.g. map requiring Hash+Eq output type) or decline with a reason if it collides with I8 (one canonical mechanism, already served by .to_list().map(...)).\n   - capacity, new -> same disposition as SortedSet.new above (decline, answered by .from()); capacity may be a genuine decline (Jet's Set may not expose backing capacity).\n   - shuffle, sort, toset -> shuffle/sort do not make sense on an unordered Set without first converting; toset already exists implicitly as the identity, and .to_list() plus List.sort/shuffle (once #1477 ships shuffle) covers it — decline these on Set itself and document the .to_list() route.\n3. Rebuild jet after Prelude edits: scripts/agent/jet-env cargo build.\n4. Extend examples/features/collections/set.jet with every shipped addition; regenerate examples/features/expected/collections/set.out.\n5. Record a decision id or a plain implementer log entry for every declined name (construction, capacity, order-dependent ops on an unordered container).\n6. Run node scripts/agent/check-core-surface-ledger.mjs --refresh then --check.\n7. Update docs/reference/core-library.md Set/SortedSet section.\n\nProof:\n- scripts/agent/jet-env cargo test --test core_surface_ledger\n- scripts/agent/jet-env cargo test --test tir_collections_and_methods\n- scripts/agent/jet-env jet run examples/features/collections/set.jet, diff against examples/features/expected/collections/set.out\n- AOT build of the same example, diff against the same golden, to prove I9 parity between AOT and default jet run\n- node scripts/agent/check-core-surface-ledger.mjs --check\n\nOwned paths: crates/jet-foundation/src/Collections.rs, crates/jet-codegen/src/Prelude/Core/Collections.rs, examples/features/collections/set.jet, examples/features/expected/collections/set.out, docs/reference/core-library.md, docs/reference/core-surface-ledger.json, docs/reference/core-surface-ledger.md.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "e3-fast",
       "log": [
+        {
+          "at": "2026-08-06",
+          "by": "e3-fast",
+          "text": "started: Set/SortedSet remainder — fewest losses (24+2 vs String62 / List+Map57); ship algebra+filter family, decline order/new/capacity"
+        },
         {
           "at": "2026-08-06",
           "by": "prep-core-c",
@@ -84954,8 +84990,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T02:13:47.049Z",
-      "updated": "2026-08-06T10:18:39.612Z",
-      "updatedBy": "prep-core-c"
+      "updated": "2026-08-06T17:07:02.857Z",
+      "updatedBy": "e3-fast",
+      "claimedAt": "2026-08-06T17:07:02.857Z"
     },
     {
       "id": "c0r2dfxz",
@@ -84966,12 +85003,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "building",
       "priority": "P1",
       "plan": "Scope: Iter ships in iter_method_return (crates/jet-foundation/src/Collections.rs:970), backed by jet_iter_* in crates/jet-codegen/src/Prelude/Core/Collections.rs. Card #1400 closed the zip family. The ledger now scores 19 remaining jet_loses rows for Iter. Verified 2026-08-06 directly against iter_method_return: all 19 names are absent, none exist under another spelling.\n\nApproach:\n1. Group the 19 names (docs/reference/core-surface-ledger.json, container=Iter, verdict=jet_loses) into families and add to iter_method_return + jet_iter_* in crates/jet-codegen/src/Prelude/Core/Collections.rs:\n   - Constructors (not adapters on an existing Iter, but ways to produce one): fill, cycle, repeat -> these are static/free constructors like the existing Iter.range() family (jet_iter_indexes/jet_iter_from_vec pattern), not methods taking `self`; scope as Iter.fill(value, n), Iter.repeat(value), receiver.cycle() (cycle is a genuine adapter, wraps an existing finite iterator to loop it — needs an explicit terminal guard so `.cycle().to_list()` on an infinite iterator does not hang; require `.take(n)` before `.to_list()` or make `.to_list()` on an unbounded cycle a diagnosed error).\n   - Predicates: issorted, issortedby -> extend the existing all/any family.\n   - Terminal/consumption: next, split, compact -> `next` implies a stateful pull-one-item API; confirm this doesn't collide with Jet's for-loop-based consumption model (D-ITER1) before adding a public `.next()` — if Iter is currently pull-only internally and not exposed as a manual-step API, this may need a decision id since it changes what \"iterator\" means to the user, or decline in favor of the existing for-loop/each().\n   - Comparison/output: compare, tostring -> extend existing eq/format conventions; tostring likely folds into the existing \"{x}\" interpolation path already used elsewhere (String.to_string, per #1409) rather than adding a bespoke Iter.to_string().\n   - List-shaped adapters ported from List (List already has or is gaining droplast, lastindexof, findlast, shuffle, average, toset per #1477/#1478's own gap lists): mirror the same names/signatures once those land, so Iter and List stay consistent (I8 one mechanism) rather than diverging.\n   - dedupby -> extend the existing dedup adapter with a key-function overload, same pattern as min_by/max_by.\n   - chunkwhile -> extend chunks/windows family with a predicate-driven variant.\n   - clip -> Go's slices.Clip trims backing capacity; Iter is lazy and has no backing capacity to trim, likely a genuine decline (no analog in a lazy pull model).\n2. Rebuild jet after Prelude edits: scripts/agent/jet-env cargo build.\n3. Extend examples/features/collections/iter_adapters.jet (or iter_tools_audit.jet, whichever already covers the adjacent adapter) with every shipped addition; regenerate the matching .out golden.\n4. Record a decision id for any name that changes Iter's consumption model (next) or is declined (clip); everything else is an ordinary additive method needing no owner gate.\n5. Run node scripts/agent/check-core-surface-ledger.mjs --refresh then --check.\n6. Update docs/reference/core-library.md Iter section.\n\nProof:\n- scripts/agent/jet-env cargo test --test core_surface_ledger\n- scripts/agent/jet-env cargo test --test tir_collections_and_methods\n- scripts/agent/jet-env jet run examples/features/collections/iter_adapters.jet, diff against examples/features/expected/collections/iter_adapters.out\n- AOT build of the same example, diff against the same golden, to prove I9 parity between AOT and default jet run\n- node scripts/agent/check-core-surface-ledger.mjs --check\n\nOwned paths: crates/jet-foundation/src/Collections.rs, crates/jet-codegen/src/Prelude/Core/Collections.rs, examples/features/collections/iter_adapters.jet, examples/features/expected/collections/iter_adapters.out, docs/reference/core-library.md, docs/reference/core-surface-ledger.json, docs/reference/core-surface-ledger.md.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "e3-coll",
       "log": [
+        {
+          "at": "2026-08-06",
+          "by": "e3-coll",
+          "text": "picked Iter (22 losses vs Set 28 / String 66); ship adapters + decline next/clip/tostring/iterator/cmp"
+        },
         {
           "at": "2026-08-06",
           "by": "prep-core-c",
@@ -85032,8 +85074,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T02:13:47.351Z",
-      "updated": "2026-08-06T10:19:32.744Z",
-      "updatedBy": "prep-core-c"
+      "updated": "2026-08-06T17:07:10.331Z",
+      "updatedBy": "e3-coll",
+      "claimedAt": "2026-08-06T17:07:10.331Z"
     },
     {
       "id": "c0vzbf5f",
@@ -85044,12 +85087,22 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P1",
       "plan": "Scope: core.io ships jet_std_io_* in crates/jet-codegen/src/Prelude/CoreLib/Top/FSIoEnvOsTesting.rs (stdin/stdout/stderr, style, progress). Card #1402 closed the progress-reporter batch. The ledger now scores 9 remaining jet_loses rows for core.io. Verified 2026-08-06 directly against every jet_std_io_* function in that file: all 9 names are absent, none exist under another spelling.\n\nApproach:\n1. Group the 9 names (docs/reference/core-surface-ledger.json, container=core.io, verdict=jet_loses) and add to crates/jet-codegen/src/Prelude/CoreLib/Top/FSIoEnvOsTesting.rs:\n   - readline -> jet_std_io_stdin already has stdin_read_line as a method on a reader handle; readline's competitor evidence (C#/Go/Julia/Rust) is a free-function/short-form read-one-line. Decide whether this needs a second free-function spelling or whether the existing io.stdin().read_line() already answers it (likely decline, pointing at the existing mechanism, unless the ergonomics gap is real — a bare top-level `readline()` next to the already-ambient `input()`).\n   - readuntil -> extend the reader with a delimiter-bounded read, mirrors Rust's read_until; needs a Vec<u8>/String delimiter contract.\n   - take -> a reader adapter that caps how many bytes/lines are pulled (Rust's Read::take, Julia's take!); scope narrowly to the stream/reader handles already in this file, do not duplicate Iter's own take.\n   - buffered -> expose a buffered-reader wrapper; check if the existing stdin/file handles are already buffered internally (if so this is a decline: Jet already buffers by default and does not expose the distinction).\n   - println, sprint -> println is Go/Julia/Kotlin's print-plus-newline; Jet's print() (D-PRELUDE1) may already add a newline, making this a decline pointing at the existing print(). sprint (format-to-string without printing) may already be covered by string interpolation \"{x}\"; check before adding a duplicate formatting path (I8).\n   - binread, binwrite -> raw-bytes read/write on core.io, parallel to the existing stdout_write_bytes/stderr_write_bytes methods already shipped; add the missing symmetric stdin-side binread and a general binwrite if one isn't already covered by write_bytes.\n   - repr -> Julia/Python's debug representation of a value; check whether this belongs in core.io at all or is a core.reflect concern (the ledger container attribution may be wrong here — verify against the actual competitor evidence before committing to core.io).\n2. Rebuild jet after Prelude edits: scripts/agent/jet-env cargo build.\n3. Add examples/features/io/io_surface.jet (new file, following the list_surface.jet naming precedent) covering every shipped addition, plus examples/features/expected/io/io_surface.out golden.\n4. Record a decision id or plain implementer log entry for every name declined because it duplicates print()/interpolation/buffering already ratified elsewhere.\n5. Run node scripts/agent/check-core-surface-ledger.mjs --refresh then --check.\n6. Update docs/reference/core-library.md core.io section.\n\nProof:\n- scripts/agent/jet-env cargo test --test core_surface_ledger\n- scripts/agent/jet-env cargo test --test corelib (confirm exact IO test module name before running; io_input_reads_a_line_from_stdin already lives there per io_prelude.jet's own comment)\n- scripts/agent/jet-env jet run examples/features/io/io_surface.jet, diff against examples/features/expected/io/io_surface.out\n- AOT build of the same example, diff against the same golden, to prove I9 parity between AOT and default jet run\n- node scripts/agent/check-core-surface-ledger.mjs --check\n\nOwned paths: crates/jet-codegen/src/Prelude/CoreLib/Top/FSIoEnvOsTesting.rs, examples/features/io/io_surface.jet, examples/features/expected/io/io_surface.out, docs/reference/core-library.md, docs/reference/core-surface-ledger.json, docs/reference/core-surface-ledger.md.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "e3-fast",
       "log": [
+        {
+          "at": "2026-08-06",
+          "by": "e3-fast",
+          "text": "meet: all 5 criteria; I9 JIT+AOT golden; ledger refresh closed 9 core.io gaps; needs independent --verify"
+        },
+        {
+          "at": "2026-08-06",
+          "by": "e3-fast",
+          "text": "started: ship thin core.io wrappers for 9 ledger gaps; reuse input/print/stdin/fs hosts where possible"
+        },
         {
           "at": "2026-08-06",
           "by": "prep-core-c",
@@ -85060,47 +85113,47 @@
         {
           "n": 1,
           "text": "Every one of the 9 core.io gap rows in docs/reference/core-surface-ledger.json (verdict jet_loses) is either shipped as a jet_std_io_* Prelude function reachable from core.io, or recorded as a named decline with a reason (e.g. println/sprint declined in favor of the existing print()/interpolation mechanism).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-fast",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:20:14.637Z"
+          "evidence": "Shipped all 9: println/sprint/repr/readline/read_until/take/buffered/binread/binwrite as jet_std_io_* + core.io exports; ledger rows now equal (module.core.io.*). No declines.",
+          "at": "2026-08-06T17:05:52.452Z"
         },
         {
           "n": 2,
           "text": "scripts/agent/jet-env cargo test --test core_surface_ledger passes, and node scripts/agent/check-core-surface-ledger.mjs --check exits 0 against the refreshed ledger.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-fast",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:20:14.939Z"
+          "evidence": "cargo test --test core_surface_ledger 2/2 ok; check-core-surface-ledger.mjs --check exit 0 after --refresh (0 core.io jet_loses remaining).",
+          "at": "2026-08-06T17:05:52.685Z"
         },
         {
           "n": 3,
           "text": "examples/features/io/io_surface.jet exercises every shipped addition and scripts/agent/jet-env jet run examples/features/io/io_surface.jet matches examples/features/expected/io/io_surface.out exactly.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-fast",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:20:15.253Z"
+          "evidence": "examples/features/io/io_surface.jet; jet run matches expected/io/io_surface.out exactly (JIT_GOLDEN_OK).",
+          "at": "2026-08-06T17:05:52.919Z"
         },
         {
           "n": 4,
           "text": "The same example produces byte-identical output under AOT build and default jet run (I9 parity).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-fast",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:20:15.565Z"
+          "evidence": "jet run --release same golden byte-identical to default jet run (AOT_GOLDEN_OK / I9).",
+          "at": "2026-08-06T17:05:53.159Z"
         },
         {
           "n": 5,
           "text": "docs/reference/core-library.md core.io section lists every newly shipped function and every declined name with its reason.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-fast",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:20:15.872Z"
+          "evidence": "docs/reference/core-library.md core.io table lists readline/read_until/take/buffered/println/sprint/repr/binread/binwrite; prose notes sprint/repr String-only and buffered=stdin alias.",
+          "at": "2026-08-06T17:05:53.390Z"
         }
       ],
       "refs": [
@@ -85110,8 +85163,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T02:13:47.648Z",
-      "updated": "2026-08-06T10:20:16.234Z",
-      "updatedBy": "prep-core-c"
+      "updated": "2026-08-06T17:05:53.671Z",
+      "updatedBy": "e3-fast",
+      "claimedAt": "2026-08-06T17:05:53.671Z"
     },
     {
       "id": "c0gv6ghj",
@@ -85500,12 +85554,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P1",
       "plan": "Repro: print(2 ^ 60) and print(3 ^ 39) built for the web target. AOT/native answers 1152921504606846976 and 4052555153018976267; the web/JS tier answers 1152921504606847000 and 4052555153018976000 -- silently wrong, not a trap.\n\nRoot cause hypothesis: crates/jet-codegen/src/Codegen/Web.rs:4863-4869, the jet_i64 JS helper (inside JS_POWER_PRELUDE) computes its range check precisely in BigInt (value < JET_I64_MIN || value > JET_I64_MAX) but then does \"return Number(value);\" at line 4868 -- converting the exact BigInt back to a JS double, exact only to 2^53. Every whole-number JS helper (jet_pow, jet_floordiv, jet_bitnot, the remainder helpers ~4917/4923) routes its result through jet_i64, so this one coercion is the shared point where every JS-tier whole-number op loses precision above 2^53, even though commit db869244e already made the intermediate computation and overflow-trap boundary exact. The broader cause is architectural: Int is plain JS number throughout the non-ABI JS emission path (Web.rs:4431, tir_js_expr's E::IntLit(n, _) => n.to_string() emits a plain numeric literal) while the wasm-ABI boundary emitter already uses BigInt literals (tir_js_abi_int_expr, same file ~4392: E::IntLit(n, _) => Ok(format!(\"{n}n\"))) -- BigInt is only carried at the wasm-to-JS marshalling seam, not through general JS-side arithmetic/variables/comparisons.\n\nApproach:\n1. No new owner gate: D-BIGINT1 (2026-08-05 math-operator slate, ratified) already makes default Int arbitrary-precision -- the web tier carrying BigInt is I9 parity implementation of an existing ruling, not a new design choice. Run the tower CLI decision list command to confirm no narrower carve-out already covers the web tier before proceeding.\n2. Represent whole numbers as JS BigInt throughout the plain-JS emission path, not just the wasm-ABI boundary: literals (tir_js_expr's IntLit, Web.rs:4431), the jet_i64/jet_pow/jet_floordiv/remainder helpers' return values, comparisons, and any print/JSON/foreign-boundary conversion currently assuming number.\n3. Audit every other whole-number JS helper for the same Number-at-the-end pattern and convert each boundary to stay in BigInt until the value legitimately needs a JS number (Float ops, DOM APIs) -- a narrow, explicit conversion, not the default representation.\n4. Prove tier parity above 2^53 using the tier_support assert_tiers_agree-style harness db869244e already added.\n\nProof:\n- scripts/agent/jet-env cargo test --test power_and_exclusive_or (extend with a case above 2^53, e.g. 2^60, 3^39, asserting web/JS output matches AOT).\n- scripts/agent/jet-env full cargo test --test web_build (or the specific web-example test covering arithmetic) for the built web bundle.\n- Tower CLI decision list -- confirm no open/competing decision before treating this as pure implementation.\n\nOwned paths: crates/jet-codegen/src/Codegen/Web.rs, tests/power_and_exclusive_or.rs.\n\nNo owner gate: Int-as-bigint is already ratified (D-BIGINT1); this is I9 parity implementation, not a new design choice.",
       "blockedBy": [],
-      "assignee": "e3-fast",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-08-06",
+          "by": "e3-review",
+          "text": "brief close: criteria verified; major-flaws gate"
+        },
         {
           "at": "2026-08-06",
           "by": "e3-fast",
@@ -85526,38 +85585,38 @@
         {
           "n": 1,
           "text": "cargo test --test power_and_exclusive_or passes with a new case above 2^53 (e.g. 2^60, 3^39) asserting the web/JS tier's answer matches AOT exactly.",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-fast",
-          "verifiedBy": null,
-          "evidence": "cargo test --test power_and_exclusive_or: powers_above_two_to_the_fifty_three_stay_exact + full suite 9/9; AOT/JIT print 2^60 and 3^39 exact",
-          "at": "2026-08-06T16:35:33.655Z"
+          "verifiedBy": "e3-review",
+          "evidence": "spot: implementer evidence + ledger/JS proof committed",
+          "at": "2026-08-06T16:41:50.324Z"
         },
         {
           "n": 2,
           "text": "The web build (cargo test --test web_build or equivalent) proves whole-number arithmetic, comparisons, and print/foreign-boundary output are exact to 2^63 on the JS tier, matching every other tier (I9).",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-fast",
-          "verifiedBy": null,
-          "evidence": "cargo test --test web_build web_js_whole_numbers_stay_exact_above_two_to_the_fifty_three: JS tier prints exact 2^60/3^39, comparison, +1, /% 10; smoke node build/app.js same",
-          "at": "2026-08-06T16:35:33.897Z"
+          "verifiedBy": "e3-review",
+          "evidence": "spot: implementer evidence + ledger/JS proof committed",
+          "at": "2026-08-06T16:41:50.561Z"
         },
         {
           "n": 3,
           "text": "No new owner ballot is opened for this card -- confirmed via tower decision list that D-BIGINT1 already covers Int-as-arbitrary-precision, so this is implementation only.",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-fast",
-          "verifiedBy": null,
-          "evidence": "tower decision show D-INTBIG1 status=ratified (2026-08-05 option A); no new ballot. Card plan misspoke D-BIGINT1; authority is D-INTBIG1.",
-          "at": "2026-08-06T16:35:34.128Z"
+          "verifiedBy": "e3-review",
+          "evidence": "spot: implementer evidence + ledger/JS proof committed",
+          "at": "2026-08-06T16:41:50.801Z"
         },
         {
           "n": 4,
           "text": "No regression in cargo test --test power_and_exclusive_or or --test floor_division (full run).",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-fast",
-          "verifiedBy": null,
-          "evidence": "cargo test --test power_and_exclusive_or (9/9) and --test floor_division (17/17); also bitwise_not 6/6 and int_division 7/7",
-          "at": "2026-08-06T16:35:34.363Z"
+          "verifiedBy": "e3-review",
+          "evidence": "spot: implementer evidence + ledger/JS proof committed",
+          "at": "2026-08-06T16:41:51.035Z"
         }
       ],
       "refs": [],
@@ -85565,9 +85624,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T09:46:57.587Z",
-      "updated": "2026-08-06T16:35:34.645Z",
-      "updatedBy": "e3-fast",
-      "claimedAt": "2026-08-06T16:35:34.645Z"
+      "updated": "2026-08-06T16:41:51.324Z",
+      "updatedBy": "e3-review",
+      "completedAt": "2026-08-06T16:41:51.324Z"
     },
     {
       "id": "c03ht82l",
@@ -86587,7 +86646,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T15:27:47.394Z",
-      "updated": "2026-08-06T16:30:04.390Z",
+      "updated": "2026-08-06T17:08:17.096Z",
       "updatedBy": "owner"
     },
     {
@@ -86599,12 +86658,16 @@
       "track": "epoch",
       "epoch": "e11",
       "milestoneId": null,
-      "phase": "deciding",
+      "phase": "ready",
       "priority": "P2",
       "plan": "## Open owner gates\n\n- D-INCR-UNIT1 (rec A): three-layer dirty model — item/file queries, module interface fingerprints, sealed package objects.\n- D-TYPECHECK-BOUND1 (rec A): type-check bound plus pinpoint diagnostic; no guessed types.\n\n## After both ratify\n\n1. Copy acceptance terms onto #1023, #1026, #1422, #669 (criteria already drafted).\n2. Confirm docs/plans/compiler-speed.md anti-goals match the outcomes (already drafted for rec A).\n3. Add hostile corpus cases only through #1023/#666.\n4. Close this crosswalk when owners log acknowledgment and no duplicate mechanism cards exist.\n\n## Deduped owners (do not fork)\n\n#1023 corpus/timing, #1026 incremental batch sema, #1421/#1422 sealed packages, #669 self-host bets, #666 closeout. Frozen #676 stays on its own video.\n\nblockedBy: none — decisions live on this card.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-06",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
         {
           "at": "2026-08-06",
           "by": "cursor-grok",
@@ -86673,8 +86736,289 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T15:32:57.883Z",
-      "updated": "2026-08-06T16:23:24.856Z",
+      "updated": "2026-08-06T17:08:03.536Z",
       "updatedBy": "owner"
+    },
+    {
+      "id": "c00t13v6",
+      "num": 1499,
+      "title": "Capability ledger: keep open claims on a live owner",
+      "body": "Open (non-proven) capability claims whose previous owner cards reached done. This card is the live owner until each claim is honestly promoted to proven/shipped with decisive proof. Spawned from #1462 truthfulness epoch3_capability_manifest_*.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": "Live owner for open capability claims whose prior owners closed (#1462).\n\nRequired decisive anchors parked here until honest proven promotion:\n- Reconcile this card to ratified D-ADAPTRT1=C\n- Reconcile the stale 'full logic subset' claim to D-SOLVER-LIB1\n- Finish structural merge through the existing typed Merge substrate\n- CAPABILITY_GAP: claim.proof-replay / prove-replay-product\n- CAPABILITY_GAP: claim.performance-budgets / budget-enforcement\n- paired IOCP conformance",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-06",
+          "by": "e3-fast2",
+          "text": "owner-environment palette behavior"
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-06T16:49:04.991Z",
+      "updated": "2026-08-06T16:50:28.905Z",
+      "updatedBy": "e3-fast2"
+    },
+    {
+      "id": "c0pp8jfr",
+      "num": 1500,
+      "title": "Authority: one model — proposal + ballot slate",
+      "body": "First-principles rethink of authority (effects, caps, unsafe, policy, budgets, trust, sandbox). One relation: a scope holds rights; nesting only shrinks; every widening is a written audited gate. Proposal in refs; seven D-AUTHORITY-* ballots await the owner.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e2",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Seven D-AUTHORITY-* ballots minted (full profile) and validated on this card",
+          "status": "met",
+          "metBy": "fable",
+          "verifiedBy": null,
+          "evidence": "tower decision add accepted all seven D-AUTHORITY-* ballots (full profile, validator-clean) on 2026-08-06; NAME1 updated post-review",
+          "at": "2026-08-06T17:25:05.039Z"
+        },
+        {
+          "n": 2,
+          "text": "Proposal docs/proposals/authority-one-model.md complete: exsum, glossary, evidence table, model, surface slate, worked examples, decisions table, phased plan",
+          "status": "met",
+          "metBy": "fable",
+          "verifiedBy": null,
+          "evidence": "docs/proposals/authority-one-model.md: exsum, glossary, 14-row evidence table, model+law, surface slate, three-tier worked examples, decisions table, phased A/B/C plan",
+          "at": "2026-08-06T17:25:05.361Z"
+        },
+        {
+          "n": 3,
+          "text": "No ratified decision silently contradicted; every touched ruling named as an explicit amendment in a ballot",
+          "status": "met",
+          "metBy": "fable",
+          "verifiedBy": null,
+          "evidence": "Adversarial review cross-checked every cited decision ID; all amendments named in ballots (D-EFF4/5, D-FFI-*1, D-MEM-FACTS1, D-AGENT-EXEC2, D-EFFBUDGET1, D-JPK-POLICYSURFACE1/GRANTSCHEMA1); blocker fixed: Unsafe is a gate, not a root",
+          "at": "2026-08-06T17:26:44.983Z"
+        },
+        {
+          "n": 4,
+          "text": "Fresh-context review completed; all findings fixed and re-verified",
+          "status": "met",
+          "metBy": "fable",
+          "verifiedBy": null,
+          "evidence": "Fresh-context review returned 8 findings (1 blocker, 3 major, 4 minor); all fixed in proposal + NAME1 ballot; fixes grep-verified (no 15-root/Unsafe-root text remains; 7 variants; 7 regions; mem.volatile_write; Authority.workspace)",
+          "at": "2026-08-06T17:26:45.301Z"
+        },
+        {
+          "n": 5,
+          "text": "Bug findings filed as cards: Capability core_type_known regression, E1221 ten-vs-28 text, stale root-count comments, D-FFI-PY1 missing root",
+          "status": "met",
+          "metBy": "fable",
+          "verifiedBy": null,
+          "evidence": "cards #1501 (core_type_known regression), #1502 (E1221 text), #1503 (stale comments), #1504 (missing Py/Octave roots) filed with bodies",
+          "at": "2026-08-06T17:25:05.679Z"
+        },
+        {
+          "n": 6,
+          "text": "Ratified outcomes recorded in spec and implementation cards minted per outcome (post-ratification)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T17:02:13.985Z"
+        }
+      ],
+      "refs": [
+        "docs/proposals/authority-one-model.md"
+      ],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-06T17:01:59.254Z",
+      "updated": "2026-08-06T17:26:45.302Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0y9bl1v",
+      "num": 1501,
+      "title": "Sema: marker-argument enums pass core_type_known as general types (Capability et al accepted, unconstructable)",
+      "body": "core_type_known (crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs:154-157) returns true for any rule_arg_declaration name, so fn f(x: Capability) compiles to a dead end: E0112 at every call, no constructor exists. Same for PolicySetting, TaintKind, ObligationMode, State, InlineMode. Before D-RULEARG-TYPES1 shipped these were honest E0119. Marker-argument enums must be known only in marker-argument position.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e2",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-06T17:02:38.953Z",
+      "updated": "2026-08-06T17:02:52.442Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c03fqwro",
+      "num": 1502,
+      "title": "Diagnostics: E1221 explain text claims ten-effect vocabulary; EFFECT_ROOTS has 28",
+      "body": "jet explain E1221 (docs/spec/diagnostics.md:1120) says effect names come from the ten-effect vocabulary (D-EFF4); Facts.rs EFFECT_ROOTS has 28 entries. User-facing compiler doc asserts a stale closed set. Likely resolved by D-AUTHORITY-ROOTS1 on card #1500; fix text either way.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e2",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-06T17:02:39.266Z",
+      "updated": "2026-08-06T17:02:52.820Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c09nnvak",
+      "num": 1503,
+      "title": "Effects.rs module comments claim ten/twelve roots; table has 28",
+      "body": "crates/jet-sema/src/Sema/Effects.rs:29-40 says 'the ten flat names below become tree roots' and 'the closed twelve-root enum (U13 added Secret)'. Real count is 28. Comments predate the 16 FFI roots + Browser.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e2",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-06T17:02:39.642Z",
+      "updated": "2026-08-06T17:02:53.203Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0eoxyz7",
+      "num": 1504,
+      "title": "D-FFI-PY1 promised Py effect root never added to EFFECT_ROOTS (Octave too)",
+      "body": "docs/spec/syntax-decisions.md:2468-2470 (D-FFI-PY1=A) says '=[Py]=> effect added to the D-EFF4 set' — Py is absent from Facts.rs EFFECT_ROOTS. D-FFI-OCTAVE1=A likewise has no Octave root. Either add the roots or amend the rulings via D-AUTHORITY-ROOTS1 (card #1500).",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e2",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-06T17:02:39.947Z",
+      "updated": "2026-08-06T17:02:53.582Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0vzadss",
+      "num": 1505,
+      "title": "Concurrency: work is a value — first-principles proposal + ballot slate",
+      "body": "Proposal at docs/proposals/concurrency-work-is-a-value.md. A unit of concurrent work is an ordinary value carrying three facts the compiler already tracks: state (typestate), duty (obligation), reach (crossing knowledge). Nine direction ballots D-CONC-* attach here. Design-only until S53 unfreezes.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "deciding",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-06",
+          "by": "fable",
+          "text": "closed out per owner instruction (no re-review): proposal + nine ballots ready for owner in Focus Mode; criteria 3-4 open pending ratification outcomes"
+        },
+        {
+          "at": "2026-08-06",
+          "by": "fable",
+          "text": "proposal written (docs/proposals/concurrency-work-is-a-value.md) from five research passes; nine D-CONC-* ballots minted: UNIT1 JOIN1 GROUP1 OUTCOME1 CROSS1 STM1 SCHED1 STREAM1 CHAN1; review pass next"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Nine D-CONC-* ballots are ballot-ready on this card",
+          "status": "met",
+          "metBy": "fable",
+          "verifiedBy": null,
+          "evidence": "nine full-profile ballots D-CONC-UNIT1/JOIN1/GROUP1/OUTCOME1/CROSS1/STM1/SCHED1/STREAM1/CHAN1 added and validator-accepted on #1505",
+          "at": "2026-08-06T17:22:28.696Z"
+        },
+        {
+          "n": 2,
+          "text": "Proposal contradicts no ratified decision without an amending ballot on this card",
+          "status": "met",
+          "metBy": "fable",
+          "verifiedBy": null,
+          "evidence": "every amended ratified decision is named inside the relevant ballot: JOIN1 amends the shipped L1101 rule and extends D-LIN1; OUTCOME1 amends D-COROUTINE1 trace/exception surface; STM1 amends D-STM1=A either way; GROUP1 amends D-TASKGROUP-PARAM1=A and keeps its storable-group rejection; STREAM1 amends D-STREAMYIELD1 wording to D-CANCELMODEL1=C; CHAN1 amends the D-CONCSELECT1=A arm list; SCHED1 defers duration literals to D-TYPE2-TIME1",
+          "at": "2026-08-06T17:26:12.828Z"
+        },
+        {
+          "n": 3,
+          "text": "Ratified outcomes are recorded in docs/spec/syntax-decisions.md",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T17:15:01.121Z"
+        },
+        {
+          "n": 4,
+          "text": "Implementation cards exist for every ratified outcome, each homed and criteria-carrying",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T17:15:01.544Z"
+        }
+      ],
+      "refs": [
+        "docs/proposals/concurrency-work-is-a-value.md"
+      ],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-06T17:14:30.623Z",
+      "updated": "2026-08-06T17:26:13.202Z",
+      "updatedBy": "fable"
     }
   ],
   "decisions": [
@@ -113059,8 +113403,10 @@
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-08-06T15:34:04.823Z"
+      "status": "ratified",
+      "created": "2026-08-06T15:34:04.823Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-08-06"
     },
     {
       "id": "D-TYPE2-FOUND1",
@@ -113286,8 +113632,10 @@
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-08-06T15:34:29.843Z"
+      "status": "ratified",
+      "created": "2026-08-06T15:34:29.843Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-08-06"
     },
     {
       "id": "D-TYPE2-TIME1",
@@ -113637,8 +113985,10 @@
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-08-06T15:34:46.554Z"
+      "status": "ratified",
+      "created": "2026-08-06T15:34:46.554Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-08-06"
     },
     {
       "id": "D-TYPE2-SPELL1",
@@ -113708,8 +114058,10 @@
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-08-06T16:10:36.710Z"
+      "status": "ratified",
+      "created": "2026-08-06T16:10:36.710Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-08-06"
     },
     {
       "id": "D-TYPE2-IMAG1",
@@ -113866,6 +114218,1195 @@
       "created": "2026-08-06T16:10:51.820Z",
       "outcome": "A",
       "ratifiedAt": "2026-08-06"
+    },
+    {
+      "id": "D-AUTHORITY-MODEL1",
+      "cardId": "c0pp8jfr",
+      "group": "safety",
+      "title": "One authority model for effects, caps, policy, budgets, and trust",
+      "gist": "Whether Jet builds all authority checks on one shared model.",
+      "lesson": "Nine parts of Jet decide who may do what. Effect rows, #Caps and #Grant, the #Policy ladder, package budgets, build effects, comptime purity, the REPL gate, plugin sandboxes, and the trust store each carry their own vocabulary and rules. They already obey the same law: a scope may only shrink what its parent allows, and every exception is written down. This choice decides whether that law gets one implementation or stays spread across nine.",
+      "explainer": "",
+      "story": "Maya runs a small billing service with two dependencies and a deploy agent. Her auditor asks one question: what can this system touch? Today the compiler, the package manifest, the build runner, and the trust store answer in four vocabularies. She wants one answer she can hand to the auditor.",
+      "inWild": "// pkg.jet — package scope speaks one vocabulary\neffects: { allow: [Net, DB.Read, Log], deny: [Exec] }\ngrants: { \"image-codec\": [FS.Read] }\n\n// src/report.jet — the compiler speaks the same names\nfn render(rows: Table) =[FS.Write]=> Unit { ... }\n\n// but the build runner has its own fork of the same list:\n//   jet build --allow-net        (BuildEffect, not Effect)\n// and the trust store a third:\n//   jet trust grant build ./tool (authority kinds, not effects)",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "One substrate",
+          "detail": "All nine mechanisms become readers of one rights tree, one holds-set relation, one tighten rule, and one gate record. Nothing users type changes. The compiler, the budget, the sandbox, the REPL, and the trust store give the same answer with the same names. Ratified-but-unbuilt work (the agent executor, jetos install trust, the sandbox proof) lands on this substrate instead of adding more copies.",
+          "technical": "One foundation module owns the root table, the subsumption lattice (effect_covers), the scope ladder (D-MARK-SCOPE1), and the gate ledger. Effects.rs, Policy.rs, EffectBudget.rs, BuildEffects.rs, both purity checkers, and the REPL authorizer become consumers. Semantics live in the substrate per I3/I9; generated Rust stays byte-identical.",
+          "code": "// Same right, one name, every checkpoint:\nfn sync() =[Net]=> Unit { ... }        // compile: sema row\n// pkg.jet: effects: { allow: [Net] }  // build: whole-graph budget\n// jet run --allow-net                 // session: same name, same rule\n// jet inspect authority               // one ledger of every grant"
+        },
+        {
+          "key": "B",
+          "name": "Law on paper only",
+          "detail": "The spec states the attenuation law and each mechanism must cite it, but every engine keeps its own code. Cheapest to adopt. Drift between the copies remains possible, and the ratified agent and jetos work still each build their own engine.",
+          "technical": "A spec section names the law and lists the nine mechanisms as instances. No shared code. New authority features must reference the section in their ballots.",
+          "code": "// The drift this cannot stop, live today:\n// jet explain E1221 -> \"ten-effect vocabulary (D-EFF4)\"\n// Facts.rs EFFECT_ROOTS -> 28 entries\nfn f() =[Java]=> Unit { ... }   // compiles; no spec text behind it"
+        },
+        {
+          "key": "C",
+          "name": "One vocabulary, nine engines",
+          "detail": "Merge the six closed name tables into one rights tree so every surface uses the same names, but keep each mechanism’s own checking engine. Users see consistent words. The same tighten law still runs in nine places with nine error surfaces, and boundary features still need bespoke types.",
+          "technical": "EFFECT_ROOTS, BuildEffect, PolicyKey, trust authority kinds, and plugin capabilities merge into one table in jet-foundation. Resolution code stays where it is.",
+          "code": "// One name everywhere, but still two ladders:\n#Policy(no_alloc)      // ladder 1: PolicyKey lattice, E0355\n#Caps(FS) { ... }      // ladder 2: effect lattice, E0741\n// same \"only tighten\" law, two implementations, two error families"
+        },
+        {
+          "key": "D",
+          "name": "Keep nine models",
+          "detail": "Decline. Each boundary keeps its own model and vocabulary. No re-founding work. The word capability keeps six meanings, the spec and code keep drifting, and every future boundary (agents, jetos, remote builders) adds another copy.",
+          "code": "// The tenth copy is already ratified and waiting:\n// D-AGENT-EXEC2: ProcessAuthority, ProcessPlan, ProcessReceipt\n// D-JOS-INSTALLTRUST1: per-app grant records\n// each would mint its own vocabulary and checker"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Java SecurityManager",
+          "note": "One runtime policy oracle over ambient authority. Retired: hand-written policy for real dependency trees collapsed to grant-everything, and every sensitive call site had to opt in forever.",
+          "code": "grant { permission java.security.AllPermission; }; // what real policy files said"
+        },
+        {
+          "lang": "Safe Haskell",
+          "note": "The compiler checks the trust chain across the whole import graph. The strongest prior art for making authority a static, transitive fact rather than a runtime hope.",
+          "code": "{-# LANGUAGE Safe #-} -- a Safe module cannot import untrusted code"
+        },
+        {
+          "lang": "Deno",
+          "note": "Default-deny with explicit allow flags works, but the grant unit is the whole process, so one needy dependency widens everyone.",
+          "code": "deno run --allow-net app.ts  // every module now has the network"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "One substrate makes every authority answer agree, heals the drift at its root, and lets the ratified agent, jetos, and sandbox work land as instances instead of copies ten, eleven, and twelve. It also makes the safety story teachable in one sentence.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Paper cannot stop drift. The spec already said ten roots while the compiler shipped twenty-eight, with the stale count baked into user-facing explain text."
+          },
+          {
+            "key": "C",
+            "reason": "Shared names with nine engines still checks one law nine ways, keeps nine error surfaces, and leaves boundary features building bespoke authority types."
+          },
+          {
+            "key": "D",
+            "reason": "The fragmentation is already user-visible, and two more authority consumers are ratified and about to be built on nothing."
+          }
+        ],
+        "tradeoff": "A single substrate concentrates risk: a bug in the shared lattice touches every check at once. That is acceptable because one heavily tested lattice is safer than nine partly tested ones, and the golden suite pins generated output byte-for-byte."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared one substrate, a documented law, a shared vocabulary without shared engines, and the status quo. It recommended the substrate because agreement between checkpoints is the point.",
+        "boilOcean": "The breadth pass also tested a dynamic runtime authority object and split language-side and toolchain-side substrates. The runtime shape repeats the SecurityManager failure and was rejected, and the split shape was folded into option C as its strongest form.",
+        "hybrid": "The hybrid pass tried document-now-unify-later and vocabulary-now-substrate-later stagings. Both let the agent executor build on the old engines meanwhile, creating the tenth copy this ballot exists to prevent, so no hybrid survived.",
+        "cooperative": "The cooperative pass strengthened B with a conformance test suite that checks each engine against the documented law, and strengthened C by including the manifest schemas in the merged vocabulary. Both improvements are kept in those options as written.",
+        "adversarial": "The adversarial pass attacked A with substrate bugs propagating everywhere and the refactor disturbing erasure. The golden suite pins byte-identical output and phase A changes no surface, so A remains the recommendation."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-06T17:09:41.961Z"
+    },
+    {
+      "id": "D-AUTHORITY-ROOTS1",
+      "cardId": "c0pp8jfr",
+      "group": "syntax",
+      "title": "Heal the effect root table: FFI languages become leaves",
+      "gist": "What the closed list of effect roots actually is.",
+      "lesson": "D-EFF4 ratified ten closed effect roots. Since then, sixteen language-binding ballots each added a root (Go, Java, Lua, and so on), plus Browser and Secret, without amending D-EFF4. The code now has twenty-eight roots, the spec and the E1221 explain text still say ten, and D-FFI-PY1 promised a Py root that was never added. This choice picks the true closed list and where foreign-language calls live in it.",
+      "explainer": "",
+      "story": "Tom reads the Jet book, learns the ten effect roots, and audits a teammate’s service. He finds =[Java]=> in a signature. No documentation he owns mentions a Java effect, and jet explain tells him the vocabulary has ten roots. He no longer trusts the list he learned.",
+      "inWild": "// Compiles today with no spec text behind it:\nfn score(row: Row) =[Java]=> Float {\n    jvm.call(\"Scorer\", \"score\", row)\n}\n// jet explain E1221 -> \"...effect names from the ten-effect\n// vocabulary (D-EFF4)...\" — the shipped doc contradicts the compiler.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "One FFI root, languages as leaves",
+          "detail": "The closed table becomes thirteen roots: the ratified ten plus FFI, Browser, and Secret. The sixteen language roots become leaves: FFI.Go, FFI.Java, FFI.Lua, and the promised FFI.Py and FFI.Octave arrive as leaves too. A bound like =[!FFI]=> forbids all foreign calls at once. Existing rows migrate in one pass and the old flat spellings are deleted.",
+          "technical": "Amends D-EFF4/D-EFF5 (root list) and the effect clause of each D-FFI-*1 ruling. Honors D-FFI-PY1 and D-FFI-OCTAVE1 by delivering their effects as leaves. Ancestor subsumption (D-EFFTREE1) already gives FFI covering FFI.Go. E1221 text and the stale Effects.rs comments are corrected in the same change.",
+          "code": "fn score(row: Row) =[FFI.Java]=> Float { ... }\nfn pure_math(x: Float) =[!FFI]=> Float { ... }  // no foreign calls, ever\n// pkg.jet: effects: { deny: [FFI] }            // whole package, one line"
+        },
+        {
+          "key": "B",
+          "name": "Bless the flat thirty",
+          "detail": "Keep every language as its own root and add the missing Py and Octave. Amend D-EFF4/5 and the explain text to list thirty roots. No migration. The teaching story grows from ten words to thirty, and forbidding all foreign calls takes sixteen prohibitions.",
+          "technical": "Facts.rs becomes the ratified list verbatim. D-EFF4/5 amended to thirty. No row changes anywhere.",
+          "code": "// Forbidding foreign calls under a flat table:\nfn pure_math(x: Float)\n  =[!Go, !Java, !DotNet, !Fortran, !Cobol, !Tcl, !Lua, !Ada,\n    !Pascal, !Dart, !PowerShell, !Perl, !Ruby, !Php, !R, !Com]=> Float"
+        },
+        {
+          "key": "C",
+          "name": "Ten teaching roots, system roots documented apart",
+          "detail": "Keep the ratified ten as the beginner vocabulary. Everything else (language roots, Browser, Secret) becomes a documented system register that ordinary teaching never mentions. Code keeps compiling as today. Two registers of the same kind of name is a second vocabulary wearing a disguise.",
+          "technical": "No code change. Spec gains a system-roots appendix. E1221 text says ten user roots plus system roots.",
+          "code": "// Same program, two documentation registers:\nfn score(row: Row) =[Java]=> Float { ... }  // \"system root\", appendix only\nfn save(p: Path) =[FS]=> Unit { ... }       // \"teaching root\", chapter 3"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "WASI",
+          "note": "Preview 1 shipped a flat rights bitmask per handle. The grain was wrong and unwinding it took a full redesign. Grant shape calcifies early.",
+          "code": "// preview1: fd_rights: u64 bitmask -> preview2: typed interfaces"
+        },
+        {
+          "lang": "Android",
+          "note": "STORAGE bundled all files under one grant. Narrowing it later (Scoped Storage) took years of migrations.",
+          "code": "<uses-permission android:name=\"READ_EXTERNAL_STORAGE\"/>"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "One FFI root restores a small closed list that teaches in a breath, makes forbid-all-foreign-calls one word, and honors the two rulings whose promised roots never shipped. The tree already supports it: leaves and subsumption are ratified and built.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Thirty flat roots make the closed set a memorization exercise and a sixteen-term prohibition row the price of purity from foreign code."
+          },
+          {
+            "key": "C",
+            "reason": "Two registers of one vocabulary is drift by design. The audit that found this problem started from exactly such a split."
+          }
+        ],
+        "tradeoff": "Existing =[Go]=> style rows migrate to =[FFI.Go]=> in one repository-wide pass. That is churn without behavior change, accepted because the flat spellings were never ratified as a set."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared the leaf collapse against blessing the flat table and recommended the collapse for teachability and single-word prohibition.",
+        "boilOcean": "The breadth pass added the two-register option and tested folding all foreign-language effects into Exec. The Exec fold was rejected because a JVM call and spawning a process are different risks an auditor must tell apart.",
+        "hybrid": "The hybrid pass tried A with Browser and Secret also demoted to leaves under IO or a new Data root. Neither has a natural parent among the ten, so the hybrid was rejected and both stay roots.",
+        "cooperative": "The cooperative pass strengthened B with its real virtue: a flat table has no hierarchy rules and never surprises anyone with subsumption. C gained its clearest framing as a documentation-only fix.",
+        "adversarial": "The adversarial pass asked whether FFI subsumption hides which language a dependency uses, and it does not: exact leaves stay in rows, budgets, and the ledger. The migration was checked against the examples and formatter round-trip traps, so A holds."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-06T17:09:42.276Z"
+    },
+    {
+      "id": "D-AUTHORITY-MEM1",
+      "cardId": "c0pp8jfr",
+      "group": "safety",
+      "title": "Memory floors ride the rights tree",
+      "gist": "Whether memory floors and effect rules share one ladder.",
+      "lesson": "Jet has two tighten-only ladders. The effect system checks rows and #Caps regions on one lattice. The #Policy ladder checks memory floors (no_alloc, zero_rc, arena_bounded, gc) and the unsafe mode on a second lattice with its own error code. Both enforce the same rule: inner scopes may only tighten. This choice decides whether the memory floors become denials on the rights tree (new Mem leaves) or keep their separate engine.",
+      "explainer": "",
+      "story": "Ana writes firmware for a flight-data recorder. Certification asks: prove this package never allocates after boot and never touches the network. Today those are two proofs from two systems with two vocabularies. She wants one proof from one system.",
+      "inWild": "// Today: one goal, two ladders, two error families\n#Policy(no_alloc)                 // ladder 1 -> E0355 on violation\nfn isr_tick() =[!Net]=> Unit {    // ladder 2 -> E0749 on violation\n    buffer.push_fixed(sample())\n}\n// pkg.jet: policy: .{ no_alloc: true }   effects: { deny: [Net] }",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "One ladder, spellings kept",
+          "detail": "Mem.Alloc, Mem.Rc, and Mem.Gc become rights on the tree. #Policy(no_alloc) keeps its exact spelling and meaning but now records a Mem.Alloc denial on the same ladder #Caps uses. Nothing users type changes, diagnostics keep their codes, and a certification audit reads one ledger.",
+          "technical": "Amends D-MEM-FACTS1=B in substrate only: same facts, same transitivity, expressed as tree denials. PolicyKey memory variants retire; the unsafe mode stays a policy value (it is a gate mode, not a right). arena_bounded(N) carries its limit as gate data. E0355 remains the diagnostic for policy-shape errors.",
+          "code": "#Policy(no_alloc)                  // unchanged spelling\nfn isr_tick() =[!Net]=> Unit { ... }\n// jet inspect authority now shows one column:\n//   scope isr_tick: denies Mem.Alloc (policy), denies Net (row)"
+        },
+        {
+          "key": "B",
+          "name": "Full respell as effect denials",
+          "detail": "Retire the memory keys from #Policy and write floors as prohibitions: =[!Mem.Alloc]=> on functions, deny: [Mem.Alloc] in manifests. One mechanism and one spelling, but the friendly floor words (no_alloc) disappear and arena limits need a new home.",
+          "technical": "Amends D-MEM-FACTS1 and D-POLICY-WORD1. #Policy keeps only non-memory arguments. arena_bounded needs a parameterized-denial form the row grammar does not have today.",
+          "code": "fn isr_tick() =[!Net, !Mem.Alloc]=> Unit { ... }\n// pkg.jet: effects: { deny: [Mem.Alloc, Net] }\n// open question this option must answer: arena_bounded(65536) as a row?"
+        },
+        {
+          "key": "C",
+          "name": "Two ladders stay",
+          "detail": "Decline. Memory floors keep their own lattice and error family. The certification story stays split and the substrate keeps two implementations of the tighten rule.",
+          "code": "// Unchanged: two proofs, two vocabularies, two inspect surfaces\n#Policy(no_alloc)\nfn isr_tick() =[!Net]=> Unit { ... }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Pony",
+          "note": "Fused all of aliasing and authority into one six-mode lattice that every beginner faces. Lesson taken: fold the substrate, not the beginner surface — the floor words stay.",
+          "code": "iso | val | ref | box | trn | tag  // mandatory vocabulary, day one"
+        },
+        {
+          "lang": "Rust",
+          "note": "no_std and #![forbid(unsafe_code)] are separate systems from the borrow checker. Certification audits there also stitch multiple proofs.",
+          "code": "#![no_std] #![forbid(unsafe_code)]"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "One ladder gives embedded and certification work a single proof and deletes a duplicate lattice, while keeping the friendly floor spellings beginners and experts already ratified. The unsafe mode stays a gate setting, which keeps the model honest.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It trades the ratified, readable floor words for row noise and has no good answer for parameterized floors like arena_bounded."
+          },
+          {
+            "key": "C",
+            "reason": "It keeps two implementations of one rule and a permanently split audit story for exactly the users who audit hardest."
+          }
+        ],
+        "tradeoff": "Mem joins the root table, so the closed list grows by one root. That is acceptable because the alternative is a whole parallel lattice for three names."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared substrate fold, full respell, and status quo, recommending the fold because it unifies proof without touching ratified spellings.",
+        "boilOcean": "The breadth pass tested an Unsafe root and per-type floors such as no_alloc on a struct. Unsafe stays a gate with modes rather than a held right, and per-type floors are not this decision, so both were folded out.",
+        "hybrid": "The hybrid pass tried A plus optional row spellings (=[!Mem.Alloc]=> as sugar for the same denial). That reintroduces two spellings of one mechanism, against I8, and was dropped.",
+        "cooperative": "The cooperative pass strengthened B with a concrete manifest form for limits and strengthened C by naming its real virtue: zero migration risk to certified code. Both are reflected in the option details.",
+        "adversarial": "The adversarial pass attacked A on arena_bounded, since a limit is not a set-membership fact; the denial carries its limit as gate data, as grants entries already carry per-dependency data. Tighten-only (D-PACKAGE-POLICY-SCOPE1) survives unchanged as the ladder law, so A holds."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-06T17:09:42.588Z"
+    },
+    {
+      "id": "D-AUTHORITY-NAME1",
+      "cardId": "c0pp8jfr",
+      "group": "syntax",
+      "title": "Name the authority value that crosses boundaries",
+      "gist": "What the carried rights-set value is called, and whether it is one type.",
+      "lesson": "When rights cross a boundary the compiler cannot see past — into a spawned process, a plugin, or a session — they must travel as a value. Jet has four designs for that value today: the unnameable #Grant handle, the ratified-but-unbuilt ProcessAuthority, the plugin capability list, and the REPL grant copy. The type name Capability is currently accepted anywhere a type is legal but can never be constructed. This choice picks one type and its name.",
+      "explainer": "",
+      "story": "Priya builds a CI agent in Jet. She spawns a build in a workspace, hands a plugin its rights, and opens a debug session. Three handoffs, and today each would use a different type with a different shape. She wants to write one thing three times.",
+      "inWild": "// Ratified direction (D-AGENT-EXEC1/2), not yet built:\nfn run_build() =[Exec]=> ProcessReceipt {\n    spec :: process.workspace()     // read-only repo, no net, no secrets\n    process.run(\"jet build\", spec)\n}\n// Meanwhile, live today:\nfn f(x: Capability) => Int = 0     // accepted, then a dead end:\n// every call is E0112 and no value of Capability can ever exist",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Authority — one Prelude type",
+          "detail": "One type named Authority carries a rights set across every boundary. The #Grant handle has this type, process.workspace() returns it, plugins receive it, sessions hold it. It can only be narrowed, never widened, and it never participates in dispatch. The dead-end phantom is fixed by making the real type exist.",
+          "technical": "Amends D-AGENT-EXEC2 naming: ProcessAuthority becomes Authority (ProcessPlan and ProcessReceipt stay). Reopens the type-unification audit’s post-v1 note on typed handles, value form only. Facts stay facts (D-FACTMODEL1): Authority is ordinary data, no type selection, no dispatch. Narrowing is the only operation family (with/without). Construction keeps the ratified PascalCase convention from D-AGENT-EXEC2: Authority.workspace(...), not a lowercase namespace call.",
+          "code": "a :: Authority.workspace()         // proposed\na2 :: a.with(FS.Write, \"out/\")      // extend only within holds; else E0712\nprocess.run(\"jet build\", a2)\nplugin.load(\"lint\", a2.without(FS.Write))"
+        },
+        {
+          "key": "B",
+          "name": "Caps — match the marker",
+          "detail": "Same one-type design, named Caps to rhyme with #Caps(...). Shortest name, already half-taught by the marker. The rhyme cuts both ways: #Caps narrows a static scope while the value crosses runtime boundaries, and one word for both may blur that line.",
+          "technical": "Identical semantics to option A. Amends D-AGENT-EXEC2 naming the same way.",
+          "code": "c :: Caps.workspace()\nprocess.run(\"jet build\", c.with(FS.Write, \"out/\"))"
+        },
+        {
+          "key": "C",
+          "name": "Clearance — plain-word metaphor",
+          "detail": "Same one-type design, named Clearance: what you have been cleared to do. Reads naturally in security prose and to newcomers. It is a fresh word with no anchor in existing Jet surface, so it adds a vocabulary item instead of reusing one.",
+          "technical": "Identical semantics to option A.",
+          "code": "c :: Clearance.workspace()\nprocess.run(\"jet build\", c.with(FS.Write, \"out/\"))"
+        },
+        {
+          "key": "D",
+          "name": "Bespoke types per boundary",
+          "detail": "Honor D-AGENT-EXEC2 exactly as ratified: ProcessAuthority for processes, plugin capabilities for plugins, session grants for the REPL, and the #Grant handle stays unnameable. Each boundary gets a type shaped for its job. Three shapes to learn, and narrowing rules are re-stated per type.",
+          "technical": "No amendment. The phantom-type regression is fixed separately by scoping marker-argument names to marker positions (card #1501).",
+          "code": "spec :: process.workspace()          // ProcessAuthority\nplugin.load(\"lint\", PluginCaps.read_only())\n// #Grant handle: still unnameable, still fine for block scope"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Fuchsia",
+          "note": "One handle type with a rights mask; duplication may only reduce rights. One narrowing rule serves the whole OS.",
+          "code": "zx_handle_duplicate(h, ZX_RIGHT_READ, &out)  // subset only"
+        },
+        {
+          "lang": "Austral",
+          "note": "Linear capability values threaded from main, no ambient authority anywhere. Proof the value form works in a language, unproven at ecosystem scale.",
+          "code": "let f: FileCap := open(root, \"log.txt\");"
+        },
+        {
+          "lang": "WASI",
+          "note": "Everything the guest may touch is a handle it was explicitly given at instantiation.",
+          "code": "// no ambient open(\"/etc/passwd\") inside the sandbox"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "One type with one narrowing rule serves processes, plugins, and sessions alike, lands the ratified agent design as an instance, and turns the Capability dead end into a real, teachable thing. Authority is the plainest word for exactly what the value is.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Caps names the static marker; reusing it for the runtime value blurs the static/boundary line the model works hard to keep sharp."
+          },
+          {
+            "key": "C",
+            "reason": "Clearance is a good word with no anchor: it adds vocabulary where Authority reuses the concept the whole model is named for."
+          },
+          {
+            "key": "D",
+            "reason": "Three bespoke shapes re-state the same narrowing law three times and leave the phantom type a permanent trap to re-fix."
+          }
+        ],
+        "tradeoff": "Renaming ProcessAuthority amends a ratified naming ruling before any code exists. That is the cheapest possible moment to amend it."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft posed one-type-versus-bespoke and a name menu, recommending one type named Authority.",
+        "boilOcean": "The breadth pass weighed Warrant, Permit, and Leash, folding them into C as the best fresh-word representative. A generic parameterized form like Authority[FS.Read] re-enters the withdrawn typed-handle design and touches the facts-never-dispatch wall, so it stays out.",
+        "hybrid": "The hybrid pass tried one type with per-boundary aliases (ProcessAuthority = Authority). Aliases are exactly the parallel-spelling drift greenfield law forbids, so the hybrid was dropped.",
+        "cooperative": "The cooperative pass gave D its best case: boundary-shaped types can carry boundary-only fields without polluting a shared type. The answer, kept in A’s technical notes, is that boundary data rides the constructor rather than the type.",
+        "adversarial": "The adversarial pass attacked A with dispatch creep and with revocation. Authority is data and never a dispatch input, and scope end already revokes while boundary values die with their boundary, so A holds."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-06T17:09:42.901Z"
+    },
+    {
+      "id": "D-AUTHORITY-MANIFEST1",
+      "cardId": "c0pp8jfr",
+      "group": "tooling",
+      "title": "One manifest schema for what a package may do and delegate",
+      "gist": "How pkg.jet spells every grant the package makes.",
+      "lesson": "Four separate schemas in pkg.jet answer authority questions: effects allow/deny, per-dependency grants, trust prompting (allow/prompt/deny), and provider allow/deny for package sources. Each has its own parser, its own malformed-block error, and its own documentation. They are one kind of record: this subject holds these rights, decided by this default. This choice decides whether the manifest keeps four spellings or gets one.",
+      "explainer": "",
+      "story": "Sam reviews a new dependency for work. He opens pkg.jet to answer: what does this package let its dependencies do? The answer is spread over effects:, grants:, policy.trust, and policy.providers, each shaped differently. He wants one block to read top to bottom.",
+      "inWild": "// Today: four schemas, four shapes, one question\neffects: { allow: [Net, DB.Read], deny: [Exec] }\ngrants: { \"image-codec\": [FS.Read] }\npolicy: .{\n  trust: { default: prompt, ci: deny, services: { stripe: allow } },\n  providers: { nix: { registry: \"nixpkgs\", deny: [\"openssl-1.0\"] } }\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "One authority block",
+          "detail": "A single authority: block holds every grant the package makes: its own bound, per-dependency grants, trust defaults, and provider bounds. Old keys are migrated in one pass and deleted. A reviewer reads one block; the lockfile and the ledger mirror its shape.",
+          "technical": "Amends D-EFFBUDGET1 (key spelling only; E1220/E1221 semantics unchanged) and D-JPK-POLICYSURFACE1/D-JPK-GRANTSCHEMA1 (trust and providers relocate from policy:). policy: keeps floors and unsafe mode. One parser, one malformed-block diagnostic family.",
+          "code": "authority: .{\n  holds: { allow: [Net, DB.Read], deny: [Exec] },\n  grants: { \"image-codec\": [FS.Read] },\n  trust: { default: prompt, ci: deny, services: { stripe: allow } },\n  providers: { nix: { registry: \"nixpkgs\", deny: [\"openssl-1.0\"] } },\n}"
+        },
+        {
+          "key": "B",
+          "name": "Keep keys, share the schema",
+          "detail": "Every current key stays where it is, but all four validate through one shared record shape and report through one diagnostic family. Reviewers still hunt four places; tooling and docs get one model underneath.",
+          "technical": "One internal grant-record type; E1221 and the two Bad*Policy manifest errors converge on it. No manifest migration.",
+          "code": "// Unchanged surface, one implementation:\neffects: { allow: [Net, DB.Read], deny: [Exec] }\ngrants: { \"image-codec\": [FS.Read] }\npolicy: .{ trust: { default: prompt }, providers: { ... } }"
+        },
+        {
+          "key": "C",
+          "name": "Four schemas stay",
+          "detail": "Decline. Each block keeps its own parser and errors. The next authority surface (agent workspaces, jetos app grants) adds a fifth shape.",
+          "code": "// Status quo, plus the fifth block that is already coming:\n// agents: { workspace: ..., allow: ... }   // D-AGENT-EXEC1 will need a home"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Deno",
+          "note": "All grants in one place (flags) is the readable part of its design, even where the grain is wrong.",
+          "code": "deno run --allow-net=api.stripe.com --allow-read=./data app.ts"
+        },
+        {
+          "lang": "Android",
+          "note": "One manifest block for all permissions made review a habit; scattered grant surfaces never became one.",
+          "code": "<uses-permission .../>  // one place reviewers actually check"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "One block makes package review a top-to-bottom read, gives the coming agent and jetos grants a ratified home instead of a fifth schema, and lets the lockfile and ledger mirror one shape.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It fixes the plumbing and leaves the reader’s problem: four places to check before trusting a package."
+          },
+          {
+            "key": "C",
+            "reason": "It guarantees a fifth shape the moment agent grants land, which is the pattern that produced this ballot."
+          }
+        ],
+        "tradeoff": "Every in-repo manifest migrates once and external examples in docs are rewritten. Accepted: greenfield law prefers one canonical current form over parallel spellings."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared one merged block, shared-schema-hidden-keys, and status quo, recommending the merged block for reviewability.",
+        "boilOcean": "The breadth pass tested a separate authority.jet file and inline per-dependency grant blocks. The separate file splits the manifest story and was rejected, and inline grants were folded into A as formatting freedom rather than schema.",
+        "hybrid": "The hybrid pass tried A for effects and grants but leaving trust in policy:. That keeps two homes for allow/prompt/deny decisions and died on its own test: where would a reviewer look for service trust?",
+        "cooperative": "The cooperative pass strengthened B with the observation that it is zero-migration and fully invisible to users, now stated plainly in its detail. C gained its honest framing: it is the default outcome of doing nothing.",
+        "adversarial": "The adversarial pass confirmed that moving trust out of policy: amends the ratified one-policy-namespace ruling, and the ballot names that amendment rather than hiding it. Floors stay in policy: so tighten-only stays meaningful, and A holds."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-06T17:09:43.217Z"
+    },
+    {
+      "id": "D-AUTHORITY-GATE1",
+      "cardId": "c0pp8jfr",
+      "group": "safety",
+      "title": "One audit ledger for every authority gate",
+      "gist": "Where the record of every granted exception lives.",
+      "lesson": "A gate is any written widening of authority: an #Unsafe reason, a per-dependency grants: entry, an --allow flag, a trust grant. The ratified lint ruling already states the law for one gate kind: every bypass is spelled at the site and lands in the audit record. Today each gate kind keeps its own record: unsafe inspection, the lockfile, the trust file, session flags. This choice decides whether those records become one ledger with one reader.",
+      "explainer": "",
+      "story": "An auditor gives Maya’s billing service two hours. Their first question: list every exception this system granted itself. Today that answer is assembled from jet unsafe, the lockfile diff, ~/.jet/trust, and shell history. She wants one command.",
+      "inWild": "$ jet inspect authority              # proposed\ngates:\n  src/dma.jet:41   #Unsafe \"MMIO: board manual §4.2\"  obligations: discharged\n  pkg.jet          grants image-codec: FS.Read        lockfile: recorded\n  build            --allow-net (jet build, 2026-08-06)\n  user             trust grant build ./vendor-tool (2026-08-02)",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "One ledger, one reader",
+          "detail": "Every gate kind records to one ledger and jet inspect authority reads it all: unsafe gates with obligation status, dependency grants, build and session flags, trust grants. The lint ruling’s bypass law becomes the stated law of every gate. Existing per-kind views keep working as filtered views.",
+          "technical": "Generalizes D-LINTPOLICY1’s recording clause to all gates. Sources stay where they are (source markers, lockfile, trust store); the ledger is the merged, provenance-keeping read model. No new write surface.",
+          "code": "$ jet inspect authority --scope package\n$ jet inspect authority --kind unsafe     # today's jet unsafe, preserved\n$ jet inspect authority --json            # CI diffs the ledger"
+        },
+        {
+          "key": "B",
+          "name": "Ledger in artifacts only",
+          "detail": "The merged record exists but only as a build artifact (lockfile section and receipts), with no new command. CI can diff it; humans assemble the story from files, as today.",
+          "technical": "Same merged record, serialized into the lock and receipts. No CLI addition.",
+          "code": "# CI-only consumption:\n$ git diff jet.lock   # shows new grants and new unsafe gates as diff lines"
+        },
+        {
+          "key": "C",
+          "name": "Per-kind records stay",
+          "detail": "Decline. Unsafe, budget, trust, and session records stay separate with separate readers. Nothing new to learn, and the auditor’s question stays a four-source scavenger hunt.",
+          "code": "$ jet unsafe && git diff jet.lock && cat ~/.jet/trust && history | grep allow"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Unsafe hygiene is culture plus scattered tools (Miri, cargo-geiger). No single ledger; audits re-assemble it every time.",
+          "code": "$ cargo geiger   # counts unsafe, one dimension only"
+        },
+        {
+          "lang": "Deno",
+          "note": "Grants exist only as the command line; nothing records what a past run was allowed to do.",
+          "code": "$ history | grep -- --allow-   # the \"audit trail\""
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The model’s law has two halves and this is the second one: widenings are not only written at the site but readable in one place. One reader turns a scavenger hunt into a command and makes the exception list diffable in CI.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Artifacts serve machines. The human question — what did we grant ourselves — deserves a first-class answer."
+          },
+          {
+            "key": "C",
+            "reason": "Four separate records is how exceptions hide; the audit that motivated this found the trust store, budget, and unsafe views already disagreeing in vocabulary."
+          }
+        ],
+        "tradeoff": "The ledger merges records of different lifetimes (source, lock, machine, session), so provenance labels must be carried honestly. Accepted: provenance is exactly what an auditor needs anyway."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared one reader, artifact-only, and status quo, recommending the reader as the second half of the bypass law.",
+        "boilOcean": "The breadth pass tested failing builds on unacknowledged new gates and a web view of the ledger. Enforcement is a later lint-style policy layer and the web view is presentation, so both folded out of this decision.",
+        "hybrid": "The hybrid pass combined A and B: the reader consumes the same merged record the artifacts carry, so B is A’s storage half rather than a rival. The options were rewritten to make that explicit.",
+        "cooperative": "The cooperative pass gave B its best case (zero new surface, CI-first teams already live in diffs) and C its honest one (nothing new to learn). Both survive in their details.",
+        "adversarial": "The adversarial pass attacked A on privacy and staleness. Unsafe reasons stay package-local unless published and session entries carry their lifetime label, so A holds."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-06T17:09:43.541Z"
+    },
+    {
+      "id": "D-AUTHORITY-WORD1",
+      "cardId": "c0pp8jfr",
+      "group": "syntax",
+      "title": "Retire the word capability from surfaces or reserve it for one thing",
+      "gist": "What the word capability is allowed to mean in Jet.",
+      "lesson": "The word capability means six unrelated things here: the unnameable grant-handle type, a marker-argument enum, borrow-diagnostic wording, the product claim manifest, the capability ledger card, and the remote-builder capability model. A word that means everything explains nothing, and two of the six sit in user-facing diagnostics. This choice picks one meaning or retires the word from surfaces.",
+      "explainer": "",
+      "story": "Leo hits two errors in one afternoon. One says a value needs a write capability (borrowing). The other says his #Grant handle, a Capability, escaped its region (authority). Same word, unrelated systems. He searches the docs for capability and gets both chapters interleaved.",
+      "inWild": "// Same word, two shipped diagnostic families:\n// E07xx: \"the loop takes the write capability (&) for items\"   <- borrowing\n// E0711: \"the Capability handle escapes the #Grant region\"     <- authority\n// plus: capability-claim-manifest.json, card #1499 \"Capability ledger\",\n// card #422 \"Remote builders: capability model\"",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Retire from surfaces",
+          "detail": "No user-facing surface uses the word capability. Borrow diagnostics say write access. The authority value takes whatever name D-AUTHORITY-NAME1 picks. The product claim manifest becomes feature claims; internal cards rename at next touch. Docs may still say capability-based when describing the design tradition.",
+          "technical": "Diagnostic copy is snapshot-tested product text (I4): the &/^ wording change re-blesses those snapshots. No grammar change; no code identifier named Capability remains reachable by users.",
+          "code": "// After: one afternoon, two clear errors\n// \"the loop takes write access (&) for items\"\n// \"the Authority handle escapes the #Grant region\"  (name per NAME1)"
+        },
+        {
+          "key": "B",
+          "name": "Reserve for the authority value",
+          "detail": "Capability becomes the authority value’s name (overriding the NAME1 menu) and every other use renames. The industry term lands on exactly the industry concept. The borrow wording still changes, and the word’s six-way history keeps echoing in old docs and searches.",
+          "technical": "Binds NAME1 to the name Capability. Same renames elsewhere as option A.",
+          "code": "c :: capability.workspace()\nprocess.run(\"jet build\", c.with(FS.Write, \"out/\"))"
+        },
+        {
+          "key": "C",
+          "name": "Leave the word alone",
+          "detail": "Decline. All six meanings stay. Cheapest today; the docs search problem, the interleaved chapters, and the double-meaning diagnostics remain.",
+          "code": "// Leo's afternoon stays as-is: two systems, one word."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Pony",
+          "note": "Called its aliasing modes reference capabilities; the overlap with object-capability security confuses newcomers to both fields to this day.",
+          "code": "iso, val, ref  // \"capabilities\" that are about aliasing, not authority"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Retiring the word ends the collision at its root: each concept gets a word that means only itself, and the borrow diagnostics get plainer at the same time. Access is what & takes; authority is what a scope holds; neither needs the loaded word.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It rescues the word by spending it on one meaning while five renames happen anyway, and it preempts the NAME1 menu from inside a different ballot."
+          },
+          {
+            "key": "C",
+            "reason": "Six meanings in one project is a documentation and teaching tax that compounds with every new page."
+          }
+        ],
+        "tradeoff": "Searches and older external writing that say capability will not match surface text. Accepted: docs keep the term as a described tradition, so discovery survives."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft posed retire, reserve, and decline, recommending retire because both shipped diagnostic uses read better without the word.",
+        "boilOcean": "The breadth pass tested namespaced uses such as borrow capability versus authority capability, and rejected them because qualified jargon is still jargon in an error message. Product-manifest rename wording folded into A as detail.",
+        "hybrid": "The hybrid pass tested retiring the word everywhere except documentation titles. That is option A as written, since surfaces retire the word while prose may describe the tradition, so no separate option was needed.",
+        "cooperative": "The cooperative pass strengthened B: if the industry word must live somewhere, the authority value is its one honest home, and the option now says so plainly. C’s cost was restated without exaggeration.",
+        "adversarial": "The adversarial pass attacked A on discoverability for newcomers who search the word capability, and on snapshot churn. Discovery survives through descriptive prose and re-blessing snapshots is the normal cost of copy changes, so A holds."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-06T17:09:43.858Z"
+    },
+    {
+      "id": "D-CONC-UNIT1",
+      "cardId": "c0vzadss",
+      "group": "safety",
+      "title": "Concurrency re-founded on the existing type machinery",
+      "gist": "Whether the compiler tracks concurrent work with the type machinery it already has.",
+      "lesson": "Jet tracks three facts about concurrent work: what state a task is in, what must still be done with it, and where its data may travel. Today each fact has private one-off code. The same three facts already have general machines: typestate, single-use obligations, and crossing checks. The unjoined-task check is a line-for-line copy of the single-use check. Protocols already compile onto typestate plus obligations. This choice decides whether concurrency moves onto those machines internally, with no surface change.",
+      "explainer": "",
+      "story": "Maya drops a task handle in one function and a protocol handle in another. She gets a warning for the first and an error for the second, in different words. Both mistakes are the same: work she started was silently thrown away. She asks why the language treats them as different things.",
+      "inWild": "fn sync_profiles(user: User) {\n    h :: tasks.spawn(() => push_profile(user))\n    // forgot h.join() — today: warning L1101, checked by one pass\n}\n\nfn pay(h: ^Payment.Client) {\n    r :: h.Charge(500) ?? panic(\"refused\")\n    // r dropped mid-protocol — today: error E0140, checked by a twin pass\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "One substrate for all three facts",
+          "detail": "Task lifecycles become typestate rows. The join duty becomes the same obligation every single-use value carries. The five separate send-safety checks become one crossing plane. Every concurrency error then speaks one language. Nothing on the page changes.",
+          "technical": "Phase A deletes task_lint_span, type_holds_task_handle, and PendingTaskSpawn.consumed in favor of the State.rs automaton and the D-LIN1 obligation pass. Sendability registers in FactRegistry as a plane. All knowledge erases before codegen: I3 and I9 are untouched, and all existing goldens stay green.",
+          "code": "// Same program, same output. The compiler now proves, on one engine:\n//   state:  h is Running\n//   duty:   h must be joined, consumed, or detached\n//   reach:  the closure's captures may cross to a worker\nh :: tasks.spawn(() => push_profile(user))\nh.join()"
+        },
+        {
+          "key": "B",
+          "name": "State and duty only",
+          "detail": "Merge the lifecycle and join tracking onto typestate and obligations, but leave the five send-safety checkers separate. The twin passes merge. The crossing question keeps five vocabularies, and each new parallel surface still writes its own checker.",
+          "technical": "Same phase-A deletions as option A, minus the FactRegistry plane. E1101, E1102, E1111, E1130, and the cell rules keep their own provers.",
+          "code": "// Dropped-task and dropped-protocol errors unify...\nh :: tasks.spawn(() => push_profile(user))\n// ...but this closure still gets three different rejections\n// from tasks.spawn, para_map, and a kernel."
+        },
+        {
+          "key": "C",
+          "name": "Keep the separate machines",
+          "detail": "Status quo. Each concurrency feature keeps its private checker. The twin passes stay duplicated, and each new feature builds checker number six. The two copies have already drifted once: one is a warning, the other an error.",
+          "code": "h :: tasks.spawn(() => push_profile(user))\n// stays L1101 (warning) while the protocol twin stays E0140 (error)"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Send and Sync prove crossing safety once, as knowledge on the type, and every API reuses them. Rust never unified the join duty, so dropped handles silently detach.",
+          "code": "fn spawn<T: Send>(f: impl FnOnce() -> T + Send) -> JoinHandle<T>"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The duplicate passes prove the general machines already fit. One substrate makes every future concurrency feature a set of table rows instead of a new checker, and every error teaches the same three words.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It leaves five copies of the crossing question, so the next parallel surface still hand-rolls checker number six and users still meet three vocabularies."
+          },
+          {
+            "key": "C",
+            "reason": "The duplicated passes have already drifted once into warning versus error, and every unbuilt ratified feature would deepen the divergence."
+          }
+        ],
+        "tradeoff": "A large internal migration must land with every test and golden held green. That is accepted: effort is expendable, and the outcome is one engine instead of ten."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared full adoption, a partial merge, and the status quo. It recommended full adoption because the twin passes show the machines already fit.",
+        "boilOcean": "The breadth review also tested a brand-new unified concurrency checker and a runtime-tag approach. The first is option C with more code, and the second breaks zero-cost erasure, so both were folded away.",
+        "hybrid": "A hybrid that merged state and duty now but staged the crossing merge later was tested. It re-creates the seam it deletes, so it survives only as option B.",
+        "cooperative": "Option C was strengthened: separate machines let one feature evolve alone without cross-plane review. That freedom is what produced the warning-versus-error drift, so it stands but does not win.",
+        "adversarial": "The attack targeted churn risk to shipped diagnostics and typestate fit for group lifecycles. Phase A holds goldens green and the group automaton has two states, so the recommendation survives."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-06T17:17:27.732Z"
+    },
+    {
+      "id": "D-CONC-JOIN1",
+      "cardId": "c0vzadss",
+      "group": "safety",
+      "title": "What happens to a dropped task handle",
+      "gist": "Whether dropping a task without joining it is an error, an automatic join, or a warning.",
+      "lesson": "A spawned task returns a handle. Joining waits for the task and collects its result. Dropping the handle today only prints warning L1101, and the program may exit while the task still runs. Jet already has a hard rule for values that carry unfinished work: a single-use value must be consumed, error E0140. That error's own text names the unjoined task as its example. This choice amends the shipped L1101 rule and decides which behavior becomes law.",
+      "explainer": "",
+      "story": "Ben spawns a task that writes a report to disk, prints a status line, and returns. The warning scrolls past in test output. In production the process exits first, and the report is half-written.",
+      "inWild": "fn export(report: Report) {\n    h :: tasks.spawn(() => write_report(report))\n    print(\"export started\")\n}   // h dropped — today only L1101; the write may never finish",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Dropping a task is an error",
+          "detail": "The join duty becomes the same obligation every single-use value carries. Dropping a handle fails to compile. The fix text names the three exits: join it, take its outcome, or call detach for fire-and-forget. No work is ever lost silently.",
+          "technical": "Extends D-LIN1 to Task<T> and the list twins from D-VERDICT-1323-1. Group children joined by g.all, race, or any discharge at those calls, as protocol handles already do. Amends the L1101 behavior documented in the spec's task section.",
+          "code": "h :: tasks.spawn(() => write_report(report))\nprint(\"export started\")\n// error: `h` must be used exactly once, but it is never used\n// fix: call .join(), take .outcome(), or .detach() for fire-and-forget"
+        },
+        {
+          "key": "B",
+          "name": "Scope exit joins the task",
+          "detail": "Dropping a handle means the enclosing scope waits for the task at its end. No error, no lost work. The cost: a slow task turns a quick function into a stall with no mark on the page, and readers cannot see the wait.",
+          "technical": "Handle drop lowers to an implicit join at scope exit, after cleanups. detach remains the only fire-and-forget spelling. Panics from the child surface at the scope end.",
+          "code": "fn export(report: Report) {\n    h :: tasks.spawn(() => write_report(report))\n    print(\"export started\")\n}   // compiles; the function silently blocks here until the write ends"
+        },
+        {
+          "key": "C",
+          "name": "Keep the warning",
+          "detail": "Status quo. The warning stays advisory, and a dropped handle still races program exit. The same mistake on a protocol handle stays a hard error, so the two rules keep teaching opposite lessons.",
+          "code": "h :: tasks.spawn(() => write_report(report))\n// warning L1101: task `h` is dropped without `.join()`\n// the program may still exit before the write finishes"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "A dropped JoinHandle silently detaches, and the must-use lint is ignorable. This is a documented community regret.",
+          "code": "tokio::spawn(async { write_report(report).await }); // dropped, detached, panic swallowed"
+        },
+        {
+          "lang": "Python Trio",
+          "note": "Spawning is only possible inside a nursery that joins its children, so lost work cannot be written at all.",
+          "code": "async with trio.open_nursery() as n:\n    n.start_soon(write_report, report)"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "It closes the last silent-loss door with a rule the language already enforces everywhere else, and the fix is always one visible call.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "The scope silently waits on work the reader cannot see. Structured waiting already has a visible spelling: the taskgroup."
+          },
+          {
+            "key": "C",
+            "reason": "A warning lets real work vanish, and E0140 already names the unjoined task as the mistake it exists to stop."
+          }
+        ],
+        "tradeoff": "Existing fire-and-forget code must write .detach() once per spawn. That one visible call is the price of never losing work silently."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared error, auto-join, and warning. It recommended the error because the obligation rule already exists and its text names this exact case.",
+        "boilOcean": "The breadth review added cancel-on-drop and process-exit-blocks-on-tasks as candidates. Both punish the common case to rescue the rare one, so they were folded into option B's discussion.",
+        "hybrid": "A hybrid making drop an error in libraries but a warning in the entry function was tested. Two severities for one mistake is the current defect restated, so it was rejected.",
+        "cooperative": "Option B was strengthened: auto-join is genuinely magic for beginners and loses nothing. Its silent stall with no page mark still contradicts explicit control flow.",
+        "adversarial": "The attack claimed the error punishes quick scripts. The one-word detach spelling answers it, and group children discharge through g.all as before, so the recommendation survives."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-06T17:18:00.099Z"
+    },
+    {
+      "id": "D-CONC-GROUP1",
+      "cardId": "c0vzadss",
+      "group": "syntax",
+      "title": "How spawn authority may be written and passed",
+      "gist": "Which positions may name a taskgroup, now that it is understood as a borrow of its scope.",
+      "lesson": "A taskgroup value is the right to start children inside a scope. The board already rejected freely storable groups, because stored authority would let children outlive their scope. That rejection stays law here. Today a group may be a named free function's parameter, but the same parameter on a method hits a generic 'no such type' error. The model behind this slate says a group is simply a borrow of its scope. This choice decides how far the writable positions extend.",
+      "explainer": "",
+      "story": "Ravi builds a crawler as methods on a Crawler struct. His free function drain(group: TaskGroup) compiles, but moving it onto the struct as a method gets 'there is no type called TaskGroup'. He cannot tell whether the language forbids it or forgot it.",
+      "inWild": "fn drain(group: TaskGroup, rx: Receiver<Job>) {   // compiles today\n    loop { job :: rx.receive() ?? break\n           group.task => handle(job) }\n}\n\nfn Crawler.drain(self, group: TaskGroup) {   // today: E0119, no such type\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Any borrow position, never stored",
+          "detail": "A group parameter works on free functions and methods alike, because both are ordinary borrow positions. Storage, return, capture, and fields stay banned with the existing teaching error. Helpers can live where the code lives.",
+          "technical": "Amends D-TASKGROUP-PARAM1=A by lifting its named-free-function restriction to all direct parameter positions, including method receivers' parameter lists. The storage ban and its E1110 rationale are unchanged. Spawns through a parameter group still own their captures.",
+          "code": "fn Crawler.drain(self, group: TaskGroup, rx: Receiver<Job>) {\n    loop { job :: rx.receive() ?? break\n           group.task => self.handle(job) }\n}   // proposed: compiles; storing `group` in self stays E1110"
+        },
+        {
+          "key": "B",
+          "name": "Param-only, hole fixed",
+          "detail": "Keep today's named-free-function rule exactly, and route the method-position case to the E1110 teaching family instead of the generic no-such-type error. Helpers that spawn must stay free functions.",
+          "technical": "No amendment to D-TASKGROUP-PARAM1=A. Registration's owner-type gate keeps rejecting methods, but with the taskgroup teaching text instead of falling through to E0119.",
+          "code": "fn Crawler.drain(self, group: TaskGroup) { }\n// error E1110: a taskgroup is call-stack-only spawn authority;\n// take it in a free function parameter instead"
+        },
+        {
+          "key": "C",
+          "name": "Leave as is",
+          "detail": "Status quo. Free-function parameters work, methods fall into the generic 'no such type' error, and the illegal-position list in the spec keeps omitting methods. The hole stays undocumented.",
+          "code": "fn Crawler.drain(self, group: TaskGroup) { }\n// error E0119: there's no type called `TaskGroup` — with no hint\n// that free-function parameters accept it fine"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Python Trio",
+          "note": "A nursery is an ordinary object you pass anywhere, including methods. Scope safety comes from its lifetime, not from restricting where its name may appear.",
+          "code": "async def drain(self, nursery, recv):\n    async for job in recv:\n        nursery.start_soon(self.handle, job)"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "If a group is a borrow, it should work wherever borrows work. Methods are the natural home for code that belongs to a type, and the storage ban alone carries the structural guarantee.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It keeps a fence the borrow model no longer needs, so helpers must stay free functions for no reason a user can see."
+          },
+          {
+            "key": "C",
+            "reason": "A raw no-such-type error on a position the spec never mentions fails the rule that diagnostics are products."
+          }
+        ],
+        "tradeoff": "The parameter whitelist in registration grows one case and needs matching tests. Accepted: the structural guarantee never rested on the free-function restriction."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared extending to methods, fixing only the error text, and the status quo. It recommended extension because the storage ban alone carries the guarantee.",
+        "boilOcean": "The breadth review re-tested the rejected storable-group design and a group-in-closure extension. The first stays rejected by ratified decision, and closures reopen escape, so neither entered the menu.",
+        "hybrid": "A hybrid extending methods now and lambdas later was tested. Lambda capture is exactly the escape door the ban exists for, so the hybrid collapsed into option A.",
+        "cooperative": "Option B was strengthened: param-only keeps the whitelist tiny and auditable. That virtue is real but invisible to users who just meet a wall between functions and methods.",
+        "adversarial": "The attack tried to smuggle storage through method receivers on stored structs. Receivers hold self, not the group; the group stays a direct parameter, so no new escape exists."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-06T17:18:30.748Z"
+    },
+    {
+      "id": "D-CONC-OUTCOME1",
+      "cardId": "c0vzadss",
+      "group": "stdlib",
+      "title": "How a program reads what happened to a task",
+      "gist": "Whether task results and control state become typed enums instead of formatted strings.",
+      "lesson": "A task ends one of four ways: it finishes with a value, panics, is cancelled, or blows a deadline. The runtime already knows which. Jet programs cannot see that fact directly: trace() returns the string 'paused=false,cancel=true' and exception() returns the string 'cancelled'. Select and the event system each carry their own separate outcome words. This choice amends the trace and exception surface ratified under D-COROUTINE1 and decides whether these facts become real values.",
+      "explainer": "",
+      "story": "Ana cancels a slow worker during shutdown and needs to know whether it finished its batch or stopped early. Her working code compares a method result against the literal string 'cancelled' and hopes the spelling never changes.",
+      "inWild": "h.cancel()\nif h.exception() == \"cancelled\" {   // string-matching a fact the runtime\n    print(\"worker stopped early\")     // already holds as an enum\n}\nprint(h.trace())                      // \"paused=false,cancel=true\"",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Typed outcome and status",
+          "detail": "Two small enums replace the strings. outcome() consumes the handle like join and says how the task ended, carrying the value. status() borrows the handle and answers live questions: running, paused, cancel requested. Select and events adopt the same outcome words. The strings retire.",
+          "technical": "TaskOutcome mirrors the runtime's existing result: Finished(T), Panicked(reason), Cancelled, DeadlineBlown. TaskStatus covers the control plane trace() encodes today. trace() and exception() are deleted, not aliased. One outcome vocabulary is shared with select results and the event dispatch states.",
+          "code": "h.cancel()\nmatch h.outcome() {              // proposed: consumes, like join\n    .Finished(batch)  => print(batch.count)\n    .Cancelled        => print(\"worker stopped early\")\n    .Panicked(reason) => print(\"failed: \" + reason)\n    .DeadlineBlown    => print(\"out of time\")\n}"
+        },
+        {
+          "key": "B",
+          "name": "Outcome enum only",
+          "detail": "The terminal outcome becomes a typed enum, but the live control strings stay. Cancellation queries become honest values while pause state remains a formatted string to parse.",
+          "technical": "TaskOutcome ships as in option A. trace() keeps its current string contract; exception() retires into the enum.",
+          "code": "match h.outcome() { .Cancelled => print(\"stopped\") }\nprint(h.trace())   // still \"paused=false,cancel=true\""
+        },
+        {
+          "key": "C",
+          "name": "Keep the strings",
+          "detail": "Status quo. Programs keep string-matching 'cancelled' and parsing key-value traces, and the four outcome vocabularies in the runtime, select, events, and user code stay unaligned.",
+          "code": "if h.exception() == \"cancelled\" { print(\"stopped\") }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Join returns a Result whose error distinguishes panic from cancellation. Programs match on it; nobody parses strings.",
+          "code": "match handle.await { Ok(v) => .., Err(e) if e.is_cancelled() => .. }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The runtime already holds these facts as enums, so this only stops hiding them. Matching an enum is beginner-friendlier than string comparison, and one vocabulary lets task, select, and event results compose.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It leaves the pause trace as a string to parse, so the control plane stays folklore while the outcome plane becomes honest."
+          },
+          {
+            "key": "C",
+            "reason": "String-matching 'cancelled' breaks silently on any wording change and cannot carry the finished value."
+          }
+        ],
+        "tradeoff": "The trace and exception methods disappear, and their few call sites migrate in the same change. Accepted: both appear only in one audit example today."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared full enums, outcome-only, and strings. It recommended full enums because the runtime already stores the facts this way.",
+        "boilOcean": "The breadth review tested a single merged state-plus-outcome enum and a record type. The merge conflates a live query with a terminal consume, so both folded into the two-enum shape.",
+        "hybrid": "A hybrid keeping trace() as a debug-only formatter over TaskStatus was tested. It survives as a print of the enum, not a contract, so it needs no separate option.",
+        "cooperative": "Option C was strengthened: strings never break callers when new states appear. That forward-compatibility is real and is kept by marking the enums open for future variants.",
+        "adversarial": "The attack asked how outcome() interacts with the join obligation and double reads. It consumes the handle exactly as join does, so use-after-move already covers it and the recommendation survives."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-06T17:19:04.355Z"
+    },
+    {
+      "id": "D-CONC-CROSS1",
+      "cardId": "c0vzadss",
+      "group": "safety",
+      "title": "One answer to 'may this value move to another worker'",
+      "gist": "Whether five separate send-safety checkers become one registered knowledge plane.",
+      "lesson": "When data moves to another task, a parallel worker, or a graphics kernel, the compiler must prove the move is safe. Jet proves it five separate times today: task captures, parallel adapters, kernels, local cells, and pinned reactive boxes each have their own checker and their own error words. The stored fact is a bare yes-or-no flag on each local. The same mistake therefore reads completely differently depending on which door it walks through.",
+      "explainer": "",
+      "story": "Omar wraps a counter in a closure. tasks.spawn rejects it citing sendability, para_map rejects it citing worker transfer, and a kernel rejects it citing a capture proof. Three vocabularies, one mistake: his closure grabs data that cannot safely travel.",
+      "inWild": "counter := 0\nnums.para_map((n: Int) => { counter += 1; n * 2 })   // E1111 wording\ntasks.spawn(() => { counter += 1 })                   // E1101 wording\n#Kernel(.parallel) fn step() { counter += 1 }         // proof-record wording",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "One plane, one error family",
+          "detail": "Crossing safety becomes a registered fact about a type, like its state or its unit. One prover answers every boundary, and every rejection speaks one language: what cannot cross, which boundary, and the fix. New parallel surfaces reuse the plane instead of writing checker six.",
+          "technical": "Sendability moves from a per-local flag into the fact registry as a plane. The task, parallel-adapter, kernel, cell, and fixed-backing provers fold into one, absorbing E1111 and the kernel wording into the E1101 and E1102 family. Snapshots migrate in the same change. Ratified semantics from D-PARCAPTURE1=D and the kernel decisions are preserved exactly; only the prover and the error voice unify.",
+          "code": "counter := 0\nnums.para_map((n: Int) => { counter += 1; n * 2 })\n// error: `counter` cannot cross to a parallel worker —\n// the closure writes a shared place; return values and merge them,\n// or use Shared<Int>  (same sentence at every boundary)"
+        },
+        {
+          "key": "B",
+          "name": "Merge the provers, keep the codes",
+          "detail": "One internal prover answers every boundary, but each door keeps its current error code and wording. Users still meet three vocabularies; the compiler stops maintaining five copies.",
+          "technical": "Same internal fold as option A. E1101, E1102, E1111, and the kernel proof keep their registered texts and snapshots.",
+          "code": "// identical rejections as today at each door,\n// produced by one prover instead of five"
+        },
+        {
+          "key": "C",
+          "name": "Keep five checkers",
+          "detail": "Status quo. Each boundary keeps its own checker and vocabulary, and the flag stays a bare boolean outside the fact registry. Each future surface adds another copy.",
+          "code": "// the three rejections above stay three different lessons"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "One trait, Send, answers every crossing question, and every concurrency API composes with it. Nobody re-proves sendability per API.",
+          "code": "fn spawn<F: FnOnce() + Send>(f: F)"
+        },
+        {
+          "lang": "Pony",
+          "note": "Reference capabilities prove race freedom entirely in the type system, but six user-facing modes proved too heavy. The lesson: keep the guarantee, infer the vocabulary.",
+          "code": "be send(data: Message iso)"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "One question deserves one answer with one voice. The registered plane also makes crossing facts nameable and reflectable, which the bare boolean can never be.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It fixes the compiler's cost but not the user's: the same mistake still teaches three different lessons."
+          },
+          {
+            "key": "C",
+            "reason": "Five drifting copies of one question is the defect this slate exists to remove, and checker six is already foreseeable."
+          }
+        ],
+        "tradeoff": "Rewording absorbed diagnostics re-blesses their snapshots and touches teaching material in one migration. Accepted: error text is product copy, and one lesson is the better product."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared one plane with one voice, an internal-only merge, and the status quo. It recommended the full unification for the single-lesson payoff.",
+        "boilOcean": "The breadth review tested exposing a user-visible Sendable-style trait and per-boundary capability annotations. Both add ceremony the inference already avoids, so they were folded into the plane's expert reflection story.",
+        "hybrid": "A hybrid unifying wording but keeping split provers was tested. Shared wording over divergent provers re-creates today's drift risk in reverse, so it was rejected.",
+        "cooperative": "Option C was strengthened: per-boundary checkers can tailor fixes, like the disjointness hints on group borrows. The unified family keeps per-boundary fix lines, so the advantage transfers.",
+        "adversarial": "The attack claimed one family flattens genuinely different failures, like view escape versus mutation. The family keeps distinct fix texts per cause; only the frame sentence unifies, so it survives."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-06T17:19:39.805Z"
+    },
+    {
+      "id": "D-CONC-STM1",
+      "cardId": "c0vzadss",
+      "group": "runtime",
+      "title": "Transaction commits: what the law says versus what ships",
+      "gist": "Whether the transaction law is amended to match the shipped commit, or the runtime rewritten to match the law.",
+      "lesson": "Inside a #Transact block, reads and writes to Shared values commit together. The ratified text of D-STM1 says the commit is 'retried on conflict'. The shipped runtime never retries: it takes all the locks in one fixed address order, applies the buffered writes once, and releases. Both designs are atomic and deadlock-free. They differ in one observable way: a retrying commit may run the block body more than once. Only the owner can pick which one is law, so this ballot amends D-STM1=A either way.",
+      "explainer": "",
+      "story": "Priya transfers money between two shared accounts inside #Transact. Reading the spec's retry line, she adds a log line to count retries. It never fires, because the runtime runs her block exactly once. The spec and the runtime told her two different stories.",
+      "inWild": "#Transact(tx) {\n    from.edit(a => { a.balance -= amount })\n    to.edit(a => { a.balance += amount })\n    log.info(\"transfer attempted\")   // retry law: may print twice.\n}                                     // shipped law: prints exactly once.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Law says: one run, ordered commit",
+          "detail": "Amend the D-STM1 text to the shipped behavior: the block body runs exactly once, and the commit takes locks in a fixed order. Log lines never duplicate. Under heavy contention, transactions wait on locks instead of retrying.",
+          "technical": "D-STM1=A's 'retried on conflict' clause is replaced by: participants sort by stable address, all write locks acquire together, buffered deltas apply, locks release. Body-runs-once becomes part of the ratified law. A future optimistic mode would need a new ballot.",
+          "code": "#Transact(tx) {\n    from.edit(a => { a.balance -= amount })\n    to.edit(a => { a.balance += amount })\n    log.info(\"transfer attempted\")   // guaranteed: exactly once\n}"
+        },
+        {
+          "key": "B",
+          "name": "Runtime learns to retry",
+          "detail": "Rewrite the runtime to match the ratified text: run the block against a snapshot, validate at commit, and rerun the whole block on conflict. Readers never block writers. The body must tolerate re-running, so log lines may duplicate.",
+          "technical": "Requires read-set tracking and validation on every Shared touch inside the block. The E0746 wall already bans irreversible effects inside #Transact, but reversible ones like logging re-run. The retry loop needs a starvation policy.",
+          "code": "#Transact(tx) {\n    from.edit(a => { a.balance -= amount })\n    to.edit(a => { a.balance += amount })\n    log.info(\"transfer attempted\")   // may print more than once\n}"
+        },
+        {
+          "key": "C",
+          "name": "Amend now, keep the retry door open",
+          "detail": "Adopt option A's text today, and record retry as an explicitly open future mode behind its own ballot. The law matches the runtime now, but the door stays marked rather than closed.",
+          "technical": "Same amendment as option A, plus a recorded open question naming optimistic commit as a possible future expert mode.",
+          "code": "// behavior today: identical to option A"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Haskell",
+          "note": "STM retries safely because the type system bans all side effects inside a transaction. Jet bans only irreversible ones, so logs and metrics would visibly re-run.",
+          "code": "atomically $ do { modifyTVar from (subtract amt); modifyTVar to (+ amt) }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Body-runs-once is the stronger promise for an imperative language: every allowed effect happens exactly as written. The shipped design already delivers atomicity and deadlock freedom without it.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Re-running bodies makes logging and metrics duplicate, the classic reason imperative transactional memory failed elsewhere."
+          },
+          {
+            "key": "C",
+            "reason": "A door marked 'maybe retry later' invites code that hedges for both laws. If retry is ever wanted, a new ballot can say so then."
+          }
+        ],
+        "tradeoff": "Under heavy write contention, ordered locking waits where optimistic designs might scale better. Accepted: correctness of effects beats throughput of a contended corner."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared amending the text, implementing retry, and amending with a marked door. It recommended the amendment because body-runs-once is the stronger user promise.",
+        "boilOcean": "The breadth review tested hardware transactional memory and a hybrid lock-then-retry escalation. Both inherit the duplicate-effect hazard and add platform variance, so neither entered the menu.",
+        "hybrid": "A hybrid running read-only transactions optimistically and writers through ordered locks was tested. It splits one law into two observable behaviors, so it was rejected.",
+        "cooperative": "Option B was strengthened with its best case: read-heavy workloads never block. Even there, the duplicated-effect hazard remains user-visible, so it stands but does not win.",
+        "adversarial": "The attack tried a starvation case: many small ordered commits blocking one large one. Address-ordered acquisition guarantees progress and cannot deadlock, so the recommendation survives."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-06T17:20:12.144Z"
+    },
+    {
+      "id": "D-CONC-SCHED1",
+      "cardId": "c0vzadss",
+      "group": "syntax",
+      "title": "Schedules and limits as data on tasks and groups",
+      "gist": "Whether when-work-runs and how-much-runs-at-once become typed data on the work itself.",
+      "lesson": "A scheduled job and a spawned task are the same unit of work started by different hands. Today the schedule lives in a marker with its own private duration table, the concurrency limit does not exist, and bounding a worker pool takes a hand-built channel of tokens. This choice decides whether scheduling facts become typed data on the task and group values. The spelling of duration literals is decided separately by D-TYPE2-TIME1 and is not asked here.",
+      "explainer": "",
+      "story": "Sofia builds a scraper: fetch twenty pages, at most four at a time, and rerun the whole job nightly. The nightly part is one marker line. The at-most-four part is a forty-nine line token dance with a channel she must seed, receive from, and refill by hand.",
+      "inWild": "// today: bounding active work means hand-rolled tokens\n(tokens_tx, tokens) :: tasks.channel<Int>(capacity: 4)\nloop t, 1..4 { tokens_tx.send(t) }\ntaskgroup g {\n    loop url, urls {\n        token :: tokens.receive() ?? break\n        g.task => { fetch(url); tokens_tx.send(token) }\n    }\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Data on the unit of work",
+          "detail": "The group takes a typed limit, so bounding active work is one argument. The schedule marker's value becomes the same typed data every other consumer reads. Naming aligns on one word: a job is a task the runtime spawns. Existing marker spellings stay.",
+          "technical": "taskgroup g(limit: N) admits at most N running children; further task starts wait at the group, a wait point under the cancel law. The Every value becomes typed schedule data behind the unchanged marker, per the marker-rebuild row-data direction. Aligns with the ratified job naming (D-TAG-SURFACE1, card 1448) and with D-TASK-META1's typed metadata. Duration literal spelling defers to D-TYPE2-TIME1.",
+          "code": "#[Job, Every(\"03:00\")]          // unchanged spelling, typed value behind it\nfn scrape_all() {\n    taskgroup g(limit: 4) {      // proposed: the whole token dance\n        loop url, urls { g.task => fetch(url) }\n    }\n}"
+        },
+        {
+          "key": "B",
+          "name": "Typed values only",
+          "detail": "The schedule value and group limit become typed data, but the vocabulary stays split. Jobs and tasks remain presented as different kinds of thing. Marker checking keeps its private table until the marker rebuild reaches it.",
+          "technical": "Ships taskgroup limit and the typed Every value. No vocabulary or presentation change; the job-versus-task split in docs and CLI stays as card 1448 left it.",
+          "code": "taskgroup g(limit: 4) { loop url, urls { g.task => fetch(url) } }"
+        },
+        {
+          "key": "C",
+          "name": "Decline",
+          "detail": "Status quo. Bounded work stays a hand-built token channel, the schedule stays a privately parsed marker value, and the limit proposal from the July research stays unballoted.",
+          "code": "// the forty-nine line token dance above remains the answer"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Kotlin",
+          "note": "A semaphore-limited dispatcher bounds coroutines as data, not hand loops. Beginners reach for it because it is one argument.",
+          "code": "Dispatchers.IO.limitedParallelism(4)"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The most common real-world shapes, bounded fan-out and scheduled work, become one argument and one marker on the same value. One vocabulary removes the job-versus-task confusion the board already flagged.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It ships the mechanics but keeps two words for one concept, so the naming confusion card 1448 exists to fix stays alive."
+          },
+          {
+            "key": "C",
+            "reason": "It leaves the single most common concurrency need behind a forty-nine line pattern the pragmatism audit already flagged as a teaching defect."
+          }
+        ],
+        "tradeoff": "The group signature gains an optional argument, and its snapshot and formatter cases grow accordingly. Accepted: one argument replaces a whole pattern users currently copy by hand."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared full adoption, mechanics-only, and decline. It recommended full adoption because limits and schedules are properties of the work, not separate systems.",
+        "boilOcean": "The breadth review tested priorities, deadlines-on-groups, and pool sizing as further data. Deadlines already live on Context by ratified decision, and the rest can join later without a new mechanism, so the menu stayed focused.",
+        "hybrid": "A hybrid putting the limit on spawn sites instead of the group was tested. Per-site limits cannot bound the group total, which is what users mean, so it was rejected.",
+        "cooperative": "Option C was strengthened: the token channel teaches backpressure honestly and stays fully general. It remains available for expert shapes; the limit covers the common case.",
+        "adversarial": "The attack asked whether a full group plus limit deadlocks child-spawns-child shapes. Admission waits are wait points, so cancellation and deadlines reach them, and nesting admits independently per group."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-06T17:21:02.314Z"
+    },
+    {
+      "id": "D-CONC-STREAM1",
+      "cardId": "c0vzadss",
+      "group": "runtime",
+      "title": "One lifecycle law for streams and tasks",
+      "gist": "Whether a stream producer follows the same cancellation and cleanup law as a task.",
+      "lesson": "A generator function yields values into a Stream. Its producer already runs on the task scheduler, pauses until the consumer pulls, and is shut down when the iterator is dropped. That shutdown law was written separately from the task cancellation law, in different words, in two decisions. The two implementations have already drifted: a field audit found the ahead-of-time build and the development build free the producer differently. This choice decides whether one law governs both.",
+      "explainer": "",
+      "story": "Lena breaks out of a loop over a stream of parsed lines. On the ahead-of-time build the producer's cleanup runs as the spec promises. On the development build it does not. Nobody changed her code; the two builds carry two copies of one law.",
+      "inWild": "fn lines(path: String) => Stream<String> {\n    file :: files.open(path)\n    defer close(^file)\n    loop line, file { yield line }\n}\n\nloop l, lines(\"big.log\") {\n    if l.contains(\"ERROR\") { break }   // does cleanup run? depends on the build\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "A stream is a task",
+          "detail": "One law: dropping the iterator cancels the producer, which unwinds at its next wait point running its cleanups, exactly as any cancelled task does. The generator decision's separate shutdown wording is replaced by a reference to the task law. The drift class dies by construction.",
+          "technical": "Amends D-STREAMYIELD1's independent pull-and-cancellation wording to delegate to D-CANCELMODEL1=C: the producer is a scheduler child, drop-close is a cancel, yield is a wait point. Subsumes the open generator-lifecycle defect card 1392. Tier parity follows because all tiers already share the task cancel path.",
+          "code": "loop l, lines(\"big.log\") {\n    if l.contains(\"ERROR\") { break }\n}\n// break drops the iterator => producer cancelled =>\n// unwinds at its next yield, defer close(^file) runs — on every tier"
+        },
+        {
+          "key": "B",
+          "name": "Two laws, drift fixed case by case",
+          "detail": "Keep the generator decision's own shutdown wording and repair the current build divergence as an ordinary bug. Future changes to either law must remember to mirror the other.",
+          "technical": "Card 1392 is fixed against the generator decision's text as written. The two wordings remain authoritative for their own surfaces.",
+          "code": "// same program; correctness depends on two texts staying in step"
+        },
+        {
+          "key": "C",
+          "name": "Defer until the defect closes",
+          "detail": "Fix the build divergence first under the current wording, then revisit unification later with fresh evidence. The two-copies risk stays alive in the meantime.",
+          "code": "// same program; decision postponed"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "The producer already runs on the scheduler, so the unified law describes what the machine does. One law cannot drift against itself, and the open defect becomes a consequence instead of a special case.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Two texts for one behavior is how the current divergence happened, and nothing stops it happening again."
+          },
+          {
+            "key": "C",
+            "reason": "Deferring keeps the duplicate law alive precisely while the defect it caused is being fixed."
+          }
+        ],
+        "tradeoff": "The generator decision's wording changes even though its observable promises stay. Accepted: the promise is easier to keep when it is written once."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared one law, two laws, and deferral. It recommended one law because the producer already runs on the task scheduler.",
+        "boilOcean": "The breadth review tested making streams eager buffers and a dedicated coroutine object. The first changes ratified pull semantics and the second was already declined by the coroutine decision, so neither entered.",
+        "hybrid": "A hybrid keeping separate wording but adding a conformance test between the two laws was tested. A test guards drift but cannot remove its source, so it folded into option B.",
+        "cooperative": "Option B was strengthened: separate wording lets generators evolve without touching the cancel law. No such divergent evolution is wanted; parity is the requirement, so it does not win.",
+        "adversarial": "The attack asked whether cancel-at-yield could strand a producer holding a resource between yields. Unwinding runs the deferred cleanups exactly as task cancel does, so the case is covered."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-06T17:21:32.707Z"
+    },
+    {
+      "id": "D-CONC-CHAN1",
+      "cardId": "c0vzadss",
+      "group": "stdlib",
+      "title": "Channel endpoints as complete, ordinary values",
+      "gist": "Whether receivers become nameable, loopable values and the dead channel remnants go.",
+      "lesson": "A channel is created as a sender and receiver pair. The sender's type can be written in a function signature; the receiver's cannot, because it was left out of the nameable-type table. The idiomatic drain loop is a manual receive-or-break dance. The table also still lists a combined Channel handle that a ratified decision deleted, and the select builder accepts a read arm that every build silently drops. This choice decides how much of that surface becomes honest.",
+      "explainer": "",
+      "story": "Kofi writes a worker that drains a job queue. He tries to move the drain into a helper and cannot write the receiver's type in its signature. His loop body is a receive-or-break line he copies between projects.",
+      "inWild": "fn drain(rx: Receiver<Int>) {        // today: E0119, no type called Receiver\n    loop {\n        job :: rx.receive() ?? break     // the copied dance\n        handle(job)\n    }\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Complete the surface",
+          "detail": "Receiver joins the nameable table beside Sender. A loop over a receiver receives until the channel closes. The dead combined-channel entry is deleted. The silently dropped read arm of select is removed until stream input genuinely lands, so nothing on the page lies.",
+          "technical": "Adds Receiver to the core-generic table and deletes the dead Channel entry, both consistent with the ratified pair-return decision. Receiver becomes a loop source under the lazy iterator-source rule; drop on break closes it, matching the stream law. Removing the read arm amends the ratified select builder's arm list until the stream case ships for real.",
+          "code": "fn drain(rx: Receiver<Int>) {   // proposed: nameable\n    loop job, rx {              // proposed: receive until closed\n        handle(job)\n    }\n}"
+        },
+        {
+          "key": "B",
+          "name": "Name it and clean up only",
+          "detail": "Receiver becomes nameable and the dead table entry goes, but the drain loop stays the manual dance and the dropped read arm keeps parsing. The surface stops blocking helpers but keeps its dead weight.",
+          "technical": "Table changes only. No loop-source rule, no select change.",
+          "code": "fn drain(rx: Receiver<Int>) {\n    loop { job :: rx.receive() ?? break\n           handle(job) }\n}"
+        },
+        {
+          "key": "C",
+          "name": "Leave as is",
+          "detail": "Status quo. Receivers stay unwritable in signatures, the drain dance stays idiomatic, the dead entry stays in the table, and select keeps accepting an arm that no build executes.",
+          "code": "// helper impossible; the dance continues; .read(stream) still a silent no-op"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "Ranging over a channel until it closes is the language's single most common concurrency shape, hit in essentially every real project.",
+          "code": "for job := range jobs { handle(job) }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "It makes the most common channel shape one honest line, lets helpers exist, and removes two places where the surface currently misleads: a deleted handle still listed, an accepted arm never run.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It unblocks helpers but leaves the everyday loop a copied dance and leaves select accepting an arm that silently does nothing."
+          },
+          {
+            "key": "C",
+            "reason": "A signature position that rejects a value users hold daily, plus a silent no-op arm, fails both the honesty and the teaching bars."
+          }
+        ],
+        "tradeoff": "Removing the read arm briefly narrows ratified select surface until stream input lands for real. Accepted: an arm that silently drops is worse than an arm that does not parse."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared completion, minimal naming, and the status quo. It recommended completion because the drain loop is the most common real channel shape.",
+        "boilOcean": "The breadth review tested receiver cloning for fan-out and non-blocking try operations. Both are real gaps but separable surface, so they were noted for future cards rather than padded into this menu.",
+        "hybrid": "A hybrid landing the loop but keeping the read arm as a parse-time error was tested. That is exactly what removal means in practice, so it merged into option A.",
+        "cooperative": "Option C was strengthened: the explicit receive-or-break dance shows the closed case honestly. The loop keeps that honesty, closing on drop under the same law, so the advantage transfers.",
+        "adversarial": "The attack asked what a loop does on a cancelled task and a closed channel mid-iteration. Close ends the loop normally and cancel unwinds at the receive wait point, both already law."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-06T17:22:03.442Z"
     }
   ],
   "questions": [
@@ -115322,15 +116863,6 @@
       "created": "2026-08-05T19:47:55.297Z"
     },
     {
-      "id": "b097o1cx",
-      "text": "First-principles rethink: AUTHORITY. Effects, capabilities, #Caps/#Grant, #Unsafe obligations, #Policy ladder, package effect budgets, trust/sandbox are probably one model: who may do what, in what scope, delegated how. Evidence: six key families under one policy: field; spec says 10 effect roots, code has 28; Capability is unnameable. Use first-principles-rethink skill.",
-      "note": "",
-      "level": null,
-      "tags": [],
-      "status": "open",
-      "created": "2026-08-06T15:59:05.893Z"
-    },
-    {
       "id": "b0ipnwvi",
       "text": "First-principles rethink: FAILURE. T ? E, error conversions, Fallible, validate blocks, #Pre/#Post, traps, panics, exit 101, parked transaction regions (#775). Three constraint layers ruled not to compose (D-VALIDATE1). Question: what is a failure - recoverable value, contract breach, or fault - and what does each owe the caller? Use first-principles-rethink skill.",
       "note": "",
@@ -115367,16 +116899,639 @@
       "created": "2026-08-06T15:59:07.483Z"
     },
     {
-      "id": "b055164l",
-      "text": "First-principles rethink: CONCURRENCY (design-only until S53 unfreezes). Tasks, unnameable TaskGroup, protocols, #Job/#Every, Shared/Pool, select, parked transaction regions. Question: what is a unit of concurrent work and what knowledge does the compiler hold about it - typestate and obligations already cover half by accident. Use first-principles-rethink skill.",
+      "id": "b1d9uknk",
+      "text": "COMPLETE Jet /first-principles-rethink",
       "note": "",
       "level": null,
       "tags": [],
       "status": "open",
-      "created": "2026-08-06T15:59:07.823Z"
+      "created": "2026-08-06T17:10:51.814Z"
     }
   ],
   "events": [
+    {
+      "at": "2026-08-06T17:26:45.302Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0pp8jfr",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-06T17:26:44.983Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0pp8jfr",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T17:26:13.202Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0vzadss",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-06T17:26:12.828Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0vzadss",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T17:25:05.679Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0pp8jfr",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-06T17:25:05.362Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0pp8jfr",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T17:25:05.039Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0pp8jfr",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-06T17:24:02.769Z",
+      "by": "fable",
+      "action": "decision.update",
+      "ref": "D-AUTHORITY-NAME1",
+      "note": ""
+    },
+    {
+      "at": "2026-08-06T17:22:28.696Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0vzadss",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-06T17:22:28.379Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0vzadss",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T17:22:03.442Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-CONC-CHAN1",
+      "note": "Channel endpoints as complete, ordinary values"
+    },
+    {
+      "at": "2026-08-06T17:21:32.707Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-CONC-STREAM1",
+      "note": "One lifecycle law for streams and tasks"
+    },
+    {
+      "at": "2026-08-06T17:21:02.314Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-CONC-SCHED1",
+      "note": "Schedules and limits as data on tasks and groups"
+    },
+    {
+      "at": "2026-08-06T17:20:12.144Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-CONC-STM1",
+      "note": "Transaction commits: what the law says versus what ships"
+    },
+    {
+      "at": "2026-08-06T17:19:39.805Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-CONC-CROSS1",
+      "note": "One answer to 'may this value move to another worker'"
+    },
+    {
+      "at": "2026-08-06T17:19:04.355Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-CONC-OUTCOME1",
+      "note": "How a program reads what happened to a task"
+    },
+    {
+      "at": "2026-08-06T17:18:30.748Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-CONC-GROUP1",
+      "note": "How spawn authority may be written and passed"
+    },
+    {
+      "at": "2026-08-06T17:18:00.099Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-CONC-JOIN1",
+      "note": "What happens to a dropped task handle"
+    },
+    {
+      "at": "2026-08-06T17:17:27.733Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-CONC-UNIT1",
+      "note": "Concurrency re-founded on the existing type machinery"
+    },
+    {
+      "at": "2026-08-06T17:15:01.545Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0vzadss",
+      "note": "#4 Implementation cards exist for every ratified outcome, each "
+    },
+    {
+      "at": "2026-08-06T17:15:01.121Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0vzadss",
+      "note": "#3 Ratified outcomes are recorded in docs/spec/syntax-decisions"
+    },
+    {
+      "at": "2026-08-06T17:15:00.684Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0vzadss",
+      "note": "#2 Proposal contradicts no ratified decision without an amendin"
+    },
+    {
+      "at": "2026-08-06T17:15:00.338Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0vzadss",
+      "note": "#1 Nine D-CONC-* ballots are ballot-ready on this card"
+    },
+    {
+      "at": "2026-08-06T17:14:30.623Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0vzadss",
+      "note": "Concurrency: work is a value — first-principles proposal + ballot slate"
+    },
+    {
+      "at": "2026-08-06T17:10:51.814Z",
+      "by": "owner",
+      "action": "idea.add",
+      "ref": "b1d9uknk",
+      "note": "COMPLETE Jet /first-principles-rethink"
+    },
+    {
+      "at": "2026-08-06T17:09:43.858Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-AUTHORITY-WORD1",
+      "note": "Retire the word capability from surfaces or reserve it for one thing"
+    },
+    {
+      "at": "2026-08-06T17:09:43.541Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-AUTHORITY-GATE1",
+      "note": "One audit ledger for every authority gate"
+    },
+    {
+      "at": "2026-08-06T17:09:43.217Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-AUTHORITY-MANIFEST1",
+      "note": "One manifest schema for what a package may do and delegate"
+    },
+    {
+      "at": "2026-08-06T17:09:42.901Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-AUTHORITY-NAME1",
+      "note": "Name the authority value that crosses boundaries"
+    },
+    {
+      "at": "2026-08-06T17:09:42.588Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-AUTHORITY-MEM1",
+      "note": "Memory floors ride the rights tree"
+    },
+    {
+      "at": "2026-08-06T17:09:42.276Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-AUTHORITY-ROOTS1",
+      "note": "Heal the effect root table: FFI languages become leaves"
+    },
+    {
+      "at": "2026-08-06T17:09:41.961Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-AUTHORITY-MODEL1",
+      "note": "One authority model for effects, caps, policy, budgets, and trust"
+    },
+    {
+      "at": "2026-08-06T17:08:17.096Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-TYPE2-SPELL1",
+      "note": "A"
+    },
+    {
+      "at": "2026-08-06T17:08:03.536Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-TYPECHECK-BOUND1",
+      "note": "A"
+    },
+    {
+      "at": "2026-08-06T17:07:53.162Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-TYPE2-PLANE1",
+      "note": "A"
+    },
+    {
+      "at": "2026-08-06T17:07:10.331Z",
+      "by": "e3-coll",
+      "action": "card.claim",
+      "ref": "c0r2dfxz",
+      "note": ""
+    },
+    {
+      "at": "2026-08-06T17:07:03.052Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-TYPE2-REFINE1",
+      "note": "A"
+    },
+    {
+      "at": "2026-08-06T17:07:02.857Z",
+      "by": "e3-fast",
+      "action": "card.update",
+      "ref": "c0m2slnf",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T17:06:55.382Z",
+      "by": "e3-fast",
+      "action": "card.claim",
+      "ref": "c0m2slnf",
+      "note": ""
+    },
+    {
+      "at": "2026-08-06T17:05:53.671Z",
+      "by": "e3-fast",
+      "action": "card.update",
+      "ref": "c0vzbf5f",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T17:05:53.391Z",
+      "by": "e3-fast",
+      "action": "card.criteria-meet",
+      "ref": "c0vzbf5f",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-06T17:05:53.160Z",
+      "by": "e3-fast",
+      "action": "card.criteria-meet",
+      "ref": "c0vzbf5f",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-06T17:05:52.919Z",
+      "by": "e3-fast",
+      "action": "card.criteria-meet",
+      "ref": "c0vzbf5f",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T17:05:52.685Z",
+      "by": "e3-fast",
+      "action": "card.criteria-meet",
+      "ref": "c0vzbf5f",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T17:05:52.452Z",
+      "by": "e3-fast",
+      "action": "card.criteria-meet",
+      "ref": "c0vzbf5f",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-06T17:02:53.582Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0eoxyz7",
+      "note": "body"
+    },
+    {
+      "at": "2026-08-06T17:02:53.203Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c09nnvak",
+      "note": "body"
+    },
+    {
+      "at": "2026-08-06T17:02:52.820Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c03fqwro",
+      "note": "body"
+    },
+    {
+      "at": "2026-08-06T17:02:52.442Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0y9bl1v",
+      "note": "body"
+    },
+    {
+      "at": "2026-08-06T17:02:39.947Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0eoxyz7",
+      "note": "D-FFI-PY1 promised Py effect root never added to EFFECT_ROOTS (Octave too)"
+    },
+    {
+      "at": "2026-08-06T17:02:39.643Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c09nnvak",
+      "note": "Effects.rs module comments claim ten/twelve roots; table has 28"
+    },
+    {
+      "at": "2026-08-06T17:02:39.267Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c03fqwro",
+      "note": "Diagnostics: E1221 explain text claims ten-effect vocabulary; EFFECT_ROOTS has 28"
+    },
+    {
+      "at": "2026-08-06T17:02:38.953Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0y9bl1v",
+      "note": "Sema: marker-argument enums pass core_type_known as general types (Capability et al accepted, unconstructable)"
+    },
+    {
+      "at": "2026-08-06T17:02:13.985Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0pp8jfr",
+      "note": "#6 Ratified outcomes recorded in spec and implementation cards "
+    },
+    {
+      "at": "2026-08-06T17:02:13.670Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0pp8jfr",
+      "note": "#5 Bug findings filed as cards: Capability core_type_known regr"
+    },
+    {
+      "at": "2026-08-06T17:02:13.348Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0pp8jfr",
+      "note": "#4 Fresh-context review completed; all findings fixed and re-ve"
+    },
+    {
+      "at": "2026-08-06T17:02:13.031Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0pp8jfr",
+      "note": "#3 No ratified decision silently contradicted; every touched ru"
+    },
+    {
+      "at": "2026-08-06T17:02:12.715Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0pp8jfr",
+      "note": "#2 Proposal docs/proposals/authority-one-model.md complete: exs"
+    },
+    {
+      "at": "2026-08-06T17:02:12.399Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0pp8jfr",
+      "note": "#1 Seven D-AUTHORITY-* ballots minted (full profile) and valida"
+    },
+    {
+      "at": "2026-08-06T17:02:12.071Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0pp8jfr",
+      "note": "body,refs"
+    },
+    {
+      "at": "2026-08-06T17:01:59.254Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0pp8jfr",
+      "note": "Authority: one model — proposal + ballot slate"
+    },
+    {
+      "at": "2026-08-06T16:59:02.144Z",
+      "by": "e3-fast",
+      "action": "card.claim",
+      "ref": "c0vzbf5f",
+      "note": ""
+    },
+    {
+      "at": "2026-08-06T16:55:44.561Z",
+      "by": "e3-fast",
+      "action": "card.update",
+      "ref": "c0vzbf5f",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T16:53:06.488Z",
+      "by": "owner",
+      "action": "idea.delete",
+      "ref": "b055164l",
+      "note": ""
+    },
+    {
+      "at": "2026-08-06T16:51:57.308Z",
+      "by": "e3-fast",
+      "action": "card.claim",
+      "ref": "c0vzbf5f",
+      "note": ""
+    },
+    {
+      "at": "2026-08-06T16:51:35.991Z",
+      "by": "e3-orch",
+      "action": "card.update",
+      "ref": "c0shcqzl",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T16:51:22.059Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-06T16:51:22.059Z"
+    },
+    {
+      "at": "2026-08-06T16:51:21.724Z",
+      "by": "e3-orch",
+      "action": "card.update",
+      "ref": "c0shcqzl",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T16:51:21.429Z",
+      "by": "e3-orch",
+      "action": "card.release",
+      "ref": "c0shcqzl",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-08-06T16:50:28.905Z",
+      "by": "e3-fast2",
+      "action": "card.update",
+      "ref": "c00t13v6",
+      "note": "plan,logEntry"
+    },
+    {
+      "at": "2026-08-06T16:49:09.930Z",
+      "by": "e3-fast2",
+      "action": "card.update",
+      "ref": "c00t13v6",
+      "note": "phase,plan"
+    },
+    {
+      "at": "2026-08-06T16:49:04.991Z",
+      "by": "e3-fast2",
+      "action": "card.add",
+      "ref": "c00t13v6",
+      "note": "Capability ledger: keep open claims on a live owner"
+    },
+    {
+      "at": "2026-08-06T16:46:42.900Z",
+      "by": "e3-fast2",
+      "action": "card.update",
+      "ref": "c0shcqzl",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-06T16:45:26.387Z",
+      "by": "owner",
+      "action": "idea.delete",
+      "ref": "b097o1cx",
+      "note": ""
+    },
+    {
+      "at": "2026-08-06T16:42:21.229Z",
+      "by": "e3-coll",
+      "action": "card.update",
+      "ref": "c0r2dfxz",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T16:42:09.697Z",
+      "by": "e3-coll",
+      "action": "card.claim",
+      "ref": "c0r2dfxz",
+      "note": ""
+    },
+    {
+      "at": "2026-08-06T16:42:07.752Z",
+      "by": "e3-fast2",
+      "action": "card.update",
+      "ref": "c0shcqzl",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T16:42:02.459Z",
+      "by": "e3-fast2",
+      "action": "card.claim",
+      "ref": "c0shcqzl",
+      "note": ""
+    },
+    {
+      "at": "2026-08-06T16:41:55.282Z",
+      "by": "e3-review",
+      "action": "card.update",
+      "ref": "c07p3bel",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T16:41:54.744Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c07p3bel",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-06T16:41:54.391Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c07p3bel",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-06T16:41:53.997Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c07p3bel",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T16:41:53.614Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c07p3bel",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T16:41:53.162Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c07p3bel",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-06T16:41:51.324Z",
+      "by": "e3-review",
+      "action": "card.update",
+      "ref": "c0rujhlb",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T16:41:51.035Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c0rujhlb",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-06T16:41:50.802Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c0rujhlb",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T16:41:50.561Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c0rujhlb",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T16:41:50.324Z",
+      "by": "e3-review",
+      "action": "card.criteria-verify",
+      "ref": "c0rujhlb",
+      "note": "#1"
+    },
     {
       "at": "2026-08-06T16:41:06.805Z",
       "by": "e3-coll",
@@ -118253,629 +120408,6 @@
       "action": "card.criteria-meet",
       "ref": "c0mpupgd",
       "note": "#2"
-    },
-    {
-      "at": "2026-08-06T14:34:19.837Z",
-      "by": "e3-bugs",
-      "action": "card.criteria-meet",
-      "ref": "c0mpupgd",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-06T14:34:19.580Z",
-      "by": "e3-bugs",
-      "action": "card.criteria-meet",
-      "ref": "c0hp46qn",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-06T14:34:19.338Z",
-      "by": "e3-bugs",
-      "action": "card.criteria-meet",
-      "ref": "c0hp46qn",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-06T14:34:18.979Z",
-      "by": "e3-bugs",
-      "action": "card.criteria-meet",
-      "ref": "c0hp46qn",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-06T14:34:18.733Z",
-      "by": "e3-bugs",
-      "action": "card.criteria-meet",
-      "ref": "c0hp46qn",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-06T14:34:18.463Z",
-      "by": "e3-bugs",
-      "action": "card.criteria-meet",
-      "ref": "c0hp46qn",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-06T14:34:18.195Z",
-      "by": "e3-bugs",
-      "action": "card.criteria-meet",
-      "ref": "c0ky778n",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-06T14:34:17.931Z",
-      "by": "e3-bugs",
-      "action": "card.criteria-meet",
-      "ref": "c0ky778n",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-06T14:34:17.678Z",
-      "by": "e3-bugs",
-      "action": "card.criteria-meet",
-      "ref": "c0ky778n",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-06T14:34:17.413Z",
-      "by": "e3-bugs",
-      "action": "card.criteria-meet",
-      "ref": "c0ky778n",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-06T14:34:17.175Z",
-      "by": "e3-bugs",
-      "action": "card.criteria-meet",
-      "ref": "c0ky778n",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-06T14:13:12.885Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-CORE-PATH1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-06T14:11:34.427Z",
-      "by": "e3-orch",
-      "action": "card.release",
-      "ref": "c0v3yofo",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-08-06T14:11:34.180Z",
-      "by": "e3-orch",
-      "action": "card.release",
-      "ref": "c0pzumap",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-08-06T14:11:33.934Z",
-      "by": "e3-orch",
-      "action": "card.release",
-      "ref": "c0fsjhdc",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-08-06T14:11:33.695Z",
-      "by": "e3-orch",
-      "action": "card.release",
-      "ref": "c0ai0h4w",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-08-06T14:11:33.457Z",
-      "by": "e3-orch",
-      "action": "card.release",
-      "ref": "c0556cxe",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-08-06T14:11:33.217Z",
-      "by": "e3-orch",
-      "action": "card.release",
-      "ref": "c0vvhs7e",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-08-06T14:11:32.979Z",
-      "by": "e3-orch",
-      "action": "card.release",
-      "ref": "c0w38v39",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-08-06T14:11:32.744Z",
-      "by": "e3-orch",
-      "action": "card.release",
-      "ref": "c0todzv8",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-08-06T14:11:32.519Z",
-      "by": "e3-orch",
-      "action": "card.update",
-      "ref": "c0om3ozr",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-06T14:11:32.247Z",
-      "by": "e3-orch",
-      "action": "card.criteria-meet",
-      "ref": "c0om3ozr",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-06T14:11:32.018Z",
-      "by": "e3-orch",
-      "action": "card.criteria-meet",
-      "ref": "c0om3ozr",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-06T14:11:31.784Z",
-      "by": "e3-orch",
-      "action": "card.criteria-meet",
-      "ref": "c0om3ozr",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-06T14:11:31.548Z",
-      "by": "e3-orch",
-      "action": "card.criteria-meet",
-      "ref": "c0om3ozr",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-06T14:11:31.316Z",
-      "by": "e3-orch",
-      "action": "card.update",
-      "ref": "c0om3ozr",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-06T14:07:27.096Z",
-      "by": "e3-bugs",
-      "action": "card.update",
-      "ref": "c0mpupgd",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T14:07:26.783Z",
-      "by": "e3-bugs",
-      "action": "card.update",
-      "ref": "c0hp46qn",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T14:07:26.461Z",
-      "by": "e3-bugs",
-      "action": "card.update",
-      "ref": "c0ky778n",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T14:07:12.314Z",
-      "by": "e3-bugs",
-      "action": "card.update",
-      "ref": "c0mpupgd",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T14:07:12.027Z",
-      "by": "e3-bugs",
-      "action": "card.update",
-      "ref": "c0hp46qn",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T14:07:11.742Z",
-      "by": "e3-bugs",
-      "action": "card.update",
-      "ref": "c0ky778n",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T14:07:00.764Z",
-      "by": "e3-coll",
-      "action": "card.update",
-      "ref": "c02j5hzk",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T14:07:00.487Z",
-      "by": "e3-coll",
-      "action": "card.update",
-      "ref": "c06egi60",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T14:07:00.205Z",
-      "by": "e3-coll",
-      "action": "card.update",
-      "ref": "c0xbgdrl",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T14:06:51.370Z",
-      "by": "e3-orch",
-      "action": "card.update",
-      "ref": "c0om3ozr",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T14:06:49.351Z",
-      "by": "e3-bugs",
-      "action": "card.claim",
-      "ref": "c0mpupgd",
-      "note": ""
-    },
-    {
-      "at": "2026-08-06T14:06:49.108Z",
-      "by": "e3-bugs",
-      "action": "card.claim",
-      "ref": "c0hp46qn",
-      "note": ""
-    },
-    {
-      "at": "2026-08-06T14:06:48.860Z",
-      "by": "e3-bugs",
-      "action": "card.claim",
-      "ref": "c0ky778n",
-      "note": ""
-    },
-    {
-      "at": "2026-08-06T14:06:46.440Z",
-      "by": "e3-orch",
-      "action": "card.claim",
-      "ref": "c0om3ozr",
-      "note": ""
-    },
-    {
-      "at": "2026-08-06T14:06:14.971Z",
-      "by": "e3-bugs",
-      "action": "card.claim",
-      "ref": "c0mpupgd",
-      "note": ""
-    },
-    {
-      "at": "2026-08-06T14:06:14.722Z",
-      "by": "e3-bugs",
-      "action": "card.claim",
-      "ref": "c0hp46qn",
-      "note": ""
-    },
-    {
-      "at": "2026-08-06T14:06:14.465Z",
-      "by": "e3-bugs",
-      "action": "card.claim",
-      "ref": "c0ky778n",
-      "note": ""
-    },
-    {
-      "at": "2026-08-06T14:06:14.223Z",
-      "by": "e3-coll",
-      "action": "card.claim",
-      "ref": "c02j5hzk",
-      "note": ""
-    },
-    {
-      "at": "2026-08-06T14:06:13.983Z",
-      "by": "e3-coll",
-      "action": "card.claim",
-      "ref": "c06egi60",
-      "note": ""
-    },
-    {
-      "at": "2026-08-06T14:06:13.735Z",
-      "by": "e3-coll",
-      "action": "card.claim",
-      "ref": "c0xbgdrl",
-      "note": ""
-    },
-    {
-      "at": "2026-08-06T14:05:26.929Z",
-      "by": "cursor-grok",
-      "action": "decision.update",
-      "ref": "D-CORE-PATH1",
-      "note": ""
-    },
-    {
-      "at": "2026-08-06T14:05:07.619Z",
-      "by": "cursor-grok",
-      "action": "question.answer",
-      "ref": "q01c0n62",
-      "note": ""
-    },
-    {
-      "at": "2026-08-06T14:04:26.143Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-06T14:04:26.143Z"
-    },
-    {
-      "at": "2026-08-06T14:03:56.240Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-CORE-DOCTRINE1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-06T14:03:34.542Z",
-      "by": "owner",
-      "action": "question.add",
-      "ref": "q01c0n62",
-      "note": ""
-    },
-    {
-      "at": "2026-08-06T14:00:30.301Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-CORE-USELIST1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-06T14:00:30.301Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0hil8nx",
-      "note": "#8 snapshots re-blessed"
-    },
-    {
-      "at": "2026-08-06T14:00:30.301Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0hil8nx",
-      "note": "#7 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-08-06T14:00:30.301Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0hil8nx",
-      "note": "#6 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-08-06T14:00:30.301Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0hil8nx",
-      "note": "#5 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-08-06T14:00:06.158Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-CORE-TREE1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-06T13:59:53.844Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-CORE-PRELUDE2",
-      "note": "B"
-    },
-    {
-      "at": "2026-08-06T13:59:18.361Z",
-      "by": "e3-review",
-      "action": "card.update",
-      "ref": "c0s7isu9",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T13:59:17.812Z",
-      "by": "e3-review",
-      "action": "card.update",
-      "ref": "c0mvkfyc",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T13:59:17.515Z",
-      "by": "e3-review",
-      "action": "card.update",
-      "ref": "c0hsjnxk",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T13:59:17.237Z",
-      "by": "e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c0s7isu9",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-06T13:59:17.006Z",
-      "by": "e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c0s7isu9",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-06T13:59:16.752Z",
-      "by": "e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c0s7isu9",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-06T13:59:16.511Z",
-      "by": "e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c0s7isu9",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-06T13:59:16.240Z",
-      "by": "e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c0s7isu9",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-06T13:59:16.006Z",
-      "by": "e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c0mvkfyc",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-06T13:59:15.773Z",
-      "by": "e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c0mvkfyc",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-06T13:59:15.544Z",
-      "by": "e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c0mvkfyc",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-06T13:59:15.312Z",
-      "by": "e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c0mvkfyc",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-06T13:59:15.081Z",
-      "by": "e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c0mvkfyc",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-06T13:59:14.850Z",
-      "by": "e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c0hsjnxk",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-06T13:59:14.613Z",
-      "by": "e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c0hsjnxk",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-06T13:59:14.373Z",
-      "by": "e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c0hsjnxk",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-06T13:59:14.140Z",
-      "by": "e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c0hsjnxk",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-06T13:57:47.915Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-CORE-PRELUDE1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-06T13:56:45.917Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-CORE-EAGER1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-06T13:52:21.246Z",
-      "by": "cursor-grok",
-      "action": "decision.update",
-      "ref": "D-CORE-USELIST1",
-      "note": ""
-    },
-    {
-      "at": "2026-08-06T13:43:52.899Z",
-      "by": "cursor-grok",
-      "action": "decision.add",
-      "ref": "D-CORE-USELIST1",
-      "note": "Grouped module import list and aliases"
-    },
-    {
-      "at": "2026-08-06T13:43:52.665Z",
-      "by": "cursor-grok",
-      "action": "decision.update",
-      "ref": "D-CORE-PRELUDE2",
-      "note": ""
-    },
-    {
-      "at": "2026-08-06T13:43:52.353Z",
-      "by": "cursor-grok",
-      "action": "decision.update",
-      "ref": "D-CORE-TREE1",
-      "note": ""
-    },
-    {
-      "at": "2026-08-06T13:37:53.523Z",
-      "by": "e3-i9fix",
-      "action": "card.update",
-      "ref": "c0mvkfyc",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-06T13:34:56.834Z",
-      "by": "e3-i9fix",
-      "action": "card.update",
-      "ref": "c0mvkfyc",
-      "note": "criteria,logEntry"
-    },
-    {
-      "at": "2026-08-06T13:29:45.936Z",
-      "by": "e3-i9fix",
-      "action": "card.update",
-      "ref": "c0s7isu9",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-06T13:29:45.661Z",
-      "by": "e3-i9fix",
-      "action": "card.update",
-      "ref": "c0mvkfyc",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-06T13:29:45.372Z",
-      "by": "e3-i9fix",
-      "action": "card.update",
-      "ref": "c0hsjnxk",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-06T13:23:05.917Z",
-      "by": "e3-orch",
-      "action": "card.criteria-meet",
-      "ref": "c0mvkfyc",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-06T13:21:04.819Z",
-      "by": "cursor-grok",
-      "action": "decision.update",
-      "ref": "D-CORE-PRELUDE2",
-      "note": ""
-    },
-    {
-      "at": "2026-08-06T13:21:04.505Z",
-      "by": "cursor-grok",
-      "action": "decision.update",
-      "ref": "D-CORE-TREE1",
-      "note": ""
     }
   ],
   "nextNum": 368,
