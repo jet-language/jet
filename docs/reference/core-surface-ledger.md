@@ -17,9 +17,16 @@ Generated on: 2026-08-06
   read from a runtime, from standard-library source, or from official
   machine-readable documentation.
 - A row carries one verdict. `equal` means at least one recorded competitor
-  answers the same workflow. `jet_wins` means none does. `jet_loses` is a
-  competitor operation with no Jet spelling. `not_compared` means no
-  surface records that container yet.
+  answers the same workflow. `jet_wins` means none does. `jet_loses` is an
+  operation two or more compared languages ship and Jet has no spelling for.
+  `single_witness` is an operation exactly one language ships.
+  `not_compared` means no surface records that container yet.
+- A gap is one workflow, not one row per language. Ten languages shipping
+  `sqrt` is one missing operation with ten witnesses.
+- One language is not evidence. A single-witness row is almost always that
+  language's own internals, such as Rust's `align_to` and `as_mut_ptr`,
+  which a memory-safe language must not expose. Those rows stay in the
+  ledger and stay counted, but they are recorded rather than scored.
 - `--check` rejects source drift, a competitor claim the recorded surface
   does not support, a duplicate row, a container a language silently
   skipped, an owner card that is closed or missing, and an unratified
@@ -35,16 +42,16 @@ Generated on: 2026-08-06
 | Module members | 1011 |
 | Collection method rows | 334 |
 | Jet-side rows | 1346 |
-| Total rows | 10577 |
+| Total rows | 10498 |
 
 ## Verdicts
 
 | Verdict | Rows |
 | --- | ---: |
-| Jet wins | 410 |
-| Equal | 351 |
-| Jet loses (two or more languages agree) | 687 |
-| Single witness (recorded, not scored) | 8544 |
+| Jet wins | 393 |
+| Equal | 368 |
+| Jet loses (two or more languages agree) | 649 |
+| Single witness (recorded, not scored) | 8503 |
 | Not compared | 585 |
 | Deliberately declined | 0 |
 
@@ -52,17 +59,17 @@ Generated on: 2026-08-06
 
 | Language | Surface read from | Recorded operations | Jet rows matched | Loss rows |
 | --- | --- | ---: | ---: | ---: |
-| Rust | standard-library source (rust-src component) | 980 | 146 | 134 |
-| Go | official frozen API files (GOROOT/api/go1*.txt) | 1681 | 133 | 235 |
-| Swift | official documentation JSON (developer.apple.com) | 505 | 65 | 88 |
-| Kotlin | official API reference (kotlinlang.org) | 1141 | 120 | 136 |
-| C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1102 | 117 | 134 |
-| TypeScript | runtime introspection | 347 | 96 | 57 |
-| Ruby | runtime introspection | 1209 | 130 | 201 |
-| Elixir | runtime introspection | 1450 | 147 | 203 |
-| Julia | official documentation search index (docs.julialang.org) | 1132 | 98 | 197 |
+| Rust | standard-library source (rust-src component) | 980 | 157 | 119 |
+| Go | official frozen API files (GOROOT/api/go1*.txt) | 1681 | 145 | 232 |
+| Swift | official documentation JSON (developer.apple.com) | 505 | 83 | 79 |
+| Kotlin | official API reference (kotlinlang.org) | 1141 | 147 | 121 |
+| C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1102 | 135 | 128 |
+| TypeScript | runtime introspection | 347 | 112 | 47 |
+| Ruby | runtime introspection | 1209 | 149 | 186 |
+| Elixir | runtime introspection | 1450 | 173 | 184 |
+| Julia | official documentation search index (docs.julialang.org) | 1132 | 108 | 189 |
 | R | official R manual package index (stat.ethz.ch R-devel) | 3536 | 34 | 0 |
-| Python | runtime introspection | 2227 | 128 | 285 |
+| Python | runtime introspection | 2227 | 142 | 283 |
 
 ## Loss clusters
 
@@ -74,39 +81,40 @@ it is done while losses remain.
 
 | Container | Loss rows | Prior card | Card phase | Owner |
 | --- | ---: | --- | --- | --- |
-| String | 81 | #1409 | done | closed |
-| core.math | 75 | none | n/a | needs_card |
+| core.math | 76 | none | n/a | needs_card |
+| String | 70 | #1409 | done | closed |
 | core.os | 56 | none | n/a | needs_card |
-| List | 54 | #1410 | done | closed |
-| core.time | 42 | none | n/a | needs_card |
+| List | 49 | #1410 | done | closed |
+| core.time | 41 | none | n/a | needs_card |
 | core.tasks | 33 | none | n/a | needs_card |
-| Map | 30 | #1410 | done | closed |
-| Set | 30 | #1404 | done | closed |
 | core.io | 27 | #1402 | done | closed |
-| core.files | 26 | #288 | building | live |
+| Map | 26 | #1410 | done | closed |
+| core.files | 25 | #288 | building | live |
+| Set | 25 | #1404 | done | closed |
 | core.net | 23 | none | n/a | needs_card |
 | core.path | 22 | #288 | building | live |
-| Iter | 21 | #1400 | done | closed |
 | ByteBuffer | 20 | none | n/a | needs_card |
 | core.archive | 15 | none | n/a | needs_card |
-| Deque | 15 | none | n/a | needs_card |
 | core.url | 14 | none | n/a | needs_card |
+| Iter | 14 | #1400 | done | closed |
 | core.log | 12 | none | n/a | needs_card |
 | core.process | 12 | none | n/a | needs_card |
+| Deque | 12 | none | n/a | needs_card |
 | core.crypto | 11 | none | n/a | needs_card |
 | core.regex | 11 | none | n/a | needs_card |
 | core.tls | 10 | none | n/a | needs_card |
-| core.text | 8 | none | n/a | needs_card |
 | core.testing | 7 | none | n/a | needs_card |
+| core.text | 7 | none | n/a | needs_card |
 | core.db | 6 | none | n/a | needs_card |
 | core.http | 6 | none | n/a | needs_card |
-| SortedSet | 5 | #1404 | done | closed |
 | core.binary | 3 | none | n/a | needs_card |
 | core.encoding.csv | 3 | none | n/a | needs_card |
 | core.uuid | 3 | none | n/a | needs_card |
+| SortedSet | 3 | #1404 | done | closed |
 | core.encoding.base64 | 2 | none | n/a | needs_card |
 | core.random | 2 | none | n/a | needs_card |
 | PriorityQueue | 2 | none | n/a | needs_card |
+| core.encoding.json | 1 | none | n/a | needs_card |
 
 ## Containers indexed per package
 

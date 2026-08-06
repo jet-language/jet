@@ -149,71 +149,108 @@ const CONTAINER_ALIASES = {
   "core.crypto.expert": "core.crypto",
 };
 
-// Cross-language spellings of one operation, keyed by Jet's own spelling. Each
-// entry only ever turns a claimed loss into a match, so a missing entry
-// overstates Jet's gap and can never invent a Jet win.
-const SYNONYMS = {
-  push: ["append", "add", "addlast", "pushback", "insert", "conj", "addrange"],
-  pop: ["pop", "removelast", "poplast", "popback", "removeat"],
-  len: ["len", "size", "count", "length"],
-  get: ["get", "at", "tryget", "item", "index", "nth", "fetch", "getvalue"],
-  set: ["set", "put", "insert", "store", "setvalue"],
-  remove: ["remove", "delete", "del", "discard", "erase", "unlink", "removeat", "drop", "pop"],
-  clear: ["clear", "empty", "truncate", "removeall", "reset"],
-  contains: ["contains", "includes", "has", "member", "haskey", "exist", "exists"],
-  index_of: ["index", "indexof", "find", "findindex", "search", "position", "findfirst"],
-  sort: ["sort", "sorted", "sortby", "order", "orderby", "sortwith", "sortperm"],
-  reverse: ["reverse", "reversed", "rev"],
-  map: ["map", "select", "collect", "convert"],
-  filter: ["filter", "select", "where", "findall", "filtermap", "reject"],
-  fold: ["fold", "reduce", "inject", "aggregate", "foldl", "foldr", "accumulate"],
-  for_each: ["foreach", "each", "iterate", "apply"],
-  first: ["first", "head", "front", "peek"],
-  last: ["last", "back", "tail", "peeklast"],
-  sum: ["sum", "total", "fsum"],
-  min: ["min", "minimum", "minby", "minimumby", "argmin"],
-  max: ["max", "maximum", "maxby", "maximumby", "argmax"],
-  any: ["any", "some", "anymatch"],
-  all: ["all", "every", "everymatch", "allmatch"],
-  zip: ["zip", "zipped", "zipwith"],
-  concat: ["concat", "chain", "extend", "addrange", "flatten"],
-  unique: ["unique", "distinct", "uniq", "nub"],
-  chunk: ["chunk", "chunked", "chunks", "partition", "batch", "grouped"],
-  window: ["window", "windowed", "windows", "sliding"],
-  take: ["take", "limit", "head"],
-  drop: ["drop", "skip", "rest"],
-  count: ["count", "len", "size", "length", "tally"],
-  join: ["join", "mkstring", "intercalate"],
-  split: ["split", "splitn", "partition"],
-  trim: ["trim", "strip", "chomp", "trimend", "trimstart"],
-  replace: ["replace", "sub", "gsub", "replaceall", "replacing"],
-  upper: ["upper", "uppercase", "toupper", "touppercase"],
-  lower: ["lower", "lowercase", "tolower", "tolowercase", "downcase"],
-  starts_with: ["startswith", "hasprefix", "startwith"],
-  ends_with: ["endswith", "hassuffix", "endwith"],
-  keys: ["keys", "keyset", "names"],
-  values: ["values", "valueset"],
-  is_empty: ["isempty", "empty", "isblank"],
-  insert: ["insert", "add", "put", "splice", "setindex"],
-  extend: ["extend", "addrange", "append", "concat"],
-  read: ["read", "readtext", "readall", "readalltext", "readtostring", "readfile"],
-  write: ["write", "writetext", "writeall", "writealltext", "writefile"],
-  exists: ["exists", "isfile", "isdir", "ispath", "fileexists"],
-  parse: ["parse", "loads", "load", "decode", "deserialize", "tryparse"],
-  to_string: ["tostring", "dumps", "dump", "encode", "serialize", "inspect", "format"],
-  now: ["now", "today", "currenttime", "utcnow", "systemtime"],
-  sleep: ["sleep", "delay", "wait", "pause"],
-  abs: ["abs", "fabs", "magnitude"],
-  round: ["round", "rint", "roundtoint"],
-  floor: ["floor", "rounddown"],
-  ceil: ["ceil", "ceiling", "roundup"],
-  sqrt: ["sqrt", "squareroot", "isqrt"],
-  pow: ["pow", "power"],
-  random: ["random", "next", "rand", "nextdouble"],
-  shuffle: ["shuffle", "shuffled", "randomize"],
-  encode: ["encode", "encodetostring", "tobase64string", "b64encode", "pack"],
-  decode: ["decode", "decodestring", "frombase64string", "b64decode", "unpack"],
-};
+// Interchangeable spellings of one operation. This was keyed by an idealised
+// name and looked up by Jet's actual spelling, so almost none of it applied:
+// Jet spells the operation to_lower, has_key, each, dedup and skip, and the
+// table was keyed lower, contains, for_each, unique and drop. Every one of
+// those scored a gap against a workflow Jet already ships. It is now an
+// equivalence table: any name in a group matches any other.
+//
+// Groups stay tight on purpose. Merging a name Jet lacks into a group Jet has
+// would hide a real gap, so is_subset is not a kind of contains.
+const SYNONYM_GROUPS = [
+  ["push", "append", "add", "add_last", "push_back", "conj", "add_range", "insert"],
+  ["pop", "remove_last", "pop_last", "pop_back"],
+  ["len", "size", "count", "length"],
+  ["get", "at", "try_get", "item", "nth", "fetch", "get_value"],
+  ["set", "put", "store", "set_value"],
+  ["remove", "delete", "del", "discard", "erase", "unlink", "remove_at"],
+  ["clear", "truncate", "remove_all", "reset", "empty_out"],
+  ["contains", "includes", "has", "member", "has_key", "contains_key", "is_member", "in"],
+  ["contains_value", "has_value"],
+  ["index_of", "index", "find_index", "position", "find_first", "search"],
+  ["sort", "sorted", "sort_by", "order_by", "sort_with", "order", "sort_with_comparator"],
+  ["reverse", "reversed", "rev"],
+  ["map", "select", "convert", "map_values"],
+  ["filter", "where", "find_all", "reject"],
+  ["fold", "reduce", "inject", "aggregate", "foldl", "foldr", "accumulate"],
+  ["each", "for_each", "iterate", "apply_each"],
+  ["first", "head", "front", "peek", "first_or_null"],
+  ["last", "back", "peek_last"],
+  ["indexed", "enumerate", "enumerated", "with_index"],
+  ["skip", "drop"],
+  ["skip_while", "drop_while"],
+  ["take", "limit"],
+  ["take_while", "take_until"],
+  ["dedup", "unique", "uniq", "distinct", "nub"],
+  ["to_lower", "lower", "lowercase", "to_lowercase", "downcase"],
+  ["to_upper", "upper", "uppercase", "to_uppercase", "upcase"],
+  ["trim", "strip"],
+  ["trim_start", "trim_left", "lstrip", "trim_leading"],
+  ["trim_end", "trim_right", "rstrip", "chomp", "trim_trailing"],
+  ["starts_with", "has_prefix", "start_with"],
+  ["ends_with", "has_suffix", "end_with"],
+  ["difference", "subtract", "diff", "except", "symmetric_difference_with"],
+  ["intersection", "intersect", "intersect_with"],
+  ["union", "unite", "union_with"],
+  ["concat", "chain", "extend", "append_all", "add_all"],
+  ["is_empty", "empty", "is_blank", "none"],
+  ["keys", "key_set", "names"],
+  ["values", "value_set"],
+  ["join", "mk_string", "intercalate"],
+  ["split", "split_n"],
+  ["split_once", "split_at", "cut"],
+  ["replace", "sub", "gsub", "replace_all", "replacing"],
+  ["read", "read_text", "read_all", "read_all_text", "read_to_string", "read_file"],
+  ["write", "write_text", "write_all", "write_all_text", "write_file"],
+  ["exists", "is_file", "is_dir", "file_exists", "is_path"],
+  ["parse", "loads", "decode", "deserialize", "try_parse", "from_string"],
+  ["to_string", "dumps", "encode", "serialize", "inspect", "format", "describe"],
+  ["now", "today", "current_time", "utc_now", "system_time"],
+  ["sleep", "delay", "pause"],
+  ["abs", "fabs", "magnitude"],
+  ["round", "rint"],
+  ["floor", "round_down"],
+  ["ceil", "ceiling", "round_up"],
+  ["sqrt", "square_root"],
+  ["pow", "power"],
+  ["random", "rand", "next_double", "next_float"],
+  ["shuffle", "shuffled", "randomize"],
+  ["zip", "zipped", "zip_with"],
+  ["chunk", "chunks", "chunked", "grouped", "batch"],
+  ["window", "windows", "windowed", "sliding"],
+  ["min", "minimum", "min_by", "argmin"],
+  ["max", "maximum", "max_by", "argmax"],
+  ["sum", "total", "fsum"],
+  ["product", "prod"],
+  ["any", "some", "any_match", "any_satisfy"],
+  ["all", "every", "all_match", "every_match", "all_satisfy"],
+  ["count_by", "tally", "counting"],
+  ["flat_map", "collect_concat"],
+  ["flatten", "flat"],
+  ["group_by", "chunk_by", "partition_by"],
+  ["to_list", "to_array", "to_vec", "collect_list", "entries"],
+  ["slice", "sub_string", "substring", "sub_sequence"],
+  ["pad_start", "pad_left", "left_pad", "just_right"],
+  ["pad_end", "pad_right", "right_pad", "just_left"],
+  ["lines", "each_line", "split_lines", "read_lines"],
+  ["chars", "characters", "each_char", "code_points"],
+  ["repeat", "times", "cycle_n"],
+  ["merge", "put_all", "update_all", "combine"],
+];
+
+// normalized name -> every normalized name it is interchangeable with.
+const SYNONYM_INDEX = (function () {
+  const index = new Map();
+  for (const group of SYNONYM_GROUPS) {
+    const keys = group.map(function (name) { return name.toLowerCase().replace(/[_!?.\-]/g, ""); });
+    for (const key of keys) {
+      if (!index.has(key)) index.set(key, new Set());
+      for (const other of keys) index.get(key).add(other);
+    }
+  }
+  return index;
+})();
 
 const COLLECTION_METHOD_FUNCTIONS = {
   task_list_method_return: "TaskList",
@@ -660,8 +697,9 @@ function normalize(name) {
 }
 
 function synonymsFor(jetMember) {
-  const keys = new Set([normalize(jetMember)]);
-  for (const alias of SYNONYMS[jetMember] || []) keys.add(normalize(alias));
+  const base = normalize(jetMember);
+  const keys = new Set([base]);
+  for (const alias of SYNONYM_INDEX.get(base) || []) keys.add(alias);
   return keys;
 }
 
@@ -997,7 +1035,7 @@ function buildLedger() {
     sourceFiles: sourceFiles(),
     canonicalContainers: containers,
     containerAliases: CONTAINER_ALIASES,
-    synonyms: SYNONYMS,
+    synonymGroups: SYNONYM_GROUPS,
     competitors: perLanguage,
     consumer: {
       card: 1398,
@@ -1187,9 +1225,16 @@ function markdown(ledger) {
     "  read from a runtime, from standard-library source, or from official",
     "  machine-readable documentation.",
     "- A row carries one verdict. `equal` means at least one recorded competitor",
-    "  answers the same workflow. `jet_wins` means none does. `jet_loses` is a",
-    "  competitor operation with no Jet spelling. `not_compared` means no",
-    "  surface records that container yet.",
+    "  answers the same workflow. `jet_wins` means none does. `jet_loses` is an",
+    "  operation two or more compared languages ship and Jet has no spelling for.",
+    "  `single_witness` is an operation exactly one language ships.",
+    "  `not_compared` means no surface records that container yet.",
+    "- A gap is one workflow, not one row per language. Ten languages shipping",
+    "  `sqrt` is one missing operation with ten witnesses.",
+    "- One language is not evidence. A single-witness row is almost always that",
+    "  language's own internals, such as Rust's `align_to` and `as_mut_ptr`,",
+    "  which a memory-safe language must not expose. Those rows stay in the",
+    "  ledger and stay counted, but they are recorded rather than scored.",
     "- `--check` rejects source drift, a competitor claim the recorded surface",
     "  does not support, a duplicate row, a container a language silently",
     "  skipped, an owner card that is closed or missing, and an unratified",
