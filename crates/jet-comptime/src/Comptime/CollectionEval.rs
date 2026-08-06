@@ -71,6 +71,13 @@ fn sorted_descending(mut items: Vec<CtValue>, span: Span) -> Result<Vec<CtValue>
     }
 }
 
+fn as_string(v: &CtValue, span: Span) -> Result<String, Diagnostic> {
+    match v {
+        CtValue::Str(s) => Ok(s.clone()),
+        _ => Err(unsupported("non-String argument to ByteBuffer", span)),
+    }
+}
+
 fn as_bytes(v: &CtValue, span: Span) -> Result<Vec<u8>, Diagnostic> {
     match v {
         CtValue::Bytes(bs) => Ok(bs.clone()),
@@ -127,9 +134,16 @@ fn lru_struct(capacity: i64, entries: Vec<CtValue>) -> CtValue {
 }
 
 fn byte_buffer_struct(bytes: Vec<u8>) -> CtValue {
+    byte_buffer_struct_at(bytes, 0)
+}
+
+fn byte_buffer_struct_at(bytes: Vec<u8>, pos: usize) -> CtValue {
     CtValue::Struct {
         type_name: crate::Syntax::TYPE_BYTE_BUFFER.to_string(),
-        fields: vec![("bytes".to_string(), CtValue::Bytes(bytes))],
+        fields: vec![
+            ("bytes".to_string(), CtValue::Bytes(bytes)),
+            ("pos".to_string(), CtValue::Int(pos as i64)),
+        ],
     }
 }
 
@@ -183,7 +197,18 @@ pub fn byte_buffer_from(bytes: &CtValue, span: Span) -> Result<CtValue, Diagnost
 pub fn prelude_new(path: &str, args: Vec<CtValue>, span: Span) -> Option<Result<CtValue, Diagnostic>> {
     Some(match path {
         "JetBitSet" => Ok(bitset_struct(Vec::new())),
-        "JetByteBuffer" => Ok(byte_buffer_struct(Vec::new())),
+        "JetByteBuffer" => {
+            let capacity = match args.into_iter().next() {
+                Some(v) => match as_int(&v, span) {
+                    Ok(n) => n.max(0) as usize,
+                    Err(e) => return Some(Err(e)),
+                },
+                None => 0,
+            };
+            let mut bytes = Vec::new();
+            bytes.reserve(capacity);
+            Ok(byte_buffer_struct(bytes))
+        }
         "JetCache" => {
             let capacity = match args.into_iter().next() {
                 Some(v) => match as_int(&v, span) {
@@ -877,7 +902,7 @@ fn lru_mutating(
 fn byte_buffer_method(
     fields: &[(String, CtValue)],
     method: &str,
-    _args: &[CtValue],
+    args: &[CtValue],
     span: Span,
 ) -> Result<CtValue, Diagnostic> {
     let bytes = fields
@@ -886,10 +911,146 @@ fn byte_buffer_method(
         .map(|(_, value)| as_bytes(value, span))
         .transpose()?
         .unwrap_or_default();
+    let pos = fields
+        .iter()
+        .find(|(name, _)| name == "pos")
+        .map(|(_, value)| as_int(value, span))
+        .transpose()?
+        .unwrap_or(0)
+        .max(0) as usize;
+    let text = String::from_utf8_lossy(&bytes).into_owned();
     match method {
         "len" => Ok(CtValue::Int(bytes.len() as i64)),
+        "capacity" => Ok(CtValue::Int(bytes.capacity() as i64)),
         "is_empty" => Ok(CtValue::Bool(bytes.is_empty())),
-        "to_bytes" => Ok(CtValue::Bytes(bytes)),
+        "to_bytes" | "get_buffer" | "buffer" => Ok(CtValue::Bytes(bytes)),
+        "position" => Ok(CtValue::Int(pos as i64)),
+        "eof" => Ok(CtValue::Bool(pos >= bytes.len())),
+        "to_string" | "string" => Ok(CtValue::Str(text)),
+        "is_ascii" => Ok(CtValue::Bool(bytes.is_ascii())),
+        "first" => Ok(match bytes.first() {
+            Some(b) => CtValue::Some(Box::new(CtValue::Int(*b as i64))),
+            None => CtValue::None(Type::Int),
+        }),
+        "get" => {
+            let index = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
+            Ok(if index < 0 {
+                CtValue::None(Type::Int)
+            } else {
+                match bytes.get(index as usize) {
+                    Some(b) => CtValue::Some(Box::new(CtValue::Int(*b as i64))),
+                    None => CtValue::None(Type::Int),
+                }
+            })
+        }
+        "contains" => {
+            let needle = as_string(args.first().unwrap_or(&CtValue::Str(String::new())), span)?;
+            Ok(CtValue::Bool(text.contains(&needle)))
+        }
+        "starts_with" => {
+            let prefix = as_string(args.first().unwrap_or(&CtValue::Str(String::new())), span)?;
+            Ok(CtValue::Bool(text.starts_with(&prefix)))
+        }
+        "ends_with" => {
+            let suffix = as_string(args.first().unwrap_or(&CtValue::Str(String::new())), span)?;
+            Ok(CtValue::Bool(text.ends_with(&suffix)))
+        }
+        "trim" => Ok(byte_buffer_struct(text.trim().as_bytes().to_vec())),
+        "trim_start" => Ok(byte_buffer_struct(text.trim_start().as_bytes().to_vec())),
+        "trim_end" => Ok(byte_buffer_struct(text.trim_end().as_bytes().to_vec())),
+        "to_lower" => Ok(byte_buffer_struct(text.to_lowercase().into_bytes())),
+        "to_upper" => Ok(byte_buffer_struct(text.to_uppercase().into_bytes())),
+        "to_title" | "title" => {
+            let mut out = String::with_capacity(text.len());
+            let mut start = true;
+            for ch in text.chars() {
+                if ch.is_whitespace() {
+                    start = true;
+                    out.push(ch);
+                } else if start {
+                    for c in ch.to_uppercase() {
+                        out.push(c);
+                    }
+                    start = false;
+                } else {
+                    for c in ch.to_lowercase() {
+                        out.push(c);
+                    }
+                }
+            }
+            Ok(byte_buffer_struct(out.into_bytes()))
+        }
+        "clone" | "copy" => Ok(byte_buffer_struct_at(bytes, pos)),
+        "lines" => Ok(CtValue::List(
+            text.lines().map(|s| CtValue::Str(s.to_string())).collect(),
+        )),
+        "index_of" => {
+            let needle = as_string(args.first().unwrap_or(&CtValue::Str(String::new())), span)?;
+            Ok(match text.find(&needle) {
+                Some(i) => CtValue::Some(Box::new(CtValue::Int(i as i64))),
+                None => CtValue::None(Type::Int),
+            })
+        }
+        "last_index_of" => {
+            let needle = as_string(args.first().unwrap_or(&CtValue::Str(String::new())), span)?;
+            Ok(match text.rfind(&needle) {
+                Some(i) => CtValue::Some(Box::new(CtValue::Int(i as i64))),
+                None => CtValue::None(Type::Int),
+            })
+        }
+        "split" => {
+            let sep = as_string(args.first().unwrap_or(&CtValue::Str(String::new())), span)?;
+            Ok(CtValue::List(
+                text.split(&sep).map(|s| CtValue::Str(s.to_string())).collect(),
+            ))
+        }
+        "replace" => {
+            let from = as_string(args.first().unwrap_or(&CtValue::Str(String::new())), span)?;
+            let to = as_string(args.get(1).unwrap_or(&CtValue::Str(String::new())), span)?;
+            Ok(byte_buffer_struct(text.replace(&from, &to).into_bytes()))
+        }
+        "join" => {
+            let parts = match args.first() {
+                Some(CtValue::List(xs)) => xs
+                    .iter()
+                    .map(|x| as_string(x, span))
+                    .collect::<Result<Vec<_>, _>>()?,
+                _ => Vec::new(),
+            };
+            Ok(byte_buffer_struct(parts.join(&text).into_bytes()))
+        }
+        "equal" => {
+            let other = match args.first() {
+                Some(CtValue::Struct { fields, .. }) => fields
+                    .iter()
+                    .find(|(n, _)| n == "bytes")
+                    .map(|(_, v)| as_bytes(v, span))
+                    .transpose()?
+                    .unwrap_or_default(),
+                _ => Vec::new(),
+            };
+            Ok(CtValue::Bool(bytes == other))
+        }
+        "compare" => {
+            let other = match args.first() {
+                Some(CtValue::Struct { fields, .. }) => fields
+                    .iter()
+                    .find(|(n, _)| n == "bytes")
+                    .map(|(_, v)| as_bytes(v, span))
+                    .transpose()?
+                    .unwrap_or_default(),
+                _ => Vec::new(),
+            };
+            Ok(CtValue::Int(match bytes.cmp(&other) {
+                std::cmp::Ordering::Less => -1,
+                std::cmp::Ordering::Equal => 0,
+                std::cmp::Ordering::Greater => 1,
+            }))
+        }
+        "parse" => match text.trim().parse::<i64>() {
+            Ok(n) => Ok(CtValue::ResOk(Box::new(CtValue::Int(n)))),
+            Err(e) => Ok(CtValue::ResErr(Box::new(CtValue::Str(e.to_string())))),
+        },
         _ => Err(unsupported(
             &format!("ByteBuffer.{} at compile time", method),
             span,
@@ -910,27 +1071,128 @@ fn byte_buffer_mutating(
         .map(|(_, value)| as_bytes(value, span))
         .transpose()?
         .unwrap_or_default();
-    match method {
-        "clear" => bytes.clear(),
-        "write_bytes" => bytes.extend(as_bytes(args.first().unwrap_or(&CtValue::Bytes(vec![])), span)?),
-        "write_u8" => bytes.push(as_int(args.first().unwrap_or(&CtValue::Int(0)), span)? as u8),
+    let mut pos = fields
+        .iter()
+        .find(|(name, _)| name == "pos")
+        .map(|(_, value)| as_int(value, span))
+        .transpose()?
+        .unwrap_or(0)
+        .max(0) as usize;
+    let result = match method {
+        "clear" | "close" | "shutdown" => {
+            bytes.clear();
+            pos = 0;
+            CtValue::Unit
+        }
+        "flush" => CtValue::Unit,
+        "rewind" => {
+            pos = 0;
+            CtValue::Unit
+        }
+        "seek" => {
+            let index = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
+            pos = if index <= 0 {
+                0
+            } else if (index as usize) > bytes.len() {
+                bytes.len()
+            } else {
+                index as usize
+            };
+            CtValue::Unit
+        }
+        "write_bytes" | "write" => {
+            bytes.extend(as_bytes(
+                args.first().unwrap_or(&CtValue::Bytes(vec![])),
+                span,
+            )?);
+            CtValue::Unit
+        }
+        "write_u8" | "write_byte" => {
+            bytes.push(as_int(args.first().unwrap_or(&CtValue::Int(0)), span)? as u8);
+            CtValue::Unit
+        }
         "write_u16_le" => {
-            bytes.extend_from_slice(&(as_int(args.first().unwrap_or(&CtValue::Int(0)), span)? as u16).to_le_bytes())
+            bytes.extend_from_slice(
+                &(as_int(args.first().unwrap_or(&CtValue::Int(0)), span)? as u16).to_le_bytes(),
+            );
+            CtValue::Unit
         }
         "write_u16_be" => {
-            bytes.extend_from_slice(&(as_int(args.first().unwrap_or(&CtValue::Int(0)), span)? as u16).to_be_bytes())
+            bytes.extend_from_slice(
+                &(as_int(args.first().unwrap_or(&CtValue::Int(0)), span)? as u16).to_be_bytes(),
+            );
+            CtValue::Unit
         }
         "write_u32_le" => {
-            bytes.extend_from_slice(&(as_int(args.first().unwrap_or(&CtValue::Int(0)), span)? as u32).to_le_bytes())
+            bytes.extend_from_slice(
+                &(as_int(args.first().unwrap_or(&CtValue::Int(0)), span)? as u32).to_le_bytes(),
+            );
+            CtValue::Unit
         }
         "write_u32_be" => {
-            bytes.extend_from_slice(&(as_int(args.first().unwrap_or(&CtValue::Int(0)), span)? as u32).to_be_bytes())
+            bytes.extend_from_slice(
+                &(as_int(args.first().unwrap_or(&CtValue::Int(0)), span)? as u32).to_be_bytes(),
+            );
+            CtValue::Unit
         }
         "write_u64_le" => {
-            bytes.extend_from_slice(&(as_int(args.first().unwrap_or(&CtValue::Int(0)), span)? as u64).to_le_bytes())
+            bytes.extend_from_slice(
+                &(as_int(args.first().unwrap_or(&CtValue::Int(0)), span)? as u64).to_le_bytes(),
+            );
+            CtValue::Unit
         }
         "write_u64_be" => {
-            bytes.extend_from_slice(&(as_int(args.first().unwrap_or(&CtValue::Int(0)), span)? as u64).to_be_bytes())
+            bytes.extend_from_slice(
+                &(as_int(args.first().unwrap_or(&CtValue::Int(0)), span)? as u64).to_be_bytes(),
+            );
+            CtValue::Unit
+        }
+        "read_byte" | "next" => {
+            if pos >= bytes.len() {
+                CtValue::None(Type::Int)
+            } else {
+                let b = bytes[pos];
+                pos += 1;
+                CtValue::Some(Box::new(CtValue::Int(b as i64)))
+            }
+        }
+        "read" => {
+            if pos >= bytes.len() {
+                CtValue::None(Type::List(Box::new(Type::IntN { signed: false, bits: 8 })))
+            } else {
+                let out = bytes[pos..].to_vec();
+                pos = bytes.len();
+                CtValue::Some(Box::new(CtValue::Bytes(out)))
+            }
+        }
+        "read_bytes" => {
+            let n = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
+            if n < 0 || pos + (n as usize) > bytes.len() {
+                CtValue::None(Type::List(Box::new(Type::IntN { signed: false, bits: 8 })))
+            } else {
+                let out = bytes[pos..pos + n as usize].to_vec();
+                pos += n as usize;
+                CtValue::Some(Box::new(CtValue::Bytes(out)))
+            }
+        }
+        "read_string" => {
+            let n = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
+            if n < 0 || pos + (n as usize) > bytes.len() {
+                CtValue::None(Type::String)
+            } else {
+                let out = bytes[pos..pos + n as usize].to_vec();
+                pos += n as usize;
+                CtValue::Some(Box::new(CtValue::Str(
+                    String::from_utf8_lossy(&out).into_owned(),
+                )))
+            }
+        }
+        "copy_to" | "write_to" => {
+            // Mutating methods with a second buffer are runtime-only.
+            return Err(unsupported(
+                &format!("ByteBuffer.{} at compile time", method),
+                span,
+            ));
         }
         _ => {
             return Err(unsupported(
@@ -938,7 +1200,7 @@ fn byte_buffer_mutating(
                 span,
             ))
         }
-    }
-    *recv = byte_buffer_struct(bytes);
-    Ok(CtValue::Unit)
+    };
+    *recv = byte_buffer_struct_at(bytes, pos);
+    Ok(result)
 }

@@ -218,6 +218,15 @@ impl LowerCtx<'_, '_> {
                 TBuiltinOp::LruPut | TBuiltinOp::LruGet => {
                     Self::receiver_is(&recv.ty, "Cache")
                 }
+                // ByteBuffer get/first/next/read_byte → Option(U8) via result-arena ABI.
+                TBuiltinOp::ByteBufferMethod { method }
+                    if matches!(
+                        method.as_str(),
+                        "get" | "first" | "next" | "read_byte"
+                    ) =>
+                {
+                    true
+                }
                 _ => false,
             },
             TExprKind::HostCall(host) => matches!(
@@ -7483,8 +7492,23 @@ impl LowerCtx<'_, '_> {
                     }
                     let val = self.lower_expr(e)?;
                     if let Type::Option(inner) = &push_ty {
-                        let zero = self.b.ins().iconst(types::I64, 0);
-                        let is_none = self.bool_from_icmp(IntCC::Equal, val, zero);
+                        // IntN Option uses the result-arena ABI (nonzero handle);
+                        // other Options use 0 = None, bits+1 = Some.
+                        let uses_result = matches!(inner.as_ref(), Type::IntN { .. })
+                            || Self::uses_result_option_abi(e);
+                        let is_none = if uses_result {
+                            let is_ok = self
+                                .module
+                                .declare_func_in_func(self.host.result_is_ok, self.b.func);
+                            let call = self.b.ins().call(is_ok, &[val]);
+                            let ok = self.b.inst_results(call)[0];
+                            let ok_wide = self.b.ins().uextend(types::I64, ok);
+                            let zero = self.b.ins().iconst(types::I64, 0);
+                            self.bool_from_icmp(IntCC::Equal, ok_wide, zero)
+                        } else {
+                            let zero = self.b.ins().iconst(types::I64, 0);
+                            self.bool_from_icmp(IntCC::Equal, val, zero)
+                        };
                         let none_block = self.b.create_block();
                         let some_block = self.b.create_block();
                         let done = self.b.create_block();
@@ -7502,21 +7526,71 @@ impl LowerCtx<'_, '_> {
                         self.b.ins().jump(done, &[]);
                         self.b.switch_to_block(some_block);
                         self.b.seal_block(some_block);
-                        let payload = self.unpack_option_payload(val, inner)?;
-                        let push = match inner.as_ref() {
-                            Type::Int => self.host.str_push_i64,
-                            Type::Float => self.host.str_push_f64,
-                            Type::Bool => self.host.str_push_bool,
-                            Type::Char => self.host.str_push_char,
-                            Type::String => self.host.str_push_str,
+                        let payload = if uses_result {
+                            let host = self
+                                .module
+                                .declare_func_in_func(self.host.result_get_i64, self.b.func);
+                            let call = self.b.ins().call(host, &[val]);
+                            self.b.inst_results(call)[0]
+                        } else {
+                            self.unpack_option_payload(val, inner)?
+                        };
+                        match inner.as_ref() {
+                            Type::Int | Type::IntN { .. } => {
+                                let push = self
+                                    .module
+                                    .declare_func_in_func(self.host.str_push_i64, self.b.func);
+                                self.b.ins().call(push, &[buf_id, payload]);
+                            }
+                            Type::Float => {
+                                let push = self
+                                    .module
+                                    .declare_func_in_func(self.host.str_push_f64, self.b.func);
+                                self.b.ins().call(push, &[buf_id, payload]);
+                            }
+                            Type::Bool => {
+                                let push = self
+                                    .module
+                                    .declare_func_in_func(self.host.str_push_bool, self.b.func);
+                                self.b.ins().call(push, &[buf_id, payload]);
+                            }
+                            Type::Char => {
+                                let push = self
+                                    .module
+                                    .declare_func_in_func(self.host.str_push_char, self.b.func);
+                                self.b.ins().call(push, &[buf_id, payload]);
+                            }
+                            Type::String => {
+                                let push = self
+                                    .module
+                                    .declare_func_in_func(self.host.str_push_str, self.b.func);
+                                self.b.ins().call(push, &[buf_id, payload]);
+                            }
+                            Type::List(elem) => {
+                                let kind = match elem.as_ref() {
+                                    Type::String => 1,
+                                    Type::IntN { signed: true, .. } => 2,
+                                    Type::IntN { signed: false, .. } => 3,
+                                    _ => 0,
+                                };
+                                let flag = self.b.ins().iconst(types::I64, kind);
+                                let show_ref = self.module.declare_func_in_func(
+                                    self.host.coll.list_show,
+                                    self.b.func,
+                                );
+                                let show_call = self.b.ins().call(show_ref, &[payload, flag]);
+                                let text = self.b.inst_results(show_call)[0];
+                                let push_ref = self
+                                    .module
+                                    .declare_func_in_func(self.host.str_push_str, self.b.func);
+                                self.b.ins().call(push_ref, &[buf_id, text]);
+                            }
                             other => {
                                 return Err(format!(
                                     "jit string interp type unsupported: Option({other:?})"
                                 ));
                             }
-                        };
-                        let push = self.module.declare_func_in_func(push, self.b.func);
-                        self.b.ins().call(push, &[buf_id, payload]);
+                        }
                         self.b.ins().jump(done, &[]);
                         self.b.switch_to_block(done);
                         self.b.seal_block(done);
@@ -16225,7 +16299,21 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host, &[]);
                 Ok(self.b.inst_results(call)[0])
             }
-            TBuiltinOp::ByteBufferFrom => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::ByteBufferWithCapacity => {
+                let host = self.module.declare_func_in_func(
+                    self.host.coll.byte_buffer_with_capacity,
+                    self.b.func,
+                );
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            TBuiltinOp::ByteBufferFrom => {
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.coll.byte_buffer_from, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
             TBuiltinOp::ByteBufferWrite { method } => {
                 let value = self.lower_expr(&args[0])?;
                 let method = match method.as_str() {
@@ -16237,6 +16325,8 @@ impl LowerCtx<'_, '_> {
                     "write_u64_le" => 5,
                     "write_u64_be" => 6,
                     "write_bytes" => 7,
+                    "write_byte" => 8,
+                    "write" => 9,
                     _ => return Err("jit byte-buffer write method unsupported".to_string()),
                 };
                 let method = self.b.ins().iconst(types::I64, method);
@@ -16253,6 +16343,87 @@ impl LowerCtx<'_, '_> {
                 );
                 let call = self.b.ins().call(host, &[recv_val]);
                 Ok(self.b.inst_results(call)[0])
+            }
+            TBuiltinOp::ByteBufferMethod { method } => {
+                let method_id = match method.as_str() {
+                    "len" => 0,
+                    "is_empty" => 1,
+                    "clear" => 2,
+                    "capacity" => 3,
+                    "position" => 4,
+                    "eof" => 5,
+                    "rewind" => 6,
+                    "flush" => 7,
+                    "close" => 8,
+                    "shutdown" => 9,
+                    "to_bytes" => 10,
+                    "get_buffer" => 11,
+                    "buffer" => 12,
+                    "to_string" => 13,
+                    "string" => 14,
+                    "trim" => 15,
+                    "trim_start" => 16,
+                    "trim_end" => 17,
+                    "to_lower" => 18,
+                    "to_upper" => 19,
+                    "to_title" => 20,
+                    "title" => 21,
+                    "clone" | "copy" => 22,
+                    "lines" => 24,
+                    "first" => 25,
+                    "next" => 26,
+                    "read_byte" => 27,
+                    "read" => 28,
+                    "is_ascii" => 29,
+                    "parse" => 30,
+                    "get" => 40,
+                    "seek" => 41,
+                    "read_bytes" => 42,
+                    "read_string" => 43,
+                    "contains" => 44,
+                    "starts_with" => 45,
+                    "ends_with" => 46,
+                    "index_of" => 47,
+                    "last_index_of" => 48,
+                    "split" => 49,
+                    "join" => 50,
+                    "equal" => 51,
+                    "compare" => 52,
+                    "copy_to" => 53,
+                    "write_to" => 54,
+                    "replace" => 60,
+                    _ => {
+                        return Err(format!(
+                            "jit byte-buffer method unsupported: {method}"
+                        ))
+                    }
+                };
+                let arg0 = if args.is_empty() {
+                    self.b.ins().iconst(types::I64, 0)
+                } else {
+                    self.lower_expr(&args[0])?
+                };
+                let arg1 = if args.len() < 2 {
+                    self.b.ins().iconst(types::I64, 0)
+                } else {
+                    self.lower_expr(&args[1])?
+                };
+                let method_v = self.b.ins().iconst(types::I64, method_id);
+                let host = self.module.declare_func_in_func(
+                    self.host.coll.byte_buffer_method,
+                    self.b.func,
+                );
+                let call = self
+                    .b
+                    .ins()
+                    .call(host, &[recv_val, method_v, arg0, arg1]);
+                let raw = self.b.inst_results(call)[0];
+                // Narrow bool-returning methods to i8 for Jet Bool.
+                Ok(match method.as_str() {
+                    "is_empty" | "eof" | "is_ascii" | "contains" | "starts_with" | "ends_with"
+                    | "equal" => self.b.ins().ireduce(types::I8, raw),
+                    _ => raw,
+                })
             }
             TBuiltinOp::BagAdd => {
                 self.require_raw_bag_key(&recv.ty)?;

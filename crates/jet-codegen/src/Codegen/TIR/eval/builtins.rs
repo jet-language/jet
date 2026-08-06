@@ -334,11 +334,25 @@ pub(super) fn eval_builtin(
             .unwrap_or_else(|| Err(unsupported("BitSet.new", span))),
         TBuiltinOp::ByteBufferNew => CollectionEval::prelude_new("JetByteBuffer", vec![], span)
             .unwrap_or_else(|| Err(unsupported("ByteBuffer.new", span))),
+        TBuiltinOp::ByteBufferWithCapacity => {
+            CollectionEval::prelude_new("JetByteBuffer", vec![recv.clone()], span)
+                .unwrap_or_else(|| Err(unsupported("ByteBuffer.with_capacity", span)))
+        }
         TBuiltinOp::ByteBufferFrom => CollectionEval::byte_buffer_from(recv, span),
         TBuiltinOp::ByteBufferWrite { method } => {
             apply_mutating(recv, method.as_str(), args, span)
         }
         TBuiltinOp::ByteBufferToBytes => apply_method(recv, "to_bytes", args, span),
+        TBuiltinOp::ByteBufferMethod { method } => {
+            if crate::Collections::builtin_method_mutates(
+                &Type::Named(crate::Syntax::TYPE_BYTE_BUFFER.to_string()),
+                method.as_str(),
+            ) {
+                apply_mutating(recv, method.as_str(), args, span)
+            } else {
+                apply_method(recv, method.as_str(), args, span)
+            }
+        }
         TBuiltinOp::BagAdd => apply_mutating(recv, "add", args, span),
         TBuiltinOp::BagRemove => apply_mutating(recv, "remove", args, span),
         TBuiltinOp::BagHas => apply_method(recv, "has", args, span),

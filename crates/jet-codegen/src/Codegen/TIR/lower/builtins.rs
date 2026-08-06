@@ -127,10 +127,77 @@ pub(crate) fn resolve_builtin_op(
     env: &LowerEnv,
     cx: &Cx,
 ) -> Option<TBuiltinOp> {
+    let rty = tir_recv_jet_ty(receiver, env);
+    let is_byte_buffer =
+        matches!(&rty, Some(Type::Named(name)) if name == crate::Syntax::TYPE_BYTE_BUFFER);
+    // ByteBuffer.position() is a 0-arg cursor read — must win before the
+    // Iter.position(pred) closure-method early-out.
+    if is_byte_buffer {
+        let op = match (method, args.len()) {
+            (
+                "write_u8" | "write_byte" | "write_u16_le" | "write_u16_be" | "write_u32_le"
+                | "write_u32_be" | "write_u64_le" | "write_u64_be" | "write_bytes" | "write",
+                1,
+            ) => TBuiltinOp::ByteBufferWrite {
+                method: method.to_string(),
+            },
+            ("to_bytes", 0) => TBuiltinOp::ByteBufferToBytes,
+            (
+                "len" | "is_empty" | "clear" | "capacity" | "position" | "eof" | "rewind" | "flush"
+                | "close" | "shutdown" | "get_buffer" | "buffer" | "to_string" | "string" | "trim"
+                | "trim_start" | "trim_end" | "to_lower" | "to_upper" | "to_title" | "title"
+                | "clone" | "copy" | "lines" | "first" | "next" | "read_byte" | "read" | "is_ascii"
+                | "parse",
+                0,
+            )
+            | (
+                "get" | "seek" | "read_bytes" | "read_string" | "contains" | "starts_with"
+                | "ends_with" | "index_of" | "last_index_of" | "split" | "join" | "equal"
+                | "compare" | "copy_to" | "write_to",
+                1,
+            )
+            | ("replace", 2) => TBuiltinOp::ByteBufferMethod {
+                method: method.to_string(),
+            },
+            _ => return None,
+        };
+        let emitted_borrow = match &op {
+            TBuiltinOp::ByteBufferWrite { .. } => {
+                crate::Collections::BuiltinReceiverBorrow::TwoPhaseWrite
+            }
+            TBuiltinOp::ByteBufferMethod { method }
+                if matches!(
+                    method.as_str(),
+                    "clear"
+                        | "seek"
+                        | "rewind"
+                        | "next"
+                        | "read"
+                        | "read_byte"
+                        | "read_bytes"
+                        | "read_string"
+                        | "flush"
+                        | "close"
+                        | "shutdown"
+                        | "copy_to"
+                        | "write_to"
+                ) =>
+            {
+                crate::Collections::BuiltinReceiverBorrow::TwoPhaseWrite
+            }
+            _ => crate::Collections::BuiltinReceiverBorrow::Read,
+        };
+        if let Some(receiver_borrow) = rty
+            .as_ref()
+            .map(|ty| crate::Collections::builtin_receiver_borrow(ty, method))
+        {
+            debug_assert_eq!(receiver_borrow, emitted_borrow);
+        }
+        return Some(op);
+    }
     if crate::Collections::is_closure_method(method) {
         return None;
     }
-    let rty = tir_recv_jet_ty(receiver, env);
     let is_string = matches!(rty, Some(Type::String));
     let is_list = matches!(&rty, Some(Type::List(_)));
     let is_map = matches!(rty, Some(Type::Map { .. }));
@@ -141,8 +208,6 @@ pub(crate) fn resolve_builtin_op(
     let is_lru = matches!(&rty, Some(Type::Apply { name, .. }) if name == crate::Syntax::TYPE_LRU);
     let is_bag = matches!(&rty, Some(Type::Apply { name, .. }) if name == "Bag");
     let is_bit_set = matches!(&rty, Some(Type::Named(name)) if name == crate::Syntax::TYPE_BIT_SET);
-    let is_byte_buffer =
-        matches!(&rty, Some(Type::Named(name)) if name == crate::Syntax::TYPE_BYTE_BUFFER);
     let is_iter = matches!(
         &rty,
         Some(ty) if crate::Collections::is_iter_type(ty)

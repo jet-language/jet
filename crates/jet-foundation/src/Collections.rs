@@ -768,6 +768,15 @@ fn builtin_static_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
         (Type::Named(n), "Passphrase", 1) if n == "KeyUnlock" => Some(Some(Type::Named("KeyUnlock".into()))),
         (Type::Named(n), "from_text", 1) if n == "X25519PublicKey" => Some(Some(Type::Result { ok: Box::new(Type::Named(n.clone())), err: Box::new(Type::Named("CryptoError".into())) })),
         (Type::Named(n), "parse", 1) if n == "PasswordHash" => Some(Some(Type::Result { ok: Box::new(Type::Named("PasswordHash".into())), err: Box::new(Type::Named("CryptoError".into())) })),
+        (Type::Named(n), "new", 0) if n == crate::Syntax::TYPE_BYTE_BUFFER => {
+            Some(Some(Type::Named(crate::Syntax::TYPE_BYTE_BUFFER.to_string())))
+        }
+        (Type::Named(n), "with_capacity", 1) if n == crate::Syntax::TYPE_BYTE_BUFFER => {
+            Some(Some(Type::Named(crate::Syntax::TYPE_BYTE_BUFFER.to_string())))
+        }
+        (Type::Named(n), "from", 1) if n == crate::Syntax::TYPE_BYTE_BUFFER => {
+            Some(Some(Type::Named(crate::Syntax::TYPE_BYTE_BUFFER.to_string())))
+        }
         // D-SHAPE-CONVERT1=A: destination-owned numeric conversion.
         _ => numeric_conversion_return(ty, method, nargs),
     }
@@ -1643,16 +1652,43 @@ fn bit_set_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
     }
 }
 
-/// D-ITERTOOLS1=A: `ByteBuffer` builder methods.
+/// D-ITERTOOLS1=A / #1467: `ByteBuffer` builder + read cursor + string-like.
 fn byte_buffer_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
+    let bytes = || Type::List(Box::new(u8t()));
+    let buf = || Type::Named(Syntax::TYPE_BYTE_BUFFER.to_string());
     match (method, nargs) {
-        ("len", 0) => Some(Some(Type::Int)),
-        ("is_empty", 0) => Some(Some(Type::Bool)),
-        ("clear", 0) => Some(None),
-        ("to_bytes", 0) => Some(Some(Type::List(Box::new(u8t())))),
+        ("len" | "capacity" | "position", 0) => Some(Some(Type::Int)),
+        ("is_empty" | "eof" | "is_ascii", 0) => Some(Some(Type::Bool)),
+        ("clear" | "rewind" | "flush" | "close" | "shutdown", 0) => Some(None),
+        ("to_bytes" | "get_buffer" | "buffer", 0) => Some(Some(bytes())),
+        ("to_string" | "string", 0) => Some(Some(Type::String)),
+        ("trim" | "trim_start" | "trim_end" | "to_lower" | "to_upper" | "to_title" | "title"
+        | "clone" | "copy", 0) => Some(Some(buf())),
+        ("lines", 0) => Some(Some(Type::List(Box::new(Type::String)))),
+        ("first" | "next" | "read_byte", 0) => Some(Some(Type::Option(Box::new(u8t())))),
+        ("read", 0) => Some(Some(Type::Option(Box::new(bytes())))),
+        ("get", 1) => Some(Some(Type::Option(Box::new(u8t())))),
+        ("seek", 1) => Some(None),
+        ("read_bytes", 1) => Some(Some(Type::Option(Box::new(bytes())))),
+        ("read_string", 1) => Some(Some(Type::Option(Box::new(Type::String)))),
+        ("contains" | "starts_with" | "ends_with", 1) => Some(Some(Type::Bool)),
+        ("index_of" | "last_index_of", 1) => Some(Some(Type::Option(Box::new(Type::Int)))),
+        ("split", 1) => Some(Some(Type::List(Box::new(Type::String)))),
+        ("join", 1) => Some(Some(buf())),
+        ("replace", 2) => Some(Some(buf())),
+        ("equal" | "compare", 1) => Some(Some(if method == "equal" {
+            Type::Bool
+        } else {
+            Type::Int
+        })),
+        ("copy_to" | "write_to", 1) => Some(None),
+        ("parse", 0) => Some(Some(Type::Result {
+            ok: Box::new(Type::Int),
+            err: Box::new(Type::String),
+        })),
         (
-            "write_u8" | "write_u16_le" | "write_u16_be" | "write_u32_le" | "write_u32_be"
-            | "write_u64_le" | "write_u64_be" | "write_bytes",
+            "write_u8" | "write_byte" | "write_u16_le" | "write_u16_be" | "write_u32_le"
+            | "write_u32_be" | "write_u64_le" | "write_u64_be" | "write_bytes" | "write",
             1,
         ) => Some(None),
         _ => None,
@@ -1727,6 +1763,7 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
         Type::Named(n) if n == Syntax::TYPE_BYTE_BUFFER => matches!(
             method,
             "write_u8"
+                | "write_byte"
                 | "write_u16_le"
                 | "write_u16_be"
                 | "write_u32_le"
@@ -1734,7 +1771,20 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
                 | "write_u64_le"
                 | "write_u64_be"
                 | "write_bytes"
+                | "write"
+                | "write_to"
                 | "clear"
+                | "seek"
+                | "rewind"
+                | "next"
+                | "read"
+                | "read_byte"
+                | "read_bytes"
+                | "read_string"
+                | "flush"
+                | "close"
+                | "shutdown"
+                | "copy_to"
         ),
         // D-TAG1: Bag mutating methods.
         Type::Apply { name, .. } if name == "Bag" => {
@@ -2135,8 +2185,8 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             _ => Some(vec![]),
         },
         Type::Named(n) if n == Syntax::TYPE_BYTE_BUFFER => match method {
-            "write_bytes" => Some(vec![Type::List(Box::new(u8t()))]),
-            "write_u8" => Some(vec![u8t()]),
+            "write_bytes" | "write" => Some(vec![Type::List(Box::new(u8t()))]),
+            "write_u8" | "write_byte" => Some(vec![u8t()]),
             "write_u16_le" | "write_u16_be" => Some(vec![Type::IntN {
                 signed: false,
                 bits: 16,
@@ -2149,6 +2199,15 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                 signed: false,
                 bits: 64,
             }]),
+            "seek" | "read_bytes" | "read_string" | "get" => Some(vec![Type::Int]),
+            "contains" | "starts_with" | "ends_with" | "split" | "index_of" | "last_index_of" => {
+                Some(vec![Type::String])
+            }
+            "replace" => Some(vec![Type::String, Type::String]),
+            "join" => Some(vec![Type::List(Box::new(Type::String))]),
+            "equal" | "compare" | "copy_to" | "write_to" => {
+                Some(vec![Type::Named(Syntax::TYPE_BYTE_BUFFER.to_string())])
+            }
             _ => Some(vec![]),
         },
         // D-REACT1=B: `Signal.set(v)` expects a value of the signal's element type.

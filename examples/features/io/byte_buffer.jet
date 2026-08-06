@@ -1,0 +1,51 @@
+// ByteBuffer: builder + one read cursor + string-like decode (I9 / #1467).
+// Cursor EOF is position == len. Reader/Writer stay on core.binary / core.io.
+fn run() {
+    b := ByteBuffer.with_capacity(16)
+    print("capacity_ok: {b.capacity() >= 16}")
+    one :: U8.{65}
+    b.write_byte(one)
+    b.write([66, 67])
+    print("bytes: {b.to_bytes()}")
+    print("get0: {b.get(0)}")
+    print("first: {b.first()}")
+    needle_b :: "B"
+    needle_a :: "A"
+    needle_c :: "C"
+    print("contains_B: {b.contains(needle_b)}")
+    print("starts_A: {b.starts_with(needle_a)}")
+    print("ends_C: {b.ends_with(needle_c)}")
+    print("ascii: {b.is_ascii()}")
+    print("index_B: {b.index_of(needle_b)}")
+    print("string: {b.string()}")
+
+    b.rewind()
+    print("pos0: {b.position()}")
+    print("eof0: {b.eof()}")
+    print("next: {b.next()}")
+    print("pos1: {b.position()}")
+    print("read_rest: {b.read()}")
+    print("eof1: {b.eof()}")
+
+    spaced := ByteBuffer.from([32, 104, 105, 32])
+    print("trim: {spaced.trim().string()}")
+    print("lower: {ByteBuffer.from([72, 73]).to_lower().string()}")
+    print("title: {ByteBuffer.from([104, 105]).to_title().string()}")
+    from_a :: "a"
+    to_b :: "b"
+    print("replace: {ByteBuffer.from([97, 97]).replace(from_a, to_b).string()}")
+    sep_comma :: ","
+    print("split: {ByteBuffer.from([97, 44, 98]).split(sep_comma)}")
+    print("lines: {ByteBuffer.from([97, 10, 98]).lines()}")
+    sep := ByteBuffer.from([45])
+    print("join: {sep.join(["x", "y"]).string()}")
+
+    c := b.copy()
+    print("equal_copy: {b.equal(c)}")
+    print("compare: {b.compare(c)}")
+    print("buffer: {b.buffer()}")
+    print("get_buffer: {b.get_buffer()}")
+    b.flush()
+    b.close()
+    print("after_close_len: {b.len()}")
+}

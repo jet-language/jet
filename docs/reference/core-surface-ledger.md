@@ -52,18 +52,18 @@ Generated on: 2026-08-06
 | Shared containers | 54 |
 | Core modules | 85 |
 | Module members | 1110 |
-| Collection method rows | 544 |
-| Jet-side rows | 1655 |
-| Total rows | 10576 |
+| Collection method rows | 592 |
+| Jet-side rows | 1703 |
+| Total rows | 10563 |
 
 ## Verdicts
 
 | Verdict | Rows |
 | --- | ---: |
-| Jet wins | 396 |
-| Equal | 668 |
-| Jet loses (two or more languages agree) | 569 |
-| Single witness (recorded, not scored) | 8352 |
+| Jet wins | 393 |
+| Equal | 719 |
+| Jet loses (two or more languages agree) | 527 |
+| Single witness (recorded, not scored) | 8333 |
 | Exported type, not an operation | 169 |
 | Not compared | 422 |
 | Deliberately declined | 0 |
@@ -72,17 +72,17 @@ Generated on: 2026-08-06
 
 | Language | Surface read from | Recorded operations | Jet rows matched | Loss rows |
 | --- | --- | ---: | ---: | ---: |
-| Rust | standard-library source (rust-src component) | 1032 | 294 | 85 |
-| Go | official frozen API files (GOROOT/api/go1*.txt) | 1878 | 332 | 186 |
+| Rust | standard-library source (rust-src component) | 1032 | 307 | 76 |
+| Go | official frozen API files (GOROOT/api/go1*.txt) | 1878 | 373 | 161 |
 | Swift | official documentation JSON (developer.apple.com) | 505 | 133 | 66 |
-| Kotlin | official API reference (kotlinlang.org) | 1141 | 175 | 121 |
-| C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1267 | 271 | 110 |
-| TypeScript | runtime introspection | 724 | 192 | 94 |
-| Ruby | runtime introspection | 1294 | 255 | 150 |
-| Elixir | runtime introspection | 1270 | 286 | 146 |
-| Julia | official documentation search index (docs.julialang.org) | 1132 | 253 | 137 |
+| Kotlin | official API reference (kotlinlang.org) | 1141 | 175 | 114 |
+| C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1267 | 290 | 95 |
+| TypeScript | runtime introspection | 724 | 194 | 92 |
+| Ruby | runtime introspection | 1294 | 272 | 138 |
+| Elixir | runtime introspection | 1270 | 299 | 137 |
+| Julia | official documentation search index (docs.julialang.org) | 1132 | 253 | 126 |
 | R | official R manual package index (stat.ethz.ch R-devel) | 1768 | 51 | 0 |
-| Python | runtime introspection | 2232 | 324 | 227 |
+| Python | runtime introspection | 2232 | 353 | 204 |
 
 ## Loss clusters
 
@@ -94,40 +94,40 @@ while losses remain.
 
 | Container | Loss rows | Owner card | Card phase | State |
 | --- | ---: | --- | --- | --- |
-| core.files | 66 | #288 | building | live |
+| core.files | 67 | #288 | building | live |
 | String | 66 | #1476 | ready | live |
-| ByteBuffer | 49 | #1467 | ready | live |
 | List | 30 | #1477 | ready | live |
 | Map | 30 | #1477 | ready | live |
 | Set | 25 | #1478 | ready | live |
 | Iter | 22 | #1479 | ready | live |
-| core.tasks | 19 | #1468 | ready | live |
-| core.crypto | 18 | #1473 | ready | live |
+| core.crypto | 19 | #1473 | ready | live |
+| core.tasks | 19 | #1468 | building | live |
 | core.net | 18 | #1469 | ready | live |
+| core.archive | 17 | #1470 | ready | live |
 | core.log | 17 | #1474 | ready | live |
-| core.archive | 16 | #1470 | ready | live |
-| core.time | 14 | #1466 | verify | live |
-| Deque | 14 | #1475 | ready | live |
-| core.regex | 13 | #1471 | ready | live |
+| core.time | 14 | #1466 | done | closed |
+| Deque | 14 | #1475 | building | live |
 | core.url | 13 | #1472 | ready | live |
+| core.regex | 12 | #1471 | ready | live |
 | core.sync | 12 | #1481 | ready | live |
-| core.math | 11 | #1464 | verify | live |
-| core.path | 11 | #288 | building | live |
+| core.math | 11 | #1464 | done | closed |
 | core.io | 10 | #1480 | ready | live |
-| core.os | 10 | #1465 | verify | live |
+| core.os | 10 | #1465 | done | closed |
+| core.path | 10 | #288 | building | live |
 | core.process | 10 | #1481 | ready | live |
 | core.db | 9 | #1481 | ready | live |
 | core.encoding.xml | 9 | #1481 | ready | live |
 | core.reflect | 9 | #1481 | ready | live |
 | core.testing | 9 | #1481 | ready | live |
+| ByteBuffer | 6 | #1467 | building | live |
+| core.http | 6 | #1481 | ready | live |
 | core.tls | 6 | #1481 | ready | live |
-| core.http | 5 | #1481 | ready | live |
 | core.uuid | 5 | #1481 | ready | live |
 | core.args | 3 | #1481 | ready | live |
-| core.binary | 3 | #1481 | ready | live |
 | core.encoding.csv | 3 | #1481 | ready | live |
 | SortedSet | 3 | #1478 | ready | live |
 | BitSet | 2 | #1493 | planning | live |
+| core.binary | 2 | #1481 | ready | live |
 | core.mem | 2 | #1481 | ready | live |
 | core.random | 2 | #1481 | ready | live |
 | PriorityQueue | 2 | #1481 | ready | live |

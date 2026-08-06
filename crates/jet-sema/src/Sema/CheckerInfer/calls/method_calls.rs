@@ -1381,6 +1381,13 @@ impl<'a> Checker<'a> {
                 if type_name == Syntax::TYPE_BYTE_BUFFER && method == "new" && args.is_empty() {
                     return Some(Type::Named(Syntax::TYPE_BYTE_BUFFER.to_string()));
                 }
+                if type_name == Syntax::TYPE_BYTE_BUFFER
+                    && method == "with_capacity"
+                    && args.len() == 1
+                {
+                    self.expect_core_arg("with_capacity", 0, &Type::Int, &mut args[0]);
+                    return Some(Type::Named(Syntax::TYPE_BYTE_BUFFER.to_string()));
+                }
                 if type_name == Syntax::TYPE_BYTE_BUFFER && method == "from" && args.len() == 1 {
                     self.expect_core_arg(
                         "from",

@@ -12,7 +12,9 @@ use crate::Codegen::TIR::TNumericOp;
 /// final filter. The arg count disambiguates `join()` (no separator) vs `join(sep)`.
 pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
     // Closure-taking methods are NEVER covered here (Phase 11), even by name.
-    if crate::Collections::is_closure_method(method) {
+    // Exception: 0-arg forms that share a name with a closure adapter
+    // (ByteBuffer.position — cursor read, not Iter.position(pred)).
+    if crate::Collections::is_closure_method(method) && nargs > 0 {
         return false;
     }
     // D-ZIPPAD1: zip-family arity is variadic. Sema has already validated the
@@ -66,9 +68,16 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         | ("is_subset", 1) | ("is_superset", 1) | ("is_disjoint", 1)
         | ("peek", 0) | ("to_sorted_list", 0)
         | ("capacity", 0) | ("count", 0) | ("to_bytes", 0)
-        | ("write_u8", 1) | ("write_u16_le", 1) | ("write_u16_be", 1)
+        | ("write_u8", 1) | ("write_byte", 1) | ("write_u16_le", 1) | ("write_u16_be", 1)
         | ("write_u32_le", 1) | ("write_u32_be", 1)
-        | ("write_u64_le", 1) | ("write_u64_be", 1) | ("write_bytes", 1)
+        | ("write_u64_le", 1) | ("write_u64_be", 1) | ("write_bytes", 1) | ("write", 1)
+        | ("position", 0) | ("eof", 0) | ("rewind", 0) | ("flush", 0) | ("close", 0)
+        | ("shutdown", 0) | ("get_buffer", 0) | ("buffer", 0) | ("string", 0)
+        | ("title", 0) | ("clone", 0) | ("copy", 0) | ("read", 0)
+        | ("read_byte", 0) | ("next", 0) | ("parse", 0)
+        | ("seek", 1) | ("read_bytes", 1) | ("read_string", 1)
+        | ("last_index_of", 1) | ("equal", 1) | ("compare", 1) | ("copy_to", 1)
+        | ("write_to", 1)
         // D-TAG1: Bag<T> instance methods (add/remove share list/set arms above).
         | ("has", 1)
         // D-COLLBREADTH1=A: Deque<T> instance methods.

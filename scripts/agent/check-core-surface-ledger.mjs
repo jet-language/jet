@@ -272,7 +272,7 @@ const CROSS_DOMAIN_DISTINCT = new Set([
   "start", "startswith", "starttimer", "stats", "step", "sticky", "stop", "stoptimer",
   "string", "stripprefix", "struct", "success", "sum", "swap", "swapcase", "sync",
   "tail", "take", "tell", "throw", "time", "timens", "timeout", "timer",
-  "title", "toboolean", "tobyte", "tobytearray", "tochararray", "todouble", "tofloat", "tohexstring",
+  "title", "totitle", "toboolean", "tobyte", "tobytearray", "tochararray", "todouble", "tofloat", "tohexstring",
   "tolist", "tolower", "topath", "toset", "toupper", "transcode", "trim", "trimend",
   "trimstart", "trylock", "type", "typeassert", "typeof", "union", "unlock", "unquote",
   "unwrap", "unzip", "update", "urandom", "use", "userinfo", "utime", "valid",
@@ -328,7 +328,8 @@ const SYNONYM_GROUPS = [
   ["write", "write_text", "write_all", "write_all_text", "write_file"],
   ["exists", "is_file", "is_dir", "file_exists", "is_path"],
   ["parse", "loads", "decode", "deserialize", "try_parse", "from_string"],
-  ["to_string", "dumps", "encode", "serialize", "inspect", "format", "describe"],
+  ["to_title", "title", "totitle"],
+  ["to_string", "dumps", "encode", "serialize", "inspect", "format", "describe", "string", "tostring"],
   ["now", "now_utc", "utc_now", "today", "current_time", "system_time", "now_local"],
   ["sleep", "delay", "pause"],
   ["abs", "fabs", "magnitude"],
@@ -494,6 +495,7 @@ const TYPE_CONTAINER = {
   X25519SecretKey: "core.crypto",
   X25519PublicKey: "core.crypto",
   PasswordHash: "core.crypto",
+  ByteBuffer: "ByteBuffer",
 };
 
 const COLLECTION_METHOD_FUNCTIONS = {

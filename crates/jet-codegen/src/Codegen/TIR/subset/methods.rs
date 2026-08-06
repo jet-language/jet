@@ -533,7 +533,8 @@ pub(crate) fn method_call_in_subset(
                     | ("PriorityQueue", "new", 0)
                     | ("Cache", "new", 1)
                     | ("BitSet", "new", 0)
-                    | ("ByteBuffer", "new", 0) => {
+                    | ("ByteBuffer", "new", 0)
+                    | ("ByteBuffer", "with_capacity", 1) => {
                         return args
                             .iter()
                             .all(|a| expr_in_subset(&a.expr, cx, locals));

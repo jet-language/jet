@@ -2016,6 +2016,32 @@ module is free (R10) — codegen only emits the helpers a program actually
 calls. See core-library.md for the full module list, signatures, and
 examples; UI snapshots: `tests/ui/core_*`, teaching errors **E0037**–**E0039**.
 
+### `ByteBuffer`
+
+Growable byte builder with one read cursor (D-ITERTOOLS1=A / #1467). EOF is
+`position == len`. Construct with `ByteBuffer.new()`, `ByteBuffer.with_capacity(n)`,
+or `ByteBuffer.from(bytes)`.
+
+Write path: `write_u8` / `write_byte`, width-specific `write_u16_*` / `write_u32_*` /
+`write_u64_*`, `write_bytes` / `write`, `write_to`.
+
+Cursor: `position`, `eof`, `seek`, `rewind`, `read`, `read_byte` / `next`,
+`read_bytes`, `read_string`, `get`, `first`.
+
+String-like ops decode UTF-8 (lossy) then reuse String behavior: `contains`,
+`starts_with`, `ends_with`, `trim` / `trim_start` / `trim_end`, `to_lower` /
+`to_upper` / `to_title` / `title`, `replace`, `split`, `join`, `lines`,
+`index_of` / `last_index_of`, `is_ascii`, `to_string` / `string`, `parse`.
+
+Lifecycle: `flush`, `close`, `shutdown`, `copy` / `clone`, `copy_to`, `equal`,
+`compare`, `capacity`, `get_buffer` / `buffer`, `to_bytes`, `len`, `is_empty`,
+`clear`.
+
+Consuming typed reads stay on `core.binary.Reader` / `core.io` Writer handles —
+ByteBuffer does not grow a second Reader/Writer type (I8).
+
+Example: `examples/features/io/byte_buffer.jet`.
+
 ### `core.math`
 
 Callable surface for floating-point and whole-number helpers (D-MATHLIB2,

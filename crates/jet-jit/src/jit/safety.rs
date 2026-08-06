@@ -2105,10 +2105,22 @@ fn resident_safe_builtin_op(
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::BitSetNew | TBuiltinOp::ByteBufferNew => args.is_empty(),
+        TBuiltinOp::ByteBufferWithCapacity => {
+            matches!(&recv.ty, Type::Int) && args.is_empty() && resident_safe_expr(recv, callees)
+        }
+        TBuiltinOp::ByteBufferFrom => {
+            matches!(&recv.ty, Type::List(_))
+                && args.is_empty()
+                && resident_safe_expr(recv, callees)
+        }
         TBuiltinOp::ByteBufferWrite { .. } => {
             matches!(&recv.ty, Type::Named(name) if name == "ByteBuffer")
                 && args.len() == 1
                 && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::ByteBufferMethod { .. } => {
+            matches!(&recv.ty, Type::Named(name) if name == "ByteBuffer")
+                && args.iter().all(|arg| resident_safe_expr(arg, callees))
         }
         TBuiltinOp::TrimView => matches!(&recv.ty, Type::String) && args.is_empty(),
         TBuiltinOp::AfterView | TBuiltinOp::BeforeView => {

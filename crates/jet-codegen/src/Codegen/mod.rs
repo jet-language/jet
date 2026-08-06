@@ -63,6 +63,7 @@ const PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/Core/Division.rs"),
     include_str!("../Prelude/TypedText.rs"),
     include_str!("../Prelude/Core/Progress.rs"),
+    include_str!("../Prelude/Core/ByteBuffer.rs"),
     include_str!("../Prelude/Core/Collections.rs"),
     include_str!("../Prelude/SharedProtocol.rs"),
     include_str!("../Prelude/Core/RuntimeControl.rs"),

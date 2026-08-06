@@ -4070,6 +4070,11 @@ pub enum TBuiltinOp {
         method: String,
     },
     ByteBufferToBytes,
+    /// Generic `ByteBuffer` instance call → `(recv).method(args…)` (cursor + string-like).
+    ByteBufferMethod {
+        method: String,
+    },
+    ByteBufferWithCapacity,
     // D-TAG1: Bag<T> counted multiset (HashMap-backed).
     BagAdd,
     BagRemove,

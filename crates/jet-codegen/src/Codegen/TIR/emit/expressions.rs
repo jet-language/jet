@@ -1344,15 +1344,32 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TBuiltinOp::BitSetToList => format!("({}).to_list()", recv),
                 TBuiltinOp::BitSetNew => "JetBitSet::new()".to_string(),
                 TBuiltinOp::ByteBufferNew => "JetByteBuffer::new()".to_string(),
+                TBuiltinOp::ByteBufferWithCapacity => {
+                    format!("JetByteBuffer::with_capacity({})", recv)
+                }
                 TBuiltinOp::ByteBufferFrom => format!("JetByteBuffer::from(&({}))", recv),
                 TBuiltinOp::ByteBufferWrite { method } => {
-                    if method == "write_bytes" {
+                    if matches!(method.as_str(), "write_bytes" | "write") {
                         format!("({}).{}(&{})", recv, method, a(0))
                     } else {
                         format!("({}).{}({})", recv, method, a(0))
                     }
                 }
                 TBuiltinOp::ByteBufferToBytes => format!("({}).to_bytes()", recv),
+                TBuiltinOp::ByteBufferMethod { method } => match method.as_str() {
+                    "clone" | "copy" => format!("({}).clone()", recv),
+                    "contains" | "starts_with" | "ends_with" | "split" | "index_of"
+                    | "last_index_of" | "join" => {
+                        format!("({}).{}(&{})", recv, method, a(0))
+                    }
+                    "replace" => format!("({}).{}(&{}, &{})", recv, method, a(0), a(1)),
+                    "equal" | "compare" => format!("({}).{}(&{})", recv, method, a(0)),
+                    "copy_to" | "write_to" => format!("({}).{}(&mut {})", recv, method, a(0)),
+                    "get" | "seek" | "read_bytes" | "read_string" => {
+                        format!("({}).{}({})", recv, method, a(0))
+                    }
+                    _ => format!("({}).{}()", recv, method),
+                },
                 // D-TAG1: Bag<T> counted multiset.
                 TBuiltinOp::BagAdd => format!(
                     "{{ *({}).entry({}).or_insert(0) += 1; true }}",

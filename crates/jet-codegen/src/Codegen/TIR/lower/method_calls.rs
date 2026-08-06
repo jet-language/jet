@@ -4560,6 +4560,20 @@ pub(crate) fn lower_method_call(
                 },
             };
         }
+        if type_name == crate::Syntax::TYPE_BYTE_BUFFER
+            && method == "with_capacity"
+            && args.len() == 1
+        {
+            let n = lower_expr(&args[0].expr, cx, env);
+            return TExpr {
+                ty: Type::Named(crate::Syntax::TYPE_BYTE_BUFFER.to_string()),
+                kind: TExprKind::BuiltinMethod {
+                    recv: Box::new(n),
+                    op: TBuiltinOp::ByteBufferWithCapacity,
+                    args: vec![],
+                },
+            };
+        }
         if type_name == crate::Syntax::TYPE_BYTE_BUFFER && method == "from" && args.len() == 1 {
             let bytes_arg = lower_expr(&args[0].expr, cx, env);
             return TExpr {

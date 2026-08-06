@@ -415,6 +415,17 @@ pub(crate) fn tir_recv_jet_ty(e: &Expr, env: &LowerEnv) -> Option<Type> {
                         args: vec![elem],
                     });
                 }
+                // ByteBuffer static constructors used as chain receivers
+                // (`ByteBuffer.from([…]).to_lower()`).
+                if !env.locals.contains_key(name)
+                    && name == crate::Syntax::TYPE_BYTE_BUFFER
+                    && matches!(
+                        (method.as_str(), args.len()),
+                        ("new", 0) | ("from", 1) | ("with_capacity", 1)
+                    )
+                {
+                    return Some(Type::Named(crate::Syntax::TYPE_BYTE_BUFFER.to_string()));
+                }
             }
             // D-ITERTOOLS1=A: chained adapters (`nums.take(3).to_list()`) must
             // resolve as `Iter`, not fall through to the list receiver — otherwise

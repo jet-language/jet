@@ -140,7 +140,7 @@ pub(crate) struct JitRuntime {
     pub(crate) priority_queues: Vec<std::collections::BinaryHeap<i64>>,
     pub(crate) lrus: Vec<Collections::LruState>,
     pub(crate) bit_sets: Vec<std::collections::BTreeSet<i64>>,
-    pub(crate) byte_buffers: Vec<Vec<u8>>,
+    pub(crate) byte_buffers: Vec<Collections::byte_buffer_semantics::JetByteBuffer>,
     pub(crate) allocators: Vec<Memory::AllocatorState>,
     pub(crate) pools: Vec<std::sync::Arc<std::sync::Mutex<Memory::PoolState>>>,
     pub(crate) shareds: Vec<std::sync::Arc<Memory::SharedState>>,

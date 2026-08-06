@@ -151,56 +151,6 @@ impl JetDebug for JetBitSet {
     }
 }
 
-#[derive(Clone)]
-struct JetByteBuffer {
-    bytes: Vec<u8>,
-}
-impl JetByteBuffer {
-    fn new() -> Self {
-        Self { bytes: Vec::new() }
-    }
-    fn from(bytes: &Vec<u8>) -> Self {
-        Self {
-            bytes: bytes.clone(),
-        }
-    }
-    fn write_u8(&mut self, v: u8) {
-        self.bytes.push(v);
-    }
-    fn write_u16_le(&mut self, v: u16) {
-        self.bytes.extend_from_slice(&v.to_le_bytes());
-    }
-    fn write_u16_be(&mut self, v: u16) {
-        self.bytes.extend_from_slice(&v.to_be_bytes());
-    }
-    fn write_u32_le(&mut self, v: u32) {
-        self.bytes.extend_from_slice(&v.to_le_bytes());
-    }
-    fn write_u32_be(&mut self, v: u32) {
-        self.bytes.extend_from_slice(&v.to_be_bytes());
-    }
-    fn write_u64_le(&mut self, v: u64) {
-        self.bytes.extend_from_slice(&v.to_le_bytes());
-    }
-    fn write_u64_be(&mut self, v: u64) {
-        self.bytes.extend_from_slice(&v.to_be_bytes());
-    }
-    fn write_bytes(&mut self, bytes: &Vec<u8>) {
-        self.bytes.extend_from_slice(bytes);
-    }
-    fn to_bytes(&self) -> Vec<u8> {
-        self.bytes.clone()
-    }
-    fn len(&self) -> i64 {
-        self.bytes.len() as i64
-    }
-    fn is_empty(&self) -> bool {
-        self.bytes.is_empty()
-    }
-    fn clear(&mut self) {
-        self.bytes.clear();
-    }
-}
 impl JetShow for JetByteBuffer {
     fn jet_show(&self) -> String {
         self.bytes.jet_show()
