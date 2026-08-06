@@ -118,9 +118,9 @@ pub const BINPAT_ENDIAN_LITTLE: &str = "le";
 /// D-MARKER-FAMILY1). This is the single merged spelling for what used to
 /// be two markers doing the same job — the `#Numeric` distinct-type marker
 /// (D-DIST3) and the `@numeric` capability bundle (D-CAPBUNDLE1) — folded
-/// per D-MARKERMOVE1=B (I8: one way to mean it). `CONTRACT_BUNDLE_NUMERIC`
+/// per D-MARKERMOVE1=B (I8: one way to mean it). `MARKER_BUNDLE_NUMERIC`
 /// no longer exists as a separate constant; use this one.
-pub const ATTR_NUMERIC: &str = "Numeric";
+pub const MARKER_NUMERIC: &str = "Numeric";
 
 /// D-QUAL3 (ratified 2026-06-24): `#UnitFamily(Currency) { usd, eur, gbp }` —
 /// declares a family of units. Each member mints one distinct `#Numeric` type
@@ -128,7 +128,7 @@ pub const ATTR_NUMERIC: &str = "Numeric";
 /// (`fn subtotal(price: Usd, qty: Int) => Usd`). The family is the
 /// "upgrade to D-DIST2" framing of D-UNIT1: sugar over the distinct-type
 /// machinery (D-DIST1/D-DIST3). PascalCase tag per D-CASING1.
-pub const ATTR_UNIT_FAMILY: &str = "UnitFamily";
+pub const MARKER_UNIT_FAMILY: &str = "UnitFamily";
 /// D-QUANTITY-DECL1=A (card #603): contextual fields in `#UnitFamily`.
 pub const UNIT_FAMILY_BASE_FIELD: &str = "base";
 pub const UNIT_FAMILY_DIMENSION_FIELD: &str = "dimension";
@@ -138,7 +138,7 @@ pub const UNIT_FAMILY_OFFSET_FIELD: &str = "offset";
 /// D-MIGRATE1 (ratified 2026-06-22): `#PublishedSchema` — marks a struct whose
 /// field layout is snapshotted at release time. A breaking field change without
 /// a declared migration is E0910. Written `#PublishedSchema` before `struct`.
-pub const ATTR_PUBLISHED_SCHEMA: &str = "PublishedSchema"; // D-MIGRATE1
+pub const MARKER_PUBLISHED_SCHEMA: &str = "PublishedSchema"; // D-MIGRATE1
 
 /// D-LIN1 (ratified 2026-06-21, option A; gated on D-QUAL2): `#SingleUse` — marks
 /// a type whose values must be consumed exactly once on every reachable path
@@ -147,23 +147,23 @@ pub const ATTR_PUBLISHED_SCHEMA: &str = "PublishedSchema"; // D-MIGRATE1
 /// with `&`/`view` is E0142. `#SingleUse` values are move-only. The tag is
 /// compile-time only and erases in codegen (I3). Written `#SingleUse` before the
 /// `struct`/`enum`, same marker idiom as `#PublishedSchema`.
-pub const ATTR_SINGLE_USE: &str = "SingleUse"; // D-LIN1
+pub const MARKER_SINGLE_USE: &str = "SingleUse"; // D-LIN1
 
 /// D-REPLAY1: `#Replayable fn` marks a function whose reachable effects must be
 /// deterministic by default. Ambient `Time`/`Rand`/`Net`/`IO` are rejected unless
 /// the work is routed through explicit deterministic/mockable capabilities.
-pub const ATTR_REPLAYABLE: &str = "Replayable";
+pub const MARKER_REPLAYABLE: &str = "Replayable";
 
 /// D-REFINE1: directive-plane invariant marker for distinct refinements.
 /// First shipped form is `#Invariant("value >= lo && value < hi")` before a
 /// `distinct Int` declaration; sema normalizes it to proof-carrying bounds.
-pub const ATTR_INVARIANT: &str = "Invariant";
+pub const MARKER_INVARIANT: &str = "Invariant";
 
 /// D-MUSTUSE1 (c18iwxqx): `#MustUse` — marks a type, function, or method whose
 /// result cannot be silently ignored as a bare expression statement (E0419).
 /// Explicit discard uses `.drop("reason")` only (D-IGNORERET2, amended by
 /// D-MARK-DISCARD1=A). Compile-time only; erases in codegen (I3).
-pub const ATTR_MUST_USE: &str = "MustUse"; // D-MUSTUSE1
+pub const MARKER_MUST_USE: &str = "MustUse"; // D-MUSTUSE1
 
 /// D-MIGRATE1 (ratified 2026-06-22): contextual keyword `migration` — introduces
 /// a migration block that declares how a `#PublishedSchema` struct changed between
@@ -277,7 +277,7 @@ pub const TASK_DETACH: &str = "detach"; // D-DETACH1
 /// `#[repr(C)]` for C interop. Field order is preserved as written.
 /// Growable fields (`[T]`, `Map`, `String`) are rejected (E1104).
 /// PascalCase per D-MARKERCASE1=A.
-pub const ATTR_LAYOUT: &str = "Layout"; // D-REPRC1 / D-MARKERCASE1
+pub const MARKER_LAYOUT: &str = "Layout"; // D-REPRC1 / D-MARKERCASE1
 /// D-REPRC1: the C-compatible layout variant — `#Layout(c)` → `#[repr(C)]`.
 pub const LAYOUT_C: &str = "c"; // D-REPRC1
 /// D-REPRC1: reserved layout variants — parse-and-error until their milestones ship.
@@ -296,28 +296,28 @@ pub const LAYOUT_COLUMNAR: &str = "columnar"; // D-SOA1 / D-SOA2A
 // Decode]`); `#[Encode]` is write-only; `#[Decode]` is read-only. Owner (D-SERDE4 = B,
 // modified): the
 // collapsed umbrella is `Codable`, with `Encode`/`Decode` as the one-way markers.
-pub const ATTR_CODABLE: &str = "Codable"; // D-SERDE4
-pub const ATTR_ENCODE: &str = "Encode"; // D-SERDE4
-pub const ATTR_DECODE: &str = "Decode"; // D-SERDE4
+pub const MARKER_CODABLE: &str = "Codable"; // D-SERDE4
+pub const MARKER_ENCODE: &str = "Encode"; // D-SERDE4
+pub const MARKER_DECODE: &str = "Decode"; // D-SERDE4
                                         // D-MARKERMOVE3 (B, ratified 2026-07-02): the other built-in derive markers
                                         // that join Codable/Encode/Decode on the contract plane (`@`).
                                         // D-AUTODERIVE-SYNTAX1=D restores Debug as a signed type-site auto-derive
                                         // control beside Printable and Equatable. User derives (`derive T.Wire {
                                         // … }`, applied as `#[Wire]`) stay `#` — the built-in/user line is the
                                         // `@`/`#` plane line.
-pub const ATTR_COMPARABLE: &str = "Comparable"; // D-MARKERMOVE3
+pub const MARKER_COMPARABLE: &str = "Comparable"; // D-MARKERMOVE3
                                                 // Per-field attributes (D-SERDE5 = A), written `#[…]` before a field.
-pub const ATTR_RENAME: &str = "Rename"; // D-SERDE5  #[Rename("wire_key")]
-pub const ATTR_SKIP: &str = "Skip"; // D-SERDE5  #[Skip]
-pub const ATTR_DEFAULT: &str = "Default"; // D-SERDE5  #[Default] / #[Default(expr)]
-pub const ATTR_FLATTEN: &str = "Flatten"; // D-SERDE5  #[Flatten]
+pub const MARKER_RENAME: &str = "Rename"; // D-SERDE5  #[Rename("wire_key")]
+pub const MARKER_SKIP: &str = "Skip"; // D-SERDE5  #[Skip]
+pub const MARKER_DEFAULT: &str = "Default"; // D-SERDE5  #[Default] / #[Default(expr)]
+pub const MARKER_FLATTEN: &str = "Flatten"; // D-SERDE5  #[Flatten]
                                           // Container attributes (D-SERDE3/7/8), written `#[…]` before a struct/enum.
-pub const ATTR_RENAME_ALL: &str = "RenameAll"; // D-SERDE3  #[RenameAll(camel)]
-pub const ATTR_DENY_UNKNOWN_FIELDS: &str = "DenyUnknownFields"; // D-SERDE8
+pub const MARKER_RENAME_ALL: &str = "RenameAll"; // D-SERDE3  #[RenameAll(camel)]
+pub const MARKER_DENY_UNKNOWN_FIELDS: &str = "DenyUnknownFields"; // D-SERDE8
 /// D-MARKER-NAME-HYGIENE1=A: serde's internal discriminant field is not a
 /// compile-time fact tag.
-pub const ATTR_TAG: &str = "Discriminant"; // D-SERDE7, D-MARKER-NAME-HYGIENE1
-pub const ATTR_UNTAGGED: &str = "Untagged"; // D-SERDE7  #[Untagged]
+pub const MARKER_TAG: &str = "Discriminant"; // D-SERDE7, D-MARKER-NAME-HYGIENE1
+pub const MARKER_UNTAGGED: &str = "Untagged"; // D-SERDE7  #[Untagged]
                                             // D-SERDE3 (= C) RenameAll casing keywords — closed typed menu, own-case args.
 pub const RENAME_ALL_CAMEL: &str = "camel"; // D-SERDE3
 pub const RENAME_ALL_SNAKE: &str = "snake"; // D-SERDE3
@@ -329,16 +329,16 @@ pub const RENAME_ALL_SCREAMING: &str = "screaming"; // D-SERDE3
 // Closed values for `#Meta(maturity: .Experimental | .Tested | .Hardened)`.
 // They are not standalone markers and therefore are absent from marker-plane
 // registries. No sema/codegen effect.
-pub const ATTR_EXPERIMENTAL: &str = "Experimental"; // D-MARK-META1
-pub const ATTR_TESTED: &str = "Tested"; // D-MARK-META1
-pub const ATTR_HARDENED: &str = "Hardened"; // D-MARK-META1
+pub const MARKER_EXPERIMENTAL: &str = "Experimental"; // D-MARK-META1
+pub const MARKER_TESTED: &str = "Tested"; // D-MARK-META1
+pub const MARKER_HARDENED: &str = "Hardened"; // D-MARK-META1
 
 // ── Explicit discard (D-IGNORERET2=A, ratified 2026-06-28; amended by
 // D-MARK-DISCARD1=A, ratified 2026-07-11, card #498) ─────────────────────────
 // `.drop("reason")` — method-style terminal that silences E0402 for a
 // fallible or #MustUse result. It is now the SOLE discard spelling; the
 // `#Suppress(MustUse) { … }` lexical-scope form is retired outright
-// (ordinary unknown-marker error — no ATTR_SUPPRESS registration).
+// (ordinary unknown-marker error — no MARKER_SUPPRESS registration).
 pub const METHOD_DROP: &str = "drop"; // D-IGNORERET2 method; distinct from consume builtin
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -412,7 +412,7 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     // Transactions (D-TXN1–D-TXN4): `#Transact(name) { … }`
     KW_TRANSACT,
     // Schedule-as-code (D-SCHEDULE1, card #505): `#Job fn` — `#Every(…)`
-    // stays out of this list, matching ATTR_TARGET/ATTR_META (paren-arg
+    // stays out of this list, matching MARKER_TARGET/MARKER_META (paren-arg
     // config markers aren't bare completion words).
     KW_TASK,
     // Test / tooling (S43, S60, D-TOOL2, D-BENCH1)
@@ -587,7 +587,7 @@ pub const IMPURE_BUILTINS: &[&str] = &[BUILTIN_PRINT, "eprint", "print", BUILTIN
 // `Redact`, `Numeric` move from `#` to `@` (e.g. `#Pure` → `#Pure`), exact
 // PascalCase spelling kept. `#Numeric` (D-DIST3) and the `@numeric` capability
 // bundle (D-CAPBUNDLE1) are the same job (I8) and merge into one `#Numeric` —
-// see `ATTR_NUMERIC` above; there is no separate bundle constant. Serde field +
+// see `MARKER_NUMERIC` above; there is no separate bundle constant. Serde field +
 // container markers (`#Rename`, `#Skip`, `#Default`, `#Flatten`,
 // `#RenameAll`, `#DenyUnknownFields`, `#Tag`, `#Untagged`) are wire-format
 // machinery, not promises, and stay on `#`.

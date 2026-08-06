@@ -35,7 +35,7 @@ impl<'a> Parser<'a> {
                 TokKind::Hash
                     if matches!(
                         self.toks.get(self.pos + 1).map(|t| &t.kind),
-                        Some(TokKind::Ident(n)) if n == Syntax::ATTR_META
+                        Some(TokKind::Ident(n)) if n == Syntax::MARKER_META
                     ) =>
                 {
                     let hash = self.bump().span;
@@ -49,7 +49,7 @@ impl<'a> Parser<'a> {
                     if matches!(
                         self.toks.get(self.pos + 1).map(|t| &t.kind),
                         Some(TokKind::Ident(n))
-                            if n == Syntax::ATTR_OFF || n == Syntax::ATTR_DEBUG_ONLY
+                            if n == Syntax::MARKER_OFF || n == Syntax::MARKER_DEBUG_ONLY
                     ) =>
                 {
                     let hash = self.bump().span;

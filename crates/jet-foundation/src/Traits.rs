@@ -593,7 +593,7 @@ impl TraitRegistry {
             let wire_types: Vec<&Type> = s
                 .fields
                 .iter()
-                .filter(|f| !f.serde_markers.iter().any(|m| m.name == Syntax::ATTR_SKIP))
+                .filter(|f| !f.serde_markers.iter().any(|m| m.name == Syntax::MARKER_SKIP))
                 .map(|f| &f.ty)
                 .collect();
             self.serde_wire_params.insert(
@@ -1074,7 +1074,7 @@ impl TraitRegistry {
             // D-CLIFLAG1: `#[CLI]` is a derive-trait name like the others above,
             // just not one of Generics's built-in constants (it's CLI-parsing
             // specific, not a wire/comparison trait) — same `derives` lookup.
-            _ if trait_name == Syntax::CONTRACT_CLI => self
+            _ if trait_name == Syntax::MARKER_CLI => self
                 .derives
                 .get(type_name)
                 .is_some_and(|d| d.contains(trait_name)),

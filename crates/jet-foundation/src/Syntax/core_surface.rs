@@ -101,23 +101,23 @@ pub const SIGIL_FENCE_CLOSE: &str = "]$";
 
 /// D-PROVENANCE1=B: binding-level tracking marker, written before the binding:
 /// `#Track name :: expr` / `#Track name := expr`.
-pub const ATTR_TRACK: &str = "Track";
+pub const MARKER_TRACK: &str = "Track";
 
 /// D-VERDICT-1308-1/2: demand compile-time knowledge for a binding, block, or
 /// conditional. Ordinary foldable expressions need no marker.
-pub const ATTR_KNOWN: &str = "Known";
+pub const MARKER_KNOWN: &str = "Known";
 
 /// D-CANVASSTATE1=D (ratified 2026-07-09): statement switch-off attribute.
 /// `#Off <stmt>` parses and type-checks the statement, then emits no code.
-pub const ATTR_OFF: &str = "Off";
+pub const MARKER_OFF: &str = "Off";
 
 /// D-CANVASSTATE1=D (ratified 2026-07-09): debug-only statement attribute.
 /// `#DebugOnly <stmt>` emits only in debug/dev builds; release builds strip it.
-pub const ATTR_DEBUG_ONLY: &str = "DebugOnly";
+pub const MARKER_DEBUG_ONLY: &str = "DebugOnly";
 
 /// D-CANVASMETA1=B (ratified 2026-07-09): tooling metadata attribute for
 /// bindings, top-level consts, and functions.
-pub const ATTR_META: &str = "Meta";
+pub const MARKER_META: &str = "Meta";
 
 /// D-CANVASMETA1=B: `#Meta` category field name.
 pub const META_FIELD_CATEGORY: &str = "category";
@@ -373,12 +373,12 @@ pub const KW_REACTIVE: &str = "Reactive";
 /// marker family, covering both the module-/file-level partition ceiling
 /// AND the per-function bucket override (the retired bare `#Wasm`/`#JS`
 /// spellings). Sema validates it against inferred `Browser` effects.
-pub const ATTR_TARGET: &str = "Target";
+pub const MARKER_TARGET: &str = "Target";
 
 /// D-WASM1=A: export this WASM function to the generated JS loader. A
 /// different job (export surface) from the `#Target(Wasm|JS)` partition
 /// family above — D-MARK-TARGET1=A leaves it untouched.
-pub const ATTR_WASM_EXPORT: &str = "WasmExport";
+pub const MARKER_WASM_EXPORT: &str = "WasmExport";
 
 /// D-WASM1=A: `#Target(JS)` argument spelling.
 pub const WEB_BUCKET_JS: &str = "JS";
@@ -398,16 +398,16 @@ pub const WEB_TARGET_DEFAULT_WEB: &str = "Web";
 /// D-HTMLPAIR1 (ratified 2026-07-01, c134): `#HTML("path.html")` — an explicit, file-level
 /// declaration of this program's companion host page for `--target=web`
 /// builds, replacing the silent `<stem>.html` filename convention.
-pub const ATTR_HTML: &str = "HTML";
+pub const MARKER_HTML: &str = "HTML";
 
 /// D-DSLBLOCK1=A (ratified 2026-07-06): `#SQL<Row> { ... }` — a stdlib-owned,
 /// checked DSL block. Third-party DSL block markers are not user-extensible.
 pub const DSL_BLOCK_SQL: &str = "SQL";
 
 /// D-DSLBLOCK1=A: initial fixed stdlib DSL block marker whitelist. `HTML`
-/// reuses `ATTR_HTML`; block form (`#HTML { ... }`) is distinct from the
+/// reuses `MARKER_HTML`; block form (`#HTML { ... }`) is distinct from the
 /// existing file-level companion-page form (`#HTML("path.html")`).
-pub const STDLIB_DSL_BLOCK_MARKERS: &[&str] = &[DSL_BLOCK_SQL, ATTR_HTML];
+pub const STDLIB_DSL_BLOCK_MARKERS: &[&str] = &[DSL_BLOCK_SQL, MARKER_HTML];
 
 /// D-FFI-SH1=A: `Sh` is D-TYPEDTEXT1's argv-safe shell-command instance.
 pub const TYPE_SH: &str = "Sh";
@@ -454,7 +454,7 @@ pub const CORE_MEM_MODULE: &str = "core.mem";
 /// `uninit` contextual keyword (see `KW_UNINIT` below); this constant is kept
 /// only so the parser can recognize the old marker and reject it with a
 /// teaching error (E0426) pointing at the new spelling.
-pub const ATTR_UNINIT: &str = "Uninit";
+pub const MARKER_UNINIT: &str = "Uninit";
 
 /// D-UNINIT-SENTINEL2=A (ratified 2026-07-24; amends D-UNINIT-SENTINEL1):
 /// contextual keyword `uninit`, legal only as the whole body of a typed-literal
@@ -585,7 +585,7 @@ pub const CORE_EMAIL_SMTP_FROM_ENV_FN: &str = "smtp_from_env";
 /// function; arena `view`s allocated inside may not escape the region (E0631).
 /// The beginner default is an implicit scope-inferred region (opt A) and never
 /// writes `region`.
-pub const ATTR_REGION: &str = "Region"; // D-BLOCKPLANE1
+pub const MARKER_REGION: &str = "Region"; // D-BLOCKPLANE1
 
 /// D-TASKSCOPE1=A + D-ARROW-CONTROL1=A: structured task group scope. The
 /// keyword remains `taskgroup`; child callable bodies use `=>`.
@@ -613,7 +613,7 @@ pub const CTX_FIELD_DEADLINE: &str = "deadline";
 /// (implemented with the D-DEFER1 scope-guard mechanism). "raw mode" jargon
 /// is deliberately avoided; `live` is the user-facing name. A contextual
 /// keyword: recognised only when followed by `{`.
-pub const ATTR_LIVE: &str = "Live"; // D-BLOCKPLANE1
+pub const MARKER_LIVE: &str = "Live"; // D-BLOCKPLANE1
 
 /// D-DET1 / D-BLOCKPLANE1: expert determinism-escape marker.
 /// `#Nondeterministic("reason") { … }` inside a `#Pure fn` suspends determinism
@@ -621,7 +621,7 @@ pub const ATTR_LIVE: &str = "Live"; // D-BLOCKPLANE1
 /// hatch. A semantic footgun, v1-legal per the card. A contextual keyword:
 /// recognised only when followed by `{`, so a name `assume_deterministic` still
 /// works elsewhere. Erased in codegen (I3) — the block is a plain Rust block.
-pub const ATTR_NONDETERMINISTIC: &str = "Nondeterministic"; // D-BLOCKPLANE1
+pub const MARKER_NONDETERMINISTIC: &str = "Nondeterministic"; // D-BLOCKPLANE1
 
 /// D-DET1 / D-SHAPE-CTORVERB1=C: the deterministic injected `Clock` capability
 /// type. A `#Pure fn` taking a `Clock` param may read time **through it**

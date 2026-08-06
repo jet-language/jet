@@ -165,7 +165,7 @@ opt-out for secrets and similar). `#Flag` on a Bool / optional / defaulted
 field is E1309. Declaration order of required value fields is
 part of the command interface; the always-available named spelling keeps scripts
 stable across reorders. Help lists positionals before flags. Marker constant:
-`CONTRACT_FLAG` (`Flag`).
+`MARKER_FLAG` (`Flag`).
 
 **D-CLI-FIELD-MARKERS1=A — per-field short names and environment fallbacks**
 *(ratified 2026-07-28, card #1277)*: a `#CLI` field can use `#Short("n")`
@@ -175,7 +175,7 @@ builder. Explicit command input wins over the environment, and the environment
 wins over `#Default`. Help shows the short name, fallback, default, and
 precedence. A short name is one ASCII letter and cannot collide (E1318).
 Typed-CLI markers with no builder mapping are E1319. Marker constants:
-`CONTRACT_SHORT` (`Short`) and `CONTRACT_ENV` (`Env`).
+`MARKER_SHORT` (`Short`) and `MARKER_ENV` (`Env`).
 
 **D-SHAPE-CLI1=A — entry type owns command inputs** *(ratified 2026-07-14,
 card #541)*: when present, the resolved parameter type of `fn run(args: T)` is
@@ -3320,8 +3320,8 @@ D-LAYOUT-CTOR1, D-OWNCOMP1, D-A11Y1, D-NATIVEUI1/2)*: reactivity is a library + 
 (`.get()/.set(v)`), `Computed<T>`, `Effect`; explicit-by-read subscription;
 pure std runtime (E2910–E2913). D-DATARACE1=C: reactive boxes use lock-ordered
 `Arc` storage so task/channel crossings cannot data-race or lean on rustc
-`Send`. Expert pins `#Local` / `#Shared` are registered (ATTR_LOCAL /
-ATTR_SHARED): `#Local` rejects task/channel/parallel crossings (E1102);
+`Send`. Expert pins `#Local` / `#Shared` are registered (MARKER_LOCAL /
+MARKER_SHARED): `#Local` rejects task/channel/parallel crossings (E1102);
 `#Shared` and automatic boundary crossings list synchronized-form upgrades
 in generated Rust (`/* jet-reactive-upgrade: … */`) and `jet report`. Events and hooks are compiler-known Core values
 in `core.event`: `Event<T>`, `Hook<T, R>`, `Subscription`, `EventScope`,

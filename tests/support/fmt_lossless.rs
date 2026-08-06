@@ -374,7 +374,7 @@ fn is_spanless_file_marker_group(tokens: &[Token]) -> bool {
     matches!(
         kinds.as_slice(),
         [TokKind::Hash, TokKind::Ident(name), ..]
-            if matches!(name.as_str(), jet::Syntax::ATTR_TARGET | jet::Syntax::ATTR_HTML)
+            if matches!(name.as_str(), jet::Syntax::MARKER_TARGET | jet::Syntax::MARKER_HTML)
     )
 }
 
@@ -423,12 +423,12 @@ fn file_chunk_category(chunk: &[Token]) -> usize {
             0
         }
         [TokKind::Hash, TokKind::Ident(name), ..]
-            if matches!(name.as_str(), jet::Syntax::ATTR_TARGET | jet::Syntax::ATTR_HTML) =>
+            if matches!(name.as_str(), jet::Syntax::MARKER_TARGET | jet::Syntax::MARKER_HTML) =>
         {
             2
         }
         [TokKind::Hash, TokKind::Ident(policy), TokKind::LParen, TokKind::Ident(no_alloc), ..]
-            if policy == jet::Syntax::ATTR_POLICY && no_alloc == jet::Syntax::POLICY_NO_ALLOC =>
+            if policy == jet::Syntax::MARKER_POLICY && no_alloc == jet::Syntax::POLICY_NO_ALLOC =>
         {
             2
         }

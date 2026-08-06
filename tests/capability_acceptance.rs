@@ -204,7 +204,7 @@ fn audited_discard() {
         "Syntax must register the `.drop` discard terminal"
     );
     assert!(
-        !syntax.contains("pub const ATTR_SUPPRESS"),
+        !syntax.contains("pub const MARKER_SUPPRESS"),
         "D-MARK-DISCARD1 retired `#Suppress(MustUse)`"
     );
 
@@ -342,9 +342,9 @@ fn maturity_convention() {
 
     let syntax = read("crates/jet-foundation/src/Syntax/package_files.rs");
     assert!(
-        syntax.contains("ATTR_EXPERIMENTAL")
-            && syntax.contains("ATTR_TESTED")
-            && syntax.contains("ATTR_HARDENED"),
+        syntax.contains("MARKER_EXPERIMENTAL")
+            && syntax.contains("MARKER_TESTED")
+            && syntax.contains("MARKER_HARDENED"),
         "Syntax.rs must register maturity values (I7)"
     );
 

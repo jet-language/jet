@@ -40,14 +40,14 @@ impl<'a> Parser<'a> {
                     crate::AST::Expr::Call(mut call) if call.args.len() == 1 => {
                         let argument = call.args.pop().unwrap();
                         let crate::AST::Expr::Int(value, _, _, _) = argument.expr else {
-                            return Err(crate::Policy::marker_argument_shape_error(Syntax::ATTR_POLICY, marker_span));
+                            return Err(crate::Policy::marker_argument_shape_error(Syntax::MARKER_POLICY, marker_span));
                         };
                         if argument.label.is_some() {
-                            return Err(crate::Policy::marker_argument_shape_error(Syntax::ATTR_POLICY, marker_span));
+                            return Err(crate::Policy::marker_argument_shape_error(Syntax::MARKER_POLICY, marker_span));
                         }
                         (call.name, call.name_span, Some(value))
                     }
-                    other => return Err(crate::Policy::marker_argument_shape_error(Syntax::ATTR_POLICY, other.span())),
+                    other => return Err(crate::Policy::marker_argument_shape_error(Syntax::MARKER_POLICY, other.span())),
                 };
                 let Some(key) = crate::Policy::PolicyKey::parse(&name) else {
                     let site_bound = crate::Policy::applied_rule(&name).is_some_and(|row| !row.inherits);
@@ -434,7 +434,7 @@ impl<'a> Parser<'a> {
                     // D-MEM1/S7 (D-NOALLOC-SEM1=A): `policy no_alloc;` — file-scoped
                     // allocation floor, parsed like `use`/`#PubFile` (not inside any
                     // `module { … }` body — only the top-level file item list).
-                    TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_POLICY) && self.policy_is_file_decl() && !self.marker_sequence_leads_to_function() => match self.policy_decl(crate::Policy::PolicyScope::Module) {
+                    TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_POLICY) && self.policy_is_file_decl() && !self.marker_sequence_leads_to_function() => match self.policy_decl(crate::Policy::PolicyScope::Module) {
                         Ok(declarations) => {
                             for declaration in declarations {
                                 if declaration.key == crate::Policy::PolicyKey::NoAlloc { no_alloc_policy = Some(declaration.span); }
@@ -587,7 +587,7 @@ impl<'a> Parser<'a> {
                                                 no_prelude = true;
                                             }
                                         }
-                                        Syntax::ATTR_TARGET => match self.web_target_from_marker(&marker) {
+                                        Syntax::MARKER_TARGET => match self.web_target_from_marker(&marker) {
                                             Ok(TargetMarker::DefaultWeb) if default_target.is_none() => {
                                                 default_target = Some(crate::Syntax::BUILD_TARGET_WEB.to_string());
                                             }
@@ -609,7 +609,7 @@ impl<'a> Parser<'a> {
                                                 failed = true;
                                             }
                                         },
-                                        Syntax::ATTR_HTML => match self.html_from_marker(&marker) {
+                                        Syntax::MARKER_HTML => match self.html_from_marker(&marker) {
                                             Ok(path) if !html_seen => {
                                                 html_seen = true;
                                                 html_path = path;
@@ -791,7 +791,7 @@ impl<'a> Parser<'a> {
                     {
                         self.output_defaults_def().map(Item::Const)
                     }
-                    TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_POLICY) => self.func().map(Item::Func),
+                    TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_POLICY) => self.func().map(Item::Func),
                     TokKind::Hash if self.at_meta_attr() => {
                         if matches!(self.meta_attr_next_kind(), Some(TokKind::KwConst)) {
                             self.retired_const_def().map(Item::Const)
@@ -947,7 +947,7 @@ impl<'a> Parser<'a> {
                                 // D-REPRC1: `pub #layout(c) struct Name { … }`
                                 TokKind::Hash
                                     if {
-                                        matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::ATTR_LAYOUT)
+                                        matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::MARKER_LAYOUT)
                                     } =>
                                 {
                                     self.bump(); // consume `pub`
@@ -957,7 +957,7 @@ impl<'a> Parser<'a> {
                                 // Name { … }` (retired `pub #PublishedSchema` teaches E0062).
                                 TokKind::Hash
                                     if {
-                                        matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::ATTR_PUBLISHED_SCHEMA)
+                                        matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::MARKER_PUBLISHED_SCHEMA)
                                     } =>
                                 {
                                     self.bump(); // consume `pub`
@@ -966,7 +966,7 @@ impl<'a> Parser<'a> {
                                 // D-LIN1: `pub #SingleUse struct|enum Name { … }`
                                 TokKind::Hash
                                     if {
-                                        matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::ATTR_SINGLE_USE)
+                                        matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::MARKER_SINGLE_USE)
                                     } =>
                                 {
                                     self.bump(); // consume `pub`
@@ -976,7 +976,7 @@ impl<'a> Parser<'a> {
                                 // { … }` (retired `pub #MustUse` teaches E0062).
                                 TokKind::Hash
                                     if {
-                                        matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::ATTR_MUST_USE)
+                                        matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::MARKER_MUST_USE)
                                     } =>
                                 {
                                     self.bump(); // consume `pub`
@@ -985,7 +985,7 @@ impl<'a> Parser<'a> {
                                 // D-QUAL3: `pub #UnitFamily(Name) { m, … }`
                                 TokKind::Hash
                                     if {
-                                        matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::ATTR_UNIT_FAMILY)
+                                        matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::MARKER_UNIT_FAMILY)
                                     } =>
                                 {
                                     self.bump(); // consume `pub`
@@ -1049,7 +1049,7 @@ impl<'a> Parser<'a> {
                     TokKind::KwTag => self.tag_def(false).map(Item::Tag),
                     TokKind::KwImpl => self.impl_or_error_conv(),
                     TokKind::Hash
-                        if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_INVARIANT)
+                        if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_INVARIANT)
                             || self.at_bundle_distinct_def() =>
                     {
                         let (is_pub, is_package_pub) = self.parse_item_visibility();
@@ -1115,7 +1115,7 @@ impl<'a> Parser<'a> {
                         if matches!(
                             &self.peek2().kind,
                             TokKind::Ident(n)
-                                if n == Syntax::ATTR_OFF || n == Syntax::ATTR_DEBUG_ONLY
+                                if n == Syntax::MARKER_OFF || n == Syntax::MARKER_DEBUG_ONLY
                         ) =>
                     {
                         let hash = self.bump().span;
@@ -1141,9 +1141,9 @@ impl<'a> Parser<'a> {
                     // ordinary unknown markers with no retired-spelling teaching.
                     TokKind::Hash
                         if matches!(&self.peek2().kind, TokKind::Ident(n)
-                            if n == Syntax::ATTR_EXPERIMENTAL
-                                || n == Syntax::ATTR_TESTED
-                                || n == Syntax::ATTR_HARDENED) =>
+                            if n == Syntax::MARKER_EXPERIMENTAL
+                                || n == Syntax::MARKER_TESTED
+                                || n == Syntax::MARKER_HARDENED) =>
                     {
                         let sigil = self.bump();
                         let name_tok = self.bump(); // guard proves Ident

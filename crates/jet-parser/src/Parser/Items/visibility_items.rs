@@ -53,7 +53,7 @@ impl<'a> Parser<'a> {
                 TokKind::Ident(ref n) if n.as_str() == Syntax::KW_ALIAS => self
                     .type_alias_def(is_pub, is_package_pub)
                     .map(Item::TypeAlias),
-                TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_UNIT_FAMILY) => {
+                TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_UNIT_FAMILY) => {
                     self.unit_family_def(is_pub, is_package_pub)
                         .map(Item::UnitFamily)
                 }

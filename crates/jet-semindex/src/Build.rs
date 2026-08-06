@@ -916,7 +916,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 },
             };
             let mut hover_text = hover_for_fn(f);
-            for (active, name) in [(f.is_unsafe, Syntax::KW_UNSAFE), (f.is_pure, Syntax::KW_PURE), (f.is_replayable, Syntax::ATTR_REPLAYABLE)] {
+            for (active, name) in [(f.is_unsafe, Syntax::KW_UNSAFE), (f.is_pure, Syntax::KW_PURE), (f.is_replayable, Syntax::MARKER_REPLAYABLE)] {
                 if active && jet_foundation::Policy::rule_allows(name, jet_foundation::Policy::RuleSite::Function) {
                     hover_text.push_str(&format!("\nrule: #{name} (function, site-bound)"));
                 }

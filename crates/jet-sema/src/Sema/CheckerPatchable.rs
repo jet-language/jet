@@ -13,7 +13,7 @@ pub(crate) fn patch_type_name(base: &str) -> String {
 fn has_patchable(s: &StructDef) -> bool {
     s.derives
         .iter()
-        .any(|(t, _)| t == Syntax::CONTRACT_PATCHABLE)
+        .any(|(t, _)| t == Syntax::MARKER_PATCHABLE)
 }
 
 /// Append synthetic `T.Patch` struct items (Codable via Encode+Decode) before registration.

@@ -56,7 +56,7 @@ impl<'a> Lexer<'a> {
             .collect::<Vec<_>>();
         let is_marker_name = |token: &&Token| matches!(token.kind, TokKind::Ident(_));
         let is_ffi = |token: &&Token| {
-            matches!(&token.kind, TokKind::Ident(name) if name == Syntax::ATTR_FFI)
+            matches!(&token.kind, TokKind::Ident(name) if name == Syntax::MARKER_FFI)
         };
         let mut cursor = significant.len();
         let mut saw_ffi = false;

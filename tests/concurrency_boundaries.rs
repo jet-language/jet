@@ -27,12 +27,12 @@ fn architecture_states_datarace1_c_guarantee() {
         "architecture must not leave reactive crossings on a rustc Send backstop"
     );
     assert_eq!(
-        jet_foundation::Syntax::ATTR_LOCAL,
+        jet_foundation::Syntax::MARKER_LOCAL,
         "Local",
         "#Local must be registered in Syntax.rs (D-DATARACE1=C / I7)"
     );
     assert_eq!(
-        jet_foundation::Syntax::ATTR_SHARED,
+        jet_foundation::Syntax::MARKER_SHARED,
         "Shared",
         "#Shared must be registered in Syntax.rs (D-DATARACE1=C / I7)"
     );

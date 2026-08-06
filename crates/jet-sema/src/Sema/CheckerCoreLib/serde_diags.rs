@@ -390,7 +390,7 @@ pub(crate) fn invalid_serde_derive_impls(
                         !f.serde_markers.iter().any(|m| {
                             matches!(
                                 m.name.as_str(),
-                                Syntax::ATTR_SKIP | Syntax::ATTR_FLATTEN
+                                Syntax::MARKER_SKIP | Syntax::MARKER_FLATTEN
                             )
                         })
                     })
@@ -467,7 +467,7 @@ pub(crate) fn validate_serde_items(
         // the codability obligation falls on the use site (E0905).
         // Container `#[RenameAll(style)]` casing menu (E2409).
         for m in container {
-            if m.name == Syntax::ATTR_RENAME_ALL {
+            if m.name == Syntax::MARKER_RENAME_ALL {
                 match m.args.first() {
                     Some(Expr::Ident(style, sp)) => {
                         if !matches!(
@@ -487,11 +487,11 @@ pub(crate) fn validate_serde_items(
         }
         if let Item::Struct(s) = item {
             for f in &s.fields {
-                let skip = f.serde_markers.iter().any(|m| m.name == Syntax::ATTR_SKIP);
+                let skip = f.serde_markers.iter().any(|m| m.name == Syntax::MARKER_SKIP);
                 let flatten = f
                     .serde_markers
                     .iter()
-                    .any(|m| m.name == Syntax::ATTR_FLATTEN);
+                    .any(|m| m.name == Syntax::MARKER_FLATTEN);
                 if flatten && !is_struct_named(&f.ty) {
                     out.push(e2408(&f.name, f.name_span));
                     continue;

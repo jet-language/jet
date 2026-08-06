@@ -5114,16 +5114,16 @@ impl<'a> Checker<'a> {
                                 "E1102",
                                 format!(
                                     "`{name}` is pinned `#{}` and can't be sent on a channel",
-                                    crate::Syntax::ATTR_LOCAL
+                                    crate::Syntax::MARKER_LOCAL
                                 ),
                                 format!(
                                     "`#{}` keeps `{}` in the fast one-thread form",
-                                    crate::Syntax::ATTR_LOCAL,
+                                    crate::Syntax::MARKER_LOCAL,
                                     got.name()
                                 ),
                                 format!(
                                     "remove `#{}`, or send an owned copy of the value",
-                                    crate::Syntax::ATTR_LOCAL
+                                    crate::Syntax::MARKER_LOCAL
                                 ),
                                 Some(arg.expr.span()),
                             ));

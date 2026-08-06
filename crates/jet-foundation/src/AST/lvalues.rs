@@ -127,9 +127,9 @@ impl MetaAttr {
             let Expr::EnumLit { type_name, variant, args, .. } = value else { return None };
             if !type_name.is_empty() || !args.is_empty() { return None; }
             let tag = match variant.as_str() {
-                crate::Syntax::ATTR_EXPERIMENTAL => crate::AST::MaturityTag::Experimental,
-                crate::Syntax::ATTR_TESTED => crate::AST::MaturityTag::Tested,
-                crate::Syntax::ATTR_HARDENED => crate::AST::MaturityTag::Hardened,
+                crate::Syntax::MARKER_EXPERIMENTAL => crate::AST::MaturityTag::Experimental,
+                crate::Syntax::MARKER_TESTED => crate::AST::MaturityTag::Tested,
+                crate::Syntax::MARKER_HARDENED => crate::AST::MaturityTag::Hardened,
                 _ => return None,
             };
             Some((tag, *span))

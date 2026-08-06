@@ -472,7 +472,7 @@ impl RuleSignature {
         // `#Meta` has dedicated duplicate-field diagnostics (E0346). Preserve
         // repeated known labels here so the semantic checker can teach the
         // actual mistake instead of collapsing it into the generic E0930.
-        if marker.name == crate::Syntax::ATTR_META
+        if marker.name == crate::Syntax::MARKER_META
             && marker.arg_labels.iter().all(Option::is_some)
         {
             return marker
@@ -499,7 +499,7 @@ impl RuleSignature {
                 if let Some((name, _)) = label {
                     return Some(name.as_str());
                 }
-                if marker.name == crate::Syntax::ATTR_META
+                if marker.name == crate::Syntax::MARKER_META
                     && matches!(argument, crate::AST::Expr::Ident(name, _) if name == crate::Syntax::META_FIELD_TUNABLE)
                 {
                     return Some(crate::Syntax::META_FIELD_TUNABLE);

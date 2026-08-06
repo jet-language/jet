@@ -138,7 +138,7 @@ fn apply_rename_all(style: &str, name: &str) -> String {
     }
 }
 fn container_rename_all(markers: &[Marker]) -> Option<String> {
-    serde_marker(markers, crate::Syntax::ATTR_RENAME_ALL).and_then(|m| match m.args.first() {
+    serde_marker(markers, crate::Syntax::MARKER_RENAME_ALL).and_then(|m| match m.args.first() {
         Some(crate::AST::Expr::Ident(n, _)) => Some(n.clone()),
         _ => None,
     })
@@ -153,7 +153,7 @@ fn marker_str_arg(m: &Marker) -> Option<String> {
     }
 }
 fn field_wire_key(style: Option<&str>, f: &Field) -> String {
-    if let Some(m) = serde_marker(&f.serde_markers, crate::Syntax::ATTR_RENAME) {
+    if let Some(m) = serde_marker(&f.serde_markers, crate::Syntax::MARKER_RENAME) {
         if let Some(s) = marker_str_arg(m) {
             return s;
         }
@@ -569,18 +569,18 @@ impl<'a> Interp<'a> {
         }
         let style = container_rename_all(&sdef.serde_markers);
         let style = style.as_deref();
-        let deny = serde_has(&sdef.serde_markers, crate::Syntax::ATTR_DENY_UNKNOWN_FIELDS);
+        let deny = serde_has(&sdef.serde_markers, crate::Syntax::MARKER_DENY_UNKNOWN_FIELDS);
         let has_flatten = sdef
             .fields
             .iter()
-            .any(|f| serde_has(&f.serde_markers, crate::Syntax::ATTR_FLATTEN));
+            .any(|f| serde_has(&f.serde_markers, crate::Syntax::MARKER_FLATTEN));
         let mut errors = Vec::new();
         if deny && !has_flatten {
             if let Some(pairs) = object_pairs(tree) {
                 let known: Vec<String> = sdef
                     .fields
                     .iter()
-                    .filter(|f| !serde_has(&f.serde_markers, crate::Syntax::ATTR_SKIP))
+                    .filter(|f| !serde_has(&f.serde_markers, crate::Syntax::MARKER_SKIP))
                     .map(|f| field_wire_key(style, f))
                     .collect();
                 for (k, _) in &pairs {
@@ -601,12 +601,12 @@ impl<'a> Interp<'a> {
         }
         let mut out_fields = Vec::new();
         for f in sdef.fields.iter().filter(|f| f.computed.is_none()) {
-            if serde_has(&f.serde_markers, crate::Syntax::ATTR_SKIP) {
+            if serde_has(&f.serde_markers, crate::Syntax::MARKER_SKIP) {
                 let v = self.field_default_value(f, span);
                 out_fields.push((f.name.clone(), v));
                 continue;
             }
-            if serde_has(&f.serde_markers, crate::Syntax::ATTR_FLATTEN) {
+            if serde_has(&f.serde_markers, crate::Syntax::MARKER_FLATTEN) {
                 let v = match self.typed_decode_value(&f.ty, tree, span) {
                     Ok(value) => value,
                     Err(error) => {
@@ -635,7 +635,7 @@ impl<'a> Interp<'a> {
                 None => {
                     if let Type::Option(inner) = &f.ty {
                         CtValue::None((**inner).clone())
-                    } else if serde_marker(&f.serde_markers, crate::Syntax::ATTR_DEFAULT).is_some() {
+                    } else if serde_marker(&f.serde_markers, crate::Syntax::MARKER_DEFAULT).is_some() {
                         self.field_default_value(f, span)
                     } else {
                         errors.push(CtValue::Struct {
@@ -681,7 +681,7 @@ impl<'a> Interp<'a> {
     }
 
     fn field_default_value(&mut self, f: &Field, _span: Span) -> CtValue {
-        if let Some(m) = serde_marker(&f.serde_markers, crate::Syntax::ATTR_DEFAULT) {
+        if let Some(m) = serde_marker(&f.serde_markers, crate::Syntax::MARKER_DEFAULT) {
             // Card #131: prefer the value sema already baked onto the marker, so
             // this decode tier and AOT codegen use the byte-identical default
             // (R12). Fall back to a live eval only if sema's pass didn't run.
@@ -704,7 +704,7 @@ impl<'a> Interp<'a> {
         let mut shape: BTreeSet<String> = s
             .fields
             .iter()
-            .filter(|f| !serde_has(&f.serde_markers, crate::Syntax::ATTR_SKIP))
+            .filter(|f| !serde_has(&f.serde_markers, crate::Syntax::MARKER_SKIP))
             .map(|f| field_wire_key(style, f))
             .collect();
         let mut shapes: Vec<Vec<String>> = Vec::with_capacity(blocks.len());
@@ -820,7 +820,7 @@ impl<'a> Interp<'a> {
                 let Type::Named(name) = ty else { return Err(e) };
                 let Some(sdef) = self.structs.get(name.as_str()).copied() else { return Err(e) };
                 let published = sdef.is_published_schema
-                    || sdef.derives.iter().any(|(t, _)| t == crate::Syntax::ATTR_PUBLISHED_SCHEMA);
+                    || sdef.derives.iter().any(|(t, _)| t == crate::Syntax::MARKER_PUBLISHED_SCHEMA);
                 if !published || !sdef.type_params.is_empty() {
                     return Err(e);
                 }

@@ -26,14 +26,14 @@ impl<'a> Parser<'a> {
         /// D-WASM1=A: is the cursor at `#Target(Wasm|JS)`?
         pub(in crate::Parser) fn at_web_target(&self) -> bool {
             matches!(self.peek().kind, TokKind::Hash)
-                && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_TARGET)
+                && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_TARGET)
                 && matches!(self.peek3().kind, TokKind::LParen)
         }
     
         /// D-HTMLPAIR1 (ratified 2026-07-01, c134): detect `#HTML(`.
         pub(super) fn at_html_marker(&self) -> bool {
             matches!(self.peek().kind, TokKind::Hash)
-                && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_HTML)
+                && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_HTML)
                 && matches!(self.peek3().kind, TokKind::LParen)
         }
     
@@ -58,7 +58,7 @@ impl<'a> Parser<'a> {
         ) -> Result<Option<String>, Diagnostic> {
             let arguments = self.bound_registered_rule_arguments(marker)?;
             let Some(path) = arguments.parameter(0) else {
-                return Err(crate::Policy::marker_argument_shape_error(Syntax::ATTR_HTML, marker.span));
+                return Err(crate::Policy::marker_argument_shape_error(Syntax::MARKER_HTML, marker.span));
             };
             match path {
                 crate::AST::Expr::Str(parts, _) if parts.len() == 1 => match &parts[0] {
@@ -81,13 +81,13 @@ impl<'a> Parser<'a> {
             let arguments = self.bound_registered_rule_arguments(marker)?;
             let Some(target) = arguments.parameter(0) else {
                 return Err(crate::Policy::marker_argument_shape_error(
-                    Syntax::ATTR_TARGET,
+                    Syntax::MARKER_TARGET,
                     marker.span,
                 ));
             };
             let Some(name) = Self::marker_enum_path(target, "Target") else {
                 return Err(crate::Policy::marker_argument_shape_error(
-                    Syntax::ATTR_TARGET,
+                    Syntax::MARKER_TARGET,
                     marker.span,
                 ));
             };

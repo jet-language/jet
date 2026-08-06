@@ -75,11 +75,11 @@ fn generate_protocol_source(decl: &ProtocolDecl) -> String {
     out.push_str(&format!("state {server} {{ {state_list} }}\n\n"));
     out.push_str(&format!(
         "#{} struct {client} {{\n    _token: Int,\n}}\n\n",
-        Syntax::ATTR_SINGLE_USE
+        Syntax::MARKER_SINGLE_USE
     ));
     out.push_str(&format!(
         "#{} struct {server} {{\n    _token: Int,\n}}\n\n",
-        Syntax::ATTR_SINGLE_USE
+        Syntax::MARKER_SINGLE_USE
     ));
 
     out.push_str(&format!("impl {client} {{\n"));

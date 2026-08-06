@@ -552,7 +552,7 @@ impl<'a> Parser<'a> {
 
     pub(in crate::Parser) fn at_known_lead(&self) -> bool {
         matches!(self.peek().kind, TokKind::Hash)
-            && matches!(&self.peek2().kind, TokKind::Ident(name) if name == Syntax::ATTR_KNOWN)
+            && matches!(&self.peek2().kind, TokKind::Ident(name) if name == Syntax::MARKER_KNOWN)
     }
 
     fn take_known_lead(&mut self) -> Result<Span, Diagnostic> {

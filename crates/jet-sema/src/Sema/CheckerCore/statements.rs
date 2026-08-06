@@ -300,7 +300,7 @@ impl<'a> Checker<'a> {
                             reason,
                             reason_expr,
                             ..
-                        } if marker.name == Syntax::ATTR_NONDETERMINISTIC => {
+                        } if marker.name == Syntax::MARKER_NONDETERMINISTIC => {
                             if let Some(text) = text {
                                 *reason = text;
                             }

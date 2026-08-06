@@ -19,7 +19,7 @@ pub(in super::super) fn expand_builtin_serde_items(items: &mut Vec<Item>, diags:
         // generated Encode body is checked.
         let mut codec_params = s.type_params.clone();
         let wire_types = s.fields.iter()
-            .filter(|f| !f.serde_markers.iter().any(|m| m.name == crate::Syntax::ATTR_SKIP))
+            .filter(|f| !f.serde_markers.iter().any(|m| m.name == crate::Syntax::MARKER_SKIP))
             .map(|f| &f.ty)
             .collect::<Vec<_>>();
         for param in &mut codec_params {
@@ -38,20 +38,20 @@ pub(in super::super) fn expand_builtin_serde_items(items: &mut Vec<Item>, diags:
         if enc {
             source.push_str(&format!("impl {}.Encode {{\nfn encode{params}(self) => DataTree {{\n", s.name));
             let active: Vec<_> = s.fields.iter().filter(|f|
-                !f.serde_markers.iter().any(|m| m.name == crate::Syntax::ATTR_SKIP)
+                !f.serde_markers.iter().any(|m| m.name == crate::Syntax::MARKER_SKIP)
             ).collect();
             let needs_mutation = active.iter().any(|f|
-                f.serde_markers.iter().any(|m| m.name == crate::Syntax::ATTR_FLATTEN)
+                f.serde_markers.iter().any(|m| m.name == crate::Syntax::MARKER_FLATTEN)
             );
             if !needs_mutation {
                 source.push_str(&serde_ordered_object_source(&s.serde_markers, &active));
             } else {
                 source.push_str("out: [String: DataTree] := []\n");
             for f in &s.fields {
-                if f.serde_markers.iter().any(|m| m.name == crate::Syntax::ATTR_SKIP)
+                if f.serde_markers.iter().any(|m| m.name == crate::Syntax::MARKER_SKIP)
                 { continue; }
                 let key = serde_source_field_key(&s.serde_markers, f);
-                if f.serde_markers.iter().any(|m| m.name == crate::Syntax::ATTR_FLATTEN) {
+                if f.serde_markers.iter().any(|m| m.name == crate::Syntax::MARKER_FLATTEN) {
                     source.push_str(&format!(
                         "nested :: self.{}.encode()\nif nested == .Object(entries) {{ loop (key, value), entries {{ out[key] = value }} }}\n",
                         f.name
@@ -73,10 +73,10 @@ pub(in super::super) fn expand_builtin_serde_items(items: &mut Vec<Item>, diags:
             source.push_str(&format!("impl {}.Decode {{\n", s.name));
             source.push_str(&format!("fn decode{params}(tree: DataTree) => {target} ? [FieldError] {{\n"));
             let deny_unknown = s.serde_markers.iter().any(|m|
-                m.name == crate::Syntax::ATTR_DENY_UNKNOWN_FIELDS
+                m.name == crate::Syntax::MARKER_DENY_UNKNOWN_FIELDS
             );
             let has_flatten = s.fields.iter().any(|f|
-                f.serde_markers.iter().any(|m| m.name == crate::Syntax::ATTR_FLATTEN)
+                f.serde_markers.iter().any(|m| m.name == crate::Syntax::MARKER_FLATTEN)
             );
             source.push_str("jet_serde_errors := [FieldError].{}\n");
             // A missing field is only a missing field on an object. Do not let
@@ -87,7 +87,7 @@ pub(in super::super) fn expand_builtin_serde_items(items: &mut Vec<Item>, diags:
             );
             if deny_unknown && !has_flatten {
                 let keys = s.fields.iter()
-                    .filter(|f| !f.serde_markers.iter().any(|m| m.name == crate::Syntax::ATTR_SKIP))
+                    .filter(|f| !f.serde_markers.iter().any(|m| m.name == crate::Syntax::MARKER_SKIP))
                     .map(|f| format!("{:?}", serde_source_field_key(&s.serde_markers, f)))
                     .collect::<Vec<_>>()
                     .join(", ");
@@ -99,9 +99,9 @@ pub(in super::super) fn expand_builtin_serde_items(items: &mut Vec<Item>, diags:
             let mut decoded_results = Vec::new();
             let mut required_presence = Vec::new();
             for f in s.fields.iter().filter(|f| f.computed.is_none()) {
-                let value = if f.serde_markers.iter().any(|m| m.name == crate::Syntax::ATTR_SKIP) {
+                let value = if f.serde_markers.iter().any(|m| m.name == crate::Syntax::MARKER_SKIP) {
                     serde_source_default(f).unwrap_or_else(|| serde_source_zero(&f.ty))
-                } else if f.serde_markers.iter().any(|m| m.name == crate::Syntax::ATTR_FLATTEN) {
+                } else if f.serde_markers.iter().any(|m| m.name == crate::Syntax::MARKER_FLATTEN) {
                     let result = format!("jet_serde_decode_{}", f.name);
                     let value = format!("jet_serde_decoded_value_{}", decoded_results.len());
                     source.push_str(&format!(
@@ -237,9 +237,9 @@ fn expand_builtin_enum_serde(
     let tag = e
         .serde_markers
         .iter()
-        .find(|m| m.name == crate::Syntax::ATTR_TAG)
+        .find(|m| m.name == crate::Syntax::MARKER_TAG)
         .and_then(marker_static_string);
-    let untagged = e.serde_markers.iter().any(|m| m.name == crate::Syntax::ATTR_UNTAGGED);
+    let untagged = e.serde_markers.iter().any(|m| m.name == crate::Syntax::MARKER_UNTAGGED);
     let mut source = String::new();
     if enc {
         source.push_str(&format!("impl {}.Encode {{\nfn encode{params}(self) => DataTree {{\nif self == {{\n", e.name));
@@ -431,7 +431,7 @@ mod serde_source_tests {
 }
 
 fn serde_enum_variant_key(v: &crate::AST::Variant) -> String {
-    v.serde_markers.iter().find(|m| m.name == crate::Syntax::ATTR_RENAME)
+    v.serde_markers.iter().find(|m| m.name == crate::Syntax::MARKER_RENAME)
         .and_then(marker_static_string).unwrap_or_else(|| v.name.clone())
 }
 
@@ -569,12 +569,12 @@ fn serde_enum_decode_constructor(
 }
 
 fn serde_source_field_key(container: &[crate::AST::Marker], f: &crate::AST::Field) -> String {
-    if let Some(marker) = f.serde_markers.iter().find(|m| m.name == crate::Syntax::ATTR_RENAME) {
+    if let Some(marker) = f.serde_markers.iter().find(|m| m.name == crate::Syntax::MARKER_RENAME) {
         if let Some(value) = marker_static_string(marker) {
             return value;
         }
     }
-    let style = container.iter().find(|m| m.name == crate::Syntax::ATTR_RENAME_ALL)
+    let style = container.iter().find(|m| m.name == crate::Syntax::MARKER_RENAME_ALL)
         .and_then(|m| m.args.first()).and_then(|e| match e { crate::AST::Expr::Ident(n, _) => Some(n.as_str()), _ => None });
     match style {
         Some("camel") => crate::Syntax::to_camel_acronym(&f.name),
@@ -637,7 +637,7 @@ fn serde_source_default(f: &crate::AST::Field) -> Option<String> {
             return serde_ct_source(value);
         }
     }
-    let marker = f.serde_markers.iter().find(|m| m.name == crate::Syntax::ATTR_DEFAULT)?;
+    let marker = f.serde_markers.iter().find(|m| m.name == crate::Syntax::MARKER_DEFAULT)?;
     match (marker.args.first(), marker.ct.as_ref()) {
         (Some(_), Some(value)) => serde_ct_source(value),
         (Some(expr), None) => serde_source_literal(expr),

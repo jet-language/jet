@@ -13,7 +13,7 @@ pub fn is_stdlib_dsl_block_marker(name: &str) -> bool {
 
 // D-UNITLIT1: unit-suffix numeric literals (`500ms`) are not an enumerable
 // keyword — the lexer resolves a literal's identifier suffix against
-// #UnitFamily members in scope (ATTR_UNIT_FAMILY, D-QUAL3). One fixed rule:
+// #UnitFamily members in scope (MARKER_UNIT_FAMILY, D-QUAL3). One fixed rule:
 /// D-UNITLIT1: a literal suffix shaped `e` + digits is reserved for float
 /// exponent notation (`1e5`) and may never resolve as a unit name.
 pub const UNIT_SUFFIX_EXPONENT_RESERVED: &str = "e"; // D-UNITLIT1

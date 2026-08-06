@@ -99,9 +99,9 @@ pub const TYPE_COMPUTED: &str = "Computed";
 pub const TYPE_EFFECT: &str = "Effect";
 /// D-DATARACE1=C: pin a reactive box to the fast one-thread form. Crossing a
 /// task/channel/parallel boundary is E1102.
-pub const ATTR_LOCAL: &str = "Local";
+pub const MARKER_LOCAL: &str = "Local";
 /// D-DATARACE1=C: pin a reactive box to the lock-guarded synchronized form.
-pub const ATTR_SHARED: &str = "Shared";
+pub const MARKER_SHARED: &str = "Shared";
 /// D-EVENT1 (ratified 2026-07-07): first-party typed Event/Hook family.
 /// Library values, compiler-known for typing/tooling; no new syntax.
 pub const EVENT_MODULE: &str = "core.event";
@@ -409,7 +409,7 @@ pub const KW_AS: &str = "as";
 /// this file's own function bodies (E0921) — local only, never follows calls
 /// into other modules. `no_alloc` is the only ratified policy name; the full
 /// policy list is a follow-on ballot (an unknown name after `policy` is E0003).
-pub const ATTR_POLICY: &str = "Policy"; // D-POLICY-WORD1
+pub const MARKER_POLICY: &str = "Policy"; // D-POLICY-WORD1
 pub const POLICY_NO_ALLOC: &str = "no_alloc";
 
 /// S51 / D-CORENS-CANON1: compiler-known `core.*` library root.
@@ -476,13 +476,13 @@ pub const C_MODULE_ROOT: &str = "c"; // S59
 /// S59: reserved final segment for compiler-generated bindgen modules.
 pub const C_BINDGEN_SEGMENT: &str = "__bindgen__"; // S59
 /// S59 / D-CFFI-CANON1: marker on generated C binding modules — `#Bindgen module`.
-pub const ATTR_BINDGEN: &str = "Bindgen"; // S59 / D-CFFI-CANON1
+pub const MARKER_BINDGEN: &str = "Bindgen"; // S59 / D-CFFI-CANON1
 /// S59 / D-CFFI-CANON1: marker on user C overlay modules — `#Extern module`.
-pub const ATTR_EXTERN_MODULE: &str = "Extern"; // S59 — `#Extern module`, not `extern rust`
+pub const MARKER_EXTERN_MODULE: &str = "Extern"; // S59 — `#Extern module`, not `extern rust`
 /// D-CFFI-SYNTAX-REOPEN / D-CFFI-CANON1: retired C FFI marker spellings,
 /// recognized only for E0060 teaching diagnostics.
-pub const ATTR_BINDGEN_RETIRED: &str = "bindgen";
-pub const ATTR_EXTERN_MODULE_RETIRED: &str = "extern";
+pub const MARKER_BINDGEN_RETIRED: &str = "bindgen";
+pub const MARKER_EXTERN_MODULE_RETIRED: &str = "extern";
 
 /// D-FFI-INLINE1=A (ratified 2026-07-11, card #501): the inline foreign tier
 /// directive marker — `#FFI(<lang>) fn name(sig) { """<foreign source>""" }`.
@@ -490,7 +490,7 @@ pub const ATTR_EXTERN_MODULE_RETIRED: &str = "extern";
 /// foreign source the per-language binder compiles on cache miss. Unsafe
 /// languages (`c`, `cpp`, `asm`) additionally require the enclosing
 /// `#Unsafe("reason")` gate (I1/S58). Spelled fully capitalized (S66).
-pub const ATTR_FFI: &str = "FFI"; // D-FFI-INLINE1
+pub const MARKER_FFI: &str = "FFI"; // D-FFI-INLINE1
 /// D-FFI-CPP1=A (ratified 2026-07-11, card #501): C++ foreign root — the
 /// `cpp.<lib>` namespace binder and the `#FFI(cpp)` inline-tier language name.
 pub const CPP_MODULE_ROOT: &str = "cpp"; // D-FFI-CPP1 / D-FFI-UNIFY1
@@ -501,7 +501,7 @@ pub const ASM_LANG: &str = "asm"; // D-FFI-ASM1
 /// D-UNSAFE2 (retired marker): `#Audit("…")` is the old two-line form;
 /// now the reason is the argument of `#Unsafe("reason")` itself. Recognized
 /// only to emit the E0055 teaching error.
-pub const ATTR_AUDIT: &str = "Audit"; // retired, D-UNSAFE2
+pub const MARKER_AUDIT: &str = "Audit"; // retired, D-UNSAFE2
                                       // D-LOOPLABEL3=A: named loops use `outer :: loop { … }`;
                                       // `break(outer)` / `next(outer)` target them. Retired `@`
                                       // prefix and suffix forms emit E0988.
@@ -678,7 +678,7 @@ pub const TASK_RESERVED_LIFECYCLE: &[&str] = &["run", "dev", "build", "test"];
 
 /// D-SCHEDULE1: `#Every(…)` — a declarative schedule marker on a `#Job fn`.
 /// Legal only alongside `#Job` (E0925 otherwise).
-pub const ATTR_EVERY: &str = "Every";
+pub const MARKER_EVERY: &str = "Every";
 
 /// D-SCHEDULE1: recognized duration suffixes for `#Every(<dur>)` — extends
 /// `duration_suffix_nanos` (`ns`/`us`/`ms`/`s`) with `min`, the ratified

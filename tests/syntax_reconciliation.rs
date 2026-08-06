@@ -476,17 +476,17 @@ fn marker_plane_matrix_covers_current_marker_families() {
 
     for syntax_anchor in [
         "MARKER_PUB_FILE",
-        "ATTR_TARGET",
-        "ATTR_LAYOUT",
-        "ATTR_CODABLE",
+        "MARKER_TARGET",
+        "MARKER_LAYOUT",
+        "MARKER_CODABLE",
         "APPLIED_RULES",
         "KW_CAPS",
         "KW_GRANT",
         "KW_COMPTIME",
         "KW_DERIVE",
-        "ATTR_TRACK",
-        "ATTR_LOCAL",
-        "ATTR_SHARED",
+        "MARKER_TRACK",
+        "MARKER_LOCAL",
+        "MARKER_SHARED",
     ] {
         assert!(
             syntax.contains(syntax_anchor),
@@ -529,13 +529,13 @@ fn card_511_census_matches_current_law() {
         package.contains("pub const METHOD_VIEW"),
         "D-SHAPE-PLACE1 keeps retired `.view(a..b)` registered for E0214 teaching"
     );
-    for retired in ["ATTR_WASM,", "ATTR_JS,", "ATTR_SUPPRESS,"] {
+    for retired in ["MARKER_WASM,", "MARKER_JS,", "MARKER_SUPPRESS,"] {
         assert!(
             !markers.contains(retired),
             "retired marker remains registered: {retired}"
         );
     }
-    for value in ["ATTR_EXPERIMENTAL", "ATTR_TESTED", "ATTR_HARDENED"] {
+    for value in ["MARKER_EXPERIMENTAL", "MARKER_TESTED", "MARKER_HARDENED"] {
         assert!(
             package.contains(value) && !markers.contains(value),
             "maturity value `{value}` must remain a #Meta value, not a standalone marker"

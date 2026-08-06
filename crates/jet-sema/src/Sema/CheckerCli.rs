@@ -46,14 +46,14 @@ fn has_default_marker(f: &Field) -> bool {
     f.default.is_some()
         || f.serde_markers
             .iter()
-            .any(|m| m.name == Syntax::ATTR_DEFAULT)
+            .any(|m| m.name == Syntax::MARKER_DEFAULT)
 }
 
 /// D-CLI-POS1=A: does `f` carry `#[Flag]` (opt out of positional filling)?
 fn has_flag_marker(f: &Field) -> bool {
     f.serde_markers
         .iter()
-        .any(|m| m.name == Syntax::CONTRACT_FLAG)
+        .any(|m| m.name == Syntax::MARKER_FLAG)
 }
 
 fn marker_string<'a>(
@@ -229,7 +229,7 @@ pub(crate) fn validate_cli_items(items: &[Item], reg: &TraitRegistry) -> Vec<Dia
                 for marker in &field.serde_markers {
                     if matches!(
                         marker.name.as_str(),
-                        Syntax::CONTRACT_SHORT | Syntax::CONTRACT_ENV
+                        Syntax::MARKER_SHORT | Syntax::MARKER_ENV
                     ) {
                         out.push(e1319(
                             &marker.name,
@@ -259,7 +259,7 @@ pub(crate) fn validate_cli_items(items: &[Item], reg: &TraitRegistry) -> Vec<Dia
                 let span = f
                     .serde_markers
                     .iter()
-                    .find(|m| m.name == Syntax::CONTRACT_FLAG)
+                    .find(|m| m.name == Syntax::MARKER_FLAG)
                     .map(|m| m.name_span)
                     .unwrap_or(f.name_span);
                 out.push(e1309(&f.name, span));
@@ -268,7 +268,7 @@ pub(crate) fn validate_cli_items(items: &[Item], reg: &TraitRegistry) -> Vec<Dia
             if let Some(_prev) = seen_flags.insert(flag.clone(), f.name_span) {
                 out.push(e1306(&flag, f.name_span));
             }
-            if let Some((marker, short)) = marker_string(f, Syntax::CONTRACT_SHORT) {
+            if let Some((marker, short)) = marker_string(f, Syntax::MARKER_SHORT) {
                 if short.len() != 1 || !short.as_bytes()[0].is_ascii_alphabetic() {
                     out.push(e1318_invalid(&short, marker.name_span));
                 } else if let Some(first) = seen_shorts.insert(short.clone(), f.name.clone()) {
@@ -276,7 +276,7 @@ pub(crate) fn validate_cli_items(items: &[Item], reg: &TraitRegistry) -> Vec<Dia
                 }
             }
             if matches!(kind, Some(CLIFieldKind::Flag)) {
-                if let Some((marker, _)) = marker_string(f, Syntax::CONTRACT_ENV) {
+                if let Some((marker, _)) = marker_string(f, Syntax::MARKER_ENV) {
                     out.push(e1319(
                         "Env",
                         &f.name,

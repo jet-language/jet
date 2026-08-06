@@ -151,7 +151,7 @@ impl<'a> Parser<'a> {
         /// in `Statements.rs` instead).
         pub(in crate::Parser) fn at_persist_binding(&self) -> bool {
             matches!(&self.peek().kind, TokKind::Hash)
-                && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::CONTRACT_PERSIST)
+                && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_PERSIST)
         }
 
         /// D-CONSTMARK1: true at `#Static` / `#Inline` (or retired lowercase)
@@ -194,7 +194,7 @@ impl<'a> Parser<'a> {
                     "E0003",
                     format!(
                         "`#{}` marks a bare binding, not `{}`",
-                        Syntax::CONTRACT_PERSIST,
+                        Syntax::MARKER_PERSIST,
                         match bad.kind {
                             TokKind::KwConst => Syntax::KW_CONST,
                             _ => Syntax::KW_COMPTIME,
@@ -202,11 +202,11 @@ impl<'a> Parser<'a> {
                     ),
                     format!(
                         "`#{}` attaches to `name :: …` or `name := …` (D-PERSIST1 / D-BIND-BARE1)",
-                        Syntax::CONTRACT_PERSIST
+                        Syntax::MARKER_PERSIST
                     ),
                     format!(
                         "write `#{} name := …` (or `::` for an immutable bare bind)",
-                        Syntax::CONTRACT_PERSIST
+                        Syntax::MARKER_PERSIST
                     ),
                     Some(Span::new(persist_span.start, bad.span.end)),
                 ));
@@ -228,15 +228,15 @@ impl<'a> Parser<'a> {
                             "expected `{}` or `{}` after the `#{}` name",
                             Syntax::SIGIL_BIND_IMMUT,
                             Syntax::SIGIL_BIND_MUT,
-                            Syntax::CONTRACT_PERSIST
+                            Syntax::MARKER_PERSIST
                         ),
                         format!(
                             "`#{}` marks a bare binding (D-PERSIST1 / D-BIND-BARE1)",
-                            Syntax::CONTRACT_PERSIST
+                            Syntax::MARKER_PERSIST
                         ),
                         format!(
                             "write `#{} {name} := …` (or `{name} :: …`)",
-                            Syntax::CONTRACT_PERSIST
+                            Syntax::MARKER_PERSIST
                         ),
                         Some(self.peek().span),
                     ));

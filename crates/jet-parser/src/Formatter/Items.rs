@@ -72,7 +72,7 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_meta_rule(&mut self, meta: &MetaAttr) {
-        self.write(&format!("{}(", Syntax::ATTR_META));
+        self.write(&format!("{}(", Syntax::MARKER_META));
         for (idx, field) in meta.fields.iter().enumerate() {
             if idx > 0 {
                 self.write(", ");
@@ -318,7 +318,7 @@ impl<'a> Fmt<'a> {
 
     fn fmt_extern_fn(&mut self, ef: &ExternFn) {
         if let Some((abi, _)) = &ef.abi {
-            self.write(&format!("#{}({}) ", Syntax::ATTR_ABI, abi));
+            self.write(&format!("#{}({}) ", Syntax::MARKER_ABI, abi));
         }
         self.write("fn ");
         self.write(&ef.name);
@@ -503,7 +503,7 @@ impl<'a> Fmt<'a> {
                 StructLayout::C => Syntax::LAYOUT_C,
                 StructLayout::Columnar => Syntax::LAYOUT_COLUMNAR,
             };
-            self.write(&format!("#{}({})", Syntax::ATTR_LAYOUT, variant));
+            self.write(&format!("#{}({})", Syntax::MARKER_LAYOUT, variant));
             self.newline();
         }
     }
@@ -516,19 +516,19 @@ impl<'a> Fmt<'a> {
         let mut covered: Vec<String> = Vec::new();
         for m in type_markers {
             match m.name.as_str() {
-                Syntax::ATTR_CODABLE => {
-                    covered.push(Syntax::ATTR_ENCODE.to_string());
-                    covered.push(Syntax::ATTR_DECODE.to_string());
+                Syntax::MARKER_CODABLE => {
+                    covered.push(Syntax::MARKER_ENCODE.to_string());
+                    covered.push(Syntax::MARKER_DECODE.to_string());
                 }
                 // Serde *attribute* markers never reach `derives`; skip them.
-                Syntax::ATTR_RENAME_ALL
-                | Syntax::ATTR_DENY_UNKNOWN_FIELDS
-                | Syntax::ATTR_TAG
-                | Syntax::ATTR_UNTAGGED
-                | Syntax::ATTR_RENAME
-                | Syntax::ATTR_SKIP
-                | Syntax::ATTR_DEFAULT
-                | Syntax::ATTR_FLATTEN => {}
+                Syntax::MARKER_RENAME_ALL
+                | Syntax::MARKER_DENY_UNKNOWN_FIELDS
+                | Syntax::MARKER_TAG
+                | Syntax::MARKER_UNTAGGED
+                | Syntax::MARKER_RENAME
+                | Syntax::MARKER_SKIP
+                | Syntax::MARKER_DEFAULT
+                | Syntax::MARKER_FLATTEN => {}
                 other => covered.push(other.to_string()),
             }
         }
@@ -575,11 +575,11 @@ impl<'a> Fmt<'a> {
                 self.fmt_marker(rules[0]);
                 if matches!(
                     rules[0].name.as_str(),
-                    Syntax::ATTR_META
+                    Syntax::MARKER_META
                         | Syntax::KW_UNSAFE
-                        | Syntax::ATTR_FFI
-                        | Syntax::ATTR_TARGET
-                        | Syntax::ATTR_WASM_EXPORT
+                        | Syntax::MARKER_FFI
+                        | Syntax::MARKER_TARGET
+                        | Syntax::MARKER_WASM_EXPORT
                 ) {
                     self.newline();
                 } else {
@@ -691,7 +691,7 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_policy_rule(&mut self, declarations: &[crate::Policy::PolicyDeclaration]) {
-        self.write(&format!("{}(", Syntax::ATTR_POLICY));
+        self.write(&format!("{}(", Syntax::MARKER_POLICY));
         for (i, declaration) in declarations.iter().enumerate() {
             if i > 0 { self.write(", "); }
             self.write(declaration.key.name());
@@ -736,7 +736,7 @@ impl<'a> Fmt<'a> {
     fn fmt_param(&mut self, p: &Param) {
         if p.root {
             self.write("#");
-            self.write(Syntax::CONTRACT_ROOT);
+            self.write(Syntax::MARKER_ROOT);
             self.write(" ");
         }
         // D-MEM1: capability is a sigil, never a word. The sigil rides the type
@@ -879,11 +879,11 @@ impl<'a> Fmt<'a> {
         self.fmt_type_markers(&s.type_markers, lone_hash_ok);
         // D-LIN1: `#SingleUse` precedes `pub`/`struct`, on the same line.
         if s.is_single_use {
-            self.write(&format!("#{} ", Syntax::ATTR_SINGLE_USE));
+            self.write(&format!("#{} ", Syntax::MARKER_SINGLE_USE));
         }
         // D-MUSTUSE1 (c18iwxqx): `#MustUse` precedes `pub`/`struct`, on the same line.
         if s.is_must_use {
-            self.write(&format!("#{} ", Syntax::ATTR_MUST_USE));
+            self.write(&format!("#{} ", Syntax::MARKER_MUST_USE));
         }
         // D-MIGRATE1: `#PublishedSchema` precedes `pub`/`struct`, on the same line.
         // A bracket marker list keeps PublishedSchema in `type_markers` while
@@ -893,9 +893,9 @@ impl<'a> Fmt<'a> {
             && !s
                 .type_markers
                 .iter()
-                .any(|marker| marker.name == Syntax::ATTR_PUBLISHED_SCHEMA)
+                .any(|marker| marker.name == Syntax::MARKER_PUBLISHED_SCHEMA)
         {
-            self.write(&format!("#{} ", Syntax::ATTR_PUBLISHED_SCHEMA));
+            self.write(&format!("#{} ", Syntax::MARKER_PUBLISHED_SCHEMA));
         }
         // D-REPRC1/D-SOA1: `#Layout(…)` sits on its own line before the struct.
         self.fmt_layout(&s.layout);
@@ -940,7 +940,7 @@ impl<'a> Fmt<'a> {
                             && !field.serde_markers.iter().any(|marker| {
                                 matches!(
                                     marker.name.as_str(),
-                                    Syntax::ATTR_SKIP | Syntax::ATTR_FLATTEN
+                                    Syntax::MARKER_SKIP | Syntax::MARKER_FLATTEN
                                 )
                             });
                         f.fmt_field(field, decodes_field);
@@ -992,11 +992,11 @@ impl<'a> Fmt<'a> {
         self.fmt_type_markers(&e.type_markers, lone_hash_ok);
         // D-LIN1: `#SingleUse` precedes `pub`/`enum`, on the same line.
         if e.is_single_use {
-            self.write(&format!("#{} ", Syntax::ATTR_SINGLE_USE));
+            self.write(&format!("#{} ", Syntax::MARKER_SINGLE_USE));
         }
         // D-MUSTUSE1 (c18iwxqx): `#MustUse` precedes `pub`/`enum`, on the same line.
         if e.is_must_use {
-            self.write(&format!("#{} ", Syntax::ATTR_MUST_USE));
+            self.write(&format!("#{} ", Syntax::MARKER_MUST_USE));
         }
         if top_level {
             self.fmt_pub_qualifier(e.is_pub, e.is_package_pub);
@@ -1179,7 +1179,7 @@ impl<'a> Fmt<'a> {
         if let Some(os) = i.os_target {
             self.write(&format!(
                 "#{}({}.{})",
-                Syntax::ATTR_TARGET,
+                Syntax::MARKER_TARGET,
                 Syntax::TARGET_OS_NAMESPACE,
                 os.name()
             ));
@@ -1231,7 +1231,7 @@ impl<'a> Fmt<'a> {
         // D-PERSIST1: `#Persist` on a bare binding (not on `comptime`).
         // D-BIND-BARE1: preserve `::` vs `:=`.
         if c.is_persist {
-            self.write(&format!("#{} ", Syntax::CONTRACT_PERSIST));
+            self.write(&format!("#{} ", Syntax::MARKER_PERSIST));
             self.write(&c.name);
             self.write(" ");
             self.write(if c.mutable {
@@ -1251,7 +1251,7 @@ impl<'a> Fmt<'a> {
                     ConstAttr::ForceInline => self.write("#Inline "),
                 }
             }
-            self.write(&format!("#{} ", Syntax::ATTR_KNOWN));
+            self.write(&format!("#{} ", Syntax::MARKER_KNOWN));
             self.write(&c.name);
             self.write(" :: ");
             self.fmt_expr(&c.value, Prec::OrFallback);
@@ -1274,7 +1274,7 @@ impl<'a> Fmt<'a> {
             return;
         }
         // Fallback: treat as an explicit known value.
-        self.write(&format!("#{} ", Syntax::ATTR_KNOWN));
+        self.write(&format!("#{} ", Syntax::MARKER_KNOWN));
         self.write(&c.name);
         self.write(" :: ");
         self.fmt_expr(&c.value, Prec::OrFallback);
@@ -1365,7 +1365,7 @@ impl<'a> Fmt<'a> {
                 self.write("[");
             }
             if field.redact {
-                self.write(Syntax::ATTR_REDACT);
+                self.write(Syntax::MARKER_REDACT);
             }
             for (i, marker) in field.serde_markers.iter().enumerate() {
                 if field.redact || i > 0 {

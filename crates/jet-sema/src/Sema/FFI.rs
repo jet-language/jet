@@ -212,8 +212,8 @@ pub(crate) fn e3203(ty: &Type, span: Span) -> Diagnostic {
         ),
         format!(
             "`#{}` / `#{}` functions must use types with a stable C ABI at the edge.",
-            Syntax::ATTR_EXTERN_MODULE,
-            Syntax::ATTR_BINDGEN,
+            Syntax::MARKER_EXTERN_MODULE,
+            Syntax::MARKER_BINDGEN,
         ),
         "Use scalars, `String`, or a struct with C layout; pointers only through the gated tier."
             .to_string(),

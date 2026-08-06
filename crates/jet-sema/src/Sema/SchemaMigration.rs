@@ -73,7 +73,7 @@ pub fn desugar_migrations(bundle: &mut ProgramBundle) {
                 let published = s.is_published_schema
                     || s.derives
                         .iter()
-                        .any(|(t, _)| t == crate::Syntax::ATTR_PUBLISHED_SCHEMA);
+                        .any(|(t, _)| t == crate::Syntax::MARKER_PUBLISHED_SCHEMA);
                 if published
                     && s.type_params.is_empty()
                     && s.derives.iter().any(|(t, _)| t == crate::Generics::DECODE)

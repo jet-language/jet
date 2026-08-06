@@ -632,7 +632,7 @@ fn emit_struct_patchable(_cx: &Cx, s: &StructDef, out: &mut String) {
     if !s
         .derives
         .iter()
-        .any(|(t, _)| t == crate::Syntax::CONTRACT_PATCHABLE)
+        .any(|(t, _)| t == crate::Syntax::MARKER_PATCHABLE)
     {
         return;
     }
@@ -1168,7 +1168,7 @@ fn union_codec_needs(
                         if !field
                             .serde_markers
                             .iter()
-                            .any(|marker| marker.name == crate::Syntax::ATTR_SKIP)
+                            .any(|marker| marker.name == crate::Syntax::MARKER_SKIP)
                         {
                             collect(&field.ty, encode, decode, encodes, decodes);
                         }
@@ -1445,13 +1445,13 @@ fn apply_rename_all(style: &str, name: &str) -> String {
     }
 }
 pub(super) fn container_rename_all(markers: &[Marker]) -> Option<String> {
-    serde_marker(markers, crate::Syntax::ATTR_RENAME_ALL).and_then(|m| match m.args.first() {
+    serde_marker(markers, crate::Syntax::MARKER_RENAME_ALL).and_then(|m| match m.args.first() {
         Some(Expr::Ident(n, _)) => Some(n.clone()),
         _ => None,
     })
 }
 pub(super) fn field_wire_key(style: Option<&str>, f: &Field) -> String {
-    if let Some(m) = serde_marker(&f.serde_markers, crate::Syntax::ATTR_RENAME) {
+    if let Some(m) = serde_marker(&f.serde_markers, crate::Syntax::MARKER_RENAME) {
         if let Some(s) = marker_str_arg(m) {
             return s;
         }
@@ -1476,7 +1476,7 @@ pub(super) fn migration_blocks<'a>(
     let published = s.is_published_schema
         || s.derives
             .iter()
-            .any(|(t, _)| t == crate::Syntax::ATTR_PUBLISHED_SCHEMA);
+            .any(|(t, _)| t == crate::Syntax::MARKER_PUBLISHED_SCHEMA);
     if !published || !s.type_params.is_empty() {
         return None;
     }
@@ -1519,7 +1519,7 @@ pub(super) fn migration_shapes(
     let mut shape: std::collections::BTreeSet<String> = s
         .fields
         .iter()
-        .filter(|f| !serde_has(&f.serde_markers, crate::Syntax::ATTR_SKIP))
+        .filter(|f| !serde_has(&f.serde_markers, crate::Syntax::MARKER_SKIP))
         .map(|f| field_wire_key(style, f))
         .collect();
     let mut shapes: Vec<Vec<String>> = Vec::with_capacity(blocks.len());

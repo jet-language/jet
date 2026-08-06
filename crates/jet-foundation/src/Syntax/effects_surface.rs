@@ -257,7 +257,7 @@ pub const INTERP_UNIT_STYLE_NAME: &str = "name";
 pub const INTERP_UNIT_STYLE_BARE: &str = "bare";
 /// D-DEBUG-REDACT / D-MARKERMOVE1 (contract plane, `#Redact`): hide a field
 /// from auto-derived Debug output.
-pub const ATTR_REDACT: &str = "Redact";
+pub const MARKER_REDACT: &str = "Redact";
 
 /// D-TXN4: the type of a transaction handle bound by `#Transact(name)`. An
 /// opaque sema-only handle; erased in codegen (I3).
@@ -327,11 +327,11 @@ pub const FOREIGN_MUTEX: &str = "Mutex";
 pub const FOREIGN_LOCK: &str = "lock";
 
 /// D-VERDICT-732-1: applied-rule prefix — bare `#Name` or list `#[a, b]`.
-pub const ATTR_PREFIX: &str = "#";
+pub const MARKER_PREFIX: &str = "#";
 
 /// S82 / D-VERDICT-732-1 (ratified): multi-attribute list delimiters after `#`.
-pub const ATTR_LIST_OPEN: &str = "[";
-pub const ATTR_LIST_CLOSE: &str = "]";
+pub const MARKER_LIST_OPEN: &str = "[";
+pub const MARKER_LIST_CLOSE: &str = "]";
 
 /// D-VERDICT-732-1: rejected old `@` applied-rule spelling (teaching error).
 pub const FOREIGN_AT_ATTR: &str = "@";

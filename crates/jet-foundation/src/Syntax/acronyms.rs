@@ -253,9 +253,9 @@ mod tests {
     fn vocabulary_rejects_old_spellings_in_surface_constants() {
         // Compiler-owned surface strings must already be lexicon-canonical.
         for name in [
-            crate::Syntax::CONTRACT_CLI,
-            crate::Syntax::ATTR_ABI,
-            crate::Syntax::ATTR_HTML,
+            crate::Syntax::MARKER_CLI,
+            crate::Syntax::MARKER_ABI,
+            crate::Syntax::MARKER_HTML,
             crate::Syntax::DSL_BLOCK_SQL,
             crate::Syntax::WEB_BUCKET_JS,
             crate::Syntax::TARGET_OS_NAMESPACE,

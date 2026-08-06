@@ -79,7 +79,7 @@ fn has_codable_derive(derives: &[(String, crate::Diagnostics::Span)]) -> bool {
     let mut decode = false;
     for (d, _) in derives {
         match d.as_str() {
-            Syntax::ATTR_CODABLE => return true,
+            Syntax::MARKER_CODABLE => return true,
             d if d == ENCODE => encode = true,
             d if d == DECODE => decode = true,
             _ => {}
@@ -275,7 +275,7 @@ fn reason_show(f: &FuncWebMeta, effects: &EffectSet) -> String {
         return "inferred: Browser effect".to_string();
     }
     if let Some(c) = f.ceiling {
-        return format!("#{}({})", Syntax::ATTR_TARGET, c.name());
+        return format!("#{}({})", Syntax::MARKER_TARGET, c.name());
     }
     if f.name == "run" {
         return "entry".to_string();

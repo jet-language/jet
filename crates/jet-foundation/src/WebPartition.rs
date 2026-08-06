@@ -52,7 +52,7 @@ impl WebPartitionMarker {
         match self {
             WebPartitionMarker::Wasm => "Target(Wasm)",
             WebPartitionMarker::JS => "Target(JS)",
-            WebPartitionMarker::WasmExport => Syntax::ATTR_WASM_EXPORT,
+            WebPartitionMarker::WasmExport => Syntax::MARKER_WASM_EXPORT,
         }
     }
 }
@@ -118,7 +118,7 @@ pub fn web_cross_partition(
             .to_string(),
         format!(
             "move the call behind a generated bridge, colocate both functions in the same bucket, or adjust their `#{}(Wasm|JS)` markers",
-            Syntax::ATTR_TARGET,
+            Syntax::MARKER_TARGET,
         ),
         span,
     )
@@ -136,8 +136,8 @@ pub fn web_target_browser(
             .to_string(),
         format!(
             "remove the `#{}(Wasm)` pin, move browser work into a `#{}(JS)` function, or drop the browser API calls",
-            Syntax::ATTR_TARGET,
-            Syntax::ATTR_TARGET,
+            Syntax::MARKER_TARGET,
+            Syntax::MARKER_TARGET,
         ),
         span,
     )

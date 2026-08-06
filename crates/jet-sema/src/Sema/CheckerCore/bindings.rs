@@ -113,9 +113,9 @@ pub(crate) fn check_meta_attr_fields(meta: &MetaAttr) -> Vec<Diagnostic> {
                         if type_name.is_empty()
                             && args.is_empty()
                             && matches!(variant.as_str(),
-                                Syntax::ATTR_EXPERIMENTAL
-                                    | Syntax::ATTR_TESTED
-                                    | Syntax::ATTR_HARDENED));
+                                Syntax::MARKER_EXPERIMENTAL
+                                    | Syntax::MARKER_TESTED
+                                    | Syntax::MARKER_HARDENED));
                 if !valid {
                     diags.push(Diagnostic::error(
                         "E0352",
@@ -217,7 +217,7 @@ impl<'a> Checker<'a> {
     }
 
         pub(crate) fn check_meta_attr(&mut self, meta: &mut MetaAttr) {
-            if let Some(mut marker) = self.take_rule_fact(Syntax::ATTR_META, meta.span) {
+            if let Some(mut marker) = self.take_rule_fact(Syntax::MARKER_META, meta.span) {
                 let Some(arguments) = self.validate_rule_signature(&mut marker) else {
                     return;
                 };

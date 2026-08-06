@@ -269,7 +269,7 @@ impl<'a> Parser<'a> {
                     ));
                 }
             }
-            if marker.name == Syntax::ATTR_RENAME
+            if marker.name == Syntax::MARKER_RENAME
                 && !matches!(
                     marker.args.as_slice(),
                     [crate::AST::Expr::Str(parts, _)]
@@ -480,7 +480,7 @@ impl<'a> Parser<'a> {
                 if crate::Policy::applied_rule(&name).is_some()
                     && !crate::Policy::rule_allows(&name, site)
                     && !(site == crate::Policy::RuleSite::Method
-                        && matches!(name.as_str(), Syntax::KW_TASK | Syntax::ATTR_EVERY))
+                        && matches!(name.as_str(), Syntax::KW_TASK | Syntax::MARKER_EVERY))
                 {
                     return Err(Self::wrong_rule_site(&marker, site, noun));
                 }
@@ -593,7 +593,7 @@ impl<'a> Parser<'a> {
                     self.toks.get(name_index + 1).map(|token| &token.kind),
                 ),
                 (Some(TokKind::Ident(name)), Some(TokKind::LParen))
-                    if name == Syntax::ATTR_TARGET
+                    if name == Syntax::MARKER_TARGET
             ) {
                 return false;
             }
@@ -714,11 +714,11 @@ impl<'a> Parser<'a> {
                 // ordinary unknown-marker diagnostic instead of classifying
                 // this spelling as an attached function marker.
                 || matches!(self.marker_name_at(self.pos), Some(name)
-                    if name == Syntax::ATTR_EXPERIMENTAL
-                        || name == Syntax::ATTR_TESTED
-                        || name == Syntax::ATTR_HARDENED)
+                    if name == Syntax::MARKER_EXPERIMENTAL
+                        || name == Syntax::MARKER_TESTED
+                        || name == Syntax::MARKER_HARDENED)
                 || matches!(self.marker_name_at(self.pos), Some(name)
-                    if name == Syntax::ATTR_POLICY && self.policy_is_file_decl())
+                    if name == Syntax::MARKER_POLICY && self.policy_is_file_decl())
             {
                 return false;
             }
@@ -842,7 +842,7 @@ impl<'a> Parser<'a> {
         /// applicator. FFI changes only the body parser.
         pub(in crate::Parser) fn func_with_marker_list(&mut self) -> Result<crate::AST::Func, Diagnostic> {
             let markers = self.parse_function_marker_sequence()?;
-            if markers.iter().any(|marker| marker.name == Syntax::ATTR_FFI) {
+            if markers.iter().any(|marker| marker.name == Syntax::MARKER_FFI) {
                 return self.ffi_fn_from_markers(markers);
             }
             let function = self.func()?;
@@ -886,7 +886,7 @@ impl<'a> Parser<'a> {
                     )
                 {
                     if site == crate::Policy::RuleSite::Method
-                        && matches!(marker.name.as_str(), Syntax::KW_TASK | Syntax::ATTR_EVERY)
+                        && matches!(marker.name.as_str(), Syntax::KW_TASK | Syntax::MARKER_EVERY)
                     {
                         return Err(Diagnostic::error(
                             "E0925",
@@ -953,13 +953,13 @@ impl<'a> Parser<'a> {
                 self.validate_registered_rule_arguments(&marker)?;
                 let arguments = self.bound_registered_rule_arguments(&marker)?;
                 match marker.name.as_str() {
-                    Syntax::ATTR_POLICY => {
+                    Syntax::MARKER_POLICY => {
                         policy.extend(self.policy_declarations_from_marker(
                             marker.clone(),
                             crate::Policy::PolicyScope::Function,
                         )?);
                     }
-                    Syntax::ATTR_META => {
+                    Syntax::MARKER_META => {
                         if function.meta.is_some() {
                             return Err(Diagnostic::error(
                                 "E0355",
@@ -990,11 +990,11 @@ impl<'a> Parser<'a> {
                     }
                     // D-TASKS-LIST1=A: only a group that also has `#Job`
                     // reaches this arm. Discovery reads the retained marker.
-                    Syntax::CONTRACT_DOC => {}
-                    Syntax::ATTR_EVERY => {
+                    Syntax::MARKER_DOC => {}
+                    Syntax::MARKER_EVERY => {
                         let Some(schedule) = arguments.parameter(0) else {
                             return Err(crate::Policy::marker_argument_shape_error(
-                                Syntax::ATTR_EVERY,
+                                Syntax::MARKER_EVERY,
                                 marker.span,
                             ));
                         };
@@ -1027,19 +1027,19 @@ impl<'a> Parser<'a> {
                             span: marker.span,
                         });
                     }
-                    Syntax::ATTR_MUST_USE if marker.args.is_empty() => {
+                    Syntax::MARKER_MUST_USE if marker.args.is_empty() => {
                         function.is_must_use = true;
                         function.must_use_span = Some(marker.span);
                     }
-                    Syntax::ATTR_REPLAYABLE if marker.args.is_empty() => {
+                    Syntax::MARKER_REPLAYABLE if marker.args.is_empty() => {
                         function.is_replayable = true;
                         function.replayable_span = Some(marker.span);
                     }
-                    Syntax::ATTR_WASM_EXPORT if marker.args.is_empty() => {
+                    Syntax::MARKER_WASM_EXPORT if marker.args.is_empty() => {
                         function.web_marker =
                             Some(crate::Syntax::WebPartitionMarker::WasmExport);
                     }
-                    Syntax::ATTR_TARGET => {
+                    Syntax::MARKER_TARGET => {
                         function.web_marker = Some(match self.web_target_from_marker(&marker)? {
                             super::TargetMarker::Bucket(crate::Syntax::WebBucket::Wasm) => {
                                 crate::Syntax::WebPartitionMarker::Wasm
@@ -1068,7 +1068,7 @@ impl<'a> Parser<'a> {
                         };
                         function.scrub_tag = Some(tag.clone());
                     }
-                    Syntax::CONTRACT_INLINE => {
+                    Syntax::MARKER_INLINE => {
                         function.inline_span = Some(marker.span);
                         if arguments.parameter(0).is_none() {
                             function.is_inline = true;
@@ -1080,7 +1080,7 @@ impl<'a> Parser<'a> {
                             function.is_inline_always = true;
                         } else {
                             return Err(crate::Policy::marker_argument_shape_error(
-                                Syntax::CONTRACT_INLINE,
+                                Syntax::MARKER_INLINE,
                                 marker.span,
                             ));
                         }
@@ -1088,7 +1088,7 @@ impl<'a> Parser<'a> {
                     // D-COMPUTE-KERNEL-SURFACE1=B: preserve the explicit
                     // kernel declaration in the AST. Sema attaches the proof
                     // only after it has checked the body.
-                    Syntax::CONTRACT_KERNEL => {
+                    Syntax::MARKER_KERNEL => {
                         if function.kernel.is_some() {
                             return Err(Diagnostic::error(
                                 "E1130",
@@ -1105,7 +1105,7 @@ impl<'a> Parser<'a> {
                             Some("parallel") => crate::AST::KernelMode::Parallel,
                             _ => {
                                 return Err(crate::Policy::marker_argument_shape_error(
-                                    Syntax::CONTRACT_KERNEL,
+                                    Syntax::MARKER_KERNEL,
                                     marker.span,
                                 ));
                             }
@@ -1116,7 +1116,7 @@ impl<'a> Parser<'a> {
                             proof: None,
                         });
                     }
-                    Syntax::CONTRACT_PRE | Syntax::CONTRACT_POST => {
+                    Syntax::MARKER_PRE | Syntax::MARKER_POST => {
                         let (Some(condition), Some(message_argument)) =
                             (arguments.parameter(0), arguments.parameter(1))
                         else {
@@ -1139,7 +1139,7 @@ impl<'a> Parser<'a> {
                             message_span,
                             span: marker.span,
                         };
-                        if marker.name == Syntax::CONTRACT_PRE {
+                        if marker.name == Syntax::MARKER_PRE {
                             function.pre.push(clause);
                         } else {
                             function.post.push(clause);
@@ -1174,8 +1174,8 @@ impl<'a> Parser<'a> {
                             span: marker.span,
                         });
                     }
-                    Syntax::ATTR_FFI if function.inline_foreign.is_some() => {}
-                    Syntax::ATTR_ABI => {
+                    Syntax::MARKER_FFI if function.inline_foreign.is_some() => {}
+                    Syntax::MARKER_ABI => {
                         return Err(Diagnostic::error(
                             "E3212",
                             "`#ABI` only applies to C declarations".to_string(),
@@ -1247,26 +1247,26 @@ impl<'a> Parser<'a> {
         pub(in crate::Parser) fn function_marker_has_applicator(name: &str) -> bool {
             matches!(
                 name,
-                Syntax::ATTR_POLICY
+                Syntax::MARKER_POLICY
                     | Syntax::KW_UNSAFE
                     | Syntax::KW_SCRUB
-                    | Syntax::CONTRACT_PRE
-                    | Syntax::CONTRACT_POST
-                    | Syntax::CONTRACT_INLINE
-                    | Syntax::CONTRACT_KERNEL
-                    | Syntax::CONTRACT_DOC
+                    | Syntax::MARKER_PRE
+                    | Syntax::MARKER_POST
+                    | Syntax::MARKER_INLINE
+                    | Syntax::MARKER_KERNEL
+                    | Syntax::MARKER_DOC
                     | Syntax::KW_TASK
-                    | Syntax::ATTR_EVERY
-                    | Syntax::ATTR_REPLAYABLE
-                    | Syntax::ATTR_WASM_EXPORT
+                    | Syntax::MARKER_EVERY
+                    | Syntax::MARKER_REPLAYABLE
+                    | Syntax::MARKER_WASM_EXPORT
                     | Syntax::KW_STATE
                     | Syntax::KW_TRANSITION
-                    | Syntax::ATTR_FFI
-                    | Syntax::ATTR_ABI
-                    | Syntax::ATTR_MUST_USE
-                    | Syntax::ATTR_META
+                    | Syntax::MARKER_FFI
+                    | Syntax::MARKER_ABI
+                    | Syntax::MARKER_MUST_USE
+                    | Syntax::MARKER_META
                     | Syntax::KW_REACTIVE
-                    | Syntax::ATTR_TARGET
+                    | Syntax::MARKER_TARGET
             )
         }
 
@@ -1355,20 +1355,20 @@ impl<'a> Parser<'a> {
                     continue;
                 }
                 match m.name.as_str() {
-                    Syntax::ATTR_CODABLE => {
-                        derives.push((Syntax::ATTR_ENCODE.to_string(), m.name_span));
-                        derives.push((Syntax::ATTR_DECODE.to_string(), m.name_span));
+                    Syntax::MARKER_CODABLE => {
+                        derives.push((Syntax::MARKER_ENCODE.to_string(), m.name_span));
+                        derives.push((Syntax::MARKER_DECODE.to_string(), m.name_span));
                     }
-                    Syntax::ATTR_ENCODE => derives.push((Syntax::ATTR_ENCODE.to_string(), m.name_span)),
-                    Syntax::ATTR_DECODE => derives.push((Syntax::ATTR_DECODE.to_string(), m.name_span)),
-                    Syntax::ATTR_RENAME_ALL
-                    | Syntax::ATTR_DENY_UNKNOWN_FIELDS
-                    | Syntax::ATTR_TAG
-                    | Syntax::ATTR_UNTAGGED
-                    | Syntax::ATTR_RENAME
-                    | Syntax::ATTR_SKIP
-                    | Syntax::ATTR_DEFAULT
-                    | Syntax::ATTR_FLATTEN => serde.push(m),
+                    Syntax::MARKER_ENCODE => derives.push((Syntax::MARKER_ENCODE.to_string(), m.name_span)),
+                    Syntax::MARKER_DECODE => derives.push((Syntax::MARKER_DECODE.to_string(), m.name_span)),
+                    Syntax::MARKER_RENAME_ALL
+                    | Syntax::MARKER_DENY_UNKNOWN_FIELDS
+                    | Syntax::MARKER_TAG
+                    | Syntax::MARKER_UNTAGGED
+                    | Syntax::MARKER_RENAME
+                    | Syntax::MARKER_SKIP
+                    | Syntax::MARKER_DEFAULT
+                    | Syntax::MARKER_FLATTEN => serde.push(m),
                     // Any other name is a derive-trait: the D-MARKERMOVE3 built-ins
                     // (`#[Debug]`, `#[Summarize]`, `#[Comparable]`) or a user
                     // derive-trait name.
@@ -1428,7 +1428,7 @@ impl<'a> Parser<'a> {
                     // silently skipped E0910 migration validation. Mirror that form here.
                     if let Some(m) = markers
                         .iter()
-                        .find(|m| m.name == Syntax::ATTR_PUBLISHED_SCHEMA)
+                        .find(|m| m.name == Syntax::MARKER_PUBLISHED_SCHEMA)
                     {
                         s.is_published_schema = true;
                         s.published_schema_span = Some(m.span);
@@ -1446,20 +1446,20 @@ impl<'a> Parser<'a> {
                     d.type_markers = markers.clone();
                     for marker in markers {
                         match marker.name.as_str() {
-                            Syntax::ATTR_NUMERIC => d.is_numeric = true,
-                            Syntax::CONTRACT_BUNDLE_COMPARABLE => {
+                            Syntax::MARKER_NUMERIC => d.is_numeric = true,
+                            Syntax::MARKER_BUNDLE_COMPARABLE => {
                                 d.is_comparable = true;
                                 d.comparable_span = Some(marker.span);
                             }
-                            Syntax::CONTRACT_BUNDLE_PRINTABLE => {
+                            Syntax::MARKER_BUNDLE_PRINTABLE => {
                                 d.is_printable = true;
                                 d.printable_span = Some(marker.span);
                             }
-                            Syntax::CONTRACT_BUNDLE_CODABLE_AS_BASE => {
+                            Syntax::MARKER_BUNDLE_CODABLE_AS_BASE => {
                                 d.is_codable_as_base = true;
                                 d.codable_as_base_span = Some(marker.span);
                             }
-                            Syntax::ATTR_INVARIANT => {
+                            Syntax::MARKER_INVARIANT => {
                                 let (bounds, span, text) =
                                     self.parse_invariant_range(marker)?;
                                 d.range = bounds.map(|(low, high)| (low, high, span));
@@ -1495,7 +1495,7 @@ impl<'a> Parser<'a> {
                 TokKind::Hash
                     if matches!(
                         &self.peek2().kind,
-                        TokKind::Ident(n) if n == Syntax::ATTR_LAYOUT
+                        TokKind::Ident(n) if n == Syntax::MARKER_LAYOUT
                     ) =>
                 {
                     self.layout_type_def(is_pub)
@@ -1503,7 +1503,7 @@ impl<'a> Parser<'a> {
                 TokKind::Hash
                     if matches!(
                         &self.peek2().kind,
-                        TokKind::Ident(n) if n == Syntax::ATTR_PUBLISHED_SCHEMA
+                        TokKind::Ident(n) if n == Syntax::MARKER_PUBLISHED_SCHEMA
                     ) =>
                 {
                     self.published_schema_struct_def(is_pub).map(Item::Struct)

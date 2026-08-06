@@ -236,7 +236,7 @@ fn format_struct_sig(s: &crate::AST::StructDef, dimensions: &crate::Sema::ApiFre
     let is_cli = s
         .derives
         .iter()
-        .any(|(name, _)| name == crate::Syntax::CONTRACT_CLI);
+        .any(|(name, _)| name == crate::Syntax::MARKER_CLI);
     let mut positional_order = 0u16;
     let fields: Vec<String> = s
         .fields
@@ -252,11 +252,11 @@ fn format_struct_sig(s: &crate::AST::StructDef, dimensions: &crate::Sema::ApiFre
             let flag_only = f
                 .serde_markers
                 .iter()
-                .any(|m| m.name == crate::Syntax::CONTRACT_FLAG);
+                .any(|m| m.name == crate::Syntax::MARKER_FLAG);
             let has_default = f
                 .serde_markers
                 .iter()
-                .any(|m| m.name == crate::Syntax::ATTR_DEFAULT);
+                .any(|m| m.name == crate::Syntax::MARKER_DEFAULT);
             let is_bool = matches!(f.ty, crate::AST::Type::Bool);
             let is_optional = matches!(f.ty, crate::AST::Type::Option(_));
             if !is_bool && !is_optional && !has_default && !flag_only {

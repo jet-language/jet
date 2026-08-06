@@ -958,7 +958,7 @@ fn list_task_names(src: &str) -> Result<Vec<TaskListing>, Vec<jet::Diagnostics::
                     .iter()
                     .find(|application| {
                         application.target == Some(f.span)
-                            && application.marker.name == jet::Syntax::CONTRACT_DOC
+                            && application.marker.name == jet::Syntax::MARKER_DOC
                     })
                     .and_then(|application| marker_string(&application.marker));
                 Some(TaskListing {

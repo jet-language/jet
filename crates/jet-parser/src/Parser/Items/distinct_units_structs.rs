@@ -17,14 +17,14 @@ impl<'a> Parser<'a> {
         /// (`#Numeric`, `#Comparable`, `#Printable`, `#CodableAsBase`) that may
         /// stack before a `distinct` type declaration?
         fn is_capability_bundle_marker(name: &str) -> bool {
-            name == Syntax::ATTR_NUMERIC
-                || name == Syntax::CONTRACT_BUNDLE_COMPARABLE
-                || name == Syntax::CONTRACT_BUNDLE_PRINTABLE
-                || name == Syntax::CONTRACT_BUNDLE_CODABLE_AS_BASE
+            name == Syntax::MARKER_NUMERIC
+                || name == Syntax::MARKER_BUNDLE_COMPARABLE
+                || name == Syntax::MARKER_BUNDLE_PRINTABLE
+                || name == Syntax::MARKER_BUNDLE_CODABLE_AS_BASE
         }
     
         fn is_distinct_prefix_marker(name: &str) -> bool {
-            Self::is_capability_bundle_marker(name) || name == Syntax::ATTR_INVARIANT
+            Self::is_capability_bundle_marker(name) || name == Syntax::MARKER_INVARIANT
         }
     
         /// D-DIST3 / D-CAPBUNDLE1 / D-MARKERMOVE1 (ratified 2026-06-20 /
@@ -46,7 +46,7 @@ impl<'a> Parser<'a> {
                                 i += 2;
                                 if matches!(
                                     self.toks.get(i - 1).map(|t| &t.kind),
-                                    Some(TokKind::Ident(n)) if n == Syntax::ATTR_INVARIANT
+                                    Some(TokKind::Ident(n)) if n == Syntax::MARKER_INVARIANT
                                 ) && matches!(self.toks.get(i).map(|t| &t.kind), Some(TokKind::LParen))
                                 {
                                     let mut depth = 0i32;
@@ -124,7 +124,7 @@ impl<'a> Parser<'a> {
                 let sigil_span = self.bump().span;
                 let (attr, attr_span) = self.expect_ident("after the marker sigil")?;
                 marker_count += 1;
-                if attr == Syntax::ATTR_INVARIANT {
+                if attr == Syntax::MARKER_INVARIANT {
                     let mut marker = self.finish_rule_marker(attr, attr_span)?;
                     marker.span.start = sigil_span.start;
                     self.bind_rule_fact(
@@ -147,15 +147,15 @@ impl<'a> Parser<'a> {
                     span: Span::new(sigil_span.start, attr_span.end),
                     ct: None,
                 });
-                if attr == Syntax::ATTR_NUMERIC {
+                if attr == Syntax::MARKER_NUMERIC {
                     is_numeric = true;
-                } else if attr == Syntax::CONTRACT_BUNDLE_COMPARABLE {
+                } else if attr == Syntax::MARKER_BUNDLE_COMPARABLE {
                     is_comparable = true;
                     comparable_span = Some(attr_span);
-                } else if attr == Syntax::CONTRACT_BUNDLE_PRINTABLE {
+                } else if attr == Syntax::MARKER_BUNDLE_PRINTABLE {
                     is_printable = true;
                     printable_span = Some(attr_span);
-                } else if attr == Syntax::CONTRACT_BUNDLE_CODABLE_AS_BASE {
+                } else if attr == Syntax::MARKER_BUNDLE_CODABLE_AS_BASE {
                     is_codable_as_base = true;
                     codable_as_base_span = Some(attr_span);
                 }
@@ -354,7 +354,7 @@ impl<'a> Parser<'a> {
         ) -> Result<(Option<(i64, i64)>, Span, Option<String>), Diagnostic> {
             let arguments = self.bound_registered_rule_arguments(&marker)?;
             let Some(invariant) = arguments.parameter(0) else {
-                return Err(crate::Policy::marker_argument_shape_error(Syntax::ATTR_INVARIANT, marker.span));
+                return Err(crate::Policy::marker_argument_shape_error(Syntax::MARKER_INVARIANT, marker.span));
             };
             let text = match invariant {
                 crate::AST::Expr::Str(parts, _) if parts.len() == 1 => match &parts[0] {
@@ -418,7 +418,7 @@ impl<'a> Parser<'a> {
         /// Token stream: `@ UnitFamily (`.
         pub(super) fn at_unit_family_def(&self) -> bool {
             matches!(&self.peek().kind, TokKind::Hash)
-                && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_UNIT_FAMILY)
+                && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_UNIT_FAMILY)
                 && matches!(&self.peek3().kind, TokKind::LParen)
         }
     
@@ -432,7 +432,7 @@ impl<'a> Parser<'a> {
             let marker = self.parse_rule_marker()?;
             let arguments = self.bound_registered_rule_arguments(&marker)?;
             let Some(crate::AST::Expr::Ident(family, family_span)) = arguments.parameter(0) else {
-                return Err(crate::Policy::marker_argument_shape_error(Syntax::ATTR_UNIT_FAMILY, marker.span));
+                return Err(crate::Policy::marker_argument_shape_error(Syntax::MARKER_UNIT_FAMILY, marker.span));
             };
             let family = family.clone();
             let family_span = *family_span;
@@ -459,7 +459,7 @@ impl<'a> Parser<'a> {
             }).transpose()?;
             let base = if let Some(value) = arguments.parameter(2) {
                 let crate::AST::Expr::Ident(base, base_span) = value else {
-                    return Err(crate::Policy::marker_argument_shape_error(Syntax::ATTR_UNIT_FAMILY, value.span()));
+                    return Err(crate::Policy::marker_argument_shape_error(Syntax::MARKER_UNIT_FAMILY, value.span()));
                 };
                 Some((base.clone(), *base_span))
             } else {
@@ -776,7 +776,7 @@ impl<'a> Parser<'a> {
             if !matches!(&self.peek().kind, TokKind::Hash) {
                 return false;
             }
-            if !matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_LAYOUT) {
+            if !matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_LAYOUT) {
                 return false;
             }
             // peek3 must be `(`
@@ -794,14 +794,14 @@ impl<'a> Parser<'a> {
             let marker = self.parse_rule_marker()?;
             let arguments = self.bound_registered_rule_arguments(&marker)?;
             let Some(crate::AST::Expr::Ident(variant, variant_span)) = arguments.parameter(0) else {
-                return Err(crate::Policy::marker_argument_shape_error(Syntax::ATTR_LAYOUT, marker.span));
+                return Err(crate::Policy::marker_argument_shape_error(Syntax::MARKER_LAYOUT, marker.span));
             };
             let variant = variant.clone();
             let variant_span = *variant_span;
             let mut tag_width = None;
             if let Some(value) = arguments.parameter(1) {
                 let crate::AST::Expr::Ident(width, width_span) = value else {
-                    return Err(crate::Policy::marker_argument_shape_error(Syntax::ATTR_LAYOUT, value.span()));
+                    return Err(crate::Policy::marker_argument_shape_error(Syntax::MARKER_LAYOUT, value.span()));
                 };
                 tag_width = Some((width.clone(), *width_span));
             }
@@ -853,7 +853,7 @@ impl<'a> Parser<'a> {
                     arg_labels.push(Some(("tag".to_string(), variant_span)));
                 }
                 def.type_markers.push(crate::AST::Marker {
-                    name: Syntax::ATTR_LAYOUT.to_string(),
+                    name: Syntax::MARKER_LAYOUT.to_string(),
                     negated: false,
                     name_span: marker.name_span,
                     args,
@@ -888,7 +888,7 @@ impl<'a> Parser<'a> {
             if !matches!(&self.peek().kind, TokKind::Hash) {
                 return false;
             }
-            if !matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_PUBLISHED_SCHEMA) {
+            if !matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_PUBLISHED_SCHEMA) {
                 return false;
             }
             // peek3 may be Semi (newline after marker) or KwStruct/KwPub (same-line)
@@ -911,7 +911,7 @@ impl<'a> Parser<'a> {
             if !matches!(&self.peek().kind, TokKind::Hash) {
                 return false;
             }
-            if !matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_SINGLE_USE) {
+            if !matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_SINGLE_USE) {
                 return false;
             }
             let peek3 = &self.peek3().kind;
@@ -933,7 +933,7 @@ impl<'a> Parser<'a> {
             let attr_start = self.peek().span;
             self.bump(); // consume `@`
             let (attr, attr_name_span) = self.expect_ident("after `@`")?;
-            debug_assert_eq!(attr, Syntax::ATTR_SINGLE_USE);
+            debug_assert_eq!(attr, Syntax::MARKER_SINGLE_USE);
             let attr_span = Span::new(attr_start.start, attr_name_span.end);
             // The lexer may insert a `Semi` after the marker identifier when the type
             // keyword is on the next line. Consume it so the next token is the keyword.
@@ -975,7 +975,7 @@ impl<'a> Parser<'a> {
             if !matches!(&self.peek().kind, TokKind::Hash) {
                 return false;
             }
-            if !matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_MUST_USE) {
+            if !matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_MUST_USE) {
                 return false;
             }
             let peek3 = &self.peek3().kind;
@@ -994,7 +994,7 @@ impl<'a> Parser<'a> {
             let attr_start = self.peek().span;
             self.bump(); // consume `@`
             let (attr, attr_name_span) = self.expect_ident("after the marker sigil")?;
-            debug_assert_eq!(attr, Syntax::ATTR_MUST_USE);
+            debug_assert_eq!(attr, Syntax::MARKER_MUST_USE);
             let attr_span = Span::new(attr_start.start, attr_name_span.end);
             while matches!(&self.peek().kind, TokKind::Semi) {
                 self.bump();
@@ -1043,7 +1043,7 @@ impl<'a> Parser<'a> {
             let attr_start = self.peek().span;
             self.bump(); // consume `@`
             let (attr, attr_name_span) = self.expect_ident("after the marker sigil")?;
-            if attr != Syntax::ATTR_PUBLISHED_SCHEMA {
+            if attr != Syntax::MARKER_PUBLISHED_SCHEMA {
                 return Err(Diagnostic::error(
                     "E0003",
                     format!(
@@ -1122,7 +1122,7 @@ impl<'a> Parser<'a> {
                     let mut redact = false;
                     let mut serde_markers = Vec::new();
                     for m in field_markers {
-                        if m.name == crate::Syntax::ATTR_REDACT {
+                        if m.name == crate::Syntax::MARKER_REDACT {
                             redact = true;
                         } else {
                             serde_markers.push(m);

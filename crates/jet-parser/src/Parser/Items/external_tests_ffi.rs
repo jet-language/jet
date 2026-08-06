@@ -609,11 +609,11 @@ impl<'a> Parser<'a> {
                 )?;
                 let marker = markers
                     .iter()
-                    .find(|marker| marker.name == Syntax::ATTR_ABI);
+                    .find(|marker| marker.name == Syntax::MARKER_ABI);
                 if markers.len() != 1 || marker.is_none() {
                     let marker = markers
                         .iter()
-                        .find(|marker| marker.name != Syntax::ATTR_ABI)
+                        .find(|marker| marker.name != Syntax::MARKER_ABI)
                         .or_else(|| markers.first())
                         .expect("attached marker sequence is non-empty");
                     return Err(Diagnostic::error(
@@ -628,7 +628,7 @@ impl<'a> Parser<'a> {
                 let marker = marker.expect("one ABI marker");
                 let arguments = self.bound_registered_rule_arguments(marker)?;
                 let Some(crate::AST::Expr::Ident(name, span)) = arguments.parameter(0) else {
-                    return Err(crate::Policy::marker_argument_shape_error(Syntax::ATTR_ABI, marker.span));
+                    return Err(crate::Policy::marker_argument_shape_error(Syntax::MARKER_ABI, marker.span));
                 };
                 while matches!(self.peek().kind, TokKind::Semi) { self.bump(); }
                 Some((name.clone(), *span))

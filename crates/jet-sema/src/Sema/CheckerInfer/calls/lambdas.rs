@@ -330,16 +330,16 @@ use std::collections::HashSet;
                                         "E1102",
                                         format!(
                                             "`{name}` is pinned `#{}` and can't cross into a task",
-                                            crate::Syntax::ATTR_LOCAL
+                                            crate::Syntax::MARKER_LOCAL
                                         ),
                                         format!(
                                             "`#{}` keeps `{}` in the fast one-thread form",
-                                            crate::Syntax::ATTR_LOCAL,
+                                            crate::Syntax::MARKER_LOCAL,
                                             cap_ty.name()
                                         ),
                                         format!(
                                             "remove `#{}`, or send owned values through a channel",
-                                            crate::Syntax::ATTR_LOCAL
+                                            crate::Syntax::MARKER_LOCAL
                                         ),
                                         Some(lam.span),
                                     ));

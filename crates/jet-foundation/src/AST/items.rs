@@ -805,9 +805,9 @@ pub enum MaturityTag {
 impl MaturityTag {
     pub fn as_str(self) -> &'static str {
         match self {
-            MaturityTag::Experimental => crate::Syntax::ATTR_EXPERIMENTAL,
-            MaturityTag::Tested => crate::Syntax::ATTR_TESTED,
-            MaturityTag::Hardened => crate::Syntax::ATTR_HARDENED,
+            MaturityTag::Experimental => crate::Syntax::MARKER_EXPERIMENTAL,
+            MaturityTag::Tested => crate::Syntax::MARKER_TESTED,
+            MaturityTag::Hardened => crate::Syntax::MARKER_HARDENED,
         }
     }
 }
@@ -1341,7 +1341,7 @@ pub enum CEnumTag { CInt, U8, I8, U16, I16, U32, I32, U64, I64 }
 
 impl EnumDef {
     pub fn c_layout_tag(&self) -> Option<CEnumTag> {
-        let marker = self.type_markers.iter().find(|m| m.name == crate::Syntax::ATTR_LAYOUT)?;
+        let marker = self.type_markers.iter().find(|m| m.name == crate::Syntax::MARKER_LAYOUT)?;
         let Some(Expr::Ident(first, _)) = marker.args.first() else { return None };
         if !first.eq_ignore_ascii_case("c") { return None; }
         Some(match marker.args.get(1) {
@@ -1872,14 +1872,14 @@ pub fn resolved_decode_wire_shapes(items: &[Item], ty: &Type) -> Option<Vec<Serd
                         if def
                             .serde_markers
                             .iter()
-                            .any(|marker| marker.name == crate::Syntax::ATTR_TAG)
+                            .any(|marker| marker.name == crate::Syntax::MARKER_TAG)
                         {
                             return Some(vec![SerdeWireShape::Object]);
                         }
                         let untagged = def
                             .serde_markers
                             .iter()
-                            .any(|marker| marker.name == crate::Syntax::ATTR_UNTAGGED);
+                            .any(|marker| marker.name == crate::Syntax::MARKER_UNTAGGED);
                         if !untagged {
                             let mut shapes = Vec::new();
                             for variant in &def.variants {

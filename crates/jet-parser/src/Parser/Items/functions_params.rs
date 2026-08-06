@@ -517,7 +517,7 @@ impl<'a> Parser<'a> {
 
         pub(super) fn param(&mut self) -> Result<Param, Diagnostic> {
             let root = if matches!(self.peek().kind, TokKind::Hash)
-                && matches!(&self.peek2().kind, TokKind::Ident(name) if name == Syntax::CONTRACT_ROOT)
+                && matches!(&self.peek2().kind, TokKind::Ident(name) if name == Syntax::MARKER_ROOT)
             {
                 let marker = self.parse_rule_marker()?;
                 self.bind_rule_fact(
@@ -685,20 +685,20 @@ impl<'a> Parser<'a> {
                 if p.root && i != 0 {
                     self.diags.push(Diagnostic::error(
                         "E0103",
-                        format!("`#{}` must mark the first parameter", Syntax::CONTRACT_ROOT),
+                        format!("`#{}` must mark the first parameter", Syntax::MARKER_ROOT),
                         "a reversible dot call has one receiver, and it is always the first value parameter"
                             .to_string(),
-                        format!("move `#{}` to the first parameter", Syntax::CONTRACT_ROOT),
+                        format!("move `#{}` to the first parameter", Syntax::MARKER_ROOT),
                         Some(p.name_span),
                     ));
                 }
                 if p.root && p.convention != AccessConvention::Read {
                     self.diags.push(Diagnostic::error(
                         "E0103",
-                        format!("`#{}` must mark a bare-read parameter", Syntax::CONTRACT_ROOT),
+                        format!("`#{}` must mark a bare-read parameter", Syntax::MARKER_ROOT),
                         "dot-call syntax never hides a write or move capability behind the receiver"
                             .to_string(),
-                        format!("remove `&` or `^` from the `#{}` parameter", Syntax::CONTRACT_ROOT),
+                        format!("remove `&` or `^` from the `#{}` parameter", Syntax::MARKER_ROOT),
                         Some(p.name_span),
                     ));
                 }
@@ -709,11 +709,11 @@ impl<'a> Parser<'a> {
             for param in params.iter().filter(|param| param.root) {
                 self.diags.push(Diagnostic::error(
                     "E0103",
-                    format!("`#{}` is only valid on a top-level function", Syntax::CONTRACT_ROOT),
+                    format!("`#{}` is only valid on a top-level function", Syntax::MARKER_ROOT),
                     "a method already owns its receiver after the dot; marking another receiver would make dispatch ambiguous".to_string(),
                     format!(
                         "remove `#{}`, or move the function to module scope",
-                        Syntax::CONTRACT_ROOT
+                        Syntax::MARKER_ROOT
                     ),
                     Some(param.name_span),
                 ));
@@ -761,7 +761,7 @@ impl<'a> Parser<'a> {
                     let mut redact = false;
                     let mut serde_markers = Vec::new();
                     for m in field_markers {
-                        if m.name == crate::Syntax::ATTR_REDACT {
+                        if m.name == crate::Syntax::MARKER_REDACT {
                             redact = true;
                         } else {
                             serde_markers.push(m);

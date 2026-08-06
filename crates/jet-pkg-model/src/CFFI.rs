@@ -115,7 +115,7 @@ fn e3207(lib: &str, span: Span) -> Diagnostic {
         "E3207",
         format!(
             "`#{}` is only allowed in generated cache files",
-            Syntax::ATTR_BINDGEN
+            Syntax::MARKER_BINDGEN
         ),
         format!(
             "`{}/{}/{}.{}` is written by `{} inspect bind`; hand-written sources use `#{} module`",
@@ -124,11 +124,11 @@ fn e3207(lib: &str, span: Span) -> Diagnostic {
             lib,
             Syntax::FILE_EXT,
             Syntax::BINARY_NAME,
-            Syntax::ATTR_EXTERN_MODULE,
+            Syntax::MARKER_EXTERN_MODULE,
         ),
         format!(
             "edit your overlay file with `#{} module`, or regenerate the cache with `{} inspect bind`",
-            Syntax::ATTR_EXTERN_MODULE,
+            Syntax::MARKER_EXTERN_MODULE,
             Syntax::BINARY_NAME,
         ),
         Some(span),
@@ -142,7 +142,7 @@ fn e3205(lib: &str, name: &str, span: Span) -> Diagnostic {
         format!("overlay `{}` disagrees with the generated binding", name),
         format!(
             "user `#{} module {}.{}` may override bindgen symbols, but the signature must stay compatible when replacing",
-            Syntax::ATTR_EXTERN_MODULE, Syntax::C_MODULE_ROOT, lib,
+            Syntax::MARKER_EXTERN_MODULE, Syntax::C_MODULE_ROOT, lib,
         ),
         "match the generated signature, or rename your overlay function".to_string(),
         Some(span),

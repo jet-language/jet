@@ -144,7 +144,7 @@ fn validate_rule_arguments(
         }
         let observation = if binding.ty == crate::Policy::RuleArgType::Ident
             || binding.ty == crate::Policy::RuleArgType::Any
-                && marker_name != Syntax::ATTR_DEFAULT
+                && marker_name != Syntax::MARKER_DEFAULT
             || binding.ty == crate::Policy::RuleArgType::DurationOrString
                 && matches!(argument, crate::AST::Expr::UnitLit { .. })
         {
@@ -153,7 +153,7 @@ fn validate_rule_arguments(
                 constant: None,
             }
         } else if binding.ty == crate::Policy::RuleArgType::Bool
-            && marker_name == Syntax::ATTR_META
+            && marker_name == Syntax::MARKER_META
             && matches!(argument, crate::AST::Expr::Ident(name, _)
                 if name == Syntax::META_FIELD_TUNABLE)
         {
@@ -395,7 +395,7 @@ pub(crate) fn resolve_static_rule_products(
             if let Some(idx) = field
                 .serde_markers
                 .iter()
-                .position(|m| m.name == Syntax::ATTR_DEFAULT)
+                .position(|m| m.name == Syntax::MARKER_DEFAULT)
             {
                 let marker = field.serde_markers.remove(idx);
                 if field.default.is_none() {
@@ -410,7 +410,7 @@ pub(crate) fn resolve_static_rule_products(
                     "E0375",
                     format!(
                         "`#{}` on field `{}` is retired — write an `=` default on the field",
-                        Syntax::ATTR_DEFAULT,
+                        Syntax::MARKER_DEFAULT,
                         field.name
                     ),
                     "field defaults use the same `=` spelling as parameter defaults (D-FIELDDEF1)"
@@ -418,7 +418,7 @@ pub(crate) fn resolve_static_rule_products(
                     format!(
                         "write `{}: … = …` instead of `#{}(…)`",
                         field.name,
-                        Syntax::ATTR_DEFAULT
+                        Syntax::MARKER_DEFAULT
                     ),
                     Some(marker.span),
                 ));
@@ -431,7 +431,7 @@ pub(crate) fn resolve_static_rule_products(
         let needs_baked_default = item.derives.iter().any(|(t, _)| {
             matches!(
                 t.as_str(),
-                "Codable" | "Decode" | "Encode" | Syntax::CONTRACT_CLI
+                "Codable" | "Decode" | "Encode" | Syntax::MARKER_CLI
             )
         });
         for field in &mut item.fields {
@@ -462,8 +462,8 @@ pub(crate) fn resolve_static_rule_products(
     }
     for (name, marker_span, text) in &static_strings {
         match name.as_str() {
-            Syntax::ATTR_HTML => module.html_path = Some(text.clone()),
-            Syntax::ATTR_INVARIANT => {
+            Syntax::MARKER_HTML => module.html_path = Some(text.clone()),
+            Syntax::MARKER_INVARIANT => {
                 if let Some(crate::AST::Item::Distinct(distinct)) = module
                     .items
                     .iter_mut()
@@ -614,7 +614,7 @@ impl<'a> crate::Sema::Checker<'a> {
                 && target.start <= application.marker.span.start
                 && !matches!(
                     application.marker.name.as_str(),
-                    Syntax::ATTR_META | Syntax::CTX_BLOCK
+                    Syntax::MARKER_META | Syntax::CTX_BLOCK
                 )
         })?;
         Some(self.rule_facts.remove(index).marker)

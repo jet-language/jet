@@ -263,7 +263,7 @@ impl<'a> Parser<'a> {
 
     pub(in super::super) fn at_meta_attr(&self) -> bool {
         matches!(self.peek().kind, TokKind::Hash)
-            && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_META)
+            && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_META)
             && matches!(self.peek3().kind, TokKind::LParen)
     }
 
@@ -381,7 +381,7 @@ impl<'a> Parser<'a> {
         matches!(self.toks.get(i).map(|t| &t.kind), Some(TokKind::Hash))
             && matches!(
                 self.toks.get(i + 1).map(|t| &t.kind),
-                Some(TokKind::Ident(n)) if n == Syntax::CONTRACT_PERSIST
+                Some(TokKind::Ident(n)) if n == Syntax::MARKER_PERSIST
             )
     }
 
@@ -548,7 +548,7 @@ impl<'a> Parser<'a> {
         };
         Err(Diagnostic::error(
             "E0426",
-            format!("`#{}` is retired", Syntax::ATTR_UNINIT),
+            format!("`#{}` is retired", Syntax::MARKER_UNINIT),
             format!(
                 "uninitialized storage is a fact about the value — it now reads `name {} Type.{{ {} }}`",
                 Syntax::SIGIL_BIND_MUT,
@@ -587,7 +587,7 @@ impl<'a> Parser<'a> {
             }
             let label = label.or_else(|| {
                 let parameter_index = parameter_indices[index]?;
-                let parameter = crate::Policy::applied_rule(Syntax::ATTR_META)?
+                let parameter = crate::Policy::applied_rule(Syntax::MARKER_META)?
                     .signature
                     .params
                     .get(parameter_index)?;
@@ -604,9 +604,9 @@ impl<'a> Parser<'a> {
                                 if type_name.is_empty()
                                     && args.is_empty()
                                     && matches!(variant.as_str(),
-                                        Syntax::ATTR_EXPERIMENTAL
-                                            | Syntax::ATTR_TESTED
-                                            | Syntax::ATTR_HARDENED));
+                                        Syntax::MARKER_EXPERIMENTAL
+                                            | Syntax::MARKER_TESTED
+                                            | Syntax::MARKER_HARDENED));
                         if !valid {
                             self.diags.push(Diagnostic::error(
                                 "E0352",
@@ -674,7 +674,7 @@ impl<'a> Parser<'a> {
         if matches!(self.peek().kind, TokKind::Hash)
             && matches!(
                 &self.peek2().kind,
-                TokKind::Ident(n) if n == Syntax::ATTR_OFF || n == Syntax::ATTR_DEBUG_ONLY
+                TokKind::Ident(n) if n == Syntax::MARKER_OFF || n == Syntax::MARKER_DEBUG_ONLY
             )
         {
             let second_start = self.peek().span;
@@ -692,8 +692,8 @@ impl<'a> Parser<'a> {
                 ),
                 format!(
                     "keep one marker: `#{} <statement>` or `#{} <statement>`",
-                    Syntax::ATTR_OFF,
-                    Syntax::ATTR_DEBUG_ONLY
+                    Syntax::MARKER_OFF,
+                    Syntax::MARKER_DEBUG_ONLY
                 ),
                 Some(Span::new(second_start.start, second_end)),
             ));
@@ -710,7 +710,7 @@ impl<'a> Parser<'a> {
             (vec![stmt], end)
         };
         let span = Span::new(attr_span.start, end);
-        if marker == Syntax::ATTR_OFF {
+        if marker == Syntax::MARKER_OFF {
             Ok(Stmt::Off { body, span })
         } else {
             Ok(Stmt::DebugOnly { body, span })
@@ -738,7 +738,7 @@ impl<'a> Parser<'a> {
         // E0055: retirement and replacement come from the shared registry;
         // the ordinary marker-call reader consumes the old arguments.
         let retired_audit = match &self.peek2().kind {
-            TokKind::Ident(name) if name == Syntax::ATTR_AUDIT => {
+            TokKind::Ident(name) if name == Syntax::MARKER_AUDIT => {
                 crate::Policy::applied_rule(name).and_then(|row| match row.status {
                     crate::Policy::RuleStatus::Retired { replacement } => Some(replacement),
                     crate::Policy::RuleStatus::Active => None,
@@ -910,7 +910,7 @@ impl<'a> Parser<'a> {
         let marker = self.parse_rule_marker()?;
         let arguments = self.bound_registered_rule_arguments(&marker)?;
         let Some(Expr::Ident(name, name_span)) = arguments.parameter(0) else {
-            return Err(crate::Policy::marker_argument_shape_error(Syntax::ATTR_REGION, marker.span));
+            return Err(crate::Policy::marker_argument_shape_error(Syntax::MARKER_REGION, marker.span));
         };
         self.expect(TokKind::LBrace, "after `#Region(name)`")?;
         let body = self.block_stmts();
@@ -1989,11 +1989,11 @@ impl<'a> Parser<'a> {
                 self.finish_stmt()?;
                 Ok(Stmt::Val(binding))
             }
-            TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_TRACK) =>
+            TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_TRACK) =>
             {
                 let marker_span = self.peek().span;
                 self.bump(); // `#`
-                let (_, name_span) = self.expect_ident(&format!("`#{}`", Syntax::ATTR_TRACK))?;
+                let (_, name_span) = self.expect_ident(&format!("`#{}`", Syntax::MARKER_TRACK))?;
                 let mut binding = self.sigil_binding()?;
                 binding.track = true;
                 binding.track_span = Some(Span::new(marker_span.start, name_span.end));
@@ -2001,11 +2001,11 @@ impl<'a> Parser<'a> {
                 Ok(Stmt::Val(binding))
             }
             TokKind::Hash
-                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_LOCAL) =>
+                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_LOCAL) =>
             {
                 let marker_span = self.peek().span;
                 self.bump(); // `#`
-                let (_, name_span) = self.expect_ident(&format!("`#{}`", Syntax::ATTR_LOCAL))?;
+                let (_, name_span) = self.expect_ident(&format!("`#{}`", Syntax::MARKER_LOCAL))?;
                 let mut binding = self.sigil_binding()?;
                 binding.reactive_local = true;
                 binding.reactive_local_span =
@@ -2014,11 +2014,11 @@ impl<'a> Parser<'a> {
                 Ok(Stmt::Val(binding))
             }
             TokKind::Hash
-                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_SHARED) =>
+                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_SHARED) =>
             {
                 let marker_span = self.peek().span;
                 self.bump(); // `#`
-                let (_, name_span) = self.expect_ident(&format!("`#{}`", Syntax::ATTR_SHARED))?;
+                let (_, name_span) = self.expect_ident(&format!("`#{}`", Syntax::MARKER_SHARED))?;
                 let mut binding = self.sigil_binding()?;
                 binding.reactive_shared = true;
                 binding.reactive_shared_span =
@@ -2075,26 +2075,26 @@ impl<'a> Parser<'a> {
             // D-UNINIT-SENTINEL1/2: `#Uninit name: Type` is retired — teaching
             // error E0426 points at `name := Type.{ uninit }`.
             TokKind::Hash
-                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_UNINIT) =>
+                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_UNINIT) =>
             {
                 return self.retired_uninit_marker();
             }
             TokKind::Hash
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if matches!(n.as_str(),
-                    Syntax::ATTR_AUDIT
+                    Syntax::MARKER_AUDIT
                     | Syntax::CTX_BLOCK
-                    | Syntax::ATTR_REGION
-                    | Syntax::ATTR_POLICY
-                    | Syntax::ATTR_LIVE
-                    | Syntax::ATTR_NONDETERMINISTIC
+                    | Syntax::MARKER_REGION
+                    | Syntax::MARKER_POLICY
+                    | Syntax::MARKER_LIVE
+                    | Syntax::MARKER_NONDETERMINISTIC
                     | Syntax::KW_CAPS
                     | Syntax::KW_GRANT
                     | Syntax::KW_TRANSACT
                     | Syntax::KW_IMPURE
                     | Syntax::KW_SHIELD
                     | Syntax::KW_REACTIVE
-                    | Syntax::ATTR_OFF
-                    | Syntax::ATTR_DEBUG_ONLY))
+                    | Syntax::MARKER_OFF
+                    | Syntax::MARKER_DEBUG_ONLY))
                     || matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_UNSAFE) =>
             {
                 if let TokKind::Ident(name) = &self.peek2().kind {
@@ -2106,16 +2106,16 @@ impl<'a> Parser<'a> {
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::CTX_BLOCK) {
                     return self.at_context_stmt();
                 }
-                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_REGION) {
+                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_REGION) {
                     return self.at_region_stmt();
                 }
-                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_POLICY) {
+                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_POLICY) {
                     return self.at_policy_stmt();
                 }
-                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_LIVE) {
+                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_LIVE) {
                     return self.at_live_stmt();
                 }
-                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_NONDETERMINISTIC) {
+                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_NONDETERMINISTIC) {
                     return self.at_nondeterministic_stmt();
                 }
                 // D-EFF1 / D-QUAL1: `#Caps(Net, DB) { … }` effect-restriction region.
@@ -2147,11 +2147,11 @@ impl<'a> Parser<'a> {
                     return self.at_reactive_stmt();
                 }
                 // D-CANVASSTATE1=D: statement switch-off attributes.
-                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_OFF) {
-                    return self.at_statement_switch_stmt(Syntax::ATTR_OFF);
+                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_OFF) {
+                    return self.at_statement_switch_stmt(Syntax::MARKER_OFF);
                 }
-                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_DEBUG_ONLY) {
-                    return self.at_statement_switch_stmt(Syntax::ATTR_DEBUG_ONLY);
+                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_DEBUG_ONLY) {
+                    return self.at_statement_switch_stmt(Syntax::MARKER_DEBUG_ONLY);
                 }
                 // D-UNSAFE2: `#Unsafe("reason") { … }` (or retired `#Audit("…") #Unsafe`).
                 self.at_unsafe_stmt()
@@ -2160,7 +2160,7 @@ impl<'a> Parser<'a> {
             // is keyed by module + name, and a local has no stable identity
             // across a reload. Takes priority over the loop-label-typo arm
             // below for the same reason as the directive-marker guard.
-            TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::CONTRACT_PERSIST) =>
+            TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_PERSIST) =>
             {
                 let t = self.bump(); // `@`
                 let name_tok = self.bump(); // `Persist`

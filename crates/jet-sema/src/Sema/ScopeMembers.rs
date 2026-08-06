@@ -221,7 +221,7 @@ fn validate_dsl_args(
         Syntax::DSL_BLOCK_SQL => {
             args.is_empty() || (args.len() == 1 && matches!(args[0], Expr::Ident(..)))
         }
-        Syntax::ATTR_HTML => args.is_empty(),
+        Syntax::MARKER_HTML => args.is_empty(),
         _ => false,
     };
     if !valid {

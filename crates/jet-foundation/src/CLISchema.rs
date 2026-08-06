@@ -750,7 +750,7 @@ pub fn command_schema(structure: &StructDef) -> Option<CLICommandSchema> {
     if !structure
         .derives
         .iter()
-        .any(|(name, _)| name == Syntax::CONTRACT_CLI)
+        .any(|(name, _)| name == Syntax::MARKER_CLI)
     {
         return None;
     }
@@ -762,15 +762,15 @@ pub fn command_schema(structure: &StructDef) -> Option<CLICommandSchema> {
         .filter(|field| field.computed.is_none())
         .map(|field| {
             let flag = field.name.replace('_', "-");
-            let short = marker(&field.serde_markers, Syntax::CONTRACT_SHORT)
+            let short = marker(&field.serde_markers, Syntax::MARKER_SHORT)
                 .and_then(marker_string);
-            let env = marker(&field.serde_markers, Syntax::CONTRACT_ENV)
+            let env = marker(&field.serde_markers, Syntax::MARKER_ENV)
                 .and_then(marker_string);
-            let help = marker(&field.serde_markers, Syntax::CONTRACT_DOC)
+            let help = marker(&field.serde_markers, Syntax::MARKER_DOC)
                 .and_then(marker_string)
                 .unwrap_or_else(|| format!("value for --{flag}"));
             let metavar = flag.replace('-', "_").to_uppercase();
-            let flag_only = marker(&field.serde_markers, Syntax::CONTRACT_FLAG).is_some();
+            let flag_only = marker(&field.serde_markers, Syntax::MARKER_FLAG).is_some();
             let shape = match &field.ty {
                 Type::Bool => CLIInputShape::Flag,
                 Type::Option(inner) => CLIInputShape::Value {
@@ -852,7 +852,7 @@ fn field_default(field: &Field) -> Option<CLIDefault> {
     if field.default.is_some() {
         return Some(CLIDefault::TypeDefault);
     }
-    let marker = marker(&field.serde_markers, Syntax::ATTR_DEFAULT)?;
+    let marker = marker(&field.serde_markers, Syntax::MARKER_DEFAULT)?;
     Some(match (&marker.args[..], &marker.ct) {
         ([_, ..], Some(value)) => CLIDefault::Value(value.clone()),
         _ => CLIDefault::TypeDefault,

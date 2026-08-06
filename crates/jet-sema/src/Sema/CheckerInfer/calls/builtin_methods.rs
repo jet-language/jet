@@ -417,16 +417,16 @@ impl<'a> Checker<'a> {
                             "E1102",
                             format!(
                                 "`{name}` is pinned `#{}` and can't cross into a parallel worker",
-                                Syntax::ATTR_LOCAL
+                                Syntax::MARKER_LOCAL
                             ),
                             format!(
                                 "`#{}` keeps `{}` in the fast one-thread form",
-                                Syntax::ATTR_LOCAL,
+                                Syntax::MARKER_LOCAL,
                                 ty.name()
                             ),
                             format!(
                                 "remove `#{}`, or keep the reactive graph off the parallel path",
-                                Syntax::ATTR_LOCAL
+                                Syntax::MARKER_LOCAL
                             ),
                             Some(lam.span),
                         ));

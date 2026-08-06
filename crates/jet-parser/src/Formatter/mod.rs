@@ -120,19 +120,19 @@ fn format_program_with_tokens(
             write_separator(&mut f);
             f.write(&format!(
                 "{}({})",
-                Syntax::ATTR_TARGET,
+                Syntax::MARKER_TARGET,
                 Syntax::WEB_TARGET_DEFAULT_WEB
             ));
         }
         if let Some(bucket) = prog.web_target_ceiling {
             write_separator(&mut f);
-            f.write(&format!("{}({})", Syntax::ATTR_TARGET, bucket.name()));
+            f.write(&format!("{}({})", Syntax::MARKER_TARGET, bucket.name()));
         }
         if let Some(html_path) = &prog.html_path {
             write_separator(&mut f);
             f.write(&format!(
                 "{}(\"{}\")",
-                Syntax::ATTR_HTML,
+                Syntax::MARKER_HTML,
                 escape_str_lit(html_path)
             ));
         }
@@ -197,7 +197,7 @@ fn format_program_with_tokens(
         first = false;
         f.write(&format!(
             "#{}({})",
-            Syntax::ATTR_TARGET,
+            Syntax::MARKER_TARGET,
             Syntax::WEB_TARGET_DEFAULT_WEB
         ));
         f.newline();
@@ -210,7 +210,7 @@ fn format_program_with_tokens(
             f.blank_line_between_items();
         }
         first = false;
-        f.write(&format!("#{}({})", Syntax::ATTR_TARGET, bucket.name()));
+        f.write(&format!("#{}({})", Syntax::MARKER_TARGET, bucket.name()));
         f.newline();
     }
     // D-HTMLPAIR1 (ratified 2026-07-01, c134): `#HTML("path.html")` — the
@@ -224,7 +224,7 @@ fn format_program_with_tokens(
             f.blank_line_between_items();
         }
         first = false;
-        f.write(&format!("#{}(\"{}\")", Syntax::ATTR_HTML, html_path));
+        f.write(&format!("#{}(\"{}\")", Syntax::MARKER_HTML, html_path));
         f.newline();
     }
     // D-POLICY-WORD1=A: `#Policy(no_alloc)` — fixed post-import
@@ -346,7 +346,7 @@ fn item_span_start(item: &Item, src: &str) -> usize {
         Item::Const(c) => {
             if c.is_persist {
                 src[..c.name_span.start]
-                    .rfind(&format!("#{}", Syntax::CONTRACT_PERSIST))
+                    .rfind(&format!("#{}", Syntax::MARKER_PERSIST))
                     .unwrap_or(c.name_span.start)
             } else if c.is_comptime {
                 // Prefer force markers, then the live `#Known` marker. Retired
@@ -355,7 +355,7 @@ fn item_span_start(item: &Item, src: &str) -> usize {
                 before
                     .rfind("#Static")
                     .or_else(|| before.rfind("#Inline"))
-                    .or_else(|| before.rfind(&format!("#{}", Syntax::ATTR_KNOWN)))
+                    .or_else(|| before.rfind(&format!("#{}", Syntax::MARKER_KNOWN)))
                     .or_else(|| before.rfind(Syntax::KW_COMPTIME))
                     .or_else(|| before.rfind(Syntax::KW_CONST))
                     .unwrap_or(c.name_span.start)
@@ -364,10 +364,10 @@ fn item_span_start(item: &Item, src: &str) -> usize {
             }
         }
         Item::Test(t) => src[..t.name_span.start]
-            .rfind(&format!("{}{}", Syntax::ATTR_PREFIX, Syntax::KW_TEST))
+            .rfind(&format!("{}{}", Syntax::MARKER_PREFIX, Syntax::KW_TEST))
             .unwrap_or(t.name_span.start),
         Item::Bench(b) => src[..b.name_span.start]
-            .rfind(&format!("{}{}", Syntax::ATTR_PREFIX, Syntax::KW_BENCH))
+            .rfind(&format!("{}{}", Syntax::MARKER_PREFIX, Syntax::KW_BENCH))
             .unwrap_or(b.name_span.start),
         Item::ExternRust(b) => src[..b.crate_span.start]
             .rfind(Syntax::KW_EXTERN)

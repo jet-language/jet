@@ -14,15 +14,15 @@ impl<'a> Parser<'a> {
             let decl_start = markers
                 .first()
                 .map_or(self.peek().span.start, |marker| marker.span.start);
-            let Some(ffi) = markers.iter().find(|marker| marker.name == Syntax::ATTR_FFI) else {
+            let Some(ffi) = markers.iter().find(|marker| marker.name == Syntax::MARKER_FFI) else {
                 return Err(crate::Policy::marker_argument_shape_error(
-                    Syntax::ATTR_FFI,
+                    Syntax::MARKER_FFI,
                     markers.first().map_or(self.peek().span, |marker| marker.span),
                 ));
             };
             let arguments = self.bound_registered_rule_arguments(ffi)?;
             let Some(crate::AST::Expr::Ident(lang, lang_span)) = arguments.parameter(0) else {
-                return Err(crate::Policy::marker_argument_shape_error(Syntax::ATTR_FFI, ffi.span));
+                return Err(crate::Policy::marker_argument_shape_error(Syntax::MARKER_FFI, ffi.span));
             };
             let lang = lang.clone();
             let lang_span = *lang_span;
@@ -178,9 +178,9 @@ impl<'a> Parser<'a> {
             let intro_is_c = match &self.peek2().kind {
                 TokKind::KwExtern => true,
                 TokKind::Ident(n) => {
-                    n == Syntax::ATTR_EXTERN_MODULE
-                        || n == Syntax::ATTR_BINDGEN
-                        || n == Syntax::ATTR_BINDGEN_RETIRED
+                    n == Syntax::MARKER_EXTERN_MODULE
+                        || n == Syntax::MARKER_BINDGEN
+                        || n == Syntax::MARKER_BINDGEN_RETIRED
                 }
                 _ => false,
             };
@@ -193,7 +193,7 @@ impl<'a> Parser<'a> {
             }
             let intro_is_c = match &self.peek2().kind {
                 TokKind::KwExtern => true,
-                TokKind::Ident(n) => n == Syntax::ATTR_BINDGEN_RETIRED,
+                TokKind::Ident(n) => n == Syntax::MARKER_BINDGEN_RETIRED,
                 _ => false,
             };
             intro_is_c && matches!(self.peek3().kind, TokKind::KwModule)
@@ -213,17 +213,17 @@ impl<'a> Parser<'a> {
                         .push(self.retired_c_module_marker_diag(&old, "#Extern", span));
                     CModuleKind::Extern
                 }
-                TokKind::Ident(n) if n == Syntax::ATTR_EXTERN_MODULE => {
+                TokKind::Ident(n) if n == Syntax::MARKER_EXTERN_MODULE => {
                     self.bump();
                     CModuleKind::Extern
                 }
-                TokKind::Ident(n) if n == Syntax::ATTR_BINDGEN => {
+                TokKind::Ident(n) if n == Syntax::MARKER_BINDGEN => {
                     self.bump();
                     CModuleKind::Bindgen
                 }
-                TokKind::Ident(n) if n == Syntax::ATTR_BINDGEN_RETIRED => {
+                TokKind::Ident(n) if n == Syntax::MARKER_BINDGEN_RETIRED => {
                     let span = Span::new(start.start, self.bump().span.end);
-                    let old = format!("#{}", Syntax::ATTR_BINDGEN_RETIRED);
+                    let old = format!("#{}", Syntax::MARKER_BINDGEN_RETIRED);
                     self.diags
                         .push(self.retired_c_module_marker_diag(&old, "#Bindgen", span));
                     CModuleKind::Bindgen
@@ -233,8 +233,8 @@ impl<'a> Parser<'a> {
                         "E0003",
                         format!(
                             "expected `{}` or `{}` after `@`, found {}",
-                            Syntax::ATTR_EXTERN_MODULE,
-                            Syntax::ATTR_BINDGEN,
+                            Syntax::MARKER_EXTERN_MODULE,
+                            Syntax::MARKER_BINDGEN,
                             describe(other)
                         ),
                         "a C FFI module begins with `#Extern module c.<lib>` or `#Bindgen module c.<lib>.__bindgen__`".to_string(),
@@ -257,9 +257,9 @@ impl<'a> Parser<'a> {
                         .push(self.retired_c_module_marker_diag(&old, "#Extern", span));
                     CModuleKind::Extern
                 }
-                TokKind::Ident(n) if n == Syntax::ATTR_BINDGEN_RETIRED => {
+                TokKind::Ident(n) if n == Syntax::MARKER_BINDGEN_RETIRED => {
                     let span = Span::new(start.start, self.bump().span.end);
-                    let old = format!("#{}", Syntax::ATTR_BINDGEN_RETIRED);
+                    let old = format!("#{}", Syntax::MARKER_BINDGEN_RETIRED);
                     self.diags
                         .push(self.retired_c_module_marker_diag(&old, "#Bindgen", span));
                     CModuleKind::Bindgen
@@ -343,11 +343,11 @@ impl<'a> Parser<'a> {
                     ),
                     format!(
                         "autogen lives in `{}.<lib>.{}`; users declare overlays as `#{} module {}.<lib>` only",
-                        Syntax::C_MODULE_ROOT, Syntax::C_BINDGEN_SEGMENT, Syntax::ATTR_EXTERN_MODULE, Syntax::C_MODULE_ROOT
+                        Syntax::C_MODULE_ROOT, Syntax::C_BINDGEN_SEGMENT, Syntax::MARKER_EXTERN_MODULE, Syntax::C_MODULE_ROOT
                     ),
                     format!(
                         "drop `{}` from your module path, or use `#{} module {}.{} {{ … }}`",
-                        Syntax::C_BINDGEN_SEGMENT, Syntax::ATTR_EXTERN_MODULE, Syntax::C_MODULE_ROOT, lib
+                        Syntax::C_BINDGEN_SEGMENT, Syntax::MARKER_EXTERN_MODULE, Syntax::C_MODULE_ROOT, lib
                     ),
                     Some(path_span),
                 ));

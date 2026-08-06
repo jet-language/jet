@@ -534,16 +534,16 @@ impl<'a> Parser<'a> {
                     | Syntax::KW_STATE
                     | Syntax::KW_TRANSITION
                     | Syntax::MARKER_PUB_FILE
-                    | Syntax::ATTR_UNIT_FAMILY
-                    | Syntax::ATTR_NUMERIC
-                    | Syntax::ATTR_LAYOUT
-                    | Syntax::ATTR_PUBLISHED_SCHEMA
-                    | Syntax::ATTR_SINGLE_USE
-                    | Syntax::ATTR_MUST_USE
-                    | Syntax::ATTR_EXTERN_MODULE
-                    | Syntax::ATTR_BINDGEN
-                    | Syntax::ATTR_TARGET
-                    | Syntax::ATTR_WASM_EXPORT
+                    | Syntax::MARKER_UNIT_FAMILY
+                    | Syntax::MARKER_NUMERIC
+                    | Syntax::MARKER_LAYOUT
+                    | Syntax::MARKER_PUBLISHED_SCHEMA
+                    | Syntax::MARKER_SINGLE_USE
+                    | Syntax::MARKER_MUST_USE
+                    | Syntax::MARKER_EXTERN_MODULE
+                    | Syntax::MARKER_BINDGEN
+                    | Syntax::MARKER_TARGET
+                    | Syntax::MARKER_WASM_EXPORT
             )
         }
     

@@ -7,9 +7,9 @@
 //!
 //! Agents: do NOT add an entry here without a decision ID approved by the
 //! owner in docs/spec/syntax-decisions.md.
-// Marker-plane reconciliation anchors: MARKER_PUB_FILE, MARKER_NO_PRELUDE, ATTR_TARGET,
-// ATTR_LAYOUT, ATTR_CODABLE, Policy::APPLIED_RULES, KW_CAPS, KW_GRANT,
-// KW_COMPTIME, KW_DERIVE, ATTR_TRACK, ATTR_LOCAL, ATTR_SHARED. Constants live in the private modules
+// Marker-plane reconciliation anchors: MARKER_PUB_FILE, MARKER_NO_PRELUDE, MARKER_TARGET,
+// MARKER_LAYOUT, MARKER_CODABLE, Policy::APPLIED_RULES, KW_CAPS, KW_GRANT,
+// KW_COMPTIME, KW_DERIVE, MARKER_TRACK, MARKER_LOCAL, MARKER_SHARED. Constants live in the private modules
 // below; keep this root file mentioning them so I7 audits can check one
 // canonical surface entrypoint.
 // D-GENERIC-CALL1=A: GENERIC_CALL_OPEN and GENERIC_CALL_CLOSE own the adjacent
@@ -32,10 +32,10 @@
 // Retires annotated `name: Type := uninit`. KW_UNINIT stays the same token.
 // D-SHAPE-CLI1 reuses the existing `fn run` / `#CLI` surface: a resolved
 // entry-parameter type owns typed shell inputs, while zero-parameter `fn run()`
-// stays valid. D-CLI-POS1=A adds field marker `Flag` (`CONTRACT_FLAG`): required
+// stays valid. D-CLI-POS1=A adds field marker `Flag` (`MARKER_FLAG`): required
 // value fields fill positionally by declaration order; `#[Flag]` keeps a field
-// flag-only. D-CLI-FIELD-MARKERS1=A adds `Short` (`CONTRACT_SHORT`) and `Env`
-// (`CONTRACT_ENV`) to that same field marker list. D-SHAPE6 adds no Jet source
+// flag-only. D-CLI-FIELD-MARKERS1=A adds `Short` (`MARKER_SHORT`) and `Env`
+// (`MARKER_ENV`) to that same field marker list. D-SHAPE6 adds no Jet source
 // token; grouped tool commands remain
 // owned by the single registry in crates/jet-cli/src/CLI.rs.
 // D-ECO-DECL1=A adds no spelling: ecosystem entries reuse ordinary named

@@ -2244,10 +2244,10 @@ pub(crate) fn check_func_body_bundle(
         (f.is_pure, crate::Syntax::KW_PURE, f.name_span),
         (f.is_sanitizer, crate::Syntax::KW_SANITIZER, f.name_span),
         (f.is_unsafe, crate::Syntax::KW_UNSAFE, f.unsafe_span.unwrap_or(f.name_span)),
-        (f.is_replayable, crate::Syntax::ATTR_REPLAYABLE, f.replayable_span.unwrap_or(f.name_span)),
-        (f.is_must_use, crate::Syntax::ATTR_MUST_USE, f.must_use_span.unwrap_or(f.name_span)),
-        (f.is_inline, crate::Syntax::CONTRACT_INLINE, f.inline_span.unwrap_or(f.name_span)),
-        (f.is_inline_always, crate::Syntax::CONTRACT_INLINE, f.inline_span.unwrap_or(f.name_span)),
+        (f.is_replayable, crate::Syntax::MARKER_REPLAYABLE, f.replayable_span.unwrap_or(f.name_span)),
+        (f.is_must_use, crate::Syntax::MARKER_MUST_USE, f.must_use_span.unwrap_or(f.name_span)),
+        (f.is_inline, crate::Syntax::MARKER_INLINE, f.inline_span.unwrap_or(f.name_span)),
+        (f.is_inline_always, crate::Syntax::MARKER_INLINE, f.inline_span.unwrap_or(f.name_span)),
         (f.is_reactive, crate::Syntax::KW_REACTIVE, f.name_span),
     ] {
         if active && !crate::Policy::rule_allows(name, crate::Policy::RuleSite::Function) {

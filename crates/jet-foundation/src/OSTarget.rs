@@ -83,14 +83,14 @@ pub fn os_target_mixed_axis(
         "E-OSTARGET-MIXED-AXIS",
         format!(
             "`#{}(OS.{})` can't combine with `#{}({})` on `{item}`",
-            Syntax::ATTR_TARGET,
+            Syntax::MARKER_TARGET,
             os.name(),
-            Syntax::ATTR_TARGET,
+            Syntax::MARKER_TARGET,
             web,
         ),
         "the OS axis (OS.Linux/OS.MacOS/OS.Windows, native platform gating) and the web axis (Wasm/JS/Web, D-WASM1's browser partition) are mutually exclusive — one item can't compile for both a specific native OS and a web bucket"
             .to_string(),
-        format!("pick one axis: remove the `#{}(OS.{})` marker or the web-axis marker", Syntax::ATTR_TARGET, os.name()),
+        format!("pick one axis: remove the `#{}(OS.{})` marker or the web-axis marker", Syntax::MARKER_TARGET, os.name()),
         span,
     )
 }
@@ -108,14 +108,14 @@ pub fn os_target_unmatched_call(
         "E-OSTARGET-UNMATCHED-CALL",
         format!(
             "`{caller}` uses `{gated_type}`, whose `impl` is gated to `#{}(OS.{})`, without itself being gated to match",
-            Syntax::ATTR_TARGET,
+            Syntax::MARKER_TARGET,
             os.name(),
         ),
         "an OS-gated impl only exists in the build for that OS; code reachable on other platforms would hit a missing method, so this is caught at compile time, not left to fail as a link (or a raw rustc) error"
             .to_string(),
         format!(
             "only use `{gated_type}` from inside an `impl` already gated to `#{}(OS.{})`, or move `{caller}`'s body into one",
-            Syntax::ATTR_TARGET,
+            Syntax::MARKER_TARGET,
             os.name(),
         ),
         span,
@@ -132,7 +132,7 @@ pub fn os_target_build_context(
         "E-OSTARGET-BUILD-CONTEXT",
         format!(
             "a `{} {} … == {{ … }}` dispatch branches on `{}.{}`",
-            format!("{}{}", Syntax::ATTR_PREFIX, Syntax::ATTR_KNOWN),
+            format!("{}{}", Syntax::MARKER_PREFIX, Syntax::MARKER_KNOWN),
             Syntax::KW_IF,
             Syntax::BUILD_INFO,
             Syntax::BUILD_INFO_OS,
@@ -144,7 +144,7 @@ pub fn os_target_build_context(
         ),
         format!(
             "write `{} {} {}.{} == {{ .{} -> … .{} -> … .{} -> … }}`, or use a plain runtime `{}` for a value that isn't known at compile time",
-            format!("{}{}", Syntax::ATTR_PREFIX, Syntax::ATTR_KNOWN),
+            format!("{}{}", Syntax::MARKER_PREFIX, Syntax::MARKER_KNOWN),
             Syntax::KW_IF,
             Syntax::BUILD_INFO,
             Syntax::BUILD_INFO_OS,
@@ -176,7 +176,7 @@ pub fn os_target_dispatch_arm(
         ),
         format!(
             "each arm gates code for exactly one native OS, so its head is a bare, payload-free OS variant — the same set `#{}(OS.*)` uses — and each OS appears at most once",
-            Syntax::ATTR_TARGET,
+            Syntax::MARKER_TARGET,
         ),
         format!(
             "write `.{} -> …`, `.{} -> …`, or `.{} -> …` (add an `else -> …` for a shared fallback)",

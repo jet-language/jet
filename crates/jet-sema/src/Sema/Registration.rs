@@ -287,7 +287,7 @@ impl<'a> Checker<'a> {
         }
         for mut marker in self.take_targeted_rule_facts(f.span) {
             let Some(arguments) = self.validate_rule_signature(&mut marker) else {
-                if marker.name == Syntax::ATTR_EVERY {
+                if marker.name == Syntax::MARKER_EVERY {
                     f.every = None;
                 }
                 continue;
@@ -299,8 +299,8 @@ impl<'a> Checker<'a> {
                         _ => f.unsafe_reason.take(),
                     };
                 }
-                Syntax::CONTRACT_PRE | Syntax::CONTRACT_POST => {
-                    let clauses = if marker.name == Syntax::CONTRACT_PRE {
+                Syntax::MARKER_PRE | Syntax::MARKER_POST => {
+                    let clauses = if marker.name == Syntax::MARKER_PRE {
                         &mut f.pre
                     } else {
                         &mut f.post
@@ -366,7 +366,7 @@ impl<'a> Checker<'a> {
             self.require_bool(&mut clause.cond, "a `#Pre` condition");
             self.in_pre_clause = false;
             if let Some(d) = check_pure_expr(&clause.cond, &f.name, self.funcs) {
-                self.diags.push(e0139(Syntax::CONTRACT_PRE, d.span));
+                self.diags.push(e0139(Syntax::MARKER_PRE, d.span));
             }
         }
         if !f.post.is_empty() {
@@ -396,7 +396,7 @@ impl<'a> Checker<'a> {
             for clause in &mut f.post {
                 self.require_bool(&mut clause.cond, "a `#Post` condition");
                 if let Some(d) = check_pure_expr(&clause.cond, &f.name, self.funcs) {
-                    self.diags.push(e0139(Syntax::CONTRACT_POST, d.span));
+                    self.diags.push(e0139(Syntax::MARKER_POST, d.span));
                 }
             }
             self.pop_scope();

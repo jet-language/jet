@@ -3136,7 +3136,7 @@ pub(crate) fn build_cx_items(
                 let param_names = s.type_params.iter().map(|p| p.name.as_str()).collect::<HashSet<_>>();
                 let mut wire = HashSet::new();
                 for field in s.fields.iter().filter(|f| f.computed.is_none()
-                    && !f.serde_markers.iter().any(|m| m.name == crate::Syntax::ATTR_SKIP)) {
+                    && !f.serde_markers.iter().any(|m| m.name == crate::Syntax::MARKER_SKIP)) {
                     for name in crate::Generics::free_type_params(&field.ty) {
                         if param_names.contains(name.as_str()) { wire.insert(name); }
                     }
@@ -3458,7 +3458,7 @@ pub(crate) fn build_cx_items(
                 }
                 if s.derives
                     .iter()
-                    .any(|(t, _)| t == Syntax::CONTRACT_PATCHABLE)
+                    .any(|(t, _)| t == Syntax::MARKER_PATCHABLE)
                 {
                     cx.patchable.insert(s.name.clone());
                     let patch = format!("{}.Patch", s.name);
