@@ -5,10 +5,9 @@
 pub const KW_TODO: &str = "Todo";
 
 /// S60's former `#Pure fn` marker, retained only so D-SHAPE8=A can reject it
-/// with E0066. Explicit purity is the empty effect arrow `=[]=>`; the same row
+/// with E0927. Explicit purity is the empty effect arrow `=[]=>`; the same row
 /// on a callback type (`f: fn(T) =[]=> U`) demands a pure callback, with E0747
-/// for an argument whose effects exceed it. Bare lowercase `pure`
-/// (FOREIGN_PURE) remains the older E0053 teaching form.
+/// for an argument whose effects exceed it.
 pub const KW_PURE: &str = "Pure";
 
 /// D-SHAPE8=A + D-EFFECT-OMIT1=A, amended by D-ARROW-CONTROL1=A on
@@ -265,10 +264,8 @@ pub const TXN_HANDLE_TYPE: &str = "Transaction";
 
 /// S14 / D-CASING1 follow-on (2026-06-21): retired lowercase spellings retained
 /// only for targeted diagnostics. `test` and `todo` teach their marker forms;
-/// both `pure` and the former `#Pure` marker are retired by D-SHAPE8=A, whose
-/// canonical explicit-purity spelling is `=[]=>`.
+/// the former `#Pure` marker is retired by D-SHAPE8=A (`=[]=>`).
 pub const FOREIGN_TEST: &str = "test";
-pub const FOREIGN_PURE: &str = "pure";
 pub const FOREIGN_TODO: &str = "todo";
 
 /// Bare lowercase `sanitizer` in fn-modifier position is retained only for

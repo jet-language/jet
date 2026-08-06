@@ -269,21 +269,9 @@ impl<'a> Parser<'a> {
                     ));
                 }
             }
-            if marker.name == Syntax::MARKER_RENAME
-                && !matches!(
-                    marker.args.as_slice(),
-                    [crate::AST::Expr::Str(parts, _)]
-                        if matches!(parts.as_slice(), [crate::AST::StrPart::Lit(_)])
-                )
-            {
-                return Err(Diagnostic::error(
-                    "E2407",
-                    "`#Rename(...)` needs a string literal".to_string(),
-                    "the wire key a `#Codable` field maps to is a constant string".to_string(),
-                    "pass one quoted string, such as `#Rename(\"wire_name\")`".to_string(),
-                    Some(marker.span),
-                ));
-            }
+            // `#Rename(name: String)` shares the String signature gate with
+            // `#Discriminant(field: String)` — Known string bindings and
+            // quoted literals both resolve in sema; wrong types are E0930.
             if rule.signature.marker_argument_bindings(marker).is_none() {
                 return Err(crate::Policy::marker_argument_shape_error(&marker.name, marker.span));
             }
@@ -1562,15 +1550,39 @@ impl<'a> Parser<'a> {
                         continue;
                     }
                 }
-                // D-EFF3 / D-MARKERMOVE2: a trait method may carry a `#Pure` prefix
-                // declaring the empty effect set as its upper bound.
-                let is_pure = if self.at_pure_fn() {
-                    self.bump_pure_marker();
-                    true
+                // D-VERDICT-1455-1 / #1492: trait-body markers share the callable
+                // registry path — retired `#Pure` is E0927 with the same fix text.
+                let markers = if matches!(self.peek().kind, TokKind::Hash) {
+                    self.parse_method_marker_sequence()?
                 } else {
-                    false
+                    Vec::new()
                 };
-                methods.push(self.trait_method_sig(is_pure)?);
+                while matches!(self.peek().kind, TokKind::Semi) {
+                    self.bump();
+                }
+                for marker in &markers {
+                    if let Some(crate::Policy::RuleStatus::Retired { replacement }) =
+                        crate::Policy::applied_rule(&marker.name).map(|rule| rule.status)
+                    {
+                        self.diags.push(Diagnostic::error(
+                            "E0927",
+                            format!("`#{}` is retired", marker.name),
+                            "the applied-rule registry owns retired spellings and replacements"
+                                .to_string(),
+                            format!("write `{replacement}`"),
+                            Some(marker.span),
+                        ));
+                        continue;
+                    }
+                    if crate::Policy::applied_rule(&marker.name).is_none() {
+                        return Err(crate::Policy::marker_unknown_error(
+                            &marker.name,
+                            &crate::Policy::active_rule_names(),
+                            marker.name_span,
+                        ));
+                    }
+                }
+                methods.push(self.trait_method_sig(false)?);
             }
             let item_end = self.bump().span.end;
             Ok(TraitDef {

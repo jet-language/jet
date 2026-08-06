@@ -337,12 +337,6 @@ impl<'a> Parser<'a> {
             }
         }
     
-        /// Parse a function whose purity is already known (the bare-`pure` teaching
-        /// path enters here after emitting E0053 and consuming the `pure` word).
-        pub(super) fn func_with_purity(&mut self, is_pure: bool) -> Result<Func, Diagnostic> {
-            self.func_with_modifiers(is_pure, false)
-        }
-    
         /// Parse a function whose `#Pure`/`#Sanitizer` modifiers are already known.
         pub(super) fn func_with_modifiers(
             &mut self,

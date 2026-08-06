@@ -1230,7 +1230,7 @@ impl<'a> Parser<'a> {
                     }
                 }
                 TokKind::Ident(name)
-                    if retired_s14_teaching_enabled()
+                    if false
                         && (name == Syntax::FOREIGN_CASE || name == Syntax::FOREIGN_DEFAULT) =>
                 {
                     let t = self.bump();

@@ -1,7 +1,6 @@
 use super::super::{
     Diagnostic, Item, Parser, Program, Span, Syntax, TokKind, describe, string_literal_value,
-    retired_s14_teaching_enabled,
-};
+    };
 use super::TargetMarker;
 use super::helpers::format_version_segment;
 
@@ -805,16 +804,6 @@ impl<'a> Parser<'a> {
                             self.func().map(Item::Func)
                         }
                     }
-                    // D-S14-PAUSE: bare lowercase `pure` teaching is paused.
-                    TokKind::Ident(n)
-                        if retired_s14_teaching_enabled()
-                            && n == Syntax::FOREIGN_PURE
-                            && self.foreign_pure_follows() =>
-                    {
-                        let t = self.bump();
-                        self.diags.push(self.foreign_pure_diag(t.span));
-                        self.func_with_purity(true).map(Item::Func)
-                    }
                     // D-TAINT-SAN: bare lowercase `sanitizer fn` is the retired
                     // spelling of the taint-strip modifier (E0059). Point at
                     // `#Sanitizer`, then parse as if `#Sanitizer fn`.
@@ -1033,7 +1022,7 @@ impl<'a> Parser<'a> {
                     }
                     // D-S14-PAUSE: bare lowercase `test "name" { … }` teaching is paused.
                     TokKind::Ident(n)
-                        if retired_s14_teaching_enabled()
+                        if false
                             && n == Syntax::FOREIGN_TEST
                             && self.foreign_test_follows() =>
                     {
@@ -1208,7 +1197,7 @@ impl<'a> Parser<'a> {
                             .map(Item::Distinct)
                     }
                     TokKind::Ident(name)
-                        if retired_s14_teaching_enabled() && name == Syntax::FOREIGN_CLASS =>
+                        if false && name == Syntax::FOREIGN_CLASS =>
                     {
                         let t = self.bump();
                         self.diags.push(Diagnostic::error(
@@ -1232,7 +1221,7 @@ impl<'a> Parser<'a> {
                         self.struct_def(false).map(Item::Struct)
                     }
                     TokKind::Ident(name)
-                        if retired_s14_teaching_enabled() && name == Syntax::FOREIGN_INTERFACE =>
+                        if false && name == Syntax::FOREIGN_INTERFACE =>
                     {
                         let t = self.bump();
                         self.diags.push(Diagnostic::error(
@@ -1272,7 +1261,7 @@ impl<'a> Parser<'a> {
                         continue;
                     }
                     TokKind::Ident(name)
-                        if retired_s14_teaching_enabled()
+                        if false
                             && (name == Syntax::FOREIGN_DEF || name == Syntax::FOREIGN_FUNC) =>
                     {
                         // D-S14-PAUSE: def/func teaching is paused.
@@ -1301,7 +1290,7 @@ impl<'a> Parser<'a> {
                         .map(Item::Func)
                     }
                     TokKind::Ident(name)
-                        if retired_s14_teaching_enabled() && name == Syntax::FOREIGN_IMPORT =>
+                        if false && name == Syntax::FOREIGN_IMPORT =>
                     {
                         let t = self.bump();
                         self.diags.push(Diagnostic::error(

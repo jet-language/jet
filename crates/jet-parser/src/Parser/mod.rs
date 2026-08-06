@@ -185,9 +185,6 @@ fn is_teaching_parse_diag(code: &str) -> bool {
     )
 }
 
-fn retired_s14_teaching_enabled() -> bool {
-    false
-}
 
 /// Hard cap on recursive parser nesting (parentheses, unary chains,
 /// literals-with-expressions, generic types). Recursive descent here — and
@@ -877,9 +874,9 @@ mod s61_tests {
     #[test]
     fn grouped_retired_function_markers_keep_known_teaching() {
         for (src, code) in [
-            ("#[Pure, Job]\nfn work() {}\n", "E0066"),
+            ("#[Pure, Job]\nfn work() {}\n", "E0927"),
             ("#[InlineAlways, Job]\nfn work() {}\n", "E0927"),
-            ("#[Pure(), Job]\nfn work() {}\n", "E0066"),
+            ("#[Pure(), Job]\nfn work() {}\n", "E0927"),
             ("#[InlineAlways(), Job]\nfn work() {}\n", "E0927"),
         ] {
             let (tokens, lex_diagnostics) = lex(src);

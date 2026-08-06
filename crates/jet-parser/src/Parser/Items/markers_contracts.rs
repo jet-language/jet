@@ -2,18 +2,6 @@ use super::super::{Diagnostic, Func, Parser, Span, Syntax, TokKind};
 use super::TargetMarker;
 
 impl<'a> Parser<'a> {
-
-        /// S60 (D-CASING1 follow-on) / D-MARKERMOVE1/2: consume a `#Pure` /
-        /// prefix already confirmed present by `at_pure_fn`.
-        pub(super) fn bump_pure_marker(&mut self) {
-            let span = self.bump().span; // `@`
-            self.bump(); // `Pure`
-            self.diags.push(Self::retired_effect_syntax(span));
-        }
-    
-
-    
-    
         pub(in crate::Parser) fn func(&mut self) -> Result<Func, Diagnostic> {
             while matches!(self.peek().kind, TokKind::Semi) {
                 self.bump();

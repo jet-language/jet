@@ -1,6 +1,5 @@
 use super::super::{
     ConstAttr, ConstDef, Diagnostic, Field, Func, Parser, Span, Syntax, TokKind, TraitMethodSig,
-    retired_s14_teaching_enabled,
 };
 
 impl<'a> Parser<'a> {
@@ -64,16 +63,6 @@ impl<'a> Parser<'a> {
     
         /// S27: method inside a type body or `impl` block.
         pub(super) fn method_in_type(&mut self) -> Result<Func, Diagnostic> {
-            let is_pure = if retired_s14_teaching_enabled()
-                && matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::FOREIGN_PURE)
-                && self.foreign_pure_follows()
-            {
-                let t = self.bump();
-                self.diags.push(self.foreign_pure_diag(t.span));
-                true
-            } else {
-                false
-            };
             let markers = if matches!(self.peek().kind, TokKind::Hash) {
                 self.parse_method_marker_sequence()?
             } else {
@@ -90,7 +79,7 @@ impl<'a> Parser<'a> {
                 false,
                 None,
                 None,
-                is_pure,
+                false,
                 false,
                 None,
                 None,

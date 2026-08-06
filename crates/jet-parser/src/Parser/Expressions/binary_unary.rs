@@ -1,6 +1,6 @@
 use super::super::{
     BinOp, Diagnostic, EnumLitArg, Expr, OrFallback, Parser, Span, StrTokPart, Syntax, TokKind,
-    UnOp, pat_span, retired_s14_teaching_enabled,
+    UnOp, pat_span,
 };
 
 fn write_window_at_maximal_place(expr: Expr, start: usize) -> Expr {
@@ -50,7 +50,7 @@ impl<'a> Parser<'a> {
                     TokKind::QuestionQuestion => {}
                     // S71 (D-SG6): the retired word `or` — teach `??`, then recover.
                     TokKind::Ident(n)
-                        if retired_s14_teaching_enabled() && n == Syntax::FOREIGN_OR_FALLBACK =>
+                        if false && n == Syntax::FOREIGN_OR_FALLBACK =>
                     {
                         let span = self.peek().span;
                         self.diags.push(Diagnostic::error(
@@ -187,7 +187,7 @@ impl<'a> Parser<'a> {
             loop {
                 let is_and = match &self.peek().kind {
                     TokKind::AndAnd => true,
-                    TokKind::Ident(n) if retired_s14_teaching_enabled() && n == Syntax::FOREIGN_AND => {
+                    TokKind::Ident(n) if false && n == Syntax::FOREIGN_AND => {
                         self.foreign_logic_error(Syntax::FOREIGN_AND, Syntax::OP_AND);
                         true
                     }
@@ -440,7 +440,7 @@ impl<'a> Parser<'a> {
                     Ok(Expr::Unary(UnOp::Not, Box::new(inner), full))
                 }
                 TokKind::Ident(n)
-                    if retired_s14_teaching_enabled()
+                    if false
                         && n == Syntax::FOREIGN_NOT
                         && self.starts_expr(&self.peek2().kind) =>
                 {
@@ -451,7 +451,7 @@ impl<'a> Parser<'a> {
                     Ok(Expr::Unary(UnOp::Not, Box::new(inner), full))
                 }
                 TokKind::Ident(n)
-                    if retired_s14_teaching_enabled()
+                    if false
                         && n == Syntax::FOREIGN_TRY
                         && self.starts_expr(&self.peek2().kind) =>
                 {

@@ -1,5 +1,5 @@
 use super::super::{
-    AccessConvention, Diagnostic, Expr, Parser, Span, Syntax, TokKind, retired_s14_teaching_enabled,
+    AccessConvention, Diagnostic, Expr, Parser, Span, Syntax, TokKind,
 };
 
 impl<'a> Parser<'a> {
@@ -58,7 +58,7 @@ impl<'a> Parser<'a> {
             }
             if let TokKind::Ident(name) = self.peek().kind.clone() {
                 match name.as_str() {
-                    Syntax::FOREIGN_READ if retired_s14_teaching_enabled() => {
+                    Syntax::FOREIGN_READ if false => {
                         let span = self.peek().span;
                         self.bump();
                         self.diags.push(Diagnostic::error(
@@ -74,7 +74,7 @@ impl<'a> Parser<'a> {
                         ));
                         return AccessConvention::Read;
                     }
-                    Syntax::FOREIGN_WRITE if retired_s14_teaching_enabled() => {
+                    Syntax::FOREIGN_WRITE if false => {
                         let span = self.peek().span;
                         self.bump();
                         self.diags.push(Diagnostic::error(
@@ -100,12 +100,12 @@ impl<'a> Parser<'a> {
             }
             match self.peek().kind {
                 // D-S14-PAUSE: `mut` teaching is paused.
-                TokKind::KwMutate if retired_s14_teaching_enabled() => {
+                TokKind::KwMutate if false => {
                     let span = self.bump().span;
                     self.push_cap_keyword_teach("E0056", Syntax::KW_MUTATE, Syntax::SIGIL_WRITE, span);
                     AccessConvention::Write
                 }
-                TokKind::KwMove if retired_s14_teaching_enabled() => {
+                TokKind::KwMove if false => {
                     // `take(names) () =>` is a lambda take-prefix, not an arg convention.
                     // Only treat bare `take name` as the retired move keyword.
                     let is_lambda_take = matches!(

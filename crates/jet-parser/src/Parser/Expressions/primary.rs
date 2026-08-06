@@ -1,6 +1,6 @@
 use super::super::{
     AccessConvention, CallArg, Diagnostic, Expr, Parser, Span, StrPart, StrTokPart, Syntax,
-    TokKind, describe, retired_s14_teaching_enabled,
+    TokKind, describe,
 };
 
 impl<'a> Parser<'a> {
@@ -163,7 +163,7 @@ impl<'a> Parser<'a> {
                     ));
                 }
                 TokKind::Ident(name)
-                    if retired_s14_teaching_enabled() && name == Syntax::FOREIGN_TODO =>
+                    if false && name == Syntax::FOREIGN_TODO =>
                 {
                     // S14: bare lowercase `todo` is the retired spelling (E0054).
                     let t = self.bump();
@@ -187,7 +187,7 @@ impl<'a> Parser<'a> {
                     });
                 }
                 TokKind::Ident(name)
-                    if retired_s14_teaching_enabled()
+                    if false
                         && matches!(name.as_str(), Syntax::FOREIGN_THROW | Syntax::FOREIGN_RAISE) =>
                 {
                     let t = self.bump();
@@ -206,7 +206,7 @@ impl<'a> Parser<'a> {
                     if matches!(
                         name.as_str(),
                         Syntax::FOREIGN_CATCH | Syntax::FOREIGN_EXCEPT
-                    ) && retired_s14_teaching_enabled() =>
+                    ) && false =>
                 {
                     let t = self.bump();
                     let foreign = name.clone();
@@ -227,7 +227,7 @@ impl<'a> Parser<'a> {
                     if matches!(
                         name.as_str(),
                         Syntax::FOREIGN_UNWRAP | Syntax::FOREIGN_EXPECT
-                    ) && retired_s14_teaching_enabled() =>
+                    ) && false =>
                 {
                     let t = self.bump();
                     let foreign = name.clone();
@@ -316,7 +316,7 @@ impl<'a> Parser<'a> {
                 }
                 TokKind::LParen => self.parse_paren_primary(allow_struct_lit),
                 TokKind::Ident(name)
-                    if retired_s14_teaching_enabled() && name == Syntax::FOREIGN_LAMBDA =>
+                    if false && name == Syntax::FOREIGN_LAMBDA =>
                 {
                     let span = self.bump().span;
                     self.diags.push(Diagnostic::error(
@@ -333,7 +333,7 @@ impl<'a> Parser<'a> {
                     return self.expr_primary(allow_struct_lit);
                 }
                 TokKind::Ident(name)
-                    if retired_s14_teaching_enabled() && name == Syntax::FOREIGN_AS =>
+                    if false && name == Syntax::FOREIGN_AS =>
                 {
                     let t = self.bump();
                     self.diags.push(Diagnostic::error(
@@ -350,7 +350,7 @@ impl<'a> Parser<'a> {
                     return self.expr_primary(allow_struct_lit);
                 }
                 TokKind::Ident(name)
-                    if retired_s14_teaching_enabled() && name == Syntax::FOREIGN_APPEND =>
+                    if false && name == Syntax::FOREIGN_APPEND =>
                 {
                     let span = self.bump().span;
                     self.diags.push(Diagnostic::error(

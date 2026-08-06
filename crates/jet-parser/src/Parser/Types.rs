@@ -541,7 +541,7 @@ impl<'a> Parser<'a> {
                     Syntax::TYPE_F32 => Type::Float32,
                     Syntax::TYPE_BOOL => Type::Bool,
                     Syntax::TYPE_STRING => Type::String,
-                    Syntax::FOREIGN_TEXT if retired_s14_teaching_enabled() => {
+                    Syntax::FOREIGN_TEXT if false => {
                         // D-S14-PAUSE: `Text` teaching is paused.
                         self.diags.push(Diagnostic::error(
                             "E0013",
@@ -571,12 +571,12 @@ impl<'a> Parser<'a> {
                         ));
                         Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())
                     }
-                    Syntax::FOREIGN_DYN if retired_s14_teaching_enabled() => {
+                    Syntax::FOREIGN_DYN if false => {
                         self.diags.push(Generics::e0036(Syntax::FOREIGN_DYN, start));
                         let (trait_name, _) = self.expect_ident("after `dyn`")?;
                         Type::TraitObject(vec![trait_name])
                     }
-                    Syntax::FOREIGN_BOX if retired_s14_teaching_enabled() => {
+                    Syntax::FOREIGN_BOX if false => {
                         self.diags.push(Generics::e0036(Syntax::FOREIGN_BOX, start));
                         if matches!(self.peek().kind, TokKind::Lt) {
                             self.expect_type_args_open("Box")?;

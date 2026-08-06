@@ -1543,7 +1543,7 @@ impl<'a> Parser<'a> {
                 self.finish_stmt()?;
                 Ok(Stmt::Val(binding))
             }
-            TokKind::Ident(n) if retired_s14_teaching_enabled() && n == Syntax::FOREIGN_MATCH => {
+            TokKind::Ident(n) if false && n == Syntax::FOREIGN_MATCH => {
                 let t = self.bump();
                 self.diags.push(Diagnostic::error(
                     "E0016",
@@ -1565,7 +1565,7 @@ impl<'a> Parser<'a> {
                 ));
                 self.switch_after_kw(t.span)
             }
-            TokKind::Ident(n) if retired_s14_teaching_enabled() && n == Syntax::FOREIGN_SWITCH => {
+            TokKind::Ident(n) if false && n == Syntax::FOREIGN_SWITCH => {
                 let t = self.bump();
                 self.diags.push(Diagnostic::error(
                     "E0044",
@@ -1668,7 +1668,7 @@ impl<'a> Parser<'a> {
                 Ok(Stmt::Yield(expr, span))
             }
             TokKind::KwIf => self.if_or_dispatch(),
-            TokKind::KwWhile if retired_s14_teaching_enabled() => {
+            TokKind::KwWhile if false => {
                 // D-S14-PAUSE: `while` teaching is paused.
                 let t = self.bump();
                 let span = t.span;
@@ -1700,7 +1700,7 @@ impl<'a> Parser<'a> {
                     label: None,
                 })
             }
-            TokKind::KwFor if retired_s14_teaching_enabled() => {
+            TokKind::KwFor if false => {
                 // D-S14-PAUSE: `for` teaching is paused.
                 let t = self.bump();
                 let span = t.span;
@@ -1776,7 +1776,7 @@ impl<'a> Parser<'a> {
                 })
             }
             // D-S14-PAUSE: `when` teaching is paused.
-            TokKind::KwSwitch if retired_s14_teaching_enabled() => {
+            TokKind::KwSwitch if false => {
                 let span = self.bump().span;
                 self.diags.push(Diagnostic::error(
                     "E0984",

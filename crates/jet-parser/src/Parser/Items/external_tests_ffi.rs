@@ -198,18 +198,6 @@ impl<'a> Parser<'a> {
                 Some(span),
             )
         }
-    
-        /// S60 (D-CASING1 follow-on) / D-MARKERMOVE1/2: true when the cursor is at
-        /// `#Pure fn`/`#Pure pub` — or the retired `#Pure` spelling, so `func()`
-        /// can consume it and teach E0062 instead of falling through elsewhere.
-        pub(in crate::Parser) fn at_pure_fn(&self) -> bool {
-            matches!(self.peek().kind, TokKind::Hash)
-                && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_PURE)
-                && matches!(self.peek3().kind, TokKind::KwFn | TokKind::KwPub)
-        }
-    
-    
-
 
         /// D-TASK-META1=A: decode optional static fields on the existing task
         /// marker. Task execution remains an ordinary function call.
@@ -232,11 +220,13 @@ impl<'a> Parser<'a> {
                     Some("Local") => crate::AST::TaskCachePolicy::Local,
                     Some("Shared") => crate::AST::TaskCachePolicy::Shared,
                     Some("Uncached") | Some("Off") => crate::AST::TaskCachePolicy::Uncached,
-                    _ => return Err(Self::task_metadata_error(
-                        "cache",
-                        ".Uncached, .Local, or .Shared",
-                        cache.span(),
-                    )),
+                    _ => {
+                        return Err(Self::task_metadata_error(
+                            "cache",
+                            ".Uncached, .Local, or .Shared",
+                            cache.span(),
+                        ))
+                    }
                 };
             }
             metadata.authority =
@@ -435,12 +425,7 @@ impl<'a> Parser<'a> {
     
     
     
-        /// S14: bare lowercase `pure` introduces a function only when `fn`/`pub`
-        /// follows (so an ordinary identifier named `pure` is unaffected).
-        pub(super) fn foreign_pure_follows(&self) -> bool {
-            matches!(self.peek2().kind, TokKind::KwFn | TokKind::KwPub)
-        }
-    
+
         /// D-TAINT-SAN: bare lowercase `sanitizer` is the retired spelling of the
         /// taint-strip modifier, recognized only when `fn`/`pub` follows (so an
         /// ordinary identifier named `sanitizer` elsewhere is unaffected). The
@@ -458,23 +443,6 @@ impl<'a> Parser<'a> {
                 ),
                 "`#Scrub(Tag)` names the exact fact removed by the function".to_string(),
                 format!("write: #{}(Tag) fn name() {{ ... }}", Syntax::KW_SCRUB),
-                Some(span),
-            )
-        }
-    
-        pub(super) fn foreign_pure_diag(&self, span: Span) -> Diagnostic {
-            Diagnostic::error(
-                "E0053",
-                format!(
-                    "the purity modifier is written `#{}`, not bare `{}`",
-                    Syntax::KW_PURE,
-                    Syntax::FOREIGN_PURE
-                ),
-                format!(
-                    "`#{}` is a marker, like every other `#`-tag, so the purity contract draws the eye",
-                    Syntax::KW_PURE
-                ),
-                format!("write: #{} fn name() {{ ... }}", Syntax::KW_PURE),
                 Some(span),
             )
         }
