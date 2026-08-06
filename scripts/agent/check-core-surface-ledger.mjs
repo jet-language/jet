@@ -954,8 +954,8 @@ function buildLedger() {
 // ---------------------------------------------------------------------------
 // Validation. Truthfulness is gated; coverage is printed.
 
-function validateSurfaces(ledger) {
-  const surfaces = loadSurfaces();
+function validateSurfaces(ledger, surfaces) {
+  surfaces = surfaces || loadSurfaces();
   const containers = canonicalContainers(surfaces);
   if (Object.keys(surfaces).length < 11) {
     throw new Error("the owner named eleven languages; only " +
@@ -985,8 +985,8 @@ function validateSurfaces(ledger) {
   }
 }
 
-function validateRows(ledger) {
-  const surfaces = loadSurfaces();
+function validateRows(ledger, surfaces) {
+  surfaces = surfaces || loadSurfaces();
   const ids = new Set();
   const sourceKeys = new Set();
   const verdicts = new Set(["equal", "jet_wins", "jet_loses", "not_compared", "declined"]);
@@ -1021,8 +1021,8 @@ function validateRows(ledger) {
 
 // A cluster may say it has no card. It may not name one that is closed or
 // absent, which is how a gap silently reads as owned after its card is done.
-function validateOwners(ledger) {
-  const board = towerBoard();
+function validateOwners(ledger, board) {
+  board = board === undefined ? towerBoard() : board;
   const cards = towerCards(board);
   for (const cluster of ledger.lossClusters) {
     if (cluster.ownerState === "live") {
@@ -1234,11 +1234,187 @@ function check() {
     " clusters-needing-a-card=" + stored.summary.clustersNeedingCard + "\n");
 }
 
+// ---------------------------------------------------------------------------
+// Hostile fixtures.
+//
+// A checker that only ever sees a correct ledger proves nothing: it would pass
+// just as happily with every gate deleted. Each fixture below takes the real
+// ledger, breaks exactly one thing, and requires the matching gate to reject
+// it. A gate that stops firing fails here rather than going quiet in CI.
+
+function clone(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function rejects(name, run) {
+  let failed = null;
+  try {
+    run();
+  } catch (error) {
+    failed = error.message;
+  }
+  if (!failed) throw new Error("fixture was accepted but must be rejected: " + name);
+  return name + " -> " + failed.split("\n")[0];
+}
+
+function hostileFixtures() {
+  const ledger = loadJson(LEDGER_PATH);
+  const surfaces = loadSurfaces();
+  const board = towerBoard();
+  const results = [];
+
+  const jetRow = ledger.rows.find(function (row) { return row.verdict === "equal"; });
+  const lossRow = ledger.rows.find(function (row) { return row.verdict === "jet_loses"; });
+  if (!jetRow || !lossRow) throw new Error("the ledger has no row to build fixtures from");
+
+  results.push(rejects("duplicate row id", function () {
+    const broken = clone(ledger);
+    broken.rows.push(clone(broken.rows[0]));
+    validateRows(broken, surfaces);
+  }));
+
+  results.push(rejects("fabricated competitor member", function () {
+    const broken = clone(ledger);
+    const row = broken.rows.find(function (item) { return item.id === jetRow.id; });
+    const language = Object.keys(row.competitors).find(function (key) {
+      return row.competitors[key].status === "has";
+    });
+    row.competitors[language] = { status: "has", operation: "jet_ledger_operation_that_does_not_exist" };
+    validateRows(broken, surfaces);
+  }));
+
+  results.push(rejects("equal verdict with no competitor operation", function () {
+    const broken = clone(ledger);
+    const row = broken.rows.find(function (item) { return item.id === jetRow.id; });
+    for (const key of Object.keys(row.competitors)) {
+      row.competitors[key] = { status: "lacks", operation: null };
+    }
+    validateRows(broken, surfaces);
+  }));
+
+  results.push(rejects("unmapped shipped method", function () {
+    const broken = clone(ledger);
+    const row = broken.rows.find(function (item) { return item.id === jetRow.id; });
+    row.jetSpelling = null;
+    validateRows(broken, surfaces);
+  }));
+
+  results.push(rejects("invalid verdict", function () {
+    const broken = clone(ledger);
+    broken.rows.find(function (item) { return item.id === jetRow.id; }).verdict = "probably_fine";
+    validateRows(broken, surfaces);
+  }));
+
+  results.push(rejects("hidden exclusion: a language skips a container", function () {
+    const broken = clone(surfaces);
+    delete broken.Rust.surface.containers[ledger.canonicalContainers[0]];
+    validateSurfaces(ledger, broken);
+  }));
+
+  results.push(rejects("hidden exclusion: absent container with no reason", function () {
+    const broken = clone(surfaces);
+    const name = Object.keys(broken.Rust.surface.containers).find(function (key) {
+      return !broken.Rust.surface.containers[key].present;
+    });
+    delete broken.Rust.surface.containers[name].reason;
+    validateSurfaces(ledger, broken);
+  }));
+
+  results.push(rejects("a language is dropped from the comparison", function () {
+    const broken = clone(surfaces);
+    delete broken.Julia;
+    validateSurfaces(ledger, broken);
+  }));
+
+  results.push(rejects("surface without recorded provenance", function () {
+    const broken = clone(surfaces);
+    delete broken.Go.surface.scopeRule;
+    validateSurfaces(ledger, broken);
+  }));
+
+  results.push(rejects("stale owner: cluster claims a closed card", function () {
+    const broken = clone(ledger);
+    const cluster = broken.lossClusters.find(function (item) { return item.ownerState === "closed"; });
+    if (!cluster) throw new Error("no closed cluster to break");
+    cluster.ownerState = "live";
+    validateOwners(broken, board);
+  }));
+
+  results.push(rejects("stale owner: cluster claims a card that is not on the board", function () {
+    const broken = clone(ledger);
+    broken.lossClusters[0].ownerState = "live";
+    broken.lossClusters[0].priorCard = 999999;
+    validateOwners(broken, board);
+  }));
+
+  results.push(rejects("cluster both names a card and claims to need one", function () {
+    const broken = clone(ledger);
+    const cluster = broken.lossClusters.find(function (item) { return item.ownerState === "needs_card"; });
+    cluster.priorCard = 1404;
+    validateOwners(broken, board);
+  }));
+
+  // The board holds no unratified decision today, so the fixture injects one.
+  // Reading the live board here would make the fixture pass by finding nothing
+  // rather than by the gate firing.
+  results.push(rejects("unratified scope exclusion", function () {
+    const broken = clone(ledger);
+    const openBoard = clone(board);
+    openBoard.decisions.push({ id: "D-LEDGER-FIXTURE-1", status: "open" });
+    const row = broken.rows.find(function (item) { return item.id === lossRow.id; });
+    row.verdict = "declined";
+    row.declinedBy = "D-LEDGER-FIXTURE-1";
+    validateOwners(broken, openBoard);
+  }));
+
+  results.push(rejects("decline naming a decision the board does not have", function () {
+    const broken = clone(ledger);
+    const row = broken.rows.find(function (item) { return item.id === lossRow.id; });
+    row.verdict = "declined";
+    row.declinedBy = "D-LEDGER-NO-SUCH-DECISION";
+    validateOwners(broken, board);
+  }));
+
+  results.push(rejects("decline with no decision id", function () {
+    const broken = clone(ledger);
+    broken.rows.find(function (item) { return item.id === lossRow.id; }).verdict = "declined";
+    validateOwners(broken, board);
+  }));
+
+  results.push(rejects("hidden uncompared Core domain", function () {
+    const broken = clone(ledger);
+    broken.uncomparedDomains = broken.uncomparedDomains.slice(1);
+    validateCoverage(broken);
+  }));
+
+  results.push(rejects("source-surface drift", function () {
+    const broken = clone(ledger);
+    broken.sourceFiles[0].sha256 = "0".repeat(64);
+    compareLedger(broken, buildLedger());
+  }));
+
+  results.push(rejects("a shipped method is dropped from the ledger", function () {
+    const broken = clone(ledger);
+    broken.rows = broken.rows.filter(function (item) { return item.id !== jetRow.id; });
+    compareLedger(broken, buildLedger());
+  }));
+
+  results.push(rejects("a competitor member is dropped from the ledger", function () {
+    const broken = clone(ledger);
+    broken.rows = broken.rows.filter(function (item) { return item.id !== lossRow.id; });
+    compareLedger(broken, buildLedger());
+  }));
+
+  for (const line of results) process.stdout.write("rejected: " + line + "\n");
+  process.stdout.write("core surface ledger: " + results.length + " hostile fixtures all rejected\n");
+}
+
 const args = process.argv.slice(2);
 try {
   if (args.includes("--refresh")) refresh();
   else if (args.includes("--check")) check();
-  else throw new Error("usage: check-core-surface-ledger.mjs --refresh|--check");
+  else if (args.includes("--hostile-fixtures")) hostileFixtures();
+  else throw new Error("usage: check-core-surface-ledger.mjs --refresh|--check|--hostile-fixtures");
 } catch (error) {
   process.stderr.write(error.message + "\n");
   process.exitCode = 1;
