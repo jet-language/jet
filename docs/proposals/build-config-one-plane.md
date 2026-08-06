@@ -43,14 +43,15 @@ nameable, reflectable. The metaprogramming slate (D-META-REG1) asks for one
 registration table behind markers, planes, rights, and build facts. This
 proposal is that table's build column.
 
-Ten ballots: adopt the model (one plane, one parser); pick the manifest
+Eleven ballots: adopt the model (one plane, one parser); pick the manifest
 vocabulary (naming menu); read facts as `$build.*`; typed settings replace
 the `features:`/`env:` string tables; one contribution law across the full
 scope ladder (item → block → function → module → file → package → layers);
 the facts-in-text/actions-in-function boundary; build entry discovery (where
 `fn build` lives, how many, how the CLI finds one); settings and module
-value parameters as one substrate; provenance stamps; one meaning for
-"profile".
+value parameters as one substrate; generic modules spelled like functions
+(types in `<>`, values in parens, `::` binds); provenance stamps; one
+meaning for "profile".
 
 What does not change: S26 stands — facts are values, never types. No macros
 (D-METAMUTATE1). Secrets stay off the plane (E1265). Runtime data stays
