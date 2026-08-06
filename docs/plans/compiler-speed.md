@@ -37,8 +37,31 @@ LLVM optimizes). Interim levers, all invariant-clean:
   programs.
 
 D-BUILD-DEFAULT1=B settles everyday defaults: `jet run` and `jet dev` use the
-fast profile; `jet build` remains optimized. The remaining open ballot on card
-#666, D-AOT-CRANELIFT1, decides the AOT mechanism under the two-lens law.
+fast profile; `jet build` remains optimized. D-AOT-CRANELIFT1 is ratified on
+card #666 under the two-lens law.
+
+## Anti-goals from Xcode / Swift (Theo, 2026-08-05)
+
+Source: https://youtu.be/zqOrriq20Tc (~30:50–42:00). Crosswalk card **#1498**.
+Owner gates: **D-INCR-UNIT1**, **D-TYPECHECK-BOUND1**. Do not fork this plan.
+
+Jet must not recreate these failure modes:
+
+1. **Incremental worse than clean / no-change multi-minute work.** Unchanged and
+   representative-edit runs belong in the #1023 corpus. Unexplained incremental
+   slowdowns are bugs, not folklore.
+2. **World rebuilds for a local edit.** Batch dirty sets use module interface
+   fingerprints and dependents only (#1026), with sealed package objects for
+   link restore (D-LIB-REUSE1=B, #1422). Text sources only — no opaque IDE
+   project databases.
+3. **Type checker “gave up” with a useless wide span.** Users must not reshape
+   working code to soothe the compiler. Bound + pinpoint diagnostics are the
+   product shape under D-TYPECHECK-BOUND1 (pending). No guessed types (I3).
+4. **Tool debugging before code debugging.** Cache purge / clean / reopen that
+   “fixes” errors is a compiler bug. Diagnostics stay stable and explainable
+   (I2/I4).
+5. **Dev profile ≠ ship profile by accident.** Cache identity keeps
+   profile/target/backend; #666 differentials catch archive-vs-run style drift.
 
 ## Self-hosted era: why Jet's compiler won't be slow like rustc
 
@@ -85,9 +108,11 @@ better incrementality, not from skipping optimization the owner asked for.
 
 ## Board
 
-Card #666 (interim + instrumentation + ballots). Epoch e9 (Bootstrapping)
-cards carry the self-hosted architecture bets; the e9 readiness wave folds
-this plan's self-hosted section into its cards.
+Card #666 (interim + instrumentation + closeout). Cards #1023–#1028 are the
+split delivery slices. #669 owns self-host architecture evidence. #1498 owns
+Theo/Xcode anti-goal crosswalk and the D-INCR-UNIT1 / D-TYPECHECK-BOUND1
+ballots. Frozen #676 stays scoped to its own video source. Epoch bootstrapping
+cards carry the self-hosted architecture bets.
 
 ## Script-speed warm reuse (#741)
 
