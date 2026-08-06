@@ -763,7 +763,7 @@ impl<'a> Parser<'a> {
         }
         // Required `#Unsafe`.
         if !(matches!(self.peek().kind, TokKind::Hash)
-            && matches!(self.peek2().kind, TokKind::KwUnsafe))
+            && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_UNSAFE))
         {
             return Err(Diagnostic::error(
                 "E0003",
@@ -2095,7 +2095,7 @@ impl<'a> Parser<'a> {
                     | Syntax::KW_REACTIVE
                     | Syntax::ATTR_OFF
                     | Syntax::ATTR_DEBUG_ONLY))
-                    || matches!(self.peek2().kind, TokKind::KwUnsafe) =>
+                    || matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_UNSAFE) =>
             {
                 if let TokKind::Ident(name) = &self.peek2().kind {
                     if crate::Policy::applied_rule(name).is_some() && !crate::Policy::rule_allows(name, crate::Policy::RuleSite::Block) {

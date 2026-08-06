@@ -79,7 +79,6 @@ impl<'a> Parser<'a> {
             let name_token = self.bump();
             let (name, name_span) = match name_token.kind {
                 TokKind::Ident(name) => (name, name_token.span),
-                TokKind::KwUnsafe => (Syntax::KW_UNSAFE.to_string(), name_token.span),
                 _ => {
                     return Err(Diagnostic::error(
                         "E0003",
@@ -583,7 +582,6 @@ impl<'a> Parser<'a> {
                 };
             match self.toks.get(name_index).map(|token| &token.kind) {
                 Some(TokKind::Ident(name)) => Some(name),
-                Some(TokKind::KwUnsafe) => Some(Syntax::KW_UNSAFE),
                 _ => None,
             }
         }
@@ -669,7 +667,6 @@ impl<'a> Parser<'a> {
                 }
                 let name = match self.toks.get(cursor).map(|token| &token.kind) {
                     Some(TokKind::Ident(name)) => name.as_str(),
-                    Some(TokKind::KwUnsafe) => Syntax::KW_UNSAFE,
                     _ => return false,
                 };
                 if site == crate::Policy::RuleSite::Function
