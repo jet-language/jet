@@ -2077,10 +2077,18 @@ fn resident_safe_builtin_op(
                 if name == "Set" && targs.len() == 1 && matches!(&targs[0], Type::Int | Type::String))
                 && args.is_empty()
         }
-        TBuiltinOp::SetCopy | TBuiltinOp::SetCapacity | TBuiltinOp::SetFirst => {
+        TBuiltinOp::SetCopy | TBuiltinOp::SetCapacity | TBuiltinOp::SetFirst | TBuiltinOp::SetValues => {
             matches!(&recv.ty, Type::Apply { name, args: targs }
                 if name == "Set" && targs.len() == 1 && matches!(&targs[0], Type::Int | Type::String))
                 && args.is_empty()
+        }
+        // #1478: `replace`/`take` — native swap-in / remove-and-return.
+        TBuiltinOp::SetReplace | TBuiltinOp::SetTake => {
+            matches!(&recv.ty, Type::Apply { name, args: targs }
+                if name == "Set" && targs.len() == 1 && matches!(&targs[0], Type::Int | Type::String))
+                && args.len() == 1
+                && matches!(&args[0].ty, Type::Int | Type::String)
+                && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::SetEqual => {
             matches!(&recv.ty, Type::Apply { name, args: targs }

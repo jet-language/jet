@@ -16378,7 +16378,9 @@ impl LowerCtx<'_, '_> {
                 self.b.ins().call(host_ref, &[recv_val, v]);
                 Ok(self.b.ins().iconst(types::I8, 0))
             }
-            TBuiltinOp::SetToList => {
+            // #1478: `Set.values()` is List-shaped at this tier too (same
+            // boxed handle `to_list` already returns) — reuse the host fn.
+            TBuiltinOp::SetToList | TBuiltinOp::SetValues => {
                 let host_ref = self
                     .module
                     .declare_func_in_func(self.host.coll.set_to_list, self.b.func);
@@ -16405,6 +16407,24 @@ impl LowerCtx<'_, '_> {
                     .module
                     .declare_func_in_func(self.host.coll.set_capacity, self.b.func);
                 let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            // #1478: `Set.replace(v)` — native swap-in, packed-Option return.
+            TBuiltinOp::SetReplace => {
+                let v = self.lower_expr(&args[0])?;
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.set_replace, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val, v]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            // #1478: `Set.take(v)` — native remove-and-return, packed-Option return.
+            TBuiltinOp::SetTake => {
+                let v = self.lower_expr(&args[0])?;
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.set_take, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val, v]);
                 Ok(self.b.inst_results(call)[0])
             }
             TBuiltinOp::SetFirst => {

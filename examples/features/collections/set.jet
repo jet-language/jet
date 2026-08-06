@@ -1,6 +1,8 @@
 // D-COLLBREADTH1=A: Set<T> — hash-backed unordered set.
 // Construct with Set.from([...]) / Set.new(), mutate with add/remove, query with has/len.
-// #1478: copy/equal/to_set/capacity/first close remaining non-closure ledger gaps.
+// #1478: copy/equal/to_set/capacity/first/values/all/filter/each/max/min/fold/
+// map/flat_map/replace/take close the order-agnostic ledger surface.
+// sort/shuffle/indexof/indexed/flatten stay declined — see D-SET-DECLINE1.
 fn run() {
     empty := Set.new()
     print("new_empty: {empty.len()} cap={empty.capacity()}")
@@ -38,6 +40,37 @@ fn run() {
     print("first_in_set: {s.has(first ?? -1)}")
     print("empty_first_none: {(empty.first() ?? -1) < 0}")
     print("capacity_ok: {s.capacity() >= s.len()}")
+
+    // #1478: order-agnostic Set surface — closed the ledger via the same
+    // to_list()-then-List machinery union/intersection already use (I8/I9).
+    values_list := s.values().to_list()
+    values_list.sort()
+    print("values sorted: {values_list}")
+    print("all positive: {s.all(n => n > 0)}")
+    filtered := s.filter(n => n > 2)
+    filtered.sort()
+    print("filtered gt2 sorted: {filtered}")
+    visited := [Int].{}
+    s.each((n: Int) => { visited.push(n) })
+    visited.sort()
+    print("each visited sorted: {visited}")
+    print("max: {s.max() ?? -1}")
+    print("min: {s.min() ?? -1}")
+    sum := s.fold(0, (acc: Int, n: Int) => acc + n)
+    print("fold sum: {sum}")
+    doubled := s.map(n => n * 2)
+    doubled.sort()
+    print("mapped doubled sorted: {doubled}")
+    flat_mapped := s.flat_map(n => [n, n * 10]).to_list()
+    flat_mapped.sort()
+    print("flat_map sorted: {flat_mapped}")
+    // Native swap-in / remove-and-return (Rust's own HashSet contract).
+    replaced := s.replace(3)
+    print("replace existing: {replaced ?? -1}")
+    print("replace missing: {(s.replace(99) ?? -1) < 0}")
+    taken := s.take(4)
+    print("take existing: {taken ?? -1}")
+    print("has after take: {s.has(4)}")
 
     ordered_a := SortedSet.from([1, 2, 3])
     ordered_b := SortedSet.from([3, 4])

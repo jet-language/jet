@@ -74,6 +74,11 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         | ("symmetric_difference", 1)
         | ("is_subset", 1) | ("is_superset", 1) | ("is_disjoint", 1)
         | ("to_set", 0)
+        // #1478: Set-only single-arg `replace`/`take` (native swap-in /
+        // remove-and-return) — distinct arity from String/List's 2-arg
+        // `replace` above and the Iter-adapter `take` (nargs 1 either way,
+        // no collision: both already resolve by receiver type at lowering).
+        | ("replace", 1)
         | ("peek", 0) | ("to_sorted_list", 0)
         | ("capacity", 0) | ("count", 0) | ("to_bytes", 0)
         | ("write_u8", 1) | ("write_byte", 1) | ("write_u16_le", 1) | ("write_u16_be", 1)

@@ -223,6 +223,13 @@ pub fn prelude_new(path: &str, args: Vec<CtValue>, span: Span) -> Option<Result<
         "std::collections::VecDeque" => Ok(deque_struct(Vec::new())),
         // Bag.new → HashMap (Map literals use MapLit, not this path).
         "std::collections::HashMap" => Ok(bag_struct(Vec::new(), Vec::new())),
+        // #1478: `Set.new()` at this tier — the tier1 native path
+        // (`crates/jet-jit/.../lower_ctx.rs`) already builds an empty
+        // HashSet handle; this closes the same construct for the canonical
+        // TIR evaluator (comptime + `jet run` deopt), matching `BTreeSet`
+        // just below (I9 — no tier left calling this an unsupported prelude
+        // static once tier1 already ships it natively).
+        "std::collections::HashSet" => Ok(set_struct(crate::Syntax::TYPE_SET, Vec::new())),
         "std::collections::BTreeSet" => Ok(set_struct(crate::Syntax::TYPE_SORTED_SET, Vec::new())),
         "std::collections::BinaryHeap" => {
             Ok(set_struct(crate::Syntax::TYPE_PRIORITY_QUEUE, Vec::new()))
@@ -299,7 +306,9 @@ pub fn apply_mutating(
     let handled = matches!(
         (type_name.as_str(), method),
         ("Bag", "add" | "remove" | "clear")
-            | ("Set", "add" | "remove" | "clear")
+            // #1478: `replace`/`take` are Set-only (Rust's native HashSet
+            // contract); SortedSet does not ship them.
+            | ("Set", "add" | "remove" | "clear" | "replace" | "take")
             | ("SortedSet", "add" | "remove" | "clear")
             | ("PriorityQueue", "push" | "pop" | "clear")
             | ("BitSet", "add" | "remove" | "clear")
@@ -466,6 +475,9 @@ fn set_method(
             items.contains(args.first().unwrap_or(&CtValue::Unit)),
         )),
         "to_list" => Ok(CtValue::List(items)),
+        // #1478: `Set.values()` — Iter is List-shaped at this eval tier
+        // (see the `take`/`dedup` note in Builtins.rs), so this is `to_list`.
+        "values" => Ok(CtValue::List(items)),
         "copy" | "to_set" => Ok(set_struct(type_name, items)),
         "capacity" => Ok(CtValue::Int(items.len() as i64)),
         "equal" => {
@@ -616,6 +628,32 @@ fn set_mutating(
                 items.remove(index);
             }
             CtValue::Unit
+        }
+        // #1478: native swap-in — always leaves `value` in the set; returns
+        // the displaced equal element if one was present (Rust's
+        // `HashSet::replace`).
+        "replace" => {
+            let value = args.first().cloned().unwrap_or(CtValue::Unit);
+            let old = match items.iter().position(|item| item == &value) {
+                Some(index) => {
+                    let prior = items[index].clone();
+                    items[index] = value;
+                    Some(prior)
+                }
+                None => {
+                    items.push(value);
+                    None
+                }
+            };
+            old.map_or_else(option_none, |v| CtValue::Some(Box::new(v)))
+        }
+        // #1478: native remove-and-return-if-present (Rust's `HashSet::take`).
+        "take" => {
+            let value = args.first().unwrap_or(&CtValue::Unit);
+            match items.iter().position(|item| item == value) {
+                Some(index) => CtValue::Some(Box::new(items.remove(index))),
+                None => option_none(),
+            }
         }
         _ => {
             return Err(unsupported(

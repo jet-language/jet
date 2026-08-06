@@ -184,7 +184,7 @@ lazy. An expected type never changes the collector or evaluation time.
 | --- | --- | --- |
 | `[T]` | list literal `[a, b]` | `map`, `filter`, `each`, `find`, `any`, `all`, `sort_by`, `reduce`, `take`, `skip`, `step_by`, `dedup`, `dedup_by`, `chunks`, `windows`, `chunk_while`, `indexed`, `indexes`, `zip`, `zip_short`, `zip_pad`, `unzip`, `take_while`, `skip_while`, `flat_map`, `filter_map`, `scan`, `fold`, `sum`, `product`, `min`, `max`, `min_by`, `max_by`, `min_max`, `min_max_by`, `group_by`, `count_by`, `count`, `extend`, `concat`, `partition`, `flatten`, `intersperse`, `repeat`, `cycle`, `drop_last`, `shuffle`, `is_sorted`, `is_sorted_by`, `last_index_of`, `average`, `compare`, `split`, `to_set`, `join`, `to_list`/`collect`, `lazy`, `starts_with`, `ends_with`, `slice`, `copy`, `equal`, `binary_search`, `binary_search_by`, `union`, `intersection`, `difference`, `random`, `replace` |
 | `[K: V]` | map literal `["a": 1]`, `Map.new()`, `Map.from_keys(keys, default)` | `keys`/`values` (lazy `Iter` views), `has_key`, `get`, `add`/`replace`, `add_new`, `remove`/`pop`, `pop_first`, `contains_value`, `merge`, `copy`, `equal`, `first`, `to_list`, `any`, `all`, `map`, `filter`, `flat_map`, `fold`, `min`, `max`, `intersection`, `slice`, `len`, `is_empty`, `clear` |
-| `Set<T>` | `Set.new()`, `Set.from(xs)` | `add`, `remove`, `has`, `union`, `intersection`, `difference`, `symmetric_difference`, `is_subset`, `is_superset`, `is_disjoint`, `copy`, `to_set`, `equal`, `capacity`, `first`, `to_list`, `len`, `is_empty`, `clear` |
+| `Set<T>` | `Set.new()`, `Set.from(xs)` | `add`, `remove`, `has`, `union`, `intersection`, `difference`, `symmetric_difference`, `is_subset`, `is_superset`, `is_disjoint`, `copy`, `to_set`, `equal`, `capacity`, `first`, `values`, `all`, `filter`, `each`, `max`, `min`, `fold`, `map`, `flat_map`, `replace`, `take`, `to_list`, `len`, `is_empty`, `clear` |
 | `SortedSet<T>` | `SortedSet.new()`, `SortedSet.from(xs)` | `add`, `remove`, `has`, `first`, `last`, `union`, `intersection`, `difference`, `symmetric_difference`, `is_subset`, `is_superset`, `is_disjoint`, `to_list`, `len`, `is_empty`, `clear` |
 | `Deque<T>` | `Deque.new()`, `Deque.init(xs)` | `push_front`, `push_back`, `pop_front`, `pop_back`, `peek_front`, `peek_back`, `capacity`, `contains`, `get`, `delete`, `to_list`, `join`, `reverse`, `split`, `len`, `is_empty`, `clear` |
 | `PriorityQueue<T>` | `PriorityQueue.new()`, `PriorityQueue.from(xs)` | `push`, `pop`, `peek`, `to_sorted_list`, `len`, `is_empty`, `clear` |
@@ -193,13 +193,23 @@ lazy. An expected type never changes the collector or evaluation time.
 | `BitSet` | `BitSet.new()` | `add`, `remove`, `has`, `count`, `to_list`, `len`, `clear` |
 | `ByteBuffer` | `ByteBuffer.new()`, `ByteBuffer.with_capacity(n)`, `ByteBuffer.from(bytes)` | write: `write_u8`/`write_byte`, `write_u16_le`/`be`, `write_u32_le`/`be`, `write_u64_le`/`be`, `write_bytes`/`write`, `write_to`; cursor: `position`, `eof`, `seek`, `rewind`, `read`, `read_byte`/`next`, `read_bytes`, `read_string`, `get`, `first`; string-like: `contains`, `starts_with`, `ends_with`, `trim`/`trim_start`/`trim_end`, `to_lower`/`to_upper`/`to_title`/`title`, `replace`, `split`, `join`, `lines`, `index_of`/`last_index_of`, `is_ascii`, `to_string`/`string`, `parse`; lifecycle: `flush`, `close`, `shutdown`, `copy`/`clone`, `copy_to`, `equal`, `compare`, `capacity`, `get_buffer`/`buffer`, `to_bytes`, `len`, `is_empty`, `clear` |
 
-`Set` / `SortedSet` declines (#1478): closure and sequence adapters (`all`,
-`each`, `filter`, `flatmap`, `flatten`, `fold`, `map`, `indexed`, `take`,
-`update`, `replace`) stay on `to_list()` / `Iter` — one mechanism (I8), not a
-parallel set-native lazy surface. Order ops (`sort`, `shuffle`, `indexof`,
-`max`, `min` as position-bearing APIs) and `copyto` are declined on unordered
-`Set` (and `copyto` on `SortedSet`); use `to_list()` then list/iter methods.
-`first` on `Set` is shipped with arbitrary hash-order semantics.
+`Set`'s closure and sequence adapters (`all`, `each`, `filter`, `fold`, `map`,
+`flat_map`, `min`, `max`) route through the same `to_list()` / `Iter`
+machinery every other container's adapters already use (I8: one mechanism,
+not a parallel set-native lazy surface); `map`/`flat_map` return a plain list
+or iter, since a Set's uniqueness does not carry through an arbitrary
+mapping — pipe the result through `.to_set()` if you want it deduplicated
+back into a Set. `values` is the lazy alias of `to_list`. `replace`/`take`
+are the native Rust `HashSet` swap-in / remove-and-return methods. `first`
+is shipped with arbitrary hash-order semantics.
+
+`Set` declines `sort`, `shuffle`, `indexof`, and `indexed` pending ballot
+`D-SET-DECLINE1` (card #1584): a hash Set has no position, so each name
+needs `to_list()` first, same as `first`'s note above. `Set` also declines
+`flatten`: Jet requires every Set element to implement Hash and Eq (E0506),
+so no `Set<T>` can ever hold a nested List or Set for `flatten` to unpack.
+`copyto` is declined on `Set` and `SortedSet`; use `to_list()` then list/iter
+methods for all of the above.
 
 Example: `examples/features/collections/iter_adapters.jet` covers adapters
 including the #1479 surface (`repeat`, `cycle`, `drop_last`, `shuffle`,

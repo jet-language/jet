@@ -352,6 +352,10 @@ pub(super) fn eval_builtin(
         TBuiltinOp::SetEqual => apply_method(recv, "equal", args, span),
         TBuiltinOp::SetCapacity => apply_method(recv, "capacity", args, span),
         TBuiltinOp::SetFirst => apply_method(recv, "first", args, span),
+        // #1478: values is a read; replace/take are native `&mut self` ops.
+        TBuiltinOp::SetValues => apply_method(recv, "values", args, span),
+        TBuiltinOp::SetReplace => apply_mutating(recv, "replace", args, span),
+        TBuiltinOp::SetTake => apply_mutating(recv, "take", args, span),
         TBuiltinOp::SortedSetFrom => {
             CollectionEval::from_list(Syntax::TYPE_SORTED_SET, recv, span)
         }
