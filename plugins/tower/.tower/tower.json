@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1463,
-    "rev": 25685,
+    "nextNum": 1464,
+    "rev": 25728,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -79870,12 +79870,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "verify",
       "priority": "P1",
       "plan": "1) Add BinOp::Pow, retire BitXor spelling ^. 2) Sema + TIR + Prelude jet_pow, all tiers call it. 3) Formatter + grammars. 4) Example + golden. 5) Targeted tests.",
       "blockedBy": [],
       "assignee": "bd-exp",
       "log": [
+        {
+          "at": "2026-08-06",
+          "by": "bd-ops",
+          "text": "All review blockers are closed. The indexed-field compound assignment now borrows the place once and calls the Prelude helper, so slots[idx].value ^= seed(3) prints 125 on both tiers. The example xor_operator.jet is formatter clean."
+        },
         {
           "at": "2026-08-06",
           "by": "fable",
@@ -79979,8 +79984,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T13:33:32.504Z",
-      "updated": "2026-08-06T00:48:25.301Z",
-      "updatedBy": "fable",
+      "updated": "2026-08-06T02:05:57.493Z",
+      "updatedBy": "bd-ops",
       "claimedAt": "2026-08-05T23:32:05.831Z"
     },
     {
@@ -79992,7 +79997,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "verify",
       "priority": "P1",
       "plan": "1) Parser associativity + precedence. 2) Sema result-type rules. 3) Prelude int_pow/float pow paths per I9. 4) Example + golden with the four canonical values. 5) Targeted parser and sema tests.",
       "blockedBy": [
@@ -80000,6 +80005,11 @@
       ],
       "assignee": "bd-exp",
       "log": [
+        {
+          "at": "2026-08-06",
+          "by": "bd-ops",
+          "text": "All review blockers are closed. The fixed-width branch now runs before the power early return, so small := U8.{2}; small ^= U8.{3} prints 8 on both tiers. The JavaScript target no longer emits **; it calls a jet_pow preamble that carries the Prelude rule, and the emitted helper traps with the same wording as every other tier. The trap wording is now one shared constant, and a test proves the Prelude text still matches so it cannot drift."
+        },
         {
           "at": "2026-08-06",
           "by": "fable",
@@ -80089,8 +80099,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T13:33:32.817Z",
-      "updated": "2026-08-06T00:48:25.683Z",
-      "updatedBy": "fable",
+      "updated": "2026-08-06T02:05:57.856Z",
+      "updatedBy": "bd-ops",
       "claimedAt": "2026-08-05T23:32:36.179Z"
     },
     {
@@ -80212,7 +80222,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "verify",
       "priority": "P1",
       "plan": "1) Token /% and /%=. 2) Parser + sema (same operand rules as /). 3) Prelude jet_floordiv per I9. 4) Formatter + grammars. 5) Example + golden + trap test.",
       "blockedBy": [],
@@ -80222,65 +80232,65 @@
         {
           "n": 1,
           "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-ops",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T13:57:39.734Z"
+          "evidence": "Floor division /% shipped. Syntax entries OP_SLASH_PERCENT and OP_SLASH_PERCENT_EQ, spec entry, grammars carry /% and /%= in all four editors, no snapshot drift. Example floor_div.jet prints 3, -4, 3.0, 4 byte-identical under jet run and jet build, proved with cmp. Tests: cargo test --test floor_division, 11 passed, including floor_division_by_zero_traps and fmt_keeps_the_division_family_spellings.",
+          "at": "2026-08-06T02:05:44.232Z"
         },
         {
           "n": 2,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-ops",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T13:57:39.734Z"
+          "evidence": "Floor division /% shipped. Syntax entries OP_SLASH_PERCENT and OP_SLASH_PERCENT_EQ, spec entry, grammars carry /% and /%= in all four editors, no snapshot drift. Example floor_div.jet prints 3, -4, 3.0, 4 byte-identical under jet run and jet build, proved with cmp. Tests: cargo test --test floor_division, 11 passed, including floor_division_by_zero_traps and fmt_keeps_the_division_family_spellings.",
+          "at": "2026-08-06T02:05:44.539Z"
         },
         {
           "n": 3,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-ops",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T13:57:39.734Z"
+          "evidence": "Floor division /% shipped. Syntax entries OP_SLASH_PERCENT and OP_SLASH_PERCENT_EQ, spec entry, grammars carry /% and /%= in all four editors, no snapshot drift. Example floor_div.jet prints 3, -4, 3.0, 4 byte-identical under jet run and jet build, proved with cmp. Tests: cargo test --test floor_division, 11 passed, including floor_division_by_zero_traps and fmt_keeps_the_division_family_spellings.",
+          "at": "2026-08-06T02:05:44.851Z"
         },
         {
           "n": 4,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-ops",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T13:57:39.734Z"
+          "evidence": "Floor division /% shipped. Syntax entries OP_SLASH_PERCENT and OP_SLASH_PERCENT_EQ, spec entry, grammars carry /% and /%= in all four editors, no snapshot drift. Example floor_div.jet prints 3, -4, 3.0, 4 byte-identical under jet run and jet build, proved with cmp. Tests: cargo test --test floor_division, 11 passed, including floor_division_by_zero_traps and fmt_keeps_the_division_family_spellings.",
+          "at": "2026-08-06T02:05:45.162Z"
         },
         {
           "n": 5,
           "text": "Example floor_div.jet golden-prints 3 (7 /% 2), -4 (-7 /% 2), 3.0 (7.5 /% 2.0), and a /%= compound; identical on AOT and jet run (I9)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-ops",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T14:36:47.609Z"
+          "evidence": "Floor division /% shipped. Syntax entries OP_SLASH_PERCENT and OP_SLASH_PERCENT_EQ, spec entry, grammars carry /% and /%= in all four editors, no snapshot drift. Example floor_div.jet prints 3, -4, 3.0, 4 byte-identical under jet run and jet build, proved with cmp. Tests: cargo test --test floor_division, 11 passed, including floor_division_by_zero_traps and fmt_keeps_the_division_family_spellings.",
+          "at": "2026-08-06T02:05:45.467Z"
         },
         {
           "n": 6,
           "text": "Trap test: /% by zero panics with the divided-by-zero message (targeted test)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-ops",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T14:36:47.934Z"
+          "evidence": "Floor division /% shipped. Syntax entries OP_SLASH_PERCENT and OP_SLASH_PERCENT_EQ, spec entry, grammars carry /% and /%= in all four editors, no snapshot drift. Example floor_div.jet prints 3, -4, 3.0, 4 byte-identical under jet run and jet build, proved with cmp. Tests: cargo test --test floor_division, 11 passed, including floor_division_by_zero_traps and fmt_keeps_the_division_family_spellings.",
+          "at": "2026-08-06T02:05:45.774Z"
         },
         {
           "n": 7,
           "text": "Formatter round-trip preserves /% and /%= (fmt stability test green)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-ops",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T14:36:48.257Z"
+          "evidence": "Floor division /% shipped. Syntax entries OP_SLASH_PERCENT and OP_SLASH_PERCENT_EQ, spec entry, grammars carry /% and /%= in all four editors, no snapshot drift. Example floor_div.jet prints 3, -4, 3.0, 4 byte-identical under jet run and jet build, proved with cmp. Tests: cargo test --test floor_division, 11 passed, including floor_division_by_zero_traps and fmt_keeps_the_division_family_spellings.",
+          "at": "2026-08-06T02:05:46.088Z"
         }
       ],
       "refs": [],
@@ -80291,9 +80301,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T13:33:33.668Z",
-      "updated": "2026-08-05T23:56:48.319Z",
+      "updated": "2026-08-06T02:05:55.804Z",
       "updatedBy": "bd-ops",
-      "claimedAt": "2026-08-05T23:56:48.319Z"
+      "claimedAt": "2026-08-06T02:05:55.804Z"
     },
     {
       "id": "c0c74q4f",
@@ -80304,7 +80314,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "verify",
       "priority": "P1",
       "plan": "1) Token %% and %%=. 2) Sema. 3) Prelude split jet_mod/jet_rem, all tiers. 4) Migrate in-repo % uses that relied on truncation. 5) Example + golden + identity test.",
       "blockedBy": [],
@@ -80314,74 +80324,74 @@
         {
           "n": 1,
           "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-ops",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T14:22:40.137Z"
+          "evidence": "Modulo semantics shipped: % floored beside %% truncated. Example modulo.jet prints 1, 1, 1, -1, 2, -2 identical on both tiers. The identity a == b*(a/%b) + a%b holds across six sign pairs. Both zero-divisor traps are green. Distinct jet_mod and jet_trunc_rem live in Prelude/Core/Division.rs and every tier calls them. Audit: no in-repo use of % relied on truncation; all six users were re-run against goldens unchanged.",
+          "at": "2026-08-06T02:05:46.398Z"
         },
         {
           "n": 2,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-ops",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T14:22:40.137Z"
+          "evidence": "Modulo semantics shipped: % floored beside %% truncated. Example modulo.jet prints 1, 1, 1, -1, 2, -2 identical on both tiers. The identity a == b*(a/%b) + a%b holds across six sign pairs. Both zero-divisor traps are green. Distinct jet_mod and jet_trunc_rem live in Prelude/Core/Division.rs and every tier calls them. Audit: no in-repo use of % relied on truncation; all six users were re-run against goldens unchanged.",
+          "at": "2026-08-06T02:05:46.722Z"
         },
         {
           "n": 3,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-ops",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T14:22:40.137Z"
+          "evidence": "Modulo semantics shipped: % floored beside %% truncated. Example modulo.jet prints 1, 1, 1, -1, 2, -2 identical on both tiers. The identity a == b*(a/%b) + a%b holds across six sign pairs. Both zero-divisor traps are green. Distinct jet_mod and jet_trunc_rem live in Prelude/Core/Division.rs and every tier calls them. Audit: no in-repo use of % relied on truncation; all six users were re-run against goldens unchanged.",
+          "at": "2026-08-06T02:05:47.246Z"
         },
         {
           "n": 4,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-ops",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T14:22:40.137Z"
+          "evidence": "Modulo semantics shipped: % floored beside %% truncated. Example modulo.jet prints 1, 1, 1, -1, 2, -2 identical on both tiers. The identity a == b*(a/%b) + a%b holds across six sign pairs. Both zero-divisor traps are green. Distinct jet_mod and jet_trunc_rem live in Prelude/Core/Division.rs and every tier calls them. Audit: no in-repo use of % relied on truncation; all six users were re-run against goldens unchanged.",
+          "at": "2026-08-06T02:05:47.800Z"
         },
         {
           "n": 5,
           "text": "Example modulo.jet golden-prints 1 (-7 % 2), -1 (-7 %% 2), and %= / %%= compounds; identical on AOT and jet run (I9)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-ops",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T14:36:48.580Z"
+          "evidence": "Modulo semantics shipped: % floored beside %% truncated. Example modulo.jet prints 1, 1, 1, -1, 2, -2 identical on both tiers. The identity a == b*(a/%b) + a%b holds across six sign pairs. Both zero-divisor traps are green. Distinct jet_mod and jet_trunc_rem live in Prelude/Core/Division.rs and every tier calls them. Audit: no in-repo use of % relied on truncation; all six users were re-run against goldens unchanged.",
+          "at": "2026-08-06T02:05:48.369Z"
         },
         {
           "n": 6,
           "text": "Identity test across positive and negative operand pairs: a == b * (a /% b) + a % b (targeted test or example assert)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-ops",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T14:36:48.896Z"
+          "evidence": "Modulo semantics shipped: % floored beside %% truncated. Example modulo.jet prints 1, 1, 1, -1, 2, -2 identical on both tiers. The identity a == b*(a/%b) + a%b holds across six sign pairs. Both zero-divisor traps are green. Distinct jet_mod and jet_trunc_rem live in Prelude/Core/Division.rs and every tier calls them. Audit: no in-repo use of % relied on truncation; all six users were re-run against goldens unchanged.",
+          "at": "2026-08-06T02:05:48.927Z"
         },
         {
           "n": 7,
           "text": "Both % and %% trap on zero divisor (targeted test); Prelude has distinct jet_mod and jet_rem and every tier calls them (no engine-local reimplementation)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-ops",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T14:36:49.226Z"
+          "evidence": "Modulo semantics shipped: % floored beside %% truncated. Example modulo.jet prints 1, 1, 1, -1, 2, -2 identical on both tiers. The identity a == b*(a/%b) + a%b holds across six sign pairs. Both zero-divisor traps are green. Distinct jet_mod and jet_trunc_rem live in Prelude/Core/Division.rs and every tier calls them. Audit: no in-repo use of % relied on truncation; all six users were re-run against goldens unchanged.",
+          "at": "2026-08-06T02:05:49.492Z"
         },
         {
           "n": 8,
           "text": "In-repo uses of % that relied on truncated semantics audited and migrated to %% where needed (list in card log)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-ops",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T14:36:49.552Z"
+          "evidence": "Modulo semantics shipped: % floored beside %% truncated. Example modulo.jet prints 1, 1, 1, -1, 2, -2 identical on both tiers. The identity a == b*(a/%b) + a%b holds across six sign pairs. Both zero-divisor traps are green. Distinct jet_mod and jet_trunc_rem live in Prelude/Core/Division.rs and every tier calls them. Audit: no in-repo use of % relied on truncation; all six users were re-run against goldens unchanged.",
+          "at": "2026-08-06T02:05:49.902Z"
         }
       ],
       "refs": [],
@@ -80392,9 +80402,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T13:33:34.155Z",
-      "updated": "2026-08-05T23:56:48.990Z",
+      "updated": "2026-08-06T02:05:56.378Z",
       "updatedBy": "bd-ops",
-      "claimedAt": "2026-08-05T23:56:48.990Z"
+      "claimedAt": "2026-08-06T02:05:56.378Z"
     },
     {
       "id": "c0kfh1yl",
@@ -80405,7 +80415,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P1",
       "plan": "1) Sema result-type change. 2) New diagnostic for /= on Int. 3) Prelude div path per I9. 4) Migrate in-repo integer / uses to /%. 5) Example + golden; full golden sweep rides the batch closeout run.",
       "blockedBy": [
@@ -80417,65 +80427,65 @@
         {
           "n": 1,
           "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-ops",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T13:49:57.463Z"
+          "evidence": "Int / Int now yields Float. Example int_div.jet prints 3.5, 8.5, 8 identical on both tiers. Five tests green. Migrated compound.jet with its fuzz twin, comptime_block.jet and all_failfast.jet. The golden suite has no remaining division-related failures.",
+          "at": "2026-08-06T02:05:50.216Z"
         },
         {
           "n": 2,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-ops",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T13:49:57.463Z"
+          "evidence": "Int / Int now yields Float. Example int_div.jet prints 3.5, 8.5, 8 identical on both tiers. Five tests green. Migrated compound.jet with its fuzz twin, comptime_block.jet and all_failfast.jet. The golden suite has no remaining division-related failures.",
+          "at": "2026-08-06T02:05:50.527Z"
         },
         {
           "n": 3,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-ops",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T13:49:57.463Z"
+          "evidence": "Int / Int now yields Float. Example int_div.jet prints 3.5, 8.5, 8 identical on both tiers. Five tests green. Migrated compound.jet with its fuzz twin, comptime_block.jet and all_failfast.jet. The golden suite has no remaining division-related failures.",
+          "at": "2026-08-06T02:05:50.836Z"
         },
         {
           "n": 4,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-ops",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T13:49:57.463Z"
+          "evidence": "Int / Int now yields Float. Example int_div.jet prints 3.5, 8.5, 8 identical on both tiers. Five tests green. Migrated compound.jet with its fuzz twin, comptime_block.jet and all_failfast.jet. The golden suite has no remaining division-related failures.",
+          "at": "2026-08-06T02:05:51.341Z"
         },
         {
           "n": 5,
           "text": "Example int_div.jet golden-prints 3.5 (7 / 2) and a correct 8.5 average; identical on AOT and jet run (I9)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-ops",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T14:36:49.879Z"
+          "evidence": "Int / Int now yields Float. Example int_div.jet prints 3.5, 8.5, 8 identical on both tiers. Five tests green. Migrated compound.jet with its fuzz twin, comptime_block.jet and all_failfast.jet. The golden suite has no remaining division-related failures.",
+          "at": "2026-08-06T02:05:51.848Z"
         },
         {
           "n": 6,
           "text": "Sema test: Int / Int infers Float; /= on an Int binding errors with the new diagnostic pointing at /%= (UI snapshot committed)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-ops",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T14:36:50.194Z"
+          "evidence": "Int / Int now yields Float. Example int_div.jet prints 3.5, 8.5, 8 identical on both tiers. Five tests green. Migrated compound.jet with its fuzz twin, comptime_block.jet and all_failfast.jet. The golden suite has no remaining division-related failures.",
+          "at": "2026-08-06T02:05:52.457Z"
         },
         {
           "n": 7,
           "text": "In-repo examples intending integer division migrated to /%; full golden sweep deferred to the batch closeout run (D-VERDICT-675-1), not per-card",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-ops",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T14:36:50.501Z"
+          "evidence": "Int / Int now yields Float. Example int_div.jet prints 3.5, 8.5, 8 identical on both tiers. Five tests green. Migrated compound.jet with its fuzz twin, comptime_block.jet and all_failfast.jet. The golden suite has no remaining division-related failures.",
+          "at": "2026-08-06T02:05:52.900Z"
         }
       ],
       "refs": [],
@@ -80486,8 +80496,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T13:33:34.653Z",
-      "updated": "2026-08-05T14:37:03.817Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-06T02:05:56.744Z",
+      "updatedBy": "bd-ops"
     },
     {
       "id": "c0skl5w6",
@@ -80498,7 +80508,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "verify",
       "priority": "P1",
       "plan": "1) Sema UnOp::Not accepts integers. 2) Prelude jet_bitnot per I9. 3) Update E0109 bool-only diagnostic + snapshot. 4) Example + golden. 5) Targeted tests.",
       "blockedBy": [],
@@ -80508,56 +80518,56 @@
         {
           "n": 1,
           "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-ops",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T13:50:06.240Z"
+          "evidence": "Prefix ! extended to whole numbers. Example bit_not.jet prints -1, -6, 11, false, 250 identical on both tiers. Five tests cover every signed and unsigned width. Snapshot tests/ui/bit_not_wrong_type.stderr committed.",
+          "at": "2026-08-06T02:05:53.387Z"
         },
         {
           "n": 2,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-ops",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T13:50:06.240Z"
+          "evidence": "Prefix ! extended to whole numbers. Example bit_not.jet prints -1, -6, 11, false, 250 identical on both tiers. Five tests cover every signed and unsigned width. Snapshot tests/ui/bit_not_wrong_type.stderr committed.",
+          "at": "2026-08-06T02:05:53.698Z"
         },
         {
           "n": 3,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-ops",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T13:50:06.240Z"
+          "evidence": "Prefix ! extended to whole numbers. Example bit_not.jet prints -1, -6, 11, false, 250 identical on both tiers. Five tests cover every signed and unsigned width. Snapshot tests/ui/bit_not_wrong_type.stderr committed.",
+          "at": "2026-08-06T02:05:54.022Z"
         },
         {
           "n": 4,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-ops",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T13:50:06.240Z"
+          "evidence": "Prefix ! extended to whole numbers. Example bit_not.jet prints -1, -6, 11, false, 250 identical on both tiers. Five tests cover every signed and unsigned width. Snapshot tests/ui/bit_not_wrong_type.stderr committed.",
+          "at": "2026-08-06T02:05:54.342Z"
         },
         {
           "n": 5,
           "text": "Example bit_not.jet golden-prints -1 (!0), -6 (!5), a flags & !mask bit-clear, and false (!true); identical on AOT and jet run (I9)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-ops",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T14:36:50.820Z"
+          "evidence": "Prefix ! extended to whole numbers. Example bit_not.jet prints -1, -6, 11, false, 250 identical on both tiers. Five tests cover every signed and unsigned width. Snapshot tests/ui/bit_not_wrong_type.stderr committed.",
+          "at": "2026-08-06T02:05:54.844Z"
         },
         {
           "n": 6,
           "text": "Sema test: ! on each integer width returns the same width; on default Int equals -x - 1; E0109 bool-only diagnostic text updated with snapshot",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-ops",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T14:36:51.135Z"
+          "evidence": "Prefix ! extended to whole numbers. Example bit_not.jet prints -1, -6, 11, false, 250 identical on both tiers. Five tests cover every signed and unsigned width. Snapshot tests/ui/bit_not_wrong_type.stderr committed.",
+          "at": "2026-08-06T02:05:55.305Z"
         }
       ],
       "refs": [],
@@ -80568,9 +80578,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T13:33:35.145Z",
-      "updated": "2026-08-05T23:56:49.668Z",
+      "updated": "2026-08-06T02:05:57.122Z",
       "updatedBy": "bd-ops",
-      "claimedAt": "2026-08-05T23:56:49.668Z"
+      "claimedAt": "2026-08-06T02:05:57.121Z"
     },
     {
       "id": "c0z2v4l9",
@@ -81753,7 +81763,13 @@
         "#1456"
       ],
       "assignee": "bd-markers",
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-06",
+          "by": "bd-markers",
+          "text": "Unregistered names at function sites now reach the one E0927 family with a did-you-mean, instead of E0355. The unknown-marker text moved into Policy::marker_unknown_error and sema delegates to it. New fixture tests/ui/E0927_unknown_marker_function.jet. Statement, block, expression, distinct, file and parameter sites are not done."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -81800,9 +81816,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T22:45:07.674Z",
-      "updated": "2026-08-05T23:57:55.293Z",
+      "updated": "2026-08-06T02:05:02.239Z",
       "updatedBy": "bd-markers",
-      "claimedAt": "2026-08-05T23:57:55.292Z"
+      "claimedAt": "2026-08-06T02:05:02.239Z"
     },
     {
       "id": "c0fsjhdc",
@@ -81877,34 +81893,40 @@
       "plan": "Resolve Authority and Summarize under card #763's ratified triage terms: implement fully or retire. Retired rows stop applying effects (Pure, InlineAlways). The FFI and RenameAll owned menus and the first-versus-last path-segment handling become registry columns. The Doc-with-Job coupling becomes row data. Marker name constants collapse to one convention.",
       "blockedBy": [],
       "assignee": "bd-markers",
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-06",
+          "by": "bd-markers",
+          "text": "Marker name constants still use three conventions: ATTR_, CONTRACT_ and MARKER_. Card #763 does not exist on the board, so its triage terms could not be read. Both ghost rows were resolved under D-VERDICT-1455-1's implement-or-retire rule and the reasoning is recorded in the spec."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "No registered row lacks end-to-end behavior: Authority and Summarize implemented fully or retired per card #763's terms",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-markers",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T22:45:34.645Z"
+          "evidence": "#Authority and #Summarize retired. Proof they were ghost rows: #Summarize on a struct with no provider used to compile and print 'gear'; it now reports E0927 unknown applied rule. examples/features/comptime/reflect.jet still prints Widget/show/label debug=false hidden_pub=false under both jet build and jet run.",
+          "at": "2026-08-06T02:05:00.579Z"
         },
         {
           "n": 2,
           "text": "Retired rows diagnose without applying effects; Pure and InlineAlways no longer set flags",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-markers",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T22:45:34.952Z"
+          "evidence": "Retired rows no longer apply effects. #Pure and #InlineAlways stop setting is_pure and is_inline_always. jet build reports E0927 with the fix text 'write #Inline(Always)'.",
+          "at": "2026-08-06T02:05:00.894Z"
         },
         {
           "n": 3,
           "text": "Owned menus, path-segment handling, and the Doc-with-Job coupling are registry columns; marker name constants use one convention",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-markers",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T22:45:35.268Z"
+          "evidence": "New registry columns owns_menu, variant_segment and companion_site replace the FFI/RenameAll, Capability/Target and task_doc name matches. Test marker_behaviour_lives_in_columns_not_name_lists. #[Job, Doc] builds, bare #Doc reports E0355, and #[Codable, RenameAll(kebabb)] still reports the product diagnostic E2409.",
+          "at": "2026-08-06T02:05:01.205Z"
         }
       ],
       "refs": [
@@ -81915,9 +81937,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T22:45:08.306Z",
-      "updated": "2026-08-05T23:57:56.637Z",
+      "updated": "2026-08-06T02:05:02.607Z",
       "updatedBy": "bd-markers",
-      "claimedAt": "2026-08-05T23:57:56.637Z"
+      "claimedAt": "2026-08-06T02:05:02.606Z"
     },
     {
       "id": "c0pzumap",
@@ -81938,7 +81960,13 @@
         "#1459"
       ],
       "assignee": "bd-markers",
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-06",
+          "by": "bd-markers",
+          "text": "The per-row coverage guard is green. The name-literal scan and the generated-grammar drift test are not done."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -81952,11 +81980,11 @@
         {
           "n": 2,
           "text": "The per-row coverage test walks every registry row through parse, validate, format round-trip, highlight, and reflect",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-markers",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T22:45:36.136Z"
+          "evidence": "tests/marker_registry_coverage.rs, 3 tests green. It builds each program from the row's own signature and site list, so it names no marker. Not green by construction: seeding a row with only interior sites fails it. It caught real drift on the first run, reporting #Extern and #Bindgen unreachable.",
+          "at": "2026-08-06T02:05:01.515Z"
         },
         {
           "n": 3,
@@ -81975,9 +82003,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T22:45:08.611Z",
-      "updated": "2026-08-05T23:57:57.309Z",
+      "updated": "2026-08-06T02:05:02.983Z",
       "updatedBy": "bd-markers",
-      "claimedAt": "2026-08-05T23:57:57.309Z"
+      "claimedAt": "2026-08-06T02:05:02.983Z"
     },
     {
       "id": "c0v3yofo",
@@ -81995,7 +82023,13 @@
         "#1455"
       ],
       "assignee": "bd-markers",
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-06",
+          "by": "bd-markers",
+          "text": "The plan text on this card is wrong about three outcomes. D-MARK-FORM1 is A and D-MARK-REPEAT1 is A, and both are now implemented end to end. D-IMPURE-REASON1 is B, so the reason stays optional and no code change is needed. D-SQL-ARG1 is B, which ratifies angle brackets and gives markers a type-parameter feature. D-HTML-NAME1 is B, which registers both under one name with site-dependent signatures. The last two need a registry schema change and are not done."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -82015,9 +82049,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T22:45:08.920Z",
-      "updated": "2026-08-05T23:57:58.248Z",
+      "updated": "2026-08-06T02:05:01.873Z",
       "updatedBy": "bd-markers",
-      "claimedAt": "2026-08-05T23:57:58.248Z"
+      "claimedAt": "2026-08-06T02:05:01.873Z"
     },
     {
       "id": "c0shcqzl",
@@ -82041,6 +82075,30 @@
       "needsAcceptance": false,
       "created": "2026-08-06T01:48:34.573Z",
       "updated": "2026-08-06T01:48:34.573Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0ky778n",
+      "num": 1463,
+      "title": "jet run drops recoverable diagnostics that jet build reports",
+      "body": "jet run silently accepts a program that jet build rejects. Reproduced on a retired marker: 'jet build' reports E0927 for a retired rule, while 'jet run' prints the program output and exits 0. jet run drops every recoverable parse diagnostic. This is general, not marker specific, and it breaks execution-tier parity for diagnostics: the same source must have one meaning on every tier. It also hides real errors from the default developer loop, which is the tier most people use.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P0",
+      "plan": "1. Find where the run path discards recoverable diagnostics.\n2. Make the run path report the same diagnostic set as the build path.\n3. Expect this to reveal pre-existing broken examples under jet run. Card each one that is not a real regression of this change.\n4. Prove one example reports the identical diagnostic under jet build and default jet run.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-06T02:05:13.261Z",
+      "updated": "2026-08-06T02:05:13.261Z",
       "updatedBy": "fable"
     }
   ],
@@ -108598,6 +108656,307 @@
   ],
   "events": [
     {
+      "at": "2026-08-06T02:05:57.856Z",
+      "by": "bd-ops",
+      "action": "card.update",
+      "ref": "c0q2s3u5",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T02:05:57.493Z",
+      "by": "bd-ops",
+      "action": "card.update",
+      "ref": "c0kw5dh0",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T02:05:57.122Z",
+      "by": "bd-ops",
+      "action": "card.update",
+      "ref": "c0skl5w6",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-06T02:05:56.745Z",
+      "by": "bd-ops",
+      "action": "card.update",
+      "ref": "c0kfh1yl",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-06T02:05:56.378Z",
+      "by": "bd-ops",
+      "action": "card.update",
+      "ref": "c0c74q4f",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-06T02:05:55.804Z",
+      "by": "bd-ops",
+      "action": "card.update",
+      "ref": "c04513m9",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-06T02:05:55.305Z",
+      "by": "bd-ops",
+      "action": "card.criteria-meet",
+      "ref": "c0skl5w6",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-06T02:05:54.844Z",
+      "by": "bd-ops",
+      "action": "card.criteria-meet",
+      "ref": "c0skl5w6",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-06T02:05:54.342Z",
+      "by": "bd-ops",
+      "action": "card.criteria-meet",
+      "ref": "c0skl5w6",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-06T02:05:54.022Z",
+      "by": "bd-ops",
+      "action": "card.criteria-meet",
+      "ref": "c0skl5w6",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T02:05:53.698Z",
+      "by": "bd-ops",
+      "action": "card.criteria-meet",
+      "ref": "c0skl5w6",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T02:05:53.387Z",
+      "by": "bd-ops",
+      "action": "card.criteria-meet",
+      "ref": "c0skl5w6",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-06T02:05:52.900Z",
+      "by": "bd-ops",
+      "action": "card.criteria-meet",
+      "ref": "c0kfh1yl",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-06T02:05:52.457Z",
+      "by": "bd-ops",
+      "action": "card.criteria-meet",
+      "ref": "c0kfh1yl",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-06T02:05:51.849Z",
+      "by": "bd-ops",
+      "action": "card.criteria-meet",
+      "ref": "c0kfh1yl",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-06T02:05:51.341Z",
+      "by": "bd-ops",
+      "action": "card.criteria-meet",
+      "ref": "c0kfh1yl",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-06T02:05:50.836Z",
+      "by": "bd-ops",
+      "action": "card.criteria-meet",
+      "ref": "c0kfh1yl",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T02:05:50.527Z",
+      "by": "bd-ops",
+      "action": "card.criteria-meet",
+      "ref": "c0kfh1yl",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T02:05:50.216Z",
+      "by": "bd-ops",
+      "action": "card.criteria-meet",
+      "ref": "c0kfh1yl",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-06T02:05:49.902Z",
+      "by": "bd-ops",
+      "action": "card.criteria-meet",
+      "ref": "c0c74q4f",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-06T02:05:49.492Z",
+      "by": "bd-ops",
+      "action": "card.criteria-meet",
+      "ref": "c0c74q4f",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-06T02:05:48.927Z",
+      "by": "bd-ops",
+      "action": "card.criteria-meet",
+      "ref": "c0c74q4f",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-06T02:05:48.369Z",
+      "by": "bd-ops",
+      "action": "card.criteria-meet",
+      "ref": "c0c74q4f",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-06T02:05:47.800Z",
+      "by": "bd-ops",
+      "action": "card.criteria-meet",
+      "ref": "c0c74q4f",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-06T02:05:47.246Z",
+      "by": "bd-ops",
+      "action": "card.criteria-meet",
+      "ref": "c0c74q4f",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T02:05:46.722Z",
+      "by": "bd-ops",
+      "action": "card.criteria-meet",
+      "ref": "c0c74q4f",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T02:05:46.399Z",
+      "by": "bd-ops",
+      "action": "card.criteria-meet",
+      "ref": "c0c74q4f",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-06T02:05:46.088Z",
+      "by": "bd-ops",
+      "action": "card.criteria-meet",
+      "ref": "c04513m9",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-06T02:05:45.775Z",
+      "by": "bd-ops",
+      "action": "card.criteria-meet",
+      "ref": "c04513m9",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-06T02:05:45.468Z",
+      "by": "bd-ops",
+      "action": "card.criteria-meet",
+      "ref": "c04513m9",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-06T02:05:45.163Z",
+      "by": "bd-ops",
+      "action": "card.criteria-meet",
+      "ref": "c04513m9",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-06T02:05:44.851Z",
+      "by": "bd-ops",
+      "action": "card.criteria-meet",
+      "ref": "c04513m9",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T02:05:44.539Z",
+      "by": "bd-ops",
+      "action": "card.criteria-meet",
+      "ref": "c04513m9",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T02:05:44.232Z",
+      "by": "bd-ops",
+      "action": "card.criteria-meet",
+      "ref": "c04513m9",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-06T02:05:13.261Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0ky778n",
+      "note": "jet run drops recoverable diagnostics that jet build reports"
+    },
+    {
+      "at": "2026-08-06T02:05:02.983Z",
+      "by": "bd-markers",
+      "action": "card.update",
+      "ref": "c0pzumap",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T02:05:02.607Z",
+      "by": "bd-markers",
+      "action": "card.update",
+      "ref": "c0kydt2i",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T02:05:02.239Z",
+      "by": "bd-markers",
+      "action": "card.update",
+      "ref": "c0ai0h4w",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T02:05:01.873Z",
+      "by": "bd-markers",
+      "action": "card.update",
+      "ref": "c0v3yofo",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T02:05:01.515Z",
+      "by": "bd-markers",
+      "action": "card.criteria-meet",
+      "ref": "c0pzumap",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T02:05:01.206Z",
+      "by": "bd-markers",
+      "action": "card.criteria-meet",
+      "ref": "c0kydt2i",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T02:05:00.895Z",
+      "by": "bd-markers",
+      "action": "card.criteria-meet",
+      "ref": "c0kydt2i",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T02:05:00.580Z",
+      "by": "bd-markers",
+      "action": "card.criteria-meet",
+      "ref": "c0kydt2i",
+      "note": "#1"
+    },
+    {
       "at": "2026-08-06T02:02:16.535Z",
       "by": "fable",
       "action": "card.update",
@@ -111795,307 +112154,6 @@
       "action": "card.update",
       "ref": "c0auczc4",
       "note": "phase"
-    },
-    {
-      "at": "2026-08-05T11:03:35.900Z",
-      "by": "claude-e3-closeout",
-      "action": "card.update",
-      "ref": "c0auczc4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-05T11:03:35.522Z",
-      "by": "claude-e3-closeout",
-      "action": "card.update",
-      "ref": "c0auczc4",
-      "note": "logEntry,blockedBy"
-    },
-    {
-      "at": "2026-08-05T10:57:38.717Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-CALLVALUE1",
-      "note": "B"
-    },
-    {
-      "at": "2026-08-05T10:57:38.717Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0nnhbti",
-      "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-08-05T10:57:38.717Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0nnhbti",
-      "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-08-05T10:57:38.717Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0nnhbti",
-      "note": "#2 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-08-05T10:57:38.717Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0nnhbti",
-      "note": "#1 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-08-05T10:57:34.241Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-AUTODIFF1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-05T10:56:08.682Z",
-      "by": "claude-e3-closeout",
-      "action": "decision.update",
-      "ref": "D-AUTODIFF1",
-      "note": ""
-    },
-    {
-      "at": "2026-08-05T10:55:28.537Z",
-      "by": "claude-e3-closeout",
-      "action": "decision.add",
-      "ref": "D-CALLVALUE1",
-      "note": "Calling a returned function value"
-    },
-    {
-      "at": "2026-08-05T10:54:53.602Z",
-      "by": "claude-e3-closeout",
-      "action": "card.add",
-      "ref": "c0nnhbti",
-      "note": "Syntax: call a returned function value with .call"
-    },
-    {
-      "at": "2026-08-05T10:30:02.372Z",
-      "by": "claude-e3-closeout",
-      "action": "question.answer",
-      "ref": "q09rip6d",
-      "note": ""
-    },
-    {
-      "at": "2026-08-05T09:48:39.483Z",
-      "by": "claude-e3-closeout",
-      "action": "card.update",
-      "ref": "c0vvhs7e",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-05T09:24:03.908Z",
-      "by": "claude-e3-closeout",
-      "action": "card.update",
-      "ref": "c0onk8jk",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-05T09:23:45.528Z",
-      "by": "claude-e3-closeout",
-      "action": "card.update",
-      "ref": "c0onk8jk",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-05T09:21:32.759Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0rfgh4h",
-      "note": "Core surface ledger against every competitor language"
-    },
-    {
-      "at": "2026-08-05T09:21:32.460Z",
-      "by": "owner",
-      "action": "card.delete",
-      "ref": "c0qs9qel",
-      "note": "Core surface ledger: adjudicate every Python comparison point and verify non-Python competitors"
-    },
-    {
-      "at": "2026-08-05T02:46:32.968Z",
-      "by": "codex-e5",
-      "action": "card.release",
-      "ref": "c0rs9jy0",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-08-05T02:46:28.066Z",
-      "by": "codex-e5",
-      "action": "card.update",
-      "ref": "c0rs9jy0",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-05T02:42:21.998Z",
-      "by": "codex-e5",
-      "action": "card.claim",
-      "ref": "c0rs9jy0",
-      "note": ""
-    },
-    {
-      "at": "2026-08-05T02:35:39.419Z",
-      "by": "codex-e5",
-      "action": "card.release",
-      "ref": "c0ynt6sy",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-08-05T02:35:39.199Z",
-      "by": "codex-e5",
-      "action": "card.update",
-      "ref": "c0ynt6sy",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-05T02:33:15.812Z",
-      "by": "codex-e5",
-      "action": "card.release",
-      "ref": "c0fcsxlk",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-08-05T02:33:15.590Z",
-      "by": "codex-e5",
-      "action": "card.update",
-      "ref": "c0fcsxlk",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-05T02:33:02.284Z",
-      "by": "codex-e5",
-      "action": "card.claim",
-      "ref": "c0fcsxlk",
-      "note": ""
-    },
-    {
-      "at": "2026-08-05T02:30:32.278Z",
-      "by": "codex-e5",
-      "action": "card.release",
-      "ref": "c0eatnv2",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-08-05T02:30:32.063Z",
-      "by": "codex-e5",
-      "action": "card.update",
-      "ref": "c0eatnv2",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-05T02:29:46.976Z",
-      "by": "codex-e5",
-      "action": "card.claim",
-      "ref": "c0eatnv2",
-      "note": ""
-    },
-    {
-      "at": "2026-08-05T02:29:38.425Z",
-      "by": "claude-e3-closeout",
-      "action": "card.update",
-      "ref": "c0rfgh4h",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-05T02:29:29.885Z",
-      "by": "claude-e3-closeout",
-      "action": "card.update",
-      "ref": "c0todzv8",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-05T02:28:08.830Z",
-      "by": "codex-e5",
-      "action": "card.release",
-      "ref": "c0wbxcvq",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-08-05T02:28:00.313Z",
-      "by": "codex-e5",
-      "action": "card.update",
-      "ref": "c0wbxcvq",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-05T02:25:54.683Z",
-      "by": "owner",
-      "action": "question.add",
-      "ref": "q09rip6d",
-      "note": ""
-    },
-    {
-      "at": "2026-08-05T02:21:33.488Z",
-      "by": "codex-e5",
-      "action": "card.claim",
-      "ref": "c0wbxcvq",
-      "note": ""
-    },
-    {
-      "at": "2026-08-05T02:21:29.994Z",
-      "by": "codex-e5",
-      "action": "card.release",
-      "ref": "c0w7297z",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-08-05T02:20:57.465Z",
-      "by": "codex-e5",
-      "action": "card.update",
-      "ref": "c0w7297z",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-05T02:18:48.397Z",
-      "by": "claude-e3-closeout",
-      "action": "card.update",
-      "ref": "c0w38v39",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-05T02:17:21.376Z",
-      "by": "claude-e3-closeout",
-      "action": "card.update",
-      "ref": "c0w38v39",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-05T02:17:12.638Z",
-      "by": "codex-e5",
-      "action": "card.claim",
-      "ref": "c0w7297z",
-      "note": ""
-    },
-    {
-      "at": "2026-08-05T02:17:06.338Z",
-      "by": "codex-e5",
-      "action": "card.release",
-      "ref": "c0e4nuy5",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-08-05T02:17:05.971Z",
-      "by": "codex-e5",
-      "action": "card.update",
-      "ref": "c0e4nuy5",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-05T02:16:04.947Z",
-      "by": "claude-e3-closeout",
-      "action": "card.update",
-      "ref": "c0y3l5yy",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-05T02:15:35.322Z",
-      "by": "claude-e3-closeout",
-      "action": "card.update",
-      "ref": "c0onk8jk",
-      "note": "logEntry,blockedBy"
     }
   ],
   "nextNum": 368,
