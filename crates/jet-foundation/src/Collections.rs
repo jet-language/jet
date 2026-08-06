@@ -218,6 +218,9 @@ pub fn builtin_method_return(
         Type::Named(n) if n == crate::Syntax::TYPE_DECIMAL => {
             crate::Numeric::decimal_method_return(method, arg_count)
         }
+        Type::Named(n) if n == crate::Syntax::TYPE_FRACTION => {
+            crate::Numeric::fraction_method_return(method, arg_count)
+        }
         Type::Named(n) if n == Syntax::TYPE_BUILD_CONTEXT => {
             build_context_method_return(method, arg_count)
         }

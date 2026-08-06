@@ -72,6 +72,21 @@ pub fn decimal_method_return(method: &str, nargs: usize) -> Option<Option<Type>>
     }
 }
 
+/// D-NUMTYPE1=A: an exact ratio. Arithmetic answers another Fraction; the two
+/// parts answer whole numbers; comparison answers a yes or no.
+pub fn fraction_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
+    let fraction = || Type::Named(Syntax::TYPE_FRACTION.to_string());
+    match (method, nargs) {
+        ("add" | "sub" | "mul" | "div", 1) => Some(Some(fraction())),
+        ("numerator" | "denominator", 0) => Some(Some(Type::Int)),
+        ("to_string", 0) => Some(Some(Type::String)),
+        ("to_float", 0) => Some(Some(Type::Float)),
+        ("is_zero", 0) => Some(Some(Type::Bool)),
+        ("equal", 1) => Some(Some(Type::Bool)),
+        _ => None,
+    }
+}
+
 // ── CtBigInt: comptime/REPL tier-0 arbitrary-precision integer ──────────────
 //
 // Mirrors `JetBigInt` in

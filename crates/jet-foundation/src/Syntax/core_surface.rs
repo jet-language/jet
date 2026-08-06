@@ -674,6 +674,8 @@ pub const TYPE_BIGINT: &str = "BigInt";
 /// D-DECIMAL1 (ratified 2026-06-26): exact base-10 decimal. Construct with
 /// `Decimal("12.34")` or `core.math.decimal("12.34")`; no implicit `Float`.
 pub const TYPE_DECIMAL: &str = "Decimal";
+// D-NUMTYPE1=A: an exact ratio of two whole numbers, kept reduced.
+pub const TYPE_FRACTION: &str = "Fraction";
 
 /// D-BUILDENTRY1/D-BUILDTARGET1/D-BUILDACTION1: typed build-program values.
 /// These names are compiler-known only while the selected root `fn build`
