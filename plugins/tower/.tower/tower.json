@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1483,
-    "rev": 25775,
+    "rev": 25781,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -81754,16 +81754,22 @@
       "plan": "Implement D-VERDICT-1455-1 (D-MARK-REG1) structurally. One shared marker reader runs at every node start, accepts any name including keyword-lexed ones, and attaches Marker nodes to the owning AST node for every site. Delete every hand-bumped marker token, both function-marker applicators, the marker_sequence_leads_to_function heuristic, the three shadow site tables, and all lexer marker-name knowledge. Sema receives markers; parse-time desugaring into flags ends.",
       "blockedBy": [],
       "assignee": "bd-markers",
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-06",
+          "by": "bd-markers",
+          "text": "Criterion 2 is not done: six #Unsafe keyword workarounds remain in parse_one_marker, marker_name_at, bracket_group_allows_site, validate_registered_rule_marker, validate_registered_rule_arguments and rule_signature_bindings. Criterion 1 covers callables only; statement, binding and expression hand-bumps remain and markers are retained on Func alone."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "The shared reader is the only marker parse path; a search proves no hand-bumped marker token remains in parser or lexer",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-markers",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T22:45:30.769Z"
+          "evidence": "Met for callables. Deleted the 200-line duplicate applicator in func(), 17 marker-named dispatcher arms, 12 shadow predicates and the three remaining hand-bumped function parsers. Proved dead by measurement, not assertion: a probe on the prologue fired 0 times across examples, tests/ui and tests/fuzz, while the same probe moved to the token func() actually sees fired 842 times. Statement, binding and expression sites are not done.",
+          "at": "2026-08-06T03:00:22.892Z"
         },
         {
           "n": 2,
@@ -81777,11 +81783,11 @@
         {
           "n": 3,
           "text": "Marker nodes are retained on every AST target site and reach sema intact",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-markers",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T22:45:31.548Z"
+          "evidence": "Func.markers is a retained Vec<Marker>, populated in apply_callable_markers, and reaches sema.",
+          "at": "2026-08-06T03:00:23.201Z"
         },
         {
           "n": 4,
@@ -81803,9 +81809,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T22:45:07.350Z",
-      "updated": "2026-08-05T23:57:54.621Z",
+      "updated": "2026-08-06T03:00:24.187Z",
       "updatedBy": "bd-markers",
-      "claimedAt": "2026-08-05T23:57:54.621Z"
+      "claimedAt": "2026-08-06T03:00:24.187Z"
     },
     {
       "id": "c0ai0h4w",
@@ -81896,16 +81902,22 @@
         "#1456"
       ],
       "assignee": "bd-markers",
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-06",
+          "by": "bd-markers",
+          "text": "Criterion 2 is not done: the tree-sitter grammar and highlight files are not yet generated from the registry."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "Formatter prints retained marker nodes; flag reconstruction and hardcoded layout lists deleted; formatter stability suite green over marker examples",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-markers",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T22:45:33.723Z"
+          "evidence": "The 16-flag formatter reconstruction is deleted, 213 lines. A probe emitting a sentinel wherever the fallback would print a marker matched 0 files across examples and tests/ui, formatted per file so one unparseable file could not abort the batch. An earlier probe method gave 0 for the control too and was discarded as invalid. fmt 161 passed, fmt_project 20 of 20.",
+          "at": "2026-08-06T03:00:23.512Z"
         },
         {
           "n": 2,
@@ -81919,11 +81931,11 @@
         {
           "n": 3,
           "text": "MethodInfo.markers returns real data with a reflection test; jet explain reads registry rows",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-markers",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T22:45:34.342Z"
+          "evidence": "MethodInfo.markers is real; it was previously ct_list of an empty vector. Proof it was broken: reverting that one line makes the same program fail E2710 with a list index out of bounds, while the fix prints Inline. examples/features/comptime/reflect.jet, whose own header claimed to demonstrate markers, now reads them. Parity verified byte for byte: jet run, the AOT binary and the golden all print the same line.",
+          "at": "2026-08-06T03:00:23.822Z"
         }
       ],
       "refs": [
@@ -81935,9 +81947,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T22:45:07.994Z",
-      "updated": "2026-08-05T23:57:55.974Z",
+      "updated": "2026-08-06T03:00:24.558Z",
       "updatedBy": "bd-markers",
-      "claimedAt": "2026-08-05T23:57:55.973Z"
+      "claimedAt": "2026-08-06T03:00:24.558Z"
     },
     {
       "id": "c0kydt2i",
@@ -109233,6 +109245,48 @@
   ],
   "events": [
     {
+      "at": "2026-08-06T03:00:24.558Z",
+      "by": "bd-markers",
+      "action": "card.update",
+      "ref": "c0fsjhdc",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T03:00:24.187Z",
+      "by": "bd-markers",
+      "action": "card.update",
+      "ref": "c0556cxe",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T03:00:23.822Z",
+      "by": "bd-markers",
+      "action": "card.criteria-meet",
+      "ref": "c0fsjhdc",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T03:00:23.512Z",
+      "by": "bd-markers",
+      "action": "card.criteria-meet",
+      "ref": "c0fsjhdc",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-06T03:00:23.201Z",
+      "by": "bd-markers",
+      "action": "card.criteria-meet",
+      "ref": "c0556cxe",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T03:00:22.892Z",
+      "by": "bd-markers",
+      "action": "card.criteria-meet",
+      "ref": "c0556cxe",
+      "note": "#1"
+    },
+    {
       "at": "2026-08-06T02:58:33.991Z",
       "by": "bd-review-ledger4",
       "action": "card.criteria-verify",
@@ -112689,48 +112743,6 @@
       "action": "card.criteria-add",
       "ref": "c0z2v4l9",
       "note": "#1 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-08-05T13:50:06.240Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-BITNOT1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-05T13:50:06.240Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0skl5w6",
-      "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-08-05T13:50:06.240Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0skl5w6",
-      "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-08-05T13:50:06.240Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0skl5w6",
-      "note": "#2 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-08-05T13:50:06.240Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0skl5w6",
-      "note": "#1 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-08-05T13:49:57.463Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-INTDIV1",
-      "note": "A"
     }
   ],
   "nextNum": 368,
