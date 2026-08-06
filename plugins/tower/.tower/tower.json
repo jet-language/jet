@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1487,
-    "rev": 25832,
+    "nextNum": 1492,
+    "rev": 25860,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -21,7 +21,7 @@
         "board-ideas"
       ]
     },
-    "completionCursor": "2026-08-06T00:49:18.033Z"
+    "completionCursor": "2026-08-06T10:02:08.749Z"
   },
   "epochs": [
     {
@@ -81793,6 +81793,11 @@
       "log": [
         {
           "at": "2026-08-06",
+          "by": "fable",
+          "text": "The #Unsafe keyword special cases are retired: no KwUnsafe reference survives outside the token definition, so criterion 2 is met. The remaining hand-bumped marker parsing is measurable now: a registry-name scan finds bare marker literals in Parser/Statements/control.rs, Parser/Items/type_methods_fields.rs, external_tests_ffi.rs, marker_groups.rs, markers_contracts.rs and Parser/Types.rs. Those files are the exact remaining work, and card #1460's drift scan cannot be written honestly until they are clean."
+        },
+        {
+          "at": "2026-08-06",
           "by": "bd-markers",
           "text": "Criterion 2 is not done: six #Unsafe keyword workarounds remain in parse_one_marker, marker_name_at, bracket_group_allows_site, validate_registered_rule_marker, validate_registered_rule_arguments and rule_signature_bindings. Criterion 1 covers callables only; statement, binding and expression hand-bumps remain and markers are retained on Func alone."
         }
@@ -81810,11 +81815,11 @@
         {
           "n": 2,
           "text": "Keyword-named markers need zero special cases; the six Unsafe keyword workarounds are deleted",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-markers",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T22:45:31.088Z"
+          "evidence": "The #Unsafe keyword workarounds are gone. grep for KwUnsafe across crates returns no hit outside the lexer token definition, so parse_one_marker, marker_name_at, bracket_group_allows_site, validate_registered_rule_marker, validate_registered_rule_arguments and rule_signature_bindings no longer special-case it. cargo build is clean.",
+          "at": "2026-08-06T10:11:21.788Z"
         },
         {
           "n": 3,
@@ -81845,7 +81850,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T22:45:07.350Z",
-      "updated": "2026-08-06T03:00:24.187Z",
+      "updated": "2026-08-06T10:11:21.788Z",
       "updatedBy": "bd-markers",
       "claimedAt": "2026-08-06T03:00:24.187Z"
     },
@@ -82071,6 +82076,11 @@
       "log": [
         {
           "at": "2026-08-06",
+          "by": "fable",
+          "text": "Criterion 1, the name-literal scan, is blocked on card #1456 and needs a narrower design. A scan that looks for a registered marker name written as a string literal returns 190 hits across the compiler, and nearly all are false positives: Task the type, Add the trait, Default, Context, allow, Static. A name alone cannot separate 'used as a marker' from 'happens to equal a marker name'. The scan only becomes meaningful once the hand-bumped marker parsing in #1456 is gone, because proving their absence is the whole point. Design it against marker-dispatch positions rather than against names."
+        },
+        {
+          "at": "2026-08-06",
           "by": "bd-markers",
           "text": "The per-row coverage guard is green. The name-literal scan and the generated-grammar drift test are not done."
         }
@@ -82111,8 +82121,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T22:45:08.611Z",
-      "updated": "2026-08-06T02:05:02.983Z",
-      "updatedBy": "bd-markers",
+      "updated": "2026-08-06T10:11:21.096Z",
+      "updatedBy": "fable",
       "claimedAt": "2026-08-06T02:05:02.983Z"
     },
     {
@@ -82745,14 +82755,20 @@
       "plan": "1. Reproduce with io.args, env.get and files.read.\n2. Make the evaluator treat a runtime-only input as unknown instead of evaluating it.\n3. Leave a value unknown rather than taking the ?? fallback when the subject is unknown.\n4. Prove that a divisor read from the environment reaches the Cranelift host and traps at run time with the shared wording.\n5. Re-point the note in tests/floor_division.rs at the now-reachable branch.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-06",
+          "by": "fable",
+          "text": "Overlaps card #1488 in epoch e2, raised concurrently, on implicit const folding of nondeterministic Core calls. This card also covers io.args, env.get and files.read being folded and the ?? fallback being taken as a constant, plus the consequence that no source reaches the Cranelift trap branches. Merge the two before either is worked."
+        }
+      ],
       "criteria": [],
       "refs": [],
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T09:46:56.973Z",
-      "updated": "2026-08-06T09:46:56.973Z",
+      "updated": "2026-08-06T10:13:32.773Z",
       "updatedBy": "fable"
     },
     {
@@ -82825,6 +82841,300 @@
       "needsAcceptance": false,
       "created": "2026-08-06T09:48:58.014Z",
       "updated": "2026-08-06T09:48:58.014Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c0nrwebl",
+      "num": 1487,
+      "title": "Value dispatch rejects a range arm head",
+      "body": "A value dispatch arm whose head is a range fails to parse. examples/features/tooling/branch_dispatch_bench.jet:37 writes 'return if n == { 0..9 -> 1 }' and the parser reports E0003 'expected -> after a value dispatch arm head, found ..', then cascades. The example stopped parsing at commit c3cbdc85b. It is the only failure in the fmt lossless corpus, so it has been masking that suite all session.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "1. Reproduce on the example.\n2. Teach the value-dispatch arm-head parser to accept a range, the same way a match arm does.\n3. Prove the example parses, formats round-trip, and matches its golden on both tiers.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-06",
+          "by": "fable",
+          "text": "Duplicate of card #1489 in epoch e2, which was raised concurrently for the same value-dispatch range arm head. Keep one and close the other; #1489 is the later number but sits in the epoch that owns the example."
+        }
+      ],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-06T10:08:06.404Z",
+      "updated": "2026-08-06T10:13:32.404Z",
+      "updatedBy": "fable"
+    },
+    {
+      "id": "c08scee7",
+      "num": 1488,
+      "title": "Implicit const-fold evaluates nondeterministic Core calls (random, time)",
+      "body": "An immutable binding is an implicit folding opportunity (D-VERDICT-1308-1, crates/jet-sema/src/Sema/CheckerCore/bindings.rs:687). The comptime evaluator accepts core.random and core.time calls, so those fold to compile-time literals while the runtime seed call stays a statement.\n\nRepro A: random.seed(11); a :: random.normal(0.0, 1.0); random.seed(11); b :: random.normal(0.0, 1.0) -> a == b prints false. examples/features/math/random_audit.jet already shows this; examples/features/expected/math/random_audit.out is correct and the compiler is wrong.\n\nRepro B: a :: time.now(); b :: time.now() -> a == b prints true.\n\nEmitted Rust proves the fold: `let user_x: f64 = 0.7399976204803688f64;` beside a live `jet_std_random_seed(11i64);`. Mutable `:=` bindings are unaffected.\n\nRoot cause: the fold gate is Comptime::is_tier2_core_call (crates/jet-comptime/src/Comptime/Methods/dispatch.rs:93). It only treats core.random as Tier-2 under repl_mode, and never treats core.time as Tier-2. Sema already knows the full set as Purity::is_nondeterministic_core (crates/jet-sema/src/Sema/Purity.rs:99); the two lists must agree.\n\nKeep random.rng(seed) foldable: an explicitly seeded generator is injected deterministic data. Implicit folds fail silently, so blocked calls fall back to the ordinary runtime path; explicit comptime bindings get a real diagnostic instead of a wrong literal.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e2",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P0",
+      "plan": "1) Extend the Tier-2 fold gate to every nondeterministic Core call (core.random except rng, core.time now/sleep/start, core.crypto.random.bytes), unconditional on repl_mode. 2) Keep the comptime list and Sema::Purity::is_nondeterministic_core in one shared place so they cannot drift. 3) Prove the reseed identity on AOT, jet run, and interpreter deopt (I9). 4) Audit examples and goldens that silently depended on a folded clock or RNG.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Reseeding proves determinism end to end: random.seed(N); a :: random.normal(...); random.seed(N); b :: random.normal(...) gives a == b on AOT, jet run, and interpreter deopt",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:10:07.326Z"
+        },
+        {
+          "n": 2,
+          "text": "a :: time.now(); b :: time.now() yields two distinct runtime reads, not one folded literal, on every tier",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:10:07.655Z"
+        },
+        {
+          "n": 3,
+          "text": "examples/features/math/random_audit.jet passes against the existing expected/math/random_audit.out with no golden edit",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:10:07.965Z"
+        },
+        {
+          "n": 4,
+          "text": "Explicit comptime/#Known binding over a nondeterministic Core call reports a registered diagnostic with a UI snapshot (I4), not a silent literal",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:10:08.291Z"
+        },
+        {
+          "n": 5,
+          "text": "random.rng(seed) and its methods still fold, with a targeted test pinning the folded values to the runtime Prelude results",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:10:08.600Z"
+        },
+        {
+          "n": 6,
+          "text": "The nondeterministic-call list has one definition shared by comptime and Sema::Purity; a test fails if the two ever disagree",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:10:08.914Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "compiler",
+        "comptime",
+        "correctness"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-06T10:09:52.160Z",
+      "updated": "2026-08-06T10:10:08.914Z",
+      "updatedBy": "claude-papercuts"
+    },
+    {
+      "id": "c01ssx12",
+      "num": 1489,
+      "title": "Value dispatch rejects range arm heads (0..9 -> 1)",
+      "body": "Statement dispatch accepts a range arm head; value dispatch does not.\n\nWorks: if n == { 0..9 -> { return 1 } else -> { return 3 } }\nFails: return if n == { 0..9 -> 1  10..99 -> 2  else -> 3 }\n  Error [E0003]: expected `->` after a value dispatch arm head, found `..`\n\nexamples/features/tooling/branch_dispatch_bench.jet has carried this hard parse error since c3cbdc85b, so the fmt-lossless corpus cannot format it.\n\nRoot cause: the range-head parser (including the E0318 `..=` and E0319 `step` porting hazards) is inlined twice in crates/jet-parser/src/Parser/Statements/conditionals.rs, at :457 and :1278. The shared head parser if_arm_head (:575) has no range case, and parse_dispatch_expr (:999) calls only if_arm_head.\n\nThe fix is a net deletion: move range-head parsing into if_arm_head and delete both inline copies, so every dispatch form gets ranges from one place. A range arm desugars to the same PatternTest node the statement form already produces, so sema, TIR, AOT, JIT, and interpreter need no new semantics.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e2",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "1) Move range-head parsing (lo..hi, E0318 ..=, E0319 step) into if_arm_head. 2) Delete the two inline copies. 3) Formatter emission plus fmt STABILITY round-trip for a value-form range arm. 4) Restore branch_dispatch_bench.jet with golden output and prove it on every tier (I9).",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "return if n == { 0..9 -> 1  10..99 -> 2  else -> 3 } parses and evaluates correctly on AOT, jet run, and interpreter deopt",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:10:44.131Z"
+        },
+        {
+          "n": 2,
+          "text": "E0318 (..=) and E0319 (step) fire identically in statement and value dispatch, with the existing UI snapshots unchanged",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:10:44.449Z"
+        },
+        {
+          "n": 3,
+          "text": "Range-head parsing exists in exactly one place; both inline copies in conditionals.rs are deleted",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:10:44.762Z"
+        },
+        {
+          "n": 4,
+          "text": "Formatter emits a value-form range arm and the fmt round-trip plus STABILITY test pass on it",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:10:45.079Z"
+        },
+        {
+          "n": 5,
+          "text": "examples/features/tooling/branch_dispatch_bench.jet parses, runs, and matches its golden output",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:10:45.392Z"
+        },
+        {
+          "n": 6,
+          "text": "fmt-lossless corpus covers branch_dispatch_bench.jet with no manifest exemption",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:10:45.707Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "compiler",
+        "parser",
+        "syntax"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-06T10:10:26.566Z",
+      "updated": "2026-08-06T10:10:45.707Z",
+      "updatedBy": "claude-papercuts"
+    },
+    {
+      "id": "c0zlv32v",
+      "num": 1490,
+      "title": "fmt-lossless corpus red on master: UI config fixtures pinned as parse-invalid",
+      "body": "tests/fmt fmt-lossless-corpus fails on master. tests/ui/build_entry_conflict/pkg.jet does not parse as program source (E0003 on the `payload:` header) but is absent from the pinned UI_PARSE_INVALID manifest in tests/support/fmt_lossless.rs:6.\n\nIt is the 22nd of 22 tests/ui/**/pkg.jet files; the other 21 sit in that manifest only because a package manifest is config, never program source. That is a category error, so every new manifest fixture breaks the corpus again.\n\nThe examples loop already gets this right: it classifies PAYLOAD_FILE and WORKSPACE_FILE as config and skips them (:1269). The UI loop (:1303) does not.\n\nSecond defect: the corpus asserts inside the scan loop, so the first mismatch aborts the run and every later fixture goes unchecked. One bad fixture hides all the others.\n\nSeparate, related report: examples/jetpack/epoch5/config/dev.jet is a config file that is not named pkg.jet, so the name-based rule does not cover it.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e2",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P0",
+      "plan": "1) Classify PAYLOAD_FILE and WORKSPACE_FILE under tests/ui as config, matching the examples loop. 2) Delete the 21 pkg.jet lines from UI_PARSE_INVALID. 3) Collect mismatches and assert once at the end so a single bad fixture stops masking the rest. 4) Confirm the corpus is green and record whether examples/jetpack/epoch5/config/dev.jet needs its own fix.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "cargo test --test fmt fmt_is_lossless_on_supported_source_corpus passes on master",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:10:58.564Z"
+        },
+        {
+          "n": 2,
+          "text": "tests/ui pkg.jet and workspace.jet are classified as config by the same rule the examples loop uses; no manifest entry names one",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:10:58.885Z"
+        },
+        {
+          "n": 3,
+          "text": "Adding a new tests/ui manifest fixture does not require touching UI_PARSE_INVALID (proved by adding one in the same run)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:10:59.210Z"
+        },
+        {
+          "n": 4,
+          "text": "A deliberately broken fixture makes the corpus report every mismatch it found, not just the first",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:10:59.757Z"
+        },
+        {
+          "n": 5,
+          "text": "The remaining UI_PARSE_INVALID entries are all genuine program fixtures, sorted and duplicate-free",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T10:11:00.255Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "tests",
+        "formatter",
+        "ci"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-06T10:10:46.025Z",
+      "updated": "2026-08-06T10:11:00.255Z",
+      "updatedBy": "claude-papercuts"
+    },
+    {
+      "id": "c0fcnl50",
+      "num": 1491,
+      "title": "Rename marker on a Codable field rejects its own string literal",
+      "body": "The test marker_rule_signatures::static_type_and_field_strings_use_the_same_signature_gate fails on master. A #Rename marker on a Codable field reports E2407 'needs a string literal' for an argument that is already a quoted string. The signature gate that admits a string on a type does not admit the same string on a field. Proven pre-existing by stashing all local work and re-running.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "1. Reproduce with a Codable struct whose field carries #Rename with a quoted string.\n2. Make the field-site signature gate accept what the type-site gate accepts.\n3. Prove the test passes and the diagnostic still fires on a genuinely non-literal argument.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-06T10:12:51.053Z",
+      "updated": "2026-08-06T10:12:51.054Z",
       "updatedBy": "fable"
     }
   ],
@@ -109382,6 +109692,202 @@
   ],
   "events": [
     {
+      "at": "2026-08-06T10:13:32.773Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0hp46qn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-06T10:13:32.404Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0nrwebl",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-06T10:12:51.054Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0fcnl50",
+      "note": "Rename marker on a Codable field rejects its own string literal"
+    },
+    {
+      "at": "2026-08-06T10:11:21.788Z",
+      "by": "bd-markers",
+      "action": "card.criteria-meet",
+      "ref": "c0556cxe",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T10:11:21.467Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0556cxe",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-06T10:11:21.096Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0pzumap",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-06T10:11:00.255Z",
+      "by": "claude-papercuts",
+      "action": "card.criteria-add",
+      "ref": "c0zlv32v",
+      "note": "#5 The remaining UI_PARSE_INVALID entries are all genuine progr"
+    },
+    {
+      "at": "2026-08-06T10:10:59.757Z",
+      "by": "claude-papercuts",
+      "action": "card.criteria-add",
+      "ref": "c0zlv32v",
+      "note": "#4 A deliberately broken fixture makes the corpus report every "
+    },
+    {
+      "at": "2026-08-06T10:10:59.211Z",
+      "by": "claude-papercuts",
+      "action": "card.criteria-add",
+      "ref": "c0zlv32v",
+      "note": "#3 Adding a new tests/ui manifest fixture does not require touc"
+    },
+    {
+      "at": "2026-08-06T10:10:58.886Z",
+      "by": "claude-papercuts",
+      "action": "card.criteria-add",
+      "ref": "c0zlv32v",
+      "note": "#2 tests/ui pkg.jet and workspace.jet are classified as config "
+    },
+    {
+      "at": "2026-08-06T10:10:58.564Z",
+      "by": "claude-papercuts",
+      "action": "card.criteria-add",
+      "ref": "c0zlv32v",
+      "note": "#1 cargo test --test fmt fmt_is_lossless_on_supported_source_co"
+    },
+    {
+      "at": "2026-08-06T10:10:46.025Z",
+      "by": "claude-papercuts",
+      "action": "card.add",
+      "ref": "c0zlv32v",
+      "note": "fmt-lossless corpus red on master: UI config fixtures pinned as parse-invalid"
+    },
+    {
+      "at": "2026-08-06T10:10:45.707Z",
+      "by": "claude-papercuts",
+      "action": "card.criteria-add",
+      "ref": "c01ssx12",
+      "note": "#6 fmt-lossless corpus covers branch_dispatch_bench.jet with no"
+    },
+    {
+      "at": "2026-08-06T10:10:45.393Z",
+      "by": "claude-papercuts",
+      "action": "card.criteria-add",
+      "ref": "c01ssx12",
+      "note": "#5 examples/features/tooling/branch_dispatch_bench.jet parses, "
+    },
+    {
+      "at": "2026-08-06T10:10:45.079Z",
+      "by": "claude-papercuts",
+      "action": "card.criteria-add",
+      "ref": "c01ssx12",
+      "note": "#4 Formatter emits a value-form range arm and the fmt round-tri"
+    },
+    {
+      "at": "2026-08-06T10:10:44.762Z",
+      "by": "claude-papercuts",
+      "action": "card.criteria-add",
+      "ref": "c01ssx12",
+      "note": "#3 Range-head parsing exists in exactly one place; both inline "
+    },
+    {
+      "at": "2026-08-06T10:10:44.449Z",
+      "by": "claude-papercuts",
+      "action": "card.criteria-add",
+      "ref": "c01ssx12",
+      "note": "#2 E0318 (..=) and E0319 (step) fire identically in statement a"
+    },
+    {
+      "at": "2026-08-06T10:10:44.131Z",
+      "by": "claude-papercuts",
+      "action": "card.criteria-add",
+      "ref": "c01ssx12",
+      "note": "#1 return if n == { 0..9 -> 1  10..99 -> 2  else -> 3 } parses "
+    },
+    {
+      "at": "2026-08-06T10:10:26.567Z",
+      "by": "claude-papercuts",
+      "action": "card.add",
+      "ref": "c01ssx12",
+      "note": "Value dispatch rejects range arm heads (0..9 -> 1)"
+    },
+    {
+      "at": "2026-08-06T10:10:08.914Z",
+      "by": "claude-papercuts",
+      "action": "card.criteria-add",
+      "ref": "c08scee7",
+      "note": "#6 The nondeterministic-call list has one definition shared by "
+    },
+    {
+      "at": "2026-08-06T10:10:08.600Z",
+      "by": "claude-papercuts",
+      "action": "card.criteria-add",
+      "ref": "c08scee7",
+      "note": "#5 random.rng(seed) and its methods still fold, with a targeted"
+    },
+    {
+      "at": "2026-08-06T10:10:08.292Z",
+      "by": "claude-papercuts",
+      "action": "card.criteria-add",
+      "ref": "c08scee7",
+      "note": "#4 Explicit comptime/#Known binding over a nondeterministic Cor"
+    },
+    {
+      "at": "2026-08-06T10:10:07.965Z",
+      "by": "claude-papercuts",
+      "action": "card.criteria-add",
+      "ref": "c08scee7",
+      "note": "#3 examples/features/math/random_audit.jet passes against the e"
+    },
+    {
+      "at": "2026-08-06T10:10:07.655Z",
+      "by": "claude-papercuts",
+      "action": "card.criteria-add",
+      "ref": "c08scee7",
+      "note": "#2 a :: time.now(); b :: time.now() yields two distinct runtime"
+    },
+    {
+      "at": "2026-08-06T10:10:07.326Z",
+      "by": "claude-papercuts",
+      "action": "card.criteria-add",
+      "ref": "c08scee7",
+      "note": "#1 Reseeding proves determinism end to end: random.seed(N); a :"
+    },
+    {
+      "at": "2026-08-06T10:09:52.161Z",
+      "by": "claude-papercuts",
+      "action": "card.add",
+      "ref": "c08scee7",
+      "note": "Implicit const-fold evaluates nondeterministic Core calls (random, time)"
+    },
+    {
+      "at": "2026-08-06T10:08:06.405Z",
+      "by": "fable",
+      "action": "card.add",
+      "ref": "c0nrwebl",
+      "note": "Value dispatch rejects a range arm head"
+    },
+    {
+      "at": "2026-08-06T10:02:08.749Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-06T10:02:08.749Z"
+    },
+    {
       "at": "2026-08-06T09:49:33.650Z",
       "by": "fable",
       "action": "card.update",
@@ -112684,202 +113190,6 @@
       "action": "card.criteria-add",
       "ref": "c0kfh1yl",
       "note": "#6 Sema test: Int / Int infers Float; /= on an Int binding erro"
-    },
-    {
-      "at": "2026-08-05T14:36:49.879Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0kfh1yl",
-      "note": "#5 Example int_div.jet golden-prints 3.5 (7 / 2) and a correct "
-    },
-    {
-      "at": "2026-08-05T14:36:49.552Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0c74q4f",
-      "note": "#8 In-repo uses of % that relied on truncated semantics audited"
-    },
-    {
-      "at": "2026-08-05T14:36:49.227Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0c74q4f",
-      "note": "#7 Both % and %% trap on zero divisor (targeted test); Prelude "
-    },
-    {
-      "at": "2026-08-05T14:36:48.897Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0c74q4f",
-      "note": "#6 Identity test across positive and negative operand pairs: a "
-    },
-    {
-      "at": "2026-08-05T14:36:48.580Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0c74q4f",
-      "note": "#5 Example modulo.jet golden-prints 1 (-7 % 2), -1 (-7 %% 2), a"
-    },
-    {
-      "at": "2026-08-05T14:36:48.257Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c04513m9",
-      "note": "#7 Formatter round-trip preserves /% and /%= (fmt stability tes"
-    },
-    {
-      "at": "2026-08-05T14:36:47.934Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c04513m9",
-      "note": "#6 Trap test: /% by zero panics with the divided-by-zero messag"
-    },
-    {
-      "at": "2026-08-05T14:36:47.609Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c04513m9",
-      "note": "#5 Example floor_div.jet golden-prints 3 (7 /% 2), -4 (-7 /% 2)"
-    },
-    {
-      "at": "2026-08-05T14:36:47.285Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0v2fuet",
-      "note": "#7 Prefix ~ copy regression: existing copy-sigil targeted tests"
-    },
-    {
-      "at": "2026-08-05T14:36:46.967Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0v2fuet",
-      "note": "#6 Sema test: ~| enforces same-width integers both sides (D-SG9"
-    },
-    {
-      "at": "2026-08-05T14:36:46.648Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0v2fuet",
-      "note": "#5 Example xor_operator.jet golden-proves ~| values and a ~|= a"
-    },
-    {
-      "at": "2026-08-05T14:36:46.331Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0q2s3u5",
-      "note": "#7 Parser test proves right-associativity (2^3^2 groups as 2^(3"
-    },
-    {
-      "at": "2026-08-05T14:36:46.030Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0q2s3u5",
-      "note": "#6 Sema unit tests: Int ^ negative Int infers Float; Int ^ non-"
-    },
-    {
-      "at": "2026-08-05T14:36:45.724Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0q2s3u5",
-      "note": "#5 Example power_semantics.jet golden-prints exactly 512 (2^3^2"
-    },
-    {
-      "at": "2026-08-05T14:36:45.426Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0kw5dh0",
-      "note": "#8 Prefix ^ (take sigil) regression: existing take-capability t"
-    },
-    {
-      "at": "2026-08-05T14:36:45.122Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0kw5dh0",
-      "note": "#7 Formatter round-trip: jet fmt is idempotent on the power exa"
-    },
-    {
-      "at": "2026-08-05T14:36:44.812Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0kw5dh0",
-      "note": "#6 No infix ^ means xor anywhere: sema unit test shows Int ^ In"
-    },
-    {
-      "at": "2026-08-05T14:36:44.506Z",
-      "by": "fable",
-      "action": "card.criteria-add",
-      "ref": "c0kw5dh0",
-      "note": "#5 Example examples/features/math/power_operator.jet golden-pro"
-    },
-    {
-      "at": "2026-08-05T14:36:11.552Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c09k2xje",
-      "note": "body,plan"
-    },
-    {
-      "at": "2026-08-05T14:36:11.064Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c04czzvb",
-      "note": "body,plan"
-    },
-    {
-      "at": "2026-08-05T14:36:10.525Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0z2v4l9",
-      "note": "body,plan"
-    },
-    {
-      "at": "2026-08-05T14:36:10.134Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0skl5w6",
-      "note": "body,plan"
-    },
-    {
-      "at": "2026-08-05T14:36:09.764Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0kfh1yl",
-      "note": "body,plan"
-    },
-    {
-      "at": "2026-08-05T14:36:09.398Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0c74q4f",
-      "note": "body,plan"
-    },
-    {
-      "at": "2026-08-05T14:36:09.033Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c04513m9",
-      "note": "body,plan"
-    },
-    {
-      "at": "2026-08-05T14:36:08.671Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0v2fuet",
-      "note": "body,plan"
-    },
-    {
-      "at": "2026-08-05T14:36:08.320Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0q2s3u5",
-      "note": "body,plan"
-    },
-    {
-      "at": "2026-08-05T14:36:07.950Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0kw5dh0",
-      "note": "body,plan"
     }
   ],
   "nextNum": 368,

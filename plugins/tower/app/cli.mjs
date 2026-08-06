@@ -35,6 +35,53 @@ function parseArgs(argv) {
   return { pos, flags };
 }
 
+// A flag a command does not read used to vanish in silence: `card add --text
+// "…"` created a card with an empty body, and a typo'd `--phase` on `card
+// update` no-oped. Every flag is declared here (camelCase, as parseArgs
+// normalizes it) and anything else is a usage error.
+const GLOBAL_FLAGS = ['json', 'by', 'file', 'stdin', 'color', 'help', 'data'];
+const COMMAND_FLAGS = {
+  init: ['name', 'dir'],
+  import: ['dir', 'name', 'force'],
+  serve: ['port', 'open', 'noWatch'],
+  status: [],
+  state: [],
+  card: ['title', 'body', 'kind', 'track', 'epoch', 'milestone', 'phase', 'priority', 'plan',
+    'workOrder', 'log', 'needsAcceptance', 'blockedBy', 'refs', 'tags', 'addTag', 'removeTag',
+    'tag', 'untagged', 'parent', 'lane', 'add', 'meet', 'verify', 'evidence', 'handoff', 'expectRev'],
+  decision: ['id', 'cardId', 'card', 'title', 'gist', 'lesson', 'story', 'explainer', 'inWild',
+    'detail', 'rec', 'group', 'ballotMode', 'shortAuthorizedBy', 'draft', 'ready', 'outcome',
+    'comment', 'quote', 'open', 'expectRev'],
+  question: ['card', 'decision', 'text', 'kind', 'open'],
+  message: ['card', 'text', 'status', 'all'],
+  papercut: ['card', 'text', 'open'],
+  idea: ['title', 'body', 'text', 'kind', 'track', 'priority', 'tags', 'note', 'all'],
+  epoch: ['name', 'goal', 'status'],
+  milestone: ['id', 'epoch', 'title', 'goal', 'criteria', 'status'],
+  next: ['agent', 'epoch', 'track', 'limit', 'burndown', 'parallel', 'readyAcrossEpochs'],
+  brief: ['agent', 'noClaim'],
+  lint: ['docs', 'docsRoot'],
+  docs: ['section', 'title', 'path', 'id', 'body', 'scratch'],
+  verdict: ['outcome', 'title'],
+  archive: [],
+  repair: ['manifest', 'dryRun', 'expectRev'],
+  events: ['limit'],
+  undo: ['expectRev'],
+  githook: [],
+};
+
+const spellFlag = (key) => `--${key.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`;
+
+function checkFlags(cmd, flags) {
+  const known = COMMAND_FLAGS[cmd];
+  if (!known) return; // unknown command — the dispatcher reports that instead
+  const unknown = Object.keys(flags).filter(f => !known.includes(f) && !GLOBAL_FLAGS.includes(f));
+  if (!unknown.length) return;
+  throw new TowerError('E_USAGE',
+    `unknown flag${unknown.length > 1 ? 's' : ''} for \`tower ${cmd}\`: `
+    + `${unknown.map(spellFlag).join(', ')} — run \`tower help\``);
+}
+
 const readPayload = (flags) => {
   if (flags.file === '-' || flags.stdin) return JSON.parse(readFileSync(0, 'utf8'));
   if (flags.file) return JSON.parse(readFileSync(flags.file, 'utf8'));
@@ -958,6 +1005,7 @@ export async function run(argv) {
   const sub = { pos: rest, flags };
   try {
     if (!cmd || cmd === 'help' || flags.help) return console.log(HELP);
+    checkFlags(cmd, flags);
     if (cmd === 'init') return cmdInit(sub);
     if (cmd === 'import') return cmdImport(sub);
 
