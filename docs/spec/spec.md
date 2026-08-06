@@ -2049,14 +2049,13 @@ Safe facts: `name`, `family`, `arch`, `cpu_count`, `temp_dir`, `executable`,
 `pid`/`getpid`, `hostname`, `username`, `release`, `version`, `getppid`,
 `getuid`, `geteuid`, `getgid`, `getegid`, `getgroups`, `getpgid`, `getpgrp`,
 `getsid`, `expand`, `uptime`, `loadavg`, `times`, `exitcode`, `success`,
-`sync`, `umask`, `getpriority`, `setpriority`, `utime`, `stop`, `atexit`,
-`set_current_dir`, `on_interrupt`.
+`sync`, `set_current_dir`, `on_interrupt`.
 
 POSIX process/session control requires an audited `#Unsafe("…")` region and a
 host-OS gate (`#Known if build.os` / `#Target(OS.*)`): `fork`, `setuid`,
 `setgid`, `setpgid`, `setpgrp`, `setsid`, `initgroups`, `kill`, `wait`,
-`waitpid`, `pipe`, `close_fd`, `mkfifo`, plus expert `umask` / `setpriority` /
-`utime` / `atexit` / `stop`. Those helpers do not fake POSIX
+`waitpid`, `pipe`, `close_fd`, `mkfifo`, `umask`, `getpriority`,
+`setpriority`, `utime`, `atexit`, `stop`. Those helpers do not fake POSIX
 semantics on Windows.
 
 Examples: `examples/features/io/os_facts.jet`,

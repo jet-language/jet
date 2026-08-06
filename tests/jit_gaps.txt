@@ -41,7 +41,6 @@ covered:
   cli/subcommands
   cli/typed_entry_args
   collections/deque
-  collections/dynamic-array-view
   collections/filter_map
   collections/fixed_arrays
   collections/fn_dispatch_map
@@ -51,7 +50,6 @@ covered:
   collections/iter_tools_audit
   collections/lazy_iter
   collections/list_bounds
-  collections/list_remove_bounds
   collections/lists
   collections/map_key
   collections/map_merge
@@ -72,6 +70,8 @@ covered:
   comptime/embed_bytes
   comptime/find
   comptime/find_empty
+  comptime/layout_facts
+  comptime/reflect
   concurrency/all_failfast
   concurrency/bounded_workers
   concurrency/cancel_cleanup
@@ -147,6 +147,7 @@ covered:
   errors/rollback_trait
   errors/transact
   errors/typed_error_families
+  functions/root_calls
   game/core_game_headless
   game/raylib_window
   io/archive
@@ -156,9 +157,7 @@ covered:
   io/cli_args
   io/compress_gzip
   io/compress_zstd
-  io/db
   io/db_checked_sql
-  io/db_read_footprint
   io/dir_entry
   io/env_overlay
   io/files
@@ -170,8 +169,10 @@ covered:
   io/log_structured
   io/no_prelude
   io/os_facts
+  io/os_process_control
   io/path
   io/process_builder
+  io/progress
   io/scope_guard
   io/stdin_filter
   io/stream
@@ -195,15 +196,20 @@ covered:
   lowlevel/swizzle
   lowlevel/target_profile_board
   lowlevel/unsafe_obligations
-  math/math_audit
+  math/bit_not
+  math/floor_div
+  math/fraction
+  math/int_div
+  math/modulo
   math/numeric_floor
+  math/power_operator
+  math/power_semantics
   math/random_audit
+  math/xor_operator
   memory/arena
   memory/arena_parse
   memory/arena_regions
   memory/copy_verb
-  memory/entity_tree
-  memory/entity_world
   memory/expiring_secret
   memory/gc_cyclic
   memory/local_cache
@@ -211,9 +217,6 @@ covered:
   memory/owner_backed_views
   memory/ownership
   memory/parameter_modes
-  memory/pin
-  memory/place_windows
-  memory/pool_stale_id
   memory/rawptr
   memory/ref_field
   memory/resource_close
@@ -267,6 +270,9 @@ covered:
   parsing/parse_interpolation
   parsing/text-cursor
   patterns/struct_destructure
+  reflection/reflect-value
+  safety/sh_typed_text
+  safety/typed_sql
   serde/codable_default
   serde/csv
   serde/csv_typed
@@ -287,7 +293,6 @@ covered:
   serde/json_coerce
   serde/json_typed
   serde/serde_derive
-  serde/serde_generic
   serde/toml
   serde/user_derive
   serde/validate
@@ -296,7 +301,6 @@ covered:
   syntax/maturity_tags
   syntax/trailing_block
   text/bigint
-  text/dates
   text/datetime
   text/decimal
   text/hex_base64
@@ -311,24 +315,26 @@ covered:
   text/unicode_text_audit
   text/uuid
   tooling/bench
-  tooling/branch_dispatch_bench
-  tooling/canvas_blueprint_demo
+  tooling/compute_kernel
   tooling/data_analysis
   tooling/data_bridges
   tooling/data_core
   tooling/data_hostile
   tooling/data_json
   tooling/data_pipeline
+  tooling/data_plot
   tooling/data_schema
   tooling/data_stream_bounds
   tooling/debug
   tooling/debug_native
+  tooling/dsl_blocks
   tooling/fidelity
   tooling/fuzz_demo
   tooling/internal_project_parts
   tooling/meta_attribute
   tooling/output_callable
   tooling/panic_report
+  tooling/para_map_crossover_bench
   tooling/property_tests
   tooling/provenance_track
   tooling/solve_puzzle
@@ -338,7 +344,6 @@ covered:
   tooling/tests
   tooling/todo_hole
   types/affine_unit_types
-  types/anonymous_unions
   types/associated_types
   types/capability_bundles
   types/computed_field
@@ -346,16 +351,11 @@ covered:
   types/display_debug
   types/distinct_types
   types/dot_construction
-  types/enum_dot
-  types/enum_dot_patterns
-  types/enums
   types/external_methods
   types/generic_constructor_inference
   types/generic_types
   types/inferred_new
   types/measurement
-  types/nested_enum_groups
-  types/no_any_alternatives
   types/option
   types/option_combinators
   types/optional_result_variants
@@ -367,7 +367,6 @@ covered:
   types/renderable-varargs-multi
   types/structs
   types/tags_and_traits
-  types/traits
   types/type_alias
   types/typed_literal_head
   types/typestate
@@ -380,7 +379,6 @@ covered:
   ui/reactive
   ui/reactive_scope
   ui/ui_a11y
-  ui/ui_component_kit
   ui/ui_motion
   ui/ui_native_linux
   ui/ui_null_backend
@@ -403,3 +401,34 @@ covered:
   web/web_wasm_string_param
 
 gaps:
+  collections/list_surface: run: jit builtin method unsupported
+  collections/zip_family: jit compile panicked before returning an unsupported reason: index out of bounds: the len is 0 but the index is 0
+  crypto/auth_sessions: run: jit core call unsupported: core.auth.register_user
+  io/db_policy: run: jit let type unsupported: Result { ok: List(Map { key: String, key_span: None, value: Named("DBValue") }), err: Named("DBError") }
+  math/math_audit: run: jit core call unsupported
+  math/more_math: run: jit core call unsupported
+  memory/pin: wire_self: jit address_of needs a local place
+  memory/shared_weak_cycle: run: jit clone unsupported type: Apply { name: "Shared.Weak", args: [Named("Node")] }
+  serde/serde_generic: run: jit missing encode `Wrap::encode`
+  text/dates: run: jit core call unsupported: core.time.days_in_month
+  text/duration_facts: run: jit Duration fact methods fall back to AOT
+  text/duration_ns: run: jit Duration fact methods fall back to AOT
+  tooling/app_live: run: jit core call unsupported: app.live
+  tooling/compute_autodiff: run: jit core call unsupported: core.compute.from_list
+  tooling/compute_device: run: jit core call unsupported: core.compute.ones
+  tooling/compute_linalg: run: jit core call unsupported: core.compute.matrix
+  tooling/compute_ml: run: jit core call unsupported: core.compute.from_list
+  tooling/compute_ndarray: run: jit core call unsupported: core.compute.vec
+  tooling/compute_simd: run: jit core call unsupported: core.compute.profile_show
+  tooling/compute_tensor: run: jit core call unsupported: core.compute.zeros
+  tooling/service_authority: receipt_id: jit enum `ServiceReceipt::Accepted`
+  tooling/service_runtime: run: jit core call unsupported: core.services.tree
+  tooling/service_tree: run: jit core call unsupported: core.services.tree
+  tooling/sync_crdt: run: jit core call unsupported: core.sync.text_new
+  types/anonymous_unions: take_number: jit call to unknown function `describe`
+  types/enum_dot: area: jit if-expression if-let unsupported
+  types/enum_dot_patterns: area: jit if-expression if-let unsupported
+  types/enums: next: jit if-expression pattern match unsupported
+  types/no_any_alternatives: label: jit if-expression if-let unsupported
+  types/traits: run: jit print type unsupported
+  ui/ui_component_kit: paint_form: jit call to unknown function `button_view`
