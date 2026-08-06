@@ -1519,9 +1519,21 @@ function competitorRows(surfaces, jetRows) {
   // Pool the witnesses of a classified capability across domains, so a name two
   // languages ship is scored once as a gap rather than held at one witness in
   // each domain that asks for it separately.
+  // Pooling only carries between containers that are *types*. A value or
+  // container protocol transfers from a List to a Map because both are things
+  // you hold; it does not transfer into a module namespace. `core.math` gains
+  // no `clear` because a List has one, and reading it that way invented gaps
+  // like `core.os.hash` and `core.time.push`.
+  const isTypeContainer = function (container) {
+    return Object.values(TYPE_CONTAINER).includes(container)
+      ? false
+      : !container.startsWith("core.") && container !== "app";
+  };
   const pooledWitnesses = new Map();
   for (const gap of gaps.values()) {
     if (!CROSS_DOMAIN_POOLED.has(gap.key)) continue;
+    if (!gap.containers.size) continue;
+    if (!Array.from(gap.containers).every(isTypeContainer)) continue;
     if (!pooledWitnesses.has(gap.key)) pooledWitnesses.set(gap.key, new Set());
     for (const language of Object.keys(gap.spellings)) {
       pooledWitnesses.get(gap.key).add(language);
