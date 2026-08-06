@@ -1347,6 +1347,7 @@ pub(crate) fn synthesize_delegation_method(
         pre: Vec::new(),
         post: Vec::new(),
         inline_foreign: None,
+        markers: Vec::new(),
         body: vec![body_stmt],
     }
 }
@@ -1425,6 +1426,7 @@ pub(crate) fn synthesize_default_method(
         pre: Vec::new(),
         post: Vec::new(),
         inline_foreign: None,
+        markers: Vec::new(),
         body: body.to_vec(),
     }
 }

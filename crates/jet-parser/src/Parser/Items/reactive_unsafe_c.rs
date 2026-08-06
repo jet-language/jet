@@ -260,6 +260,7 @@ impl<'a> Parser<'a> {
                     source,
                     source_span,
                 }),
+                markers: Vec::new(),
                 body: Vec::new(),
             };
             self.apply_function_markers(function, markers)

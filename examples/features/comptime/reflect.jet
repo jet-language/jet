@@ -4,13 +4,15 @@ derive T.Summarize {
     info :: T.reflect()
     tname :: info.name
     method :: info.methods[0].name
+    // D-REFLECT1: markers written on a method, not a hardcoded empty list.
+    method_marker :: info.methods[0].markers[0]
     pub_field :: info.fields[0].name
     hidden_pub :: info.fields[1].is_pub
     has_debug :: info.has_marker("Debug")
     emit("""
 impl $tname {{
     fn summary(self) => String {{
-        return "$tname/$method/$pub_field debug=$has_debug hidden_pub=$hidden_pub"
+        return "$tname/$method[$method_marker]/$pub_field debug=$has_debug hidden_pub=$hidden_pub"
     }}
 }}
 """)
@@ -25,6 +27,7 @@ struct Widget {
     pub label: String
     secret: Int
 
+    #Inline
     fn show(self) => String = ~self.label
 }
 

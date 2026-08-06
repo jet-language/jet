@@ -1211,6 +1211,18 @@ impl<'a> Parser<'a> {
                 }
             }
             self.policy_declarations.extend(policy);
+            // D-VERDICT-1455-1: keep the marker nodes on the callable. The
+            // typed fields above stay for codegen; consumers read these instead
+            // of rebuilding a marker from flags.
+            function.markers = ordered_markers
+                .iter()
+                .filter(|marker| {
+                    crate::Policy::applied_rule(&marker.name).is_some_and(|rule| {
+                        matches!(rule.status, crate::Policy::RuleStatus::Active)
+                    })
+                })
+                .cloned()
+                .collect();
             for marker in &ordered_markers {
                 self.bind_rule_fact(
                     marker.name_span,
