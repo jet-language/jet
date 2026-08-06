@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1462,
-    "rev": 25650,
+    "rev": 25653,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -79859,6 +79859,11 @@
         {
           "at": "2026-08-06",
           "by": "bd-review",
+          "text": "Review hold. Ignore the previous one-word log line; it was a command probe. Blocker: jet build on an indexed field compound power crashes the compiler. A probe with grid[0].power ^= 3 panics at crates/jet-foundation/src/AST/expressions.rs line 125, because TStmt::IndexFieldAssign in crates/jet-codegen/src/Codegen/TIR/emit/statements.rs line 1067 calls op.rust_spell() without the is_pow guard the plain assign has. jet run prints 8 for the same program. Minor: examples/features/math/xor_operator.jet is not formatter clean, so the criterion 7 evidence overstates the fmt result. Criteria 1 to 6 and 8 verified. Criterion 7 left unverified."
+        },
+        {
+          "at": "2026-08-06",
+          "by": "bd-review",
           "text": "test"
         },
         {
@@ -79949,7 +79954,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T13:33:32.504Z",
-      "updated": "2026-08-06T00:00:00.809Z",
+      "updated": "2026-08-06T00:00:11.901Z",
       "updatedBy": "bd-review",
       "claimedAt": "2026-08-05T23:32:05.831Z"
     },
@@ -79970,6 +79975,11 @@
       ],
       "assignee": "bd-exp",
       "log": [
+        {
+          "at": "2026-08-06",
+          "by": "bd-review",
+          "text": "Review hold. Three tier-parity blockers. One: a fixed-width compound power diverges. A probe with w := U8.{3} then w ^= 6 prints 729 under jet run and traps under jet build. apply_binop_to_var in crates/jet-jit/src/jit/lower_ctx.rs line 7250 returns lower_pow before the IntN branch, so the fixed-width path never reaches INTN_OP_POW. The same statement with *= traps on both tiers. Two: the JS web tier emits plain JavaScript **. binop in crates/jet-codegen/src/Codegen/Web.rs line 4789 feeds tir_js_expr at line 4410, and jet build --target=web wrote return (2 ** n) into build/app.js. JavaScript ** never traps on a negative exponent and is not exact. Three: the trap wording is written four times, in Prelude/Core/Power.rs, MathLayout.rs, Builtins.rs and runtime_host.rs, and it already differs. A U8 power overflow says this operation overflows under jet run and this power overflows under AOT. Separate concern for the owner: sema turns only a written negative exponent into a Float, so 2 ^ e with a computed negative e traps instead of giving a fraction. D-EXPSEM1=A says an Int raised to a negative Int is a Float. That narrowing is a new user-facing rule and needs a ballot. It was written into docs/spec/syntax-decisions.md as if it were ratified. Coverage note: every test in tests/power_and_exclusive_or.rs runs AOT or sema only, with literal operands the comptime folder resolves, so all three blockers pass the suite. Criteria 1 to 5 and 7 verified. Criterion 6 left unverified."
+        },
         {
           "at": "2026-08-05",
           "by": "bd-exp",
@@ -80049,7 +80059,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T13:33:32.817Z",
-      "updated": "2026-08-05T23:59:10.899Z",
+      "updated": "2026-08-06T00:00:25.761Z",
       "updatedBy": "bd-review",
       "claimedAt": "2026-08-05T23:32:36.179Z"
     },
@@ -80070,6 +80080,11 @@
       ],
       "assignee": "bd-exp",
       "log": [
+        {
+          "at": "2026-08-06",
+          "by": "bd-review",
+          "text": "Review pass on the exclusive-or work itself. All seven criteria verified independently. One minor: examples/features/math/xor_operator.jet is not formatter clean, because jet fmt collapses the loop body at lines 15 to 17 onto one line. The ~| and ~|= spellings round trip correctly. This card ships in the same commit as #1428 and #1429, which are on hold."
+        },
         {
           "at": "2026-08-05",
           "by": "bd-exp",
@@ -80149,7 +80164,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T13:33:33.119Z",
-      "updated": "2026-08-05T23:59:25.935Z",
+      "updated": "2026-08-06T00:00:26.128Z",
       "updatedBy": "bd-review",
       "claimedAt": "2026-08-05T23:32:57.701Z"
     },
@@ -108405,6 +108420,27 @@
   ],
   "events": [
     {
+      "at": "2026-08-06T00:00:26.128Z",
+      "by": "bd-review",
+      "action": "card.update",
+      "ref": "c0v2fuet",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-06T00:00:25.761Z",
+      "by": "bd-review",
+      "action": "card.update",
+      "ref": "c0q2s3u5",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-06T00:00:11.901Z",
+      "by": "bd-review",
+      "action": "card.update",
+      "ref": "c0kw5dh0",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-08-06T00:00:00.809Z",
       "by": "bd-review",
       "action": "card.update",
@@ -111882,27 +111918,6 @@
       "action": "card.release",
       "ref": "c0esko6c",
       "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-08-05T01:35:48.995Z",
-      "by": "fable",
-      "action": "card.add",
-      "ref": "c0h6q1j3",
-      "note": "hangar compat root: ABI isolation proof — no cross-universe library leakage"
-    },
-    {
-      "at": "2026-08-05T01:35:48.681Z",
-      "by": "fable",
-      "action": "card.add",
-      "ref": "c0bzkfdl",
-      "note": "jetos provenance query: file, command, and process to package, universe, and generation"
-    },
-    {
-      "at": "2026-08-05T01:35:33.561Z",
-      "by": "fable",
-      "action": "card.add",
-      "ref": "c0dxl32d",
-      "note": "jetos takeover: reversible in-place adoption from a running Linux host"
     }
   ],
   "nextNum": 368,
