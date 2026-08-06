@@ -277,15 +277,15 @@ fn run() {
     tree := services.tree("state")
     store :: services.state_store(store_path) ?? panic("state store")
     if adapter == "snapshot" {
-        services.set_state_snapshot(&tree, store, "app-state", 1) ?? panic("snapshot state")
+        services.set_state_snapshot(&tree, store, "app-state", 1, "reversible") ?? panic("snapshot state")
     } else {
         if adapter == "schema-drift" {
-            services.set_state_event_log(&tree, store, "other-events", 1) ?? panic("event state")
+            services.set_state_event_log(&tree, store, "other-events", 1, "reversible") ?? panic("event state")
         } else {
             if adapter == "version-drift" {
-                services.set_state_event_log(&tree, store, "app-state", 2) ?? panic("event state")
+                services.set_state_event_log(&tree, store, "app-state", 2, "reversible") ?? panic("event state")
             } else {
-                services.set_state_event_log(&tree, store, "app-state", 1) ?? panic("event state")
+                services.set_state_event_log(&tree, store, "app-state", 1, "reversible") ?? panic("event state")
             }
         }
     }
@@ -411,7 +411,7 @@ fn run() {
     phase :: env.get("JET_SERVICE_AUTH_PHASE") ?? panic("phase")
     tree := services.tree("workflows")
     store :: services.state_store(store_path) ?? panic("state store")
-    services.set_state_event_log(&tree, store, "wf-events", 1) ?? panic("state")
+    services.set_state_event_log(&tree, store, "wf-events", 1, "reversible") ?? panic("state")
     services.worker(&tree, "worker", 1) ?? panic("worker")
     services.start(&tree) ?? panic("start")
     if phase == "write" {
@@ -531,7 +531,7 @@ fn run() {
     temp := testing.temp_dir("service-failure")
     store_path :: path.join(temp, "delivery.state")
     store :: services.state_store(store_path) ?? panic("state store")
-    services.set_state_event_log(&tree, store, "delivery-events", 1) ?? panic("state")
+    services.set_state_event_log(&tree, store, "delivery-events", 1, "reversible") ?? panic("state")
     worker :: services.worker(&tree, "worker", 1) ?? panic("worker")
     services.start(&tree) ?? panic("start")
 
@@ -586,7 +586,7 @@ fn run() {
     snapshot := services.tree("snapshot")
     snapshot_store :: path.join(temp, "snapshot.state")
     snapshot_authority :: services.state_store(snapshot_store) ?? panic("snapshot store")
-    services.set_state_snapshot(&snapshot, snapshot_authority, "snapshot", 1) ?? panic("snapshot state")
+    services.set_state_snapshot(&snapshot, snapshot_authority, "snapshot", 1, "reversible") ?? panic("snapshot state")
     snapshot_worker :: services.worker(&snapshot, "worker", 2) ?? panic("snapshot worker")
     services.start(&snapshot) ?? panic("snapshot start")
     services.commit_snapshot(&snapshot, "state-v1") ?? panic("snapshot commit")
@@ -597,7 +597,7 @@ fn run() {
     events := services.tree("events")
     event_store :: path.join(temp, "events.state")
     event_authority :: services.state_store(event_store) ?? panic("event store")
-    services.set_state_event_log(&events, event_authority, "events", 1) ?? panic("event state")
+    services.set_state_event_log(&events, event_authority, "events", 1, "reversible") ?? panic("event state")
     event_worker :: services.worker(&events, "worker", 2) ?? panic("event worker")
     services.start(&events) ?? panic("event start")
     services.append_event(&events, "first") ?? panic("event one")
@@ -609,7 +609,7 @@ fn run() {
     workflow := services.tree("workflow")
     workflow_store_path :: path.join(temp, "workflow.state")
     workflow_store :: services.state_store(workflow_store_path) ?? panic("workflow store")
-    services.set_state_event_log(&workflow, workflow_store, "workflow-events", 1) ?? panic("workflow state")
+    services.set_state_event_log(&workflow, workflow_store, "workflow-events", 1, "reversible") ?? panic("workflow state")
     workflow_worker :: services.worker(&workflow, "worker", 2) ?? panic("workflow worker")
     services.start(&workflow) ?? panic("workflow start")
     run_id :: services.workflow_start(&workflow, "checkout", 1) ?? panic("workflow id")
@@ -692,7 +692,7 @@ fn run() {
     temp := testing.temp_dir("services-delivery-eventlog")
     store_path :: path.join(temp, "state.log")
     store :: services.state_store(store_path) ?? panic("state store")
-    services.set_state_event_log(&tree, store, "app-events", 1) ?? panic("state")
+    services.set_state_event_log(&tree, store, "app-events", 1, "reversible") ?? panic("state")
     worker :: services.worker(&tree, "a", 4) ?? panic("worker")
     services.start(&tree) ?? panic("start")
 
@@ -742,7 +742,7 @@ fn run() {
     snapshot_path :: path.join(temp, "snapshot.log")
     snap_tree := services.tree("snap")
     snap_store :: services.state_store(snapshot_path) ?? panic("snapshot store")
-    services.set_state_snapshot(&snap_tree, snap_store, "app-state", 1) ?? panic("snapshot adapter")
+    services.set_state_snapshot(&snap_tree, snap_store, "app-state", 1, "reversible") ?? panic("snapshot adapter")
     _snap_worker :: services.worker(&snap_tree, "a", 2) ?? panic("snapshot worker")
     services.start(&snap_tree) ?? panic("snapshot start")
     services.commit_snapshot(&snap_tree, "state-v1") ?? panic("commit")
@@ -751,7 +751,7 @@ fn run() {
     event_path :: path.join(temp, "events.log")
     log_tree := services.tree("log")
     log_store :: services.state_store(event_path) ?? panic("event store")
-    services.set_state_event_log(&log_tree, log_store, "app-events", 1) ?? panic("event adapter")
+    services.set_state_event_log(&log_tree, log_store, "app-events", 1, "reversible") ?? panic("event adapter")
     _log_worker :: services.worker(&log_tree, "a", 2) ?? panic("event worker")
     services.start(&log_tree) ?? panic("event start")
     services.append_event(&log_tree, "first") ?? panic("first event")
@@ -792,5 +792,117 @@ fn state_adapters_reopen_and_reject_corrupt_stores_default_run() {
     assert_eq!(
         stdout,
         "restored:state-v1\nreplay:first|second\ncorrupt:rejected\n"
+    );
+}
+
+/// The rollback path only does real work when the tree has a state adapter.
+/// With no adapter, `prepare_rollback` returns early and `restore_rollback`
+/// never touches the store, so a rollback test on a bare tree proves nothing
+/// about the durable body. This sets an adapter first, so the upgrade really
+/// copies the store aside and the rollback reads it back.
+const ROLLBACK_WITH_STATE_SOURCE: &str = r#"
+use core.env as env
+use core.services as services
+
+fn run() {
+    store_path :: env.get("JET_SERVICE_ROLLBACK_STORE") ?? panic("store")
+    policy :: env.get("JET_SERVICE_ROLLBACK_POLICY") ?? panic("policy")
+    tree := services.tree("cluster")
+    store :: services.state_store(store_path) ?? panic("state store")
+    services.set_state_event_log(&tree, store, "cluster-events", 1, policy) ?? panic("state")
+    endpoint :: services.worker(&tree, "api", 1) ?? panic("worker")
+    services.start(&tree) ?? panic("start")
+    services.append_event(&tree, "before-upgrade") ?? panic("append")
+    services.directory_register(&tree, "api", endpoint) ?? panic("register")
+    services.drain_worker(&tree, endpoint) ?? panic("drain")
+    services.handoff_generation(&tree) ?? panic("handoff")
+    receipt :: services.upgrade_receipt(tree) ?? panic("receipt")
+    print("receipt:{receipt}")
+    services.append_event(&tree, "after-upgrade") ?? panic("append after")
+    rolled :: services.rollback_generation(&tree)
+    if rolled == {
+        .Ok(generation) -> {
+            events :: services.replay_events(tree)
+            print("rolled:{generation}:{events}")
+        }
+        .Err(_) -> { print("rolled:refused") }
+    }
+    services.stop(&tree) ?? panic("stop")
+}
+"#;
+
+fn run_rollback_process(bin: &Path, store: &Path, policy: &str) -> (bool, String, String) {
+    let output = Command::new(bin)
+        .env("JET_SERVICE_ROLLBACK_STORE", store)
+        .env("JET_SERVICE_ROLLBACK_POLICY", policy)
+        .output()
+        .unwrap();
+    (
+        output.status.success(),
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+    )
+}
+
+/// A reversible migration copies the store aside on upgrade, so rolling back
+/// restores the events as they stood before it.
+#[test]
+fn a_reversible_migration_rolls_the_state_store_back() {
+    if !have_rustc() {
+        return;
+    }
+    let (dir, bin) = compile_restart_binary(ROLLBACK_WITH_STATE_SOURCE);
+    let store = dir.join("cluster.log");
+    let (ok, stdout, stderr) = run_rollback_process(&bin, &store, "reversible");
+    assert!(ok, "reversible rollback run failed: {stderr}");
+    assert!(
+        stdout.contains("rollback_available=true"),
+        "a reversible migration must offer a rollback: {stdout}"
+    );
+    assert!(
+        stdout.contains("rolled:1:before-upgrade"),
+        "rolling back must restore the store as it stood before the upgrade: {stdout}"
+    );
+    assert!(
+        !stdout.contains("after-upgrade"),
+        "the event written after the upgrade must not survive the rollback: {stdout}"
+    );
+}
+
+/// A forward-only migration refuses to roll back, and says so through the
+/// receipt rather than by silently doing nothing.
+#[test]
+fn a_forward_only_migration_refuses_to_roll_back() {
+    if !have_rustc() {
+        return;
+    }
+    let (dir, bin) = compile_restart_binary(ROLLBACK_WITH_STATE_SOURCE);
+    let store = dir.join("cluster.log");
+    let (ok, stdout, stderr) = run_rollback_process(&bin, &store, "forward_only");
+    assert!(ok, "forward-only run failed: {stderr}");
+    assert!(
+        stdout.contains("migration=forward_only"),
+        "the receipt must name the policy the adapter was opened under: {stdout}"
+    );
+    assert!(
+        stdout.contains("rollback_available=false"),
+        "a forward-only migration must not offer a rollback: {stdout}"
+    );
+}
+
+/// An unknown migration policy is a named error, not a silent default. The
+/// policy decides whether a rollback is possible at all, so guessing it is
+/// worse than refusing.
+#[test]
+fn an_unknown_migration_policy_is_refused() {
+    if !have_rustc() {
+        return;
+    }
+    let (dir, bin) = compile_restart_binary(ROLLBACK_WITH_STATE_SOURCE);
+    let store = dir.join("cluster.log");
+    let (ok, stdout, stderr) = run_rollback_process(&bin, &store, "whenever");
+    assert!(
+        !ok,
+        "an unknown migration policy must stop the program: {stdout}{stderr}"
     );
 }

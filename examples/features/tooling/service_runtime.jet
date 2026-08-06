@@ -10,7 +10,7 @@ fn run() {
     temp := testing.temp_dir("service-runtime")
     state_store :: path.join(temp, "state.log")
     store :: services.state_store(state_store) ?? panic("state store")
-    services.set_state_event_log(&tree, store, "app-events", 1) ?? panic("state")
+    services.set_state_event_log(&tree, store, "app-events", 1, "reversible") ?? panic("state")
     a :: services.worker(&tree, "a", 2) ?? panic("a")
     b :: services.worker(&tree, "b", 2) ?? panic("b")
     services.set_restart(&tree, services.restart_rest_for_one()) ?? panic("restart")

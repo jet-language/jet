@@ -1294,7 +1294,13 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
                         CtValue::Int(version) => *version,
                         _ => return Err(unsupported("service state version", span)),
                     };
-                    jet_services_set_state_snapshot(&mut tree, store, schema, version)
+                    let migration = ct_to_service_string(
+                        one(4)?,
+                        MAX_SERVICE_STATE_SCHEMA,
+                        "service state migration policy",
+                        span,
+                    )?;
+                    jet_services_set_state_snapshot(&mut tree, store, schema, version, migration)
                 }
                 _ => {
                     let store = ct_to_state_store(one(1)?, span)?;
@@ -1308,7 +1314,13 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
                         CtValue::Int(version) => *version,
                         _ => return Err(unsupported("service state version", span)),
                     };
-                    jet_services_set_state_event_log(&mut tree, store, schema, version)
+                    let migration = ct_to_service_string(
+                        one(4)?,
+                        MAX_SERVICE_STATE_SCHEMA,
+                        "service state migration policy",
+                        span,
+                    )?;
+                    jet_services_set_state_event_log(&mut tree, store, schema, version, migration)
                 }
             };
             Ok(match result {

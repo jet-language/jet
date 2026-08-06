@@ -364,13 +364,23 @@ fn jet_services_state_authority(
     store: &JetServiceStateStore,
     schema: String,
     version: i64,
+    migration: JetServiceMigration,
 ) -> Result<JetServiceStateAuthority, JetServiceError> {
-    jet_services_state_authority_with_migration(
-        store.path.clone(),
-        schema,
-        version,
-        JetServiceMigration::Reversible,
-    )
+    jet_services_state_authority_with_migration(store.path.clone(), schema, version, migration)
+}
+
+/// The migration policy a state adapter is opened under, named the way the
+/// author writes it. An unknown name is a policy error rather than a silent
+/// default, because the default decides whether a rollback is possible at all.
+fn jet_services_migration_from_name(name: &str) -> Result<JetServiceMigration, JetServiceError> {
+    match name {
+        "reversible" => Ok(JetServiceMigration::Reversible),
+        "dual_write" => Ok(JetServiceMigration::DualWrite),
+        "forward_only" => Ok(JetServiceMigration::ForwardOnly),
+        _ => Err(JetServiceError::Policy(format!(
+            "unknown migration policy {name:?}; write \"reversible\", \"dual_write\", or \"forward_only\""
+        ))),
+    }
 }
 
 fn jet_services_state_authority_with_migration(
@@ -411,18 +421,6 @@ fn jet_services_migration_name(migration: &JetServiceMigration) -> &'static str 
         JetServiceMigration::DualWrite => "dual_write",
         JetServiceMigration::ForwardOnly => "forward_only",
     }
-}
-
-fn jet_services_migration_reversible() -> JetServiceMigration {
-    JetServiceMigration::Reversible
-}
-
-fn jet_services_migration_dual_write() -> JetServiceMigration {
-    JetServiceMigration::DualWrite
-}
-
-fn jet_services_migration_forward_only() -> JetServiceMigration {
-    JetServiceMigration::ForwardOnly
 }
 
 fn jet_services_attach_state_authority(
@@ -1537,6 +1535,7 @@ fn jet_services_set_state_snapshot(
     store: JetServiceStateStore,
     schema: String,
     version: i64,
+    migration: String,
 ) -> Result<(), JetServiceError> {
     if tree.started {
         return Err(JetServiceError::Policy(
@@ -1548,7 +1547,8 @@ fn jet_services_set_state_snapshot(
             "cannot replace a state adapter after it has records".to_string(),
         ));
     }
-    let authority = jet_services_state_authority(&store, schema, version)?;
+    let migration = jet_services_migration_from_name(&migration)?;
+    let authority = jet_services_state_authority(&store, schema, version, migration)?;
     tree.state_adapter = JetServiceStateAdapter::Snapshot;
     tree.state_authority = Some(jet_services_attach_state_authority(
         &authority,
@@ -1562,6 +1562,7 @@ fn jet_services_set_state_event_log(
     store: JetServiceStateStore,
     schema: String,
     version: i64,
+    migration: String,
 ) -> Result<(), JetServiceError> {
     if tree.started {
         return Err(JetServiceError::Policy(
@@ -1573,7 +1574,8 @@ fn jet_services_set_state_event_log(
             "cannot replace a state adapter after it has records".to_string(),
         ));
     }
-    let authority = jet_services_state_authority(&store, schema, version)?;
+    let migration = jet_services_migration_from_name(&migration)?;
+    let authority = jet_services_state_authority(&store, schema, version, migration)?;
     tree.state_adapter = JetServiceStateAdapter::EventLog;
     tree.state_authority = Some(jet_services_attach_state_authority(
         &authority,

@@ -1189,6 +1189,10 @@ pub fn core_fixed_sig(
                 (read, Type::Named("ServiceStateStore".to_string())),
                 (read, Type::String),
                 (read, Type::Int),
+                // The migration policy the adapter is opened under. It decides
+                // whether a later rollback is possible, so it is written at the
+                // call rather than defaulted out of sight.
+                (read, Type::String),
             ],
             Some(result_ty(
                 Type::Named("Unit".into()),

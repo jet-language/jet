@@ -1215,20 +1215,22 @@ pub(crate) fn emit_tir_core_call(
             format!("{}(&mut ({}))", helper("jet_services_set_state_empty"), arg(0))
         }
         ("core.services", "set_state_snapshot") => format!(
-            "{}(&mut ({}), ({}).clone(), ({}).clone(), {})",
+            "{}(&mut ({}), ({}).clone(), ({}).clone(), {}, ({}).clone())",
             helper("jet_services_set_state_snapshot"),
             arg(0),
             arg(1),
             arg(2),
-            arg(3)
+            arg(3),
+            arg(4)
         ),
         ("core.services", "set_state_event_log") => format!(
-            "{}(&mut ({}), ({}).clone(), ({}).clone(), {})",
+            "{}(&mut ({}), ({}).clone(), ({}).clone(), {}, ({}).clone())",
             helper("jet_services_set_state_event_log"),
             arg(0),
             arg(1),
             arg(2),
-            arg(3)
+            arg(3),
+            arg(4)
         ),
         ("core.services", "commit_snapshot") => format!(
             "{}(&mut ({}), ({}).clone())",
