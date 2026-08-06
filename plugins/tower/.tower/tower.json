@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1483,
-    "rev": 25781,
+    "rev": 25784,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -81076,12 +81076,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-ul3-core",
-      "phase": "building",
+      "phase": "verify",
       "priority": "P0",
       "plan": "1. Generate a closed inventory from Collections.rs, module_items.rs, and fixed_sigs.rs. Do not trust prose as the source of shipped Jet methods.\n2. Select every Python builtin type and stdlib module Jet claims to cover. Use official Python docs to enumerate the matching public surface.\n3. Give every row a stable ID, Python member, Jet spelling, matched workflow, and one verdict: Jet wins, equal, Jet loses, or out of scope.\n4. Link every Jet-loses row to one live Tower card or open decision. Out-of-scope requires a ratified product-scope decision that explicitly says Jet does not compete for that workflow. A design decline does not remove a scored loss.\n5. Add deterministic checks for an unmapped shipped method, missing Python member, duplicate row, hidden exclusion, stale owner, source-table drift, or unratified scope exclusion.\n6. Store the durable ledger under docs and make #1398 consume it as its only workflow inventory. Do not create a second benchmark framework.\n7. A fresh reviewer checks closure against both source tables and official Python docs.\nblockedBy: none.",
       "blockedBy": [],
       "assignee": "bd-ledger",
       "log": [
+        {
+          "at": "2026-08-06",
+          "by": "bd-ledger",
+          "text": "Round five fixed. Losses moved down to 625, exactly the predicted low single digits. Wins rose to 386 because the qualifier rule was restricted to suffixes that genuinely restate a workflow, which pushed several rows back out of equal onto their own merits. Equals fell to 493. Card #1468 is cleared: core.tasks now shows 19 Jet members."
+        },
         {
           "at": "2026-08-06",
           "by": "bd-ledger",
@@ -81130,8 +81135,8 @@
           "status": "met",
           "metBy": "bd-ledger",
           "verifiedBy": null,
-          "evidence": "The Jet method tables are now discovered from Collections.rs rather than hand-listed: 60 tables instead of 42, and 1431 Jet-side rows. The reader handles all three ways a table is written in that file, attributes builtin_static_return arms to the type each names, and reads every Syntax module. All seven proven false losses are resolved and core.reflect went from 1 Jet member to 10. A bidirectional fixture fails by name when a table is dropped from the ledger or added to the compiler.",
-          "at": "2026-08-06T02:47:51.480Z"
+          "evidence": "Discovery is now keyed on dispatch rather than on names. It walks out from builtin_method_return, follows dispatched and tail calls, and reads other modules, so Numeric.rs bigint_method_return and decimal_method_return are read. methodNames resolves all five ways a table names a method: string literals, Syntax constants, matches! over constants, if let over constants, constant arrays, and one level of helper. Duration went 0 to 1, TaskList 0 to 7, Task 1 to 7. 51 merged containers, 1470 Jet-side rows. The gate now fails when a mapped table yields nothing and when a declared container receives nothing; that gate immediately caught numeric_conversion_return returning zero.",
+          "at": "2026-08-06T03:07:50.442Z"
         },
         {
           "n": 2,
@@ -81193,9 +81198,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T18:12:13.321Z",
-      "updated": "2026-08-06T02:58:33.991Z",
-      "updatedBy": "bd-review-ledger4",
-      "claimedAt": "2026-08-06T02:58:33.291Z"
+      "updated": "2026-08-06T03:07:50.805Z",
+      "updatedBy": "bd-ledger",
+      "claimedAt": "2026-08-06T03:07:50.805Z"
     },
     {
       "id": "c0fmfiwg",
@@ -82306,6 +82311,11 @@
         {
           "at": "2026-08-06",
           "by": "fable",
+          "text": "Cleared. The corrected ledger reads Task, TaskList and Duration correctly and core.tasks now shows 19 Jet members. The three false rows are gone. Size this card from the current cluster row."
+        },
+        {
+          "at": "2026-08-06",
+          "by": "fable",
           "text": "Hold before starting. A ledger review proved that Task.cancel, Task.wait and TaskList.wait_all already ship at Collections.rs:1202 and :802, with constants in Syntax/effects_surface.rs and working examples in task_controls.jet and task_group_helpers.jet. They were scored as gaps by a broken extractor. Wait for the corrected ledger."
         }
       ],
@@ -82317,7 +82327,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T02:13:30.630Z",
-      "updated": "2026-08-06T02:58:33.668Z",
+      "updated": "2026-08-06T03:07:51.175Z",
       "updatedBy": "fable"
     },
     {
@@ -109245,6 +109255,27 @@
   ],
   "events": [
     {
+      "at": "2026-08-06T03:07:51.176Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c02j5hzk",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-06T03:07:50.805Z",
+      "by": "bd-ledger",
+      "action": "card.update",
+      "ref": "c00ms1om",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T03:07:50.442Z",
+      "by": "bd-ledger",
+      "action": "card.criteria-meet",
+      "ref": "c00ms1om",
+      "note": "#1"
+    },
+    {
       "at": "2026-08-06T03:00:24.558Z",
       "by": "bd-markers",
       "action": "card.update",
@@ -112722,27 +112753,6 @@
       "action": "card.criteria-add",
       "ref": "c0z2v4l9",
       "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-08-05T13:56:38.538Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0z2v4l9",
-      "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-08-05T13:56:38.538Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0z2v4l9",
-      "note": "#2 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-08-05T13:56:38.538Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0z2v4l9",
-      "note": "#1 Syntax.rs entry updated"
     }
   ],
   "nextNum": 368,
