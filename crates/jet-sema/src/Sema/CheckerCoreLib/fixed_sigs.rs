@@ -343,14 +343,40 @@ pub fn core_fixed_sig(
         )),
         ("core.env", "current_dir") => Some((vec![], Some(result_ty(Type::String, io_error_ty())))),
         ("core.env", "home_dir") => Some((vec![], Some(Type::Option(Box::new(Type::String))))),
-        ("core.os", "name" | "family" | "arch" | "temp_dir" | "executable" | "hostname" | "username") => {
+        ("core.os", "name" | "family" | "arch" | "temp_dir" | "executable" | "hostname" | "username"
+            | "release" | "version") => {
             Some((vec![], Some(Type::String)))
         }
-        ("core.os", "pid" | "cpu_count") => Some((vec![], Some(Type::Int))),
+        ("core.os", "expand") => Some((vec![(read, Type::String)], Some(Type::String))),
+        ("core.os", "pid" | "getpid" | "cpu_count" | "getppid" | "getuid" | "geteuid" | "getgid"
+            | "getegid" | "getpgrp") => Some((vec![], Some(Type::Int))),
+        ("core.os", "umask" | "exitcode") => Some((vec![(read, Type::Int)], Some(Type::Int))),
+        ("core.os", "success") => Some((vec![(read, Type::Int)], Some(Type::Bool))),
+        ("core.os", "uptime") => Some((vec![], Some(Type::Float))),
+        ("core.os", "getgroups") => Some((vec![], Some(Type::List(Box::new(Type::Int))))),
+        ("core.os", "loadavg" | "times") => {
+            Some((vec![], Some(Type::List(Box::new(Type::Float)))))
+        }
+        ("core.os", "getpgid" | "getsid") => {
+            Some((vec![(read, Type::Int)], Some(result_ty(Type::Int, io_error_ty()))))
+        }
+        ("core.os", "getpriority") => {
+            Some((vec![(read, Type::Int)], Some(result_ty(Type::Int, io_error_ty()))))
+        }
+        ("core.os", "setpriority") => Some((
+            vec![(read, Type::Int), (read, Type::Int)],
+            Some(result_ty(unit_ty(), io_error_ty())),
+        )),
+        ("core.os", "utime") => Some((
+            vec![(read, Type::String), (read, Type::Int), (read, Type::Int)],
+            Some(result_ty(unit_ty(), io_error_ty())),
+        )),
+        ("core.os", "sync") => Some((vec![], None)),
+        ("core.os", "stop") => Some((vec![(read, Type::Int)], None)),
         ("core.os", "set_current_dir") => {
             Some((vec![(read, Type::String)], Some(result_ty(unit_ty(), io_error_ty()))))
         }
-        ("core.os", "on_interrupt") => Some((
+        ("core.os", "on_interrupt" | "atexit") => Some((
             vec![(
                 read,
                 Type::Fn {
@@ -361,6 +387,35 @@ pub fn core_fixed_sig(
                 },
             )],
             None,
+        )),
+        ("core.os", "fork" | "setsid" | "wait") => {
+            Some((vec![], Some(result_ty(Type::Int, io_error_ty()))))
+        }
+        ("core.os", "waitpid") => Some((
+            vec![(read, Type::Int), (read, Type::Int)],
+            Some(result_ty(Type::Int, io_error_ty())),
+        )),
+        ("core.os", "setuid" | "setgid") => Some((
+            vec![(read, Type::Int)],
+            Some(result_ty(unit_ty(), io_error_ty())),
+        )),
+        ("core.os", "setpgrp") => Some((vec![], Some(result_ty(unit_ty(), io_error_ty())))),
+        ("core.os", "setpgid" | "kill") => Some((
+            vec![(read, Type::Int), (read, Type::Int)],
+            Some(result_ty(unit_ty(), io_error_ty())),
+        )),
+        ("core.os", "initgroups") => Some((
+            vec![(read, Type::String), (read, Type::Int)],
+            Some(result_ty(unit_ty(), io_error_ty())),
+        )),
+        ("core.os", "pipe") => Some((
+            vec![],
+            Some(result_ty(Type::List(Box::new(Type::Int)), io_error_ty())),
+        )),
+        ("core.os", "close_fd") => Some((vec![(read, Type::Int)], None)),
+        ("core.os", "mkfifo") => Some((
+            vec![(read, Type::String), (read, Type::Int)],
+            Some(result_ty(unit_ty(), io_error_ty())),
         )),
         // U13 (D-JPK-SECRETCRYPTO1): `core.vault.get(name)` — a decrypted repo
         // secret, `None` if `name` isn't in the store. Same "may be missing"

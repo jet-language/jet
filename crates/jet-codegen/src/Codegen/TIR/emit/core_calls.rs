@@ -576,15 +576,88 @@ pub(crate) fn emit_tir_core_call(
         ("core.os", "cpu_count") => format!("{}()", helper("jet_std_os_cpu_count")),
         ("core.os", "temp_dir") => format!("{}()", helper("jet_std_os_temp_dir")),
         ("core.os", "executable") => format!("{}()", helper("jet_std_os_executable")),
-        ("core.os", "pid") => format!("{}()", helper("jet_std_os_pid")),
+        ("core.os", "pid" | "getpid") => format!("{}()", helper("jet_std_os_pid")),
         ("core.os", "hostname") => format!("{}()", helper("jet_std_os_hostname")),
         ("core.os", "username") => format!("{}()", helper("jet_std_os_username")),
+        ("core.os", "release") => format!("{}()", helper("jet_std_os_release")),
+        ("core.os", "version") => format!("{}()", helper("jet_std_os_version")),
+        ("core.os", "expand") => format!("{}(&({}))", helper("jet_std_os_expand"), arg(0)),
+        ("core.os", "getppid") => format!("{}()", helper("jet_std_os_getppid")),
+        ("core.os", "getuid") => format!("{}()", helper("jet_std_os_getuid")),
+        ("core.os", "geteuid") => format!("{}()", helper("jet_std_os_geteuid")),
+        ("core.os", "getgid") => format!("{}()", helper("jet_std_os_getgid")),
+        ("core.os", "getegid") => format!("{}()", helper("jet_std_os_getegid")),
+        ("core.os", "getgroups") => format!("{}()", helper("jet_std_os_getgroups")),
+        ("core.os", "getpgrp") => format!("{}()", helper("jet_std_os_getpgrp")),
+        ("core.os", "uptime") => format!("{}()", helper("jet_std_os_uptime")),
+        ("core.os", "loadavg") => format!("{}()", helper("jet_std_os_loadavg")),
+        ("core.os", "times") => format!("{}()", helper("jet_std_os_times")),
+        ("core.os", "sync") => format!("{}()", helper("jet_std_os_sync")),
+        ("core.os", "getpgid") => format!("{}({})", helper("jet_std_os_getpgid"), arg(0)),
+        ("core.os", "getsid") => format!("{}({})", helper("jet_std_os_getsid"), arg(0)),
+        ("core.os", "exitcode") => format!("{}({})", helper("jet_std_os_exitcode"), arg(0)),
+        ("core.os", "success") => format!("{}({})", helper("jet_std_os_success"), arg(0)),
+        ("core.os", "umask") => format!("{}({})", helper("jet_std_os_umask"), arg(0)),
+        ("core.os", "getpriority") => format!("{}({})", helper("jet_std_os_getpriority"), arg(0)),
+        ("core.os", "setpriority") => format!(
+            "{}({}, {})",
+            helper("jet_std_os_setpriority"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.os", "utime") => format!(
+            "{}(&({}), {}, {})",
+            helper("jet_std_os_utime"),
+            arg(0),
+            arg(1),
+            arg(2)
+        ),
+        ("core.os", "stop") => format!("{}({})", helper("jet_std_os_stop"), arg(0)),
         ("core.os", "set_current_dir") => {
             format!("{}(&({}))", helper("jet_std_os_set_current_dir"), arg(0))
         }
         ("core.os", "on_interrupt") => {
             format!("{}({})", helper("jet_std_os_on_interrupt"), arg(0))
         }
+        ("core.os", "atexit") => format!("{}({})", helper("jet_std_os_atexit"), arg(0)),
+        ("core.os", "fork") => format!("{}()", helper("jet_std_os_fork")),
+        ("core.os", "setuid") => format!("{}({})", helper("jet_std_os_setuid"), arg(0)),
+        ("core.os", "setgid") => format!("{}({})", helper("jet_std_os_setgid"), arg(0)),
+        ("core.os", "setpgid") => format!(
+            "{}({}, {})",
+            helper("jet_std_os_setpgid"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.os", "setpgrp") => format!("{}()", helper("jet_std_os_setpgrp")),
+        ("core.os", "setsid") => format!("{}()", helper("jet_std_os_setsid")),
+        ("core.os", "initgroups") => format!(
+            "{}(&({}), {})",
+            helper("jet_std_os_initgroups"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.os", "kill") => format!(
+            "{}({}, {})",
+            helper("jet_std_os_kill"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.os", "wait") => format!("{}()", helper("jet_std_os_wait")),
+        ("core.os", "waitpid") => format!(
+            "{}({}, {})",
+            helper("jet_std_os_waitpid"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.os", "pipe") => format!("{}()", helper("jet_std_os_pipe")),
+        ("core.os", "close_fd") => format!("{}({})", helper("jet_std_os_close_fd"), arg(0)),
+        ("core.os", "mkfifo") => format!(
+            "{}(&({}), {})",
+            helper("jet_std_os_mkfifo"),
+            arg(0),
+            arg(1)
+        ),
         ("core.process", "exit") => format!("{}({})", helper("jet_std_process_exit"), arg(0)),
         ("core.process", "run") => format!("{}(&({}))", helper("jet_std_process_run"), arg(0)),
         ("core.process", "cmd") => format!("{}(&({}))", helper("jet_std_process_cmd"), arg(0)),

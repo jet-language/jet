@@ -827,6 +827,9 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
     if needs_fs_runtime {
         out.push_str(include_str!("../Prelude/CoreLib/Top/TestingShared.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/FSIoEnvOsTesting.rs"));
+        // #1465: identity / release / POSIX control — after FSIoEnvOsTesting so
+        // jet_std_os_pid / env helpers and jet_std_process_exit stay in scope.
+        out.push_str(include_str!("../Prelude/CoreLib/Top/OsExtra.rs"));
     }
     if needs_crypto {
         // CryptoEntropy already in kernel closure (TLS identity + JetStd).

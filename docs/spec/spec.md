@@ -2029,6 +2029,28 @@ Jet ships:
 Examples: `examples/features/math/math_audit.jet`,
 `examples/features/math/more_math.jet`, `examples/features/math/fraction.jet`.
 
+### `core.os` (D-OSFACTS1, ledger #1465)
+
+System facts and process identity live in `core.os`. Environment variables and
+cwd/home stay in `core.env`. Subprocess run/exit stay in `core.process`.
+
+Safe facts: `name`, `family`, `arch`, `cpu_count`, `temp_dir`, `executable`,
+`pid`/`getpid`, `hostname`, `username`, `release`, `version`, `getppid`,
+`getuid`, `geteuid`, `getgid`, `getegid`, `getgroups`, `getpgid`, `getpgrp`,
+`getsid`, `expand`, `uptime`, `loadavg`, `times`, `exitcode`, `success`,
+`sync`, `umask`, `getpriority`, `setpriority`, `utime`, `stop`, `atexit`,
+`set_current_dir`, `on_interrupt`.
+
+POSIX process/session control requires an audited `#Unsafe("…")` region and a
+host-OS gate (`#Known if build.os` / `#Target(OS.*)`): `fork`, `setuid`,
+`setgid`, `setpgid`, `setpgrp`, `setsid`, `initgroups`, `kill`, `wait`,
+`waitpid`, `pipe`, `close_fd`, `mkfifo`, plus expert `umask` / `setpriority` /
+`utime` / `atexit` / `stop`. Those helpers do not fake POSIX
+semantics on Windows.
+
+Examples: `examples/features/io/os_facts.jet`,
+`examples/features/io/os_process_control.jet`.
+
 D-CORE-COMPRESS1=A splits compression by job. `core.compress.gzip` and
 `core.compress.zstd` are the only byte-stream codec homes; both expose
 `compress` and fallible `decompress`. `core.archive` exposes zip/tar container

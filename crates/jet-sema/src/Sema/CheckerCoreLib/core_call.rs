@@ -471,6 +471,36 @@ impl<'a> Checker<'a> {
                 }
                 return None;
             }
+            // #1465 / I1: POSIX process/session control is expert-tier.
+            if module == "core.os"
+                && matches!(
+                    name,
+                    "fork"
+                        | "setuid"
+                        | "setgid"
+                        | "setpgid"
+                        | "setpgrp"
+                        | "setsid"
+                        | "initgroups"
+                        | "kill"
+                        | "wait"
+                        | "waitpid"
+                        | "pipe"
+                        | "close_fd"
+                        | "mkfifo"
+                        | "umask"
+                        | "setpriority"
+                        | "utime"
+                        | "atexit"
+                        | "stop"
+                )
+                && !self.in_unsafe
+            {
+                self.diags.push(super::alloc_ptrs::e3101(
+                    &format!("os.{name}"),
+                    span,
+                ));
+            }
             // E2-M16 / E3403: a `pure fn` cannot reach a non-deterministic std call
             // (time/random). `jet eval --pure` requires every fn to be `pure`, so
             // this covers the --pure path too.
@@ -3764,6 +3794,39 @@ impl<'a> Checker<'a> {
                         name: crate::Syntax::EXPIRING_VALUE_TYPE.to_string(),
                         args: vec![value_ty],
                     });
+                }
+                // #1465: POSIX process/session control requires `#Unsafe` (I1).
+                (
+                    "core.os",
+                    "fork"
+                        | "setuid"
+                        | "setgid"
+                        | "setpgid"
+                        | "setpgrp"
+                        | "setsid"
+                        | "initgroups"
+                        | "kill"
+                        | "wait"
+                        | "waitpid"
+                        | "pipe"
+                        | "close_fd"
+                        | "mkfifo"
+                        | "umask"
+                        | "setpriority"
+                        | "utime"
+                        | "atexit"
+                        | "stop",
+                ) => {
+                    if !self.in_unsafe {
+                        self.diags.push(Diagnostic::error(
+                            "E3101",
+                            format!("`core.os.{name}` requires an audited `#Unsafe` region"),
+                            "POSIX process and session control can change credentials, signals, and process topology (I1)".to_string(),
+                            format!("wrap the call in `#Unsafe(\"posix {name}: …\") {{ … }}` and gate the host OS with `#Known if build.os` / `#Target(OS.*)`"),
+                            Some(span),
+                        ));
+                    }
+                    // Continue into shared fixed-signature checking below.
                 }
                 // D-CRYPTOENV1=A: expert-only raw crypto — requires import + #Unsafe gate.
                 ("core.crypto.expert" | "core.vault.expert", _) => {
