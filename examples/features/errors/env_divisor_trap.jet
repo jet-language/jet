@@ -1,9 +1,10 @@
-// #1483: dividing by an env-derived value traps at runtime with the Prelude
+// #1483: dividing by an args-derived value traps at runtime with the Prelude
 // wording — never E0953 "your comptime code stopped the build".
-use core.env as env
+// Argv is read at run time (I9 with AOT); missing arg falls through to 0.
+use core.io as io
 
 fn run() {
-    raw :: env.get("JET_EXAMPLE_DIVISOR") ?? "0"
+    raw :: io.args().get(1) ?? "0"
     n :: 10 /% (Int.parse(raw) ?? 0)
     print(n)
 }
