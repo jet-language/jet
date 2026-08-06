@@ -388,13 +388,15 @@ fn checked_bundle(file: &str) -> Result<ProgramBundle, Vec<Diagnostic>> {
             Ok(mut bundle) => {
                 crate::RunCache::note_check();
                 let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Run);
-                let errors: Vec<Diagnostic> = diags
-                    .into_iter()
-                    .filter(|d| matches!(d.severity, crate::Diagnostics::Severity::Error))
-                    .collect();
-                if !errors.is_empty() {
-                    return Err(errors);
-                }
+                // Same gate as `jet build` / entry-swap: recoverable parse
+                // teaching must not disappear on the default `jet run` path.
+                // Extension hooks are empty here (no plugin session on plain run);
+                // `compile_bundle_path_opts_full` still passes them on the build path.
+                let _lints = crate::Driver::gate_diagnostics(
+                    std::mem::take(&mut bundle.parse_teaching),
+                    diags,
+                    Vec::new(),
+                )?;
                 Ok(bundle)
             }
             Err(diags) => Err(diags),

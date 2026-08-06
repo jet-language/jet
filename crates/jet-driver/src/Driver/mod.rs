@@ -6,6 +6,35 @@
 use crate::Diagnostics::{Diagnostic, Severity};
 use std::path::Path;
 
+/// One diagnostic gate shared by `jet build`, `jet run`, `jet dev`, and check.
+///
+/// Surfaces what parser recovery (`parse_teaching`) and sema (+ optional
+/// extension hooks) already produced. Does not re-check anything (I3).
+/// Returns lints on success; errors on failure.
+pub fn gate_diagnostics(
+    parse_teaching: Vec<Diagnostic>,
+    sema: Vec<Diagnostic>,
+    extension: Vec<Diagnostic>,
+) -> Result<Vec<Diagnostic>, Vec<Diagnostic>> {
+    let mut errors = Vec::new();
+    let mut lints = Vec::new();
+    for diagnostic in parse_teaching
+        .into_iter()
+        .chain(sema)
+        .chain(extension)
+    {
+        match diagnostic.severity {
+            Severity::Error => errors.push(diagnostic),
+            Severity::Lint => lints.push(diagnostic),
+        }
+    }
+    if errors.is_empty() {
+        Ok(lints)
+    } else {
+        Err(errors)
+    }
+}
+
 /// Main pipeline: load from file path → sema → ffi → codegen.
 ///
 /// D-OSTARGET1=A (ratified 2026-07-01, c134): `cross_target` is the raw
@@ -414,18 +443,7 @@ fn target_profile_usage_for_file(
 ) -> Result<crate::TargetProfile::TargetProfileUse, Vec<Diagnostic>> {
     let mut bundle = crate::Loader::load_entry_with_overlay(file, None, false)?;
     let diags = crate::Sema::check_bundle(&mut bundle, mode);
-    let mut errors = Vec::new();
-    for d in std::mem::take(&mut bundle.parse_teaching)
-        .into_iter()
-        .chain(diags)
-    {
-        if d.severity == Severity::Error {
-            errors.push(d);
-        }
-    }
-    if !errors.is_empty() {
-        return Err(errors);
-    }
+    let _lints = gate_diagnostics(std::mem::take(&mut bundle.parse_teaching), diags, Vec::new())?;
     let mmio = collect_mmio_usage(&bundle);
     let mut core_apis: Vec<String> = bundle.used_core.into_iter().collect();
     core_apis.sort();
@@ -2987,29 +3005,14 @@ fn compile_bundle_path_opts_full(
     }
     let extension_diags =
         crate::CompilerExtensionHook::post_sema_diagnostics(&bundle, None, &diags);
-    // U11 (D-JPK-SCRIPTDEP1=A) and any other loader-time teaching diagnostic
-    // (`bundle.parse_teaching`) ride the same errors/lints split as sema's —
-    // `check_file` already does this for `jet check`/LSP; `jet run`/`build`
-    // was dropping them on the floor (parse_teaching had no active producer
-    // before U11's L0203, so the gap went unnoticed).
-    let mut errors = Vec::new();
-    let mut lints = Vec::new();
     // Freestanding / impure / output / default compile variants here do not
     // surface `SemIndexEffectFacts`. Pass `None` so the hook omits
     // `ReadEffects` honestly — never invent placeholders (D-DX5-HOOK1).
-    for d in std::mem::take(&mut bundle.parse_teaching)
-        .into_iter()
-        .chain(diags)
-        .chain(extension_diags)
-    {
-        match d.severity {
-            Severity::Error => errors.push(d),
-            Severity::Lint => lints.push(d),
-        }
-    }
-    if !errors.is_empty() {
-        return Err(errors);
-    }
+    let lints = gate_diagnostics(
+        std::mem::take(&mut bundle.parse_teaching),
+        diags,
+        extension_diags,
+    )?;
     let ffi_result = match cross_target {
         Some(target) => crate::FFI::prepare_for_target(&bundle, target),
         None => crate::FFI::prepare(&bundle),
@@ -3622,25 +3625,13 @@ pub fn compile_bundle_path_with_entry(
     let diags = crate::Sema::check_bundle(&mut bundle, mode);
     let extension_diags =
         crate::CompilerExtensionHook::post_sema_diagnostics(&bundle, None, &diags);
-    // U11 (D-JPK-SCRIPTDEP1=A): see the matching comment in
-    // `compile_bundle_path_opts_dbg` — `parse_teaching` rides along here too.
-    let mut errors = Vec::new();
-    let mut lints = Vec::new();
     // Entry-swap uses plain `check_bundle` (no effect-facts return). Pass
     // `None` → omit `ReadEffects`; do not invent effect rows (D-DX5-HOOK1).
-    for d in std::mem::take(&mut bundle.parse_teaching)
-        .into_iter()
-        .chain(diags)
-        .chain(extension_diags)
-    {
-        match d.severity {
-            Severity::Error => errors.push(d),
-            Severity::Lint => lints.push(d),
-        }
-    }
-    if !errors.is_empty() {
-        return Err(errors);
-    }
+    let lints = gate_diagnostics(
+        std::mem::take(&mut bundle.parse_teaching),
+        diags,
+        extension_diags,
+    )?;
     let ffi = match crate::FFI::prepare(&bundle) {
         Ok(link) => link,
         Err(ffi_diags) => return Err(ffi_diags),
