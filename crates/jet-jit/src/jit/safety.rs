@@ -643,16 +643,19 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             }
             if module == "core.io" {
                 return match method.as_str() {
-                    "args" => args.is_empty(),
-                    "progress" if (1..=3).contains(&args.len()) => {
+                    "args" | "readline" | "buffered" => args.is_empty(),
+                    "print" | "println" | "eprint" | "sprint" | "repr" | "take"
+                    | "read_until" | "binread" | "input" | "confirm" | "input_secret"
+                    | "read_all_input" | "stdin" | "stdout" | "stderr"
+                    | "terminal_width" | "terminal_height" => {
                         args.iter().all(|arg| resident_safe_expr(arg, callees))
                     }
-                    "confirm" | "input_secret" => {
-                        args.len() == 1 && resident_safe_expr(&args[0], callees)
-                    }
-                    "choose" => {
+                    "binwrite" | "choose" | "style" | "style_force" => {
                         args.len() == 2
                             && args.iter().all(|arg| resident_safe_expr(arg, callees))
+                    }
+                    "progress" if (1..=3).contains(&args.len()) => {
+                        args.iter().all(|arg| resident_safe_expr(arg, callees))
                     }
                     _ => false,
                 };

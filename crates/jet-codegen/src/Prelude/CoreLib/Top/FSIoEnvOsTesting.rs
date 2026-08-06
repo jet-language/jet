@@ -386,6 +386,95 @@ fn jet_std_io_stdin_read_line(r: &mut JetStdinReader) -> Result<Option<String>, 
     }
 }
 
+// #1480: free-function spellings the Core surface ledger scores against peers.
+fn jet_std_io_readline() -> Result<String, jet_std::IOError> {
+    jet_std_io_input(None)
+}
+
+fn jet_std_io_read_until(delim: &String) -> Result<String, jet_std::IOError> {
+    use std::io::Read;
+    if delim.is_empty() {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Read,
+            Some("stdin".to_string()),
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "empty delimiter"),
+        ));
+    }
+    let needle = delim.as_bytes();
+    let mut stdin = std::io::stdin().lock();
+    let mut out = Vec::new();
+    let mut window = Vec::new();
+    let mut buf = [0u8; 1];
+    loop {
+        match stdin.read(&mut buf) {
+            Ok(0) => break,
+            Ok(_) => {
+                out.push(buf[0]);
+                window.push(buf[0]);
+                if window.len() > needle.len() {
+                    window.remove(0);
+                }
+                if window.as_slice() == needle {
+                    out.truncate(out.len() - needle.len());
+                    break;
+                }
+            }
+            Err(e) => {
+                return Err(jet_std::IOError::other(
+                    jet_std::IOOperation::Read,
+                    Some("stdin".to_string()),
+                    e,
+                ))
+            }
+        }
+    }
+    String::from_utf8(out).map_err(|e| {
+        jet_std::IOError::other(
+            jet_std::IOOperation::Read,
+            Some("stdin".to_string()),
+            std::io::Error::new(std::io::ErrorKind::InvalidData, e),
+        )
+    })
+}
+
+fn jet_std_io_take(n: i64) -> Result<Vec<u8>, jet_std::IOError> {
+    use std::io::Read;
+    if n < 0 {
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Read,
+            Some("stdin".to_string()),
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "negative take"),
+        ));
+    }
+    let mut buf = vec![0u8; n as usize];
+    let read = std::io::stdin()
+        .lock()
+        .read(&mut buf)
+        .map_err(|e| jet_std::IOError::other(jet_std::IOOperation::Read, Some("stdin".to_string()), e))?;
+    buf.truncate(read);
+    Ok(buf)
+}
+
+fn jet_std_io_buffered() -> JetStdinReader {
+    jet_std_io_stdin()
+}
+
+fn jet_std_io_sprint(text: &String) -> String {
+    text.clone()
+}
+
+fn jet_std_io_repr(text: &String) -> String {
+    format!("{text:?}")
+}
+
+fn jet_std_io_binread(path: &String) -> Result<Vec<u8>, jet_std::IOError> {
+    jet_std_fs_read_bytes(path)
+}
+
+fn jet_std_io_binwrite(path: &String, bytes: &Vec<u8>) -> Result<(), jet_std::IOError> {
+    jet_std_fs_write_atomic(path, bytes)
+}
+
 // D-COREIO1=A: stdout/stderr stream handles and TTY-aware terminal helpers.
 struct JetStdout;
 struct JetStderr;

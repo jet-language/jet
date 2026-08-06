@@ -9711,6 +9711,19 @@ impl LowerCtx<'_, '_> {
                     self.emit_print(&args[0])?;
                     return Ok(self.b.ins().iconst(types::I8, 0));
                 }
+                if module == "core.io" && method == "println" && args.len() == 1 {
+                    self.emit_print(&args[0])?;
+                    return Ok(self.b.ins().iconst(types::I8, 0));
+                }
+                if module == "core.io" && method == "readline" && args.is_empty() {
+                    let has_prompt = self.b.ins().iconst(types::I8, 0);
+                    let prompt = self.b.ins().iconst(types::I64, 0);
+                    let host_ref = self
+                        .module
+                        .declare_func_in_func(self.host.core.io_input, self.b.func);
+                    let call = self.b.ins().call(host_ref, &[has_prompt, prompt]);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
                 if module == "core.science.measurement"
                     && method == "from"
                     && args.len() == 2
@@ -9815,6 +9828,27 @@ impl LowerCtx<'_, '_> {
                         "input_secret" if args.len() == 1 => (
                             self.host.io.input_secret,
                             vec![self.lower_expr(&args[0])?],
+                        ),
+                        "buffered" if args.is_empty() => (self.host.io.stdin, Vec::new()),
+                        "sprint" if args.len() == 1 => {
+                            (self.host.io.sprint, vec![self.lower_expr(&args[0])?])
+                        }
+                        "repr" if args.len() == 1 => {
+                            (self.host.io.repr, vec![self.lower_expr(&args[0])?])
+                        }
+                        "take" if args.len() == 1 => {
+                            (self.host.io.take, vec![self.lower_expr(&args[0])?])
+                        }
+                        "read_until" if args.len() == 1 => {
+                            (self.host.io.read_until, vec![self.lower_expr(&args[0])?])
+                        }
+                        "binread" if args.len() == 1 => (
+                            self.host.core.fs_read_bytes,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "binwrite" if args.len() == 2 => (
+                            self.host.core.fs_write_atomic,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
                         ),
                         _ => {
                             return Err(format!("jit core call unsupported: {module}.{method}"))

@@ -886,10 +886,19 @@ printf "Ada\n" | nix develop -c jet run ask.jet
 |----------|---------|--------------|
 | `args()` | `[String]` | Command-line arguments |
 | `input([prompt])` | `String ? IOError` | Read one line from stdin; optional prompt |
+| `readline()` | `String ? IOError` | Same as `input()` with no prompt (peer free-function spelling) |
+| `read_until(delim)` | `String ? IOError` | Read stdin bytes until `delim` (excluded); empty delim errors |
+| `take(n)` | `[U8] ? IOError` | Read up to `n` raw bytes from stdin |
+| `buffered()` | `StdinHandle` | Same buffered stdin handle as `stdin()` (Jet buffers by default) |
 | `confirm(prompt)` | `Bool` | Ask yes or no; show `[y/N]` and use no for a bare Enter |
 | `choose(prompt, items)` | `String ? IOError` | Number the strings and re-prompt until the user makes a valid choice |
 | `input_secret(prompt)` | `String ? IOError` | Read one line without echo; return an error when stdin is not a terminal |
 | `read_all_input()` | `String ? IOError` | Read all of stdin to end-of-file |
+| `print(value…)` / `println(value…)` | nothing | Print each value on its own line (`println` is the peer spelling of `print`) |
+| `sprint(text)` | `String` | Identity format-to-string for a `String` (use `"{x}"` for other values) |
+| `repr(text)` | `String` | Debug representation of a `String` |
+| `binread(path)` | `[U8] ? IOError` | Read a file as raw bytes |
+| `binwrite(path, bytes)` | `() ? IOError` | Atomically write raw bytes to a file |
 | `eprint(value)` | nothing | Print to stderr (any printable value) |
 | `stdin()` | `StdinHandle` | Buffered stdin handle with `.read_line()` and `.lines()` |
 | `stdout()` / `stderr()` | `Stdout` / `Stderr` | Stream handles |
@@ -904,11 +913,15 @@ printf "Ada\n" | nix develop -c jet run ask.jet
 | `progress(text)` | `() ? IOError` | TTY: carriage-return progress update; non-TTY: one plain line |
 | `progress(source[, description[, format]])` | `Iter<T>` | Wrap a `List<T>` or `Iter<T>`; report percent, count, elapsed time, remaining estimate, and rate as items are pulled. Format fields are `{description}`, `{percent}`, `{count}`, `{total}`, `{elapsed}`, `{remaining}`, and `{rate}`. |
 
-`print` stays in the core prelude (no `use` needed). Use `io.eprint` for stderr.
-Use `input` for public text and scripts. Use `input_secret` for passwords and
-tokens. It never falls back to an echoed read when stdin is redirected.
-`core.term` still owns `live { ... }` and `term.read_key()` for direct raw-key
-input; it is the shipped raw-mode/key-event bridge under D-TERM1.
+`print` stays in the core prelude (no `use` needed). `io.print` / `io.println`
+are the qualified twins for `#NoPrelude` files — same newline-per-value
+behavior. Use `io.eprint` for stderr. Use `input` or `readline` for public
+text and scripts. Use `input_secret` for passwords and tokens. It never falls
+back to an echoed read when stdin is redirected. `sprint` / `repr` take a
+`String`; format other values with interpolation first. `buffered()` is an
+alias of `stdin()` — Jet already buffers stdin. `core.term` still owns
+`live { ... }` and `term.read_key()` for direct raw-key input; it is the
+shipped raw-mode/key-event bridge under D-TERM1.
 
 `jet run file.jet -- arg1 arg2` forwards everything after `--` verbatim as
 program arguments (`io.args()` sees them, argv[1..]); plain positional words

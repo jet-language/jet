@@ -1,0 +1,24 @@
+// #1480: remaining core.io ledger gaps — thin wrappers over existing IO.
+use core.io as io
+
+fn run() {
+    print(io.sprint("sprint-ok"))
+    print(io.repr("repr"))
+    io.println("println-ok")
+
+    path :: "/tmp/jet_1480_io_surface.bin"
+    io.binwrite(path, [65, 66, 67]) ?? panic("binwrite")
+    bytes :: io.binread(path) ?? panic("binread")
+    print(bytes)
+
+    _ :: io.buffered()
+    print("buffered_ok")
+
+    // Empty stdin (golden harness): readline/take/read_until stay deterministic.
+    line :: io.readline() ?? panic("readline")
+    print("readline_len:{line.len()}")
+    chunk :: io.take(0) ?? panic("take")
+    print("take_len:{chunk.len()}")
+    until :: io.read_until("X") ?? panic("read_until")
+    print("until_len:{until.len()}")
+}

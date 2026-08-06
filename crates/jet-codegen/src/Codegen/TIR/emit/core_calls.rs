@@ -520,6 +520,21 @@ pub(crate) fn emit_tir_core_call(
             format!("{}(&({}))", helper("jet_std_io_input_secret"), arg(0))
         }
         ("core.io", "read_all_input") => format!("{}()", helper("jet_std_io_read_all_input")),
+        ("core.io", "readline") => format!("{}()", helper("jet_std_io_readline")),
+        ("core.io", "read_until") => {
+            format!("{}(&({}))", helper("jet_std_io_read_until"), arg(0))
+        }
+        ("core.io", "take") => format!("{}({})", helper("jet_std_io_take"), arg(0)),
+        ("core.io", "buffered") => format!("{}()", helper("jet_std_io_buffered")),
+        ("core.io", "sprint") => format!("{}(&({}))", helper("jet_std_io_sprint"), arg(0)),
+        ("core.io", "repr") => format!("{}(&({}))", helper("jet_std_io_repr"), arg(0)),
+        ("core.io", "binread") => format!("{}(&({}))", helper("jet_std_io_binread"), arg(0)),
+        ("core.io", "binwrite") => format!(
+            "{}(&({}), &({}))",
+            helper("jet_std_io_binwrite"),
+            arg(0),
+            arg(1)
+        ),
         // D-STDIN1=A: io.stdin() → JetStdinReader handle.
         ("core.io", "stdin") => format!("{}()", helper("jet_std_io_stdin")),
         ("core.io", "stdout") => format!("{}()", helper("jet_std_io_stdout")),
@@ -3551,7 +3566,7 @@ pub(crate) fn emit_tir_core_call(
             format!("{}(&mut ({}))", helper("jet_std_random_shuffle"), arg(0))
         }
         ("core.io", "eprint") => format!("eprintln!(\"{{}}\", ({}).jet_show())", arg(0)),
-        ("core.io", "print") => format!("println!(\"{{}}\", ({}).jet_show())", arg(0)),
+        ("core.io", "print" | "println") => format!("println!(\"{{}}\", ({}).jet_show())", arg(0)),
         // D-TERM1 (ratified 2026-06-22): terminal direct-input.
         ("core.term", "read_key") => format!("{}()", helper("jet_term_read_key")),
         // D-FIDELITY-API1=A: runtime-global fidelity signal.

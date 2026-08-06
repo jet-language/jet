@@ -121,6 +121,7 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
             | ("core.random", "shuffle")
             | ("core.io", "eprint")
             | ("core.io", "print")
+            | ("core.io", "println")
             | ("core.io", "progress")
             // D-ENC1 / D-GENERIC-CALL1 / D-SERDE6: typed encode/decode return
             // types depend on the value type / call-site `<T>`, so codegen reads
@@ -312,6 +313,30 @@ pub fn core_fixed_sig(
         ("core.io", "read_all_input") => {
             Some((vec![], Some(result_ty(Type::String, io_error_ty()))))
         }
+        // #1480: remaining core.io ledger gaps — thin wrappers over existing IO.
+        ("core.io", "readline") => {
+            Some((vec![], Some(result_ty(Type::String, io_error_ty()))))
+        }
+        ("core.io", "read_until") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(Type::String, io_error_ty())),
+        )),
+        ("core.io", "take") => Some((
+            vec![(read, Type::Int)],
+            Some(result_ty(list_u8.clone(), io_error_ty())),
+        )),
+        ("core.io", "buffered") => Some((vec![], Some(Type::Named("StdinHandle".to_string())))),
+        ("core.io", "sprint" | "repr") => {
+            Some((vec![(read, Type::String)], Some(Type::String)))
+        }
+        ("core.io", "binread") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(list_u8.clone(), io_error_ty())),
+        )),
+        ("core.io", "binwrite") => Some((
+            vec![(read, Type::String), (read, list_u8.clone())],
+            Some(result_ty(unit.clone(), io_error_ty())),
+        )),
         // D-STDIN1=A: streaming line-by-line stdin.
         ("core.io", "stdin") => Some((vec![], Some(Type::Named("StdinHandle".to_string())))),
         ("core.io", "stdout") => Some((vec![], Some(Type::Named("Stdout".to_string())))),

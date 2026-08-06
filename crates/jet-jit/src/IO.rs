@@ -1113,6 +1113,76 @@ extern "C" fn jet_jit_io_input_secret(prompt: i64) -> i64 {
     }
 }
 
+// #1480: thin core.io wrappers (same Prelude symbols AOT emits).
+extern "C" fn jet_jit_io_sprint(text: i64) -> i64 {
+    let s = clone_str(text);
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s))
+}
+
+extern "C" fn jet_jit_io_repr(text: i64) -> i64 {
+    let s = clone_str(text);
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(format!("{s:?}")))
+}
+
+extern "C" fn jet_jit_io_take(n: i64) -> i64 {
+    use std::io::Read;
+    if n < 0 {
+        return result_err("negative take");
+    }
+    let mut buf = vec![0u8; n as usize];
+    match std::io::stdin().lock().read(&mut buf) {
+        Ok(read) => {
+            buf.truncate(read);
+            let list = Concurrency::with_runtime_mut(|rt| {
+                let list = rt.heap.alloc_empty_list();
+                for b in buf {
+                    let _ = rt.heap.list_push_int(list, b as i64);
+                }
+                list
+            });
+            result_ok_bits(list as u64)
+        }
+        Err(e) => result_err(&format!("take: {e}")),
+    }
+}
+
+extern "C" fn jet_jit_io_read_until(delim: i64) -> i64 {
+    use std::io::Read;
+    let needle = clone_str(delim);
+    if needle.is_empty() {
+        return result_err("empty delimiter");
+    }
+    let needle_b = needle.as_bytes();
+    let mut stdin = std::io::stdin().lock();
+    let mut out = Vec::new();
+    let mut window = Vec::new();
+    let mut buf = [0u8; 1];
+    loop {
+        match stdin.read(&mut buf) {
+            Ok(0) => break,
+            Ok(_) => {
+                out.push(buf[0]);
+                window.push(buf[0]);
+                if window.len() > needle_b.len() {
+                    window.remove(0);
+                }
+                if window.as_slice() == needle_b {
+                    out.truncate(out.len() - needle_b.len());
+                    break;
+                }
+            }
+            Err(e) => return result_err(&format!("read_until: {e}")),
+        }
+    }
+    match String::from_utf8(out) {
+        Ok(s) => {
+            let id = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s));
+            result_ok_bits(id as u64)
+        }
+        Err(e) => result_err(&format!("read_until: {e}")),
+    }
+}
+
 /// Materialize stdin lines into a string list (for-in walk).
 extern "C" fn jet_jit_stdin_lines(_h: i64) -> i64 {
     let mut lines = Vec::new();
@@ -1246,6 +1316,10 @@ pub(crate) struct IOHostFns {
     pub confirm: FuncId,
     pub choose: FuncId,
     pub input_secret: FuncId,
+    pub sprint: FuncId,
+    pub repr: FuncId,
+    pub take: FuncId,
+    pub read_until: FuncId,
     pub stdin_lines: FuncId,
     pub file_lines: FuncId,
     pub file_writer_write_line: FuncId,
@@ -1349,6 +1423,10 @@ pub(crate) fn register_io_symbols(builder: &mut JITBuilder) {
         "jet_jit_io_input_secret",
         jet_jit_io_input_secret as *const u8,
     );
+    builder.symbol("jet_jit_io_sprint", jet_jit_io_sprint as *const u8);
+    builder.symbol("jet_jit_io_repr", jet_jit_io_repr as *const u8);
+    builder.symbol("jet_jit_io_take", jet_jit_io_take as *const u8);
+    builder.symbol("jet_jit_io_read_until", jet_jit_io_read_until as *const u8);
     builder.symbol("jet_jit_stdin_lines", jet_jit_stdin_lines as *const u8);
     builder.symbol("jet_jit_file_lines", jet_jit_file_lines as *const u8);
     builder.symbol(
@@ -1449,6 +1527,10 @@ pub(crate) fn declare_io_host_fns(module: &mut JITModule) -> Result<IOHostFns, S
         confirm: import("jet_jit_io_confirm", &unary_i8)?,
         choose: import("jet_jit_io_choose", &binary)?,
         input_secret: import("jet_jit_io_input_secret", &unary)?,
+        sprint: import("jet_jit_io_sprint", &unary)?,
+        repr: import("jet_jit_io_repr", &unary)?,
+        take: import("jet_jit_io_take", &unary)?,
+        read_until: import("jet_jit_io_read_until", &unary)?,
         stdin_lines: import("jet_jit_stdin_lines", &unary)?,
         file_lines: import("jet_jit_file_lines", &unary)?,
         file_writer_write_line: import("jet_jit_file_writer_write_line", &binary)?,
