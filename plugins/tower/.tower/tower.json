@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1499,
-    "rev": 26606,
+    "rev": 26620,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -81264,12 +81264,22 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "building",
       "priority": "P2",
       "plan": "Scope: make variadic method calls work end to end, with the same meaning as free-function variadics. Free functions already lower rest parameters on every tier, so methods reuse that one mechanism (I8). Out of scope: any new syntax; rest-parameter semantics changes.\nRepro: type with 'fn write(self, level: Int, parts: ...Int)'. Both 'l.write(1)' and 'l.write(1, 2, 3)' fail with E0104 today. Loosening the arity check alone reaches an ICE in codegen.\nApproach: 1) Add the failing example first: examples/features/functions (variadic method with zero, one, and three rest args) plus expected output. 2) Sema: extend check_method_args in crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs (and the arity path in Sema/CheckerItems.rs) to accept rest-parameter arity exactly like the free-function path. Reuse the free-function logic; do not fork it. 3) Codegen: add method variadic lowering in crates/jet-codegen/src/Codegen/Items.rs mirroring the free-function lowering so the same TIR reaches AOT, JIT, and interpreter. No per-engine code. 4) Keep E0104 for genuinely wrong calls; existing snapshots unchanged.\nProof: scripts/agent/jet-env cargo test --test golden with the new example filter; jet build + jet run + interpreter on the example give identical output; free-function variadic example still green.\nOwned paths: crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs, crates/jet-sema/src/Sema/CheckerItems.rs, crates/jet-codegen/src/Codegen/Items.rs, examples/features/functions/, matching expected outputs.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "e3-bugz",
       "log": [
+        {
+          "at": "2026-08-06",
+          "by": "e3-bugz",
+          "text": "started: variadic methods"
+        },
+        {
+          "at": "2026-08-06",
+          "by": "e3-bugz",
+          "text": "started: variadic methods end-to-end"
+        },
         {
           "at": "2026-08-06",
           "by": "fable",
@@ -81319,8 +81329,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T17:15:58.572Z",
-      "updated": "2026-08-06T10:18:24.984Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-06T15:56:42.420Z",
+      "updatedBy": "e3-bugz",
+      "claimedAt": "2026-08-06T15:56:42.420Z"
     },
     {
       "id": "c024dgns",
@@ -84163,12 +84174,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "building",
       "priority": "P2",
       "plan": "Scope. Expose pattern()/source() (the raw text a Regex was compiled from), flags()/options(), named_captures() and names() (the engine already parses and stores group names — no engine work, just accessor wiring), a module-level escape(text) helper, and a count() convenience. Out of scope, already covered — extractor blind spot: Match.end() already exists (net_text_time.rs, 0-arg) but the ledger extractor only reads module_items.rs/fixed_sigs.rs/Collections.rs and never scans net_text_time.rs, so it wrongly scores an already-shipped method as a loss; FindIndex is covered by the existing match() + start()/end(). Out of scope, no coherent capability: Expand (Python-only template substitution, no second witness with the same meaning), String/ToString/regex? (three single-purpose, low-signal rows with no shared meaning across the witnessing languages).\n\nApproach.\n1. Read crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs — JetRegex/JetRegexMatch struct fields (pattern, flags, group_names, ~lines 117-130) already store everything needed. Read crates/jet-sema/src/Sema/CheckerCoreLib/net_text_time.rs regex_method_return (~line 497) and its Match arm (~line 517).\n2. Add pattern()/source(), flags(), named_captures(), count() to JetRegex/JetRegexMatch in Open.rs as pure accessors over already-stored fields — no algorithm change. Add escape(text) as a new jet.regex module function (pure string escaping).\n3. Register the new names in crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs jet.regex list (~line 738) and net_text_time.rs regex_method_return/Match arms; add fixed_sigs.rs entries beside the existing Regex rows (~line 2392).\n4. Teach scripts/agent/check-core-surface-ledger.mjs to also read net_text_time.rs's regex_method_return/Match method-name tables as a Jet-surface source for the Regex/Match containers, alongside MODULE_ITEMS_PATH/FIXED_SIGS_PATH, so already-shipped instance methods (like end()) stop scoring as losses. Extend the parser, not the JSON data — same source-derived policy the script already documents.\n5. Extend examples/features/text/regex.jet with pattern/flags/named_captures/count/escape calls; bless expected/text/regex.out.\n6. Update docs/reference/core-library.md core.regex section.\n7. Run node scripts/agent/check-core-surface-ledger.mjs --refresh.\n\nProof.\n- scripts/agent/jet-env cargo test --test core_surface_ledger\n- JET_GOLDEN_FILTER='text/regex' scripts/agent/jet-env cargo test --test golden -- examples_compile_and_run\n- scripts/agent/jet-env jet run examples/features/text/regex.jet, comparing output to the expected file, to prove I9 parity between AOT (golden) and default jet run.\n\nOwned paths: crates/jet-codegen/src/Prelude/CoreLib/JetStd/Open.rs; crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs, fixed_sigs.rs, net_text_time.rs; scripts/agent/check-core-surface-ledger.mjs; examples/features/text/regex.jet + expected out; docs/reference/core-library.md.\n\nCoordination note: card #1472 (core.url) needs the same net_text_time.rs extractor fix for a different function (url_mime_method_return) in the same script file. Whichever card lands first should leave check-core-surface-ledger.mjs in a state the other extends cleanly rather than reverting or re-deriving the same parsing hook.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "e3-coll",
       "log": [
+        {
+          "at": "2026-08-06",
+          "by": "e3-coll",
+          "text": "started: regex accessors + extractor"
+        },
         {
           "at": "2026-08-06",
           "by": "prep-core-b",
@@ -84238,8 +84254,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T02:13:31.552Z",
-      "updated": "2026-08-06T10:27:50.259Z",
-      "updatedBy": "prep-core-b"
+      "updated": "2026-08-06T15:56:32.125Z",
+      "updatedBy": "e3-coll",
+      "claimedAt": "2026-08-06T15:56:32.125Z"
     },
     {
       "id": "c0mvp4zc",
@@ -85470,12 +85487,22 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "building",
       "priority": "P1",
       "plan": "Repro: examples/features/concurrency/all_failfast.jet (existing example) -- a taskgroup where boom() calls panic(\"task failed\") while a sibling task is still running; g.all([slow, bad]) fails fast. AOT: stderr shows the full six-line block (panic: task failed / --> .../all_failfast.jet:17 in boom / source line + caret) then the trailing \"panic: a task panicked\" line, matching examples/features/expected/concurrency/all_failfast.err.out. Default jet run: the block's fields render empty (no message, no function name, blank source line) and the trailing line is also missing per the card.\n\nRoot cause hypothesis: panic(\"...\") lowers to jet_panic_rich(file, line, fn_name, src_line, col, caret, msg, locals) (crates/jet-codegen/src/Prelude/Core.rs:1422-1461), the shared Prelude function AOT calls directly, which eprintln!s the six-line block itself before unwinding. Under jet run's Cranelift JIT tier, JIT-compiled code cannot call that Rust function directly -- it calls a separate reimplementation, jet_jit_rich_panic (crates/jet-jit/src/jit/runtime_host.rs:848-883), an extern \"C\" JIT-host bridge that resolves its string arguments via rt.heap.clone_string(...).unwrap_or_default() (~858-862) against Concurrency::with_runtime_mut's state, which is thread_local! (crates/jet-jit/src/Concurrency.rs:22). A taskgroup task body runs on a scheduler worker thread spawned via std::thread::spawn (crates/jet-codegen/src/Prelude/Scheduler.rs, worker loop ~2470-2510), which gets its own fresh JitRuntime/heap on that new OS thread. If the panic's string data was allocated on the MAIN thread's heap (heap handles are per-thread), clone_string on the worker thread finds nothing and silently returns None for every field via unwrap_or_default() -- producing exactly \"no message, no function name, blank source line\" while the block's fixed structure (labels/arrows/pipes) still prints. This also reads as an I9 concern: jet_jit_rich_panic re-implements the same rendering jet_panic_rich already owns in the shared Prelude, instead of the JIT calling through to that one Prelude function.\n\nApproach:\n1. Confirm by tracing whether jet_jit_rich_panic's rt.heap.clone_string(...) calls return None specifically when invoked from a taskgroup worker thread vs the main thread for a top-level panic (which the card says renders correctly).\n2. Fix at the shared root, not the taskgroup caller specifically: either (a) make the scheduler worker thread share or correctly re-resolve heap handles across the std::thread::spawn boundary, or (b) per I9, stop re-implementing the six-line renderer in jet_jit_rich_panic and have JIT-compiled task code marshal through to the same Prelude rendering AOT uses.\n3. Investigate the missing trailing \"panic: a task panicked\" line under jet run too -- likely the same cross-thread state issue (jet_scheduler_fatal, Scheduler.rs:101).\n4. Prove AOT and default jet run produce byte-identical stderr for the example (I9); interpreter deopt too if taskgroups reach it.\n\nProof:\n- scripts/agent/jet-env cargo test --test golden -- all_failfast (AOT vs examples/features/expected/concurrency/all_failfast.err.out).\n- New/extended targeted test asserting jet run's stderr on all_failfast.jet matches the same golden byte-for-byte (I9) -- likely alongside tests/dev.rs's existing 3-way parity harness.\n- scripts/agent/jet-env jet run examples/features/concurrency/all_failfast.jet manual smoke, comparing stderr to the AOT run.\n\nOwned paths: crates/jet-jit/src/jit/runtime_host.rs, crates/jet-jit/src/Concurrency.rs, crates/jet-codegen/src/Prelude/Scheduler.rs, tests/dev.rs.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "e3-bugz",
       "log": [
+        {
+          "at": "2026-08-06",
+          "by": "e3-bugz",
+          "text": "started: JIT task panic empty block"
+        },
+        {
+          "at": "2026-08-06",
+          "by": "e3-bugz",
+          "text": "started: fix JIT task panic heap/I9"
+        },
         {
           "at": "2026-08-06",
           "by": "prep-bugs-a",
@@ -85525,8 +85552,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T09:48:58.014Z",
-      "updated": "2026-08-06T10:37:44.153Z",
-      "updatedBy": "prep-bugs-a"
+      "updated": "2026-08-06T15:56:42.141Z",
+      "updatedBy": "e3-bugz",
+      "claimedAt": "2026-08-06T15:56:42.141Z"
     },
     {
       "id": "c0nrwebl",
@@ -114894,9 +114922,161 @@
       "tags": [],
       "status": "open",
       "created": "2026-08-05T19:47:55.297Z"
+    },
+    {
+      "id": "b097o1cx",
+      "text": "First-principles rethink: AUTHORITY. Effects, capabilities, #Caps/#Grant, #Unsafe obligations, #Policy ladder, package effect budgets, trust/sandbox are probably one model: who may do what, in what scope, delegated how. Evidence: six key families under one policy: field; spec says 10 effect roots, code has 28; Capability is unnameable. Use first-principles-rethink skill.",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-08-06T15:59:05.893Z"
+    },
+    {
+      "id": "b0ipnwvi",
+      "text": "First-principles rethink: FAILURE. T ? E, error conversions, Fallible, validate blocks, #Pre/#Post, traps, panics, exit 101, parked transaction regions (#775). Three constraint layers ruled not to compose (D-VALIDATE1). Question: what is a failure - recoverable value, contract breach, or fault - and what does each owe the caller? Use first-principles-rethink skill.",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-08-06T15:59:06.467Z"
+    },
+    {
+      "id": "b0o8fe4t",
+      "text": "First-principles rethink: DATA AT BOUNDARIES. DataTree magic string, Codable, migrations, closed streaming format enum, XML algebra, exact JSON numbers (#1395), deferred typed-text heads. Question: what is a value crossing a trust or format boundary - schema, evolution, validation, provenance as one model, connected to the tag/taint plane. Use first-principles-rethink skill.",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-08-06T15:59:06.801Z"
+    },
+    {
+      "id": "b0tpifjr",
+      "text": "First-principles rethink: NOTATION. Four grammars share # (marker, [T#N], pkg#ver, {x#Debug}); unit literals; closed literal heads SQL/HTML/Sh; format selectors. Isomorphic audit carries an owner-gated ballot on the # false rhyme. Question: one meaning per glyph, the way @ vs # was settled. Use first-principles-rethink skill.",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-08-06T15:59:07.132Z"
+    },
+    {
+      "id": "b0zinpzp",
+      "text": "First-principles rethink: BUILD/CONFIG PLANE. package.jet, env.jet, computed modules, unshipped rung-4 fn build, generic-module value params, policy scopes. Question: what is configuration - compile-time knowledge about the program, plausibly a plane of the type-v2 carriers+knowledge model rather than a parallel world. Use first-principles-rethink skill.",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-08-06T15:59:07.483Z"
+    },
+    {
+      "id": "b055164l",
+      "text": "First-principles rethink: CONCURRENCY (design-only until S53 unfreezes). Tasks, unnameable TaskGroup, protocols, #Job/#Every, Shared/Pool, select, parked transaction regions. Question: what is a unit of concurrent work and what knowledge does the compiler hold about it - typestate and obligations already cover half by accident. Use first-principles-rethink skill.",
+      "note": "",
+      "level": null,
+      "tags": [],
+      "status": "open",
+      "created": "2026-08-06T15:59:07.823Z"
     }
   ],
   "events": [
+    {
+      "at": "2026-08-06T15:59:07.824Z",
+      "by": "fable",
+      "action": "idea.add",
+      "ref": "b055164l",
+      "note": "First-principles rethink: CONCURRENCY (design-only until S53"
+    },
+    {
+      "at": "2026-08-06T15:59:07.484Z",
+      "by": "fable",
+      "action": "idea.add",
+      "ref": "b0zinpzp",
+      "note": "First-principles rethink: BUILD/CONFIG PLANE. package.jet, e"
+    },
+    {
+      "at": "2026-08-06T15:59:07.132Z",
+      "by": "fable",
+      "action": "idea.add",
+      "ref": "b0tpifjr",
+      "note": "First-principles rethink: NOTATION. Four grammars share # (m"
+    },
+    {
+      "at": "2026-08-06T15:59:06.801Z",
+      "by": "fable",
+      "action": "idea.add",
+      "ref": "b0o8fe4t",
+      "note": "First-principles rethink: DATA AT BOUNDARIES. DataTree magic"
+    },
+    {
+      "at": "2026-08-06T15:59:06.468Z",
+      "by": "fable",
+      "action": "idea.add",
+      "ref": "b0ipnwvi",
+      "note": "First-principles rethink: FAILURE. T ? E, error conversions,"
+    },
+    {
+      "at": "2026-08-06T15:59:05.893Z",
+      "by": "fable",
+      "action": "idea.add",
+      "ref": "b097o1cx",
+      "note": "First-principles rethink: AUTHORITY. Effects, capabilities, "
+    },
+    {
+      "at": "2026-08-06T15:56:42.420Z",
+      "by": "e3-bugz",
+      "action": "card.update",
+      "ref": "c0ogiepl",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T15:56:42.141Z",
+      "by": "e3-bugz",
+      "action": "card.update",
+      "ref": "c03ht82l",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T15:56:32.125Z",
+      "by": "e3-coll",
+      "action": "card.update",
+      "ref": "c0hrwp53",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T15:56:30.245Z",
+      "by": "e3-bugz",
+      "action": "card.update",
+      "ref": "c0ogiepl",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T15:56:29.967Z",
+      "by": "e3-bugz",
+      "action": "card.update",
+      "ref": "c03ht82l",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T15:56:23.052Z",
+      "by": "e3-bugz",
+      "action": "card.claim",
+      "ref": "c0ogiepl",
+      "note": ""
+    },
+    {
+      "at": "2026-08-06T15:56:22.567Z",
+      "by": "e3-bugz",
+      "action": "card.claim",
+      "ref": "c03ht82l",
+      "note": ""
+    },
+    {
+      "at": "2026-08-06T15:56:15.632Z",
+      "by": "e3-coll",
+      "action": "card.claim",
+      "ref": "c0hrwp53",
+      "note": ""
+    },
     {
       "at": "2026-08-06T15:55:27.664Z",
       "by": "e3-coll",
@@ -118298,104 +118478,6 @@
       "action": "card.criteria-add",
       "ref": "c04zqxw1",
       "note": "#1 scripts/agent/jet-env cargo test --test jetpack_tasks and --"
-    },
-    {
-      "at": "2026-08-06T10:41:23.696Z",
-      "by": "prep-entry",
-      "action": "card.criteria-add",
-      "ref": "c0zvnp4f",
-      "note": "#5 docs/spec/syntax-decisions.md has a D-APP-UNIFY1=B log entry"
-    },
-    {
-      "at": "2026-08-06T10:41:18.093Z",
-      "by": "prep-entry",
-      "action": "card.criteria-add",
-      "ref": "c0zvnp4f",
-      "note": "#4 target-capability-mismatch diagnostic registered in docs/spe"
-    },
-    {
-      "at": "2026-08-06T10:41:14.117Z",
-      "by": "prep-entry",
-      "action": "card.criteria-add",
-      "ref": "c0zvnp4f",
-      "note": "#3 I9 parity: scripts/agent/jet-env jet run, jet build, and jet"
-    },
-    {
-      "at": "2026-08-06T10:41:06.889Z",
-      "by": "prep-entry",
-      "action": "card.criteria-add",
-      "ref": "c0zvnp4f",
-      "note": "#2 scripts/agent/jet-env rg \"\\bWebApp\\b\" crates/ Source/ exampl"
-    },
-    {
-      "at": "2026-08-06T10:41:01.061Z",
-      "by": "prep-entry",
-      "action": "card.criteria-add",
-      "ref": "c0zvnp4f",
-      "note": "#1 named example examples/features/web/web_app.jet uses fn run("
-    },
-    {
-      "at": "2026-08-06T10:40:53.712Z",
-      "by": "prep-entry",
-      "action": "card.criteria-add",
-      "ref": "c0uq2h91",
-      "note": "#8 scripts/agent/jet-env cargo test --test dev passes with jet "
-    },
-    {
-      "at": "2026-08-06T10:40:49.833Z",
-      "by": "prep-entry",
-      "action": "card.criteria-add",
-      "ref": "c0uq2h91",
-      "note": "#7 scripts/agent/jet-env jet build examples/features/web/web_ap"
-    },
-    {
-      "at": "2026-08-06T10:40:45.890Z",
-      "by": "prep-entry",
-      "action": "card.criteria-add",
-      "ref": "c0uq2h91",
-      "note": "#6 scripts/agent/jet-env rg \"fn app\\(\\)\" examples/ crates/ Sour"
-    },
-    {
-      "at": "2026-08-06T10:40:41.165Z",
-      "by": "prep-entry",
-      "action": "card.criteria-add",
-      "ref": "c0uq2h91",
-      "note": "#5 scripts/agent/jet-env cargo test --test web_app passes with "
-    },
-    {
-      "at": "2026-08-06T10:40:09.023Z",
-      "by": "prep-entry",
-      "action": "card.update",
-      "ref": "c01pwyjw",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-06T10:40:06.558Z",
-      "by": "bd-verify",
-      "action": "card.update",
-      "ref": "c0iu2ebc",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T10:40:06.061Z",
-      "by": "bd-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0iu2ebc",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-06T10:40:05.616Z",
-      "by": "bd-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0iu2ebc",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-06T10:40:05.293Z",
-      "by": "bd-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0iu2ebc",
-      "note": "#3"
     }
   ],
   "nextNum": 368,
