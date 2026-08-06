@@ -148,7 +148,28 @@ pub fn run_checked(bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
                 .exit_code
                 .unwrap_or_else(|| d.what.parse().unwrap_or(0)),
         },
+        // Whole-program interpret traps are live-program panics (I9 / #1483),
+        // not comptime build failures — match AOT exit 70 + `panic:` wording.
+        Err(d) if d.code == "E0953" => runtime_trap_from_e0953(sink, d),
         Err(d) => RunOutcome::Problems(vec![dev_boundary_from_comptime(d)]),
+    }
+}
+
+fn runtime_trap_from_e0953(mut sink: crate::Comptime::DevSink, d: Diagnostic) -> RunOutcome {
+    let msg = d
+        .why
+        .strip_prefix("while computing this value at compile time, the program panicked: ")
+        .unwrap_or(d.why.as_str());
+    if !sink.stderr.is_empty() && !sink.stderr.ends_with('\n') {
+        sink.stderr.push('\n');
+    }
+    sink.stderr.push_str("panic: ");
+    sink.stderr.push_str(msg);
+    sink.stderr.push('\n');
+    RunOutcome::Ran {
+        stdout: sink.stdout,
+        stderr: sink.stderr,
+        exit_code: 70,
     }
 }
 
@@ -265,6 +286,7 @@ pub fn run_named_task(bundle: &ProgramBundle, name: &str, try_anyway: bool) -> R
             stderr: sink.stderr,
             exit_code: 0,
         },
+        Err(d) if d.code == "E0953" => runtime_trap_from_e0953(sink, d),
         Err(d) => RunOutcome::Problems(vec![dev_boundary_from_comptime(d)]),
     }
 }

@@ -6,7 +6,10 @@
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
-use tir_support::{assert_tiers_agree, build_and_run, build_and_run_full, have_rustc, jit_run_with_env};
+use tir_support::{
+    assert_tiers_agree, build_and_run, build_and_run_full, have_rustc, jit_run_with_env,
+    jit_run_with_env_args,
+};
 
 /// A function the checker cannot see through, so its result is a runtime value
 /// and the operator below is really evaluated by the built program.
@@ -381,6 +384,29 @@ fn run() {{
     let (code, out, err) = jit_run_with_env("jit_env_live_divisor", &src, &[("JET_TRAP_DIVISOR", "2")]);
     assert_eq!(code, 0, "live env divisor must run: out={out} err={err}");
     assert_eq!(out, "5\n", "10 /% 2 from live env, got: {out}");
+}
+
+/// #1483: `io.args` under `jet run` reads the live invocation argv — a non-zero
+/// divisor from args must compute, not trap or fold at build time.
+#[test]
+fn args_divisor_uses_live_invocation_argv() {
+    let src = format!(
+        "use core.io as io
+{SEED}
+fn run() {{
+    raw :: io.args().get(1) ?? \"0\"
+    print(seed(10) /% (Int.parse(raw) ?? 0))
+}}
+"
+    );
+    let (code, out, err) =
+        jit_run_with_env_args("jit_args_live_divisor", &src, &[], &["5"]);
+    assert_eq!(code, 0, "live args divisor must run: out={out} err={err}");
+    assert_eq!(out, "2\n", "10 /% 5 from argv, got: {out}");
+    assert!(
+        !err.contains("E0953") && !err.contains("comptime"),
+        "args divisor must not use comptime voice: {err}"
+    );
 }
 
 /// D-EXPSEM1=A / D-FLOORDIV1=A / D-MODSEM1=A: the Prelude files are the one

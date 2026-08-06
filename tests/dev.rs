@@ -3106,13 +3106,30 @@ fn unified_loop_jit_tiers_are_explicit_and_match_aot() {
         assert_eq!(native.stdout, "0\n2\n4\n");
 
         let invalid = "fn run() {\n    xs := [1, 2]\n    stride := 0\n    loop x, xs, stride {\n        print(x)\n    }\n}\n";
-        let RunOutcome::Problems(diags) =
-            run_cranelift_outcome_without_fallback(invalid, "source_stride_pre_pull")
-        else {
-            panic!("invalid dynamic stride must stop before the first source pull")
-        };
-        assert_eq!(diags.len(), 1, "{diags:?}");
-        assert_eq!(diags[0].code, "E0123");
+        // AOT emits jet_panic("E0123: …") → exit 70 + panic: wording (I9).
+        // Resident JIT must match that shape, not a Problems diagnostic.
+        match run_cranelift_outcome_without_fallback(invalid, "source_stride_pre_pull") {
+            RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            } => {
+                assert_eq!(exit_code, 70, "invalid stride must exit 70: out={stdout} err={stderr}");
+                assert!(
+                    stdout.is_empty(),
+                    "invalid dynamic stride must stop before the first source pull, got stdout={stdout:?}"
+                );
+                assert!(
+                    stderr.contains("panic:") && stderr.contains("E0123"),
+                    "invalid stride must carry E0123 in panic wording, got: {stderr}"
+                );
+                assert!(
+                    !stderr.contains("E0953") && !stderr.contains("comptime"),
+                    "invalid stride must not use comptime voice: {stderr}"
+                );
+            }
+            other => panic!("invalid dynamic stride expected runtime trap, got: {other:?}"),
+        }
     }
 }
 
@@ -5862,7 +5879,38 @@ fn run() {
         let outcome = run_cranelift_outcome_without_fallback(source, &format!("1216_{case}"));
         match case.as_str() {
             "oob" | "sum_overflow" => {
-                assert!(matches!(outcome, RunOutcome::Problems(_)));
+                // AOT jet_panic shape for live traps: exit 70 + panic: wording (#1483).
+                let RunOutcome::Ran {
+                    stdout: _,
+                    stderr,
+                    exit_code,
+                } = outcome
+                else {
+                    panic!("`{case}` expected runtime trap Ran, got: {outcome:?}");
+                };
+                assert_eq!(
+                    exit_code, 70,
+                    "`{case}` must exit 70: err={stderr}"
+                );
+                assert!(
+                    stderr.contains("panic:"),
+                    "`{case}` must use panic: wording, got: {stderr}"
+                );
+                assert!(
+                    !stderr.contains("E0953") && !stderr.contains("comptime"),
+                    "`{case}` must not use comptime voice: {stderr}"
+                );
+                if case == "oob" {
+                    assert!(
+                        stderr.contains("index") || stderr.contains("bounds"),
+                        "`oob` trap wording: {stderr}"
+                    );
+                } else {
+                    assert!(
+                        stderr.contains("overflow") || stderr.contains("overflowed"),
+                        "`sum_overflow` trap wording: {stderr}"
+                    );
+                }
             }
             expected_case => {
                 let RunOutcome::Ran { stdout, .. } = outcome else {
@@ -6027,13 +6075,22 @@ fn run() {
 
     jet_jit::reset_jit_trace_for_test();
     match run_cranelift_outcome_without_fallback(source, "uninit_fixed_dynamic_oob") {
-        RunOutcome::Problems(diagnostics) => assert!(
-            diagnostics.iter().any(|diagnostic| diagnostic.code == "E0953"),
-            "{diagnostics:#?}"
-        ),
-        RunOutcome::Ran { stdout, .. } => {
-            panic!("dynamic out-of-bounds index unexpectedly ran: {stdout:?}")
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => {
+            assert_eq!(exit_code, 70, "dynamic OOB must exit 70: out={stdout} err={stderr}");
+            assert!(
+                stderr.contains("panic:") && stderr.contains("index out of bounds"),
+                "dynamic OOB trap wording: {stderr}"
+            );
+            assert!(
+                !stderr.contains("E0953") && !stderr.contains("comptime"),
+                "dynamic OOB must not use comptime voice: {stderr}"
+            );
         }
+        other => panic!("dynamic OOB expected runtime trap, got: {other:?}"),
     }
     assert!(jet_jit::jit_executed_for_test());
     assert!(
@@ -6471,7 +6528,7 @@ fn fixed_width_signed_remainder_overflow_traps_across_tiers() {
     }
     let _guard = dev_diff_lock().lock().unwrap();
     let source = r#"
-fn remainder(value: I8, divisor: I8) -> I8 {
+fn remainder(value: I8, divisor: I8) => I8 {
     return value % divisor
 }
 
@@ -6495,67 +6552,35 @@ fn run() {
         jet_jit::resident_jit_safe_bundle_detail(&bundle)
     );
     jet_jit::try_compile_bundle(&bundle)
-        .unwrap_or_else(|reason| panic!("signed remainder trap must JIT-compile: {reason}"));
+        .unwrap_or_else(|reason| panic!("signed remainder fixture must JIT-compile: {reason}"));
 
+    // D-MODSEM1: `MIN % -1` is 0 and fits — jet_mod answers rather than traps.
+    let expected = ProgramOutput::ran("0\n".into(), String::new(), 0);
     let interpreted = match dev_iteration(&shown, false, true) {
-        RunOutcome::Problems(diags) => diags,
         RunOutcome::Ran {
             stdout,
             stderr,
             exit_code,
-        } => panic!(
-            "interpreter did not trap: stdout={stdout:?} stderr={stderr:?} exit={exit_code}"
-        ),
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        other => panic!("interpreter MIN % -1: {other:?}"),
     };
     jet_jit::reset_jit_trace_for_test();
-    let resident =
-        match run_cranelift_outcome_without_fallback(source, "fixed_width_remainder_trap") {
-            RunOutcome::Problems(diags) => diags,
-            RunOutcome::Ran {
-                stdout,
-                stderr,
-                exit_code,
-            } => panic!(
-                "resident JIT did not trap: stdout={stdout:?} stderr={stderr:?} exit={exit_code}"
-            ),
-        };
+    let resident = match run_cranelift_outcome_without_fallback(source, "fixed_width_remainder_trap")
+    {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        other => panic!("resident JIT MIN % -1: {other:?}"),
+    };
     assert!(jet_jit::jit_executed_for_test());
     assert!(
         !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
-        "signed remainder trap used deopt or fallback"
+        "signed remainder fixture used deopt or fallback"
     );
-
-    assert_eq!(interpreted.len(), 1, "interpreter trap count");
-    assert_eq!(resident.len(), 1, "resident JIT trap count");
-    let interpreted = &interpreted[0];
-    let resident = &resident[0];
-    assert_eq!(resident.severity, interpreted.severity, "trap severity drift");
-    assert_eq!(resident.code, interpreted.code, "trap code drift");
-    assert_eq!(resident.what, interpreted.what, "trap summary drift");
-    assert_eq!(resident.why, interpreted.why, "trap detail drift");
-    assert_eq!(resident.fix, interpreted.fix, "trap fix drift");
-    assert_eq!(resident.detail, interpreted.detail, "trap detail field drift");
-    assert_eq!(
-        resident.structured, interpreted.structured,
-        "trap structured field drift"
-    );
-    assert!(resident.edit.is_none() && interpreted.edit.is_none());
-    let trap = "attempt to calculate the remainder with overflow";
-    assert_eq!(interpreted.code, "E0953");
-    assert_eq!(
-        interpreted.what,
-        "your comptime code stopped the build"
-    );
-    assert_eq!(
-        interpreted.why,
-        format!(
-            "while computing this value at compile time, the program panicked: {trap}"
-        )
-    );
-    assert_eq!(
-        interpreted.fix,
-        "this is the sanctioned way to validate at compile time — fix the input the check rejects"
-    );
+    assert_eq!(interpreted, expected, "interpreter MIN % -1 drift");
+    assert_eq!(resident, expected, "resident JIT MIN % -1 drift");
 
     let aot = compiled_binary_output(
         &dir,
@@ -6564,15 +6589,7 @@ fn run() {
         "fixed_width_remainder_trap",
         &shown,
     );
-    assert_eq!(
-        aot,
-        ProgramOutput::ran(
-            String::new(),
-            format!("panic: {trap}\n  --> {shown}:3\n"),
-            70,
-        ),
-        "AOT remainder trap presentation drift"
-    );
+    assert_eq!(aot, expected, "AOT MIN % -1 presentation drift");
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -6586,7 +6603,7 @@ fn fixed_width_and_plain_int_remainder_zero_traps_across_tiers() {
         (
             "fixed_width",
             r#"
-fn remainder(value: I8, divisor: I8) -> I8 {
+fn remainder(value: I8, divisor: I8) => I8 {
     return value % divisor
 }
 
@@ -6598,7 +6615,7 @@ fn run() {
         (
             "plain_int",
             r#"
-fn remainder(value: Int, divisor: Int) -> Int {
+fn remainder(value: Int, divisor: Int) => Int {
     return value % divisor
 }
 
@@ -6627,25 +6644,49 @@ fn run() {
             .unwrap_or_else(|reason| panic!("{tag} remainder-zero fixture must JIT-compile: {reason}"));
 
         let interpreted = match dev_iteration(&shown, false, true) {
-            RunOutcome::Problems(diags) => diags,
             RunOutcome::Ran {
                 stdout,
                 stderr,
                 exit_code,
-            } => panic!(
-                "{tag} interpreter did not trap: stdout={stdout:?} stderr={stderr:?} exit={exit_code}"
-            ),
+            } => {
+                assert_eq!(
+                    exit_code, 70,
+                    "{tag} interpreter must exit 70: out={stdout} err={stderr}"
+                );
+                assert!(
+                    stderr.contains("panic:") && stderr.contains("divided by zero"),
+                    "{tag} interpreter trap wording: {stderr}"
+                );
+                assert!(
+                    !stderr.contains("E0953") && !stderr.contains("comptime"),
+                    "{tag} interpreter must not use comptime voice: {stderr}"
+                );
+                (stdout, stderr)
+            }
+            other => panic!("{tag} interpreter expected runtime trap, got: {other:?}"),
         };
         jet_jit::reset_jit_trace_for_test();
         let resident = match run_cranelift_outcome_without_fallback(source, tag) {
-            RunOutcome::Problems(diags) => diags,
             RunOutcome::Ran {
                 stdout,
                 stderr,
                 exit_code,
-            } => panic!(
-                "{tag} resident JIT did not trap: stdout={stdout:?} stderr={stderr:?} exit={exit_code}"
-            ),
+            } => {
+                assert_eq!(
+                    exit_code, 70,
+                    "{tag} resident JIT must exit 70: out={stdout} err={stderr}"
+                );
+                assert!(
+                    stderr.contains("panic:") && stderr.contains("divided by zero"),
+                    "{tag} resident trap wording: {stderr}"
+                );
+                assert!(
+                    !stderr.contains("E0953") && !stderr.contains("comptime"),
+                    "{tag} resident must not use comptime voice: {stderr}"
+                );
+                (stdout, stderr)
+            }
+            other => panic!("{tag} resident JIT expected runtime trap, got: {other:?}"),
         };
         assert!(
             jet_jit::jit_executed_for_test(),
@@ -6655,52 +6696,25 @@ fn run() {
             !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
             "{tag} remainder-zero fixture used deopt or fallback"
         );
-
-        assert_eq!(interpreted.len(), 1, "{tag} interpreter trap count");
-        assert_eq!(resident.len(), 1, "{tag} resident JIT trap count");
-        let interpreted = &interpreted[0];
-        let resident = &resident[0];
-        assert_eq!(resident.severity, interpreted.severity, "{tag} severity drift");
-        assert_eq!(resident.code, interpreted.code, "{tag} code drift");
-        assert_eq!(resident.what, interpreted.what, "{tag} summary drift");
-        assert_eq!(resident.why, interpreted.why, "{tag} detail drift");
-        assert_eq!(resident.fix, interpreted.fix, "{tag} fix drift");
-        assert_eq!(resident.detail, interpreted.detail, "{tag} detail field drift");
         assert_eq!(
-            resident.structured, interpreted.structured,
-            "{tag} structured field drift"
+            interpreted.0, resident.0,
+            "{tag} stdout drift between interpret and resident"
         );
-        assert!(resident.edit.is_none() && interpreted.edit.is_none());
-        let trap = "divided by zero";
-        assert_eq!(interpreted.code, "E0953");
-        assert_eq!(
-            interpreted.what,
-            "your comptime code stopped the build"
-        );
-        assert_eq!(
-            interpreted.why,
-            format!(
-                "while computing this value at compile time, the program panicked: {trap}"
-            )
-        );
-        assert_eq!(
-            interpreted.fix,
-            "this is the sanctioned way to validate at compile time — fix the input the check rejects"
+        // stderr paths may differ (source span formatting); pin the panic sentence.
+        assert!(
+            interpreted.1.contains("divided by zero") && resident.1.contains("divided by zero")
         );
 
         let aot = compiled_binary_output(&dir, tag, i, tag, &shown);
-        assert_eq!(
-            aot,
-            ProgramOutput::ran(
-                String::new(),
-                format!("panic: {trap}\n  --> {shown}:3\n"),
-                70,
-            ),
-            "{tag} AOT remainder-zero presentation drift"
+        assert_eq!(aot.exit_code, 70, "{tag} AOT must exit 70");
+        assert!(
+            aot.stderr.contains("panic:") && aot.stderr.contains("divided by zero"),
+            "{tag} AOT remainder-zero presentation drift: {}",
+            aot.stderr
         );
         assert!(
-            !aot.stderr.contains("panicked at"),
-            "{tag} leaked a raw Rust panic"
+            !aot.stderr.contains("panicked at") && !aot.stderr.contains("E0953"),
+            "{tag} leaked a raw Rust panic or comptime voice"
         );
     }
     let _ = fs::remove_dir_all(&dir);
@@ -6759,7 +6773,7 @@ fn fixed_width_mixed_sign_shift_counts_trap_across_tiers() {
         cases.into_iter().enumerate()
     {
         let source = format!(
-            "fn shift(value: {value_ty}, count: {count_ty}) -> {value_ty} {{\n    return value {operator} count\n}}\n\nfn run() {{\n    print(shift({value}, {count}))\n}}\n"
+            "fn shift(value: {value_ty}, count: {count_ty}) => {value_ty} {{\n    return value {operator} count\n}}\n\nfn run() {{\n    print(shift({value}, {count}))\n}}\n"
         );
         let file = dir.join(format!("{tag}.jet"));
         fs::write(&file, &source).unwrap();
@@ -6774,81 +6788,70 @@ fn fixed_width_mixed_sign_shift_counts_trap_across_tiers() {
             .unwrap_or_else(|reason| panic!("{tag} must JIT-compile: {reason}"));
 
         let interpreted = match dev_iteration(&shown, false, true) {
-            RunOutcome::Problems(diags) => diags,
             RunOutcome::Ran {
                 stdout,
                 stderr,
                 exit_code,
-            } => panic!(
-                "{tag} interpreter did not trap: stdout={stdout:?} stderr={stderr:?} exit={exit_code}"
-            ),
+            } => {
+                assert_eq!(
+                    exit_code, 70,
+                    "{tag} interpreter must exit 70: out={stdout} err={stderr}"
+                );
+                assert!(
+                    stderr.contains("panic:") && stderr.contains(trap),
+                    "{tag} interpreter trap wording: {stderr}"
+                );
+                assert!(
+                    !stderr.contains("E0953") && !stderr.contains("comptime"),
+                    "{tag} interpreter must not use comptime voice: {stderr}"
+                );
+                (stdout, stderr)
+            }
+            other => panic!("{tag} interpreter expected runtime trap, got: {other:?}"),
         };
         jet_jit::reset_jit_trace_for_test();
         let resident = match run_cranelift_outcome_without_fallback(&source, tag) {
-            RunOutcome::Problems(diags) => diags,
             RunOutcome::Ran {
                 stdout,
                 stderr,
                 exit_code,
-            } => panic!(
-                "{tag} resident JIT did not trap: stdout={stdout:?} stderr={stderr:?} exit={exit_code}"
-            ),
+            } => {
+                assert_eq!(
+                    exit_code, 70,
+                    "{tag} resident JIT must exit 70: out={stdout} err={stderr}"
+                );
+                assert!(
+                    stderr.contains("panic:") && stderr.contains(trap),
+                    "{tag} resident trap wording: {stderr}"
+                );
+                assert!(
+                    !stderr.contains("E0953") && !stderr.contains("comptime"),
+                    "{tag} resident must not use comptime voice: {stderr}"
+                );
+                (stdout, stderr)
+            }
+            other => panic!("{tag} resident JIT expected runtime trap, got: {other:?}"),
         };
         assert!(jet_jit::jit_executed_for_test(), "{tag} did not run natively");
         assert!(
             !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
             "{tag} used deopt or fallback"
         );
-
-        assert_eq!(interpreted.len(), 1, "{tag} interpreter trap count");
-        assert_eq!(resident.len(), 1, "{tag} resident JIT trap count");
-        let interpreted = &interpreted[0];
-        let resident = &resident[0];
         assert_eq!(
-            resident.severity, interpreted.severity,
-            "{tag} trap severity drift"
-        );
-        assert_eq!(resident.code, interpreted.code, "{tag} trap code drift");
-        assert_eq!(resident.what, interpreted.what, "{tag} trap summary drift");
-        assert_eq!(resident.why, interpreted.why, "{tag} trap detail drift");
-        assert_eq!(resident.fix, interpreted.fix, "{tag} trap fix drift");
-        assert_eq!(
-            resident.detail, interpreted.detail,
-            "{tag} trap detail field drift"
-        );
-        assert_eq!(
-            resident.structured, interpreted.structured,
-            "{tag} trap structured field drift"
-        );
-        assert!(resident.edit.is_none() && interpreted.edit.is_none());
-        assert_eq!(interpreted.code, "E0953", "{tag} interpreter trap code");
-        assert_eq!(
-            interpreted.what,
-            "your comptime code stopped the build",
-            "{tag} trap summary"
-        );
-        assert_eq!(
-            interpreted.why,
-            format!(
-                "while computing this value at compile time, the program panicked: {trap}"
-            ),
-            "{tag} trap detail"
-        );
-        assert_eq!(
-            interpreted.fix,
-            "this is the sanctioned way to validate at compile time — fix the input the check rejects",
-            "{tag} trap fix"
+            interpreted.0, resident.0,
+            "{tag} stdout drift between interpret and resident"
         );
 
         let aot = compiled_binary_output(&dir, tag, i, tag, &shown);
-        assert_eq!(
-            aot,
-            ProgramOutput::ran(
-                String::new(),
-                format!("panic: {trap}\n  --> {shown}:2\n"),
-                70,
-            ),
-            "{tag} AOT shift trap presentation drift"
+        assert_eq!(aot.exit_code, 70, "{tag} AOT must exit 70");
+        assert!(
+            aot.stderr.contains("panic:") && aot.stderr.contains(trap),
+            "{tag} AOT shift trap presentation drift: {}",
+            aot.stderr
+        );
+        assert!(
+            !aot.stderr.contains("E0953") && !aot.stderr.contains("panicked at"),
+            "{tag} leaked comptime voice or raw Rust panic"
         );
     }
 

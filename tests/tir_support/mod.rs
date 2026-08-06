@@ -70,6 +70,16 @@ pub fn jit_run_with_env(
     src: &str,
     vars: &[(&str, &str)],
 ) -> (i32, String, String) {
+    jit_run_with_env_args(name, src, vars, &[])
+}
+
+/// `jit_run` with process env and program argv after `--`.
+pub fn jit_run_with_env_args(
+    name: &str,
+    src: &str,
+    vars: &[(&str, &str)],
+    program_args: &[&str],
+) -> (i32, String, String) {
     let dir = unique_tmp("jet_jit_run");
     fs::create_dir_all(&dir).unwrap();
     let jet_path = dir.join(format!("{name}.jet"));
@@ -83,6 +93,12 @@ pub fn jit_run_with_env(
         .env("JET_CACHE_DIR", dir.join("cache"));
     for (key, value) in vars {
         command.env(key, value);
+    }
+    if !program_args.is_empty() {
+        command.arg("--");
+        for arg in program_args {
+            command.arg(arg);
+        }
     }
     let out = command.output().unwrap();
     let _ = fs::remove_dir_all(&dir);
