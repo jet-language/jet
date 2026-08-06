@@ -119,7 +119,7 @@ while losses remain.
 | ByteBuffer | 6 | #1467 | verify | live |
 | core.http | 6 | #1481 | ready | live |
 | core.tls | 6 | #1481 | ready | live |
-| core.regex | 5 | #1471 | building | live |
+| core.regex | 5 | #1471 | verify | live |
 | core.uuid | 5 | #1481 | ready | live |
 | Deque | 4 | #1475 | verify | live |
 | core.args | 3 | #1481 | ready | live |
