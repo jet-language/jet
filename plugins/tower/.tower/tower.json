@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1495,
-    "rev": 26187,
+    "rev": 26202,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -83099,8 +83099,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T02:13:29.376Z",
-      "updated": "2026-08-06T11:24:26.036Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-06T11:36:28.737Z",
+      "updatedBy": "owner"
     },
     {
       "id": "c0mvkfyc",
@@ -85322,13 +85322,52 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": "1. Mark the collection-shaped groups as type-only.\n2. Give canonicalKey and synonymsFor the container, and skip a type-only group in a module container.\n3. Refresh and report how far the loss count moves.\n4. Add a hostile fixture that fails if a collection verb matches in a module container.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
-      "criteria": [],
+      "log": [
+        {
+          "at": "2026-08-06",
+          "by": "bd-verify",
+          "text": "Closed."
+        },
+        {
+          "at": "2026-08-06",
+          "by": "fable",
+          "text": "Fixed. Seven names that had been folded away now classify on their own: append, delete, in, length, size, truncate, unlink."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Collection-verb synonym groups apply only inside container types, so a module namespace keeps its own spelling.",
+          "status": "verified",
+          "metBy": "fable",
+          "verifiedBy": "bd-verify",
+          "evidence": "Verified on merged master by running the gates directly.",
+          "at": "2026-08-06T11:38:03.268Z"
+        },
+        {
+          "n": 2,
+          "text": "core.math, core.time and core.os carry no collection-verb loss rows.",
+          "status": "verified",
+          "metBy": "fable",
+          "verifiedBy": "bd-verify",
+          "evidence": "Verified on merged master by running the gates directly.",
+          "at": "2026-08-06T11:38:03.575Z"
+        },
+        {
+          "n": 3,
+          "text": "A hostile fixture proves truncate, add and reset stay themselves in a module namespace, and that truncate still folds into clear inside a container type.",
+          "status": "verified",
+          "metBy": "fable",
+          "verifiedBy": "bd-verify",
+          "evidence": "Verified on merged master by running the gates directly.",
+          "at": "2026-08-06T11:38:03.895Z"
+        }
+      ],
       "refs": [
         "docs/reference/core-surface-ledger.json"
       ],
@@ -85336,8 +85375,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T11:06:41.061Z",
-      "updated": "2026-08-06T11:06:41.061Z",
-      "updatedBy": "fable"
+      "updated": "2026-08-06T11:38:04.271Z",
+      "updatedBy": "bd-verify",
+      "completedAt": "2026-08-06T11:38:04.271Z"
     }
   ],
   "decisions": [
@@ -110449,6 +110489,110 @@
       "created": "2026-08-06T00:05:59.105Z",
       "outcome": "A",
       "ratifiedAt": "2026-08-06"
+    },
+    {
+      "id": "D-NUMTYPE1",
+      "cardId": "c0hsjnxk",
+      "group": "stdlib",
+      "title": "Which number types Core ships beyond whole and decimal",
+      "gist": "Whether Jet ships a complex number type and an exact fraction type.",
+      "lesson": "Jet ships four number types today: Int for whole numbers, Float for measured numbers, BigInt for whole numbers of any size, and Decimal for exact base-ten money. The Core surface ledger compares Jet against eleven languages. Four operations it scores as missing are not missing functions at all. They are accessors on types Jet does not have: the real and imaginary parts of a complex number, and the top and bottom of an exact fraction. This choice decides whether those types exist.",
+      "explainer": "",
+      "story": "Ravi ports a signal filter. Every step multiplies complex numbers, and the textbook writes them as one value. In Jet he carries two Float variables through every function and writes the multiply rule out by hand each time. One sign error in the middle of it costs him an afternoon.",
+      "inWild": "// A Fourier step, written the way the textbook writes it.\nfn twiddle(k: Int, n: Int) => Complex {\n    angle :: -math.tau * Float.from_int(k) / Float.from_int(n)\n    return Complex.{ real: math.cos(angle), imaginary: math.sin(angle) }\n}\n\n// Without the type, every caller carries two Floats and repeats the\n// multiply rule: (a+bi)(c+di) = (ac-bd) + (ad+bc)i\n",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Ship both, as ordinary Core types",
+          "detail": "`Complex` and `Fraction` join Int, Float, BigInt and Decimal. Complex carries two Floats and answers the arithmetic operators. Fraction carries two whole numbers, stays exact, and reduces itself. Gain: signal, control and geometry code reads like its textbook, and exact ratios stop drifting the way Floats do. Loss: two more types every beginner sees in the Core listing, and two more sets of operator rules to learn.",
+          "technical": "`Complex` is a struct of two Float fields, `real` and `imaginary`, with `+ - * /`, `abs`, `conjugate` and `polar`. `Fraction` is a struct of two Int fields, `numerator` and `denominator`, kept reduced with a positive denominator, with `+ - * /` and exact comparison. Division by a zero denominator is refused where every other zero divisor is. Neither is a default; both are opt-in by naming them.",
+          "code": "use core.math as math\n\nfilter :: Complex.{ real: 0.5, imaginary: -0.5 }\nprint(filter * filter)          // Complex(0.0, -0.5)\nprint(filter.abs())             // 0.7071067811865476\n\nthird :: Fraction.{ numerator: 1, denominator: 3 }\nprint(third + third + third)    // 1/1, exactly\nprint(0.1 + 0.2 == 0.3)         // false, the Float answer"
+        },
+        {
+          "key": "B",
+          "name": "Ship Complex only",
+          "detail": "`Complex` joins Core. Exact fractions stay out, because `Decimal` already answers the money case that most people reach for. Gain: the numeric work that most obviously needs a type gets one, and the Core listing grows by a single name. Loss: exact ratios still drift. A program that adds a third three times still does not get one, and the workaround is to carry two whole numbers by hand.",
+          "technical": "`Complex` as in option A. `numerator` and `denominator` are recorded as declined against this decision id, so the ledger stops scoring them.",
+          "code": "signal :: Complex.{ real: 1.0, imaginary: 2.0 }\nprint(signal.conjugate())       // Complex(1.0, -2.0)\n\n// Exact thirds still need care.\nprint(0.1 + 0.2)                // 0.30000000000000004"
+        },
+        {
+          "key": "C",
+          "name": "Ship Fraction only",
+          "detail": "`Fraction` joins Core. Complex numbers stay out, on the grounds that they belong with the compute and signal libraries rather than in the Core every program loads. Gain: exact ratios for schedules, gearing, sampling rates and probabilities, which are common in ordinary programs. Loss: complex arithmetic stays hand-written, and the textbook formula and the Jet code stop looking alike.",
+          "technical": "`Fraction` as in option A. `real` and `imaginary` are recorded as declined against this decision id, and complex support is left to a later compute library.",
+          "code": "rate :: Fraction.{ numerator: 44100, denominator: 48000 }\nprint(rate)                     // 147/160, reduced\nprint(rate * Fraction.{ numerator: 160, denominator: 147 })  // 1/1"
+        },
+        {
+          "key": "D",
+          "name": "Ship neither, and record the decline",
+          "detail": "Core keeps four number types. Both are recorded as deliberate declines with this decision id, so they stop being scored as gaps and stop resurfacing. Gain: the beginner surface stays as small as it is now, and neither type has to answer the hard questions about operators, ordering and printing. Loss: Jet stays behind eleven compared languages on both, and anyone doing signal or exact-ratio work writes the type themselves.",
+          "technical": "No new Core types. `real`, `imaginary`, `numerator` and `denominator` are marked declined against this decision id in the Core surface ledger. A user-written struct is the answer, and nothing in Core blocks that.",
+          "code": "// The answer stays a user type.\ntype Complex {\n    real: Float\n    imaginary: Float\n}\n\nfn multiply(a: Complex, b: Complex) => Complex {\n    return Complex.{\n        real: a.real * b.real - a.imaginary * b.imaginary,\n        imaginary: a.real * b.imaginary + a.imaginary * b.real,\n    }\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Python",
+          "note": "Complex is built into the language with its own literal. Exact fractions are a standard-library module.",
+          "code": "z = 1 + 2j\nfrom fractions import Fraction\nFraction(1, 3) * 3   # Fraction(1, 1)"
+        },
+        {
+          "lang": "Julia",
+          "note": "Both are built in, and both take part in the ordinary numeric tower.",
+          "code": "z = 1 + 2im\n1//3 + 1//3 + 1//3   # 1//1"
+        },
+        {
+          "lang": "Rust",
+          "note": "Neither is in the standard library. Both live in widely used external packages.",
+          "code": "// num_complex::Complex64, num_rational::Ratio"
+        },
+        {
+          "lang": "Go",
+          "note": "Complex is built into the language with two widths. Exact fractions are in the big-number package.",
+          "code": "z := complex(1, 2)\nbig.NewRat(1, 3)"
+        },
+        {
+          "lang": "Swift",
+          "note": "Neither is in the standard library. Complex is in the official numerics package.",
+          "code": "// swift-numerics: Complex<Double>"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Both types answer a question a program cannot answer well by hand. Complex arithmetic written out at every call site is where sign errors hide, and Float ratios drift in exactly the places people assume they will not. Neither type costs the beginner anything until it is named, and both are ordinary structs with ordinary operators.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It leaves exact ratios drifting. Sampling rates, gearing and probabilities are ordinary programs, not specialist ones."
+          },
+          {
+            "key": "C",
+            "reason": "It leaves the textbook formula and the Jet code looking different, which is where sign errors in signal code come from."
+          },
+          {
+            "key": "D",
+            "reason": "It keeps Jet behind eleven compared languages on both, and hands every user the same hand-written multiply rule to get wrong."
+          }
+        ],
+        "tradeoff": "Two more names in the Core listing, and two more sets of operator rules to document. That is accepted because neither appears until a program names it, and the alternative is hand-written arithmetic in the places most likely to be wrong."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft framed the choice as four ledger rows that are accessors on absent types rather than missing functions. It compared shipping both, either one alone, and neither.",
+        "boilOcean": "The breadth review also tested a single numeric-tower type covering both, and shipping them outside Core in a compute package. The tower was dropped because it hides two different sets of operator rules behind one name, and the package split was folded into option D, whose answer is already a user-written type.",
+        "hybrid": "The hybrid review tested shipping Complex in Core and Fraction in a compute package. It was rejected because exact ratios turn up in ordinary scheduling and sampling code, not in specialist numeric work.",
+        "cooperative": "The cooperative review strengthened every option, giving D a full worked user-written type and giving B and C an explicit decline id so a declined row stops being scored.",
+        "adversarial": "The adversarial review attacked the recommendation on beginner surface. Both types survive because neither appears until a program names one, and both behave as ordinary structs with the operators already ratified."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-08-06T11:34:44.495Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-08-06"
     }
   ],
   "questions": [
@@ -111893,6 +112037,111 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-06T11:38:04.271Z",
+      "by": "bd-verify",
+      "action": "card.update",
+      "ref": "c09riaeq",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T11:38:03.896Z",
+      "by": "bd-verify",
+      "action": "card.criteria-verify",
+      "ref": "c09riaeq",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T11:38:03.575Z",
+      "by": "bd-verify",
+      "action": "card.criteria-verify",
+      "ref": "c09riaeq",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T11:38:03.268Z",
+      "by": "bd-verify",
+      "action": "card.criteria-verify",
+      "ref": "c09riaeq",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-06T11:38:02.949Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c09riaeq",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T11:37:50.229Z",
+      "by": "bd-verify",
+      "action": "card.criteria-verify",
+      "ref": "c09riaeq",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T11:37:49.760Z",
+      "by": "bd-verify",
+      "action": "card.criteria-verify",
+      "ref": "c09riaeq",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-06T11:37:49.402Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c09riaeq",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T11:37:49.091Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c09riaeq",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-06T11:37:48.773Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c09riaeq",
+      "note": "#3 A hostile fixture proves truncate, add and reset stay themse"
+    },
+    {
+      "at": "2026-08-06T11:37:48.465Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c09riaeq",
+      "note": "#2 core.math, core.time and core.os carry no collection-verb lo"
+    },
+    {
+      "at": "2026-08-06T11:37:48.149Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c09riaeq",
+      "note": "#1 Collection-verb synonym groups apply only inside container t"
+    },
+    {
+      "at": "2026-08-06T11:37:23.830Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c09riaeq",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T11:36:28.737Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-NUMTYPE1",
+      "note": "A"
+    },
+    {
+      "at": "2026-08-06T11:34:44.495Z",
+      "by": "fable",
+      "action": "decision.add",
+      "ref": "D-NUMTYPE1",
+      "note": "Which number types Core ships beyond whole and decimal"
+    },
     {
       "at": "2026-08-06T11:24:26.036Z",
       "by": "fable",
@@ -115287,111 +115536,6 @@
       "action": "card.criteria-meet",
       "ref": "c0c74q4f",
       "note": "#2"
-    },
-    {
-      "at": "2026-08-06T02:05:46.399Z",
-      "by": "bd-ops",
-      "action": "card.criteria-meet",
-      "ref": "c0c74q4f",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-06T02:05:46.088Z",
-      "by": "bd-ops",
-      "action": "card.criteria-meet",
-      "ref": "c04513m9",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-06T02:05:45.775Z",
-      "by": "bd-ops",
-      "action": "card.criteria-meet",
-      "ref": "c04513m9",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-06T02:05:45.468Z",
-      "by": "bd-ops",
-      "action": "card.criteria-meet",
-      "ref": "c04513m9",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-06T02:05:45.163Z",
-      "by": "bd-ops",
-      "action": "card.criteria-meet",
-      "ref": "c04513m9",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-06T02:05:44.851Z",
-      "by": "bd-ops",
-      "action": "card.criteria-meet",
-      "ref": "c04513m9",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-06T02:05:44.539Z",
-      "by": "bd-ops",
-      "action": "card.criteria-meet",
-      "ref": "c04513m9",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-06T02:05:44.232Z",
-      "by": "bd-ops",
-      "action": "card.criteria-meet",
-      "ref": "c04513m9",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-06T02:05:13.261Z",
-      "by": "fable",
-      "action": "card.add",
-      "ref": "c0ky778n",
-      "note": "jet run drops recoverable diagnostics that jet build reports"
-    },
-    {
-      "at": "2026-08-06T02:05:02.983Z",
-      "by": "bd-markers",
-      "action": "card.update",
-      "ref": "c0pzumap",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T02:05:02.607Z",
-      "by": "bd-markers",
-      "action": "card.update",
-      "ref": "c0kydt2i",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T02:05:02.239Z",
-      "by": "bd-markers",
-      "action": "card.update",
-      "ref": "c0ai0h4w",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T02:05:01.873Z",
-      "by": "bd-markers",
-      "action": "card.update",
-      "ref": "c0v3yofo",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T02:05:01.515Z",
-      "by": "bd-markers",
-      "action": "card.criteria-meet",
-      "ref": "c0pzumap",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-06T02:05:01.206Z",
-      "by": "bd-markers",
-      "action": "card.criteria-meet",
-      "ref": "c0kydt2i",
-      "note": "#3"
     }
   ],
   "nextNum": 368,
