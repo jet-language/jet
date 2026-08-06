@@ -203,19 +203,25 @@ impl<'a> Parser<'a> {
             let Some(rule) = crate::Policy::applied_rule(&marker.name) else {
                 return Ok(());
             };
-            if marker.name == Syntax::KW_TEST && marker.args.is_empty() {
-                return Ok(());
-            }
-            use crate::Policy::RuleForm;
             if matches!(rule.status, crate::Policy::RuleStatus::Retired { .. }) {
                 return Ok(());
             }
-            let call_required = matches!(rule.form, RuleForm::Call)
-                || matches!(rule.form, RuleForm::Block) && rule.signature.required() > 0;
-            let bare_required = matches!(rule.form, RuleForm::Bare);
+            // D-MARK-FORM1=A, one placement law: the signature alone decides
+            // whether parentheses may and must appear. There is no written-form
+            // column and no per-marker grammar category.
+            if parenthesized && !rule.signature.accepts_arguments() {
+                return Err(crate::Policy::marker_argument_shape_error(&marker.name, marker.span));
+            }
+            if parenthesized && marker.args.is_empty() {
+                return Err(crate::Policy::marker_empty_arguments_error(
+                    &marker.name,
+                    marker.span,
+                ));
+            }
             // `#Unsafe` keeps its product diagnostic E3112 for a missing reason.
-            if (call_required && !parenthesized && marker.name != Syntax::KW_UNSAFE)
-                || bare_required && parenthesized
+            if !parenthesized
+                && rule.signature.arguments_required()
+                && marker.name != Syntax::KW_UNSAFE
             {
                 return Err(crate::Policy::marker_argument_shape_error(&marker.name, marker.span));
             }
@@ -502,7 +508,47 @@ impl<'a> Parser<'a> {
                 }
                 self.diags.push(diagnostic);
             }
+            self.diagnose_repeated_markers(&markers, noun);
             Ok(markers)
+        }
+
+        /// D-MARK-REPEAT1=A: one rule written twice on one target is an error
+        /// with a drop-the-repeat fix. Rows whose repetition carries meaning
+        /// carry `repeatable` in the registry; the check reads that column and
+        /// never a name list.
+        pub(in crate::Parser) fn diagnose_repeated_markers(
+            &mut self,
+            markers: &[Marker],
+            noun: &str,
+        ) {
+            for (index, marker) in markers.iter().enumerate() {
+                if crate::Policy::applied_rule(&marker.name)
+                    .is_none_or(|rule| rule.repeatable)
+                {
+                    continue;
+                }
+                if !markers[..index]
+                    .iter()
+                    .any(|earlier| earlier.name == marker.name)
+                {
+                    continue;
+                }
+                let mut diagnostic = Diagnostic::error(
+                    "E0999",
+                    format!("`#{}` is already applied to this {noun}", marker.name),
+                    format!(
+                        "`#{}` is not a repeatable rule, so the second copy adds nothing and can only disagree with the first",
+                        marker.name
+                    ),
+                    "remove the repeated marker".to_string(),
+                    Some(marker.span),
+                );
+                diagnostic.edit = Some(crate::Diagnostics::TextEdit {
+                    span: marker.span,
+                    new_text: String::new(),
+                });
+                self.diags.push(diagnostic);
+            }
         }
 
         /// D-SHAPE2: parse leading `#[…]` applied-rule groups before a

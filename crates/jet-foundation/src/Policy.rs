@@ -183,6 +183,11 @@ impl RuleSite {
     ];
 }
 
+/// D-MARK-FORM1=A: one placement law. A marker, or one bracket group, is
+/// written immediately before its target; the registry says which targets it
+/// accepts; parentheses appear exactly when arguments are written. There is no
+/// written-form column — the signature and the site list carry everything the
+/// five retired `RuleForm` categories used to approximate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AppliedRule {
     pub name: &'static str,
@@ -192,19 +197,11 @@ pub struct AppliedRule {
     pub policy_scopes: &'static [PolicyScope],
     /// Exact sound attachment sites for non-inheriting rules.
     pub sites: &'static [RuleSite],
-    pub form: RuleForm,
+    /// D-MARK-REPEAT1=A: may this rule be written more than once on one target?
+    pub repeatable: bool,
     pub status: RuleStatus,
     pub inherits: bool,
     pub resolution: RuleResolution,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RuleForm {
-    Bare,
-    Call,
-    BareOrCall,
-    Block,
-    Prefix,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -348,6 +345,19 @@ impl RuleSignature {
         format!("({})", parts.join(", "))
     }
 
+    /// D-MARK-FORM1=A: may this rule be written with parentheses at all? A row
+    /// that declares no parameter and no variadic list never takes arguments.
+    pub const fn accepts_arguments(self) -> bool {
+        !self.params.is_empty() || self.variadic.is_some()
+    }
+
+    /// D-MARK-FORM1=A: must arguments be written? A row with a required
+    /// parameter needs them, and so does a row whose only parameter is a
+    /// variadic list — an empty list carries no rule.
+    pub const fn arguments_required(self) -> bool {
+        self.required() > 0 || (self.params.is_empty() && self.variadic.is_some())
+    }
+
     pub const fn required(self) -> usize {
         let mut count = 0;
         let mut index = 0;
@@ -483,6 +493,24 @@ pub fn marker_argument_shape_error(
     )
 }
 
+/// D-MARK-FORM1=A: parentheses appear exactly when arguments are written, so
+/// an empty pair is always a leftover the formatter can delete.
+pub fn marker_empty_arguments_error(
+    name: &str,
+    span: crate::Diagnostics::Span,
+) -> crate::Diagnostics::Diagnostic {
+    let bare = format!("#{name}");
+    let mut diagnostic = crate::Diagnostics::Diagnostic::error(
+        "E0930",
+        format!("`#{name}()` has empty parentheses"),
+        "a marker writes parentheses exactly when it passes arguments".to_string(),
+        format!("write `{bare}`"),
+        Some(span),
+    );
+    diagnostic.edit = Some(crate::Diagnostics::TextEdit { span, new_text: bare });
+    diagnostic
+}
+
 /// A marker argument whose shape is right but whose value is outside the
 /// declared menu. Naming the menu is the whole point: the writer typed a name
 /// the compiler knows nothing about.
@@ -575,25 +603,37 @@ const EXPR_SITE: &[RuleSite] = &[RuleSite::Expression];
 const PARAMETER_SITE: &[RuleSite] = &[RuleSite::Parameter];
 
 macro_rules! rule {
-    ($name:expr, $sig:expr, $sites:expr, $form:ident) => {
+    ($name:expr, $sig:expr, $sites:expr) => {
         AppliedRule {
             name: $name,
             signature: $sig,
             policy_scopes: NO_POLICY_SCOPES,
             sites: $sites,
-            form: RuleForm::$form,
+            repeatable: false,
             status: RuleStatus::Active,
             inherits: false,
             resolution: RuleResolution::SiteBound,
         }
     };
-    (retired $name:expr, $sig:expr, $sites:expr, $form:ident, $replacement:expr) => {
+    (repeatable $name:expr, $sig:expr, $sites:expr) => {
         AppliedRule {
             name: $name,
             signature: $sig,
             policy_scopes: NO_POLICY_SCOPES,
             sites: $sites,
-            form: RuleForm::$form,
+            repeatable: true,
+            status: RuleStatus::Active,
+            inherits: false,
+            resolution: RuleResolution::SiteBound,
+        }
+    };
+    (retired $name:expr, $sig:expr, $sites:expr, $replacement:expr) => {
+        AppliedRule {
+            name: $name,
+            signature: $sig,
+            policy_scopes: NO_POLICY_SCOPES,
+            sites: $sites,
+            repeatable: false,
             status: RuleStatus::Retired { replacement: $replacement },
             inherits: false,
             resolution: RuleResolution::SiteBound,
@@ -640,19 +680,20 @@ pub const APPLIED_RULES: &[AppliedRule] = &[
         signature: sig!(variadic Any => "PolicySetting"),
         policy_scopes: ALL_SCOPES,
         sites: &[RuleSite::Package, RuleSite::Module, RuleSite::Function, RuleSite::Method, RuleSite::Block],
-        form: RuleForm::Call,
+        repeatable: false,
         status: RuleStatus::Active,
         inherits: true,
         resolution: RuleResolution::Tighten,
     },
-    rule!("Unsafe", sig!(param!("reason", String), param!("obligations", Ident => "ObligationMode", ".None")), &[RuleSite::Function, RuleSite::Method, RuleSite::Block, RuleSite::Operation], Call),
-    rule!("Grant", sig!(variadic Ident => "Capability"), &[RuleSite::Block, RuleSite::Operation], Call),
-    rule!("Scrub", sig!(param!("tag", Ident)), CALLABLE_SITE, Call),
-    rule!(retired "Pure", sig!(), CALLABLE_SITE, Bare, "=[]=>"),
-    rule!("Pre", sig!(param!("condition", Any), param!("message", String)), CALLABLE_SITE, Call),
-    rule!("Post", sig!(param!("condition", Any), param!("message", String)), CALLABLE_SITE, Call),
-    rule!("Kernel", sig!(param!("mode", Ident => "KernelMode")), FUNCTION_SITE, Call),
-    rule!("Inline", sig!(param!("mode", Ident => "InlineMode", ".Hint")), &[RuleSite::Function, RuleSite::Method, RuleSite::Constant], BareOrCall),
+    rule!("Unsafe", sig!(param!("reason", String), param!("obligations", Ident => "ObligationMode", ".None")), &[RuleSite::Function, RuleSite::Method, RuleSite::Block, RuleSite::Operation]),
+    rule!("Grant", sig!(variadic Ident => "Capability"), &[RuleSite::Block, RuleSite::Operation]),
+    rule!("Scrub", sig!(param!("tag", Ident)), CALLABLE_SITE),
+    rule!(retired "Pure", sig!(), CALLABLE_SITE, "=[]=>"),
+    // D-MARK-REPEAT1=A: several contracts on one callable each explain their own violation.
+    rule!(repeatable "Pre", sig!(param!("condition", Any), param!("message", String)), CALLABLE_SITE),
+    rule!(repeatable "Post", sig!(param!("condition", Any), param!("message", String)), CALLABLE_SITE),
+    rule!("Kernel", sig!(param!("mode", Ident => "KernelMode")), FUNCTION_SITE),
+    rule!("Inline", sig!(param!("mode", Ident => "InlineMode", ".Hint")), &[RuleSite::Function, RuleSite::Method, RuleSite::Constant]),
     // D-TASK-META1=A: the bare form stays the beginner task marker; the
     // optional named fields are typed metadata on the same marker.
     rule!("Job", sig!(
@@ -664,102 +705,103 @@ pub const APPLIED_RULES: &[AppliedRule] = &[
         param!("cache", Any, ".Uncached"),
         param!("authority", Any, "none"),
         param!("limits", Any, "{}")
-    ), FUNCTION_SITE, BareOrCall),
-    rule!("Every", sig!(param!("schedule", DurationOrString)), FUNCTION_SITE, Call),
-    rule!("Replayable", sig!(), CALLABLE_SITE, Bare),
-    rule!("WasmExport", sig!(), FUNCTION_SITE, Bare),
-    rule!("State", sig!(param!("state", Ident => "State")), CALLABLE_SITE, Call),
-    rule!("Transition", sig!(param!("from", Ident => "State"), param!("to", Ident => "State")), CALLABLE_SITE, Call),
-    rule!("FFI", sig!(param!("language", Ident => "FfiLanguage")), FUNCTION_SITE, Call),
-    rule!("ABI", sig!(param!("name", Ident => "ABI")), FUNCTION_SITE, Call),
-    rule!("MustUse", sig!(), &[RuleSite::Function, RuleSite::Method, RuleSite::Type], Bare),
-    rule!("Codable", sig!(), TYPE_SITE, Bare),
-    rule!("Encode", sig!(), TYPE_SITE, Bare),
-    rule!("Decode", sig!(), TYPE_SITE, Bare),
-    rule!("PublishedSchema", sig!(), TYPE_SITE, Bare),
-    rule!("Summarize", sig!(), TYPE_SITE, Bare),
-    rule!("Comparable", sig!(), TYPE_SITE, Bare),
-    rule!("Equatable", sig!(), TYPE_SITE, Bare),
-    rule!("Debug", sig!(), TYPE_SITE, Bare),
-    rule!("Numeric", sig!(), TYPE_SITE, Bare),
-    rule!("Printable", sig!(), TYPE_SITE, Bare),
-    rule!("CodableAsBase", sig!(), TYPE_SITE, Bare),
-    rule!("CLI", sig!(), TYPE_SITE, Bare),
-    rule!("Patchable", sig!(), TYPE_SITE, Bare),
+    ), FUNCTION_SITE),
+    rule!("Every", sig!(param!("schedule", DurationOrString)), FUNCTION_SITE),
+    rule!("Replayable", sig!(), CALLABLE_SITE),
+    rule!("WasmExport", sig!(), FUNCTION_SITE),
+    rule!("State", sig!(param!("state", Ident => "State")), CALLABLE_SITE),
+    rule!("Transition", sig!(param!("from", Ident => "State"), param!("to", Ident => "State")), CALLABLE_SITE),
+    rule!("FFI", sig!(param!("language", Ident => "FfiLanguage")), FUNCTION_SITE),
+    rule!("ABI", sig!(param!("name", Ident => "ABI")), FUNCTION_SITE),
+    rule!("MustUse", sig!(), &[RuleSite::Function, RuleSite::Method, RuleSite::Type]),
+    rule!("Codable", sig!(), TYPE_SITE),
+    rule!("Encode", sig!(), TYPE_SITE),
+    rule!("Decode", sig!(), TYPE_SITE),
+    rule!("PublishedSchema", sig!(), TYPE_SITE),
+    rule!("Summarize", sig!(), TYPE_SITE),
+    rule!("Comparable", sig!(), TYPE_SITE),
+    rule!("Equatable", sig!(), TYPE_SITE),
+    rule!("Debug", sig!(), TYPE_SITE),
+    rule!("Numeric", sig!(), TYPE_SITE),
+    rule!("Printable", sig!(), TYPE_SITE),
+    rule!("CodableAsBase", sig!(), TYPE_SITE),
+    rule!("CLI", sig!(), TYPE_SITE),
+    rule!("Patchable", sig!(), TYPE_SITE),
     rule!("UnitFamily", sig!(
         param!("family", Ident),
         param!("dimension", Any, "nominal"),
         param!("base", Ident, "first member")
-    ), TYPE_SITE, Call),
-    rule!("SingleUse", sig!(), TYPE_SITE, Bare),
-    rule!("Invariant", sig!(param!("condition", String)), TYPE_SITE, Call),
-    rule!("Layout", sig!(param!("kind", Ident => "Layout"), param!("tag", Ident => "IntType", "I32")), TYPE_SITE, Call),
-    rule!("RenameAll", sig!(param!("case", Ident => "NamingCase")), TYPE_SITE, Call),
-    rule!("DenyUnknownFields", sig!(), TYPE_SITE, Bare),
-    rule!("Discriminant", sig!(param!("field", String)), TYPE_SITE, Call),
-    rule!("Untagged", sig!(), TYPE_SITE, Bare),
-    rule!("Redact", sig!(), FIELD_SITE, Bare),
-    rule!("Rename", sig!(param!("name", String)), FIELD_OR_VARIANT_SITE, Call),
-    rule!("Skip", sig!(), FIELD_SITE, Bare),
-    rule!("Default", sig!(param!("value", Any, "T.default")), FIELD_SITE, BareOrCall),
-    rule!("Flatten", sig!(), FIELD_SITE, Bare),
-    rule!("Doc", sig!(param!("text", String)), FIELD_SITE, Call),
-    rule!("Flag", sig!(), FIELD_SITE, Bare),
-    rule!("Short", sig!(param!("name", String)), FIELD_SITE, Call),
-    rule!("Env", sig!(param!("name", String)), FIELD_SITE, Call),
-    rule!("Persist", sig!(), DECLARATION_SITE, Bare),
-    rule!("Track", sig!(), DECLARATION_SITE, Bare),
-    rule!("Known", sig!(), &[RuleSite::Declaration, RuleSite::Constant, RuleSite::Block, RuleSite::Statement], Prefix),
-    rule!("Local", sig!(), DECLARATION_SITE, Bare),
-    rule!("Shared", sig!(), DECLARATION_SITE, Bare),
-    rule!("Meta", sig!(param!("category", String, "\"\""), param!("tunable", Bool, "false"), param!("maturity", Ident => "Maturity", ".Tested")), &[RuleSite::Function, RuleSite::Method, RuleSite::Declaration, RuleSite::Constant], Call),
-    rule!("Todo", sig!(), EXPR_SITE, Bare),
-    rule!("Shield", sig!(), BLOCK_SITE, Block),
-    rule!("Impure", sig!(param!("reason", String, "none")), BLOCK_SITE, Block),
-    rule!("Caps", sig!(variadic Ident => "Capability"), BLOCK_SITE, Block),
-    rule!("Transact", sig!(param!("name", Ident)), BLOCK_SITE, Block),
-    rule!("Region", sig!(param!("name", Ident)), BLOCK_SITE, Block),
-    rule!("Live", sig!(), BLOCK_SITE, Block),
-    rule!("Nondeterministic", sig!(param!("reason", String)), BLOCK_SITE, Block),
-    rule!("Context", sig!(param!("allocator", Any, "default"), param!("logger", Any, "default"), param!("deadline", Int, "default")), BLOCK_SITE, Block),
-    rule!("Reactive", sig!(), &[RuleSite::Function, RuleSite::Method, RuleSite::Block], Block),
-    rule!("Off", sig!(), STATEMENT_SITE, Prefix),
-    rule!("DebugOnly", sig!(), STATEMENT_SITE, Prefix),
-    rule!("Test", sig!(param!("name", String, "function name")), &[RuleSite::Test], Block),
-    rule!("Bench", sig!(param!("name", String)), &[RuleSite::Bench], Block),
-    rule!("Target", sig!(param!("target", Ident => "Target")), &[RuleSite::File, RuleSite::Module, RuleSite::Function], Call),
-    rule!("Root", sig!(), PARAMETER_SITE, Bare),
-    rule!("HTML", sig!(param!("path", String)), FILE_SITE, Call),
-    rule!("PubFile", sig!(), FILE_SITE, Bare),
-    rule!("NoPrelude", sig!(), FILE_SITE, Bare),
-    rule!("SQL", sig!(), BLOCK_SITE, Block),
-    rule!("Extern", sig!(param!("library", String)), MODULE_SITE, Call),
-    rule!("Bindgen", sig!(param!("library", String)), MODULE_SITE, Call),
-    rule!("allow", sig!(param!("lint", Ident)), &[RuleSite::Declaration, RuleSite::Field, RuleSite::Statement], Call),
-    rule!("Static", sig!(), CONST_SITE, Bare),
-    rule!("Authority", sig!(), &[RuleSite::Operation], Bare),
-    rule!("wire", sig!(), FIELD_SITE, Bare),
-    rule!(retired "InlineAlways", sig!(), FUNCTION_SITE, Bare, "#Inline(Always)"),
-    rule!(retired "static", sig!(), CONST_SITE, Bare, "#Static"),
-    rule!(retired "inline", sig!(), CONST_SITE, Bare, "#Inline"),
-    rule!(retired "Add", sig!(), EXPR_SITE, Bare, ".Add"),
-    rule!(retired "Mul", sig!(), EXPR_SITE, Bare, ".Mul"),
-    rule!(retired "Min", sig!(), EXPR_SITE, Bare, ".Min"),
-    rule!(retired "Max", sig!(), EXPR_SITE, Bare, ".Max"),
-    rule!(retired "Audit", sig!(param!("reason", String)), &[RuleSite::Function, RuleSite::Method, RuleSite::Block], Call, "#Unsafe(reason)"),
-    rule!(retired "Wasm", sig!(), FUNCTION_SITE, Bare, "#Target(Wasm)"),
-    rule!(retired "JS", sig!(), FUNCTION_SITE, Bare, "#Target(JS)"),
-    rule!(retired "Suppress", sig!(param!("reason", String)), BLOCK_SITE, Block, ".drop(\"reason\")"),
-    rule!(retired "Uninit", sig!(), FIELD_SITE, Bare, "give the field a real initial value — stored uninitialized-sentinel fields were retired outright (D-UNINIT-SENTINEL1)"),
-    rule!(retired "Cli", sig!(), TYPE_SITE, Bare, "#CLI"),
-    rule!(retired "Abi", sig!(param!("name", Ident => "ABI")), FUNCTION_SITE, Call, "#ABI"),
-    rule!(retired "Html", sig!(param!("path", String)), FILE_SITE, Call, "#HTML"),
-    rule!(retired "Sql", sig!(), BLOCK_SITE, Block, "#SQL"),
-    rule!(retired "Ref", sig!(), FIELD_SITE, Bare, "use an owned value"),
-    rule!(retired "Tainted", sig!(param!("kind", Ident => "TaintKind", ".Input")), &[RuleSite::Expression, RuleSite::Operation], BareOrCall, "#Input"),
-    rule!(retired "Sanitizer", sig!(), CALLABLE_SITE, Bare, "#Scrub(Tag)"),
-    rule!(retired "Task", sig!(), FUNCTION_SITE, Bare, "#Job"),
-    rule!(retired "Tag", sig!(param!("field", String)), TYPE_SITE, Call, "#Discriminant"),
+    ), TYPE_SITE),
+    rule!("SingleUse", sig!(), TYPE_SITE),
+    rule!("Invariant", sig!(param!("condition", String)), TYPE_SITE),
+    rule!("Layout", sig!(param!("kind", Ident => "Layout"), param!("tag", Ident => "IntType", "I32")), TYPE_SITE),
+    rule!("RenameAll", sig!(param!("case", Ident => "NamingCase")), TYPE_SITE),
+    rule!("DenyUnknownFields", sig!(), TYPE_SITE),
+    rule!("Discriminant", sig!(param!("field", String)), TYPE_SITE),
+    rule!("Untagged", sig!(), TYPE_SITE),
+    rule!("Redact", sig!(), FIELD_SITE),
+    rule!("Rename", sig!(param!("name", String)), FIELD_OR_VARIANT_SITE),
+    rule!("Skip", sig!(), FIELD_SITE),
+    rule!("Default", sig!(param!("value", Any, "T.default")), FIELD_SITE),
+    rule!("Flatten", sig!(), FIELD_SITE),
+    rule!("Doc", sig!(param!("text", String)), FIELD_SITE),
+    rule!("Flag", sig!(), FIELD_SITE),
+    rule!("Short", sig!(param!("name", String)), FIELD_SITE),
+    rule!("Env", sig!(param!("name", String)), FIELD_SITE),
+    rule!("Persist", sig!(), DECLARATION_SITE),
+    rule!("Track", sig!(), DECLARATION_SITE),
+    rule!("Known", sig!(), &[RuleSite::Declaration, RuleSite::Constant, RuleSite::Block, RuleSite::Statement]),
+    rule!("Local", sig!(), DECLARATION_SITE),
+    rule!("Shared", sig!(), DECLARATION_SITE),
+    rule!("Meta", sig!(param!("category", String, "\"\""), param!("tunable", Bool, "false"), param!("maturity", Ident => "Maturity", ".Tested")), &[RuleSite::Function, RuleSite::Method, RuleSite::Declaration, RuleSite::Constant]),
+    rule!("Todo", sig!(), EXPR_SITE),
+    rule!("Shield", sig!(), BLOCK_SITE),
+    rule!("Impure", sig!(param!("reason", String, "none")), BLOCK_SITE),
+    rule!("Caps", sig!(variadic Ident => "Capability"), BLOCK_SITE),
+    rule!("Transact", sig!(param!("name", Ident)), BLOCK_SITE),
+    rule!("Region", sig!(param!("name", Ident)), BLOCK_SITE),
+    rule!("Live", sig!(), BLOCK_SITE),
+    rule!("Nondeterministic", sig!(param!("reason", String)), BLOCK_SITE),
+    rule!("Context", sig!(param!("allocator", Any, "default"), param!("logger", Any, "default"), param!("deadline", Int, "default")), BLOCK_SITE),
+    rule!("Reactive", sig!(), &[RuleSite::Function, RuleSite::Method, RuleSite::Block]),
+    rule!("Off", sig!(), STATEMENT_SITE),
+    rule!("DebugOnly", sig!(), STATEMENT_SITE),
+    rule!("Test", sig!(param!("name", String, "function name")), &[RuleSite::Test]),
+    rule!("Bench", sig!(param!("name", String)), &[RuleSite::Bench]),
+    rule!("Target", sig!(param!("target", Ident => "Target")), &[RuleSite::File, RuleSite::Module, RuleSite::Function]),
+    rule!("Root", sig!(), PARAMETER_SITE),
+    rule!("HTML", sig!(param!("path", String)), FILE_SITE),
+    rule!("PubFile", sig!(), FILE_SITE),
+    rule!("NoPrelude", sig!(), FILE_SITE),
+    rule!("SQL", sig!(), BLOCK_SITE),
+    rule!("Extern", sig!(param!("library", String)), MODULE_SITE),
+    rule!("Bindgen", sig!(param!("library", String)), MODULE_SITE),
+    // D-MARK-REPEAT1=A: one target may silence several lints.
+    rule!(repeatable "allow", sig!(param!("lint", Ident)), &[RuleSite::Declaration, RuleSite::Field, RuleSite::Statement]),
+    rule!("Static", sig!(), CONST_SITE),
+    rule!("Authority", sig!(), &[RuleSite::Operation]),
+    rule!("wire", sig!(), FIELD_SITE),
+    rule!(retired "InlineAlways", sig!(), FUNCTION_SITE, "#Inline(Always)"),
+    rule!(retired "static", sig!(), CONST_SITE, "#Static"),
+    rule!(retired "inline", sig!(), CONST_SITE, "#Inline"),
+    rule!(retired "Add", sig!(), EXPR_SITE, ".Add"),
+    rule!(retired "Mul", sig!(), EXPR_SITE, ".Mul"),
+    rule!(retired "Min", sig!(), EXPR_SITE, ".Min"),
+    rule!(retired "Max", sig!(), EXPR_SITE, ".Max"),
+    rule!(retired "Audit", sig!(param!("reason", String)), &[RuleSite::Function, RuleSite::Method, RuleSite::Block], "#Unsafe(reason)"),
+    rule!(retired "Wasm", sig!(), FUNCTION_SITE, "#Target(Wasm)"),
+    rule!(retired "JS", sig!(), FUNCTION_SITE, "#Target(JS)"),
+    rule!(retired "Suppress", sig!(param!("reason", String)), BLOCK_SITE, ".drop(\"reason\")"),
+    rule!(retired "Uninit", sig!(), FIELD_SITE, "give the field a real initial value — stored uninitialized-sentinel fields were retired outright (D-UNINIT-SENTINEL1)"),
+    rule!(retired "Cli", sig!(), TYPE_SITE, "#CLI"),
+    rule!(retired "Abi", sig!(param!("name", Ident => "ABI")), FUNCTION_SITE, "#ABI"),
+    rule!(retired "Html", sig!(param!("path", String)), FILE_SITE, "#HTML"),
+    rule!(retired "Sql", sig!(), BLOCK_SITE, "#SQL"),
+    rule!(retired "Ref", sig!(), FIELD_SITE, "use an owned value"),
+    rule!(retired "Tainted", sig!(param!("kind", Ident => "TaintKind", ".Input")), &[RuleSite::Expression, RuleSite::Operation], "#Input"),
+    rule!(retired "Sanitizer", sig!(), CALLABLE_SITE, "#Scrub(Tag)"),
+    rule!(retired "Task", sig!(), FUNCTION_SITE, "#Job"),
+    rule!(retired "Tag", sig!(param!("field", String)), TYPE_SITE, "#Discriminant"),
 ];
 
 pub fn applied_rule_registry() -> &'static [AppliedRule] {
