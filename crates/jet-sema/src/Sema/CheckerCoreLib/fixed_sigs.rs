@@ -2214,6 +2214,48 @@ pub fn core_fixed_sig(
             ],
             Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
         )),
+        ("core.net", "nodelay") => Some((
+            vec![(read, Type::Named("TcpStream".to_string()))],
+            Some(result_ty(Type::Bool, Type::Named("NetError".to_string()))),
+        )),
+        ("core.net", "set_nodelay") => Some((
+            vec![
+                (
+                    AccessConvention::Write,
+                    Type::Named("TcpStream".to_string()),
+                ),
+                (read, Type::Bool),
+            ],
+            Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
+        )),
+        ("core.net", "ttl") => Some((
+            vec![(read, Type::Named("TcpStream".to_string()))],
+            Some(result_ty(Type::Int, Type::Named("NetError".to_string()))),
+        )),
+        ("core.net", "set_ttl") => Some((
+            vec![
+                (
+                    AccessConvention::Write,
+                    Type::Named("TcpStream".to_string()),
+                ),
+                (read, Type::Int),
+            ],
+            Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
+        )),
+        ("core.net", "socket_type") => Some((
+            vec![(read, Type::Named("TcpStream".to_string()))],
+            Some(Type::String),
+        )),
+        ("core.net", "sendfile") => Some((
+            vec![
+                (
+                    AccessConvention::Write,
+                    Type::Named("TcpStream".to_string()),
+                ),
+                (read, Type::String),
+            ],
+            Some(result_ty(Type::Int, Type::Named("NetError".to_string()))),
+        )),
         // Convenience: send a complete HTTP/1.1 response and close the stream.
         ("core.net", "tcp_reply") => Some((
             vec![
@@ -2402,6 +2444,18 @@ pub fn core_fixed_sig(
                 (read, Type::Int),
             ],
             Some(result_ty(Type::List(Box::new(Type::String)), Type::Named("NetError".to_string()))),
+        )),
+        ("core.net", "dns_ptr") => Some((
+            vec![(read, Type::String), (read, Type::Int)],
+            Some(result_ty(Type::List(Box::new(Type::String)), Type::Named("NetError".to_string()))),
+        )),
+        ("core.net", "getservbyname") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(Type::Int, Type::Named("NetError".to_string()))),
+        )),
+        ("core.net", "getservbyport") => Some((
+            vec![(read, Type::Int)],
+            Some(result_ty(Type::String, Type::Named("NetError".to_string()))),
         )),
         ("core.net", "dns_srv") => Some((
             vec![(read, Type::String), (read, Type::Int)],

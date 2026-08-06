@@ -9974,6 +9974,44 @@ impl LowerCtx<'_, '_> {
                             self.host.net_http.set_timeout,
                             vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
                         ),
+                        "nodelay" if args.len() == 1 => (
+                            self.host.net_http.nodelay,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "set_nodelay" if args.len() == 2 => {
+                            let stream = self.lower_expr(&args[0])?;
+                            let enabled = self.lower_expr(&args[1])?;
+                            let enabled = self.b.ins().uextend(types::I64, enabled);
+                            (self.host.net_http.set_nodelay, vec![stream, enabled])
+                        }
+                        "ttl" if args.len() == 1 => (
+                            self.host.net_http.ttl,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "set_ttl" if args.len() == 2 => (
+                            self.host.net_http.set_ttl,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "socket_type" if args.len() == 1 => (
+                            self.host.net_http.socket_type,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "sendfile" if args.len() == 2 => (
+                            self.host.net_http.sendfile,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "dns_ptr" if args.len() == 2 => (
+                            self.host.net_http.dns_ptr,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "getservbyname" if args.len() == 1 => (
+                            self.host.net_http.getservbyname,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "getservbyport" if args.len() == 1 => (
+                            self.host.net_http.getservbyport,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
                         "tcp_reply" if args.len() == 3 => (
                             self.host.net_http.tcp_reply,
                             vec![

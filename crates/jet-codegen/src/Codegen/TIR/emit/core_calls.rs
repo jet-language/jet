@@ -2917,6 +2917,31 @@ pub(crate) fn emit_tir_core_call(
             arg(0),
             arg(1)
         ),
+        ("core.net", "nodelay") => {
+            format!("{}(&({}))", helper("jet_net_nodelay"), arg(0))
+        }
+        ("core.net", "set_nodelay") => format!(
+            "{}(&({}), {})",
+            helper("jet_net_set_nodelay"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.net", "ttl") => format!("{}(&({}))", helper("jet_net_ttl"), arg(0)),
+        ("core.net", "set_ttl") => format!(
+            "{}(&({}), {})",
+            helper("jet_net_set_ttl"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.net", "socket_type") => {
+            format!("{}(&({}))", helper("jet_net_socket_type"), arg(0))
+        }
+        ("core.net", "sendfile") => format!(
+            "{}(&mut ({}), &({}))",
+            helper("jet_net_sendfile"),
+            arg(0),
+            arg(1)
+        ),
         ("core.net", "tcp_reply") => format!(
             "{}({}, &({}), &({}))",
             helper("jet_net_tcp_reply"),
@@ -3032,6 +3057,15 @@ pub(crate) fn emit_tir_core_call(
             arg(1),
             arg(2), arg(1)
         ),
+        ("core.net", "dns_ptr") => {
+            format!("{}({}(&({}), {}), &({}))", helper("jet_net_dns_result"), helper("jet_net_dns_ptr"), arg(0), arg(1), arg(0))
+        }
+        ("core.net", "getservbyname") => {
+            format!("{}(&({}))", helper("jet_net_getservbyname"), arg(0))
+        }
+        ("core.net", "getservbyport") => {
+            format!("{}({})", helper("jet_net_getservbyport"), arg(0))
+        }
         ("core.net", "dns_srv") => {
             format!("{}({}(&({}), {}), &({}))", helper("jet_net_dns_result"), helper("jet_net_dns_srv"), arg(0), arg(1), arg(0))
         }

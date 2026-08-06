@@ -368,6 +368,117 @@ extern "C" fn jet_jit_net_set_timeout(stream: i64, ms: i64) -> i64 {
     map_net_unit(jet_net_set_timeout(&mut guard, ms))
 }
 
+extern "C" fn jet_jit_net_nodelay(stream: i64) -> i64 {
+    let Some(stream) = tcp_stream(stream) else {
+        return net_err(JetNetError::InvalidInput(jet_net_detail(
+            "nodelay",
+            None,
+            None,
+            "invalid TcpStream".into(),
+            None,
+        )));
+    };
+    let guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+    match jet_net_nodelay(&guard) {
+        Ok(v) => result_ok(if v { 1 } else { 0 }),
+        Err(e) => net_err(e),
+    }
+}
+
+extern "C" fn jet_jit_net_set_nodelay(stream: i64, enabled: i64) -> i64 {
+    let Some(stream) = tcp_stream(stream) else {
+        return net_err(JetNetError::InvalidInput(jet_net_detail(
+            "set_nodelay",
+            None,
+            None,
+            "invalid TcpStream".into(),
+            None,
+        )));
+    };
+    let guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+    map_net_unit(jet_net_set_nodelay(&guard, enabled != 0))
+}
+
+extern "C" fn jet_jit_net_ttl(stream: i64) -> i64 {
+    let Some(stream) = tcp_stream(stream) else {
+        return net_err(JetNetError::InvalidInput(jet_net_detail(
+            "ttl",
+            None,
+            None,
+            "invalid TcpStream".into(),
+            None,
+        )));
+    };
+    let guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+    match jet_net_ttl(&guard) {
+        Ok(v) => result_ok(v as u64),
+        Err(e) => net_err(e),
+    }
+}
+
+extern "C" fn jet_jit_net_set_ttl(stream: i64, ttl: i64) -> i64 {
+    let Some(stream) = tcp_stream(stream) else {
+        return net_err(JetNetError::InvalidInput(jet_net_detail(
+            "set_ttl",
+            None,
+            None,
+            "invalid TcpStream".into(),
+            None,
+        )));
+    };
+    let guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+    map_net_unit(jet_net_set_ttl(&guard, ttl))
+}
+
+extern "C" fn jet_jit_net_socket_type(stream: i64) -> i64 {
+    let Some(stream) = tcp_stream(stream) else {
+        return alloc_string(String::new());
+    };
+    let guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+    alloc_string(jet_net_socket_type(&guard))
+}
+
+extern "C" fn jet_jit_net_sendfile(stream: i64, path: i64) -> i64 {
+    let path = clone_string(path);
+    let Some(stream) = tcp_stream(stream) else {
+        return net_err(JetNetError::InvalidInput(jet_net_detail(
+            "sendfile",
+            None,
+            None,
+            "invalid TcpStream".into(),
+            None,
+        )));
+    };
+    let mut guard = stream.lock().unwrap_or_else(|p| p.into_inner());
+    match jet_net_sendfile(&mut guard, &path) {
+        Ok(n) => result_ok(n as u64),
+        Err(e) => net_err(e),
+    }
+}
+
+extern "C" fn jet_jit_net_dns_ptr(name: i64, ms: i64) -> i64 {
+    let name = clone_string(name);
+    match jet_net_dns_result(jet_net_dns_ptr(&name, ms), &name) {
+        Ok(rows) => result_ok_handle(list_of_strings(rows)),
+        Err(e) => net_err(e),
+    }
+}
+
+extern "C" fn jet_jit_net_getservbyname(name: i64) -> i64 {
+    let name = clone_string(name);
+    match jet_net_getservbyname(&name) {
+        Ok(port) => result_ok(port as u64),
+        Err(e) => net_err(e),
+    }
+}
+
+extern "C" fn jet_jit_net_getservbyport(port: i64) -> i64 {
+    match jet_net_getservbyport(port) {
+        Ok(name) => result_ok_handle(alloc_string(name)),
+        Err(e) => net_err(e),
+    }
+}
+
 extern "C" fn jet_jit_net_tcp_reply(stream: i64, status: i64, body: i64) -> i64 {
     let status = clone_string(status);
     let body = clone_string(body);
@@ -1595,6 +1706,15 @@ pub(crate) struct NetHttpHostFns {
     pub tcp_connect: FuncId,
     pub listener_local_socket_addr: FuncId,
     pub set_timeout: FuncId,
+    pub nodelay: FuncId,
+    pub set_nodelay: FuncId,
+    pub ttl: FuncId,
+    pub set_ttl: FuncId,
+    pub socket_type: FuncId,
+    pub sendfile: FuncId,
+    pub dns_ptr: FuncId,
+    pub getservbyname: FuncId,
+    pub getservbyport: FuncId,
     pub tcp_reply: FuncId,
     pub udp_bind: FuncId,
     pub udp_local_addr: FuncId,
@@ -1698,6 +1818,21 @@ pub(crate) fn register_net_http_symbols(builder: &mut JITBuilder) {
         jet_jit_net_listener_local_socket_addr as *const u8,
     );
     builder.symbol("jet_jit_net_set_timeout", jet_jit_net_set_timeout as *const u8);
+    builder.symbol("jet_jit_net_nodelay", jet_jit_net_nodelay as *const u8);
+    builder.symbol("jet_jit_net_set_nodelay", jet_jit_net_set_nodelay as *const u8);
+    builder.symbol("jet_jit_net_ttl", jet_jit_net_ttl as *const u8);
+    builder.symbol("jet_jit_net_set_ttl", jet_jit_net_set_ttl as *const u8);
+    builder.symbol("jet_jit_net_socket_type", jet_jit_net_socket_type as *const u8);
+    builder.symbol("jet_jit_net_sendfile", jet_jit_net_sendfile as *const u8);
+    builder.symbol("jet_jit_net_dns_ptr", jet_jit_net_dns_ptr as *const u8);
+    builder.symbol(
+        "jet_jit_net_getservbyname",
+        jet_jit_net_getservbyname as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_net_getservbyport",
+        jet_jit_net_getservbyport as *const u8,
+    );
     builder.symbol("jet_jit_net_tcp_reply", jet_jit_net_tcp_reply as *const u8);
     builder.symbol("jet_jit_net_udp_bind", jet_jit_net_udp_bind as *const u8);
     builder.symbol(
@@ -1977,6 +2112,15 @@ pub(crate) fn declare_net_http_host_fns(
             &sig1,
         )?,
         set_timeout: import(module, "jet_jit_net_set_timeout", &sig2)?,
+        nodelay: import(module, "jet_jit_net_nodelay", &sig1)?,
+        set_nodelay: import(module, "jet_jit_net_set_nodelay", &sig2)?,
+        ttl: import(module, "jet_jit_net_ttl", &sig1)?,
+        set_ttl: import(module, "jet_jit_net_set_ttl", &sig2)?,
+        socket_type: import(module, "jet_jit_net_socket_type", &sig1)?,
+        sendfile: import(module, "jet_jit_net_sendfile", &sig2)?,
+        dns_ptr: import(module, "jet_jit_net_dns_ptr", &sig2)?,
+        getservbyname: import(module, "jet_jit_net_getservbyname", &sig1)?,
+        getservbyport: import(module, "jet_jit_net_getservbyport", &sig1)?,
         tcp_reply: import(module, "jet_jit_net_tcp_reply", &sig3)?,
         udp_bind: import(module, "jet_jit_net_udp_bind", &sig1)?,
         udp_local_addr: import(module, "jet_jit_net_udp_local_addr", &sig1)?,

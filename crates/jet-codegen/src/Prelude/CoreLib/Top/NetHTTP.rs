@@ -1771,6 +1771,136 @@ fn jet_net_set_write_timeout(stream: &mut JetTCPStream, ms: i64) -> Result<(), J
     Ok(())
 }
 
+fn jet_net_nodelay(stream: &JetTCPStream) -> Result<bool, JetNetError> {
+    if stream.closed {
+        return Err(jet_net_closed("tcp nodelay"));
+    }
+    stream
+        .inner
+        .nodelay()
+        .map_err(|e| jet_net_io_error("tcp nodelay", None, e))
+}
+
+fn jet_net_set_nodelay(stream: &JetTCPStream, enabled: bool) -> Result<(), JetNetError> {
+    if stream.closed {
+        return Err(jet_net_closed("set tcp nodelay"));
+    }
+    stream
+        .inner
+        .set_nodelay(enabled)
+        .map_err(|e| jet_net_io_error("set tcp nodelay", None, e))
+}
+
+fn jet_net_ttl(stream: &JetTCPStream) -> Result<i64, JetNetError> {
+    if stream.closed {
+        return Err(jet_net_closed("tcp ttl"));
+    }
+    stream
+        .inner
+        .ttl()
+        .map(|v| v as i64)
+        .map_err(|e| jet_net_io_error("tcp ttl", None, e))
+}
+
+fn jet_net_set_ttl(stream: &JetTCPStream, ttl: i64) -> Result<(), JetNetError> {
+    if stream.closed {
+        return Err(jet_net_closed("set tcp ttl"));
+    }
+    if !(0..=u32::MAX as i64).contains(&ttl) {
+        return Err(JetNetError::InvalidInput(jet_net_detail(
+            "set tcp ttl",
+            None,
+            None,
+            "ttl must fit u32".to_string(),
+            None,
+        )));
+    }
+    stream
+        .inner
+        .set_ttl(ttl as u32)
+        .map_err(|e| jet_net_io_error("set tcp ttl", None, e))
+}
+
+/// TCP streams are always SOCK_STREAM; returned for ledger socket_type parity.
+fn jet_net_socket_type(_stream: &JetTCPStream) -> String {
+    "stream".to_string()
+}
+
+/// Copy file bytes onto an open TCP stream (observable sendfile; not the syscall).
+fn jet_net_sendfile(stream: &mut JetTCPStream, path: &String) -> Result<i64, JetNetError> {
+    if stream.closed || stream.write_shutdown {
+        return Err(jet_net_closed("tcp sendfile"));
+    }
+    let mut file = std::fs::File::open(path.as_str()).map_err(|e| {
+        jet_net_io_error("tcp sendfile open", Some(path.clone()), e)
+    })?;
+    let _deadline = jet_net_operation_deadline(stream.write_timeout_ms);
+    let mut written: u64 = 0;
+    let mut buf = [0u8; 8192];
+    loop {
+        let n = std::io::Read::read(&mut file, &mut buf).map_err(|e| {
+            jet_net_io_error("tcp sendfile read", Some(path.clone()), e)
+        })?;
+        if n == 0 {
+            break;
+        }
+        let chunk = buf[..n].to_vec();
+        jet_net_tcp_write_all_bytes(stream, &chunk)?;
+        written += n as u64;
+    }
+    Ok(written.min(i64::MAX as u64) as i64)
+}
+
+const JET_NET_SERVICES: &[(&str, i64)] = &[
+    ("ftp", 21),
+    ("ssh", 22),
+    ("telnet", 23),
+    ("smtp", 25),
+    ("dns", 53),
+    ("domain", 53),
+    ("http", 80),
+    ("pop3", 110),
+    ("imap", 143),
+    ("https", 443),
+    ("smtps", 465),
+    ("submission", 587),
+    ("imaps", 993),
+    ("pop3s", 995),
+];
+
+fn jet_net_getservbyname(name: &String) -> Result<i64, JetNetError> {
+    let key = name.to_ascii_lowercase();
+    JET_NET_SERVICES
+        .iter()
+        .find(|(n, _)| *n == key)
+        .map(|(_, port)| *port)
+        .ok_or_else(|| {
+            JetNetError::InvalidInput(jet_net_detail(
+                "getservbyname",
+                None,
+                None,
+                format!("unknown service `{name}`"),
+                None,
+            ))
+        })
+}
+
+fn jet_net_getservbyport(port: i64) -> Result<String, JetNetError> {
+    JET_NET_SERVICES
+        .iter()
+        .find(|(_, p)| *p == port)
+        .map(|(n, _)| (*n).to_string())
+        .ok_or_else(|| {
+            JetNetError::InvalidInput(jet_net_detail(
+                "getservbyport",
+                None,
+                None,
+                format!("unknown port `{port}`"),
+                None,
+            ))
+        })
+}
+
 fn jet_net_udp_bind(addr: &String) -> Result<JetUDPSocket, JetNetError> {
     let inner = std::net::UdpSocket::bind(addr.as_str())
         .map_err(|e| jet_net_io_error("udp bind", Some(addr.clone()), e))?;
@@ -2786,6 +2916,39 @@ fn jet_net_dns_txt_at(server: &String, name: &String, ms: i64) -> Result<Vec<Str
             p += len;
         }
         out.push(s);
+    }
+    Ok(out)
+}
+
+fn jet_net_dns_ptr(name: &String, ms: i64) -> Result<Vec<String>, String> {
+    let deadline = std::time::Instant::now() + jet_net_timeout(ms)?;
+    let servers = jet_net_dns_system_servers();
+    if servers.is_empty() {
+        return Err("host DNS configuration has no resolver for PTR lookup".to_string());
+    }
+    let mut last = String::new();
+    for server in servers {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() {
+            return Err(format!("network timeout during DNS lookup for `{name}`"));
+        }
+        match jet_net_dns_ptr_at(
+            &server,
+            name,
+            remaining.as_millis().min(i64::MAX as u128) as i64,
+        ) {
+            Ok(v) => return Ok(v),
+            Err(e) => last = e,
+        }
+    }
+    Err(last)
+}
+
+fn jet_net_dns_ptr_at(server: &String, name: &String, ms: i64) -> Result<Vec<String>, String> {
+    let mut out = Vec::new();
+    let records = jet_net_dns_query(server, name, 12, ms)?;
+    for r in jet_net_dns_matching_records(&records, name, 12)? {
+        out.push(jet_net_dns_record_name(&r)?);
     }
     Ok(out)
 }

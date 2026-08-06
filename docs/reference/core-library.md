@@ -3110,6 +3110,12 @@ Beginner calls accept strings; expert calls accept typed
 | `listener_local_socket_addr(listener)` | `SocketAddr ? NetError` | Typed listener address |
 | `set_timeout(stream, ms)` | `() ? NetError` | Set read/write timeouts |
 | `set_read_timeout(stream, ms)` / `set_write_timeout(stream, ms)` | `() ? NetError` | Directional timeouts |
+| `nodelay(stream)` / `set_nodelay(stream, enabled)` | `Bool ? NetError` / `() ? NetError` | TCP_NODELAY get/set |
+| `ttl(stream)` / `set_ttl(stream, hops)` | `Int ? NetError` / `() ? NetError` | IP TTL get/set |
+| `socket_type(stream)` | `String` | Always `"stream"` for TCP |
+| `sendfile(stream, path)` | `Int ? NetError` | Copy file bytes onto the stream (observable sendfile; not sendfile(2)) |
+| `dns_ptr(name, ms)` | `[String] ? NetError` | PTR reverse lookup |
+| `getservbyname(name)` / `getservbyport(port)` | `Int ? NetError` / `String ? NetError` | Embedded well-known service table |
 | `udp_bind(addr)` / `udp_bind_addr(addr)` | `UdpSocket ? NetError` | Datagram sockets |
 | `udp_local_addr(socket)` | `SocketAddr ? NetError` | Typed local address |
 | `udp_set_timeout(socket, ms)` | `() ? NetError` | Persistent read/write deadline budget; earliest ambient deadline wins |
@@ -3126,6 +3132,7 @@ Beginner calls accept strings; expert calls accept typed
 | `stream.set_timeout(Duration)` / `stream.read(limit, deadline: Duration)` / `stream.write_all(bytes, deadline: Duration)` / `stream.ready(interest, deadline: Duration)` / `stream.close()` | matching stream results | Same-handle Unix persistent/per-call deadlines, readiness, and lifecycle |
 | `dns_a(name, ms)` / `dns_aaaa(name, ms)` | `[IPAddr] ? NetError` | System resolver config, timeout in ms |
 | `dns_txt(name, ms)` | `[String] ? NetError` | TXT records |
+| `dns_ptr(name, ms)` | `[String] ? NetError` | PTR reverse lookup |
 | `dns_srv(name, ms)` | `[DNSSrv] ? NetError` | SRV records |
 | `dns_*_at(server, name, ms)` | same as matching lookup | Expert override for a specific DNS server |
 | `dns_srv_target(srv)` / `dns_srv_port(srv)` | `String` / `Int` | Inspect SRV records |
@@ -3136,7 +3143,8 @@ failures. `error_operation/address/name/message/os_code` expose portable control
 and audit data. Raw OS text is never control-flow law. Linux is the Epoch 3
 proof platform for TCP/UDP/Unix/DNS/TLS/happy-eyeballs (`tcp_connect_happy`);
 native macOS/Windows hostile-matrix execution is deferred to Epoch 9 with the
-same Prelude symbols (I9). Example: `examples/features/net/socket_echo.jet`.
+same Prelude symbols (I9). Examples: `examples/features/net/socket_echo.jet`,
+`examples/features/net/dns_lookup.jet`.
 
 Ordinary A/AAAA lookups use the platform resolver and preserve host files,
 search policy, VPNs, and enterprise DNS. TXT/SRV use configured host name
