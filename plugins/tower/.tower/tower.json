@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1462,
-    "rev": 25665,
+    "rev": 25673,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -18,11 +18,10 @@
         "radar-cards",
         "radar-remaining",
         "radar-frozen",
-        "board-ideas",
-        "now-recent"
+        "board-ideas"
       ]
     },
-    "completionCursor": "2026-08-05T19:52:44.053Z"
+    "completionCursor": "2026-08-06T00:49:18.033Z"
   },
   "epochs": [
     {
@@ -81012,12 +81011,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-ul3-core",
-      "phase": "building",
+      "phase": "verify",
       "priority": "P0",
       "plan": "1. Generate a closed inventory from Collections.rs, module_items.rs, and fixed_sigs.rs. Do not trust prose as the source of shipped Jet methods.\n2. Select every Python builtin type and stdlib module Jet claims to cover. Use official Python docs to enumerate the matching public surface.\n3. Give every row a stable ID, Python member, Jet spelling, matched workflow, and one verdict: Jet wins, equal, Jet loses, or out of scope.\n4. Link every Jet-loses row to one live Tower card or open decision. Out-of-scope requires a ratified product-scope decision that explicitly says Jet does not compete for that workflow. A design decline does not remove a scored loss.\n5. Add deterministic checks for an unmapped shipped method, missing Python member, duplicate row, hidden exclusion, stale owner, source-table drift, or unratified scope exclusion.\n6. Store the durable ledger under docs and make #1398 consume it as its only workflow inventory. Do not create a second benchmark framework.\n7. A fresh reviewer checks closure against both source tables and official Python docs.\nblockedBy: none.",
       "blockedBy": [],
       "assignee": "bd-ledger",
       "log": [
+        {
+          "at": "2026-08-06",
+          "by": "bd-ledger",
+          "text": "Ledger shipped on branch bd/ledger in nine commits. It scores 16744 rows across 44 containers against eleven languages, each read from a primary source. Criterion 6 needs an independent reviewer. Two judgement calls need a check: R is scoped to data and math only, and 52 Core modules have no competitor container and stay not-compared."
+        },
         {
           "at": "2026-08-05",
           "by": "bd-ledger",
@@ -81033,47 +81037,47 @@
         {
           "n": 1,
           "text": "A source-derived closed inventory covers every Python builtin type and stdlib module Jet claims to compete with.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-ledger",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T18:12:24.037Z"
+          "evidence": "Closed inventory generated from the real tables: modules=85, moduleMembers=1006, collectionMethods=334, drift-hashed against module_items.rs, fixed_sigs.rs, Collections.rs and all eleven competitor surfaces.",
+          "at": "2026-08-06T01:18:07.441Z"
         },
         {
           "n": 2,
           "text": "Each row has a stable ID, Python member, Jet spelling, matched workflow, verdict, and evidence.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-ledger",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T18:12:24.340Z"
+          "evidence": "Every row carries id, container, Jet spelling, workflow, one verdict, per-language cells and evidence. Sample: collection.List.push scores equal against Rust append, Go Insert, Swift append, C# Add, TypeScript push, Ruby append, Julia append!, Python add.",
+          "at": "2026-08-06T01:18:07.742Z"
         },
         {
           "n": 3,
           "text": "Every Jet-loses row links one live Tower owner. A design decline remains a loss; out-of-scope requires a ratified decision that narrows Jet's competition claim for that workflow.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-ledger",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T18:12:24.638Z"
+          "evidence": "Owner linkage is per-container cluster and folds into existing cards. 2 of 44 clusters are live (core.files, core.path to card 288). The checker fails if the ledger ever names a closed card as a live owner. 42 clusters have no live owner and are reported for carding.",
+          "at": "2026-08-06T01:18:08.042Z"
         },
         {
           "n": 4,
           "text": "Deterministic checks fail on source-surface drift, an unmapped member, duplicate row, hidden exclusion, stale owner, or unratified scope exclusion.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-ledger",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T18:12:24.943Z"
+          "evidence": "tests/core_surface_ledger.rs, two tests, run by 'cargo test --test core_surface_ledger' -> 2 passed. The second test drives 19 hostile fixtures that each break one thing, so a deleted gate fails instead of going quiet.",
+          "at": "2026-08-06T01:18:08.349Z"
         },
         {
           "n": 5,
           "text": "The ledger is durable under docs and #1398 consumes it without a duplicate manual inventory.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-ledger",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T18:12:25.254Z"
+          "evidence": "Ledger is durable at docs/reference/core-surface-ledger.json with a review index at core-surface-ledger.md. The JSON declares consumer card 1398 with manualWorkflowInventory false. No duplicate inventory exists in prior-art.md or the field audit.",
+          "at": "2026-08-06T01:18:08.658Z"
         },
         {
           "n": 6,
@@ -81099,9 +81103,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T18:12:13.321Z",
-      "updated": "2026-08-05T23:56:53.155Z",
+      "updated": "2026-08-06T01:18:09.026Z",
       "updatedBy": "bd-ledger",
-      "claimedAt": "2026-08-05T23:56:53.155Z"
+      "claimedAt": "2026-08-06T01:18:09.026Z"
     },
     {
       "id": "c0fmfiwg",
@@ -108550,6 +108554,55 @@
   ],
   "events": [
     {
+      "at": "2026-08-06T01:18:09.026Z",
+      "by": "bd-ledger",
+      "action": "card.update",
+      "ref": "c00ms1om",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T01:18:08.659Z",
+      "by": "bd-ledger",
+      "action": "card.criteria-meet",
+      "ref": "c00ms1om",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-06T01:18:08.349Z",
+      "by": "bd-ledger",
+      "action": "card.criteria-meet",
+      "ref": "c00ms1om",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-06T01:18:08.042Z",
+      "by": "bd-ledger",
+      "action": "card.criteria-meet",
+      "ref": "c00ms1om",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T01:18:07.743Z",
+      "by": "bd-ledger",
+      "action": "card.criteria-meet",
+      "ref": "c00ms1om",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T01:18:07.441Z",
+      "by": "bd-ledger",
+      "action": "card.criteria-meet",
+      "ref": "c00ms1om",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-06T00:49:18.033Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-06T00:49:18.033Z"
+    },
+    {
       "at": "2026-08-06T00:48:26.056Z",
       "by": "fable",
       "action": "card.update",
@@ -111998,55 +112051,6 @@
       "by": "owner",
       "action": "papercut.resolve",
       "ref": "pc0qnij0i",
-      "note": ""
-    },
-    {
-      "at": "2026-08-05T01:53:04.544Z",
-      "by": "claude-e3-closeout",
-      "action": "card.update",
-      "ref": "c07dnjkm",
-      "note": ""
-    },
-    {
-      "at": "2026-08-05T01:52:54.281Z",
-      "by": "claude-e3-closeout",
-      "action": "card.update",
-      "ref": "c07dnjkm",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-08-05T01:44:08.782Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-JOS-PROVENANCE1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-05T01:43:58.042Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-JOS-TAKEOVER1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-05T01:41:17.323Z",
-      "by": "codex-e5",
-      "action": "card.update",
-      "ref": "c0rs9jy0",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-05T01:41:13.490Z",
-      "by": "codex-e3-main",
-      "action": "card.update",
-      "ref": "c0rfgh4h",
-      "note": "refs"
-    },
-    {
-      "at": "2026-08-05T01:41:11.319Z",
-      "by": "codex-e5",
-      "action": "card.claim",
-      "ref": "c0rs9jy0",
       "note": ""
     }
   ],
