@@ -386,7 +386,13 @@ impl<'a> Parser<'a> {
                 let op = match &self.peek().kind {
                     TokKind::Star => BinOp::Mul,
                     TokKind::Slash => BinOp::Div,
-                    TokKind::Percent => BinOp::Rem,
+                    // D-FLOORDIV1=A: `/%` sits with the other division-family
+                    // operators, so `a /% b * c` groups left to right.
+                    TokKind::SlashPercent => BinOp::FloorDiv,
+                    // D-MODSEM1=A: `%` is the floored modulo, `%%` the
+                    // truncated remainder. Both sit at the division level.
+                    TokKind::Percent => BinOp::Mod,
+                    TokKind::PercentPercent => BinOp::Rem,
                     _ => break,
                 };
                 let op_span = self.bump().span;

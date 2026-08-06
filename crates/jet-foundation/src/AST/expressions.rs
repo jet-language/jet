@@ -61,6 +61,14 @@ pub enum BinOp {
     Sub,
     Mul,
     Div,
+    /// D-FLOORDIV1=A: infix `/%` divides and rounds the answer down, toward
+    /// negative infinity, on whole numbers and on floats alike.
+    FloorDiv,
+    /// D-MODSEM1=A: infix `%` is the floored modulo — its answer takes the
+    /// divisor's sign, so `-7 % 2` is 1. It pairs with `/%`.
+    Mod,
+    /// D-MODSEM1=A: infix `%%` is the truncated remainder — its answer takes
+    /// the dividend's sign, so `-7 %% 2` is -1. It pairs with `/`.
     Rem,
     /// D-EXPOP1=A / D-EXPSEM1=A: infix `^` raises the left side to the power of
     /// the right side. Right-associative, binds tighter than unary minus.
@@ -96,7 +104,9 @@ impl BinOp {
             BinOp::Sub => "-",
             BinOp::Mul => "*",
             BinOp::Div => "/",
-            BinOp::Rem => "%",
+            BinOp::FloorDiv => "/%",
+            BinOp::Mod => "%",
+            BinOp::Rem => "%%",
             BinOp::Pow => "^",
             BinOp::BitAnd => "&",
             BinOp::BitOr => "|",
@@ -116,16 +126,20 @@ impl BinOp {
 
     /// The Rust operator that carries this operation, for generated code.
     /// It matches `spell` everywhere the two languages agree; `~|`
-    /// (D-XORSPELL1) is Rust's `^`, and `^` (D-EXPOP1) has no Rust operator
-    /// at all — codegen calls the Prelude power instead of asking here.
-    pub fn rust_spell(self) -> &'static str {
-        match self {
+    /// (D-XORSPELL1) is Rust's `^`, and Jet's `%%` is Rust's `%` — both
+    /// truncate.
+    ///
+    /// `None` means Rust has no operator for it and codegen must call the
+    /// Prelude instead: `^` (D-EXPSEM1), `/%` (D-FLOORDIV1), and the floored
+    /// `%` (D-MODSEM1) are all shaped that way. Returning `None` rather than
+    /// panicking keeps the answer a value the caller has to handle.
+    pub fn rust_spell(self) -> Option<&'static str> {
+        Some(match self {
             BinOp::BitXor => "^",
-            BinOp::Pow => {
-                unreachable!("D-EXPSEM1: `^` emits a Prelude power call, not a Rust operator")
-            }
+            BinOp::Rem => "%",
+            BinOp::Pow | BinOp::FloorDiv | BinOp::Mod => return None,
             other => other.spell(),
-        }
+        })
     }
 
     /// S17 compound-assignment spelling for this binary op, when one exists.
@@ -135,7 +149,9 @@ impl BinOp {
             BinOp::Sub => Some("-="),
             BinOp::Mul => Some("*="),
             BinOp::Div => Some("/="),
-            BinOp::Rem => Some("%="),
+            BinOp::FloorDiv => Some("/%="),
+            BinOp::Mod => Some("%="),
+            BinOp::Rem => Some("%%="),
             BinOp::Pow => Some("^="),
             BinOp::BitAnd => Some("&="),
             BinOp::BitOr => Some("|="),

@@ -8,9 +8,14 @@ fn slow_one() => Int {
     return 1
 }
 
+// This example is about cancelling siblings, so it panics outright rather than
+// through arithmetic. `1 / zero` no longer type-checks in a `=> Int` function
+// (D-INTDIV1: the quotient is a Float), and `/%` is not a drop-in either,
+// because the comptime evaluator folds a divisor it can see and stops the
+// build before the task ever runs.
 fn boom() => Int {
-    zero :: 0
-    return 1 / zero
+    panic("task failed")
+    return 0
 }
 
 fn run() {

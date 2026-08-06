@@ -571,6 +571,8 @@ impl<'a> Checker<'a> {
                 | BinOp::Sub
                 | BinOp::Mul
                 | BinOp::Div
+                // D-FLOORDIV1=A: `/%` takes the same operands as `/`.
+                | BinOp::FloorDiv
                 // D-EXPSEM1=A: any Float operand makes the power a Float.
                 | BinOp::Pow
                 | BinOp::Eq
@@ -579,7 +581,7 @@ impl<'a> Checker<'a> {
                 | BinOp::Le
                 | BinOp::Gt
                 | BinOp::Ge
-        ) || (matches!(op, BinOp::Rem | BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor)
+        ) || (matches!(op, BinOp::Mod | BinOp::Rem | BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor)
             && lt.is_integer()
             && rt.is_integer());
         if joins_numeric && lt != rt {
@@ -950,6 +952,8 @@ impl<'a> Checker<'a> {
                     | BinOp::Sub
                     | BinOp::Mul
                     | BinOp::Div
+                    | BinOp::FloorDiv
+                    | BinOp::Mod
                     | BinOp::Rem
                     | BinOp::BitAnd
                     | BinOp::BitOr
@@ -1148,6 +1152,28 @@ impl<'a> Checker<'a> {
         }
 
         match op {
+            // D-FLOORDIV1=A: `/%` divides and rounds down. It keeps the operand
+            // type — whole numbers stay whole, floats stay floats — so it is the
+            // operator that gives a whole-number quotient.
+            BinOp::FloorDiv => {
+                if lt == rt && lt.is_numeric() {
+                    Some(lt)
+                } else {
+                    self.diags.push(Diagnostic::error(
+                        "E0109",
+                        format!(
+                            "`{}` needs both sides to be the same number type, but this has {} and {}",
+                            op.spell(),
+                            lt.show(),
+                            rt.show()
+                        ),
+                        compound_why(op),
+                        "make both sides the same number type".to_string(),
+                        Some(span),
+                    ));
+                    None
+                }
+            }
             // D-EXPSEM1=A: a whole-number base raised to a whole-number power
             // stays exact. A written negative exponent gives a fraction, so
             // both sides move to Float first. Any Float operand already made
@@ -1166,6 +1192,16 @@ impl<'a> Checker<'a> {
                 }
             }
             BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div => {
+                // D-INTDIV1=A: `/` always answers the true quotient, so
+                // `7 / 2` is 3.5 rather than 3. Both sides move to Float first
+                // and the result is a Float. `/%` is the whole-number path.
+                // Sized widths keep the D-SG9 same-width rule and are not
+                // touched here.
+                if op == BinOp::Div && lt == Type::Int && rt == Type::Int {
+                    self.widen_numeric_expr(lhs, &lt, &Type::Float);
+                    self.widen_numeric_expr(rhs, &rt, &Type::Float);
+                    return Some(Type::Float);
+                }
                 // D-VERDICT-1304-1: the widening join above rewrites both
                 // operands to one numeric type. Arithmetic keeps that type.
                 if lt == rt && lt.is_numeric() {
@@ -1242,8 +1278,9 @@ impl<'a> Checker<'a> {
                     None
                 }
             }
-            BinOp::Rem | BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor => {
-                // D-SG9: remainder and the bitwise ops work on any integer width,
+            BinOp::Mod | BinOp::Rem | BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor => {
+                // D-SG9/D-MODSEM1: both remainders and the bitwise ops work on any
+                // integer width,
                 // both sides the same width, and keep it.
                 if lt == rt && lt.is_integer() {
                     Some(lt)

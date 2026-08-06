@@ -21,7 +21,7 @@ use std::collections::HashMap;
 use super::runtime_host::{
     HostFns, INTN_MODE_CHECKED, INTN_MODE_SATURATING, INTN_MODE_TRAP, INTN_MODE_WRAPPING,
     INTN_OP_ADD, INTN_OP_BIT_AND, INTN_OP_BIT_OR, INTN_OP_BIT_XOR, INTN_OP_DIV, INTN_OP_MUL,
-    INTN_OP_POW, INTN_OP_REM, INTN_OP_SHL, INTN_OP_SHR, INTN_OP_SUB,
+    INTN_OP_FLOOR_DIV, INTN_OP_MOD, INTN_OP_POW, INTN_OP_REM, INTN_OP_SHL, INTN_OP_SHR, INTN_OP_SUB,
 };
 use super::safety::{
     collect_select_arms_jit, flatten_string, jit_closure_elem_type, jit_list_float_type,
@@ -7212,20 +7212,46 @@ impl LowerCtx<'_, '_> {
         result
     }
 
-    /// D-EXPSEM1=A: Cranelift has no power instruction, so `^` calls the host
-    /// power — the same exact, trapping rule every other tier runs.
-    fn lower_pow(&mut self, ty: &Type, base: Value, exponent: Value, line: u32) -> Result<Value, String> {
-        let host_id = match ty {
-            Type::Int => self.host.pow_i64,
-            Type::Float | Type::Float32 => self.host.pow_f64,
-            _ => return Err("jit power unsupported for this type".to_string()),
+    /// D-EXPSEM1=A / D-FLOORDIV1=A: Cranelift has no power instruction and no
+    /// rounding-down division, so `^` and `/%` call the host — the same rules
+    /// every other tier runs. `None` means this is an ordinary Cranelift
+    /// instruction and the caller emits it directly.
+    fn prelude_host_binop(&self, op: BinOp, ty: &Type) -> Option<FuncId> {
+        match (op, ty) {
+            (BinOp::Pow, Type::Int) => Some(self.host.pow_i64),
+            (BinOp::Pow, Type::Float | Type::Float32) => Some(self.host.pow_f64),
+            (BinOp::FloorDiv, Type::Int) => Some(self.host.floordiv_i64),
+            // D-MODSEM1=A: `%` is whole-number only, so there is no float host.
+            (BinOp::Mod, Type::Int) => Some(self.host.mod_i64),
+            (BinOp::Rem, Type::Int) => Some(self.host.rem_i64),
+            (BinOp::FloorDiv, Type::Float | Type::Float32) => Some(self.host.floordiv_f64),
+            _ => None,
+        }
+    }
+
+    /// Marshal two operands into one of those host calls. The whole-number
+    /// hosts take the source line so their trap can name it; the float hosts
+    /// never trap and take neither.
+    fn lower_prelude_binop(
+        &mut self,
+        op: BinOp,
+        ty: &Type,
+        lhs: Value,
+        rhs: Value,
+        line: u32,
+    ) -> Result<Value, String> {
+        let Some(host_id) = self.prelude_host_binop(op, ty) else {
+            return Err(format!(
+                "jit `{}` unsupported for this type",
+                op.spell()
+            ));
         };
         let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
         let call = if matches!(ty, Type::Int) {
             let line_const = self.b.ins().iconst(types::I32, line as i64);
-            self.b.ins().call(host_ref, &[base, exponent, line_const])
+            self.b.ins().call(host_ref, &[lhs, rhs, line_const])
         } else {
-            self.b.ins().call(host_ref, &[base, exponent])
+            self.b.ins().call(host_ref, &[lhs, rhs])
         };
         let result = self.b.inst_results(call)[0];
         self.emit_trap_check()?;
@@ -7247,9 +7273,9 @@ impl LowerCtx<'_, '_> {
         line: u32,
     ) -> Result<Value, String> {
         let rhs_ty = self.erase_distinct_ty(rhs_ty);
-        if op == BinOp::Pow {
-            return self.lower_pow(&rhs_ty, current, rhs, line);
-        }
+        // A fixed-width whole number carries its own width through the host
+        // table, which already knows `^` (INTN_OP_POW). Only the default `Int`
+        // and the floats reach `lower_pow`.
         if let Type::IntN { signed, bits } = rhs_ty {
             return self.lower_intn_values(
                 op,
@@ -7260,6 +7286,9 @@ impl LowerCtx<'_, '_> {
                 bits,
                 signed,
             );
+        }
+        if matches!(op, BinOp::Pow | BinOp::FloorDiv | BinOp::Mod | BinOp::Rem) {
+            return self.lower_prelude_binop(op, &rhs_ty, current, rhs, line);
         }
         Ok(match (op, &rhs_ty) {
             (BinOp::Add, Type::Int) => self.b.ins().iadd(current, rhs),
@@ -9037,12 +9066,34 @@ impl LowerCtx<'_, '_> {
                             return Err(format!("jit unary neg unsupported type: {other:?}"));
                         }
                     },
-                    UnOp::Not => {
-                        let zero = self.b.ins().iconst(types::I8, 0);
-                        let one = self.b.ins().iconst(types::I8, 1);
-                        let cmp = self.b.ins().icmp(IntCC::Equal, inner, zero);
-                        self.b.ins().select(cmp, one, zero)
-                    }
+                    // D-BITNOT1=A: `!` turns over every bit it is given. On a
+                    // Bool that is the one bit; on a whole number it is the
+                    // bitwise complement, which Cranelift spells `bnot`.
+                    UnOp::Not => match &operand.ty {
+                        Type::Int => self.b.ins().bnot(inner),
+                        // Turning over every bit is exclusive-or with a value
+                        // whose bits are all set, so the fixed-width path
+                        // reuses the host table that already narrows to the
+                        // declared width.
+                        Type::IntN { signed, bits } => {
+                            let ones = self.b.ins().iconst(types::I64, -1);
+                            self.lower_intn_values(
+                                BinOp::BitXor,
+                                INTN_MODE_TRAP,
+                                inner,
+                                ones,
+                                *signed,
+                                *bits,
+                                true,
+                            )?
+                        }
+                        _ => {
+                            let zero = self.b.ins().iconst(types::I8, 0);
+                            let one = self.b.ins().iconst(types::I8, 1);
+                            let cmp = self.b.ins().icmp(IntCC::Equal, inner, zero);
+                            self.b.ins().select(cmp, one, zero)
+                        }
+                    },
                 })
             }
             TExprKind::IncDec {
@@ -19663,6 +19714,8 @@ impl LowerCtx<'_, '_> {
             BinOp::Shl => INTN_OP_SHL,
             BinOp::Shr => INTN_OP_SHR,
             BinOp::Pow => INTN_OP_POW,
+            BinOp::FloorDiv => INTN_OP_FLOOR_DIV,
+            BinOp::Mod => INTN_OP_MOD,
             _ => return Err("jit fixed-width integer operation unsupported".to_string()),
         };
         let args = [
@@ -19937,8 +19990,8 @@ impl LowerCtx<'_, '_> {
                 self.b.ins().isub(one, eq)
             });
         }
-        if op == BinOp::Pow {
-            return self.lower_pow(&lhs_ty, l, r, line);
+        if matches!(op, BinOp::Pow | BinOp::FloorDiv | BinOp::Mod | BinOp::Rem) {
+            return self.lower_prelude_binop(op, &lhs_ty, l, r, line);
         }
         Ok(match (&lhs_ty, op) {
             (Type::Int, BinOp::Add) => self.b.ins().iadd(l, r),

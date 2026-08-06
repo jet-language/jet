@@ -128,7 +128,7 @@
 ; builtin: check input print
 ; marker.rule: ABI Authority Bench Bindgen CLI Caps Codable CodableAsBase Comparable Context Debug DebugOnly Decode Default DenyUnknownFields Discriminant Doc Encode Env Equatable Every Extern FFI Flag Flatten Grant HTML Impure Inline Invariant Job Kernel Known Layout Live Local Meta MustUse NoPrelude Nondeterministic Numeric Off Patchable Persist Policy Post Pre Printable PubFile PublishedSchema Reactive Redact Region Rename RenameAll Replayable Root SQL Scrub Shared Shield Short SingleUse Skip State Static Summarize Target Test Todo Track Transact Transition UnitFamily Unsafe Untagged WasmExport allow wire
 ; sigil: # $[ & ... :: := ]$ ^ ~
-; operator: ! != % %= && &= * *= + ++ += - -- -= -> .. ..< .[ .{ / /= < << <<= <= == => > >= >> >>= ? ?. ?? ^= | |= || ~| ~|=
+; operator: ! != % %% %%= %= && &= * *= + ++ += - -- -= -> .. ..< .[ .{ / /% /%= /= < << <<= <= == => > >= >> >>= ? ?. ?? ^= | |= || ~| ~|=
 ; END GENERATED JET SYNTAX HIGHLIGHTS
 
 ; Config / manifest keys (pkg.jet, env.jet)

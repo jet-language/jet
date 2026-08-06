@@ -66,11 +66,29 @@ pub fn eval_binop(
             .checked_mul(b)
             .map(Int)
             .ok_or_else(|| overflow("multiply", span)),
+        // D-INTDIV1=A: `/` answers the true quotient, so two whole numbers give
+        // a Float. Sema has already moved both sides to Float in ordinary code;
+        // this arm catches the comptime paths that reach the raw values.
         (BinOp::Div, Int(_), Int(0)) => Err(divide_by_zero(span)),
-        (BinOp::Div, Int(a), Int(b)) => a
-            .checked_div(b)
-            .map(Int)
-            .ok_or_else(|| overflow("divide", span)),
+        (BinOp::Div, Int(a), Int(b)) => Ok(Float(crate::AST::CtFloat::F64(a as f64 / b as f64))),
+        // D-FLOORDIV1=A: `/%` rounds the answer down, so a signed answer that
+        // came out one too high is corrected. Dividing by zero traps like `/`.
+        (BinOp::FloorDiv, Int(_), Int(0)) => Err(divide_by_zero(span)),
+        (BinOp::FloorDiv, Int(a), Int(b)) => {
+            crate::Comptime::MathLayout::floor_div(a as i128, b as i128)
+                .and_then(|value| i64::try_from(value).ok())
+                .map(Int)
+                .ok_or_else(|| overflow("divide", span))
+        }
+        // D-MODSEM1=A: `%` is the floored modulo, whose answer takes the
+        // divisor's sign; `%%` below is Rust's truncated remainder.
+        (BinOp::Mod, Int(_), Int(0)) => Err(divide_by_zero(span)),
+        (BinOp::Mod, Int(a), Int(b)) => {
+            crate::Comptime::MathLayout::floored_mod(a as i128, b as i128)
+                .and_then(|value| i64::try_from(value).ok())
+                .map(Int)
+                .ok_or_else(|| overflow("take the remainder of", span))
+        }
         (BinOp::Rem, Int(_), Int(0)) => Err(divide_by_zero(span)),
         (BinOp::Rem, Int(a), Int(b)) => a
             .checked_rem(b)
@@ -81,14 +99,16 @@ pub fn eval_binop(
         // exponent has no whole-number answer; sema types a written one as
         // Float, so one that reaches here came from a value it could not read.
         (BinOp::Pow, Int(_), Int(b)) if b < 0 => Err(comptime_panic(
-            "a negative exponent has no whole-number result (make the base a Float to raise it to a negative power)",
+            crate::Comptime::MathLayout::INTEGER_POWER_NEGATIVE,
             span,
         )),
         (BinOp::Pow, Int(a), Int(b)) => u32::try_from(b)
             .ok()
             .and_then(|exponent| a.checked_pow(exponent))
             .map(Int)
-            .ok_or_else(|| overflow("raise to a power", span)),
+            .ok_or_else(|| {
+                comptime_panic(crate::Comptime::MathLayout::INTEGER_POWER_OVERFLOW, span)
+            }),
         (BinOp::BitAnd, Int(a), Int(b)) => Ok(Int(a & b)),
         (BinOp::BitOr, Int(a), Int(b)) => Ok(Int(a | b)),
         (BinOp::BitXor, Int(a), Int(b)) => Ok(Int(a ^ b)),

@@ -13,6 +13,27 @@ use crate::Sema::{type_is_copy, Checker, LocalInfo, LoopValueFrame, LoopValueKin
 use crate::Syntax;
 use crate::Generics::substitute_type;
 use std::collections::HashMap;
+
+/// D-INTDIV1=A: `/` answers the true quotient, so it hands back a Float even
+/// for two whole numbers. When that Float is being stored into a whole-number
+/// binding, the useful advice is the operator that keeps a whole number — not
+/// the generic "drop the decimal part". `n /= 2` reaches here as `n = n / 2`,
+/// because compound assignment is desugared before checking, so both spellings
+/// get the same fix.
+fn division_fix_hint(want: &Type, got: &Type, value: &Expr) -> String {
+    let divides = matches!(
+        value,
+        Expr::Binary(crate::AST::BinOp::Div, _, _, _)
+    );
+    if divides && *want == Type::Int && matches!(got, Type::Float | Type::Float32) {
+        // `n /= 2` and `n = n / 2` both reach here, and the two spellings want
+        // different repairs, so name each one.
+        return "use `/%` to divide and round down (`/%=` in place), \
+                or make the binding a Float"
+            .to_string();
+    }
+    type_fix_hint(want, got)
+}
 use std::collections::HashSet;
 use super::helpers::layout_constraint_fingerprint;
 impl<'a> Checker<'a> {
@@ -619,7 +640,7 @@ impl<'a> Checker<'a> {
                                             vt.show()
                                         ),
                                         "a binding keeps one type for its whole life".to_string(),
-                                        type_fix_hint(&info.ty, &vt),
+                                        division_fix_hint(&info.ty, &vt, value),
                                         Some(value.span()),
                                     ));
                                 }

@@ -5537,3 +5537,79 @@ Spellings live in Syntax.rs (`OP_CARET`, `OP_CARET_EQ`, `OP_TILDE_PIPE`,
 `OP_TILDE_PIPE_EQ`). Flagships: `examples/features/math/power_operator.jet`,
 `examples/features/math/power_semantics.jet`,
 `examples/features/math/xor_operator.jet`. Cards #1428, #1429, #1430.
+
+**2026-08-05 — D-FLOORDIV1=A**: infix `/%` divides and rounds the answer down,
+toward negative infinity, with compound `/%=`. It rounds down on whole numbers
+and on floats alike, so `7 /% 2` is 3, `-7 /% 2` is -4, and `7.5 /% 2.0` is
+3.0. Rounding down rather than toward zero means the answer does not jump up as
+it crosses zero, which is what wrap-around and bucketing arithmetic wants. `/%`
+sits with the other division-family operators, so a chain groups left to right
+and `*` does not bind tighter. Dividing by zero traps, exactly as `/` does, and
+reports "divided by zero". `/%` is the whole-number companion of `/`, which
+gives a Float (D-INTDIV1). Semantics live in one Prelude file
+(`crates/jet-codegen/src/Prelude/Core/Division.rs`), shared verbatim by the
+native and wasm Rust tiers; the comptime interpreter and the Cranelift host call
+one shared rounding rule in `MathLayout`, and the JS tier calls a preamble
+helper carrying the same rule. Spellings live in Syntax.rs
+(`OP_SLASH_PERCENT`, `OP_SLASH_PERCENT_EQ`). Flagship:
+`examples/features/math/floor_div.jet`. Card #1431.
+
+**2026-08-05 — D-MODSEM1=A**: `%` is the floored modulo and `%%` is the
+truncated remainder, with compounds `%=` and `%%=`. The two differ only when
+the operands straddle zero, and that difference is why both exist. `%` takes
+the DIVISOR's sign, so `-7 % 2` is 1 — the answer stays in range for a positive
+divisor, which is what clock and ring-buffer arithmetic wants, with no separate
+"if it went negative" branch. `%%` takes the DIVIDEND's sign, so `-7 %% 2` is
+-1, which is what "what is left over" wants when the original sign matters.
+`%` pairs with `/%` so that `a == b * (a /% b) + a % b`. The two remainders
+are always exactly one divisor apart when they disagree, and equal when they
+agree.
+Both are whole-number only under the D-SG9 same-width rule, and both trap on a
+zero divisor rather than letting a Rust panic reach the user (I2) — so neither
+uses the bare Rust operator, and their traps do not depend on whether the
+checker could see through the operands. Semantics live in the same one Prelude
+file as `/%` (`Prelude/Core/Division.rs`), shared verbatim by the native and
+wasm Rust tiers; the comptime interpreter and the Cranelift host call one
+shared rule in `MathLayout`, and the JS tier calls preamble helpers carrying it.
+No in-repo use of `%` relied on truncation — every operand was already
+non-negative, where the two agree. Spellings live in Syntax.rs (`OP_PERCENT`,
+`OP_PERCENT_EQ`, `OP_PERCENT_PERCENT`, `OP_PERCENT_PERCENT_EQ`). Flagship:
+`examples/features/math/modulo.jet`. Card #1432.
+
+**2026-08-05 — D-BITNOT1=A**: prefix `!` turns over every bit it is given. On a
+`Bool` there is one bit, so a yes becomes a no and that meaning is unchanged.
+On a whole number it is the bitwise complement — the missing partner of `&`,
+`|`, and `~|` — and the width comes back unchanged. On the default `Int`, which
+carries no fixed width, turning over every bit is the same as `-x - 1`; on a
+sized type the exact bits of that width flip, so `!U8.{5}` is 250. Clearing
+bits is the everyday use: `flags & !mask` keeps everything except the bits the
+mask names. No new sigil — `!` already existed, and this widens what it accepts,
+so E0109 now says `!` needs a Bool or a whole number
+(`tests/ui/bit_not_wrong_type.stderr`). Rust's `!` is already both operations,
+so the native and wasm tiers need no helper; the Cranelift host uses `bnot` for
+`Int` and reuses the fixed-width exclusive-or table for a sized type, and the
+interpreter complements the value directly. The JS tier is the one that splits
+them: JavaScript's `!` is logical only, so a whole number there lowers to `~`.
+Spelling lives in Syntax.rs (`OP_BIT_NOT`, the same `!` as `OP_NOT`). Flagship:
+`examples/features/math/bit_not.jet`. Card #1434.
+
+**2026-08-05 — D-INTDIV1=A**: `/` answers the true quotient, so two whole
+numbers give a Float: `7 / 2` is 3.5, the Python 3 model. This removes the
+oldest arithmetic surprise in programming — an average that silently loses its
+fraction. `/%` (D-FLOORDIV1) is the whole-number path, and it is the operator to
+reach for when rounding down is what was meant. Because the result no longer
+fits back into a whole-number binding, `n /= 2` on an `Int` is a type error;
+compound assignment is desugared to `n = n / 2` before checking, so both
+spellings report the same E0108 and its fix names `/%`
+(`tests/ui/int_div_compound_on_int.stderr`). Sized widths are not touched: they
+keep the D-SG9 same-width rule, so `/` on `U8` still answers a `U8`. Both
+operands widen to Float in sema, so every tier runs one ordinary float
+division and no engine needed a new rule. In-repo migration: the compound-assignment example and its two fuzz twins moved
+to `/%=`; the comptime ratio in `comptime_block.jet` and its differential twin
+moved to `/%`; the divide-by-zero probe in `user_defined.jet` moved to `/%`,
+which still traps where `/` would now answer a Float infinity.
+`all_failfast.jet` panics outright instead: `return 1 / zero` in a `=> Int`
+function is a type error under this decision, and `/%` was not a drop-in there
+because the comptime evaluator folds a divisor it can see and stops the build.
+The example is about sibling cancellation, so it says so directly. Spelling is unchanged
+(`OP_SLASH`). Flagship: `examples/features/math/int_div.jet`. Card #1433.

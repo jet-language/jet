@@ -1,0 +1,26 @@
+// Floor division (D-FLOORDIV1=A): infix `/%` divides and rounds the answer
+// down, and `/%=` divides a mutable binding in place. It rounds toward
+// negative infinity, not toward zero, so the answer never jumps up as it
+// crosses zero: `-7 /% 2` is -4, one step below -3.5.
+//
+// `/%` pairs with the floored `%` (modulo.jet), so for every pair of whole
+// numbers `a == b * (a /% b) + a % b`.
+//
+// Dividing by zero traps, exactly as `/` does.
+fn shelf(count: Int) => Int { return count }
+
+fn run() {
+    // Rounding down agrees with rounding toward zero while both sides are
+    // positive: seven books, two to a shelf, fills three shelves.
+    books :: shelf(7)
+    per_shelf :: shelf(2)
+    print(books /% per_shelf)
+    // Below zero the two disagree, and `/%` keeps going down.
+    print(shelf(-7) /% per_shelf)
+    // Floats round down the same way.
+    print(7.5 /% 2.0)
+    // `/%=` divides in place.
+    remaining := shelf(9)
+    remaining /%= shelf(2)
+    print(remaining)
+}

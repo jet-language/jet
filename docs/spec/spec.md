@@ -127,8 +127,9 @@ value-arm-body = expr | value-block ;
 value-block = "{" { stmt } expr "}" ;
 expr     = precedence climbing over:
            "||"  >  "&&"  >  "==" "!=" "<" ">" "<=" ">="
-           >  "|"  >  "^"  >  "&"  >  "<<" ">>"
-           >  "+" "-"  >  "*" "/" "%"  >  unary "-" "!"
+           >  "|"  >  "~|"  >  "&"  >  "<<" ">>"      // D-XORSPELL1: "~|" is xor
+           >  "+" "-"  >  "*" "/" "/%" "%" "%%"  >  unary "-" "!"
+           >  "^"                                     // D-EXPSEM1: power, groups right
            >  call | ident | literal | "(" expr ")" ;
 ```
 

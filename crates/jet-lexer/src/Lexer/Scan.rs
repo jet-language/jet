@@ -282,8 +282,21 @@ impl<'a> Lexer<'a> {
                 '-' => toks.push(simple(self, TokKind::Minus, 1)),
                 '*' if next == '=' => toks.push(simple(self, TokKind::StarEq, 2)),
                 '*' => toks.push(simple(self, TokKind::Star, 1)),
+                // D-FLOORDIV1=A: `/%=` before `/%` before `/=` before `/`
+                // (longest match). Comments are consumed earlier, so `//` and
+                // `/*` never reach here.
+                '/' if next == '%' && next2 == '=' => {
+                    toks.push(simple(self, TokKind::SlashPercentEq, 3))
+                }
+                '/' if next == '%' => toks.push(simple(self, TokKind::SlashPercent, 2)),
                 '/' if next == '=' => toks.push(simple(self, TokKind::SlashEq, 2)),
                 '/' => toks.push(simple(self, TokKind::Slash, 1)),
+                // D-MODSEM1=A: `%%=` before `%%` before `%=` before `%`
+                // (longest match).
+                '%' if next == '%' && next2 == '=' => {
+                    toks.push(simple(self, TokKind::PercentPercentEq, 3))
+                }
+                '%' if next == '%' => toks.push(simple(self, TokKind::PercentPercent, 2)),
                 '%' if next == '=' => toks.push(simple(self, TokKind::PercentEq, 2)),
                 '%' => toks.push(simple(self, TokKind::Percent, 1)),
                 '^' if next == '=' => toks.push(simple(self, TokKind::CaretEq, 2)),

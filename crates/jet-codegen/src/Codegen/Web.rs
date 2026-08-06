@@ -1835,7 +1835,7 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
         "trait user_Display { fn display(&self) -> String; }\n\
          trait JetDisplay { fn jet_display(&self) -> String; }\n\n",
     );
-    out.push_str(WASM_POWER_PRELUDE);
+    out.push_str(WASM_ARITH_PRELUDE);
     let need_packed_abi = |pred: &dyn Fn(&Type) -> bool| {
         wasm_funcs.iter().any(|f| {
             let export = f.marker == Some(WebPartitionMarker::WasmExport)
@@ -2623,22 +2623,26 @@ fn emit_wasm_body(
             TIR::TStmt::Assign { place, op, value, line, .. } => {
                 let value_ty = value.ty.clone();
                 let value = wasm_emit_expr(value, funcs, file_prefix, reconstructions)?;
-                // D-EXPSEM1=A: Rust has no `**=`, so `^=` reads the place, calls
-                // the shared Prelude power, and writes the result back.
-                let is_pow = *op == Some(crate::AST::BinOp::Pow);
+                // D-EXPSEM1=A / D-FLOORDIV1=A: Rust has no `**=` and no `/%=`,
+                // so those compounds read the place, call the shared Prelude
+                // helper, and write the result back.
+                let prelude_of = |target: &str| {
+                    op.and_then(|op| {
+                        wasm_prelude_call(op, target, &value, &value_ty, file_prefix, *line)
+                    })
+                };
                 match place {
                     TIR::TPlace::Local(local) if local.uninit_scalar => {
                         let place = local.rust_place();
+                        let read = format!("({place}).read().clone()");
                         match op {
-                            Some(_) if is_pow => {
-                                let read = format!("({place}).read().clone()");
-                                let powered =
-                                    wasm_pow_call(&read, &value, &value_ty, file_prefix, *line);
-                                out.push_str(&format!("{pad}{place}.write({powered});\n"));
+                            Some(_) if prelude_of(&read).is_some() => {
+                                let call = prelude_of(&read).expect("checked just above");
+                                out.push_str(&format!("{pad}{place}.write({call});\n"));
                             }
                             Some(op) => out.push_str(&format!(
                                 "{pad}{place}.write(({place}).read().clone() {} {value});\n",
-                                binop(op)
+                                binop(op).ok_or(())?
                             )),
                             None => {
                                 out.push_str(&format!("{pad}{place}.write({value});\n"))
@@ -2651,16 +2655,15 @@ fn emit_wasm_body(
                             local.rust_place()
                         ));
                     }
-                    _ if is_pow => {
+                    _ if prelude_of(&wasm_tir_place(place)?).is_some() => {
                         let target = wasm_tir_place(place)?;
-                        let powered =
-                            wasm_pow_call(&target, &value, &value_ty, file_prefix, *line);
-                        out.push_str(&format!("{pad}{target} = {powered};\n"));
+                        let call = prelude_of(&target).expect("checked just above");
+                        out.push_str(&format!("{pad}{target} = {call};\n"));
                     }
                     _ => out.push_str(&format!(
                         "{pad}{} {}= {value};\n",
                         wasm_tir_place(place)?,
-                        op.as_ref().map(binop).unwrap_or("")
+                        match op { Some(op) => binop(op).ok_or(())?, None => "" }
                     )),
                 }
             }
@@ -3161,11 +3164,14 @@ fn wasm_emit_expr(
                 wasm_storage_ty(ty).ok_or(())?
             ),
         },
-        // D-EXPSEM1=A: `^` calls the shared Prelude power (Prelude/Core/Power.rs),
-        // the same source the native build runs, because Rust has no power
-        // operator.
+        // D-EXPSEM1=A / D-FLOORDIV1=A: `^` and `/%` call the shared Prelude
+        // helpers (Prelude/Core/Power.rs, Prelude/Core/Division.rs) — the same
+        // source the native build runs — because Rust spells neither operator.
         TIR::TExprKind::Binary {
-            op: crate::AST::BinOp::Pow,
+            op: op @ (crate::AST::BinOp::Pow
+                | crate::AST::BinOp::FloorDiv
+                | crate::AST::BinOp::Mod
+                | crate::AST::BinOp::Rem),
             lhs,
             rhs,
             line,
@@ -3173,12 +3179,13 @@ fn wasm_emit_expr(
         } => {
             let l = wasm_emit_expr(lhs, funcs, file_prefix, reconstructions)?;
             let r = wasm_emit_expr(rhs, funcs, file_prefix, reconstructions)?;
-            wasm_pow_call(&l, &r, &expr.ty, file_prefix, *line)
+            wasm_prelude_call(*op, &l, &r, &expr.ty, file_prefix, *line)
+                .expect("the match arm admits only Prelude-carried operators")
         }
         TIR::TExprKind::Binary { op, lhs, rhs, .. } => format!(
             "({} {} {})",
             wasm_emit_expr(lhs, funcs, file_prefix, reconstructions)?,
-            binop(op),
+            binop(op).ok_or(())?,
             wasm_emit_expr(rhs, funcs, file_prefix, reconstructions)?
         ),
         TIR::TExprKind::Unary { op, operand } => format!("({}{})", unop(op), wasm_emit_expr(operand, funcs, file_prefix, reconstructions)?),
@@ -3395,6 +3402,7 @@ fn emit_js_app(
         "// Generated by jet — web JS entry (D-WEBBACKEND1).\n\
          import * as jetDom from \"./jet_dom_runtime.js\";\n\n",
     );
+    out.push_str(JS_POWER_PRELUDE);
     let mut handlers = Vec::new();
     let exports: Vec<&FuncWeb> = funcs
         .iter()
@@ -4071,8 +4079,20 @@ fn emit_tir_js_body(
             }
             TIR::TStmt::Let { name, init, .. } => out.push_str(&format!("{pad}let {} = {};\n", web_name(name), tir_js_expr(init, funcs, file_prefix)?)),
             TIR::TStmt::Assign { place, op, value, .. } => {
-                let assign = op.as_ref().map(|o| format!("{}=", binop(o))).unwrap_or_else(|| "=".to_string());
-                out.push_str(&format!("{pad}{} {assign} {};\n", web_tir_place(place)?, tir_js_expr(value, funcs, file_prefix)?));
+                let target = web_tir_place(place)?;
+                let v = tir_js_expr(value, funcs, file_prefix)?;
+                // D-EXPSEM1=A / D-FLOORDIV1=A: JavaScript's `**=` is the
+                // floating-point power and it has no rounding division at all,
+                // so those compounds read the place and call the JS preamble.
+                if let Some(call) = op.and_then(|op| js_prelude_call(op, &target, &v, &value.ty)) {
+                    out.push_str(&format!("{pad}{target} = {call};\n"));
+                } else {
+                    let assign = match op {
+                        Some(o) => format!("{}=", binop(o).ok_or(())?),
+                        None => "=".to_string(),
+                    };
+                    out.push_str(&format!("{pad}{target} {assign} {v};\n"));
+                }
             }
             TIR::TStmt::Return(Some(expr)) => out.push_str(&format!("{pad}return {};\n", tir_js_expr(expr, funcs, file_prefix)?)),
             TIR::TStmt::Return(None) => out.push_str(&format!("{pad}return;\n")),
@@ -4370,17 +4390,31 @@ fn tir_js_abi_int_expr(
     use TIR::TExprKind as E;
     match &expr.kind {
         E::IntLit(n, _) => Ok(format!("{n}n")),
-        E::Unary { op, operand } => Ok(format!(
-            "({}{})",
-            unop(op),
+        // `!` leaves BigInt land through the wrapper below, because the helper
+        // it needs answers an ordinary number.
+        E::Unary { op, operand } if !matches!(op, crate::AST::UnOp::Not) => Ok(format!(
+            "(-{})",
             tir_js_abi_int_expr(operand, funcs, file_prefix)?
         )),
-        E::Binary { op, lhs, rhs, .. } => Ok(format!(
-            "({} {} {})",
-            tir_js_abi_int_expr(lhs, funcs, file_prefix)?,
-            binop(op),
-            tir_js_abi_int_expr(rhs, funcs, file_prefix)?
-        )),
+        // D-EXPSEM1=A / D-FLOORDIV1=A: `^` and `/%` have no BigInt operator here
+        // — they fall through to the wrapper below, which wraps the ordinary
+        // JS-tier result.
+        E::Binary { op, lhs, rhs, .. }
+            if !matches!(
+                op,
+                crate::AST::BinOp::Pow
+                    | crate::AST::BinOp::FloorDiv
+                    | crate::AST::BinOp::Mod
+                    | crate::AST::BinOp::Rem
+            ) =>
+        {
+            Ok(format!(
+                "({} {} {})",
+                tir_js_abi_int_expr(lhs, funcs, file_prefix)?,
+                binop(op).ok_or(())?,
+                tir_js_abi_int_expr(rhs, funcs, file_prefix)?
+            ))
+        }
         E::Clone(inner) | E::MaterializeView(inner) | E::DistinctRaw(inner) => {
             tir_js_abi_int_expr(inner, funcs, file_prefix)
         }
@@ -4407,8 +4441,29 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
             _ => "void 0".to_string(),
         },
         E::HostCall(_) => return Err(()),
-        E::Binary { op, lhs, rhs, .. } => format!("({} {} {})", tir_js_expr(lhs, funcs, file_prefix)?, binop(op), tir_js_expr(rhs, funcs, file_prefix)?),
-        E::Unary { op, operand } => format!("({}{})", unop(op), tir_js_expr(operand, funcs, file_prefix)?),
+        // D-EXPSEM1=A / D-FLOORDIV1=A: `^` and `/%` call the JS preamble, which
+        // carries the same rules the Prelude helpers do.
+        E::Binary {
+            op: op @ (crate::AST::BinOp::Pow
+                | crate::AST::BinOp::FloorDiv
+                | crate::AST::BinOp::Mod
+                | crate::AST::BinOp::Rem),
+            lhs,
+            rhs,
+            ..
+        } => js_prelude_call(
+            *op,
+            &tir_js_expr(lhs, funcs, file_prefix)?,
+            &tir_js_expr(rhs, funcs, file_prefix)?,
+            &expr.ty,
+        )
+        .expect("the match arm admits only Prelude-carried operators"),
+        E::Binary { op, lhs, rhs, .. } => format!("({} {} {})", tir_js_expr(lhs, funcs, file_prefix)?, binop(op).ok_or(())?, tir_js_expr(rhs, funcs, file_prefix)?),
+        E::Unary { op, operand } => js_unary_call(
+            op,
+            &operand.ty,
+            &tir_js_expr(operand, funcs, file_prefix)?,
+        ),
         E::Clone(inner) | E::MaterializeView(inner) | E::DistinctRaw(inner) => tir_js_expr(inner, funcs, file_prefix)?,
         E::Borrow { place, .. } => tir_js_expr(place, funcs, file_prefix)?,
         E::DistinctCtor { arg, .. } => tir_js_expr(arg, funcs, file_prefix)?,
@@ -4749,47 +4804,156 @@ fn is_wasm_export(name: &str, funcs: &[FuncWeb]) -> bool {
     funcs.iter().any(|f| f.key == name && f.marker == Some(WebPartitionMarker::WasmExport))
 }
 
-/// D-EXPOP1=A / D-EXPSEM1=A: the wasm module runs the same power source as the
-/// native Prelude. `jet_panic` is the only tier-local piece — the wasm module
-/// has no runtime reporter, so a trap is a wasm panic.
-const WASM_POWER_PRELUDE: &str = concat!(
+/// D-EXPOP1=A / D-EXPSEM1=A / D-FLOORDIV1=A: the wasm module runs the same
+/// arithmetic source as the native Prelude — the very same files, included
+/// verbatim. `jet_panic` is the only tier-local piece: the wasm module has no
+/// runtime reporter, so a trap is a wasm panic.
+const WASM_ARITH_PRELUDE: &str = concat!(
     "fn jet_panic(file: &str, line: u32, message: &str) -> ! {\n",
     "    panic!(\"{}:{}: {}\", file, line, message)\n",
     "}\n\n",
     include_str!("../Prelude/Core/Power.rs"),
+    "\n",
+    include_str!("../Prelude/Core/Division.rs"),
     "\n"
 );
 
-/// D-EXPSEM1=A: one call shape for `^` in the wasm module — the whole-number
-/// power carries the source position so its trap can name the line; the float
-/// power needs no position because it never traps.
-fn wasm_pow_call(
+/// D-EXPSEM1=A / D-FLOORDIV1=A: the operators Rust has no symbol for. Each one
+/// calls the same Prelude helper the native build calls, from the copy of that
+/// Prelude file the wasm module includes. `None` means the operator is an
+/// ordinary Rust one and the caller emits it directly.
+///
+/// The whole-number helpers carry the source position so their trap can name
+/// the line the author wrote; the float helpers never trap and take neither.
+fn wasm_prelude_call(
+    op: crate::AST::BinOp,
     lhs: &str,
     rhs: &str,
     ty: &Type,
     file_prefix: Option<&str>,
     line: u32,
-) -> String {
-    if matches!(ty, Type::Float | Type::Float32) {
-        format!("({lhs}).jet_pow({rhs})")
-    } else {
-        let file = file_prefix.unwrap_or_default();
-        format!("({lhs}).jet_pow(({rhs}) as i128, {file:?}, {line})")
-    }
+) -> Option<String> {
+    use crate::AST::BinOp;
+    let float = matches!(ty, Type::Float | Type::Float32);
+    let file = file_prefix.unwrap_or_default();
+    Some(match op {
+        BinOp::Pow if float => format!("({lhs}).jet_pow({rhs})"),
+        BinOp::Pow => format!("({lhs}).jet_pow(({rhs}) as i128, {file:?}, {line})"),
+        BinOp::FloorDiv if float => format!("({lhs}).jet_floordiv({rhs})"),
+        BinOp::FloorDiv => format!("({lhs}).jet_floordiv({rhs}, {file:?}, {line})"),
+        BinOp::Mod => format!("({lhs}).jet_mod({rhs}, {file:?}, {line})"),
+        BinOp::Rem => format!("({lhs}).jet_trunc_rem({rhs}, {file:?}, {line})"),
+        _ => return None,
+    })
 }
 
-fn binop(op: &crate::AST::BinOp) -> &'static str {
+/// D-EXPOP1=A / D-EXPSEM1=A: the JS tier's copy of the one power rule
+/// (`Prelude/Core/Power.rs`). A whole-number power stays exact and stops the
+/// moment it leaves the range JavaScript can hold exactly; a negative exponent
+/// has no whole-number answer. `throw` is how this tier reports a trap.
+///
+/// JavaScript's own `**` is a floating-point power: it neither stays exact nor
+/// traps, so `^` on whole numbers never lowers to it. Floats do use it, since
+/// there the two operations agree.
+const JS_POWER_PRELUDE: &str = concat!(
+    // Every whole-number operator below computes in BigInt and clamps to 64
+    // bits with `BigInt.asIntN`, because JavaScript's own number operators are
+    // doubles (`*` stops being exact at 2^53) and its bitwise operators are
+    // 32-bit. BigInt is the only way this tier can carry the Prelude's rule
+    // rather than approximate it.
+    "const JET_I64_MIN = -(2n ** 63n);\n",
+    "const JET_I64_MAX = 2n ** 63n - 1n;\n",
+    "function jet_i64(value, message) {\n",
+    "  if (value < JET_I64_MIN || value > JET_I64_MAX) throw new Error(message);\n",
+    "  return Number(value);\n",
+    "}\n\n",
+    "function jet_pow(base, exponent) {\n",
+    "  if (exponent < 0) {\n",
+    "    throw new Error(\"a negative exponent has no whole-number result ",
+    "(make the base a Float to raise it to a negative power)\");\n",
+    "  }\n",
+    "  const overflow = \"this power overflows the value's type ",
+    "(the result is outside its range)\";\n",
+    "  const b = BigInt(base);\n",
+    "  if (b !== 0n && b !== 1n && b !== -1n && exponent > 63) {\n",
+    "    throw new Error(overflow);\n",
+    "  }\n",
+    "  return jet_i64(b ** BigInt(exponent), overflow);\n",
+    "}\n\n",
+    // D-BITNOT1=A: `!` on a whole number turns over every one of its 64 bits.
+    // JavaScript's `~` works on 32 bits, so it is not the same operation.
+    "function jet_bitnot(value) {\n",
+    "  return Number(BigInt.asIntN(64, ~BigInt(value)));\n",
+    "}\n\n",
+    // D-FLOORDIV1=A: the JS tier's copy of the one floor-division rule
+    // (`Prelude/Core/Division.rs`). Whole numbers trap on a zero divisor, the
+    // same as `/`, and on the one pair whose quotient leaves the range.
+    "function jet_floordiv(left, right) {\n",
+    "  if (right === 0) throw new Error(\"divided by zero\");\n",
+    "  const a = BigInt(left);\n",
+    "  const b = BigInt(right);\n",
+    "  let quotient = a / b;\n",
+    "  if (a % b !== 0n && (a < 0n) !== (b < 0n)) quotient -= 1n;\n",
+    "  return jet_i64(quotient, \"this division overflows the value's type ",
+    "(the result is outside its range)\");\n",
+    "}\n\n",
+    // Floats round down with no trap: a zero divisor gives an infinity, exactly
+    // as `/` does.
+    "function jet_floordiv_float(left, right) {\n",
+    "  return Math.floor(left / right);\n",
+    "}\n\n",
+    // D-MODSEM1=A: the floored modulo. JavaScript's `%` is the truncated
+    // remainder, which Jet spells `%%`, so the answer is corrected onto the
+    // divisor's side of zero.
+    "function jet_mod(left, right) {\n",
+    "  if (right === 0) throw new Error(\"divided by zero\");\n",
+    "  const a = BigInt(left);\n",
+    "  const b = BigInt(right);\n",
+    "  let remainder = a % b;\n",
+    "  if (remainder !== 0n && (remainder < 0n) !== (b < 0n)) remainder += b;\n",
+    "  return Number(BigInt.asIntN(64, remainder));\n",
+    "}\n\n",
+    // D-MODSEM1=A: the truncated remainder, which is the sign JavaScript's own
+    // `%` already gives — this adds the zero-divisor trap and the 64-bit range.
+    "function jet_trunc_rem(left, right) {\n",
+    "  if (right === 0) throw new Error(\"divided by zero\");\n",
+    "  return Number(BigInt.asIntN(64, BigInt(left) % BigInt(right)));\n",
+    "}\n\n"
+);
+
+/// D-EXPSEM1=A: one call shape for `^` in the JS tier. Floats take the
+/// JavaScript power, which agrees with the Prelude float power; whole numbers
+/// take `jet_pow`, which carries the exact, trapping rule.
+fn js_prelude_call(op: crate::AST::BinOp, lhs: &str, rhs: &str, ty: &Type) -> Option<String> {
+    use crate::AST::BinOp;
+    let float = matches!(ty, Type::Float | Type::Float32);
+    Some(match op {
+        BinOp::Pow if float => format!("Math.pow({lhs}, {rhs})"),
+        BinOp::Pow => format!("jet_pow({lhs}, {rhs})"),
+        // A float divisor of zero gives an infinity, exactly as `/` does, so
+        // only the whole-number helper traps.
+        BinOp::FloorDiv if float => format!("jet_floordiv_float({lhs}, {rhs})"),
+        BinOp::FloorDiv => format!("jet_floordiv({lhs}, {rhs})"),
+        BinOp::Mod => format!("jet_mod({lhs}, {rhs})"),
+        BinOp::Rem => format!("jet_trunc_rem({lhs}, {rhs})"),
+        _ => return None,
+    })
+}
+
+/// The operator symbol for the wasm Rust tier and the JS tier, where the two
+/// languages agree. `None` means the operation has no symbol on this tier and
+/// the caller must reach for the Prelude helper instead: `^` (D-EXPSEM1), `/%`
+/// (D-FLOORDIV1), and the floored `%` (D-MODSEM1) are all shaped that way,
+/// because JavaScript's `**`, `/`, and `%` are each a different operation.
+fn binop(op: &crate::AST::BinOp) -> Option<&'static str> {
     use crate::AST::BinOp::*;
-    match op {
+    Some(match op {
         Add => "+",
         Sub => "-",
         Mul => "*",
         Div => "/",
         Rem => "%",
-        // D-EXPOP1=A: JavaScript spells the power `**`, and it is
-        // right-associative there too. The wasm Rust tier never reaches this
-        // table for `^` — it calls the shared Prelude power instead.
-        Pow => "**",
+        Pow | FloorDiv | Mod => return None,
         BitAnd => "&",
         BitOr => "|",
         BitXor => "^",
@@ -4803,13 +4967,32 @@ fn binop(op: &crate::AST::BinOp) -> &'static str {
         Ge => ">=",
         And => "&&",
         Or => "||",
-    }
+    })
 }
+
+/// The Rust spelling. Rust's `!` is already the bitwise complement on whole
+/// numbers and the logical one on `Bool` (D-BITNOT1=A), so one symbol covers
+/// both there.
 fn unop(op: &crate::AST::UnOp) -> &'static str {
     use crate::AST::UnOp::*;
     match op {
         Neg => "-",
         Not => "!",
+    }
+}
+
+/// D-BITNOT1=A: JavaScript splits what Rust joins. `!` there is the logical
+/// negation only — on a number it asks "is this zero", which is not what `!`
+/// means in Jet. The bitwise complement is `~`.
+fn js_unary_call(op: &crate::AST::UnOp, ty: &Type, operand: &str) -> String {
+    use crate::AST::UnOp::*;
+    match op {
+        Neg => format!("(-{operand})"),
+        Not if matches!(ty, Type::Bool) => format!("(!{operand})"),
+        // D-BITNOT1=A: JavaScript's `~` turns over 32 bits, so it answers -1
+        // where Jet answers -4294967297. The preamble helper carries the 64-bit
+        // rule the Prelude runs.
+        Not => format!("jet_bitnot({operand})"),
     }
 }
 

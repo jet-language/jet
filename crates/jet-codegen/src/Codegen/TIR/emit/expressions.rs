@@ -1,4 +1,5 @@
 use crate::AST::{BinOp, CtFloat, Type, UnOp};
+use crate::Codegen::TIR::emit::statements::PRELUDE_CARRIED;
 use crate::Codegen::Cx;
 use crate::Codegen::mangle;
 use crate::Codegen::user_type_rust;
@@ -1700,15 +1701,27 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         } => {
             let ls = emit_tir_expr(lhs, cx);
             let rs = emit_tir_expr(rhs, cx);
-            if *op == BinOp::Pow {
-                // D-EXPSEM1: Rust has no power operator, so `^` always calls the
-                // one Prelude helper. Whole numbers keep the exact, trapping
-                // rule; floats use the floating-point power.
+            if matches!(op, BinOp::Pow | BinOp::FloorDiv | BinOp::Mod | BinOp::Rem) {
+                // D-EXPSEM1 / D-FLOORDIV1: Rust spells neither operator, so `^`
+                // and `/%` always call the one Prelude helper. Whole numbers
+                // keep the exact, trapping rule; floats use the float helper.
                 let (file, line) = (&cx.file, *line);
-                if matches!(e.ty, Type::Float | Type::Float32) {
-                    format!("({}).jet_pow({})", ls, rs)
-                } else {
-                    format!("({}).jet_pow(({}) as i128, {:?}, {})", ls, rs, file, line)
+                let float = matches!(e.ty, Type::Float | Type::Float32);
+                match (*op, float) {
+                    (BinOp::Pow, true) => format!("({}).jet_pow({})", ls, rs),
+                    (BinOp::Pow, false) => {
+                        format!("({}).jet_pow(({}) as i128, {:?}, {})", ls, rs, file, line)
+                    }
+                    (BinOp::FloorDiv, true) => format!("({}).jet_floordiv({})", ls, rs),
+                    (BinOp::FloorDiv, false) => {
+                        format!("({}).jet_floordiv({}, {:?}, {})", ls, rs, file, line)
+                    }
+                    // D-MODSEM1=A: both remainders are whole-number only, so
+                    // there is no float shape to choose between. Each traps on
+                    // a zero divisor rather than letting Rust's own panic out
+                    // (I2), so neither can use the bare Rust operator.
+                    (BinOp::Mod, _) => format!("({}).jet_mod({}, {:?}, {})", ls, rs, file, line),
+                    _ => format!("({}).jet_trunc_rem({}, {:?}, {})", ls, rs, file, line),
                 }
             } else if *overflow {
                 // Trapping helper: source location was resolved at lowering, so
@@ -1736,7 +1749,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     }
                 }
             } else {
-                format!("(({}) {} ({}))", ls, op.rust_spell(), rs)
+                format!("(({}) {} ({}))", ls, op.rust_spell().expect(PRELUDE_CARRIED), rs)
             }
         }
         // D-CHAINCMP1: `0 <= sev < 10` — a Rust block expression binds each
@@ -1774,7 +1787,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                             variant
                         )
                     } else {
-                        format!("(__jcc{} {} __jcc{})", i, op.rust_spell(), i + 1)
+                        format!("(__jcc{} {} __jcc{})", i, op.rust_spell().expect(PRELUDE_CARRIED), i + 1)
                     }
                 })
                 .collect();

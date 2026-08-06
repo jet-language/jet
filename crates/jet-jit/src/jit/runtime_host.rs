@@ -241,12 +241,13 @@ fn with_runtime_result<R: Default, F: FnOnce(&mut JitRuntime) -> R>(default: R, 
 /// caller yields a dummy `0`); JIT code branches to its epilogue at the next
 /// `emit_trap_check`. Message text is unchanged from the old exit-70 path.
 fn jet_trap_overflow(op: &str) {
+    use jet_codegen::Comptime::MathLayout;
     let msg = match op {
         "add" => "this addition overflows the value's type (the result is outside its range)",
         "sub" => "this subtraction overflows the value's type (the result is outside its range)",
         "mul" => "this multiplication overflows the value's type (the result is outside its range)",
         "div" => "this division can't be done (dividing by zero, or overflow)",
-        "pow" => "this power overflows the value's type (the result is outside its range)",
+        "pow" => MathLayout::INTEGER_POWER_OVERFLOW,
         _ => "this operation overflows the value's type (the result is outside its range)",
     };
     with_runtime_mut(|rt| rt.set_trap(msg));
@@ -264,6 +265,10 @@ pub(crate) const INTN_OP_SHL: i64 = 8;
 pub(crate) const INTN_OP_SHR: i64 = 9;
 /// D-EXPSEM1=A: `^` on a fixed-width whole number.
 pub(crate) const INTN_OP_POW: i64 = 10;
+/// D-FLOORDIV1=A: `/%` on a fixed-width whole number.
+pub(crate) const INTN_OP_FLOOR_DIV: i64 = 11;
+/// D-MODSEM1=A: `%` on a fixed-width whole number.
+pub(crate) const INTN_OP_MOD: i64 = 12;
 pub(crate) const INTN_MODE_TRAP: i64 = 0;
 pub(crate) const INTN_MODE_WRAPPING: i64 = 1;
 pub(crate) const INTN_MODE_SATURATING: i64 = 2;
@@ -337,19 +342,53 @@ extern "C" fn jet_jit_pow_f64(a: f64, b: f64) -> f64 {
     a.powf(b)
 }
 
-extern "C" fn jet_jit_rem_i64(a: i64, b: i64, _line: u32) -> i64 {
+/// D-FLOORDIV1=A: the same rounding-down division the Prelude runs
+/// (`Prelude/Core/Division.rs`), through the one shared rule.
+extern "C" fn jet_jit_floordiv_i64(a: i64, b: i64, _line: u32) -> i64 {
     use jet_codegen::Comptime::MathLayout;
-    if let Some(message) = MathLayout::integer_remainder_trap(a, b, true, 64) {
-        with_runtime_mut(|rt| rt.set_trap(message));
+    if b == 0 {
+        with_runtime_mut(|rt| rt.set_trap(MathLayout::INTEGER_DIVIDE_ZERO));
         return 0;
     }
-    match a.checked_rem(b) {
+    match MathLayout::floor_div(a as i128, b as i128).and_then(|v| i64::try_from(v).ok()) {
         Some(value) => value,
         None => {
-            with_runtime_mut(|rt| rt.set_trap(MathLayout::INTEGER_REMAINDER_OVERFLOW));
+            with_runtime_mut(|rt| rt.set_trap(MathLayout::INTEGER_DIVIDE_OVERFLOW));
             0
         }
     }
+}
+
+/// D-FLOORDIV1=A: on floats `/%` divides and rounds the answer down.
+extern "C" fn jet_jit_floordiv_f64(a: f64, b: f64) -> f64 {
+    (a / b).floor()
+}
+
+/// D-MODSEM1=A: the floored modulo the Prelude runs
+/// (`Prelude/Core/Division.rs`), through the one shared rule.
+extern "C" fn jet_jit_mod_i64(a: i64, b: i64, _line: u32) -> i64 {
+    use jet_codegen::Comptime::MathLayout;
+    if b == 0 {
+        with_runtime_mut(|rt| rt.set_trap(MathLayout::INTEGER_DIVIDE_ZERO));
+        return 0;
+    }
+    match MathLayout::floored_mod(a as i128, b as i128).and_then(|v| i64::try_from(v).ok()) {
+        Some(value) => value,
+        None => {
+            with_runtime_mut(|rt| rt.set_trap(MathLayout::INTEGER_DIVIDE_OVERFLOW));
+            0
+        }
+    }
+}
+
+extern "C" fn jet_jit_rem_i64(a: i64, b: i64, _line: u32) -> i64 {
+    use jet_codegen::Comptime::MathLayout;
+    if let Some(message) = MathLayout::integer_remainder_trap(b) {
+        with_runtime_mut(|rt| rt.set_trap(message));
+        return 0;
+    }
+    // D-MODSEM1=A: `MIN %% -1` is 0, the same answer `%` gives.
+    a.wrapping_rem(b)
 }
 
 extern "C" fn jet_jit_intn_binop(
@@ -375,6 +414,8 @@ extern "C" fn jet_jit_intn_binop(
         INTN_OP_SHL => BinOp::Shl,
         INTN_OP_SHR => BinOp::Shr,
         INTN_OP_POW => BinOp::Pow,
+        INTN_OP_FLOOR_DIV => BinOp::FloorDiv,
+        INTN_OP_MOD => BinOp::Mod,
         _ => {
             with_runtime_mut(|rt| rt.set_trap("unknown fixed-width integer operation"));
             return 0;
@@ -388,8 +429,14 @@ extern "C" fn jet_jit_intn_binop(
         with_runtime_mut(|rt| rt.set_trap(&message));
         return 0;
     }
+    // D-FLOORDIV1=A: `/%` names a zero divisor exactly, rather than falling
+    // into the shared "this division can't be done" wording below.
+    if mode == INTN_MODE_TRAP && matches!(op, BinOp::FloorDiv | BinOp::Mod) && right == 0 {
+        with_runtime_mut(|rt| rt.set_trap(MathLayout::INTEGER_DIVIDE_ZERO));
+        return 0;
+    }
     if mode == INTN_MODE_TRAP && op == BinOp::Rem {
-        if let Some(message) = MathLayout::integer_remainder_trap(left, right, signed, bits) {
+        if let Some(message) = MathLayout::integer_remainder_trap(right) {
             with_runtime_mut(|rt| rt.set_trap(message));
             return 0;
         }
@@ -440,14 +487,25 @@ extern "C" fn jet_jit_intn_binop(
         Ok(_) => 0,
         Err(_) if mode == INTN_MODE_CHECKED => 0,
         Err(_) => {
-            let name = match op {
-                BinOp::Add => "add",
-                BinOp::Sub => "sub",
-                BinOp::Mul => "mul",
-                BinOp::Div | BinOp::Rem => "div",
-                _ => "shift",
-            };
-            jet_trap_overflow(name);
+            // D-FLOORDIV1=A / D-MODSEM1=A: `/%` and `%` report the Prelude's own
+            // overflow wording, not the shared "this division can't be done"
+            // sentence `/` uses, so a fixed-width width overflow reads the same
+            // here as it does on every other tier.
+            match op {
+                BinOp::FloorDiv | BinOp::Mod => {
+                    with_runtime_mut(|rt| rt.set_trap(MathLayout::INTEGER_DIVIDE_OVERFLOW));
+                }
+                _ => {
+                    let name = match op {
+                        BinOp::Add => "add",
+                        BinOp::Sub => "sub",
+                        BinOp::Mul => "mul",
+                        BinOp::Div => "div",
+                        _ => "shift",
+                    };
+                    jet_trap_overflow(name);
+                }
+            }
             0
         }
     }
@@ -1522,6 +1580,9 @@ pub(crate) struct HostFns {
     pub(crate) div_i64: FuncId,
     pub(crate) rem_i64: FuncId,
     pub(crate) pow_i64: FuncId,
+    pub(crate) floordiv_i64: FuncId,
+    pub(crate) mod_i64: FuncId,
+    pub(crate) floordiv_f64: FuncId,
     pub(crate) pow_f64: FuncId,
     pub(crate) intn_binop: FuncId,
     pub(crate) intn_to_string: FuncId,
@@ -1673,6 +1734,9 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     builder.symbol("jet_jit_rem_i64", jet_jit_rem_i64 as *const u8);
     builder.symbol("jet_jit_pow_i64", jet_jit_pow_i64 as *const u8);
     builder.symbol("jet_jit_pow_f64", jet_jit_pow_f64 as *const u8);
+    builder.symbol("jet_jit_floordiv_i64", jet_jit_floordiv_i64 as *const u8);
+    builder.symbol("jet_jit_mod_i64", jet_jit_mod_i64 as *const u8);
+    builder.symbol("jet_jit_floordiv_f64", jet_jit_floordiv_f64 as *const u8);
     builder.symbol("jet_jit_intn_binop", jet_jit_intn_binop as *const u8);
     builder.symbol(
         "jet_jit_intn_to_string",
@@ -2344,6 +2408,9 @@ fn declare_host_fns(
         rem_i64: import("jet_jit_rem_i64", &sig_bin_i64)?,
         pow_i64: import("jet_jit_pow_i64", &sig_bin_i64)?,
         pow_f64: import("jet_jit_pow_f64", &sig_pow_f64)?,
+        floordiv_i64: import("jet_jit_floordiv_i64", &sig_bin_i64)?,
+        mod_i64: import("jet_jit_mod_i64", &sig_bin_i64)?,
+        floordiv_f64: import("jet_jit_floordiv_f64", &sig_pow_f64)?,
         intn_binop: import("jet_jit_intn_binop", &sig_intn_binop)?,
         intn_to_string: import("jet_jit_intn_to_string", &sig_i64_i64_i64)?,
         print_i64: import("jet_jit_print_i64", &sig_i64)?,
