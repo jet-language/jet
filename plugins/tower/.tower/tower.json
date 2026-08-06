@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1462,
-    "rev": 25629,
+    "rev": 25650,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -79857,6 +79857,11 @@
       "assignee": "bd-exp",
       "log": [
         {
+          "at": "2026-08-06",
+          "by": "bd-review",
+          "text": "test"
+        },
+        {
           "at": "2026-08-05",
           "by": "bd-exp",
           "text": "Rebound the caret end to end. Lexer, parser, sema, TIR, AOT emit, Cranelift host, comptime interpreter, and both web tiers now read infix ^ as the power and ^= as power-assign. The rule lives in one Prelude file, crates/jet-codegen/src/Prelude/Core/Power.rs, which the native and wasm Rust modules both include verbatim, so every tier runs one power. Commit a508832d0."
@@ -79866,56 +79871,56 @@
         {
           "n": 1,
           "text": "Syntax.rs entry updated",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-exp",
-          "verifiedBy": null,
-          "evidence": "crates/jet-foundation/src/Syntax/math_layout.rs: OP_CARET documented as D-EXPOP1=A power, OP_CARET_EQ as power-assign, new OP_TILDE_PIPE and OP_TILDE_PIPE_EQ for D-XORSPELL1=A",
-          "at": "2026-08-05T23:30:22.322Z"
+          "verifiedBy": "bd-review",
+          "evidence": "Read crates/jet-foundation/src/Syntax/math_layout.rs: OP_CARET and OP_CARET_EQ carry D-EXPOP1=A power doc comments, OP_TILDE_PIPE and OP_TILDE_PIPE_EQ added with D-XORSPELL1=A.",
+          "at": "2026-08-05T23:58:46.458Z"
         },
         {
           "n": 2,
           "text": "syntax-decisions.md log entry",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-exp",
-          "verifiedBy": null,
-          "evidence": "docs/spec/syntax-decisions.md: new 2026-08-05 log entry for D-EXPOP1=A / D-EXPSEM1=A / D-XORSPELL1=A",
-          "at": "2026-08-05T23:30:22.640Z"
+          "verifiedBy": "bd-review",
+          "evidence": "Read docs/spec/syntax-decisions.md lines 5520-5539: a 2026-08-05 entry for D-EXPOP1=A / D-EXPSEM1=A / D-XORSPELL1=A exists. Note: the entry also records an unratified runtime rule, logged separately.",
+          "at": "2026-08-05T23:58:46.760Z"
         },
         {
           "n": 3,
           "text": "jet devtools grammars regenerated",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-exp",
-          "verifiedBy": null,
-          "evidence": "scripts/agent/jet-env jet self devtools grammars -> regenerated editors/jet.tmGrammar, tree-sitter/grammar.js, vscode/syntaxes/jet.tmLanguage.json, zed highlights.scm",
-          "at": "2026-08-05T23:30:22.951Z"
+          "verifiedBy": "bd-review",
+          "evidence": "Read all four generated files in the diff: editors/jet.tmGrammar, editors/vscode/syntaxes/jet.tmLanguage.json, editors/tree-sitter/grammar.js and editors/zed/languages/jet/highlights.scm all list ~| and ~|=, and crates/jet-foundation/src/Syntax/highlights.rs adds the two HighlightToken entries.",
+          "at": "2026-08-05T23:58:47.077Z"
         },
         {
           "n": 4,
           "text": "snapshots re-blessed",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-exp",
-          "verifiedBy": null,
-          "evidence": "cargo test --test diagnostic_snapshots: no snapshot changed for this work; the 27 pre-existing mismatches are core-module lists, E1130 and DB policy text, none touching ^ or ~|",
-          "at": "2026-08-05T23:30:23.254Z"
+          "verifiedBy": "bd-review",
+          "evidence": "Ran cargo test --test diagnostic_snapshots: 27 mismatches, and a grep of the whole run for power, exclusive-or or ~| returns nothing. A grep of all 889 tests/ui/*.jet inputs finds no infix ^ and no ~|, so this change cannot move any snapshot.",
+          "at": "2026-08-05T23:58:47.396Z"
         },
         {
           "n": 5,
           "text": "Example examples/features/math/power_operator.jet golden-proves 3 ^ 2 == 9 and a ^= compound; expected output file committed and byte-identical under AOT build and default jet run (I9)",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-exp",
-          "verifiedBy": null,
-          "evidence": "examples/features/math/power_operator.jet with expected/math/power_operator.out (9, 64, 1024, 2.25 - covers 3 ^ 2 == 9 and growth ^= 10); jet build then ./build/power_operator and jet run both print the same four lines; JET_GOLDEN_FILTER=math cargo test --test golden passes it",
-          "at": "2026-08-05T23:30:38.536Z"
+          "verifiedBy": "bd-review",
+          "evidence": "Rebuilt, cleared ~/.cache/jet/build, then ran examples/features/math/power_operator.jet under jet run and under jet build plus the built binary. Both print 9 / 64 / 1024 / 2.25, byte-identical to examples/features/expected/math/power_operator.out.",
+          "at": "2026-08-05T23:58:56.344Z"
         },
         {
           "n": 6,
           "text": "No infix ^ means xor anywhere: sema unit test shows Int ^ Int type-checks as power; canon.jet and all in-repo examples migrated off ^-as-xor",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-exp",
-          "verifiedBy": null,
-          "evidence": "cargo test --test power_and_exclusive_or infix_caret_never_means_exclusive_or (12 ^ 2 prints 144, not 14) and power_result_types_follow_the_operands; migrated examples/features/basics/compound.jet, examples/features/lowlevel/sized_integers.jet, tests/fuzz/sema/valid/ex_basics_compound.jet and the editor grammars off ^-as-xor; grep finds no infix ^-as-xor left in the repo",
-          "at": "2026-08-05T23:30:38.849Z"
+          "verifiedBy": "bd-review",
+          "evidence": "Ran cargo test --test power_and_exclusive_or: 8 passed, including infix_caret_never_means_exclusive_or. Grepped every .jet file under examples, tests/fuzz, crates and Source: every remaining ^ is the prefix take sigil. Grepped docs/spec for caret-as-xor prose: none left.",
+          "at": "2026-08-05T23:58:56.656Z"
         },
         {
           "n": 7,
@@ -79929,11 +79934,11 @@
         {
           "n": 8,
           "text": "Prefix ^ (take sigil) regression: existing take-capability targeted tests still green after the rebind",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-exp",
-          "verifiedBy": null,
-          "evidence": "cargo test --test power_and_exclusive_or prefix_take_and_copy_survive_the_rebind: ^blade take argument, ~source copy, and infix ^ on one line print 3, 9, 144",
-          "at": "2026-08-05T23:30:39.470Z"
+          "verifiedBy": "bd-review",
+          "evidence": "Ran cargo test --test power_and_exclusive_or prefix_take_and_copy_survive_the_rebind: passed. Also compiled a probe with melt(^blade) beside infix ^ and infix ~| on the same lines; both tiers accept it.",
+          "at": "2026-08-05T23:58:56.955Z"
         }
       ],
       "refs": [],
@@ -79944,8 +79949,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T13:33:32.504Z",
-      "updated": "2026-08-05T23:32:05.831Z",
-      "updatedBy": "bd-exp",
+      "updated": "2026-08-06T00:00:00.809Z",
+      "updatedBy": "bd-review",
       "claimedAt": "2026-08-05T23:32:05.831Z"
     },
     {
@@ -79975,47 +79980,47 @@
         {
           "n": 1,
           "text": "Syntax.rs entry updated",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-exp",
-          "verifiedBy": null,
-          "evidence": "crates/jet-foundation/src/Syntax/math_layout.rs: OP_CARET and OP_CARET_EQ carry the D-EXPOP1=A / D-EXPSEM1=A power meaning",
-          "at": "2026-08-05T23:32:33.589Z"
+          "verifiedBy": "bd-review",
+          "evidence": "Read crates/jet-foundation/src/Syntax/math_layout.rs: OP_CARET and OP_CARET_EQ carry the D-EXPOP1=A power meaning.",
+          "at": "2026-08-05T23:59:09.357Z"
         },
         {
           "n": 2,
           "text": "syntax-decisions.md log entry",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-exp",
-          "verifiedBy": null,
-          "evidence": "docs/spec/syntax-decisions.md: the 2026-08-05 entry states right grouping, minus binding looser, exact Int, written negative exponent to Float, any Float operand to Float",
-          "at": "2026-08-05T23:32:33.900Z"
+          "verifiedBy": "bd-review",
+          "evidence": "Read docs/spec/syntax-decisions.md lines 5520-5539: the entry states right grouping, minus binding looser, exact whole numbers, written negative exponent to Float, any Float operand to Float.",
+          "at": "2026-08-05T23:59:09.662Z"
         },
         {
           "n": 3,
           "text": "jet devtools grammars regenerated",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-exp",
-          "verifiedBy": null,
-          "evidence": "scripts/agent/jet-env jet self devtools grammars regenerated all four editor grammar sections in the same change",
-          "at": "2026-08-05T23:32:34.215Z"
+          "verifiedBy": "bd-review",
+          "evidence": "Read all four generated editor grammar files in the diff; all four regenerated in the same change.",
+          "at": "2026-08-05T23:59:09.973Z"
         },
         {
           "n": 4,
           "text": "snapshots re-blessed",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-exp",
-          "verifiedBy": null,
-          "evidence": "cargo test --test diagnostic_snapshots: the power semantics add no diagnostic text, so no snapshot changed; the 27 pre-existing mismatches are unrelated",
-          "at": "2026-08-05T23:32:34.521Z"
+          "verifiedBy": "bd-review",
+          "evidence": "Ran cargo test --test diagnostic_snapshots: 27 mismatches, none mentioning power, exclusive-or or ~|. No UI input uses infix ^.",
+          "at": "2026-08-05T23:59:10.283Z"
         },
         {
           "n": 5,
           "text": "Example power_semantics.jet golden-prints exactly 512 (2^3^2), -9 (-3^2), 1024 (2^10, exact Int), 0.5 (2^-1); identical on AOT and jet run (I9)",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-exp",
-          "verifiedBy": null,
-          "evidence": "examples/features/math/power_semantics.jet with expected/math/power_semantics.out prints 512, -9, 1024, 0.5 then 512 (comptime fold), 64, 9, 1024.0; jet build then ./build/power_semantics and jet run give byte-identical output; JET_GOLDEN_FILTER=math cargo test --test golden passes it",
-          "at": "2026-08-05T23:32:34.825Z"
+          "verifiedBy": "bd-review",
+          "evidence": "Ran examples/features/math/power_semantics.jet under jet run and under jet build plus the built binary after clearing ~/.cache/jet/build. Both print 512 / -9 / 1024 / 0.5 / 512 / 64 / 9 / 1024.0, byte-identical to the expected file.",
+          "at": "2026-08-05T23:59:10.592Z"
         },
         {
           "n": 6,
@@ -80029,11 +80034,11 @@
         {
           "n": 7,
           "text": "Parser test proves right-associativity (2^3^2 groups as 2^(3^2)) and that unary minus binds looser (-3^2 groups as -(3^2))",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-exp",
-          "verifiedBy": null,
-          "evidence": "cargo test --test power_and_exclusive_or power_groups_right_and_beats_unary_minus: 2 ^ 3 ^ 2 prints 512 while (2 ^ 3) ^ 2 prints 64, and -3 ^ 2 prints -9 while (-3) ^ 2 prints 9; also 2 * 3 ^ 2 is 18 and 2 ^ 3 * 2 is 16",
-          "at": "2026-08-05T23:32:35.448Z"
+          "verifiedBy": "bd-review",
+          "evidence": "Read the new expr_pow level in crates/jet-parser/src/Parser/Expressions/binary_unary.rs: base at postfix, exponent back through unary, so it is right-associative and sits under unary minus. Confirmed by running the example: 2 ^ 3 ^ 2 is 512 while (2 ^ 3) ^ 2 is 64, and -3 ^ 2 is -9 while (-3) ^ 2 is 9. cargo test --test power_and_exclusive_or power_groups_right_and_beats_unary_minus passes.",
+          "at": "2026-08-05T23:59:10.899Z"
         }
       ],
       "refs": [],
@@ -80044,8 +80049,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T13:33:32.817Z",
-      "updated": "2026-08-05T23:32:36.179Z",
-      "updatedBy": "bd-exp",
+      "updated": "2026-08-05T23:59:10.899Z",
+      "updatedBy": "bd-review",
       "claimedAt": "2026-08-05T23:32:36.179Z"
     },
     {
@@ -80075,65 +80080,65 @@
         {
           "n": 1,
           "text": "Syntax.rs entry updated",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-exp",
-          "verifiedBy": null,
-          "evidence": "crates/jet-foundation/src/Syntax/math_layout.rs: new OP_TILDE_PIPE and OP_TILDE_PIPE_EQ constants carry D-XORSPELL1=A",
-          "at": "2026-08-05T23:32:55.072Z"
+          "verifiedBy": "bd-review",
+          "evidence": "Read crates/jet-foundation/src/Syntax/math_layout.rs: OP_TILDE_PIPE and OP_TILDE_PIPE_EQ added with D-XORSPELL1=A doc comments.",
+          "at": "2026-08-05T23:59:24.103Z"
         },
         {
           "n": 2,
           "text": "syntax-decisions.md log entry",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-exp",
-          "verifiedBy": null,
-          "evidence": "docs/spec/syntax-decisions.md: the 2026-08-05 entry records ~| and ~|= in the old ^ precedence slot under the same D-SG9 rule",
-          "at": "2026-08-05T23:32:55.393Z"
+          "verifiedBy": "bd-review",
+          "evidence": "Read docs/spec/syntax-decisions.md lines 5528-5532: the entry records ~| and ~|= in the old ^ precedence slot under the same D-SG9 rule. Confirmed in code: expr_bitxor in crates/jet-parser/src/Parser/Expressions/binary_unary.rs kept its position and only swapped TokKind::Caret for TokKind::TildePipe.",
+          "at": "2026-08-05T23:59:24.409Z"
         },
         {
           "n": 3,
           "text": "jet devtools grammars regenerated",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-exp",
-          "verifiedBy": null,
-          "evidence": "scripts/agent/jet-env jet self devtools grammars: ~| and ~|= now appear in editors/jet.tmGrammar, tree-sitter/grammar.js, vscode jet.tmLanguage.json and zed highlights.scm",
-          "at": "2026-08-05T23:32:55.703Z"
+          "verifiedBy": "bd-review",
+          "evidence": "Read the diff for editors/jet.tmGrammar, editors/vscode/syntaxes/jet.tmLanguage.json, editors/tree-sitter/grammar.js and editors/zed/languages/jet/highlights.scm: all four list ~| and ~|=.",
+          "at": "2026-08-05T23:59:24.711Z"
         },
         {
           "n": 4,
           "text": "snapshots re-blessed",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-exp",
-          "verifiedBy": null,
-          "evidence": "cargo test --test diagnostic_snapshots: the ~| respelling changes no snapshot text; every .stderr mentioning a caret is the take sigil and still passes",
-          "at": "2026-08-05T23:32:56.017Z"
+          "verifiedBy": "bd-review",
+          "evidence": "Ran cargo test --test diagnostic_snapshots: 27 mismatches, none mentioning ~| or exclusive-or. Every caret in tests/ui/*.jet is the take sigil.",
+          "at": "2026-08-05T23:59:25.021Z"
         },
         {
           "n": 5,
           "text": "Example xor_operator.jet golden-proves ~| values and a ~|= accumulator loop; identical on AOT and jet run (I9)",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-exp",
-          "verifiedBy": null,
-          "evidence": "examples/features/math/xor_operator.jet with expected/math/xor_operator.out prints 6, 150, 80, 9 - covering ~| on Int and on a U8 pair, a ~|= accumulator loop, and copy beside xor; jet build then ./build/xor_operator and jet run give byte-identical output; JET_GOLDEN_FILTER=math cargo test --test golden passes it",
-          "at": "2026-08-05T23:32:56.338Z"
+          "verifiedBy": "bd-review",
+          "evidence": "Ran examples/features/math/xor_operator.jet under jet run and under jet build plus the built binary after clearing ~/.cache/jet/build. Both print 6 / 150 / 80 / 9, byte-identical to examples/features/expected/math/xor_operator.out.",
+          "at": "2026-08-05T23:59:25.326Z"
         },
         {
           "n": 6,
           "text": "Sema test: ~| enforces same-width integers both sides (D-SG9 rule carried over)",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-exp",
-          "verifiedBy": null,
-          "evidence": "cargo test --test power_and_exclusive_or exclusive_or_needs_matching_integer_widths: U8 ~| U8 accepted, U8 ~| I8 reports E0109, 1.5 ~| 2.5 reports E0109",
-          "at": "2026-08-05T23:32:56.646Z"
+          "verifiedBy": "bd-review",
+          "evidence": "Ran cargo test --test power_and_exclusive_or exclusive_or_needs_matching_integer_widths: passed. U8 ~| U8 accepted, U8 ~| I8 and 1.5 ~| 2.5 both report E0109.",
+          "at": "2026-08-05T23:59:25.632Z"
         },
         {
           "n": 7,
           "text": "Prefix ~ copy regression: existing copy-sigil targeted tests green; a line mixing copy and xor (x ~| ~y) parses correctly in a parser test",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-exp",
-          "verifiedBy": null,
-          "evidence": "cargo test --test power_and_exclusive_or prefix_take_and_copy_survive_the_rebind: melt(^blade) prints 3 and flags ~| ~source prints 9, so prefix copy and infix xor parse correctly on one line",
-          "at": "2026-08-05T23:32:56.955Z"
+          "verifiedBy": "bd-review",
+          "evidence": "Ran cargo test --test power_and_exclusive_or prefix_take_and_copy_survive_the_rebind: passed, covering flags ~| ~source on one line. Read the lexer order in crates/jet-lexer/src/Lexer/Scan.rs: ~|= then ~| then ~, after ~~, so prefix copy is untouched.",
+          "at": "2026-08-05T23:59:25.935Z"
         }
       ],
       "refs": [],
@@ -80144,8 +80149,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T13:33:33.119Z",
-      "updated": "2026-08-05T23:32:57.701Z",
-      "updatedBy": "bd-exp",
+      "updated": "2026-08-05T23:59:25.935Z",
+      "updatedBy": "bd-review",
       "claimedAt": "2026-08-05T23:32:57.701Z"
     },
     {
@@ -108400,6 +108405,153 @@
   ],
   "events": [
     {
+      "at": "2026-08-06T00:00:00.809Z",
+      "by": "bd-review",
+      "action": "card.update",
+      "ref": "c0kw5dh0",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-05T23:59:25.935Z",
+      "by": "bd-review",
+      "action": "card.criteria-verify",
+      "ref": "c0v2fuet",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-05T23:59:25.632Z",
+      "by": "bd-review",
+      "action": "card.criteria-verify",
+      "ref": "c0v2fuet",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-05T23:59:25.326Z",
+      "by": "bd-review",
+      "action": "card.criteria-verify",
+      "ref": "c0v2fuet",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-05T23:59:25.022Z",
+      "by": "bd-review",
+      "action": "card.criteria-verify",
+      "ref": "c0v2fuet",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-05T23:59:24.712Z",
+      "by": "bd-review",
+      "action": "card.criteria-verify",
+      "ref": "c0v2fuet",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-05T23:59:24.410Z",
+      "by": "bd-review",
+      "action": "card.criteria-verify",
+      "ref": "c0v2fuet",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-05T23:59:24.103Z",
+      "by": "bd-review",
+      "action": "card.criteria-verify",
+      "ref": "c0v2fuet",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-05T23:59:10.899Z",
+      "by": "bd-review",
+      "action": "card.criteria-verify",
+      "ref": "c0q2s3u5",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-05T23:59:10.592Z",
+      "by": "bd-review",
+      "action": "card.criteria-verify",
+      "ref": "c0q2s3u5",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-05T23:59:10.283Z",
+      "by": "bd-review",
+      "action": "card.criteria-verify",
+      "ref": "c0q2s3u5",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-05T23:59:09.973Z",
+      "by": "bd-review",
+      "action": "card.criteria-verify",
+      "ref": "c0q2s3u5",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-05T23:59:09.662Z",
+      "by": "bd-review",
+      "action": "card.criteria-verify",
+      "ref": "c0q2s3u5",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-05T23:59:09.357Z",
+      "by": "bd-review",
+      "action": "card.criteria-verify",
+      "ref": "c0q2s3u5",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-05T23:58:56.955Z",
+      "by": "bd-review",
+      "action": "card.criteria-verify",
+      "ref": "c0kw5dh0",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-05T23:58:56.657Z",
+      "by": "bd-review",
+      "action": "card.criteria-verify",
+      "ref": "c0kw5dh0",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-05T23:58:56.345Z",
+      "by": "bd-review",
+      "action": "card.criteria-verify",
+      "ref": "c0kw5dh0",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-05T23:58:47.396Z",
+      "by": "bd-review",
+      "action": "card.criteria-verify",
+      "ref": "c0kw5dh0",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-05T23:58:47.078Z",
+      "by": "bd-review",
+      "action": "card.criteria-verify",
+      "ref": "c0kw5dh0",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-05T23:58:46.760Z",
+      "by": "bd-review",
+      "action": "card.criteria-verify",
+      "ref": "c0kw5dh0",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-05T23:58:46.458Z",
+      "by": "bd-review",
+      "action": "card.criteria-verify",
+      "ref": "c0kw5dh0",
+      "note": "#1"
+    },
+    {
       "at": "2026-08-05T23:57:58.249Z",
       "by": "bd-markers",
       "action": "card.update",
@@ -111751,153 +111903,6 @@
       "action": "card.add",
       "ref": "c0dxl32d",
       "note": "jetos takeover: reversible in-place adoption from a running Linux host"
-    },
-    {
-      "at": "2026-08-05T01:34:12.140Z",
-      "by": "codex-e5",
-      "action": "card.update",
-      "ref": "c0esko6c",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-05T01:21:48.166Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c07dnjkm",
-      "note": "epoch"
-    },
-    {
-      "at": "2026-08-05T01:21:43.168Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c07dnjkm",
-      "note": "milestoneId"
-    },
-    {
-      "at": "2026-08-05T01:20:45.025Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-05T01:20:45.024Z"
-    },
-    {
-      "at": "2026-08-05T01:17:16.124Z",
-      "by": "codex-e3-main",
-      "action": "card.update",
-      "ref": "c0rfgh4h",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-05T01:17:15.861Z",
-      "by": "codex-e3-main",
-      "action": "card.claim",
-      "ref": "c0rfgh4h",
-      "note": ""
-    },
-    {
-      "at": "2026-08-05T01:15:55.465Z",
-      "by": "codex-e3-main",
-      "action": "card.update",
-      "ref": "c0a2mcjv",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-05T01:15:44.768Z",
-      "by": "codex-e3-main",
-      "action": "card.update",
-      "ref": "c0a2mcjv",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-05T01:15:38.055Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c0a2mcjv",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-05T01:15:37.708Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c0a2mcjv",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-05T01:15:37.373Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c0a2mcjv",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-05T01:15:37.029Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c0a2mcjv",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-05T01:15:36.691Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c0a2mcjv",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-05T01:15:36.351Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c0a2mcjv",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-05T01:15:36.022Z",
-      "by": "codex-e3-review",
-      "action": "card.criteria-verify",
-      "ref": "c0a2mcjv",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-05T01:15:23.559Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c0a2mcjv",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-05T01:15:23.227Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c0a2mcjv",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-05T01:15:22.794Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c0a2mcjv",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-05T01:15:22.349Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c0a2mcjv",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-05T01:15:21.901Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c0a2mcjv",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-05T01:15:21.469Z",
-      "by": "codex-e3-main",
-      "action": "card.criteria-meet",
-      "ref": "c0a2mcjv",
-      "note": "#2"
     }
   ],
   "nextNum": 368,
