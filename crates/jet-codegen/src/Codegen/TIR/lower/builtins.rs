@@ -12,6 +12,33 @@ use crate::Codegen::TIR::unit_type;
 use crate::Codegen::TIR::ListRemoveMode;
 use crate::Diagnostics::Span;
 
+/// #1478: Set/SortedSet delegate their iterator-family surface (filter, map,
+/// each, all, fold, flat_map, min, max) to the same List/Iter machinery every
+/// other container already uses — insert the exact `.to_list()` conversion a
+/// user would write by hand. AOT and JIT then never see a raw `HashSet`/
+/// `BTreeSet` where they expect a `Vec`-backed list (I9: no second mechanism;
+/// I8: one canonical iteration path). Not for `values`/`replace`/`take`,
+/// which stay on the native Set API and must NOT be wrapped.
+pub(crate) fn wrap_set_receiver_as_list(recv: TExpr) -> TExpr {
+    let (op, elem) = match &recv.ty {
+        Type::Apply { name, args } if name == "Set" => {
+            (TBuiltinOp::SetToList, args.first().cloned().unwrap_or(Type::Int))
+        }
+        Type::Apply { name, args } if name == crate::Syntax::TYPE_SORTED_SET => {
+            (TBuiltinOp::SortedSetToList, args.first().cloned().unwrap_or(Type::Int))
+        }
+        _ => return recv,
+    };
+    TExpr {
+        ty: Type::List(Box::new(elem)),
+        kind: TExprKind::BuiltinMethod {
+            recv: Box::new(recv),
+            op,
+            args: vec![],
+        },
+    }
+}
+
 fn tuple_fields(ty: Option<&Type>) -> Option<Vec<(String, Type)>> {
     match ty {
         Some(Type::Tuple(fields)) => Some(
@@ -538,10 +565,16 @@ pub(crate) fn resolve_builtin_op(
         ("get_disjoint_write", 1) => TBuiltinOp::GetDisjointWrite,
         ("keys", 0) if is_lru => TBuiltinOp::LruKeys,
         ("keys", 0) => TBuiltinOp::Keys,
+        // #1478: `Set.values()` is the lazy Set-native alias of `to_list`;
+        // must precede the Map-generic `Values` fallback below.
+        ("values", 0) if is_set => TBuiltinOp::SetValues,
         ("values", 0) => TBuiltinOp::Values,
         ("has_key", 1) => TBuiltinOp::ContainsKey,
         ("to_string", 0) => TBuiltinOp::ToString,
         // D-ITER1: non-closure list adapters.
+        // #1478: `Set.take(v)` is the native remove-and-return-if-present
+        // form; must precede the List-generic `Take` (lazy prefix) fallback.
+        ("take", 1) if is_set => TBuiltinOp::SetTake,
         ("take", 1) => TBuiltinOp::Take,
         ("skip", 1) => TBuiltinOp::Skip,
         ("step_by", 1) => TBuiltinOp::StepBy,
@@ -690,6 +723,11 @@ pub(crate) fn resolve_builtin_op(
 // removed duplicate #1477
 
         ("capacity", 0) if is_set => TBuiltinOp::SetCapacity,
+        // #1478: remaining Set surface — replace stays on the native HashSet
+        // API (no Vec detour needed). `values`/`take` are gated ABOVE their
+        // Map/List-generic same-named arms (`Values`/`Take` below) so the
+        // Set-specific op wins the match instead of being shadowed.
+        ("replace", 1) if is_set => TBuiltinOp::SetReplace,
         ("add", 2) if is_lru => TBuiltinOp::LruPut,
         ("add_new", 2) if is_lru => TBuiltinOp::LruAddNew,
         ("capacity", 0) if is_lru => TBuiltinOp::LruCapacity,
@@ -737,6 +775,10 @@ pub(crate) fn resolve_builtin_op(
             | TBuiltinOp::Clear
             | TBuiltinOp::SetInsert
             | TBuiltinOp::SetRemove
+            // #1478: `.replace()`/`.take()` are native `&mut self` HashSet
+            // methods — same two-phase borrow as `.add()`/`.remove()`.
+            | TBuiltinOp::SetReplace
+            | TBuiltinOp::SetTake
             | TBuiltinOp::SortedSetInsert
             | TBuiltinOp::SortedSetRemove
             | TBuiltinOp::BitSetAdd

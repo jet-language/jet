@@ -52,18 +52,18 @@ Generated on: 2026-08-06
 | Shared containers | 54 |
 | Core modules | 85 |
 | Module members | 1137 |
-| Collection method rows | 702 |
-| Jet-side rows | 1840 |
-| Total rows | 10432 |
+| Collection method rows | 713 |
+| Jet-side rows | 1851 |
+| Total rows | 10431 |
 
 ## Verdicts
 
 | Verdict | Rows |
 | --- | ---: |
 | Jet wins | 401 |
-| Equal | 850 |
-| Jet loses (two or more languages agree) | 318 |
-| Single witness (recorded, not scored) | 8274 |
+| Equal | 861 |
+| Jet loses (two or more languages agree) | 307 |
+| Single witness (recorded, not scored) | 8273 |
 | Exported type, not an operation | 169 |
 | Not compared | 420 |
 | Deliberately declined | 0 |
@@ -72,14 +72,14 @@ Generated on: 2026-08-06
 
 | Language | Surface read from | Recorded operations | Jet rows matched | Loss rows |
 | --- | --- | ---: | ---: | ---: |
-| Rust | standard-library source (rust-src component) | 1032 | 357 | 28 |
+| Rust | standard-library source (rust-src component) | 1032 | 359 | 26 |
 | Go | official frozen API files (GOROOT/api/go1*.txt) | 1878 | 406 | 112 |
-| Swift | official documentation JSON (developer.apple.com) | 505 | 175 | 32 |
-| Kotlin | official API reference (kotlinlang.org) | 1141 | 231 | 60 |
+| Swift | official documentation JSON (developer.apple.com) | 505 | 183 | 24 |
+| Kotlin | official API reference (kotlinlang.org) | 1141 | 240 | 51 |
 | C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1267 | 327 | 47 |
-| TypeScript | runtime introspection | 724 | 219 | 66 |
-| Ruby | runtime introspection | 1294 | 338 | 82 |
-| Elixir | runtime introspection | 1270 | 369 | 75 |
+| TypeScript | runtime introspection | 724 | 221 | 64 |
+| Ruby | runtime introspection | 1294 | 342 | 78 |
+| Elixir | runtime introspection | 1270 | 370 | 74 |
 | Julia | official documentation search index (docs.julialang.org) | 1132 | 282 | 79 |
 | R | official R manual package index (stat.ethz.ch R-devel) | 1768 | 51 | 0 |
 | Python | runtime introspection | 2232 | 419 | 158 |
@@ -98,7 +98,6 @@ while losses remain.
 | String | 34 | #1581 | ready | live |
 | core.crypto | 17 | #1473 | ready | live |
 | core.archive | 16 | #1470 | ready | live |
-| Set | 16 | #1478 | verify | live |
 | core.time | 14 | #1466 | done | closed |
 | core.tasks | 13 | #1468 | done | closed |
 | core.sync | 12 | #1481 | ready | live |
@@ -115,6 +114,7 @@ while losses remain.
 | core.testing | 7 | #1481 | ready | live |
 | core.tls | 6 | #1481 | ready | live |
 | core.uuid | 5 | #1481 | ready | live |
+| Set | 5 | #1584 | ready | live |
 | core.http | 4 | #1481 | ready | live |
 | core.regex | 4 | #1471 | done | closed |
 | core.encoding.csv | 3 | #1481 | ready | live |

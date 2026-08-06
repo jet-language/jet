@@ -883,6 +883,13 @@ impl<'a> Checker<'a> {
                                         if matches!(name.as_str(), "View" | "ViewMut") => {
                                         refined_ret = Some(Type::List(Box::new((**r).clone())));
                                     }
+                                    // #1478: `Set.map(f: T -> R) -> [R]` — same shape as
+                                    // `List.map`; a Set's uniqueness doesn't carry through
+                                    // an arbitrary mapping, so the result is a plain list.
+                                    Type::Apply { name, .. }
+                                        if name == "Set" || name == Syntax::TYPE_SORTED_SET => {
+                                        refined_ret = Some(Type::List(Box::new((**r).clone())));
+                                    }
                                     _ => {}
                                 }
                             }

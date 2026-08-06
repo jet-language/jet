@@ -1742,6 +1742,24 @@ fn set_method_return(elem: &Type, method: &str, nargs: usize) -> Option<Option<T
         ("equal", 1) => Some(Some(Type::Bool)),
         ("capacity", 0) => Some(Some(Type::Int)),
         ("first", 0) => Some(Some(Type::Option(Box::new(elem.clone())))),
+        // #1478: ledger closes on Set's remaining order-agnostic surface.
+        // `values` is the lazy alias of `to_list` (I8, mirrors `Map.values`).
+        ("values", 0) => Some(Some(iter_ty(elem.clone()))),
+        // Native swap-in / remove-and-return — Rust's own HashSet contract.
+        ("replace" | "take", 1) => Some(Some(Type::Option(Box::new(elem.clone())))),
+        ("all", 1) => Some(Some(Type::Bool)),
+        ("each", 1) => Some(None),
+        ("filter", 1) => Some(Some(Type::List(Box::new(elem.clone())))),
+        ("min" | "max", 0) => Some(Some(Type::Option(Box::new(elem.clone())))),
+        // `map`/`fold`/`flat_map` placeholders — sema refines from the
+        // closure body's actual return type, same as the List surface.
+        ("map", 1) => Some(Some(Type::List(Box::new(Type::Int)))),
+        ("fold", 2) => Some(Some(Type::Int)),
+        ("flat_map", 1) => Some(Some(iter_ty(Type::Int))),
+        // #1478: `flatten` declined — E0506 forbids a Set element type that
+        // is itself a List/Set (Set elements must be Hash+Eq), so no legal
+        // `Set<T>` can ever satisfy `flatten`'s nested-container precondition.
+        // See the D-SET-DECLINE1 ballot for the full declined-name rationale.
         _ => None,
     }
 }
@@ -1915,7 +1933,8 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
         ),
         // D-COLLBREADTH1=A: Set mutating methods.
         Type::Apply { name, .. } if name == "Set" => {
-            matches!(method, "add" | "remove" | "clear")
+            // #1478: `.replace`/`.take` are native HashSet `&mut self` methods.
+            matches!(method, "add" | "remove" | "clear" | "replace" | "take")
         }
         Type::Apply { name, .. } if name == Syntax::TYPE_SORTED_SET => {
             matches!(method, "add" | "remove" | "clear")
@@ -2592,8 +2611,41 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                 "union" | "intersection" | "difference" | "symmetric_difference"
                 | "is_subset" | "is_superset" | "is_disjoint" => Some(vec![Type::Apply {
                     name: "Set".to_string(),
-                    args: vec![elem],
+                    args: vec![elem.clone()],
                 }]),
+                // #1478: replace(v)/take(v) stay on the native single-value form.
+                "replace" | "take" => Some(vec![elem.clone()]),
+                "filter" | "all" => Some(vec![Type::Fn {
+                    params: vec![elem.clone()],
+                    ret: Some(Box::new(Type::Bool)),
+                    effect_bound: None,
+                    return_view_provenance: None,
+                    param_contract: None,
+                }]),
+                "each" => Some(vec![Type::Fn {
+                    params: vec![elem.clone()],
+                    ret: None,
+                    effect_bound: None,
+                    return_view_provenance: None,
+                    param_contract: None,
+                }]),
+                "map" | "flat_map" => Some(vec![Type::Fn {
+                    params: vec![elem],
+                    ret: None, // sema refines R from the closure's actual return
+                    effect_bound: None,
+                    return_view_provenance: None,
+                    param_contract: None,
+                }]),
+                "fold" => Some(vec![
+                    Type::Int, // init — sema refines
+                    Type::Fn {
+                        params: vec![Type::Int, elem],
+                        ret: Some(Box::new(Type::Int)),
+                        effect_bound: None,
+                        return_view_provenance: None,
+                        param_contract: None,
+                    },
+                ]),
                 _ => Some(vec![]),
             }
         }

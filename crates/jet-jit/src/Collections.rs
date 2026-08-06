@@ -1312,6 +1312,58 @@ extern "C" fn jet_jit_set_remove(set: i64, v: i64) {
     });
 }
 
+// #1478: native swap-in — always leaves `v` (or its string-canonical id) in
+// the set; returns the displaced equal element as a packed Option (Rust's
+// `HashSet::replace`), same ABI convention as `jet_jit_set_first`.
+extern "C" fn jet_jit_set_replace(set: i64, v: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let idx = (set as usize).wrapping_sub(1);
+        let Some(existing) = rt.sets.get(idx).cloned() else {
+            return option_packed(None);
+        };
+        let string_kind = set_is_string(rt, set);
+        let old = if string_kind {
+            let needle = rt.heap.clone_string(v).unwrap_or_default();
+            existing
+                .iter()
+                .find(|id| rt.heap.clone_string(**id).as_deref() == Some(needle.as_str()))
+                .copied()
+        } else {
+            existing.contains(&v).then_some(v)
+        };
+        if let Some(old) = old {
+            rt.sets[idx].remove(&old);
+        }
+        rt.sets[idx].insert(v);
+        option_packed(old)
+    })
+}
+
+// #1478: native remove-and-return-if-present (Rust's `HashSet::take`); does
+// NOT insert on a miss, unlike `replace`.
+extern "C" fn jet_jit_set_take(set: i64, v: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let idx = (set as usize).wrapping_sub(1);
+        let Some(existing) = rt.sets.get(idx).cloned() else {
+            return option_packed(None);
+        };
+        let string_kind = set_is_string(rt, set);
+        let found = if string_kind {
+            let needle = rt.heap.clone_string(v).unwrap_or_default();
+            existing
+                .iter()
+                .find(|id| rt.heap.clone_string(**id).as_deref() == Some(needle.as_str()))
+                .copied()
+        } else {
+            existing.contains(&v).then_some(v)
+        };
+        if let Some(found) = found {
+            rt.sets[idx].remove(&found);
+        }
+        option_packed(found)
+    })
+}
+
 extern "C" fn jet_jit_set_has(set: i64, v: i64) -> i8 {
     Concurrency::with_runtime_mut(|rt| {
         match rt.sets.get((set as usize).wrapping_sub(1)) {
@@ -2743,6 +2795,8 @@ pub(crate) struct CollectionsHostFns {
     pub set_equal: cranelift_module::FuncId,
     pub set_capacity: cranelift_module::FuncId,
     pub set_first: cranelift_module::FuncId,
+    pub set_replace: cranelift_module::FuncId,
+    pub set_take: cranelift_module::FuncId,
     pub set_union: cranelift_module::FuncId,
     pub set_intersection: cranelift_module::FuncId,
     pub set_difference: cranelift_module::FuncId,
@@ -2914,6 +2968,8 @@ pub(crate) fn register_collections_symbols(builder: &mut cranelift_jit::JITBuild
     builder.symbol("jet_jit_set_equal", jet_jit_set_equal as *const u8);
     builder.symbol("jet_jit_set_capacity", jet_jit_set_capacity as *const u8);
     builder.symbol("jet_jit_set_first", jet_jit_set_first as *const u8);
+    builder.symbol("jet_jit_set_replace", jet_jit_set_replace as *const u8);
+    builder.symbol("jet_jit_set_take", jet_jit_set_take as *const u8);
     builder.symbol("jet_jit_set_union", jet_jit_set_union as *const u8);
     builder.symbol(
         "jet_jit_set_intersection",
@@ -3234,6 +3290,8 @@ pub(crate) fn declare_collections_host_fns(
         set_equal: import("jet_jit_set_equal", &sig_list_eq)?,
         set_capacity: import("jet_jit_set_capacity", &sig_len)?,
         set_first: import("jet_jit_set_first", &sig_len)?,
+        set_replace: import("jet_jit_set_replace", &sig_get_opt)?,
+        set_take: import("jet_jit_set_take", &sig_get_opt)?,
         set_union: import("jet_jit_set_union", &sig_get_opt)?,
         set_intersection: import("jet_jit_set_intersection", &sig_get_opt)?,
         set_difference: import("jet_jit_set_difference", &sig_get_opt)?,

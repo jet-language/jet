@@ -1340,6 +1340,17 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TBuiltinOp::SetEqual => format!("({}) == ({})", recv, a(0)),
                 TBuiltinOp::SetCapacity => format!("({}).capacity() as i64", recv),
                 TBuiltinOp::SetFirst => format!("({}).iter().next().cloned()", recv),
+                // #1478: `values()` is the same materialization as `to_list()`,
+                // wrapped lazy (I8 — one mechanism, `Iter<T>` typed).
+                TBuiltinOp::SetValues => format!(
+                    "jet_iter_from_vec(({}).iter().cloned().collect::<Vec<_>>())",
+                    recv
+                ),
+                // #1478: native swap-in — inserts `a0`, returns the old equal
+                // element if one was present (Rust's own `HashSet::replace`).
+                TBuiltinOp::SetReplace => format!("({}).replace({})", recv, a(0)),
+                // #1478: native remove-and-return — Rust's own `HashSet::take`.
+                TBuiltinOp::SetTake => format!("({}).take(&({}))", recv, a(0)),
                 TBuiltinOp::SortedSetFrom => {
                     format!(
                         "({}).into_iter().collect::<std::collections::BTreeSet<_>>()",

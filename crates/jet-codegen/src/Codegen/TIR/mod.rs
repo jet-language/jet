@@ -4109,6 +4109,12 @@ pub enum TBuiltinOp {
     SetCapacity,
     /// #1478: `set.first()` → arbitrary element (unordered).
     SetFirst,
+    /// #1478: `set.values()` → lazy view over the same arbitrary order as `to_list`.
+    SetValues,
+    /// #1478: `set.replace(v)` → `(recv).replace(a0)` (native swap-in, returns old equal value).
+    SetReplace,
+    /// #1478: `set.take(v)` → `(recv).take(&a0)` (native remove-and-return-if-present).
+    SetTake,
     SortedSetFrom,
     SortedSetInsert,
     SortedSetRemove,

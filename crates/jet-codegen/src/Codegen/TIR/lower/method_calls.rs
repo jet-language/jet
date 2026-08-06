@@ -2185,6 +2185,14 @@ pub(crate) fn lower_method_call(
             } else {
                 lower_expr(receiver, cx, env)
             };
+            // #1478: `Set.min()`/`Set.max()` reuse the generic List reducer —
+            // route through the same `.to_list()` a user would write so AOT
+            // and JIT never see a raw `HashSet` where they expect a `Vec`.
+            let recv_t = if matches!(op, TBuiltinOp::Min { .. } | TBuiltinOp::Max { .. }) {
+                crate::Codegen::TIR::wrap_set_receiver_as_list(recv_t)
+            } else {
+                recv_t
+            };
             // D-ITERTOOLS1=A: `tir_recv_jet_ty` is None for list literals, so a
             // chain like `[…].flatten().to_list()` can mis-resolve `to_list` as
             // SetToList. Prefer the lowered receiver type.
@@ -3555,6 +3563,20 @@ pub(crate) fn lower_method_call(
         let recv_t = lower_expr(receiver, cx, env);
         let recv_ast_ty = tir_recv_jet_ty(receiver, env);
         let recv_ty = recv_ast_ty.unwrap_or_else(|| recv_t.ty.clone());
+        // #1478: Set/SortedSet closures (filter/map/each/all/fold/flat_map)
+        // route through the same to_list()-then-List path every other
+        // container's closures already use (I9 — AOT and JIT both need a
+        // real `Vec`-backed list, not a raw `HashSet`/`BTreeSet`).
+        let (recv_t, recv_ty) = if matches!(
+            &recv_ty,
+            Type::Apply { name, .. } if name == "Set" || name == crate::Syntax::TYPE_SORTED_SET
+        ) {
+            let wrapped = crate::Codegen::TIR::wrap_set_receiver_as_list(recv_t);
+            let ty = wrapped.ty.clone();
+            (wrapped, ty)
+        } else {
+            (recv_t, recv_ty)
+        };
         // A `ReduceOp` value on SIMD is MathMethod, never collection fold.
         let reduce_value = method == "reduce"
             && args
