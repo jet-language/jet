@@ -493,21 +493,27 @@ pub fn marker_argument_shape_error(
     )
 }
 
-/// D-MARK-FORM1=A: parentheses appear exactly when arguments are written, so
-/// an empty pair is always a leftover the formatter can delete.
+/// D-MARK-FORM1=A: parentheses appear exactly when arguments are written, so an
+/// empty pair is always a leftover. `parens` covers `(` through `)` alone, so
+/// the autofix deletes exactly that and `jet fmt` can apply it.
 pub fn marker_empty_arguments_error(
     name: &str,
-    span: crate::Diagnostics::Span,
+    parens: crate::Diagnostics::Span,
 ) -> crate::Diagnostics::Diagnostic {
-    let bare = format!("#{name}");
     let mut diagnostic = crate::Diagnostics::Diagnostic::error(
-        "E0930",
+        // E0999 is the marker-spelling family the formatter canonicalizes
+        // (D-MARK-STACK1's bracket edges live here too); E0930 is reserved for
+        // arguments that were written and do not match the signature.
+        "E0999",
         format!("`#{name}()` has empty parentheses"),
         "a marker writes parentheses exactly when it passes arguments".to_string(),
-        format!("write `{bare}`"),
-        Some(span),
+        format!("write `#{name}`"),
+        Some(parens),
     );
-    diagnostic.edit = Some(crate::Diagnostics::TextEdit { span, new_text: bare });
+    diagnostic.edit = Some(crate::Diagnostics::TextEdit {
+        span: parens,
+        new_text: String::new(),
+    });
     diagnostic
 }
 

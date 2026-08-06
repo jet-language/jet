@@ -1368,16 +1368,38 @@ purity to the empty function-effect row (`f: fn(Int) =[]=> Int`). Field-level wi
 use `#`: `Rename`, `Skip`, `Default`, `Flatten`, `RenameAll`,
 `DenyUnknownFields`, `Discriminant`, `Untagged`.
 
-**S82 — Applied-rule grammar shapes** *(D-SHAPE2/D-ATTR2/D-VERDICT-732-1)*:
-`#Rule` single, line before the declaration;
-`#[A, B]` comma lists (no Rust `#[derive(…)]` wrapper);
-`#Rule { … }` scoped region statement (`#Unsafe { }`, `#Transact { }`) or
-in-body config as a type body's first statements. `comptime` stays a prefix
-keyword. LSP surfaces applicable markers per item.
+**S82 — One placement law** *(D-SHAPE2/D-ATTR2/D-VERDICT-732-1; rewritten by
+D-MARK-FORM1=A, ratified 2026-08-05, card #1455)*: a marker, or one `#[A, B]`
+bracket group, is written immediately before its target. The registry says
+which targets each rule accepts. Parentheses appear exactly when arguments are
+written; empty parentheses are an error the formatter fixes.
+
+That one sentence covers every position. `#Codable struct …`, `#Known limit ::
+32`, `#Inline fn hot(…)`, and `#Unsafe("reason") { … }` are the same shape —
+marker, then target — differing only in what the target is. The five written
+forms (`Bare`, `Call`, `BareOrCall`, `Block`, `Prefix`) are retired; they
+described one shape and the registry held contradictory filings for it. The
+row schema is name, signature, legal targets, repeatable, status, and
+inheritance: the signature says whether arguments may and must be written, and
+the target list says where the rule may sit. LSP surfaces applicable markers
+per item.
+
+Layout is the formatter's job, one rule: a marker on a type, function, or
+method goes on its own line above it; a marker on a field, parameter, binding,
+statement, or block stays inline.
+
+**D-MARK-REPEAT1=A — One rule once per target** *(ratified 2026-08-05, card
+#1455)*: writing the same rule twice on one target is an E0999 error with a
+remove-the-repeat fix. Rows whose repetition carries meaning declare
+`repeatable` in the registry: `#Pre` and `#Post` (several contracts, each with
+its own message) and `#allow` (several lints). Every other row rejects the
+second copy, because a silent duplicate is a typo or a merge artifact and two
+copies can only disagree once one of them gains arguments.
 
 **D-MARKSIG1=A — Marker signatures and one call grammar** *(ratified
-2026-07-23, card #759)*: one declarative registry row owns each rule's name,
-typed signature, legal sites, form, and active or retired status. Marker
+2026-07-23, card #759; the `form` column retired by D-MARK-FORM1=A)*: one
+declarative registry row owns each rule's name,
+typed signature, legal sites, and active or retired status. Marker
 arguments use the ordinary Jet call grammar: positional arguments first, then
 named arguments. One E0930 family reports a mismatch and prints the declared
 signature. Parser, sema, formatter, LSP, explain, and retirement handling read

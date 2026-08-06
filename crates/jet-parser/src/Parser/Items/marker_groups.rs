@@ -127,6 +127,7 @@ impl<'a> Parser<'a> {
             let mut arg_labels = Vec::new();
             let mut end = name_span.end;
             let parenthesized = matches!(self.peek().kind, TokKind::LParen);
+            let paren_start = self.peek().span.start;
             if parenthesized {
                 self.bump(); // `(`
                 if !matches!(self.peek().kind, TokKind::RParen) {
@@ -153,6 +154,19 @@ impl<'a> Parser<'a> {
                 ct: None,
             };
             self.validate_registered_rule_marker(&marker, parenthesized)?;
+            // D-MARK-FORM1=A: an empty pair is a leftover, not a different
+            // spelling. Report it and keep parsing so `jet fmt` can apply the
+            // delete edit — a hard stop would leave the file unformattable.
+            if parenthesized
+                && marker.args.is_empty()
+                && crate::Policy::applied_rule(&marker.name)
+                    .is_some_and(|rule| rule.signature.accepts_arguments())
+            {
+                self.diags.push(crate::Policy::marker_empty_arguments_error(
+                    &marker.name,
+                    Span::new(paren_start, end),
+                ));
+            }
             self.rule_facts.push(crate::AST::AppliedRuleApplication {
                 marker: marker.clone(),
                 target: None,
@@ -211,12 +225,6 @@ impl<'a> Parser<'a> {
             // column and no per-marker grammar category.
             if parenthesized && !rule.signature.accepts_arguments() {
                 return Err(crate::Policy::marker_argument_shape_error(&marker.name, marker.span));
-            }
-            if parenthesized && marker.args.is_empty() {
-                return Err(crate::Policy::marker_empty_arguments_error(
-                    &marker.name,
-                    marker.span,
-                ));
             }
             // `#Unsafe` keeps its product diagnostic E3112 for a missing reason.
             if !parenthesized
@@ -533,7 +541,9 @@ impl<'a> Parser<'a> {
                 {
                     continue;
                 }
-                let mut diagnostic = Diagnostic::error(
+                // No autofix: deleting one entry of `#[A, A]` in place would
+                // leave a dangling comma. The writer removes the repeat.
+                self.diags.push(Diagnostic::error(
                     "E0999",
                     format!("`#{}` is already applied to this {noun}", marker.name),
                     format!(
@@ -542,12 +552,7 @@ impl<'a> Parser<'a> {
                     ),
                     "remove the repeated marker".to_string(),
                     Some(marker.span),
-                );
-                diagnostic.edit = Some(crate::Diagnostics::TextEdit {
-                    span: marker.span,
-                    new_text: String::new(),
-                });
-                self.diags.push(diagnostic);
+                ));
             }
         }
 
