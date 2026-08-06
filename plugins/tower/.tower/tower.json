@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1580,
-    "rev": 28073,
+    "rev": 28084,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -78448,7 +78448,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-03T20:21:49.909Z",
-      "updated": "2026-08-06T21:54:06.240Z",
+      "updated": "2026-08-06T22:19:07.526Z",
       "updatedBy": "owner",
       "workOrder": 290
     },
@@ -85782,6 +85782,11 @@
       "log": [
         {
           "at": "2026-08-06",
+          "by": "bd2-io",
+          "text": "Fixed the JIT-hosts-reencode-logic hold. Moved jet_std_io_input/readline/read_until/take/sprint/repr out of Prelude/CoreLib/Top/FSIoEnvOsTesting.rs into a new Prelude/CoreLib/Top/IoLineStream.rs (same text, still include_str'd into AOT via Codegen/mod.rs). crates/jet-jit/src/IO.rs now include!s that exact file inside a new io_line_stream module and the jet_jit_io_sprint/repr/take/read_until hosts only marshal heap handles and call the included jet_std_io_* functions, no reimplemented logic left. Added a dedicated jet_jit_io_readline host (new IOHostFns.readline) that calls jet_std_io_readline; lower_ctx.rs readline lowering now targets it instead of reusing io_input's FuncId (core.io.input keeps using io_input, unrelated surface). io_line_stream carries a small local jet_std shim (IOOperation/IOContext/IOError::other only) so the included Prelude text type-checks in the JIT crate; it holds no logic, matching the existing enc_stream/mod.rs precedent. Proof: cargo build clean; jet run examples/features/io/io_surface.jet matches golden; AOT build of the same example matches the same golden (I9 parity); cargo test --test core_surface_ledger still fails, but on a pre-existing unrelated Tower ledger issue (stale owner card #1476, String surface) not touched by this change."
+        },
+        {
+          "at": "2026-08-06",
           "by": "e3-review",
           "text": "e3-review major-flaws: HOLD close. JIT hosts re-encode #1480 surface (jet_jit_io_take/read_until/sprint/repr) instead of calling Prelude jet_std_io_*; readline JIT routes to io_input not jet_std_io_readline. Observable golden JIT≡AOT not enough for I9. Fix hosts to marshal→Prelude, then re-verify."
         },
@@ -85855,8 +85860,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T02:13:47.648Z",
-      "updated": "2026-08-06T21:41:23.815Z",
-      "updatedBy": "audit-apply",
+      "updated": "2026-08-06T22:16:00.016Z",
+      "updatedBy": "bd2-io",
       "claimedAt": "2026-08-06T17:05:53.671Z",
       "workOrder": 40
     },
@@ -87691,7 +87696,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T17:01:59.254Z",
-      "updated": "2026-08-06T21:55:10.935Z",
+      "updated": "2026-08-06T22:19:26.498Z",
       "updatedBy": "owner"
     },
     {
@@ -87973,7 +87978,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T17:14:30.623Z",
-      "updated": "2026-08-06T21:55:39.098Z",
+      "updated": "2026-08-06T22:19:20.355Z",
       "updatedBy": "owner",
       "workOrder": 410
     },
@@ -127220,8 +127225,8 @@
           "key": "C",
           "name": "Retire the old marker; #Policy means wrappers only",
           "detail": "MEM1 already moves the four memory keys onto the rights tree as denials. The two survivors follow their own laws home: the unsafe permission becomes an authority manifest entry, and explicit_units becomes a typed setting on the fact plane. The PolicyKey table deletes, and #Policy has exactly one meaning: the ratified wrapper chain.",
-          "technical": "no_alloc, zero_rc, arena_bounded, gc: rights-tree denial rows per D-AUTHORITY-MEM1 and D-AUTHORITY-MEM2. unsafe: an allow/deny entry in the authority manifest per D-AUTHORITY-MANIFEST1. explicit_units: a typed setting per D-CONF-KEY1. Scope inheritance (organization to block) rides the manifest and scope law that already governs those planes.",
-          "code": "=[!Mem.Alloc]=>\nfn render(frame: Frame) => Pixels { ... }\n\n#Policy(retry(3), trace(\"users.load\"))\n+fn load_user(id: UserId) => User ? DbErr { ... }"
+          "technical": "no_alloc, zero_rc, arena_bounded, gc: rights-tree denial rows per D-AUTHORITY-MEM1 and D-AUTHORITY-MEM2. unsafe: an allow/deny entry in the authority manifest per D-AUTHORITY-MANIFEST1. explicit_units: a typed setting per D-CONF-KEY1. Scope inheritance (organization to block) rides the manifest and scope law that already governs those planes. The denial row rides the signature effect arrow, in the return position. It never stands above a function; only markers stand there.",
+          "code": "fn render(frame: Frame) =[!Mem.Alloc]=> Pixels { ... }\n\n#Policy(retry(3), trace(\"users.load\"))\n+fn load_user(id: UserId) => User ? DbErr { ... }"
         },
         {
           "key": "D",
@@ -127273,8 +127278,10 @@
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-08-06T21:39:46.414Z"
+      "status": "ratified",
+      "created": "2026-08-06T21:39:46.414Z",
+      "outcome": "C",
+      "ratifiedAt": "2026-08-06"
     },
     {
       "id": "D-CONC-SPAWN1",
@@ -127306,6 +127313,13 @@
           "name": "Handles only: task everywhere, combinators as calls",
           "detail": "One spawn form: task f() returns a handle. all, race, and any become ordinary functions over handles, not blocks. The grammar gains one form instead of four. The cost: race and any must not start work early, so their arguments go back inside lambdas, and every fan-out is handle bookkeeping.",
           "code": "a :: task sum_range(1, 25)\nb :: task sum_range(26, 50)\n(x, y) :: all(a, b)\n\nwinner :: race(() => slow(), () => fast())"
+        },
+        {
+          "key": "D",
+          "name": "One keyword, nested: task, task.all, task.race, task.any, task.group",
+          "detail": "Option A surface, spelled under one keyword. task f() starts one child. task.all, task.race, and task.any fan out with no handles. task.group g(limit: n) covers dynamic counts. Only task becomes a reserved word; all, race, any, and group stay free for user names. This spelling came from owner feedback on this ballot.",
+          "technical": "Same laws as option A: scope-end joins per D-CONC-JOIN1, the ratified fail-fast, cancel-losers, and first-Ok meanings, and group joins at the closing brace. The parser reads task and an optional selector, so the grammar gains one head form, not four. Autocomplete after task. lists the whole concurrency surface.",
+          "code": "(a, b) :: task.all { sum_range(1, 25), sum_range(26, 50) }\nprint(a + b)\n\nwinner :: task.race { slow(), fast() }\n\nh :: task work()\nh.join()\n\ntask.group g(limit: 4) {\n    loop url, urls { task fetch(url) }\n}"
         }
       ],
       "comparisons": [
@@ -127320,20 +127334,24 @@
           "code": "async let a = sumRange(1, 25)\nprint(await a)"
         }
       ],
-      "rec": "A",
+      "rec": "D",
       "recommendation": {
-        "why": "Starting work reads like calling a function, which is the beginner promise. The two newest ratified decisions already write this surface in their own text, so option A makes the board agree with itself.",
+        "why": "It keeps everything option A wins: spawning reads like calling a function, and the two newest ratified decisions keep their surface. It reserves one word instead of four, so all, race, any, and group stay available as user names.",
         "whyNot": [
           {
+            "key": "A",
+            "reason": "It reserves all, race, any, and group as block keywords. Those are common user identifiers; any and all are everyday function names."
+          },
+          {
             "key": "B",
-            "reason": "It keeps the import and lambda ceremony, and it forces corrections to two newer ratified decisions that already show the four spellings."
+            "reason": "It keeps the import and lambda ceremony, and it forces corrections to two newer ratified decisions that already show the bare spellings."
           },
           {
             "key": "C",
             "reason": "Fan-out becomes handle bookkeeping, and race and any need lambdas again so they do not start work early. The ceremony returns through the back door."
           }
         ],
-        "tradeoff": "The grammar gains four block forms, and the formatter, tree-sitter grammar, and teaching material must cover all four."
+        "tradeoff": "Every fan-out site pays a short task. prefix, and D-CONC-JOIN1 and D-CONC-SCHED1 need their code samples respelled to the nested forms."
       },
       "hybrid": null,
       "ballotMode": "full",
@@ -127347,8 +127365,10 @@
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-08-06T21:40:08.140Z"
+      "status": "ratified",
+      "created": "2026-08-06T21:40:08.140Z",
+      "outcome": "D",
+      "ratifiedAt": "2026-08-06"
     },
     {
       "id": "D-AUTHORITY-MEM2",
@@ -127366,14 +127386,14 @@
           "key": "A",
           "name": "Parameterized denial row",
           "detail": "The denial row grammar gains arguments. A plain denial stays =[!Mem.Alloc]=>; a bounded one is =[!Mem.Alloc(above: 65536)]=>, and manifests write deny: [Mem.Alloc(above: 65536)]. One mechanism carries both the floor and the number, in the one place a reader already checks.",
-          "technical": "The rights tree row for Mem.Alloc accepts an optional above: Bytes argument. The authority gate records the number in the audit ledger with the denial. Sema enforces the unbounded form statically where it can and the bounded form at the allocator, on every tier.",
-          "code": "=[!Mem.Alloc(above: 65536)]=>\nfn decode_frame(input: Bytes) => Frame { ... }\n\n// pkg.jet\ndeny: [Mem.Alloc(above: 65536)]"
+          "technical": "The rights tree row for Mem.Alloc accepts an optional above: Bytes argument. The authority gate records the number in the audit ledger with the denial. Sema enforces the unbounded form statically where it can and the bounded form at the allocator, on every tier. The row rides the signature effect arrow, in the return position, never a line above the function.",
+          "code": "fn decode_frame(input: Bytes) =[!Mem.Alloc(above: 65536)]=> Frame { ... }\n\n// pkg.jet\ndeny: [Mem.Alloc(above: 65536)]"
         },
         {
           "key": "B",
           "name": "A typed setting on the fact plane",
           "detail": "The bound becomes a typed build fact, arena_ceiling :: Bytes, on the settings plane the build/config law just created. The denial row stays parameterless. The reader must now check two places to learn one memory law: the row for the floor, the setting for the number.",
-          "code": "// pkg.jet settings\narena_ceiling :: 65536 bytes\n\n=[!Mem.Alloc]=>\nfn decode_frame(input: Bytes) => Frame { ... }"
+          "code": "// pkg.jet settings\narena_ceiling :: 65536 bytes\n\nfn decode_frame(input: Bytes) =[!Mem.Alloc]=> Frame { ... }"
         },
         {
           "key": "C",
@@ -127431,8 +127451,10 @@
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-08-06T21:40:08.578Z"
+      "status": "ratified",
+      "created": "2026-08-06T21:40:08.578Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-08-06"
     },
     {
       "id": "D-CONC-FAIL1",
@@ -128614,9 +128636,11 @@
       "by": "owner",
       "kind": "question",
       "text": "What about all task keywords but nested so you have task, task.group, task.race, task.all, task.any\n\nAny issue with this?",
-      "status": "open",
-      "answer": "",
-      "created": "2026-08-06T21:51:17.538Z"
+      "status": "answered",
+      "answer": "No blocking issue — nesting is strictly better. Bare all, race, any, and group would reserve four common identifier names; nested, only task is reserved, and typing task. autocompletes the whole concurrency surface. The parser gains one head form instead of four. The only cost is a short task. prefix at each fan-out site. The ballot now carries this as option D, and the recommendation moved to D. All ratified laws (scope-end joins, fail-fast, cancel-losers, first-Ok) carry over unchanged.",
+      "created": "2026-08-06T21:51:17.538Z",
+      "answeredAt": "2026-08-06",
+      "answeredBy": "fable"
     },
     {
       "id": "q3bebnsm",
@@ -128625,9 +128649,11 @@
       "by": "owner",
       "kind": "question",
       "text": "I’m inclined to go with your recommendation but WHAT THE FUCK is the =[!Mem.Alloc]=> doing in a marker position. That ONLY is the effect syntax for functions and lambdas, potentially markers… it can never go elsewhere.",
-      "status": "open",
-      "answer": "",
-      "created": "2026-08-06T21:54:05.840Z"
+      "status": "answered",
+      "answer": "You are right, and that was a sample error, not a proposal. The denial row is part of the signature effect arrow, exactly as MEM1 ratified: fn render(frame: Frame) =[!Mem.Alloc]=> Pixels { ... }. It never stands above a function; only markers stand there. Option C's code sample is fixed, and its technical text now states the signature-only placement.",
+      "created": "2026-08-06T21:54:05.840Z",
+      "answeredAt": "2026-08-06",
+      "answeredBy": "fable"
     },
     {
       "id": "q4i062hj",
@@ -128636,9 +128662,11 @@
       "by": "owner",
       "kind": "question",
       "text": "I’m inclined to go with your recommendation but WHAT THE FUCK is the =[!Mem.Alloc]=> doing in a marker position. That ONLY is the effect syntax for functions and lambdas, potentially markers… it can never go elsewhere.",
-      "status": "open",
-      "answer": "",
-      "created": "2026-08-06T21:54:06.240Z"
+      "status": "answered",
+      "answer": "Same answer as your other question on this ballot: the stacked arrow was a sample error. The denial row lives in the signature effect arrow: fn render(frame: Frame) =[!Mem.Alloc]=> Pixels { ... }. Option C's sample is fixed.",
+      "created": "2026-08-06T21:54:06.240Z",
+      "answeredAt": "2026-08-06",
+      "answeredBy": "fable"
     },
     {
       "id": "q57y8uci",
@@ -128647,9 +128675,11 @@
       "by": "owner",
       "kind": "question",
       "text": "As stated in another ballot ABSOLUTELY FUCKING NOT we will not put the effect arrow above a function. That is part of the return signature. IT NEVER GOES ABOVE A FUNCTION DEFINITION.",
-      "status": "open",
-      "answer": "",
-      "created": "2026-08-06T21:55:10.935Z"
+      "status": "answered",
+      "answer": "Agreed. The effect arrow is part of the return signature and never stands above a function; the stacked placement was a sample error. Options A and B now show it in the signature: fn decode_frame(input: Bytes) =[!Mem.Alloc(above: 65536)]=> Frame { ... }. The manifest form deny: [Mem.Alloc(above: 65536)] is unchanged.",
+      "created": "2026-08-06T21:55:10.935Z",
+      "answeredAt": "2026-08-06",
+      "answeredBy": "fable"
     }
   ],
   "ideas": [
@@ -129042,6 +129072,83 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-06T22:19:26.498Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-AUTHORITY-MEM2",
+      "note": "A"
+    },
+    {
+      "at": "2026-08-06T22:19:20.355Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-CONC-SPAWN1",
+      "note": "D"
+    },
+    {
+      "at": "2026-08-06T22:19:07.526Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-CALLPOLICY2",
+      "note": "C"
+    },
+    {
+      "at": "2026-08-06T22:16:00.016Z",
+      "by": "bd2-io",
+      "action": "card.update",
+      "ref": "c0vzbf5f",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-06T22:03:37.891Z",
+      "by": "fable",
+      "action": "question.answer",
+      "ref": "q2zzopmh",
+      "note": ""
+    },
+    {
+      "at": "2026-08-06T22:03:37.549Z",
+      "by": "fable",
+      "action": "question.answer",
+      "ref": "q57y8uci",
+      "note": ""
+    },
+    {
+      "at": "2026-08-06T22:03:37.210Z",
+      "by": "fable",
+      "action": "question.answer",
+      "ref": "q4i062hj",
+      "note": ""
+    },
+    {
+      "at": "2026-08-06T22:03:36.861Z",
+      "by": "fable",
+      "action": "question.answer",
+      "ref": "q3bebnsm",
+      "note": ""
+    },
+    {
+      "at": "2026-08-06T22:03:26.977Z",
+      "by": "fable",
+      "action": "decision.update",
+      "ref": "D-CONC-SPAWN1",
+      "note": ""
+    },
+    {
+      "at": "2026-08-06T22:03:26.627Z",
+      "by": "fable",
+      "action": "decision.update",
+      "ref": "D-AUTHORITY-MEM2",
+      "note": ""
+    },
+    {
+      "at": "2026-08-06T22:03:26.267Z",
+      "by": "fable",
+      "action": "decision.update",
+      "ref": "D-CALLPOLICY2",
+      "note": ""
+    },
     {
       "at": "2026-08-06T21:55:39.098Z",
       "by": "owner",
@@ -132464,83 +132571,6 @@
       "action": "card.criteria-add",
       "ref": "c0p834bt",
       "note": "#6 Greenfield: the replaced form is deleted in the same change,"
-    },
-    {
-      "at": "2026-08-06T21:35:03.432Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0p834bt",
-      "note": "#5 Time takes part in unit algebra: 12meter / 2s type-checks as"
-    },
-    {
-      "at": "2026-08-06T21:35:03.086Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0p834bt",
-      "note": "#4 Point plus delta gives a point: now() + 5min is an Instant"
-    },
-    {
-      "at": "2026-08-06T21:35:02.729Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0p834bt",
-      "note": "#3 One spelling works everywhere: wait :: 500ms then task.timeo"
-    },
-    {
-      "at": "2026-08-06T21:35:02.379Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0p834bt",
-      "note": "#2 Both hidden duration suffix tables are deleted, with no priv"
-    },
-    {
-      "at": "2026-08-06T21:35:02.032Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0p834bt",
-      "note": "#1 Duration is the delta quantity of the Time family with a fix"
-    },
-    {
-      "at": "2026-08-06T21:35:01.689Z",
-      "by": "audit-rethinks-b",
-      "action": "card.add",
-      "ref": "c0p834bt",
-      "note": "Time joins the unit plane: one Time family, one literal system"
-    },
-    {
-      "at": "2026-08-06T21:35:01.353Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c04yd90c",
-      "note": "#9 Tier parity (I9) is proved inside this card: parser, sema, T"
-    },
-    {
-      "at": "2026-08-06T21:35:01.007Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c04yd90c",
-      "note": "#8 Exact arithmetic uses machine-word fast paths with spill, wi"
-    },
-    {
-      "at": "2026-08-06T21:35:00.670Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c04yd90c",
-      "note": "#7 docs/spec/syntax-decisions.md records the amendments to D-IN"
-    },
-    {
-      "at": "2026-08-06T21:35:00.330Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c04yd90c",
-      "note": "#6 Mixing an exact operand with an approximate one answers appr"
-    },
-    {
-      "at": "2026-08-06T21:34:59.986Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c04yd90c",
-      "note": "#5 fast: Float = 19.99 opts into machine float with today's spe"
     }
   ],
   "nextNum": 368,

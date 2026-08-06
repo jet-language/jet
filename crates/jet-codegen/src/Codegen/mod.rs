@@ -827,6 +827,9 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
     }
     if needs_fs_runtime {
         out.push_str(include_str!("../Prelude/CoreLib/Top/TestingShared.rs"));
+        // #1480: split out of FSIoEnvOsTesting.rs so the JIT host can
+        // `include!` this exact source (I9 — single Prelude source of truth).
+        out.push_str(include_str!("../Prelude/CoreLib/Top/IoLineStream.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/FSIoEnvOsTesting.rs"));
         // #1465: identity / release / POSIX control — after FSIoEnvOsTesting so
         // jet_std_os_pid / env helpers and jet_std_process_exit stay in scope.

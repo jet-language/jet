@@ -9716,12 +9716,14 @@ impl LowerCtx<'_, '_> {
                     return Ok(self.b.ins().iconst(types::I8, 0));
                 }
                 if module == "core.io" && method == "readline" && args.is_empty() {
-                    let has_prompt = self.b.ins().iconst(types::I8, 0);
-                    let prompt = self.b.ins().iconst(types::I64, 0);
+                    // #1480: dedicated host — marshals only, calls the same
+                    // `jet_std_io_readline` Prelude symbol AOT emits (I9).
+                    // Do not route through `io_input`: that host backs the
+                    // separate `core.io.input` surface.
                     let host_ref = self
                         .module
-                        .declare_func_in_func(self.host.core.io_input, self.b.func);
-                    let call = self.b.ins().call(host_ref, &[has_prompt, prompt]);
+                        .declare_func_in_func(self.host.io.readline, self.b.func);
+                    let call = self.b.ins().call(host_ref, &[]);
                     return Ok(self.b.inst_results(call)[0]);
                 }
                 if module == "core.science.measurement"
