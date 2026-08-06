@@ -6,7 +6,10 @@
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
-use tir_support::{assert_tiers_agree, build_and_run, build_and_run_full, have_rustc, jit_run, jit_run_with_env};
+use tir_support::{
+    assert_tiers_agree, build_and_run, build_and_run_full, have_rustc, jit_run_with_env,
+    jit_run_with_env_args,
+};
 
 /// A function the checker cannot see through, so its result is a runtime value
 /// and the operator below is really evaluated by the built program.
@@ -328,16 +331,11 @@ fn run() {
 }
 
 /// D-FLOORDIV1=A: dividing by zero must stop the program on `jet run` too, and
-/// say the same sentence the AOT binary says.
+/// say the same sentence the AOT binary says — as a runtime trap (exit 70 +
+/// `panic:`), never E0953 "comptime stopped the build" (#1483).
 ///
-/// Read what this does and does not prove. It proves one wording across tiers.
-/// It does **not** reach the Cranelift host's zero-divisor branch, because the
-/// comptime evaluator folds the operands first and stops the build with E0953.
-/// Nothing written in Jet source reaches that branch today: the evaluator folds
-/// through `seed`, and it also folds `io.args()`, `env.get()` and
-/// `files.read()` on a path that does not exist, taking the `??` fallback as a
-/// constant. That is card #1483, and the host's own branches stay covered by
-/// `every_tier_reports_one_trap_wording` below until it is fixed.
+/// The divisor comes from the process environment so the Cranelift / deopt
+/// host really executes the trap instead of folding a literal away first.
 #[test]
 fn dividing_by_zero_traps_on_the_jit_tier() {
     for (name, op) in [
@@ -346,19 +344,69 @@ fn dividing_by_zero_traps_on_the_jit_tier() {
         ("jit_remainder_zero", "%%"),
     ] {
         let src = format!(
-            "{SEED}
+            "use core.env as env
+{SEED}
 fn run() {{
-    print(seed(7) {op} seed(0))
+    zero :: Int.parse(env.get(\"JET_TRAP_DIVISOR\") ?? \"0\") ?? 0
+    print(seed(7) {op} zero)
 }}
 "
         );
         let (code, out, err) = jit_run_with_env(name, &src, &[("JET_TRAP_DIVISOR", "0")]);
-        assert_ne!(code, 0, "`{op}` by zero must stop `jet run`: {out}{err}");
+        assert_eq!(
+            code, 70,
+            "`{op}` by zero must exit 70 under `jet run`: out={out} err={err}"
+        );
         assert!(
-            err.contains("divided by zero"),
-            "`{op}` by zero on `jet run`: expected the divided-by-zero wording, got: {err}"
+            err.contains("panic:") && err.contains("divided by zero"),
+            "`{op}` by zero on `jet run`: expected runtime panic wording, got: {err}"
+        );
+        assert!(
+            !err.contains("E0953") && !err.contains("comptime"),
+            "`{op}` by zero must not speak in comptime voice, got: {err}"
         );
     }
+}
+
+/// #1483: `env.get` under `jet run` reads the live process environment — not a
+/// value frozen at build time (I9 with AOT).
+#[test]
+fn env_divisor_uses_live_process_environment() {
+    let src = format!(
+        "use core.env as env
+{SEED}
+fn run() {{
+    d :: Int.parse(env.get(\"JET_TRAP_DIVISOR\") ?? \"0\") ?? 0
+    print(seed(10) /% d)
+}}
+"
+    );
+    let (code, out, err) = jit_run_with_env("jit_env_live_divisor", &src, &[("JET_TRAP_DIVISOR", "2")]);
+    assert_eq!(code, 0, "live env divisor must run: out={out} err={err}");
+    assert_eq!(out, "5\n", "10 /% 2 from live env, got: {out}");
+}
+
+/// #1483: `io.args` under `jet run` reads the live invocation argv — a non-zero
+/// divisor from args must compute, not trap or fold at build time.
+#[test]
+fn args_divisor_uses_live_invocation_argv() {
+    let src = format!(
+        "use core.io as io
+{SEED}
+fn run() {{
+    raw :: io.args().get(1) ?? \"0\"
+    print(seed(10) /% (Int.parse(raw) ?? 0))
+}}
+"
+    );
+    let (code, out, err) =
+        jit_run_with_env_args("jit_args_live_divisor", &src, &[], &["5"]);
+    assert_eq!(code, 0, "live args divisor must run: out={out} err={err}");
+    assert_eq!(out, "2\n", "10 /% 5 from argv, got: {out}");
+    assert!(
+        !err.contains("E0953") && !err.contains("comptime"),
+        "args divisor must not use comptime voice: {err}"
+    );
 }
 
 /// D-EXPSEM1=A / D-FLOORDIV1=A / D-MODSEM1=A: the Prelude files are the one

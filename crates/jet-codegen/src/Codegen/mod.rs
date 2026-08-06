@@ -830,7 +830,11 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
         out.push_str(include_str!("../Prelude/CoreLib/Top/FSIoEnvOsTesting.rs"));
         // #1465: identity / release / POSIX control — after FSIoEnvOsTesting so
         // jet_std_os_pid / env helpers and jet_std_process_exit stay in scope.
+        // Vetted region: OsExtra carries POSIX `unsafe` at crate root (not only
+        // inside `mod jet_os_sys`); golden I1 strips this delimiter.
+        out.push_str("// JET_VETTED_UNSAFE_BEGIN: jet_os_extra\n");
         out.push_str(include_str!("../Prelude/CoreLib/Top/OsExtra.rs"));
+        out.push_str("// JET_VETTED_UNSAFE_END: jet_os_extra\n");
     }
     if needs_crypto {
         // CryptoEntropy already in kernel closure (TLS identity + JetStd).

@@ -148,7 +148,28 @@ pub fn run_checked(bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
                 .exit_code
                 .unwrap_or_else(|| d.what.parse().unwrap_or(0)),
         },
+        // Whole-program interpret traps are live-program panics (I9 / #1483),
+        // not comptime build failures — match AOT exit 70 + `panic:` wording.
+        Err(d) if d.code == "E0953" => runtime_trap_from_e0953(sink, d),
         Err(d) => RunOutcome::Problems(vec![dev_boundary_from_comptime(d)]),
+    }
+}
+
+fn runtime_trap_from_e0953(mut sink: crate::Comptime::DevSink, d: Diagnostic) -> RunOutcome {
+    let msg = d
+        .why
+        .strip_prefix("while computing this value at compile time, the program panicked: ")
+        .unwrap_or(d.why.as_str());
+    if !sink.stderr.is_empty() && !sink.stderr.ends_with('\n') {
+        sink.stderr.push('\n');
+    }
+    sink.stderr.push_str("panic: ");
+    sink.stderr.push_str(msg);
+    sink.stderr.push('\n');
+    RunOutcome::Ran {
+        stdout: sink.stdout,
+        stderr: sink.stderr,
+        exit_code: 70,
     }
 }
 
@@ -265,6 +286,7 @@ pub fn run_named_task(bundle: &ProgramBundle, name: &str, try_anyway: bool) -> R
             stderr: sink.stderr,
             exit_code: 0,
         },
+        Err(d) if d.code == "E0953" => runtime_trap_from_e0953(sink, d),
         Err(d) => RunOutcome::Problems(vec![dev_boundary_from_comptime(d)]),
     }
 }
@@ -388,13 +410,15 @@ fn checked_bundle(file: &str) -> Result<ProgramBundle, Vec<Diagnostic>> {
             Ok(mut bundle) => {
                 crate::RunCache::note_check();
                 let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Run);
-                let errors: Vec<Diagnostic> = diags
-                    .into_iter()
-                    .filter(|d| matches!(d.severity, crate::Diagnostics::Severity::Error))
-                    .collect();
-                if !errors.is_empty() {
-                    return Err(errors);
-                }
+                // Same gate as `jet build` / entry-swap: recoverable parse
+                // teaching must not disappear on the default `jet run` path.
+                // Extension hooks are empty here (no plugin session on plain run);
+                // `compile_bundle_path_opts_full` still passes them on the build path.
+                let _lints = crate::Driver::gate_diagnostics(
+                    std::mem::take(&mut bundle.parse_teaching),
+                    diags,
+                    Vec::new(),
+                )?;
                 Ok(bundle)
             }
             Err(diags) => Err(diags),

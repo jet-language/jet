@@ -5,7 +5,7 @@
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
-use tir_support::{assert_tiers_agree, build_and_run, have_rustc};
+use tir_support::{assert_tiers_agree, build_and_run, build_and_run_full, have_rustc, jit_run};
 
 const SEED: &str = "fn score(n: Int) => Int {\n    return n\n}\n";
 
@@ -130,4 +130,92 @@ fn run() {{
         &src,
         "3.5\n3.0\n-3.5\n0.25\n8.5\n8\n",
     );
+}
+
+/// #1484: fixed-width `/` by zero must use the Prelude wording and exit 70 —
+/// never a raw Rust "attempt to divide by zero" at exit 101 (I2). Includes a
+/// call-result operand so the TIR overflow flag cannot hide behind Ident-only
+/// AST replay, plus bare Ident and parameter shapes.
+#[test]
+fn fixed_width_divide_by_zero_traps_with_prelude_wording() {
+    if !have_rustc() {
+        return;
+    }
+    for (name, src) in [
+        (
+            "u8_div_zero",
+            r#"
+fn run() {
+    a :: U8.{10}
+    zero :: U8.{0}
+    print(a / zero)
+}
+"#,
+        ),
+        (
+            "i8_div_zero",
+            r#"
+fn run() {
+    a :: I8.{10}
+    zero :: I8.{0}
+    print(a / zero)
+}
+"#,
+        ),
+        (
+            "u8_param_div_zero",
+            r#"
+fn div(a: U8, zero: U8) {
+    print(a / zero)
+}
+fn run() {
+    div(U8.{10}, U8.{0})
+}
+"#,
+        ),
+        (
+            "u8_call_div_zero",
+            r#"
+fn score(n: U8) => U8 {
+    return n
+}
+fn run() {
+    print(score(U8.{10}) / score(U8.{0}))
+}
+"#,
+        ),
+    ] {
+        let (code, out, err) = build_and_run_full("jet_intdiv", name, src);
+        assert_eq!(
+            code, 70,
+            "{name}: fixed-width / by zero must exit 70, got {code}; out={out} err={err}"
+        );
+        assert!(
+            err.contains("this division can't be done")
+                || err.contains("dividing by zero")
+                || err.contains("divided by zero"),
+            "{name}: expected Prelude division wording, got: {err}"
+        );
+        assert!(
+            !err.contains("attempt to divide by zero"),
+            "{name}: raw Rust panic leaked (I2): {err}"
+        );
+
+        let (jit_code, jit_out, jit_err) = jit_run(&format!("{name}_jit"), src);
+        assert_eq!(
+            jit_code, 70,
+            "{name}: jet run must exit 70 (I9), got {jit_code}: {jit_out}{jit_err}"
+        );
+        assert!(
+            jit_err.contains("panic:")
+                && (jit_err.contains("this division can't be done")
+                    || jit_err.contains("dividing by zero")
+                    || jit_err.contains("divided by zero")),
+            "{name}: jet run expected Prelude panic wording, got: {jit_err}"
+        );
+        assert!(
+            !jit_err.contains("E0953") && !jit_err.contains("attempt to divide by zero"),
+            "{name}: jet run must not use E0953 or raw Rust panic: {jit_err}"
+        );
+    }
 }

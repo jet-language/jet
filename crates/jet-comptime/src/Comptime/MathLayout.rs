@@ -176,7 +176,7 @@ pub fn integer_binop(
         BinOp::Add => checked(a.checked_add(b), "add"),
         BinOp::Sub => checked(a.checked_sub(b), "subtract"),
         BinOp::Mul => checked(a.checked_mul(b), "multiply"),
-        BinOp::Div if b == 0 => Err(unsupported("division by zero", span)),
+        BinOp::Div if b == 0 => Err(comptime_panic(INTEGER_DIVIDE_ZERO, span)),
         BinOp::Div => checked(a.checked_div(b), "divide"),
         // D-FLOORDIV1=A: `/%` rounds down, in the same words `/` uses when the
         // divisor is zero.
