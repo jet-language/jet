@@ -42,7 +42,7 @@ Generated on: 2026-08-06
 | Module members | 1011 |
 | Collection method rows | 354 |
 | Jet-side rows | 1366 |
-| Total rows | 9777 |
+| Total rows | 9418 |
 
 ## Verdicts
 
@@ -50,8 +50,8 @@ Generated on: 2026-08-06
 | --- | ---: |
 | Jet wins | 339 |
 | Equal | 437 |
-| Jet loses (two or more languages agree) | 561 |
-| Single witness (recorded, not scored) | 7850 |
+| Jet loses (two or more languages agree) | 585 |
+| Single witness (recorded, not scored) | 7467 |
 | Not compared | 590 |
 | Deliberately declined | 0 |
 
@@ -60,16 +60,16 @@ Generated on: 2026-08-06
 | Language | Surface read from | Recorded operations | Jet rows matched | Loss rows |
 | --- | --- | ---: | ---: | ---: |
 | Rust | standard-library source (rust-src component) | 980 | 230 | 95 |
-| Go | official frozen API files (GOROOT/api/go1*.txt) | 1681 | 208 | 212 |
-| Swift | official documentation JSON (developer.apple.com) | 505 | 98 | 80 |
-| Kotlin | official API reference (kotlinlang.org) | 1141 | 157 | 117 |
-| C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1102 | 189 | 121 |
-| TypeScript | runtime introspection | 347 | 127 | 37 |
-| Ruby | runtime introspection | 1209 | 197 | 166 |
-| Elixir | runtime introspection | 1192 | 229 | 153 |
-| Julia | official documentation search index (docs.julialang.org) | 1132 | 136 | 189 |
+| Go | official frozen API files (GOROOT/api/go1*.txt) | 1681 | 208 | 222 |
+| Swift | official documentation JSON (developer.apple.com) | 505 | 98 | 82 |
+| Kotlin | official API reference (kotlinlang.org) | 1141 | 157 | 124 |
+| C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1102 | 189 | 126 |
+| TypeScript | runtime introspection | 347 | 127 | 38 |
+| Ruby | runtime introspection | 1209 | 197 | 182 |
+| Elixir | runtime introspection | 1192 | 229 | 157 |
+| Julia | official documentation search index (docs.julialang.org) | 1132 | 136 | 206 |
 | R | official R manual package index (stat.ethz.ch R-devel) | 1768 | 36 | 0 |
-| Python | runtime introspection | 2012 | 210 | 235 |
+| Python | runtime introspection | 2012 | 210 | 260 |
 
 ## Loss clusters
 
@@ -83,32 +83,32 @@ it is done while losses remain.
 | --- | ---: | --- | --- | --- |
 | core.math | 72 | none | n/a | needs_card |
 | String | 61 | #1409 | done | closed |
-| core.os | 46 | none | n/a | needs_card |
+| core.files | 52 | #288 | building | live |
+| core.os | 45 | none | n/a | needs_card |
 | core.time | 43 | none | n/a | needs_card |
-| List | 41 | #1410 | done | closed |
+| ByteBuffer | 42 | none | n/a | needs_card |
 | core.tasks | 32 | none | n/a | needs_card |
-| ByteBuffer | 25 | none | n/a | needs_card |
-| core.io | 25 | #1402 | done | closed |
+| List | 27 | #1410 | done | closed |
 | Map | 25 | #1410 | done | closed |
-| core.files | 22 | #288 | building | live |
 | Set | 20 | #1404 | done | closed |
+| Iter | 19 | #1400 | done | closed |
+| core.net | 15 | none | n/a | needs_card |
 | core.archive | 14 | none | n/a | needs_card |
-| core.path | 13 | #288 | building | live |
-| core.net | 12 | none | n/a | needs_card |
 | core.regex | 12 | none | n/a | needs_card |
 | core.url | 12 | none | n/a | needs_card |
 | core.crypto | 11 | none | n/a | needs_card |
 | core.log | 11 | none | n/a | needs_card |
 | Deque | 10 | none | n/a | needs_card |
+| core.io | 9 | #1402 | done | closed |
 | core.process | 8 | none | n/a | needs_card |
 | core.db | 7 | none | n/a | needs_card |
 | core.testing | 7 | none | n/a | needs_card |
-| Iter | 7 | #1400 | done | closed |
+| core.path | 6 | #288 | building | live |
 | core.http | 5 | none | n/a | needs_card |
-| core.tls | 5 | none | n/a | needs_card |
+| core.tls | 4 | none | n/a | needs_card |
 | core.uuid | 4 | none | n/a | needs_card |
+| core.binary | 3 | none | n/a | needs_card |
 | core.encoding.csv | 3 | none | n/a | needs_card |
-| core.binary | 2 | none | n/a | needs_card |
 | core.random | 2 | none | n/a | needs_card |
 | PriorityQueue | 2 | none | n/a | needs_card |
 | core.encoding.json | 1 | none | n/a | needs_card |

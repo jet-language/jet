@@ -947,14 +947,29 @@ function competitorRows(surfaces, jetRows) {
         // three spellings of the operation Jet would ship once.
         const key = canonicalKey(operation);
         if (keys.has(key)) continue;
-        const id = "gap." + container + "." + key;
+        // Merge on the matching domain, not the container. Python records
+        // unlink under core.os and Ruby under core.path; they are one missing
+        // capability with two witnesses, not two single-witness rows.
+        const id = "gap." + domainFor(container) + "." + key;
         if (!gaps.has(id)) {
-          gaps.set(id, { id: id, container: container, key: key, spellings: {}, evidence: new Set() });
+          gaps.set(id, {
+            id: id,
+            container: container,
+            key: key,
+            containers: new Set(),
+            spellings: {},
+            evidence: new Set(),
+          });
         }
         const gap = gaps.get(id);
+        gap.containers.add(container);
         // One row per distinct operation per language: Ruby ships chop and
         // chop!, which are one workflow spelled twice.
-        if (!gap.spellings[language]) gap.spellings[language] = operation;
+        // Record where the witness was seen: a merged gap spans containers, so
+        // the spelling may come from a sibling of the one the row is filed in.
+        if (!gap.spellings[language]) {
+          gap.spellings[language] = { operation: operation, container: container };
+        }
         gap.evidence.add("surface:" + entry.path);
       }
     }
@@ -962,20 +977,26 @@ function competitorRows(surfaces, jetRows) {
 
   return Array.from(gaps.values()).map(function (gap) {
     const languages = Object.keys(gap.spellings).sort();
+    const containers = Array.from(gap.containers).sort();
     const competitors = {};
     for (const language of languages) {
-      competitors[language] = { status: "has", operation: gap.spellings[language] };
+      competitors[language] = {
+        status: "has",
+        operation: gap.spellings[language].operation,
+        foundIn: gap.spellings[language].container,
+      };
     }
     return {
       id: gap.id,
       source: {
         kind: "competitor_operation",
-        container: gap.container,
+        container: containers[0],
+        containers: containers,
         member: gap.key,
         languages: languages,
         sourceLine: null,
       },
-      container: gap.container,
+      container: containers[0],
       jetSpelling: null,
       workflow: "operation " + languages.length + " of " + Object.keys(surfaces).length +
         " compared languages ship in " + gap.container + ", with no matching Jet spelling",
@@ -1122,6 +1143,27 @@ function packageAttributedContainers(surfaces) {
   });
 }
 
+// One capability can still be missing from several unrelated containers: every
+// competitor ships Map.new, Set.new and Deque.new, and Jet constructs
+// differently. That is one design question, not one backlog item per container,
+// so it is reported as a repeat instead of hiding inside the row count.
+function repeatedCapabilities(rows) {
+  const byKey = new Map();
+  for (const row of rows) {
+    if (row.verdict !== "jet_loses") continue;
+    if (!byKey.has(row.source.member)) byKey.set(row.source.member, []);
+    byKey.get(row.source.member).push(row.container);
+  }
+  return Array.from(byKey.entries())
+    .filter(function (pair) { return pair[1].length >= 3; })
+    .map(function (pair) {
+      return { capability: pair[0], containers: pair[1].sort(), rowCount: pair[1].length };
+    })
+    .sort(function (left, right) {
+      return right.rowCount - left.rowCount || left.capability.localeCompare(right.capability);
+    });
+}
+
 function uncomparedDomains(modules, containers) {
   const recorded = new Set(containers);
   return modules.map(function (entry) { return entry.module; })
@@ -1197,6 +1239,7 @@ function buildLedger() {
     },
     inventory: { modules: modules, fixedSignaturePairs: fixedPairs, collections: collections },
     lossClusters: clusters,
+    repeatedCapabilities: repeatedCapabilities(rows),
     packageAttributedContainers: packageAttributedContainers(surfaces),
     uncomparedDomains: uncompared,
     rows: rows,
@@ -1220,6 +1263,10 @@ function buildLedger() {
       lossClusterCount: clusters.length,
       clustersNeedingCard: clusters.filter(function (c) { return c.ownerState !== "live"; }).length,
       uncomparedDomainCount: uncompared.length,
+      repeatedCapabilityCount: repeatedCapabilities(rows).length,
+      repeatedCapabilityRowCount: repeatedCapabilities(rows).reduce(function (n, item) {
+        return n + item.rowCount;
+      }, 0),
       packageAttributedContainerCount: packageAttributedContainers(surfaces).length,
     },
   };
