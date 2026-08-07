@@ -751,6 +751,17 @@ pub fn apply_method(
                 .map(|(_, v)| v.clone())
                 .unwrap_or(CtValue::Unit))
         }
+        // D-FAIL-CARRIER1=A: `.or_err("why")` lifts a clean absence into a
+        // failure. One carrier, so the payload rides through untouched and only
+        // the report changes — the same move the prelude's
+        // `JetOptionalView::or_err` makes.
+        (CtValue::Present(payload), "or_err") => Ok(CtValue::Present(payload.clone())),
+        (CtValue::Failed(CtReport::Clean(_)), "or_err") => {
+            match args.into_iter().next() {
+                Some(why @ CtValue::Str(_)) => Ok(CtValue::failed(Box::new(why))),
+                _ => Err(unsupported("`.or_err` requires a string reason", span)),
+            }
+        }
         // D-HOLE1: `.zip` — pair two `Option`s, `None` if either is absent.
         // `(v, "zip")` rather than guarding to `CtValue::Present`/`Failed` because
         // both arms of the pairing need the same fallback.

@@ -1167,8 +1167,13 @@ fn view_method_return(elem: &Type, method: &str, nargs: usize) -> Option<Option<
 /// `finish_builtin_method`, the same "sema refines" convention `list_method_return`'s
 /// `map` uses).
 fn option_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
-    let _ = inner;
     match (method, nargs) {
+        // D-FAIL-CARRIER1=A: `.or_err("why")` lifts a clean absence into a
+        // failure. The payload rides through; only the report changes.
+        ("or_err", 1) => Some(Some(Type::Result {
+            ok: Box::new(inner.clone()),
+            err: Box::new(Type::Named(crate::Syntax::TYPE_ERROR.to_string())),
+        })),
         ("map", 1) => Some(Some(Type::Option(Box::new(Type::Int)))),
         _ => None,
     }
@@ -2342,6 +2347,8 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
         // D-HOLE1: `opt.map(f: T -> R)`. `.zip` isn't listed — it's checked directly
         // (see `Collections::builtin_method_return`'s `Type::Option` arm comment).
         Type::Option(inner) => match method {
+            // D-FAIL-CARRIER1=A: the reason a clean absence becomes a failure.
+            "or_err" => Some(vec![Type::String]),
             "map" => Some(vec![Type::Fn {
                 params: vec![(**inner).clone()],
                 ret: None, // sema refines R from the closure's actual return

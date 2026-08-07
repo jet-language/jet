@@ -587,6 +587,31 @@ pub(crate) fn lower_method_call(
             },
         };
     }
+    // D-FAIL-CARRIER1=A: `.or_err("why")` lifts a clean absence into a failure.
+    // One carrier, so the payload rides through untouched and only the report
+    // changes. The prelude's `JetOptionalView::or_err` holds that one meaning;
+    // this is a plain marshalling call onto it.
+    if method == "or_err"
+        && args.len() == 1
+        && matches!(tir_recv_jet_ty(receiver, env), Some(Type::Option(_)))
+    {
+        let recv = lower_expr(receiver, cx, env);
+        let why = lower_one_call_arg(&args[0], None, env, cx);
+        return TExpr {
+            ty: resolved_ret.cloned().unwrap_or_else(|| Type::Result {
+                ok: Box::new(recv.ty.clone()),
+                err: Box::new(Type::Named(Syntax::TYPE_ERROR.to_string())),
+            }),
+            kind: TExprKind::MethodCall {
+                recv: Box::new(recv),
+                method: TMethodRef::bare(method),
+                type_args: Vec::new(),
+                args: vec![why],
+                source_first_string_literal: first_string_literal_arg(args),
+                operator_line: None,
+            },
+        };
+    }
     let guard_receiver = tir_recv_jet_ty(receiver, env).and_then(|ty| match ty {
         Type::Tagged { marker, inner } => match inner.as_ref() {
             Type::Apply { name, args }
