@@ -354,7 +354,7 @@ const CORELIB_KERNEL_PARTS: &[&str] = &[
     include_str!("../Prelude/CoreLib/JetStd/CommonTypes.rs"),
     include_str!("../Prelude/CoreLib/JetStd/DBPluginWire.rs"),
     include_str!("../Prelude/CoreLib/JetStd/DataTree.rs"),
-    "\nmod jet_cell {\n",
+    "\nmod jet_cell {\n#[allow(unused_imports)]\nuse crate::{JetOutcome, JetAbsent};\n",
     include_str!("../Prelude/LocalCell.rs"),
     "\n}\npub use self::jet_cell::{JetCell, JetCellEditGuard, JetCellReadGuard};\n",
     include_str!("../Prelude/CoreLib/JetStd/MathTaskMem.rs"),

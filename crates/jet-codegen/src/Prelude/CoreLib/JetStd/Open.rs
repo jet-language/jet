@@ -1,4 +1,8 @@
 mod jet_std {
+    // The one outcome carrier: from the flat Prelude under AOT, from the host
+    // module when another tier includes this file.
+    #[allow(unused_imports)]
+    use super::*;
     // D-IOERROR-TREE1=A: one public context shape for every byte-stream error.
     #[derive(Clone, Copy, Debug, PartialEq)]
     pub enum IOOperation {
