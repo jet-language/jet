@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1599,
-    "rev": 28532,
+    "rev": 28552,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -24,7 +24,7 @@
         "board-ideas"
       ]
     },
-    "completionCursor": "2026-08-07T00:28:53.119Z"
+    "completionCursor": "2026-08-07T08:14:28.792Z"
   },
   "epochs": [
     {
@@ -97120,21 +97120,37 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "verify",
       "priority": "P3",
       "plan": null,
       "blockedBy": [],
       "assignee": "bd2-fix2",
-      "log": [],
-      "criteria": [],
+      "log": [
+        {
+          "at": "2026-08-07",
+          "by": "bd2-fix2",
+          "text": "Duplicate of #1598's jet-sema item: identical break (ApiFreeze.rs Func missing markers E0063, Schema.rs auto_derive_default set twice E0062). Fixed once on #1598 in worktree bd2/fix2; not fixed twice. See #1598 for full fix set and workspace-wide proof."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "duplicate of #1598 criterion 3 (same jet-sema ApiFreeze.rs markers + Schema.rs auto_derive_default dup break); fixed there, evidence lives on #1598",
+          "status": "met",
+          "metBy": "bd2-fix2",
+          "verifiedBy": null,
+          "evidence": "dedup with #1598: both cards named the identical jet-sema break (ApiFreeze.rs missing markers field E0063, Schema.rs duplicate auto_derive_default E0062). Fixed once in worktree .claude/worktrees/fix2, closed under #1598's broader criteria. cargo test -p jet-sema --lib now compiles (68 passed, 3 pre-existing unrelated failures).",
+          "at": "2026-08-07T03:58:41.781Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T02:07:05.794Z",
-      "updated": "2026-08-07T03:38:23.716Z",
+      "updated": "2026-08-07T03:58:50.924Z",
       "updatedBy": "bd2-fix2",
-      "claimedAt": "2026-08-07T03:38:23.715Z"
+      "claimedAt": "2026-08-07T03:58:50.924Z"
     },
     {
       "id": "c0pd9rd4",
@@ -97210,21 +97226,82 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "verify",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
       "assignee": "bd2-fix2",
-      "log": [],
-      "criteria": [],
+      "log": [
+        {
+          "at": "2026-08-07",
+          "by": "bd2-fix2",
+          "text": "Fixed all 4 named breaks plus 2 bonus targets (tests/reflect.rs, tests/compiler_stack.rs) found in the same full cargo test --workspace --no-run sweep, same drift class. Overlaps #1595 exactly on the jet-sema break (ApiFreeze.rs markers + Schema.rs auto_derive_default dup) — fixed once here, #1595 closed as duplicate pointing back to this card. Full workspace now compiles: cargo test --workspace --no-run exits 0. cargo build green."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "crates/jet-comptime/tests/tls_tier2.rs: add owner_type_args to both Expr::MethodCall literals; target compiles",
+          "status": "met",
+          "metBy": "bd2-fix2",
+          "verifiedBy": null,
+          "evidence": "worktree .claude/worktrees/fix2; cargo test -p jet-comptime --test tls_tier2 runs 2/2 (both fail pre-existing 'TIR eval bridge not installed', unrelated test-isolation gap, no install_comptime_bridge() call in this test file — not a compile issue)",
+          "at": "2026-08-07T03:58:34.206Z"
+        },
+        {
+          "n": 2,
+          "text": "tests/jetpack_services.rs:270: proj.join -> proj.path.join (Scratch has no join method); target compiles",
+          "status": "met",
+          "metBy": "bd2-fix2",
+          "verifiedBy": null,
+          "evidence": "cargo test --test jetpack_services: 16 passed, 1 ignored, 0 failed, incl. the fixed test",
+          "at": "2026-08-07T03:58:34.572Z"
+        },
+        {
+          "n": 3,
+          "text": "crates/jet-sema lib tests: ApiFreeze.rs Func literal gets markers: Vec::new(); Schema.rs drops duplicate auto_derive_default: false; lib target compiles",
+          "status": "met",
+          "metBy": "bd2-fix2",
+          "verifiedBy": null,
+          "evidence": "cargo test -p jet-sema --lib: 68 passed, 3 pre-existing failures (module-line-budget + unrelated unwrap panics in Bundle.rs, nothing to do with Func/StructDef literal fields)",
+          "at": "2026-08-07T03:58:34.929Z"
+        },
+        {
+          "n": 4,
+          "text": "crates/jet-comptime lib tests: Reflect.rs Func literal gets kernel: None, markers: Vec::new(); lib target compiles",
+          "status": "met",
+          "metBy": "bd2-fix2",
+          "verifiedBy": null,
+          "evidence": "cargo test -p jet-comptime --lib: 72 passed, 1 pre-existing failure (Methods.rs module-line-budget assertion, unrelated)",
+          "at": "2026-08-07T03:58:35.277Z"
+        },
+        {
+          "n": 5,
+          "text": "cargo test --workspace --no-run compiles every target with zero errors (full log captured)",
+          "status": "met",
+          "metBy": "bd2-fix2",
+          "verifiedBy": null,
+          "evidence": "scripts/agent/jet-env cargo test --workspace --no-run > noRun_5.log; tail shows EXIT:0, grep -c '^error' = 0",
+          "at": "2026-08-07T03:58:35.615Z"
+        },
+        {
+          "n": 6,
+          "text": "bonus (found via same full --no-run sweep, same drift class, not named in either card): tests/reflect.rs Param+Func fields and tests/compiler_stack.rs TExprKind::Call type_args fixed; both targets compile and run",
+          "status": "met",
+          "metBy": "bd2-fix2",
+          "verifiedBy": null,
+          "evidence": "cargo test --test reflect --test compiler_stack: reflect 3/3 passed; compiler_stack 4/5 passed (1 pre-existing failure, E0106 'Cache' builtin-name collision, unrelated to TExprKind::Call.type_args)",
+          "at": "2026-08-07T03:58:35.983Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T03:35:48.745Z",
-      "updated": "2026-08-07T03:38:23.015Z",
+      "updated": "2026-08-07T03:58:50.494Z",
       "updatedBy": "bd2-fix2",
-      "claimedAt": "2026-08-07T03:38:23.015Z"
+      "claimedAt": "2026-08-07T03:58:50.493Z"
     }
   ],
   "decisions": [
@@ -131704,6 +131781,139 @@
   ],
   "events": [
     {
+      "at": "2026-08-07T08:14:28.792Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-07T08:14:28.792Z"
+    },
+    {
+      "at": "2026-08-07T03:58:50.924Z",
+      "by": "bd2-fix2",
+      "action": "card.update",
+      "ref": "c0w33upc",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T03:58:50.494Z",
+      "by": "bd2-fix2",
+      "action": "card.update",
+      "ref": "c07ylf1g",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T03:58:49.714Z",
+      "by": "bd2-fix2",
+      "action": "card.update",
+      "ref": "c0w33upc",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T03:58:49.009Z",
+      "by": "bd2-fix2",
+      "action": "card.update",
+      "ref": "c07ylf1g",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T03:58:41.781Z",
+      "by": "bd2-fix2",
+      "action": "card.criteria-meet",
+      "ref": "c0w33upc",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T03:58:41.044Z",
+      "by": "bd2-fix2",
+      "action": "card.criteria-add",
+      "ref": "c0w33upc",
+      "note": "#1 duplicate of #1598 criterion 3 (same jet-sema ApiFreeze.rs m"
+    },
+    {
+      "at": "2026-08-07T03:58:35.984Z",
+      "by": "bd2-fix2",
+      "action": "card.criteria-meet",
+      "ref": "c07ylf1g",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-07T03:58:35.615Z",
+      "by": "bd2-fix2",
+      "action": "card.criteria-meet",
+      "ref": "c07ylf1g",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-07T03:58:35.277Z",
+      "by": "bd2-fix2",
+      "action": "card.criteria-meet",
+      "ref": "c07ylf1g",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-07T03:58:34.929Z",
+      "by": "bd2-fix2",
+      "action": "card.criteria-meet",
+      "ref": "c07ylf1g",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-07T03:58:34.573Z",
+      "by": "bd2-fix2",
+      "action": "card.criteria-meet",
+      "ref": "c07ylf1g",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-07T03:58:34.206Z",
+      "by": "bd2-fix2",
+      "action": "card.criteria-meet",
+      "ref": "c07ylf1g",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T03:58:25.776Z",
+      "by": "bd2-fix2",
+      "action": "card.criteria-add",
+      "ref": "c07ylf1g",
+      "note": "#6 bonus (found via same full --no-run sweep, same drift class,"
+    },
+    {
+      "at": "2026-08-07T03:58:21.800Z",
+      "by": "bd2-fix2",
+      "action": "card.criteria-add",
+      "ref": "c07ylf1g",
+      "note": "#5 cargo test --workspace --no-run compiles every target with z"
+    },
+    {
+      "at": "2026-08-07T03:58:21.444Z",
+      "by": "bd2-fix2",
+      "action": "card.criteria-add",
+      "ref": "c07ylf1g",
+      "note": "#4 crates/jet-comptime lib tests: Reflect.rs Func literal gets "
+    },
+    {
+      "at": "2026-08-07T03:58:20.888Z",
+      "by": "bd2-fix2",
+      "action": "card.criteria-add",
+      "ref": "c07ylf1g",
+      "note": "#3 crates/jet-sema lib tests: ApiFreeze.rs Func literal gets ma"
+    },
+    {
+      "at": "2026-08-07T03:58:20.206Z",
+      "by": "bd2-fix2",
+      "action": "card.criteria-add",
+      "ref": "c07ylf1g",
+      "note": "#2 tests/jetpack_services.rs:270: proj.join -> proj.path.join ("
+    },
+    {
+      "at": "2026-08-07T03:58:19.542Z",
+      "by": "bd2-fix2",
+      "action": "card.criteria-add",
+      "ref": "c07ylf1g",
+      "note": "#1 crates/jet-comptime/tests/tls_tier2.rs: add owner_type_args "
+    },
+    {
       "at": "2026-08-07T03:41:24.572Z",
       "by": "bd2-orch",
       "action": "card.update",
@@ -135068,139 +135278,6 @@
       "by": "audit-apply",
       "action": "card.update",
       "ref": "c08h3xqu",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:43:09.786Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0575p3w",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:43:09.376Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0v0qz26",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:43:08.963Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0exxobe",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:43:08.537Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0zjmtah",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:43:08.129Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0pdzfiu",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:43:07.712Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c09mc3y7",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:43:07.301Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c04rht5r",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:43:06.890Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0pb8211",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:43:06.486Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0r2uq88",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:43:06.071Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0be7t09",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:43:05.656Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c07zohrf",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:43:05.237Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0gyn86h",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:43:04.555Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0p0jpo1",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:43:03.977Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0fxc599",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:43:03.411Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c066jfg6",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:43:02.997Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c023xgxf",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:43:02.583Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0iylrhu",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:43:02.167Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0199z6h",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:43:01.753Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0re71tf",
       "note": "blockedBy"
     }
   ],
