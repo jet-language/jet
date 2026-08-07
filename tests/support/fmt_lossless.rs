@@ -23,6 +23,8 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/chained_comparison_mixed_direction.jet",
     "tests/ui/compiler_fact_unknown_member.jet",
     "tests/ui/comptime_keyword_retired.jet",
+    "tests/ui/comptime_known_block_retired.jet",
+    "tests/ui/comptime_known_retired.jet",
     "tests/ui/const_retired.jet",
     "tests/ui/context_eq_rejected.jet",
     "tests/ui/context_unknown_field.jet",
