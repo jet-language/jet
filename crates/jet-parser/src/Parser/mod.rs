@@ -1094,8 +1094,11 @@ fn notify(ready: Bool) =[Net]=> () {
         assert!(once.contains("fn classify(score: Int) => Grade = if {"), "{once}");
         assert!(once.contains("score >= 90 -> .A"), "{once}");
         assert!(once.contains("fn notify(ready: Bool) =[Net]=> ()"), "{once}");
-        assert!(once.contains("if ready send() else skip()"), "{once}");
-        assert!(once.contains("loop item; items audit(item)"), "{once}");
+        // D-BRACE1=A (card #808/c08mu840, done): braces are mandatory for
+        // if/else/loop bodies now; fmt auto-wraps and collapses a fitting
+        // one-liner instead of preserving the old braceless spelling.
+        assert!(once.contains("if ready { send() } else { skip() }"), "{once}");
+        assert!(once.contains("loop item, items { audit(item) }"), "{once}");
         assert!(once.contains("next(outer)"), "{once}");
         assert!(once.contains("task :: group.task => fetch()"), "{once}");
         assert!(once.contains("#Grant(caps: FS, Net)"), "{once}");
