@@ -57,7 +57,7 @@ pub(super) fn map_missing(span: Span) -> Diagnostic {
 /// c97/D-STRPARSE1: internal sentinel used by `Expr::Try` to propagate an
 /// error value through the interpreter call stack. The error value is encoded
 /// in `what`; `eval_call` intercepts this code and converts it to a
-/// `CtValue::ResErr(...)` return instead of surfacing it as a user diagnostic.
+/// `CtValue::failed(...)` return instead of surfacing it as a user diagnostic.
 pub(super) const ERR_PROPAGATE_CODE: &str = "__CT_ERR_PROPAGATE__";
 
 /// c97/D-STRPARSE1: internal sentinel for `?? return expr` — signals an early

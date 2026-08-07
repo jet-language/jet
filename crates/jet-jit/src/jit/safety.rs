@@ -26,7 +26,7 @@ fn resident_safe_string_parts(parts: &[TStrPart], callees: &HashSet<String>) -> 
 }
 
 fn resident_safe_ct_value(value: &jet_foundation::AST::CtValue) -> bool {
-    use jet_foundation::AST::CtValue;
+    use jet_foundation::AST::{CtReport, CtValue};
     match value {
         CtValue::Int(_)
         | CtValue::Float(_)
@@ -34,8 +34,8 @@ fn resident_safe_ct_value(value: &jet_foundation::AST::CtValue) -> bool {
         | CtValue::Char(_)
         | CtValue::Str(_)
         | CtValue::Unit
-        | CtValue::None(_) => true,
-        CtValue::Some(inner) | CtValue::ResOk(inner) | CtValue::ResErr(inner) => {
+        | CtValue::Failed(CtReport::Clean(_)) => true,
+        CtValue::Present(inner) | CtValue::Failed(CtReport::Told(inner)) => {
             resident_safe_ct_value(inner)
         }
         // Anonymous-union field payloads lower as CtValue::Enum (#1444 Box.{value: 9}).
@@ -849,12 +849,8 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                 && args_ok
                 && resident_safe_handle_op(op, recv, args)
         }
-        TExprKind::OrFallback {
-            value,
-            fallback,
-            is_option,
-        } => {
-            if *is_option {
+        TExprKind::OrFallback { value, fallback } => {
+            if matches!(value.ty, Type::Option(_)) {
                 resident_safe_expr(value, callees)
                     && matches!(
                         fallback,

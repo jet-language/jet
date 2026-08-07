@@ -18,16 +18,16 @@ fn jet_path_join(p: &JetPath, other: &String) -> JetPath {
         inner: p.inner.join(other.as_str()),
     }
 }
-fn jet_path_parent(p: &JetPath) -> Option<JetPath> {
-    p.inner.parent().map(|par| JetPath {
+fn jet_path_parent(p: &JetPath) -> JetOutcome<JetPath, JetAbsent> {
+    jet_outcome_of(p.inner.parent().map(|par| JetPath {
         inner: par.to_path_buf(),
-    })
+    }))
 }
-fn jet_path_extension(p: &JetPath) -> Option<String> {
-    p.inner.extension().map(|e| e.to_string_lossy().to_string())
+fn jet_path_extension(p: &JetPath) -> JetOutcome<String, JetAbsent> {
+    jet_outcome_of(p.inner.extension().map(|e| e.to_string_lossy().to_string()))
 }
-fn jet_path_stem(p: &JetPath) -> Option<String> {
-    p.inner.file_stem().map(|s| s.to_string_lossy().to_string())
+fn jet_path_stem(p: &JetPath) -> JetOutcome<String, JetAbsent> {
+    jet_outcome_of(p.inner.file_stem().map(|s| s.to_string_lossy().to_string()))
 }
 
 static JET_ATOMIC_TEMP_COUNTER: std::sync::atomic::AtomicU64 =

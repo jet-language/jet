@@ -19,6 +19,8 @@ mod runtime {
 
 /// Canonical wire encode/decode (`jet_std` DBPluginWire fragment).
 mod wire {
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/DBPluginWire.rs");
 }
 

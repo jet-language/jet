@@ -8629,7 +8629,7 @@ impl LowerCtx<'_, '_> {
     }
 
     fn lower_ct_value(&mut self, value: &jet_foundation::AST::CtValue) -> Result<Value, String> {
-        use jet_foundation::AST::{CtKey, CtValue};
+        use jet_foundation::AST::{CtKey, CtReport, CtValue};
         match value {
             CtValue::Int(value) => Ok(self.b.ins().iconst(types::I64, *value)),
             CtValue::Float(value) => Ok(self.b.ins().f64const(value.as_f64())),
@@ -8729,13 +8729,13 @@ impl LowerCtx<'_, '_> {
                 }
                 Ok(handle)
             }
-            CtValue::Some(inner) => {
+            CtValue::Present(inner) => {
                 let payload = self.lower_ct_value(inner)?;
                 self.pack_option_payload(payload, &inner.jet_type())
             }
-            CtValue::None(_) => Ok(self.b.ins().iconst(types::I64, 0)),
-            CtValue::ResOk(inner) => self.lower_ct_result(true, inner),
-            CtValue::ResErr(inner) => self.lower_ct_result(false, inner),
+            CtValue::Failed(CtReport::Clean(_)) => Ok(self.b.ins().iconst(types::I64, 0)),
+            CtValue::Present(inner) => self.lower_ct_result(true, inner),
+            CtValue::Failed(CtReport::Told(inner)) => self.lower_ct_result(false, inner),
             CtValue::Struct { type_name, fields } => {
                 self.lower_ct_struct(type_name, fields)
             }
@@ -8800,7 +8800,7 @@ impl LowerCtx<'_, '_> {
                 if let Some(ct) = by_name.get(jet).or_else(|| by_name.get(name.as_str())) {
                     out.push((ty.clone(), (*ct).clone()));
                 } else if let Type::Option(inner) = ty {
-                    out.push((ty.clone(), CtValue::None(inner.as_ref().clone())));
+                    out.push((ty.clone(), CtValue::absent(inner.as_ref().clone())));
                 }
                 // else: computed / non-stored — omit
             }
@@ -13082,12 +13082,8 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host_ref, &[recv_list, after_list]);
                 Ok(self.finish_wait_call(self.b.inst_results(call)[0]))
             }
-            TExprKind::OrFallback {
-                value,
-                fallback,
-                is_option,
-            } => {
-                if *is_option {
+            TExprKind::OrFallback { value, fallback } => {
+                if matches!(value.ty, Type::Option(_)) {
                     let status = self.lower_list_get_opt_status(value)?;
                     let ok_block = self.b.create_block();
                     let fail_block = self.b.create_block();

@@ -4,6 +4,8 @@ use crate::AST::{CtValue, Type};
 use crate::Diagnostics::{Diagnostic, Span};
 use super::Diagnostics::unsupported;
 
+#[allow(unused_imports)]
+pub use jet_foundation::Outcome::*;
 include!("../../../jet-codegen/src/Prelude/CoreLib/Top/LiveQuery.rs");
 
 fn live_to_ct(q: &JetLiveQuery) -> CtValue {

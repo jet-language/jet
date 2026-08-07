@@ -1960,6 +1960,17 @@ pub enum THostCall {
         method: String,
         args: Vec<TExpr>,
     },
+    /// D-FAIL-CARRIER1=A: read a middle state off the outcome. `field` is the
+    /// Jet field the error type carries it on, and `notes` picks which prelude
+    /// reader decides what a success answers — `jet_notes` for the words a
+    /// failure had, `jet_partial` for the payload it kept. Every engine reads
+    /// this one node, so the rule is stated once and no Rust text is written
+    /// here.
+    CarrierFact {
+        recv: Box<TExpr>,
+        field: String,
+        notes: bool,
+    },
     /// `Cell(Read|Edit)Guard.map/split`: sema-proved paths, shared by all tiers.
     CellGuardProject {
         recv: Box<TExpr>,
@@ -3292,16 +3303,14 @@ pub enum TExprKind {
         /// Pre-escaped Rust string literal for the enclosing function name.
         fn_name: String,
     },
-    /// c109 Phase 8: the `??` fallback operator (`Expr::OrFallback`). `is_option`
-    /// is the TOTAL sema fact: `true` → the value is `T?` and lowers to a
-    /// `match … { Some(v) => v, None => fb }`; `false` → the value is `T ? E` and
-    /// lowers to `match … { Ok(v) => v, Err(_) => fb }`. The fallback is a value or
-    /// an early `return` (the panic form is deferred — its `safe_locals_expr`
-    /// reproduction is out of subset).
+    /// c109 Phase 8: the `??` fallback operator (`Expr::OrFallback`).
+    /// D-FAIL-CARRIER1=A: one carrier, so one lowering —
+    /// `match … { Ok(v) => v, Err(_) => fb }` reads `T?` and `T ? E` alike.
+    /// The fallback is a value or an early `return` (the panic form is deferred —
+    /// its `safe_locals_expr` reproduction is out of subset).
     OrFallback {
         value: Box<TExpr>,
         fallback: TOrFallback,
-        is_option: bool,
     },
     /// c109 Phase 8: optional field/chain `base?.member` (`Expr::OptField`). The
     /// `flatten` fact (TOTAL, from sema) picks the combinator: `true` → `.and_then`

@@ -2,7 +2,7 @@
 //! by including the same source (`Prelude/CoreLib/Top/Compute.rs`). Marshalling
 //! to `CtValue` lives here; engines must not re-encode tensor law.
 
-use crate::AST::{CtFloat, CtValue, Type};
+use crate::AST::{CtFloat, CtReport, CtValue, Type};
 use crate::Diagnostics::{Diagnostic, Span};
 use super::Diagnostics::unsupported;
 
@@ -19,6 +19,8 @@ trait JetDisplay {
 // small range carrier and panic adapter needed to include that core source.
 mod compute_range_semantics {
     use jet_foundation::StructuralDebug::jet_debug_range;
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../../../jet-codegen/src/Prelude/Core/RangeBounds.rs");
 }
 use compute_range_semantics::jet_range_bounds;
@@ -34,6 +36,8 @@ fn jet_panic(file: &str, line: u32, msg: &str) -> ! {
     jet_foundation::ice!(None, "{} (at {}:{})", msg, file, line)
 }
 
+#[allow(unused_imports)]
+pub use jet_foundation::Outcome::*;
 include!("../../../jet-codegen/src/Prelude/CoreLib/Top/Compute.rs");
 
 fn device_to_ct(device: JetComputeDevice) -> CtValue {
@@ -232,9 +236,9 @@ fn tensor_to_ct(tensor: &JetTensor) -> CtValue {
                     .last_transfer
                     .as_ref()
                     .map(transfer_to_ct)
-                    .map(|value| CtValue::Some(Box::new(value)))
+                    .map(|value| CtValue::Present(Box::new(value)))
                     .unwrap_or_else(|| {
-                        CtValue::None(Type::Named("ComputeTransfer".to_string()))
+                        CtValue::absent(Type::Named("ComputeTransfer".to_string()))
                     }),
             ),
         ],
@@ -283,8 +287,8 @@ fn ct_to_tensor(value: &CtValue, span: Span) -> Result<JetTensor, Diagnostic> {
             .ok_or_else(|| unsupported("Tensor field", span))
     };
     let last_transfer = match field("last_transfer")? {
-        CtValue::Some(value) => Some(ct_to_transfer(value, span)?),
-        CtValue::None(_) => None,
+        CtValue::Present(value) => Some(ct_to_transfer(value, span)?),
+        CtValue::Failed(CtReport::Clean(_)) => None,
         _ => return Err(unsupported("Tensor last_transfer", span)),
     };
     let tensor = JetTensor {
@@ -536,19 +540,19 @@ fn ct_to_sparse(value: &CtValue, span: Span) -> Result<JetSparseCsr, Diagnostic>
 }
 
 fn ok_grad(g: JetComputeGradTriple) -> CtValue {
-    CtValue::ResOk(Box::new(grad_to_ct(&g)))
+    CtValue::Present(Box::new(grad_to_ct(&g)))
 }
 
 fn ok_sparse(s: JetSparseCsr) -> CtValue {
-    CtValue::ResOk(Box::new(sparse_to_ct(&s)))
+    CtValue::Present(Box::new(sparse_to_ct(&s)))
 }
 
 fn ok_tensor(tensor: JetTensor) -> CtValue {
-    CtValue::ResOk(Box::new(tensor_to_ct(&tensor)))
+    CtValue::Present(Box::new(tensor_to_ct(&tensor)))
 }
 
 fn err_compute(err: JetComputeError) -> CtValue {
-    CtValue::ResErr(Box::new(map_err(err)))
+    CtValue::failed(Box::new(map_err(err)))
 }
 
 fn as_float(value: &CtValue, span: Span) -> Result<f64, Diagnostic> {
@@ -639,7 +643,7 @@ pub fn apply(
             &ct_to_tensor(one(0)?, span)?,
             &as_i64_list(one(1)?, span)?,
         ) {
-            Ok(v) => CtValue::ResOk(Box::new(CtValue::Float(CtFloat::f64(v)))),
+            Ok(v) => CtValue::Present(Box::new(CtValue::Float(CtFloat::f64(v)))),
             Err(e) => err_compute(e),
         }),
         "set" => {
@@ -649,7 +653,7 @@ pub fn apply(
                 &as_i64_list(one(1)?, span)?,
                 as_float(one(2)?, span)?,
             ) {
-                Ok(()) => Ok(CtValue::ResOk(Box::new(CtValue::Struct {
+                Ok(()) => Ok(CtValue::Present(Box::new(CtValue::Struct {
                     type_name: "__JetComputeSet".to_string(),
                     fields: vec![
                         ("tensor".to_string(), tensor_to_ct(&tensor)),
@@ -733,7 +737,7 @@ pub fn apply(
             Err(e) => err_compute(e),
         }),
         "det" => Ok(match jet_compute_det(&ct_to_tensor(one(0)?, span)?) {
-            Ok(v) => CtValue::ResOk(Box::new(CtValue::Float(CtFloat::f64(v)))),
+            Ok(v) => CtValue::Present(Box::new(CtValue::Float(CtFloat::f64(v)))),
             Err(e) => err_compute(e),
         }),
         "inv" | "fft" => {
@@ -757,7 +761,7 @@ pub fn apply(
         "stream_new" => Ok(stream_to_ct(&jet_compute_stream_new())),
         "stream_sync" => Ok(
             match jet_compute_stream_sync(&ct_to_stream(one(0)?, span)?) {
-                Ok(()) => CtValue::ResOk(Box::new(CtValue::Unit)),
+                Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
                 Err(e) => err_compute(e),
             },
         ),
@@ -780,7 +784,7 @@ pub fn apply(
             &as_i64_list(one(0)?, span)?,
             &as_i64_list(one(1)?, span)?,
         ) {
-            Ok(b) => CtValue::ResOk(Box::new(CtValue::Bool(b))),
+            Ok(b) => CtValue::Present(Box::new(CtValue::Bool(b))),
             Err(e) => err_compute(e),
         }),
         "jvp_add" | "jvp_mul" | "jvp_matmul" => Ok(match if method == "jvp_add" {
@@ -853,7 +857,7 @@ pub fn apply(
             &ct_to_tensor(one(0)?, span)?,
             &ct_to_tensor(one(1)?, span)?,
         ) {
-            Ok(v) => CtValue::ResOk(Box::new(CtValue::Float(CtFloat::f64(v)))),
+            Ok(v) => CtValue::Present(Box::new(CtValue::Float(CtFloat::f64(v)))),
             Err(e) => err_compute(e),
         }),
         "sgd_step" => Ok(match jet_compute_sgd_step(
@@ -915,14 +919,14 @@ pub fn apply(
 /// Unpack `set`'s success payload into (updated tensor, unit Result).
 pub fn take_set_ok(value: CtValue) -> Option<(CtValue, CtValue)> {
     match value {
-        CtValue::ResOk(inner) => match *inner {
+        CtValue::Present(inner) => match *inner {
             CtValue::Struct { type_name, fields } if type_name == "__JetComputeSet" => {
                 let tensor = fields.iter().find(|(n, _)| n == "tensor")?.1.clone();
-                Some((tensor, CtValue::ResOk(Box::new(CtValue::Unit))))
+                Some((tensor, CtValue::Present(Box::new(CtValue::Unit))))
             }
             other => Some((
                 CtValue::Unit,
-                CtValue::ResOk(Box::new(other)),
+                CtValue::Present(Box::new(other)),
             )),
         },
         other => Some((CtValue::Unit, other)),

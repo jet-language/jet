@@ -557,8 +557,9 @@ fn emit_struct_cli(cx: &Cx, s: &StructDef, out: &mut String) {
                 spec_body.push_str(&cli_option_spec_line(root, input, metavar));
                 let rust = cx.rust_type(inner);
                 let conv = cli_scalar_from_string(inner, "__v", &flag, root);
+                // D-FAIL-CARRIER1=A: an optional CLI input is the carrier, not an `Option`.
                 decode_lines.push_str(&format!(
-                    "    let {m}: Option<{rust}> = match {root}jet_parsed_option(__parsed, &{flag:?}.to_string()) {{ Some(__v) => Some({conv}), None => None }};\n"
+                    "    let {m}: {root}JetOutcome<{rust}, {root}JetAbsent> = match {root}jet_parsed_option(__parsed, &{flag:?}.to_string()) {{ Ok(__v) => Ok({conv}), Err({root}JetAbsent) => Err({root}JetAbsent) }};\n"
                 ));
             }
             jet_foundation::CLISchema::CLIInputShape::Value {
@@ -599,7 +600,7 @@ fn emit_struct_cli(cx: &Cx, s: &StructDef, out: &mut String) {
                 // Named wins: ArgsSpec merges bare positionals into options under
                 // the same name when the named form is absent, so one decode path.
                 decode_lines.push_str(&format!(
-                    "    let {m}: {rust} = match {root}jet_parsed_option(__parsed, &{flag:?}.to_string()) {{ Some(__v) => {conv}, None => {absent} }};\n"
+                    "    let {m}: {rust} = match {root}jet_parsed_option(__parsed, &{flag:?}.to_string()) {{ Ok(__v) => {conv}, Err(_) => {absent} }};\n"
                 ));
             }
         }

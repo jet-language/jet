@@ -11,19 +11,41 @@ mod BrowserHost;
 pub mod scheduler;
 /// D-LOCALCELL1=A: canonical local Cell runtime shared by emitted AOT code and
 /// the TIR evaluator's deopt adapter.
-#[path = "Prelude/LocalCell.rs"]
-pub mod local_cell;
+pub mod local_cell {
+    // The carrier is one type across every tier; the AOT copy of this file gets
+    // it from the flat Prelude, this copy from jet-foundation.
+    include!("Prelude/LocalCell.rs");
+    // Items are order-independent; the import trails the include so a file that
+    // opens with an inner doc comment still compiles as a module.
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
+}
 /// D-NUMWIDEN-CROSS1=E: one checked integer-to-float widening policy shared
 /// by AOT emission, TIR evaluation, and the resident JIT adapter.
-#[path = "Prelude/NumericWiden.rs"]
-pub mod numeric_widen;
+pub mod numeric_widen {
+    include!("Prelude/NumericWiden.rs");
+    // Items are order-independent; the import trails the include so a file that
+    // opens with an inner doc comment still compiles as a module.
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
+}
 /// D-TASKGROUP-PARAM1=A: canonical structured task ownership policy. The JIT
 /// compiles the same Prelude source that AOT embeds.
-#[path = "Prelude/TaskGroup.rs"]
-pub mod task_group;
+pub mod task_group {
+    include!("Prelude/TaskGroup.rs");
+    // Items are order-independent; the import trails the include so a file that
+    // opens with an inner doc comment still compiles as a module.
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
+}
 /// D-TYPEDTEXT1=D: typed SQL/HTML/Sh semantics shared by AOT and TIR.
-#[path = "Prelude/TypedText.rs"]
-pub mod typed_text;
+pub mod typed_text {
+    include!("Prelude/TypedText.rs");
+    // Items are order-independent; the import trails the include so a file that
+    // opens with an inner doc comment still compiles as a module.
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
+}
 /// D-PROCESS-SESSION1=A / #1181: shared native Unix PTY substrate used by the
 /// emitted process prelude and the resident JIT adapter.
 #[path = "Prelude/CoreLib/ProcessPty.rs"]

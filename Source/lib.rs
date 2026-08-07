@@ -86,6 +86,10 @@ pub use jet_cli::{CLI, Explain, Help};
 pub use jet_canvas as CanvasUi;
 pub use jet_devserver as DevServer;
 pub use jet_foundation::ExitCodes;
+// D-FAIL-CARRIER1=A: the one outcome carrier. It is embedded as the first
+// prelude part, and it is a real module here too, so the compiler's own
+// interpreters call the same functions the generated program calls.
+pub use jet_foundation::Outcome;
 // D-ARCH-SOURCE1=A: real REPL seam ownership. Compatibility paths remain
 // `jet::REPL`, `jet::Term`, and `jet::SemanticSymbols`; implementation lives
 // entirely in the workspace crate.
@@ -1219,7 +1223,7 @@ pub fn compile_rust(src: &str) -> Result<String, Vec<Diagnostic>> {
     compile(src).map(|o| o.rust)
 }
 
-pub use Comptime::CtValue;
+pub use Comptime::{CtReport, CtValue};
 pub use Diagnostics::render_all as render_diagnostics;
 pub use Diagnostics::{render_all_colored, render_all_json, render_all_linked};
 pub use Sema::check_pure_program_root;

@@ -43,6 +43,8 @@ struct JetFileWriter {
 }
 
 mod jet_std {
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../crates/jet-codegen/src/Prelude/TaskGroup.rs");
 
     #[derive(Clone, Copy)]
@@ -148,12 +150,26 @@ fn jet_log_emit(_level: &str, msg: &str, _fields: &[LogField]) {
         .push(msg.to_string());
 }
 
+#[allow(unused_imports)]
+pub use jet_foundation::Outcome::*;
 include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs");
+#[allow(unused_imports)]
+pub use jet_foundation::Outcome::*;
 include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPRoute.rs");
+#[allow(unused_imports)]
+pub use jet_foundation::Outcome::*;
 include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs");
+#[allow(unused_imports)]
+pub use jet_foundation::Outcome::*;
 include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs");
+#[allow(unused_imports)]
+pub use jet_foundation::Outcome::*;
 include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/WsClient.rs");
+#[allow(unused_imports)]
+pub use jet_foundation::Outcome::*;
 include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/Ws.rs");
+#[allow(unused_imports)]
+pub use jet_foundation::Outcome::*;
 include!("../crates/jet-codegen/src/Prelude/Scheduler.rs");
 
 mod http_server_tls_runtime {

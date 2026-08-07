@@ -1,4 +1,4 @@
-use crate::Comptime::CtValue;
+use crate::Comptime::{CtReport, CtValue};
 use crate::local_cell::{
     JetCell, JetCellEditGuard, JetCellOptionLike, JetCellReadGuard,
 };
@@ -168,14 +168,14 @@ impl JetCellOptionLike for CtValue {
 
     fn value(&self) -> Option<&CtValue> {
         match self {
-            CtValue::Some(value) => Some(value),
-            CtValue::None(_) => None,
+            CtValue::Present(value) => Some(value),
+            CtValue::Failed(CtReport::Clean(_)) => None,
             _ => None,
         }
     }
 
     fn store(&mut self, value: CtValue) {
-        *self = CtValue::Some(Box::new(value));
+        *self = CtValue::Present(Box::new(value));
     }
 }
 
@@ -215,7 +215,7 @@ fn collect_guard_handles(
                 collect_guard_handles(value, reads, edits);
             }
         }
-        CtValue::Some(value) | CtValue::ResOk(value) | CtValue::ResErr(value) => {
+        CtValue::Present(value) | CtValue::Failed(CtReport::Told(value)) => {
             collect_guard_handles(value, reads, edits);
         }
         CtValue::Closure(closure) => {
@@ -230,7 +230,7 @@ fn collect_guard_handles(
         | CtValue::Str(_)
         | CtValue::BigInt(_)
         | CtValue::Bytes(_)
-        | CtValue::None(_)
+        | CtValue::Failed(CtReport::Clean(_))
         | CtValue::Unit => {}
     }
 }

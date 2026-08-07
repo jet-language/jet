@@ -1,4 +1,5 @@
 use super::*;
+use crate::Comptime::Value::CtReport;
 
 fn decode_path(path: &str) -> String {
     if path == "$" {
@@ -150,9 +151,9 @@ impl<'a> Interp<'a> {
                         };
                         let n = as_int(&value, args[0].expr.span())?;
                         Ok(if (lo..=hi).contains(&n) {
-                            CtValue::ResOk(Box::new(CtValue::Int(n)))
+                            CtValue::Present(Box::new(CtValue::Int(n)))
                         } else {
-                            CtValue::ResErr(Box::new(CtValue::Str(format!(
+                            CtValue::failed(Box::new(CtValue::Str(format!(
                                 "{} out of range {}..{}",
                                 n, lo, hi
                             ))))
@@ -164,8 +165,8 @@ impl<'a> Interp<'a> {
                         }
                     }
                     return match converted {
-                        CtValue::ResOk(value) if range.is_some() => check_range(*value),
-                        CtValue::ResErr(error) if range.is_some() => Ok(CtValue::ResErr(error)),
+                        CtValue::Present(value) if range.is_some() => check_range(*value),
+                        CtValue::Failed(CtReport::Told(error)) if range.is_some() => Ok(CtValue::Failed(CtReport::Told(error))),
                         value => check_range(value),
                     };
                 }
@@ -316,11 +317,11 @@ impl<'a> Interp<'a> {
                     _ => None,
                 };
                 return Ok(match ns {
-                    Some(ns) => CtValue::ResOk(Box::new(CtValue::Struct {
+                    Some(ns) => CtValue::Present(Box::new(CtValue::Struct {
                         type_name: crate::Syntax::DURATION_TYPE.to_string(),
                         fields: vec![("ns".to_string(), CtValue::Int(ns))],
                     })),
-                    None => CtValue::ResErr(Box::new(CtValue::Struct {
+                    None => CtValue::failed(Box::new(CtValue::Struct {
                         type_name: crate::Syntax::DURATION_RANGE_ERROR_TYPE.to_string(),
                         fields: vec![(
                             "reason".to_string(),
@@ -497,8 +498,8 @@ impl<'a> Interp<'a> {
                         &struct_fields,
                         method == "to_bytes_canonical",
                     ) {
-                        Ok(bytes) => CtValue::ResOk(Box::new(CtValue::Bytes(bytes))),
-                        Err(reason) => CtValue::ResErr(Box::new(CtValue::Struct {
+                        Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
+                        Err(reason) => CtValue::failed(Box::new(CtValue::Struct {
                             type_name: "CBORError".to_string(),
                             fields: vec![
                                 (
@@ -537,7 +538,7 @@ impl<'a> Interp<'a> {
                         ) {
                             Ok(tree) => tree,
                             Err(error) => {
-                                return Ok(CtValue::ResErr(Box::new(decode_xml_error(error))))
+                                return Ok(CtValue::failed(Box::new(decode_xml_error(error))))
                             }
                         }
                     } else {
@@ -559,7 +560,7 @@ impl<'a> Interp<'a> {
                         match parsed {
                             Ok(tree) => tree,
                             Err(error) => {
-                                return Ok(CtValue::ResErr(Box::new(decode_xml_error(error))))
+                                return Ok(CtValue::failed(Box::new(decode_xml_error(error))))
                             }
                         }
                     };
@@ -567,15 +568,15 @@ impl<'a> Interp<'a> {
                         match super::super::super::EncodingLite::xml_project_for_decode(&document) {
                             Ok(tree) => tree,
                             Err(error) => {
-                                return Ok(CtValue::ResErr(Box::new(decode_error_value(
+                                return Ok(CtValue::failed(Box::new(decode_error_value(
                                     error,
                                     "XML value cannot be projected for typed decode",
                                 ))))
                             }
                         };
                     return match self.typed_decode_top(&type_args[0], &projected, span) {
-                        Ok((value, _)) => Ok(CtValue::ResOk(Box::new(value))),
-                        Err(error) => Ok(CtValue::ResErr(Box::new(error))),
+                        Ok((value, _)) => Ok(CtValue::Present(Box::new(value))),
+                        Err(error) => Ok(CtValue::failed(Box::new(error))),
                     };
                 }
                 // D-MIGRATE3=A / D-SERDE6: `decode<T>`/`decode_traced<T>` — typed
@@ -615,7 +616,7 @@ impl<'a> Interp<'a> {
                     let options = match super::super::super::EncodingLite::cbor_options(argv.get(1)) {
                         Ok(options) => options,
                         Err(error) => {
-                            return Ok(CtValue::ResErr(Box::new(decode_error_value(
+                            return Ok(CtValue::failed(Box::new(decode_error_value(
                                 super::super::super::EncodingLite::cbor_error_value(error),
                                 "invalid CBOR options",
                             ))))
@@ -624,15 +625,15 @@ impl<'a> Interp<'a> {
                     let tree = match super::super::super::EncodingLite::cbor_decode(&bytes, &options, true) {
                         Ok(tree) => tree,
                         Err(error) => {
-                            return Ok(CtValue::ResErr(Box::new(decode_error_value(
+                            return Ok(CtValue::failed(Box::new(decode_error_value(
                                 super::super::super::EncodingLite::cbor_error_value(error),
                                 "invalid CBOR input",
                             ))))
                         }
                     };
                     return match self.typed_decode_top(&type_args[0], &tree, span) {
-                        Ok((value, _)) => Ok(CtValue::ResOk(Box::new(value))),
-                        Err(error) => Ok(CtValue::ResErr(Box::new(error))),
+                        Ok((value, _)) => Ok(CtValue::Present(Box::new(value))),
+                        Err(error) => Ok(CtValue::failed(Box::new(error))),
                     };
                 }
                 // D-CTEFFECT1 Tier-1: fetch is hermetic (sha256-pinned); no gate.
@@ -845,15 +846,15 @@ impl<'a> Interp<'a> {
                 let a = self.eval(&args[1].expr, scope)?;
                 let b = self.eval(&args[2].expr, scope)?;
                 return Ok(match (a, b) {
-                    (CtValue::Some(av), CtValue::Some(bv)) => {
-                        CtValue::Some(Box::new(self.call_inline_closure(
+                    (CtValue::Present(av), CtValue::Present(bv)) => {
+                        CtValue::Present(Box::new(self.call_inline_closure(
                             &f,
                             vec![*av, *bv],
                             span,
                             scope,
                         )?))
                     }
-                    _ => CtValue::None(Type::Int),
+                    _ => CtValue::absent(Type::Int),
                 });
             }
         }
@@ -942,10 +943,10 @@ impl<'a> Interp<'a> {
                             &self.call_inline_closure(&f, vec![x.clone()], span, scope)?,
                             span,
                         )? {
-                            return Ok(CtValue::Some(Box::new(x.clone())));
+                            return Ok(CtValue::Present(Box::new(x.clone())));
                         }
                     }
-                    return Ok(CtValue::None(Type::Int));
+                    return Ok(CtValue::absent(Type::Int));
                 }
                 // `.sort_by` writes back like the MUTATING list methods below
                 // (D-BIND4 `:=` receiver) — key every element once, sort the
@@ -980,7 +981,7 @@ impl<'a> Interp<'a> {
                     self.write_back(receiver, sorted, scope)?;
                     return Ok(CtValue::Unit);
                 }
-                (CtValue::Some(inner), "map") => {
+                (CtValue::Present(inner), "map") => {
                     let f = self.eval(&args[0].expr, scope)?;
                     let v = self.call_inline_closure(
                         &f,
@@ -988,9 +989,9 @@ impl<'a> Interp<'a> {
                         span,
                         scope,
                     )?;
-                    return Ok(CtValue::Some(Box::new(v)));
+                    return Ok(CtValue::Present(Box::new(v)));
                 }
-                (CtValue::None(t), "map") => return Ok(CtValue::None(t.clone())),
+                (CtValue::Failed(CtReport::Clean(t)), "map") => return Ok(CtValue::absent(t.clone())),
                 _ => {}
             }
             evaluated_receiver = Some(recv);
@@ -1295,7 +1296,7 @@ impl<'a> Interp<'a> {
                         argv.push(self.eval(&arg.expr, scope)?);
                     }
                     let option_none = || {
-                        CtValue::None(match resolved_ret {
+                        CtValue::absent(match resolved_ret {
                             Some(Type::Option(inner)) => (**inner).clone(),
                             _ => Type::Int,
                         })
@@ -1307,7 +1308,7 @@ impl<'a> Interp<'a> {
                         "peek" => items
                             .first()
                             .cloned()
-                            .map_or_else(option_none, |value| CtValue::Some(Box::new(value))),
+                            .map_or_else(option_none, |value| CtValue::Present(Box::new(value))),
                         "to_sorted_list" => CtValue::List(items.clone()),
                         "push" => {
                             items.push(argv[0].clone());
@@ -1318,7 +1319,7 @@ impl<'a> Interp<'a> {
                         "pop" if items.is_empty() => option_none(),
                         "pop" => {
                             changed = true;
-                            CtValue::Some(Box::new(items.remove(0)))
+                            CtValue::Present(Box::new(items.remove(0)))
                         }
                         "clear" => {
                             items.clear();
@@ -1435,7 +1436,7 @@ impl<'a> Interp<'a> {
                         argv.push(self.eval(&arg.expr, scope)?);
                     }
                     let option_none = || {
-                        CtValue::None(match resolved_ret {
+                        CtValue::absent(match resolved_ret {
                             Some(Type::Option(inner)) => (**inner).clone(),
                             _ => Type::Int,
                         })
@@ -1448,11 +1449,11 @@ impl<'a> Interp<'a> {
                         "first" => items
                             .first()
                             .cloned()
-                            .map_or_else(option_none, |value| CtValue::Some(Box::new(value))),
+                            .map_or_else(option_none, |value| CtValue::Present(Box::new(value))),
                         "last" => items
                             .last()
                             .cloned()
-                            .map_or_else(option_none, |value| CtValue::Some(Box::new(value))),
+                            .map_or_else(option_none, |value| CtValue::Present(Box::new(value))),
                         "to_list" => CtValue::List(items.clone()),
                         "add" => {
                             let added = !items.contains(&argv[0]);
@@ -1547,7 +1548,7 @@ impl<'a> Interp<'a> {
                         argv.push(self.eval(&arg.expr, scope)?);
                     }
                     let option_none = || {
-                        CtValue::None(match resolved_ret {
+                        CtValue::absent(match resolved_ret {
                             Some(Type::Option(inner)) => (**inner).clone(),
                             _ => Type::Int,
                         })
@@ -1559,11 +1560,11 @@ impl<'a> Interp<'a> {
                         "peek_front" => items
                             .first()
                             .cloned()
-                            .map_or_else(option_none, |value| CtValue::Some(Box::new(value))),
+                            .map_or_else(option_none, |value| CtValue::Present(Box::new(value))),
                         "peek_back" => items
                             .last()
                             .cloned()
-                            .map_or_else(option_none, |value| CtValue::Some(Box::new(value))),
+                            .map_or_else(option_none, |value| CtValue::Present(Box::new(value))),
                         "get" => {
                             let idx = match argv.first() {
                                 Some(CtValue::Int(i)) if *i >= 0 => *i as usize,
@@ -1572,7 +1573,7 @@ impl<'a> Interp<'a> {
                             items
                                 .get(idx)
                                 .cloned()
-                                .map_or_else(option_none, |value| CtValue::Some(Box::new(value)))
+                                .map_or_else(option_none, |value| CtValue::Present(Box::new(value)))
                         }
                         "contains" => {
                             let needle = argv.first().cloned().unwrap_or(CtValue::Unit);
@@ -1600,12 +1601,12 @@ impl<'a> Interp<'a> {
                         "pop_front" if items.is_empty() => option_none(),
                         "pop_front" => {
                             changed = true;
-                            CtValue::Some(Box::new(items.remove(0)))
+                            CtValue::Present(Box::new(items.remove(0)))
                         }
                         "pop_back" => match items.pop() {
                             Some(value) => {
                                 changed = true;
-                                CtValue::Some(Box::new(value))
+                                CtValue::Present(Box::new(value))
                             }
                             None => option_none(),
                         },
@@ -1685,7 +1686,7 @@ impl<'a> Interp<'a> {
                         argv.push(self.eval(&arg.expr, scope)?);
                     }
                     let option_none = || {
-                        CtValue::None(match resolved_ret {
+                        CtValue::absent(match resolved_ret {
                             Some(Type::Option(inner)) => (**inner).clone(),
                             _ => Type::Int,
                         })
@@ -1748,7 +1749,7 @@ impl<'a> Interp<'a> {
                                 }
                                 changed = true;
                                 displaced.map_or_else(option_none, |value| {
-                                    CtValue::Some(Box::new(value))
+                                    CtValue::Present(Box::new(value))
                                 })
                             }
                         }
@@ -1761,7 +1762,7 @@ impl<'a> Interp<'a> {
                                 let value = pair[1].clone();
                                 entries.insert(0, entry);
                                 changed = true;
-                                CtValue::Some(Box::new(value))
+                                CtValue::Present(Box::new(value))
                             }
                             None => option_none(),
                         },
@@ -1771,7 +1772,7 @@ impl<'a> Interp<'a> {
                                     unreachable!("Cache entries are pairs")
                                 };
                                 changed = true;
-                                CtValue::Some(Box::new(pair[1].clone()))
+                                CtValue::Present(Box::new(pair[1].clone()))
                             }
                             None => option_none(),
                         },
@@ -2120,7 +2121,7 @@ impl<'a> Interp<'a> {
         }
         if is_build_context && method == "fetch" {
             return eval_net_fetch(&argv, Some(&mut self.embed_inputs), span)
-                .map(|value| CtValue::ResOk(Box::new(value)));
+                .map(|value| CtValue::Present(Box::new(value)));
         }
         if is_build_context && method == "embed" {
             return eval_build_embed(&argv, self.base_dir, Some(&mut self.embed_inputs), span);

@@ -8,18 +8,18 @@ fn jet_data_error(
     jet_std::DataError {
         kind,
         operation: operation.to_string(),
-        row: None,
-        column: None,
-        index: None,
+        row: Err(JetAbsent),
+        column: Err(JetAbsent),
+        index: Err(JetAbsent),
         reason: reason.into(),
-        cause: None,
+        cause: Err(JetAbsent),
     }
 }
 
 fn jet_data_error_at(
     kind: jet_std::DataErrorKind,
     operation: &str,
-    index: Option<i64>,
+    index: JetOutcome<i64, JetAbsent>,
     reason: impl Into<String>,
 ) -> jet_std::DataError {
     let mut error = jet_data_error(kind, operation, reason);
@@ -29,7 +29,7 @@ fn jet_data_error_at(
 
 fn jet_data_from_encoding(
     operation: &str,
-    row: Option<i64>,
+    row: JetOutcome<i64, JetAbsent>,
     enc: jet_std::EncodingError,
 ) -> jet_std::DataError {
     let kind = match enc.kind {
@@ -43,15 +43,15 @@ fn jet_data_from_encoding(
         operation: operation.to_string(),
         row,
         column: enc.column,
-        index: None,
+        index: Err(JetAbsent),
         reason: enc.reason.clone(),
-        cause: Some(enc),
+        cause: Ok(enc),
     }
 }
 
 fn jet_data_limits_validate(limits: &jet_std::DataLimits) -> Result<(), jet_std::DataError> {
     jet_encoding_validate_limits(&limits.encoding).map_err(|enc| {
-        jet_data_from_encoding("DataLimits", None, enc)
+        jet_data_from_encoding("DataLimits", Err(JetAbsent), enc)
     })?;
     for (name, value) in [
         ("max_groups", limits.max_groups),
@@ -84,7 +84,7 @@ fn jet_data_reject_nonfinite(operation: &str, values: &[f64]) -> Result<(), jet_
             return Err(jet_data_error_at(
                 jet_std::DataErrorKind::NonFinite,
                 operation,
-                Some(index as i64),
+                Ok(index as i64),
                 "numeric input must be finite",
             ));
         }
@@ -292,7 +292,7 @@ fn jet_data_bar_text_checked(
             return Err(jet_data_error_at(
                 jet_std::DataErrorKind::InvalidArgument,
                 "bar_text",
-                Some(index as i64),
+                Ok(index as i64),
                 "plot counts must be non-negative",
             ));
         }
@@ -300,7 +300,7 @@ fn jet_data_bar_text_checked(
             return Err(jet_data_error_at(
                 jet_std::DataErrorKind::NonFinite,
                 "bar_text",
-                Some(index as i64),
+                Ok(index as i64),
                 "plot values must be finite",
             ));
         }
@@ -314,7 +314,7 @@ fn jet_data_bar_svg_checked(groups: &Vec<jet_std::DataGroup>) -> Result<String, 
             return Err(jet_data_error_at(
                 jet_std::DataErrorKind::InvalidArgument,
                 "bar_svg",
-                Some(index as i64),
+                Ok(index as i64),
                 "plot counts must be non-negative",
             ));
         }
@@ -322,7 +322,7 @@ fn jet_data_bar_svg_checked(groups: &Vec<jet_std::DataGroup>) -> Result<String, 
             return Err(jet_data_error_at(
                 jet_std::DataErrorKind::NonFinite,
                 "bar_svg",
-                Some(index as i64),
+                Ok(index as i64),
                 "plot values must be finite",
             ));
         }
@@ -335,7 +335,7 @@ fn jet_data_plot_error(error: DataPlotError) -> jet_std::DataError {
         "NonFinite" => jet_std::DataErrorKind::NonFinite,
         _ => jet_std::DataErrorKind::InvalidArgument,
     };
-    jet_data_error_at(kind, error.operation, error.index, error.reason)
+    jet_data_error_at(kind, error.operation, jet_outcome_of(error.index), error.reason)
 }
 
 fn jet_data_line_text_checked(
@@ -627,7 +627,7 @@ fn jet_data_left_join_checked<T, U, FL, FR>(
     left_key: FL,
     right_key: FR,
     limits: &jet_std::DataLimits,
-) -> Result<Vec<jet_std::DataJoin<T, Option<U>>>, jet_std::DataError>
+) -> Result<Vec<jet_std::DataJoin<T, JetOutcome<U, JetAbsent>>>, jet_std::DataError>
 where
     T: Clone,
     U: Clone,
@@ -653,7 +653,7 @@ where
                     }
                     joined.push(jet_std::DataJoin {
                         left: left_row.clone(),
-                        right: Some(right_row.clone()),
+                        right: Ok(right_row.clone()),
                     });
                 }
             }
@@ -667,7 +667,7 @@ where
                 }
                 joined.push(jet_std::DataJoin {
                     left: left_row,
-                    right: None,
+                    right: Err(JetAbsent),
                 });
             }
         }
@@ -708,7 +708,7 @@ fn jet_data_csv_reader(
 ) -> Result<jet_std::DataStream, jet_std::DataError> {
     jet_data_limits_validate(&limits)?;
     let reader = jet_enc_csv_reader(input, limits.encoding.clone())
-        .map_err(|enc| jet_data_from_encoding("csv_reader", None, enc))?;
+        .map_err(|enc| jet_data_from_encoding("csv_reader", Err(JetAbsent), enc))?;
     Ok(jet_std::DataStream {
         inner: jet_std::DataStreamInner::CSV {
             reader,
@@ -727,7 +727,7 @@ fn jet_data_json_reader(
 ) -> Result<jet_std::DataStream, jet_std::DataError> {
     jet_data_limits_validate(&limits)?;
     let reader = jet_enc_json_reader(input, limits.encoding.clone())
-        .map_err(|enc| jet_data_from_encoding("json_reader", None, enc))?;
+        .map_err(|enc| jet_data_from_encoding("json_reader", Err(JetAbsent), enc))?;
     Ok(jet_std::DataStream {
         inner: jet_std::DataStreamInner::JSON {
             reader,
@@ -784,7 +784,7 @@ fn jet_data_stream_decode_csv_row<T: user_Decode>(
                 "csv_reader",
                 jet_data_field_errors_reason(errors),
             );
-            error.row = Some(row_index);
+            error.row = Ok(row_index);
             error
         })
 }
@@ -915,7 +915,15 @@ fn jet_data_json_fold_from_event(
     }
 }
 
+// D-FAIL-CARRIER1=A: the row is `T? ? DataError` — end of stream is a clean
+// absence, a broken row is a report.
 fn jet_data_stream_next<T: user_Decode>(
+    stream: &mut jet_std::DataStream,
+) -> Result<JetOutcome<T, JetAbsent>, jet_std::DataError> {
+    jet_data_stream_scan(stream).map(jet_outcome_of)
+}
+
+fn jet_data_stream_scan<T: user_Decode>(
     stream: &mut jet_std::DataStream,
 ) -> Result<Option<T>, jet_std::DataError> {
     if let Some(error) = &stream.terminal {
@@ -936,7 +944,7 @@ fn jet_data_stream_next<T: user_Decode>(
                     Err(enc) => {
                         return jet_data_stream_fail(
                             stream,
-                            jet_data_from_encoding("csv_reader", None, enc),
+                            jet_data_from_encoding("csv_reader", Err(JetAbsent), enc),
                         );
                     }
                 }
@@ -956,7 +964,7 @@ fn jet_data_stream_next<T: user_Decode>(
                 }
                 Err(enc) => jet_data_stream_fail(
                     stream,
-                    jet_data_from_encoding("csv_reader", Some(stream.row_index + 1), enc),
+                    jet_data_from_encoding("csv_reader", Ok(stream.row_index + 1), enc),
                 ),
             }
         }
@@ -989,7 +997,7 @@ fn jet_data_stream_next<T: user_Decode>(
                     Err(enc) => {
                         return jet_data_stream_fail(
                             stream,
-                            jet_data_from_encoding("json_reader", None, enc),
+                            jet_data_from_encoding("json_reader", Err(JetAbsent), enc),
                         );
                     }
                 }
@@ -1009,7 +1017,7 @@ fn jet_data_stream_next<T: user_Decode>(
                 Err(enc) => {
                     return jet_data_stream_fail(
                         stream,
-                        jet_data_from_encoding("json_reader", Some(stream.row_index + 1), enc),
+                        jet_data_from_encoding("json_reader", Ok(stream.row_index + 1), enc),
                     );
                 }
             };
@@ -1024,14 +1032,14 @@ fn jet_data_stream_next<T: user_Decode>(
                                 "json_reader",
                                 jet_data_field_errors_reason(errors),
                             );
-                            error.row = Some(stream.row_index);
+                            error.row = Ok(stream.row_index);
                             jet_data_stream_fail(stream, error)
                         }
                     }
                 }
                 Err(enc) => jet_data_stream_fail(
                     stream,
-                    jet_data_from_encoding("json_reader", Some(stream.row_index + 1), enc),
+                    jet_data_from_encoding("json_reader", Ok(stream.row_index + 1), enc),
                 ),
             }
         }
@@ -1045,8 +1053,8 @@ fn jet_data_stream_collect<T: user_Decode + Clone>(
     let mut out = Vec::new();
     loop {
         match jet_data_stream_next::<T>(stream)? {
-            None => return Ok(out),
-            Some(row) => {
+            Err(JetAbsent) => return Ok(out),
+            Ok(row) => {
                 if out.len() as i64 >= stream.limits.max_output_rows {
                     // Crossing fails before retaining the item that crosses.
                     return jet_data_stream_fail(
@@ -1081,7 +1089,7 @@ where
     let mut groups: std::collections::BTreeMap<String, (i64, f64)> =
         std::collections::BTreeMap::new();
     loop {
-        let Some(row) = jet_data_stream_next::<T>(stream)? else {
+        let Ok(row) = jet_data_stream_next::<T>(stream)? else {
             break;
         };
         let k = key(row.clone());

@@ -28,7 +28,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use crate::AST::{CtFloat, CtKey, CtValue, StructDef, Type};
+use crate::AST::{CtFloat, CtKey, CtReport, CtValue, StructDef, Type};
 
 use super::JSONInterp::{json_payload, json_variant};
 
@@ -1798,17 +1798,17 @@ fn xml_options(value: &CtValue) -> Result<jet_foundation::XmlPull::ParseOptions,
 fn xml_error_value_with_source(error: jet_foundation::XmlPull::Error, source_bytes: bool) -> CtValue {
     let kind = format!("{:?}", error.kind);
     let byte_offset = if source_bytes || error.line.is_some() {
-        CtValue::Some(Box::new(CtValue::Int(error.offset as i64)))
+        CtValue::Present(Box::new(CtValue::Int(error.offset as i64)))
     } else {
-        CtValue::None(Type::Int)
+        CtValue::absent(Type::Int)
     };
     CtValue::Struct {
         type_name: "XMLError".to_string(),
         fields: vec![
             ("kind".to_string(), CtValue::Enum { type_name: "XMLReason".to_string(), variant: kind, args: Vec::new() }),
             ("byte_offset".to_string(), byte_offset),
-            ("line".to_string(), error.line.map(|value| CtValue::Some(Box::new(CtValue::Int(value as i64)))).unwrap_or(CtValue::None(Type::Int))),
-            ("column".to_string(), error.column.map(|value| CtValue::Some(Box::new(CtValue::Int(value as i64)))).unwrap_or(CtValue::None(Type::Int))),
+            ("line".to_string(), error.line.map(|value| CtValue::Present(Box::new(CtValue::Int(value as i64)))).unwrap_or(CtValue::absent(Type::Int))),
+            ("column".to_string(), error.column.map(|value| CtValue::Present(Box::new(CtValue::Int(value as i64)))).unwrap_or(CtValue::absent(Type::Int))),
             ("path".to_string(), CtValue::Str(error.path)),
             ("reason".to_string(), CtValue::Str(error.reason)),
         ],
@@ -1828,9 +1828,9 @@ fn xml_shape_error_value(reason: String) -> CtValue {
         type_name: "XMLError".to_string(),
         fields: vec![
             ("kind".to_string(), CtValue::Enum { type_name: "XMLReason".to_string(), variant: "Shape".to_string(), args: Vec::new() }),
-            ("byte_offset".to_string(), CtValue::None(Type::Int)),
-            ("line".to_string(), CtValue::None(Type::Int)),
-            ("column".to_string(), CtValue::None(Type::Int)),
+            ("byte_offset".to_string(), CtValue::absent(Type::Int)),
+            ("line".to_string(), CtValue::absent(Type::Int)),
+            ("column".to_string(), CtValue::absent(Type::Int)),
             ("path".to_string(), CtValue::Str(String::new())),
             ("reason".to_string(), CtValue::Str(reason)),
         ],
@@ -1861,15 +1861,15 @@ pub(super) fn xml_expanded_name(node: &CtValue) -> Result<CtValue, CtValue> {
             (
                 "prefix".to_string(),
                 prefix
-                    .map(|value| CtValue::Some(Box::new(CtValue::Str(value))))
-                    .unwrap_or(CtValue::None(Type::String)),
+                    .map(|value| CtValue::Present(Box::new(CtValue::Str(value))))
+                    .unwrap_or(CtValue::absent(Type::String)),
             ),
             ("local".to_string(), CtValue::Str(local)),
             (
                 "namespace_uri".to_string(),
                 namespace_uri
-                    .map(|value| CtValue::Some(Box::new(CtValue::Str(value))))
-                    .unwrap_or(CtValue::None(Type::String)),
+                    .map(|value| CtValue::Present(Box::new(CtValue::Str(value))))
+                    .unwrap_or(CtValue::absent(Type::String)),
             ),
         ],
     })
@@ -1878,8 +1878,8 @@ pub(super) fn xml_expanded_name(node: &CtValue) -> Result<CtValue, CtValue> {
 pub(super) fn xml_attribute(element: &CtValue, name: &str) -> Result<CtValue, CtValue> {
     let value = xml_from_ct(element).map_err(xml_shape_error_value)?;
     match jet_foundation::XmlPull::lookup_attribute(&value, name).map_err(xml_error_value)? {
-        Some(text) => Ok(CtValue::Some(Box::new(CtValue::Str(text)))),
-        None => Ok(CtValue::None(Type::String)),
+        Some(text) => Ok(CtValue::Present(Box::new(CtValue::Str(text)))),
+        None => Ok(CtValue::absent(Type::String)),
     }
 }
 
@@ -2270,7 +2270,7 @@ fn cbor_encode_val(v: &CtValue, out: &mut Vec<u8>, canonical: bool) {
         return;
     }
     match v {
-        CtValue::Unit | CtValue::None(_) => out.push(0xf6),
+        CtValue::Unit | CtValue::Failed(CtReport::Clean(_)) => out.push(0xf6),
         CtValue::Bool(false) => out.push(0xf4),
         CtValue::Bool(true) => out.push(0xf5),
         CtValue::Int(n) if *n >= 0 => cbor_push_len(out, 0, *n as u64),
@@ -2311,7 +2311,7 @@ fn cbor_encode_val(v: &CtValue, out: &mut Vec<u8>, canonical: bool) {
             out,
             canonical,
         ),
-        CtValue::Some(value) | CtValue::ResOk(value) | CtValue::ResErr(value) => {
+        CtValue::Present(value) | CtValue::Failed(CtReport::Told(value)) => {
             cbor_encode_val(value, out, canonical);
         }
         CtValue::Enum { variant, args, .. } => match (variant.as_str(), args.first()) {
@@ -2417,7 +2417,7 @@ fn cbor_codable_value(
                 fields: mapped,
             })
         }
-        CtValue::Some(inner) => Ok(CtValue::Some(Box::new(cbor_codable_value(
+        CtValue::Present(inner) => Ok(CtValue::Present(Box::new(cbor_codable_value(
             inner,
             match ty {
                 Some(Type::Option(inner)) => Some(inner.as_ref()),
@@ -2425,10 +2425,10 @@ fn cbor_codable_value(
             },
             struct_fields,
         )?))),
-        CtValue::None(_) => Ok(value.clone()),
+        CtValue::Failed(CtReport::Clean(_)) => Ok(value.clone()),
         CtValue::BigInt(_) => Err("CBOR cannot encode BigInt outside Jet Int".to_string()),
         CtValue::Closure(_) => Err("CBOR cannot encode a function value".to_string()),
-        CtValue::ResOk(_) | CtValue::ResErr(_) => {
+        CtValue::Failed(CtReport::Told(_)) => {
             Err("CBOR cannot encode a Result without an explicit Codable schema".to_string())
         }
         CtValue::Enum {
@@ -3572,7 +3572,7 @@ pub(super) fn encoding_limits_safe_value() -> CtValue {
             ("buffer_bytes".to_string(), CtValue::Int(lim.buffer_bytes)),
             ("max_depth".to_string(), CtValue::Int(lim.max_depth)),
             ("max_item_bytes".to_string(), CtValue::Int(lim.max_item_bytes)),
-            ("max_total_bytes".to_string(), CtValue::None(crate::AST::Type::Int)),
+            ("max_total_bytes".to_string(), CtValue::absent(crate::AST::Type::Int)),
             (
                 "max_expansion_depth".to_string(),
                 CtValue::Int(lim.max_expansion_depth),
@@ -3598,8 +3598,8 @@ pub(super) fn encoding_limits_from_value(v: &CtValue) -> Result<EncodingLimitsLi
             ("buffer_bytes", CtValue::Int(n)) => lim.buffer_bytes = *n,
             ("max_depth", CtValue::Int(n)) => lim.max_depth = *n,
             ("max_item_bytes", CtValue::Int(n)) => lim.max_item_bytes = *n,
-            ("max_total_bytes", CtValue::None(_)) => lim.max_total_bytes = None,
-            ("max_total_bytes", CtValue::Some(inner)) => match inner.as_ref() {
+            ("max_total_bytes", CtValue::Failed(CtReport::Clean(_))) => lim.max_total_bytes = None,
+            ("max_total_bytes", CtValue::Present(inner)) => match inner.as_ref() {
                 CtValue::Int(n) => lim.max_total_bytes = Some(*n),
                 _ => return Err("max_total_bytes must be Int?".to_string()),
             },
@@ -3633,13 +3633,13 @@ fn encoding_error_value(kind: &str, reason: impl Into<String>) -> CtValue {
                 },
             ),
             ("byte_offset".to_string(), CtValue::Int(0)),
-            ("line".to_string(), CtValue::Some(Box::new(CtValue::Int(1)))),
-            ("column".to_string(), CtValue::Some(Box::new(CtValue::Int(1)))),
+            ("line".to_string(), CtValue::Present(Box::new(CtValue::Int(1)))),
+            ("column".to_string(), CtValue::Present(Box::new(CtValue::Int(1)))),
             ("path".to_string(), CtValue::Str(String::new())),
             ("reason".to_string(), CtValue::Str(reason.into())),
             (
                 "cause".to_string(),
-                CtValue::None(crate::AST::Type::Named("EncodingCause".to_string())),
+                CtValue::absent(crate::AST::Type::Named("EncodingCause".to_string())),
             ),
         ],
     }

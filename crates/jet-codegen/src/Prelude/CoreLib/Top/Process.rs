@@ -180,7 +180,7 @@ fn jet_process_spec_spawn(
                 .map(jet_std::ProcessReader::Stderr)
                 .map(std::io::BufReader::new),
         )),
-        terminal: None,
+        terminal: Err(JetAbsent),
         inner: std::rc::Rc::new(std::cell::RefCell::new(Some(child))),
         timeout_ms: spec.timeout_ms,
         started: std::time::Instant::now(),
@@ -249,7 +249,7 @@ fn jet_process_terminal_spawn(
         // on the same master: stderr is represented by the unified stdout
         // stream, matching native terminal behavior.
         stderr: std::rc::Rc::new(std::cell::RefCell::new(None)),
-        terminal: Some(jet_std::TerminalSession { master }),
+        terminal: Ok(jet_std::TerminalSession { master }),
         inner: std::rc::Rc::new(std::cell::RefCell::new(Some(child))),
         timeout_ms: spec.timeout_ms,
         started: std::time::Instant::now(),
@@ -413,7 +413,7 @@ fn jet_process_child_wait(
         if let Some(timeout) = child.timeout_ms {
             if child.started.elapsed() >= std::time::Duration::from_millis(timeout as u64) {
                 #[cfg(unix)]
-                if child.terminal.is_some()
+                if child.terminal.is_ok()
                     && jet_process_pty::signal_group(inner.id(), jet_process_signal_kill()).is_err()
                 {
                     inner.kill().map_err(|error| jet_std::IOError::other(jet_std::IOOperation::Close, Some("process".to_string()), error))?;
@@ -421,7 +421,7 @@ fn jet_process_child_wait(
                 #[cfg(not(unix))]
                 inner.kill().map_err(|error| jet_std::IOError::other(jet_std::IOOperation::Close, Some("process".to_string()), error))?;
                 #[cfg(unix)]
-                if child.terminal.is_none() {
+                if child.terminal.is_err() {
                     inner.kill().map_err(|error| jet_std::IOError::other(jet_std::IOOperation::Close, Some("process".to_string()), error))?;
                 }
                 timed_out = true;
@@ -562,7 +562,7 @@ fn jet_process_child_signal(
 ) -> Result<(), jet_std::IOError> {
     if let Some(inner) = child.inner.borrow_mut().as_mut() {
         #[cfg(unix)]
-        if child.terminal.is_some() {
+        if child.terminal.is_ok() {
             if jet_process_pty::signal_group(inner.id(), signal).is_ok() {
                 return Ok(());
             }

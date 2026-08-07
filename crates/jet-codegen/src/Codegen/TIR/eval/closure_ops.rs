@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use crate::Codegen::TIR::{TClosureOp, TExpr, TExprKind, TLambda, TLambdaBody};
 use crate::Comptime::Builtins::{as_bool, cmp};
-use crate::Comptime::CtValue;
+use crate::Comptime::{CtReport, CtValue};
 use crate::Diagnostics::Diagnostic;
 
 use super::{
@@ -248,13 +248,13 @@ impl<'a> EvalCtx<'a> {
                 indexes.push(crate::Comptime::Builtins::as_int(&target, self.span())?);
             }
             if indexes.len() != 2 {
-                return Ok(CtValue::ResErr(Box::new(CtValue::Str(
+                return Ok(CtValue::failed(Box::new(CtValue::Str(
                     "edit_disjoint needs exactly two indexes".to_string(),
                 ))));
             }
             let ordered = match super::disjoint_semantics::indexes(items.len(), &indexes) {
                 Ok(ordered) => ordered,
-                Err(error) => return Ok(CtValue::ResErr(Box::new(CtValue::Str(error)))),
+                Err(error) => return Ok(CtValue::failed(Box::new(CtValue::Str(error)))),
             };
             let mut views = ordered
                 .into_iter()
@@ -275,7 +275,7 @@ impl<'a> EvalCtx<'a> {
             views.sort_by_key(|(position, _)| *position);
             let argv = views.into_iter().map(|(_, view)| view).collect();
             let _ = self.apply_callable(&args[1], argv, scope)?;
-            return Ok(CtValue::ResOk(Box::new(CtValue::Unit)));
+            return Ok(CtValue::Present(Box::new(CtValue::Unit)));
         }
         let mut recv_v = self.eval_expr(recv, scope)?;
         let progress = progress_parts(&recv_v);
@@ -420,7 +420,7 @@ impl<'a> EvalCtx<'a> {
                     );
                     let keep = call1(self, item.clone())?;
                     if as_bool(&keep, self.span())? {
-                        return Ok(CtValue::Some(Box::new(item)));
+                        return Ok(CtValue::Present(Box::new(item)));
                     }
                 }
                 emit_progress_finish(
@@ -429,7 +429,7 @@ impl<'a> EvalCtx<'a> {
                     progress_cursor,
                     &mut progress_count,
                 );
-                Ok(CtValue::None(crate::AST::Type::Named("Any".into())))
+                Ok(CtValue::absent(crate::AST::Type::Named("Any".into())))
             }
             TClosureOp::Any | TClosureOp::BagAny => {
                 let items = match recv_v {
@@ -629,12 +629,12 @@ impl<'a> EvalCtx<'a> {
                 for (index, item) in items.into_iter().enumerate() {
                     pending += source_pulls.get(index).copied().unwrap_or(1);
                     match call1(self, item)? {
-                        CtValue::Some(v) | CtValue::ResOk(v) => {
+                        CtValue::Present(v) => {
                             out.push(*v);
                             out_pulls.push(pending);
                             pending = 0;
                         }
-                        CtValue::None(_) | CtValue::ResErr(_) => {}
+                        CtValue::Failed(CtReport::Clean(_)) | CtValue::Failed(CtReport::Told(_)) => {}
                         other => {
                             out.push(other);
                             out_pulls.push(pending);
@@ -656,7 +656,7 @@ impl<'a> EvalCtx<'a> {
                         &mut progress_count,
                     );
                     if as_bool(&call1(self, item)?, self.span())? {
-                        return Ok(CtValue::Some(Box::new(CtValue::Int(i as i64))));
+                        return Ok(CtValue::Present(Box::new(CtValue::Int(i as i64))));
                     }
                 }
                 emit_progress_finish(
@@ -665,11 +665,11 @@ impl<'a> EvalCtx<'a> {
                     progress_cursor,
                     &mut progress_count,
                 );
-                Ok(CtValue::None(crate::AST::Type::Int))
+                Ok(CtValue::absent(crate::AST::Type::Int))
             }
             TClosureOp::OptionMap => match recv_v {
-                CtValue::Some(inner) => Ok(CtValue::Some(Box::new(call1(self, *inner)?))),
-                CtValue::None(t) => Ok(CtValue::None(t)),
+                CtValue::Present(inner) => Ok(CtValue::Present(Box::new(call1(self, *inner)?))),
+                CtValue::Failed(CtReport::Clean(t)) => Ok(CtValue::Failed(CtReport::Clean(t))),
                 _ => Err(unsupported("option map receiver", self.span())),
             },
             TClosureOp::ParaMap => {
@@ -725,7 +725,7 @@ impl<'a> EvalCtx<'a> {
                     return Err(unsupported("min_by/max_by receiver", self.span()));
                 };
                 let Some(mut best) = items.first().cloned() else {
-                    return Ok(CtValue::None(crate::AST::Type::Named("Any".into())));
+                    return Ok(CtValue::absent(crate::AST::Type::Named("Any".into())));
                 };
                 let maximum = matches!(op, TClosureOp::MaxBy);
                 let mut best_key = call1(self, best.clone())?;
@@ -739,7 +739,7 @@ impl<'a> EvalCtx<'a> {
                         best_key = candidate_key;
                     }
                 }
-                Ok(CtValue::Some(Box::new(best)))
+                Ok(CtValue::Present(Box::new(best)))
             }
             TClosureOp::CountBy => {
                 let CtValue::List(items) = recv_v else {
@@ -859,17 +859,17 @@ impl<'a> EvalCtx<'a> {
                 for (i, item) in items.into_iter().enumerate() {
                     let ord = self.apply_callable(f, vec![item], scope)?;
                     if matches!(ord, CtValue::Int(0)) {
-                        return Ok(CtValue::Some(Box::new(CtValue::Int(i as i64))));
+                        return Ok(CtValue::Present(Box::new(CtValue::Int(i as i64))));
                     }
                 }
-                Ok(CtValue::None(crate::AST::Type::Int))
+                Ok(CtValue::absent(crate::AST::Type::Int))
             }
             TClosureOp::ListMinMaxBy { .. } => {
                 let CtValue::List(items) = recv_v else {
                     return Err(unsupported("min_max_by receiver", self.span()));
                 };
                 if items.is_empty() {
-                    return Ok(CtValue::None(crate::AST::Type::Int));
+                    return Ok(CtValue::absent(crate::AST::Type::Int));
                 }
                 let f = args.first().ok_or_else(|| unsupported("min_max_by arg", self.span()))?;
                 let mut min_item = items[0].clone();
@@ -881,7 +881,7 @@ impl<'a> EvalCtx<'a> {
                     if key < min_key { min_key = key.clone(); min_item = item.clone(); }
                     if key > max_key { max_key = key; max_item = item; }
                 }
-                Ok(CtValue::Some(Box::new(CtValue::Struct {
+                Ok(CtValue::Present(Box::new(CtValue::Struct {
                     type_name: String::new(),
                     fields: vec![("min".into(), min_item), ("max".into(), max_item)],
                 })))

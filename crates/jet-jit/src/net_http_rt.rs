@@ -232,7 +232,11 @@ pub mod jet_std {
         crate::Encoding::json_rt::datatree_from_json(j)
     }
 
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/UrlMime.rs");
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/JSONCodec.rs");
 }
 
@@ -328,13 +332,29 @@ fn jet_scheduler_unix_stream_ready_wait(
     (read, write)
 }
 
+#[allow(unused_imports)]
+pub use jet_foundation::Outcome::*;
 include!("../../jet-codegen/src/Prelude/CoreLib/Top/DNSResolverPolicy.rs");
+#[allow(unused_imports)]
+pub use jet_foundation::Outcome::*;
 include!("../../jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs");
+#[allow(unused_imports)]
+pub use jet_foundation::Outcome::*;
 include!("../../jet-codegen/src/Prelude/CoreLib/Top/HTTPRoute.rs");
+#[allow(unused_imports)]
+pub use jet_foundation::Outcome::*;
 include!("../../jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs");
+#[allow(unused_imports)]
+pub use jet_foundation::Outcome::*;
 include!("../../jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs");
+#[allow(unused_imports)]
+pub use jet_foundation::Outcome::*;
 include!("../../jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs");
+#[allow(unused_imports)]
+pub use jet_foundation::Outcome::*;
 include!("../../jet-codegen/src/Prelude/CoreLib/Top/WsClient.rs");
+#[allow(unused_imports)]
+pub use jet_foundation::Outcome::*;
 include!("../../jet-codegen/src/Prelude/CoreLib/Top/Ws.rs");
 
 include!("net_http_hosts.rs");

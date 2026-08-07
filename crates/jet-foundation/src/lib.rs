@@ -19,6 +19,7 @@ pub mod JitBackend;
 pub mod JSON;
 pub mod Numeric;
 pub mod OSTarget;
+pub mod Outcome;
 pub mod JetTrace;
 pub mod PerformanceBudget;
 pub mod Persist;

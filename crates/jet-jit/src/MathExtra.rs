@@ -7,6 +7,8 @@ use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
 
 pub(crate) mod math_rt {
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!(concat!(env!("OUT_DIR"), "/math_rt.rs"));
 }
 

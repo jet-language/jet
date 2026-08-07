@@ -20,6 +20,8 @@ trait JetShow {
 }
 
 mod wire {
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/DBPluginWire.rs");
 }
 
@@ -66,12 +68,12 @@ fn io_error(kind: &str, cause: impl Into<String>) -> CtValue {
                     ),
                     (
                         "resource".to_string(),
-                        CtValue::Some(Box::new(CtValue::Str("stdin".to_string()))),
+                        CtValue::Present(Box::new(CtValue::Str("stdin".to_string()))),
                     ),
-                    ("os_code".to_string(), CtValue::None(Type::Int)),
+                    ("os_code".to_string(), CtValue::absent(Type::Int)),
                     (
                         "cause".to_string(),
-                        CtValue::Some(Box::new(CtValue::Str(cause.into()))),
+                        CtValue::Present(Box::new(CtValue::Str(cause.into()))),
                     ),
                 ],
             },
@@ -553,11 +555,11 @@ pub fn ambient_core_call(
                 return Some(Err(unsupported("jet.db.policy arguments", span)));
             };
             Some(Ok(match wire::jet_db_policy_validate(table, expression) {
-                Ok(()) => CtValue::ResOk(Box::new(db_policy_value(
+                Ok(()) => CtValue::Present(Box::new(db_policy_value(
                     table.clone(),
                     expression.clone(),
                 ))),
-                Err(error) => CtValue::ResErr(Box::new(CtValue::Str(error))),
+                Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
             }))
         }
         ("jet.db" | "core.db", "transaction" | "migrate") => {
@@ -565,7 +567,7 @@ pub fn ambient_core_call(
                 return Some(Err(unsupported("database scope", span)));
             };
             let Some(scope) = db_scope_parts(scope_value) else {
-                return Some(Ok(CtValue::ResErr(Box::new(db_err(
+                return Some(Ok(CtValue::failed(Box::new(db_err(
                     "database transaction requires a policy scope",
                 )))));
             };
@@ -583,8 +585,8 @@ pub fn ambient_core_call(
                 wire::jet_db_transaction(&mut backend, label, &steps)
             };
             Some(Ok(match result {
-                Ok(done) => CtValue::ResOk(Box::new(CtValue::Int(done))),
-                Err(error) => CtValue::ResErr(Box::new(db_err(error.message))),
+                Ok(done) => CtValue::Present(Box::new(CtValue::Int(done))),
+                Err(error) => CtValue::failed(Box::new(db_err(error.message))),
             }))
         }
         ("core.io", "confirm") => {
@@ -608,8 +610,8 @@ pub fn ambient_core_call(
                 values.push(item.clone());
             }
             Some(Ok(match IO::prompt_choose(prompt, &values) {
-                Ok(item) => CtValue::ResOk(Box::new(CtValue::Str(item))),
-                Err(error) => CtValue::ResErr(Box::new(io_error("InvalidInput", error))),
+                Ok(item) => CtValue::Present(Box::new(CtValue::Str(item))),
+                Err(error) => CtValue::failed(Box::new(io_error("InvalidInput", error))),
             }))
         }
         ("core.io", "input_secret") => {
@@ -617,14 +619,14 @@ pub fn ambient_core_call(
                 return Some(Err(unsupported("core.io.input_secret prompt", span)));
             };
             Some(Ok(match IO::prompt_input_secret(prompt) {
-                Ok(secret) => CtValue::ResOk(Box::new(CtValue::Str(secret))),
+                Ok(secret) => CtValue::Present(Box::new(CtValue::Str(secret))),
                 Err(error) => {
                     let kind = if error == "secret input needs a terminal" {
                         "InvalidInput"
                     } else {
                         "Other"
                     };
-                    CtValue::ResErr(Box::new(io_error(kind, error)))
+                    CtValue::failed(Box::new(io_error(kind, error)))
                 }
             }))
         }
@@ -699,10 +701,10 @@ pub fn ambient_core_call(
             };
             Some(Ok(
                 match Crypto::runtime::jet_crypto_hkdf_typed_impl(&ikm, &salt, &info, len) {
-                    Ok(secret) => CtValue::ResOk(Box::new(secret_value(
+                    Ok(secret) => CtValue::Present(Box::new(secret_value(
                         Crypto::runtime::jet_crypto_expert_secret_bytes_impl(&secret),
                     ))),
-                    Err(e) => CtValue::ResErr(Box::new(crypto_err(e.to_string()))),
+                    Err(e) => CtValue::failed(Box::new(crypto_err(e.to_string()))),
                 },
             ))
         }
@@ -713,8 +715,8 @@ pub fn ambient_core_call(
             };
             Some(Ok(
                 match Crypto::runtime::jet_crypto_x25519_public_impl(&secret) {
-                    Ok(pub_bytes) => CtValue::ResOk(Box::new(CtValue::Bytes(pub_bytes))),
-                    Err(e) => CtValue::ResErr(Box::new(CtValue::Str(e))),
+                    Ok(pub_bytes) => CtValue::Present(Box::new(CtValue::Bytes(pub_bytes))),
+                    Err(e) => CtValue::failed(Box::new(CtValue::Str(e))),
                 },
             ))
         }
@@ -729,8 +731,8 @@ pub fn ambient_core_call(
             };
             Some(Ok(
                 match Crypto::runtime::jet_crypto_x25519_shared_impl(&secret, &public) {
-                    Ok(shared) => CtValue::ResOk(Box::new(CtValue::Bytes(shared))),
-                    Err(e) => CtValue::ResErr(Box::new(CtValue::Str(e))),
+                    Ok(shared) => CtValue::Present(Box::new(CtValue::Bytes(shared))),
+                    Err(e) => CtValue::failed(Box::new(CtValue::Str(e))),
                 },
             ))
         }
@@ -741,10 +743,10 @@ pub fn ambient_core_call(
             };
             Some(Ok(
                 match Crypto::runtime::jet_crypto_password_hash_typed_impl(&password) {
-                    Ok(ph) => CtValue::ResOk(Box::new(password_hash_value(
+                    Ok(ph) => CtValue::Present(Box::new(password_hash_value(
                         Crypto::runtime::jet_crypto_password_text_impl(&ph),
                     ))),
-                    Err(e) => CtValue::ResErr(Box::new(crypto_err(e.to_string()))),
+                    Err(e) => CtValue::failed(Box::new(crypto_err(e.to_string()))),
                 },
             ))
         }
@@ -772,8 +774,8 @@ pub fn ambient_core_call(
             let ph = Crypto::runtime::password_hash_from_text(stored);
             Some(Ok(
                 match Crypto::runtime::jet_crypto_password_verify_typed_impl(&password, &ph) {
-                    Ok(b) => CtValue::ResOk(Box::new(CtValue::Bool(b))),
-                    Err(e) => CtValue::ResErr(Box::new(crypto_err(e.to_string()))),
+                    Ok(b) => CtValue::Present(Box::new(CtValue::Bool(b))),
+                    Err(e) => CtValue::failed(Box::new(crypto_err(e.to_string()))),
                 },
             ))
         }
@@ -799,10 +801,10 @@ pub fn ambient_core_call(
         }
         ("jet.crypto", "__x25519_generate") => Some(Ok(
             match Crypto::runtime::jet_crypto_x25519_generate_impl() {
-                Ok(key) => CtValue::ResOk(Box::new(x25519_secret_value(
+                Ok(key) => CtValue::Present(Box::new(x25519_secret_value(
                     Crypto::runtime::jet_crypto_expert_x25519_secret_bytes_impl(&key),
                 ))),
-                Err(e) => CtValue::ResErr(Box::new(crypto_err(e.to_string()))),
+                Err(e) => CtValue::failed(Box::new(crypto_err(e.to_string()))),
             },
         )),
         ("jet.crypto", "__x25519_public") => {
@@ -842,7 +844,7 @@ pub fn ambient_core_call(
                         match Crypto::runtime::jet_crypto_x25519_public_from_bytes_impl(bytes) {
                             Ok(pk) => out.push(pk),
                             Err(e) => {
-                                return Some(Ok(CtValue::ResErr(Box::new(crypto_err(
+                                return Some(Ok(CtValue::failed(Box::new(crypto_err(
                                     e.to_string(),
                                 )))))
                             }
@@ -867,8 +869,8 @@ pub fn ambient_core_call(
                     &dest,
                     || false,
                 ) {
-                    Ok(()) => CtValue::ResOk(Box::new(CtValue::Unit)),
-                    Err(e) => CtValue::ResErr(Box::new(crypto_err(e.to_string()))),
+                    Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
+                    Err(e) => CtValue::failed(Box::new(crypto_err(e.to_string()))),
                 },
             ))
         }
@@ -893,11 +895,11 @@ pub fn ambient_core_call(
                         &dest,
                         || false,
                     ) {
-                        Ok(()) => CtValue::ResOk(Box::new(CtValue::Unit)),
-                        Err(e) => CtValue::ResErr(Box::new(crypto_err(e.to_string()))),
+                        Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
+                        Err(e) => CtValue::failed(Box::new(crypto_err(e.to_string()))),
                     }
                 }
-                Err(e) => CtValue::ResErr(Box::new(crypto_err(e))),
+                Err(e) => CtValue::failed(Box::new(crypto_err(e))),
             }))
         }
         _ => None,
@@ -1259,8 +1261,8 @@ pub fn ambient_handle(
                 return Some(Err(unsupported("ServiceRuntime.commit id", span)));
             };
             return Some(Ok(match service_prelude::jet_services_runtime_commit(&runtime, id) {
-                Ok(()) => CtValue::ResOk(Box::new(CtValue::Unit)),
-                Err(error) => CtValue::ResErr(Box::new(service_error_value(error))),
+                Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
+                Err(error) => CtValue::failed(Box::new(service_error_value(error))),
             }));
         }
         let result = match op {
@@ -1297,8 +1299,8 @@ pub fn ambient_handle(
             _ => unreachable!(),
         };
         return Some(Ok(match result {
-            Ok(receipt) => CtValue::ResOk(Box::new(service_receipt_value(receipt))),
-            Err(error) => CtValue::ResErr(Box::new(service_error_value(error))),
+            Ok(receipt) => CtValue::Present(Box::new(service_receipt_value(receipt))),
+            Err(error) => CtValue::failed(Box::new(service_error_value(error))),
         }));
     }
     let handle = db_handle(recv)?;
@@ -1321,17 +1323,17 @@ pub fn ambient_handle(
                     &sql, &values, &table, &expression, &user,
                 ) {
                     Ok((sql, values)) => (handle, sql, values),
-                    Err(error) => return Some(Ok(CtValue::ResErr(Box::new(db_err(error.message))))),
+                    Err(error) => return Some(Ok(CtValue::failed(Box::new(db_err(error.message))))),
                 },
-                None => return Some(Ok(CtValue::ResErr(Box::new(db_err(
+                None => return Some(Ok(CtValue::failed(Box::new(db_err(
                     "database row operations require a policy scope",
                 ))))),
             };
             let params = wire::jet_db_encode_params(&values);
             let out = DB::runtime_execute(handle, &sql, &params);
             Some(Ok(match wire::jet_db_decode_execute_result(&out) {
-                Ok(n) => CtValue::ResOk(Box::new(CtValue::Int(n))),
-                Err(e) => CtValue::ResErr(Box::new(db_err(e.message))),
+                Ok(n) => CtValue::Present(Box::new(CtValue::Int(n))),
+                Err(e) => CtValue::failed(Box::new(db_err(e.message))),
             }))
         }
         "DBQuery" => {
@@ -1348,19 +1350,19 @@ pub fn ambient_handle(
                     &sql, &values, &table, &expression, &user,
                 ) {
                     Ok((sql, values)) => (handle, sql, values),
-                    Err(error) => return Some(Ok(CtValue::ResErr(Box::new(db_err(error.message))))),
+                    Err(error) => return Some(Ok(CtValue::failed(Box::new(db_err(error.message))))),
                 },
-                None => return Some(Ok(CtValue::ResErr(Box::new(db_err(
+                None => return Some(Ok(CtValue::failed(Box::new(db_err(
                     "database row operations require a policy scope",
                 ))))),
             };
             let params = wire::jet_db_encode_params(&values);
             let out = DB::runtime_query(handle, &sql, &params);
             Some(Ok(match wire::jet_db_decode_query_result(&out) {
-                Ok(rows) => CtValue::ResOk(Box::new(CtValue::List(
+                Ok(rows) => CtValue::Present(Box::new(CtValue::List(
                     rows.into_iter().map(row_map).collect(),
                 ))),
-                Err(e) => CtValue::ResErr(Box::new(db_err(e.message))),
+                Err(e) => CtValue::failed(Box::new(db_err(e.message))),
             }))
         }
         "DBQueryOne" => {
@@ -1377,9 +1379,9 @@ pub fn ambient_handle(
                     &sql, &values, &table, &expression, &user,
                 ) {
                     Ok((sql, values)) => (handle, sql, values),
-                    Err(error) => return Some(Ok(CtValue::ResErr(Box::new(db_err(error.message))))),
+                    Err(error) => return Some(Ok(CtValue::failed(Box::new(db_err(error.message))))),
                 },
-                None => return Some(Ok(CtValue::ResErr(Box::new(db_err(
+                None => return Some(Ok(CtValue::failed(Box::new(db_err(
                     "database row operations require a policy scope",
                 ))))),
             };
@@ -1388,16 +1390,16 @@ pub fn ambient_handle(
             Some(Ok(match wire::jet_db_decode_query_result(&out) {
                 Ok(rows) => {
                     let opt = match rows.into_iter().next() {
-                        Some(row) => CtValue::Some(Box::new(row_map(row))),
-                        None => CtValue::None(Type::Map {
+                        Some(row) => CtValue::Present(Box::new(row_map(row))),
+                        None => CtValue::absent(Type::Map {
                             key: Box::new(Type::String),
                             key_span: None,
                             value: Box::new(Type::Named("DBValue".into())),
                         }),
                     };
-                    CtValue::ResOk(Box::new(opt))
+                    CtValue::Present(Box::new(opt))
                 }
-                Err(e) => CtValue::ResErr(Box::new(db_err(e.message))),
+                Err(e) => CtValue::failed(Box::new(db_err(e.message))),
             }))
         }
         "DBLive" => {
@@ -1412,7 +1414,7 @@ pub fn ambient_handle(
             let (handle, table, expression, user) = match db_scope_parts(recv) {
                 Some(parts) => parts,
                 None => {
-                    return Some(Ok(CtValue::ResErr(Box::new(db_err(
+                    return Some(Ok(CtValue::failed(Box::new(db_err(
                         "database live queries require a policy scope",
                     )))))
                 }
@@ -1421,7 +1423,7 @@ pub fn ambient_handle(
                 &sql, &values, &table, &expression, &user,
             ) {
                 Ok(value) => value,
-                Err(error) => return Some(Ok(CtValue::ResErr(Box::new(db_err(error.message))))),
+                Err(error) => return Some(Ok(CtValue::failed(Box::new(db_err(error.message))))),
             };
             let out = DB::runtime_query(handle, &sql, &wire::jet_db_encode_params(&values));
             Some(Ok(match wire::jet_db_decode_query_result(&out) {
@@ -1433,11 +1435,11 @@ pub fn ambient_handle(
                         &[CtValue::Str(footprint), CtValue::Str(initial)],
                         span,
                     ) {
-                        Ok(query) => CtValue::ResOk(Box::new(query)),
+                        Ok(query) => CtValue::Present(Box::new(query)),
                         Err(error) => return Some(Err(error)),
                     }
                 }
-                Err(error) => CtValue::ResErr(Box::new(db_err(error.message))),
+                Err(error) => CtValue::failed(Box::new(db_err(error.message))),
             }))
         }
         _ => None,
@@ -1587,11 +1589,11 @@ fn ambient_http_server_call(
                 credentials,
                 max_age,
             ) {
-                Ok(h) => Ok(CtValue::ResOk(Box::new(http_handle_value(
+                Ok(h) => Ok(CtValue::Present(Box::new(http_handle_value(
                     "HTTPCorsPolicy",
                     h,
                 )))),
-                Err(error) => Ok(CtValue::ResErr(Box::new(error.value))),
+                Err(error) => Ok(CtValue::failed(Box::new(error.value))),
             }
         }
         "cors" => {
@@ -1622,7 +1624,7 @@ fn ambient_http_handle(
     span: Span,
 ) -> Option<Result<CtValue, Diagnostic>> {
     if op == "HTTPJSONDecodeError" {
-        return Some(Ok(CtValue::ResErr(Box::new(
+        return Some(Ok(CtValue::failed(Box::new(
             crate::net_http_rt::runtime_http_json_decode_error(),
         ))));
     }
@@ -1689,7 +1691,7 @@ fn ambient_http_handle(
 
 fn http_json_text_result(result: Result<String, CtValue>) -> CtValue {
     match result {
-        Ok(text) => CtValue::ResOk(Box::new(CtValue::Str(text))),
-        Err(error) => CtValue::ResErr(Box::new(error)),
+        Ok(text) => CtValue::Present(Box::new(CtValue::Str(text))),
+        Err(error) => CtValue::failed(Box::new(error)),
     }
 }

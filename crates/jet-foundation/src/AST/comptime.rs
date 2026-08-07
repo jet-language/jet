@@ -489,16 +489,65 @@ pub enum CtValue {
         variant: String,
         args: Vec<(Option<String>, CtValue)>,
     },
-    Some(Box<CtValue>),
-    None(Type),
-    ResOk(Box<CtValue>),
-    ResErr(Box<CtValue>),
+    /// D-FAIL-CARRIER1=A — the payload side of the one outcome carrier. `T?`
+    /// and `T ? E` are two views of this carrier, so a present payload has one
+    /// spelling, not one per view. Mirrors the prelude's `Ok` on
+    /// `JetOutcome<T, E>`.
+    Present(Box<CtValue>),
+    /// D-FAIL-CARRIER1=A — the stop side of the one outcome carrier. The report
+    /// says whether the stop is clean or told.
+    Failed(CtReport),
     Unit,
     /// c139 JIT/interpreter-parity: a lambda value (`(x) => x > 3`) captured
     /// at the point it's created, so the interpreter can invoke it later —
     /// passed to a higher-order method (`.filter`/`.map`/`.each`/`.sort_by`/
     /// `Option.lift2`), stored, or returned. See `ClosureData` below.
     Closure(std::sync::Arc<ClosureData>),
+}
+
+/// D-FAIL-CARRIER1=A — the report on the stop side of the one outcome carrier.
+///
+/// `T?` and `T ? E` stop the same way; they differ only in what the report has
+/// to say. A clean report says nothing but the payload it lacks, and is the
+/// comptime twin of the prelude's zero-sized `JetAbsent`. A told report is the
+/// error value on `T ? E`'s stop side.
+#[derive(Clone, Debug, PartialEq)]
+pub enum CtReport {
+    /// The clean report: an absence, which is not a failure.
+    Clean(Box<Type>),
+    /// The told report: the failure the caller reads.
+    Told(Box<CtValue>),
+}
+
+impl CtValue {
+    /// Stop with a clean report: the `T?` view of the carrier, where the
+    /// missing payload would have had type `ty`.
+    pub fn absent(ty: impl Into<Box<Type>>) -> CtValue {
+        CtValue::Failed(CtReport::Clean(ty.into()))
+    }
+
+    /// Stop with a told report: the `T ? E` view of the carrier.
+    pub fn failed(report: Box<CtValue>) -> CtValue {
+        CtValue::Failed(CtReport::Told(report))
+    }
+
+    /// Does this outcome carry a payload?
+    pub fn is_present(&self) -> bool {
+        matches!(self, CtValue::Present(_))
+    }
+
+    /// Did this outcome stop with a clean report?
+    pub fn is_clean_stop(&self) -> bool {
+        matches!(self, CtValue::Failed(CtReport::Clean(_)))
+    }
+
+    /// The told report, when this outcome stopped with one.
+    pub fn told_report(&self) -> Option<&CtValue> {
+        match self {
+            CtValue::Failed(CtReport::Told(report)) => Some(report),
+            _ => None,
+        }
+    }
 }
 
 /// c139: a closure's captured state — the AST `Lambda` node plus every
@@ -595,13 +644,13 @@ impl CtValue {
                     value: Box::new(v),
                 }
             }
-            CtValue::Some(inner) => Type::Option(Box::new(inner.jet_type())),
-            CtValue::None(t) => Type::Option(Box::new(t.clone())),
-            CtValue::ResOk(inner) => Type::Result {
-                ok: Box::new(inner.jet_type()),
-                err: Box::new(Type::Named("ParseError".to_string())),
-            },
-            CtValue::ResErr(e) => Type::Result {
+            // D-FAIL-CARRIER1=A: a payload alone does not say which view of the
+            // carrier a caller asked for, so the optional view — the one with
+            // the clean report — is the answer. Sema owns the declared type;
+            // this is only the value's own shape.
+            CtValue::Present(inner) => Type::Option(Box::new(inner.jet_type())),
+            CtValue::Failed(CtReport::Clean(t)) => Type::Option(t.clone()),
+            CtValue::Failed(CtReport::Told(e)) => Type::Result {
                 ok: Box::new(Type::Int),
                 err: Box::new(e.jet_type()),
             },
@@ -646,10 +695,9 @@ impl CtValue {
                     .collect();
                 format!("[{}]", parts.join(", "))
             }
-            CtValue::Some(v) => v.jet_show(),
-            CtValue::None(_) => "null".to_string(),
-            CtValue::ResOk(v) => v.jet_show(),
-            CtValue::ResErr(_) => "err".to_string(),
+            CtValue::Present(v) => v.jet_show(),
+            CtValue::Failed(CtReport::Clean(_)) => "null".to_string(),
+            CtValue::Failed(CtReport::Told(_)) => "err".to_string(),
             CtValue::Struct { type_name, fields } => {
                 // AOT `JetShow` for user structs is `format!("{:?}", self)`
                 // (`Codegen::Items`) → `user_Name { user_field: … }`. Match that
@@ -734,10 +782,10 @@ impl CtValue {
                     .collect();
                 format!("{{{}}}", parts.join(", "))
             }
-            CtValue::Some(v) => format!("Some({})", v.debug_rust()),
-            CtValue::None(_) => "None".to_string(),
-            CtValue::ResOk(v) => format!("Ok({})", v.debug_rust()),
-            CtValue::ResErr(v) => format!("Err({})", v.debug_rust()),
+            // D-FAIL-CARRIER1=A: one carrier, so one pair of Rust spellings.
+            CtValue::Present(v) => format!("Ok({})", v.debug_rust()),
+            CtValue::Failed(CtReport::Clean(_)) => "Err(JetAbsent)".to_string(),
+            CtValue::Failed(CtReport::Told(v)) => format!("Err({})", v.debug_rust()),
             CtValue::Struct { type_name, fields } => {
                 let ty = type_name.strip_prefix("user_").unwrap_or(type_name);
                 let mangled = format!("user_{}", ty.replace('.', "__"));
@@ -893,18 +941,14 @@ impl CtValue {
                     out.push(')');
                 }
             }
-            CtValue::Some(v) => {
-                out.push_str("Some(");
-                v.render_pretty_inner(out, depth);
-                out.push(')');
-            }
-            CtValue::None(_) => out.push_str("None"),
-            CtValue::ResOk(v) => {
+            // D-FAIL-CARRIER1=A: one carrier, so one pair of spellings.
+            CtValue::Present(v) => {
                 out.push_str("Ok(");
                 v.render_pretty_inner(out, depth);
                 out.push(')');
             }
-            CtValue::ResErr(e) => {
+            CtValue::Failed(CtReport::Clean(_)) => out.push_str("Err(JetAbsent)"),
+            CtValue::Failed(CtReport::Told(e)) => {
                 out.push_str("Err(");
                 e.render_pretty_inner(out, depth);
                 out.push(')');
@@ -982,10 +1026,11 @@ impl CtValue {
                     }
                 }
             }
-            CtValue::Some(v) => v.to_json(),
-            CtValue::None(_) => "null".to_string(),
-            CtValue::ResOk(v) => format!("{{\"ok\":{}}}", v.to_json()),
-            CtValue::ResErr(e) => format!("{{\"err\":{}}}", e.to_json()),
+            // D-FAIL-CARRIER1=A: one carrier, so a payload encodes as itself and
+            // a clean stop as null; only a told report needs a tag.
+            CtValue::Present(v) => v.to_json(),
+            CtValue::Failed(CtReport::Clean(_)) => "null".to_string(),
+            CtValue::Failed(CtReport::Told(e)) => format!("{{\"err\":{}}}", e.to_json()),
             CtValue::Unit => "null".to_string(),
             // c139: a closure has no JSON representation — unreachable in
             // practice (a value routed through the encoder never contains
@@ -1034,10 +1079,10 @@ impl CtValue {
                     s
                 }
             }
-            CtValue::Some(v) => format!("Some({})", v.serialize()),
-            CtValue::None(_) => "None".to_string(),
-            CtValue::ResOk(v) => format!("Ok({})", v.serialize()),
-            CtValue::ResErr(e) => format!("Err({})", e.serialize()),
+            // D-FAIL-CARRIER1=A: one carrier, so one pair of Rust spellings.
+            CtValue::Present(v) => format!("Ok({})", v.serialize()),
+            CtValue::Failed(CtReport::Clean(_)) => "Err(JetAbsent)".to_string(),
+            CtValue::Failed(CtReport::Told(e)) => format!("Err({})", e.serialize()),
             CtValue::Struct { type_name, fields } => {
                 let parts: Vec<String> = fields
                     .iter()

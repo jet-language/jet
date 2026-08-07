@@ -10,6 +10,8 @@ mod native {
     trait JetShow {
         fn jet_show(&self) -> String;
     }
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/Args.rs");
 
     thread_local! {
@@ -378,8 +380,8 @@ mod native {
                     Err(e) => return Some(Err(e)),
                 };
                 match jet_args_parse(&spec, &argv) {
-                    Ok(parsed) => Ok(CtValue::ResOk(Box::new(parsed_value(push_parsed(parsed))))),
-                    Err(msg) => Ok(CtValue::ResErr(Box::new(CtValue::Str(msg)))),
+                    Ok(parsed) => Ok(CtValue::Present(Box::new(parsed_value(push_parsed(parsed))))),
+                    Err(msg) => Ok(CtValue::failed(Box::new(CtValue::Str(msg)))),
                 }
             }
             "ParsedArgsFlag" => {
@@ -398,9 +400,9 @@ mod native {
                     Ok(s) => s,
                     Err(e) => return Some(Err(e)),
                 };
-                Ok(match with_parsed(id, |p| jet_parsed_option(p, &name)).flatten() {
-                    Some(s) => CtValue::Some(Box::new(CtValue::Str(s))),
-                    None => CtValue::None(crate::AST::Type::String),
+                Ok(match with_parsed(id, |p| jet_parsed_option(p, &name)).and_then(|r| r.ok()) {
+                    Some(s) => CtValue::Present(Box::new(CtValue::Str(s))),
+                    None => CtValue::absent(crate::AST::Type::String),
                 })
             }
             "ParsedArgsOptionInt" => {
@@ -410,9 +412,9 @@ mod native {
                     Err(e) => return Some(Err(e)),
                 };
                 Ok(
-                    match with_parsed(id, |p| jet_parsed_option_int(p, &name)).flatten() {
-                        Some(n) => CtValue::Some(Box::new(CtValue::Int(n))),
-                        None => CtValue::None(crate::AST::Type::Int),
+                    match with_parsed(id, |p| jet_parsed_option_int(p, &name)).and_then(|r| r.ok()) {
+                        Some(n) => CtValue::Present(Box::new(CtValue::Int(n))),
+                        None => CtValue::absent(crate::AST::Type::Int),
                     },
                 )
             }
@@ -423,11 +425,11 @@ mod native {
                     Err(e) => return Some(Err(e)),
                 };
                 Ok(
-                    match with_parsed(id, |p| jet_parsed_option_float(p, &name)).flatten() {
+                    match with_parsed(id, |p| jet_parsed_option_float(p, &name)).and_then(|r| r.ok()) {
                         Some(n) => {
-                            CtValue::Some(Box::new(CtValue::Float(crate::AST::CtFloat::f64(n))))
+                            CtValue::Present(Box::new(CtValue::Float(crate::AST::CtFloat::f64(n))))
                         }
-                        None => CtValue::None(crate::AST::Type::Float),
+                        None => CtValue::absent(crate::AST::Type::Float),
                     },
                 )
             }
@@ -443,9 +445,9 @@ mod native {
             "ParsedArgsSubcommand" => {
                 let id = parsed_id(recv)?;
                 Ok(
-                    match with_parsed(id, |p| jet_parsed_subcommand(p)).flatten() {
-                        Some(s) => CtValue::Some(Box::new(CtValue::Str(s))),
-                        None => CtValue::None(crate::AST::Type::String),
+                    match with_parsed(id, |p| jet_parsed_subcommand(p)).and_then(|r| r.ok()) {
+                        Some(s) => CtValue::Present(Box::new(CtValue::Str(s))),
+                        None => CtValue::absent(crate::AST::Type::String),
                     },
                 )
             }
@@ -456,9 +458,9 @@ mod native {
                     _ => return Some(Err(unsupported("ParsedArgs.positional expects Int", span))),
                 };
                 Ok(
-                    match with_parsed(id, |p| jet_parsed_positional(p, idx)).flatten() {
-                        Some(s) => CtValue::Some(Box::new(CtValue::Str(s))),
-                        None => CtValue::None(crate::AST::Type::String),
+                    match with_parsed(id, |p| jet_parsed_positional(p, idx)).and_then(|r| r.ok()) {
+                        Some(s) => CtValue::Present(Box::new(CtValue::Str(s))),
+                        None => CtValue::absent(crate::AST::Type::String),
                     },
                 )
             }

@@ -8,6 +8,8 @@ use cranelift_module::{FuncId, Linkage, Module};
 
 /// Sketch runtime extracted by `build.rs` from `jet-codegen` Prelude/Core.rs.
 pub(crate) mod sketch_rt {
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!(concat!(env!("OUT_DIR"), "/sketch_rt.rs"));
 }
 

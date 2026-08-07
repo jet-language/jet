@@ -198,8 +198,8 @@ fn db_value_result(
     if type_name != "DBValue" {
         return Err(unsupported("DBValue accessor receiver", span));
     }
-    let ok = |v| Ok(CtValue::ResOk(Box::new(v)));
-    let err = |msg: String| Ok(CtValue::ResErr(Box::new(CtValue::Str(msg))));
+    let ok = |v| Ok(CtValue::Present(Box::new(v)));
+    let err = |msg: String| Ok(CtValue::failed(Box::new(CtValue::Str(msg))));
     match (want, variant.as_str(), args.as_slice()) {
         ("is_null", "Null", _) => Ok(CtValue::Bool(true)),
         ("is_null", _, _) => Ok(CtValue::Bool(false)),
@@ -237,8 +237,8 @@ fn datatree_int_result(recv: &CtValue) -> CtValue {
         )),
     };
     match result {
-        Ok(value) => CtValue::ResOk(Box::new(value)),
-        Err(reason) => CtValue::ResErr(Box::new(decode_error(String::new(), reason))),
+        Ok(value) => CtValue::Present(Box::new(value)),
+        Err(reason) => CtValue::failed(Box::new(decode_error(String::new(), reason))),
     }
 }
 
@@ -269,7 +269,7 @@ fn datatree_field_result(recv: &CtValue, args: &[CtValue]) -> CtValue {
     let name = match args.first() {
         Some(CtValue::Str(name)) => name,
         _ => {
-            return CtValue::ResErr(Box::new(decode_error(
+            return CtValue::failed(Box::new(decode_error(
                 String::new(),
                 "field name must be Text".to_string(),
             )));
@@ -303,8 +303,8 @@ fn datatree_field_result(recv: &CtValue, args: &[CtValue]) -> CtValue {
         )),
     };
     match result {
-        Ok(value) => CtValue::ResOk(Box::new(value)),
-        Err(error) => CtValue::ResErr(Box::new(error)),
+        Ok(value) => CtValue::Present(Box::new(value)),
+        Err(error) => CtValue::failed(Box::new(error)),
     }
 }
 
@@ -336,8 +336,8 @@ fn datatree_at_result(recv: &CtValue, args: &[CtValue]) -> CtValue {
         )),
     };
     match result {
-        Ok(value) => CtValue::ResOk(Box::new(value)),
-        Err(error) => CtValue::ResErr(Box::new(error)),
+        Ok(value) => CtValue::Present(Box::new(value)),
+        Err(error) => CtValue::failed(Box::new(error)),
     }
 }
 
@@ -352,8 +352,8 @@ fn datatree_scalar_result(recv: &CtValue, variant: &str, name: &str) -> CtValue 
         _ => None,
     };
     match value {
-        Some(value) => CtValue::ResOk(Box::new(value)),
-        None => CtValue::ResErr(Box::new(decode_error(
+        Some(value) => CtValue::Present(Box::new(value)),
+        None => CtValue::failed(Box::new(decode_error(
             String::new(),
             format!(
                 "expected {name}, got {}",
@@ -422,8 +422,8 @@ pub(super) fn eval_handle(
                 _ => return Err(unsupported("Path.write_atomic expects bytes", span)),
             };
             match std::fs::write(&path, bytes) {
-                Ok(()) => Ok(CtValue::ResOk(Box::new(CtValue::Unit))),
-                Err(e) => Ok(CtValue::ResErr(Box::new(CtValue::Str(e.to_string())))),
+                Ok(()) => Ok(CtValue::Present(Box::new(CtValue::Unit))),
+                Err(e) => Ok(CtValue::failed(Box::new(CtValue::Str(e.to_string())))),
             }
         }
         THandleOp::DBValueInt => db_value_result(recv, "int", span),
@@ -914,11 +914,11 @@ fn duration_new(
         }
     };
     Ok(match ms {
-        Some(ms) => CtValue::ResOk(Box::new(CtValue::Struct {
+        Some(ms) => CtValue::Present(Box::new(CtValue::Struct {
             type_name: crate::Syntax::DURATION_TYPE.to_string(),
             fields: vec![("ns".to_string(), CtValue::Int(ms))],
         })),
-        None => CtValue::ResErr(Box::new(CtValue::Struct {
+        None => CtValue::failed(Box::new(CtValue::Struct {
             type_name: crate::Syntax::DURATION_RANGE_ERROR_TYPE.to_string(),
             fields: vec![(
                 "reason".to_string(),
@@ -944,7 +944,7 @@ mod tests {
     }
 
     fn decode_reason(value: CtValue) -> Option<String> {
-        let CtValue::ResErr(error) = value else {
+        let CtValue::failed(error) = value else {
             return None;
         };
         let CtValue::Struct { fields, .. } = *error else {
@@ -962,7 +962,7 @@ mod tests {
     fn datatree_int_rejects_float_and_text_with_canonical_reasons() {
         assert_eq!(
             datatree_int_result(&tree("Int", CtValue::Int(7))),
-            CtValue::ResOk(Box::new(CtValue::Int(7)))
+            CtValue::Present(Box::new(CtValue::Int(7)))
         );
         assert_eq!(
             decode_reason(datatree_int_result(&tree(

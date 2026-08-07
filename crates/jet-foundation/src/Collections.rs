@@ -424,6 +424,7 @@ pub fn builtin_method_return(
         // of the receiver's, which doesn't fit this table's one-fixed-placeholder-type
         // shape), so it is NOT listed here.
         Type::Option(inner) => option_method_return(inner, method, arg_count),
+        Type::Result { ok, .. } => result_method_return(ok, method, arg_count),
         Type::Int | Type::Float | Type::Bool | Type::Char | Type::IntN { .. } | Type::Float32 => {
             numeric_method_return(recv_ty, method, arg_count)
         }
@@ -1175,9 +1176,26 @@ fn view_method_return(elem: &Type, method: &str, nargs: usize) -> Option<Option<
 /// `finish_builtin_method`, the same "sema refines" convention `list_method_return`'s
 /// `map` uses).
 fn option_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
-    let _ = inner;
     match (method, nargs) {
+        // D-FAIL-CARRIER1=A: `.or_err("why")` lifts a clean absence into a
+        // failure. The payload rides through; only the report changes.
+        ("or_err", 1) => Some(Some(Type::Result {
+            ok: Box::new(inner.clone()),
+            err: Box::new(Type::Named(crate::Syntax::TYPE_ERROR.to_string())),
+        })),
         ("map", 1) => Some(Some(Type::Option(Box::new(Type::Int)))),
+        _ => None,
+    }
+}
+
+/// D-FAIL-CARRIER1=A: the middle states of the carrier, read from the fallible
+/// view. `.partial` answers `T?` — sema first proves the error type carries the
+/// surviving payload under that name and at that type, so the answer is
+/// derivable from the receiver alone.
+fn result_method_return(ok: &Type, method: &str, nargs: usize) -> Option<Option<Type>> {
+    match (method, nargs) {
+        ("partial", 0) => Some(Some(Type::Option(Box::new(ok.clone())))),
+        ("notes", 0) => Some(Some(Type::List(Box::new(Type::String)))),
         _ => None,
     }
 }
@@ -2380,6 +2398,9 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
         // D-HOLE1: `opt.map(f: T -> R)`. `.zip` isn't listed — it's checked directly
         // (see `Collections::builtin_method_return`'s `Type::Option` arm comment).
         Type::Option(inner) => match method {
+            // D-FAIL-CARRIER1=A: the reason a clean absence becomes a failure,
+            // and the note an outcome collects on its way.
+            "or_err" => Some(vec![Type::String]),
             "map" => Some(vec![Type::Fn {
                 params: vec![(**inner).clone()],
                 ret: None, // sema refines R from the closure's actual return

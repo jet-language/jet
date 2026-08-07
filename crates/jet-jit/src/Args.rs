@@ -12,6 +12,8 @@ mod runtime {
     trait JetShow {
         fn jet_show(&self) -> String;
     }
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/Args.rs");
 
     #[derive(Clone)]
@@ -116,17 +118,17 @@ mod runtime {
         })
     }
 
-    fn pack_option_str(opt: Option<String>) -> i64 {
+    fn pack_option_str(opt: JetOutcome<String, JetAbsent>) -> i64 {
         match opt {
-            Some(s) => alloc_str(s).wrapping_add(1),
-            None => 0,
+            Ok(s) => alloc_str(s).wrapping_add(1),
+            Err(JetAbsent) => 0,
         }
     }
 
-    fn pack_option_i64(opt: Option<i64>) -> i64 {
+    fn pack_option_i64(opt: JetOutcome<i64, JetAbsent>) -> i64 {
         match opt {
-            Some(v) => v.wrapping_add(1),
-            None => 0,
+            Ok(v) => v.wrapping_add(1),
+            Err(JetAbsent) => 0,
         }
     }
 
@@ -294,8 +296,8 @@ mod runtime {
 
     pub(super) extern "C" fn jet_jit_parsed_option_float_opt(h: i64, name: i64) -> i64 {
         with_parsed(h, |p| match jet_parsed_option_float(p, &clone_str(name)) {
-            Some(v) => (v.to_bits() as i64).wrapping_add(1),
-            None => 0,
+            Ok(v) => (v.to_bits() as i64).wrapping_add(1),
+            Err(JetAbsent) => 0,
         })
     }
 

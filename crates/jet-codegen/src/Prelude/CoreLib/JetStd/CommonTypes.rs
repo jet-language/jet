@@ -79,36 +79,36 @@
         pub buffer_bytes: i64,
         pub max_depth: i64,
         pub max_item_bytes: i64,
-        pub max_total_bytes: Option<i64>,
+        pub max_total_bytes: JetOutcome<i64, JetAbsent>,
         pub max_expansion_depth: i64,
         pub max_expansion_bytes: i64,
     }
     impl EncodingLimits {
-        pub fn safe() -> Self { Self { buffer_bytes: 65536, max_depth: 256, max_item_bytes: 16777216, max_total_bytes: None, max_expansion_depth: 32, max_expansion_bytes: 8388608 } }
+        pub fn safe() -> Self { Self { buffer_bytes: 65536, max_depth: 256, max_item_bytes: 16777216, max_total_bytes: Err(JetAbsent), max_expansion_depth: 32, max_expansion_bytes: 8388608 } }
     }
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub enum EncodingFormat { JSON, JSONL, CSV, XML, CBOR }
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub enum EncodingErrorKind { Syntax, Truncated, Unsupported, Limit, IO, State }
     #[derive(Clone, Debug, PartialEq, Eq)]
-    pub struct EncodingCause { pub kind: String, pub os_code: Option<i64>, pub message: String }
+    pub struct EncodingCause { pub kind: String, pub os_code: JetOutcome<i64, JetAbsent>, pub message: String }
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub struct EncodingError {
         pub format: EncodingFormat, pub kind: EncodingErrorKind, pub byte_offset: i64,
-        pub line: Option<i64>, pub column: Option<i64>, pub path: String,
-        pub reason: String, pub cause: Option<EncodingCause>,
+        pub line: JetOutcome<i64, JetAbsent>, pub column: JetOutcome<i64, JetAbsent>, pub path: String,
+        pub reason: String, pub cause: JetOutcome<EncodingCause, JetAbsent>,
     }
     impl EncodingError {
         /// D-ENCSTREAM-SURFACE1=A: handle-free IO snapshot when kind is IO.
-        pub fn cause(&self) -> Option<EncodingCause> {
+        pub fn cause(&self) -> JetOutcome<EncodingCause, JetAbsent> {
             self.cause.clone()
         }
         fn display_text(&self) -> String {
             let mut out = format!("{:?} {:?} at byte {}", self.format, self.kind, self.byte_offset);
-            if let Some(line) = self.line {
+            if let Ok(line) = self.line {
                 out.push_str(&format!(", line {line}"));
             }
-            if let Some(column) = self.column {
+            if let Ok(column) = self.column {
                 out.push_str(&format!(", column {column}"));
             }
             if !self.path.is_empty() {
@@ -170,9 +170,9 @@
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub struct XMLError {
         pub kind: XMLReason,
-        pub byte_offset: Option<i64>,
-        pub line: Option<i64>,
-        pub column: Option<i64>,
+        pub byte_offset: JetOutcome<i64, JetAbsent>,
+        pub line: JetOutcome<i64, JetAbsent>,
+        pub column: JetOutcome<i64, JetAbsent>,
         pub path: String,
         pub reason: String,
     }
@@ -361,7 +361,7 @@
             std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<ProcessReader>>>>,
         pub stderr:
             std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<ProcessReader>>>>,
-        pub terminal: Option<TerminalSession>,
+        pub terminal: JetOutcome<TerminalSession, JetAbsent>,
         pub timeout_ms: Option<i64>,
         pub started: std::time::Instant,
     }
@@ -442,7 +442,7 @@
         pub x_label: String,
         pub y_label: String,
         pub markers: bool,
-        pub reference: Option<f64>,
+        pub reference: JetOutcome<f64, JetAbsent>,
         pub style: String,
         pub color: String,
         pub legend: String,
@@ -481,22 +481,22 @@
     pub struct DataError {
         pub kind: DataErrorKind,
         pub operation: String,
-        pub row: Option<i64>,
-        pub column: Option<i64>,
-        pub index: Option<i64>,
+        pub row: JetOutcome<i64, JetAbsent>,
+        pub column: JetOutcome<i64, JetAbsent>,
+        pub index: JetOutcome<i64, JetAbsent>,
         pub reason: String,
-        pub cause: Option<EncodingError>,
+        pub cause: JetOutcome<EncodingError, JetAbsent>,
     }
     impl DataError {
         fn display_text(&self) -> String {
             let mut out = format!("{:?} {}", self.kind, self.operation);
-            if let Some(row) = self.row {
+            if let Ok(row) = self.row {
                 out.push_str(&format!(", row {row}"));
             }
-            if let Some(column) = self.column {
+            if let Ok(column) = self.column {
                 out.push_str(&format!(", column {column}"));
             }
-            if let Some(index) = self.index {
+            if let Ok(index) = self.index {
                 out.push_str(&format!(", index {index}"));
             }
             out.push_str(&format!(": {}", self.reason));
@@ -1334,8 +1334,8 @@
                 IOOperation::Resolve => "resolve", IOOperation::Codec => "codec",
             };
             let mut text = format!("{kind} during {operation}");
-            if let Some(resource) = &context.resource { text.push_str(&format!(" `{resource}`")); }
-            if let Some(cause) = &context.cause { text.push_str(&format!(": {cause}")); }
+            if let Ok(resource) = &context.resource { text.push_str(&format!(" `{resource}`")); }
+            if let Ok(cause) = &context.cause { text.push_str(&format!(": {cause}")); }
             text
         }
     }

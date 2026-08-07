@@ -4,7 +4,7 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
 
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::AST::{BinOp, CtFloat, CtKey, CtValue, Type};
+use crate::AST::{BinOp, CtFloat, CtKey, CtReport, CtValue, Type};
 
 use super::super::super::Builtins::{as_bool, as_int, cmp};
 use super::super::super::Diagnostics::{index_oob, overflow, unsupported};
@@ -181,8 +181,8 @@ fn eval(
             let mut out = Vec::new();
             for x in xs {
                 match interp.call_inline_closure(f, vec![x.clone()], span, scope)? {
-                    CtValue::ResOk(value) => out.push(*value),
-                    CtValue::ResErr(_) => {}
+                    CtValue::Present(value) => out.push(*value),
+                    CtValue::Failed(CtReport::Told(_)) => {}
                     _ => {
                         return Err(unsupported(
                             "filter_map callback returning a non-Result",
@@ -390,12 +390,12 @@ fn eval(
             let mut out = Vec::with_capacity(xs.len());
             for x in xs {
                 match x {
-                    CtValue::ResOk(value) => out.push((**value).clone()),
-                    CtValue::ResErr(error) => return Ok(CtValue::ResErr(error.clone())),
+                    CtValue::Present(value) => out.push((**value).clone()),
+                    CtValue::Failed(CtReport::Told(error)) => return Ok(CtValue::failed(error.clone())),
                     _ => return Err(unsupported("try_collect on a non-Result list", span)),
                 }
             }
-            CtValue::ResOk(Box::new(CtValue::List(out)))
+            CtValue::Present(Box::new(CtValue::List(out)))
         }
         ("unzip", []) => {
             let mut left = Vec::with_capacity(xs.len());
@@ -490,7 +490,7 @@ fn eval_zip(
                 return value.clone();
             }
         }
-        CtValue::None(
+        CtValue::absent(
             columns[index]
                 .first()
                 .map(CtValue::jet_type)
@@ -551,8 +551,8 @@ fn key(value: CtValue, span: Span) -> Result<CtKey, Diagnostic> {
 
 fn option(value: Option<CtValue>, xs: &[CtValue]) -> CtValue {
     value.map_or_else(
-        || CtValue::None(xs.first().map(CtValue::jet_type).unwrap_or(Type::Int)),
-        |value| CtValue::Some(Box::new(value)),
+        || CtValue::absent(xs.first().map(CtValue::jet_type).unwrap_or(Type::Int)),
+        |value| CtValue::Present(Box::new(value)),
     )
 }
 

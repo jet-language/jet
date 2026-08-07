@@ -24,7 +24,7 @@ fn jet_data_line_options_validate(
     options: &jet_std::DataLineOptions,
     operation: &'static str,
 ) -> Result<(), DataPlotError> {
-    if let Some(reference) = options.reference {
+    if let Ok(reference) = options.reference {
         if !reference.is_finite() {
             return Err(DataPlotError {
                 kind: "NonFinite",
@@ -122,7 +122,7 @@ pub(crate) fn jet_data_line_text(
         options.color,
         if options.markers { "on" } else { "off" }
     ));
-    if let Some(reference) = options.reference {
+    if let Ok(reference) = options.reference {
         lines.push(format!("reference: {reference:.6}"));
     }
     if !options.legend.is_empty() {
@@ -146,7 +146,7 @@ pub(crate) fn jet_data_line_svg(
     let values = jet_data_line_values(groups);
     let mut min = values.iter().copied().fold(f64::INFINITY, f64::min);
     let mut max = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-    if let Some(reference) = options.reference {
+    if let Ok(reference) = options.reference {
         min = min.min(reference);
         max = max.max(reference);
     }
@@ -193,7 +193,7 @@ pub(crate) fn jet_data_line_svg(
         width - right,
         height - bottom
     ));
-    if let Some(reference) = options.reference {
+    if let Ok(reference) = options.reference {
         let (_, y) = point(0, reference);
         out.push_str(&format!(
             "<line x1=\"{left}\" y1=\"{y:.3}\" x2=\"{}\" y2=\"{y:.3}\" stroke=\"#888\" stroke-dasharray=\"4 4\"/>",

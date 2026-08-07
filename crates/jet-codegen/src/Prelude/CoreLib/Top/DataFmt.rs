@@ -33,7 +33,7 @@ fn jet_data_left_join<T, U, FL, FR>(
     right: &Vec<U>,
     left_key: FL,
     right_key: FR,
-) -> Vec<jet_std::DataJoin<T, Option<U>>>
+) -> Vec<jet_std::DataJoin<T, JetOutcome<U, JetAbsent>>>
 where
     T: Clone,
     U: Clone,
@@ -51,13 +51,13 @@ where
                 for right_row in matches {
                     joined.push(jet_std::DataJoin {
                         left: left_row.clone(),
-                        right: Some(right_row.clone()),
+                        right: Ok(right_row.clone()),
                     });
                 }
             }
             None => joined.push(jet_std::DataJoin {
                 left: left_row,
-                right: None,
+                right: Err(JetAbsent),
             }),
         }
     }
@@ -218,11 +218,11 @@ fn jet_data_bridge_err(
     jet_std::DataError {
         kind,
         operation: "require_bridge".to_string(),
-        row: None,
-        column: None,
-        index: None,
+        row: Err(JetAbsent),
+        column: Err(JetAbsent),
+        index: Err(JetAbsent),
         reason: reason.into(),
-        cause: None,
+        cause: Err(JetAbsent),
     }
 }
 

@@ -811,7 +811,7 @@ extern "C" fn jet_jit_http_req_param(req: i64, name: i64) -> i64 {
         NetHttpHandle::HTTPRequest(r) => Some(jet_http_srv_req_param(r, &name)),
         _ => None,
     })
-    .flatten())
+    .and_then(|r| r.ok()))
 }
 
 extern "C" fn jet_jit_http_req_header(req: i64, name: i64) -> i64 {
@@ -820,7 +820,7 @@ extern "C" fn jet_jit_http_req_header(req: i64, name: i64) -> i64 {
         NetHttpHandle::HTTPRequest(r) => Some(jet_http_srv_req_header(r, &name)),
         _ => None,
     })
-    .flatten())
+    .and_then(|r| r.ok()))
 }
 
 extern "C" fn jet_jit_http_body_text(body: i64, limit: i64) -> i64 {
@@ -1683,7 +1683,7 @@ extern "C" fn jet_jit_http_resp_header(resp: i64, name: i64) -> i64 {
         NetHttpHandle::HTTPResponse(r) => Some(jet_http_client_response_header(r, &name)),
         _ => None,
     })
-    .flatten())
+    .and_then(|r| r.ok()))
 }
 
 extern "C" fn jet_jit_http_resp_cookies(resp: i64) -> i64 {

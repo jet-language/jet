@@ -25,8 +25,11 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
     }
     matches!(
         (method, nargs),
+        // D-FAIL-CARRIER1=A: `.or_err("why")` lifts a clean absence into a
+        // failure; `.partial` and `.notes` read the carrier's middle states.
+        ("or_err", 1) | ("partial", 0) | ("notes", 0)
         // List + map shared.
-        ("len", 0) | ("is_empty", 0) | ("clear", 0)
+        |         ("len", 0) | ("is_empty", 0) | ("clear", 0)
         // List-only.
         | ("push", 1) | ("pop", 0) | ("pop", 1) | ("first", 0) | ("last", 0)
         | ("index_of", 1) | ("reverse", 0) | ("sort", 0) | ("join", 1)

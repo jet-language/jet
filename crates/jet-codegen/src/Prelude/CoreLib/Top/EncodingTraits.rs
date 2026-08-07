@@ -102,11 +102,12 @@ impl<T: user_Encode, const N: usize> user_Encode for [T; N] {
         jet_std::DataTree::Array(self.iter().map(|value| value.jet_encode()).collect())
     }
 }
-impl<T: user_Encode> user_Encode for Option<T> {
+// D-FAIL-CARRIER1=A: `T?` is the carrier, so the carrier is what codes.
+impl<T: user_Encode> user_Encode for JetOutcome<T, JetAbsent> {
     fn jet_encode(&self) -> jet_std::DataTree {
         match self {
-            Some(x) => x.jet_encode(),
-            None => jet_std::DataTree::Null,
+            Ok(x) => x.jet_encode(),
+            Err(JetAbsent) => jet_std::DataTree::Null,
         }
     }
 }
@@ -271,11 +272,11 @@ impl<T: user_Decode, const N: usize> user_Decode for [T; N] {
 impl user_Decode for jet_std::DataTree {
     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> { Ok(t.clone()) }
 }
-impl<T: user_Decode> user_Decode for Option<T> {
+impl<T: user_Decode> user_Decode for JetOutcome<T, JetAbsent> {
     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
         match t {
-            jet_std::DataTree::Null => Ok(None),
-            other => Ok(Some(T::jet_decode(other)?)),
+            jet_std::DataTree::Null => Ok(Err(JetAbsent)),
+            other => Ok(Ok(T::jet_decode(other)?)),
         }
     }
 }
@@ -430,8 +431,8 @@ fn jet_data_series_values<T: Clone>(series: &jet_std::DataSeries<T>) -> Vec<T> {
     series.values.clone()
 }
 
-fn jet_data_missing_count<T>(series: &jet_std::DataSeries<Option<T>>) -> i64 {
-    series.missing + series.values.iter().filter(|v| v.is_none()).count() as i64
+fn jet_data_missing_count<T>(series: &jet_std::DataSeries<JetOutcome<T, JetAbsent>>) -> i64 {
+    series.missing + series.values.iter().filter(|v| v.is_err()).count() as i64
 }
 
 fn jet_data_lazy<T: Clone>(table: &jet_std::DataTable<T>) -> jet_std::DataLazyFrame<T> {

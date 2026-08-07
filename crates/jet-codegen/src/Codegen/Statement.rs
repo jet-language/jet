@@ -172,8 +172,8 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
                 }
             }
         }
-        Pattern::Present { binding, .. } => format!("Some({})", mangle(binding)),
-        Pattern::Absent(_) => "None".to_string(),
+        Pattern::Present { binding, .. } => format!("Ok({})", mangle(binding)),
+        Pattern::Absent(_) => "Err(_)".to_string(),
         Pattern::Ok { binding, .. } => format!("Ok({})", mangle(binding)),
         Pattern::Err { binding, .. } => format!("Err({})", mangle(binding)),
         // D-PATR arm-head: range patterns go through mixed-switch; shouldn't appear here.
@@ -335,8 +335,8 @@ pub(crate) fn emit_if_let_pattern(cx: &Cx, pattern: &Pattern) -> String {
                 }
             }
         }
-        Pattern::Present { binding, .. } => format!("Some({})", mangle(binding)),
-        Pattern::Absent(_) => "None".to_string(),
+        Pattern::Present { binding, .. } => format!("Ok({})", mangle(binding)),
+        Pattern::Absent(_) => "Err(_)".to_string(),
         Pattern::Ok { binding, .. } => format!("Ok({})", mangle(binding)),
         Pattern::Err { binding, .. } => format!("Err({})", mangle(binding)),
         // Or/Range in if-let position: fall back to a safe default.

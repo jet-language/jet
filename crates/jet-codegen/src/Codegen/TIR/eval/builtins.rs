@@ -3,7 +3,7 @@ use crate::AST::{CtFloat, Type};
 use crate::AST::CtKey;
 use crate::Comptime::Builtins::{apply_method, apply_mutating, apply_static_type_method};
 use crate::Comptime::CollectionEval;
-use crate::Comptime::CtValue;
+use crate::Comptime::{CtReport, CtValue};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Codegen::TIR::TBuiltinOp;
 use crate::Syntax;
@@ -86,7 +86,7 @@ fn eval_zip_family(
     };
     let fills_for = |index: usize| -> CtValue {
         match fill_mode {
-            crate::Codegen::TIR::TZipFillMode::DefaultNone => CtValue::None(
+            crate::Codegen::TIR::TZipFillMode::DefaultNone => CtValue::absent(
                 field_types
                     .get(index)
                     .map(zip_none_type)
@@ -103,7 +103,7 @@ fn eval_zip_family(
                         )
                     })
                     .unwrap_or_else(|| {
-                        CtValue::None(
+                        CtValue::absent(
                             field_types
                                 .get(index)
                                 .map(zip_none_type)
@@ -126,14 +126,14 @@ fn eval_zip_family(
                             )
                         })
                         .unwrap_or_else(|| {
-                            CtValue::None(
+                            CtValue::absent(
                                 field_types
                                     .get(index)
                                     .map(zip_none_type)
                                     .unwrap_or(Type::Int),
                             )
                         }),
-                    _ => CtValue::None(
+                    _ => CtValue::absent(
                         field_types
                             .get(index)
                             .map(zip_none_type)
@@ -438,14 +438,14 @@ pub(super) fn eval_builtin(
             let mut out = Vec::with_capacity(xs.len());
             for x in xs {
                 match x {
-                    CtValue::ResOk(value) => out.push((**value).clone()),
-                    CtValue::ResErr(error) => {
-                        return Ok(CtValue::ResErr(Box::new((**error).clone())))
+                    CtValue::Present(value) => out.push((**value).clone()),
+                    CtValue::Failed(CtReport::Told(error)) => {
+                        return Ok(CtValue::failed(Box::new((**error).clone())))
                     }
                     _ => return Err(unsupported("try_collect on a non-Result list", span)),
                 }
             }
-            Ok(CtValue::ResOk(Box::new(CtValue::List(out))))
+            Ok(CtValue::Present(Box::new(CtValue::List(out))))
         }
         // CtValue has no distinct View type — materialize the inclusive window as a List.
         TBuiltinOp::ViewNew { .. } | TBuiltinOp::ViewMutNew { .. } => {

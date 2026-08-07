@@ -7,7 +7,7 @@ use cranelift_module::{FuncId, Linkage, Module};
 use jet_codegen::local_cell::{
     JetCell, JetCellEditGuard, JetCellGetOrSet, JetCellReadGuard,
 };
-use jet_codegen::{AST::CtValue, AST::Type};
+use jet_codegen::{AST::CtReport, AST::CtValue, AST::Type};
 use std::collections::{HashMap, HashSet};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
@@ -291,9 +291,9 @@ fn decode_value(
         CellSchema::String => CtValue::Str(rt.heap.clone_string(raw)?),
         CellSchema::Option(inner, inner_ty) => {
             if raw == 0 {
-                CtValue::None(inner_ty.clone())
+                CtValue::absent(inner_ty.clone())
             } else {
-                CtValue::Some(Box::new(decode_value(rt, raw.wrapping_sub(1), inner)?))
+                CtValue::Present(Box::new(decode_value(rt, raw.wrapping_sub(1), inner)?))
             }
         }
         CellSchema::List(inner) => {
@@ -349,8 +349,8 @@ fn encode_value(
         (CellSchema::Bool, CtValue::Bool(value)) => Some(i64::from(*value)),
         (CellSchema::Char, CtValue::Char(value)) => Some(*value as u32 as i64),
         (CellSchema::String, CtValue::Str(value)) => Some(rt.heap.alloc_string(value.clone())),
-        (CellSchema::Option(_, _), CtValue::None(_)) => Some(0),
-        (CellSchema::Option(inner, _), CtValue::Some(value)) => {
+        (CellSchema::Option(_, _), CtValue::Failed(CtReport::Clean(_))) => Some(0),
+        (CellSchema::Option(inner, _), CtValue::Present(value)) => {
             Some(encode_value(rt, value, inner)?.wrapping_add(1))
         }
         (CellSchema::List(inner), CtValue::List(values)) => {

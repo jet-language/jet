@@ -1,12 +1,16 @@
 //! Encoding stream hosts (#729) — `include!` canonical EncodingStream + HostileIo.
 //! File create/open plus JSON/JSONL/CSV/CBOR/XML reader/writer handles.
 
+#[allow(unused_imports)]
+pub use jet_foundation::Outcome::*;
 use super::Concurrency;
 use super::Encoding::{alloc_datatree, clone_heap_string, read_datatree, result_err_msg, result_ok_bits};
 
 /// Canonical stream runtime (jet_std types + EncodingStream algorithm).
 #[allow(dead_code, unused_imports, unused_variables, clippy::all)]
 pub(crate) mod runtime {
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     trait JetShow {
         fn jet_show(&self) -> String;
     }
@@ -24,6 +28,8 @@ pub(crate) mod runtime {
     }
 
     pub mod jet_std {
+        #[allow(unused_imports)]
+        pub use jet_foundation::Outcome::*;
         use super::{JetDisplay, JetShow};
 
         #[derive(Clone, Debug, PartialEq, Eq)]
@@ -31,7 +37,7 @@ pub(crate) mod runtime {
             pub buffer_bytes: i64,
             pub max_depth: i64,
             pub max_item_bytes: i64,
-            pub max_total_bytes: Option<i64>,
+            pub max_total_bytes: JetOutcome<i64, JetAbsent>,
             pub max_expansion_depth: i64,
             pub max_expansion_bytes: i64,
         }
@@ -41,7 +47,7 @@ pub(crate) mod runtime {
                     buffer_bytes: 65536,
                     max_depth: 256,
                     max_item_bytes: 16777216,
-                    max_total_bytes: None,
+                    max_total_bytes: Err(JetAbsent),
                     max_expansion_depth: 32,
                     max_expansion_bytes: 8388608,
                 }
@@ -68,7 +74,7 @@ pub(crate) mod runtime {
         #[derive(Clone, Debug, PartialEq, Eq)]
         pub struct EncodingCause {
             pub kind: String,
-            pub os_code: Option<i64>,
+            pub os_code: JetOutcome<i64, JetAbsent>,
             pub message: String,
         }
         #[derive(Clone, Debug, PartialEq, Eq)]
@@ -76,22 +82,22 @@ pub(crate) mod runtime {
             pub format: EncodingFormat,
             pub kind: EncodingErrorKind,
             pub byte_offset: i64,
-            pub line: Option<i64>,
-            pub column: Option<i64>,
+            pub line: JetOutcome<i64, JetAbsent>,
+            pub column: JetOutcome<i64, JetAbsent>,
             pub path: String,
             pub reason: String,
-            pub cause: Option<EncodingCause>,
+            pub cause: JetOutcome<EncodingCause, JetAbsent>,
         }
         impl EncodingError {
-            pub fn cause(&self) -> Option<EncodingCause> {
+            pub fn cause(&self) -> JetOutcome<EncodingCause, JetAbsent> {
                 self.cause.clone()
             }
             fn display_text(&self) -> String {
                 let mut out = format!("{:?} {:?} at byte {}", self.format, self.kind, self.byte_offset);
-                if let Some(line) = self.line {
+                if let Ok(line) = self.line {
                     out.push_str(&format!(", line {line}"));
                 }
-                if let Some(column) = self.column {
+                if let Ok(column) = self.column {
                     out.push_str(&format!(", column {column}"));
                 }
                 if !self.path.is_empty() {
@@ -165,8 +171,8 @@ pub(crate) mod runtime {
         pub struct XMLError {
             pub kind: XMLReason,
             pub byte_offset: Option<i64>,
-            pub line: Option<i64>,
-            pub column: Option<i64>,
+            pub line: JetOutcome<i64, JetAbsent>,
+            pub column: JetOutcome<i64, JetAbsent>,
             pub path: String,
             pub reason: String,
         }
@@ -412,7 +418,11 @@ pub(crate) mod runtime {
         }
     }
 
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/EncodingHostileIo.rs");
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs");
 
     pub(crate) fn enc_json_writer(
@@ -453,7 +463,7 @@ pub(crate) mod runtime {
     pub(crate) fn enc_json_reader_next(
         reader: &mut jet_std::JSONReader,
     ) -> Result<Option<jet_std::DataEvent>, jet_std::EncodingError> {
-        jet_enc_json_reader_next(reader)
+        jet_enc_json_reader_next(reader).map(|found| found.ok())
     }
     pub(crate) fn enc_jsonl_writer(
         output: JetFileWriter,
@@ -486,7 +496,7 @@ pub(crate) mod runtime {
     pub(crate) fn enc_jsonl_reader_next(
         reader: &mut jet_std::JSONLReader,
     ) -> Result<Option<jet_std::DataTree>, jet_std::EncodingError> {
-        jet_enc_jsonl_reader_next(reader)
+        jet_enc_jsonl_reader_next(reader).map(|found| found.ok())
     }
     pub(crate) fn enc_csv_writer(
         output: JetFileWriter,
@@ -519,7 +529,7 @@ pub(crate) mod runtime {
     pub(crate) fn enc_csv_reader_next(
         reader: &mut jet_std::CSVReader,
     ) -> Result<Option<Vec<String>>, jet_std::EncodingError> {
-        jet_enc_csv_reader_next(reader)
+        jet_enc_csv_reader_next(reader).map(|found| found.ok())
     }
     pub(crate) fn enc_cbor_writer(
         output: JetFileWriter,
@@ -552,7 +562,7 @@ pub(crate) mod runtime {
     pub(crate) fn enc_cbor_reader_next(
         reader: &mut jet_std::CBORReader,
     ) -> Result<Option<jet_std::DataEvent>, jet_std::EncodingError> {
-        jet_enc_cbor_reader_next(reader)
+        jet_enc_cbor_reader_next(reader).map(|found| found.ok())
     }
     pub(crate) fn enc_xml_writer(
         output: JetFileWriter,
@@ -587,7 +597,7 @@ pub(crate) mod runtime {
     pub(crate) fn enc_xml_reader_next(
         reader: &mut jet_std::XMLReader,
     ) -> Result<Option<jet_std::DataTree>, jet_std::EncodingError> {
-        jet_enc_xml_reader_next(reader)
+        jet_enc_xml_reader_next(reader).map(|found| found.ok())
     }
 }
 
@@ -700,7 +710,7 @@ fn read_limits(handle: i64) -> runtime::jet_std::EncodingLimits {
             buffer_bytes: get(0),
             max_depth: get(1),
             max_item_bytes: get(2),
-            max_total_bytes: if total == 0 { None } else { Some(total) },
+            max_total_bytes: if total == 0 { Err(JetAbsent) } else { Ok(total) },
             max_expansion_depth: get(4),
             max_expansion_bytes: get(5),
         };

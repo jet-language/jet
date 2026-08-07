@@ -184,20 +184,20 @@ fn jet_rng_bytes(r: &mut jet_std::Rng, n: i64) -> Vec<u8> {
 fn jet_rng_split(r: &mut jet_std::Rng) -> jet_std::Rng {
     jet_std::Rng { state: jet_det_rng_next(r) }
 }
-fn jet_rng_pick<T: Clone>(r: &mut jet_std::Rng, xs: &Vec<T>) -> Option<T> {
+fn jet_rng_pick<T: Clone>(r: &mut jet_std::Rng, xs: &Vec<T>) -> JetOutcome<T, JetAbsent> {
     if xs.is_empty() {
-        None
+        Err(JetAbsent)
     } else {
-        Some(xs[jet_rng_int(r, 0, xs.len() as i64 - 1) as usize].clone())
+        Ok(xs[jet_rng_int(r, 0, xs.len() as i64 - 1) as usize].clone())
     }
 }
 fn jet_rng_weighted_pick<T: Clone>(
     r: &mut jet_std::Rng,
     xs: &Vec<T>,
     weights: &Vec<f64>,
-) -> Option<T> {
+) -> JetOutcome<T, JetAbsent> {
     if xs.is_empty() || xs.len() != weights.len() {
-        return None;
+        return Err(JetAbsent);
     }
     let mut total = 0.0;
     for &w in weights {
@@ -206,17 +206,17 @@ fn jet_rng_weighted_pick<T: Clone>(
         }
     }
     if total <= 0.0 {
-        return None;
+        return Err(JetAbsent);
     }
     let mut needle = jet_rng_float_range(r, 0.0, total);
     for (item, &weight) in xs.iter().zip(weights.iter()) {
         let w = if weight.is_finite() && weight > 0.0 { weight } else { 0.0 };
         if needle < w {
-            return Some(item.clone());
+            return Ok(item.clone());
         }
         needle -= w;
     }
-    xs.last().cloned()
+    jet_outcome_of(xs.last().cloned())
 }
 fn jet_rng_sample<T: Clone>(r: &mut jet_std::Rng, xs: &Vec<T>, k: i64) -> Vec<T> {
     let want = (k.max(0) as usize).min(xs.len());

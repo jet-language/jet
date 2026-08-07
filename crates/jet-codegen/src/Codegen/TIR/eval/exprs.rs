@@ -7,7 +7,7 @@ use crate::Codegen::TIR::{
     TPlace, TStrPart,
 };
 use crate::Comptime::Builtins::{as_bool, as_int, eval_binop};
-use crate::Comptime::{apply_core_call, apply_impure_core_call, CtValue, DevSink};
+use crate::Comptime::{apply_core_call, apply_impure_core_call, CtReport, CtValue, DevSink};
 use crate::Diagnostics::Diagnostic;
 use super::builtins::eval_builtin;
 use super::handles::eval_handle;
@@ -371,7 +371,7 @@ fn try_collect_pulls(items: &[CtValue], pulls: &[usize], tail: usize) -> usize {
     let mut consumed = 0usize;
     for (index, item) in items.iter().enumerate() {
         consumed = consumed.saturating_add(pulls.get(index).copied().unwrap_or(1));
-        if matches!(item, CtValue::ResErr(_)) {
+        if matches!(item, CtValue::Failed(CtReport::Told(_))) {
             return consumed;
         }
     }
@@ -756,7 +756,7 @@ fn show_typed_value(value: &CtValue, ty: &Type, debug: bool) -> Option<String> {
             let (signed, _) = crate::Comptime::MathLayout::integer_type_layout(ty)?;
             Some(crate::Comptime::MathLayout::integer_show(*value, signed))
         }
-        (CtValue::Some(value), Type::Option(inner)) => {
+        (CtValue::Present(value), Type::Option(inner)) => {
             Some(show_typed_value(value, inner, debug).unwrap_or_else(|| {
                 if debug {
                     value.debug_rust()
@@ -765,7 +765,7 @@ fn show_typed_value(value: &CtValue, ty: &Type, debug: bool) -> Option<String> {
                 }
             }))
         }
-        (CtValue::None(_), Type::Option(_)) => Some("null".to_string()),
+        (CtValue::Failed(CtReport::Clean(_)), Type::Option(_)) => Some("null".to_string()),
         (CtValue::List(values), Type::List(inner) | Type::FixedList { elem: inner, .. }) => {
             let parts = values
                 .iter()
@@ -810,8 +810,8 @@ impl<'a> EvalCtx<'a> {
                 _ => Err(unsupported("Encode Char value", self.span())),
             },
             Type::Option(inner) => match value {
-                CtValue::Some(value) => self.eval_serde_encode_value(*value, inner),
-                CtValue::None(_) => Ok(datatree("Null", None)),
+                CtValue::Present(value) => self.eval_serde_encode_value(*value, inner),
+                CtValue::Failed(CtReport::Clean(_)) => Ok(datatree("Null", None)),
                 _ => Err(unsupported("Encode Option value", self.span())),
             },
             Type::List(inner) | Type::FixedList { elem: inner, .. }
@@ -943,8 +943,8 @@ impl<'a> EvalCtx<'a> {
                             return Ok(None);
                         };
                         let old = match self.eval_datatree_decode(encoded.clone(), from_ty)? {
-                            CtValue::ResOk(value) => *value,
-                            CtValue::ResErr(error) => {
+                            CtValue::Present(value) => *value,
+                            CtValue::Failed(CtReport::Told(error)) => {
                                 return Ok(Some(Err(decode_error_under(key, *error))));
                             }
                             _ => unreachable!(),
@@ -997,7 +997,7 @@ impl<'a> EvalCtx<'a> {
                 };
                 let decoded = match decoded {
                     Ok(value) => value,
-                    Err(error) => return Ok(CtValue::ResErr(Box::new(error))),
+                    Err(error) => return Ok(CtValue::failed(Box::new(error))),
                 };
                 if let Type::IntN { signed, bits } = ty {
                     let CtValue::Int(int_value) = &decoded else {
@@ -1017,7 +1017,7 @@ impl<'a> EvalCtx<'a> {
                         } else {
                             "out-of-range Int"
                         };
-                        return Ok(CtValue::ResErr(Box::new(decode_error(
+                        return Ok(CtValue::failed(Box::new(decode_error(
                             "",
                             format!("expected {}, found {found}", ty.name()),
                         ))));
@@ -1052,7 +1052,7 @@ impl<'a> EvalCtx<'a> {
                     Some(("Float", Some(CtValue::Float(value)))) => value.as_f64(),
                     Some(("Int", Some(CtValue::Int(value)))) => *value as f64,
                     _ => {
-                        return Ok(CtValue::ResErr(Box::new(decode_error(
+                        return Ok(CtValue::failed(Box::new(decode_error(
                             "",
                             format!("expected F32, found {}", datatree_kind(&tree)),
                         ))));
@@ -1096,7 +1096,7 @@ impl<'a> EvalCtx<'a> {
                 )),
             },
             Type::Char => match self.eval_datatree_decode(tree, &Type::String)? {
-                CtValue::ResOk(value) => {
+                CtValue::Present(value) => {
                     let CtValue::Str(value) = *value else {
                         unreachable!();
                     };
@@ -1106,14 +1106,14 @@ impl<'a> EvalCtx<'a> {
                         _ => Err(decode_error("", format!("expected a single Char, found {value:?}"))),
                     }
                 }
-                CtValue::ResErr(error) => Err(*error),
+                CtValue::Failed(CtReport::Told(error)) => Err(*error),
                 _ => unreachable!(),
             },
             Type::Option(inner) => match datatree_variant(&tree) {
-                Some(("Null", _)) => Ok(CtValue::None((**inner).clone())),
+                Some(("Null", _)) => Ok(CtValue::absent((**inner).clone())),
                 _ => match self.eval_datatree_decode(tree, inner)? {
-                    CtValue::ResOk(value) => Ok(CtValue::Some(value)),
-                    CtValue::ResErr(error) => Err(*error),
+                    CtValue::Present(value) => Ok(CtValue::Present(value)),
+                    CtValue::Failed(CtReport::Told(error)) => Err(*error),
                     _ => unreachable!(),
                 },
             },
@@ -1131,7 +1131,7 @@ impl<'a> EvalCtx<'a> {
                 };
                 if let Type::FixedList { len, .. } = ty {
                     if bytes.len() != *len as usize {
-                        return Ok(CtValue::ResErr(Box::new(decode_error(
+                        return Ok(CtValue::failed(Box::new(decode_error(
                             "",
                             format!(
                                 "expected a fixed list of length {len}, found {}",
@@ -1146,14 +1146,14 @@ impl<'a> EvalCtx<'a> {
             }
             Type::List(inner) | Type::FixedList { elem: inner, .. } => {
                 let Some(("Array", Some(CtValue::List(values)))) = datatree_variant(&tree) else {
-                    return Ok(CtValue::ResErr(Box::new(decode_error(
+                    return Ok(CtValue::failed(Box::new(decode_error(
                         "",
                         format!("expected a list, found {}", datatree_kind(&tree)),
                     ))));
                 };
                 if let Type::FixedList { len, .. } = ty {
                     if values.len() != *len as usize {
-                        return Ok(CtValue::ResErr(Box::new(decode_error(
+                        return Ok(CtValue::failed(Box::new(decode_error(
                             "",
                             format!("expected a fixed list of length {len}, found {}", values.len()),
                         ))));
@@ -1163,8 +1163,8 @@ impl<'a> EvalCtx<'a> {
                 let mut errors = Vec::new();
                 for (index, value) in values.iter().cloned().enumerate() {
                     match self.eval_datatree_decode(value, inner)? {
-                        CtValue::ResOk(value) => out.push(*value),
-                        CtValue::ResErr(error) => {
+                        CtValue::Present(value) => out.push(*value),
+                        CtValue::Failed(CtReport::Told(error)) => {
                             if let CtValue::List(items) = decode_error_under(
                                 &format!("[{index}]"),
                                 *error,
@@ -1183,7 +1183,7 @@ impl<'a> EvalCtx<'a> {
             }
             Type::Map { key, value: item, .. } if matches!(key.as_ref(), Type::String) => {
                 let Some(("Object", Some(object))) = datatree_variant(&tree) else {
-                    return Ok(CtValue::ResErr(Box::new(decode_error(
+                    return Ok(CtValue::failed(Box::new(decode_error(
                         "",
                         format!("expected an object, found {}", datatree_kind(&tree)),
                     ))));
@@ -1200,7 +1200,7 @@ impl<'a> EvalCtx<'a> {
                         fields.clone()
                     }
                     _ => {
-                        return Ok(CtValue::ResErr(Box::new(decode_error(
+                        return Ok(CtValue::failed(Box::new(decode_error(
                             "",
                             format!("expected an object, found {}", datatree_kind(&tree)),
                         ))));
@@ -1210,10 +1210,10 @@ impl<'a> EvalCtx<'a> {
                 let mut errors = Vec::new();
                 for (key, value) in values {
                     match self.eval_datatree_decode(value, item)? {
-                        CtValue::ResOk(value) => {
+                        CtValue::Present(value) => {
                             out.insert(crate::AST::CtKey::Str(key.clone()), *value);
                         }
-                        CtValue::ResErr(error) => {
+                        CtValue::Failed(CtReport::Told(error)) => {
                             if let CtValue::List(items) = decode_error_under(&key, *error) {
                                 errors.extend(items);
                             }
@@ -1236,12 +1236,12 @@ impl<'a> EvalCtx<'a> {
                         let decoded = self.eval_datatree_decode(tree, &base)?;
                         if let (
                             Some((lo, hi)),
-                            CtValue::ResOk(value),
+                            CtValue::Present(value),
                         ) = (self.distinct_ranges.get(name), &decoded)
                         {
                             if !matches!(value.as_ref(), CtValue::Int(n) if (*lo..=*hi).contains(n))
                             {
-                                return Ok(CtValue::ResErr(Box::new(decode_error(
+                                return Ok(CtValue::failed(Box::new(decode_error(
                                     "",
                                     format!("expected {name} within {lo}..{hi}"),
                                 ))));
@@ -1263,7 +1263,7 @@ impl<'a> EvalCtx<'a> {
                         })
                     });
                 let result = self.run_func(func, vec![tree.clone()], &mut child)?;
-                if matches!(result, CtValue::ResErr(_)) {
+                if matches!(result, CtValue::Failed(CtReport::Told(_))) {
                     // The emitted migration walker probes the current shape
                     // through Rust's short-circuiting `?`, so only its first
                     // failed field contributes a propagation frame. Generated
@@ -1281,7 +1281,7 @@ impl<'a> EvalCtx<'a> {
                             return self.run_func(func, vec![migrated], &mut child);
                         }
                         Some(Err(error)) => {
-                            return Ok(CtValue::ResErr(Box::new(error)));
+                            return Ok(CtValue::failed(Box::new(error)));
                         }
                         None => {}
                     }
@@ -1294,8 +1294,8 @@ impl<'a> EvalCtx<'a> {
             )),
         };
         Ok(match result {
-            Ok(value) => CtValue::ResOk(Box::new(value)),
-            Err(error) => CtValue::ResErr(Box::new(error)),
+            Ok(value) => CtValue::Present(Box::new(value)),
+            Err(error) => CtValue::failed(Box::new(error)),
         })
     }
 
@@ -1639,7 +1639,7 @@ impl<'a> EvalCtx<'a> {
                 let (shared_index, lease_index, editable, path) = shared_guard_parts(&guard)
                     .ok_or_else(|| unsupported("SharedGuard wait", self.span()))?;
                 if !editable {
-                    return Ok(CtValue::ResErr(Box::new(CtValue::Str(
+                    return Ok(CtValue::failed(Box::new(CtValue::Str(
                         "a condition wait needs an edit guard".to_string(),
                     ))));
                 }
@@ -1695,7 +1695,7 @@ impl<'a> EvalCtx<'a> {
                         std::sync::Arc::new(super::EvalConditionWaiter::new(cancel.clone()))
                     },
                 ) {
-                    Ok(()) => Ok(CtValue::ResOk(Box::new(CtValue::Unit))),
+                    Ok(()) => Ok(CtValue::Present(Box::new(CtValue::Unit))),
                     Err(super::shared_protocol::JetConditionWaitError::Predicate(error)) => {
                         Err(error)
                     }
@@ -2192,10 +2192,10 @@ impl<'a> EvalCtx<'a> {
                                 match super::disjoint_semantics::split(xs.len(), mid) {
                                     Ok(bounds) => bounds,
                                     Err(error) => {
-                                        return Ok(CtValue::ResErr(Box::new(CtValue::Str(error))));
+                                        return Ok(CtValue::failed(Box::new(CtValue::Str(error))));
                                     }
                                 };
-                            return Ok(CtValue::ResOk(Box::new(CtValue::Struct {
+                            return Ok(CtValue::Present(Box::new(CtValue::Struct {
                                 type_name: tuple_struct.clone(),
                                 fields: vec![
                                     (
@@ -2221,7 +2221,7 @@ impl<'a> EvalCtx<'a> {
                                 match super::disjoint_semantics::indexes(xs.len(), &indexes) {
                                     Ok(bounds) => bounds,
                                     Err(error) => {
-                                        return Ok(CtValue::ResErr(Box::new(CtValue::Str(error))));
+                                        return Ok(CtValue::failed(Box::new(CtValue::Str(error))));
                                     }
                                 };
                             let mut views = ordered
@@ -2231,7 +2231,7 @@ impl<'a> EvalCtx<'a> {
                                 })
                                 .collect::<Vec<_>>();
                             views.sort_by_key(|(position, _)| *position);
-                            return Ok(CtValue::ResOk(Box::new(CtValue::List(
+                            return Ok(CtValue::Present(Box::new(CtValue::List(
                                 views.into_iter().map(|(_, view)| view).collect(),
                             ))));
                         }
@@ -2462,9 +2462,9 @@ impl<'a> EvalCtx<'a> {
                                 CtValue::Str("expired".to_string())
                             };
                             if valid {
-                                CtValue::ResOk(Box::new(value))
+                                CtValue::Present(Box::new(value))
                             } else {
-                                CtValue::ResErr(Box::new(value))
+                                CtValue::failed(Box::new(value))
                             }
                         }
                         _ => return Err(unsupported("expiring method", self.span())),
@@ -2554,8 +2554,8 @@ impl<'a> EvalCtx<'a> {
                 );
                 if http_json {
                     result = match result {
-                        CtValue::ResErr(_) => result,
-                        CtValue::ResOk(value) => {
+                        CtValue::Failed(CtReport::Told(_)) => result,
+                        CtValue::Present(value) => {
                             let CtValue::Str(text) = *value else {
                                 return Err(unsupported("HTTP JSON text adapter", self.span()));
                             };
@@ -2567,8 +2567,8 @@ impl<'a> EvalCtx<'a> {
                                 self.repl_mode,
                             )?;
                             let tree = match parsed {
-                                CtValue::ResOk(tree) => *tree,
-                                CtValue::ResErr(_) => {
+                                CtValue::Present(tree) => *tree,
+                                CtValue::Failed(CtReport::Told(_)) => {
                                     ambient_http_json_decode_error(self.span())?
                                 }
                                 _ => {
@@ -2578,7 +2578,7 @@ impl<'a> EvalCtx<'a> {
                                     ))
                                 }
                             };
-                            if matches!(tree, CtValue::ResErr(_)) {
+                            if matches!(tree, CtValue::Failed(CtReport::Told(_))) {
                                 tree
                             } else {
                                 let Type::Result { ok, .. } = &expr.ty else {
@@ -2588,8 +2588,8 @@ impl<'a> EvalCtx<'a> {
                                     ));
                                 };
                                 match self.eval_datatree_decode(tree, ok)? {
-                                    CtValue::ResOk(value) => CtValue::ResOk(value),
-                                    CtValue::ResErr(_) => {
+                                    CtValue::Present(value) => CtValue::Present(value),
+                                    CtValue::Failed(CtReport::Told(_)) => {
                                         ambient_http_json_decode_error(self.span())?
                                     }
                                     _ => unreachable!("DataTree decode returns Result"),
@@ -2772,8 +2772,8 @@ impl<'a> EvalCtx<'a> {
                         &fields,
                         method == "to_bytes_canonical",
                     ) {
-                        Ok(bytes) => CtValue::ResOk(Box::new(CtValue::Bytes(bytes))),
-                        Err(reason) => CtValue::ResErr(Box::new(CtValue::Struct {
+                        Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
+                        Err(reason) => CtValue::failed(Box::new(CtValue::Struct {
                             type_name: "CBORError".to_string(),
                             fields: vec![
                                 (
@@ -2829,14 +2829,14 @@ impl<'a> EvalCtx<'a> {
                     ) {
                         Ok(tree) => tree,
                         Err(error) => {
-                            return Ok(CtValue::ResErr(Box::new(
+                            return Ok(CtValue::failed(Box::new(
                                 crate::Comptime::cbor_decode_source_error_for_tir(error),
                             )))
                         }
                     };
                     return Ok(match self.eval_datatree_decode(tree, ok)? {
-                        CtValue::ResOk(value) => CtValue::ResOk(value),
-                        CtValue::ResErr(error) => CtValue::ResErr(error),
+                        CtValue::Present(value) => CtValue::Present(value),
+                        CtValue::Failed(CtReport::Told(error)) => CtValue::Failed(CtReport::Told(error)),
                         _ => unreachable!("Decode protocol returns Result"),
                     });
                 }
@@ -2844,7 +2844,7 @@ impl<'a> EvalCtx<'a> {
                     && method == "__signing_generate"
                     && argv.is_empty()
                 {
-                    return Ok(CtValue::ResOk(Box::new(CtValue::Int(1))));
+                    return Ok(CtValue::Present(Box::new(CtValue::Int(1))));
                 }
                 if module == "jet.crypto"
                     && method == "__signing_public"
@@ -3134,11 +3134,11 @@ impl<'a> EvalCtx<'a> {
             }
             TExprKind::Clone(inner) => self.eval_expr(inner, scope),
             TExprKind::Present(inner) => {
-                Ok(CtValue::Some(Box::new(self.eval_expr(inner, scope)?)))
+                Ok(CtValue::Present(Box::new(self.eval_expr(inner, scope)?)))
             }
-            TExprKind::Absent => Ok(CtValue::None(expr.ty.clone())),
-            TExprKind::Ok(inner) => Ok(CtValue::ResOk(Box::new(self.eval_expr(inner, scope)?))),
-            TExprKind::Err(inner) => Ok(CtValue::ResErr(Box::new(self.eval_expr(inner, scope)?))),
+            TExprKind::Absent => Ok(CtValue::absent(expr.ty.clone())),
+            TExprKind::Ok(inner) => Ok(CtValue::Present(Box::new(self.eval_expr(inner, scope)?))),
+            TExprKind::Err(inner) => Ok(CtValue::failed(Box::new(self.eval_expr(inner, scope)?))),
             TExprKind::TupleLit { fields, .. } => {
                 let mut out = Vec::with_capacity(fields.len());
                 for (name, e) in fields {
@@ -3165,7 +3165,7 @@ impl<'a> EvalCtx<'a> {
                 ..
             } => {
                 let b = match self.eval_expr(base, scope)? {
-                    CtValue::ResOk(inner) | CtValue::Some(inner) => *inner,
+                    CtValue::Present(inner) => *inner,
                     other => other,
                 };
                 let i = self.eval_expr(index, scope)?;
@@ -3362,7 +3362,7 @@ impl<'a> EvalCtx<'a> {
                                             (patch_name == name).then_some(value)
                                         })
                                         .and_then(|value| match value {
-                                            CtValue::Some(value) => Some((**value).clone()),
+                                            CtValue::Present(value) => Some((**value).clone()),
                                             _ => None,
                                         })
                                         .unwrap_or_else(|| old.clone());
@@ -3397,7 +3397,7 @@ impl<'a> EvalCtx<'a> {
                                         .find_map(|(other_name, value)| {
                                             (other_name == name).then_some(value)
                                         })
-                                        .filter(|value| matches!(value, CtValue::Some(_)))
+                                        .filter(|value| matches!(value, CtValue::Present(_)))
                                         .cloned()
                                         .unwrap_or_else(|| current.clone());
                                     (name.clone(), incoming)
@@ -3580,8 +3580,8 @@ impl<'a> EvalCtx<'a> {
             } => {
                 let v = self.eval_expr(inner, scope)?;
                 match v {
-                    CtValue::ResOk(inner) | CtValue::Some(inner) => Ok(*inner),
-                    CtValue::ResErr(e) => {
+                    CtValue::Present(inner) => Ok(*inner),
+                    CtValue::Failed(CtReport::Told(e)) => {
                         // D-ERRCTX1: match AOT `jet_trace_err` / JIT host (dev builds).
                         let file = file.trim_matches('"');
                         let fn_name = fn_name.trim_matches('"');
@@ -3598,30 +3598,24 @@ impl<'a> EvalCtx<'a> {
                             }
                         }
                         // Propagate as a function return of the error value.
-                        self.pending_return = Some(CtValue::ResErr(e));
+                        self.pending_return = Some(CtValue::failed(e));
                         Ok(CtValue::Unit)
                     }
-                    CtValue::None(_) => {
-                        self.pending_return = Some(CtValue::None(crate::AST::Type::Int));
+                    CtValue::Failed(CtReport::Clean(_)) => {
+                        self.pending_return = Some(CtValue::absent(crate::AST::Type::Int));
                         Ok(CtValue::Unit)
                     }
                     other => Ok(other),
                 }
             }
-            TExprKind::OrFallback {
-                value,
-                fallback,
-                is_option,
-            } => {
+            TExprKind::OrFallback { value, fallback } => {
                 let v = self.eval_expr(value, scope)?;
-                // Always treat `None` as a miss: fragment lowering can leave
-                // `is_option=false` when the Option return type is unknown, and
-                // `??` must still unwrap (SortedSet.first() ?? -1, etc.).
-                let miss = matches!(v, CtValue::None(_))
-                    || (!*is_option && matches!(v, CtValue::ResErr(_)));
+                // D-FAIL-CARRIER1=A: one carrier — the report side is the miss,
+                // whether the report is a clean absence or a failure.
+                let miss = matches!(v, CtValue::Failed(CtReport::Clean(_)) | CtValue::Failed(CtReport::Told(_)));
                 if !miss {
                     return match v {
-                        CtValue::Some(inner) | CtValue::ResOk(inner) => Ok(*inner),
+                        CtValue::Present(inner) => Ok(*inner),
                         other => Ok(other),
                     };
                 }
@@ -3916,6 +3910,20 @@ impl<'a> EvalCtx<'a> {
                     *edit_paths_disjoint,
                     scope,
                 ),
+                // D-FAIL-CARRIER1=A: marshalling only. The interpreter supplies
+                // the projection onto the report and calls the very same
+                // prelude reader every other tier calls, so what a success and
+                // a failure each answer is decided in one place.
+                crate::Codegen::TIR::THostCall::CarrierFact { recv, field, notes } => {
+                    let outcome = self.eval_expr(recv, scope)?;
+                    crate::Comptime::Builtins::carrier_fact(&outcome, field, *notes)
+                        .ok_or_else(|| {
+                            unsupported(
+                                "this middle state needs an error type that carries it",
+                                self.span(),
+                            )
+                        })
+                }
                 crate::Codegen::TIR::THostCall::Method { recv, method, args } => {
                     let mut r = self.eval_expr(recv, scope)?;
                     if matches!(
@@ -3951,7 +3959,7 @@ impl<'a> EvalCtx<'a> {
                             .get(clock_index)
                             .is_some_and(|now| *now <= deadline);
                         if !valid {
-                            return Ok(CtValue::ResErr(Box::new(CtValue::Str(
+                            return Ok(CtValue::failed(Box::new(CtValue::Str(
                                 "expired".to_string(),
                             ))));
                         }
@@ -3970,7 +3978,7 @@ impl<'a> EvalCtx<'a> {
                             return Err(unsupported("expiring secret lambda", self.span()));
                         };
                         let result = self.eval_tlambda(lambda, vec![value], scope)?;
-                        return Ok(CtValue::ResOk(Box::new(result)));
+                        return Ok(CtValue::Present(Box::new(result)));
                     }
                     if matches!(&r, CtValue::Struct { type_name, .. } if type_name == "__JetTirSharedWeak")
                         && method == "upgrade"
@@ -3994,12 +4002,12 @@ impl<'a> EvalCtx<'a> {
                             .get(index)
                             .is_some();
                         return Ok(if alive {
-                            CtValue::Some(Box::new(CtValue::Struct {
+                            CtValue::Present(Box::new(CtValue::Struct {
                                 type_name: "__JetTirShared".to_string(),
                                 fields: vec![("index".to_string(), CtValue::Int(index as i64))],
                             }))
                         } else {
-                            CtValue::None(Type::Shared(Box::new(Type::Int)))
+                            CtValue::absent(Type::Shared(Box::new(Type::Int)))
                         });
                     }
                     if matches!(&r, CtValue::Struct { type_name, .. } if type_name == "__JetTirShared") {
@@ -4231,9 +4239,9 @@ impl<'a> EvalCtx<'a> {
                             None => String::new(),
                         };
                         return Ok(match argv.first() {
-                            Some(CtValue::ResOk(v)) => CtValue::ResOk(v.clone()),
-                            Some(CtValue::ResErr(err)) => {
-                                CtValue::ResErr(Box::new(CtValue::Str(format!(
+                            Some(CtValue::Present(v)) => CtValue::Present(v.clone()),
+                            Some(CtValue::Failed(CtReport::Told(err))) => {
+                                CtValue::failed(Box::new(CtValue::Str(format!(
                                     "{}: {}",
                                     msg,
                                     err.jet_show()
@@ -4342,7 +4350,7 @@ impl<'a> EvalCtx<'a> {
             }
             TExprKind::RangeCheckedCtor { name, arg } => {
                 let v = self.eval_expr(arg, scope)?;
-                Ok(CtValue::ResOk(Box::new(v)))
+                Ok(CtValue::Present(Box::new(v)))
                 // Range bounds are enforced by sema for literals; dynamic checks
                 // reuse the same ok-wrapping Result shape as AOT try_new.
                 .map(|ok| {
@@ -4360,8 +4368,8 @@ impl<'a> EvalCtx<'a> {
                 let v = self.eval_expr(arg, scope)?;
                 let converted = self.eval_numeric_op(&v, op, &arg.ty, &expr.ty)?;
                 let inner = match converted {
-                    CtValue::ResOk(v) => *v,
-                    CtValue::ResErr(e) if *fallible => return Ok(CtValue::ResErr(e)),
+                    CtValue::Present(v) => *v,
+                    CtValue::Failed(CtReport::Told(e)) if *fallible => return Ok(CtValue::Failed(CtReport::Told(e))),
                     other if !*fallible => other,
                     other => other,
                 };
@@ -4372,14 +4380,14 @@ impl<'a> EvalCtx<'a> {
                     if *n < *lo || *n > *hi {
                         let err = CtValue::Str(format!("value doesn't fit in range {lo}..{hi}"));
                         return Ok(if *fallible {
-                            CtValue::ResErr(Box::new(err))
+                            CtValue::failed(Box::new(err))
                         } else {
                             return Err(unsupported("distinct out of range", self.span()));
                         });
                     }
                 }
                 Ok(if *fallible {
-                    CtValue::ResOk(Box::new(inner))
+                    CtValue::Present(Box::new(inner))
                 } else {
                     inner
                 })
@@ -4423,12 +4431,12 @@ impl<'a> EvalCtx<'a> {
                     .ok_or_else(|| "unit conversion would round".to_string())
                 };
                 match converted {
-                    Ok(value) if *fallible || rounding.is_some() => Ok(CtValue::ResOk(Box::new(
+                    Ok(value) if *fallible || rounding.is_some() => Ok(CtValue::Present(Box::new(
                         CtValue::Float(CtFloat::f64(value)),
                     ))),
                     Ok(value) => Ok(CtValue::Float(CtFloat::f64(value))),
                     Err(error) if *fallible || rounding.is_some() => {
-                        Ok(CtValue::ResErr(Box::new(CtValue::Str(error))))
+                        Ok(CtValue::failed(Box::new(CtValue::Str(error))))
                     }
                     Err(error) => Err(unsupported(&error, self.span())),
                 }
@@ -4735,8 +4743,8 @@ impl<'a> EvalCtx<'a> {
                 let mut child = HashMap::new();
                 child.insert("self".to_string(), recv);
                 match self.run_func(func, vec![key], &mut child)? {
-                    CtValue::Some(value) => Ok(*value),
-                    CtValue::None(_) => Err(unsupported("index miss", self.span())),
+                    CtValue::Present(value) => Ok(*value),
+                    CtValue::Failed(CtReport::Clean(_)) => Err(unsupported("index miss", self.span())),
                     _ => Err(unsupported("Index.get result", self.span())),
                 }
             }
@@ -4773,7 +4781,7 @@ impl<'a> EvalCtx<'a> {
                 };
                 let result = self.eval_expr(inner, scope)?;
                 match result {
-                    CtValue::ResErr(error) => Ok(CtValue::ResErr(Box::new(
+                    CtValue::Failed(CtReport::Told(error)) => Ok(CtValue::failed(Box::new(
                         decode_error_under(&segment, *error),
                     ))),
                     other => Ok(other),
@@ -4817,9 +4825,9 @@ impl<'a> EvalCtx<'a> {
                                             (
                                                 name.clone(),
                                                 if changed {
-                                                    CtValue::Some(Box::new(new_value.clone()))
+                                                    CtValue::Present(Box::new(new_value.clone()))
                                                 } else {
-                                                    CtValue::None(new_value.jet_type())
+                                                    CtValue::absent(new_value.jet_type())
                                                 },
                                             )
                                         })
@@ -4955,8 +4963,8 @@ impl<'a> EvalCtx<'a> {
             } => {
                 let v = self.eval_expr(base, scope)?;
                 match v {
-                    CtValue::None(_) => Ok(CtValue::None(expr.ty.clone())),
-                    CtValue::Some(inner) => {
+                    CtValue::Failed(CtReport::Clean(_)) => Ok(CtValue::absent(expr.ty.clone())),
+                    CtValue::Present(inner) => {
                         let field = match *inner {
                             CtValue::Struct { fields, .. } => fields
                                 .into_iter()
@@ -4972,7 +4980,7 @@ impl<'a> EvalCtx<'a> {
                         if *flatten {
                             Ok(field)
                         } else {
-                            Ok(CtValue::Some(Box::new(field)))
+                            Ok(CtValue::Present(Box::new(field)))
                         }
                     }
                     CtValue::Struct { fields, .. } => fields
@@ -4982,7 +4990,7 @@ impl<'a> EvalCtx<'a> {
                             if *flatten {
                                 v
                             } else {
-                                CtValue::Some(Box::new(v))
+                                CtValue::Present(Box::new(v))
                             }
                         })
                         .ok_or_else(|| unsupported(&format!("opt field `{member}`"), self.span())),
@@ -5477,12 +5485,12 @@ impl<'a> EvalCtx<'a> {
                     _ => (i64::MIN, i64::MAX),
                 };
                 if *n < lo || *n > hi {
-                    return Ok(CtValue::ResErr(Box::new(CtValue::Str(format!(
+                    return Ok(CtValue::failed(Box::new(CtValue::Str(format!(
                         "value doesn't fit in {dst_spelling}"
                     )))));
                 }
                 let _ = result_ty;
-                Ok(CtValue::ResOk(Box::new(CtValue::Int(*n))))
+                Ok(CtValue::Present(Box::new(CtValue::Int(*n))))
             }
             TNumericOp::FloatToInt {
                 dst_spelling,
@@ -5496,9 +5504,9 @@ impl<'a> EvalCtx<'a> {
                 let lo: f64 = lower.parse().unwrap_or(f64::NEG_INFINITY);
                 let hi: f64 = upper_exclusive.parse().unwrap_or(f64::INFINITY);
                 if f.is_finite() && f.as_f64() >= lo && f.as_f64() < hi {
-                    Ok(CtValue::ResOk(Box::new(CtValue::Int(f.as_f64().trunc() as i64))))
+                    Ok(CtValue::Present(Box::new(CtValue::Int(f.as_f64().trunc() as i64))))
                 } else {
-                    Ok(CtValue::ResErr(Box::new(CtValue::Str(format!(
+                    Ok(CtValue::failed(Box::new(CtValue::Str(format!(
                         "value doesn't fit in {dst_spelling}"
                     )))))
                 }
@@ -5509,11 +5517,11 @@ impl<'a> EvalCtx<'a> {
                 };
                 let n = f.as_f64();
                 if n.is_finite() && n >= -(f32::MAX as f64) && n <= f32::MAX as f64 {
-                    Ok(CtValue::ResOk(Box::new(CtValue::Float(
+                    Ok(CtValue::Present(Box::new(CtValue::Float(
                         crate::AST::CtFloat::f32(n as f32),
                     ))))
                 } else {
-                    Ok(CtValue::ResErr(Box::new(CtValue::Str(format!(
+                    Ok(CtValue::failed(Box::new(CtValue::Str(format!(
                         "value doesn't fit in {dst_spelling}"
                     )))))
                 }
@@ -5755,12 +5763,12 @@ impl<'a> EvalCtx<'a> {
                     .collect::<Result<Vec<_>, Diagnostic>>()?;
                 return Ok(jet_foundation::StructuralDebug::jet_debug_map(parts));
             }
-            CtValue::Some(inner) => return self.show_value(inner, scope),
-            CtValue::None(_) => return Ok("null".to_string()),
-            CtValue::ResOk(inner) => {
-                return Ok(format!("Ok({})", self.show_value(inner, scope)?));
-            }
-            CtValue::ResErr(inner) => {
+            // D-FAIL-CARRIER1=A: a payload shows as itself on both views of the
+            // carrier, the same way the prelude's `JetShow` unwraps a clean
+            // outcome. Only a told report needs the `Err(…)` wrapper.
+            CtValue::Present(inner) => return self.show_value(inner, scope),
+            CtValue::Failed(CtReport::Clean(_)) => return Ok("null".to_string()),
+            CtValue::Failed(CtReport::Told(inner)) => {
                 return Ok(format!("Err({})", self.show_value(inner, scope)?));
             }
             _ => {}
@@ -5795,10 +5803,9 @@ impl<'a> EvalCtx<'a> {
             CtValue::Bytes(_)
             | CtValue::List(_)
             | CtValue::Map(_)
-            | CtValue::Some(_)
-            | CtValue::None(_)
-            | CtValue::ResOk(_)
-            | CtValue::ResErr(_) => unreachable!("composite display case handled above"),
+            | CtValue::Present(_)
+            | CtValue::Failed(CtReport::Clean(_))
+            | CtValue::Failed(CtReport::Told(_)) => unreachable!("composite display case handled above"),
         })
     }
 

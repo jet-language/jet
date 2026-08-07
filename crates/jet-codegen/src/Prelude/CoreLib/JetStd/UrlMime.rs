@@ -161,22 +161,22 @@
             }
             out
         }
-        pub fn host(&self) -> Option<String> {
-            self.host.clone().filter(|h| !h.is_empty())
+        pub fn host(&self) -> JetOutcome<String, JetAbsent> {
+            jet_outcome_of(self.host.clone().filter(|h| !h.is_empty()))
         }
-        pub fn port(&self) -> Option<i64> {
-            self.port
+        pub fn port(&self) -> JetOutcome<i64, JetAbsent> {
+            jet_outcome_of(self.port)
         }
-        pub fn default_port(&self) -> Option<i64> {
+        pub fn default_port(&self) -> JetOutcome<i64, JetAbsent> {
             match self.scheme.as_str() {
-                "http" | "ws" => Some(80),
-                "https" | "wss" => Some(443),
-                "ftp" => Some(21),
-                "ssh" => Some(22),
-                "smtp" => Some(25),
-                "pop3" => Some(110),
-                "imap" => Some(143),
-                _ => None,
+                "http" | "ws" => Ok(80),
+                "https" | "wss" => Ok(443),
+                "ftp" => Ok(21),
+                "ssh" => Ok(22),
+                "smtp" => Ok(25),
+                "pop3" => Ok(110),
+                "imap" => Ok(143),
+                _ => Err(JetAbsent),
             }
         }
         pub fn path(&self) -> String {
@@ -198,8 +198,8 @@
                 .map(|(k, v)| vec![k.clone(), v.clone()])
                 .collect()
         }
-        pub fn fragment(&self) -> Option<String> {
-            self.fragment.clone()
+        pub fn fragment(&self) -> JetOutcome<String, JetAbsent> {
+            jet_outcome_of(self.fragment.clone())
         }
         pub fn normalize(&self) -> Self {
             let mut out = self.clone();
@@ -344,12 +344,12 @@
         pub fn essence(&self) -> String {
             format!("{}/{}", self.top, self.sub)
         }
-        pub fn param(&self, name: &String) -> Option<String> {
+        pub fn param(&self, name: &String) -> JetOutcome<String, JetAbsent> {
             let needle = name.to_ascii_lowercase();
-            self.params
+            jet_outcome_of(self.params
                 .iter()
                 .find(|(k, _)| k == &needle)
-                .map(|(_, v)| v.clone())
+                .map(|(_, v)| v.clone()))
         }
         pub fn params(&self) -> Vec<Vec<String>> {
             self.params

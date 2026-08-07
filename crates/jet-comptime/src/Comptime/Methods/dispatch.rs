@@ -232,17 +232,17 @@ pub fn apply_seeded_rng_method(
         "pick" => {
             let values = list(0)?;
             Ok(if values.is_empty() {
-                CtValue::None(Type::Int)
+                CtValue::absent(Type::Int)
             } else {
                 let index = seeded_rng_int(state, 0, values.len() as i64 - 1) as usize;
-                CtValue::Some(Box::new(values[index].clone()))
+                CtValue::Present(Box::new(values[index].clone()))
             })
         }
         "weighted_pick" => {
             let values = list(0)?;
             let weights = list(1)?;
             if values.is_empty() || values.len() != weights.len() {
-                return Ok(CtValue::None(Type::Int));
+                return Ok(CtValue::absent(Type::Int));
             }
             let weights = weights
                 .iter()
@@ -253,7 +253,7 @@ pub fn apply_seeded_rng_method(
                 .filter(|weight| weight.is_finite() && **weight > 0.0)
                 .sum::<f64>();
             if total <= 0.0 {
-                return Ok(CtValue::None(Type::Int));
+                return Ok(CtValue::absent(Type::Int));
             }
             let mut needle = seeded_rng_float(state) * total;
             let picked = values
@@ -273,7 +273,7 @@ pub fn apply_seeded_rng_method(
                     }
                 })
                 .or_else(|| values.last().cloned());
-            Ok(CtValue::Some(Box::new(picked.unwrap())))
+            Ok(CtValue::Present(Box::new(picked.unwrap())))
         }
         "sample" => {
             let values = list(0)?;
@@ -1146,7 +1146,7 @@ impl<'a> Interp<'a> {
                 // the sentinel — convert to an `Err` return from this callee
                 // so the caller can handle it (e.g. with `??`).
                 let msg = d.what.clone();
-                Ok(CtValue::ResErr(Box::new(CtValue::Str(msg))))
+                Ok(CtValue::failed(Box::new(CtValue::Str(msg))))
             }
             Err(ref d) if d.code == EARLY_RETURN_CODE => {
                 // `?? return expr` inside a function — the return value was
@@ -1410,9 +1410,9 @@ impl<'a> Interp<'a> {
         let v = self.eval(&arg.expr, scope)?;
         let n = as_int(&v, arg.expr.span())?;
         Ok(if n >= lo && n <= hi {
-            CtValue::ResOk(Box::new(CtValue::Int(n)))
+            CtValue::Present(Box::new(CtValue::Int(n)))
         } else {
-            CtValue::ResErr(Box::new(CtValue::Str(format!(
+            CtValue::failed(Box::new(CtValue::Str(format!(
                 "{} out of range {}..{}",
                 n, lo, hi
             ))))

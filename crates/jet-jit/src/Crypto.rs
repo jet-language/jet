@@ -9,7 +9,11 @@ use cranelift_module::{FuncId, Linkage, Module};
 use jet_foundation::AST::Type;
 
 pub(crate) mod runtime {
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/UnicodeTables.rs");
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs");
     include!("../../jet-pkg-model/src/Prelude/Crypto.rs");
     include!("../../jet-pkg-model/src/Prelude/VaultNfc.rs");
@@ -20,6 +24,8 @@ pub(crate) mod runtime {
     fn jet_sha256_raw(data: &[u8]) -> [u8; 32] {
         jet_crypto_email_sha256_impl(data)
     }
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/Auth.rs");
 
     pub fn auth_verify_jwt(

@@ -18,6 +18,8 @@ pub(crate) mod ui_rt {
         }
     }
 
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/Ui.rs");
 
     // Headless GTK stand-in for resident JIT (no libgtk link). Same surface as

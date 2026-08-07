@@ -4,7 +4,7 @@ use std::sync::{mpsc, Arc};
 use crate::AST::Type;
 use crate::Codegen::TIR::{TForInMethod, TIfCond, TPatternPosition, TPlace, TStmt};
 use crate::Comptime::Builtins::{as_bool, as_int, eval_binop};
-use crate::Comptime::CtValue;
+use crate::Comptime::{CtReport, CtValue};
 use crate::Diagnostics::Diagnostic;
 use super::{
     encode_view_mut_path, load_view_mut_owner_list, parse_view_mut_path, raw_place_local,
@@ -865,8 +865,8 @@ impl<'a> EvalCtx<'a> {
                         next_scope.insert("self".to_string(), iterator);
                         let next = self.run_func(next_func, Vec::new(), &mut next_scope)?;
                         iterator = next_scope.remove("self").unwrap_or(CtValue::Unit);
-                        let CtValue::Some(item) = next else {
-                            if matches!(next, CtValue::None(_)) {
+                        let CtValue::Present(item) = next else {
+                            if matches!(next, CtValue::Failed(CtReport::Clean(_))) {
                                 break;
                             }
                             return Err(unsupported("Iterator.next result", self.span()));
@@ -1560,7 +1560,7 @@ impl<'a> EvalCtx<'a> {
             TIfCond::IsNone { subj } => {
                 Ok(matches!(
                     self.eval_expr(subj, scope)?,
-                    CtValue::None(_) | CtValue::Unit
+                    CtValue::Failed(CtReport::Clean(_)) | CtValue::Unit
                 ))
             }
             TIfCond::IfLet { pattern, subj } => {
@@ -1574,28 +1574,28 @@ impl<'a> EvalCtx<'a> {
                 }
                 match &pattern.pattern {
                     crate::AST::Pattern::Ok { binding, .. } => match value {
-                        CtValue::ResOk(inner) => {
+                        CtValue::Present(inner) => {
                             scope.insert(binding.clone(), *inner);
                             Ok(true)
                         }
                         _ => Ok(false),
                     },
                     crate::AST::Pattern::Err { binding, .. } => match value {
-                        CtValue::ResErr(inner) => {
+                        CtValue::Failed(CtReport::Told(inner)) => {
                             scope.insert(binding.clone(), *inner);
                             Ok(true)
                         }
                         _ => Ok(false),
                     },
                     crate::AST::Pattern::Present { binding, .. } => match value {
-                        CtValue::Some(inner) => {
+                        CtValue::Present(inner) => {
                             scope.insert(binding.clone(), *inner);
                             Ok(true)
                         }
                         _ => Ok(false),
                     },
                     crate::AST::Pattern::Absent(_) => {
-                        Ok(matches!(value, CtValue::None(_) | CtValue::Unit))
+                        Ok(matches!(value, CtValue::Failed(CtReport::Clean(_)) | CtValue::Unit))
                     }
                     _ => bind_match_pattern(&pattern.pattern, &value, scope),
                 }
@@ -1667,7 +1667,7 @@ fn returned_shared_guards(flow: &Flow) -> Vec<usize> {
                     collect(value, out);
                 }
             }
-            CtValue::Some(value) | CtValue::ResOk(value) | CtValue::ResErr(value) => {
+            CtValue::Present(value) | CtValue::Failed(CtReport::Told(value)) => {
                 collect(value, out);
             }
             _ => {}
@@ -1694,18 +1694,18 @@ pub(super) fn bind_match_pattern(
         Pattern::Variant { variant, bindings, .. } => {
             let (got, args) = match value {
                 CtValue::Enum { variant, args, .. } => (variant.as_str(), args.as_slice()),
-                CtValue::ResOk(inner) if variant == "Ok" => {
+                CtValue::Present(inner) if variant == "Ok" => {
                     return bind_slots(bindings, &[(**inner).clone()], scope);
                 }
-                CtValue::ResErr(inner) if variant == "Err" => {
+                CtValue::Failed(CtReport::Told(inner)) if variant == "Err" => {
                     return bind_slots(bindings, &[(**inner).clone()], scope);
                 }
-                CtValue::Some(inner)
+                CtValue::Present(inner)
                     if variant == "Some" || variant == "Present" || variant == "Val" =>
                 {
                     return bind_slots(bindings, &[(**inner).clone()], scope);
                 }
-                CtValue::None(_) | CtValue::Unit if variant == "None" || variant == "Absent" => {
+                CtValue::Failed(CtReport::Clean(_)) | CtValue::Unit if variant == "None" || variant == "Absent" => {
                     return Ok(bindings.is_empty());
                 }
                 _ => return Ok(false),
@@ -1721,27 +1721,27 @@ pub(super) fn bind_match_pattern(
             bind_slots(bindings, &positional, scope)
         }
         Pattern::Ok { binding, .. } => match value {
-            CtValue::ResOk(inner) => {
+            CtValue::Present(inner) => {
                 scope.insert(binding.clone(), (**inner).clone());
                 Ok(true)
             }
             _ => Ok(false),
         },
         Pattern::Err { binding, .. } => match value {
-            CtValue::ResErr(inner) => {
+            CtValue::Failed(CtReport::Told(inner)) => {
                 scope.insert(binding.clone(), (**inner).clone());
                 Ok(true)
             }
             _ => Ok(false),
         },
         Pattern::Present { binding, .. } => match value {
-            CtValue::Some(inner) => {
+            CtValue::Present(inner) => {
                 scope.insert(binding.clone(), (**inner).clone());
                 Ok(true)
             }
             _ => Ok(false),
         },
-        Pattern::Absent(_) => Ok(matches!(value, CtValue::None(_) | CtValue::Unit)),
+        Pattern::Absent(_) => Ok(matches!(value, CtValue::Failed(CtReport::Clean(_)) | CtValue::Unit)),
         Pattern::Range { lo, hi, .. } => match value {
             CtValue::Int(n) => Ok(*n >= *lo && *n <= *hi),
             CtValue::Char(c) => {

@@ -1,5 +1,9 @@
 // D-EMAIL1=A: bounded, dependency-free email address and MIME substrate.
 pub mod jet_email {
+    // The one outcome carrier: from the flat Prelude under AOT, from the host
+    // module when another tier includes this file.
+    #[allow(unused_imports)]
+    use super::*;
     pub const MAX_RECIPIENTS: usize = 100;
     pub const MAX_ATTACHMENTS: usize = 64;
     pub const MAX_HEADER_BYTES: usize = 998;
@@ -129,7 +133,7 @@ pub mod jet_email {
         pub recipient_policy: RecipientPolicy,
         pub trust: TLSTrust,
         pub limits: Limits,
-        pub dkim: Option<DkimConfig<S>>,
+        pub dkim: JetOutcome<DkimConfig<S>, JetAbsent>,
     }
 
     #[derive(Clone, Copy)]
@@ -164,7 +168,7 @@ pub mod jet_email {
             if let SMTPAuth::Password { password, .. } = &mut self.config.auth {
                 (self.runtime.wipe)(password);
             }
-            if let Some(dkim) = &mut self.config.dkim {
+            if let Ok(dkim) = &mut self.config.dkim {
                 (self.runtime.wipe)(&mut dkim.private_key);
             }
         }
@@ -187,7 +191,7 @@ pub mod jet_email {
             selector: dkim.selector.clone(),
             private_key: extract(&dkim.private_key),
             signed_headers: dkim.signed_headers.clone(),
-        });
+        }).map_err(|JetAbsent| JetAbsent);
         smtp_bytes(SMTPConfig {
             host: config.host.clone(), port: config.port, security: config.security.clone(), auth,
             recipient_policy: config.recipient_policy.clone(), trust: config.trust.clone(),
@@ -200,7 +204,7 @@ pub mod jet_email {
             wipe_config_secrets(&mut config, runtime);
             return Err(error);
         }
-        if config.dkim.as_ref().is_some_and(|dkim| dkim.private_key.len() != 32) {
+        if config.dkim.as_ref().is_ok_and(|dkim| dkim.private_key.len() != 32) {
             wipe_config_secrets(&mut config, runtime);
             return Err(error("dkim", "private_key must contain exactly 32 bytes"));
         }
@@ -215,7 +219,7 @@ pub mod jet_email {
 
     fn wipe_config_secrets(config: &mut SMTPConfig<Vec<u8>>, runtime: RuntimeFns) {
         if let SMTPAuth::Password { password, .. } = &mut config.auth { (runtime.wipe)(password); }
-        if let Some(dkim) = &mut config.dkim { (runtime.wipe)(&mut dkim.private_key); }
+        if let Ok(dkim) = &mut config.dkim { (runtime.wipe)(&mut dkim.private_key); }
     }
 
     pub fn smtp_from_env(runtime: RuntimeFns) -> Result<Mailer, Error> {
@@ -262,7 +266,7 @@ pub mod jet_email {
         let private_key = std::env::var("SMTP_DKIM_PRIVATE_KEY_BASE64").ok();
         let signed_headers_env = std::env::var("SMTP_DKIM_SIGNED_HEADERS").ok();
         let dkim = match (domain, selector, private_key) {
-            (None, None, None) if signed_headers_env.is_none() => None,
+            (None, None, None) if signed_headers_env.is_none() => Err(JetAbsent),
             (Some(domain), Some(selector), Some(private_key)) => {
                 let mut encoded = private_key.into_bytes();
                 let decoded = decode_dkim_base64(&encoded, runtime.wipe);
@@ -275,7 +279,7 @@ pub mod jet_email {
                     Some(value) => value.split(',').map(|name| name.trim().to_string()).collect(),
                     None => default_dkim_headers(),
                 };
-                Some(DkimConfig { domain, selector, private_key, signed_headers })
+                Ok(DkimConfig { domain, selector, private_key, signed_headers })
             }
             (_, _, Some(private_key)) => {
                 let mut encoded = private_key.into_bytes();
@@ -322,7 +326,7 @@ pub mod jet_email {
         if let TLSTrust::SystemPlusCa { pem } = &config.trust {
             validate_ca_pem(pem)?;
         }
-        if let Some(dkim) = &config.dkim { validate_dkim_config(dkim)?; }
+        if let Ok(dkim) = &config.dkim { validate_dkim_config(dkim)?; }
         Ok(())
     }
 
@@ -964,11 +968,11 @@ pub mod jet_email {
         -> Result<Vec<u8>, Error>
     {
         validate_smtp_config(config)?;
-        if config.dkim.as_ref().is_some_and(|dkim| dkim.private_key.len() != 32) {
+        if config.dkim.as_ref().is_ok_and(|dkim| dkim.private_key.len() != 32) {
             return Err(error("dkim", "private_key must contain exactly 32 bytes"));
         }
         let mut wire = serialize(message)?;
-        if let Some(dkim) = &config.dkim {
+        if let Ok(dkim) = &config.dkim {
             let runtime = runtime.ok_or_else(|| error("dkim", "signing runtime is unavailable"))?;
             wire = dkim_sign(wire, dkim, runtime)?;
         }

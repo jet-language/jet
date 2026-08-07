@@ -1291,7 +1291,7 @@ fn emit_tir_stmt(
                         pad,
                     ));
                     out.push_str(&format!(
-                        "{}    {}for _jet_item in std::iter::from_fn(|| <{iter_rust} as user_Iterator>::next(&mut _jet_it)){} {{\n",
+                        "{}    {}for _jet_item in std::iter::from_fn(|| <{iter_rust} as user_Iterator>::next(&mut _jet_it).ok()){} {{\n",
                         pad, lbl, stride_suffix,
                     ));
                     out.push_str(&format!(

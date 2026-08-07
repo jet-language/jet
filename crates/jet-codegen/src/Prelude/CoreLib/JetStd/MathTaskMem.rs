@@ -857,8 +857,8 @@
     /// the payload alive; `upgrade` restores a strong handle when still live.
     pub struct JetSharedWeak<T>(std::sync::Weak<JetSharedCell<T>>);
     impl<T: 'static> JetSharedWeak<T> {
-        pub fn upgrade(&self) -> Option<JetShared<T>> {
-            self.0.upgrade().map(JetShared)
+        pub fn upgrade(&self) -> JetOutcome<JetShared<T>, JetAbsent> {
+            jet_outcome_of(self.0.upgrade().map(JetShared))
         }
     }
     impl<T> Clone for JetSharedWeak<T> {

@@ -103,7 +103,7 @@ pub use Reflect::{
     build_enum_layout_info, build_program_info, build_struct_layout_info, build_struct_type_info,
     build_struct_type_info_with_states, ProgramSemanticFacts,
 };
-pub use Value::CtValue;
+pub use Value::{CtReport, CtValue};
 
 static REPL_INTERRUPT_COUNT: AtomicUsize = AtomicUsize::new(0);
 static REPL_RUNTIME_CALL_ACTIVE: AtomicBool = AtomicBool::new(false);
@@ -279,7 +279,7 @@ pub fn run_build_entry_with_policy(
             return Err(error);
         }
     };
-    if let CtValue::ResErr(error) = &returned {
+    if let CtValue::Failed(CtReport::Told(error)) = &returned {
         Build::abort_program_build(&context);
         let detail = error.jet_show();
         let (code, what, why, fix) = if let Some(detail) = detail.strip_prefix("E3511: ") {
@@ -426,7 +426,7 @@ pub fn cbor_decode_typed_for_tir(
     let options = match EncodingLite::cbor_options(options) {
         Ok(options) => options,
         Err(error) => {
-            return CtValue::ResErr(Box::new(cbor_decode_source_error_for_tir(
+            return CtValue::failed(Box::new(cbor_decode_source_error_for_tir(
                 EncodingLite::cbor_error_value(error),
             )));
         }
@@ -434,15 +434,15 @@ pub fn cbor_decode_typed_for_tir(
     let tree = match EncodingLite::cbor_decode(bytes, &options, true) {
         Ok(tree) => tree,
         Err(error) => {
-            return CtValue::ResErr(Box::new(cbor_decode_source_error_for_tir(
+            return CtValue::failed(Box::new(cbor_decode_source_error_for_tir(
                 EncodingLite::cbor_error_value(error),
             )));
         }
     };
     match TypedDecode::typed_decode_builtin_value(root_ty, &tree) {
-        Some(Ok(value)) => CtValue::ResOk(Box::new(value)),
-        Some(Err(error)) => CtValue::ResErr(Box::new(error)),
-        None => CtValue::ResErr(Box::new(TypedDecode::decode_error(format!(
+        Some(Ok(value)) => CtValue::Present(Box::new(value)),
+        Some(Err(error)) => CtValue::failed(Box::new(error)),
+        None => CtValue::failed(Box::new(TypedDecode::decode_error(format!(
             "comptime can't decode `{}` yet",
             root_ty.name()
         )))),

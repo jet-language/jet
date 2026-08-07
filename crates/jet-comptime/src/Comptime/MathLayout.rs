@@ -741,10 +741,10 @@ pub fn overflow_opt(
             Ok(CtValue::Int(narrow(clamped)))
         }
         Syntax::BUILTIN_CHECKED => match checked_op(op, a, b) {
-            Some(raw) if (lo..=hi).contains(&raw) => Ok(CtValue::Some(Box::new(CtValue::Int(
+            Some(raw) if (lo..=hi).contains(&raw) => Ok(CtValue::Present(Box::new(CtValue::Int(
                 narrow(raw),
             )))),
-            _ => Ok(CtValue::None(Type::IntN { signed, bits })),
+            _ => Ok(CtValue::absent(Type::IntN { signed, bits })),
         },
         _ => Err(overflow(mode, span)),
     }

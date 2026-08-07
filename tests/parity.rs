@@ -619,8 +619,9 @@ fn ct_value_methods(text: &str) -> BTreeSet<(String, String)> {
         ("Bool", "Bool"),
         ("Char", "Char"),
         ("BigInt", "BigInt"),
-        ("Some", "Option"),
-        ("None", "Option"),
+        // D-FAIL-CARRIER1=A: one carrier, so one pair of variants.
+        ("Present", "Option"),
+        ("Failed", "Option"),
     ];
     let syntax = format!("{}\n{}", read("crates/jet-foundation/src/Syntax.rs"), read_rust_tree("crates/jet-foundation/src/Syntax"));
     let values = string_constant_values(&syntax, "");

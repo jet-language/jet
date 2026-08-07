@@ -45,7 +45,7 @@ pub fn eval_core_call(
             }).flatten() {
                 Some(source) => source,
                 None => {
-                    return Some(Ok(CtValue::ResErr(Box::new(compiler_error_value(
+                    return Some(Ok(CtValue::failed(Box::new(compiler_error_value(
                         "E0956",
                         "`core.compiler.check` needs a parsed syntax tree with its source",
                         span,
@@ -59,7 +59,7 @@ pub fn eval_core_call(
             } else {
                 format!("`core.compiler.{method}` expects one source String")
             };
-            return Some(Ok(CtValue::ResErr(Box::new(compiler_error_value(
+            return Some(Ok(CtValue::failed(Box::new(compiler_error_value(
                 "E0956",
                 message,
                 span,
@@ -77,7 +77,7 @@ pub fn eval_core_call(
             let got = schema
                 .and_then(|value| match value { CtValue::Int(value) => Some(*value), _ => None })
                 .map_or_else(|| "missing".to_string(), |value| value.to_string());
-            return Some(Ok(CtValue::ResErr(Box::new(compiler_error_value(
+            return Some(Ok(CtValue::failed(Box::new(compiler_error_value(
                 "E0956",
                 format!("unsupported CompilerSyntaxTree schema version {got}"),
                 span,
@@ -90,14 +90,14 @@ pub fn eval_core_call(
         "check" => checked_value(&source),
         "source_map" => source_map_value(&source_map_from_generated_rust(&source)),
         _ => {
-            return Some(Ok(CtValue::ResErr(Box::new(compiler_error_value(
+            return Some(Ok(CtValue::failed(Box::new(compiler_error_value(
                 "E0956",
                 format!("unknown `core.compiler` operation `{method}`"),
                 span,
             )))))
         }
     };
-    Some(Ok(CtValue::ResOk(Box::new(value))))
+    Some(Ok(CtValue::Present(Box::new(value))))
 }
 
 fn ct_struct(type_name: &str, fields: Vec<(&str, CtValue)>) -> CtValue {
@@ -122,8 +122,8 @@ fn span_value(range: TextRange) -> CtValue {
 
 fn optional_span(range: Option<TextRange>) -> CtValue {
     range.map_or(
-        CtValue::None(Type::Named(crate::Syntax::TYPE_SOURCE_SPAN.to_string())),
-        |range| CtValue::Some(Box::new(span_value(range))),
+        CtValue::absent(Type::Named(crate::Syntax::TYPE_SOURCE_SPAN.to_string())),
+        |range| CtValue::Present(Box::new(span_value(range))),
     )
 }
 
@@ -214,8 +214,8 @@ fn syntax_node_value(node: &SyntaxNode) -> CtValue {
             (
                 "name",
                 node.name.clone().map_or(
-                    CtValue::None(Type::String),
-                    |name| CtValue::Some(Box::new(CtValue::Str(name))),
+                    CtValue::absent(Type::String),
+                    |name| CtValue::Present(Box::new(CtValue::Str(name))),
                 ),
             ),
             ("span", span_value(node.span)),
@@ -287,15 +287,15 @@ fn effect_info_value(values: impl IntoIterator<Item = String>) -> CtValue {
 
 fn compiler_option_string(value: Option<&str>) -> CtValue {
     value.map_or(
-        CtValue::None(Type::String),
-        |value| CtValue::Some(Box::new(CtValue::Str(value.to_string()))),
+        CtValue::absent(Type::String),
+        |value| CtValue::Present(Box::new(CtValue::Str(value.to_string()))),
     )
 }
 
 fn compiler_option_int(value: Option<usize>) -> CtValue {
     value.map_or(
-        CtValue::None(Type::Int),
-        |value| CtValue::Some(Box::new(CtValue::Int(value as i64))),
+        CtValue::absent(Type::Int),
+        |value| CtValue::Present(Box::new(CtValue::Int(value as i64))),
     )
 }
 
@@ -431,8 +431,8 @@ fn compiler_symbol_kind_value(kind: &jet_semindex::SymbolKind) -> CtValue {
             ("parent", compiler_option_string(parent)),
             (
                 "mutable",
-                mutable.map_or(CtValue::None(Type::Bool), |value| {
-                    CtValue::Some(Box::new(CtValue::Bool(value)))
+                mutable.map_or(CtValue::absent(Type::Bool), |value| {
+                    CtValue::Present(Box::new(CtValue::Bool(value)))
                 }),
             ),
             ("ty", compiler_option_string(ty)),
@@ -567,8 +567,8 @@ fn compiler_reference_value(reference: &jet_semindex::SymbolRef) -> CtValue {
             (
                 "target",
                 reference.target.as_ref().map_or(
-                    CtValue::None(Type::Named("CompilerDefinitionAnchor".to_string())),
-                    |target| CtValue::Some(Box::new(compiler_anchor_value(target))),
+                    CtValue::absent(Type::Named("CompilerDefinitionAnchor".to_string())),
+                    |target| CtValue::Present(Box::new(compiler_anchor_value(target))),
                 ),
             ),
             ("span", compiler_semantic_span(reference.span)),
@@ -748,9 +748,9 @@ fn checked_value_from_parts(
                 .collect(),
         );
         let semantic_index = if has_errors {
-            CtValue::None(Type::Named("CompilerSemanticIndex".to_string()))
+            CtValue::absent(Type::Named("CompilerSemanticIndex".to_string()))
         } else {
-            CtValue::Some(Box::new(compiler_semantic_index_value(&index, source)))
+            CtValue::Present(Box::new(compiler_semantic_index_value(&index, source)))
         };
         (functions, effects, semantic_index)
     } else {
@@ -762,8 +762,8 @@ fn checked_value_from_parts(
             .collect::<Vec<_>>();
         (
             CtValue::List(functions),
-            CtValue::None(Type::Named("CompilerSemanticIndex".to_string())),
-            CtValue::None(Type::Named("CompilerSemanticIndex".to_string())),
+            CtValue::absent(Type::Named("CompilerSemanticIndex".to_string())),
+            CtValue::absent(Type::Named("CompilerSemanticIndex".to_string())),
         )
     };
     ct_struct(
@@ -805,8 +805,8 @@ fn source_map_value(map: &SourceMap) -> CtValue {
                                     (
                                         "source",
                                         line.source.clone().map_or(
-                                            CtValue::None(Type::String),
-                                            |source| CtValue::Some(Box::new(CtValue::Str(source))),
+                                            CtValue::absent(Type::String),
+                                            |source| CtValue::Present(Box::new(CtValue::Str(source))),
                                         ),
                                     ),
                                     ("source_line", CtValue::Int(line.source_line as i64)),

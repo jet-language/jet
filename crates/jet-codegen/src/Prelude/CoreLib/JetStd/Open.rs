@@ -1,4 +1,8 @@
 mod jet_std {
+    // The one outcome carrier: from the flat Prelude under AOT, from the host
+    // module when another tier includes this file.
+    #[allow(unused_imports)]
+    use super::*;
     // D-IOERROR-TREE1=A: one public context shape for every byte-stream error.
     #[derive(Clone, Copy, Debug, PartialEq)]
     pub enum IOOperation {
@@ -15,14 +19,21 @@ mod jet_std {
     #[derive(Clone, Debug, PartialEq)]
     pub struct IOContext {
         pub operation: IOOperation,
-        pub resource: Option<String>,
-        pub os_code: Option<i64>,
-        pub cause: Option<String>,
+        pub resource: JetOutcome<String, JetAbsent>,
+        pub os_code: JetOutcome<i64, JetAbsent>,
+        pub cause: JetOutcome<String, JetAbsent>,
     }
 
     impl IOContext {
+        // The constructor still takes Rust plumbing so every host call site reads
+        // the same; the carrier starts here, once.
         pub fn new(operation: IOOperation, resource: Option<String>, os_code: Option<i64>, cause: Option<String>) -> Self {
-            Self { operation, resource, os_code, cause }
+            Self {
+                operation,
+                resource: jet_outcome_of(resource),
+                os_code: jet_outcome_of(os_code),
+                cause: jet_outcome_of(cause),
+            }
         }
     }
 
@@ -262,17 +273,20 @@ mod jet_std {
     }
 
     impl JetRegexMatch {
-        pub fn group(&self, n: i64) -> Option<String> {
-            let n = usize::try_from(n).ok()?;
-            let (start, end) = self.spans.get(n).copied().flatten()?;
-            Some(self.text[start..end].to_string())
+        pub fn group(&self, n: i64) -> JetOutcome<String, JetAbsent> {
+            let Ok(n) = usize::try_from(n) else { return Err(JetAbsent) };
+            let Some((start, end)) = self.spans.get(n).copied().flatten() else { return Err(JetAbsent) };
+            Ok(self.text[start..end].to_string())
         }
 
-        pub fn name(&self, name: &str) -> Option<String> {
-            let idx = self
+        pub fn name(&self, name: &str) -> JetOutcome<String, JetAbsent> {
+            let Some(idx) = self
                 .names
                 .iter()
-                .position(|n| n.as_deref() == Some(name))?;
+                .position(|n| n.as_deref() == Some(name))
+            else {
+                return Err(JetAbsent);
+            };
             self.group(idx as i64)
         }
 
@@ -284,22 +298,26 @@ mod jet_std {
             self.group_end(0).unwrap_or(-1)
         }
 
-        pub fn group_start(&self, n: i64) -> Option<i64> {
-            let n = usize::try_from(n).ok()?;
-            self.spans
-                .get(n)
-                .copied()
-                .flatten()
-                .map(|(start, _)| start as i64)
+        pub fn group_start(&self, n: i64) -> JetOutcome<i64, JetAbsent> {
+            let Ok(n) = usize::try_from(n) else { return Err(JetAbsent) };
+            jet_outcome_of(
+                self.spans
+                    .get(n)
+                    .copied()
+                    .flatten()
+                    .map(|(start, _)| start as i64),
+            )
         }
 
-        pub fn group_end(&self, n: i64) -> Option<i64> {
-            let n = usize::try_from(n).ok()?;
-            self.spans
-                .get(n)
-                .copied()
-                .flatten()
-                .map(|(_, end)| end as i64)
+        pub fn group_end(&self, n: i64) -> JetOutcome<i64, JetAbsent> {
+            let Ok(n) = usize::try_from(n) else { return Err(JetAbsent) };
+            jet_outcome_of(
+                self.spans
+                    .get(n)
+                    .copied()
+                    .flatten()
+                    .map(|(_, end)| end as i64),
+            )
         }
 
         /// Named capture pairs as `[[name, value], …]` (unnamed groups omitted).
@@ -309,7 +327,7 @@ mod jet_std {
                 .enumerate()
                 .filter_map(|(i, n)| {
                     let name = n.as_ref()?.clone();
-                    let value = self.group(i as i64)?;
+                    let value = self.group(i as i64).ok()?;
                     Some(vec![name, value])
                 })
                 .collect()
@@ -355,18 +373,18 @@ mod jet_std {
             self.find_match(text).is_some()
         }
 
-        pub fn match_value(&self, text: &str) -> Option<JetRegexMatch> {
-            self.find_match(text)
+        pub fn match_value(&self, text: &str) -> JetOutcome<JetRegexMatch, JetAbsent> {
+            jet_outcome_of(self.find_match(text))
         }
 
-        pub fn find(&self, text: &str) -> Option<String> {
-            self.find_match(text).and_then(|m| m.group(0))
+        pub fn find(&self, text: &str) -> JetOutcome<String, JetAbsent> {
+            jet_outcome_of(self.find_match(text).and_then(|m| m.group(0).ok()))
         }
 
         pub fn find_all(&self, text: &str) -> Vec<String> {
             self.matches(text)
                 .into_iter()
-                .filter_map(|m| m.group(0))
+                .filter_map(|m| m.group(0).ok())
                 .collect()
         }
 
@@ -631,12 +649,14 @@ mod jet_std {
         pattern.is_match(text)
     }
 
+    // Core answers the emit boundary with Rust plumbing; `jet_outcome_of` at the
+    // call site turns it into the carrier, exactly once.
     pub fn jet_regex_match(pattern: &JetRegex, text: &str) -> Option<JetRegexMatch> {
-        pattern.match_value(text)
+        pattern.match_value(text).ok()
     }
 
     pub fn jet_regex_find(pattern: &JetRegex, text: &str) -> Option<String> {
-        pattern.find(text)
+        pattern.find(text).ok()
     }
 
     pub fn jet_regex_find_all(pattern: &JetRegex, text: &str) -> Vec<String> {
@@ -1272,7 +1292,7 @@ mod jet_std {
                         }
                         name.push(c);
                     }
-                    if let Some(value) = mat.name(&name) {
+                    if let Ok(value) = mat.name(&name) {
                         out.push_str(&value);
                     }
                 }
@@ -1282,7 +1302,7 @@ mod jet_std {
                         num.push(chars.next().unwrap());
                     }
                     if let Ok(idx) = num.parse::<i64>() {
-                        if let Some(value) = mat.group(idx) {
+                        if let Ok(value) = mat.group(idx) {
                             out.push_str(&value);
                         }
                     }

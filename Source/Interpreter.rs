@@ -127,7 +127,7 @@ pub fn run_checked(bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
     }
     let mut sink = crate::Comptime::DevSink::new();
     match crate::Comptime::TirBridge::run_bundle(bundle, &mut sink, true) {
-        Ok(crate::Comptime::CtValue::ResErr(error)) => {
+        Ok(crate::Comptime::CtValue::Failed(crate::Comptime::CtReport::Told(error))) => {
             sink.stderr.push_str(&error.jet_show());
             sink.stderr.push('\n');
             RunOutcome::Ran {
@@ -272,7 +272,7 @@ pub fn run_named_task(bundle: &ProgramBundle, name: &str, try_anyway: bool) -> R
             fields
         },
     ) {
-        Ok(crate::Comptime::CtValue::ResErr(error)) => {
+        Ok(crate::Comptime::CtValue::Failed(crate::Comptime::CtReport::Told(error))) => {
             sink.stderr.push_str(&error.jet_show());
             sink.stderr.push('\n');
             RunOutcome::Ran {

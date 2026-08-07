@@ -6,7 +6,7 @@ use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::{CtFloat, Type};
 use super::super::Builtins::as_int;
 use super::super::Diagnostics::unsupported;
-use super::super::Value::CtValue;
+use super::super::Value::{CtReport, CtValue};
 
 use super::repl_process::run_repl_process;
 
@@ -194,7 +194,7 @@ fn csv_rows_from_records(v: &CtValue) -> Option<Vec<Vec<String>>> {
         CtValue::Int(n) => n.to_string(),
         CtValue::Float(f) => f.render(),
         CtValue::Bool(b) => b.to_string(),
-        CtValue::Unit | CtValue::None(_) => String::new(),
+        CtValue::Unit | CtValue::Failed(CtReport::Clean(_)) => String::new(),
         other => other.to_json(),
     };
     let mut rows = vec![header.clone()];
@@ -229,15 +229,15 @@ fn url_parts_to_ct(u: &super::super::UrlLite::UrlParts) -> CtValue {
             (
                 "host".to_string(),
                 match &u.host {
-                    Some(h) if !h.is_empty() => CtValue::Some(Box::new(CtValue::Str(h.clone()))),
-                    _ => CtValue::None(Type::String),
+                    Some(h) if !h.is_empty() => CtValue::Present(Box::new(CtValue::Str(h.clone()))),
+                    _ => CtValue::absent(Type::String),
                 },
             ),
             (
                 "port".to_string(),
                 match u.port {
-                    Some(p) => CtValue::Some(Box::new(CtValue::Int(p))),
-                    None => CtValue::None(Type::Int),
+                    Some(p) => CtValue::Present(Box::new(CtValue::Int(p))),
+                    None => CtValue::absent(Type::Int),
                 },
             ),
             ("path".to_string(), CtValue::Str(u.path.clone())),
@@ -255,8 +255,8 @@ fn url_parts_to_ct(u: &super::super::UrlLite::UrlParts) -> CtValue {
             (
                 "fragment".to_string(),
                 match &u.fragment {
-                    Some(f) => CtValue::Some(Box::new(CtValue::Str(f.clone()))),
-                    None => CtValue::None(Type::String),
+                    Some(f) => CtValue::Present(Box::new(CtValue::Str(f.clone()))),
+                    None => CtValue::absent(Type::String),
                 },
             ),
         ],
@@ -371,8 +371,8 @@ fn as_data_line_options(
         _ => return Err(unsupported("DataLineOptions `markers` must be Bool", span)),
     };
     let reference = match field("reference")? {
-        CtValue::Some(value) => Some(as_float(&value, span)?),
-        CtValue::None(_) => None,
+        CtValue::Present(value) => Some(as_float(&value, span)?),
+        CtValue::Failed(CtReport::Clean(_)) => None,
         _ => return Err(unsupported("DataLineOptions `reference` must be Float?", span)),
     };
     Ok(super::super::DataLite::LineOptions {
@@ -403,19 +403,19 @@ fn data_line_error(error: super::super::DataLite::LineError) -> CtValue {
                 "operation".to_string(),
                 CtValue::Str(error.operation.to_string()),
             ),
-            ("row".to_string(), CtValue::None(Type::Int)),
-            ("column".to_string(), CtValue::None(Type::Int)),
+            ("row".to_string(), CtValue::absent(Type::Int)),
+            ("column".to_string(), CtValue::absent(Type::Int)),
             (
                 "index".to_string(),
                 error
                     .index
-                    .map(|index| CtValue::Some(Box::new(CtValue::Int(index))))
-                    .unwrap_or(CtValue::None(Type::Int)),
+                    .map(|index| CtValue::Present(Box::new(CtValue::Int(index))))
+                    .unwrap_or(CtValue::absent(Type::Int)),
             ),
             ("reason".to_string(), CtValue::Str(error.reason.to_string())),
             (
                 "cause".to_string(),
-                CtValue::None(Type::Named("EncodingError".to_string())),
+                CtValue::absent(Type::Named("EncodingError".to_string())),
             ),
         ],
     }
@@ -447,14 +447,14 @@ pub fn apply_data_line_call(
         ("line_text", true) => Ok(match super::super::DataLite::line_text_checked(
             &groups, &options,
         ) {
-            Ok(text) => CtValue::ResOk(Box::new(CtValue::Str(text))),
-            Err(error) => CtValue::ResErr(Box::new(data_line_error(error))),
+            Ok(text) => CtValue::Present(Box::new(CtValue::Str(text))),
+            Err(error) => CtValue::failed(Box::new(data_line_error(error))),
         }),
         ("line_svg", true) => Ok(match super::super::DataLite::line_svg_checked(
             &groups, &options,
         ) {
-            Ok(svg) => CtValue::ResOk(Box::new(CtValue::Str(svg))),
-            Err(error) => CtValue::ResErr(Box::new(data_line_error(error))),
+            Ok(svg) => CtValue::Present(Box::new(CtValue::Str(svg))),
+            Err(error) => CtValue::failed(Box::new(data_line_error(error))),
         }),
         _ => Err(unsupported(
             &format!("unsupported core.data line renderer `{method}`"),
@@ -920,8 +920,8 @@ pub fn apply_core_call(
         )),
         ("core.compress.gzip", "decompress") => {
             Ok(match super::super::ArchiveLite::gzip_decompress(&as_bytes(one(0)?, span)?) {
-                Ok(bytes) => CtValue::ResOk(Box::new(CtValue::Bytes(bytes))),
-                Err(error) => CtValue::ResErr(Box::new(CtValue::Str(error))),
+                Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
+                Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
             })
         }
         // The std-only resident codec accepts ordinary dictionaryless zstd
@@ -931,8 +931,8 @@ pub fn apply_core_call(
         )),
         ("core.compress.zstd", "decompress") => {
             Ok(match super::super::ArchiveLite::zstd_decompress(&as_bytes(one(0)?, span)?) {
-                Ok(bytes) => CtValue::ResOk(Box::new(CtValue::Bytes(bytes))),
-                Err(error) => CtValue::ResErr(Box::new(CtValue::Str(error))),
+                Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
+                Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
             })
         }
         // D-CORE-COMPRESS1=A / card #392 C4: archive containers are pure byte
@@ -985,13 +985,13 @@ pub fn apply_core_call(
         ("core.perf", "override_fidelity") => {
             let value = as_float(one(0)?, span)?;
             if !value.is_finite() || !(0.0..=1.0).contains(&value) {
-                return Ok(CtValue::ResErr(Box::new(CtValue::Str(format!(
+                return Ok(CtValue::failed(Box::new(CtValue::Str(format!(
                     "core.perf.Perf.override_fidelity needs 0.0 through 1.0, got {}",
                     value
                 )))));
             }
             PERF_FIDELITY.with(|c| c.set((value as f32).to_bits()));
-            Ok(CtValue::ResOk(Box::new(CtValue::Unit)))
+            Ok(CtValue::Present(Box::new(CtValue::Unit)))
         }
         ("core.perf", "reset_fidelity") => {
             PERF_FIDELITY.with(|c| c.set(PERF_DEFAULT_FIDELITY_BITS));
@@ -1101,35 +1101,35 @@ pub fn apply_core_call(
             match method {
                 "isqrt" => {
                     if value < 0 {
-                        return Ok(CtValue::None(Type::Int));
+                        return Ok(CtValue::absent(Type::Int));
                     }
                     let mut root = (value as f64).sqrt() as i64;
                     while root > 0 && root.saturating_mul(root) > value { root -= 1; }
                     while (root + 1).saturating_mul(root + 1) <= value { root += 1; }
-                    Ok(CtValue::Some(Box::new(CtValue::Int(root))))
+                    Ok(CtValue::Present(Box::new(CtValue::Int(root))))
                 }
                 "factorial" => {
                     if value < 0 {
-                        return Ok(CtValue::None(Type::Int));
+                        return Ok(CtValue::absent(Type::Int));
                     }
                     let mut total: i64 = 1;
                     let mut step: i64 = 2;
                     while step <= value {
                         total = match total.checked_mul(step) {
                             Some(next) => next,
-                            None => return Ok(CtValue::None(Type::Int)),
+                            None => return Ok(CtValue::absent(Type::Int)),
                         };
                         step += 1;
                     }
-                    Ok(CtValue::Some(Box::new(CtValue::Int(total))))
+                    Ok(CtValue::Present(Box::new(CtValue::Int(total))))
                 }
                 "checked_abs" => Ok(match value.checked_abs() {
-                    Some(answer) => CtValue::Some(Box::new(CtValue::Int(answer))),
-                    None => CtValue::None(Type::Int),
+                    Some(answer) => CtValue::Present(Box::new(CtValue::Int(answer))),
+                    None => CtValue::absent(Type::Int),
                 }),
                 _ => Ok(match value.checked_neg() {
-                    Some(answer) => CtValue::Some(Box::new(CtValue::Int(answer))),
-                    None => CtValue::None(Type::Int),
+                    Some(answer) => CtValue::Present(Box::new(CtValue::Int(answer))),
+                    None => CtValue::absent(Type::Int),
                 }),
             }
         }
@@ -1224,8 +1224,8 @@ pub fn apply_core_call(
                 _ => return Err(unsupported("binomial needs whole numbers", span)),
             };
             Ok(match math_lib_pure::jet_std_math_binomial(n, k) {
-                Some(v) => CtValue::Some(Box::new(CtValue::Int(v))),
-                None => CtValue::None(Type::Int),
+                Some(v) => CtValue::Present(Box::new(CtValue::Int(v))),
+                None => CtValue::absent(Type::Int),
             })
         }
         ("core.math", "cmp") => {
@@ -1249,8 +1249,8 @@ pub fn apply_core_call(
         ("core.math", "ilogb") => {
             let x = as_ct_float(one(0)?, span)?.as_f64();
             Ok(match math_lib_pure::jet_std_math_ilogb(x) {
-                Some(e) => CtValue::Some(Box::new(CtValue::Int(e))),
-                None => CtValue::None(Type::Int),
+                Some(e) => CtValue::Present(Box::new(CtValue::Int(e))),
+                None => CtValue::absent(Type::Int),
             })
         }
         ("core.math", "logb") => {
@@ -1365,51 +1365,51 @@ pub fn apply_core_call(
             let a = as_int(one(0)?, span)?;
             let b = as_int(one(1)?, span)?;
             Ok(match a.checked_add(b) {
-                Some(n) => CtValue::Some(Box::new(CtValue::Int(n))),
-                None => CtValue::None(Type::Int),
+                Some(n) => CtValue::Present(Box::new(CtValue::Int(n))),
+                None => CtValue::absent(Type::Int),
             })
         }
         ("core.math", "checked_div") => {
             let a = as_int(one(0)?, span)?;
             let b = as_int(one(1)?, span)?;
             Ok(match a.checked_div(b) {
-                Some(n) => CtValue::Some(Box::new(CtValue::Int(n))),
-                None => CtValue::None(Type::Int),
+                Some(n) => CtValue::Present(Box::new(CtValue::Int(n))),
+                None => CtValue::absent(Type::Int),
             })
         }
         ("core.math", "checked_rem") => {
             let a = as_int(one(0)?, span)?;
             let b = as_int(one(1)?, span)?;
             Ok(match a.checked_rem(b) {
-                Some(n) => CtValue::Some(Box::new(CtValue::Int(n))),
-                None => CtValue::None(Type::Int),
+                Some(n) => CtValue::Present(Box::new(CtValue::Int(n))),
+                None => CtValue::absent(Type::Int),
             })
         }
         ("core.math", "checked_sub") => {
             let a = as_int(one(0)?, span)?;
             let b = as_int(one(1)?, span)?;
             Ok(match a.checked_sub(b) {
-                Some(n) => CtValue::Some(Box::new(CtValue::Int(n))),
-                None => CtValue::None(Type::Int),
+                Some(n) => CtValue::Present(Box::new(CtValue::Int(n))),
+                None => CtValue::absent(Type::Int),
             })
         }
         ("core.math", "checked_mul") => {
             let a = as_int(one(0)?, span)?;
             let b = as_int(one(1)?, span)?;
             Ok(match a.checked_mul(b) {
-                Some(n) => CtValue::Some(Box::new(CtValue::Int(n))),
-                None => CtValue::None(Type::Int),
+                Some(n) => CtValue::Present(Box::new(CtValue::Int(n))),
+                None => CtValue::absent(Type::Int),
             })
         }
         ("core.math", "checked_pow") => {
             let base = as_int(one(0)?, span)?;
             let exp = as_int(one(1)?, span)?;
             Ok(if exp < 0 {
-                CtValue::None(Type::Int)
+                CtValue::absent(Type::Int)
             } else {
                 match base.checked_pow(exp as u32) {
-                    Some(n) => CtValue::Some(Box::new(CtValue::Int(n))),
-                    None => CtValue::None(Type::Int),
+                    Some(n) => CtValue::Present(Box::new(CtValue::Int(n))),
+                    None => CtValue::absent(Type::Int),
                 }
             })
         }
@@ -1521,8 +1521,8 @@ pub fn apply_core_call(
             if let Some(policy) = args.get(1) {
                 let (ambiguous_wide, controls_reject) = text_width_policy_flags(policy);
                 match super::super::TextLite::display_width_policy(s, ambiguous_wide, controls_reject) {
-                    Ok(n) => Ok(CtValue::ResOk(Box::new(CtValue::Int(n)))),
-                    Err(message) => Ok(CtValue::ResErr(Box::new(CtValue::Struct {
+                    Ok(n) => Ok(CtValue::Present(Box::new(CtValue::Int(n)))),
+                    Err(message) => Ok(CtValue::failed(Box::new(CtValue::Struct {
                         type_name: "TextError".to_string(),
                         fields: vec![("message".to_string(), CtValue::Str(message))],
                     }))),
@@ -1677,8 +1677,8 @@ pub fn apply_core_call(
         ("core.encoding.json", "parse") => {
             let text = as_string(one(0)?, span)?;
             match super::super::JSONInterp::parse_json(text) {
-                Ok(v) => Ok(CtValue::ResOk(Box::new(v))),
-                Err(e) => Ok(CtValue::ResErr(Box::new(
+                Ok(v) => Ok(CtValue::Present(Box::new(v))),
+                Err(e) => Ok(CtValue::failed(Box::new(
                     super::super::JSONInterp::json_error_value(e),
                 ))),
             }
@@ -1717,8 +1717,8 @@ pub fn apply_core_call(
                     super::super::EncodingLite::EncodingLimitsLite::safe()
                 };
                 match super::super::EncodingLite::json_canonical_jcs(v, &limits) {
-                    Ok(text) => Ok(CtValue::ResOk(Box::new(CtValue::Str(text)))),
-                    Err(error) => Ok(CtValue::ResErr(Box::new(error))),
+                    Ok(text) => Ok(CtValue::Present(Box::new(CtValue::Str(text)))),
+                    Err(error) => Ok(CtValue::failed(Box::new(error))),
                 }
             } else {
                 Ok(CtValue::Str(super::super::EncodingLite::json_canonical(v)))
@@ -1731,8 +1731,8 @@ pub fn apply_core_call(
         ("core.encoding.jsonl", "parse") => {
             let text = as_string(one(0)?, span)?;
             match super::super::EncodingLite::jsonl_parse(text) {
-                Ok(rows) => Ok(CtValue::ResOk(Box::new(CtValue::List(rows)))),
-                Err(e) => Ok(CtValue::ResErr(Box::new(e))),
+                Ok(rows) => Ok(CtValue::Present(Box::new(CtValue::List(rows)))),
+                Err(e) => Ok(CtValue::failed(Box::new(e))),
             }
         }
         ("core.encoding.jsonl", "to_string") => {
@@ -1746,12 +1746,12 @@ pub fn apply_core_call(
         ("core.encoding.csv", "parse") => {
             let text = as_string(one(0)?, span)?;
             match super::super::EncodingLite::csv_parse(text) {
-                Ok(rows) => Ok(CtValue::ResOk(Box::new(CtValue::List(
+                Ok(rows) => Ok(CtValue::Present(Box::new(CtValue::List(
                     rows.into_iter()
                         .map(|row| CtValue::List(row.into_iter().map(CtValue::Str).collect()))
                         .collect(),
                 )))),
-                Err(e) => Ok(CtValue::ResErr(Box::new(CtValue::Str(e)))),
+                Err(e) => Ok(CtValue::failed(Box::new(CtValue::Str(e)))),
             }
         }
         ("core.encoding.csv", "to_string") => {
@@ -1768,8 +1768,8 @@ pub fn apply_core_call(
         ("core.encoding.toml", "parse") => {
             let text = as_string(one(0)?, span)?;
             match super::super::EncodingLite::toml_parse(text) {
-                Ok(v) => Ok(CtValue::ResOk(Box::new(v))),
-                Err(e) => Ok(CtValue::ResErr(Box::new(e))),
+                Ok(v) => Ok(CtValue::Present(Box::new(v))),
+                Err(e) => Ok(CtValue::failed(Box::new(e))),
             }
         }
         ("core.encoding.toml", "to_string") => {
@@ -1779,8 +1779,8 @@ pub fn apply_core_call(
         ("core.encoding.yaml", "parse") => {
             let text = as_string(one(0)?, span)?;
             match super::super::EncodingLite::yaml_parse(text) {
-                Ok(v) => Ok(CtValue::ResOk(Box::new(v))),
-                Err(e) => Ok(CtValue::ResErr(Box::new(e))),
+                Ok(v) => Ok(CtValue::Present(Box::new(v))),
+                Err(e) => Ok(CtValue::failed(Box::new(e))),
             }
         }
         ("core.encoding.yaml", "to_string") => {
@@ -1790,22 +1790,22 @@ pub fn apply_core_call(
         ("core.encoding.xml", "parse") => {
             let text = as_string(one(0)?, span)?;
             match super::super::EncodingLite::xml_parse(text) {
-                Ok(v) => Ok(CtValue::ResOk(Box::new(v))),
-                Err(e) => Ok(CtValue::ResErr(Box::new(super::super::EncodingLite::xml_error_value(e)))),
+                Ok(v) => Ok(CtValue::Present(Box::new(v))),
+                Err(e) => Ok(CtValue::failed(Box::new(super::super::EncodingLite::xml_error_value(e)))),
             }
         }
         ("core.encoding.xml", "parse_with") => {
             let text = as_string(one(0)?, span)?;
             match super::super::EncodingLite::xml_parse_with(text, one(1)?) {
-                Ok(v) => Ok(CtValue::ResOk(Box::new(v))),
-                Err(e) => Ok(CtValue::ResErr(Box::new(super::super::EncodingLite::xml_error_value(e)))),
+                Ok(v) => Ok(CtValue::Present(Box::new(v))),
+                Err(e) => Ok(CtValue::failed(Box::new(super::super::EncodingLite::xml_error_value(e)))),
             }
         }
         ("core.encoding.xml", "parse_bytes") => {
             let bytes = as_bytes(one(0)?, span)?;
             match super::super::EncodingLite::xml_parse_bytes(&bytes, args.get(1)) {
-                Ok(v) => Ok(CtValue::ResOk(Box::new(v))),
-                Err(e) => Ok(CtValue::ResErr(Box::new(super::super::EncodingLite::xml_source_error_value(e)))),
+                Ok(v) => Ok(CtValue::Present(Box::new(v))),
+                Err(e) => Ok(CtValue::failed(Box::new(super::super::EncodingLite::xml_source_error_value(e)))),
             }
         }
         ("core.encoding.xml", "to_string") => {
@@ -1813,43 +1813,43 @@ pub fn apply_core_call(
         }
         ("core.encoding.xml", "to_bytes") => {
             match super::super::EncodingLite::xml_to_bytes(one(0)?, args.get(1)) {
-                Ok(bytes) => Ok(CtValue::ResOk(Box::new(CtValue::Bytes(bytes)))),
-                Err(error) => Ok(CtValue::ResErr(Box::new(error))),
+                Ok(bytes) => Ok(CtValue::Present(Box::new(CtValue::Bytes(bytes)))),
+                Err(error) => Ok(CtValue::failed(Box::new(error))),
             }
         }
         // D-ENCXML-PROJECTION1=A: focused helpers (shared foundation projection).
         ("core.encoding.xml", "root") => {
             match super::super::EncodingLite::xml_root(one(0)?) {
-                Ok(v) => Ok(CtValue::ResOk(Box::new(v))),
-                Err(e) => Ok(CtValue::ResErr(Box::new(e))),
+                Ok(v) => Ok(CtValue::Present(Box::new(v))),
+                Err(e) => Ok(CtValue::failed(Box::new(e))),
             }
         }
         ("core.encoding.xml", "expanded_name") => {
             match super::super::EncodingLite::xml_expanded_name(one(0)?) {
-                Ok(v) => Ok(CtValue::ResOk(Box::new(v))),
-                Err(e) => Ok(CtValue::ResErr(Box::new(e))),
+                Ok(v) => Ok(CtValue::Present(Box::new(v))),
+                Err(e) => Ok(CtValue::failed(Box::new(e))),
             }
         }
         ("core.encoding.xml", "attribute") => {
             let name = as_string(one(1)?, span)?;
             match super::super::EncodingLite::xml_attribute(one(0)?, name) {
-                Ok(v) => Ok(CtValue::ResOk(Box::new(v))),
-                Err(e) => Ok(CtValue::ResErr(Box::new(e))),
+                Ok(v) => Ok(CtValue::Present(Box::new(v))),
+                Err(e) => Ok(CtValue::failed(Box::new(e))),
             }
         }
         ("core.encoding.xml", "content") => {
             match super::super::EncodingLite::xml_content(one(0)?) {
-                Ok(v) => Ok(CtValue::ResOk(Box::new(v))),
-                Err(e) => Ok(CtValue::ResErr(Box::new(e))),
+                Ok(v) => Ok(CtValue::Present(Box::new(v))),
+                Err(e) => Ok(CtValue::failed(Box::new(e))),
             }
         }
         // --- core.encoding.cbor (ported verbatim, `EncodingLite.rs`) ---
         // D-ENC-CBOR-SURFACE1: current whole-value names return the same
         // Result shape as AOT. Edition compatibility names remain below.
-        ("core.encoding.cbor", "to_bytes") => Ok(CtValue::ResOk(Box::new(
+        ("core.encoding.cbor", "to_bytes") => Ok(CtValue::Present(Box::new(
             CtValue::Bytes(super::super::EncodingLite::cbor_encode(one(0)?)),
         ))),
-        ("core.encoding.cbor", "to_bytes_canonical") => Ok(CtValue::ResOk(Box::new(
+        ("core.encoding.cbor", "to_bytes_canonical") => Ok(CtValue::Present(Box::new(
             CtValue::Bytes(super::super::EncodingLite::cbor_encode_canonical(one(0)?)),
         ))),
         ("core.encoding.cbor", "parse") => {
@@ -1857,14 +1857,14 @@ pub fn apply_core_call(
             let options = match super::super::EncodingLite::cbor_options(args.get(1)) {
                 Ok(options) => options,
                 Err(error) => {
-                    return Ok(CtValue::ResErr(Box::new(
+                    return Ok(CtValue::failed(Box::new(
                         super::super::EncodingLite::cbor_error_value(error),
                     )))
                 }
             };
             match super::super::EncodingLite::cbor_decode(&bytes, &options, false) {
-                Ok(v) => Ok(CtValue::ResOk(Box::new(v))),
-                Err(error) => Ok(CtValue::ResErr(Box::new(
+                Ok(v) => Ok(CtValue::Present(Box::new(v))),
+                Err(error) => Ok(CtValue::failed(Box::new(
                     super::super::EncodingLite::cbor_error_value(error),
                 ))),
             }
@@ -1876,8 +1876,8 @@ pub fn apply_core_call(
             let bytes = as_bytes(one(0)?, span)?;
             let options = super::super::EncodingLite::cbor_safe_options();
             match super::super::EncodingLite::cbor_decode(&bytes, &options, false) {
-                Ok(v) => Ok(CtValue::ResOk(Box::new(v))),
-                Err(e) => Ok(CtValue::ResErr(Box::new(CtValue::Str(e.reason)))),
+                Ok(v) => Ok(CtValue::Present(Box::new(v))),
+                Err(e) => Ok(CtValue::failed(Box::new(CtValue::Str(e.reason)))),
             }
         }
         // --- core.time pure constructors ---
@@ -2015,8 +2015,8 @@ pub fn apply_core_call(
                 return Err(unsupported("random.pick needs a list", span));
             };
             Ok(match with_ambient_rng(|st| random_pick_ct(st, xs)) {
-                Some(v) => CtValue::Some(Box::new(v)),
-                None => CtValue::None(Type::Int),
+                Some(v) => CtValue::Present(Box::new(v)),
+                None => CtValue::absent(Type::Int),
             })
         }
         ("core.random", "weighted_pick") => {
@@ -2035,8 +2035,8 @@ pub fn apply_core_call(
                 .collect::<Result<_, _>>()?;
             Ok(
                 match with_ambient_rng(|st| random_weighted_pick_ct(st, xs, &weights)) {
-                    Some(v) => CtValue::Some(Box::new(v)),
-                    None => CtValue::None(Type::Int),
+                    Some(v) => CtValue::Present(Box::new(v)),
+                    None => CtValue::absent(Type::Int),
                 },
             )
         }
@@ -2177,8 +2177,8 @@ pub fn apply_core_call(
         ("core.encoding.hex", "decode") => {
             let s = as_string(one(0)?, span)?;
             Ok(match hex_decode(s) {
-                Some(bytes) => CtValue::ResOk(Box::new(CtValue::Bytes(bytes))),
-                None => CtValue::ResErr(Box::new(CtValue::Str(format!("`{}` isn't valid hex", s)))),
+                Some(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
+                None => CtValue::failed(Box::new(CtValue::Str(format!("`{}` isn't valid hex", s)))),
             })
         }
         ("core.encoding.base64", "encode") => {
@@ -2196,8 +2196,8 @@ pub fn apply_core_call(
                 allow_whitespace,
                 allow_missing_padding,
             ) {
-                Ok(bytes) => CtValue::ResOk(Box::new(CtValue::Bytes(bytes))),
-                Err(error) => CtValue::ResErr(Box::new(CtValue::Str(error))),
+                Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
+                Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
             })
         }
         // --- core.encoding.base64 URL-safe variant (pure; mirrors AOT's
@@ -2223,8 +2223,8 @@ pub fn apply_core_call(
                 allow_whitespace,
                 allow_padding,
             ) {
-                Ok(bytes) => CtValue::ResOk(Box::new(CtValue::Bytes(bytes))),
-                Err(error) => CtValue::ResErr(Box::new(CtValue::Str(error))),
+                Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
+                Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
             })
         }
         // --- core.encoding.base32 (pure; mirrors AOT's `jet_std_base32_*`,
@@ -2246,8 +2246,8 @@ pub fn apply_core_call(
                 allow_missing_padding,
                 allow_lowercase,
             ) {
-                Ok(bytes) => CtValue::ResOk(Box::new(CtValue::Bytes(bytes))),
-                Err(e) => CtValue::ResErr(Box::new(CtValue::Str(e))),
+                Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
+                Err(e) => CtValue::failed(Box::new(CtValue::Str(e))),
             })
         }
         // --- D-URL1=A: core.url (pure RFC-3986-shaped parser, ported
@@ -2256,8 +2256,8 @@ pub fn apply_core_call(
         ("core.url", "parse") => {
             let s = as_string(one(0)?, span)?;
             Ok(match super::super::UrlLite::UrlParts::parse(s) {
-                Ok(u) => CtValue::ResOk(Box::new(url_parts_to_ct(&u))),
-                Err(e) => CtValue::ResErr(Box::new(CtValue::Str(e))),
+                Ok(u) => CtValue::Present(Box::new(url_parts_to_ct(&u))),
+                Err(e) => CtValue::failed(Box::new(CtValue::Str(e))),
             })
         }
         ("core.url", "from_parts") => {
@@ -2269,8 +2269,8 @@ pub fn apply_core_call(
             Ok(
                 match super::super::UrlLite::UrlParts::from_parts(&scheme, &host, &path, &query, &fragment)
                 {
-                    Ok(u) => CtValue::ResOk(Box::new(url_parts_to_ct(&u))),
-                    Err(e) => CtValue::ResErr(Box::new(CtValue::Str(e))),
+                    Ok(u) => CtValue::Present(Box::new(url_parts_to_ct(&u))),
+                    Err(e) => CtValue::failed(Box::new(CtValue::Str(e))),
                 },
             )
         }
@@ -2344,8 +2344,8 @@ pub fn apply_core_call(
         ("core.url", "percent_decode") => {
             let s = as_string(one(0)?, span)?;
             Ok(match super::super::UrlLite::url_percent_decode_str(s) {
-                Ok(v) => CtValue::ResOk(Box::new(CtValue::Str(v))),
-                Err(e) => CtValue::ResErr(Box::new(CtValue::Str(e))),
+                Ok(v) => CtValue::Present(Box::new(CtValue::Str(v))),
+                Err(e) => CtValue::failed(Box::new(CtValue::Str(e))),
             })
         }
         // D-COMPUTE1=D / I9: same Prelude as AOT (`ComputeLite` includes Compute.rs).
@@ -2512,7 +2512,7 @@ pub fn apply_core_call(
         ("core.data", "require_bridge") => {
             let provider = as_string(one(0)?, span)?;
             let Some(step) = super::super::DataLite::normalize_bridge_provider(&provider) else {
-                return Ok(CtValue::ResErr(Box::new(CtValue::Struct {
+                return Ok(CtValue::failed(Box::new(CtValue::Struct {
                     type_name: "DataError".to_string(),
                     fields: vec![
                         (
@@ -2527,9 +2527,9 @@ pub fn apply_core_call(
                             "operation".to_string(),
                             CtValue::Str("require_bridge".to_string()),
                         ),
-                        ("row".to_string(), CtValue::None(crate::AST::Type::Int)),
-                        ("column".to_string(), CtValue::None(crate::AST::Type::Int)),
-                        ("index".to_string(), CtValue::None(crate::AST::Type::Int)),
+                        ("row".to_string(), CtValue::absent(crate::AST::Type::Int)),
+                        ("column".to_string(), CtValue::absent(crate::AST::Type::Int)),
+                        ("index".to_string(), CtValue::absent(crate::AST::Type::Int)),
                         (
                             "reason".to_string(),
                             CtValue::Str(format!(
@@ -2538,7 +2538,7 @@ pub fn apply_core_call(
                         ),
                         (
                             "cause".to_string(),
-                            CtValue::None(crate::AST::Type::Named("EncodingError".to_string())),
+                            CtValue::absent(crate::AST::Type::Named("EncodingError".to_string())),
                         ),
                     ],
                 })));
@@ -2549,9 +2549,9 @@ pub fn apply_core_call(
                 .expect("bridge row");
             let (_s, path, copy, ownership, trust, fallback, replacement) = row;
             if path == "available" {
-                Ok(CtValue::ResOk(Box::new(CtValue::Unit)))
+                Ok(CtValue::Present(Box::new(CtValue::Unit)))
             } else {
-                Ok(CtValue::ResErr(Box::new(CtValue::Struct {
+                Ok(CtValue::failed(Box::new(CtValue::Struct {
                     type_name: "DataError".to_string(),
                     fields: vec![
                         (
@@ -2566,9 +2566,9 @@ pub fn apply_core_call(
                             "operation".to_string(),
                             CtValue::Str("require_bridge".to_string()),
                         ),
-                        ("row".to_string(), CtValue::None(crate::AST::Type::Int)),
-                        ("column".to_string(), CtValue::None(crate::AST::Type::Int)),
-                        ("index".to_string(), CtValue::None(crate::AST::Type::Int)),
+                        ("row".to_string(), CtValue::absent(crate::AST::Type::Int)),
+                        ("column".to_string(), CtValue::absent(crate::AST::Type::Int)),
+                        ("index".to_string(), CtValue::absent(crate::AST::Type::Int)),
                         (
                             "reason".to_string(),
                             CtValue::Str(format!(
@@ -2577,7 +2577,7 @@ pub fn apply_core_call(
                         ),
                         (
                             "cause".to_string(),
-                            CtValue::None(crate::AST::Type::Named("EncodingError".to_string())),
+                            CtValue::absent(crate::AST::Type::Named("EncodingError".to_string())),
                         ),
                     ],
                 })))
@@ -2758,8 +2758,8 @@ fn regex_find(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
         span,
     )?;
     Ok(match re.find(text) {
-        Some(m) => CtValue::Some(Box::new(CtValue::Str(text[m.start..m.end].to_string()))),
-        None => CtValue::None(crate::AST::Type::String),
+        Some(m) => CtValue::Present(Box::new(CtValue::Str(text[m.start..m.end].to_string()))),
+        None => CtValue::absent(crate::AST::Type::String),
     })
 }
 
@@ -2859,8 +2859,8 @@ fn regex_match(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
         span,
     )?;
     Ok(match re.find(text) {
-        Some(found) => CtValue::Some(Box::new(regex_match_value(text, found))),
-        None => CtValue::None(crate::AST::Type::Named("Match".to_string())),
+        Some(found) => CtValue::Present(Box::new(regex_match_value(text, found))),
+        None => CtValue::absent(crate::AST::Type::Named("Match".to_string())),
     })
 }
 
@@ -2870,9 +2870,9 @@ fn regex_match_value(text: &str, found: super::super::RegexLite::MatchLite) -> C
         .iter()
         .map(|item| {
             item.map(|(start, end)| {
-                CtValue::Some(Box::new(CtValue::Str(text[start..end].to_string())))
+                CtValue::Present(Box::new(CtValue::Str(text[start..end].to_string())))
             })
-            .unwrap_or_else(|| CtValue::None(crate::AST::Type::String))
+            .unwrap_or_else(|| CtValue::absent(crate::AST::Type::String))
         })
         .collect();
     let spans = found
@@ -2880,7 +2880,7 @@ fn regex_match_value(text: &str, found: super::super::RegexLite::MatchLite) -> C
         .iter()
         .map(|item| {
             item.map(|(start, end)| {
-                CtValue::Some(Box::new(CtValue::Struct {
+                CtValue::Present(Box::new(CtValue::Struct {
                     type_name: "__RegexSpan".to_string(),
                     fields: vec![
                         ("start".to_string(), CtValue::Int(start as i64)),
@@ -2889,7 +2889,7 @@ fn regex_match_value(text: &str, found: super::super::RegexLite::MatchLite) -> C
                 }))
             })
             .unwrap_or_else(|| {
-                CtValue::None(crate::AST::Type::Named("__RegexSpan".to_string()))
+                CtValue::absent(crate::AST::Type::Named("__RegexSpan".to_string()))
             })
         })
         .collect();
@@ -2897,8 +2897,8 @@ fn regex_match_value(text: &str, found: super::super::RegexLite::MatchLite) -> C
         .names
         .into_iter()
         .map(|name| {
-            name.map(|name| CtValue::Some(Box::new(CtValue::Str(name))))
-                .unwrap_or_else(|| CtValue::None(crate::AST::Type::String))
+            name.map(|name| CtValue::Present(Box::new(CtValue::Str(name))))
+                .unwrap_or_else(|| CtValue::absent(crate::AST::Type::String))
         })
         .collect();
     CtValue::Struct {
@@ -2947,8 +2947,8 @@ pub fn apply_impure_core_call(
             let path_str = as_string(one(0)?, span)?;
             let path = base_dir.join(path_str);
             match std::fs::read_to_string(&path) {
-                Ok(s) => Ok(CtValue::ResOk(Box::new(CtValue::Str(s)))),
-                Err(e) => Ok(CtValue::ResErr(Box::new(io_error_value(
+                Ok(s) => Ok(CtValue::Present(Box::new(CtValue::Str(s)))),
+                Err(e) => Ok(CtValue::failed(Box::new(io_error_value(
                     &path.to_string_lossy(),
                     e,
                 )))),
@@ -2958,8 +2958,8 @@ pub fn apply_impure_core_call(
             let path_str = as_string(one(0)?, span)?;
             let path = base_dir.join(path_str);
             match std::fs::read(&path) {
-                Ok(bs) => Ok(CtValue::ResOk(Box::new(CtValue::Bytes(bs)))),
-                Err(e) => Ok(CtValue::ResErr(Box::new(io_error_value(
+                Ok(bs) => Ok(CtValue::Present(Box::new(CtValue::Bytes(bs)))),
+                Err(e) => Ok(CtValue::failed(Box::new(io_error_value(
                     &path.to_string_lossy(),
                     e,
                 )))),
@@ -2982,8 +2982,8 @@ pub fn apply_impure_core_call(
                 std::fs::write(&path, content)
             };
             match result {
-                Ok(()) => Ok(CtValue::ResOk(Box::new(CtValue::Unit))),
-                Err(e) => Ok(CtValue::ResErr(Box::new(io_error_value(
+                Ok(()) => Ok(CtValue::Present(Box::new(CtValue::Unit))),
+                Err(e) => Ok(CtValue::failed(Box::new(io_error_value(
                     &path.to_string_lossy(),
                     e,
                 )))),
@@ -3005,8 +3005,8 @@ pub fn apply_impure_core_call(
             let path_str = as_string(one(0)?, span)?;
             let path = base_dir.join(path_str);
             match std::fs::create_dir_all(&path) {
-                Ok(()) => Ok(CtValue::ResOk(Box::new(CtValue::Unit))),
-                Err(e) => Ok(CtValue::ResErr(Box::new(io_error_value(
+                Ok(()) => Ok(CtValue::Present(Box::new(CtValue::Unit))),
+                Err(e) => Ok(CtValue::failed(Box::new(io_error_value(
                     &path.to_string_lossy(),
                     e,
                 )))),
@@ -3039,13 +3039,13 @@ pub fn apply_impure_core_call(
                         }
                     }
                     if let Some(e) = err {
-                        Ok(CtValue::ResErr(Box::new(io_error_value(
+                        Ok(CtValue::failed(Box::new(io_error_value(
                             &path.to_string_lossy(),
                             e,
                         ))))
                     } else {
                         entries.sort_by(|a, b| a.0.cmp(&b.0));
-                        Ok(CtValue::ResOk(Box::new(CtValue::List(
+                        Ok(CtValue::Present(Box::new(CtValue::List(
                             entries
                                 .into_iter()
                                 .map(|(name, full_path, is_dir)| CtValue::Struct {
@@ -3060,7 +3060,7 @@ pub fn apply_impure_core_call(
                         ))))
                     }
                 }
-                Err(e) => Ok(CtValue::ResErr(Box::new(io_error_value(
+                Err(e) => Ok(CtValue::failed(Box::new(io_error_value(
                     &path.to_string_lossy(),
                     e,
                 )))),
@@ -3075,8 +3075,8 @@ pub fn apply_impure_core_call(
                 std::fs::remove_file(&path)
             };
             match result {
-                Ok(()) => Ok(CtValue::ResOk(Box::new(CtValue::Unit))),
-                Err(e) => Ok(CtValue::ResErr(Box::new(io_error_value(
+                Ok(()) => Ok(CtValue::Present(Box::new(CtValue::Unit))),
+                Err(e) => Ok(CtValue::failed(Box::new(io_error_value(
                     &path.to_string_lossy(),
                     e,
                 )))),
@@ -3085,8 +3085,8 @@ pub fn apply_impure_core_call(
         ("core.env", "get") => {
             let key = as_string(one(0)?, span)?;
             match std::env::var(key) {
-                Ok(v) => Ok(CtValue::Some(Box::new(CtValue::Str(v)))),
-                Err(_) => Ok(CtValue::None(crate::AST::Type::String)),
+                Ok(v) => Ok(CtValue::Present(Box::new(CtValue::Str(v)))),
+                Err(_) => Ok(CtValue::absent(crate::AST::Type::String)),
             }
         }
         ("core.env", "set") => {
@@ -3096,18 +3096,18 @@ pub fn apply_impure_core_call(
             Ok(CtValue::Unit)
         }
         ("core.env", "current_dir") => match std::env::current_dir() {
-            Ok(p) => Ok(CtValue::ResOk(Box::new(CtValue::Str(
+            Ok(p) => Ok(CtValue::Present(Box::new(CtValue::Str(
                 p.to_string_lossy().into_owned(),
             )))),
-            Err(e) => Ok(CtValue::ResErr(Box::new(io_error_value(".", e)))),
+            Err(e) => Ok(CtValue::failed(Box::new(io_error_value(".", e)))),
         },
         ("core.env", "home_dir") => Ok(
             match std::env::var("HOME")
                 .ok()
                 .or_else(|| std::env::var("USERPROFILE").ok())
             {
-                Some(v) => CtValue::Some(Box::new(CtValue::Str(v))),
-                None => CtValue::None(crate::AST::Type::String),
+                Some(v) => CtValue::Present(Box::new(CtValue::Str(v))),
+                None => CtValue::absent(crate::AST::Type::String),
             },
         ),
         ("core.io", "args") => {
@@ -3206,7 +3206,7 @@ pub fn apply_impure_core_call(
             if repl_mode {
                 Err(repl_native_module_diag("core.io", method, span))
             } else {
-                Ok(CtValue::ResOk(Box::new(CtValue::Str(String::new()))))
+                Ok(CtValue::Present(Box::new(CtValue::Str(String::new()))))
             }
         }
         ("core.io", "stdin") if repl_mode => Err(repl_native_module_diag("core.io", method, span)),
@@ -3244,7 +3244,7 @@ pub fn apply_impure_core_call(
                 }
             };
             if cmd.is_empty() {
-                return Ok(CtValue::ResErr(Box::new(CtValue::Struct {
+                return Ok(CtValue::failed(Box::new(CtValue::Struct {
                     type_name: "IOError".to_string(),
                     fields: vec![(
                         "message".to_string(),
@@ -3259,7 +3259,7 @@ pub fn apply_impure_core_call(
                 verified_root,
                 std::time::Duration::from_secs(30),
             ) {
-                Ok(out) => Ok(CtValue::ResOk(Box::new(CtValue::Struct {
+                Ok(out) => Ok(CtValue::Present(Box::new(CtValue::Struct {
                     type_name: "ProcessResult".to_string(),
                     fields: vec![
                         (
@@ -3276,7 +3276,7 @@ pub fn apply_impure_core_call(
                         ),
                     ],
                 }))),
-                Err(e) => Ok(CtValue::ResErr(Box::new(io_error_value(&cmd[0], e)))),
+                Err(e) => Ok(CtValue::failed(Box::new(io_error_value(&cmd[0], e)))),
             }
         }
         ("core.tls", _) => Err(Diagnostic::error(

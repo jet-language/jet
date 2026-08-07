@@ -1,4 +1,6 @@
 mod runtime {
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs");
 }
 

@@ -66,8 +66,8 @@ fn browser_error(error: JetBrowserError) -> CtValue {
 
 fn result<T>(value: Result<T, JetBrowserError>, map: impl FnOnce(T) -> CtValue) -> CtValue {
     match value {
-        Ok(value) => CtValue::ResOk(Box::new(map(value))),
-        Err(error) => CtValue::ResErr(Box::new(browser_error(error))),
+        Ok(value) => CtValue::Present(Box::new(map(value))),
+        Err(error) => CtValue::failed(Box::new(browser_error(error))),
     }
 }
 
@@ -502,8 +502,8 @@ pub(crate) fn eval_method(
             (BrowserHostValue::Page(page), "cookie") => result(
                 jet_browser_page_cookie(page, &string_arg(args, 0, span)?),
                 |value| match value {
-                    Some(text) => CtValue::Some(Box::new(CtValue::Str(text))),
-                    None => CtValue::None(Type::String),
+                    Some(text) => CtValue::Present(Box::new(CtValue::Str(text))),
+                    None => CtValue::absent(Type::String),
                 },
             ),
             (BrowserHostValue::Page(page), "clear_cookies") => {
@@ -516,8 +516,8 @@ pub(crate) fn eval_method(
                     &string_arg(args, 1, span)?,
                 ),
                 |value| match value {
-                    Some(text) => CtValue::Some(Box::new(CtValue::Str(text))),
-                    None => CtValue::None(Type::String),
+                    Some(text) => CtValue::Present(Box::new(CtValue::Str(text))),
+                    None => CtValue::absent(Type::String),
                 },
             ),
             (BrowserHostValue::Page(page), "storage_set") => result(
