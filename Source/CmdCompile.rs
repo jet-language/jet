@@ -136,13 +136,13 @@ fn json_strings(values: &[String]) -> String {
 /// D-BUILDPROFILE1: load Package build profiles from the project root of `source_file`.
 fn load_pkg_profiles(
     source_file: &str,
-) -> Option<Vec<jet::PackageManifest::BuildProfileDef>> {
+) -> Option<Vec<jet::Package::BuildProfileDef>> {
     let src_path = std::path::Path::new(source_file);
     let search_from = src_path.parent().unwrap_or(std::path::Path::new("."));
     let root = jet::Loader::find_manifest_root(search_from)?;
     let pack_path = jet::Loader::manifest_path(&root)?;
     let raw = fs::read_to_string(&pack_path).ok()?;
-    jet::PackageManifest::parse(&raw)
+    jet::Package::PackageFacts::parse(&raw, pack_path.display().to_string())
         .ok()
         .map(|mf| mf.build_profiles)
 }
@@ -186,12 +186,13 @@ fn resolve_named_profile(name: &str, source_file: &str, mode: OutputMode) -> Bui
 /// and the later E1293 gate inspect the same policy without re-parsing it.
 fn load_pkg_manifest(
     source_file: &str,
-) -> Option<(PathBuf, jet::PackageManifest::PackManifest)> {
+) -> Option<(PathBuf, jet::Package::PackageFacts)> {
     let source_path = Path::new(source_file);
     let search_from = source_path.parent().unwrap_or(Path::new("."));
     let root = jet::Loader::find_manifest_root(search_from)?;
-    let raw = fs::read_to_string(jet::Loader::manifest_path(&root)?).ok()?;
-    let manifest = jet::PackageManifest::parse(&raw).ok()?;
+    let pack_path = jet::Loader::manifest_path(&root)?;
+    let raw = fs::read_to_string(&pack_path).ok()?;
+    let manifest = jet::Package::PackageFacts::parse(&raw, pack_path.display().to_string()).ok()?;
     Some((root, manifest))
 }
 

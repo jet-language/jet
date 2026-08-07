@@ -1,7 +1,8 @@
 name: CI
 
-# D-CI3=A: full suite on every push (flags red). Nightly lane adds rotating-seed
-# fuzzing (N>=1000) and perf ratchet. c730 adds the named JIT/AOT parity job.
+# D-CI1=A: the complete cargo test-target inventory, sharded, on every push
+# (flags red). Nightly lane adds rotating-seed fuzzing (N>=1000) and perf
+# ratchet. c730 adds the named JIT/AOT parity job.
 on:
   push:
   pull_request:
@@ -126,10 +127,10 @@ jobs:
           if-no-files-found: error
 
   verify:
-    name: Full verify suite
+    name: Verify checks
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -146,11 +147,6 @@ jobs:
       - name: Cargo check
         run: nix develop -c cargo check
 
-      - name: Full verify suite (D-CI3)
-        env:
-          JET_REQUIRE_RUSTC: "1"
-        run: nix develop .#full -c scripts/agent/verify-full.sh
-
       - name: Install aarch64 cross tools
         run: |
           sudo apt-get update
@@ -159,6 +155,41 @@ jobs:
 
       - name: aarch64 freestanding QEMU smoke
         run: nix develop .#full -c bash tools/ci/aarch64-qemu-freestanding.sh
+
+  # #211 (D-CI1=A): the complete cargo test-target inventory (every lib/bin/
+  # test target `cargo metadata` names across the whole workspace — not just
+  # the "."/jet-driver/jetpack-bin/jetos default-members plain `cargo test`
+  # silently limited itself to), sharded across parallel jobs so PR wall-clock
+  # stays sane as the suite grows. tools/ci/test-shards.sh enumerates targets
+  # fresh every run, so a newly added test file always lands in some shard —
+  # it can never silently fall out of the gate the way default-members did.
+  # tests/release_gates.rs proves shard_count here matches SHARD_COUNT below
+  # and that the shards' union is the exact `cargo metadata` inventory.
+  verify-tests:
+    name: Verify tests (shard ${{ matrix.shard }}/6)
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5]
+    env:
+      JET_REQUIRE_RUSTC: "1"
+      JET_TEST_SHARD: ${{ matrix.shard }}
+      JET_TEST_SHARD_COUNT: "6"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Verify suite shard (D-CI1)
+        run: nix develop .#full -c scripts/agent/verify-full.sh
 
   nightly-fuzz:
     name: Nightly rotating-seed fuzz + perf ratchet

@@ -214,7 +214,7 @@ fn jetpack_dependency_debt_is_explicit_until_product_split() {
     // Card #367 / D-PRODUCT-SPLIT1=C slice 1: `jet-driver` moved off
     // `jetpack` onto `jet-pkg-model` (the read-only data model), so it left
     // this debt list. Slice 3 moved the root package's read-only-model
-    // touch points (`PackageManifest`/`Manifest`/`ScriptDeps`/`Lock`/`CBind`/
+    // touch points (`PackageFacts`/`Manifest`/`ScriptDeps`/`Lock`/`CBind`/
     // `CFFI`/`FFI`/`EffectBudget`/`LintPolicy`/hangar-listing `Store`) off
     // `jetpack` too, onto the same `jet-pkg-model` seam via `jet-driver`'s
     // re-export — but the root package still bundles `jetpack` itself for
@@ -270,7 +270,7 @@ fn direct_jetpack_imports_stay_behind_known_boundaries() {
         // `crate::Jetpack` patterns never matched — a detection blind spot,
         // not new debt. Now that the alias is gone, main.rs's remaining
         // genuine-engine calls (`WorkspaceFile`, `JetPin`, `ScriptLock`) are
-        // direct `jetpack::…` and honestly tracked here. `PackageManifest`/
+        // direct `jetpack::…` and honestly tracked here. `PackageFacts`/
         // `EffectBudget`/`LintPolicy`/`ScriptDeps`/`Store` usages moved to
         // the shared model (`jet::…`) and left this file entirely.
         "Source/main.rs",

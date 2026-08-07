@@ -276,7 +276,7 @@ impl WatchGraph {
         let project = entry.parent().unwrap_or_else(|| Path::new("."));
         let extras = [
             (
-                jet_driver::PackageManifest::PackManifest::path_in(project),
+                jet_driver::Manifest::manifest_path_in(project),
                 RootKind::Manifest,
             ),
             (project.join(".jet/lock"), RootKind::Lock),

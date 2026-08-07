@@ -735,6 +735,105 @@ fn jet_uuid_format(b: &[u8; 16]) -> String {
     )
 }
 
+// #1481 core.uuid: parse a hyphenated UUID string into its 16 raw bytes,
+// rejecting anything that is not exactly 8-4-4-4-12 hex digits.
+fn jet_uuid_bytes(s: &str) -> Result<[u8; 16], String> {
+    let hex: String = s.chars().filter(|c| *c != '-').collect();
+    if hex.len() != 32 || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(format!("`{s}` is not a UUID (want 8-4-4-4-12 hex digits)"));
+    }
+    let groups: Vec<usize> = s.match_indices('-').map(|(i, _)| i).collect();
+    if groups != [8, 13, 18, 23] {
+        return Err(format!("`{s}` is not a UUID (want 8-4-4-4-12 hex digits)"));
+    }
+    let mut bytes = [0u8; 16];
+    for (i, byte) in bytes.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).map_err(|_| {
+            format!("`{s}` is not a UUID (want 8-4-4-4-12 hex digits)")
+        })?;
+    }
+    Ok(bytes)
+}
+
+// #1481 core.uuid: validate and normalize (lowercase) a UUID string — the
+// String representation stays canonical (D-CORE-TREE1 area; no new UUID type).
+fn jet_std_uuid_parse(s: &String) -> Result<String, String> {
+    jet_uuid_bytes(s).map(|bytes| jet_uuid_format(&bytes))
+}
+
+// #1481 core.uuid: RFC 4122 SHA-1 (version 5) — deterministic, no CSPRNG.
+// Pure std, zero deps (I6); this is the one extra hash function UUID v5
+// needs and is not reused elsewhere, so it stays local instead of a shared
+// crypto primitive.
+fn jet_uuid_sha1(data: &[u8]) -> [u8; 20] {
+    let mut h: [u32; 5] = [0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0];
+    let bit_len = (data.len() as u64) * 8;
+    let mut msg = data.to_vec();
+    msg.push(0x80);
+    while msg.len() % 64 != 56 {
+        msg.push(0);
+    }
+    msg.extend_from_slice(&bit_len.to_be_bytes());
+    for chunk in msg.chunks_exact(64) {
+        let mut w = [0u32; 80];
+        for (i, word) in w.iter_mut().take(16).enumerate() {
+            *word = u32::from_be_bytes([
+                chunk[i * 4],
+                chunk[i * 4 + 1],
+                chunk[i * 4 + 2],
+                chunk[i * 4 + 3],
+            ]);
+        }
+        for i in 16..80 {
+            w[i] = (w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16]).rotate_left(1);
+        }
+        let (mut a, mut b, mut c, mut d, mut e) = (h[0], h[1], h[2], h[3], h[4]);
+        for (i, word) in w.iter().enumerate() {
+            let (f, k) = match i {
+                0..=19 => ((b & c) | ((!b) & d), 0x5A827999u32),
+                20..=39 => (b ^ c ^ d, 0x6ED9EBA1),
+                40..=59 => ((b & c) | (b & d) | (c & d), 0x8F1BBCDC),
+                _ => (b ^ c ^ d, 0xCA62C1D6),
+            };
+            let temp = a
+                .rotate_left(5)
+                .wrapping_add(f)
+                .wrapping_add(e)
+                .wrapping_add(k)
+                .wrapping_add(*word);
+            e = d;
+            d = c;
+            c = b.rotate_left(30);
+            b = a;
+            a = temp;
+        }
+        h[0] = h[0].wrapping_add(a);
+        h[1] = h[1].wrapping_add(b);
+        h[2] = h[2].wrapping_add(c);
+        h[3] = h[3].wrapping_add(d);
+        h[4] = h[4].wrapping_add(e);
+    }
+    let mut out = [0u8; 20];
+    for (i, word) in h.iter().enumerate() {
+        out[i * 4..i * 4 + 4].copy_from_slice(&word.to_be_bytes());
+    }
+    out
+}
+
+// #1481 core.uuid: v5 (namespace + name, SHA-1) — deterministic sibling of
+// the already-shipped v4 (random) and v7 (time-ordered).
+fn jet_std_uuid_v5(namespace: &String, name: &String) -> Result<String, String> {
+    let ns = jet_uuid_bytes(namespace)?;
+    let mut input = ns.to_vec();
+    input.extend_from_slice(name.as_bytes());
+    let digest = jet_uuid_sha1(&input);
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    bytes[6] = (bytes[6] & 0x0f) | 0x50; // version 5
+    bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant 10xx
+    Ok(jet_uuid_format(&bytes))
+}
+
 fn jet_std_uuid_v4() -> String {
     let mut bytes = [0u8; 16];
     jet_uuid_fill_random(&mut bytes);

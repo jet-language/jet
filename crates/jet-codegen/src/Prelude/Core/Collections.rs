@@ -819,9 +819,17 @@ fn jet_iter_repeat<T: 'static + Clone>(it: JetIter<T>, n: i64) -> JetIter<T> {
     JetIter(Box::new((0..n).flat_map(move |_| xs.clone().into_iter())))
 }
 
-fn jet_iter_cycle<T: 'static + Clone>(it: JetIter<T>) -> JetIter<T> {
+/// D-ITER1: bounded cycle — produces exactly `n` items by looping the
+/// source (not `n` loops; `jet_iter_repeat` covers "loop n times"). A
+/// 0-arg infinite cycle has no safe representation across every execution
+/// tier (I9), so `.cycle(n)` is the only shipped form.
+fn jet_iter_cycle<T: 'static + Clone>(it: JetIter<T>, n: i64) -> JetIter<T> {
     let xs = it.to_list();
-    JetIter(Box::new(xs.into_iter().cycle()))
+    let n = n.max(0) as usize;
+    if xs.is_empty() {
+        return jet_iter_from_vec(Vec::new());
+    }
+    JetIter(Box::new(xs.into_iter().cycle().take(n)))
 }
 
 fn jet_iter_drop_last<T: 'static>(it: JetIter<T>, n: i64) -> JetIter<T> {

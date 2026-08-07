@@ -322,6 +322,7 @@ fn tir_function_entry_resets_structural_depth() {
             ty: jet::AST::Type::Named("Unit".to_string()),
             kind: TExprKind::Call {
                 name: "helper".to_string(),
+                type_args: Vec::new(),
                 args: Vec::new(),
             },
         })],

@@ -1,23 +1,23 @@
-//! Convert a parsed `PackManifest` into the compiler's `Manifest::Manifest`
+//! Convert composed `PackageFacts` into the compiler's `Manifest::Manifest`
 //! (E1206), and the `jet new` template generator.
 
-use super::{DepSource, PackManifest};
+use super::{DepSource, PackageFacts};
 use crate::Diagnostics::Diagnostic;
 use crate::RefSpec::Source;
 
-/// Convert a parsed `PackManifest` into the compiler's `Manifest::Manifest`
+/// Convert composed `PackageFacts` into the compiler's `Manifest::Manifest`
 /// — the type `loader.rs`/`fetch.rs`/`lock.rs` operate on. `raw` is the
-/// original `pkg.jet` text (kept for comment-preserving `jet add`/`remove`
-/// edits, mirroring the old `jet.toml` `Manifest::raw`).
-pub fn to_manifest(pm: &PackManifest, raw: &str) -> Result<crate::Manifest::Manifest, Diagnostic> {
+/// original `package.jet` text (kept for comment-preserving `jet add`/
+/// `remove` edits).
+pub fn to_manifest(facts: &PackageFacts, raw: &str) -> Result<crate::Manifest::Manifest, Diagnostic> {
     use crate::Manifest::{DepSpec, GitSelector, Manifest, PackageMeta as MPackageMeta};
     use std::collections::BTreeMap;
 
     let mut dependencies = BTreeMap::new();
-    for dep in &pm.deps {
-        let spec = match &dep.source {
+    for (name, source) in &facts.deps {
+        let spec = match source {
             // S59/D-CFFI2: a native C-library link dep is not a Jet package —
-            // it is resolved by Source/CFFI.rs into linker flags, never realized
+            // resolved by `Source/CFFI.rs` into linker flags, never realized
             // as source or written to the package lock. Skip it here.
             DepSource::CLib { .. } => continue,
             DepSource::Version(v) => DepSpec::Registry(v.clone()),
@@ -29,19 +29,13 @@ pub fn to_manifest(pm: &PackManifest, raw: &str) -> Result<crate::Manifest::Mani
                     GitSelector::Rev(r) => GitSelector::Rev(r.clone()),
                 },
             },
-            DepSource::Provider {
-                provider: Source::Path,
-                target,
-            } => DepSpec::Path {
-                path: target.clone(),
-            },
-            DepSource::Provider {
-                provider: Source::Github,
-                target,
-            } => {
+            DepSource::Provider { provider: Source::Path, target } => {
+                DepSpec::Path { path: target.clone() }
+            }
+            DepSource::Provider { provider: Source::Github, target } => {
                 let Some((owner_repo, rev)) = target.rsplit_once('/') else {
                     return Err(bad_dep_shape(
-                        &dep.name,
+                        name,
                         "an `owner/repo/rev@github` dependency needs a pinned rev as its last segment; use the inline `{ git: \"...\", branch/tag: \"...\" }` form to track a moving branch or tag",
                     ));
                 };
@@ -52,7 +46,7 @@ pub fn to_manifest(pm: &PackManifest, raw: &str) -> Result<crate::Manifest::Mani
             }
             DepSource::Provider { provider, .. } => {
                 return Err(bad_dep_shape(
-                    &dep.name,
+                    name,
                     &format!(
                         "`{}` is not a valid source for a Jet library dependency — use a bare local path, `owner/repo/rev@github`, or an inline git struct",
                         provider.label()
@@ -60,19 +54,19 @@ pub fn to_manifest(pm: &PackManifest, raw: &str) -> Result<crate::Manifest::Mani
                 ));
             }
         };
-        dependencies.insert(dep.name.clone(), spec);
+        dependencies.insert(name.clone(), spec);
     }
 
     Ok(Manifest {
         package: MPackageMeta {
-            name: pm.package.name.clone(),
-            version: pm.package.version.clone(),
-            edition: pm.package.edition.clone(),
-            jet_constraint: pm.package.jet_constraint.clone(),
-            description: pm.package.description.clone(),
-            license: pm.package.license.clone(),
-            repository: pm.package.repository.clone(),
-            layer: pm.package.layer,
+            name: facts.name.clone(),
+            version: facts.version.clone().unwrap_or_default(),
+            edition: facts.edition.clone(),
+            jet_constraint: facts.jet.clone(),
+            description: facts.description.clone(),
+            license: facts.license.clone(),
+            repository: facts.repository.clone(),
+            layer: facts.layer,
         },
         dependencies,
         dependencies_rust: BTreeMap::new(),
@@ -90,7 +84,8 @@ fn bad_dep_shape(name: &str, why: &str) -> Diagnostic {
     )
 }
 
-/// Generate the canonical `package.jet` template for `jet new`.
+/// Generate the canonical `package.jet` template for `jet new` (D-CONF-NAME1:
+/// bare `name:`/`version:`, no `identity:`/`payload:` wrapper).
 pub fn new_template(name: &str, annotated: bool) -> String {
     let ver = crate::Manifest::COMPILER_VERSION;
     if annotated {
@@ -103,7 +98,7 @@ license: "MIT OR Apache-2.0"
 repository: ""
 
 // Jet package dependencies:
-// deps: {{
+// deps: .{{
 //     helpers:  ../helpers,
 //     parsekit: {{ git: "https://github.com/acme/parsekit", tag: "v0.4.1" }},
 // }}
@@ -118,7 +113,7 @@ description: ""
 license: "MIT OR Apache-2.0"
 repository: ""
 
-deps: {{
+deps: .{{
 }}
 "#
         )

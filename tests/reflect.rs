@@ -3,7 +3,7 @@
 use jet::Comptime::{build_struct_type_info, CtValue};
 use jet::Diagnostics::Span;
 use jet::AST::{
-    AccessConvention, Expr, Field, Func, Marker, Param, StructDef, Type, TypeParam,
+    AccessConvention, Expr, Field, Func, Marker, Param, ParamZone, StructDef, Type, TypeParam,
 };
 
 fn span() -> Span {
@@ -37,8 +37,11 @@ fn method(name: &str, is_pub: bool) -> Func {
         type_params: Vec::new(),
         params: vec![Param {
             convention: AccessConvention::Read,
+            root: false,
             name: "self".to_string(),
             name_span: span(),
+            public_label: None,
+            zone: ParamZone::Either,
             ty: Type::Named("Self".to_string()),
             ty_span: span(),
             default: None,
@@ -82,6 +85,7 @@ fn method(name: &str, is_pub: bool) -> Func {
         every: None,
         task_metadata: None,
         inline_foreign: None,
+        markers: Vec::new(),
         body: Vec::new(),
     }
 }

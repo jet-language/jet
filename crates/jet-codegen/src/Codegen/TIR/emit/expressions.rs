@@ -1126,6 +1126,24 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         a(1), recv, a(0), cx.file, line, recv, a(0), cx.file, line
                     ),
                 },
+                TBuiltinOp::PriorityQueueRemove { line, mode } => match mode {
+                    crate::Codegen::TIR::ListRemoveMode::Value => format!(
+                        "jet_priority_queue_remove_value(&mut ({}), {})",
+                        recv,
+                        a(0)
+                    ),
+                    crate::Codegen::TIR::ListRemoveMode::Slot => format!(
+                        "jet_priority_queue_remove_slot(&mut ({}), {}, {:?}, {})",
+                        recv,
+                        a(0),
+                        cx.file,
+                        line
+                    ),
+                    crate::Codegen::TIR::ListRemoveMode::Dynamic => format!(
+                        "match ({}) {{ JetRemoveBy::Val => jet_priority_queue_remove_value(&mut ({}), {}), JetRemoveBy::Slot => jet_priority_queue_remove_slot(&mut ({}), {}, {:?}, {}) }}",
+                        a(1), recv, a(0), recv, a(0), cx.file, line
+                    ),
+                },
                 TBuiltinOp::CountList => {
                     format!("jet_list_count(&({}), &({}))", recv, a(0))
                 }
@@ -1260,6 +1278,22 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         format!("{}jet_text_normalize_nfc(&({}))", cx.root_prefix, recv)
                     }
                     "rsplit" => format!("jet_iter_string_rsplit(&({}), &{})", recv, a(0)),
+                    // D-STR-DECLINE1=C: `matches`/`match` — compile the pattern
+                    // through the one core.regex engine, then run the same
+                    // `jet_regex_is_match`/`jet_regex_find` `jet.regex.is_match`/
+                    // `jet.regex.find` already call.
+                    "matches" => format!(
+                        "{root}jet_std::jet_regex_compile(&({pattern})).map(|__jet_re| {root}jet_std::jet_regex_is_match(&__jet_re, &({recv})))",
+                        root = cx.root_prefix,
+                        pattern = a(0),
+                        recv = recv,
+                    ),
+                    "match" => format!(
+                        "{root}jet_std::jet_regex_compile(&({pattern})).map(|__jet_re| {root}jet_std::jet_regex_find(&__jet_re, &({recv})))",
+                        root = cx.root_prefix,
+                        pattern = a(0),
+                        recv = recv,
+                    ),
                     other => format!(
                         "compile_error!(\"unknown StringMethod: {}\")",
                         other
@@ -1351,6 +1385,18 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TBuiltinOp::SetReplace => format!("jet_outcome_of(({}).replace({}))", recv, a(0)),
                 // #1478: native remove-and-return — Rust's own `HashSet::take`.
                 TBuiltinOp::SetTake => format!("jet_outcome_of(({}).take(&({})))", recv, a(0)),
+                // D-SET-DECLINE1=C: `set.sort()` — materialize then sort the
+                // copy, same as `set.to_list()` followed by `List.sort()`.
+                TBuiltinOp::SetSort => format!(
+                    "{{ let mut __jet_v = ({}).iter().cloned().collect::<Vec<_>>(); __jet_v.sort(); __jet_v }}",
+                    recv
+                ),
+                // D-SET-DECLINE1=C: `set.shuffle()` — the same `jet_iter_shuffle`
+                // engine `List.shuffle()` runs, materialized back to a `List`.
+                TBuiltinOp::SetShuffle => format!(
+                    "jet_iter_shuffle(jet_iter_from_vec(({}).iter().cloned().collect::<Vec<_>>())).to_list()",
+                    recv
+                ),
                 TBuiltinOp::SortedSetFrom => {
                     format!(
                         "({}).into_iter().collect::<std::collections::BTreeSet<_>>()",
@@ -1596,7 +1642,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TBuiltinOp::Chunks => format!("jet_iter_chunks({as_iter}, {})", a(0)),
                 TBuiltinOp::Windows => format!("jet_iter_windows({as_iter}, {})", a(0)),
                 TBuiltinOp::IterRepeat => format!("jet_iter_repeat({as_iter}, {})", a(0)),
-                TBuiltinOp::IterCycle => format!("jet_iter_cycle({as_iter})"),
+                TBuiltinOp::IterCycle => format!("jet_iter_cycle({as_iter}, {})", a(0)),
                 TBuiltinOp::IterDropLast => format!("jet_iter_drop_last({as_iter}, {})", a(0)),
                 TBuiltinOp::IterShuffle => format!("jet_iter_shuffle({as_iter})"),
                 TBuiltinOp::IterIsSorted => format!("jet_iter_is_sorted({as_iter})"),
@@ -3569,6 +3615,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::ProcessChildMethod { method } => match method.as_str() {
                     "id" => format!("{}jet_process_child_id(&({}))", root, recv),
                     "wait" => format!("{}jet_process_child_wait(&({}))", root, recv),
+                    // #1481 core.process: a non-blocking poll alongside the
+                    // blocking `wait()` — same handle, no new mechanism.
+                    "exited" => format!("{}jet_process_child_exited(&({}))", root, recv),
                     "kill" => format!("{}jet_process_child_kill(&({}))", root, recv),
                     "terminate" => {
                         format!("{}jet_process_child_terminate(&({}))", root, recv)

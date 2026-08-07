@@ -25,10 +25,10 @@ pub fn extract_public_api(src: &str, file: &str) -> Vec<ApiItem> {
         .and_then(|parent| {
             parent
                 .ancestors()
-                .find_map(crate::PackageManifest::PackManifest::load)
+                .find_map(crate::Package::PackageFacts::load)
         })
         .and_then(Result::ok)
-        .map(|manifest| manifest.package.name)
+        .map(|manifest| manifest.name)
         .unwrap_or_else(|| "package".to_string());
     extract_public_api_for_package(src, file, &package)
 }

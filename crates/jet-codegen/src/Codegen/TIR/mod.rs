@@ -4012,7 +4012,7 @@ pub enum TBuiltinOp {
     // #1479: remaining Iter ledger surface (non-closure).
     /// `repeat(n)` → `jet_iter_repeat({as_iter}, n)`.
     IterRepeat,
-    /// `cycle()` → `jet_iter_cycle({as_iter})`.
+    /// `cycle(n)` → `jet_iter_cycle({as_iter}, n)` — exactly `n` items.
     IterCycle,
     /// `drop_last(n)` → `jet_iter_drop_last({as_iter}, n)`.
     IterDropLast,
@@ -4113,6 +4113,12 @@ pub enum TBuiltinOp {
     SetReplace,
     /// #1478: `set.take(v)` → `(recv).take(&a0)` (native remove-and-return-if-present).
     SetTake,
+    /// D-SET-DECLINE1=C: `set.sort()` → a fresh sorted `List`, same
+    /// to-list-then-sort machinery `to_list()` already runs (Set never mutates).
+    SetSort,
+    /// D-SET-DECLINE1=C: `set.shuffle()` → a fresh shuffled `List`, the same
+    /// `jet_iter_shuffle` engine `List.shuffle()` already runs.
+    SetShuffle,
     SortedSetFrom,
     SortedSetInsert,
     SortedSetRemove,
@@ -4127,6 +4133,12 @@ pub enum TBuiltinOp {
     PriorityQueueFrom,
     PriorityQueuePeek,
     PriorityQueueToSortedList,
+    /// D-LISTREMOVE1/F: `remove(x[, by])` on a `PriorityQueue`; same selector
+    /// shape as `RemoveList`, no positional ordering guarantee across pushes.
+    PriorityQueueRemove {
+        line: usize,
+        mode: ListRemoveMode,
+    },
     LruPut,
     LruAddNew,
     LruGet,

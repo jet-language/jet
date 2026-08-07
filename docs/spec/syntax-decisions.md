@@ -5655,3 +5655,42 @@ Retired rows also stop applying effects. `#Pure` set `is_pure` and
 `#InlineAlways` set `is_inline_always` *after* diagnosing, so both retired
 spellings kept working and the registry's status column lied about them. They
 now teach their replacement and apply nothing.
+
+**2026-08-06 — D-CONF-PLANE1=A / D-CONF-NAME1=A**: `package.jet` has one
+parser and one field vocabulary. Before this decision, the compile path read
+the legacy flat parser (`payload:`/`packages:`/`effects:`/`build:`, no
+`outputs:` vocabulary) while tooling and Canvas read the role-typed
+`Package` parser (`identity:`/`outputs:`/`policy:`) — two parsers, two
+truths, and a declared `outputs:` output that never reached `jet build`.
+`jet_pkg_model::Package` (`crates/jet-pkg-model/src/Package/`) is now the
+only reader, wired into the compile path at `jet-driver`'s `Loader.rs` and
+`Manifest::parse`; the legacy parser directory
+(`crates/jet-pkg-model/src/PackageManifest/`) is deleted, not deprecated.
+
+The field vocabulary is judged as one coherent set (D-CONF-NAME1, option A):
+identity is bare `name:`/`version:` at the top level — no wrapper. The
+`identity: .{ }` block (D-SHAPE5) and the `payload: { }` block (U10) are both
+retired; either now reports the ordinary unknown-field E1206, naming the
+ratified spelling. The block nouns are `deps:`, `outputs:`, `settings:`,
+`build:`, `policy:`, `members:` (`MANIFEST_FIELD_NAME`, `MANIFEST_FIELD_VERSION`,
+`MANIFEST_BLOCK_DEPS`, `MANIFEST_BLOCK_OUTPUTS`, `MANIFEST_BLOCK_SETTINGS`,
+`MANIFEST_BLOCK_MEMBERS` in `crates/jet-foundation/src/Syntax/jetpack_config.rs`;
+`build:`/`effects:`/`grants:`/`policy:` keep their own prior decision IDs —
+D-BUILDPROFILE1, D-EFFBUDGET1, D-JPK-GRANTSCHEMA1 — unchanged by this ballot).
+`settings:` is accepted and stored structurally; typed `$build.settings.*`
+reads are the separate, unratified D-CONF-KEY1/D-CONF-READ1 ballots and are
+not wired here.
+
+Every block noun's grammar accepts nested records with or without the
+dot-construction prefix (`deps: .{ … }` and `deps: { … }` both parse; new
+manifests are written with the dot, matching every other typed literal in
+Jet). Dependency values accept both the legacy bare token (`helpers:
+../helpers`, `textkit: textkit#1.2.0`) and the ratified quoted spelling
+(`httpkit: "^2"`) — the same `DepSource` classification either way.
+D-BUILDSCOPE1's package-scoped `fn build` may still live beside the manifest
+fields in the same file; the one parser steps over that one declaration
+rather than reporting it as a malformed field.
+
+Every in-repo `package.jet`/`pkg.jet` (examples, tests, fixtures) moved to
+the bare-identity spelling in the same change; no fallback parse path
+remains. Flagship: `examples/features/packages/outputs_build/`. Card #1517.

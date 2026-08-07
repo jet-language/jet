@@ -39,4 +39,17 @@ fn run() {
     print("é".normalize() == "é")
     rparts :: "a,b,c".rsplit(",")
     print(rparts.len())
+    // D-STR-DECLINE1=C: `matches`/`match` route through the one core.regex
+    // engine (`jet.regex.compile` + `is_match`/`find`) — same bad-pattern
+    // `? String` error shape `jet.regex.compile` already returns.
+    phone :: "call 555-0134"
+    has_digits :: phone.matches("[0-9]+") ?? panic("bad pattern")
+    print(has_digits)
+    no_digits :: "no numbers here".matches("[0-9]+") ?? panic("bad pattern")
+    print(no_digits)
+    found :: phone.match("[0-9]+") ?? panic("bad pattern")
+    print(found ?? "none")
+    // A bad pattern takes the `??` fallback (compile fails before any match runs).
+    bad_pattern :: "x".matches("[") ?? false
+    print(bad_pattern)
 }

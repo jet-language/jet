@@ -7,7 +7,7 @@ This page is the durable review index. The JSON file beside it is the
 machine-readable source that card #1398 reads. Do not keep a second
 hand-written workflow inventory.
 
-Generated on: 2026-08-06
+Generated on: 2026-08-07
 
 ## What decides a row
 
@@ -51,38 +51,38 @@ Generated on: 2026-08-06
 | Languages compared | 11 |
 | Shared containers | 54 |
 | Core modules | 85 |
-| Module members | 1137 |
-| Collection method rows | 713 |
-| Jet-side rows | 1851 |
-| Total rows | 10431 |
+| Module members | 1139 |
+| Collection method rows | 722 |
+| Jet-side rows | 1862 |
+| Total rows | 10434 |
 
 ## Verdicts
 
 | Verdict | Rows |
 | --- | ---: |
-| Jet wins | 401 |
-| Equal | 861 |
-| Jet loses (two or more languages agree) | 307 |
-| Single witness (recorded, not scored) | 8273 |
+| Jet wins | 404 |
+| Equal | 869 |
+| Jet loses (two or more languages agree) | 192 |
+| Single witness (recorded, not scored) | 8272 |
 | Exported type, not an operation | 169 |
 | Not compared | 420 |
-| Deliberately declined | 0 |
+| Deliberately declined | 108 |
 
 ## Competitors
 
 | Language | Surface read from | Recorded operations | Jet rows matched | Loss rows |
 | --- | --- | ---: | ---: | ---: |
-| Rust | standard-library source (rust-src component) | 1032 | 359 | 26 |
-| Go | official frozen API files (GOROOT/api/go1*.txt) | 1878 | 406 | 112 |
-| Swift | official documentation JSON (developer.apple.com) | 505 | 183 | 24 |
-| Kotlin | official API reference (kotlinlang.org) | 1141 | 240 | 51 |
-| C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1267 | 327 | 47 |
-| TypeScript | runtime introspection | 724 | 221 | 64 |
-| Ruby | runtime introspection | 1294 | 342 | 78 |
-| Elixir | runtime introspection | 1270 | 370 | 74 |
-| Julia | official documentation search index (docs.julialang.org) | 1132 | 282 | 79 |
+| Rust | standard-library source (rust-src component) | 1032 | 360 | 12 |
+| Go | official frozen API files (GOROOT/api/go1*.txt) | 1878 | 407 | 59 |
+| Swift | official documentation JSON (developer.apple.com) | 505 | 185 | 4 |
+| Kotlin | official API reference (kotlinlang.org) | 1141 | 245 | 18 |
+| C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1267 | 329 | 24 |
+| TypeScript | runtime introspection | 724 | 222 | 53 |
+| Ruby | runtime introspection | 1294 | 343 | 45 |
+| Elixir | runtime introspection | 1270 | 372 | 60 |
+| Julia | official documentation search index (docs.julialang.org) | 1132 | 283 | 63 |
 | R | official R manual package index (stat.ethz.ch R-devel) | 1768 | 51 | 0 |
-| Python | runtime introspection | 2232 | 419 | 158 |
+| Python | runtime introspection | 2232 | 420 | 116 |
 
 ## Loss clusters
 
@@ -95,37 +95,23 @@ while losses remain.
 | Container | Loss rows | Owner card | Card phase | State |
 | --- | ---: | --- | --- | --- |
 | core.files | 66 | #288 | building | live |
-| String | 34 | #1581 | ready | live |
 | core.crypto | 17 | #1473 | ready | live |
 | core.archive | 16 | #1470 | ready | live |
 | core.time | 14 | #1466 | done | closed |
 | core.tasks | 13 | #1468 | done | closed |
-| core.sync | 12 | #1481 | ready | live |
 | core.math | 10 | #1464 | done | closed |
 | core.os | 10 | #1465 | done | closed |
-| core.encoding.xml | 9 | #1481 | ready | live |
 | core.log | 9 | #1474 | done | closed |
 | core.net | 9 | #1469 | done | closed |
 | core.path | 9 | #288 | building | live |
-| core.process | 9 | #1481 | ready | live |
 | ByteBuffer | 8 | #1467 | done | closed |
-| core.db | 8 | #1481 | ready | live |
-| core.reflect | 8 | #1481 | ready | live |
-| core.testing | 7 | #1481 | ready | live |
-| core.tls | 6 | #1481 | ready | live |
-| core.uuid | 5 | #1481 | ready | live |
-| Set | 5 | #1584 | ready | live |
-| core.http | 4 | #1481 | ready | live |
 | core.regex | 4 | #1471 | done | closed |
-| core.encoding.csv | 3 | #1481 | ready | live |
-| core.args | 2 | #1481 | ready | live |
-| core.binary | 2 | #1481 | ready | live |
-| core.mem | 2 | #1481 | ready | live |
-| core.random | 2 | #1481 | ready | live |
+| core.tls | 2 | #1593 | planning | live |
 | BitSet | 1 | #1493 | ready | live |
-| core.encoding.json | 1 | #1481 | ready | live |
+| core.process | 1 | #1590 | verify | live |
+| core.uuid | 1 | #1590 | verify | live |
 | Deque | 1 | #1475 | done | closed |
-| PriorityQueue | 1 | #1481 | ready | live |
+| String | 1 | #1581 | verify | live |
 
 ## Containers indexed per package
 

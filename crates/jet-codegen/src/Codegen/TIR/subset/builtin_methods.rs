@@ -56,6 +56,11 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         | ("after", 1) | ("before", 1)
         // c97/D-STRPARSE1: parsing stays `Type.parse`.
         | ("lines", 0)
+        // D-STR-DECLINE1=C: `to_int`/`to_float` — same `Int.parse`/`Float.parse`
+        // builtin, string is the receiver either way. `matches`/`match` — the
+        // one core.regex engine, composed for a String receiver.
+        | ("to_int", 0) | ("to_float", 0)
+        | ("matches", 1) | ("match", 1)
         // `to_string` (String/Bool/Char receiver — those carry `recv_type == None`;
         // a numeric `to_string` sets `recv_type` and so is excluded by the guard).
         | ("to_string", 0)
@@ -66,7 +71,7 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         | ("sum", 0) | ("product", 0) | ("min", 0) | ("max", 0)
         | ("flatten", 0) | ("intersperse", 1) | ("unzip", 0)
         // #1479 Iter ledger surface (non-closure).
-        | ("cycle", 0) | ("drop_last", 1) | ("shuffle", 0)
+        | ("cycle", 1) | ("drop_last", 1) | ("shuffle", 0)
         | ("is_sorted", 0) | ("average", 0)
         // D-LOOPMAP1=B: enter the lazy pipeline plane from an in-memory list.
         | ("lazy", 0)
@@ -219,7 +224,7 @@ pub(crate) fn is_process_handle_method_name(
         ),
         Some("ProcessChild") => matches!(
             (method, nargs),
-            ("id" | "wait" | "kill" | "terminate" | "interrupt", 0)
+            ("id" | "wait" | "exited" | "kill" | "terminate" | "interrupt", 0)
         ),
         Some("TerminalSession") => matches!((method, nargs), ("resize", 1)),
         // D-PROCESS1=A: `.write(text)` on `child.stdin`.

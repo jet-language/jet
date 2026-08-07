@@ -1,6 +1,6 @@
 ---
 name: mine-video-for-jet
-description: Mine one or more YouTube videos using resumable transcript/comment evidence, caption-quality checks, stratified anonymous comment samples, claim ledgers, linked sources, and cross-video contradiction synthesis; cross-check findings against Jet's specs, code, tests, plans, and Tower; and, only when explicitly requested, create deduplicated Tower cards and ballot-ready decisions. Use for "analyze this video for Jet," "extract lessons and pitfalls," "cross-check these videos," or "make frozen Tower cards/ballots from this video."
+description: Mine one or more YouTube videos using resumable transcript/comment evidence, caption-quality checks, stratified anonymous comment samples, claim ledgers, linked sources, and cross-video contradiction synthesis; mine both macro lessons and micro details (APIs, features, syntax, ergonomics); cross-check findings against Jet's specs, code, tests, plans, and Tower; and, by default, log every actionable finding as deduplicated Tower cards and ballot-ready decisions. Use for "analyze this video for Jet," "extract lessons and pitfalls," "cross-check these videos," or "make Tower cards/ballots from this video."
 ---
 
 # Mine Video for Jet
@@ -11,8 +11,9 @@ Extract evidence first. Persist progress. Separate video claims, comment signals
 
 ### 1. Establish scope
 
-- Confirm the YouTube URL and requested outcome: report only, repo changes, Tower cards, ballots, or some combination.
-- Treat Tower writes and repo edits as unauthorized unless requested explicitly.
+- Confirm the YouTube URL and any outcome the owner named.
+- Tower logging is the default outcome (owner directive 2026-08-06): every actionable finding — gap, deferred consideration, measurement, owner gate — becomes a Tower card or ballot in the same run, never a "revisit later" line in the report. Skip Tower writes only when the owner explicitly says report-only.
+- Repo edits remain unauthorized unless requested explicitly.
 - Read `AGENTS.md`, then its required spec files in order. Read `.agents/skills/tower/SKILL.md` and `.agents/skills/tower-ballot/SKILL.md` before any Tower work.
 - Preserve unrelated dirty-tree changes. Do not checkpoint or delegate when doing so would commit another worker's changes.
 
@@ -47,6 +48,7 @@ For long or multi-session work, keep a small progress manifest (`/tmp/jet-youtub
 
 - Process transcript in bounded timestamp chunks until the full runtime is covered.
 - Reconstruct thesis, causal chain, measurements, proposed fixes, caveats, and unresolved questions.
+- Mine micro alongside macro. Architectural lessons are half the value; also harvest every concrete small thing the video or comments praise, demo, or complain about: a nice API shape, a pleasant syntax form, a single well-designed feature, an ergonomic default, a naming choice, an error-message style, a tooling nicety. Each micro item gets its own ledger row and Jet cross-check; do not fold micro items into a macro theme.
 - Distinguish host commentary from material being quoted or read.
 - Preserve timestamps for important claims, but paraphrase in final output unless a short quote is necessary.
 - Note caption quality. Creator captions (`subtitles` in the info JSON) are high quality; auto/unknown captions are never high-confidence evidence without corroboration.
@@ -139,8 +141,9 @@ Build one ledger per video, then group all claims by exact `topic` key (a short 
 - Read every conflicting claim and primary source. Never resolve contradiction by count, likes, or confidence labels alone.
 - Merge recommendations only when Jet impact and acceptance proof match. Preserve distinct mechanisms or contexts.
 
-### 9. Write Tower only when requested
+### 9. Write Tower (default)
 
+- Log everything now. Any finding whose action is not "none" gets a Tower card (or attaches to an existing card) in this run. Never end with a deferred list; "revisit at 1.0" still means a card exists today, homed appropriately.
 - Read Tower status and search for duplicates first.
 - Create one card per coherent deliverable, not one card per bullet.
 - Add one ballot per independently decidable owner choice. Use full tower-ballot fields and worked options.
@@ -175,4 +178,6 @@ Keep comments anonymous unless identity materially affects credibility. Avoid lo
 - Do not compare clean and incremental builds, CPU-summed and wall time, or debug and release profiles as equivalents.
 - Do not solve backend cost through hidden allocation, silent de-optimization, or new surface syntax.
 - Do not expose backend diagnostics as Jet user errors.
-- Do not mutate Tower or repo merely because report recommends work.
+- Do not mutate the repo merely because the report recommends work; Tower logging, by contrast, is mandatory for every actionable finding unless the owner said report-only.
+- Do not report a finding as "revisit later" without a card that carries it.
+- Do not skip micro findings (APIs, syntax, features, ergonomics) because they look too small to matter.

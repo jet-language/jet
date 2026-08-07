@@ -1,6 +1,6 @@
 //! M14 soundness fuzz: sema-checked programs must compile with rustc (I2).
 //! Short CI run (N=50 default); use FUZZ_SEED for reproducibility and
-//! FUZZ_VARIANTS to raise N (D-CI3: nightly lane runs N>=1000 with a
+//! FUZZ_VARIANTS to raise N (D-CI1: nightly lane runs N>=1000 with a
 //! rotating seed).
 
 use std::fs;

@@ -444,7 +444,7 @@ pub fn evaluate_env_with_profiles(
     // this project's own `pkg.jet` `packages:` block (E1267) — a different
     // manifest than the `env.jet`/`config.jet` this pass is evaluating, so it's
     // loaded fresh here rather than threaded through as a plan field.
-    let manifest = super::super::PackageManifest::PackManifest::load(base_dir).and_then(|r| r.ok());
+    let manifest = super::super::Package::PackageFacts::load(base_dir).and_then(|r| r.ok());
     for image in &images {
         match image.kind {
             ImageKind::Iso => {
@@ -472,12 +472,12 @@ pub fn evaluate_env_with_profiles(
                 let kind = manifest.as_ref().and_then(|m| m.package_kind(&image.from));
                 let is_executable = matches!(
                     kind,
-                    Some(super::super::PackageManifest::PackageKind::Executable)
+                    Some(super::super::Package::PackageKind::Executable)
                 );
                 if !is_executable {
                     let is_library = matches!(
                         kind,
-                        Some(super::super::PackageManifest::PackageKind::Library)
+                        Some(super::super::Package::PackageKind::Library)
                     );
                     return Err(oci_from_non_executable(
                         &image.name,

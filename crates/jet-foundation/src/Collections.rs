@@ -921,7 +921,11 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
         ("is_sorted", 0) => Some(Some(Type::Bool)),
         ("is_sorted_by", 1) => Some(Some(Type::Bool)),
         ("dedup_by", 1) => Some(Some(iter_ty(inner.clone()))),
-        ("cycle", 0) => Some(Some(iter_ty(inner.clone()))),
+        // D-ITER1: bounded — cycles the sequence, producing exactly `n`
+        // items (not `n` loops; `repeat(n)` already covers "loop n times").
+        // A 0-arg infinite `cycle()` has no safe representation across
+        // AOT/JIT/interpreter without unbounded materialization risk (I9).
+        ("cycle", 1) => Some(Some(iter_ty(inner.clone()))),
         ("drop_last", 1) => Some(Some(iter_ty(inner.clone()))),
         ("last_index_of", 1) => Some(Some(Type::Option(Box::new(Type::Int)))),
         ("average", 0) => Some(Some(Type::Float)),
@@ -1118,7 +1122,11 @@ fn iter_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
         ("is_sorted", 0) => Some(Some(Type::Bool)),
         ("is_sorted_by", 1) => Some(Some(Type::Bool)),
         ("dedup_by", 1) => Some(Some(iter_ty(inner.clone()))),
-        ("cycle", 0) => Some(Some(iter_ty(inner.clone()))),
+        // D-ITER1: bounded — cycles the sequence, producing exactly `n`
+        // items (not `n` loops; `repeat(n)` already covers "loop n times").
+        // A 0-arg infinite `cycle()` has no safe representation across
+        // AOT/JIT/interpreter without unbounded materialization risk (I9).
+        ("cycle", 1) => Some(Some(iter_ty(inner.clone()))),
         ("repeat", 1) => Some(Some(iter_ty(inner.clone()))),
         ("drop_last", 1) => Some(Some(iter_ty(inner.clone()))),
         ("last_index_of", 1) => Some(Some(Type::Option(Box::new(Type::Int)))),
@@ -1274,6 +1282,28 @@ fn string_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
         ("repeat", 1) => Some(Some(Type::String)),
         // c97/D-STRPARSE1: fallible integer parse. Same `Int ? ParseError` result
         // `Int.parse(s)` returns, so one error type covers text→int.
+        // D-STR-DECLINE1=C: `to_int`/`to_float` are direct String spellings of
+        // the one parse mechanism `Int.parse`/`Float.parse` already run —
+        // same `? ParseError` result, reached one call shorter from text.
+        ("to_int", 0) => Some(Some(Type::Result {
+            ok: Box::new(Type::Int),
+            err: Box::new(Type::Named("ParseError".to_string())),
+        })),
+        ("to_float", 0) => Some(Some(Type::Result {
+            ok: Box::new(Type::Float),
+            err: Box::new(Type::Named("ParseError".to_string())),
+        })),
+        // D-STR-DECLINE1=C: `matches`/`match` route through the one core.regex
+        // engine (`jet.regex.compile` + `is_match`/`find`) — same `? String`
+        // bad-pattern error shape `jet.regex.compile` already returns.
+        ("matches", 1) => Some(Some(Type::Result {
+            ok: Box::new(Type::Bool),
+            err: Box::new(Type::String),
+        })),
+        ("match", 1) => Some(Some(Type::Result {
+            ok: Box::new(Type::Option(Box::new(Type::String))),
+            err: Box::new(Type::String),
+        })),
         _ => None,
     }
 }
@@ -1761,10 +1791,16 @@ fn set_method_return(elem: &Type, method: &str, nargs: usize) -> Option<Option<T
         ("map", 1) => Some(Some(Type::List(Box::new(Type::Int)))),
         ("fold", 2) => Some(Some(Type::Int)),
         ("flat_map", 1) => Some(Some(iter_ty(Type::Int))),
+        // D-SET-DECLINE1=C: `sort`/`shuffle` turn an unordered Set into an
+        // ordered `List`, the same to-list-then-List machinery `filter`/`map`/
+        // `fold`/`each`/`all`/`min`/`max` already run. Neither mutates the Set.
+        ("sort" | "shuffle", 0) => Some(Some(Type::List(Box::new(elem.clone())))),
         // #1478: `flatten` declined — E0506 forbids a Set element type that
         // is itself a List/Set (Set elements must be Hash+Eq), so no legal
         // `Set<T>` can ever satisfy `flatten`'s nested-container precondition.
-        // See the D-SET-DECLINE1 ballot for the full declined-name rationale.
+        // `indexof`/`indexed` also declined — a hash Set keeps no stable
+        // position for `index_of`/`indexed` to answer. See the D-SET-DECLINE1
+        // ballot for the full declined-name rationale.
         _ => None,
     }
 }
@@ -1799,6 +1835,8 @@ fn priority_queue_method_return(elem: &Type, method: &str, nargs: usize) -> Opti
         ("is_empty", 0) => Some(Some(Type::Bool)),
         ("push" | "clear", _) => Some(None),
         ("pop" | "peek", 0) => Some(Some(Type::Option(Box::new(elem.clone())))),
+        // D-LISTREMOVE1/F (criterion c6 on #1481): same value/slot shape as List.remove.
+        ("remove", 1 | 2) => Some(Some(Type::Option(Box::new(elem.clone())))),
         ("to_sorted_list", 0) => Some(Some(Type::List(Box::new(elem.clone())))),
         _ => None,
     }
@@ -2246,7 +2284,8 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
                 },
             ]),
             // D-ITER1: non-closure adapters.
-            "take" | "skip" | "step_by" | "chunks" | "windows" | "repeat" | "drop_last" | "split" => {
+            "take" | "skip" | "step_by" | "chunks" | "windows" | "repeat" | "drop_last" | "split"
+            | "cycle" => {
                 Some(vec![Type::Int])
             }
             "intersperse" | "last_index_of" | "binary_search" => Some(vec![(**inner).clone()]),
@@ -2265,7 +2304,6 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             | "flatten"
             | "unzip"
             | "is_sorted"
-            | "cycle"
             | "shuffle"
             | "average"
             | "to_set" | "copy" | "random" | "min_max" => Some(vec![]),
@@ -2431,6 +2469,10 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
         },
         Type::Apply { name, args } if name == Syntax::TYPE_PRIORITY_QUEUE => match method {
             "push" => Some(vec![args.first().cloned().unwrap_or(Type::Int)]),
+            "remove" => Some(vec![
+                args.first().cloned().unwrap_or(Type::Int),
+                Type::Named(Syntax::TYPE_REMOVE_BY.to_string()),
+            ]),
             _ => Some(vec![]),
         },
         Type::Apply { name, args } if name == Syntax::TYPE_LRU && args.len() >= 2 => match method {

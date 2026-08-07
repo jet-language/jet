@@ -8,7 +8,7 @@
 
 use std::fmt;
 use std::fs;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -532,8 +532,24 @@ fn legacy_plan(root: &Path) -> Result<TransitionPlan, TransitionError> {
         package_path.display().to_string(),
     )
     .map_err(|error| package_error(&package_path, error))?;
-    let before_facts = PackageFacts::load(&root)
-        .ok_or_else(|| TransitionError(format!("no typed Package root in {}", root.display())))?
+    // Compose from the in-memory `root_facts` rather than re-reading the
+    // Package root from disk: a migration-era `pkg.jet` still holds its raw
+    // `payload:`/`identity:` wrapper on disk until this fold writes the
+    // translated `package.jet`, so `PackageFacts::load` would re-parse that
+    // untranslated text and fail closed on a field the typed parser no
+    // longer recognizes.
+    let mut before_facts = root_facts.clone();
+    before_facts
+        .compose_configs(&root)
+        .map_err(|error| package_error(&package_path, error))?;
+    before_facts
+        .validate_defaults()
+        .map_err(|error| TransitionError(format!(
+            "typed Package {} is invalid: {error}",
+            package_path.display()
+        )))?;
+    before_facts
+        .validate_members_in(&root)
         .map_err(|error| package_error(&package_path, error))?;
     let mut configs = root_facts.configs.clone();
     let mut changes = Vec::new();
@@ -1660,59 +1676,74 @@ fn render_member_package(name: &str, body: &str) -> String {
     format!("name: {}\n{}\n", quote(name), body.trim())
 }
 
+/// Fold a migration-era `pkg.jet` (`payload:`/`identity:` wrapper, or the
+/// legacy bare form) into the canonical `package.jet` root shape
+/// (D-CONF-PLANE1/D-CONF-NAME1: bare `name:`/`version:`, no wrapper). Reads
+/// with this file's own lightweight structural scanner
+/// (`source_entries`/`field_value`/`record_body`, already used by
+/// `validate_legacy_manifest_fields` above) — a one-way text splice for
+/// upgrading old input, not a second manifest parser: the compile path and
+/// tooling read every `package.jet`/`pkg.jet` through the one
+/// `jet_pkg_model::Package` parser once migration has run.
 fn render_legacy_package_root(source: &str) -> Result<String, TransitionError> {
     validate_legacy_manifest_fields(source)?;
-    let manifest = crate::PackageManifest::parse(source)
-        .map_err(|error| TransitionError(format!("cannot migrate pkg.jet into package.jet: {error:?}")))?;
-    if !manifest.packages.is_empty()
-        || !manifest.build_profiles.is_empty()
-        || !manifest.build_allow.is_empty()
-        || manifest.effects_enabled
-        || !manifest.grants.is_empty()
-        || manifest.trust_policy.is_some()
-        || !manifest.provider_policy.is_empty()
-        || manifest.lints_deny.is_some()
-        || !manifest.memory_policy.is_empty()
-        || manifest.auto_derive.is_some()
-    {
-        return Err(TransitionError(
-            "pkg.jet contains package, build, effects, policy, or target facts that need an explicit migration before jet init can fold it"
-                .to_string(),
-        ));
+    const IDENTITY_FIELDS: &[&str] = &[
+        "name", "version", "jet", "edition", "license", "description", "repository", "target",
+        "runtime",
+    ];
+    const REJECTED_BLOCKS: &[&str] = &["packages", "build", "effects", "grants", "policy"];
+
+    let stripped = strip_comments(source);
+    let entries = source_entries(&stripped);
+    let mut identity: BTreeMap<String, String> = BTreeMap::new();
+    let mut deps_value: Option<String> = None;
+    for entry in &entries {
+        let Some(field) = entry.field.as_deref() else { continue };
+        if matches!(field, "payload" | "identity") {
+            let value = field_value(&entry.raw, field).unwrap_or_default();
+            let body = record_body(&value).unwrap_or_default();
+            for nested in source_entries(body) {
+                let Some(nested_field) = nested.field.as_deref() else { continue };
+                if let Some(value) = field_value(&nested.raw, nested_field) {
+                    identity.insert(nested_field.to_string(), value);
+                }
+            }
+        } else if IDENTITY_FIELDS.contains(&field) {
+            if let Some(value) = field_value(&entry.raw, field) {
+                identity.insert(field.to_string(), value);
+            }
+        } else if field == "deps" {
+            deps_value = field_value(&entry.raw, field);
+        } else if REJECTED_BLOCKS.contains(&field) {
+            let value = field_value(&entry.raw, field).unwrap_or_default();
+            let body = record_body(&value).unwrap_or_default();
+            if !body.trim().is_empty() {
+                return Err(TransitionError(
+                    "pkg.jet contains package, build, effects, policy, or target facts that need an explicit migration before jet init can fold it"
+                        .to_string(),
+                ));
+            }
+        }
     }
+
     let mut output = format!(
         "name: {}\nversion: {}\n",
-        quote(&manifest.package.name),
-        quote(&manifest.package.version)
+        identity.get("name").cloned().unwrap_or_else(|| "\"\"".to_string()),
+        identity.get("version").cloned().unwrap_or_else(|| "\"\"".to_string()),
     );
-    if let Some(jet) = manifest.package.jet_constraint {
-        output.push_str(&format!("jet: {}\n", quote(&jet)));
-    }
-    if let Some(edition) = manifest.package.edition {
-        output.push_str(&format!("edition: {}\n", quote(&edition)));
-    }
-    if let Some(license) = manifest.package.license {
-        output.push_str(&format!("license: {}\n", quote(&license)));
-    }
-    if let Some(description) = manifest.package.description {
-        output.push_str(&format!("description: {}\n", quote(&description)));
-    }
-    if let Some(repository) = manifest.package.repository {
-        output.push_str(&format!("repository: {}\n", quote(&repository)));
-    }
-    if let Some(target) = manifest.package.target {
-        output.push_str(&format!("target: {}\n", quote(&target)));
-    }
-    if let Some(layer) = manifest.package.layer {
-        output.push_str(&format!("runtime: {}\n", quote(layer.as_str())));
+    for field in ["jet", "edition", "license", "description", "repository", "target", "runtime"] {
+        if let Some(value) = identity.get(field) {
+            output.push_str(&format!("{field}: {value}\n"));
+        }
     }
     output.push_str("deps: .{\n");
-    for dependency in manifest.deps {
-        output.push_str(&format!(
-            "    {}: {}\n",
-            dependency.name,
-            legacy_dependency_value(&dependency.source)
-        ));
+    if let Some(deps_value) = deps_value.as_deref().and_then(record_body) {
+        for entry in source_entries(deps_value) {
+            let Some(name) = entry.field.as_deref() else { continue };
+            if let Some(value) = field_value(&entry.raw, name) {
+                output.push_str(&format!("    {name}: {value}\n"));
+            }
+        }
     }
     output.push_str("}\n");
     Ok(output)
@@ -1877,28 +1908,6 @@ fn validate_legacy_dependency_block(value: &str) -> Result<(), TransitionError> 
         }
     }
     Ok(())
-}
-
-fn legacy_dependency_value(source: &crate::PackageManifest::DepSource) -> String {
-    match source {
-        crate::PackageManifest::DepSource::Version(value) => value.clone(),
-        crate::PackageManifest::DepSource::Provider { provider, target } => {
-            if matches!(provider, crate::RefSpec::Source::Path) {
-                target.clone()
-            } else {
-                format!("{target}@{}", provider.label())
-            }
-        }
-        crate::PackageManifest::DepSource::Git { url, selector } => {
-            let (field, value) = match selector {
-                crate::Manifest::GitSelector::Tag(value) => ("tag", value),
-                crate::Manifest::GitSelector::Branch(value) => ("branch", value),
-                crate::Manifest::GitSelector::Rev(value) => ("rev", value),
-            };
-            format!("{{ git: {url:?}, {field}: {value:?} }}")
-        }
-        crate::PackageManifest::DepSource::CLib { target } => format!("lib: {target}"),
-    }
 }
 
 fn render_fleet_config(host: &str) -> String {

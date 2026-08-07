@@ -39,6 +39,14 @@ mod jet_std {
         pub ms: i64,
     }
 
+    impl Duration {
+        // D-TIMERES1=A: mirrors CoreLib/JetStd/CommonTypes.rs Duration::as_millis
+        // (this test stub stores milliseconds directly, so it's the identity read).
+        pub fn as_millis(self) -> i64 {
+            self.ms
+        }
+    }
+
     pub struct JetMIME(pub String);
 
     impl JetMIME {
@@ -79,6 +87,13 @@ fn jet_deadline_exceeded(wait_kind: &str) -> ! {
 
 fn jet_panic(file: &str, line: u32, msg: &str) -> ! {
     panic!("{msg} (at {file}:{line})");
+}
+
+// D-TASK-PAUSE-TIER1: mirrors jet_foundation::StructuralDebug::jet_task_control_trace
+// (the canonical AOT crate root embeds StructuralDebug.rs alongside Scheduler.rs;
+// this test harness includes Scheduler.rs alone, so it needs the same symbol locally).
+fn jet_task_control_trace(paused: bool, cancel: bool) -> String {
+    format!("paused={paused},cancel={cancel}")
 }
 
 #[derive(Clone)]

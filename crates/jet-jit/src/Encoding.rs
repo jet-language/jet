@@ -842,6 +842,107 @@ fn uuid_format(b: &[u8; 16]) -> String {
     )
 }
 
+// #1481 core.uuid: parse/v5 mirror the AOT Prelude's `jet_uuid_bytes`/
+// `jet_std_uuid_parse`/`jet_std_uuid_v5` (Source/Prelude/CoreLib/Top/
+// EncodingCodecs.rs) — same validation and SHA-1 math, JIT-side heap ABI.
+fn uuid_bytes(s: &str) -> Result<[u8; 16], String> {
+    let hex: String = s.chars().filter(|c| *c != '-').collect();
+    if hex.len() != 32 || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(format!("`{s}` is not a UUID (want 8-4-4-4-12 hex digits)"));
+    }
+    let groups: Vec<usize> = s.match_indices('-').map(|(i, _)| i).collect();
+    if groups != [8, 13, 18, 23] {
+        return Err(format!("`{s}` is not a UUID (want 8-4-4-4-12 hex digits)"));
+    }
+    let mut bytes = [0u8; 16];
+    for (i, byte) in bytes.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16)
+            .map_err(|_| format!("`{s}` is not a UUID (want 8-4-4-4-12 hex digits)"))?;
+    }
+    Ok(bytes)
+}
+
+fn uuid_sha1(data: &[u8]) -> [u8; 20] {
+    let mut h: [u32; 5] = [0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0];
+    let bit_len = (data.len() as u64) * 8;
+    let mut msg = data.to_vec();
+    msg.push(0x80);
+    while msg.len() % 64 != 56 {
+        msg.push(0);
+    }
+    msg.extend_from_slice(&bit_len.to_be_bytes());
+    for chunk in msg.chunks_exact(64) {
+        let mut w = [0u32; 80];
+        for (i, word) in w.iter_mut().take(16).enumerate() {
+            *word = u32::from_be_bytes([
+                chunk[i * 4],
+                chunk[i * 4 + 1],
+                chunk[i * 4 + 2],
+                chunk[i * 4 + 3],
+            ]);
+        }
+        for i in 16..80 {
+            w[i] = (w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16]).rotate_left(1);
+        }
+        let (mut a, mut b, mut c, mut d, mut e) = (h[0], h[1], h[2], h[3], h[4]);
+        for (i, word) in w.iter().enumerate() {
+            let (f, k) = match i {
+                0..=19 => ((b & c) | ((!b) & d), 0x5A827999u32),
+                20..=39 => (b ^ c ^ d, 0x6ED9EBA1),
+                40..=59 => ((b & c) | (b & d) | (c & d), 0x8F1BBCDC),
+                _ => (b ^ c ^ d, 0xCA62C1D6),
+            };
+            let temp = a
+                .rotate_left(5)
+                .wrapping_add(f)
+                .wrapping_add(e)
+                .wrapping_add(k)
+                .wrapping_add(*word);
+            e = d;
+            d = c;
+            c = b.rotate_left(30);
+            b = a;
+            a = temp;
+        }
+        h[0] = h[0].wrapping_add(a);
+        h[1] = h[1].wrapping_add(b);
+        h[2] = h[2].wrapping_add(c);
+        h[3] = h[3].wrapping_add(d);
+        h[4] = h[4].wrapping_add(e);
+    }
+    let mut out = [0u8; 20];
+    for (i, word) in h.iter().enumerate() {
+        out[i * 4..i * 4 + 4].copy_from_slice(&word.to_be_bytes());
+    }
+    out
+}
+
+extern "C" fn jet_jit_uuid_parse(text: i64) -> i64 {
+    match uuid_bytes(&clone_heap_string(text)) {
+        Ok(bytes) => {
+            let normalized = uuid_format(&bytes);
+            Concurrency::with_runtime_mut(|rt| result_ok_bits(rt.heap.alloc_string(normalized) as u64))
+        }
+        Err(e) => result_err_msg(&e),
+    }
+}
+
+extern "C" fn jet_jit_uuid_v5(namespace: i64, name: i64) -> i64 {
+    let ns = match uuid_bytes(&clone_heap_string(namespace)) {
+        Ok(ns) => ns,
+        Err(e) => return result_err_msg(&e),
+    };
+    let mut input = ns.to_vec();
+    input.extend_from_slice(clone_heap_string(name).as_bytes());
+    let digest = uuid_sha1(&input);
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    bytes[6] = (bytes[6] & 0x0f) | 0x50;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    let s = uuid_format(&bytes);
+    Concurrency::with_runtime_mut(|rt| result_ok_bits(rt.heap.alloc_string(s) as u64))
+}
+
 extern "C" fn jet_jit_uuid_v4() -> i64 {
     let mut bytes = [0u8; 16];
     uuid_fill_random(&mut bytes);
@@ -2074,6 +2175,8 @@ pub(crate) struct EncodingHostFns {
     pub csv_tree_to_string: cranelift_module::FuncId,
     pub uuid_v4: cranelift_module::FuncId,
     pub uuid_v7: cranelift_module::FuncId,
+    pub uuid_v5: cranelift_module::FuncId,
+    pub uuid_parse: cranelift_module::FuncId,
     pub json_parse: cranelift_module::FuncId,
     pub json_decode: cranelift_module::FuncId,
     pub json_to_string: cranelift_module::FuncId,
@@ -2144,6 +2247,8 @@ pub(crate) fn register_encoding_symbols(builder: &mut cranelift_jit::JITBuilder)
     );
     builder.symbol("jet_jit_uuid_v4", jet_jit_uuid_v4 as *const u8);
     builder.symbol("jet_jit_uuid_v7", jet_jit_uuid_v7 as *const u8);
+    builder.symbol("jet_jit_uuid_v5", jet_jit_uuid_v5 as *const u8);
+    builder.symbol("jet_jit_uuid_parse", jet_jit_uuid_parse as *const u8);
     builder.symbol("jet_jit_json_parse", jet_jit_json_parse as *const u8);
     builder.symbol("jet_jit_json_decode", jet_jit_json_decode as *const u8);
     builder.symbol("jet_jit_json_to_string", jet_jit_json_to_string as *const u8);
@@ -2574,6 +2679,8 @@ pub(crate) fn declare_encoding_host_fns(
         csv_tree_to_string: import("jet_jit_csv_tree_to_string", &sig_unary)?,
         uuid_v4: import("jet_jit_uuid_v4", &sig_nullary)?,
         uuid_v7: import("jet_jit_uuid_v7", &sig_unary)?,
+        uuid_v5: import("jet_jit_uuid_v5", &sig_binary)?,
+        uuid_parse: import("jet_jit_uuid_parse", &sig_unary)?,
         json_parse: import("jet_jit_json_parse", &sig_unary)?,
         json_decode: import("jet_jit_json_decode", &sig_unary)?,
         json_to_string: import("jet_jit_json_to_string", &sig_unary)?,

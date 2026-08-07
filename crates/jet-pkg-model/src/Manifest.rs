@@ -9,7 +9,7 @@
 //! no back-compat alias.
 
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::PackageManifest::{self, ManifestError};
+use crate::Package::{self, PackageParseError};
 use crate::Syntax;
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -274,22 +274,50 @@ impl GitSelector {
 // Parser
 // ──────────────────────────────────────────────
 
-/// Parse a `pkg.jet` package manifest from its text.
+/// Parse a `package.jet` package manifest from its text (D-CONF-PLANE1: the
+/// one role-typed parser, no legacy-vocabulary fallback).
 pub fn parse(path: &Path, raw: &str) -> Result<Manifest, Diagnostic> {
-    let pm = PackageManifest::parse(raw).map_err(|e| to_diagnostic(path, &e))?;
-    PackageManifest::to_manifest(&pm, raw)
+    // `parse_uncomposed`, not `parse`: the compile path's toolchain/edition/
+    // dependency checks operate on this package's own declared facts and
+    // never load file-backed `Config` contributions (that composition, and
+    // the `defaults:`/`outputs:` validation it enables, is a tooling/Canvas
+    // concern via `PackageFacts::load`). Validating `defaults:` here against
+    // an uncomposed read would reject any package whose default output is
+    // declared in a `configs:`-referenced file.
+    let facts = Package::PackageFacts::parse_uncomposed(raw, path.display().to_string())
+        .map_err(|e| to_diagnostic(path, &e))?;
+    Package::to_manifest(&facts, raw)
 }
 
-/// Load and parse the nearest package manifest in a directory. The canonical
+/// The path to the package manifest in a project dir. The canonical
 /// `package.jet` wins; `pkg.jet` is accepted only as migration-era input.
+pub fn manifest_path_in(dir: &Path) -> std::path::PathBuf {
+    let canonical = dir.join(Syntax::PACKAGE_FILE);
+    if canonical.is_file() {
+        canonical
+    } else {
+        dir.join(Syntax::PAYLOAD_FILE)
+    }
+}
+
+/// Whether both manifest spellings exist in this directory — ambiguous.
+pub fn has_both_manifests(dir: &Path) -> bool {
+    dir.join(Syntax::PACKAGE_FILE).is_file() && dir.join(Syntax::PAYLOAD_FILE).is_file()
+}
+
+/// Load and parse the nearest package manifest in a directory.
 pub fn load(dir: &Path) -> Option<Result<Manifest, Diagnostic>> {
-    if PackageManifest::PackManifest::has_both_manifests(dir) {
+    if has_both_manifests(dir) {
         return Some(Err(to_diagnostic(
             &dir.join(Syntax::PACKAGE_FILE),
-            &ManifestError::BothManifestFiles,
+            &PackageParseError::Composition(format!(
+                "both `{}` and migration-era `{}` exist; keep one Package root",
+                Syntax::PACKAGE_FILE,
+                Syntax::PAYLOAD_FILE,
+            )),
         )));
     }
-    let pack_path = PackageManifest::PackManifest::path_in(dir);
+    let pack_path = manifest_path_in(dir);
     if !pack_path.is_file() {
         return None;
     }
@@ -382,102 +410,40 @@ fn version_ge(a: &str, b: &str) -> bool {
 /// Insert or update a dependency in the `deps: { … }` block, preserving
 /// comments and existing entries. Returns the updated `pkg.jet` text.
 pub fn add_dependency(raw: &str, name: &str, spec: &DepSpec) -> String {
-    PackageManifest::add_dep(raw, name, spec)
+    Package::add_dep(raw, name, spec)
 }
 
 /// Remove a dependency from `deps: { … }`, preserving comments.
 pub fn remove_dependency(raw: &str, name: &str) -> String {
-    PackageManifest::remove_dep(raw, name)
+    Package::remove_dep(raw, name)
 }
 
 /// Generate a `pkg.jet` template for `jet new`.
 pub fn new_template(name: &str, annotated: bool) -> String {
-    PackageManifest::new_template(name, annotated)
+    Package::new_template(name, annotated)
 }
 
 // ──────────────────────────────────────────────
 // Diagnostics
 // ──────────────────────────────────────────────
 
-fn to_diagnostic(path: &Path, err: &ManifestError) -> Diagnostic {
+fn to_diagnostic(path: &Path, err: &PackageParseError) -> Diagnostic {
     let file = path.display().to_string();
     match err {
-        ManifestError::MissingPayload => e1206(&file, "no `payload: { … }` block"),
-        ManifestError::BothManifestFiles => Diagnostic::error(
-            "E1206",
-            "the package has two manifest roots".to_string(),
-            format!(
-                "`{}` is canonical and `{}` is migration input; reading both would make package identity ambiguous",
-                Syntax::PACKAGE_FILE,
-                Syntax::PAYLOAD_FILE,
-            ),
-            format!(
-                "remove `{}` or migrate its contents into `{}`",
-                Syntax::PAYLOAD_FILE,
-                Syntax::PACKAGE_FILE,
-            ),
-            None,
-        ),
-        ManifestError::MissingField(field) => {
-            e1206(&file, &format!("`payload` is missing required field `{field}`"))
+        PackageParseError::UnknownField(field) => e1206_unknown_field(field),
+        PackageParseError::MissingName => {
+            e1206(&file, &format!("`{}` needs a `name` field", Syntax::PACKAGE_FILE))
         }
-        ManifestError::BadDepValue { name, value } => e1206(
-            &file,
-            &format!(
-                "dependency `{name}` has value `{value}`, which is not a `name#version`, bare path, `target@provider` ref, or inline git struct"
-            ),
-        ),
-        ManifestError::BadDepRef {
-            name,
-            err: crate::RefSpec::RefError::ProviderFirst { raw, replacement },
-        } => e1206(
-            &file,
-            &format!(
-                "dependency `{name}` uses retired provider-first ref `{raw}`; write `{replacement}`"
-            ),
-        ),
-        ManifestError::BadDepRef {
-            name,
-            err: crate::RefSpec::RefError::PathProviderRetired { raw, path },
-        } => e1206(
-            &file,
-            &format!(
-                "dependency `{name}` uses retired path-provider ref `{raw}`; write the bare path `{path}`"
-            ),
-        ),
-        ManifestError::BadDepRef { name, err } => {
-            e1206(&file, &format!("dependency `{name}`'s ref is invalid: {err:?}"))
+        PackageParseError::MissingRecord(field) => {
+            e1206(&file, &format!("`{field}:` needs a record value"))
         }
-        ManifestError::BadGitDep { name, reason } => {
-            e1206(&file, &format!("dependency `{name}`'s git struct {reason}"))
+        PackageParseError::MalformedField(value) => {
+            e1206(&file, &format!("malformed field `{value}`"))
         }
-        ManifestError::BadTarget { name, value } => e1210(
-            &file,
-            &format!(
-                "package `{name}` lists target `{value}`, which is not a known target"
-            ),
-        ),
-        ManifestError::ReservedTarget { name, value } => e1210(
-            &file,
-            &format!(
-                "package `{name}` lists target `{value}`, which has no backend yet (reserved for a future increment)"
-            ),
-        ),
-        ManifestError::KindFieldRemoved { name } => e1211(
-            &file,
-            &format!(
-                "package `{name}` uses `{}:`, which was removed",
-                Syntax::PACKAGE_FIELD_KIND_REMOVED,
-            ),
-        ),
-        ManifestError::BadTargetField { name, detail } => {
-            e1216(&file, &format!("package `{name}`: {detail}"))
+        PackageParseError::UnknownOutputKind(kind) => {
+            e1206(&file, &format!("unknown Output kind `{kind}`"))
         }
-        ManifestError::ReservedSection(section) => e1209(&file, section),
-        ManifestError::BadBuildProfile { name, reason } => {
-            e1206(&file, &format!("build profile `{name}`: {reason}"))
-        }
-        ManifestError::BadLayer { value } => e1206(
+        PackageParseError::InvalidValue { field, value } if field == "runtime" => e1206(
             &file,
             &format!(
                 "`runtime` must be `{}`, `{}`, or `{}`, not `{value}`",
@@ -486,23 +452,58 @@ fn to_diagnostic(path: &Path, err: &ManifestError) -> Diagnostic {
                 Syntax::RuntimeLayer::HOSTED,
             ),
         ),
-        ManifestError::BadEffectsBlock { detail } => e1221(&file, detail),
-        ManifestError::BadTrustPolicy { detail } => {
-            e1206(&file, &format!("`policy.trust` is malformed: {detail}"))
+        PackageParseError::InvalidValue { field, value } => {
+            e1206(&file, &format!("invalid value for `{field}`: `{value}`"))
         }
-        ManifestError::BadProviderPolicy { detail } => {
-            e1206(&file, &format!("`policy.providers` is malformed: {detail}"))
+        PackageParseError::ConfigMembers => {
+            e1206(&file, "a Config file cannot declare `members`")
         }
-        ManifestError::BadLintsPolicy { detail } => {
-            e1206(&file, &format!("`policy.lints` is malformed: {detail}"))
+        PackageParseError::Composition(detail) => e1206(&file, detail),
+        PackageParseError::BadTarget { name, value, reserved: true } => e1210(
+            &file,
+            &format!(
+                "package `{name}` lists target `{value}`, which has no backend yet (reserved for a future increment)"
+            ),
+        ),
+        PackageParseError::BadTarget { name, value, reserved: false } => e1210(
+            &file,
+            &format!("package `{name}` lists target `{value}`, which is not a known target"),
+        ),
+        PackageParseError::KindFieldRemoved { name } => e1211(
+            &file,
+            &format!(
+                "package `{name}` uses `{}:`, which was removed",
+                Syntax::PACKAGE_FIELD_KIND_REMOVED,
+            ),
+        ),
+        PackageParseError::BadTargetField { name, detail } => {
+            e1216(&file, &format!("package `{name}`: {detail}"))
         }
-        ManifestError::BadMemoryPolicy { detail } => {
+        PackageParseError::ReservedSection(section) => e1209(&file, section),
+        PackageParseError::BadEffectsBlock(detail) => e1221(&file, detail),
+        PackageParseError::BadMemoryPolicy { detail } => {
             e1206(&file, &format!("memory policy is malformed: {detail}"))
         }
-        ManifestError::BadAutoDerivePolicy { detail } => {
+        PackageParseError::BadAutoDerivePolicy { detail } => {
             e1206(&file, &format!("`policy.auto_derive` is malformed: {detail}"))
         }
     }
+}
+
+/// D-CONF-PLANE1/D-CONF-NAME1: an unknown top-level manifest field — most
+/// often a retired spelling (`payload:`, `identity:`, a `packages:` typo).
+/// This is the one diagnostic every wrong-vocabulary `package.jet` hits, now
+/// that there is one parser and one field list.
+fn e1206_unknown_field(field: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E1206",
+        format!("unknown field `{field}:` in `{}`", Syntax::PACKAGE_FILE),
+        format!(
+            "`{field}:` is not part of the Package vocabulary. Identity is bare `name:` and `version:` at the top level (D-CONF-NAME1) — there is no `identity:` or `payload:` wrapper."
+        ),
+        "use `name:`, `version:`, `deps:`, `outputs:`, `settings:`, `build:`, `policy:`, or `members:`; see docs/spec/syntax-decisions.md D-CONF-NAME1".to_string(),
+        None,
+    )
 }
 
 /// D-EFFBUDGET1 (E1221): a malformed `effects:`/`grants:` block — an unknown

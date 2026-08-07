@@ -5,7 +5,7 @@ use crate::AST::Type;
 use crate::Diagnostics::{Diagnostic, Span};
 
 use super::Builtins::{as_int, cmp};
-use super::Diagnostics::unsupported;
+use super::Diagnostics::{index_oob, unsupported};
 use super::Value::CtValue;
 
 mod set_semantics {
@@ -312,7 +312,7 @@ pub fn apply_mutating(
             // contract); SortedSet does not ship them.
             | ("Set", "add" | "remove" | "clear" | "replace" | "take")
             | ("SortedSet", "add" | "remove" | "clear")
-            | ("PriorityQueue", "push" | "pop" | "clear")
+            | ("PriorityQueue", "push" | "pop" | "clear" | "remove")
             | ("BitSet", "add" | "remove" | "clear")
             | ("Deque", "push_front" | "push_back" | "pop_front" | "pop_back" | "clear")
             | ("Cache", "add" | "add_new" | "get" | "remove" | "clear")
@@ -480,6 +480,29 @@ fn set_method(
         // #1478: `Set.values()` — Iter is List-shaped at this eval tier
         // (see the `take`/`dedup` note in Builtins.rs), so this is `to_list`.
         "values" => Ok(CtValue::List(items)),
+        // D-SET-DECLINE1=C: `sort`/`shuffle` — same to-list-then-List
+        // machinery as `to_list`/`values` above, never mutating the Set.
+        "sort" => {
+            let mut sorted = items;
+            sorted.sort_by(|a, b| {
+                super::Builtins::cmp(a.clone(), b.clone(), span)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            Ok(CtValue::List(sorted))
+        }
+        // Same Fisher-Yates + fixed-seed PCG stream `List.shuffle()` runs
+        // (`(CtValue::List(xs), "shuffle")` in Builtins.rs) — deterministic
+        // and uniform regardless of the Set's internal walk order.
+        "shuffle" => {
+            let mut out = items;
+            let mut state: u64 = 0xC0FF_EE42;
+            for i in (1..out.len()).rev() {
+                state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+                let j = ((state >> 33) as usize) % (i + 1);
+                out.swap(i, j);
+            }
+            Ok(CtValue::List(out))
+        }
         "copy" | "to_set" => Ok(set_struct(type_name, items)),
         "capacity" => Ok(CtValue::Int(items.len() as i64)),
         "equal" => {
@@ -710,6 +733,29 @@ fn priority_queue_mutating(
         }
         "pop" if items.is_empty() => option_none(),
         "pop" => CtValue::Present(Box::new(items.remove(0))),
+        // D-LISTREMOVE1/F (criterion c6 on #1481): same value/slot selector
+        // as `List.remove`, over the same highest-first order `push` already
+        // maintains — matches the AOT/JIT `BinaryHeap::into_sorted_vec().rev()`
+        // order so `.Slot` means the same position on every tier (I9).
+        "remove" => {
+            let by_slot = matches!(
+                args.get(1),
+                Some(CtValue::Enum { variant, .. }) if variant == "Slot"
+            );
+            if by_slot {
+                let i = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
+                if i < 0 || i as usize >= items.len() {
+                    return Err(index_oob(items.len(), i, span));
+                }
+                CtValue::Present(Box::new(items.remove(i as usize)))
+            } else {
+                let value = args.first().cloned().unwrap_or(CtValue::Unit);
+                match items.iter().position(|item| *item == value) {
+                    Some(index) => CtValue::Present(Box::new(items.remove(index))),
+                    None => CtValue::absent(items.first().map(|item| item.jet_type()).unwrap_or(Type::Int)),
+                }
+            }
+        }
         _ => {
             return Err(unsupported(
                 &format!("PriorityQueue.{} at compile time", method),

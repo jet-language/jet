@@ -33,4 +33,37 @@ fn run() {
     nested :: [[1, 2], [3, 4], [5, 6]]
     flat :: nested.flat_map((xs: [Int]) => xs).to_list()
     print(flat)
+    // #1479: remaining Iter ledger surface
+    // repeat / cycle — repeat(n) loops the whole sequence n times; cycle(n)
+    // produces exactly n items (not necessarily a clean multiple).
+    print(nums.repeat(2).to_list())
+    print(nums.cycle(13).to_list())
+    // drop_last
+    print(nums.drop_last(3).to_list())
+    // is_sorted / is_sorted_by
+    print(nums.is_sorted())
+    unsorted :: [3, 1, 2]
+    print(unsorted.is_sorted())
+    print(unsorted.is_sorted_by((n: Int) => -n))
+    // dedup_by — collapses consecutive items sharing a key
+    parities :: [2, 4, 6, 1, 3, 8, 10]
+    print(parities.dedup_by((n: Int) => (n % 2)).to_list())
+    // last_index_of
+    repeats :: [5, 3, 1, 3, 9]
+    print(repeats.last_index_of(3))
+    // average
+    print(nums.average())
+    // compare — three-way order against another sequence
+    print(nums.compare([1, 2, 3, 4, 5, 6, 7, 8, 9, 9]))
+    // split — materializes into a {left, right} pair at index n
+    parts :: nums.split(4)
+    print(parts.left)
+    print(parts.right)
+    // shuffle — deterministic seeded order, stable across runs
+    print(nums.shuffle().to_list())
+    // chunk_while — groups runs where the predicate holds between neighbors
+    jagged :: [1, 2, 3, 5, 6, 9, 10, 12]
+    print(jagged.chunk_while((a: Int, b: Int) => (b == a + 1)).to_list())
+    // to_set — length only; set element order is not print-stable
+    print(nums.to_set().len())
 }

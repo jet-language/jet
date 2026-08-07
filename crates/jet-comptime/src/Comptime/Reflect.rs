@@ -842,6 +842,8 @@ mod tests {
             declared_return_view_provenance: None,
             gc_return: false,
             gc_scope: false,
+            kernel: None,
+            markers: Vec::new(),
             body: Vec::new(),
         }
     }

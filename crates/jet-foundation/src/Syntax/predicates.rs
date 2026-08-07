@@ -29,8 +29,8 @@ pub const UNIT_SUFFIX_EXPONENT_RESERVED: &str = "e"; // D-UNITLIT1
 // operand evaluated once).
 // D-CLIFLAG1: the struct-level CLI-derive marker and field-level doc marker
 // spellings ride D-CONTRACTCASE1/D-MARKERMOVE1 — constants land with them.
-// D-EFFBUDGET1: `effects`/`allow`/`deny`/`grants` are pkg.jet manifest keys
-// (Jetpack/PackageManifest), not language tokens; effect names reuse D-EFF4.
+// D-EFFBUDGET1: `effects`/`allow`/`deny`/`grants` are package.jet manifest
+// keys (jet_pkg_model::Package), not language tokens; effect names reuse D-EFF4.
 // D-ANY-JAI1 + D-VARARGBOUND1: reuses D-VARIADIC1 `...T`; multi-trait
 // bounds use the owner-amended list form (`T: [A, B]`, `...items: [A, B]`).
 // D-UFCS1 (B), D-POINTERCHAIN1 (A), D-ERRCTX1 (D): no typeable surface.

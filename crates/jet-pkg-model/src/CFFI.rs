@@ -1214,16 +1214,16 @@ pub fn resolve_link_for_target(
 
 /// Look up a declared `<lib>: c@<target>` dep in the package manifest at
 /// `project_root`, returning its target (`"system"` or a local path) when
-/// present. Uses the real PackageManifest parser — the same one that produces
-/// `pm.deps` — not an ad-hoc reader.
+/// present. Uses the one Package parser — the same one that produces
+/// `facts.deps` — not an ad-hoc reader.
 fn declared_c_dep(lib: &str, project_root: &Path) -> Option<String> {
-    use crate::PackageManifest::{DepSource, PackManifest};
-    let pm: PackManifest = PackManifest::load(project_root)?.ok()?;
-    pm.deps.into_iter().find_map(|dep| {
-        if dep.name != lib {
+    use crate::Package::{DepSource, PackageFacts};
+    let facts: PackageFacts = PackageFacts::load(project_root)?.ok()?;
+    facts.deps.into_iter().find_map(|(name, source)| {
+        if name != lib {
             return None;
         }
-        match dep.source {
+        match source {
             DepSource::CLib { target } => Some(target),
             _ => None,
         }

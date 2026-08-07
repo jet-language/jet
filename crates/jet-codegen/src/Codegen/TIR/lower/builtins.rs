@@ -331,6 +331,14 @@ pub(crate) fn resolve_builtin_op(
                 TBuiltinOp::RemoveMap
             } else if is_lru {
                 TBuiltinOp::RemoveMap
+            } else if is_priority_queue && list_remove_mode.is_some() {
+                // D-LISTREMOVE1/F: PriorityQueue reuses List's exact selector
+                // shape and panic-line convention (criterion c6 on #1481).
+                let line = crate::Diagnostics::span_line_col(&cx.src, method_span.start).0;
+                TBuiltinOp::PriorityQueueRemove {
+                    line,
+                    mode: list_remove_mode.unwrap(),
+                }
             } else if (is_list || rty.is_none()) && list_remove_mode.is_some() {
                 // The list form embeds the *method-span* line for its bounds panic,
                 // exactly as `emit_builtin_method` reads `span_line_col(method_span.start)`.
@@ -370,6 +378,9 @@ pub(crate) fn resolve_builtin_op(
             method: "reverse".to_string(),
         },
         ("reverse", 0) => TBuiltinOp::Reverse,
+        // D-SET-DECLINE1=C: guard ahead of the unconditional List `sort` arm
+        // below — Set.sort() returns a fresh List instead of mutating in place.
+        ("sort", 0) if is_set => TBuiltinOp::SetSort,
         ("sort", 0) => TBuiltinOp::Sort,
         ("join", 1) if is_deque => TBuiltinOp::DequeJoin,
         ("join", 1) => TBuiltinOp::JoinSep,
@@ -395,8 +406,11 @@ pub(crate) fn resolve_builtin_op(
         ("repeat", 1) if is_string => TBuiltinOp::Repeat,
         // List literals leave `rty` None — same pattern as Take/Dedup.
         ("repeat", 1) => TBuiltinOp::IterRepeat,
-        ("cycle", 0) => TBuiltinOp::IterCycle,
+        ("cycle", 1) => TBuiltinOp::IterCycle,
         ("drop_last", 1) => TBuiltinOp::IterDropLast,
+        // D-SET-DECLINE1=C: guard ahead of the unconditional Iter `shuffle`
+        // arm below — Set.shuffle() returns a fresh List, same as Set.sort().
+        ("shuffle", 0) if is_set => TBuiltinOp::SetShuffle,
         ("shuffle", 0) => TBuiltinOp::IterShuffle,
         ("is_sorted", 0) => TBuiltinOp::IterIsSorted,
         ("last_index_of", 1) if is_string => TBuiltinOp::StringMethod {
@@ -467,11 +481,18 @@ pub(crate) fn resolve_builtin_op(
             "remove_prefix"
                 | "remove_suffix"
                 | "equal"
-                | "rsplit",
+                | "rsplit"
+                | "matches"
+                | "match",
             1,
         ) if is_string => TBuiltinOp::StringMethod {
             method: method.to_string(),
         },
+        // D-STR-DECLINE1=C: `s.to_int()`/`s.to_float()` are the same builtin
+        // `Int.parse(s)`/`Float.parse(s)` already lower to (D-STRPARSE1) — the
+        // string is the receiver either way, so the op is reused verbatim.
+        ("to_int", 0) if is_string => TBuiltinOp::ParseInt,
+        ("to_float", 0) if is_string => TBuiltinOp::ParseFloat,
         ("split_once", 1) if is_string => {
             let fields = option_tuple_fields(resolved_ret).unwrap_or_else(|| {
                 vec![

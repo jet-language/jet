@@ -187,7 +187,7 @@ lazy. An expected type never changes the collector or evaluation time.
 | `Set<T>` | `Set.new()`, `Set.from(xs)` | `add`, `remove`, `has`, `union`, `intersection`, `difference`, `symmetric_difference`, `is_subset`, `is_superset`, `is_disjoint`, `copy`, `to_set`, `equal`, `capacity`, `first`, `values`, `all`, `filter`, `each`, `max`, `min`, `fold`, `map`, `flat_map`, `replace`, `take`, `to_list`, `len`, `is_empty`, `clear` |
 | `SortedSet<T>` | `SortedSet.new()`, `SortedSet.from(xs)` | `add`, `remove`, `has`, `first`, `last`, `union`, `intersection`, `difference`, `symmetric_difference`, `is_subset`, `is_superset`, `is_disjoint`, `to_list`, `len`, `is_empty`, `clear` |
 | `Deque<T>` | `Deque.new()`, `Deque.init(xs)` | `push_front`, `push_back`, `pop_front`, `pop_back`, `peek_front`, `peek_back`, `capacity`, `contains`, `get`, `delete`, `to_list`, `join`, `reverse`, `split`, `len`, `is_empty`, `clear` |
-| `PriorityQueue<T>` | `PriorityQueue.new()`, `PriorityQueue.from(xs)` | `push`, `pop`, `peek`, `to_sorted_list`, `len`, `is_empty`, `clear` |
+| `PriorityQueue<T>` | `PriorityQueue.new()`, `PriorityQueue.from(xs)` | `push`, `pop`, `peek`, `to_sorted_list`, `remove` (`x, by: RemoveBy = .Val`, D-LISTREMOVE1), `len`, `is_empty`, `clear` |
 | `Cache<K,V>` | `Cache.new(capacity)` | `add`, `add_new`, `get`, `remove`, `has_key`, `keys`, `capacity`, `len`, `is_empty`, `clear` |
 | `Bag<T>` | `Bag.new()`, `Bag.from(xs)` | `add`, `remove`, `has`, `count`, `to_list`, `len`, `is_empty`, `clear` |
 | `BitSet` | `BitSet.new()` | `add`, `remove`, `has`, `count`, `to_list`, `len`, `clear` |
@@ -203,23 +203,32 @@ back into a Set. `values` is the lazy alias of `to_list`. `replace`/`take`
 are the native Rust `HashSet` swap-in / remove-and-return methods. `first`
 is shipped with arbitrary hash-order semantics.
 
-`Set` declines `sort`, `shuffle`, `indexof`, and `indexed` pending ballot
-`D-SET-DECLINE1` (card #1584): a hash Set has no position, so each name
-needs `to_list()` first, same as `first`'s note above. `Set` also declines
-`flatten`: Jet requires every Set element to implement Hash and Eq (E0506),
-so no `Set<T>` can ever hold a nested List or Set for `flatten` to unpack.
+`Set.sort()` and `Set.shuffle()` ship (`D-SET-DECLINE1`, card #1584): each
+turns an unordered Set into a fresh `List`, running the same `to_list()`-then-
+`List` machinery `first`'s note above already uses — neither mutates the Set.
+`Set` declines `indexof` and `indexed`: a hash Set has no stable position, so
+each name needs `to_list()` first instead. `Set` also declines `flatten`:
+Jet requires every Set element to implement Hash and Eq (E0506), so no
+`Set<T>` can ever hold a nested List or Set for `flatten` to unpack.
 `copyto` is declined on `Set` and `SortedSet`; use `to_list()` then list/iter
 methods for all of the above.
 
 Example: `examples/features/collections/iter_adapters.jet` covers adapters
 including the #1479 surface (`repeat`, `cycle`, `drop_last`, `shuffle`,
 `is_sorted`/`is_sorted_by`, `dedup_by`, `last_index_of`, `average`, `compare`,
-`split`, `chunk_while`, `to_set`). `cycle` is infinite — call `.take(n)` (or
-another finite adapter) before `to_list`. `shuffle` uses a fixed demo seed so
-examples stay deterministic; use `Rng` when you need a real random shuffle.
-Synonyms in the Core surface ledger map competitor spellings such as `fill`→
-`repeat`, `cmp`→`compare`, `next`→`first`, `size_hint`→`len`, `compact`→
-`filter`, `tostring`→`join`, and `clip`/`iterator`→`to_list`.
+`split`, `chunk_while`, `to_set`). `cycle(n)` produces exactly `n` items by
+looping the source — bounded by the count, unlike `repeat(n)`'s "loop n
+times." (A 0-arg infinite `cycle()` has no safe representation across
+AOT/JIT/interpreter, so the bounded form is the only one shipped.) `shuffle`
+uses a fixed demo seed so examples stay deterministic; use `Rng` when you need
+a real random shuffle.
+
+D-ITER-DECLINE1 declines Iter's remaining six ledger names: `fill`,
+`cycle_n`, and `duplicate` route to `repeat`; `tostring` routes to `join`;
+`clip` and `iterator` route to `to_list`/`collect`; `compact` routes to
+`filter`; `next` is declined outright — Iter has no held cursor to pull one
+item and remember where you stopped outside a loop; use a for-loop, `each`,
+or the lazy adapters (`take`, `skip`, `take_while`) instead.
 Also: `examples/features/collections/iter_tools_audit.jet` covers the
 adapter and specialized-container surface. Lazy protocol:
 `examples/features/collections/lazy_iter.jet`.
@@ -408,6 +417,35 @@ implicit; callers choose an explicit MIME type or extension lookup.
 | `m.media_type()` / `.subtype()` / `.essence()` | `String` | Type/subtype accessors |
 | `m.param(name)` / `.params()` | `String?` / `[[String]]` | Parameter lookup and decoded key/value rows |
 
+### `core.uuid` — UUIDs (D-UUIDENC1=A)
+
+A UUID stays a plain `String` — no separate nominal type. `v4` and `v7`
+generate; `parse` validates and normalizes; `v5` derives the same UUID every
+time from a namespace and a name.
+
+```jet
+use core.uuid as uuid
+
+fn run() {
+    id :: uuid.v4()                                  // random
+    normalized :: uuid.parse("6BA7B810-9DAD-11D1-80B4-00C04FD430C8") ?? panic("bad uuid")
+    dns_ns :: "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+    same_every_time :: uuid.v5(dns_ns, "python.org") ?? panic("bad namespace")
+}
+```
+
+| Function | Returns | What it does |
+|----------|---------|--------------|
+| `v4()` | `String` | Random UUID (system CSPRNG) |
+| `v7(clock)` | `String` | Time-ordered UUID from an injected `Clock`, deterministic in tests |
+| `parse(text)` | `String ? String` | Validate 8-4-4-4-12 hex, return the lowercased normal form |
+| `v5(namespace, name)` | `String ? String` | Deterministic UUID from a namespace UUID and a name (RFC 4122, SHA-1); errors if `namespace` doesn't parse |
+
+**Ledger-declined names (D-CORESURF-SMALL1).** `uuid4` already ships as
+`v4`. `uuid1` is MAC-address-based, an older and weaker format; Jet declines
+it in favor of the already-shipped, safer `v7`. `join` matches no real UUID
+operation in any compared language.
+
 ### `core.email` — bounded messages and SMTP submission
 
 `core.email` separates a typed message from its transport. Address and header
@@ -588,6 +626,11 @@ Card 301 audit state:
 | Graceful shutdown | Shipped for HTTP/1.x and HTTP/2 over cleartext or TLS: `Server.bind`/`serve`/`shutdown(grace)` stop accepts, send HTTP/2 GOAWAY with the accepted last-stream id, drain active work until grace, cancel stragglers, refuse new streams/requests (including TLS keep-alive reuse), and return bounded report counts |
 | Pooling and HTTP/2 | Shipped across both facets: shared native `Client` pools HTTP/1.1 keepalive after drained bodies and multiplexed HTTP/2 sessions (ALPN plus explicit h2c); concurrent streams open without holding the connection mutex across HEADERS waits, with exact `http_client_law` interop coverage for reuse, hostile HPACK, and TLS ALPN. Native HTTP/2 server serving runs over cleartext preface and rustls ALPN with flow control and graceful GOAWAY drain. |
 | WebSocket | Shipped as standalone `core.ws` (D-WS1=B): `ws.connect(url)` and `ws.upgrade(req)` share one RFC6455 codec with 1 MiB message bounds, masked client frames, ping/pong, close, and ambient-deadline cancellation. Live client↔server echo, hostile handshake rejection, and oversized-frame refusal are covered by `tests/ws_law.rs`. `wss://` TLS upgrade remains open behind the existing TLS bridge. |
+
+**Ledger-declined names (D-CORESURF-SMALL1).** `first` already ships as
+`HTTPHeaders.first`. `postform` already ships as the request builder's
+`.form(...)` call. `cancelrequest` duplicates the deadline every request
+already takes.
 
 ### `core.ws` — WebSocket client and server
 
@@ -848,6 +891,13 @@ enforcement uses the explicit `DBScope` selected by `D-DBPOLICY-BIND1`.
 
 Example: `examples/features/tooling/sync_crdt.jet`.
 
+**Ledger-declined names (D-CORESURF-SMALL1).** `broadcast`, `clear`, `lock`,
+`rlock`, `signal`, `trylock`, `unlock`, `wait`, `thread`, `timer`, and
+`locked` come from Go/Python/Ruby's `sync`/threading package — OS-level
+locks and condition variables, a different mechanism from this module's CRDT
+sync. Jet's safety design omits raw shared-memory locks; `core.tasks` owns
+concurrency instead. `put` duplicates `map_set` above.
+
 ### `core.watcher` — file/process/port change events
 
 `core.watcher` owns watch-style APIs (D-WATCH-SCOPE1). It uses std-only polling
@@ -1025,6 +1075,10 @@ Examples: `examples/features/io/args_spec.jet`,
 `examples/features/io/args_audit.jet`, and typed entry-parameter CLIs under
 `examples/features/cli/`.
 
+**Ledger-declined names (D-CORESURF-SMALL1).** `parse` and `parseargs` both
+already ship as `ArgsSpec.parse(argv)` above — Jet's one declarative
+CLI-parsing route (D-ARGS1).
+
 ---
 
 ### `core.reflect` — runtime reflection floor (D-ANY-JAI1)
@@ -1076,6 +1130,12 @@ A value that isn't `Display`-able (a closure, a `Shared<T>`) is **E0112** at
 the `reflect.of(...)` call site — the fix is the same as for a failed `"{x}"`
 interpolation: add `impl Display`, or reflect one of its fields instead.
 Example: `examples/features/reflection/reflect-value.jet`.
+
+**Ledger-declined names (D-CORESURF-SMALL1).** `reflect.of` is deliberately a
+read-only structural snapshot: no runtime type registry, no field write by
+string name (I1). `get`, `set`, `clear`, `copy`, and `equal` would all need
+that registry. `getfile`, `getmodule`, and `loadfile` ask for dynamic runtime
+code loading, which a compiled, ahead-of-time language does not do.
 
 ---
 
@@ -1315,15 +1375,21 @@ pipeline stage; use `spawn()` for the interactive child. PTY/ConPTY transport,
 transcripts, binary streams, process-tree control, and resource limits remain
 separate backend slices of the same process mechanism.
 
-`ProcessChild` exposes `id()`, `wait()`, `kill()`, `terminate()`,
+`ProcessChild` exposes `id()`, `wait()`, `exited()`, `kill()`, `terminate()`,
 `interrupt()`, `.terminal`, a `.stdin` writer (`child.stdin.write(text)`), and
 `.stdout`/`.stderr` streaming readers consumed only via
 `loop line; child.stdout.lines() { ... }` (same loop-source-only shape as
 `FileReader.lines()`/`io.stdin().lines()` — storing the reader or the line
-stream in a name is E2502).
+stream in a name is E2502). `exited()` is `Bool ? IOError`: a non-blocking
+companion to `wait()` that reports whether the child has already exited,
+without draining its output or blocking (#1481).
 
 **`ProcessResult`** — `code: Int`, `success: Bool`, `timed_out: Bool`,
 `signal: Int?`, `output: String`, `errors: String`.
+
+**Ledger-declined names (D-CORESURF-SMALL1).** `id`/`kill`/`wait`/`spawn`/
+`output`/`success` above already answer those competitor names one-for-one.
+`exitcode` is `ProcessResult.code`; `start` is `ProcessSpec.spawn()`.
 
 ---
 
@@ -1561,6 +1627,9 @@ The injected `Rng` mirrors the full ambient `random.*` set (D-DET-CAPAPI):
 Every draw needs a `&Rng` receiver, and `shuffle` needs the list passed with
 `&` because it edits in place.
 
+**Ledger-declined names (D-CORESURF-SMALL1).** `random` and `uniform` both
+already ship above, as `float()` and `float_range(low, high)`.
+
 ### `core.solve` — finite solver state
 
 `core.solve` gives constraint-style code an explicit state value instead of a
@@ -1695,6 +1764,10 @@ comptime, and default `jet run`.
 | `.reverse()` | `String` | Reverse Unicode scalar order |
 | `.normalize()` | `String` | NFC (same as `core.text.nfc`) |
 | `.rsplit(sep)` | `Iter<String>` | Split from the right; part order is left-to-right |
+| `.to_int()` | `Int ? ParseError` | `D-STR-DECLINE1=C`: same builtin `Int.parse(s)` runs — the string is the receiver either way |
+| `.to_float()` | `Float ? ParseError` | `D-STR-DECLINE1=C`: same builtin `Float.parse(s)` runs |
+| `.matches(pattern)` | `Bool ? String` | `D-STR-DECLINE1=C`: routes to the one `core.regex` engine's `is_match`; the error is a bad-pattern compile failure |
+| `.match(pattern)` | `String? ? String` | `D-STR-DECLINE1=C`: routes to the same engine's `find` — first match, or none |
 
 Competitor accounting is explicit: Python `partition`/`count`, Rust
 `find`/`split_once`/`is_ascii`, Go `Cut`/`Count`, Swift `split`/`firstIndex`,
@@ -1704,22 +1777,24 @@ locale-sensitive casing remain out of scope under `D-TEXTUNICODE1=A`; regex
 replacement remains owned by `D-REGEXENGINE1=A`. These explicit v1 decisions
 are not silently added to the ambient String surface.
 
+`D-STR-DECLINE1` (option C, card #1580/#1581) ships the four highest-frequency
+names above (`to_int`/`to_float`/`matches`/`match`) as direct String
+spellings and declines the rest:
+
 String declines (#1476, #1580): mutation verbs (`clear`/`push`/`pop`/`remove`/
 `write`/`copyto`) stay off immutable text — rebuild with `+` / `replace` /
 `slice`. Sequence adapters (`all`/`map`/`fold`/`skip`/`chunk`/…) and indexers
 (`get`/`first`/`last`/`codepointat`) live on `.chars()` / `.bytes()` then
-List/Iter (I8). `parse`/`tofloat` stay on destination types (`Int.parse` /
-`Float.parse`, E0311). `match`/`matches` stay on `core.regex`. `concat` stays
-on `+` / interpolation, the same join Jet already ships. Buffer-only names
-(`capacity`/`intern`/`isvalid`/`isprint`/`chop`/`replacerange`/`indexofany`/
-`lastindexofany`/`rpartition`) are declined; use the shipped surface or
-`core.text` helpers instead. Card #1580's 34-row batch (`clear`/`get`/`push`/
-`matches`/`parse`/`pop`/`remove`/`replacerange`/`isprint`/`map`/`write`/`all`/
-`skip`/`droplast`/`indexed`/`first`/`flatmap`/`each`/`last`/`max`/`min`/`fold`/
-`chunk`/`codepointat`/`indexofany`/`intern`/`lastindexofany`/`scan`/`tofloat`/
-`concat`/`match`/`chop`/`rpartition`/`isvalid`) restates this same reasoning
-as ballot `D-STR-DECLINE1`, pending owner ratification; card #1581 applies the
-ratified outcome to the ledger.
+List/Iter (I8). `concat` stays on `+` / interpolation, the same join Jet
+already ships. Buffer-only names (`capacity`/`intern`/`isvalid`/`isprint`/
+`chop`/`replacerange`/`indexofany`/`lastindexofany`/`rpartition`) are
+declined; use the shipped surface or `core.text` helpers instead. Card
+#1580's remaining 30-row batch (`clear`/`get`/`push`/`pop`/`remove`/
+`replacerange`/`isprint`/`map`/`write`/`all`/`skip`/`droplast`/`indexed`/
+`first`/`flatmap`/`each`/`last`/`max`/`min`/`fold`/`chunk`/`codepointat`/
+`indexofany`/`intern`/`lastindexofany`/`scan`/`concat`/`chop`/`rpartition`/
+`isvalid`) is declined under the ratified `D-STR-DECLINE1`; card #1581 applied
+that outcome to the ledger (`docs/reference/core-surface-ledger.json`).
 
 ---
 
@@ -2020,6 +2095,20 @@ error-allocation oracles remain open. Entries above state ratified API law, not 
 broad-complete implementation claim.
 
 Compiler/runtime codec implementations remain std-only under I6.
+
+**Ledger-declined names (D-CORESURF-SMALL1).** `core.encoding.xml`: `close`,
+`flush`, and `write` already ship above as `XMLWriter.finish`/`flush`/
+`write`. `end`, `indent`, `name`, and `nodetype` ask for incremental
+SAX-style tag control; Jet parses every format into one shared `DataTree`
+value instead, by design (D-SERDE13=B). `copy` and `clear` each have one
+witness language and no consistent competitor meaning.
+`core.encoding.csv`: `flush` already ships as `CSVWriter.flush`. `read`
+already ships as `CSVReader.next`, matching every other stream reader's
+name above. `fieldsizelimit` already ships as the shared
+`EncodingLimits.max_item_bytes`, one cross-format limit instead of a
+CSV-only one.
+`core.encoding.json`: `dump` is already reachable as `to_string()` plus a
+file write, or the streaming `JSONWriter` above.
 
 Jet has no general `Any` top type (D-DYNAMIC-TYPE1): use the precise shape for
 the job — an enum for a closed set of variants, generics or traits for
@@ -2462,6 +2551,12 @@ blocks for assertion snapshots; `testing.snap` is for explicit named files.
 Benchmark limits use a `#Bench` region plus a typed `Budget` declaration. The
 shared budget evaluator owns samples, baselines, confidence, reports, and CI
 outcomes; `core.testing` has no separate benchmark evaluator.
+
+**Ledger-declined names (D-CORESURF-SMALL1).** `benchmark`, `fail`, `main`,
+`run`, `runtests`, `skip`, and `stop` all ask for the same capability
+`#Test`/`#Bench` markers plus `jet test`/`jet bench` above already give —
+defining, running, skipping, and failing a test — spelled as a marker
+instead of a module function call (D-TESTKIT1).
 
 #### `jet test` — directory recursion, filters, shuffle, parallel runs
 
@@ -2924,6 +3019,10 @@ drops values in reverse order and reuses the same bytes. Fixed constructors
 must directly initialize a lexical binding; handles and views cannot be
 returned, stored, captured, or sent across task/join boundaries.
 
+**Ledger-declined names (D-CORESURF-SMALL1).** `replace` duplicates the take
+operator (`^`) plus assignment, which already swaps a value out of a binding.
+`copy` duplicates plain assignment for `Copy` values.
+
 ---
 
 ## Text parsing
@@ -3052,6 +3151,11 @@ fn run() {
 | `r.is_at_end()` | `Bool` | Position at buffer end |
 
 `examples/features/parsing/binary-reader.jet` is the golden example.
+
+**Ledger-declined names (D-CORESURF-SMALL1).** `Reader` is a fixed
+in-memory byte-buffer parser (D-SHIFT1), not a stream. `pipe` asks for a
+stream-to-stream copy, a different mechanism. `readchar` asks for character
+decoding, which belongs to `core.text`'s `Cursor`, not a byte reader.
 
 ---
 
@@ -3257,6 +3361,15 @@ An empty TLS read is a verified close-notify. Raw transport EOF without
 close-notify is `.Protocol(IOContext.{ operation: .Read, cause: ... })`
 truncation.
 
+**Ledger-declined names (D-CORESURF-SMALL1).** `start` already ships as
+`client(...)` above. `handshake` happens inside `client(...)` automatically,
+by design — there is no separate step. `verifyhostname` is mandatory
+already, visible as `stream.peer_identity().verified_server_name`; Jet gives
+no way to turn it off. `ciphersuites` and `tlsversion` (the negotiated
+values, not the `.with_version_bounds` request) are real gaps that
+`D-CORESURF-SMALL1` defers to a follow-up card, not this ballot — they need
+a native TLS-bridge change; card #1593 tracks them.
+
 ---
 
 ## core.db
@@ -3295,6 +3408,11 @@ the capability. Cleanup stays on `Close` via `close(...)`.
 | `db.migrate(scoped, name, statements)` | `Int ? DBError` | Records migration checksum in `__jet_migrations`; rerun returns `0`, changed checksum errors |
 
 `DBValue` variants are `Null`, `Int`, `Float`, `Text`, and `Bool`.
+
+**Ledger-declined names (D-CORESURF-SMALL1).** `close`/`commit`/`rollback`
+already ship above on `DBScope`. `first` already ships as `query_one`.
+`count` duplicates `query(...).len()`. `raw` would open an unaudited escape
+from the portable `Driver` surface every backend goes through.
 
 ---
 

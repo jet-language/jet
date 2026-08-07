@@ -2119,6 +2119,50 @@ fn jet_list_remove_slot<T: Clone>(xs: &mut Vec<T>, i: i64, file: &str, line: u32
     Ok(xs.remove(i as usize))
 }
 
+// D-LISTREMOVE1/F (criterion c6 on #1481): PriorityQueue.remove reuses List's
+// exact value/slot selector shape. `BinaryHeap` has no native indexed or
+// value-search removal, so both forms round-trip through an owned `Vec` —
+// sorted highest-first, the same canonical order `peek`/`to_sorted_list`
+// already publish (and the one the TIR-eval/comptime twin uses), so `.Slot`
+// means the same position on every execution tier (I9).
+fn jet_priority_queue_remove_value<T: Ord>(
+    pq: &mut std::collections::BinaryHeap<T>,
+    value: T,
+) -> Option<T> {
+    let mut items: Vec<T> = std::mem::take(pq).into_sorted_vec();
+    items.reverse();
+    let found = items
+        .iter()
+        .position(|item| *item == value)
+        .map(|index| items.remove(index));
+    *pq = items.into_iter().collect();
+    found
+}
+
+fn jet_priority_queue_remove_slot<T: Ord>(
+    pq: &mut std::collections::BinaryHeap<T>,
+    i: i64,
+    file: &str,
+    line: u32,
+) -> Option<T> {
+    let mut items: Vec<T> = std::mem::take(pq).into_sorted_vec();
+    items.reverse();
+    let len = items.len() as i64;
+    if i < 0 || i >= len {
+        jet_panic(
+            file,
+            line,
+            &format!(
+                "the priority queue has {} items, so position {} doesn't exist",
+                len, i
+            ),
+        );
+    }
+    let removed = items.remove(i as usize);
+    *pq = items.into_iter().collect();
+    Some(removed)
+}
+
 fn jet_list_count<T: PartialEq>(xs: &[T], value: &T) -> i64 {
     xs.iter().filter(|item| *item == value).count() as i64
 }

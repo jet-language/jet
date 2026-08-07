@@ -334,7 +334,10 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "upper",
             "scalars",
         ],
-        "core.uuid" => &["v4", "v7"],
+        // #1481: `parse` validates/normalizes a UUID string (D-CORE-TREE1 keeps
+        // UUIDs as `String`, no new nominal type); `v5` is the deterministic
+        // namespace+name sibling of the already-shipped `v4`/`v7`.
+        "core.uuid" => &["v4", "v7", "v5", "parse"],
         "core.mem" => &[
             "Ptr",
             "from_addr",

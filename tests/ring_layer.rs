@@ -13,35 +13,33 @@ fn tmp_project(name: &str) -> PathBuf {
 #[test]
 fn manifest_parses_layer_ceiling() {
     let raw = r#"
-payload: {
-    name: "embed",
-    version: "0.1.0",
-    runtime: alloc,
-}
+name: "embed"
+version: "0.1.0"
+runtime: alloc
 "#;
-    let pm = jetpack::PackageManifest::parse(raw).unwrap();
-    assert_eq!(pm.package.layer, Some(jet::Syntax::RuntimeLayer::Alloc));
-    let mf = jetpack::PackageManifest::to_manifest(&pm, raw).unwrap();
+    let pm = jetpack::Package::PackageFacts::parse(raw, "test").unwrap();
+    assert_eq!(pm.layer, Some(jet::Syntax::RuntimeLayer::Alloc));
+    let mf = jetpack::Package::to_manifest(&pm, raw).unwrap();
     assert_eq!(mf.package.layer, Some(jet::Syntax::RuntimeLayer::Alloc));
 }
 
 #[test]
 fn manifest_rejects_unknown_layer() {
-    let raw = "payload: { name: \"x\", version: \"1\", runtime: heap }";
-    let err = jetpack::PackageManifest::parse(raw).unwrap_err();
+    let raw = "name: \"x\"\nversion: \"1\"\nruntime: heap\n";
+    let err = jetpack::Package::PackageFacts::parse(raw, "test").unwrap_err();
     assert!(matches!(
         err,
-        jetpack::PackageManifest::ManifestError::BadLayer { .. }
+        jetpack::Package::PackageParseError::InvalidValue { .. }
     ));
 }
 
 #[test]
 fn manifest_rejects_retired_std_runtime_name() {
-    let raw = "payload: { name: \"x\", version: \"1\", runtime: std }";
-    let err = jetpack::PackageManifest::parse(raw).unwrap_err();
+    let raw = "name: \"x\"\nversion: \"1\"\nruntime: std\n";
+    let err = jetpack::Package::PackageFacts::parse(raw, "test").unwrap_err();
     assert!(matches!(
         err,
-        jetpack::PackageManifest::ManifestError::BadLayer { .. }
+        jetpack::Package::PackageParseError::InvalidValue { .. }
     ));
 }
 
@@ -50,7 +48,7 @@ fn math_import_infers_core_layer() {
     let dir = tmp_project("math");
     fs::write(
         dir.join("pkg.jet"),
-        "payload: { name: \"m\", version: \"0.1.0\" }\n",
+        "name: \"m\"\nversion: \"0.1.0\"\n",
     )
     .unwrap();
     let main = r#"
@@ -80,7 +78,7 @@ fn solve_import_infers_alloc_layer() {
     let dir = tmp_project("solve");
     fs::write(
         dir.join("pkg.jet"),
-        "payload: { name: \"m\", version: \"0.1.0\" }\n",
+        "name: \"m\"\nversion: \"0.1.0\"\n",
     )
     .unwrap();
     let main = r#"
@@ -111,7 +109,7 @@ fn fs_import_infers_std_layer() {
     let dir = tmp_project("fs");
     fs::write(
         dir.join("pkg.jet"),
-        "payload: { name: \"m\", version: \"0.1.0\" }\n",
+        "name: \"m\"\nversion: \"0.1.0\"\n",
     )
     .unwrap();
     let main = r#"
@@ -141,7 +139,7 @@ fn ceiling_blocks_std_import() {
     let dir = tmp_project("ceiling");
     fs::write(
         dir.join("pkg.jet"),
-        "payload: { name: \"m\", version: \"0.1.0\", runtime: core }\n",
+        "name: \"m\"\nversion: \"0.1.0\"\nruntime: core\n",
     )
     .unwrap();
     let main = r#"
@@ -167,7 +165,7 @@ fn alloc_ceiling_allows_mem_not_fs() {
     let dir = tmp_project("alloc_ok");
     fs::write(
         dir.join("pkg.jet"),
-        "payload: { name: \"m\", version: \"0.1.0\", runtime: alloc }\n",
+        "name: \"m\"\nversion: \"0.1.0\"\nruntime: alloc\n",
     )
     .unwrap();
     let main = r#"
@@ -194,7 +192,7 @@ fn ambient_input_infers_std_layer() {
     let dir = tmp_project("input");
     fs::write(
         dir.join("pkg.jet"),
-        "payload: { name: \"m\", version: \"0.1.0\" }\n",
+        "name: \"m\"\nversion: \"0.1.0\"\n",
     )
     .unwrap();
     let main = r#"
@@ -223,7 +221,7 @@ fn ceiling_blocks_ambient_input_helper() {
     let dir = tmp_project("input_ceiling");
     fs::write(
         dir.join("pkg.jet"),
-        "payload: { name: \"m\", version: \"0.1.0\", runtime: core }\n",
+        "name: \"m\"\nversion: \"0.1.0\"\nruntime: core\n",
     )
     .unwrap();
     let main = r#"

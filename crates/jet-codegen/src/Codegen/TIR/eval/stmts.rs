@@ -888,6 +888,32 @@ impl<'a> EvalCtx<'a> {
                     return Ok(Flow::Normal);
                 }
                 }
+                if progress.is_none() {
+                    if let Some(TForInMethod::Chars) = method_kind {
+                        // I9: same semantics as AOT/JIT `({recv}).chars()` —
+                        // iterate Unicode scalar values of the receiver string.
+                        let CtValue::Str(s) = &coll else {
+                            return Err(unsupported("chars() receiver", self.span()));
+                        };
+                        for ch in s.chars() {
+                            self.burn()?;
+                            scope.insert(var.clone(), CtValue::Char(ch));
+                            match self.exec_stmts(body, scope)? {
+                                Flow::Normal | Flow::Continue => {}
+                                Flow::Break => break,
+                                Flow::BreakLabel(ref name)
+                                    if label.as_deref() == Some(name.as_str()) =>
+                                {
+                                    break
+                                }
+                                Flow::ContinueLabel(ref name)
+                                    if label.as_deref() == Some(name.as_str()) => {}
+                                other => return Ok(other),
+                            }
+                        }
+                        return Ok(Flow::Normal);
+                    }
+                }
                 if method_kind.is_some() {
                     return Err(unsupported("for-in method collection", self.span()));
                 }

@@ -5,8 +5,8 @@ use std::collections::BTreeMap;
 use jet_foundation::JSON::json_escape;
 use jet_pkg_model::Overlay::OverlayPolicy;
 use jet_pkg_model::Package::{
-    ConfigFacts as PackageConfigFacts, EnvironmentFact, MemberRef, OutputFact as PackageOutputFact,
-    OutputPayload, PackageFacts, ServiceFact,
+    dep_display, ConfigFacts as PackageConfigFacts, EnvironmentFact, MemberRef,
+    OutputFact as PackageOutputFact, OutputPayload, PackageFacts, ServiceFact,
 };
 
 use crate::Build::{SymDef, SymKind, SymRef};
@@ -178,7 +178,7 @@ fn json_config_facts(value: &PackageConfigFacts) -> String {
             .deps
             .iter()
             .map(|(name, source)| {
-                format!("{{\"name\":{},\"source\":{}}}", json_str(name), json_str(source))
+                format!("{{\"name\":{},\"source\":{}}}", json_str(name), json_str(&dep_display(source)))
             })
             .collect::<Vec<_>>()
             .join(","),
@@ -219,7 +219,7 @@ pub fn package_facts_json(facts: &PackageFacts) -> String {
     let deps = facts
         .deps
         .iter()
-        .map(|(name, source)| format!("{{\"name\":{},\"source\":{}}}", json_str(name), json_str(source)))
+        .map(|(name, source)| format!("{{\"name\":{},\"source\":{}}}", json_str(name), json_str(&dep_display(source))))
         .collect::<Vec<_>>()
         .join(",");
     let outputs = json_package_outputs(&facts.outputs, Some(&facts.provenance));

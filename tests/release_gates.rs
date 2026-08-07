@@ -421,3 +421,166 @@ fn later_breaking_milestones_name_their_gate() {
         "expected at least one non-m2 epoch-2 plan to scan"
     );
 }
+
+// ============================================================================
+// Section: #211 CI test-target inventory + sharding (D-CI1=A)
+// ============================================================================
+
+/// The exact `cargo metadata` inventory of test-bearing targets, as
+/// `-p PKG --lib` / `-p PKG --bin NAME` / `-p PKG --test NAME` lines — the
+/// same shape `tools/ci/test-shards.sh` emits. Computed independently here
+/// (a separate `jq` invocation, not a call into the script) so a bug in the
+/// script's own partition math still shows up as a mismatch below.
+fn full_workspace_test_target_inventory(root: &std::path::Path) -> Vec<String> {
+    let metadata = Command::new("cargo")
+        .args(["metadata", "--no-deps", "--format-version", "1"])
+        .current_dir(root)
+        .output()
+        .expect("run cargo metadata");
+    assert!(
+        metadata.status.success(),
+        "cargo metadata failed:\n{}",
+        String::from_utf8_lossy(&metadata.stderr)
+    );
+
+    let jq_filter = r#".packages[] | .name as $pkg | .targets[]
+      | select(.kind[0] == "lib" or .kind[0] == "bin" or .kind[0] == "test")
+      | if .kind[0] == "lib" then "-p \($pkg) --lib"
+        elif .kind[0] == "bin" then "-p \($pkg) --bin \(.name)"
+        else "-p \($pkg) --test \(.name)" end"#;
+    let mut child = Command::new("jq")
+        .args(["-r", jq_filter])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn jq");
+    {
+        use std::io::Write;
+        child
+            .stdin
+            .as_mut()
+            .unwrap()
+            .write_all(&metadata.stdout)
+            .expect("pipe cargo metadata into jq");
+    }
+    let jq_result = child.wait_with_output().expect("jq output");
+    assert!(
+        jq_result.status.success(),
+        "jq filter failed:\n{}",
+        String::from_utf8_lossy(&jq_result.stderr)
+    );
+    String::from_utf8(jq_result.stdout)
+        .unwrap()
+        .lines()
+        .map(str::to_string)
+        .collect()
+}
+
+#[test]
+fn ci_shard_matrix_matches_test_shards_script_count() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let workflow = fs::read_to_string(root.join(".github/workflows/ci.yml"))
+        .expect("read .github/workflows/ci.yml");
+    assert!(
+        workflow.contains("verify-tests:"),
+        "CI must name the #211 sharded verify-tests job"
+    );
+    let shard_list = workflow
+        .split("shard: [")
+        .nth(1)
+        .and_then(|rest| rest.split(']').next())
+        .unwrap_or_else(|| panic!("verify-tests job must declare a `shard: [...]` matrix"));
+    let declared_count = shard_list.split(',').filter(|s| !s.trim().is_empty()).count();
+    assert!(
+        declared_count >= 1,
+        "verify-tests shard matrix must not be empty"
+    );
+    assert!(
+        workflow.contains(&format!(r#"JET_TEST_SHARD_COUNT: "{declared_count}""#)),
+        "JET_TEST_SHARD_COUNT must equal the matrix's shard count ({declared_count})"
+    );
+
+    let out = Command::new("bash")
+        .arg(root.join("tools/ci/test-shards.sh"))
+        .arg("0")
+        .arg(declared_count.to_string())
+        .current_dir(&root)
+        .output()
+        .expect("run tools/ci/test-shards.sh");
+    assert!(
+        out.status.success(),
+        "tools/ci/test-shards.sh must accept the workflow's own shard count:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn ci_test_shards_cover_every_workspace_target_exactly_once() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let shard_count = 6;
+
+    let want = full_workspace_test_target_inventory(&root);
+    assert!(
+        want.len() > 200,
+        "sanity: expected well over 200 lib/bin/test targets across the workspace, got {}",
+        want.len()
+    );
+
+    let mut got: Vec<String> = Vec::new();
+    for shard in 0..shard_count {
+        let out = Command::new("bash")
+            .arg(root.join("tools/ci/test-shards.sh"))
+            .arg(shard.to_string())
+            .arg(shard_count.to_string())
+            .current_dir(&root)
+            .output()
+            .expect("run tools/ci/test-shards.sh");
+        assert!(
+            out.status.success(),
+            "shard {shard} enumeration failed:\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        got.extend(
+            String::from_utf8(out.stdout)
+                .unwrap()
+                .lines()
+                .map(str::to_string),
+        );
+    }
+
+    assert_eq!(
+        got.len(),
+        got.iter().collect::<std::collections::BTreeSet<_>>().len(),
+        "a test target appeared in more than one shard"
+    );
+
+    let mut want_sorted = want.clone();
+    want_sorted.sort();
+    let mut got_sorted = got.clone();
+    got_sorted.sort();
+    assert_eq!(
+        want_sorted, got_sorted,
+        "the union of all CI test shards must equal the exact workspace test-target inventory \
+         (nothing silently skipped, nothing duplicated)"
+    );
+}
+
+#[test]
+fn verify_full_default_run_covers_whole_workspace() {
+    // The unsharded default path (no JET_TEST_SHARD set) is what local/manual
+    // `scripts/agent/verify-full.sh` runs use; it must cover the same
+    // complete inventory as the sharded CI path, via plain `cargo test
+    // --workspace` rather than the old default-members-only `cargo test`.
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let verify = fs::read_to_string(root.join("scripts/agent/verify-full.sh"))
+        .expect("read scripts/agent/verify-full.sh");
+    assert!(
+        verify.contains("cargo test --workspace \"$@\""),
+        "the unsharded default path must run `cargo test --workspace`, not the \
+         default-members-only `cargo test`"
+    );
+    assert!(
+        verify.contains("tools/ci/test-shards.sh"),
+        "the sharded path must delegate enumeration to tools/ci/test-shards.sh"
+    );
+}

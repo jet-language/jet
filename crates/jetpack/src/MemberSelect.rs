@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::Diagnostics::Diagnostic;
-use crate::PackageManifest;
+use crate::Package;
 use crate::SHA256;
 use crate::WorkspaceFile::{WorkspaceMember, WorkspacePlan};
 
@@ -93,17 +93,16 @@ pub fn dependency_order(root: &Path, members: &[WorkspaceMember]) -> Vec<Workspa
     let mut indegree = vec![0usize; members.len()];
 
     for (index, member) in members.iter().enumerate() {
-        let manifest = std::fs::read_to_string(PackageManifest::PackManifest::path_in(
-            &member_abs(root, member),
-        ))
+        let manifest_path = crate::Manifest::manifest_path_in(&member_abs(root, member));
+        let manifest = std::fs::read_to_string(&manifest_path)
             .ok()
-            .and_then(|source| PackageManifest::parse(&source).ok());
+            .and_then(|source| Package::PackageFacts::parse(&source, manifest_path.display().to_string()).ok());
         let Some(manifest) = manifest else {
             continue;
         };
         let mut seen = HashSet::new();
-        for dependency in manifest.deps {
-            let Some(&dependency_index) = names.get(dependency.name.as_str()) else {
+        for dependency_name in manifest.deps.keys() {
+            let Some(&dependency_index) = names.get(dependency_name.as_str()) else {
                 continue;
             };
             if dependency_index == index || !seen.insert(dependency_index) {
@@ -315,17 +314,17 @@ fn reverse_dependents(root: &Path, plan: &WorkspacePlan) -> HashMap<String, Vec<
     let mut reverse: HashMap<String, Vec<String>> = HashMap::new();
     for m in &plan.members {
         let abs = member_abs(root, m);
-        let pkg_jet = PackageManifest::PackManifest::path_in(&abs);
+        let pkg_jet = crate::Manifest::manifest_path_in(&abs);
         let Ok(src) = std::fs::read_to_string(&pkg_jet) else {
             continue;
         };
-        let Ok(manifest) = PackageManifest::parse(&src) else {
+        let Ok(manifest) = Package::PackageFacts::parse(&src, pkg_jet.display().to_string()) else {
             continue;
         };
-        for dep in &manifest.deps {
-            if names.contains(dep.name.as_str()) {
+        for dep_name in manifest.deps.keys() {
+            if names.contains(dep_name.as_str()) {
                 reverse
-                    .entry(dep.name.clone())
+                    .entry(dep_name.clone())
                     .or_default()
                     .push(m.name.clone());
             }
@@ -494,7 +493,7 @@ mod tests {
         };
         std::fs::write(
             abs.join("pkg.jet"),
-            format!("payload: {{ name: \"{name}\", version: \"1.0.0\" }}\n{deps_block}"),
+            format!("name: \"{name}\"\nversion: \"1.0.0\"\n{deps_block}"),
         )
         .unwrap();
         // A source file so tree_hash is non-empty / change-sensitive.
