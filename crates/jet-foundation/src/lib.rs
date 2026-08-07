@@ -27,6 +27,8 @@ pub mod Policy;
 pub mod RingLayer;
 pub mod RegexSyntax;
 pub mod SHA256;
+pub mod MatchScan;
+pub mod StreamCursor;
 pub mod StructuralDebug;
 pub mod Syntax;
 pub mod TargetProfile;

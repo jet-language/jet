@@ -12,6 +12,7 @@ mod local_cell;
 mod regex_ops;
 mod services_calls;
 mod stmts;
+mod stream;
 mod webapp;
 
 mod range_semantics {
@@ -2301,6 +2302,7 @@ fn eval_expr_hook(
     let repl_mode = req.repl_mode;
     let source_span = req.expr.span();
     let mut sink_target = req.sink.take();
+    let mutated_out = req.mutated.take();
     let sink = sink_target
         .as_deref_mut()
         .map(|sink| Arc::new(Mutex::new(std::mem::take(sink))));
@@ -2352,6 +2354,12 @@ fn eval_expr_hook(
     let result = ctx.eval_expr(&tir, &mut scope);
     if let (Some(target), Some(shared)) = (sink_target, ctx.sink.as_ref()) {
         *target = std::mem::take(&mut *shared.lock().expect("evaluator sink poisoned"));
+    }
+    // Hand back the bindings the expression left behind: a mutating receiver
+    // (`reader.read_u8()`, `cursor.skip_ws()`) advances state the next
+    // statement must observe.
+    if let Some(out) = mutated_out {
+        *out = scope;
     }
     result
 }

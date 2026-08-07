@@ -464,6 +464,7 @@ fn eval_members_expr(
         &HashMap::new(),
         false,
         0,
+        None,
     )?;
     let paths = extract_string_list(v, expr.span())?
         .into_iter()

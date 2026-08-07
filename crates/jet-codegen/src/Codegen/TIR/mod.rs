@@ -129,6 +129,22 @@ pub struct TCodecMigrationPlan {
     pub steps: Vec<Vec<TCodecMigrationOp>>,
 }
 
+/// D-MIGRATE4 version vocabulary. Shapes count from one, and a step names the
+/// shapes it moves between. Codegen bakes these names into the generated
+/// chain-walker and the evaluator reports them back out of a `decode_traced`,
+/// so both read them from here. `index` is zero-based.
+pub fn migration_shape_name(index: usize) -> String {
+    format!("v{}", index + 1)
+}
+
+pub fn migration_step_name(index: usize) -> String {
+    format!(
+        "{}->{}",
+        migration_shape_name(index),
+        migration_shape_name(index + 1)
+    )
+}
+
 #[derive(Debug, Clone)]
 pub enum TCodecMigrationOp {
     Rename {

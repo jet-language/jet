@@ -10870,6 +10870,147 @@ fn run() {
     );
 }
 
+/// I9 for the typed text codecs: `decode<T>` and `decode_traced<T>` mean the
+/// same thing under the full build and under default `jet run`, which reaches
+/// them through the canonical TIR evaluator. One fixture covers every codec
+/// that shares the decode machinery, fresh and migrated records, per-row csv
+/// migration, and a parse failure's wording.
+#[test]
+fn typed_codec_decode_matches_between_full_build_and_quick_run() {
+    let jet = jet_bin();
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc || !jet.exists() {
+        eprintln!("note: skipping typed codec decode tier parity (need jet + rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_typed_decode_tiers_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+
+    let src = r#"
+use core.encoding.json as json
+use core.encoding.toml as toml
+use core.encoding.yaml as yaml
+use core.encoding.csv as csv
+
+#[PublishedSchema, Codable]
+struct Config {
+    port: Int
+    host: String
+}
+
+migration Config {
+    add host: String = "localhost"
+}
+
+#Codable
+struct Point { x: Int  y: Int }
+
+#Codable
+struct Rank { value: Int }
+
+// Two blocks, so a v1 record walks two steps and a v2 record walks one.
+#[PublishedSchema, Codable]
+struct Profile {
+    title: String
+    score: Rank
+}
+
+migration Profile {
+    remove legacy_id
+}
+
+migration Profile {
+    rename name => title
+    change score: Int => Rank via { (n) => Rank.{ value: n } }
+}
+
+fn run() {
+    // json, record already in the current shape.
+    fresh :: json.decode_traced<Config>("{{\"port\": 1, \"host\": \"a\"}}") ?? panic("bad fresh")
+    print("{fresh.value.port} {fresh.value.host} {fresh.migration.migrated} {fresh.migration.from} {fresh.migration.steps.len()}")
+
+    // json, record in the historical shape: the chain fills the added field.
+    old :: json.decode_traced<Config>("{{\"port\": 2}}") ?? panic("bad old")
+    print("{old.value.port} {old.value.host} {old.migration.migrated} {old.migration.from} {old.migration.steps[0]}")
+
+    // Untraced decode walks the same chain and drops the status.
+    plain :: json.decode<Config>("{{\"port\": 3}}") ?? panic("bad plain")
+    print("{plain.port} {plain.host}")
+
+    // A type with no migration blocks reports a fresh status.
+    p :: json.decode_traced<Point>("{{\"x\": 4, \"y\": 5}}") ?? panic("bad point")
+    print("{p.value.x} {p.value.y} {p.migration.migrated}")
+
+    // A record two shapes behind walks both steps; one shape behind walks one.
+    far :: json.decode_traced<Profile>("{{\"legacy_id\": 9, \"name\": \"Ada\", \"score\": 95}}") ?? panic("bad v1")
+    print("{far.value.title} {far.value.score.value} {far.migration.from} {far.migration.steps.len()} {far.migration.steps[0]} {far.migration.steps[1]}")
+    near :: json.decode_traced<Profile>("{{\"name\": \"Grace\", \"score\": 7}}") ?? panic("bad v2")
+    print("{near.value.title} {near.migration.from} {near.migration.steps.len()} {near.migration.steps[0]}")
+
+    t :: toml.decode_traced<Config>("port = 6\n") ?? panic("bad toml")
+    print("{t.value.port} {t.value.host} {t.migration.migrated} {t.migration.from}")
+
+    y :: yaml.decode<Config>("port: 7\nhost: b\n") ?? panic("bad yaml")
+    print("{y.port} {y.host}")
+
+    // csv decodes to a list; every row migrates and the batch reports it once.
+    rows :: csv.decode_traced<Config>("port\n8\n9\n") ?? panic("bad csv")
+    print("{rows.value.len()} {rows.value[0].port} {rows.value[1].host} {rows.migration.migrated} {rows.migration.steps[0]}")
+
+    // A field that does not fit is an ordinary decode error, not a crash,
+    // and a csv row error keeps its `row <n>` path prefix.
+    if json.decode<Config>("{{\"port\": \"nope\", \"host\": \"h\"}}") == {
+        .Ok(v) -> print("unexpected {v.port}")
+        .Err(errs) -> print("err {errs.len()} {errs[0].path} {errs[0].reason}")
+    }
+    if csv.decode<Config>("port,host\nnope,h\n") == {
+        .Ok(v) -> print("unexpected {v.len()}")
+        .Err(errs) -> print("row err {errs.len()} {errs[0].path} {errs[0].reason}")
+    }
+}
+"#;
+
+    let (code, compiled, stderr) = build_and_run(&dir, "typed_decode_tiers", src, &[], None);
+    assert_eq!(code, 0, "full build failed: {stderr}");
+    assert_eq!(
+        compiled,
+        "1 a false  0\n\
+         2 localhost true v1 v1->v2\n\
+         3 localhost\n\
+         4 5 false\n\
+         Ada 95 v1 2 v1->v2 v2->v3\n\
+         Grace v2 1 v2->v3\n\
+         6 localhost true v1\n\
+         7 b\n\
+         2 8 localhost true v1->v2\n\
+         err 1 port expected Int, found text \"nope\"\n\
+         row err 1 row 1.port expected Int, found text \"nope\"\n"
+    );
+
+    // `jet run` wants the source under its own extension; `build_and_run`
+    // names its fixture after the crate it emits.
+    let quick_path = dir.join("typed_decode_tiers.jet");
+    fs::write(&quick_path, src).unwrap();
+    let quick = Command::new(&jet)
+        .arg("run")
+        .arg(&quick_path)
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(
+        quick.status.success(),
+        "quick run failed:\n{}",
+        String::from_utf8_lossy(&quick.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&quick.stdout),
+        compiled,
+        "typed codec decode must mean the same thing on both tiers (I9)"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn perf_static_api_lowers_to_core_helpers() {
     let out = compile_temp(

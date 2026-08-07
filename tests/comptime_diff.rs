@@ -453,6 +453,34 @@ fn run() {
     );
 }
 
+/// A `#Known` binding that advances a receiver has to leave the advance
+/// behind for the next `#Known` binding to see, or the folded answers drift
+/// from what the same code does at run time: two sequential reads would both
+/// report byte zero.
+#[test]
+fn sequential_comptime_reads_advance_the_shared_reader() {
+    check_comptime_src(
+        34_001,
+        "sequential #Known reader reads",
+        r#"
+fn run() {
+    #Known ct :: Reader.over([U8].{7, 9, 11})
+    #Known ct_a :: ct.read_u8() ?? panic("ct a")
+    #Known ct_b :: ct.read_u8() ?? panic("ct b")
+    #Known comptime_value :: "{ct_a}|{ct_b}|{ct.remaining()}"
+
+    rt :: Reader.over([U8].{7, 9, 11})
+    rt_a :: rt.read_u8() ?? panic("rt a")
+    rt_b :: rt.read_u8() ?? panic("rt b")
+    runtime_value :: "{rt_a}|{rt_b}|{rt.remaining()}"
+
+    print("{comptime_value}")
+    print("{runtime_value}")
+}
+"#,
+    );
+}
+
 /// Shared by `check_comptime_case` (single-expression cases) and
 /// `check_comptime_module_case` (card #392's `use core.X as a; a.f(...)`
 /// cases, which need a full program — a bare `use` isn't an expression).
@@ -498,8 +526,14 @@ fn check_comptime_src(i: usize, label: &str, src: &str) {
     );
 
     let dir = std::env::temp_dir();
-    let rs = dir.join(format!("jet_ctdiff_{}_{}.rs", std::process::id(), i));
-    let bin = dir.join(format!("jet_ctdiff_{}_{}", std::process::id(), i));
+    // Case numbers are per-test, so two tests running side by side both reach
+    // index 0 and race for the same file: one rustc deletes the object the
+    // other is linking, and the failure reads like an I2 miscompile. Number
+    // the artifacts per run instead.
+    static ARTIFACT: AtomicUsize = AtomicUsize::new(0);
+    let unique = ARTIFACT.fetch_add(1, Ordering::Relaxed);
+    let rs = dir.join(format!("jet_ctdiff_{}_{}_{}.rs", std::process::id(), i, unique));
+    let bin = dir.join(format!("jet_ctdiff_{}_{}_{}", std::process::id(), i, unique));
     fs::write(&rs, &compiled.rust).unwrap();
     let mut rustc = Command::new("rustc");
     rustc

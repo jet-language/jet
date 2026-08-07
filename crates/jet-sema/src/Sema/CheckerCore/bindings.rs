@@ -676,7 +676,8 @@ impl<'a> Checker<'a> {
                 // whitelisted pure Core calls (e.g. `math.sqrt(x)`).
                 // D-CTEFFECT1: pass impure context so bindings inside #Impure blocks
                 // start with the gate already open.
-                match crate::Comptime::evaluate_owned_with_imports_opts_collecting(
+                let mut mutated = std::collections::HashMap::new();
+                let folded = crate::Comptime::evaluate_owned_with_imports_opts_collecting(
                     &b.init,
                     self.ct_funcs,
                     self.ct_externs,
@@ -685,7 +686,10 @@ impl<'a> Checker<'a> {
                     self.core_imports,
                     self.allow_impure && self.ct_impure_depth > 0,
                     self.ct_impure_depth,
-                ) {
+                    Some(&mut mutated),
+                );
+                self.apply_ct_mutations(mutated);
+                match folded {
                     Ok((v, inputs)) => {
                         // Same guard as the implicit path below: a value codegen
                         // cannot write back out must not become literal data.
@@ -703,18 +707,25 @@ impl<'a> Checker<'a> {
                 // implicit folding opportunity. Failure is silent; only
                 // explicit `#Known` demands a compile-time answer.
                 let globals = self.current_ct_globals();
-                if let Ok((v, _)) =
-                    crate::Comptime::evaluate_owned_with_imports_opts_collecting(
-                        &b.init,
-                        self.ct_funcs,
-                        self.ct_externs,
-                        self.ct_base_dir,
-                        &globals,
-                        self.core_imports,
-                        false,
-                        0,
-                    )
-                {
+                let mut mutated = std::collections::HashMap::new();
+                let folded = crate::Comptime::evaluate_owned_with_imports_opts_collecting(
+                    &b.init,
+                    self.ct_funcs,
+                    self.ct_externs,
+                    self.ct_base_dir,
+                    &globals,
+                    self.core_imports,
+                    false,
+                    0,
+                    Some(&mut mutated),
+                );
+                let changed = Self::ct_mutated_names(&globals, &mutated);
+                if !changed.is_empty() {
+                    // The initializer advanced a receiver. Baking either side
+                    // would desync the emitted runtime copy, so hand the whole
+                    // chain back to run time.
+                    self.forget_ct_bindings(&changed);
+                } else if let Ok((v, _)) = folded {
                     // Only record a folded value codegen can write back out.
                     // The comptime evaluator models many builtins as a struct
                     // with an internal field encoding (`Set` as `{items}`,

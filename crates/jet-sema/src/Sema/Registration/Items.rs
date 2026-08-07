@@ -254,6 +254,7 @@ pub(crate) fn eval_comptime_items(
                         false,
                         0,
                         &structs,
+                        None,
                     ) {
                         Ok((v, inputs)) => {
                             // `v.jet_type()` reads the element type off the value's

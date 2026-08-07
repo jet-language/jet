@@ -74,6 +74,9 @@ const PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/Observe.rs"),
     include_str!("../../../jet-foundation/src/ExactUnitConversion.rs"),
     include_str!("../../../jet-foundation/src/StructuralDebug.rs"),
+    // D-SHIFT1: `binary.Reader` / `text.Cursor`. Owned by jet-foundation so the
+    // AOT prelude and the canonical TIR evaluator run one kernel (I9).
+    include_str!("../../../jet-foundation/src/StreamCursor.rs"),
 ];
 
 fn push_prelude(out: &mut String) {
@@ -2056,8 +2059,15 @@ mod tests {
         let set_algebra =
             std::fs::read_to_string(root.join("src/Prelude/Core/SetAlgebra.rs")).unwrap();
         let core = std::fs::read_to_string(root.join("src/Prelude/Core.rs")).unwrap();
+        let power = std::fs::read_to_string(root.join("src/Prelude/Core/Power.rs")).unwrap();
+        let division =
+            std::fs::read_to_string(root.join("src/Prelude/Core/Division.rs")).unwrap();
         let typed_text =
             std::fs::read_to_string(root.join("src/Prelude/TypedText.rs")).unwrap();
+        let progress =
+            std::fs::read_to_string(root.join("src/Prelude/Core/Progress.rs")).unwrap();
+        let byte_buffer =
+            std::fs::read_to_string(root.join("src/Prelude/Core/ByteBuffer.rs")).unwrap();
         let collections =
             std::fs::read_to_string(root.join("src/Prelude/Core/Collections.rs")).unwrap();
         let shared_protocol =
@@ -2072,6 +2082,8 @@ mod tests {
                 .unwrap();
         let structural_debug =
             std::fs::read_to_string(root.join("../jet-foundation/src/StructuralDebug.rs")).unwrap();
+        let stream_cursor =
+            std::fs::read_to_string(root.join("../jet-foundation/src/StreamCursor.rs")).unwrap();
         for (relative, source) in [
             ("src/Prelude/Core/UnicodeString.rs", unicode.as_str()),
             ("src/Prelude/Core/Values.rs", values.as_str()),
@@ -2083,7 +2095,11 @@ mod tests {
             ),
             ("src/Prelude/Core/SetAlgebra.rs", set_algebra.as_str()),
             ("src/Prelude/Core.rs", core.as_str()),
+            ("src/Prelude/Core/Power.rs", power.as_str()),
+            ("src/Prelude/Core/Division.rs", division.as_str()),
             ("src/Prelude/TypedText.rs", typed_text.as_str()),
+            ("src/Prelude/Core/Progress.rs", progress.as_str()),
+            ("src/Prelude/Core/ByteBuffer.rs", byte_buffer.as_str()),
             ("src/Prelude/Core/Collections.rs", collections.as_str()),
             ("src/Prelude/SharedProtocol.rs", shared_protocol.as_str()),
             (
@@ -2099,6 +2115,10 @@ mod tests {
             (
                 "../jet-foundation/src/StructuralDebug.rs",
                 structural_debug.as_str(),
+            ),
+            (
+                "../jet-foundation/src/StreamCursor.rs",
+                stream_cursor.as_str(),
             ),
         ] {
             assert!(
@@ -2149,6 +2169,9 @@ mod tests {
         let structural_debug_pos = production_codegen
             .find("include_str!(\"../../../jet-foundation/src/StructuralDebug.rs\")")
             .unwrap();
+        let stream_cursor_pos = production_codegen
+            .find("include_str!(\"../../../jet-foundation/src/StreamCursor.rs\")")
+            .unwrap();
         assert!(
             unicode_pos < values_pos
                 && values_pos < range_bounds_pos
@@ -2160,7 +2183,8 @@ mod tests {
                 && collections_pos < control_pos
                 && control_pos < observe_pos
                 && observe_pos < exact_units_pos
-                && exact_units_pos < structural_debug_pos,
+                && exact_units_pos < structural_debug_pos
+                && structural_debug_pos < stream_cursor_pos,
             "prelude ownership order is generated-byte order"
         );
         assert!(production_codegen.contains("for part in PRELUDE_PARTS"));
@@ -2175,7 +2199,11 @@ mod tests {
                 expiring_secret.as_str(),
                 set_algebra.as_str(),
                 core.as_str(),
+                power.as_str(),
+                division.as_str(),
                 typed_text.as_str(),
+                progress.as_str(),
+                byte_buffer.as_str(),
                 collections.as_str(),
                 shared_protocol.as_str(),
                 runtime_control.as_str(),
@@ -2183,6 +2211,7 @@ mod tests {
                 observe.as_str(),
                 exact_units.as_str(),
                 structural_debug.as_str(),
+                stream_cursor.as_str(),
             ],
             "PRELUDE_PARTS must list every owned module exactly once in generated-byte order"
         );
@@ -2197,7 +2226,11 @@ mod tests {
             expiring_secret.as_str(),
             set_algebra.as_str(),
             core.as_str(),
+            power.as_str(),
+            division.as_str(),
             typed_text.as_str(),
+            progress.as_str(),
+            byte_buffer.as_str(),
             collections.as_str(),
             shared_protocol.as_str(),
             runtime_control.as_str(),
@@ -2205,16 +2238,17 @@ mod tests {
             observe.as_str(),
             exact_units.as_str(),
             structural_debug.as_str(),
+            stream_cursor.as_str(),
         ]
         .concat();
         assert_eq!(
             emitted, expected,
             "owned prelude modules must concatenate without byte loss or boundary changes"
         );
-        assert_eq!(emitted.len(), 289_259, "split changed prelude byte length");
+        assert_eq!(emitted.len(), 331_699, "split changed prelude byte length");
         assert_eq!(
             crate::SHA256::sha256_hex(emitted.as_bytes()),
-            "d54e62a062214e87698001cc65071e7fb699d80328ee0b05b01851dd6f5aef92",
+            "4c073a5981cdb4e6476d54c674972a2157cbfec83b24be2a5630a6c7d04c83cf",
             "split changed historical prelude bytes, order, or boundary newline"
         );
     }

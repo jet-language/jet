@@ -370,6 +370,13 @@ pub fn cbor_parse_for_tir(
         .map_err(EncodingLite::cbor_error_value)
 }
 
+/// TIR/JIT bridge for the text codecs' parse-failure wording. `codec` is the
+/// name as the Prelude writes it — `JSON`, `TOML`, `YAML` — so a typed decode
+/// reports `invalid JSON (line 3): …` on every tier from one implementation.
+pub fn codec_parse_error_for_tir(codec: &str, error: CtValue) -> CtValue {
+    TypedDecode::json_parse_err_to_decode(codec, error)
+}
+
 /// Convert a parser failure to the typed decoder's shared `[FieldError]`
 /// contract. CBOR's parser keeps byte offsets and `$` paths; typed decode
 /// exposes those details in the field-error reason and uses source paths.
@@ -567,6 +574,7 @@ pub fn evaluate_with_imports_opts(
         repl_mode: false,
         emitted_fragments: None,
         embed_inputs: None,
+        mutated: None,
     })
 }
 
@@ -582,6 +590,7 @@ pub fn evaluate_with_imports_opts_collecting(
     core_imports: &HashMap<String, String>,
     allow_impure: bool,
     initial_impure_depth: usize,
+    mutated: Option<&mut HashMap<String, CtValue>>,
 ) -> Result<(CtValue, Vec<crate::AST::ComptimeInput>), Diagnostic> {
     evaluate_with_imports_opts_collecting_structs(
         init,
@@ -593,6 +602,7 @@ pub fn evaluate_with_imports_opts_collecting(
         allow_impure,
         initial_impure_depth,
         empty_structs(),
+        mutated,
     )
 }
 
@@ -608,6 +618,7 @@ pub fn evaluate_with_imports_opts_collecting_structs<'a>(
     allow_impure: bool,
     initial_impure_depth: usize,
     structs: &HashMap<String, &'a StructDef>,
+    mutated: Option<&mut HashMap<String, CtValue>>,
 ) -> Result<(CtValue, Vec<crate::AST::ComptimeInput>), Diagnostic> {
     if initial_impure_depth == 0 {
         check_purity(init, funcs, extern_names)?;
@@ -632,6 +643,7 @@ pub fn evaluate_with_imports_opts_collecting_structs<'a>(
         repl_mode: false,
         emitted_fragments: None,
         embed_inputs: Some(&mut embed_inputs),
+        mutated,
     })?;
     Ok((val, embed_inputs))
 }
@@ -1203,6 +1215,7 @@ pub fn evaluate_owned_with_imports_opts_collecting(
     core_imports: &HashMap<String, String>,
     allow_impure: bool,
     initial_impure_depth: usize,
+    mutated: Option<&mut HashMap<String, CtValue>>,
 ) -> Result<(CtValue, Vec<crate::AST::ComptimeInput>), Diagnostic> {
     let reachable = Purity::reachable_owned_funcs(init, funcs);
     let refs: HashMap<String, &Func> =
@@ -1216,6 +1229,7 @@ pub fn evaluate_owned_with_imports_opts_collecting(
         core_imports,
         allow_impure,
         initial_impure_depth,
+        mutated,
     )
 }
 

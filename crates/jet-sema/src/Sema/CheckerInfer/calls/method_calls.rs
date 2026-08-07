@@ -3161,6 +3161,7 @@ impl<'a> Checker<'a> {
                                 self.core_imports,
                                 false,
                                 0,
+                                None,
                             ) {
                                 Ok((CtValue::Int(value), inputs)) => {
                                     self.ct_embed_inputs.extend(inputs);

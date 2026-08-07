@@ -4845,8 +4845,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                             .collect();
                         format!("{} {{ {} }}", struct_name, field_inits.join(", "))
                     };
+                    // Advance and miss-reporting belong to the shared kernel
+                    // (`jet-foundation/src/StreamCursor.rs`); only the scan and
+                    // the binding projection are specialized here.
                     format!(
-                        "{{ let __jet_cur = &mut ({recv}); let __jet_tail: &str = &__jet_cur.buf[__jet_cur.pos..]; match {closure} {{ Some(({bind_pat})) => {{ __jet_cur.pos += __jet_consumed; Ok({ok_val}) }}, None => Err(format!(\"pattern did not match at cursor position {{}}\", __jet_cur.pos)) }} }}",
+                        "{{ let __jet_cur = &mut ({recv}); let __jet_tail: &str = {root}jet_cursor_tail(__jet_cur); match {closure} {{ Some(({bind_pat})) => {{ {root}jet_cursor_take_pattern(__jet_cur, __jet_consumed); Ok({ok_val}) }}, None => Err({root}jet_cursor_pattern_miss(__jet_cur)) }} }}",
+                        root = root,
                         recv = recv,
                         closure = closure,
                         bind_pat = bind_pat,
@@ -4881,7 +4885,8 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         format!("{} {{ {} }}", struct_name, field_inits.join(", "))
                     };
                     format!(
-                        "{{ let __jet_rdr = &mut ({recv}); let __jet_tail: &[u8] = &__jet_rdr.buf[__jet_rdr.pos..]; match {closure} {{ Some(({bind_pat})) => {{ __jet_rdr.pos += __jet_consumed; Ok({ok_val}) }}, None => Err(format!(\"pattern did not match at reader position {{}}\", __jet_rdr.pos)) }} }}",
+                        "{{ let __jet_rdr = &mut ({recv}); let __jet_tail: &[u8] = {root}jet_reader_tail(__jet_rdr); match {closure} {{ Some(({bind_pat})) => {{ {root}jet_reader_take_pattern(__jet_rdr, __jet_consumed); Ok({ok_val}) }}, None => Err({root}jet_reader_pattern_miss(__jet_rdr)) }} }}",
+                        root = root,
                         recv = recv,
                         closure = closure,
                         bind_pat = bind_pat,
