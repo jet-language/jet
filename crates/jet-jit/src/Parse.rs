@@ -13,6 +13,7 @@ use jet_foundation::MatchScan::{
 };
 use jet_foundation::StreamCursor as kernel;
 use std::sync::Mutex;
+use crate::Marshal::result_err_msg;
 
 /// Pattern tables live outside `Runtime` so ids baked into Cranelift IR during
 /// lowering survive Runtime resets between compile and execute.
@@ -53,14 +54,11 @@ fn with_cursor_mut<R>(handle: i64, f: impl FnOnce(&mut CursorSlot) -> R) -> Opti
 }
 
 fn result_ok(bits: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| crate::runtime_host::alloc_jit_result(rt, true, bits as u64))
+    crate::Marshal::result_ok(bits as u64)
 }
 
 fn result_err(msg: String) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let sid = rt.heap.alloc_string(msg);
-        crate::runtime_host::alloc_jit_result(rt, false, sid as u64)
-    })
+    result_err_msg(&msg)
 }
 
 fn result_ok_bytes(bytes: Vec<u8>) -> i64 {

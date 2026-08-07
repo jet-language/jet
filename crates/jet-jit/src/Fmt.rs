@@ -1,7 +1,7 @@
 //! `core.fmt` host shims (#729). Mirrors `jet_fmt_*` in
 //! `jet-codegen/.../DataFmt.rs` (prelude is string-embedded; same algorithm).
 
-use super::Concurrency;
+use crate::Marshal::{clone_string, alloc_string};
 
 fn comma_int(value: i64) -> String {
     let raw = value.abs().to_string();
@@ -131,70 +131,62 @@ fn fmt_ordinal(value: i64) -> String {
     format!("{}{}", comma_int(value), suffix)
 }
 
-fn clone_str(id: i64) -> String {
-    Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(id).unwrap_or_default())
-}
-
-fn alloc_str(s: String) -> i64 {
-    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s))
-}
-
 extern "C" fn jet_jit_fmt_number(value: i64) -> i64 {
-    alloc_str(fmt_number(value))
+    alloc_string(fmt_number(value))
 }
 
 extern "C" fn jet_jit_fmt_decimal(value: f64, precision: i64) -> i64 {
-    alloc_str(fmt_decimal(value, precision))
+    alloc_string(fmt_decimal(value, precision))
 }
 
 extern "C" fn jet_jit_fmt_percent(value: f64, precision: i64) -> i64 {
-    alloc_str(fmt_percent(value, precision))
+    alloc_string(fmt_percent(value, precision))
 }
 
 extern "C" fn jet_jit_fmt_bytes(value: i64) -> i64 {
-    alloc_str(fmt_bytes(value))
+    alloc_string(fmt_bytes(value))
 }
 
 extern "C" fn jet_jit_fmt_duration(ms: i64) -> i64 {
-    alloc_str(fmt_duration(ms))
+    alloc_string(fmt_duration(ms))
 }
 
 extern "C" fn jet_jit_fmt_ordinal(value: i64) -> i64 {
-    alloc_str(fmt_ordinal(value))
+    alloc_string(fmt_ordinal(value))
 }
 
 extern "C" fn jet_jit_fmt_plural(count: i64, singular: i64, plural: i64) -> i64 {
-    let singular = clone_str(singular);
-    let plural = clone_str(plural);
+    let singular = clone_string(singular);
+    let plural = clone_string(plural);
     let word = if count.abs() == 1 {
         &singular
     } else {
         &plural
     };
-    alloc_str(format!("{} {}", comma_int(count), word))
+    alloc_string(format!("{} {}", comma_int(count), word))
 }
 
 extern "C" fn jet_jit_fmt_pad_left(text: i64, width: i64, fill: i64) -> i64 {
-    let text = clone_str(text);
-    let fill = clone_str(fill);
+    let text = clone_string(text);
+    let fill = clone_string(fill);
     let need = pad_need(&text, width);
-    alloc_str(format!("{}{}", pad_fill(&fill, need), text))
+    alloc_string(format!("{}{}", pad_fill(&fill, need), text))
 }
 
 extern "C" fn jet_jit_fmt_pad_right(text: i64, width: i64, fill: i64) -> i64 {
-    let text = clone_str(text);
-    let fill = clone_str(fill);
+    let text = clone_string(text);
+    let fill = clone_string(fill);
     let need = pad_need(&text, width);
-    alloc_str(format!("{}{}", text, pad_fill(&fill, need)))
+    alloc_string(format!("{}{}", text, pad_fill(&fill, need)))
 }
 
 extern "C" fn jet_jit_fmt_pad_center(text: i64, width: i64, fill: i64) -> i64 {
-    let text = clone_str(text);
-    let fill = clone_str(fill);
+    let text = clone_string(text);
+    let fill = clone_string(fill);
     let need = pad_need(&text, width);
     let left = need / 2;
     let right = need - left;
-    alloc_str(format!(
+    alloc_string(format!(
         "{}{}{}",
         pad_fill(&fill, left),
         text,

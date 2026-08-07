@@ -11,6 +11,7 @@ use jet_foundation::PackageEdition;
 use jet_foundation::AST::{CtKey, CtValue, Expr, Item, MigrationOp, ProgramBundle, StrPart};
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
+use crate::Marshal::{clone_string, clone_bytes, alloc_byte_list, result_ok, result_err_msg};
 
 /// Canonical `jet_std` JSON/DataTree runtime — adapter types, shared algorithm via include!
 pub(crate) mod json_rt {
@@ -336,49 +337,6 @@ pub(crate) fn read_datatree(handle: i64) -> Option<json_rt::DataTree> {
     }
 }
 
-pub(crate) fn clone_heap_string(id: i64) -> String {
-    Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(id).unwrap_or_default())
-}
-
-fn clone_heap_bytes(list: i64) -> Vec<u8> {
-    Concurrency::with_runtime_mut(|rt| {
-        let len = rt.heap.list_len(list).unwrap_or(0);
-        let mut out = Vec::with_capacity(len as usize);
-        for i in 0..len {
-            out.push(rt.heap.list_get_int(list, i).unwrap_or(0) as u8);
-        }
-        out
-    })
-}
-
-fn alloc_byte_list(bytes: &[u8]) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let list = rt.heap.alloc_empty_list();
-        for &b in bytes {
-            let _ = rt.heap.list_push_int(list, b as i64);
-        }
-        list
-    })
-}
-
-pub(crate) fn result_ok_bits(bits: u64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        rt.results.push(super::JitResultValue { ok: true, bits });
-        rt.results.len() as i64
-    })
-}
-
-pub(crate) fn result_err_msg(msg: &str) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let sid = rt.heap.alloc_string(msg.to_string());
-        rt.results.push(super::JitResultValue {
-            ok: false,
-            bits: sid as u64,
-        });
-        rt.results.len() as i64
-    })
-}
-
 fn result_err_fields(errors: Vec<json_rt::FieldError>) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let error_list = rt.heap.alloc_empty_list();
@@ -516,46 +474,46 @@ fn hex_decode(text: &str) -> Result<Vec<u8>, String> {
 }
 
 extern "C" fn jet_jit_hex_encode(bytes: i64) -> i64 {
-    let encoded = hex_encode(&clone_heap_bytes(bytes));
+    let encoded = hex_encode(&clone_bytes(bytes));
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(encoded))
 }
 
 extern "C" fn jet_jit_hex_decode(text: i64) -> i64 {
-    match hex_decode(&clone_heap_string(text)) {
-        Ok(bytes) => result_ok_bits(alloc_byte_list(&bytes) as u64),
+    match hex_decode(&clone_string(text)) {
+        Ok(bytes) => result_ok(alloc_byte_list(&bytes) as u64),
         Err(e) => result_err_msg(&e),
     }
 }
 
 extern "C" fn jet_jit_b64_encode(bytes: i64) -> i64 {
-    let encoded = b64_encode(&clone_heap_bytes(bytes));
+    let encoded = b64_encode(&clone_bytes(bytes));
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(encoded))
 }
 
 extern "C" fn jet_jit_b64_encode_url(bytes: i64) -> i64 {
-    let encoded = b64url_encode(&clone_heap_bytes(bytes));
+    let encoded = b64url_encode(&clone_bytes(bytes));
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(encoded))
 }
 
 extern "C" fn jet_jit_b64_decode(text: i64) -> i64 {
     let edition = PackageEdition::package_edition();
-    match base_encoding_dispatch::decode_base64(&edition, &clone_heap_string(text), false, false) {
-        Ok(bytes) => result_ok_bits(alloc_byte_list(&bytes) as u64),
+    match base_encoding_dispatch::decode_base64(&edition, &clone_string(text), false, false) {
+        Ok(bytes) => result_ok(alloc_byte_list(&bytes) as u64),
         Err(e) => result_err_msg(&e),
     }
 }
 
 extern "C" fn jet_jit_b64_decode_url(text: i64) -> i64 {
     let edition = PackageEdition::package_edition();
-    match base_encoding_dispatch::decode_base64url(&edition, &clone_heap_string(text), false, false)
+    match base_encoding_dispatch::decode_base64url(&edition, &clone_string(text), false, false)
     {
-        Ok(bytes) => result_ok_bits(alloc_byte_list(&bytes) as u64),
+        Ok(bytes) => result_ok(alloc_byte_list(&bytes) as u64),
         Err(e) => result_err_msg(&e),
     }
 }
 
 extern "C" fn jet_jit_base32_encode(bytes: i64) -> i64 {
-    let encoded = base32_encode(&clone_heap_bytes(bytes));
+    let encoded = base32_encode(&clone_bytes(bytes));
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(encoded))
 }
 
@@ -563,12 +521,12 @@ extern "C" fn jet_jit_base32_decode(text: i64) -> i64 {
     let edition = PackageEdition::package_edition();
     match base_encoding_dispatch::decode_base32(
         &edition,
-        &clone_heap_string(text),
+        &clone_string(text),
         false,
         false,
         false,
     ) {
-        Ok(bytes) => result_ok_bits(alloc_byte_list(&bytes) as u64),
+        Ok(bytes) => result_ok(alloc_byte_list(&bytes) as u64),
         Err(e) => result_err_msg(&e),
     }
 }
@@ -749,8 +707,8 @@ fn clone_string_rows(list: i64) -> Vec<Vec<String>> {
 }
 
 extern "C" fn jet_jit_csv_parse(text: i64) -> i64 {
-    match csv_parse(&clone_heap_string(text)) {
-        Ok(rows) => result_ok_bits(alloc_string_rows(rows) as u64),
+    match csv_parse(&clone_string(text)) {
+        Ok(rows) => result_ok(alloc_string_rows(rows) as u64),
         Err(e) => result_err_msg(&e),
     }
 }
@@ -918,29 +876,29 @@ fn uuid_sha1(data: &[u8]) -> [u8; 20] {
 }
 
 extern "C" fn jet_jit_uuid_parse(text: i64) -> i64 {
-    match uuid_bytes(&clone_heap_string(text)) {
+    match uuid_bytes(&clone_string(text)) {
         Ok(bytes) => {
             let normalized = uuid_format(&bytes);
-            Concurrency::with_runtime_mut(|rt| result_ok_bits(rt.heap.alloc_string(normalized) as u64))
+            Concurrency::with_runtime_mut(|rt| result_ok(rt.heap.alloc_string(normalized) as u64))
         }
         Err(e) => result_err_msg(&e),
     }
 }
 
 extern "C" fn jet_jit_uuid_v5(namespace: i64, name: i64) -> i64 {
-    let ns = match uuid_bytes(&clone_heap_string(namespace)) {
+    let ns = match uuid_bytes(&clone_string(namespace)) {
         Ok(ns) => ns,
         Err(e) => return result_err_msg(&e),
     };
     let mut input = ns.to_vec();
-    input.extend_from_slice(clone_heap_string(name).as_bytes());
+    input.extend_from_slice(clone_string(name).as_bytes());
     let digest = uuid_sha1(&input);
     let mut bytes = [0u8; 16];
     bytes.copy_from_slice(&digest[..16]);
     bytes[6] = (bytes[6] & 0x0f) | 0x50;
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
     let s = uuid_format(&bytes);
-    Concurrency::with_runtime_mut(|rt| result_ok_bits(rt.heap.alloc_string(s) as u64))
+    Concurrency::with_runtime_mut(|rt| result_ok(rt.heap.alloc_string(s) as u64))
 }
 
 extern "C" fn jet_jit_uuid_v4() -> i64 {
@@ -978,15 +936,15 @@ extern "C" fn jet_jit_uuid_v7(clock: i64) -> i64 {
 // ── JSON / DataTree (core.encoding.json) ─────────────────────────────────────
 
 extern "C" fn jet_jit_json_parse(text: i64) -> i64 {
-    match json_rt::parse_datatree(&clone_heap_string(text)) {
-        Ok(tree) => result_ok_bits(alloc_datatree(&tree) as u64),
+    match json_rt::parse_datatree(&clone_string(text)) {
+        Ok(tree) => result_ok(alloc_datatree(&tree) as u64),
         Err(e) => result_err_msg(&format!("invalid JSON (line {}): {}", e.line, e.message)),
     }
 }
 
 extern "C" fn jet_jit_json_decode(text: i64) -> i64 {
-    match json_rt::decode_lenient(&clone_heap_string(text)) {
-        Ok(tree) => result_ok_bits(alloc_datatree(&tree) as u64),
+    match json_rt::decode_lenient(&clone_string(text)) {
+        Ok(tree) => result_ok(alloc_datatree(&tree) as u64),
         Err(e) => result_err_msg(&format!("invalid JSON (line {}): {}", e.line, e.message)),
     }
 }
@@ -1080,7 +1038,7 @@ extern "C" fn jet_jit_json_events(tree: i64) -> i64 {
 
 /// `core.encoding.jsonl.parse` — same as `jet_std_jsonl_parse`.
 extern "C" fn jet_jit_jsonl_parse(text: i64) -> i64 {
-    let src = clone_heap_string(text);
+    let src = clone_string(text);
     let mut handles = Vec::new();
     for (idx, line) in src.lines().enumerate() {
         let trimmed = line.trim();
@@ -1105,7 +1063,7 @@ extern "C" fn jet_jit_jsonl_parse(text: i64) -> i64 {
         }
         list
     });
-    result_ok_bits(list as u64)
+    result_ok(list as u64)
 }
 
 /// `core.encoding.jsonl.to_string` — same as `jet_std_jsonl_render`.
@@ -1196,10 +1154,10 @@ fn xml_decode_fields(error: jet_foundation::XmlPull::Error) -> Vec<json_rt::Fiel
 }
 
 extern "C" fn jet_jit_xml_parse(text: i64) -> i64 {
-    match jet_foundation::XmlPull::parse_document(&clone_heap_string(text)) {
+    match jet_foundation::XmlPull::parse_document(&clone_string(text)) {
         Ok(mut value) => {
             jet_foundation::XmlPull::invalidate_untrusted_lexical_evidence(&mut value);
-            result_ok_bits(alloc_datatree(&xml_value_to_datatree(value)) as u64)
+            result_ok(alloc_datatree(&xml_value_to_datatree(value)) as u64)
         }
         Err(e) => result_err_msg(&xml_err_msg(e)),
     }
@@ -1233,7 +1191,7 @@ extern "C" fn jet_jit_xml_root(tree: i64) -> i64 {
     match xml_tree_value(tree).and_then(|v| {
         jet_foundation::XmlPull::document_root(&v).map_err(xml_err_msg)
     }) {
-        Ok(root) => result_ok_bits(alloc_datatree(&xml_value_to_datatree(root)) as u64),
+        Ok(root) => result_ok(alloc_datatree(&xml_value_to_datatree(root)) as u64),
         Err(e) => result_err_msg(&e),
     }
 }
@@ -1262,7 +1220,7 @@ extern "C" fn jet_jit_xml_expanded_name(tree: i64) -> i64 {
                 let _ = rt.heap.record_set_int(rec, 3, uri_bits);
                 rec
             });
-            result_ok_bits(handle as u64)
+            result_ok(handle as u64)
         }
         Err(e) => result_err_msg(&e),
     }
@@ -1270,11 +1228,11 @@ extern "C" fn jet_jit_xml_expanded_name(tree: i64) -> i64 {
 
 /// `xml.attribute` → Result[String?, XMLError] (Option packed as 0 / sid+1).
 extern "C" fn jet_jit_xml_attribute(tree: i64, name: i64) -> i64 {
-    let key = clone_heap_string(name);
+    let key = clone_string(name);
     match xml_tree_value(tree).and_then(|v| {
         jet_foundation::XmlPull::lookup_attribute(&v, &key).map_err(xml_err_msg)
     }) {
-        Ok(opt) => result_ok_bits(pack_opt_string(opt) as u64),
+        Ok(opt) => result_ok(pack_opt_string(opt) as u64),
         Err(e) => result_err_msg(&e),
     }
 }
@@ -1296,7 +1254,7 @@ extern "C" fn jet_jit_xml_content(tree: i64) -> i64 {
                 }
                 list
             });
-            result_ok_bits(list as u64)
+            result_ok(list as u64)
         }
         Err(e) => result_err_msg(&e),
     }
@@ -1312,19 +1270,19 @@ extern "C" fn jet_jit_xml_to_bytes(tree: i64) -> i64 {
         )
         .map_err(xml_err_msg)
     }) {
-        Ok(bytes) => result_ok_bits(alloc_byte_list(&bytes) as u64),
+        Ok(bytes) => result_ok(alloc_byte_list(&bytes) as u64),
         Err(e) => result_err_msg(&e),
     }
 }
 
 /// Parse + `project_document_for_decode` — front half of typed `xml.decode`.
 extern "C" fn jet_jit_xml_project(text: i64) -> i64 {
-    match jet_foundation::XmlPull::parse_document(&clone_heap_string(text)) {
+    match jet_foundation::XmlPull::parse_document(&clone_string(text)) {
         Ok(mut value) => {
             jet_foundation::XmlPull::invalidate_untrusted_lexical_evidence(&mut value);
             match jet_foundation::XmlPull::project_document_for_decode(&value) {
                 Ok(projected) => {
-                    result_ok_bits(alloc_datatree(&xml_value_to_datatree(projected)) as u64)
+                    result_ok(alloc_datatree(&xml_value_to_datatree(projected)) as u64)
                 }
                 Err(e) => result_err_fields(xml_decode_fields(e)),
             }
@@ -1335,13 +1293,13 @@ extern "C" fn jet_jit_xml_project(text: i64) -> i64 {
 
 /// Parse bytes + project — front half of typed `xml.decode_bytes`.
 extern "C" fn jet_jit_xml_project_bytes(bytes: i64) -> i64 {
-    let input = clone_heap_bytes(bytes);
+    let input = clone_bytes(bytes);
     match jet_foundation::XmlPull::parse_document_bytes(&input) {
         Ok(mut value) => {
             jet_foundation::XmlPull::invalidate_untrusted_lexical_evidence(&mut value);
             match jet_foundation::XmlPull::project_document_for_decode(&value) {
                 Ok(projected) => {
-                    result_ok_bits(alloc_datatree(&xml_value_to_datatree(projected)) as u64)
+                    result_ok(alloc_datatree(&xml_value_to_datatree(projected)) as u64)
                 }
                 Err(e) => result_err_fields(xml_decode_fields(e)),
             }
@@ -1647,7 +1605,7 @@ fn jet_jit_cbor_to_bytes_impl(tree: i64, canonical: bool) -> i64 {
         Some(t) => {
             let mut out = Vec::new();
             match cbor_encode_val(&t, &mut out, canonical) {
-                Ok(()) => result_ok_bits(alloc_byte_list(&out) as u64),
+                Ok(()) => result_ok(alloc_byte_list(&out) as u64),
                 Err(e) => result_err_msg(&e),
             }
         }
@@ -1787,7 +1745,7 @@ fn cbor_decode_fields(value: CtValue) -> Vec<json_rt::FieldError> {
 }
 
 fn jet_jit_cbor_parse_impl(bytes: i64, options: Option<i64>, allow_bytes: bool) -> i64 {
-    let input = clone_heap_bytes(bytes);
+    let input = clone_bytes(bytes);
     let options = options.map(|handle| {
         let (max_depth, max_items, max_bytes, require_canonical) =
             Concurrency::with_runtime_mut(|rt| {
@@ -1815,7 +1773,7 @@ fn jet_jit_cbor_parse_impl(bytes: i64, options: Option<i64>, allow_bytes: bool) 
     });
     match jet_codegen::Comptime::cbor_parse_for_tir(&input, options.as_ref(), allow_bytes) {
         Ok(tree) => match cbor_ct_datatree(&tree) {
-            Some(tree) => result_ok_bits(alloc_datatree(&tree) as u64),
+            Some(tree) => result_ok(alloc_datatree(&tree) as u64),
             None if allow_bytes => result_err_fields(json_rt::FieldError::one(
                 "invalid DataTree from CBOR parser",
             )),
@@ -1850,12 +1808,12 @@ extern "C" fn jet_jit_cbor_decode_tree_options(bytes: i64, options: i64) -> i64 
 /// CSV typed decode front half: header+rows → `[DataTree]` of Text-cell objects
 /// (mirrors `jet_enc_csv_decode` before `T::jet_decode`).
 extern "C" fn jet_jit_csv_decode_trees(text: i64) -> i64 {
-    match csv_parse(&clone_heap_string(text)) {
+    match csv_parse(&clone_string(text)) {
         Ok(rows) => {
             let mut it = rows.into_iter();
             let Some(header) = it.next() else {
                 let empty = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_empty_list());
-                return result_ok_bits(empty as u64);
+                return result_ok(empty as u64);
             };
             let mut handles = Vec::new();
             for row in it {
@@ -1876,19 +1834,19 @@ extern "C" fn jet_jit_csv_decode_trees(text: i64) -> i64 {
                 }
                 list
             });
-            result_ok_bits(list as u64)
+            result_ok(list as u64)
         }
         Err(e) => result_err_msg(&e),
     }
 }
 
 extern "C" fn jet_jit_datatree_field(tree: i64, name: i64) -> i64 {
-    let key = clone_heap_string(name);
+    let key = clone_string(name);
     let Some(tree) = read_datatree(tree) else {
         return result_err_decode(&key, "invalid DataTree");
     };
     match tree.field(&key) {
-        Ok(value) => result_ok_bits(alloc_datatree(&value) as u64),
+        Ok(value) => result_ok(alloc_datatree(&value) as u64),
         Err(errors) => result_err_fields(errors),
     }
 }
@@ -1898,7 +1856,7 @@ extern "C" fn jet_jit_datatree_at(tree: i64, index: i64) -> i64 {
         return result_err_decode(&format!("[{index}]"), "invalid DataTree");
     };
     match tree.at(index) {
-        Ok(value) => result_ok_bits(alloc_datatree(&value) as u64),
+        Ok(value) => result_ok(alloc_datatree(&value) as u64),
         Err(errors) => result_err_fields(errors),
     }
 }
@@ -1908,7 +1866,7 @@ extern "C" fn jet_jit_datatree_int(tree: i64) -> i64 {
         return result_err_decode("", "invalid DataTree");
     };
     match tree.int() {
-        Ok(value) => result_ok_bits(value as u64),
+        Ok(value) => result_ok(value as u64),
         Err(errors) => result_err_fields(errors),
     }
 }
@@ -1919,7 +1877,7 @@ extern "C" fn jet_jit_datatree_decode_int(tree: i64) -> i64 {
         return result_err_decode("", "invalid DataTree");
     };
     match json_rt::decode_int(&tree) {
-        Ok(value) => result_ok_bits(value as u64),
+        Ok(value) => result_ok(value as u64),
         Err(errors) => result_err_fields(errors),
     }
 }
@@ -1941,7 +1899,7 @@ extern "C" fn jet_jit_decode_int_range(
         return result;
     }
     let value = value.bits as i64;
-    let type_name = clone_heap_string(type_name);
+    let type_name = clone_string(type_name);
     match json_rt::check_int_range(Ok(value), lo, hi, &type_name) {
         Ok(_) => result,
         Err(errors) => result_err_fields(errors),
@@ -2012,7 +1970,7 @@ extern "C" fn jet_jit_decode_error_under_segment(result: i64, segment: i64) -> i
     let Some(errors) = result_errors(result) else {
         return result;
     };
-    let segment = clone_heap_string(segment);
+    let segment = clone_string(segment);
     result_err_fields(json_rt::FieldError::under_errors(&segment, errors))
 }
 
@@ -2043,7 +2001,7 @@ extern "C" fn jet_jit_datatree_text(tree: i64) -> i64 {
     match json_rt::decode_string(&tree) {
         Ok(value) => {
             let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(value));
-            result_ok_bits(sid as u64)
+            result_ok(sid as u64)
         }
         Err(errors) => result_err_fields(errors),
     }
@@ -2054,7 +2012,7 @@ extern "C" fn jet_jit_datatree_bool(tree: i64) -> i64 {
         return result_err_decode("", "invalid DataTree");
     };
     match json_rt::decode_bool(&tree) {
-        Ok(value) => result_ok_bits(u64::from(value)),
+        Ok(value) => result_ok(u64::from(value)),
         Err(errors) => result_err_fields(errors),
     }
 }
@@ -2064,14 +2022,14 @@ extern "C" fn jet_jit_datatree_float(tree: i64) -> i64 {
         return result_err_decode("", "invalid DataTree");
     };
     match json_rt::decode_float(&tree) {
-        Ok(value) => result_ok_bits(value.to_bits()),
+        Ok(value) => result_ok(value.to_bits()),
         Err(errors) => result_err_fields(errors),
     }
 }
 
 extern "C" fn jet_jit_toml_parse(text: i64) -> i64 {
-    match json_rt::toml::parse_to_tree(&clone_heap_string(text)) {
-        Ok(tree) => result_ok_bits(alloc_datatree(&tree) as u64),
+    match json_rt::toml::parse_to_tree(&clone_string(text)) {
+        Ok(tree) => result_ok(alloc_datatree(&tree) as u64),
         Err(e) => result_err_msg(&format!("invalid TOML (line {}): {}", e.line, e.message)),
     }
 }
@@ -2084,8 +2042,8 @@ extern "C" fn jet_jit_toml_to_string(tree: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_yaml_parse(text: i64) -> i64 {
-    match yaml_rt::yaml::parse_to_tree(&clone_heap_string(text)) {
-        Ok(tree) => result_ok_bits(alloc_datatree(&tree) as u64),
+    match yaml_rt::yaml::parse_to_tree(&clone_string(text)) {
+        Ok(tree) => result_ok(alloc_datatree(&tree) as u64),
         Err(e) => result_err_msg(&format!("invalid YAML (line {}): {}", e.line, e.message)),
     }
 }
@@ -2577,7 +2535,7 @@ fn apply_step(pairs: &mut Vec<(String, json_rt::DataTree)>, ops: &[MigrateStepOp
 
 /// Try walking an older shape forward. Ok payload = record `[tree, from, steps]`.
 extern "C" fn jet_jit_datatree_migrate(type_name: i64, tree: i64) -> i64 {
-    let name = clone_heap_string(type_name);
+    let name = clone_string(type_name);
     let Some(src) = read_datatree(tree) else {
         return result_err_msg("invalid DataTree");
     };
@@ -2628,7 +2586,7 @@ extern "C" fn jet_jit_datatree_migrate(type_name: i64, tree: i64) -> i64 {
                 let _ = rt.heap.record_set_int(h, 2, steps_h);
                 h
             });
-            result_ok_bits(rec as u64)
+            result_ok(rec as u64)
         }
         Err(msg) => result_err_msg(msg),
     }

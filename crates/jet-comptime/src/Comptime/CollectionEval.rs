@@ -6,7 +6,7 @@ use crate::Diagnostics::{Diagnostic, Span};
 
 use super::Builtins::{as_int, cmp};
 use super::Diagnostics::{index_oob, unsupported};
-use super::Value::CtValue;
+use crate::AST::CtValue;
 
 mod set_semantics {
     #[allow(unused_imports)]

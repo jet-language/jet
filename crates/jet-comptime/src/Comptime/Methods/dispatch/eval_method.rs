@@ -1,5 +1,5 @@
 use super::*;
-use crate::Comptime::Value::CtReport;
+use crate::AST::CtReport;
 
 fn decode_path(path: &str) -> String {
     if path == "$" {

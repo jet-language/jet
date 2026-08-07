@@ -23,32 +23,7 @@ use jet_env_model::ModuleEval::{DevServicePlan, PromptPathMode, PromptStripMode}
 use jetpack::Shell::Env as ShellEnv;
 
 mod common;
-use common::jetpack_bin;
-
-struct Scratch {
-    path: PathBuf,
-}
-
-impl Scratch {
-    fn new(tag: &str) -> Scratch {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!(
-            "jpk-services-it-{tag}-{nanos}-{:?}",
-            std::thread::current().id()
-        ));
-        fs::create_dir_all(&path).unwrap();
-        Scratch { path }
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.path);
-    }
-}
+use common::{jetpack_bin, Scratch};
 
 fn jetpack() -> Command {
     let mut command = Command::new(jetpack_bin());

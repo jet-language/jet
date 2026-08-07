@@ -15,37 +15,11 @@ use std::path::PathBuf;
 use std::process::{Command, Output};
 use std::time::Duration;
 
+mod common;
+use common::Scratch;
+
 fn real_jet() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
-}
-
-/// A throwaway directory under the system temp dir.
-struct Scratch {
-    path: PathBuf,
-}
-
-impl Scratch {
-    fn new(tag: &str) -> Scratch {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!(
-            "jet-engine-dispatch-it-{tag}-{nanos}-{:?}",
-            std::thread::current().id()
-        ));
-        fs::create_dir_all(&path).unwrap();
-        Scratch { path }
-    }
-    fn join(&self, p: &str) -> PathBuf {
-        self.path.join(p)
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.path);
-    }
 }
 
 /// Copy the real `jet` binary into an isolated directory with no `jetpack`

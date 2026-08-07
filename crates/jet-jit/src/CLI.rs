@@ -11,6 +11,7 @@ use jet_foundation::CLISchema::{
 };
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicPtr, Ordering};
+use crate::Marshal::alloc_string;
 
 #[allow(dead_code, unused_imports, clippy::all)]
 mod runtime {
@@ -187,10 +188,6 @@ fn struct_fields(items: &[Item], name: &str) -> Option<Vec<(String, Type)>> {
     )
 }
 
-fn alloc_str(s: String) -> i64 {
-    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s))
-}
-
 fn build_spec(inputs: &[CLIInputSchema], prog: &str) -> Spec {
     let mut spec = empty_spec(prog);
     for input in inputs {
@@ -305,7 +302,7 @@ fn decode_struct(
                         }
                     },
                 };
-                alloc_str(text)
+                alloc_string(text)
             }
             (
                 CLIInputShape::Value {
@@ -315,7 +312,7 @@ fn decode_struct(
                 },
                 Type::Option(_),
             ) => match option_val(parsed, flag_name) {
-                Some(v) => alloc_str(v).wrapping_add(1),
+                Some(v) => alloc_string(v).wrapping_add(1),
                 None => 0,
             },
             _ => {

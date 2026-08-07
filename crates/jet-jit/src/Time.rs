@@ -5,6 +5,7 @@ use super::Concurrency;
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
+use crate::Marshal::{alloc_string, clone_string, result_err_msg, result_ok};
 
 pub(crate) mod time_rt {
     #[allow(unused_imports)]
@@ -40,30 +41,8 @@ fn with_time<R: Default>(handle: i64, f: impl FnOnce(&TimeValue) -> R) -> R {
     })
 }
 
-fn clone_str(id: i64) -> String {
-    Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(id).unwrap_or_default())
-}
-
-fn alloc_str(s: String) -> i64 {
-    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s))
-}
-
-fn result_ok(bits: u64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        rt.results.push(super::JitResultValue { ok: true, bits });
-        rt.results.len() as i64
-    })
-}
-
 fn result_err(msg: String) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let sid = rt.heap.alloc_string(msg);
-        rt.results.push(super::JitResultValue {
-            ok: false,
-            bits: sid as u64,
-        });
-        rt.results.len() as i64
-    })
+    result_err_msg(&msg)
 }
 
 extern "C" fn jet_jit_date_new(y: i64, m: i64, d: i64) -> i64 {
@@ -75,7 +54,7 @@ extern "C" fn jet_jit_date_today() -> i64 {
 }
 
 extern "C" fn jet_jit_date_parse(s: i64) -> i64 {
-    match time_rt::JetDate::parse(&clone_str(s)) {
+    match time_rt::JetDate::parse(&clone_string(s)) {
         Ok(d) => result_ok(push(TimeValue::Date(d)) as u64),
         Err(e) => result_err(e),
     }
@@ -90,7 +69,7 @@ extern "C" fn jet_jit_datetime_now() -> i64 {
 }
 
 extern "C" fn jet_jit_time_parse_rfc3339(s: i64) -> i64 {
-    match time_rt::JetDateTime::parse_rfc3339(&clone_str(s)) {
+    match time_rt::JetDateTime::parse_rfc3339(&clone_string(s)) {
         Ok(dt) => result_ok(push(TimeValue::DateTime(dt)) as u64),
         Err(e) => result_err(e),
     }
@@ -183,12 +162,12 @@ extern "C" fn jet_jit_civil_time_method(
     arg4: i64,
     arg5: i64,
 ) -> i64 {
-    let method = clone_str(method);
+    let method = clone_string(method);
     with_time(recv, |v| match (v, method.as_str()) {
         (TimeValue::Date(d), "year") => d.year(),
         (TimeValue::Date(d), "month") => d.month(),
         (TimeValue::Date(d), "day") => d.day(),
-        (TimeValue::Date(d), "to_string") => alloc_str(d.to_string_fmt()),
+        (TimeValue::Date(d), "to_string") => alloc_string(d.to_string_fmt()),
         (TimeValue::Date(d), "add_days") => push(TimeValue::Date(d.add_days(arg0))),
         (TimeValue::Date(d), "add_months") => push(TimeValue::Date(d.add_months(arg0))),
         (TimeValue::Date(d), "diff_days") => {
@@ -224,7 +203,7 @@ extern "C" fn jet_jit_civil_time_method(
                 .unwrap_or(0)
         }
         (TimeValue::Date(d), "format") => {
-            alloc_str(d.format_pattern(&clone_str(arg0)))
+            alloc_string(d.format_pattern(&clone_string(arg0)))
         }
         (TimeValue::DateTime(dt), "to_timestamp") => dt.to_timestamp(),
         (TimeValue::DateTime(dt), "date") => push(TimeValue::Date(dt.date())),
@@ -235,20 +214,20 @@ extern "C" fn jet_jit_civil_time_method(
         (TimeValue::DateTime(dt), "millisecond") => dt.millisecond(),
         (TimeValue::DateTime(dt), "microsecond") => dt.microsecond(),
         (TimeValue::DateTime(dt), "nanosecond") => dt.nanosecond(),
-        (TimeValue::DateTime(dt), "to_string") => alloc_str(dt.to_string_fmt()),
-        (TimeValue::DateTime(dt), "format_rfc3339") => alloc_str(dt.format_rfc3339()),
+        (TimeValue::DateTime(dt), "to_string") => alloc_string(dt.to_string_fmt()),
+        (TimeValue::DateTime(dt), "format_rfc3339") => alloc_string(dt.format_rfc3339()),
         (TimeValue::DateTime(dt), "to_unix_ms") => dt.to_unix_ms(),
         (TimeValue::DateTime(dt), "format") => {
-            alloc_str(dt.format_pattern(&clone_str(arg0)))
+            alloc_string(dt.format_pattern(&clone_string(arg0)))
         }
         (TimeValue::DateTime(dt), "truncate" | "floor") => {
-            push(TimeValue::DateTime(dt.floor(&clone_str(arg0))))
+            push(TimeValue::DateTime(dt.floor(&clone_string(arg0))))
         }
         (TimeValue::DateTime(dt), "ceil") => {
-            push(TimeValue::DateTime(dt.ceil(&clone_str(arg0))))
+            push(TimeValue::DateTime(dt.ceil(&clone_string(arg0))))
         }
         (TimeValue::DateTime(dt), "round") => {
-            push(TimeValue::DateTime(dt.round(&clone_str(arg0))))
+            push(TimeValue::DateTime(dt.round(&clone_string(arg0))))
         }
         (TimeValue::DateTime(dt), "replace") => push(TimeValue::DateTime(dt.replace(
             arg0, arg1, arg2, arg3, arg4, arg5,
@@ -273,9 +252,9 @@ extern "C" fn jet_jit_civil_time_method(
         }
         (TimeValue::Instant(i), "elapsed_millis") => i.elapsed_millis(),
         (TimeValue::Instant(i), "elapsed") => i.elapsed_nanos(),
-        (TimeValue::LocalTime(t), "to_string") => alloc_str(t.to_string_fmt()),
+        (TimeValue::LocalTime(t), "to_string") => alloc_string(t.to_string_fmt()),
         (TimeValue::Zoned(z), "format") => {
-            alloc_str(z.format_pattern(&clone_str(arg0)))
+            alloc_string(z.format_pattern(&clone_string(arg0)))
         }
         (TimeValue::Zoned(z), "offset_seconds") => z.offset_seconds(),
         (TimeValue::Zoned(z), "is_dst") => {

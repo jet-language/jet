@@ -14,6 +14,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::common::{jetos_bin, jetpack_bin};
+#[allow(unused_imports)]
+pub use crate::common::{make_tree_writable, Scratch};
 
 pub fn jetpack() -> Command {
     neutral_command(jetpack_bin())
@@ -211,57 +213,6 @@ pub fn studio_attack_snapshot(server_pid: u32, truncate: bool) -> std::thread::J
 }
 
 
-/// A throwaway directory under the system temp dir, removed on drop.
-pub struct Scratch {
-    pub path: PathBuf,
-}
-
-
-impl Scratch {
-    pub fn new(tag: &str) -> Scratch {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!(
-            "jpk-it-{tag}-{nanos}-{:?}",
-            std::thread::current().id()
-        ));
-        fs::create_dir_all(&path).unwrap();
-        Scratch { path }
-    }
-    pub fn join(&self, p: &str) -> PathBuf {
-        self.path.join(p)
-    }
-}
-
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        make_tree_writable(&self.path);
-        let _ = fs::remove_dir_all(&self.path);
-    }
-}
-
-
-#[cfg(unix)]
-pub fn make_tree_writable(path: &Path) {
-    use std::os::unix::fs::PermissionsExt as _;
-    let Ok(meta) = fs::symlink_metadata(path) else {
-        return;
-    };
-    if meta.is_dir() {
-        for entry in fs::read_dir(path).unwrap() {
-            make_tree_writable(&entry.unwrap().path());
-        }
-    }
-    if !meta.file_type().is_symlink() {
-        let mode = if meta.is_dir() { 0o755 } else { meta.permissions().mode() | 0o600 };
-        fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
-    }
-}
-
-
 pub fn assert_no_ephemeral_links(path: &Path) {
     let Ok(meta) = fs::symlink_metadata(path) else {
         return;
@@ -278,17 +229,6 @@ pub fn assert_no_ephemeral_links(path: &Path) {
             assert_no_ephemeral_links(&entry.path());
         }
     }
-}
-
-
-#[cfg(not(unix))]
-pub fn make_tree_writable(path: &Path) {
-    let Ok(meta) = fs::metadata(path) else {
-        return;
-    };
-    let mut permissions = meta.permissions();
-    permissions.set_readonly(false);
-    fs::set_permissions(path, permissions).unwrap();
 }
 
 

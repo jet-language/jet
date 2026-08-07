@@ -4,7 +4,8 @@
 #[allow(unused_imports)]
 pub use jet_foundation::Outcome::*;
 use super::Concurrency;
-use super::Encoding::{alloc_datatree, clone_heap_string, read_datatree, result_err_msg, result_ok_bits};
+use super::Encoding::{alloc_datatree, read_datatree};
+use crate::Marshal::{clone_string, result_err_msg, result_ok};
 
 /// Canonical stream runtime (jet_std types + EncodingStream algorithm).
 #[allow(dead_code, unused_imports, unused_variables, clippy::all)]
@@ -637,7 +638,7 @@ codec_slots! {
 }
 
 fn push_ok_handle(handle: i64) -> i64 {
-    result_ok_bits(handle as u64)
+    result_ok(handle as u64)
 }
 
 fn take_file_writer(handle: i64) -> Result<runtime::JetFileWriter, String> {
@@ -792,7 +793,7 @@ pub(crate) fn json_canonical_checked(tree: i64, limits: i64) -> i64 {
     match runtime::enc_json_canonical(&to_stream_tree(&tree), &lim) {
         Ok(text) => {
             let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text));
-            result_ok_bits(sid as u64)
+            result_ok(sid as u64)
         }
         Err(error) => result_err_encoding(&error),
     }
@@ -915,7 +916,7 @@ fn option_bits(opt: Option<i64>) -> u64 {
 // ── core.files create / open ─────────────────────────────────────────────────
 
 pub(crate) extern "C" fn jet_jit_fs_create(path: i64) -> i64 {
-    let p = clone_heap_string(path);
+    let p = clone_string(path);
     match std::fs::File::create(&p) {
         Ok(f) => {
             let w = runtime::JetFileWriter {
@@ -933,7 +934,7 @@ pub(crate) extern "C" fn jet_jit_fs_create(path: i64) -> i64 {
 }
 
 pub(crate) extern "C" fn jet_jit_fs_open(path: i64) -> i64 {
-    let p = clone_heap_string(path);
+    let p = clone_string(path);
     match std::fs::File::open(&p) {
         Ok(f) => {
             let r = runtime::JetFileReader {

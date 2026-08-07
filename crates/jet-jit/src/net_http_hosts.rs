@@ -8,6 +8,7 @@ use std::sync::{Mutex, MutexGuard};
 
 use crate::Concurrency;
 use crate::JitResultValue;
+use crate::Marshal::{alloc_string, clone_string, result_err_msg, result_ok};
 
 enum NetHttpHandle {
     TcpListener(Arc<JetTCPListener>),
@@ -122,10 +123,6 @@ fn ws_conn(handle: i64) -> Option<Arc<Mutex<JetWsConn>>> {
     })
 }
 
-fn clone_string(handle: i64) -> String {
-    Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(handle).unwrap_or_default())
-}
-
 fn clone_string_list(handle: i64) -> Vec<String> {
     if handle <= 0 {
         return Vec::new();
@@ -139,10 +136,6 @@ fn clone_string_list(handle: i64) -> Vec<String> {
         }
         out
     })
-}
-
-fn alloc_string(s: String) -> i64 {
-    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s))
 }
 
 fn clone_bytes(handle: i64) -> Vec<u8> {
@@ -166,16 +159,8 @@ fn alloc_bytes(bytes: &[u8]) -> i64 {
     })
 }
 
-fn result_ok(bits: u64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        rt.results.push(JitResultValue { ok: true, bits });
-        rt.results.len() as i64
-    })
-}
-
-fn result_err(message: String) -> i64 {
-    let handle = alloc_string(message);
-    result_err_bits(handle)
+fn result_err(msg: String) -> i64 {
+    result_err_msg(&msg)
 }
 
 fn result_err_bits(bits: i64) -> i64 {

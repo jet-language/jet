@@ -5,7 +5,7 @@
 
 use crate::AST::{EnumDef, Field, Func, Marker, StructDef, StructLayout, TypeParam, VariantPayload};
 
-use super::Value::CtValue;
+use crate::AST::CtValue;
 
 #[derive(Debug, Clone, Default)]
 pub struct ProgramSemanticFacts {

@@ -5,6 +5,7 @@ use super::Concurrency;
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
+use crate::Marshal::clone_string;
 
 /// Sketch runtime extracted by `build.rs` from `jet-codegen` Prelude/Core.rs.
 pub(crate) mod sketch_rt {
@@ -38,10 +39,6 @@ fn with_sketch_mut<R: Default>(handle: i64, f: impl FnOnce(&mut SketchSlot) -> R
     })
 }
 
-fn clone_str(id: i64) -> String {
-    Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(id).unwrap_or_default())
-}
-
 fn list_from_strings(items: Vec<String>) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let list = rt.heap.alloc_empty_list();
@@ -73,7 +70,7 @@ extern "C" fn jet_jit_reservoir_new(capacity: i64) -> i64 {
 
 /// `kind`: 0=HLL, 1=TDigest (unused here), 2=CMS, 3=Reservoir.
 extern "C" fn jet_jit_sketch_add_str(handle: i64, kind: i64, s: i64) {
-    let item = clone_str(s);
+    let item = clone_string(s);
     with_sketch_mut(handle, |slot| match (kind, slot) {
         (0, SketchSlot::Hll(h)) => h.add(&item),
         (2, SketchSlot::Cms(c)) => c.add(&item),
@@ -98,7 +95,7 @@ extern "C" fn jet_jit_sketch_count0(handle: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_sketch_count1(handle: i64, key: i64) -> i64 {
-    let k = clone_str(key);
+    let k = clone_string(key);
     with_sketch_mut(handle, |slot| match slot {
         SketchSlot::Cms(c) => c.count(&k),
         _ => 0,

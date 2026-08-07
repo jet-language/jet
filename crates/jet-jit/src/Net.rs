@@ -7,6 +7,7 @@ use super::Concurrency;
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
+use crate::Marshal::{alloc_string, clone_string, result_err_msg, result_ok};
 
 mod runtime {
     use crate::JetShow;
@@ -216,30 +217,8 @@ fn with_net<R>(handle: i64, f: impl FnOnce(&NetValue) -> Option<R>) -> Option<R>
     })
 }
 
-fn clone_string(handle: i64) -> String {
-    Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(handle).unwrap_or_default())
-}
-
-fn alloc_string(s: String) -> i64 {
-    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s))
-}
-
-fn result_ok(bits: u64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        rt.results.push(super::JitResultValue { ok: true, bits });
-        rt.results.len() as i64
-    })
-}
-
-fn result_err(message: String) -> i64 {
-    let handle = alloc_string(message);
-    Concurrency::with_runtime_mut(|rt| {
-        rt.results.push(super::JitResultValue {
-            ok: false,
-            bits: handle as u64,
-        });
-        rt.results.len() as i64
-    })
+fn result_err(msg: String) -> i64 {
+    result_err_msg(&msg)
 }
 
 fn option_string(s: Option<String>) -> i64 {

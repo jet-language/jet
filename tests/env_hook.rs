@@ -14,36 +14,10 @@
 //! in `cmd_enter` is exercised without depending on engine-binary discovery.
 
 use std::fs;
-use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 mod common;
-use common::jetpack_bin;
-
-struct Scratch {
-    path: PathBuf,
-}
-
-impl Scratch {
-    fn new(tag: &str) -> Scratch {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!(
-            "jpk-envhook-it-{tag}-{nanos}-{:?}",
-            std::thread::current().id()
-        ));
-        fs::create_dir_all(&path).unwrap();
-        Scratch { path }
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.path);
-    }
-}
+use common::{jetpack_bin, Scratch};
 
 /// A `jetpack` command with the env-hook state variables cleared, stdin nulled
 /// (non-interactive), and a fixed `PATH` baseline so activation output is

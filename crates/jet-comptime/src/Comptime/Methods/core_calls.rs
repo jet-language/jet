@@ -6,7 +6,7 @@ use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::{CtFloat, Type};
 use super::super::Builtins::as_int;
 use super::super::Diagnostics::unsupported;
-use super::super::Value::{CtReport, CtValue};
+use crate::AST::{CtReport, CtValue};
 
 use super::repl_process::run_repl_process;
 

@@ -29,6 +29,7 @@ mod Fmt;
 mod Game;
 mod IO;
 mod Layout;
+mod Marshal;
 mod Math;
 mod MathExtra;
 mod Ffi;
