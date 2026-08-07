@@ -79,18 +79,23 @@ pub fn make_tree_writable(path: &Path) {
     let Ok(meta) = fs::symlink_metadata(path) else {
         return;
     };
-    if meta.is_dir() {
-        for entry in fs::read_dir(path).unwrap() {
-            make_tree_writable(&entry.unwrap().path());
-        }
-    }
+    // Runs inside Drop for every suite: a file the tested daemon removes
+    // mid-walk, or a dir we cannot read yet, must not panic during unwind
+    // and bury the original assertion.
     if !meta.file_type().is_symlink() {
         let mode = if meta.is_dir() {
             0o755
         } else {
             meta.permissions().mode() | 0o600
         };
-        fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
+        let _ = fs::set_permissions(path, fs::Permissions::from_mode(mode));
+    }
+    if meta.is_dir() {
+        let Ok(entries) = fs::read_dir(path) else { return };
+        for entry in entries {
+            let Ok(entry) = entry else { continue };
+            make_tree_writable(&entry.path());
+        }
     }
 }
 
@@ -101,7 +106,7 @@ pub fn make_tree_writable(path: &Path) {
     };
     let mut permissions = meta.permissions();
     permissions.set_readonly(false);
-    fs::set_permissions(path, permissions).unwrap();
+    let _ = fs::set_permissions(path, permissions);
 }
 
 pub fn test_worker_count(cap: usize) -> usize {
