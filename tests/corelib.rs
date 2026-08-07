@@ -10900,6 +10900,25 @@ migration Config {
 #Codable
 struct Point { x: Int  y: Int }
 
+#Codable
+struct Rank { value: Int }
+
+// Two blocks, so a v1 record walks two steps and a v2 record walks one.
+#[PublishedSchema, Codable]
+struct Profile {
+    title: String
+    score: Rank
+}
+
+migration Profile {
+    remove legacy_id
+}
+
+migration Profile {
+    rename name => title
+    change score: Int => Rank via { (n) => Rank.{ value: n } }
+}
+
 fn run() {
     // json, record already in the current shape.
     fresh :: json.decode_traced<Config>("{{\"port\": 1, \"host\": \"a\"}}") ?? panic("bad fresh")
@@ -10916,6 +10935,12 @@ fn run() {
     // A type with no migration blocks reports a fresh status.
     p :: json.decode_traced<Point>("{{\"x\": 4, \"y\": 5}}") ?? panic("bad point")
     print("{p.value.x} {p.value.y} {p.migration.migrated}")
+
+    // A record two shapes behind walks both steps; one shape behind walks one.
+    far :: json.decode_traced<Profile>("{{\"legacy_id\": 9, \"name\": \"Ada\", \"score\": 95}}") ?? panic("bad v1")
+    print("{far.value.title} {far.value.score.value} {far.migration.from} {far.migration.steps.len()} {far.migration.steps[0]} {far.migration.steps[1]}")
+    near :: json.decode_traced<Profile>("{{\"name\": \"Grace\", \"score\": 7}}") ?? panic("bad v2")
+    print("{near.value.title} {near.migration.from} {near.migration.steps.len()} {near.migration.steps[0]}")
 
     t :: toml.decode_traced<Config>("port = 6\n") ?? panic("bad toml")
     print("{t.value.port} {t.value.host} {t.migration.migrated} {t.migration.from}")
@@ -10948,6 +10973,8 @@ fn run() {
          2 localhost true v1 v1->v2\n\
          3 localhost\n\
          4 5 false\n\
+         Ada 95 v1 2 v1->v2 v2->v3\n\
+         Grace v2 1 v2->v3\n\
          6 localhost true v1\n\
          7 b\n\
          2 8 localhost true v1->v2\n\
