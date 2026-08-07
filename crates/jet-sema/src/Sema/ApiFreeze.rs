@@ -801,6 +801,7 @@ mod tests {
             is_inline: false,
             is_inline_always: false,
             inline_span: None,
+            markers: Vec::new(),
             body: vec![],
         }
     }

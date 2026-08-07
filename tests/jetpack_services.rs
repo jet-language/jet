@@ -267,7 +267,7 @@ fn services_from_nested_project_directory_use_the_project_state_root() {
         r#"fixture: { run: ["sh", "-c", "echo nested-started; sleep 30"] }"#,
         "fn run() {}\n",
     );
-    let nested = proj.join("src/nested");
+    let nested = proj.path.join("src/nested");
     fs::create_dir_all(&nested).unwrap();
     let env = [
         ("JETPACK_ROOT", root.path.display().to_string()),
