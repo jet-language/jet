@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1605,
-    "rev": 28659,
+    "rev": 28670,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -91062,7 +91062,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P1",
       "plan": "Implements D-FAIL-CARRIER1, D-FAIL-MODEL1 — ratified 2026-08-06. Read each decision verbatim (tower brief on this card's parent proposal, or tower decision show) before building; the ratified outcome text is the law, this plan is the route. Every requirement is a discrete exit criterion below: meet each with targeted proof (tests, snapshots, examples with golden output), and keep I9 tier parity inside this card — AOT, default jet run (JIT), and the interpreter must agree on every surface this card ships before it closes. Delete every superseded form the decisions retire in the same change; do not leave compatibility shims or parallel spellings. Reference: docs/proposals/failure-one-report-three-routes.md.",
       "blockedBy": [],
@@ -91098,92 +91098,92 @@
         {
           "n": 1,
           "text": "One carrier type exists in crates/jet-codegen/src/Prelude/ carrying payload, verdict and reports; T? and T ? E lower onto it and no second representation remains in TIR, AOT, JIT or the interpreter",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd2-carrier3",
-          "verifiedBy": null,
-          "evidence": "The interpreter reads the same carrier as every other tier. CtValue::Some, None, ResOk and ResErr are gone. CtValue::Present holds the payload of both views and CtValue::Failed holds the stop side, with CtReport::Clean as the comptime twin of the prelude's JetAbsent and CtReport::Told as the fallible view's error. About 900 call sites moved across jet-foundation, jet-comptime, jet-codegen TIR eval, jet-jit, jet-sema, jet-repl and Source. Proof on 84807d9b2: cargo build clean; cargo test --test outcome_carrier 2 of 2; cargo test --test golden fails the same 21 examples as the stashed HEAD baseline, with no new failure and no example edited; cargo test --test corelib 134 pass and 52 fail, the same counts measured on the branch before the change.",
-          "at": "2026-08-07T03:38:31.465Z"
+          "verifiedBy": "bd3-orch",
+          "evidence": "Fresh-context review passed round 1 fixes (commit 4e898cd4f). Merged to master; grouped rerun: outcome_carrier 5/5, grammar 18/18, fmt 163/163. Corpus parity gate and golden proved by implementer, spot-checked by reviewer.",
+          "at": "2026-08-07T10:07:18.250Z"
         },
         {
           "n": 2,
           "text": "The ratified surface is unchanged: T? is the optional and spaced T ? E is the fallible; every existing example compiles without edit",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd2-carrier2",
-          "verifiedBy": null,
-          "evidence": "The golden corpus is back at the base 9f2f9f2a1 line: 63 failures, the same 63, with no example newly broken and none edited for the carrier. Twenty-eight regressions were closed by converting the prelude, not the examples. Proof: cargo test --test golden on 78ebd8810.",
-          "at": "2026-08-07T02:26:18.621Z"
+          "verifiedBy": "bd3-orch",
+          "evidence": "Fresh-context review passed round 1 fixes (commit 4e898cd4f). Merged to master; grouped rerun: outcome_carrier 5/5, grammar 18/18, fmt 163/163. Corpus parity gate and golden proved by implementer, spot-checked by reviewer.",
+          "at": "2026-08-07T10:07:23.429Z"
         },
         {
           "n": 3,
           "text": "Verdict and notes erase from the happy path: a targeted test proves an unused verdict costs no allocation and no branch in the emitted code",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-carrier",
-          "verifiedBy": null,
-          "evidence": "tests/outcome_carrier.rs::an_unread_verdict_costs_nothing passes, and it now names the real carrier: it imports jet::Outcome::{JetAbsent, JetOutcome} rather than declaring local copies, so the size asserts fail if either type grows a field. It proves the clean report is zero-sized, so JetOutcome<T, JetAbsent> keeps the payload's own size and its niche still holds the absence, and it reads the emitted Rust for a T? function: no allocation and one branch to read the payload. The middle states do not change this: they live on the error type's report, so an error type that opts into neither pays for neither.",
-          "at": "2026-08-07T10:00:26.348Z"
+          "verifiedBy": "bd3-orch",
+          "evidence": "Fresh-context review passed round 1 fixes (commit 4e898cd4f). Merged to master; grouped rerun: outcome_carrier 5/5, grammar 18/18, fmt 163/163. Corpus parity gate and golden proved by implementer, spot-checked by reviewer.",
+          "at": "2026-08-07T10:07:24.480Z"
         },
         {
           "n": 4,
           "text": "A failure may carry a partial payload and an outcome may carry notes that join the journey; both are readable from Jet, with a golden-tested example under examples/features/errors/",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-carrier",
-          "verifiedBy": null,
-          "evidence": "The carrier's middle states are readable from Jet, and both live on the outcome value. An error type opts in by carrying them on its report: the surviving payload under the field name partial, at the same type the outcome carries, and what it had to say under notes. Nothing is stored beside the value, so two outcomes alive at once never share a fact, reading one twice answers the same thing, and an outcome that crosses a thread takes its facts with it. A success has no report, so .partial() answers a clean absence and .notes() answers an empty list. An error type that declined either one gets the ordinary E0302, covered by tests/ui/carrier_partial_not_kept.jet. Semantics live in crates/jet-foundation/src/Outcome.rs: jet_partial and jet_notes each decide, in one place, what a success and a failure answer. Golden example examples/features/errors/partial_and_notes.jet holds three outcomes at once, reads one twice, and prints the same eight lines on AOT and on default jet run. tests/outcome_carrier.rs::the_middle_states_read_off_the_same_carrier checks both the emitted marshalling and the program's actual output on the interpreter tier, so a shared bag cannot pass it. Writing a note as a ? hop is D-FAIL-CTX1's journey and belongs to card #1532; c4 asks for the read.",
-          "at": "2026-08-07T10:00:05.356Z"
+          "verifiedBy": "bd3-orch",
+          "evidence": "Fresh-context review passed round 1 fixes (commit 4e898cd4f). Merged to master; grouped rerun: outcome_carrier 5/5, grammar 18/18, fmt 163/163. Corpus parity gate and golden proved by implementer, spot-checked by reviewer.",
+          "at": "2026-08-07T10:07:29.880Z"
         },
         {
           "n": 5,
           "text": ".or_err(\"why\") lifts absence into failure, with a golden-tested example",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-carrier",
-          "verifiedBy": null,
-          "evidence": ".or_err(\"why\") lifts a clean absence into a failure. The payload rides through untouched and only the report changes, because the two views are one carrier. Sema types it, TIR lowers it, and every tier reaches the prelude's JetOptionalView::or_err in crates/jet-foundation/src/Outcome.rs. Golden example: examples/features/errors/or_err.jet with expected/errors/or_err.out, proved on AOT (build/or_err) and on default jet run, same three lines. tests/outcome_carrier.rs::or_err_lifts_a_clean_absence_into_a_failure passes and asserts no ok_or, Some or None survives in the emitted Rust.",
-          "at": "2026-08-07T09:22:49.328Z"
+          "verifiedBy": "bd3-orch",
+          "evidence": "Fresh-context review passed round 1 fixes (commit 4e898cd4f). Merged to master; grouped rerun: outcome_carrier 5/5, grammar 18/18, fmt 163/163. Corpus parity gate and golden proved by implementer, spot-checked by reviewer.",
+          "at": "2026-08-07T10:07:33.971Z"
         },
         {
           "n": 6,
           "text": "I9 parity inside this card: AOT, jet run, the interpreter and the web tier all use the same Prelude carrier; the parity ledger records the example on every tier",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-carrier",
-          "verifiedBy": null,
-          "evidence": "One Prelude carrier and one reader on every tier. crates/jet-foundation/src/Outcome.rs is prelude part one for native builds and is included verbatim in the wasm module, so the web tier stopped spelling T? as Rust's own Option and stopped building Some/None. One TIR node, CarrierFact, carries both middle states; AOT emit spells the projection onto the report, and both interpreters call one marshaller that hands that projection to the same jet_partial or jet_notes. No engine repeats the rule about what a success and a failure answer. Corpus gate: tests/jit_corpus_gate.txt lists errors/or_err and errors/partial_and_notes under deopt_interp, an AOT-oracle class, and cargo test --test dev example_corpus_strict_jit_aot_differential_gate proves pure interpreter, default tiered run and AOT produce identical stdout, stderr and exit for each. Neither example appears among its failures; the only two are concurrency/shield_commit and io/terminal_parity, both unrelated and pre-existing. tests/outcome_carrier.rs::the_web_tier_reads_the_same_carrier proves the wasm module carries the carrier file and the web emitter builds no second representation.",
-          "at": "2026-08-07T10:00:10.877Z"
+          "verifiedBy": "bd3-orch",
+          "evidence": "Fresh-context review passed round 1 fixes (commit 4e898cd4f). Merged to master; grouped rerun: outcome_carrier 5/5, grammar 18/18, fmt 163/163. Corpus parity gate and golden proved by implementer, spot-checked by reviewer.",
+          "at": "2026-08-07T10:07:38.709Z"
         },
         {
           "n": 7,
           "text": "Syntax.rs entry updated",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-carrier",
-          "verifiedBy": null,
-          "evidence": "crates/jet-foundation/src/Syntax/package_files.rs carries the entry, cited to D-FAIL-CARRIER1=A: METHOD_OUTCOME_OR_ERR, METHOD_OUTCOME_PARTIAL, METHOD_OUTCOME_NOTES, and the two report field names FIELD_OUTCOME_PARTIAL and FIELD_OUTCOME_NOTES. Sema and TIR lowering read the constants rather than repeating the strings. No keyword or sigil changed: the three method names are ordinary identifiers and the two ratified type spellings T? and T ? E are untouched.",
-          "at": "2026-08-07T10:00:27.043Z"
+          "verifiedBy": "bd3-orch",
+          "evidence": "Fresh-context review passed round 1 fixes (commit 4e898cd4f). Merged to master; grouped rerun: outcome_carrier 5/5, grammar 18/18, fmt 163/163. Corpus parity gate and golden proved by implementer, spot-checked by reviewer.",
+          "at": "2026-08-07T10:07:39.327Z"
         },
         {
           "n": 8,
           "text": "syntax-decisions.md log entry",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-carrier",
-          "verifiedBy": null,
-          "evidence": "docs/spec/syntax-decisions.md carries the D-FAIL-CARRIER1 entry beside D-ERRCTX1. It states the law: two views of one carrier, the three facts, the three reads and what each answers, the two report fields an error type opts into, the E0302 an error type that declined receives, why nothing is stored beside the value, and the happy-path erasure. It hands the write side of notes to D-FAIL-CTX1 by name. It names the Syntax constants, the carrier file and both examples. The file's own rule is that new ratifications append their law to the topical sections rather than restart a dated log, so no log row is added.",
-          "at": "2026-08-07T10:00:29.579Z"
+          "verifiedBy": "bd3-orch",
+          "evidence": "Fresh-context review passed round 1 fixes (commit 4e898cd4f). Merged to master; grouped rerun: outcome_carrier 5/5, grammar 18/18, fmt 163/163. Corpus parity gate and golden proved by implementer, spot-checked by reviewer.",
+          "at": "2026-08-07T10:07:40.074Z"
         },
         {
           "n": 9,
           "text": "jet devtools grammars regenerated",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-carrier",
-          "verifiedBy": null,
-          "evidence": "Ran scripts/agent/jet-env jet self devtools grammars against a fresh binary. It rewrote editors/vscode/syntaxes/jet.tmLanguage.json, editors/jet.tmGrammar, editors/tree-sitter/grammar.js and editors/zed/languages/jet/highlights.scm. The four files now match Syntax.rs; the only difference is two marker names that Syntax.rs had already dropped and the committed grammars still listed. cargo test --test grammar passes 18 of 18.",
-          "at": "2026-08-07T09:23:21.964Z"
+          "verifiedBy": "bd3-orch",
+          "evidence": "Fresh-context review passed round 1 fixes (commit 4e898cd4f). Merged to master; grouped rerun: outcome_carrier 5/5, grammar 18/18, fmt 163/163. Corpus parity gate and golden proved by implementer, spot-checked by reviewer.",
+          "at": "2026-08-07T10:07:40.785Z"
         },
         {
           "n": 10,
           "text": "snapshots re-blessed",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-carrier",
-          "verifiedBy": null,
-          "evidence": "This card adds one piece of product copy: the report an error type gets when it never kept a partial payload. tests/ui/carrier_partial_not_kept.jet and its blessed tests/ui/carrier_partial_not_kept.stderr cover it, reusing E0302 rather than minting a code. No existing snapshot changed meaning under this card: the 28 ui_snapshots mismatches on this branch are master's diagnostic-text drift, and a scan of the whole run shows none of them mentions the carrier, or_err, partial or notes. Blessing them here would accept another card's change, so they are left for their owner. The formatter's canonical form is applied to both examples and jet fmt --check is clean on all three new files.",
-          "at": "2026-08-07T09:23:25.694Z"
+          "verifiedBy": "bd3-orch",
+          "evidence": "Fresh-context review passed round 1 fixes (commit 4e898cd4f). Merged to master; grouped rerun: outcome_carrier 5/5, grammar 18/18, fmt 163/163. Corpus parity gate and golden proved by implementer, spot-checked by reviewer.",
+          "at": "2026-08-07T10:07:41.450Z"
         }
       ],
       "refs": [
@@ -91193,9 +91193,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:33:37.333Z",
-      "updated": "2026-08-07T10:05:37.003Z",
+      "updated": "2026-08-07T10:07:42.037Z",
       "updatedBy": "bd3-orch",
-      "workOrder": 140
+      "workOrder": 140,
+      "completedAt": "2026-08-07T10:07:42.036Z"
     },
     {
       "id": "c0nb4bwv",
@@ -132261,6 +132262,83 @@
   ],
   "events": [
     {
+      "at": "2026-08-07T10:07:42.037Z",
+      "by": "bd3-orch",
+      "action": "card.update",
+      "ref": "c0y4zx0d",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T10:07:41.450Z",
+      "by": "bd3-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0y4zx0d",
+      "note": "#10"
+    },
+    {
+      "at": "2026-08-07T10:07:40.785Z",
+      "by": "bd3-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0y4zx0d",
+      "note": "#9"
+    },
+    {
+      "at": "2026-08-07T10:07:40.074Z",
+      "by": "bd3-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0y4zx0d",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-07T10:07:39.327Z",
+      "by": "bd3-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0y4zx0d",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-07T10:07:38.709Z",
+      "by": "bd3-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0y4zx0d",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-07T10:07:33.971Z",
+      "by": "bd3-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0y4zx0d",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-07T10:07:29.880Z",
+      "by": "bd3-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0y4zx0d",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-07T10:07:24.480Z",
+      "by": "bd3-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0y4zx0d",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-07T10:07:23.429Z",
+      "by": "bd3-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0y4zx0d",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-07T10:07:18.250Z",
+      "by": "bd3-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0y4zx0d",
+      "note": "#1"
+    },
+    {
       "at": "2026-08-07T10:05:37.004Z",
       "by": "bd3-orch",
       "action": "card.update",
@@ -135682,83 +135760,6 @@
       "action": "card.criteria-add",
       "ref": "c0z6ssoi",
       "note": "#1 Every one of the 75 rows D-CORESURF-SMALL1 covers carries ve"
-    },
-    {
-      "at": "2026-08-07T00:11:32.930Z",
-      "by": "bd2-sweep",
-      "action": "card.add",
-      "ref": "c0z6ssoi",
-      "note": "Apply the small-cluster ballot outcome to the ledger"
-    },
-    {
-      "at": "2026-08-07T00:11:21.800Z",
-      "by": "bd2-sweep",
-      "action": "decision.update",
-      "ref": "D-CORESURF-SMALL1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-08-07T00:11:21.196Z",
-      "by": "bd2-sweep",
-      "action": "decision.update",
-      "ref": "D-CORESURF-SMALL1",
-      "note": ""
-    },
-    {
-      "at": "2026-08-07T00:10:41.689Z",
-      "by": "bd2-sweep",
-      "action": "decision.add",
-      "ref": "D-CORESURF-SMALL1",
-      "note": "The small-cluster ledger's 75 remaining names: decline or ship anyway (draft)"
-    },
-    {
-      "at": "2026-08-07T00:09:23.175Z",
-      "by": "owner",
-      "action": "question.add",
-      "ref": "q8d9qc5s",
-      "note": ""
-    },
-    {
-      "at": "2026-08-07T00:08:52.390Z",
-      "by": "owner",
-      "action": "question.add",
-      "ref": "q785552p",
-      "note": ""
-    },
-    {
-      "at": "2026-08-07T00:07:29.819Z",
-      "by": "claude-fable",
-      "action": "card.criteria-add",
-      "ref": "c03t94dv",
-      "note": "#2 Results written to docs/research with raw data; any adopted "
-    },
-    {
-      "at": "2026-08-07T00:07:29.184Z",
-      "by": "claude-fable",
-      "action": "card.criteria-add",
-      "ref": "c03t94dv",
-      "note": "#1 Benchmark harness defined: task set, control language, metri"
-    },
-    {
-      "at": "2026-08-07T00:07:20.703Z",
-      "by": "claude-fable",
-      "action": "card.add",
-      "ref": "c03t94dv",
-      "note": "Benchmark agent codegen quality on Jet (strict-typing hypothesis)"
-    },
-    {
-      "at": "2026-08-07T00:07:20.206Z",
-      "by": "claude-fable",
-      "action": "card.criteria-add",
-      "ref": "c0y6f65g",
-      "note": "#3 Owner ballot slate covers the architecture choice; no implem"
-    },
-    {
-      "at": "2026-08-07T00:07:19.797Z",
-      "by": "claude-fable",
-      "action": "card.criteria-add",
-      "ref": "c0y6f65g",
-      "note": "#2 Lazy view-render caching is evaluated as a default (skip re-"
     }
   ],
   "nextNum": 368,
