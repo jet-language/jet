@@ -8,7 +8,7 @@ use crate::Codegen::TIR::{
 };
 use crate::Comptime::Builtins::{as_bool, as_int, eval_binop};
 use crate::Comptime::{apply_core_call, apply_impure_core_call, CtValue, DevSink};
-use crate::Diagnostics::Diagnostic;
+use crate::Diagnostics::{Diagnostic, Span};
 use super::builtins::eval_builtin;
 use super::handles::eval_handle;
 use super::local_cell::{internal_index, project_mut, project_pair_mut, project_ref};
@@ -628,6 +628,60 @@ fn decode_error(path: impl Into<String>, reason: impl Into<String>) -> CtValue {
     }])
 }
 
+/// D-MIGRATE3=A: `MigrationStatus` for a record that arrived in the current
+/// shape — `jet_std::MigrationStatus::fresh()`.
+fn migration_status_fresh() -> CtValue {
+    migration_status_value(false, String::new(), Vec::new())
+}
+
+/// D-MIGRATE4: `MigrationStatus` for a record that entered the chain at
+/// historical shape `start` and was walked forward through `total` steps.
+/// Version names are 1-based, matching the generated chain-walker.
+fn migration_status(start: usize, total: usize) -> CtValue {
+    migration_status_value(
+        true,
+        format!("v{}", start + 1),
+        (start..total)
+            .map(|step| CtValue::Str(format!("v{}->v{}", step + 1, step + 2)))
+            .collect(),
+    )
+}
+
+fn migration_status_value(migrated: bool, from: String, steps: Vec<CtValue>) -> CtValue {
+    CtValue::Struct {
+        type_name: "MigrationStatus".to_string(),
+        fields: vec![
+            ("migrated".to_string(), CtValue::Bool(migrated)),
+            ("from".to_string(), CtValue::Str(from)),
+            ("steps".to_string(), CtValue::List(steps)),
+        ],
+    }
+}
+
+/// A CSV cell as text. The dynamic parser hands back `Str` cells; anything
+/// else renders through the shared display so no row silently reads empty.
+fn string_cell(value: &CtValue) -> String {
+    match value {
+        CtValue::Str(text) => text.clone(),
+        other => other.jet_show(),
+    }
+}
+
+fn migration_did_run(status: &CtValue) -> bool {
+    matches!(status, CtValue::Struct { fields, .. }
+        if fields.iter().any(|(name, value)|
+            name == "migrated" && matches!(value, CtValue::Bool(true))))
+}
+
+/// The codec name the Prelude puts in `invalid <CODEC> (line n): …`.
+fn codec_label(module: &str) -> &'static str {
+    match module {
+        "core.encoding.toml" => "TOML",
+        "core.encoding.yaml" => "YAML",
+        _ => "JSON",
+    }
+}
+
 fn decode_error_under(segment: &str, error: CtValue) -> CtValue {
     let CtValue::List(entries) = error else {
         return decode_error(segment, error.jet_show());
@@ -880,11 +934,14 @@ impl<'a> EvalCtx<'a> {
         }
     }
 
+    /// Replay the D-MIGRATE4 chain over a tree the current shape rejected.
+    /// `Ok` carries the migrated tree and the `MigrationStatus` describing the
+    /// walk, the same `from`/`steps` the generated chain-walker reports.
     fn apply_codec_migration(
         &mut self,
         type_name: &str,
         tree: &CtValue,
-    ) -> Result<Option<Result<CtValue, CtValue>>, Diagnostic> {
+    ) -> Result<Option<Result<(CtValue, CtValue), CtValue>>, Diagnostic> {
         let Some(plan) = self.codec_migrations.get(type_name).cloned() else {
             return Ok(None);
         };
@@ -962,13 +1019,203 @@ impl<'a> EvalCtx<'a> {
                 }
             }
         }
-        Ok(Some(Ok(datatree_object(pairs))))
+        Ok(Some(Ok((
+            datatree_object(pairs),
+            migration_status(start, plan.steps.len()),
+        ))))
     }
 
     fn eval_datatree_decode(
         &mut self,
         tree: CtValue,
         ty: &Type,
+    ) -> Result<CtValue, Diagnostic> {
+        self.eval_datatree_decode_status(tree, ty, &mut None)
+    }
+
+    /// D-MIGRATE3=A: `json|toml|yaml|csv . decode<T>` and `. decode_traced<T>`.
+    ///
+    /// Marshalling only (I9). The tree comes from the codec's own parser, the
+    /// one `apply_core_call` already hosts for `parse`; the value comes out of
+    /// the type's generated Decode TIR, the body AOT compiles. `decode` is
+    /// `decode_traced(…)?.value`, exactly as `jet_enc_*_decode` defines it, so
+    /// both spellings walk the same migration chain.
+    fn eval_typed_codec_decode(
+        &mut self,
+        module: &str,
+        method: &str,
+        ret_ty: &Type,
+        argv: &[CtValue],
+        span: Span,
+    ) -> Result<CtValue, Diagnostic> {
+        let shape = || unsupported(&format!("`{module}.{method}()` resolved return type"), span);
+        let Type::Result { ok, .. } = ret_ty else {
+            return Err(shape());
+        };
+        let traced = method == "decode_traced";
+        let target = if traced {
+            match &**ok {
+                Type::Apply { name, args } if name == "DecodeResult" => {
+                    args.first().cloned().ok_or_else(shape)?
+                }
+                _ => return Err(shape()),
+            }
+        } else {
+            (**ok).clone()
+        };
+        let Some(CtValue::Str(text)) = argv.first() else {
+            return Err(unsupported(
+                &format!("`{module}.{method}()` text argument"),
+                span,
+            ));
+        };
+        let text = text.clone();
+        let decoded = if module == "core.encoding.csv" {
+            self.decode_codec_rows(&target, text, span)?
+        } else {
+            self.decode_codec_value(module, &target, text, span)?
+        };
+        let (value, migration) = match decoded {
+            Ok(pair) => pair,
+            Err(error) => return Ok(CtValue::ResErr(Box::new(error))),
+        };
+        Ok(CtValue::ResOk(Box::new(if traced {
+            CtValue::Struct {
+                type_name: "DecodeResult".to_string(),
+                fields: vec![
+                    ("value".to_string(), value),
+                    ("migration".to_string(), migration),
+                ],
+            }
+        } else {
+            value
+        })))
+    }
+
+    /// One whole record: parse, then decode. `Err` is the `[FieldError]` value.
+    fn decode_codec_value(
+        &mut self,
+        module: &str,
+        target: &Type,
+        text: String,
+        span: Span,
+    ) -> Result<Result<(CtValue, CtValue), CtValue>, Diagnostic> {
+        let parsed = apply_core_call(
+            module,
+            "parse",
+            vec![CtValue::Str(text)],
+            span,
+            self.repl_mode,
+        )?;
+        let tree = match parsed {
+            CtValue::ResOk(tree) => *tree,
+            CtValue::ResErr(error) => {
+                return Ok(Err(crate::Comptime::codec_parse_error_for_tir(
+                    codec_label(module),
+                    *error,
+                )))
+            }
+            _ => return Err(unsupported(&format!("`{module}.parse()` result"), span)),
+        };
+        let mut status = None;
+        Ok(match self.eval_datatree_decode_status(tree, target, &mut status)? {
+            CtValue::ResOk(value) => {
+                Ok((*value, status.unwrap_or_else(migration_status_fresh)))
+            }
+            CtValue::ResErr(error) => Err(*error),
+            _ => unreachable!("Decode protocol returns Result"),
+        })
+    }
+
+    /// CSV decodes to `[T]`: the header row names the fields, every later row
+    /// becomes an object of `Text` cells. Row errors collect under `row <n>`
+    /// (1-based) and a short row leaves its cells empty, as the Prelude does.
+    /// A file is one column layout, so the batch reports the first row that
+    /// actually migrated.
+    fn decode_codec_rows(
+        &mut self,
+        target: &Type,
+        text: String,
+        span: Span,
+    ) -> Result<Result<(CtValue, CtValue), CtValue>, Diagnostic> {
+        let Type::List(item) = target else {
+            return Err(unsupported("`core.encoding.csv.decode()` row type", span));
+        };
+        let parsed = apply_core_call(
+            "core.encoding.csv",
+            "parse",
+            vec![CtValue::Str(text)],
+            span,
+            self.repl_mode,
+        )?;
+        let rows = match parsed {
+            CtValue::ResOk(rows) => match *rows {
+                CtValue::List(rows) => rows,
+                _ => return Err(unsupported("`core.encoding.csv.parse()` result", span)),
+            },
+            CtValue::ResErr(error) => {
+                return Ok(Err(decode_error("", string_cell(&error))))
+            }
+            _ => return Err(unsupported("`core.encoding.csv.parse()` result", span)),
+        };
+        let mut rows = rows.into_iter();
+        let Some(CtValue::List(header)) = rows.next() else {
+            return Ok(Ok((CtValue::List(Vec::new()), migration_status_fresh())));
+        };
+        let header: Vec<String> = header.iter().map(string_cell).collect();
+        let mut values = Vec::new();
+        let mut errors = Vec::new();
+        let mut migration = migration_status_fresh();
+        for (index, row) in rows.enumerate() {
+            let cells = match row {
+                CtValue::List(cells) => cells,
+                _ => Vec::new(),
+            };
+            let tree = datatree_object(
+                header
+                    .iter()
+                    .enumerate()
+                    .map(|(column, name)| {
+                        let cell = cells.get(column).map(string_cell).unwrap_or_default();
+                        (name.clone(), datatree("Text", Some(CtValue::Str(cell))))
+                    })
+                    .collect(),
+            );
+            let mut status = None;
+            match self.eval_datatree_decode_status(tree, item, &mut status)? {
+                CtValue::ResOk(value) => {
+                    if let Some(status) = status {
+                        if migration_did_run(&status) && !migration_did_run(&migration) {
+                            migration = status;
+                        }
+                    }
+                    values.push(*value);
+                }
+                CtValue::ResErr(error) => {
+                    if let CtValue::List(entries) =
+                        decode_error_under(&format!("row {}", index + 1), *error)
+                    {
+                        errors.extend(entries);
+                    }
+                }
+                _ => unreachable!("Decode protocol returns Result"),
+            }
+        }
+        if !errors.is_empty() {
+            return Ok(Err(CtValue::List(errors)));
+        }
+        Ok(Ok((CtValue::List(values), migration)))
+    }
+
+    /// `status` reports the D-MIGRATE3 `MigrationStatus` of the top-level
+    /// record. Only `decode_traced` asks for it; `eval_datatree_decode` passes
+    /// `None`, so a nested field that migrates cannot leak into its parent's
+    /// status — matching AOT, where nested fields call plain `jet_decode`.
+    fn eval_datatree_decode_status(
+        &mut self,
+        tree: CtValue,
+        ty: &Type,
+        status: &mut Option<CtValue>,
     ) -> Result<CtValue, Diagnostic> {
         let result: Result<CtValue, CtValue> = match ty {
             Type::Named(name) if name == "DataTree" || name == "JSON" => Ok(tree),
@@ -1276,9 +1523,13 @@ impl<'a> EvalCtx<'a> {
                         }
                     }
                     match self.apply_codec_migration(&ty.name(), &tree)? {
-                        Some(Ok(migrated)) => {
+                        Some(Ok((migrated, walked))) => {
                             let mut child = HashMap::new();
-                            return self.run_func(func, vec![migrated], &mut child);
+                            let out = self.run_func(func, vec![migrated], &mut child)?;
+                            if matches!(out, CtValue::ResOk(_)) {
+                                *status = Some(walked);
+                            }
+                            return Ok(out);
                         }
                         Some(Err(error)) => {
                             return Ok(CtValue::ResErr(Box::new(error)));
@@ -1286,6 +1537,7 @@ impl<'a> EvalCtx<'a> {
                         None => {}
                     }
                 }
+                *status = Some(migration_status_fresh());
                 return Ok(result);
             }
             _ => Err(decode_error(
@@ -2790,6 +3042,26 @@ impl<'a> EvalCtx<'a> {
                             ],
                         })),
                     });
+                }
+                // D-MIGRATE3=A: the text codecs' typed decode. `TExprKind::CoreCall`
+                // carries no type arguments, so the target comes from the call's
+                // resolved return type — `Result<T, [FieldError]>` for `decode`,
+                // `Result<DecodeResult<T>, [FieldError]>` for `decode_traced`.
+                if matches!(
+                    module.as_str(),
+                    "core.encoding.json"
+                        | "core.encoding.toml"
+                        | "core.encoding.yaml"
+                        | "core.encoding.csv"
+                ) && matches!(method.as_str(), "decode" | "decode_traced")
+                {
+                    return self.eval_typed_codec_decode(
+                        module,
+                        method,
+                        &expr.ty,
+                        &argv,
+                        *source_span,
+                    );
                 }
                 if module == "core.encoding.cbor" && method == "decode" {
                     let Type::Result { ok, .. } = &expr.ty else {

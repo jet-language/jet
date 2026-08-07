@@ -370,6 +370,13 @@ pub fn cbor_parse_for_tir(
         .map_err(EncodingLite::cbor_error_value)
 }
 
+/// TIR/JIT bridge for the text codecs' parse-failure wording. `codec` is the
+/// name as the Prelude writes it — `JSON`, `TOML`, `YAML` — so a typed decode
+/// reports `invalid JSON (line 3): …` on every tier from one implementation.
+pub fn codec_parse_error_for_tir(codec: &str, error: CtValue) -> CtValue {
+    TypedDecode::json_parse_err_to_decode(codec, error)
+}
+
 /// Convert a parser failure to the typed decoder's shared `[FieldError]`
 /// contract. CBOR's parser keeps byte offsets and `$` paths; typed decode
 /// exposes those details in the field-error reason and uses source paths.

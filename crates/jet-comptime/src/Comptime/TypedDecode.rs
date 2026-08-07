@@ -969,7 +969,7 @@ impl<'a> Interp<'a> {
     }
 }
 
-fn json_parse_err_to_decode(codec: &str, e: CtValue) -> CtValue {
+pub(super) fn json_parse_err_to_decode(codec: &str, e: CtValue) -> CtValue {
     let (line, message) = match e {
         CtValue::Struct { fields, .. } => {
             let line = fields
