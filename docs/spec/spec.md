@@ -2348,16 +2348,23 @@ Combinators are methods on the group handle only (no detached work):
 - `g.race([t1, t2, …]) => T` — first **successful** result wins; losers are
   cancelled (D-RACEWIN1; example `167_race_cancel.jet`).
 - `g.any([t1, t2, …]) => T` — first **completion** wins, including errors.
-- `g.select()` — fluent scoped multiplex (D-CONCSELECT1=A):
+- Waiting on several sources at once — a select — is a subjectless `if` table
+  whose arm heads are a binding and a source (D-CONC-CHAN2=D; amends
+  D-CONCSELECT1=A's fluent builder and D-CONC-CHAN1's spelling of it). The
+  comma head marks the wait; a Bool head in the same table is a registered
+  diagnostic. `after` takes a Time delta and fires when no source is ready by
+  that deadline; an optional `else` arm makes the wait non-blocking. The whole
+  table compiles to one wait, so there is no test-then-read race:
 
 ```jet
-winner :: g.select().recv(ch1).recv(ch2).after(ms).wait()?
+if {
+    job, jobs    -> handle(job)
+    msg, control -> obey(msg)
+    after 100ms  -> retry()
+}
 ```
 
-`.recv(receiver)` registers a receive arm; `.after(ms)` a timer arm; `.read(stream)`
-is reserved for stream I/O (stub until networking lands). `.wait()` blocks until
-one arm wins, deregisters losers, and returns the received value. Example:
-`168_select_channel.jet`.
+Cancellation at the wait follows D-CANCELMODEL1=C. Example: `select_channel.jet`.
 
 The M:N scheduler (D-ASYNCRT1=A) parks tasks at channel/timer/IO waits instead
 of blocking OS threads. Native I/O pollers: Linux `epoll`, macOS/BSD `kqueue`,

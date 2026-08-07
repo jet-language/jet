@@ -32,7 +32,7 @@ code.
 | Task failure | `h.exception() == "cancelled"` string test | `h.join() ?? fallback` — the normal `?` rail |
 | Bounded worker pool | 49 lines of hand-made channel tokens | `group g(limit: 4) { … }` |
 | Drain a channel | `loop { v :: rx.receive() ?? break … }` | `loop v, rx { … }` |
-| Wait on two channels | `g.select().recv(a).recv(b).after(ms: 100, value: -1).wait()` | `select { v, a -> …  v, b -> …  after 100ms -> … }` |
+| Wait on two channels | `g.select().recv(a).recv(b).after(ms: 100, value: -1).wait()` | `if { v, a -> …  v, b -> …  after 100ms -> … }` (D-CONC-CHAN2=D) |
 | Read shared state | `config.read(c => c.name)` | `config.name` |
 | Change shared state | `config.edit(c => { c.hits += 1 })` | `config.hits += 1` |
 
@@ -209,14 +209,15 @@ winner :: g.select().recv(ch1).recv(ch2).after(ms: 100, value: -1).wait()
 ```
 
 **Proposed.** Channels are builtin values. Draining is a loop. Waiting on
-several sources is an arm table — the same `head -> body` shape as `if`.
+several sources is a subjectless `if` table — no second branching keyword
+(D-CONC-CHAN2=D; amends the `select` spelling below).
 
 ```jet
 (tx, rx) :: channel<Int>(capacity: 8)
 
 loop job, rx { handle(job) }             // receive until the channel closes
 
-select {
+if {
     job, jobs    -> handle(job)          // arm binding mirrors `loop v, source`
     msg, control -> obey(msg)
     after 100ms  -> retry()              // unit literal, one time rail (D-TYPE2-TIME1)
@@ -224,13 +225,15 @@ select {
 ```
 
 - `Receiver<T>` and `Sender<T>` become nameable in signatures.
-- `select` works anywhere in a task, on plain endpoints. It no longer needs a
-  group.
+- The wait table works anywhere in a task, on plain endpoints. It no longer
+  needs a group. `select` is not a keyword; it stays a free identifier.
 - The dead `Channel` table entry and the `.read` arm (accepted today, silently
   dropped on every tier) are deleted.
 
 **Deleted:** the `g.select()` builder, `tasks.channel`, the `.read` arm.
-Amends D-CONCSELECT1 and narrows D-TASKRUNTIME1's module surface.
+Amends D-CONCSELECT1 and narrows D-TASKRUNTIME1's module surface; the wait
+spelling is D-CONC-CHAN2=D, not the `select { … }` table shown above in an
+earlier draft of this proposal.
 
 ### 4. Shared state and transactions — D-CONC-SHARE1, D-CONC-STM1
 
