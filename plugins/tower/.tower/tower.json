@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1617,
-    "rev": 28866,
+    "nextNum": 1618,
+    "rev": 28883,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -92249,6 +92249,11 @@
       "log": [
         {
           "at": "2026-08-07",
+          "by": "bd3-dollar2",
+          "text": "[handoff] Branch bd3/dollar, head 13ac34a31, worktree .claude/worktrees/dollar, off master 7b127acab, unmerged. Eight of ten criteria met. Criteria 1 and 6 stay open on one root cause, described below. Phase stays building.\n\nCOMMITS THIS SESSION\n- 0aa39f2f5 feat(meta): the compile-time mark rides the name, everywhere\n- 33285ac5a test(meta): pin the two E0377 fixtures as parser-invalid\n- 13ac34a31 chore(meta): delete the last E2712/E2713 references\n\nTHE I2 VIOLATION IS FIXED. A folded value whose Rust spelling pins none of its type parameters reached rustc as E0282, which surfaces as an internal compiler error. TExprKind::CtLit now states the type the fold already decided, by ascription, and only for the spellings that need it: the carrier's Ok/Err and an empty collection. comptime_diff went from 12 of 26 to 23 of 26 and no I2 violation remains in the run.\n\nTWO MORE DEFECTS OF THE SAME SLICE, ALSO FIXED\n- The mark leaked into generated Rust identifiers, emitting , which rustc cannot parse. mangle() now spells a marked name userct_<name>. That keeps the mapping injective, which is exactly what the ratified text needs: a plain name and a marked name can never denote the same binding, so they must never mangle to the same Rust place.\n- T.$layout had regressed to E0302. Sema, TIR lowering and the interpreter now read the one COMPILER_FACTS table, so $layout, $name and $fields are one spelling.\n\nWHAT REMAINS, AND WHY IT IS ONE THING\nCriterion 1's second clause and criterion 6 are the same defect. A marked name resolves through current_ct_globals(), a snapshot, instead of through the ordinary binding path an unmarked name used before this card. Three consequences, all visible as the three remaining comptime_diff failures:\n- sequential_comptime_reads_advance_the_shared_reader: a real divergence, comptime gives 7|7|3 where runtime gives 7|9|1. Reading $ct twice does not advance the shared reader because each mention reads the snapshot; apply_ct_mutations writes back to ct_scopes but the marked name does not route through it.\n- comptime_loadable_matches_runtime: the type comes from the folded CtValue rather than the binding, so Loadable.Idle comes back as a bare Loadable and loses its methods. I fixed the local case by looking the name up in the ordinary environment first, but a module-level marked binding is not in that environment.\n- reusable_regex_matches_across_comptime_tir_and_runtime: E0956 on replace_all_with.\nAll three fixtures are faithful migrations of master's text, verified with git show master:tests/comptime_diff.rs, so the cause is the branch's resolution path, not the migration. The fix is to make a marked name resolve as an ordinary name whose identifier text includes the mark, which is what D-META-STAGE1=B means by 'sema treats the sigil as part of the identifier'. That is a focused pass on sema's binding registration and is the honest remainder of this card.\n\nPROOF, one combined run then reruns of only the red targets\n- comptime_diff 23 of 26 (three above).\n- fmt 163 of 163, up from the 162 passed 1 failed master baseline, because pinning the new fixtures also closed the corpus mismatch.\n- grammar 18 of 18. diagnostic_snapshots 4 of 4.\n- golden 63 failures, exactly the branch's documented baseline, with no comptime example among them.\n- jet-parser lib 43 passed 1 failed and jet-sema lib 68 passed 3 failed, which match the previous session's recorded pre-existing baseline exactly.\n- cargo build clean throughout.\n\nPRE-EXISTING RED, NOT THIS CARD\ntests/diagnostics_coverage.rs fails 4 of 11 on codes E1320, E1322, E1323, E3504 and E0416. None is in the metaprogramming range and none is touched by this card; they want their own card.\n\nTRAP WORTH KNOWING, cost me a wrong diagnosis\nWith CARGO_TARGET_DIR shared across worktrees, another worktree's build replaces target/debug/jet and the shared dep artifacts underneath you. I read a stale binary and concluded my sema fix had not worked when it had, and a lib-test compile failed with 'no variant named ComptimeName in jet_lexer::AST::Expr' because it linked another worktree's artifacts. Build and run in the same command, or verify the binary is yours before trusting a probe."
+        },
+        {
+          "at": "2026-08-07",
           "by": "bd3-dollar",
           "text": "[handoff] Session ended mid-card; handing to bd3-dollar2 on the same branch bd3/dollar."
         },
@@ -92286,38 +92291,38 @@
         {
           "n": 2,
           "text": "#Known, #Known if and the #Known block are deleted with one teaching diagnostic each; #Known leaves the marker registry and its Prefix form and four legal sites go with it",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd3-dollar2",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:34:12.901Z"
+          "evidence": "The three retired forms parse no further than recovery and teach one diagnostic, E0377, whose fix names the exact replacement per form: write $name :: … for a binding, $if <condition> { … } for a branch, $ { … } for a block. #Known left the marker registry: crates/jet-foundation/src/Policy.rs now carries rule!(retired \"Known\", sig!(), NO_SITES, \"$name :: …\"), so the Prefix form and its four legal sites (Declaration, Constant, Block, Statement) are gone with it. The regenerated editor grammars no longer list Known among the marker rules. E0377 is registered under I4: an index row and a what/why/fix row in docs/spec/diagnostics.md, plus two UI snapshots, tests/ui/comptime_known_retired.jet for the binding form and tests/ui/comptime_known_block_retired.jet for the block and branch forms, both blessed from real output and pinned parser-invalid in the lossless corpus. cargo test --test diagnostic_snapshots passes 4 of 4; --test grammar 18 of 18.",
+          "at": "2026-08-07T13:21:02.599Z"
         },
         {
           "n": 3,
           "text": "D-CTMARKER1's carry-out rule and E2713 are deleted, not generalized; a repository search shows no remaining splice-carry concept",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd3-dollar2",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:34:13.244Z"
+          "evidence": "D-CTMARKER1 retires outright. Expr::ComptimeSplice became Expr::ComptimeName and the strip is gone, so there is no scope-crossing concept left to state; an unresolved marked name now reports the ordinary E0107 rather than a splice-specific code. E2712 and E2713 are deleted, not generalized: both rows are gone from docs/spec/diagnostics.md, E2712 is gone from the expected-spec-ahead list in tests/diagnostics_coverage.rs, and the two sema comments that explained the suppression now name D-META-STAGE1=B instead. A repository search for E2712, E2713 across crates/, Source/ and tests/ returns nothing.",
+          "at": "2026-08-07T13:21:18.299Z"
         },
         {
           "n": 4,
           "text": "T.$layout keeps working and T.$name and T.$fields join it in the same spelling",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd3-dollar2",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:34:13.587Z"
+          "evidence": "All three facts answer in one spelling. Sema gained a branch that reads the closed COMPILER_FACTS table and projects the matching TypeInfo member, so T.$layout, T.$name and T.$fields each answer that member's type; TIR lowering and the interpreter read the same table instead of hardcoding $layout. T.$layout had in fact regressed to E0302 on the checkpoint, so this restores it and adds the other two in the same move. Proof: a fixture with struct Point { x: Int, y: Int } reading Point.$name, Point.$fields.len() and Point.$layout.kind passes jet check with no problems. A marked member outside the table still reports E0302 and names the three facts.",
+          "at": "2026-08-07T13:21:18.687Z"
         },
         {
           "n": 5,
           "text": "Every example, test and doc using #Known is migrated in the same change, including examples/features/comptime/comptime_block.jet and comptime_if.jet",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd3-dollar2",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:34:13.930Z"
+          "evidence": "Every in-repo consumer is migrated. The checkpoint had already moved 131 occurrences across 79 .jet files including examples/features/comptime/comptime_block.jet and comptime_if.jet; this session moved the remaining 208 across 54 Rust sources, the three living spec docs (spec.md, syntax-decisions.md, diagnostics.md), and re-blessed 24 UI snapshots from real output rather than by hand. What still spells #Known is only text that teaches its retirement (the take_mark recovery comments, the E0377 message built from RETIRED_MARKER_KNOWN, the Syntax.rs constant doc), the two E0377 fixtures, and decision history (docs/proposals, docs/audits, docs/research), which the greenfield rule preserves. Two migration bugs from the checkpoint were found and fixed rather than carried: an over-marked runtime local in the local_comptime_is_literal_data fixture, where a plain xs inside build() had been marked because a different $xs existed in run(), and 28 unmarked use sites. cargo test --test golden shows 63 failures, exactly the branch's documented baseline, with no comptime example among them.",
+          "at": "2026-08-07T13:21:34.510Z"
         },
         {
           "n": 6,
@@ -92331,38 +92336,38 @@
         {
           "n": 7,
           "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd3-dollar2",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:34:14.603Z"
+          "evidence": "crates/jet-foundation/src/Syntax/core_surface.rs carries COMPTIME_MARK and is_comptime_name with the decision ID: D-META-STAGE1=B, ratified 2026-08-06, amends D-VERDICT-1308-1/2 and retires D-CTMARKER1. The doc states the law: the mark belongs to the name and is written at every mention, a bare mark opens a compile-time block and precedes $if and $loop, ordinary foldable expressions need no mark, and the retired spellings teach E0377. RETIRED_MARKER_KNOWN sits beside it as the retired spelling the recovery path reads.",
+          "at": "2026-08-07T13:21:38.458Z"
         },
         {
           "n": 8,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd3-dollar2",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:34:14.957Z"
+          "evidence": "docs/spec/syntax-decisions.md rewrites the S57 entry as amended by D-META-STAGE1=B, card #1537. It carries the ratified worked example, states that the mark belongs to the name and is written at every mention, that sema treats the mark as part of the identifier so a plain name and a marked name can never denote the same binding, and that codegen keeps them apart by spelling a marked name userct_<name> where a plain name is user_<name>. It records that D-CTMARKER1 retires outright with its carry-out rule and E2713 deleted rather than generalized, that #Known and its two sibling forms teach E0377 and leave the marker registry, and that comptime stays retired under E0374. It names the Syntax constants and both examples, and adds the D-LAYOUT-FACTS1=B paragraph for the three compiler-owned facts.",
+          "at": "2026-08-07T13:21:56.209Z"
         },
         {
           "n": 9,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd3-dollar2",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:34:15.308Z"
+          "evidence": "Ran jet self devtools grammars against a freshly built binary after retiring the Known marker rule. It rewrote editors/vscode/syntaxes/jet.tmLanguage.json, editors/jet.tmGrammar, editors/tree-sitter/grammar.js and editors/zed/languages/jet/highlights.scm, and Known is no longer among the marker rules in any of them. cargo test --test grammar passes 18 of 18.",
+          "at": "2026-08-07T13:22:00.097Z"
         },
         {
           "n": 10,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd3-dollar2",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:34:15.648Z"
+          "evidence": "Blessed with UPDATE_EXPECT=1 against a fresh binary and reviewed: 24 .stderr fixtures moved to the $ spelling because their .jet sources did, and two new E0377 fixtures were added. Sample: const_retired.stderr now reads 'const is retired — write $' with the fix 'write $name :: …', which is the real new output. cargo test --test diagnostic_snapshots passes 4 of 4. The two new fixtures are also pinned parser-invalid in tests/support/fmt_lossless.rs, which took cargo test --test fmt from 162 passed 1 failed to 163 passed 0 failed.",
+          "at": "2026-08-07T13:22:01.958Z"
         }
       ],
       "refs": [
@@ -92372,8 +92377,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:34:12.218Z",
-      "updated": "2026-08-07T12:24:08.363Z",
-      "updatedBy": "bd3-dollar",
+      "updated": "2026-08-07T13:22:33.539Z",
+      "updatedBy": "bd3-dollar2",
       "workOrder": 180
     },
     {
@@ -98422,6 +98427,73 @@
       "needsAcceptance": false,
       "created": "2026-08-07T12:50:06.101Z",
       "updated": "2026-08-07T12:50:14.839Z",
+      "updatedBy": "bd3-tests"
+    },
+    {
+      "id": "c0h9h1pl",
+      "num": 1617,
+      "title": "tir_unsafe_and_runtime: foreign-struct qualified-name cascade + generic Stack<T> Clone bound",
+      "body": "Found while closing #1600. Two separate remaining tir_unsafe_and_runtime.rs failures, deeper than originally scoped: (1) foreign_struct_construction (E0113: fn make() => Note declared but note.Note.{...} construction infers Type::Named(\"note.Note\") — check_struct_lit's import_ns qualification (crates/jet-sema/src/Sema/CheckerInfer/expr.rs check_struct_lit, nominal_name = import_ns.map(|alias| format!(\"{alias}.{type_name}\"))) disambiguates same-named structs across modules but breaks THREE downstream consumers that expect bare registry-keyed names: field_type (fixed in #1600, splits qualified names back apart before struct_owner_module lookup), return-type assignability (E0113, still broken — check_type_assignable doesn't know alias.Type equals Type), and TIR subset coverage (is_covered_struct_ty/tir_covers in crates/jet-codegen/src/Codegen/TIR/subset/entry.rs also expects bare names — using note.Note as a DECLARED return type annotation to dodge E0113 makes tir_covers wrongly return false, producing an ICE 'codegen reached a construct the typed IR does not cover (make)' since the AST-fallback path is retired). Root cause needs one fix, not three patches: either make check_type_assignable/is_covered_struct_ty also split-and-compare qualified names (matching the field_type fix's approach), or reconsider whether check_struct_lit should qualify the nominal name at all for the common case. Left the fixture at its ORIGINAL bare  return type (still red, E0113) to avoid shipping the ICE regression. (2) generic_struct_fns (E0277 rustc rejection): after fixing the real ownership-sigil bug (D-MEM1 struct-literal field fill/rebind from a read-only param needs ~a/~b/~s, not bare — this part IS fixed and committed), a new codegen gap surfaced: struct Stack<T> { items: [T] } derives a Rust  bound on the struct, but fn empty_stack<T>() => Stack<T> doesn't get that same bound propagated to its own generic parameter, so rustc rejects the generated  (I2). Needs the same bound-propagation fix generic struct-returning functions elsewhere presumably already have — or doesn't, if this is the first generic-struct-with-list-field-returning-function case exercised end to end.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-07",
+          "by": "bd3-tests",
+          "text": "Investigated string-literal-aware brace counting for strip_mod (tests/tir_support/mod.rs) — fixed one real bug (raw {}/braces inside format! string literals) but jet_cell still truncates early (debug-traced: consumes only ~11KB starting at byte 843357, ending 854325, when the real module is far larger). Some OTHER token category (char literal, raw string, or comment) still desyncs the depth counter. Left the string-literal fix in place (strictly more correct, doesn't regress anything) but didn't fully solve unsafe_tier_emit_is_byte_exact — needs a proper Rust-aware brace matcher (or line-based mod/brace matching) instead of a byte-level counter."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "foreign_struct_construction passes: cross-module struct field access, return-type assignability, and TIR subset coverage all agree on the same qualified-vs-bare struct name",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T13:20:52.978Z"
+        },
+        {
+          "n": 2,
+          "text": "generic_struct_fns passes: empty_stack<T>()'s generated Rust signature carries the same Clone bound Stack<T> requires",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T13:20:53.744Z"
+        },
+        {
+          "n": 3,
+          "text": "cargo test --test tir_unsafe_and_runtime passes both tests",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T13:20:54.555Z"
+        },
+        {
+          "n": 4,
+          "text": "tests/tir_support/mod.rs strip_vetted_prelude_modules correctly strips the whole jet_cell module (debug-traced: it currently stops after only ~11KB when the real module is much larger, leaving unsafe impl Send for JetSharedCell unstripped and falsely flagged by the I1 self-check)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T13:22:51.434Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-07T13:20:32.509Z",
+      "updated": "2026-08-07T13:22:52.129Z",
       "updatedBy": "bd3-tests"
     }
   ],
@@ -132975,6 +133047,125 @@
   ],
   "events": [
     {
+      "at": "2026-08-07T13:22:52.129Z",
+      "by": "bd3-tests",
+      "action": "card.update",
+      "ref": "c0h9h1pl",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T13:22:51.435Z",
+      "by": "bd3-tests",
+      "action": "card.criteria-add",
+      "ref": "c0h9h1pl",
+      "note": "#4 tests/tir_support/mod.rs strip_vetted_prelude_modules correc"
+    },
+    {
+      "at": "2026-08-07T13:22:46.110Z",
+      "by": "bd3-dollar2",
+      "action": "papercut.add",
+      "ref": "pc0usdx48",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T13:22:33.539Z",
+      "by": "bd3-dollar2",
+      "action": "card.update",
+      "ref": "c0z2jsot",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T13:22:01.958Z",
+      "by": "bd3-dollar2",
+      "action": "card.criteria-meet",
+      "ref": "c0z2jsot",
+      "note": "#10"
+    },
+    {
+      "at": "2026-08-07T13:22:00.098Z",
+      "by": "bd3-dollar2",
+      "action": "card.criteria-meet",
+      "ref": "c0z2jsot",
+      "note": "#9"
+    },
+    {
+      "at": "2026-08-07T13:21:56.209Z",
+      "by": "bd3-dollar2",
+      "action": "card.criteria-meet",
+      "ref": "c0z2jsot",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-07T13:21:38.458Z",
+      "by": "bd3-dollar2",
+      "action": "card.criteria-meet",
+      "ref": "c0z2jsot",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-07T13:21:34.510Z",
+      "by": "bd3-dollar2",
+      "action": "card.criteria-meet",
+      "ref": "c0z2jsot",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-07T13:21:18.688Z",
+      "by": "bd3-dollar2",
+      "action": "card.criteria-meet",
+      "ref": "c0z2jsot",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-07T13:21:18.299Z",
+      "by": "bd3-dollar2",
+      "action": "card.criteria-meet",
+      "ref": "c0z2jsot",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-07T13:21:02.599Z",
+      "by": "bd3-dollar2",
+      "action": "card.criteria-meet",
+      "ref": "c0z2jsot",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-07T13:20:54.556Z",
+      "by": "bd3-tests",
+      "action": "card.criteria-add",
+      "ref": "c0h9h1pl",
+      "note": "#3 cargo test --test tir_unsafe_and_runtime passes both tests"
+    },
+    {
+      "at": "2026-08-07T13:20:53.745Z",
+      "by": "bd3-tests",
+      "action": "card.criteria-add",
+      "ref": "c0h9h1pl",
+      "note": "#2 generic_struct_fns passes: empty_stack<T>()'s generated Rust"
+    },
+    {
+      "at": "2026-08-07T13:20:52.979Z",
+      "by": "bd3-tests",
+      "action": "card.criteria-add",
+      "ref": "c0h9h1pl",
+      "note": "#1 foreign_struct_construction passes: cross-module struct fiel"
+    },
+    {
+      "at": "2026-08-07T13:20:32.509Z",
+      "by": "bd3-tests",
+      "action": "card.add",
+      "ref": "c0h9h1pl",
+      "note": "tir_unsafe_and_runtime: foreign-struct qualified-name cascade + generic Stack<T> Clone bound"
+    },
+    {
+      "at": "2026-08-07T13:17:35.686Z",
+      "by": "bd3-effect",
+      "action": "papercut.add",
+      "ref": "pc08xq6wo",
+      "note": "#1543"
+    },
+    {
       "at": "2026-08-07T13:15:13.404Z",
       "by": "owner",
       "action": "done.clear",
@@ -136354,125 +136545,6 @@
       "action": "card.criteria-add",
       "ref": "c0g2j76x",
       "note": "#1 examples/features/errors/must_use.jet golden passes (AOT)"
-    },
-    {
-      "at": "2026-08-07T01:08:40.332Z",
-      "by": "prep-bugs",
-      "action": "card.update",
-      "ref": "c0g2j76x",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-07T01:08:19.152Z",
-      "by": "prep-bugs",
-      "action": "card.update",
-      "ref": "c0y9bl1v",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-07T01:08:13.411Z",
-      "by": "prep-bugs",
-      "action": "card.criteria-add",
-      "ref": "c0y9bl1v",
-      "note": "#6 No existing example or test declares one of the seven rule-a"
-    },
-    {
-      "at": "2026-08-07T01:08:12.798Z",
-      "by": "prep-bugs",
-      "action": "card.criteria-add",
-      "ref": "c0y9bl1v",
-      "note": "#5 scripts/agent/jet-env cargo test --test diagnostics_coverage"
-    },
-    {
-      "at": "2026-08-07T01:08:12.168Z",
-      "by": "prep-bugs",
-      "action": "card.criteria-add",
-      "ref": "c0y9bl1v",
-      "note": "#4 scripts/agent/jet-env cargo test --test diagnostic_snapshots"
-    },
-    {
-      "at": "2026-08-07T01:08:11.814Z",
-      "by": "prep-bugs",
-      "action": "card.criteria-add",
-      "ref": "c0y9bl1v",
-      "note": "#3 Capability still parses and type-checks in legitimate marker"
-    },
-    {
-      "at": "2026-08-07T01:08:11.473Z",
-      "by": "prep-bugs",
-      "action": "card.criteria-add",
-      "ref": "c0y9bl1v",
-      "note": "#2 The same general-position rejection covers Target (the other"
-    },
-    {
-      "at": "2026-08-07T01:08:11.113Z",
-      "by": "prep-bugs",
-      "action": "card.criteria-add",
-      "ref": "c0y9bl1v",
-      "note": "#1 fn f(x: Capability) {} in a non-marker (general) position re"
-    },
-    {
-      "at": "2026-08-07T01:08:02.897Z",
-      "by": "prep-bugs",
-      "action": "card.update",
-      "ref": "c0y9bl1v",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-07T01:07:30.696Z",
-      "by": "prep-bugs",
-      "action": "card.update",
-      "ref": "c0zlv32v",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-07T01:07:23.567Z",
-      "by": "prep-bugs",
-      "action": "card.update",
-      "ref": "c0zlv32v",
-      "note": "body,plan"
-    },
-    {
-      "at": "2026-08-07T01:06:52.627Z",
-      "by": "prep-bugs",
-      "action": "card.update",
-      "ref": "c08scee7",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-07T01:05:25.304Z",
-      "by": "bd2-manifest",
-      "action": "papercut.add",
-      "ref": "pc0wqowkz",
-      "note": ""
-    },
-    {
-      "at": "2026-08-07T01:02:13.255Z",
-      "by": "prep-syntax",
-      "action": "card.update",
-      "ref": "c06k75xs",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-07T01:02:12.848Z",
-      "by": "prep-syntax",
-      "action": "card.update",
-      "ref": "c00zqair",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-07T01:02:12.440Z",
-      "by": "prep-syntax",
-      "action": "card.update",
-      "ref": "c0pxsuic",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-07T01:02:12.052Z",
-      "by": "prep-syntax",
-      "action": "card.update",
-      "ref": "c0ywkxuc",
-      "note": "phase"
     }
   ],
   "nextNum": 368,
@@ -136720,6 +136792,22 @@
       "text": "CARGO_TARGET_DIR=<main>/target shared across worktrees caused a real build break (E0599: no variant ComptimeSplice for jet::AST::Expr in Source/CmdProve.rs) even though the variant exists in my worktree's own crates/jet-foundation/src/AST/expressions.rs — reproducible on retry, not transient. Likely stale rlib reuse across worktrees with divergent AST enum shapes. Fell back to the worktree-local target dir to unblock.",
       "cardId": null,
       "created": "2026-08-07T12:52:31.667Z",
+      "status": "open"
+    },
+    {
+      "id": "pc08xq6wo",
+      "by": "bd3-effect",
+      "text": "Shared CARGO_TARGET_DIR across worktrees poisons builds: concurrent cargo from worktrees/dollar and worktrees/profile made my build fail with 'no variant ComptimeSplice in jet_foundation::AST::Expr' on unmodified code. Different sources, one target dir, whoever writes last wins. Agents need per-worktree target dirs.",
+      "cardId": "c0c86cps",
+      "created": "2026-08-07T13:17:35.686Z",
+      "status": "open"
+    },
+    {
+      "id": "pc0usdx48",
+      "by": "bd3-dollar2",
+      "text": "Sharing CARGO_TARGET_DIR across git worktrees lets another worktree's build replace target/debug/jet and shared dep artifacts mid-session: a stale binary made a working sema fix look broken, and a lib test failed with 'no variant named ComptimeName in jet_lexer::AST::Expr' from another branch's artifacts. Build and run in one command, or verify the binary is yours.",
+      "cardId": null,
+      "created": "2026-08-07T13:22:46.110Z",
       "status": "open"
     }
   ]

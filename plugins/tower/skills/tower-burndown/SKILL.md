@@ -224,11 +224,14 @@ progress and looks hung. Every burndown command path must:
 
 Put these constraints in every worker brief that runs compiler/test commands.
 
-**Shared build cache (mandatory for worktree workers).** Every worktree
-worker exports `CARGO_TARGET_DIR=<main-clone>/target` so all streams share
-one warm cache instead of cold-building a private `target/` (5–10 min each).
-Cargo's own lock serializes concurrent builds safely; brief queueing beats
-cold rebuilds. Never point the target dir at `/tmp` (RAM tmpfs).
+**Per-worktree persistent build caches.** Do NOT share one
+`CARGO_TARGET_DIR` across concurrent worktrees on diverged branches: streams
+overwrite each other's dep artifacts and `target/debug/jet`, producing
+wrong-binary smoke runs and phantom compile errors from another branch's
+code (observed 2026-08-07). Each worktree keeps its own `target/`; the cache
+stays warm because worktrees persist across batches (below). Sharing the
+main clone's target dir is safe only for a lone worker or branches at the
+same base. Never point any target dir at `/tmp` (RAM tmpfs).
 
 **Worktrees persist across batches.** Keep a finished worker's worktree in
 place for the next batch instead of delete/recreate; remove worktrees only at
