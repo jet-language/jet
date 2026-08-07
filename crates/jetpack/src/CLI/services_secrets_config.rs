@@ -417,7 +417,7 @@ pub(super) fn cmd_services(theme: &Theme, parsed: &Parsed) -> i32 {
 
     let plan = match load_project_plan_with_selections(
         theme,
-        parsed.flags.profile.as_deref(),
+        parsed.flags.preset.as_deref(),
         parsed.flags.environment_profile.as_deref(),
     ) {
         Ok(plan) => plan,
@@ -802,7 +802,7 @@ pub(super) fn cmd_service_probe(theme: &Theme, parsed: &Parsed) -> i32 {
     };
     let plan = match load_project_plan_with_selections(
         theme,
-        parsed.flags.profile.as_deref(),
+        parsed.flags.preset.as_deref(),
         parsed.flags.environment_profile.as_deref(),
     ) {
         Ok(plan) => plan,

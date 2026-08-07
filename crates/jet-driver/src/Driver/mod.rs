@@ -63,40 +63,40 @@ pub fn compile_bundle_path_opts(
 }
 
 #[derive(Debug)]
-pub enum TargetProfileCompileError {
+pub enum TargetMachineCompileError {
     Diagnostics(Vec<Diagnostic>),
-    Profile(Vec<crate::TargetProfile::TargetProfileError>),
+    Machine(Vec<crate::TargetMachine::TargetMachineError>),
 }
 
-/// D-TARGET-* production hook: validate a selected typed target profile from
+/// D-TARGET-* production hook: validate a selected typed target machine from
 /// sema facts before codegen. CLI/UI wording remains future work; this returns
-/// profile errors as data.
-pub fn compile_bundle_path_with_target_profile(
+/// machine errors as data.
+pub fn compile_bundle_path_with_target_machine(
     file: &str,
     mode: crate::Sema::CompileMode,
-    profile: &crate::TargetProfile::TargetProfile,
-) -> Result<crate::CompileOutput, TargetProfileCompileError> {
-    let usage = target_profile_usage_for_file(file, mode)
-        .map_err(TargetProfileCompileError::Diagnostics)?;
-    let profile_errors = profile.validate(&usage);
-    if !profile_errors.is_empty() {
-        return Err(TargetProfileCompileError::Profile(profile_errors));
+    machine: &crate::TargetMachine::TargetMachine,
+) -> Result<crate::CompileOutput, TargetMachineCompileError> {
+    let usage = target_machine_usage_for_file(file, mode)
+        .map_err(TargetMachineCompileError::Diagnostics)?;
+    let machine_errors = machine.validate(&usage);
+    if !machine_errors.is_empty() {
+        return Err(TargetMachineCompileError::Machine(machine_errors));
     }
     compile_bundle_path_opts_full(
         file,
         mode,
-        profile.no_os,
+        machine.no_os,
         false,
         false,
         false,
         false,
-        Some(profile.triple.as_str()),
+        Some(machine.triple.as_str()),
         None,
     )
-    .map_err(TargetProfileCompileError::Diagnostics)
+    .map_err(TargetMachineCompileError::Diagnostics)
 }
 
-/// Artifacts from a typed no-OS profile build (linker, map, audit, size, ELF).
+/// Artifacts from a typed no-OS machine build (linker, map, audit, size, ELF).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TargetFirmwareArtifacts {
     pub out_dir: std::path::PathBuf,
@@ -105,46 +105,46 @@ pub struct TargetFirmwareArtifacts {
     pub map: std::path::PathBuf,
     pub elf: std::path::PathBuf,
     pub audit_json: std::path::PathBuf,
-    pub size_budget: crate::TargetProfile::SizeBudgetReport,
+    pub size_budget: crate::TargetMachine::SizeBudgetReport,
     pub audit: String,
 }
 
-/// D-TARGET-*: validate profile, generate linker/startup, link firmware ELF,
+/// D-TARGET-*: validate machine, generate linker/startup, link firmware ELF,
 /// write audit + size budget under `out_dir` (typically `.jet/target/<name>/`).
-pub fn build_target_profile_firmware(
-    profile: &crate::TargetProfile::TargetProfile,
-    usage: &crate::TargetProfile::TargetProfileUse,
+pub fn build_target_machine_firmware(
+    machine: &crate::TargetMachine::TargetMachine,
+    usage: &crate::TargetMachine::TargetMachineUse,
     out_dir: &std::path::Path,
-) -> Result<TargetFirmwareArtifacts, TargetProfileCompileError> {
-    use crate::TargetProfile::{ExecutionTier, TargetProfileError};
+) -> Result<TargetFirmwareArtifacts, TargetMachineCompileError> {
+    use crate::TargetMachine::{ExecutionTier, TargetMachineError};
     use std::fs;
     use std::process::Command;
 
-    if let Err(err) = profile.supports_execution_tier(ExecutionTier::Aot) {
-        return Err(TargetProfileCompileError::Profile(vec![err]));
+    if let Err(err) = machine.supports_execution_tier(ExecutionTier::Aot) {
+        return Err(TargetMachineCompileError::Machine(vec![err]));
     }
     // Explicit honesty: Dev/JIT are rejected for no-OS before any artifact work.
-    if let Err(err) = profile.supports_execution_tier(ExecutionTier::Dev) {
+    if let Err(err) = machine.supports_execution_tier(ExecutionTier::Dev) {
         // expected for no-os; record in audit via execution field
         let _ = err;
     }
-    let mut errors = profile.validate(usage);
-    if !profile.no_os {
-        errors.push(TargetProfileError::HostedHasNoLinkerScript);
+    let mut errors = machine.validate(usage);
+    if !machine.no_os {
+        errors.push(TargetMachineError::HostedHasNoLinkerScript);
     }
     if !errors.is_empty() {
-        return Err(TargetProfileCompileError::Profile(errors));
+        return Err(TargetMachineCompileError::Machine(errors));
     }
 
-    let linker = profile
+    let linker = machine
         .generate_linker_script()
-        .map_err(|e| TargetProfileCompileError::Profile(vec![e]))?;
-    let startup = profile
+        .map_err(|e| TargetMachineCompileError::Machine(vec![e]))?;
+    let startup = machine
         .generate_startup_source()
-        .map_err(|e| TargetProfileCompileError::Profile(vec![e]))?;
+        .map_err(|e| TargetMachineCompileError::Machine(vec![e]))?;
 
     fs::create_dir_all(out_dir).map_err(|e| {
-        TargetProfileCompileError::Profile(vec![TargetProfileError::FirmwareBuildFailed {
+        TargetMachineCompileError::Machine(vec![TargetMachineError::FirmwareBuildFailed {
             detail: format!("create out dir: {e}"),
         }])
     })?;
@@ -154,25 +154,25 @@ pub fn build_target_profile_firmware(
     let obj_path = out_dir.join("startup.o");
     let map_path = out_dir.join("firmware.map");
     let elf_path = out_dir.join("firmware.elf");
-    let audit_path = out_dir.join(format!("{}.target.json", sanitize_name(&profile.name)));
+    let audit_path = out_dir.join(format!("{}.target.json", sanitize_name(&machine.name)));
 
     fs::write(&linker_path, &linker).map_err(|e| {
-        TargetProfileCompileError::Profile(vec![TargetProfileError::FirmwareBuildFailed {
+        TargetMachineCompileError::Machine(vec![TargetMachineError::FirmwareBuildFailed {
             detail: format!("write linker: {e}"),
         }])
     })?;
     fs::write(&startup_path, &startup.contents).map_err(|e| {
-        TargetProfileCompileError::Profile(vec![TargetProfileError::FirmwareBuildFailed {
+        TargetMachineCompileError::Machine(vec![TargetMachineError::FirmwareBuildFailed {
             detail: format!("write startup: {e}"),
         }])
     })?;
 
-    let clang = resolve_target_clang().map_err(TargetProfileCompileError::Profile)?;
-    let lld = resolve_tool("ld.lld").map_err(TargetProfileCompileError::Profile)?;
+    let clang = resolve_target_clang().map_err(TargetMachineCompileError::Machine)?;
+    let lld = resolve_tool("ld.lld").map_err(TargetMachineCompileError::Machine)?;
 
     let mut clang_cmd = Command::new(&clang);
     clang_cmd
-        .arg(format!("--target={}", profile.triple))
+        .arg(format!("--target={}", machine.triple))
         .arg("-nostdlib")
         .arg("-ffreestanding")
         .arg("-fno-builtin")
@@ -181,13 +181,13 @@ pub fn build_target_profile_firmware(
         .arg("-o")
         .arg(&obj_path);
     let clang_out = clang_cmd.output().map_err(|e| {
-        TargetProfileCompileError::Profile(vec![TargetProfileError::FirmwareBuildFailed {
+        TargetMachineCompileError::Machine(vec![TargetMachineError::FirmwareBuildFailed {
             detail: format!("spawn clang: {e}"),
         }])
     })?;
     if !clang_out.status.success() {
-        return Err(TargetProfileCompileError::Profile(vec![
-            TargetProfileError::FirmwareBuildFailed {
+        return Err(TargetMachineCompileError::Machine(vec![
+            TargetMachineError::FirmwareBuildFailed {
                 detail: format!(
                     "clang failed: {}",
                     String::from_utf8_lossy(&clang_out.stderr).trim()
@@ -203,17 +203,17 @@ pub fn build_target_profile_firmware(
         .arg("-o")
         .arg(&elf_path)
         .arg(&obj_path);
-    if profile.triple.contains("aarch64") {
+    if machine.triple.contains("aarch64") {
         link_cmd.arg("--image-base=0x40000000");
     }
     let link_out = link_cmd.output().map_err(|e| {
-        TargetProfileCompileError::Profile(vec![TargetProfileError::FirmwareBuildFailed {
+        TargetMachineCompileError::Machine(vec![TargetMachineError::FirmwareBuildFailed {
             detail: format!("spawn ld.lld: {e}"),
         }])
     })?;
     if !link_out.status.success() {
-        return Err(TargetProfileCompileError::Profile(vec![
-            TargetProfileError::FirmwareBuildFailed {
+        return Err(TargetMachineCompileError::Machine(vec![
+            TargetMachineError::FirmwareBuildFailed {
                 detail: format!(
                     "ld.lld failed: {}",
                     String::from_utf8_lossy(&link_out.stderr).trim()
@@ -225,17 +225,17 @@ pub fn build_target_profile_firmware(
     let artifact_bytes = fs::metadata(&elf_path)
         .map(|m| m.len())
         .unwrap_or(0);
-    let size_budget = profile.size_budget(usage, artifact_bytes);
+    let size_budget = machine.size_budget(usage, artifact_bytes);
     if !size_budget.ok() {
-        return Err(TargetProfileCompileError::Profile(vec![
-            TargetProfileError::SizeBudgetExceeded {
+        return Err(TargetMachineCompileError::Machine(vec![
+            TargetMachineError::SizeBudgetExceeded {
                 report: size_budget,
             },
         ]));
     }
-    let audit = profile.audit_json_with_budget(usage, Some(&size_budget));
+    let audit = machine.audit_json_with_budget(usage, Some(&size_budget));
     fs::write(&audit_path, &audit).map_err(|e| {
-        TargetProfileCompileError::Profile(vec![TargetProfileError::FirmwareBuildFailed {
+        TargetMachineCompileError::Machine(vec![TargetMachineError::FirmwareBuildFailed {
             detail: format!("write audit: {e}"),
         }])
     })?;
@@ -255,8 +255,8 @@ pub fn build_target_profile_firmware(
 /// Run QEMU virt smoke for an aarch64 no-OS ELF; returns serial output.
 pub fn qemu_virt_aarch64_smoke(
     elf: &std::path::Path,
-) -> Result<String, Vec<crate::TargetProfile::TargetProfileError>> {
-    use crate::TargetProfile::TargetProfileError;
+) -> Result<String, Vec<crate::TargetMachine::TargetMachineError>> {
+    use crate::TargetMachine::TargetMachineError;
     use std::process::Command;
 
     let qemu = resolve_tool("qemu-system-aarch64")?;
@@ -273,7 +273,7 @@ pub fn qemu_virt_aarch64_smoke(
         .arg(elf)
         .output()
         .map_err(|e| {
-            vec![TargetProfileError::FirmwareBuildFailed {
+            vec![TargetMachineError::FirmwareBuildFailed {
                 detail: format!("spawn qemu: {e}"),
             }]
         })?;
@@ -285,7 +285,7 @@ pub fn qemu_virt_aarch64_smoke(
     if serial.contains("OK") {
         Ok(serial)
     } else {
-        Err(vec![TargetProfileError::FirmwareBuildFailed {
+        Err(vec![TargetMachineError::FirmwareBuildFailed {
             detail: format!(
                 "qemu smoke missing OK marker (status={:?}); serial={serial:?}",
                 output.status.code()
@@ -294,22 +294,36 @@ pub fn qemu_virt_aarch64_smoke(
     }
 }
 
-/// D-TARGET-AUDIT1: machine audit JSON for a named board profile.
-pub fn target_profile_dossier_json(profile_name: &str) -> Result<String, String> {
-    let profile = match profile_name {
+/// D-CONF-WORD1=A: the machine axis. `--target` answers what machine this
+/// build is for, whether the name is a rustc triple or a declared board.
+pub fn target_machine_by_name(name: &str) -> Option<crate::TargetMachine::TargetMachine> {
+    match name {
         "board.sensor_v1" | "firmware" | "sensor" => {
-            crate::TargetProfile::TargetProfile::board_sensor_v1()
+            Some(crate::TargetMachine::TargetMachine::board_sensor_v1())
         }
-        "board.virt_aarch64" | "virt" => crate::TargetProfile::TargetProfile::board_virt_aarch64(),
-        "hosted" => crate::TargetProfile::TargetProfile::hosted("x86_64-unknown-linux-gnu"),
-        other => {
-            return Err(format!(
-                "unknown target profile `{other}` (try board.sensor_v1, board.virt_aarch64, hosted)"
-            ))
+        "board.virt_aarch64" | "virt" => {
+            Some(crate::TargetMachine::TargetMachine::board_virt_aarch64())
         }
+        "hosted" => Some(crate::TargetMachine::TargetMachine::hosted(
+            "x86_64-unknown-linux-gnu",
+        )),
+        _ => None,
+    }
+}
+
+/// The machine names `--target` accepts beside a rustc triple.
+pub const TARGET_MACHINE_NAMES: &[&str] = &["board.sensor_v1", "board.virt_aarch64", "hosted"];
+
+/// D-TARGET-AUDIT1: machine audit JSON for a named board machine.
+pub fn target_machine_dossier_json(machine_name: &str) -> Result<String, String> {
+    let Some(machine) = target_machine_by_name(machine_name) else {
+        return Err(format!(
+            "unknown target machine `{machine_name}` (try {})",
+            TARGET_MACHINE_NAMES.join(", ")
+        ));
     };
-    let usage = crate::TargetProfile::TargetProfileUse::default();
-    Ok(profile.audit_json(&usage))
+    let usage = crate::TargetMachine::TargetMachineUse::default();
+    Ok(machine.audit_json(&usage))
 }
 
 fn sanitize_name(name: &str) -> String {
@@ -318,7 +332,7 @@ fn sanitize_name(name: &str) -> String {
         .collect()
 }
 
-fn resolve_target_clang() -> Result<std::path::PathBuf, Vec<crate::TargetProfile::TargetProfileError>> {
+fn resolve_target_clang() -> Result<std::path::PathBuf, Vec<crate::TargetMachine::TargetMachineError>> {
     if let Ok(path) = std::env::var("JET_TARGET_CLANG") {
         let p = std::path::PathBuf::from(path);
         if p.is_file() {
@@ -343,11 +357,11 @@ fn resolve_target_clang() -> Result<std::path::PathBuf, Vec<crate::TargetProfile
 
 fn resolve_tool(
     name: &str,
-) -> Result<std::path::PathBuf, Vec<crate::TargetProfile::TargetProfileError>> {
+) -> Result<std::path::PathBuf, Vec<crate::TargetMachine::TargetMachineError>> {
     if let Ok(path) = which_tool(name) {
         return Ok(path);
     }
-    Err(vec![crate::TargetProfile::TargetProfileError::FirmwareToolchainMissing {
+    Err(vec![crate::TargetMachine::TargetMachineError::FirmwareToolchainMissing {
         tool: name.to_string(),
     }])
 }
@@ -437,30 +451,30 @@ pub fn compile_bundle_path_output_opts(
     )
 }
 
-fn target_profile_usage_for_file(
+fn target_machine_usage_for_file(
     file: &str,
     mode: crate::Sema::CompileMode,
-) -> Result<crate::TargetProfile::TargetProfileUse, Vec<Diagnostic>> {
+) -> Result<crate::TargetMachine::TargetMachineUse, Vec<Diagnostic>> {
     let mut bundle = crate::Loader::load_entry_with_overlay(file, None, false)?;
     let diags = crate::Sema::check_bundle(&mut bundle, mode);
     let _lints = gate_diagnostics(std::mem::take(&mut bundle.parse_teaching), diags, Vec::new())?;
     let mmio = collect_mmio_usage(&bundle);
     let mut core_apis: Vec<String> = bundle.used_core.into_iter().collect();
     core_apis.sort();
-    Ok(crate::TargetProfile::TargetProfileUse {
+    Ok(crate::TargetMachine::TargetMachineUse {
         core_apis,
         mmio,
-        ..crate::TargetProfile::TargetProfileUse::default()
+        ..crate::TargetMachine::TargetMachineUse::default()
     })
 }
 
 #[derive(Clone, Copy)]
 struct PtrFact {
     address: u64,
-    size: crate::TargetProfile::ByteSize,
+    size: crate::TargetMachine::ByteSize,
 }
 
-fn collect_mmio_usage(bundle: &crate::AST::ProgramBundle) -> Vec<crate::TargetProfile::MmioAccess> {
+fn collect_mmio_usage(bundle: &crate::AST::ProgramBundle) -> Vec<crate::TargetMachine::MmioAccess> {
     let mut out = Vec::new();
     for module in &bundle.modules {
         let core_aliases = core_aliases(module);
@@ -509,7 +523,7 @@ fn core_aliases(module: &crate::AST::LoadedModule) -> std::collections::HashMap<
 fn collect_mmio_func(
     f: &crate::AST::Func,
     core_aliases: &std::collections::HashMap<String, String>,
-    out: &mut Vec<crate::TargetProfile::MmioAccess>,
+    out: &mut Vec<crate::TargetMachine::MmioAccess>,
 ) {
     let mut ptrs = std::collections::HashMap::new();
     let reason = if f.is_unsafe {
@@ -525,7 +539,7 @@ fn collect_mmio_stmts(
     core_aliases: &std::collections::HashMap<String, String>,
     ptrs: &mut std::collections::HashMap<String, PtrFact>,
     unsafe_reason: Option<&str>,
-    out: &mut Vec<crate::TargetProfile::MmioAccess>,
+    out: &mut Vec<crate::TargetMachine::MmioAccess>,
 ) {
     for stmt in stmts {
         match stmt {
@@ -612,7 +626,7 @@ fn collect_mmio_for_kind(
     core_aliases: &std::collections::HashMap<String, String>,
     ptrs: &mut std::collections::HashMap<String, PtrFact>,
     unsafe_reason: Option<&str>,
-    out: &mut Vec<crate::TargetProfile::MmioAccess>,
+    out: &mut Vec<crate::TargetMachine::MmioAccess>,
 ) {
     match kind {
         crate::AST::ForKind::Range { start, end, step, exclusive: _ } => {
@@ -636,7 +650,7 @@ fn collect_mmio_expr(
     core_aliases: &std::collections::HashMap<String, String>,
     ptrs: &std::collections::HashMap<String, PtrFact>,
     unsafe_reason: Option<&str>,
-    out: &mut Vec<crate::TargetProfile::MmioAccess>,
+    out: &mut Vec<crate::TargetMachine::MmioAccess>,
 ) {
     match expr {
         crate::AST::Expr::PtrFromAddr { addr, .. } => {
@@ -654,11 +668,11 @@ fn collect_mmio_expr(
                 if let Some(first) = args.first() {
                     if let crate::AST::Expr::Ident(name, _) = &first.expr {
                         if let Some(fact) = ptrs.get(name) {
-                            out.push(crate::TargetProfile::MmioAccess {
+                            out.push(crate::TargetMachine::MmioAccess {
                                 address: fact.address,
                                 size: fact.size,
                                 unsafe_gate: unsafe_reason.map(|reason| {
-                                    crate::TargetProfile::UnsafeGate {
+                                    crate::TargetMachine::UnsafeGate {
                                         reason: reason.to_string(),
                                     }
                                 }),
@@ -756,17 +770,17 @@ fn ptr_fact_from_expr(expr: &crate::AST::Expr) -> Option<PtrFact> {
     })
 }
 
-fn byte_size_for_type(ty: &crate::AST::Type) -> Option<crate::TargetProfile::ByteSize> {
+fn byte_size_for_type(ty: &crate::AST::Type) -> Option<crate::TargetMachine::ByteSize> {
     match ty {
-        crate::AST::Type::Bool => Some(crate::TargetProfile::ByteSize::bytes(1)),
+        crate::AST::Type::Bool => Some(crate::TargetMachine::ByteSize::bytes(1)),
         crate::AST::Type::Char | crate::AST::Type::Float32 => {
-            Some(crate::TargetProfile::ByteSize::bytes(4))
+            Some(crate::TargetMachine::ByteSize::bytes(4))
         }
         crate::AST::Type::Int | crate::AST::Type::Float | crate::AST::Type::String => {
-            Some(crate::TargetProfile::ByteSize::bytes(8))
+            Some(crate::TargetMachine::ByteSize::bytes(8))
         }
         crate::AST::Type::IntN { bits, .. } => {
-            Some(crate::TargetProfile::ByteSize::bytes((*bits as u64) / 8))
+            Some(crate::TargetMachine::ByteSize::bytes((*bits as u64) / 8))
         }
         crate::AST::Type::Tagged { inner, .. } => byte_size_for_type(inner),
         _ => None,

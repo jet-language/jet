@@ -22,7 +22,7 @@ rustup target add aarch64-unknown-linux-gnu
 Run `jet self doctor --target=aarch64-unknown-linux-gnu` to check whether the
 toolchain component is present before building.
 
-## Freestanding profile
+## Freestanding machine
 
 The `--freestanding` flag rejects OS-dependent APIs at compile time (E3301)
 and compiles with `panic=abort` (D-CROSS2). Only `core`-level modules are
@@ -51,30 +51,30 @@ Combine with a cross target:
 jet build --freestanding --target=aarch64-unknown-linux-gnu 61_freestanding.jet
 ```
 
-## Typed target profile facts
+## Typed target machine facts
 
 Card #239 / D-TARGET-* makes freestanding and embedded builds use typed board
-profiles. Hosted Jet keeps hidden defaults. A selected no-OS profile carries
+machines. Hosted Jet keeps hidden defaults. A selected no-OS machine carries
 these facts before codegen and into build artifacts:
 
 - target triple plus `no-os`
 - named memory regions: origin, size in bytes/KiB/MiB, kind (`flash`, `ram`,
   `mmio`, `reserved`), access (`r`, `rw`, `rx`, `rwx`)
-- linker provenance: generated from profile facts, or a file path with a
+- linker provenance: generated from machine facts, or a file path with a
   `sha256:` hash
 - allocator policy: none, fixed region/size, or hosted default
 - panic policy: abort, report sink, or hosted default
-- execution honesty: no-OS profiles are AOT-only (`dev` / `jit` rejected)
+- execution honesty: no-OS machines are AOT-only (`dev` / `jit` rejected)
 - audit requirements for build artifact plus dossier lens
 
 Validation is data-first. It reports missing flash/RAM, overlapping or
 overflowing memory, RAM budget overflow, heap use with no allocator, hosted
-Core APIs on a no-OS profile, MMIO outside declared regions, MMIO without an
+Core APIs on a no-OS machine, MMIO outside declared regions, MMIO without an
 unsafe audit gate, missing panic policy, and missing linker provenance.
 
 ### Real firmware artifacts
 
-Selecting a typed profile builds deterministic firmware under
+Selecting a typed machine builds deterministic firmware under
 `.jet/target/<name>/` (tests use a temp dir):
 
 - `memory.ld` — generated linker script from memory regions
@@ -85,7 +85,7 @@ Selecting a typed profile builds deterministic firmware under
 
 Representative boards:
 
-| Profile | Triple | Proof |
+| Machine | Triple | Proof |
 |---------|--------|-------|
 | `board.sensor_v1` | `thumbv7em-none-eabihf` | MCU ELF + map + audit + flash budget |
 | `board.virt_aarch64` | `aarch64-unknown-none` | QEMU `virt` boots and prints `OK` |
@@ -95,9 +95,9 @@ jet inspect dossier target board.sensor_v1
 jet inspect dossier target board.virt_aarch64 --json
 ```
 
-Hostile profiles fail closed (overlap, missing panic, heap without allocator,
+Hostile machines fail closed (overlap, missing panic, heap without allocator,
 MMIO outside regions). Unsupported Dev/JIT paths return
-`ExecutionTierUnsupported` for no-OS profiles.
+`ExecutionTierUnsupported` for no-OS machines.
 
 ## Running under QEMU (D-CROSS3 local harness)
 
@@ -110,8 +110,8 @@ Arch), then:
 qemu-aarch64-static ./build/61_freestanding
 ```
 
-For a typed no-OS profile, QEMU system-mode is the live proof path. The
-`board.virt_aarch64` profile builds `firmware.elf` and boots under:
+For a typed no-OS machine, QEMU system-mode is the live proof path. The
+`board.virt_aarch64` machine builds `firmware.elf` and boots under:
 
 ```sh
 qemu-system-aarch64 \
@@ -121,7 +121,7 @@ qemu-system-aarch64 \
   -nographic
 ```
 
-The smoke harness expects the UART to print `OK` (see `tests/target_profiles.rs`).
+The smoke harness expects the UART to print `OK` (see `tests/target_machines.rs`).
 
 ## Checking target availability
 
@@ -137,11 +137,11 @@ Adds a `cross` section to the doctor report:
 ## Caveats (v1)
 
 - No board-support package or HAL library (use the low-level tier directly).
-- Jet module spelling for board profiles (`module board.sensor_v1 { … }` per
-  D-TARGET-SURFACE1) selects through typed profile builders today; package
-  `targets: { profile: … }` wiring stays on the existing `targets:` surface.
-- Profile validation errors remain data (`TargetProfileError`) until a follow-up
+- Jet module spelling for board machines (`module board.sensor_v1 { … }` per
+  D-TARGET-SURFACE1) selects through typed machine builders today; package
+  `targets: { machine: … }` wiring stays on the existing `targets:` surface.
+- Machine validation errors remain data (`TargetMachineError`) until a follow-up
   diagnostic ballot promotes them to registered codes.
 - WASM is deferred to post-epoch (no browser runtime in v1).
 - E3303 (missing global allocator in freestanding) is registered. The typed
-  profile model catches the same fact as data.
+  machine model catches the same fact as data.

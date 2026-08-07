@@ -309,13 +309,13 @@ mod tests {
     }
 
     #[test]
-    fn parses_workflow_and_environment_profiles_separately() {
-        let args: Vec<String> = ["--profile", "work", "--env-profile", "full"]
+    fn parses_preset_and_environment_module_separately() {
+        let args: Vec<String> = ["--preset", "work", "--env-profile", "full"]
             .iter()
             .map(|s| (*s).to_string())
             .collect();
         let p = parse_args(&args);
-        assert_eq!(p.flags.profile.as_deref(), Some("work"));
+        assert_eq!(p.flags.preset.as_deref(), Some("work"));
         assert_eq!(p.flags.environment_profile.as_deref(), Some("full"));
     }
 

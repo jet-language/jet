@@ -74,25 +74,25 @@ module workspace {
 Jet rejects absolute paths, `..`, escaping symlinks, duplicate physical
 directories, duplicate Package names, and nested member roots.
 
-## Environment profiles and language packs
+## Environment presets and language packs
 
-Workflow profiles resolve parents before children. `--profile` selects one
-named workflow profile for the command. The `env.<name>` modules are separate
-environment profiles: `--env-profile full` selects one module when an
-environment declares more than one. Without that flag, `dev`, then `default`,
-then lexical order chooses the environment profile. Conflicting facts fail
-closed. JetOS/tool profiles keep their own commands and state.
+Presets resolve parents before children. `--preset` selects one named preset
+for the command. The `env.<name>` modules are separate compositions:
+`--env-profile full` selects one module when an environment declares more than
+one. Without that flag, `dev`, then `default`, then lexical order chooses the
+module. Conflicting facts fail closed. JetOS/tool generations keep their own
+commands and state.
 
 Language selections are typed records. Enabled records expand through the
 closed catalog into ordinary package references. Disabled records remain in
 the plan and in the trust fingerprint, but missing tools for a disabled pack do
 not block the environment.
 
-## Source-backed package profiles
+## Source-backed package generations
 
-Package profiles are separate from shell environment profiles. A
-`profile.<name>` declaration names package refs, parent profiles, and exact
-path collision choices. `user.<name>` and JetOS use the same profile graph.
+A package generation is separate from a shell environment preset. A
+`profile.<name>` declaration names package refs, parent generations, and exact
+path collision choices. `user.<name>` and JetOS use the same generation graph.
 
 ```text
 module profile.base {
@@ -143,7 +143,7 @@ a second resolver or an untracked PATH shortcut.
 
 ```text
 module env.dev {
-    profiles: {
+    presets: {
         base: .{ packages: ["git@nixpkgs"] }
         work: .{ extends: ["base"], hostname: "build-01" }
     }

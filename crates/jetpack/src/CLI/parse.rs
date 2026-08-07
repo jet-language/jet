@@ -62,11 +62,11 @@ pub(super) struct Flags {
     pub(super) studio_serve: Option<String>,
     /// D-JOS-STUDIO-HOST1=A: selected jetos host for Studio.
     pub(super) studio_host: Option<String>,
-    /// D-ENV-PROFILE1: explicit named environment profile.
-    pub(super) profile: Option<String>,
-    /// D-ENV-FACET1: explicit profile selecting one `env.<name>` contribution.
-    /// This is separate from `--profile`, which selects a named workflow
-    /// profile declared inside the environment.
+    /// D-ENV-PROFILE1, renamed by D-CONF-WORD1=A: the named environment
+    /// composition to enter, declared under `presets:`.
+    pub(super) preset: Option<String>,
+    /// D-ENV-FACET1: explicit selector for one `env.<name>` contribution.
+    /// Separate from `--preset`, which selects a declared composition.
     pub(super) environment_profile: Option<String>,
     /// U20: `jetpack add <ref> --adapt` drafts an adapter declaration instead
     /// of editing `env.jet` with a plain package ref.
@@ -162,7 +162,7 @@ pub(super) fn parse_args_for(verb: &str, args: &[String]) -> Parsed {
         os_disk: None,
         studio_serve: None,
         studio_host: None,
-        profile: None,
+        preset: None,
         environment_profile: None,
     };
     let mut positional = Vec::new();
@@ -187,10 +187,10 @@ pub(super) fn parse_args_for(verb: &str, args: &[String]) -> Parsed {
             a if a == Syntax::TRUST_BYPASS_FLAG => flags.trust = true,
             a if a == Syntax::ENV_FLAG_FLAKE => flags.flake = true,
             a if a == Syntax::ENV_FLAG_PURE => flags.pure = true,
-            a if a == Syntax::ENV_FLAG_PROFILE => {
+            a if a == Syntax::ENV_FLAG_PRESET => {
                 i += 1;
                 if let Some(name) = args.get(i) {
-                    flags.profile = Some(name.clone());
+                    flags.preset = Some(name.clone());
                 }
             }
             a if a == Syntax::ENV_FLAG_ENV_PROFILE => {
@@ -377,6 +377,22 @@ pub fn main(args: Vec<String>) -> i32 {
     if let Some(diag) = crate::MemberSelect::reject_filter_dsl(rest) {
         let theme = Theme::resolve_choice(color);
         theme.error_coded(&diag.code, &diag.what, &diag.why, &diag.fix);
+        return 2;
+    }
+    // D-CONF-WORD1=A: `profile` names one thing, the optimize bundle. A named
+    // environment composition is a preset.
+    if rest.iter().any(|a| a == Syntax::ENV_FLAG_PROFILE_RETIRED) {
+        let theme = Theme::resolve_choice(color);
+        theme.error_coded(
+            "E1300",
+            &format!("`{}` is retired", Syntax::ENV_FLAG_PROFILE_RETIRED),
+            "profile answers how hard to optimize a build; a named environment composition is a preset",
+            &format!(
+                "select the composition with `{} <name>`, declared under `{}:`",
+                Syntax::ENV_FLAG_PRESET,
+                Syntax::ENV_FIELD_PRESETS
+            ),
+        );
         return 2;
     }
     let theme = Theme::resolve_choice(color);

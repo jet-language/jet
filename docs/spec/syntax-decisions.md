@@ -5727,3 +5727,33 @@ rather than reporting it as a malformed field.
 Every in-repo `package.jet`/`pkg.jet` (examples, tests, fixtures) moved to
 the bare-identity spelling in the same change; no fallback parse path
 remains. Flagship: `examples/features/packages/outputs_build/`. Card #1517.
+
+## D-CONF-WORD1=A — one meaning for the word profile (2026-08-06, card #1526)
+
+`profile` names exactly one thing: the optimize bundle selected by
+`--profile` and its ratified `--release` sugar. `release`, `debug`, and `ci`
+keep the word, and D-BUILDPROFILE1 is untouched.
+
+The board identity is a machine description, so it moved into the machine
+vocabulary: `TargetProfile` is now `TargetMachine`, and `--target` selects it
+by a declared machine name (`board.sensor_v1`, `board.virt_aarch64`, `hosted`)
+beside an ordinary rustc triple. A no-OS machine carries the freestanding fact
+itself, so naming it is enough. The `targets:` manifest field (D-TGT1-4) and
+build-graph targets (D-BUILDTARGET1) keep their own words, and E1216 is
+unchanged.
+
+A named environment composition is a preset. `ENV_FIELD_PROFILES` becomes
+`ENV_FIELD_PRESETS` (`presets:`) and `ENV_FLAG_PROFILE` becomes
+`ENV_FLAG_PRESET` (`--preset`); the retired `--profile` spelling teaches E1300
+and selects nothing. `ProfileSpec`, `ProfileSet`, `ResolvedProfile`, and
+`ProfileError` renamed to their `Preset` spellings.
+
+Package and user profiles are generations. D-JPK-PROFILE1's wording only:
+docs and diagnostic text (E1332, E1335) read `generation`, and no flag,
+field, or on-disk schema changed.
+
+Every in-repo consumer moved in the same change; no alias or fallback
+spelling remains. `--env-profile` still selects one `env.<name>` module and
+is the one slice this card left open: the ruling folds it into `--preset`,
+but that name is taken by the `presets:` selector, so the replacement word is
+an owner call. Card #1526.

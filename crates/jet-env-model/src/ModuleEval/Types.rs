@@ -9,7 +9,7 @@ use super::super::Recipe::BuildRecipe;
 use super::super::RefSpec::SourceTable;
 use super::Environment::{
     EnvironmentIntegration, EnvironmentLifecycle, IntegrationFactProjection, LanguageExpansion, LanguagePack,
-    LanguageProjection, LanguageSpec, PackageProfileSpec, ProfileSpec, ResolvedProfile,
+    LanguageProjection, LanguageSpec, PackageProfileSpec, PresetSpec, ResolvedPreset,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,7 +72,7 @@ pub struct EvaluatedModule {
     /// D-ENV-LIFECYCLE1: typed lifecycle facts captured from env fields.
     pub lifecycle: EnvironmentLifecycle,
     /// D-ENV-PROFILE1: named profile contributions.
-    pub profiles: Vec<ProfileSpec>,
+    pub profiles: Vec<PresetSpec>,
     /// D-ENV-LANGPACK1: typed language-pack selections from this module.
     pub languages: Vec<LanguageSpec>,
     /// D-ENV-FILES1: managed environment-file declarations.
@@ -387,11 +387,11 @@ pub struct EnvPlan {
     /// Typed lifecycle facts for activation, checks, and reload.
     pub lifecycle: EnvironmentLifecycle,
     /// Named profiles before CLI/host selection.
-    pub profiles: Vec<ProfileSpec>,
+    pub profiles: Vec<PresetSpec>,
     /// Typed language-pack selections before catalog expansion.
     pub languages: Vec<LanguageSpec>,
     /// The profile selected by the evaluator/runtime, if one was requested.
-    pub selected_profile: Option<ResolvedProfile>,
+    pub selected_preset: Option<ResolvedPreset>,
     /// One evaluator-owned expansion shared by realization and trust. The
     /// `language_packs` field remains as a compatibility view for existing
     /// environment consumers; it is populated from this expansion.
@@ -426,9 +426,9 @@ pub struct EnvironmentFacts {
     pub source_files: Vec<String>,
     pub dev_services: Vec<DevServicePlan>,
     pub lifecycle: EnvironmentLifecycle,
-    pub profiles: Vec<ProfileSpec>,
+    pub profiles: Vec<PresetSpec>,
     pub languages: Vec<LanguageSpec>,
-    pub selected_profile: Option<ResolvedProfile>,
+    pub selected_preset: Option<ResolvedPreset>,
     pub language_expansion: LanguageExpansion,
     pub language_packs: Vec<LanguagePack>,
     pub language_projections: Vec<LanguageProjection>,

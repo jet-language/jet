@@ -68,7 +68,7 @@ pub use jet_driver::{
     Sema,
     Store as PkgStore,
     Syntax,
-    TargetProfile,
+    TargetMachine,
     Traits,
     AST,
     CFFI,

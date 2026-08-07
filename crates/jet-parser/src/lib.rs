@@ -3,7 +3,7 @@
 #![allow(unreachable_patterns)]
 // Re-export foundation + lexer so `crate::AST`, `crate::Lexer` etc. work in Parser/Formatter.
 pub use jet_lexer::{
-    CanonicalAST, Collections, Diagnostics, Generics, Lexer, Numeric, Syntax, TargetProfile,
+    CanonicalAST, Collections, Diagnostics, Generics, Lexer, Numeric, Syntax, TargetMachine,
     Traits, Policy, AST, SHA256,
 };
 mod FencedNames;
