@@ -911,7 +911,6 @@ pub const APPLIED_RULES: &[AppliedRule] = &[
     rule!("Env", sig!(param!("name", String)), FIELD_SITE),
     rule!("Persist", sig!(), DECLARATION_SITE),
     rule!("Track", sig!(), DECLARATION_SITE),
-    rule!("Known", sig!(), &[RuleSite::Declaration, RuleSite::Constant, RuleSite::Block, RuleSite::Statement]),
     rule!("Local", sig!(), DECLARATION_SITE),
     rule!("Shared", sig!(), DECLARATION_SITE),
     rule!("Meta", sig!(param!("category", String, "\"\""), param!("tunable", Bool, "false"), param!("maturity", Ident => "Maturity", ".Tested")), &[RuleSite::Function, RuleSite::Method, RuleSite::Declaration, RuleSite::Constant]),

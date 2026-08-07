@@ -349,13 +349,12 @@ fn item_span_start(item: &Item, src: &str) -> usize {
                     .rfind(&format!("#{}", Syntax::MARKER_PERSIST))
                     .unwrap_or(c.name_span.start)
             } else if c.is_comptime {
-                // Prefer force markers, then the live `#Known` marker. Retired
-                // keywords remain last-resort recovery starts.
+                // Prefer force markers; the compile-time mark rides the name.
+                // Retired keywords remain last-resort recovery starts.
                 let before = &src[..c.name_span.start];
                 before
                     .rfind("#Static")
                     .or_else(|| before.rfind("#Inline"))
-                    .or_else(|| before.rfind(&format!("#{}", Syntax::MARKER_KNOWN)))
                     .or_else(|| before.rfind(Syntax::KW_COMPTIME))
                     .or_else(|| before.rfind(Syntax::KW_CONST))
                     .unwrap_or(c.name_span.start)

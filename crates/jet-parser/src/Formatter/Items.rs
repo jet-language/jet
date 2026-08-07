@@ -1244,14 +1244,13 @@ impl<'a> Fmt<'a> {
             return;
         }
         if c.is_comptime {
-            // D-CONSTMARK1: `#Static` / `#Inline` precede `#Known`.
+            // D-CONSTMARK1: `#Static` / `#Inline` precede the marked name.
             for attr in &c.attrs {
                 match attr {
                     ConstAttr::ForceStatic => self.write("#Static "),
                     ConstAttr::ForceInline => self.write("#Inline "),
                 }
             }
-            self.write(&format!("#{} ", Syntax::MARKER_KNOWN));
             self.write(&c.name);
             self.write(" :: ");
             self.fmt_expr(&c.value, Prec::OrFallback);
@@ -1274,7 +1273,6 @@ impl<'a> Fmt<'a> {
             return;
         }
         // Fallback: treat as an explicit known value.
-        self.write(&format!("#{} ", Syntax::MARKER_KNOWN));
         self.write(&c.name);
         self.write(" :: ");
         self.fmt_expr(&c.value, Prec::OrFallback);

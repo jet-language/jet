@@ -103,9 +103,22 @@ pub const SIGIL_FENCE_CLOSE: &str = "]$";
 /// `#Track name :: expr` / `#Track name := expr`.
 pub const MARKER_TRACK: &str = "Track";
 
-/// D-VERDICT-1308-1/2: demand compile-time knowledge for a binding, block, or
-/// conditional. Ordinary foldable expressions need no marker.
-pub const MARKER_KNOWN: &str = "Known";
+/// D-META-STAGE1=B (ratified 2026-08-06, amends D-VERDICT-1308-1/2 and retires
+/// D-CTMARKER1): `$` is the one compile-time mark. It belongs to the name, so
+/// it is written at every mention — `$limit :: 1000` then `print("{$limit}")`.
+/// A bare mark opens a compile-time block (`$ { … }`) and precedes the `if` and
+/// `loop` verbs at compile time (`$if`, `$loop`). Ordinary foldable expressions
+/// need no mark. The retired `#Known` spellings teach E0377/E0378/E0379.
+pub const COMPTIME_MARK: &str = "$";
+
+/// Is this identifier a compile-time name? The mark is part of the identifier,
+/// so a plain name and a marked name never denote the same binding.
+pub fn is_comptime_name(name: &str) -> bool {
+    name.starts_with('$')
+}
+
+/// The retired marker spelling, kept only so the parser can teach the mark.
+pub const RETIRED_MARKER_KNOWN: &str = "Known";
 
 /// D-CANVASSTATE1=D (ratified 2026-07-09): statement switch-off attribute.
 /// `#Off <stmt>` parses and type-checks the statement, then emits no code.
@@ -706,10 +719,22 @@ pub const TYPE_PROGRAM_INFO: &str = "ProgramInfo";
 pub const TYPE_TYPE_INFO: &str = "TypeInfo";
 pub const TYPE_SOURCE_SPAN: &str = "SourceSpan";
 
-/// D-LAYOUT-FACTS1=B: the one focused compiler-owned type fact. The parser
-/// accepts this after `.` only in the contextual `$layout` form; it is not a
-/// user-declarable member name.
+/// D-LAYOUT-FACTS1=B / D-META-STAGE1=B: the compiler-owned type facts. The
+/// parser accepts these after `.` only in the contextual `$fact` form; they are
+/// not user-declarable member names.
 pub const COMPILER_FACT_LAYOUT: &str = "$layout";
+pub const COMPILER_FACT_NAME: &str = "$name";
+pub const COMPILER_FACT_FIELDS: &str = "$fields";
+/// Each compiler fact and the `TypeInfo` member it projects.
+pub const COMPILER_FACTS: &[(&str, &str)] = &[
+    (COMPILER_FACT_LAYOUT, "layout"),
+    (COMPILER_FACT_NAME, "name"),
+    (COMPILER_FACT_FIELDS, "fields"),
+];
+
+pub fn compiler_fact_member(fact: &str) -> Option<&'static str> {
+    COMPILER_FACTS.iter().find_map(|(name, member)| (*name == fact).then_some(*member))
+}
 pub const TYPE_LAYOUT_INFO: &str = "LayoutInfo";
 pub const TYPE_LAYOUT_FIELD: &str = "LayoutField";
 

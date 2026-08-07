@@ -381,6 +381,9 @@ pub fn name_case_for_category(category: &str) -> Option<NameCase> {
 
 pub fn name_has_case(name: &str, case: NameCase) -> bool {
     if name == "_" { return true; }
+    // D-META-STAGE1=B: the compile-time mark is part of the name; case policy
+    // reads the name under the mark.
+    let name = name.strip_prefix('$').unwrap_or(name);
     let name = name.strip_prefix('_').unwrap_or(name);
     if name.is_empty() || name.starts_with('_') || name.ends_with('_') || name.contains("__") { return false; }
     let mut chars = name.chars();
@@ -394,6 +397,10 @@ pub fn name_has_case(name: &str, case: NameCase) -> bool {
 }
 
 pub fn canonical_name_case(name: &str, case: NameCase) -> String {
+    // D-META-STAGE1=B: keep the compile-time mark, re-case the name under it.
+    if let Some(rest) = name.strip_prefix('$') {
+        return format!("${}", canonical_name_case(rest, case));
+    }
     match case {
         NameCase::Pascal => {
             let leading = name.starts_with('_');

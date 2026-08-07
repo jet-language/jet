@@ -390,6 +390,14 @@ impl<'a> Parser<'a> {
         let Some(i) = self.meta_attr_next_index() else {
             return false;
         };
+        // D-META-STAGE1=B: `#Meta(...) $name :: …` is a marked compile-time
+        // binding; the retired `#Known` lead still routes here to teach.
+        if matches!(
+            self.toks.get(i).map(|t| &t.kind),
+            Some(TokKind::Ident(n)) if Syntax::is_comptime_name(n)
+        ) {
+            return true;
+        }
         matches!(self.toks.get(i).map(|t| &t.kind), Some(TokKind::Hash))
             && matches!(
                 self.toks.get(i + 1).map(|t| &t.kind),
@@ -1543,6 +1551,17 @@ impl<'a> Parser<'a> {
                 self.finish_stmt()?;
                 Ok(Stmt::Val(binding))
             }
+            // D-META-STAGE1=B: the bare mark opens a compile-time block and
+            // precedes the `if` and `loop` verbs at compile time.
+            TokKind::Dollar => {
+                if matches!(self.peek2().kind, TokKind::KwIf) {
+                    return self.comptime_if_stmt();
+                }
+                if matches!(self.peek2().kind, TokKind::KwLoop) {
+                    return self.comptime_loop_stmt();
+                }
+                self.comptime_block_stmt()
+            }
             TokKind::Ident(n) if false && n == Syntax::FOREIGN_MATCH => {
                 let t = self.bump();
                 self.diags.push(Diagnostic::error(
@@ -2248,7 +2267,6 @@ impl<'a> Parser<'a> {
                     | Expr::Field(_, _, _)
                     | Expr::MethodCall { .. }
                     // D-CTMARKER1=C: `$name;` as a standalone statement — valid in comptime contexts.
-                    | Expr::ComptimeSplice { .. }
                     // S7: `expr?;` propagates a fallible result as a statement (E2-M7).
                     | Expr::Try(_, _, _)
                     | Expr::OrFallback { .. }

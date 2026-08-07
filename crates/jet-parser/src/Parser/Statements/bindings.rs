@@ -61,6 +61,22 @@ impl<'a> Parser<'a> {
             ));
         }
         let mutable = self.expect_bind_sigil()?;
+        // D-META-STAGE1=B: the mark is part of the name, so a marked binding is
+        // a compile-time binding. A compile-time value is computed once, before
+        // the program runs, so it is never mutable.
+        let is_comptime = Syntax::is_comptime_name(&name);
+        if is_comptime && mutable {
+            return Err(Diagnostic::error(
+                "E0380",
+                format!("`{name}` is a compile-time name, so it cannot be mutable"),
+                "a compile-time value is computed once, before the program runs".to_string(),
+                format!(
+                    "write `{name} {} value`, or drop the `$` mark for a runtime binding",
+                    Syntax::SIGIL_BIND_IMMUT
+                ),
+                Some(name_span),
+            ));
+        }
         // Bare `name := uninit` — type must ride a `Type.{ uninit }` head.
         if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_UNINIT)
             && matches!(
@@ -129,7 +145,7 @@ impl<'a> Parser<'a> {
             ty: None,
             ty_span: None,
             init,
-            is_comptime: false,
+            is_comptime,
             ct: None,
             uninit: false,
             arena_view: false,
@@ -427,7 +443,7 @@ impl<'a> Parser<'a> {
     /// D-VERDICT-1308-1: parse `#Known { … }`; recover retired `comptime`.
     /// Erases at codegen (build-time only). `$name` splice deferred to c155.
     pub(super) fn comptime_block_stmt(&mut self) -> Result<Stmt, Diagnostic> {
-        let start = self.take_known_lead()?;
+        let start = self.take_mark()?;
         self.expect(TokKind::LBrace, "to open the `#Known` block body")?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
@@ -437,12 +453,26 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// D-META-STAGE1=B: `$loop …` is the ratified `loop` verb at compile time,
+    /// not a second iteration form. It is one compile-time block holding one
+    /// loop, so it folds through the same path as `$ { … }` and emits no
+    /// runtime code.
+    pub(super) fn comptime_loop_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+        let start = self.take_mark()?;
+        let body = self.loop_stmt(None)?;
+        let end = self.toks[self.pos - 1].span.end;
+        Ok(Stmt::ComptimeBlock {
+            body: vec![body],
+            span: Span::new(start.start, end),
+        })
+    }
+
     /// D-VERDICT-1308-2: parse `#Known if <cond> { … } else { … }`.
     /// Both arms require `{ }` (braceless bodies are not allowed for `#Known if`).
     /// `else` is optional in statement position. Sema selects the arm; codegen
     /// emits only the selected arm (D-WHEN2: dropped arm is name-resolved only).
     pub(super) fn comptime_if_stmt(&mut self) -> Result<Stmt, Diagnostic> {
-        let start = self.take_known_lead()?;
+        let start = self.take_mark()?;
         self.bump(); // `if`
 
         // D-OSTARGET2=B (ratified 2026-07-03): the dispatch form
@@ -489,9 +519,11 @@ impl<'a> Parser<'a> {
         let then_body = self.block_stmts();
         let else_body = if matches!(self.peek().kind, TokKind::KwElse) {
             self.bump();
-            // Allow `else if` chained with another `#Known if`.
-            if (matches!(self.peek().kind, TokKind::KwComptime)
-                && matches!(self.peek2().kind, TokKind::KwIf))
+            // Allow `else if` chained with another `$if`.
+            if (matches!(
+                self.peek().kind,
+                TokKind::Dollar | TokKind::KwComptime
+            ) && matches!(self.peek2().kind, TokKind::KwIf))
                 || (self.at_known_lead() && matches!(self.peek3().kind, TokKind::KwIf))
             {
                 let chain = self.comptime_if_stmt()?;
@@ -514,14 +546,22 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// D-META-STAGE1=B: `$name :: expr`. The mark is part of the identifier, so
+    /// the lexer already carried it into the name and there is no lead to strip.
     pub(super) fn comptime_binding(&mut self) -> Result<Binding, Diagnostic> {
-        let retired = matches!(self.peek().kind, TokKind::KwComptime);
-        self.take_known_lead()?;
-        let (name, name_span) = self.expect_ident("after `#Known`")?;
-        if retired {
+        let retired = matches!(self.peek().kind, TokKind::KwComptime)
+            || self.at_known_lead();
+        let (name, name_span) = if retired {
+            self.take_mark()?;
+            let (name, span) = self.expect_ident("after the compile-time mark")?;
+            (format!("${name}"), span)
+        } else {
+            self.expect_ident("for the compile-time binding name")?
+        };
+        if matches!(self.peek().kind, TokKind::Eq) {
             self.expect(TokKind::Eq, "in the retired comptime binding")?;
         } else {
-            self.expect(TokKind::ColonColon, "in a `#Known` binding")?;
+            self.expect(TokKind::ColonColon, "in a compile-time binding")?;
         }
         let init = self.expr()?;
         Ok(Binding {
@@ -550,29 +590,66 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// D-META-STAGE1=B: `#Known` is retired. This detects the retired spelling
+    /// so each of its three forms teaches the mark instead of failing obscurely.
     pub(in crate::Parser) fn at_known_lead(&self) -> bool {
         matches!(self.peek().kind, TokKind::Hash)
-            && matches!(&self.peek2().kind, TokKind::Ident(name) if name == Syntax::MARKER_KNOWN)
+            && matches!(&self.peek2().kind, TokKind::Ident(name) if name == Syntax::RETIRED_MARKER_KNOWN)
     }
 
-    fn take_known_lead(&mut self) -> Result<Span, Diagnostic> {
+    /// D-META-STAGE1=B: consume the bare compile-time mark that opens a
+    /// compile-time block or precedes the `if` and `loop` verbs. Retired
+    /// `#Known` and `comptime` spellings are consumed with a teaching error.
+    fn take_mark(&mut self) -> Result<Span, Diagnostic> {
         if matches!(self.peek().kind, TokKind::KwComptime) {
             let span = self.bump().span;
             self.diags.push(Diagnostic::error(
                 "E0374",
                 "`comptime` is retired".to_string(),
-                "Jet folds ordinary foldable expressions automatically; explicit compile-time demand lives on the marker plane"
+                "Jet folds ordinary foldable expressions automatically; explicit compile-time demand is written with the `$` mark"
                     .to_string(),
-                "remove the keyword for ordinary code, or replace it with `#Known` when failure to compute now must stop the build"
+                "remove the keyword for ordinary code, or write `$name :: …` when failure to compute now must stop the build"
                     .to_string(),
                 Some(span),
             ));
             return Ok(span);
         }
-        let start = self.peek().span;
-        self.expect(TokKind::Hash, "to start `#Known`")?;
-        let (_, end) = self.expect_ident("after `#`")?;
-        Ok(Span::new(start.start, end.end))
+        if self.at_known_lead() {
+            let start = self.peek().span;
+            self.bump();
+            let end = self.bump().span;
+            let span = Span::new(start.start, end.end);
+            let (code, what, fix) = if matches!(self.peek().kind, TokKind::KwIf) {
+                (
+                    "E0378",
+                    "`#Known if` is retired",
+                    "write `$if condition { … }`",
+                )
+            } else if matches!(self.peek().kind, TokKind::LBrace) {
+                (
+                    "E0379",
+                    "`#Known { … }` is retired",
+                    "write `$ { … }`",
+                )
+            } else {
+                (
+                    "E0377",
+                    "`#Known name :: …` is retired",
+                    "write `$name :: …`, and write `$name` at every mention",
+                )
+            };
+            self.diags.push(Diagnostic::error(
+                code,
+                what.to_string(),
+                "one mark says compile time, and `$` is that mark (D-META-STAGE1=B)".to_string(),
+                fix.to_string(),
+                Some(span),
+            ));
+            return Ok(span);
+        }
+        let span = self.peek().span;
+        self.expect(TokKind::Dollar, "to start a compile-time block")?;
+        Ok(span)
     }
 
     // --- expressions -----------------------------------------------------

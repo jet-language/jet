@@ -1291,7 +1291,6 @@ impl<'a> Checker<'a> {
             | Expr::Todo { .. }
         | Expr::NoElse(_)
             | Expr::ReduceMarker(..)
-            | Expr::ComptimeSplice { .. }
             | Expr::IncDec { .. } => {}
         }
     }

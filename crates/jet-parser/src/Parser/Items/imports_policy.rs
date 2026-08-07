@@ -1164,6 +1164,10 @@ impl<'a> Parser<'a> {
                     TokKind::Hash if self.at_known_lead() => {
                         self.comptime_def().map(Item::Const)
                     }
+                    // D-META-STAGE1=B: a top-level `$name :: expr` binding.
+                    TokKind::Ident(ref n) if Syntax::is_comptime_name(n) => {
+                        self.comptime_def().map(Item::Const)
+                    }
                     TokKind::At => {
                         let t = self.bump();
                         self.diags.push(Diagnostic::error(

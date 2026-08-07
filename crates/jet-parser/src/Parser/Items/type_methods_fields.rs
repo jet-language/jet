@@ -399,16 +399,29 @@ impl<'a> Parser<'a> {
                     ));
                 }
                 TokKind::Hash if known => {
+                    let start = self.peek().span;
                     self.bump();
-                    self.bump();
+                    let end = self.bump().span;
+                    self.diags.push(Diagnostic::error(
+                        "E0377",
+                        "`#Known name :: …` is retired".to_string(),
+                        "one mark says compile time, and `$` is that mark (D-META-STAGE1=B)"
+                            .to_string(),
+                        "write `$name :: …`, and write `$name` at every mention".to_string(),
+                        Some(Span::new(start.start, end.end)),
+                    ));
                 }
+                // D-META-STAGE1=B: `$name :: expr` — the mark rides the name.
+                TokKind::Ident(ref n) if Syntax::is_comptime_name(n) => {}
                 _ => {
                     self.expect_kw(TokKind::KwComptime, "to start a comptime binding")?;
                 }
             }
-            let (name, name_span) = self.expect_ident("after `#Known`")?;
-            if known {
-                self.expect(TokKind::ColonColon, "after the `#Known` name")?;
+            let marked = matches!(&self.peek().kind, TokKind::Ident(n) if Syntax::is_comptime_name(n));
+            let (name, name_span) = self.expect_ident("for the compile-time binding name")?;
+            let name = if marked { name } else { format!("${name}") };
+            if known || marked {
+                self.expect(TokKind::ColonColon, "after the compile-time name")?;
             } else {
                 self.expect(TokKind::Eq, "after the retired comptime name")?;
             }

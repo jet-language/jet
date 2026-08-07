@@ -563,17 +563,6 @@ impl<'a> Parser<'a> {
                     }
                     Ok(Expr::Ident(type_name, span))
                 }
-                // D-CTMARKER1=C: `$name` — comptime splice expression.
-                TokKind::Dollar => {
-                    let dollar_span = self.bump().span;
-                    let (name, name_span) = self.expect_ident("after `$` in a comptime splice")?;
-                    let full = Span::new(dollar_span.start, name_span.end);
-                    Ok(Expr::ComptimeSplice {
-                        name,
-                        span: full,
-                        value: None,
-                    })
-                }
                 other => Err(Diagnostic::error(
                     "E0003",
                     format!("expected a value, found {}", describe(&other)),

@@ -252,8 +252,32 @@ impl<'a> Lexer<'a> {
                 '@' => toks.push(simple(self, TokKind::At, 1)),
                 '#' => toks.push(simple(self, TokKind::Hash, 1)),
                 // D-VERDICT-1320-1: fence open digraph `$[` is longest-match
-                // before the D-CTMARKER1 `$name` comptime splice.
+                // before the D-META-STAGE1 compile-time mark.
                 '$' if next == '[' => toks.push(simple(self, TokKind::FenceOpen, 2)),
+                // D-META-STAGE1=B: the compile-time mark belongs to the name,
+                // so `$word` is one identifier whose text carries the mark. A
+                // keyword after the mark stays a bare `$` plus that keyword
+                // (`$if`, `$loop`), and a lone `$` opens a compile-time block.
+                '$' if next.is_alphabetic() || next == '_' => {
+                    let mut j = self.i + 1;
+                    let mut name = String::from("$");
+                    while j < self.chars.len() {
+                        let ch = self.at(j);
+                        if ch.is_alphanumeric() || ch == '_' {
+                            name.push(ch);
+                            j += 1;
+                        } else {
+                            break;
+                        }
+                    }
+                    if keyword(&name[1..]).is_some() {
+                        toks.push(simple(self, TokKind::Dollar, 1));
+                    } else {
+                        self.i = j;
+                        let span = Span::new(start, self.pos(self.i));
+                        toks.push(Token { kind: TokKind::Ident(name), span });
+                    }
+                }
                 '$' => toks.push(simple(self, TokKind::Dollar, 1)),
                 '?' if next == '?' => toks.push(simple(self, TokKind::QuestionQuestion, 2)),
                 '?' if next == '.' => toks.push(simple(self, TokKind::QuestionDot, 2)),
