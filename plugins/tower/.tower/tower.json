@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1613,
-    "rev": 28772,
+    "rev": 28785,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -97429,38 +97429,38 @@
         {
           "n": 2,
           "text": "The E0328 row in docs/spec/diagnostics.md escapes its in-cell pipes as \\| so the row splits into exactly 3 cells; release_gates test ga_every_diagnostic_has_explain passes",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-tests",
-          "verifiedBy": null,
-          "evidence": "docs/spec/diagnostics.md:301 E0328 row's raw in-cell pipes escaped as \\|; cargo test -p jet --test release_gates ga_every_diagnostic_has_explain: ok",
-          "at": "2026-08-07T09:17:29.921Z"
+          "verifiedBy": "bd3-orch",
+          "evidence": "Reviewer passed the release_gates fixes in the batch review; blocker chain #1602→#1605 closed and merged; master rerun: release_gates 16/16.",
+          "at": "2026-08-07T11:48:47.528Z"
         },
         {
           "n": 3,
           "text": "jet explain E0328 (fresh target/debug/jet) resolves and prints the standard retired notice",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-tests",
-          "verifiedBy": null,
-          "evidence": "target/debug/jet explain E0328 (fresh build) prints: 'E0328\\n\\nThis code is retired: it is no longer produced by the current\\ncompiler, and is kept here only so old build logs stay readable.'",
-          "at": "2026-08-07T09:17:30.576Z"
+          "verifiedBy": "bd3-orch",
+          "evidence": "Reviewer passed the release_gates fixes in the batch review; blocker chain #1602→#1605 closed and merged; master rerun: release_gates 16/16.",
+          "at": "2026-08-07T11:48:47.894Z"
         },
         {
           "n": 4,
           "text": "A grep over docs/spec/diagnostics.md proves no other registry row carries an unescaped raw pipe inside a cell; evidence logged on this card",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-tests",
-          "verifiedBy": null,
-          "evidence": "awk over docs/spec/diagnostics.md lines 96-806 (the 3-cell Explain registry table) counting pipe chars per row after stripping \\| escapes: every row has exactly 4 raw '|' chars (3 cells), zero anomalies after the E0328 fix. Command: awk 'NR==96,NR==806' docs/spec/diagnostics.md | awk '/^\\| [EL][0-9]/{line=$0; gsub(/\\\\\\|/,\"\",line); n=gsub(/\\|/,\"|\",line); if(n!=4) print n\" pipes: \"$0}' -> empty output.",
-          "at": "2026-08-07T09:17:31.081Z"
+          "verifiedBy": "bd3-orch",
+          "evidence": "Reviewer passed the release_gates fixes in the batch review; blocker chain #1602→#1605 closed and merged; master rerun: release_gates 16/16.",
+          "at": "2026-08-07T11:48:48.723Z"
         },
         {
           "n": 5,
           "text": "scripts/agent/jet-env cargo test -p jet --test release_gates is fully green",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd3-orch",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T08:31:53.095Z"
+          "evidence": "release_gates fully green on master after #1602/#1605 merged: 16 passed, 0 failed (rerun by bd3-orch, log scratchpad/readerproof2.log).",
+          "at": "2026-08-07T11:48:46.798Z"
         }
       ],
       "refs": [
@@ -97473,8 +97473,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T02:53:48.807Z",
-      "updated": "2026-08-07T11:05:01.715Z",
-      "updatedBy": "bd3-reader",
+      "updated": "2026-08-07T11:48:48.724Z",
+      "updatedBy": "bd3-orch",
       "claimedAt": "2026-08-07T09:17:55.182Z"
     },
     {
@@ -97678,11 +97678,11 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
-      "assignee": "bd3-reader",
+      "assignee": null,
       "log": [
         {
           "at": "2026-08-07",
@@ -97704,29 +97704,29 @@
         {
           "n": 1,
           "text": "Reader/Cursor handle ops (ReaderOver, ReaderRead*, ReaderTake, ReaderRemaining, ReaderAtEnd, CursorOver, CursorTakeUntil, CursorSkipWs, CursorTakePattern, ReaderTakePattern) work under quick-run (default jet run) via the shared ambient evaluator, matching AOT Prelude semantics (I9)",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-reader",
-          "verifiedBy": null,
-          "evidence": "Reader/Cursor ops run in the canonical TIR evaluator through crates/jet-codegen/src/Codegen/TIR/eval/stream.rs, which calls jet_foundation::StreamCursor — the exact source Codegen/mod.rs splices into the AOT prelude. After review, take_pattern's surrounding policy moved there too: jet_cursor_tail, jet_reader_tail, jet_{cursor,reader}_take_pattern and jet_{cursor,reader}_pattern_miss now own what the scan may look at, how far a hit advances, and what a miss reports, and all three tiers call them (AOT emit at TIR/emit/expressions.rs, the Cranelift host at jet-jit/src/Parse.rs, the evaluator at eval/stream.rs). MatchScan::bin_match_consumed owns the other shared rule, that a binary pattern ending mid-byte is a miss. Each tier keeps only its match engine and its binding projection. Proof after the refactor: examples/canon.jet prints byte-identical output under jet run and jet run --release and matches tests/fixtures/canon/expected.out; a fixture exercising ReaderOver, ReaderReadU8/U16Be/U32Be/U64Be/U32Le, ReaderTake, ReaderRemaining, ReaderAtEnd, CursorOver, CursorSkipWs, CursorTakePattern and CursorTakeUntil prints the same lines on both tiers; cargo test -p jet-foundation 138 passed, including new asserts pinning the advance and the miss wording.",
-          "at": "2026-08-07T11:36:32.492Z"
+          "verifiedBy": "bd3-orch",
+          "evidence": "Reviewer (bd3-review) passed rounds 1-2. Merged to master (1e53ce143 + variant-rename fixup); rerun on master: release_gates 16/16 including canon_compiles_and_runs, outcome_carrier 5/5, corelib typed_codec_decode tier-parity 1/1.",
+          "at": "2026-08-07T11:48:24.348Z"
         },
         {
           "n": 2,
           "text": "cargo test -p jet --test release_gates canon_compiles_and_runs passes",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-reader",
-          "verifiedBy": null,
-          "evidence": "cargo test -p jet --test release_gates: 16 passed, 0 failed. canon_compiles_and_runs passes now that the json.decode_traced blocker (#1605) is implemented on the same branch, commit 54fef177c.",
-          "at": "2026-08-07T11:01:20.358Z"
+          "verifiedBy": "bd3-orch",
+          "evidence": "Reviewer (bd3-review) passed rounds 1-2. Merged to master (1e53ce143 + variant-rename fixup); rerun on master: release_gates 16/16 including canon_compiles_and_runs, outcome_carrier 5/5, corelib typed_codec_decode tier-parity 1/1.",
+          "at": "2026-08-07T11:48:25.153Z"
         },
         {
           "n": 3,
           "text": "examples/canon.jet's D-SHIFT1 stream-parsing section proves under both AOT and default jet run",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-reader",
-          "verifiedBy": null,
-          "evidence": "examples/canon.jet's parse_packet and parse_incident, copied verbatim into a scratch file with the same caller lines, print the same two lines under 'jet run' and 'jet run --release': 'reader: magic=42 count=3 payload_len=3' and 'cursor: id=4411 sev=3 reason=disk full'. Those match tests/fixtures/canon/expected.out lines 21 and 22. Under AOT the whole of examples/canon.jet now matches expected.out byte for byte; before this change the stream section printed nothing because it panicked with 'bad packet: short payload'. Under default 'jet run' canon.jet still stops earlier, at line 161, on the unrelated json.decode_traced gap (card #1605), so the section is proved from the same source rather than from a full canon.jet run.",
-          "at": "2026-08-07T10:27:47.412Z"
+          "verifiedBy": "bd3-orch",
+          "evidence": "Reviewer (bd3-review) passed rounds 1-2. Merged to master (1e53ce143 + variant-rename fixup); rerun on master: release_gates 16/16 including canon_compiles_and_runs, outcome_carrier 5/5, corelib typed_codec_decode tier-parity 1/1.",
+          "at": "2026-08-07T11:48:25.911Z"
         }
       ],
       "refs": [],
@@ -97734,9 +97734,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T09:16:54.961Z",
-      "updated": "2026-08-07T11:37:03.919Z",
-      "updatedBy": "bd3-reader",
-      "claimedAt": "2026-08-07T11:37:03.919Z"
+      "updated": "2026-08-07T11:48:29.409Z",
+      "updatedBy": "bd3-orch",
+      "completedAt": "2026-08-07T11:48:29.409Z"
     },
     {
       "id": "c0utog26",
@@ -97795,11 +97795,11 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
-      "assignee": "bd3-reader",
+      "assignee": null,
       "log": [
         {
           "at": "2026-08-07",
@@ -97826,38 +97826,38 @@
         {
           "n": 1,
           "text": "json/toml/yaml/csv decode<T> and decode_traced<T> evaluate in the canonical TIR evaluator, using the call's resolved return type for the target type",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-reader",
-          "verifiedBy": null,
-          "evidence": "crates/jet-codegen/src/Codegen/TIR/eval/exprs.rs gains eval_typed_codec_decode, reached from the CoreCall arm for json/toml/yaml/csv decode and decode_traced. The target type comes from the call's resolved return type, since TExprKind::CoreCall carries no type arguments: Result<T, [FieldError]> for decode, Result<DecodeResult<T>, [FieldError]> for decode_traced, one list layer deeper for csv. The tree comes from the codec's own parser through apply_core_call's existing parse arm, and the value comes out of the type's generated Decode TIR, the body AOT compiles, so no decode policy is re-encoded in the evaluator. Proof: new test tests/corelib.rs::typed_codec_decode_matches_between_full_build_and_quick_run runs one fixture over all four codecs under the full build and under default jet run and asserts identical stdout; it passes.",
-          "at": "2026-08-07T11:00:31.828Z"
+          "verifiedBy": "bd3-orch",
+          "evidence": "Reviewer (bd3-review) passed rounds 1-2. Merged to master (1e53ce143 + variant-rename fixup); rerun on master: release_gates 16/16 including canon_compiles_and_runs, outcome_carrier 5/5, corelib typed_codec_decode tier-parity 1/1.",
+          "at": "2026-08-07T11:48:26.685Z"
         },
         {
           "n": 2,
           "text": "decode_traced returns the DecodeResult { value, migration } shape with a migrated flag that matches AOT for both current-schema and old-schema input",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-reader",
-          "verifiedBy": null,
-          "evidence": "decode_traced returns DecodeResult { value, migration }; apply_codec_migration reports the MigrationStatus of the walk. After review, the D-MIGRATE4 version vocabulary is defined once: Codegen/TIR/mod.rs::migration_shape_name and ::migration_step_name. Codegen/Items.rs bakes those names into the generated chain-walker and eval/exprs.rs::migration_status reports the same ones, so 'v1' and 'v1->v2' exist in one place. The status is an out-param only the top-level call asks for, so a nested field that migrates cannot leak into its parent's status, matching AOT where nested fields call plain jet_decode. tests/corelib.rs::typed_codec_decode_matches_between_full_build_and_quick_run asserts identical stdout from the full build and default jet run for a current-shape record, a type with no migration blocks, a one-block record, a two-block record two shapes behind (v1, steps v1->v2 and v2->v3) and one shape behind (v2, step v2->v3), toml, and csv where every row migrates and the batch reports once. Test passes after the refactor.",
-          "at": "2026-08-07T11:36:42.651Z"
+          "verifiedBy": "bd3-orch",
+          "evidence": "Reviewer (bd3-review) passed rounds 1-2. Merged to master (1e53ce143 + variant-rename fixup); rerun on master: release_gates 16/16 including canon_compiles_and_runs, outcome_carrier 5/5, corelib typed_codec_decode tier-parity 1/1.",
+          "at": "2026-08-07T11:48:27.500Z"
         },
         {
           "n": 3,
           "text": "cargo test -p jet --test release_gates canon_compiles_and_runs passes",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-reader",
-          "verifiedBy": null,
-          "evidence": "cargo test -p jet --test release_gates: 16 passed, 0 failed, 190.75s. canon_compiles_and_runs is green; it was the only failure before this change.",
-          "at": "2026-08-07T11:00:56.729Z"
+          "verifiedBy": "bd3-orch",
+          "evidence": "Reviewer (bd3-review) passed rounds 1-2. Merged to master (1e53ce143 + variant-rename fixup); rerun on master: release_gates 16/16 including canon_compiles_and_runs, outcome_carrier 5/5, corelib typed_codec_decode tier-parity 1/1.",
+          "at": "2026-08-07T11:48:27.852Z"
         },
         {
           "n": 4,
           "text": "examples/canon.jet prints identical output under AOT (jet run --release) and default jet run",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-reader",
-          "verifiedBy": null,
-          "evidence": "With ~/.cache/jet cleared, examples/canon.jet produces byte-identical stdout under default jet run and under jet run --release, and both match tests/fixtures/canon/expected.out exactly (22 lines, diff empty in both directions).",
-          "at": "2026-08-07T11:01:15.151Z"
+          "verifiedBy": "bd3-orch",
+          "evidence": "Reviewer (bd3-review) passed rounds 1-2. Merged to master (1e53ce143 + variant-rename fixup); rerun on master: release_gates 16/16 including canon_compiles_and_runs, outcome_carrier 5/5, corelib typed_codec_decode tier-parity 1/1.",
+          "at": "2026-08-07T11:48:28.540Z"
         }
       ],
       "refs": [],
@@ -97865,9 +97865,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T10:26:11.230Z",
-      "updated": "2026-08-07T11:37:04.319Z",
-      "updatedBy": "bd3-reader",
-      "claimedAt": "2026-08-07T11:37:04.319Z"
+      "updated": "2026-08-07T11:48:30.586Z",
+      "updatedBy": "bd3-orch",
+      "completedAt": "2026-08-07T11:48:30.586Z"
     },
     {
       "id": "c0ubf542",
@@ -132699,6 +132699,97 @@
   ],
   "events": [
     {
+      "at": "2026-08-07T11:48:48.724Z",
+      "by": "bd3-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0ksjkvh",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-07T11:48:47.894Z",
+      "by": "bd3-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0ksjkvh",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-07T11:48:47.528Z",
+      "by": "bd3-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0ksjkvh",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-07T11:48:46.798Z",
+      "by": "bd3-orch",
+      "action": "card.criteria-meet",
+      "ref": "c0ksjkvh",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-07T11:48:30.586Z",
+      "by": "bd3-orch",
+      "action": "card.update",
+      "ref": "c0mu3d3u",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T11:48:29.409Z",
+      "by": "bd3-orch",
+      "action": "card.update",
+      "ref": "c09qyavw",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T11:48:28.540Z",
+      "by": "bd3-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0mu3d3u",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-07T11:48:27.853Z",
+      "by": "bd3-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0mu3d3u",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-07T11:48:27.500Z",
+      "by": "bd3-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0mu3d3u",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-07T11:48:26.685Z",
+      "by": "bd3-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0mu3d3u",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T11:48:25.911Z",
+      "by": "bd3-orch",
+      "action": "card.criteria-verify",
+      "ref": "c09qyavw",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-07T11:48:25.153Z",
+      "by": "bd3-orch",
+      "action": "card.criteria-verify",
+      "ref": "c09qyavw",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-07T11:48:24.348Z",
+      "by": "bd3-orch",
+      "action": "card.criteria-verify",
+      "ref": "c09qyavw",
+      "note": "#1"
+    },
+    {
       "at": "2026-08-07T11:37:04.319Z",
       "by": "bd3-reader",
       "action": "card.update",
@@ -136106,97 +136197,6 @@
       "action": "card.update",
       "ref": "c0vh9xhx",
       "note": "plan,logEntry"
-    },
-    {
-      "at": "2026-08-07T00:55:35.716Z",
-      "by": "fable",
-      "action": "decision.add",
-      "ref": "D-FMT-SIMPLIFY1",
-      "note": "fmt simplify: catalog, surface, and default"
-    },
-    {
-      "at": "2026-08-07T00:54:27.935Z",
-      "by": "prep-records",
-      "action": "card.update",
-      "ref": "c0eoxyz7",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-07T00:54:27.502Z",
-      "by": "prep-records",
-      "action": "card.update",
-      "ref": "c09nnvak",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-07T00:54:27.070Z",
-      "by": "prep-records",
-      "action": "card.update",
-      "ref": "c03fqwro",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-07T00:54:24.172Z",
-      "by": "prep-records",
-      "action": "card.criteria-add",
-      "ref": "c0eoxyz7",
-      "note": "#3 This card closes no earlier than #1567"
-    },
-    {
-      "at": "2026-08-07T00:54:23.832Z",
-      "by": "prep-records",
-      "action": "card.criteria-add",
-      "ref": "c0eoxyz7",
-      "note": "#2 D-FFI-PY1 and D-FFI-OCTAVE1 are marked honored, not broken, "
-    },
-    {
-      "at": "2026-08-07T00:54:23.481Z",
-      "by": "prep-records",
-      "action": "card.criteria-add",
-      "ref": "c0eoxyz7",
-      "note": "#1 FFI.Py and FFI.Octave exist as leaves under FFI in the heale"
-    },
-    {
-      "at": "2026-08-07T00:54:22.232Z",
-      "by": "prep-records",
-      "action": "card.update",
-      "ref": "c0eoxyz7",
-      "note": "plan,blockedBy"
-    },
-    {
-      "at": "2026-08-07T00:54:17.050Z",
-      "by": "prep-records",
-      "action": "card.criteria-add",
-      "ref": "c09nnvak",
-      "note": "#2 This card closes no earlier than #1567"
-    },
-    {
-      "at": "2026-08-07T00:54:16.699Z",
-      "by": "prep-records",
-      "action": "card.criteria-add",
-      "ref": "c09nnvak",
-      "note": "#1 Effects.rs lines ~29 and ~40 state the correct root count an"
-    },
-    {
-      "at": "2026-08-07T00:54:15.931Z",
-      "by": "prep-records",
-      "action": "card.update",
-      "ref": "c09nnvak",
-      "note": "plan,blockedBy"
-    },
-    {
-      "at": "2026-08-07T00:54:06.346Z",
-      "by": "prep-records",
-      "action": "card.criteria-add",
-      "ref": "c03fqwro",
-      "note": "#3 This card closes no earlier than #1567"
-    },
-    {
-      "at": "2026-08-07T00:54:06.002Z",
-      "by": "prep-records",
-      "action": "card.criteria-add",
-      "ref": "c03fqwro",
-      "note": "#2 Any UI snapshot embedding the E1221 explain string is re-ble"
     }
   ],
   "nextNum": 368,
