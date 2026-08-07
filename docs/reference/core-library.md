@@ -203,11 +203,13 @@ back into a Set. `values` is the lazy alias of `to_list`. `replace`/`take`
 are the native Rust `HashSet` swap-in / remove-and-return methods. `first`
 is shipped with arbitrary hash-order semantics.
 
-`Set` declines `sort`, `shuffle`, `indexof`, and `indexed` pending ballot
-`D-SET-DECLINE1` (card #1584): a hash Set has no position, so each name
-needs `to_list()` first, same as `first`'s note above. `Set` also declines
-`flatten`: Jet requires every Set element to implement Hash and Eq (E0506),
-so no `Set<T>` can ever hold a nested List or Set for `flatten` to unpack.
+`Set.sort()` and `Set.shuffle()` ship (`D-SET-DECLINE1`, card #1584): each
+turns an unordered Set into a fresh `List`, running the same `to_list()`-then-
+`List` machinery `first`'s note above already uses — neither mutates the Set.
+`Set` declines `indexof` and `indexed`: a hash Set has no stable position, so
+each name needs `to_list()` first instead. `Set` also declines `flatten`:
+Jet requires every Set element to implement Hash and Eq (E0506), so no
+`Set<T>` can ever hold a nested List or Set for `flatten` to unpack.
 `copyto` is declined on `Set` and `SortedSet`; use `to_list()` then list/iter
 methods for all of the above.
 
@@ -1762,6 +1764,10 @@ comptime, and default `jet run`.
 | `.reverse()` | `String` | Reverse Unicode scalar order |
 | `.normalize()` | `String` | NFC (same as `core.text.nfc`) |
 | `.rsplit(sep)` | `Iter<String>` | Split from the right; part order is left-to-right |
+| `.to_int()` | `Int ? ParseError` | `D-STR-DECLINE1=C`: same builtin `Int.parse(s)` runs — the string is the receiver either way |
+| `.to_float()` | `Float ? ParseError` | `D-STR-DECLINE1=C`: same builtin `Float.parse(s)` runs |
+| `.matches(pattern)` | `Bool ? String` | `D-STR-DECLINE1=C`: routes to the one `core.regex` engine's `is_match`; the error is a bad-pattern compile failure |
+| `.match(pattern)` | `String? ? String` | `D-STR-DECLINE1=C`: routes to the same engine's `find` — first match, or none |
 
 Competitor accounting is explicit: Python `partition`/`count`, Rust
 `find`/`split_once`/`is_ascii`, Go `Cut`/`Count`, Swift `split`/`firstIndex`,
@@ -1771,22 +1777,24 @@ locale-sensitive casing remain out of scope under `D-TEXTUNICODE1=A`; regex
 replacement remains owned by `D-REGEXENGINE1=A`. These explicit v1 decisions
 are not silently added to the ambient String surface.
 
+`D-STR-DECLINE1` (option C, card #1580/#1581) ships the four highest-frequency
+names above (`to_int`/`to_float`/`matches`/`match`) as direct String
+spellings and declines the rest:
+
 String declines (#1476, #1580): mutation verbs (`clear`/`push`/`pop`/`remove`/
 `write`/`copyto`) stay off immutable text — rebuild with `+` / `replace` /
 `slice`. Sequence adapters (`all`/`map`/`fold`/`skip`/`chunk`/…) and indexers
 (`get`/`first`/`last`/`codepointat`) live on `.chars()` / `.bytes()` then
-List/Iter (I8). `parse`/`tofloat` stay on destination types (`Int.parse` /
-`Float.parse`, E0311). `match`/`matches` stay on `core.regex`. `concat` stays
-on `+` / interpolation, the same join Jet already ships. Buffer-only names
-(`capacity`/`intern`/`isvalid`/`isprint`/`chop`/`replacerange`/`indexofany`/
-`lastindexofany`/`rpartition`) are declined; use the shipped surface or
-`core.text` helpers instead. Card #1580's 34-row batch (`clear`/`get`/`push`/
-`matches`/`parse`/`pop`/`remove`/`replacerange`/`isprint`/`map`/`write`/`all`/
-`skip`/`droplast`/`indexed`/`first`/`flatmap`/`each`/`last`/`max`/`min`/`fold`/
-`chunk`/`codepointat`/`indexofany`/`intern`/`lastindexofany`/`scan`/`tofloat`/
-`concat`/`match`/`chop`/`rpartition`/`isvalid`) restates this same reasoning
-as ballot `D-STR-DECLINE1`, pending owner ratification; card #1581 applies the
-ratified outcome to the ledger.
+List/Iter (I8). `concat` stays on `+` / interpolation, the same join Jet
+already ships. Buffer-only names (`capacity`/`intern`/`isvalid`/`isprint`/
+`chop`/`replacerange`/`indexofany`/`lastindexofany`/`rpartition`) are
+declined; use the shipped surface or `core.text` helpers instead. Card
+#1580's remaining 30-row batch (`clear`/`get`/`push`/`pop`/`remove`/
+`replacerange`/`isprint`/`map`/`write`/`all`/`skip`/`droplast`/`indexed`/
+`first`/`flatmap`/`each`/`last`/`max`/`min`/`fold`/`chunk`/`codepointat`/
+`indexofany`/`intern`/`lastindexofany`/`scan`/`concat`/`chop`/`rpartition`/
+`isvalid`) is declined under the ratified `D-STR-DECLINE1`; card #1581 applied
+that outcome to the ledger (`docs/reference/core-surface-ledger.json`).
 
 ---
 
@@ -3358,8 +3366,9 @@ truncation.
 by design — there is no separate step. `verifyhostname` is mandatory
 already, visible as `stream.peer_identity().verified_server_name`; Jet gives
 no way to turn it off. `ciphersuites` and `tlsversion` (the negotiated
-values, not the `.with_version_bounds` request) are real gaps that need a
-native TLS-bridge change; card #1590 tracks them.
+values, not the `.with_version_bounds` request) are real gaps that
+`D-CORESURF-SMALL1` defers to a follow-up card, not this ballot — they need
+a native TLS-bridge change; card #1593 tracks them.
 
 ---
 

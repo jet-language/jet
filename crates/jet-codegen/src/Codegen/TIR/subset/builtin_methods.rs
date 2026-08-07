@@ -54,6 +54,11 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         | ("after", 1) | ("before", 1)
         // c97/D-STRPARSE1: parsing stays `Type.parse`.
         | ("lines", 0)
+        // D-STR-DECLINE1=C: `to_int`/`to_float` — same `Int.parse`/`Float.parse`
+        // builtin, string is the receiver either way. `matches`/`match` — the
+        // one core.regex engine, composed for a String receiver.
+        | ("to_int", 0) | ("to_float", 0)
+        | ("matches", 1) | ("match", 1)
         // `to_string` (String/Bool/Char receiver — those carry `recv_type == None`;
         // a numeric `to_string` sets `recv_type` and so is excluded by the guard).
         | ("to_string", 0)

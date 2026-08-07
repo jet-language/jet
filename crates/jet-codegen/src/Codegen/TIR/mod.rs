@@ -4115,6 +4115,12 @@ pub enum TBuiltinOp {
     SetReplace,
     /// #1478: `set.take(v)` → `(recv).take(&a0)` (native remove-and-return-if-present).
     SetTake,
+    /// D-SET-DECLINE1=C: `set.sort()` → a fresh sorted `List`, same
+    /// to-list-then-sort machinery `to_list()` already runs (Set never mutates).
+    SetSort,
+    /// D-SET-DECLINE1=C: `set.shuffle()` → a fresh shuffled `List`, the same
+    /// `jet_iter_shuffle` engine `List.shuffle()` already runs.
+    SetShuffle,
     SortedSetFrom,
     SortedSetInsert,
     SortedSetRemove,

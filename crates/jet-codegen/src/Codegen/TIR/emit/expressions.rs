@@ -1278,6 +1278,22 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         format!("{}jet_text_normalize_nfc(&({}))", cx.root_prefix, recv)
                     }
                     "rsplit" => format!("jet_iter_string_rsplit(&({}), &{})", recv, a(0)),
+                    // D-STR-DECLINE1=C: `matches`/`match` — compile the pattern
+                    // through the one core.regex engine, then run the same
+                    // `jet_regex_is_match`/`jet_regex_find` `jet.regex.is_match`/
+                    // `jet.regex.find` already call.
+                    "matches" => format!(
+                        "{root}jet_std::jet_regex_compile(&({pattern})).map(|__jet_re| {root}jet_std::jet_regex_is_match(&__jet_re, &({recv})))",
+                        root = cx.root_prefix,
+                        pattern = a(0),
+                        recv = recv,
+                    ),
+                    "match" => format!(
+                        "{root}jet_std::jet_regex_compile(&({pattern})).map(|__jet_re| {root}jet_std::jet_regex_find(&__jet_re, &({recv})))",
+                        root = cx.root_prefix,
+                        pattern = a(0),
+                        recv = recv,
+                    ),
                     other => format!(
                         "compile_error!(\"unknown StringMethod: {}\")",
                         other
@@ -1369,6 +1385,18 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TBuiltinOp::SetReplace => format!("({}).replace({})", recv, a(0)),
                 // #1478: native remove-and-return — Rust's own `HashSet::take`.
                 TBuiltinOp::SetTake => format!("({}).take(&({}))", recv, a(0)),
+                // D-SET-DECLINE1=C: `set.sort()` — materialize then sort the
+                // copy, same as `set.to_list()` followed by `List.sort()`.
+                TBuiltinOp::SetSort => format!(
+                    "{{ let mut __jet_v = ({}).iter().cloned().collect::<Vec<_>>(); __jet_v.sort(); __jet_v }}",
+                    recv
+                ),
+                // D-SET-DECLINE1=C: `set.shuffle()` — the same `jet_iter_shuffle`
+                // engine `List.shuffle()` runs, materialized back to a `List`.
+                TBuiltinOp::SetShuffle => format!(
+                    "jet_iter_shuffle(jet_iter_from_vec(({}).iter().cloned().collect::<Vec<_>>())).to_list()",
+                    recv
+                ),
                 TBuiltinOp::SortedSetFrom => {
                     format!(
                         "({}).into_iter().collect::<std::collections::BTreeSet<_>>()",

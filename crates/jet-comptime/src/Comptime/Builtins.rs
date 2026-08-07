@@ -1459,6 +1459,26 @@ pub fn apply_method(
             Some(CtValue::Str(other)) => Ok(CtValue::Bool(s == other.as_str())),
             _ => Err(unsupported("equal with a non-text argument", span)),
         },
+        // D-STR-DECLINE1=C: `matches`/`match` — the same RegexLite engine
+        // `jet.regex.compile`/`is_match`/`find` already run (`regex_is_match`/
+        // `regex_find` in Methods/core_calls.rs), composed for a String receiver.
+        (CtValue::Str(s), "matches") => match args.into_iter().next() {
+            Some(CtValue::Str(pattern)) => Ok(match super::RegexLite::RegexLite::parse(&pattern) {
+                Ok(re) => CtValue::ResOk(Box::new(CtValue::Bool(re.is_match(s)))),
+                Err(message) => CtValue::ResErr(Box::new(CtValue::Str(message))),
+            }),
+            _ => Err(unsupported("matches with a non-text argument", span)),
+        },
+        (CtValue::Str(s), "match") => match args.into_iter().next() {
+            Some(CtValue::Str(pattern)) => Ok(match super::RegexLite::RegexLite::parse(&pattern) {
+                Ok(re) => CtValue::ResOk(Box::new(match re.find(s) {
+                    Some(m) => CtValue::Some(Box::new(CtValue::Str(s[m.start..m.end].to_string()))),
+                    None => CtValue::None(Type::String),
+                })),
+                Err(message) => CtValue::ResErr(Box::new(CtValue::Str(message))),
+            }),
+            _ => Err(unsupported("match with a non-text argument", span)),
+        },
         (CtValue::Str(s), "rsplit") => match args.into_iter().next() {
             Some(CtValue::Str(sep)) => {
                 let parts = if sep.is_empty() {

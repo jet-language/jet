@@ -16442,6 +16442,14 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host_ref, &[recv_val]);
                 Ok(self.b.inst_results(call)[0])
             }
+            // D-SET-DECLINE1=C: no resident host lowering, same as Set's other
+            // to-list-then-List ops (filter/map/fold/each/all/min/max) — deopts
+            // to the interpreter, which runs the same to-list-then-sort/shuffle
+            // machinery (I9: AOT + interpreter share the semantics; this tier
+            // just isn't JIT-resident).
+            TBuiltinOp::SetSort | TBuiltinOp::SetShuffle => {
+                Err("jit set method unsupported".to_string())
+            }
             TBuiltinOp::SetUnion => {
                 let other = self.lower_expr(&args[0])?;
                 let host_ref = self

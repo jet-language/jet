@@ -2,7 +2,9 @@
 // Construct with Set.from([...]) / Set.new(), mutate with add/remove, query with has/len.
 // #1478: copy/equal/to_set/capacity/first/values/all/filter/each/max/min/fold/
 // map/flat_map/replace/take close the order-agnostic ledger surface.
-// sort/shuffle/indexof/indexed/flatten stay declined — see D-SET-DECLINE1.
+// D-SET-DECLINE1=C: sort/shuffle ship, each returning a fresh List (Set never
+// mutates). indexof/indexed/flatten stay declined — a hash Set keeps no
+// position, and no legal Set element can itself be a nested container.
 fn run() {
     empty := Set.new()
     print("new_empty: {empty.len()} cap={empty.capacity()}")
@@ -64,6 +66,13 @@ fn run() {
     flat_mapped := s.flat_map(n => [n, n * 10]).to_list()
     flat_mapped.sort()
     print("flat_map sorted: {flat_mapped}")
+    // D-SET-DECLINE1=C: dedupe-then-sort, the everyday idiom, now one call —
+    // same to-list-then-sort machinery `values().to_list()` above already runs.
+    sorted := s.sort()
+    print("sorted: {sorted}")
+    shuffled := s.shuffle()
+    shuffled.sort()
+    print("shuffled len and contents (sorted for a stable golden): {shuffled.len()} {shuffled}")
     // Native swap-in / remove-and-return (Rust's own HashSet contract).
     replaced := s.replace(3)
     print("replace existing: {replaced ?? -1}")
