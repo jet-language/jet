@@ -1259,6 +1259,7 @@ impl<'a> Fmt<'a> {
                     ConstAttr::ForceInline => self.write("#Inline "),
                 }
             }
+            self.write(&format!("#{} ", Syntax::RETIRED_MARKER_KNOWN));
             self.write(&c.name);
             self.write(" :: ");
             self.fmt_expr(&c.value, Prec::OrFallback);
@@ -1281,6 +1282,7 @@ impl<'a> Fmt<'a> {
             return;
         }
         // Fallback: treat as an explicit known value.
+        self.write(&format!("#{} ", Syntax::RETIRED_MARKER_KNOWN));
         self.write(&c.name);
         self.write(" :: ");
         self.fmt_expr(&c.value, Prec::OrFallback);

@@ -103,6 +103,19 @@ impl<'a> Parser<'a> {
         pub(super) fn field(&mut self) -> Result<Field, Diagnostic> {
             let (is_pub, is_package_pub) = self.parse_pub_qualifier();
             let (name, name_span) = self.expect_ident("for a field name")?;
+            // D-META-STAGE1=B: the compile-time mark rides the name, so `$word`
+            // now lexes as one identifier. A field never carries it — the
+            // `$`-marked members belong to the compiler (`T.$layout`).
+            if Syntax::is_comptime_name(&name) {
+                return Err(Diagnostic::error(
+                    "E0003",
+                    format!("`{name}` is not a field name"),
+                    "the compile-time mark `$` belongs to the compiler's own members and to compile-time bindings, never to a declared field"
+                        .to_string(),
+                    format!("drop the `$`, or read the compiler fact as `T.{name}`"),
+                    Some(name_span),
+                ));
+            }
             self.expect(TokKind::Colon, "after a field name")?;
             let (ty, ty_span) = self.type_()?;
             // D-FIELDPOL1: `name: T => expr` — a computed field. `expr` is a

@@ -355,6 +355,7 @@ fn item_span_start(item: &Item, src: &str) -> usize {
                 before
                     .rfind("#Static")
                     .or_else(|| before.rfind("#Inline"))
+                    .or_else(|| before.rfind(&format!("#{}", Syntax::RETIRED_MARKER_KNOWN)))
                     .or_else(|| before.rfind(Syntax::KW_COMPTIME))
                     .or_else(|| before.rfind(Syntax::KW_CONST))
                     .unwrap_or(c.name_span.start)
