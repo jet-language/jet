@@ -108,10 +108,10 @@ while losses remain.
 | core.regex | 4 | #1471 | done | closed |
 | core.tls | 2 | #1593 | planning | live |
 | BitSet | 1 | #1493 | ready | live |
-| core.process | 1 | #1590 | building | live |
-| core.uuid | 1 | #1590 | building | live |
+| core.process | 1 | #1590 | verify | live |
+| core.uuid | 1 | #1590 | verify | live |
 | Deque | 1 | #1475 | done | closed |
-| String | 1 | #1581 | building | live |
+| String | 1 | #1581 | verify | live |
 
 ## Containers indexed per package
 
