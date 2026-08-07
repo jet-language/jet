@@ -193,7 +193,7 @@ pub(crate) fn walk_expr_for_const_refs(
         }
         Expr::Tainted(inner, _, _) // D-TAINT1: tag erased; recurse into the value.
         | Expr::Present(inner, _) => walk_expr_for_const_refs(inner, const_names, taken),
-        Expr::Absent(_) | Expr::ReduceMarker(_, _) | Expr::Todo { .. } | Expr::NoElse(_)
+        Expr::Absent(_) | Expr::ReduceMarker(_, _) | Expr::Todo { .. } | Expr::NoElse(_) | Expr::ComptimeSplice { .. }
         // D-SHIFT1 (c7shift) / D-BINPAT1 (card #506 follow-up): a leaf
         // literal, no nested `Expr` to recurse into.
         | Expr::StrMatchLit(_, _)
@@ -424,6 +424,7 @@ pub(crate) fn expr_refs_name(e: &Expr, name: &str) -> bool {
         | Expr::Todo { .. }
         | Expr::NoElse(_)
         | Expr::UnitLit { .. }
+        | Expr::ComptimeSplice { .. }
         // D-SHIFT1 (c7shift) / D-BINPAT1 (card #506 follow-up): a leaf
         // literal, no nested `Expr` to recurse into.
         | Expr::StrMatchLit(_, _)

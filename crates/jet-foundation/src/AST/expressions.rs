@@ -1,5 +1,5 @@
 use super::{
-    AccessConvention, BinMatchPart, EnumLitArg, Func, IndexKind, OrFallback, Param,
+    AccessConvention, BinMatchPart, CtValue, EnumLitArg, Func, IndexKind, OrFallback, Param,
     Pattern, Stmt, StrMatchPart, TryConvert, Type,
 };
 use crate::{Diagnostics::Span, Syntax};
@@ -621,6 +621,16 @@ pub enum Expr {
         addr: Box<Expr>,
         span: Span,
     },
+    /// D-CTMARKER1=C: `$name` — comptime splice expression. In a comptime
+    /// context (derive body, `#Known {}` block, comptime binding RHS), looks
+    /// up `name` in the comptime scope. Outside comptime context: E2712.
+    /// Inside `emit("… $name …")` strings, `$name` is handled by
+    /// `apply_dollar_splices` (string interpolation, not this AST node).
+    ComptimeSplice {
+        name: String,
+        span: Span,
+        value: Option<CtValue>,
+    },
     /// D-FMTPARENS1=A: explicit author grouping parentheses `(expr)`.
     /// Transparent to type-checking and codegen; formatter always emits the parens.
     Paren(Box<Expr>, Span),
@@ -679,6 +689,7 @@ impl Expr {
             | Expr::If { span: s, .. }
             | Expr::CallValue { span: s, .. }
             | Expr::PtrFromAddr { span: s, .. }
+            | Expr::ComptimeSplice { span: s, .. }
             | Expr::CompareChain { span: s, .. }
             | Expr::UnitLit { span: s, .. }
             | Expr::IncDec { span: s, .. } => *s,

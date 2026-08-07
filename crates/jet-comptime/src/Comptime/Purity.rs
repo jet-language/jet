@@ -240,7 +240,8 @@ fn walk_expr_nodes(e: &Expr, include_suppressed: bool, f: &mut impl FnMut(&Expr)
         | Expr::Absent(_)
         | Expr::Todo { .. }
         | Expr::NoElse(_)
-        | Expr::ReduceMarker(_, _) => {}
+        | Expr::ReduceMarker(_, _)
+        | Expr::ComptimeSplice { .. } => {}
         Expr::ListLit(items, _) | Expr::CompareChain { operands: items, .. } => {
             for item in items {
                 walk_expr_nodes(item, include_suppressed, f);

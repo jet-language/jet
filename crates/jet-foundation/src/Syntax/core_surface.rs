@@ -117,7 +117,11 @@ pub fn is_comptime_name(name: &str) -> bool {
     name.starts_with('$')
 }
 
-/// The retired marker spelling, kept only so the parser can teach the mark.
+/// D-VERDICT-1308-1/2: demand compile-time knowledge for a binding, block, or
+/// conditional. Ordinary foldable expressions need no marker. B5 revert
+/// (card #1456): #1537's checkpoint renamed this to "retired" ahead of its
+/// own migration of the 327 in-repo uses; still the live, working spelling
+/// until #1537 lands that migration in one change.
 pub const RETIRED_MARKER_KNOWN: &str = "Known";
 
 /// D-CANVASSTATE1=D (ratified 2026-07-09): statement switch-off attribute.

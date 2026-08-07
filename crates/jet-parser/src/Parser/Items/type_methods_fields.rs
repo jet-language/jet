@@ -379,9 +379,9 @@ impl<'a> Parser<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0374",
                         "`comptime` is retired".to_string(),
-                        "Jet folds ordinary foldable expressions automatically; explicit compile-time demand is written with the `$` mark"
+                        "Jet folds ordinary foldable expressions automatically; explicit compile-time demand lives on the marker plane"
                             .to_string(),
-                        "remove the keyword for ordinary code, or write `$name :: …` when failure to compute now must stop the build"
+                        "remove the keyword for ordinary code, or replace it with `#Known` when failure to compute now must stop the build"
                             .to_string(),
                         Some(span),
                     ));
@@ -390,38 +390,37 @@ impl<'a> Parser<'a> {
                     let kw = self.bump();
                     self.diags.push(Diagnostic::error(
                         "E0146",
-                        format!("`{}` is retired — write `$name`", Syntax::KW_CONST),
-                        "explicit compile-time demand is a mark on an immutable binding"
+                        format!("`{}` is retired — write `#Known`", Syntax::KW_CONST),
+                        "explicit compile-time demand is a marker on an immutable binding"
                             .to_string(),
-                        "write `$name :: …` (or `#Persist name := …` for hot-reload state)"
+                        "write `#Known name :: …` (or `#Persist name := …` for hot-reload state)"
                             .to_string(),
                         Some(kw.span),
                     ));
                 }
+                // B5 revert (card #1456): `#Known` parses like master again — see
+                // Statements/bindings.rs::take_mark for why.
                 TokKind::Hash if known => {
-                    let start = self.peek().span;
                     self.bump();
-                    let end = self.bump().span;
-                    self.diags.push(Diagnostic::error(
-                        "E0377",
-                        "`#Known name :: …` is retired".to_string(),
-                        "one mark says compile time, and `$` is that mark (D-META-STAGE1=B)"
-                            .to_string(),
-                        "write `$name :: …`, and write `$name` at every mention".to_string(),
-                        Some(Span::new(start.start, end.end)),
-                    ));
+                    self.bump();
                 }
                 // D-META-STAGE1=B: `$name :: expr` — the mark rides the name.
+                // Additive new spelling from #1537's checkpoint; kept, not part
+                // of the B5 revert (it doesn't hard-error anything in the
+                // existing `#Known` corpus).
                 TokKind::Ident(ref n) if Syntax::is_comptime_name(n) => {}
                 _ => {
                     self.expect_kw(TokKind::KwComptime, "to start a comptime binding")?;
                 }
             }
             let marked = matches!(&self.peek().kind, TokKind::Ident(n) if Syntax::is_comptime_name(n));
-            let (name, name_span) = self.expect_ident("for the compile-time binding name")?;
-            let name = if marked { name } else { format!("${name}") };
+            let (name, name_span) = self.expect_ident(if known || marked {
+                "after `#Known`"
+            } else {
+                "for the compile-time binding name"
+            })?;
             if known || marked {
-                self.expect(TokKind::ColonColon, "after the compile-time name")?;
+                self.expect(TokKind::ColonColon, "after the `#Known` name")?;
             } else {
                 self.expect(TokKind::Eq, "after the retired comptime name")?;
             }

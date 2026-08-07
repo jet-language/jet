@@ -831,6 +831,7 @@ fn expr_has_comptime_evaluation(expr: &Expr) -> bool {
         Expr::CallValue { callee, args, .. } => {
             expr_has_comptime_evaluation(callee) || args.iter().any(argument)
         }
+        Expr::ComptimeSplice { .. } => true,
         Expr::Int(..)
         | Expr::Float(..)
         | Expr::Bool(..)

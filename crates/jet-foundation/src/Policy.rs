@@ -911,6 +911,11 @@ pub const APPLIED_RULES: &[AppliedRule] = &[
     rule!("Env", sig!(param!("name", String)), FIELD_SITE),
     rule!("Persist", sig!(), DECLARATION_SITE),
     rule!("Track", sig!(), DECLARATION_SITE),
+    // B5 revert (card #1456): #1537's own checkpoint dropped this row to retire
+    // `#Known`, but #1537 hasn't landed its migration of the 327 in-repo uses
+    // yet. Restored so `#Known` stays a recognized, working spelling until
+    // #1537 lands the full retirement + migration in one change.
+    rule!("Known", sig!(), &[RuleSite::Declaration, RuleSite::Constant, RuleSite::Block, RuleSite::Statement]),
     rule!("Local", sig!(), DECLARATION_SITE),
     rule!("Shared", sig!(), DECLARATION_SITE),
     rule!("Meta", sig!(param!("category", String, "\"\""), param!("tunable", Bool, "false"), param!("maturity", Ident => "Maturity", ".Tested")), &[RuleSite::Function, RuleSite::Method, RuleSite::Declaration, RuleSite::Constant]),

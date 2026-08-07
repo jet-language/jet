@@ -367,6 +367,24 @@ impl<'a> Parser<'a> {
                     }
                     return self.expr_primary(allow_struct_lit);
                 }
+                // D-CTMARKER1=C: `$name` comptime splice expression. B5 revert
+                // (card #1456): the lexer now merges `$name` into one `Ident`
+                // token (D-META-STAGE1's checkpoint, kept), so the splice is
+                // recognized here by the mark on the token text instead of a
+                // separate `Dollar` token — same AST node, same semantics.
+                // Declaration positions (`comptime_binding`, `comptime_def`,
+                // `marker_decl_param_list`) consume a `$`-marked ident via
+                // `expect_ident` before ever reaching this expression parser,
+                // so they're unaffected.
+                TokKind::Ident(name) if Syntax::is_comptime_name(name.as_str()) => {
+                    let bare = name.trim_start_matches('$').to_string();
+                    let span = self.bump().span;
+                    Ok(Expr::ComptimeSplice {
+                        name: bare,
+                        span,
+                        value: None,
+                    })
+                }
                 TokKind::Ident(name) => {
                     let span = self.bump().span;
                     let type_name = name.clone();

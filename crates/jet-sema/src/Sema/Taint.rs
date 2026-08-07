@@ -297,6 +297,7 @@ impl<'a> TaintCtx<'a> {
         | Expr::NoElse(_)
             | Expr::Lambda(_)
             | Expr::UnitLit { .. }
+            | Expr::ComptimeSplice { .. }
             | Expr::StrMatchLit(_, _)
             | Expr::BinMatchLit(_, _) => TagSet::new(),
         }
@@ -480,6 +481,7 @@ impl<'a> TaintCtx<'a> {
             | Expr::Todo { .. }
         | Expr::NoElse(_)
             | Expr::UnitLit { .. }
+            | Expr::ComptimeSplice { .. }
             // D-SHIFT1 (c7shift) / D-BINPAT1 (card #506 follow-up): a leaf
             // literal, no nested `Expr` to recurse into.
             | Expr::StrMatchLit(_, _)
