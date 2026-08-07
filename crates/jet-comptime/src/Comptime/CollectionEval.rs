@@ -478,6 +478,29 @@ fn set_method(
         // #1478: `Set.values()` — Iter is List-shaped at this eval tier
         // (see the `take`/`dedup` note in Builtins.rs), so this is `to_list`.
         "values" => Ok(CtValue::List(items)),
+        // D-SET-DECLINE1=C: `sort`/`shuffle` — same to-list-then-List
+        // machinery as `to_list`/`values` above, never mutating the Set.
+        "sort" => {
+            let mut sorted = items;
+            sorted.sort_by(|a, b| {
+                super::Builtins::cmp(a.clone(), b.clone(), span)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            Ok(CtValue::List(sorted))
+        }
+        // Same Fisher-Yates + fixed-seed PCG stream `List.shuffle()` runs
+        // (`(CtValue::List(xs), "shuffle")` in Builtins.rs) — deterministic
+        // and uniform regardless of the Set's internal walk order.
+        "shuffle" => {
+            let mut out = items;
+            let mut state: u64 = 0xC0FF_EE42;
+            for i in (1..out.len()).rev() {
+                state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+                let j = ((state >> 33) as usize) % (i + 1);
+                out.swap(i, j);
+            }
+            Ok(CtValue::List(out))
+        }
         "copy" | "to_set" => Ok(set_struct(type_name, items)),
         "capacity" => Ok(CtValue::Int(items.len() as i64)),
         "equal" => {

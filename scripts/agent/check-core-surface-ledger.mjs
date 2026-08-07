@@ -614,7 +614,6 @@ const CLUSTER_OWNER = {
   Map: 1477,
   Set: 1584,
   SortedSet: 1584,
-  Iter: 1586,
   "core.io": 1480,
   "core.files": 288,
   "core.path": 288,
@@ -628,17 +627,170 @@ const CLUSTER_OWNER = {
   "core.testing": 1590,
   "core.reflect": 1590,
   "core.http": 1590,
-  "core.tls": 1590,
+  // D-CORESURF-SMALL1's own text defers core.tls's last 2 rows (ciphersuites,
+  // tlsversion — the negotiated values) to a follow-up card, not this ballot:
+  // a native TLS-bridge change, tracked separately from the decline sweep.
+  "core.tls": 1593,
   "core.uuid": 1590,
   "core.binary": 1590,
   "core.encoding.csv": 1590,
   "core.random": 1590,
-  PriorityQueue: 1590,
   "core.args": 1590,
   "core.encoding.json": 1590,
   "core.mem": 1590,
-  "core.mime": 1590,
 };
+
+// Every row D-STR-DECLINE1, D-SET-DECLINE1, and D-CORESURF-SMALL1 decline,
+// keyed by the row `id` `buildRows`/`competitorRows` mint today, mapped to the
+// ratified decision plus the existing Jet route named in that decision's
+// technical text. `buildLedger` applies this after rows are built (below),
+// flipping a matched row's verdict from `jet_loses`/`single_witness` to
+// `declined` — the ledger's only source of a "declined" verdict, so a refresh
+// reproduces the same declines deterministically instead of losing them the
+// moment someone hand-edits the generated JSON (which `--check` rejects).
+//
+// D-ITER-DECLINE1 needs no entry here: all six names it declines (fill,
+// cycle_n, duplicate, tostring, clip, iterator, compact, next) already
+// normalize onto a Jet-shipped Iter member (`repeat`, `join`, `to_list`/
+// `collect`, `filter`, `first`) through `SYNONYM_GROUPS`, so `competitorRows`
+// never mints a gap row for them in the first place — there is nothing left
+// to mark declined.
+const RATIFIED_DECLINES = {
+  // D-STR-DECLINE1=C: String's 30 declined ledger gaps (to_int/to_float/
+  // match/matches ship instead — see Collections.rs `string_method_return`).
+  "gap.text.clear": ["D-STR-DECLINE1", "String is immutable — rebuild with + or .replace()/.slice()"],
+  "gap.text.push": ["D-STR-DECLINE1", "String is immutable — rebuild with + or .replace()/.slice()"],
+  "gap.text.pop": ["D-STR-DECLINE1", "String is immutable — rebuild with + or .replace()/.slice()"],
+  "gap.text.remove": ["D-STR-DECLINE1", "String is immutable — rebuild with + or .replace()/.slice()"],
+  "gap.text.write": ["D-STR-DECLINE1", "String is immutable — rebuild with + or .replace()/.slice()"],
+  "gap.text.all": ["D-STR-DECLINE1", "String.chars() then Iter.all"],
+  "gap.text.map": ["D-STR-DECLINE1", "String.chars() then Iter.map"],
+  "gap.text.fold": ["D-STR-DECLINE1", "String.chars() then Iter.fold"],
+  "gap.text.skip": ["D-STR-DECLINE1", "String.chars() then Iter.skip"],
+  "gap.text.chunk": ["D-STR-DECLINE1", "String.chars() then Iter.chunk"],
+  "gap.text.droplast": ["D-STR-DECLINE1", "String.chars() then Iter.drop_last"],
+  "gap.text.indexed": ["D-STR-DECLINE1", "String.chars() then Iter.indexed"],
+  "gap.text.flatmap": ["D-STR-DECLINE1", "String.chars() then Iter.flat_map"],
+  "gap.text.each": ["D-STR-DECLINE1", "String.chars() then Iter.each"],
+  "gap.text.max": ["D-STR-DECLINE1", "String.chars() then Iter.max"],
+  "gap.text.min": ["D-STR-DECLINE1", "String.chars() then Iter.min"],
+  "gap.text.scan": ["D-STR-DECLINE1", "String.chars() then Iter.scan"],
+  "gap.text.first": ["D-STR-DECLINE1", "String.chars() then Iter.first"],
+  "gap.text.last": ["D-STR-DECLINE1", "String.chars() then Iter.last"],
+  "gap.text.get": ["D-STR-DECLINE1", "String.chars() then Iter.get"],
+  "gap.text.codepointat": ["D-STR-DECLINE1", "String.chars() then Iter.get"],
+  "gap.text.concat": ["D-STR-DECLINE1", "the + operator / string interpolation"],
+  "gap.text.isvalid": ["D-STR-DECLINE1", "a live String is always valid UTF-8 by construction"],
+  "gap.text.replacerange": ["D-STR-DECLINE1", "String.slice() + String.replace()"],
+  "gap.text.isprint": ["D-STR-DECLINE1", "niche buffer op — two-witness, covered by the shipped String surface"],
+  "gap.text.intern": ["D-STR-DECLINE1", "niche buffer op — two-witness, covered by the shipped String surface"],
+  "gap.text.indexofany": ["D-STR-DECLINE1", "niche buffer op — two-witness, covered by the shipped String surface"],
+  "gap.text.lastindexofany": ["D-STR-DECLINE1", "niche buffer op — two-witness, covered by the shipped String surface"],
+  "gap.text.chop": ["D-STR-DECLINE1", "String.slice()"],
+  "gap.text.rpartition": ["D-STR-DECLINE1", "String.slice() + String.last_index_of()"],
+  // D-SET-DECLINE1=C: Set's 3 declined ledger gaps (sort/shuffle ship
+  // instead — see Collections.rs `set_method_return`).
+  "gap.Set.indexof": ["D-SET-DECLINE1", "Set.to_list() then List.index_of — a hash Set keeps no position"],
+  "gap.Set.indexed": ["D-SET-DECLINE1", "Set.to_list() then List.indexed — a hash Set keeps no position"],
+  "gap.Set.flatten": ["D-SET-DECLINE1", "no legal Set<T> can hold a nested container (E0506 requires Hash+Eq elements)"],
+  // D-CORESURF-SMALL1=A: the small-cluster ledger's 75 declined names.
+  "gap.core.sync.broadcast": ["D-CORESURF-SMALL1", "core.tasks — message passing, not raw shared-memory locks"],
+  "gap.core.sync.clear": ["D-CORESURF-SMALL1", "core.tasks — no shared mutable state to clear"],
+  "gap.core.sync.lock": ["D-CORESURF-SMALL1", "core.tasks — message passing, not raw shared-memory locks"],
+  "gap.core.sync.put": ["D-CORESURF-SMALL1", "SyncMap.map_set"],
+  "gap.core.sync.rlock": ["D-CORESURF-SMALL1", "core.tasks — message passing, not raw shared-memory locks"],
+  "gap.core.sync.signal": ["D-CORESURF-SMALL1", "core.tasks — message passing, not raw shared-memory locks"],
+  "gap.core.sync.trylock": ["D-CORESURF-SMALL1", "core.tasks — message passing, not raw shared-memory locks"],
+  "gap.core.sync.unlock": ["D-CORESURF-SMALL1", "core.tasks — message passing, not raw shared-memory locks"],
+  "gap.core.sync.wait": ["D-CORESURF-SMALL1", "core.tasks — message passing, not raw shared-memory locks"],
+  "gap.core.sync.thread": ["D-CORESURF-SMALL1", "core.tasks — message passing, not raw shared-memory locks"],
+  "gap.core.sync.timer": ["D-CORESURF-SMALL1", "core.tasks — message passing, not raw shared-memory locks"],
+  "gap.core.sync.locked": ["D-CORESURF-SMALL1", "core.tasks — message passing, not raw shared-memory locks"],
+  "gap.core.encoding.xml.close": ["D-CORESURF-SMALL1", "XMLWriter.finish"],
+  "gap.core.encoding.xml.copy": ["D-CORESURF-SMALL1", "one witness language; no consistent competitor meaning"],
+  "gap.core.encoding.xml.end": ["D-CORESURF-SMALL1", "core.encoding.xml parses into one shared DataTree (D-SERDE13=B), not incremental SAX tags"],
+  "gap.core.encoding.xml.flush": ["D-CORESURF-SMALL1", "XMLWriter.flush"],
+  "gap.core.encoding.xml.indent": ["D-CORESURF-SMALL1", "core.encoding.xml parses into one shared DataTree (D-SERDE13=B), not incremental SAX tags"],
+  "gap.core.encoding.xml.name": ["D-CORESURF-SMALL1", "core.encoding.xml parses into one shared DataTree (D-SERDE13=B), not incremental SAX tags"],
+  "gap.core.encoding.xml.nodetype": ["D-CORESURF-SMALL1", "core.encoding.xml parses into one shared DataTree (D-SERDE13=B), not incremental SAX tags"],
+  "gap.core.encoding.xml.write": ["D-CORESURF-SMALL1", "XMLWriter.write"],
+  "gap.core.encoding.xml.clear": ["D-CORESURF-SMALL1", "one witness language; no consistent competitor meaning"],
+  "gap.core.process.id": ["D-CORESURF-SMALL1", "ProcessChild.id"],
+  "gap.core.process.kill": ["D-CORESURF-SMALL1", "ProcessChild.kill"],
+  "gap.core.process.wait": ["D-CORESURF-SMALL1", "ProcessChild.wait"],
+  "gap.core.process.spawn": ["D-CORESURF-SMALL1", "ProcessSpec.spawn"],
+  "gap.core.process.output": ["D-CORESURF-SMALL1", "ProcessChild.output"],
+  "gap.core.process.success": ["D-CORESURF-SMALL1", "ProcessResult.success"],
+  "gap.core.process.exitcode": ["D-CORESURF-SMALL1", "ProcessResult.code"],
+  "gap.core.process.start": ["D-CORESURF-SMALL1", "ProcessSpec.spawn"],
+  "gap.core.db.close": ["D-CORESURF-SMALL1", "DBConnection.close"],
+  "gap.core.db.commit": ["D-CORESURF-SMALL1", "DBScope.commit"],
+  "gap.core.db.name": ["D-CORESURF-SMALL1", "one witness language; no consistent competitor meaning"],
+  "gap.core.db.first": ["D-CORESURF-SMALL1", "DBConnection.query_one"],
+  "gap.core.db.raw": ["D-CORESURF-SMALL1", "declined — would open an unaudited escape from the portable DB-plugin-wire protocol"],
+  "gap.core.db.rollback": ["D-CORESURF-SMALL1", "DBScope.rollback"],
+  "gap.core.db.copy": ["D-CORESURF-SMALL1", "one witness language; no consistent competitor meaning"],
+  "gap.core.db.count": ["D-CORESURF-SMALL1", "DBConnection.query(...).len()"],
+  "gap.core.testing.benchmark": ["D-CORESURF-SMALL1", "#Bench marker block + `jet bench`"],
+  "gap.core.testing.fail": ["D-CORESURF-SMALL1", "#Test marker block + `jet test`"],
+  "gap.core.testing.main": ["D-CORESURF-SMALL1", "#Test marker block + `jet test`"],
+  "gap.core.testing.run": ["D-CORESURF-SMALL1", "#Test marker block + `jet test`"],
+  "gap.core.testing.runtests": ["D-CORESURF-SMALL1", "#Test marker block + `jet test`"],
+  "gap.core.testing.skip": ["D-CORESURF-SMALL1", "#Test marker block's .skip(reason) + `jet test`"],
+  "gap.core.testing.stop": ["D-CORESURF-SMALL1", "#Test marker block + `jet test`"],
+  "gap.core.reflect.clear": ["D-CORESURF-SMALL1", "declined — reflect.of(x) is read-only (I1: no field write by string name)"],
+  "gap.core.reflect.copy": ["D-CORESURF-SMALL1", "declined — reflect.of(x) is read-only (I1: no field write by string name)"],
+  "gap.core.reflect.equal": ["D-CORESURF-SMALL1", "declined — reflect.of(x) is read-only (I1: no field write by string name)"],
+  "gap.core.reflect.get": ["D-CORESURF-SMALL1", "declined — reflect.of(x) is read-only (I1: no field write by string name)"],
+  "gap.core.reflect.set": ["D-CORESURF-SMALL1", "declined — reflect.of(x) is read-only (I1: no field write by string name)"],
+  "gap.core.reflect.getfile": ["D-CORESURF-SMALL1", "declined — a compiled, ahead-of-time language does not load code at runtime"],
+  "gap.core.reflect.getmodule": ["D-CORESURF-SMALL1", "declined — a compiled, ahead-of-time language does not load code at runtime"],
+  "gap.core.reflect.loadfile": ["D-CORESURF-SMALL1", "declined — a compiled, ahead-of-time language does not load code at runtime"],
+  "gap.core.http.cancelrequest": ["D-CORESURF-SMALL1", "duplicates the deadline every request already takes"],
+  "gap.core.http.copy": ["D-CORESURF-SMALL1", "one witness language; no consistent competitor meaning"],
+  "gap.core.http.first": ["D-CORESURF-SMALL1", "HTTPHeaders.first"],
+  "gap.core.http.postform": ["D-CORESURF-SMALL1", "the request builder's .form(...) call"],
+  "gap.network.start": ["D-CORESURF-SMALL1", "tls.client()"],
+  "gap.network.handshake": ["D-CORESURF-SMALL1", "happens inside tls.client() automatically, by design"],
+  "gap.network.verifyhostname": ["D-CORESURF-SMALL1", "mandatory already — TLSPeerIdentity.verified_server_name, no opt-out"],
+  "gap.network.copy": ["D-CORESURF-SMALL1", "one witness language; no consistent competitor meaning"],
+  "gap.core.uuid.join": ["D-CORESURF-SMALL1", "matches no real UUID operation in any compared language"],
+  "gap.core.uuid.uuid1": ["D-CORESURF-SMALL1", "declined — MAC-address-based, weaker than the already-shipped v7"],
+  "gap.core.uuid.uuid4": ["D-CORESURF-SMALL1", "uuid.v4 — same call, existing name"],
+  "gap.bytes.pipe": ["D-CORESURF-SMALL1", "declined — JetReader is a fixed in-memory parser (D-SHIFT1), not a stream"],
+  "gap.bytes.readchar": ["D-CORESURF-SMALL1", "declined — character decoding belongs to core.text's Cursor, not a byte reader"],
+  "gap.core.encoding.csv.flush": ["D-CORESURF-SMALL1", "CSVWriter.flush"],
+  "gap.core.encoding.csv.read": ["D-CORESURF-SMALL1", "CSVReader.next"],
+  "gap.core.encoding.csv.fieldsizelimit": ["D-CORESURF-SMALL1", "EncodingLimits.max_item_bytes"],
+  "gap.core.random.random": ["D-CORESURF-SMALL1", "core.random.float"],
+  "gap.core.random.uniform": ["D-CORESURF-SMALL1", "core.random.float_range"],
+  "gap.core.args.parse": ["D-CORESURF-SMALL1", "ArgsSpec.parse"],
+  "gap.core.args.parseargs": ["D-CORESURF-SMALL1", "ArgsSpec.parse"],
+  "gap.core.encoding.json.dump": ["D-CORESURF-SMALL1", "to_string() + a file write, or the streaming JSONWriter"],
+  "gap.core.mem.replace": ["D-CORESURF-SMALL1", "the take operator (^) + assignment"],
+  "gap.core.mem.copy": ["D-CORESURF-SMALL1", "one witness language; duplicates plain assignment for Copy values"],
+};
+
+function applyRatifiedDeclines(rows) {
+  const seen = new Set();
+  for (const row of rows) {
+    const entry = RATIFIED_DECLINES[row.id];
+    if (!entry) continue;
+    if (row.verdict !== "jet_loses" && row.verdict !== "single_witness") {
+      throw new Error("RATIFIED_DECLINES names " + row.id +
+        ", but its verdict is already " + row.verdict + " — remove the stale entry");
+    }
+    const [decision, jetSpelling] = entry;
+    row.verdict = "declined";
+    row.declinedBy = decision;
+    row.jetSpelling = jetSpelling;
+    seen.add(row.id);
+  }
+  const missing = Object.keys(RATIFIED_DECLINES).filter((id) => !seen.has(id));
+  if (missing.length) {
+    throw new Error("RATIFIED_DECLINES names a row the ledger no longer mints: " + missing.join(", "));
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Source-table parsing. The compiler's own tables decide what Jet ships.
@@ -1900,6 +2052,7 @@ function buildLedger() {
   const collections = collectionInventory();
   const jetRows = buildRows(modules, fixedPairs, collections, surfaces);
   const rows = jetRows.concat(competitorRows(surfaces, jetRows));
+  applyRatifiedDeclines(rows);
   const clusters = lossClusters(rows, towerCards(towerBoard()));
   const uncompared = uncomparedDomains(modules, containers);
 

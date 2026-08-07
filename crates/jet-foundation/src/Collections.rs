@@ -1277,6 +1277,28 @@ fn string_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
         ("repeat", 1) => Some(Some(Type::String)),
         // c97/D-STRPARSE1: fallible integer parse. Same `Int ? ParseError` result
         // `Int.parse(s)` returns, so one error type covers text→int.
+        // D-STR-DECLINE1=C: `to_int`/`to_float` are direct String spellings of
+        // the one parse mechanism `Int.parse`/`Float.parse` already run —
+        // same `? ParseError` result, reached one call shorter from text.
+        ("to_int", 0) => Some(Some(Type::Result {
+            ok: Box::new(Type::Int),
+            err: Box::new(Type::Named("ParseError".to_string())),
+        })),
+        ("to_float", 0) => Some(Some(Type::Result {
+            ok: Box::new(Type::Float),
+            err: Box::new(Type::Named("ParseError".to_string())),
+        })),
+        // D-STR-DECLINE1=C: `matches`/`match` route through the one core.regex
+        // engine (`jet.regex.compile` + `is_match`/`find`) — same `? String`
+        // bad-pattern error shape `jet.regex.compile` already returns.
+        ("matches", 1) => Some(Some(Type::Result {
+            ok: Box::new(Type::Bool),
+            err: Box::new(Type::String),
+        })),
+        ("match", 1) => Some(Some(Type::Result {
+            ok: Box::new(Type::Option(Box::new(Type::String))),
+            err: Box::new(Type::String),
+        })),
         _ => None,
     }
 }
@@ -1764,10 +1786,16 @@ fn set_method_return(elem: &Type, method: &str, nargs: usize) -> Option<Option<T
         ("map", 1) => Some(Some(Type::List(Box::new(Type::Int)))),
         ("fold", 2) => Some(Some(Type::Int)),
         ("flat_map", 1) => Some(Some(iter_ty(Type::Int))),
+        // D-SET-DECLINE1=C: `sort`/`shuffle` turn an unordered Set into an
+        // ordered `List`, the same to-list-then-List machinery `filter`/`map`/
+        // `fold`/`each`/`all`/`min`/`max` already run. Neither mutates the Set.
+        ("sort" | "shuffle", 0) => Some(Some(Type::List(Box::new(elem.clone())))),
         // #1478: `flatten` declined — E0506 forbids a Set element type that
         // is itself a List/Set (Set elements must be Hash+Eq), so no legal
         // `Set<T>` can ever satisfy `flatten`'s nested-container precondition.
-        // See the D-SET-DECLINE1 ballot for the full declined-name rationale.
+        // `indexof`/`indexed` also declined — a hash Set keeps no stable
+        // position for `index_of`/`indexed` to answer. See the D-SET-DECLINE1
+        // ballot for the full declined-name rationale.
         _ => None,
     }
 }

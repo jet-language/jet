@@ -52,8 +52,8 @@ Generated on: 2026-08-07
 | Shared containers | 54 |
 | Core modules | 85 |
 | Module members | 1139 |
-| Collection method rows | 716 |
-| Jet-side rows | 1856 |
+| Collection method rows | 722 |
+| Jet-side rows | 1862 |
 | Total rows | 10434 |
 
 ## Verdicts
@@ -61,28 +61,28 @@ Generated on: 2026-08-07
 | Verdict | Rows |
 | --- | ---: |
 | Jet wins | 404 |
-| Equal | 863 |
-| Jet loses (two or more languages agree) | 305 |
-| Single witness (recorded, not scored) | 8273 |
+| Equal | 869 |
+| Jet loses (two or more languages agree) | 192 |
+| Single witness (recorded, not scored) | 8272 |
 | Exported type, not an operation | 169 |
 | Not compared | 420 |
-| Deliberately declined | 0 |
+| Deliberately declined | 108 |
 
 ## Competitors
 
 | Language | Surface read from | Recorded operations | Jet rows matched | Loss rows |
 | --- | --- | ---: | ---: | ---: |
-| Rust | standard-library source (rust-src component) | 1032 | 359 | 26 |
-| Go | official frozen API files (GOROOT/api/go1*.txt) | 1878 | 407 | 111 |
-| Swift | official documentation JSON (developer.apple.com) | 505 | 183 | 24 |
-| Kotlin | official API reference (kotlinlang.org) | 1141 | 240 | 51 |
-| C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1267 | 329 | 45 |
-| TypeScript | runtime introspection | 724 | 221 | 64 |
-| Ruby | runtime introspection | 1294 | 342 | 78 |
-| Elixir | runtime introspection | 1270 | 370 | 74 |
-| Julia | official documentation search index (docs.julialang.org) | 1132 | 282 | 79 |
+| Rust | standard-library source (rust-src component) | 1032 | 360 | 12 |
+| Go | official frozen API files (GOROOT/api/go1*.txt) | 1878 | 407 | 59 |
+| Swift | official documentation JSON (developer.apple.com) | 505 | 185 | 4 |
+| Kotlin | official API reference (kotlinlang.org) | 1141 | 245 | 18 |
+| C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1267 | 329 | 24 |
+| TypeScript | runtime introspection | 724 | 222 | 53 |
+| Ruby | runtime introspection | 1294 | 343 | 45 |
+| Elixir | runtime introspection | 1270 | 372 | 60 |
+| Julia | official documentation search index (docs.julialang.org) | 1132 | 283 | 63 |
 | R | official R manual package index (stat.ethz.ch R-devel) | 1768 | 51 | 0 |
-| Python | runtime introspection | 2232 | 420 | 157 |
+| Python | runtime introspection | 2232 | 420 | 116 |
 
 ## Loss clusters
 
@@ -95,36 +95,23 @@ while losses remain.
 | Container | Loss rows | Owner card | Card phase | State |
 | --- | ---: | --- | --- | --- |
 | core.files | 66 | #288 | building | live |
-| String | 34 | #1581 | ready | live |
 | core.crypto | 17 | #1473 | ready | live |
 | core.archive | 16 | #1470 | ready | live |
 | core.time | 14 | #1466 | done | closed |
 | core.tasks | 13 | #1468 | done | closed |
-| core.sync | 12 | #1590 | ready | live |
 | core.math | 10 | #1464 | done | closed |
 | core.os | 10 | #1465 | done | closed |
-| core.encoding.xml | 9 | #1590 | ready | live |
 | core.log | 9 | #1474 | done | closed |
 | core.net | 9 | #1469 | done | closed |
 | core.path | 9 | #288 | building | live |
-| core.process | 9 | #1590 | ready | live |
 | ByteBuffer | 8 | #1467 | done | closed |
-| core.db | 8 | #1590 | ready | live |
-| core.reflect | 8 | #1590 | ready | live |
-| core.testing | 7 | #1590 | ready | live |
-| core.tls | 6 | #1590 | ready | live |
-| Set | 5 | #1584 | ready | live |
-| core.http | 4 | #1590 | ready | live |
 | core.regex | 4 | #1471 | done | closed |
-| core.uuid | 4 | #1590 | ready | live |
-| core.encoding.csv | 3 | #1590 | ready | live |
-| core.args | 2 | #1590 | ready | live |
-| core.binary | 2 | #1590 | ready | live |
-| core.mem | 2 | #1590 | ready | live |
-| core.random | 2 | #1590 | ready | live |
+| core.tls | 2 | #1593 | planning | live |
 | BitSet | 1 | #1493 | ready | live |
-| core.encoding.json | 1 | #1590 | ready | live |
+| core.process | 1 | #1590 | building | live |
+| core.uuid | 1 | #1590 | building | live |
 | Deque | 1 | #1475 | done | closed |
+| String | 1 | #1581 | building | live |
 
 ## Containers indexed per package
 
