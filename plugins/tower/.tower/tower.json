@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1613,
-    "rev": 28764,
+    "rev": 28772,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -24,7 +24,7 @@
         "board-ideas"
       ]
     },
-    "completionCursor": "2026-08-07T10:18:13.023Z"
+    "completionCursor": "2026-08-07T11:26:33.504Z"
   },
   "epochs": [
     {
@@ -97687,6 +97687,11 @@
         {
           "at": "2026-08-07",
           "by": "bd3-reader",
+          "text": "Review fixes, commits 3f830eb89 and 29a752219 on bd3/reader. R1: take_pattern's advance and miss text were written three times (AOT emit, Cranelift host, evaluator). They now live in jet-foundation/src/StreamCursor.rs beside the rest of the D-SHIFT1 kernel, with MatchScan::bin_match_consumed owning the mid-byte rule; every tier calls them and keeps only its own match engine and binding projection. The evidence gap the reviewer named is covered: tests/comptime_diff.rs::sequential_comptime_reads_advance_the_shared_reader runs two #Known reads off one reader and compares against the same code at run time. Neutering apply_ct_mutations makes it fail with comptime '7|7|3' against runtime '7|9|1', so it is not green by accident. Re-run after the refactor: release_gates 16 passed 0 failed; comptime_diff 26 passed 0 failed; corelib typed_codec_decode_matches_between_full_build_and_quick_run passed; jet-foundation 138 passed; jet-codegen prelude 2 passed. One unrelated harness bug surfaced and is fixed in the same commit: comptime_diff numbered its rustc artifacts by per-test case index, so two tests both at index 0 raced for one output path and failed as a fake I2 miscompile on '2 + 3 * 4'. [handoff] Branch bd3/reader is unmerged and awaits the reviewer's recheck."
+        },
+        {
+          "at": "2026-08-07",
+          "by": "bd3-reader",
           "text": "Targeted proof run on branch bd3/reader, HEAD 19ea9b34e. cargo test -p jet-foundation: 137 passed, 0 failed (new StreamCursor and MatchScan kernel tests). cargo test -p jet-codegen prelude: 2 passed; the prelude ownership test also listed only 15 of the 19 spliced modules before this change and always failed, so it now lists all 20 and pins the new bytes. cargo test --test comptime_diff: 25 passed, 0 failed, which covers the binding-folding change. cargo test --test release_gates: 15 passed, 1 failed, the failure being canon_compiles_and_runs on the json.decode_traced gap (card #1605). cargo test --test parity: canonical_builtin_inventory_is_complete_and_stable fails on unclassified core.auth builtins; that is unrelated to this diff, which touches no auth or parity file. examples/canon.jet under jet run --release now matches tests/fixtures/canon/expected.out byte for byte. [handoff] Branch bd3/reader is unmerged in worktree .claude/worktrees/reader, on top of bd3/tests. It needs an independent review and then #1605 before criterion 2 can close."
         },
         {
@@ -97702,8 +97707,8 @@
           "status": "met",
           "metBy": "bd3-reader",
           "verifiedBy": null,
-          "evidence": "crates/jet-codegen/src/Codegen/TIR/eval/stream.rs handles all sixteen ops and calls jet_foundation::StreamCursor, the exact source Codegen/mod.rs splices into the AOT prelude (PRELUDE_PARTS), plus jet_foundation::MatchScan for the two take_pattern ops. Proof file exercising ReaderOver, ReaderReadU8/U16Be/U32Be/U64Be/U32Le, ReaderTake, ReaderRemaining, ReaderAtEnd, CursorOver, CursorSkipWs, CursorTakePattern and CursorTakeUntil prints identical output under 'jet run' and 'jet run --release': 'reader: magic=42 count=3 payload_len=3' / 'cursor: id=4411 sev=3 reason=disk full' / 'probe: u8=1 u16be=512 u32be=50331648 u64be=288230376151711744 rem=1 end=false' / 'short: err: short'. Kernel unit tests: cargo test -p jet-foundation, 137 passed.",
-          "at": "2026-08-07T10:27:39.679Z"
+          "evidence": "Reader/Cursor ops run in the canonical TIR evaluator through crates/jet-codegen/src/Codegen/TIR/eval/stream.rs, which calls jet_foundation::StreamCursor — the exact source Codegen/mod.rs splices into the AOT prelude. After review, take_pattern's surrounding policy moved there too: jet_cursor_tail, jet_reader_tail, jet_{cursor,reader}_take_pattern and jet_{cursor,reader}_pattern_miss now own what the scan may look at, how far a hit advances, and what a miss reports, and all three tiers call them (AOT emit at TIR/emit/expressions.rs, the Cranelift host at jet-jit/src/Parse.rs, the evaluator at eval/stream.rs). MatchScan::bin_match_consumed owns the other shared rule, that a binary pattern ending mid-byte is a miss. Each tier keeps only its match engine and its binding projection. Proof after the refactor: examples/canon.jet prints byte-identical output under jet run and jet run --release and matches tests/fixtures/canon/expected.out; a fixture exercising ReaderOver, ReaderReadU8/U16Be/U32Be/U64Be/U32Le, ReaderTake, ReaderRemaining, ReaderAtEnd, CursorOver, CursorSkipWs, CursorTakePattern and CursorTakeUntil prints the same lines on both tiers; cargo test -p jet-foundation 138 passed, including new asserts pinning the advance and the miss wording.",
+          "at": "2026-08-07T11:36:32.492Z"
         },
         {
           "n": 2,
@@ -97729,9 +97734,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T09:16:54.961Z",
-      "updated": "2026-08-07T11:11:35.754Z",
+      "updated": "2026-08-07T11:37:03.919Z",
       "updatedBy": "bd3-reader",
-      "claimedAt": "2026-08-07T11:11:35.754Z"
+      "claimedAt": "2026-08-07T11:37:03.919Z"
     },
     {
       "id": "c0utog26",
@@ -97799,6 +97804,11 @@
         {
           "at": "2026-08-07",
           "by": "bd3-reader",
+          "text": "Review fix, commit 3f830eb89 on bd3/reader. R2: the D-MIGRATE4 version vocabulary was written twice — Codegen/Items.rs baked 'v{i}->v{i+1}' into the generated chain-walker while the evaluator rebuilt the same strings. Both now call Codegen/TIR/mod.rs::migration_shape_name and ::migration_step_name. Re-run after the refactor: release_gates 16 passed 0 failed with canon_compiles_and_runs green; comptime_diff 26 passed 0 failed; corelib typed_codec_decode_matches_between_full_build_and_quick_run passed; examples/canon.jet still byte-identical under jet run, jet run --release, and tests/fixtures/canon/expected.out. [handoff] Branch bd3/reader is unmerged and awaits the reviewer's recheck."
+        },
+        {
+          "at": "2026-08-07",
+          "by": "bd3-reader",
           "text": "Targeted proof, branch bd3/reader HEAD be05f1f8f. cargo test -p jet --test release_gates: 16 passed, 0 failed (canon_compiles_and_runs green). cargo test --test comptime_diff: 25 passed, 0 failed, so the binding-folding change from #1602 still holds. cargo test --test corelib typed_codec_decode_matches_between_full_build_and_quick_run: 1 passed. examples/canon.jet is byte-identical under jet run, jet run --release, and tests/fixtures/canon/expected.out, with ~/.cache/jet cleared first. Not run: the full suite, per the scoped-proof rule."
         },
         {
@@ -97828,8 +97838,8 @@
           "status": "met",
           "metBy": "bd3-reader",
           "verifiedBy": null,
-          "evidence": "decode_traced returns CtValue::Struct DecodeResult { value, migration }; apply_codec_migration now reports the MigrationStatus of the walk it performed, so migrated, from and steps carry the version names the generated chain-walker uses. The status is an out-param only the top-level call asks for, so a nested field that migrates cannot leak into its parent's status, matching AOT where nested fields call plain jet_decode. tests/corelib.rs::typed_codec_decode_matches_between_full_build_and_quick_run asserts identical stdout from the full build and default jet run for: a current-shape json record (false, empty from, zero steps); a type with no migration blocks (false); a one-block record (true v1 v1->v2 with the added field filled); a two-block record two shapes behind (v1, two steps, v1->v2 and v2->v3) and one shape behind (v2, one step, v2->v3); toml (true v1); and csv, where every row migrates and the batch reports v1->v2 once. Test passes.",
-          "at": "2026-08-07T11:10:46.346Z"
+          "evidence": "decode_traced returns DecodeResult { value, migration }; apply_codec_migration reports the MigrationStatus of the walk. After review, the D-MIGRATE4 version vocabulary is defined once: Codegen/TIR/mod.rs::migration_shape_name and ::migration_step_name. Codegen/Items.rs bakes those names into the generated chain-walker and eval/exprs.rs::migration_status reports the same ones, so 'v1' and 'v1->v2' exist in one place. The status is an out-param only the top-level call asks for, so a nested field that migrates cannot leak into its parent's status, matching AOT where nested fields call plain jet_decode. tests/corelib.rs::typed_codec_decode_matches_between_full_build_and_quick_run asserts identical stdout from the full build and default jet run for a current-shape record, a type with no migration blocks, a one-block record, a two-block record two shapes behind (v1, steps v1->v2 and v2->v3) and one shape behind (v2, step v2->v3), toml, and csv where every row migrates and the batch reports once. Test passes after the refactor.",
+          "at": "2026-08-07T11:36:42.651Z"
         },
         {
           "n": 3,
@@ -97855,9 +97865,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T10:26:11.230Z",
-      "updated": "2026-08-07T11:11:05.755Z",
+      "updated": "2026-08-07T11:37:04.319Z",
       "updatedBy": "bd3-reader",
-      "claimedAt": "2026-08-07T11:11:05.755Z"
+      "claimedAt": "2026-08-07T11:37:04.319Z"
     },
     {
       "id": "c0ubf542",
@@ -132689,6 +132699,62 @@
   ],
   "events": [
     {
+      "at": "2026-08-07T11:37:04.319Z",
+      "by": "bd3-reader",
+      "action": "card.update",
+      "ref": "c0mu3d3u",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T11:37:03.920Z",
+      "by": "bd3-reader",
+      "action": "card.update",
+      "ref": "c09qyavw",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T11:37:03.499Z",
+      "by": "bd3-reader",
+      "action": "card.update",
+      "ref": "c0mu3d3u",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T11:36:54.583Z",
+      "by": "bd3-reader",
+      "action": "card.update",
+      "ref": "c09qyavw",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T11:36:42.651Z",
+      "by": "bd3-reader",
+      "action": "card.criteria-meet",
+      "ref": "c0mu3d3u",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-07T11:36:32.492Z",
+      "by": "bd3-reader",
+      "action": "card.criteria-meet",
+      "ref": "c09qyavw",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T11:34:35.325Z",
+      "by": "bd3-reader",
+      "action": "papercut.add",
+      "ref": "pc012nx6o",
+      "note": "#1602"
+    },
+    {
+      "at": "2026-08-07T11:26:33.504Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-07T11:26:33.504Z"
+    },
+    {
       "at": "2026-08-07T11:26:19.285Z",
       "by": "bd3-orch",
       "action": "card.update",
@@ -136131,62 +136197,6 @@
       "action": "card.criteria-add",
       "ref": "c03fqwro",
       "note": "#2 Any UI snapshot embedding the E1221 explain string is re-ble"
-    },
-    {
-      "at": "2026-08-07T00:54:05.652Z",
-      "by": "prep-records",
-      "action": "card.criteria-add",
-      "ref": "c03fqwro",
-      "note": "#1 jet explain E1221 output matches the post-ROOTS1 root set (1"
-    },
-    {
-      "at": "2026-08-07T00:54:04.205Z",
-      "by": "prep-records",
-      "action": "card.update",
-      "ref": "c03fqwro",
-      "note": "plan,blockedBy"
-    },
-    {
-      "at": "2026-08-07T00:53:56.456Z",
-      "by": "prep-records",
-      "action": "card.update",
-      "ref": "c0pp8jfr",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-07T00:53:56.028Z",
-      "by": "prep-records",
-      "action": "card.update",
-      "ref": "c0pp8jfr",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-07T00:53:44.703Z",
-      "by": "prep-records",
-      "action": "card.criteria-add",
-      "ref": "c0pp8jfr",
-      "note": "#11 Decision-to-card map logged: each of the 9 D-AUTHORITY-* ids"
-    },
-    {
-      "at": "2026-08-07T00:53:44.081Z",
-      "by": "prep-records",
-      "action": "card.update",
-      "ref": "c0pp8jfr",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-07T00:53:33.114Z",
-      "by": "prep-records",
-      "action": "card.update",
-      "ref": "c0hil8nx",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-07T00:53:32.681Z",
-      "by": "prep-records",
-      "action": "card.update",
-      "ref": "c0hil8nx",
-      "note": "logEntry"
     }
   ],
   "nextNum": 368,
@@ -136419,6 +136429,14 @@
       "resolvedAt": "2026-08-07T10:57:16.089Z",
       "resolvedBy": "claude-fable",
       "resolution": "Fixed: jet-env rejects /tmp CARGO_TARGET_DIR, AGENTS.md documents the tmpfs trap, scripts/agent/tmp-guard.sh auto-cleans and blocks under memory pressure"
+    },
+    {
+      "id": "pc012nx6o",
+      "by": "bd3-reader",
+      "text": "tests/comptime_diff.rs numbered rustc artifacts by per-test case index, so two tests both using index 0 raced for one output path and failed as a fake I2 miscompile; fixed on bd3/reader",
+      "cardId": "c09qyavw",
+      "created": "2026-08-07T11:34:35.325Z",
+      "status": "open"
     }
   ]
 }
