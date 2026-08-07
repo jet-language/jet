@@ -3302,7 +3302,9 @@ pub fn apply_impure_core_call(
         // that TirBridge already evaluates (date/math/measurement/testing/…).
         // Pure style/net helpers share the AST allowlist so impure_depth>0
         // (TirBridge / jet run deopt) still hits CorePureParity.
-        ("core.io", method) if super::dispatch::is_pure_tier2_call("core.io", method) => {
+        ("core.io", method)
+            if jet_foundation::Effects::core_effect("core.io", method).is_none() =>
+        {
             apply_core_call(module, method, args, span, repl_mode)
         }
         ("core.random", _) | ("core.testing", "fake_rng") => {
@@ -3334,13 +3336,10 @@ pub fn apply_impure_core_call(
         | ("core.time.datetime", _)
         | ("core.science.measurement", _) => apply_core_call(module, method, args, span, repl_mode),
         // Pure net helpers (e.g. ip_addr, socket_addr_parse) — not live sockets.
-        // Keep E3412 for the rest. Shares the allowlist with the REPL/comptime
-        // AST evaluator (`dispatch::is_pure_tier2_call`) so both tiers agree.
+        // Keep E3412 for the rest. D-META-EFFECT1: "pure" is what the effect
+        // table says, so both tiers agree without a second list here.
         ("core.net", method)
-            if matches!(
-                method,
-                "ip_addr" | "ip" | "ipv4" | "ipv6" | "parse_ip" | "is_ipv4" | "is_ipv6"
-            ) || super::dispatch::is_pure_tier2_call("core.net", method) =>
+            if jet_foundation::Effects::core_effect("core.net", method).is_none() =>
         {
             apply_core_call(module, method, args, span, repl_mode)
         }
