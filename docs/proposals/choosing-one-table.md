@@ -1,31 +1,30 @@
 # Choosing: one table, one pattern grammar
 
-Proposal, 2026-08-07, revision 2 (example-led rewrite). First-principles audit of patterns, matching, and control flow. Owner choices are the four D-CHOOSE ballots on the audit card. Every code block is labeled: **A — today** compiles now (or is ratified law), **B — proposed** needs a ballot. Unlabeled code is unchanged law shown for the full picture.
+Proposal, 2026-08-07, revision 3. Rev 2 swung too far toward compression: pattern-left binds read backwards, the loop-head forms hid their meaning, and several spellings collided with planned law. This revision was rebuilt from an adversarial syntax audit (inference load, garden-path parses, left-to-right verbalization, parser collisions) and a full cross-reference against ratified-but-unbuilt and planned cards. Every code block is labeled: **A — today** compiles now or is ratified law, **B — proposed** needs a ballot. Withdrawn rev-2 forms are shown struck through with the reason, so nothing disappears silently.
 
 ## Executive summary
 
-Jet already made the big call: no `match` keyword. One `if` builds every branch, one `loop` builds every repeat, and the fresh D-CONC-CHAN2 ruling put the channel wait on the same arm table. This audit does not reopen that. It found that the remaining pieces are fragmented: two pattern grammars that each know forms the other lacks, a loop head that takes only a name or one special pair, a search loop with no answer for "found nothing", and multi-head functions as a second dispatch mechanism nobody balloted.
+The ideas stand; the spellings changed. The ceremony-shortening for breaking down a result or optional stays, but every proposed form now reads subject-first, left to right, with the failure word written on the line. The adversarial audit's core finding: rev 2's forms all moved the pattern in front of the subject and deleted the word for a miss — every parser collision and misreading followed from that one move. The fix is one already-parsing shape: `subject == pattern ?? route`.
 
-The fix is one rule, applied everywhere: **a pattern is a shape that looks like the value, with names where data should land — and the same shapes work in every position.** Four ballots deliver it. Nothing a beginner writes today changes. Every case below is shown as an A/B pair so the win is visible on the page.
+Three short laws now carry the whole design, and each one is an indication rule, not an inference rule:
+
+1. **`::` always succeeds.** If a line binds with `::`, it cannot fail. No exceptions, so no guessing.
+2. **Testing uses `==`; the miss uses `??`.** A line that can fail says so with `==` (the test) and answers "and if not?" with a written route. The bound names exist afterward only because the route left.
+3. **Proposed on your suggestion: `::` defines, `=` fills.** Aliases (D-ALIAS-OP1=B, card #1513 — this is the alias ruling, not D-NAME-ALIAS1) and module instantiation (D-CONF-GENSPELL1) already moved definitions to `::`. A single-line function body is a definition too: `fn area(r: Float) => Float :: 3.14 * r * r`. What stays `=`: filling a slot — reassignment, parameter and field defaults, enum discriminants.
+
+The slate is now six ballots: PAT1 (one pattern grammar in every *test* position — binds unchanged), TEST1 (the statement test-bind law above), FIND1 (search loops, revised: the route is mandatory, nothing inferred), HEADS1 (rescoped: one coverage proof now, surface reconciliation named), FNBODY1 (your `::` function-body suggestion), and the withdrawn DRAW1 is deleted — its question dissolved when head patterns died.
 
 ## How to read the code
 
-Six sigils carry everything. One line each:
-
 | Sigil | Says | Example |
 |---|---|---|
-| `::` | bind: the left side receives the right side's value | `x :: 5` |
+| `::` | bind — always succeeds | `x :: 5` |
 | `:=` | same bind, mutable | `i := 0` |
-| `->` | arm arrow: "when this head fits, do this" | `200 -> ok()` |
-| `=>` | function arrow (declares the return type; never an arm) | `fn f() => Int` |
-| `??` | "and if not?" — the route when there is no value | `?? return` |
-| `.{ }` / `.Name` / `[ ]` / `( )` | shapes: a struct, an enum case, a list, a tuple | `.Ok(n)`, `[a, b]` |
-
-Three reading rules, and every line in this document follows them:
-
-1. **Left of `::` receives.** `x :: 5` and `.Ok(n) :: parse()` are the same sentence: a shape on the left, a value on the right, names get filled. A plain name is just the simplest shape.
-2. **A table tries its heads top to bottom; the first fit wins.** `if` runs the table once. `loop` runs its one head once per item.
-3. **`??` always answers "and if not?".** Its routes are a default value, `return`, `break`, `next`, or `panic(...)` — the same five everywhere it appears.
+| `==` | test — this line can miss | `x == .Ok(n)` |
+| `??` | the route on a miss: a default, `return`, `break`, `next`, `panic(...)` | `?? return` |
+| `->` | arm arrow: when this head fits, do this | `200 -> ok()` |
+| `=>` | function arrow (declares the return type) | `fn f() => Int` |
+| `.{ }` / `.Name` / `[ ]` / `( )` | shapes: struct, enum case, list, tuple | `.Ok(n)`, `[a, b]` |
 
 ## The catalog — every case, before and after
 
@@ -41,47 +40,61 @@ grade :: if score == {
 
 ### 2. Handle a result
 
-**A — today.** The arm table handles both sides. This stays and stays canonical:
+**A — today.** The arm table handles both sides; it stays canonical. And a value fallback already has its form — this line ships in the examples today:
 
 ```jet
 if parse_age(input) == {
     .Ok(n)  -> use(n)
     .Err(e) -> print(e.message)
 }
+
+n :: Int.parse(line) ?? next     // value fallback: works today
 ```
 
-**B — proposed (PAT1).** When only the happy path matters, move the shape to the receiver seat and route the miss. This is S74's own promised form, finally general:
+**B — proposed (TEST1).** When the miss should exit, test subject-first and route the miss. Spoken left to right: "if parse_age of input is an Ok of n — otherwise return."
 
 ```jet
-.Ok(n) :: parse_age(input) ?? return
+parse_age(input) == .Ok(n) ?? return
 use(n)
 ```
 
-Read it with rule 1: `.Ok(n)` receives; if the value is not an `Ok`, the `??` route answers.
+The law that makes this safe is written, not inferred: the route must leave (`return`, `break`, `next`, `panic`) — a value route is illegal here, because `n` would be unproven. `n` exists after the line only because the miss left. A pattern test with no `??` route binds nothing.
+
+~~Rev 2: `.Ok(n) :: parse_age(input) ?? return`~~ — withdrawn: pattern before subject reads backwards, the failure was invisible, and the leading `.Ok(` collides with the scope-member statement grammar.
 
 ### 3. Destructure a struct — unchanged
 
+The bind carries the type head; this is the shipped form (rev 2 mislabeled the headless spelling as law):
+
 ```jet
-.{id, severity: sev, ..} :: incident
+Incident.{id, severity: sev, ..} :: incident
 ```
 
-### 4. Destructure a list
+### 4. List shapes in tests
 
-**A — today.** Exact length only; anything else is an error (E0315):
+**A — today.** Lists destructure only beside `::`, exact length only:
 
 ```jet
 [a, b] :: point
 ```
 
-**B — proposed (PAT1).** Rest patterns, and a route when the shape can miss. The exact-length form above stays exactly as it is — no new ceremony:
+**B — proposed (PAT1).** List and tuple shapes join the test grammar — arm heads and `==` tests — with a rest spelled `...rest`. Three dots is the ratified capture-and-name convention (`{rest:...}` in string patterns, `...xs` spread); two dots stays discard-only (`..` in struct binds). Rev 2's `..rest` broke that split and is withdrawn.
 
 ```jet
-[head, ..rest] :: queue ?? return
+if queue == {
+    []              -> idle()
+    [only]          -> single(only)
+    [head, ...rest] -> stream(head, rest)
+}
+
+queue == [head, ...rest] ?? return
 ```
+
+The bind side does not change: `[a, b] :: point` keeps its exact-length runtime check, and no new bind forms are added anywhere in this proposal.
 
 ### 5. Parse a string
 
-**A — today.** String patterns exist, but only inside an arm table, so one field costs three lines:
+**A — today.** String patterns exist, but only as arm heads, so one field costs three lines:
 
 ```jet
 if version == {
@@ -90,16 +103,16 @@ if version == {
 }
 ```
 
-**B — proposed (PAT1).** The identical pattern, moved to the receiver seat:
+**B — proposed (TEST1).** Subject first, same pattern, route on the miss. Spoken: "if version looks like v-major-dot-minor — otherwise return usage."
 
 ```jet
-"v{major:Int}.{minor:Int}" :: version ?? return usage()
+version == "v{major:Int}.{minor:Int}" ?? return usage()
 use(major, minor)
 ```
 
-### 6. Iterate — unchanged
+Because the reader meets `==` before the quote, the holes are announced as bindings before they appear — the interpolation confusion of rev 2's string-on-the-left form (~~`"v{major:Int}..." :: version`~~) cannot start.
 
-All loop forms as they are today, commas between clauses (D-LOOP-COMMA1):
+### 6. Iterate — unchanged
 
 ```jet
 loop { poll() }                          // forever
@@ -111,15 +124,13 @@ loop i, 0..10, 2 { probe(i) }            // with a stride
 
 ### 7. Filter and collect — unchanged
 
-The ratified comprehension (D-LOOP-GUARD1); the guard follows the source with no comma:
-
 ```jet
 names :: loop u, users if u.active -> u.name
 ```
 
-### 8. Destructure in the loop head
+### 8. Destructure while iterating — withdrawn, stays as it is
 
-**A — today.** The head takes a name; fields come off it in the body:
+~~Rev 2: `loop .{name, age}, users { }`~~ — withdrawn on your call, and the audit agrees: the head falls into the condition-loop parse and garden-paths, and the pattern head added characters without adding clarity. The head stays a name or a `(key, value)` pair. Fields come off the binding, or off one explicit bind line when a body uses many:
 
 ```jet
 loop u, users {
@@ -127,51 +138,47 @@ loop u, users {
 }
 ```
 
-**B — proposed (PAT1).** Any shape works in the head, because the head is a pattern position now. `(key, count)` above was never special — it is just a tuple shape:
-
-```jet
-loop .{name, age}, users {
-    greet(name, age)
-}
-```
-
 ### 9. Skip the items that do not fit
 
-**A — today.** Test and skip in the body:
+~~Rev 2: `loop .Ok(r), readings { }`~~ — withdrawn: silent data loss with no word on the line for it, exactly the objection that walls the wait table.
+
+**A — today.** The arm table already says the skip out loud, and this compiles now:
 
 ```jet
 loop r, readings {
-    if !r.ok next
-    record(r)
+    if r == {
+        .Ok(reading) -> record(reading)
+        else         -> next
+    }
 }
 ```
 
-**B — proposed (DRAW1).** Say the shape you want; a miss skips, exactly like the guard in case 7:
+**B — proposed (TEST1, same law as case 2).** For a long happy path, the flat form: one line, subject first, skip written:
 
 ```jet
-loop .Ok(r), readings {
-    record(r)
+loop r, readings {
+    r == .Ok(reading) ?? next
+    record(reading)
 }
 ```
 
-One wall, on purpose: this works in a `loop`, never in a wait table (case 11). A wait draws from whichever channel is ready; a filter after the draw would drop the drawn item. Filtering a wait happens in the body, where the item is visibly yours.
+This is not new loop syntax — it is case 2's statement inside a loop body, where `?? next` is already a ratified route. One mechanism, and the more verbose form is the clearer one, as requested.
 
 ### 10. Find the first — and what if there is none?
 
-**A — today.** A mutable flag, a break, a second table:
+**A — today.** The ratified idiom is D-LOOPSTATE1's labeled value loop — explicit, and the rev-2 draft failed to cite it:
 
 ```jet
-found := None
-loop u, users {
-    if u.role == .Admin {
-        found = Val(u)
-        break
+found :: loop {
+    loop u, users {
+        if u.role == .Admin break(found, Val(u))
     }
+    break None
 }
 admin :: found ?? return Err("no admin")
 ```
 
-**B — proposed (FIND1).** A loop used as a value, whose exits are `break value`, is worth `T?`: the found value, or `None` when the loop runs out. Then `??` answers "and if not?" like everywhere else:
+**B — proposed (FIND1, revised).** A finite loop in value position with `break v` exits — and the route is *mandatory*, so nothing is inferred: the loop's own type is the break value's type, and the written route answers exhaustion. `?? next` and `?? break` are illegal immediately after the loop's `}` (they would read as controlling the loop that just closed); use the labeled form above for that.
 
 ```jet
 admin :: loop u, users {
@@ -179,17 +186,11 @@ admin :: loop u, users {
 } ?? return Err("no admin")
 ```
 
-Python needed a special for-else construct for this, with a firing rule people look up. Here it is the same `??` from cases 2, 4, and 5.
+Python's for-else, with the else spelled by the same `??` as every other miss in the language.
 
 ### 11. Wait on channels — already ratified, shown for the picture
 
-**A — today (shipping).** A method chain on the group handle:
-
-```jet
-winner :: g.select().recv(jobs).recv(control).wait()
-```
-
-**B — ratified 2026-08-07 (D-CONC-CHAN2=D, not built yet).** The wait is an `if` table; each head is a binding and a source, the same head shape a drain loop uses:
+**B — ratified (D-CONC-CHAN2=D, not built, card #1560).** No change proposed here:
 
 ```jet
 if {
@@ -199,70 +200,79 @@ if {
 }
 ```
 
-This proposal changes nothing here. It only names the wall (case 9) and reuses the head shape.
+The wall stands: wait arms take no patterns and no guards — a filter after a draw from many sources would drop the drawn item. Filtering a wait happens in the body (case 9's form), where the item is visibly yours.
 
-### 12. Dispatch by argument shape
+### 12. Dispatch by argument shape — rescoped
 
-**A — today (S83).** Multi-head functions are their own mechanism with their own coverage rule:
+**A — today (S83).**
 
 ```jet
 fn area(Circle(r: Float)) => Float = 3.14 * r * r
 fn area(Rect(w: Float, h: Float)) => Float = w * h
 ```
 
-**B — proposed (HEADS1).** The surface stays letter-for-letter. Its *meaning* becomes the table below, so coverage is E0307 — the same proof every table gets, one error copy instead of two:
+**B — proposed (HEADS1, rescoped).** The audit found the honest blocker: S83 heads are a second pattern dialect — bare names where every arm head requires `.Circle` (D-ENUMDOT1), typed sub-bindings that no arm head has. So the ballot now asks only for the unification that is safe today: coverage and overlap are checked by the table's proofs (E0307, unreachable-arm lint), one error copy instead of two. Whether the *surface* becomes literal table sugar is a named follow-up that must first reconcile the head dialect with D-ENUMDOT1 and D-PAT6.
+
+### 13. Single-line function bodies — your suggestion, balloted
+
+**A — today (D-ARROW-CONTROL1=A).**
 
 ```jet
-fn area(shape: Shape) => Float = if shape == {
-    .Circle(r)  -> 3.14 * r * r
-    .Rect(w, h) -> w * h
-}
+fn area(r: Float) => Float = 3.14 * r * r
 ```
+
+**B — proposed (FNBODY1).** A one-line body is a definition, and definitions are moving to `::`: aliases (`alias Parsed<T> :: T ? AppError`, D-ALIAS-OP1=B) and module instantiation (`module int_cache :: cache<Int>(64)`, D-CONF-GENSPELL1=A) already made the move. The law: **`::` defines, `=` fills.** Defaults (`timeout: Int = 30`), field defaults, enum discriminants, and reassignment fill a slot inside something being defined — they keep `=`.
+
+```jet
+fn area(r: Float) => Float :: 3.14 * r * r
+```
+
+Named honestly in the ballot: this amends D-ARROW-CONTROL1, and D-ALIAS-OP1's recorded rationale explicitly chose to leave the fn-body `=` alone when aliases moved — the ballot quotes that reasoning so the pick is made with it on the table.
 
 ## The one law behind the catalog
 
-Every A and B above is one rule wearing different clothes: **a choice is an ordered table of heads; the first head that fits binds its names and runs its body; a miss falls to the next head; a table that runs out follows the `??` rail.** The arm table tries arms. The loop tries items. The wait tries sources. The bind is a one-head table whose `else` is spelled `??`. Exhaustiveness (E0307) is the proof that a table cannot run out, which is why exhaustive tables need no `else`. And a head that fits also teaches the checker its facts — that is D-FACT-FLOW1's ratified flow-fact store, already law.
+A choice is an ordered table of heads; the first head that fits binds its names and runs its body; a miss falls to the next head; a table that runs out follows the `??` rail. The arm table tries arms. The loop tries items. The wait tries sources. The statement test (case 2) is a one-head table whose else is its route. Exhaustiveness (E0307) is the proof a table cannot run out. And the three indication laws keep every form honest: `::` cannot fail, `==` can, `??` says what happens then.
 
-The audit's evidence for why this pass is needed now, in one table:
+## Cross-reference against planned law
 
-| Fragment | Where | Defect |
+The full sweep ran against every ratified-but-unbuilt decision and planning/ready/implement card. Verdicts:
+
+| Proposal element | Planned law it touches | Verdict |
 |---|---|---|
-| Two pattern grammars | `AST/patterns.rs:37` (arms) vs `:210` (binds) | arms lack lists/tuples; binds lack ranges/strings/or |
-| S74 refutable bind | `syntax-decisions.md:523` | spec law, zero code (card #1652) |
-| Loop head | `control.rs:1195` | takes a name or one special pair, never a shape |
-| Found-nothing | — | no answer; flag pattern everywhere |
-| Multi-heads (S83) | `syntax-decisions.md:262` | second dispatch mechanism; owner-gate carried twice, never filed |
-| Stale prose | `yielding-loops.md`, `spec.md:2351` | teaches retired `;` headers and the dead select chain (card #1654) |
-| JIT parity | `jit_gaps.txt:442,454-456` | value-position pattern dispatch missing on JIT (card #1653) |
+| TEST1 statement test-bind | S31 (pattern `==` binds in conditions) — scope extension to statements is new law, stated in the ballot; E0405 (`??` needs a fallible left side) gains one named exception: a pattern-test left side with a diverging route | Named amendment |
+| TEST1 replaces the pattern-left refutable bind | S74's `Val(n) :: maybe_port() ?? return` — ratified, zero code (card #1652) | Amends S74: the unbuilt pattern-left form is retired before it is ever built; #1652 re-points to TEST1 |
+| `...rest` in list patterns | Two-dot discard (S74 struct `..`), three-dot capture (`{rest:...}` D-PARSESTR1/D-BINPAT1, `...xs` D-VARIADIC1) | Meshes — rev 2's `..rest` collided and is withdrawn |
+| FIND1 value loops | D-LOOPSTATE1 (labeled search loop ships today), S23/E0075 (payload breaks illegal in yielding loops), D-LOOP-STMT-ARROW1 (arrow statement loops), D-LOOP-SUBJECT1 (bindingless arrow loops) | Cited; FIND1 is brace-form only, arrow forms unchanged; the bindingless arrow form cannot host `break v` (E0075) and the ballot says so |
+| FNBODY1 | D-ARROW-CONTROL1=A (fn `= expr`), D-ALIAS-OP1=B (aliases to `::`; its rationale kept fn `=`), D-CONF-GENSPELL1=A (modules to `::`), S61/D-FIELDDEF1/D-META-CONST1 (defaults and discriminants keep `=`) | Named amendment; the fill-vs-define split leaves every `=` fill-site untouched |
+| Refinement types as patterns (`Int(0..100)` in a test) | D-TYPE2-SPELL1=A gives type-position refinements and `.from_int` conversion only | Deferred, named in What stays out — not folded in silently |
+| Wait table | D-CONC-CHAN2=D, card #1560 | Unchanged, wall restated |
 
 ## Decisions for the owner
 
-Each ballot stands alone; any subset can be adopted. Full ballots on the audit card.
-
-| Ballot | Decides | Catalog cases | Recommendation |
+| Ballot | Decides | Case | Recommendation |
 |---|---|---|---|
-| D-CHOOSE-PAT1 | One pattern grammar in every position; refutable shape binds take a `??` route (S74's law made general); list/tuple exact-length binds keep today's meaning untouched | 2, 4, 5, 8 | Adopt |
-| D-CHOOSE-DRAW1 | A refutable loop-head pattern skips the miss (same meaning as the guard); wait arms stay walled | 9 | Adopt skip |
-| D-CHOOSE-FIND1 | A value loop with `break v` exits is worth `T?` and rides `??` (names its narrowing of S23/E0075) | 10 | Adopt |
-| D-CHOOSE-HEADS1 | Multi-heads become sugar for the table; coverage is E0307 | 12 | Sugar |
+| D-CHOOSE-PAT1 | List and tuple shapes join arm heads and `==` tests with `...rest`; binds unchanged; loop heads unchanged | 4 | Adopt |
+| D-CHOOSE-TEST1 | The statement test-bind: `subject == pattern ?? route`, diverging routes only, bindings survive because the route left; replaces S74's unbuilt pattern-left form | 2, 5, 9 | Adopt |
+| D-CHOOSE-FIND1 | Finite value loop with `break v` and a mandatory `??` route; `?? next`/`?? break` illegal after the loop's `}` | 10 | Adopt |
+| D-CHOOSE-HEADS1 | Multi-head coverage checked by the table's proofs now; surface desugar deferred to a named follow-up | 12 | Adopt the proof half |
+| D-CHOOSE-FNBODY1 | Single-line fn bodies: `= expr` becomes `:: expr` under "`::` defines, `=` fills" | 13 | Owner-raised; recommended with the collision named |
+| ~~D-CHOOSE-DRAW1~~ | Deleted — head patterns are withdrawn everywhere, so the question it asked no longer exists | 8, 9 | — |
 
-Amendments named per ballot: PAT1 amends S74, D-DESTRUCT1, S19, and D-FAIL-BIND1 (ambient `err` reaches the bind-form route). DRAW1 amends S19. FIND1 amends the S68 value law and narrows S23/E0075. HEADS1 amends S83. Nothing else moves: the comma law, the comma-less guard, `if` as the only branching keyword, the wait table, and the `==` dispatch marker all stand.
+## What stays, and what stays out
 
-## What stays, and why
-
-- **`if` as the only branching keyword (S68)** — validated by the frequency audit; `match`, `switch`, `case`, `when` stay free identifiers forever.
-- **`if subj == { }`** — the marker reads as "if subj is one of these"; the isomorphic audit said teach it, not respell it. Stays on merit.
-- **No bare `_` arm** — `else` is the one out-word in tables, and `??` is the same word beside a bind. The wildcard lives in payload slots.
-- **Exhaustiveness stays a proof** — open scalars still need `else`; no integer-range proofs.
-- **The wait-arm wall** — no guards or refutable patterns after a draw from many sources; a miss there would drop data.
-- **Parameter destructuring stays declined (D-PAT6)** — HEADS1 rules the multi-head form only; single-head parameters stay plain names.
+- **`if` as the only branching keyword; the arm table; the comma law; the comma-less guard; the wait table** — all stand untouched.
+- **Binds gain nothing and lose nothing.** `x :: 5`, `Incident.{..} :: incident`, `[a, b] :: point`, `(x, y) :: point` are exactly today's law. `::` cannot fail — that is now a stated law, not an accident.
+- **No head patterns in loops** — withdrawn, on your call and the parser's.
+- **Refinement patterns (`Int(0..100)` as a test head) stay out** — D-TYPE2's `.from_int` remains the check-and-convert; folding refinements into the pattern grammar is future work, named here so it is not invented twice.
+- **Binary patterns in TEST1 position** — `frame == [U8].{"{ver:U4}{rest:...}"} ?? return` follows from the one-engine law (D-BINPAT1) and is included in TEST1's technical text, not left to inference.
+- **Parameter destructuring stays declined (D-PAT6).**
 
 ## Implementation shape
 
-**Phase A — re-found, zero surface change.** One pattern grammar behind both parsers; rename the internal `Stmt::Switch` fossil; all tests green. Close the stale prose in the same pass (card #1654) and re-point the 33 frozen tests (#1650).
+**Phase A — re-found, zero surface change.** One pattern engine behind arm heads and `==` tests; rename the internal `Stmt::Switch` fossil; stale-prose cards (#1654) and frozen tests (#1650) close in the same pass.
 
-**Phase B — land ratified-but-unbuilt once.** S74's refutable bind (card #1652) and D-CONC-CHAN2's wait table both build on the merged grammar. The four JIT pattern-dispatch gaps close here (card #1653) — that is I9 debt regardless of any ballot.
+**Phase B — land ratified-but-unbuilt once.** The wait table (#1560) and the TEST1 statement (which supersedes #1652's S74 form if TEST1 ratifies) build on the shared engine. The four JIT pattern-dispatch gaps (#1653) close here.
 
-**Phase C — the balloted surface, one clean migration each.** PAT1's new forms with examples and goldens per I5, DRAW1's skip with its teaching lint, FIND1's typing rule, HEADS1's desugar. Each deletes what it replaces.
+**Phase C — the balloted surface, one clean migration each.** PAT1's list/tuple test shapes, TEST1 with its two written laws, FIND1's mandatory-route value loop, HEADS1's proof unification, FNBODY1's formatter-driven migration of every `= expr` body.
 
-**After ratification:** reconcile the e3 board — record outcomes in spec, mint implementation cards per outcome, and update or retire #1416, #1419, #1420, #1453, #1560, #1650 so one plan remains. That is criterion 5 on the audit card.
+**After ratification:** criterion 5 on the audit card — record outcomes in spec, re-point #1652, reconcile #1416/#1419/#1420/#1453/#1560/#1650, mint implementation cards per outcome.
