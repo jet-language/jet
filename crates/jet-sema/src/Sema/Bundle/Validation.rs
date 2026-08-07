@@ -464,6 +464,7 @@ pub(crate) fn collect_used_core(
                 Item::Bench(b) => collect_core_stmts(&b.body, imports, &mut used, &mut spans, &mut ffi_cb),
                 Item::Const(c) => collect_core_expr(&c.value, imports, &mut used, &mut spans, &mut ffi_cb),
                 Item::EffectDecl(_)
+                | Item::MarkerDecl(_)
                 | Item::Trait(_)
                 | Item::Tag(_) // D-QUAL2: tags use no core imports
                 | Item::ExternRust(_)

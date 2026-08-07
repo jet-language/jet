@@ -3,5 +3,13 @@ Error [E0374]: `comptime` is retired
     |
   2 |     comptime answer = 40 + 2
     |     ^^^^^^^^
- Why: Jet folds ordinary foldable expressions automatically; explicit compile-time demand lives on the marker plane
- Fix: remove the keyword for ordinary code, or replace it with `#Known` when failure to compute now must stop the build
+ Why: Jet folds ordinary foldable expressions automatically; explicit compile-time demand is written with the `$` mark
+ Fix: remove the keyword for ordinary code, or write `$name :: …` when failure to compute now must stop the build
+
+Error [E0107]: nothing named `answer` exists here
+  --> tests/ui/comptime_keyword_retired.jet:3:11
+    |
+  3 |     print(answer)
+    |           ^^^^^^
+ Why: a name must be declared before it's used
+ Fix: did you mean `$answer`?

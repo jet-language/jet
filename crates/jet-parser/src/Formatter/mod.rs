@@ -375,6 +375,7 @@ fn item_span_start(item: &Item, src: &str) -> usize {
         // D-QUAL2: tag declarations use their own span.
         Item::Tag(t) => t.span.start,
         Item::EffectDecl(declaration) => declaration.span.start,
+        Item::MarkerDecl(declaration) => declaration.span.start,
         Item::Module(m) => src[..m.name_span.start]
             .rfind(Syntax::KW_MODULE)
             .unwrap_or(m.span.start),
@@ -458,6 +459,7 @@ fn item_span_end(item: &Item) -> usize {
             .unwrap_or(t.name_span.end),
         Item::Tag(t) => t.span.end,
         Item::EffectDecl(declaration) => declaration.span.end,
+        Item::MarkerDecl(declaration) => declaration.span.end,
         Item::Module(m) => m.span.end,
         Item::CModule(cm) => cm.span.end,
         Item::CodeModule(cm) => cm.span.end,

@@ -1559,7 +1559,10 @@ fn check_bundle_opts_for_output_inner(
                 Item::ProtocolDecl(_) => {}
                 // D-METADERIVE1=A: user-authored derive blocks are expanded below; skip here.
                 Item::UserDerive(_) => {}
+                // D-META-NAME1/FORM1: registration is #1457's/#1458's job; no
+                // registry row for #1456's declaration-side parse.
                 Item::EffectDecl(_)
+                | Item::MarkerDecl(_)
                 | Item::GenericModule(_)
                 | Item::ModuleAlias(_) => {}
             }
@@ -2222,6 +2225,7 @@ fn check_bundle_opts_for_output_inner(
                     walk_stmts_for_const_refs(&b.body, &const_names, &mut address_taken)
                 }
                 Item::EffectDecl(_)
+            | Item::MarkerDecl(_)
             | Item::Const(_)
             | Item::ExternRust(_)
             | Item::Trait(_)

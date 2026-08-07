@@ -514,6 +514,7 @@ pub(crate) fn collect_type_shapes(items: &[Item]) -> CollectedTypeShapes {
                 }
             }
             Item::EffectDecl(_)
+            | Item::MarkerDecl(_)
             | Item::Trait(_) | Item::ExternRust(_) | Item::Module(_) | Item::CModule(_)
             | Item::CodeModule(_) | Item::Distinct(_) | Item::TypeAlias(_) | Item::UnitFamily(_) | Item::ErrorConv(_)
             | Item::Tag(_) // D-QUAL2: tags erase

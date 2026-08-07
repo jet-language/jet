@@ -3300,6 +3300,7 @@ pub(crate) fn build_cx_items(
                     .push(m.clone());
             }
             Item::EffectDecl(_)
+            | Item::MarkerDecl(_)
             | Item::Impl(_) | Item::Test(_) | Item::Bench(_) | Item::Module(_) | Item::ErrorConv(_)
             | Item::StateDecl(_) // D-STATE-DECL: erases
             | Item::ProtocolDecl(_) // D-PROTO1/D-PROTO2: erases

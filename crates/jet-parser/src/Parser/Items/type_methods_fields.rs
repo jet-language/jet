@@ -379,9 +379,9 @@ impl<'a> Parser<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0374",
                         "`comptime` is retired".to_string(),
-                        "Jet folds ordinary foldable expressions automatically; explicit compile-time demand lives on the marker plane"
+                        "Jet folds ordinary foldable expressions automatically; explicit compile-time demand is written with the `$` mark"
                             .to_string(),
-                        "remove the keyword for ordinary code, or replace it with `#Known` when failure to compute now must stop the build"
+                        "remove the keyword for ordinary code, or write `$name :: …` when failure to compute now must stop the build"
                             .to_string(),
                         Some(span),
                     ));
@@ -390,10 +390,10 @@ impl<'a> Parser<'a> {
                     let kw = self.bump();
                     self.diags.push(Diagnostic::error(
                         "E0146",
-                        format!("`{}` is retired — write `#Known`", Syntax::KW_CONST),
-                        "explicit compile-time demand is a marker on an immutable binding"
+                        format!("`{}` is retired — write `$name`", Syntax::KW_CONST),
+                        "explicit compile-time demand is a mark on an immutable binding"
                             .to_string(),
-                        "write `#Known name :: …` (or `#Persist name := …` for hot-reload state)"
+                        "write `$name :: …` (or `#Persist name := …` for hot-reload state)"
                             .to_string(),
                         Some(kw.span),
                     ));

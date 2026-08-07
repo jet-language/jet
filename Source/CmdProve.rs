@@ -1294,8 +1294,7 @@ fn collect_capture_expr(
         | Expr::UnitLit { .. }
         | Expr::Absent(_)
         | Expr::Todo { .. }
-        | Expr::ReduceMarker(..)
-        | Expr::ComptimeSplice { .. } => {}
+        | Expr::ReduceMarker(..) => {}
         _ => sites.push(CaptureSite {
             operation: "unsupported expression boundary".to_string(),
             effect: None,

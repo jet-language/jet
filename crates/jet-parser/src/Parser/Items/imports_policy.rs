@@ -1092,6 +1092,12 @@ impl<'a> Parser<'a> {
                         self.protocol_decl_with_pkg(is_pub, is_package_pub)
                             .map(Item::ProtocolDecl)
                     }
+                    // D-META-NAME1=A / D-META-FORM1=A: `marker Name(params…)`
+                    // — a rule declaration (card #1456, declaration-side parse
+                    // only).
+                    TokKind::Ident(n) if n == Syntax::KW_MARKER && self.at_marker_decl() => {
+                        self.marker_decl().map(Item::MarkerDecl)
+                    }
                     // D-TYPEALIAS1: `alias Name<T> = …`
                     TokKind::Ident(n) if n == Syntax::KW_ALIAS => {
                         let (is_pub, is_package_pub) = self.parse_item_visibility();

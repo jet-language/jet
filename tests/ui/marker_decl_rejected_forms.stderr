@@ -1,0 +1,23 @@
+Error [E0381]: a trailing `on` clause isn't how a marker states a fact
+  --> tests/ui/marker_decl_rejected_forms.jet:6:29
+    |
+  6 | marker Inline(mode: String) on [.Function]
+    |                             ^^
+ Why: D-META-FORM1=A: a fact about the rule (its legal sites, whether it repeats) is an ordinary named parameter in the same list, marked with the compile-time `$` sigil — not a clause after the list
+ Fix: move the sites into the parameter list as `$sites: [.Function, …]`
+
+Error [E0381]: a second parameter list isn't how a marker states a fact
+  --> tests/ui/marker_decl_rejected_forms.jet:8:30
+    |
+  8 | marker Pre(condition: String)(sites: [.Function])
+    |                              ^
+ Why: D-META-FORM1=A: the rule's own arguments and facts about the rule share one named-parameter list, told apart by the compile-time `$` sigil — not two parameter lists
+ Fix: fold the second list's facts into the first as `$sites: […]`, `$repeatable: true`
+
+Error [E0381]: a scope block isn't how a marker states a fact
+  --> tests/ui/marker_decl_rejected_forms.jet:10:31
+    |
+ 10 | marker Unsafe(reason: String) {
+    |                               ^
+ Why: D-META-FORM1=A: a fact about the rule is an ordinary `$`-marked named parameter in the declaration's own parameter list — not a member line in a trailing block
+ Fix: write the facts as parameters, e.g. `$sites: [.Function, …], $repeatable: true`

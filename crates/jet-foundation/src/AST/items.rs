@@ -78,6 +78,12 @@ pub enum Item {
     /// D-GENMOD2=A: `module alias = module_name<args>` — module instantiation alias.
     /// Expanded to a `CodeModule` by sema before registration and body-checking.
     ModuleAlias(ModuleAliasDef),
+    /// D-META-NAME1=A / D-META-FORM1=A: `marker Name(params…)` — a rule
+    /// declaration written as an ordinary Jet item. Declaration-side parse
+    /// only (card #1456); erases before TIR like `EffectDecl`. Lowering the
+    /// parsed declaration into the runtime registry row the rest of the
+    /// compiler consumes is #1457's and #1458's job.
+    MarkerDecl(MarkerDecl),
 }
 
 #[derive(Debug, Clone)]
@@ -85,6 +91,34 @@ pub struct EffectDecl {
     pub name: String,
     pub name_span: Span,
     pub span: Span,
+}
+
+/// D-META-NAME1=A / D-META-FORM1=A: `marker Name(params…)`. The rule's own
+/// arguments and facts about the rule ($sites, $repeatable, …) share one
+/// named-parameter list; a fact is a parameter whose name carries the
+/// compile-time sigil (`Syntax::is_comptime_name`). No `on` clause, no
+/// second parameter list, no scope block — D-META-FORM1=A rejected all
+/// three by name.
+#[derive(Debug, Clone)]
+pub struct MarkerDecl {
+    pub name: String,
+    pub name_span: Span,
+    pub params: Vec<MarkerDeclParam>,
+    pub span: Span,
+}
+
+/// D-META-FORM1=A: one entry in a `marker Name(...)` parameter list. An
+/// ordinary entry is `name: Type [= default]` — an argument the marker's
+/// own use site supplies (`ty` carries the type, `value` an optional
+/// default). A `$`-marked entry (`Syntax::is_comptime_name(&name)`) is
+/// `$name: value` — a fixed fact about the rule itself ($sites, $repeatable,
+/// …), so it carries no type and `value` is always present.
+#[derive(Debug, Clone)]
+pub struct MarkerDeclParam {
+    pub name: String,
+    pub name_span: Span,
+    pub ty: Option<Type>,
+    pub value: Option<Box<Expr>>,
 }
 
 /// D-MOD1/2: code module — `module math;` or `module math { pub fn … }`.
