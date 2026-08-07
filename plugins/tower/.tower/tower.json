@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1621,
-    "rev": 28950,
+    "rev": 28972,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -92259,7 +92259,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "verify",
       "priority": "P1",
       "plan": "Implements D-META-STAGE1 — ratified 2026-08-06. Read each decision verbatim (tower brief on this card's parent proposal, or tower decision show) before building; the ratified outcome text is the law, this plan is the route. Every requirement is a discrete exit criterion below: meet each with targeted proof (tests, snapshots, examples with golden output), and keep I9 tier parity inside this card — AOT, default jet run (JIT), and the interpreter must agree on every surface this card ships before it closes. Delete every superseded form the decisions retire in the same change; do not leave compatibility shims or parallel spellings. Reference: docs/proposals/metaprogramming-one-compile-time-program.md.",
       "blockedBy": [],
@@ -92320,92 +92320,92 @@
         {
           "n": 1,
           "text": "$name :: expr, $if cond { } else { }, a bare $ { } block and $loop parse, check and fold; sema treats the mark as part of the identifier so a plain name and a marked name can never denote the same binding",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:34:12.560Z"
+          "status": "verified",
+          "metBy": "bd3-orch",
+          "verifiedBy": "bd3-review",
+          "evidence": "Verified on the merged tree (master 303a62950 + bd3/dollar). The mark rides the name end to end: the lexer hands $x as one Ident token, the ordinary binding path reads stage from it (Parser/Statements/bindings.rs: is_comptime: Syntax::is_comptime_name(&name)), and codegen keeps the two apart injectively -- Codegen/mod.rs:1318 mangle() maps $x to userct_x and x to user_x, and no plain name can reach the userct_ form (a plain ct_x mangles to user_ct_x). cargo test --test comptime_diff on the merged tree: 26 passed, 0 failed, including the sequential-reader-advance differential that proves a marked binding folds and advances rather than re-reading its start state.",
+          "at": "2026-08-07T14:33:50.388Z"
         },
         {
           "n": 2,
           "text": "#Known, #Known if and the #Known block are deleted with one teaching diagnostic each; #Known leaves the marker registry and its Prefix form and four legal sites go with it",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-dollar2",
-          "verifiedBy": null,
-          "evidence": "The three retired forms parse no further than recovery and teach one diagnostic, E0377, whose fix names the exact replacement per form: write $name :: … for a binding, $if <condition> { … } for a branch, $ { … } for a block. #Known left the marker registry: crates/jet-foundation/src/Policy.rs now carries rule!(retired \"Known\", sig!(), NO_SITES, \"$name :: …\"), so the Prefix form and its four legal sites (Declaration, Constant, Block, Statement) are gone with it. The regenerated editor grammars no longer list Known among the marker rules. E0377 is registered under I4: an index row and a what/why/fix row in docs/spec/diagnostics.md, plus two UI snapshots, tests/ui/comptime_known_retired.jet for the binding form and tests/ui/comptime_known_block_retired.jet for the block and branch forms, both blessed from real output and pinned parser-invalid in the lossless corpus. cargo test --test diagnostic_snapshots passes 4 of 4; --test grammar 18 of 18.",
-          "at": "2026-08-07T13:21:02.599Z"
+          "verifiedBy": "bd3-review",
+          "evidence": "#Known parses nowhere: the only survivors of a repo-wide sweep are the two retirement UI fixtures, retirement-teaching comments, and decision history in docs/proposals. One code, not three: E0377 with per-form fix text. I4 complete -- registry row at docs/spec/diagnostics.md:350, what/why/fix row at :1413, single emission site at Parser/Statements/bindings.rs:568, and both UI fixture pairs (comptime_known_retired, comptime_known_block_retired). Recovery is clean, not cascading: the binding fixture yields one E0377 whose fix names the real binding (write `$limit :: …`) with no follow-on E0107, and the block fixture yields exactly two, one per form (`$ { … }` and `$if <condition> { … }`). cargo test --test diagnostics_coverage on the merged tree: 11 passed, 0 failed.",
+          "at": "2026-08-07T14:33:50.755Z"
         },
         {
           "n": 3,
           "text": "D-CTMARKER1's carry-out rule and E2713 are deleted, not generalized; a repository search shows no remaining splice-carry concept",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-dollar2",
-          "verifiedBy": null,
-          "evidence": "D-CTMARKER1 retires outright. Expr::ComptimeSplice became Expr::ComptimeName and the strip is gone, so there is no scope-crossing concept left to state; an unresolved marked name now reports the ordinary E0107 rather than a splice-specific code. E2712 and E2713 are deleted, not generalized: both rows are gone from docs/spec/diagnostics.md, E2712 is gone from the expected-spec-ahead list in tests/diagnostics_coverage.rs, and the two sema comments that explained the suppression now name D-META-STAGE1=B instead. A repository search for E2712, E2713 across crates/, Source/ and tests/ returns nothing.",
-          "at": "2026-08-07T13:21:18.299Z"
+          "verifiedBy": "bd3-review",
+          "evidence": "Expr::ComptimeSplice, E2712 and E2713 are gone from every compiler crate and from Source/ -- grep returns zero code references. The two textual survivors are a stale test comment (tests/fmt.rs:1757, cosmetic) and the retirement record in docs/spec/syntax-decisions.md:2073, which is preserved history. The concept is replaced, not generalized: ComptimeName carries the mark in the name, so there is nothing to carry out of a block.",
+          "at": "2026-08-07T14:33:51.103Z"
         },
         {
           "n": 4,
           "text": "T.$layout keeps working and T.$name and T.$fields join it in the same spelling",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-dollar2",
-          "verifiedBy": null,
-          "evidence": "All three facts answer in one spelling. Sema gained a branch that reads the closed COMPILER_FACTS table and projects the matching TypeInfo member, so T.$layout, T.$name and T.$fields each answer that member's type; TIR lowering and the interpreter read the same table instead of hardcoding $layout. T.$layout had in fact regressed to E0302 on the checkpoint, so this restores it and adds the other two in the same move. Proof: a fixture with struct Point { x: Int, y: Int } reading Point.$name, Point.$fields.len() and Point.$layout.kind passes jet check with no problems. A marked member outside the table still reports E0302 and names the three facts.",
-          "at": "2026-08-07T13:21:18.687Z"
+          "verifiedBy": "bd3-review",
+          "evidence": "One closed table, four consumers, zero duplicated lists: Syntax/core_surface.rs:731 COMPILER_FACTS plus its single accessor compiler_fact_member(), read by the parser (Parser/Expressions/ptr_tuple.rs:115,121), sema (CheckerInfer/expr.rs:3021), TIR lowering (TIR/lower/expressions.rs:1904) and the TIR interpreter (TIR/eval/exprs.rs:3240). $layout, $name and $fields are rows in that one table, so no tier can drift from another.",
+          "at": "2026-08-07T14:34:05.482Z"
         },
         {
           "n": 5,
           "text": "Every example, test and doc using #Known is migrated in the same change, including examples/features/comptime/comptime_block.jet and comptime_if.jet",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-dollar2",
-          "verifiedBy": null,
-          "evidence": "Every in-repo consumer is migrated. The checkpoint had already moved 131 occurrences across 79 .jet files including examples/features/comptime/comptime_block.jet and comptime_if.jet; this session moved the remaining 208 across 54 Rust sources, the three living spec docs (spec.md, syntax-decisions.md, diagnostics.md), and re-blessed 24 UI snapshots from real output rather than by hand. What still spells #Known is only text that teaches its retirement (the take_mark recovery comments, the E0377 message built from RETIRED_MARKER_KNOWN, the Syntax.rs constant doc), the two E0377 fixtures, and decision history (docs/proposals, docs/audits, docs/research), which the greenfield rule preserves. Two migration bugs from the checkpoint were found and fixed rather than carried: an over-marked runtime local in the local_comptime_is_literal_data fixture, where a plain xs inside build() had been marked because a different $xs existed in run(), and 28 unmarked use sites. cargo test --test golden shows 63 failures, exactly the branch's documented baseline, with no comptime example among them.",
-          "at": "2026-08-07T13:21:34.510Z"
+          "verifiedBy": "bd3-review",
+          "evidence": "Migration is complete, not silently skipped. Repo-wide sweep for #Known over .jet/.rs/.md/.txt returns only: the two deliberate E0377 fixtures, retirement-teaching comments in core_surface.rs and the parser, and decision history in docs/proposals. Zero #Known remain in examples -- comptime_block.jet and comptime_if.jet are migrated. The migrated fixtures are pinned correctly too: both E0377 fixtures were added to UI_PARSE_INVALID in tests/support/fmt_lossless.rs at lines 26-27 in correct sorted position (the list is binary-searched), so cargo test --test fmt is 163 passed / 0 failed on the merged tree -- no regression against master's 163.",
+          "at": "2026-08-07T14:34:05.853Z"
         },
         {
           "n": 6,
           "text": "I9 parity inside this card: compile-time values fold before codegen so AOT, jet run and the interpreter see one folded program, proven by golden output on both tiers",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:34:14.263Z"
+          "status": "verified",
+          "metBy": "bd3-orch",
+          "verifiedBy": "bd3-review",
+          "evidence": "Golden on the merged tree: 61 distinct failing example stems, at or below the branch baseline of 63, so the change adds no golden failure. Critically for the fragment ConstRef change, ZERO comptime/ examples appear anywhere in the failure output. The ConstRef place lowering is correctly gated: TIR/lower/expressions.rs:518 applies only under super::is_eval_fragment(), so ordinary AOT lowering still bakes the value through the existing ComptimeName { value: Some(..) } arm and no CtLit baking that was load-bearing changed. comptime_diff 26/26 covers the fold-and-advance path on the interpreter side.",
+          "at": "2026-08-07T14:34:06.217Z"
         },
         {
           "n": 7,
           "text": "Syntax.rs entry updated",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-dollar2",
-          "verifiedBy": null,
-          "evidence": "crates/jet-foundation/src/Syntax/core_surface.rs carries COMPTIME_MARK and is_comptime_name with the decision ID: D-META-STAGE1=B, ratified 2026-08-06, amends D-VERDICT-1308-1/2 and retires D-CTMARKER1. The doc states the law: the mark belongs to the name and is written at every mention, a bare mark opens a compile-time block and precedes $if and $loop, ordinary foldable expressions need no mark, and the retired spellings teach E0377. RETIRED_MARKER_KNOWN sits beside it as the retired spelling the recovery path reads.",
-          "at": "2026-08-07T13:21:38.458Z"
+          "verifiedBy": "bd3-review",
+          "evidence": "Confirmed present in the diff, not merely claimed by a prior worker: crates/jet-foundation/src/Syntax/core_surface.rs carries COMPTIME_MARK, is_comptime_name(), RETIRED_MARKER_KNOWN and the COMPILER_FACTS table with its accessor, each cited to D-META-STAGE1=B. Sema, TIR lowering, the TIR interpreter and the parser all read these constants rather than repeating the strings.",
+          "at": "2026-08-07T14:34:19.105Z"
         },
         {
           "n": 8,
           "text": "syntax-decisions.md log entry",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-dollar2",
-          "verifiedBy": null,
-          "evidence": "docs/spec/syntax-decisions.md rewrites the S57 entry as amended by D-META-STAGE1=B, card #1537. It carries the ratified worked example, states that the mark belongs to the name and is written at every mention, that sema treats the mark as part of the identifier so a plain name and a marked name can never denote the same binding, and that codegen keeps them apart by spelling a marked name userct_<name> where a plain name is user_<name>. It records that D-CTMARKER1 retires outright with its carry-out rule and E2713 deleted rather than generalized, that #Known and its two sibling forms teach E0377 and leave the marker registry, and that comptime stays retired under E0374. It names the Syntax constants and both examples, and adds the D-LAYOUT-FACTS1=B paragraph for the three compiler-owned facts.",
-          "at": "2026-08-07T13:21:56.209Z"
+          "verifiedBy": "bd3-review",
+          "evidence": "Confirmed present in the diff. docs/spec/syntax-decisions.md amends S57 -- 'Compile-time demand (as amended by D-META-STAGE1=B, ratified 2026-08-06, card #1537)' -- with a worked example covering $limit, $ { }, $if and interpolated mentions, the rule that sema treats the mark as part of the identifier, the codegen mangling law (userct_<name> vs user_<name>), and the outright retirement of D-CTMARKER1. Substantive law text, not a one-line log row.",
+          "at": "2026-08-07T14:34:19.464Z"
         },
         {
           "n": 9,
           "text": "jet devtools grammars regenerated",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-dollar2",
-          "verifiedBy": null,
-          "evidence": "Ran jet self devtools grammars against a freshly built binary after retiring the Known marker rule. It rewrote editors/vscode/syntaxes/jet.tmLanguage.json, editors/jet.tmGrammar, editors/tree-sitter/grammar.js and editors/zed/languages/jet/highlights.scm, and Known is no longer among the marker rules in any of them. cargo test --test grammar passes 18 of 18.",
-          "at": "2026-08-07T13:22:00.097Z"
+          "verifiedBy": "bd3-review",
+          "evidence": "All four generated grammars changed in the diff (editors/jet.tmGrammar, editors/tree-sitter/grammar.js, editors/vscode/syntaxes/jet.tmLanguage.json, editors/zed/languages/jet/highlights.scm). Proof they match Syntax.rs rather than being hand-edited: cargo test --test grammar on the merged tree is 18 passed, 0 failed, and that suite asserts the committed grammars equal what the generator produces from Syntax.rs.",
+          "at": "2026-08-07T14:34:19.817Z"
         },
         {
           "n": 10,
           "text": "snapshots re-blessed",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-dollar2",
-          "verifiedBy": null,
-          "evidence": "Blessed with UPDATE_EXPECT=1 against a fresh binary and reviewed: 24 .stderr fixtures moved to the $ spelling because their .jet sources did, and two new E0377 fixtures were added. Sample: const_retired.stderr now reads 'const is retired — write $' with the fix 'write $name :: …', which is the real new output. cargo test --test diagnostic_snapshots passes 4 of 4. The two new fixtures are also pinned parser-invalid in tests/support/fmt_lossless.rs, which took cargo test --test fmt from 162 passed 1 failed to 163 passed 0 failed.",
-          "at": "2026-08-07T13:22:01.958Z"
+          "verifiedBy": "bd3-review",
+          "evidence": "Snapshots are consistent on the merged tree: cargo test --test diagnostics_coverage 11 passed / 0 failed (E0377 registered with both fixture pairs, no new uncovered code), and cargo test --test fmt 163 passed / 0 failed. The two E0377 .stderr fixtures were reviewed by hand and record clean per-form recovery with no cascading follow-on diagnostics.",
+          "at": "2026-08-07T14:34:20.174Z"
         }
       ],
       "refs": [
@@ -92415,8 +92415,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:34:12.218Z",
-      "updated": "2026-08-07T13:51:21.363Z",
-      "updatedBy": "bd3-dollar2",
+      "updated": "2026-08-07T14:34:20.174Z",
+      "updatedBy": "bd3-review",
       "workOrder": 180,
       "claimedAt": "2026-08-07T13:44:00.019Z"
     },
@@ -98703,6 +98703,42 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-08-07T13:50:21.942Z"
+        },
+        {
+          "n": 5,
+          "text": "Syntax.rs entry updated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:16:45.209Z"
+        },
+        {
+          "n": 6,
+          "text": "syntax-decisions.md log entry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:16:45.209Z"
+        },
+        {
+          "n": 7,
+          "text": "jet devtools grammars regenerated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:16:45.209Z"
+        },
+        {
+          "n": 8,
+          "text": "snapshots re-blessed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:16:45.209Z"
         }
       ],
       "refs": [
@@ -98712,8 +98748,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T13:50:00.598Z",
-      "updated": "2026-08-07T14:05:05.766Z",
-      "updatedBy": "fact-planes-audit"
+      "updated": "2026-08-07T14:18:40.448Z",
+      "updatedBy": "owner"
     }
   ],
   "decisions": [
@@ -131810,8 +131846,10 @@
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-08-07T13:55:16.014Z"
+      "status": "ratified",
+      "created": "2026-08-07T13:55:16.014Z",
+      "outcome": "B",
+      "ratifiedAt": "2026-08-07"
     },
     {
       "id": "D-FACT-WORD1",
@@ -131885,8 +131923,10 @@
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-08-07T13:55:22.270Z"
+      "status": "ratified",
+      "created": "2026-08-07T13:55:22.270Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-08-07"
     },
     {
       "id": "D-FACT-GATE1",
@@ -131955,8 +131995,10 @@
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-08-07T13:55:26.027Z"
+      "status": "ratified",
+      "created": "2026-08-07T13:55:26.027Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-08-07"
     },
     {
       "id": "D-FACT-READ1",
@@ -132019,8 +132061,10 @@
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-08-07T13:55:34.969Z"
+      "status": "ratified",
+      "created": "2026-08-07T13:55:34.969Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-08-07"
     },
     {
       "id": "D-FACT-HOME1",
@@ -132083,8 +132127,10 @@
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-08-07T13:55:39.433Z"
+      "status": "ratified",
+      "created": "2026-08-07T13:55:39.433Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-08-07"
     },
     {
       "id": "D-FACT-OWN1",
@@ -132152,8 +132198,10 @@
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-08-07T13:55:43.800Z"
+      "status": "ratified",
+      "created": "2026-08-07T13:55:43.800Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-08-07"
     },
     {
       "id": "D-FACT-FLOW1",
@@ -132216,8 +132264,10 @@
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-08-07T13:55:49.884Z"
+      "status": "ratified",
+      "created": "2026-08-07T13:55:49.884Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-08-07"
     }
   ],
   "questions": [
@@ -133824,6 +133874,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-07T14:34:49.315Z",
+      "by": "facts-reconciler",
+      "action": "papercut.add",
+      "ref": "pc0womkxu",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T14:34:20.174Z",
+      "by": "bd3-review",
+      "action": "card.criteria-verify",
+      "ref": "c0z2jsot",
+      "note": "#10"
+    },
+    {
+      "at": "2026-08-07T14:34:19.817Z",
+      "by": "bd3-review",
+      "action": "card.criteria-verify",
+      "ref": "c0z2jsot",
+      "note": "#9"
+    },
+    {
+      "at": "2026-08-07T14:34:19.464Z",
+      "by": "bd3-review",
+      "action": "card.criteria-verify",
+      "ref": "c0z2jsot",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-07T14:34:19.105Z",
+      "by": "bd3-review",
+      "action": "card.criteria-verify",
+      "ref": "c0z2jsot",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-07T14:34:06.218Z",
+      "by": "bd3-review",
+      "action": "card.criteria-verify",
+      "ref": "c0z2jsot",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-07T14:34:05.853Z",
+      "by": "bd3-review",
+      "action": "card.criteria-verify",
+      "ref": "c0z2jsot",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-07T14:34:05.482Z",
+      "by": "bd3-review",
+      "action": "card.criteria-verify",
+      "ref": "c0z2jsot",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-07T14:33:51.103Z",
+      "by": "bd3-review",
+      "action": "card.criteria-verify",
+      "ref": "c0z2jsot",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-07T14:33:50.755Z",
+      "by": "bd3-review",
+      "action": "card.criteria-verify",
+      "ref": "c0z2jsot",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-07T14:33:50.388Z",
+      "by": "bd3-review",
+      "action": "card.criteria-verify",
+      "ref": "c0z2jsot",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T14:18:40.448Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-FACT-FLOW1",
+      "note": "A"
+    },
+    {
+      "at": "2026-08-07T14:18:25.331Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-FACT-OWN1",
+      "note": "A"
+    },
+    {
+      "at": "2026-08-07T14:17:26.711Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-FACT-HOME1",
+      "note": "A"
+    },
+    {
+      "at": "2026-08-07T14:16:45.209Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-FACT-READ1",
+      "note": "A"
+    },
+    {
+      "at": "2026-08-07T14:16:45.209Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0q81flf",
+      "note": "#8 snapshots re-blessed"
+    },
+    {
+      "at": "2026-08-07T14:16:45.209Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0q81flf",
+      "note": "#7 jet devtools grammars regenerated"
+    },
+    {
+      "at": "2026-08-07T14:16:45.209Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0q81flf",
+      "note": "#6 syntax-decisions.md log entry"
+    },
+    {
+      "at": "2026-08-07T14:16:45.209Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0q81flf",
+      "note": "#5 Syntax.rs entry updated"
+    },
+    {
+      "at": "2026-08-07T14:16:24.254Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-FACT-GATE1",
+      "note": "A"
+    },
+    {
+      "at": "2026-08-07T14:16:16.552Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-FACT-WORD1",
+      "note": "A"
+    },
+    {
+      "at": "2026-08-07T14:16:02.011Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-FACT-LAW1",
+      "note": "B"
+    },
+    {
+      "at": "2026-08-07T14:13:08.742Z",
+      "by": "bd3-orch",
+      "action": "card.update",
+      "ref": "c0z2jsot",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T14:13:08.311Z",
+      "by": "bd3-orch",
+      "action": "card.criteria-meet",
+      "ref": "c0z2jsot",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-07T14:13:07.935Z",
+      "by": "bd3-orch",
+      "action": "card.criteria-meet",
+      "ref": "c0z2jsot",
+      "note": "#1"
+    },
     {
       "at": "2026-08-07T14:05:05.766Z",
       "by": "fact-planes-audit",
@@ -137148,181 +137373,6 @@
       "action": "card.release",
       "ref": "c0o5w74b",
       "note": ""
-    },
-    {
-      "at": "2026-08-07T02:25:55.060Z",
-      "by": "bd2-bugs",
-      "action": "card.release",
-      "ref": "c0g2j76x",
-      "note": ""
-    },
-    {
-      "at": "2026-08-07T02:25:50.882Z",
-      "by": "bd2-bugs",
-      "action": "card.update",
-      "ref": "c0o5w74b",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-07T02:25:50.456Z",
-      "by": "bd2-bugs",
-      "action": "card.update",
-      "ref": "c0g2j76x",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-07T02:25:46.599Z",
-      "by": "bd2-bugs",
-      "action": "card.criteria-meet",
-      "ref": "c0o5w74b",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-07T02:14:28.717Z",
-      "by": "bd2-manifest",
-      "action": "card.release",
-      "ref": "c0ejda8e",
-      "note": ""
-    },
-    {
-      "at": "2026-08-07T02:14:13.552Z",
-      "by": "bd2-manifest",
-      "action": "card.update",
-      "ref": "c0ejda8e",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-07T02:14:03.410Z",
-      "by": "bd2-manifest",
-      "action": "card.criteria-meet",
-      "ref": "c0ejda8e",
-      "note": "#9"
-    },
-    {
-      "at": "2026-08-07T02:14:02.859Z",
-      "by": "bd2-manifest",
-      "action": "card.criteria-meet",
-      "ref": "c0ejda8e",
-      "note": "#8"
-    },
-    {
-      "at": "2026-08-07T02:13:51.643Z",
-      "by": "bd2-manifest",
-      "action": "card.criteria-meet",
-      "ref": "c0ejda8e",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-07T02:13:51.064Z",
-      "by": "bd2-manifest",
-      "action": "card.criteria-meet",
-      "ref": "c0ejda8e",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-07T02:13:41.998Z",
-      "by": "bd2-manifest",
-      "action": "card.criteria-meet",
-      "ref": "c0ejda8e",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-07T02:13:41.623Z",
-      "by": "bd2-manifest",
-      "action": "card.criteria-meet",
-      "ref": "c0ejda8e",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-07T02:13:32.517Z",
-      "by": "bd2-manifest",
-      "action": "card.criteria-meet",
-      "ref": "c0ejda8e",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-07T02:13:32.152Z",
-      "by": "bd2-manifest",
-      "action": "card.criteria-meet",
-      "ref": "c0ejda8e",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-07T02:13:24.367Z",
-      "by": "bd2-manifest",
-      "action": "card.criteria-meet",
-      "ref": "c0ejda8e",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-07T02:12:16.650Z",
-      "by": "bd2-manifest",
-      "action": "papercut.add",
-      "ref": "pc0p2b1ij",
-      "note": ""
-    },
-    {
-      "at": "2026-08-07T02:12:07.070Z",
-      "by": "bd2-bugs",
-      "action": "card.criteria-meet",
-      "ref": "c0g2j76x",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-07T02:11:57.405Z",
-      "by": "bd2-bugs",
-      "action": "card.criteria-meet",
-      "ref": "c0g2j76x",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-07T02:11:56.296Z",
-      "by": "bd2-bugs",
-      "action": "card.criteria-meet",
-      "ref": "c0g2j76x",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-07T02:11:45.822Z",
-      "by": "bd2-bugs",
-      "action": "card.criteria-meet",
-      "ref": "c0g2j76x",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-07T02:11:44.515Z",
-      "by": "bd2-bugs",
-      "action": "card.criteria-meet",
-      "ref": "c0g2j76x",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-07T02:11:43.167Z",
-      "by": "bd2-bugs",
-      "action": "card.criteria-meet",
-      "ref": "c0g2j76x",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-07T02:11:35.262Z",
-      "by": "bd2-bugs",
-      "action": "card.criteria-meet",
-      "ref": "c0o5w74b",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-07T02:11:33.582Z",
-      "by": "bd2-bugs",
-      "action": "card.criteria-meet",
-      "ref": "c0o5w74b",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-07T02:11:25.534Z",
-      "by": "bd2-bugs",
-      "action": "card.criteria-add",
-      "ref": "c0o5w74b",
-      "note": "#3 No regression in the broader golden suite vs current master "
     }
   ],
   "nextNum": 368,
@@ -137594,6 +137644,14 @@
       "text": "git stash push -- <one-file> with no local changes to that file reports 'No local changes to save' but a following git stash pop still pops whatever is on TOP of the stash stack (an unrelated old stash from a prior session) and can conflict — hit this in the main repo's stash list (foreign-eval-builtins, foreign-wip-during-1478-abi-fix, cleanup-session entries pre-date this session). Resolved safely by restoring the one conflicted file to HEAD; stash entries left untouched. Avoid stash push/pop entirely when just wanting a scoped before/after diff — use git show HEAD:<path> instead.",
       "cardId": null,
       "created": "2026-08-07T13:25:32.481Z",
+      "status": "open"
+    },
+    {
+      "id": "pc0womkxu",
+      "by": "facts-reconciler",
+      "text": "tower CLI resolves .tower from cwd, so running it from a worktree silently reads the worktree's stale tracked copy instead of the canonical main board; agents in worktrees must export TOWER_DATA=<main>/plugins/tower/.tower",
+      "cardId": null,
+      "created": "2026-08-07T14:34:49.314Z",
       "status": "open"
     }
   ]
