@@ -591,8 +591,8 @@ Each ballot stands alone; any subset can be adopted. Full worked examples per op
 | ID | Question | Options (first = recommended) |
 |----|----------|-------------------------------|
 | D-NAME-TREE1 | Adopt the model: one tree, attach/alias law, one sema name ledger inside the compiler? | A adopt / B adopt the law but keep today's import surface / C reject |
-| D-NAME-FILES1 | Are project files visible without imports, and what are the explicit forms? | A yes, whole tree; `use project.…` explicit; quoted path for out-of-tree / B same directory only / C no, keep explicit imports |
-| D-NAME-AUDIT1 | The explicit-imports switch: how does a project refuse zero-import? | A `imports: .Explicit` as a deny-level lint + `jet fix` inserts lines / B a hard compile mode / C no switch, `jet imports` only |
+| D-NAME-FILES1 | Are project files visible without imports, and what are the explicit forms? | **Ratified C, 2026-08-07** — manual named imports stay; no invisible auto-import. Owner: "Let's just stick with manual named imports like we used to have rather than the magic auto imports that are invisible." |
+| D-NAME-AUDIT1 | ~~The explicit-imports switch~~ | Withdrawn — moot under FILES1=C; with no magic there is nothing to refuse |
 | D-NAME-ALIAS1 | Where does the prelude live? | A a readable Core module of `pub use` aliases / B today's compiler table / C mode-gated: bigger list for single files, small in packages |
 | D-NAME-FENCE1 | Which visibility set? | A `pub`, `pub(package)`, `pub module` (+ `priv` inside it), one `_` story / B keep today's six spellings / C minimal: `pub` and `_` only |
 | D-NAME-SIGIL1 | Ratify the underscore ladder and settle the dunder/sunder shapes? | A one law: `_` human, `__` machine (visible `__jet` scheme), dunders/sunders mean nothing on purpose / B carve `__name__` back as visible protocol members / C repeal the `__` reservation |

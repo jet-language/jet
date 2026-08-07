@@ -5883,3 +5883,5 @@ planes on the one registry), #1622 (home the orphans), #1501 (phantom-name
 refusal), #1623 (the `$` read surface), #1571 (the gate ledger), #1624 (the one
 law voice). No per-plane card in #1517–#1579 closes before its substrate
 prerequisite closes.
+
+**2026-08-07 — D-NAME-FILES1 = C** *(card #1625, proposal `docs/proposals/names-one-tree.md`)*. Manual named imports stay: every cross-file name keeps an explicit import line, and no invisible auto-import of project files ships. Owner's words: "Let's just stick with manual named imports like we used to have rather than the magic auto imports that are invisible." D-NAME-AUDIT1 (the refuse-the-magic switch) is withdrawn as moot. The rest of the D-NAME slate stays open on the card.
