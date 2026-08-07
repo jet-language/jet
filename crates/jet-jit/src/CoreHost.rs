@@ -6,6 +6,7 @@
 
 use super::Concurrency;
 use std::cell::{Cell, RefCell};
+use crate::Marshal::{clone_string, clone_bytes, alloc_byte_list, result_ok, result_err_msg};
 
 // ── core.os (mirrors jet_std_os_* in FSIoEnvOsTesting.rs) ────────────────────
 
@@ -432,7 +433,7 @@ extern "C" fn jet_jit_os_exitcode(status: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_os_expand(template: i64) -> i64 {
-    let template = clone_heap_string(template);
+    let template = clone_string(template);
     let mut out = String::with_capacity(template.len());
     let bytes = template.as_bytes();
     let mut i = 0;
@@ -473,7 +474,7 @@ extern "C" fn jet_jit_os_getpgid(pid: i64) -> i64 {
         if got < 0 {
             return result_err_errno(IO_OP_RESOLVE);
         }
-        return result_ok_bits(got as u64);
+        return result_ok(got as u64);
     }
     #[cfg(not(unix))]
     {
@@ -489,7 +490,7 @@ extern "C" fn jet_jit_os_getsid(pid: i64) -> i64 {
         if got < 0 {
             return result_err_errno(IO_OP_RESOLVE);
         }
-        return result_ok_bits(got as u64);
+        return result_ok(got as u64);
     }
     #[cfg(not(unix))]
     {
@@ -502,7 +503,7 @@ extern "C" fn jet_jit_os_setpgid(pid: i64, pgid: i64) -> i64 {
     #[cfg(unix)]
     {
         if unsafe { jet_jit_os_sys::setpgid(pid as i32, pgid as i32) } == 0 {
-            return result_ok_bits(0);
+            return result_ok(0);
         }
         return result_err_errno(IO_OP_WRITE);
     }
@@ -517,7 +518,7 @@ extern "C" fn jet_jit_os_setpgrp() -> i64 {
     #[cfg(unix)]
     {
         if unsafe { jet_jit_os_sys::setpgrp() } == 0 {
-            return result_ok_bits(0);
+            return result_ok(0);
         }
         return result_err_errno(IO_OP_WRITE);
     }
@@ -555,7 +556,7 @@ extern "C" fn jet_jit_os_getpriority(who: i64) -> i64 {
             if got == -1 && *jet_jit_os_sys::errno_ptr() != 0 {
                 return result_err_errno(IO_OP_RESOLVE);
             }
-            return result_ok_bits(got as u64);
+            return result_ok(got as u64);
         }
     }
     #[cfg(not(unix))]
@@ -569,7 +570,7 @@ extern "C" fn jet_jit_os_setpriority(who: i64, prio: i64) -> i64 {
     #[cfg(unix)]
     {
         if unsafe { jet_jit_os_sys::setpriority(0, who as u32, prio as i32) } == 0 {
-            return result_ok_bits(0);
+            return result_ok(0);
         }
         return result_err_errno(IO_OP_WRITE);
     }
@@ -584,7 +585,7 @@ extern "C" fn jet_jit_os_kill(pid: i64, sig: i64) -> i64 {
     #[cfg(unix)]
     {
         if unsafe { jet_jit_os_sys::kill(pid as i32, sig as i32) } == 0 {
-            return result_ok_bits(0);
+            return result_ok(0);
         }
         return result_err_errno(IO_OP_WRITE);
     }
@@ -602,7 +603,7 @@ extern "C" fn jet_jit_os_pipe() -> i64 {
         if unsafe { jet_jit_os_sys::pipe(fds.as_mut_ptr()) } != 0 {
             return result_err_errno(IO_OP_RESOLVE);
         }
-        return result_ok_bits(alloc_i64_list(&[fds[0] as i64, fds[1] as i64]) as u64);
+        return result_ok(alloc_i64_list(&[fds[0] as i64, fds[1] as i64]) as u64);
     }
     #[cfg(not(unix))]
     {
@@ -624,7 +625,7 @@ extern "C" fn jet_jit_os_close_fd(fd: i64) {
 extern "C" fn jet_jit_os_mkfifo(path: i64, mode: i64) -> i64 {
     #[cfg(unix)]
     {
-        let p = clone_heap_string(path);
+        let p = clone_string(path);
         let c_path = match std::ffi::CString::new(p.as_str()) {
             Ok(c) => c,
             Err(_) => {
@@ -636,7 +637,7 @@ extern "C" fn jet_jit_os_mkfifo(path: i64, mode: i64) -> i64 {
             }
         };
         if unsafe { jet_jit_os_sys::mkfifo(c_path.as_ptr(), mode as u32) } == 0 {
-            return result_ok_bits(0);
+            return result_ok(0);
         }
         return result_err_errno(IO_OP_RESOLVE);
     }
@@ -654,7 +655,7 @@ extern "C" fn jet_jit_os_fork() -> i64 {
         if pid < 0 {
             return result_err_errno(IO_OP_RESOLVE);
         }
-        return result_ok_bits(pid as u64);
+        return result_ok(pid as u64);
     }
     #[cfg(not(unix))]
     {
@@ -666,7 +667,7 @@ extern "C" fn jet_jit_os_setuid(uid: i64) -> i64 {
     #[cfg(unix)]
     {
         if unsafe { jet_jit_os_sys::setuid(uid as u32) } == 0 {
-            return result_ok_bits(0);
+            return result_ok(0);
         }
         return result_err_errno(IO_OP_WRITE);
     }
@@ -681,7 +682,7 @@ extern "C" fn jet_jit_os_setgid(gid: i64) -> i64 {
     #[cfg(unix)]
     {
         if unsafe { jet_jit_os_sys::setgid(gid as u32) } == 0 {
-            return result_ok_bits(0);
+            return result_ok(0);
         }
         return result_err_errno(IO_OP_WRITE);
     }
@@ -699,7 +700,7 @@ extern "C" fn jet_jit_os_setsid() -> i64 {
         if sid < 0 {
             return result_err_errno(IO_OP_WRITE);
         }
-        return result_ok_bits(sid as u64);
+        return result_ok(sid as u64);
     }
     #[cfg(not(unix))]
     {
@@ -710,7 +711,7 @@ extern "C" fn jet_jit_os_setsid() -> i64 {
 extern "C" fn jet_jit_os_initgroups(user: i64, group: i64) -> i64 {
     #[cfg(unix)]
     {
-        let name = clone_heap_string(user);
+        let name = clone_string(user);
         let c_name = match std::ffi::CString::new(name.as_str()) {
             Ok(c) => c,
             Err(_) => {
@@ -718,7 +719,7 @@ extern "C" fn jet_jit_os_initgroups(user: i64, group: i64) -> i64 {
             }
         };
         if unsafe { jet_jit_os_sys::initgroups(c_name.as_ptr(), group as u32) } == 0 {
-            return result_ok_bits(0);
+            return result_ok(0);
         }
         return result_err_errno(IO_OP_WRITE);
     }
@@ -737,7 +738,7 @@ extern "C" fn jet_jit_os_wait() -> i64 {
         if pid < 0 {
             return result_err_errno(IO_OP_CLOSE);
         }
-        return result_ok_bits(pid as u64);
+        return result_ok(pid as u64);
     }
     #[cfg(not(unix))]
     {
@@ -753,7 +754,7 @@ extern "C" fn jet_jit_os_waitpid(pid: i64, options: i64) -> i64 {
         if got < 0 {
             return result_err_errno(IO_OP_CLOSE);
         }
-        return result_ok_bits(got as u64);
+        return result_ok(got as u64);
     }
     #[cfg(not(unix))]
     {
@@ -765,7 +766,7 @@ extern "C" fn jet_jit_os_waitpid(pid: i64, options: i64) -> i64 {
 extern "C" fn jet_jit_os_utime(path: i64, atime: i64, mtime: i64) -> i64 {
     #[cfg(unix)]
     {
-        let p = clone_heap_string(path);
+        let p = clone_string(path);
         let c_path = match std::ffi::CString::new(p.as_str()) {
             Ok(c) => c,
             Err(_) => {
@@ -777,7 +778,7 @@ extern "C" fn jet_jit_os_utime(path: i64, atime: i64, mtime: i64) -> i64 {
             modtime: mtime,
         };
         if unsafe { jet_jit_os_sys::utime(c_path.as_ptr(), &times) } == 0 {
-            return result_ok_bits(0);
+            return result_ok(0);
         }
         return result_err_errno(IO_OP_WRITE);
     }
@@ -798,7 +799,7 @@ extern "C" fn jet_jit_os_atexit(_handler: i64) -> i64 {
         // Surface is present; installing an opaque Jet closure needs the
         // callback ABI. Return Ok so compile/run parity holds for calls that
         // only check Result.
-        result_ok_bits(0)
+        result_ok(0)
     }
     #[cfg(not(unix))]
     {
@@ -917,28 +918,6 @@ fn unix_to_ymdhms(secs: i64) -> (i32, u32, u32, u32, u32, u32) {
 
 fn is_leap(y: i32) -> bool {
     (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0)
-}
-
-fn clone_heap_string(id: i64) -> String {
-    Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(id).unwrap_or_default())
-}
-
-fn result_ok_bits(bits: u64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        rt.results.push(super::JitResultValue { ok: true, bits });
-        rt.results.len() as i64
-    })
-}
-
-fn result_err_msg(msg: &str) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let sid = rt.heap.alloc_string(msg.to_string());
-        rt.results.push(super::JitResultValue {
-            ok: false,
-            bits: sid as u64,
-        });
-        rt.results.len() as i64
-    })
 }
 
 /// Marshal Prelude `IOError::Other(IOContext{…})` — same cause text as
@@ -1063,46 +1042,46 @@ fn jit_log_emit(level: &str, msg: &str, fields: &[JitLogField]) {
 }
 
 extern "C" fn jet_jit_log_set_level(msg: i64) {
-    jit_log_set_level_str(&clone_heap_string(msg));
+    jit_log_set_level_str(&clone_string(msg));
 }
 
 extern "C" fn jet_jit_log_setup(msg: i64) {
-    jit_log_setup_str(&clone_heap_string(msg));
+    jit_log_setup_str(&clone_string(msg));
 }
 
 extern "C" fn jet_jit_log_debug(msg: i64) {
     if JIT_LOG_LEVEL.with(|l| l.get()) <= 0 {
-        jit_log_emit("debug", &clone_heap_string(msg), &[]);
+        jit_log_emit("debug", &clone_string(msg), &[]);
     }
 }
 
 extern "C" fn jet_jit_log_info(msg: i64) {
     if JIT_LOG_LEVEL.with(|l| l.get()) <= 1 {
-        jit_log_emit("info", &clone_heap_string(msg), &[]);
+        jit_log_emit("info", &clone_string(msg), &[]);
     }
 }
 
 extern "C" fn jet_jit_log_warn(msg: i64) {
     if JIT_LOG_LEVEL.with(|l| l.get()) <= 2 {
-        jit_log_emit("warn", &clone_heap_string(msg), &[]);
+        jit_log_emit("warn", &clone_string(msg), &[]);
     }
 }
 
 extern "C" fn jet_jit_log_error(msg: i64) {
     if JIT_LOG_LEVEL.with(|l| l.get()) <= 3 {
-        jit_log_emit("error", &clone_heap_string(msg), &[]);
+        jit_log_emit("error", &clone_string(msg), &[]);
     }
 }
 
 extern "C" fn jet_jit_log_critical(msg: i64) {
     if JIT_LOG_LEVEL.with(|l| l.get()) <= 4 {
-        jit_log_emit("critical", &clone_heap_string(msg), &[]);
+        jit_log_emit("critical", &clone_string(msg), &[]);
     }
 }
 
 extern "C" fn jet_jit_log_fatal(msg: i64) {
     if JIT_LOG_LEVEL.with(|l| l.get()) <= 5 {
-        jit_log_emit("fatal", &clone_heap_string(msg), &[]);
+        jit_log_emit("fatal", &clone_string(msg), &[]);
     }
     let _ = std::io::Write::flush(&mut std::io::stderr());
     std::process::exit(1);
@@ -1120,7 +1099,7 @@ extern "C" fn jet_jit_log_enabled(level: i64) -> i8 {
     if JIT_LOG_DISABLED.with(|d| d.get()) {
         return 0;
     }
-    let Some(rank) = jit_log_level_rank(&clone_heap_string(level)) else {
+    let Some(rank) = jit_log_level_rank(&clone_string(level)) else {
         return 0;
     };
     if JIT_LOG_LEVEL.with(|l| l.get()) <= rank {
@@ -1131,7 +1110,7 @@ extern "C" fn jet_jit_log_enabled(level: i64) -> i8 {
 }
 
 extern "C" fn jet_jit_log_set_trace_id(msg: i64) {
-    let id = clone_heap_string(msg);
+    let id = clone_string(msg);
     JIT_LOG_TRACE_ID.with(|t| *t.borrow_mut() = id);
 }
 
@@ -1150,16 +1129,16 @@ fn alloc_log_field(key: String, value: String, kind: &str, redacted: bool) -> i6
 }
 
 extern "C" fn jet_jit_log_field(key: i64, value: i64) -> i64 {
-    alloc_log_field(clone_heap_string(key), clone_heap_string(value), "string", false)
+    alloc_log_field(clone_string(key), clone_string(value), "string", false)
 }
 
 extern "C" fn jet_jit_log_int_field(key: i64, value: i64) -> i64 {
-    alloc_log_field(clone_heap_string(key), value.to_string(), "int", false)
+    alloc_log_field(clone_string(key), value.to_string(), "int", false)
 }
 
 extern "C" fn jet_jit_log_bool_field(key: i64, value: i8) -> i64 {
     alloc_log_field(
-        clone_heap_string(key),
+        clone_string(key),
         if value != 0 { "true" } else { "false" }.to_string(),
         "bool",
         false,
@@ -1168,7 +1147,7 @@ extern "C" fn jet_jit_log_bool_field(key: i64, value: i8) -> i64 {
 
 extern "C" fn jet_jit_log_counter(name: i64, value: i64) -> i64 {
     alloc_log_field(
-        format!("metric.counter.{}", clone_heap_string(name)),
+        format!("metric.counter.{}", clone_string(name)),
         value.to_string(),
         "counter",
         false,
@@ -1181,7 +1160,7 @@ extern "C" fn jet_jit_log_span(name: i64) -> i64 {
         n.set(id + 1);
         id
     });
-    let name_s = clone_heap_string(name);
+    let name_s = clone_string(name);
     Concurrency::with_runtime_mut(|rt| {
         let rec = rt.heap.alloc_record(2);
         let _ = rt.heap.record_set_int(rec, 0, id);
@@ -1245,56 +1224,56 @@ fn read_log_fields(list: i64) -> Vec<JitLogField> {
 extern "C" fn jet_jit_log_info_fields(msg: i64, fields: i64) {
     if JIT_LOG_LEVEL.with(|l| l.get()) <= 1 {
         let fs = read_log_fields(fields);
-        jit_log_emit("info", &clone_heap_string(msg), &fs);
+        jit_log_emit("info", &clone_string(msg), &fs);
     }
 }
 
 // ── core.files / core.path (mirrors jet_std_fs_* / jet_std_path_*) ───────────
 
 extern "C" fn jet_jit_fs_exists(path: i64) -> i8 {
-    let p = clone_heap_string(path);
+    let p = clone_string(path);
     i8::from(std::path::Path::new(&p).exists())
 }
 
 extern "C" fn jet_jit_fs_read(path: i64) -> i64 {
-    let p = clone_heap_string(path);
+    let p = clone_string(path);
     match std::fs::read_to_string(&p) {
         Ok(text) => {
             let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text));
-            result_ok_bits(sid as u64)
+            result_ok(sid as u64)
         }
         Err(e) => result_err_msg(&format!("read {p}: {e}")),
     }
 }
 
 extern "C" fn jet_jit_fs_read_bytes(path: i64) -> i64 {
-    let p = clone_heap_string(path);
+    let p = clone_string(path);
     match std::fs::read(&p) {
-        Ok(bytes) => result_ok_bits(alloc_byte_list(&bytes) as u64),
+        Ok(bytes) => result_ok(alloc_byte_list(&bytes) as u64),
         Err(e) => result_err_msg(&format!("read_bytes {p}: {e}")),
     }
 }
 
 extern "C" fn jet_jit_fs_write(path: i64, text: i64) -> i64 {
-    let p = clone_heap_string(path);
-    let t = clone_heap_string(text);
+    let p = clone_string(path);
+    let t = clone_string(text);
     match std::fs::write(&p, t) {
-        Ok(()) => result_ok_bits(0),
+        Ok(()) => result_ok(0),
         Err(e) => result_err_msg(&format!("write {p}: {e}")),
     }
 }
 
 extern "C" fn jet_jit_fs_create_dir(path: i64) -> i64 {
-    let p = clone_heap_string(path);
+    let p = clone_string(path);
     match std::fs::create_dir_all(&p) {
-        Ok(()) => result_ok_bits(0),
+        Ok(()) => result_ok(0),
         Err(e) => result_err_msg(&format!("create_dir {p}: {e}")),
     }
 }
 
 extern "C" fn jet_jit_path_join(base: i64, part: i64) -> i64 {
-    let b = clone_heap_string(base);
-    let p = clone_heap_string(part);
+    let b = clone_string(base);
+    let p = clone_string(part);
     let joined = std::path::Path::new(&b)
         .join(p)
         .to_string_lossy()
@@ -1304,7 +1283,7 @@ extern "C" fn jet_jit_path_join(base: i64, part: i64) -> i64 {
 
 /// String-form `core.path.parent` / `.extension` / `.normalize` (D-IO1 helpers).
 extern "C" fn jet_jit_path_parent_str(path: i64) -> i64 {
-    let s = clone_heap_string(path);
+    let s = clone_string(path);
     let out = std::path::Path::new(&s)
         .parent()
         .map(|p| p.to_string_lossy().to_string())
@@ -1313,7 +1292,7 @@ extern "C" fn jet_jit_path_parent_str(path: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_path_extension_str(path: i64) -> i64 {
-    let s = clone_heap_string(path);
+    let s = clone_string(path);
     let out = std::path::Path::new(&s)
         .extension()
         .map(|e| e.to_string_lossy().to_string())
@@ -1322,7 +1301,7 @@ extern "C" fn jet_jit_path_extension_str(path: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_path_normalize_str(path: i64) -> i64 {
-    let s = clone_heap_string(path);
+    let s = clone_string(path);
     let source = std::path::Path::new(&s);
     let rooted = source.has_root();
     let mut normalized = std::path::PathBuf::new();
@@ -1357,12 +1336,12 @@ extern "C" fn jet_jit_path_write_atomic(rec: i64, bytes: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_path_from(path: i64) -> i64 {
-    path_record(clone_heap_string(path))
+    path_record(clone_string(path))
 }
 
 extern "C" fn jet_jit_path_join_handle(rec: i64, part: i64) -> i64 {
     let base = path_string_from_record(rec);
-    let p = clone_heap_string(part);
+    let p = clone_string(part);
     path_record(
         std::path::Path::new(&base)
             .join(p)
@@ -1445,7 +1424,7 @@ extern "C" fn jet_jit_path_walk(rec: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_fs_list_dir(path: i64) -> i64 {
-    let p = clone_heap_string(path);
+    let p = clone_string(path);
     let rd = match std::fs::read_dir(&p) {
         Ok(rd) => rd,
         Err(e) => return result_err_msg(&format!("list_dir {p}: {e}")),
@@ -1481,27 +1460,6 @@ extern "C" fn jet_jit_fs_list_dir(path: i64) -> i64 {
             bits: list as u64,
         });
         rt.results.len() as i64
-    })
-}
-
-fn clone_heap_bytes(list: i64) -> Vec<u8> {
-    Concurrency::with_runtime_mut(|rt| {
-        let len = rt.heap.list_len(list).unwrap_or(0);
-        let mut out = Vec::with_capacity(len as usize);
-        for i in 0..len {
-            out.push(rt.heap.list_get_int(list, i).unwrap_or(0) as u8);
-        }
-        out
-    })
-}
-
-fn alloc_byte_list(bytes: &[u8]) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let list = rt.heap.alloc_empty_list();
-        for &b in bytes {
-            let _ = rt.heap.list_push_int(list, b as i64);
-        }
-        list
     })
 }
 
@@ -1696,16 +1654,16 @@ fn jet_temp_path(prefix: &str) -> String {
 }
 
 extern "C" fn jet_jit_fs_remove(path: i64) -> i64 {
-    let p = clone_heap_string(path);
+    let p = clone_string(path);
     let res = std::fs::remove_file(&p).or_else(|_| std::fs::remove_dir(&p));
     match res {
-        Ok(()) => result_ok_bits(0),
+        Ok(()) => result_ok(0),
         Err(e) => result_err_msg(&format!("remove {p}: {e}")),
     }
 }
 
 extern "C" fn jet_jit_fs_remove_all(path: i64) -> i64 {
-    let p = clone_heap_string(path);
+    let p = clone_string(path);
     let path = std::path::Path::new(&p);
     let res = if path.is_dir() {
         std::fs::remove_dir_all(&p)
@@ -1713,13 +1671,13 @@ extern "C" fn jet_jit_fs_remove_all(path: i64) -> i64 {
         std::fs::remove_file(&p)
     };
     match res {
-        Ok(()) => result_ok_bits(0),
+        Ok(()) => result_ok(0),
         Err(e) => result_err_msg(&format!("remove_all {p}: {e}")),
     }
 }
 
 extern "C" fn jet_jit_fs_stat(path: i64) -> i64 {
-    let p = clone_heap_string(path);
+    let p = clone_string(path);
     let meta = match std::fs::symlink_metadata(&p) {
         Ok(m) => m,
         Err(e) => return result_err_msg(&format!("stat {p}: {e}")),
@@ -1753,12 +1711,12 @@ extern "C" fn jet_jit_fs_stat(path: i64) -> i64 {
         let _ = rt.heap.record_set_string(rec, 7, kid);
         rec
     });
-    result_ok_bits(rec as u64)
+    result_ok(rec as u64)
 }
 
 extern "C" fn jet_jit_fs_read_at(path: i64, offset: i64, len: i64) -> i64 {
     use std::io::{Read, Seek, SeekFrom};
-    let p = clone_heap_string(path);
+    let p = clone_string(path);
     let mut f = match std::fs::File::open(&p) {
         Ok(f) => f,
         Err(e) => return result_err_msg(&format!("read_at {p}: {e}")),
@@ -1772,13 +1730,13 @@ extern "C" fn jet_jit_fs_read_at(path: i64, offset: i64, len: i64) -> i64 {
         Err(e) => return result_err_msg(&format!("read_at {p}: {e}")),
     };
     buf.truncate(n);
-    result_ok_bits(alloc_byte_list(&buf) as u64)
+    result_ok(alloc_byte_list(&buf) as u64)
 }
 
 extern "C" fn jet_jit_fs_write_at(path: i64, offset: i64, bytes: i64) -> i64 {
     use std::io::{Seek, SeekFrom, Write};
-    let p = clone_heap_string(path);
-    let data = clone_heap_bytes(bytes);
+    let p = clone_string(path);
+    let data = clone_bytes(bytes);
     let mut f = match std::fs::OpenOptions::new()
         .create(true)
         .write(true)
@@ -1791,26 +1749,26 @@ extern "C" fn jet_jit_fs_write_at(path: i64, offset: i64, bytes: i64) -> i64 {
         return result_err_msg(&format!("write_at {p}: {e}"));
     }
     match f.write_all(&data) {
-        Ok(()) => result_ok_bits(0),
+        Ok(()) => result_ok(0),
         Err(e) => result_err_msg(&format!("write_at {p}: {e}")),
     }
 }
 
 extern "C" fn jet_jit_fs_fsync(path: i64) -> i64 {
-    let p = clone_heap_string(path);
+    let p = clone_string(path);
     match std::fs::OpenOptions::new()
         .read(true)
         .open(&p)
         .and_then(|f| f.sync_all())
     {
-        Ok(()) => result_ok_bits(0),
+        Ok(()) => result_ok(0),
         Err(e) => result_err_msg(&format!("fsync {p}: {e}")),
     }
 }
 
 extern "C" fn jet_jit_fs_write_atomic(path: i64, bytes: i64) -> i64 {
-    let p = clone_heap_string(path);
-    let data = clone_heap_bytes(bytes);
+    let p = clone_string(path);
+    let data = clone_bytes(bytes);
     let path = std::path::Path::new(&p);
     let parent = match path.parent() {
         Some(parent) if !parent.as_os_str().is_empty() => parent,
@@ -1829,7 +1787,7 @@ extern "C" fn jet_jit_fs_write_atomic(path: i64, bytes: i64) -> i64 {
         return result_err_msg(&format!("write_atomic {p}: {e}"));
     }
     match std::fs::rename(&tmp, path) {
-        Ok(()) => result_ok_bits(0),
+        Ok(()) => result_ok(0),
         Err(e) => {
             let _ = std::fs::remove_file(&tmp);
             result_err_msg(&format!("write_atomic {p}: {e}"))
@@ -1838,7 +1796,7 @@ extern "C" fn jet_jit_fs_write_atomic(path: i64, bytes: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_fs_walk(path: i64) -> i64 {
-    let p = clone_heap_string(path);
+    let p = clone_string(path);
     let entries = match walk_entries(std::path::Path::new(&p)) {
         Ok(e) => e,
         Err(e) => return result_err_msg(&format!("walk {p}: {e}")),
@@ -1857,11 +1815,11 @@ extern "C" fn jet_jit_fs_walk(path: i64) -> i64 {
         }
         list
     });
-    result_ok_bits(list as u64)
+    result_ok(list as u64)
 }
 
 extern "C" fn jet_jit_fs_glob(pattern: i64) -> i64 {
-    let pat = clone_heap_string(pattern);
+    let pat = clone_string(pattern);
     let split = pat.find(['*', '?']).unwrap_or(pat.len());
     let base = pat[..split]
         .rsplit_once(std::path::MAIN_SEPARATOR)
@@ -1885,12 +1843,12 @@ extern "C" fn jet_jit_fs_glob(pattern: i64) -> i64 {
         }
         list
     });
-    result_ok_bits(list as u64)
+    result_ok(list as u64)
 }
 
 extern "C" fn jet_jit_fs_symlink(from: i64, to: i64) -> i64 {
-    let src = clone_heap_string(from);
-    let dst = clone_heap_string(to);
+    let src = clone_string(from);
+    let dst = clone_string(to);
     #[cfg(unix)]
     let res = std::os::unix::fs::symlink(&src, &dst);
     #[cfg(windows)]
@@ -1902,49 +1860,49 @@ extern "C" fn jet_jit_fs_symlink(from: i64, to: i64) -> i64 {
         }
     };
     match res {
-        Ok(()) => result_ok_bits(0),
+        Ok(()) => result_ok(0),
         Err(e) => result_err_msg(&format!("symlink {dst}: {e}")),
     }
 }
 
 extern "C" fn jet_jit_fs_read_link(path: i64) -> i64 {
-    let p = clone_heap_string(path);
+    let p = clone_string(path);
     match std::fs::read_link(&p) {
         Ok(target) => {
             let sid = Concurrency::with_runtime_mut(|rt| {
                 rt.heap
                     .alloc_string(target.to_string_lossy().to_string())
             });
-            result_ok_bits(sid as u64)
+            result_ok(sid as u64)
         }
         Err(e) => result_err_msg(&format!("read_link {p}: {e}")),
     }
 }
 
 extern "C" fn jet_jit_fs_hard_link(from: i64, to: i64) -> i64 {
-    let src = clone_heap_string(from);
-    let dst = clone_heap_string(to);
+    let src = clone_string(from);
+    let dst = clone_string(to);
     match std::fs::hard_link(&src, &dst) {
-        Ok(()) => result_ok_bits(0),
+        Ok(()) => result_ok(0),
         Err(e) => result_err_msg(&format!("hard_link {dst}: {e}")),
     }
 }
 
 extern "C" fn jet_jit_fs_canonicalize(path: i64) -> i64 {
-    let p = clone_heap_string(path);
+    let p = clone_string(path);
     match std::fs::canonicalize(&p) {
         Ok(abs) => {
             let sid = Concurrency::with_runtime_mut(|rt| {
                 rt.heap.alloc_string(abs.to_string_lossy().to_string())
             });
-            result_ok_bits(sid as u64)
+            result_ok(sid as u64)
         }
         Err(e) => result_err_msg(&format!("canonicalize {p}: {e}")),
     }
 }
 
 extern "C" fn jet_jit_fs_absolute(path: i64) -> i64 {
-    let p = clone_heap_string(path);
+    let p = clone_string(path);
     let path = std::path::Path::new(&p);
     let abs = if path.is_absolute() {
         path.to_path_buf()
@@ -1957,12 +1915,12 @@ extern "C" fn jet_jit_fs_absolute(path: i64) -> i64 {
     let sid = Concurrency::with_runtime_mut(|rt| {
         rt.heap.alloc_string(abs.to_string_lossy().to_string())
     });
-    result_ok_bits(sid as u64)
+    result_ok(sid as u64)
 }
 
 extern "C" fn jet_jit_fs_copy_dir(from: i64, to: i64) -> i64 {
-    let src = clone_heap_string(from);
-    let dst = clone_heap_string(to);
+    let src = clone_string(from);
+    let dst = clone_string(to);
     fn copy_tree(src: &std::path::Path, dst: &std::path::Path) -> Result<(), String> {
         std::fs::create_dir_all(dst).map_err(|e| e.to_string())?;
         for entry in std::fs::read_dir(src).map_err(|e| e.to_string())? {
@@ -1979,41 +1937,41 @@ extern "C" fn jet_jit_fs_copy_dir(from: i64, to: i64) -> i64 {
         Ok(())
     }
     match copy_tree(std::path::Path::new(&src), std::path::Path::new(&dst)) {
-        Ok(()) => result_ok_bits(0),
+        Ok(()) => result_ok(0),
         Err(e) => result_err_msg(&format!("copy_dir {src}: {e}")),
     }
 }
 
 extern "C" fn jet_jit_fs_temp_dir(prefix: i64) -> i64 {
-    let pref = clone_heap_string(prefix);
+    let pref = clone_string(prefix);
     let path = jet_temp_path(&pref);
     match std::fs::create_dir(&path) {
-        Ok(()) => result_ok_bits(path_record(path) as u64),
+        Ok(()) => result_ok(path_record(path) as u64),
         Err(e) => result_err_msg(&format!("temp_dir {path}: {e}")),
     }
 }
 
 extern "C" fn jet_jit_fs_temp_file(prefix: i64) -> i64 {
-    let pref = clone_heap_string(prefix);
+    let pref = clone_string(prefix);
     let path = jet_temp_path(&pref);
     match std::fs::OpenOptions::new()
         .create_new(true)
         .write(true)
         .open(&path)
     {
-        Ok(_) => result_ok_bits(path_record(path) as u64),
+        Ok(_) => result_ok(path_record(path) as u64),
         Err(e) => result_err_msg(&format!("temp_file {path}: {e}")),
     }
 }
 
 extern "C" fn jet_jit_fs_lock(path: i64) -> i64 {
-    let p = clone_heap_string(path);
+    let p = clone_string(path);
     match std::fs::OpenOptions::new()
         .create_new(true)
         .write(true)
         .open(&p)
     {
-        Ok(_) => result_ok_bits(path_record(p) as u64),
+        Ok(_) => result_ok(path_record(p) as u64),
         Err(e) => result_err_msg(&format!("lock {p}: {e}")),
     }
 }
@@ -2130,7 +2088,7 @@ extern "C" fn jet_jit_math_ceil_f32(x: f64) -> f64 {
 
 /// Option ABI: `0` = None, else string-handle+1 (same as list_get_opt).
 extern "C" fn jet_jit_env_get(name: i64) -> i64 {
-    let key = clone_heap_string(name);
+    let key = clone_string(name);
     let key = std::ffi::OsStr::new(&key);
     let value = jit_env_read()
         .iter()
@@ -2146,8 +2104,8 @@ extern "C" fn jet_jit_env_get(name: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_env_set(name: i64, value: i64) -> i64 {
-    let key = clone_heap_string(name);
-    let val = clone_heap_string(value);
+    let key = clone_string(name);
+    let val = clone_string(value);
     if let Err(error) = jit_env_validate_name(&key) {
         return result_err_msg(error);
     }
@@ -2163,11 +2121,11 @@ extern "C" fn jet_jit_env_set(name: i64, value: i64) -> i64 {
         entries.remove(old);
     }
     entries.push((key, std::ffi::OsString::from(val)));
-    result_ok_bits(0)
+    result_ok(0)
 }
 
 extern "C" fn jet_jit_env_unset(name: i64) -> i64 {
-    let key = clone_heap_string(name);
+    let key = clone_string(name);
     if let Err(error) = jit_env_validate_name(&key) {
         return result_err_msg(error);
     }
@@ -2178,7 +2136,7 @@ extern "C" fn jet_jit_env_unset(name: i64) -> i64 {
         .position(|(candidate, _)| jit_env_key_eq(candidate.as_os_str(), key))
         .map(|old| entries.remove(old))
         .is_some();
-    result_ok_bits(u64::from(existed))
+    result_ok(u64::from(existed))
 }
 
 extern "C" fn jet_jit_env_vars() -> i64 {
@@ -2218,13 +2176,13 @@ extern "C" fn jet_jit_env_vars() -> i64 {
         }
         list
     });
-    result_ok_bits(list as u64)
+    result_ok(list as u64)
 }
 
 extern "C" fn jet_jit_io_input(has_prompt: i8, prompt: i64) -> i64 {
     use std::io::Write;
     if has_prompt != 0 {
-        let p = clone_heap_string(prompt);
+        let p = clone_string(prompt);
         print!("{p}");
         if let Err(e) = std::io::stdout().flush() {
             return result_err_msg(&format!("flush stdout: {e}"));
@@ -2238,7 +2196,7 @@ extern "C" fn jet_jit_io_input(has_prompt: i8, prompt: i64) -> i64 {
         s.pop();
     }
     let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s));
-    result_ok_bits(sid as u64)
+    result_ok(sid as u64)
 }
 
 extern "C" fn jet_jit_process_exit(code: i64) {

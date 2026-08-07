@@ -10,6 +10,7 @@ use cranelift_module::{FuncId, Linkage, Module};
 use std::io::{BufRead, IsTerminal, Write};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
+use crate::Marshal::{clone_string, result_err_msg, result_ok};
 
 mod progress_semantics {
     #[allow(unused_imports)]
@@ -59,13 +60,13 @@ mod io_line_stream {
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/IoLineStream.rs");
 
     pub(super) extern "C" fn jet_jit_io_sprint(text: i64) -> i64 {
-        let s = super::clone_str(text);
+        let s = super::clone_string(text);
         let out = jet_std_io_sprint(&s);
         super::Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(out))
     }
 
     pub(super) extern "C" fn jet_jit_io_repr(text: i64) -> i64 {
-        let s = super::clone_str(text);
+        let s = super::clone_string(text);
         let out = jet_std_io_repr(&s);
         super::Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(out))
     }
@@ -80,18 +81,18 @@ mod io_line_stream {
                     }
                     list
                 });
-                super::result_ok_bits(list as u64)
+                super::result_ok(list as u64)
             }
             Err(e) => super::result_err(&format!("{e:?}")),
         }
     }
 
     pub(super) extern "C" fn jet_jit_io_read_until(delim: i64) -> i64 {
-        let needle = super::clone_str(delim);
+        let needle = super::clone_string(delim);
         match jet_std_io_read_until(&needle) {
             Ok(s) => {
                 let id = super::Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s));
-                super::result_ok_bits(id as u64)
+                super::result_ok(id as u64)
             }
             Err(e) => super::result_err(&format!("{e:?}")),
         }
@@ -101,7 +102,7 @@ mod io_line_stream {
         match jet_std_io_readline() {
             Ok(s) => {
                 let id = super::Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s));
-                super::result_ok_bits(id as u64)
+                super::result_ok(id as u64)
             }
             Err(e) => super::result_err(&format!("{e:?}")),
         }
@@ -134,10 +135,6 @@ fn known_iter_lists() -> &'static Mutex<HashSet<i64>> {
     KNOWN.get_or_init(|| Mutex::new(HashSet::new()))
 }
 
-fn clone_str(id: i64) -> String {
-    Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(id).unwrap_or_default())
-}
-
 fn result_ok_unit() -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         rt.results.push(super::JitResultValue { ok: true, bits: 0 });
@@ -145,22 +142,8 @@ fn result_ok_unit() -> i64 {
     })
 }
 
-fn result_ok_bits(bits: u64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        rt.results.push(super::JitResultValue { ok: true, bits });
-        rt.results.len() as i64
-    })
-}
-
 fn result_err(msg: &str) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let sid = rt.heap.alloc_string(msg.to_string());
-        rt.results.push(super::JitResultValue {
-            ok: false,
-            bits: sid as u64,
-        });
-        rt.results.len() as i64
-    })
+    result_err_msg(msg)
 }
 
 fn list_from_lines(lines: Vec<String>) -> i64 {
@@ -420,13 +403,13 @@ extern "C" fn jet_jit_io_stdin() -> i64 {
 }
 
 extern "C" fn jet_jit_stdout_write(_h: i64, text: i64) -> i64 {
-    let s = clone_str(text);
+    let s = clone_string(text);
     Concurrency::with_runtime_mut(|rt| rt.stdout.push_str(&s));
     result_ok_unit()
 }
 
 extern "C" fn jet_jit_stdout_write_line(_h: i64, text: i64) -> i64 {
-    let s = clone_str(text);
+    let s = clone_string(text);
     Concurrency::with_runtime_mut(|rt| {
         rt.stdout.push_str(&s);
         rt.stdout.push('\n');
@@ -458,13 +441,13 @@ extern "C" fn jet_jit_stdout_is_tty(_h: i64) -> i8 {
 }
 
 extern "C" fn jet_jit_stderr_write(_h: i64, text: i64) -> i64 {
-    let s = clone_str(text);
+    let s = clone_string(text);
     Concurrency::with_runtime_mut(|rt| rt.stderr.push_str(&s));
     result_ok_unit()
 }
 
 extern "C" fn jet_jit_stderr_write_line(_h: i64, text: i64) -> i64 {
-    let s = clone_str(text);
+    let s = clone_string(text);
     Concurrency::with_runtime_mut(|rt| {
         rt.stderr.push_str(&s);
         rt.stderr.push('\n');
@@ -504,8 +487,8 @@ extern "C" fn jet_jit_terminal_height() -> i64 {
 }
 
 extern "C" fn jet_jit_io_style(style: i64, text: i64) -> i64 {
-    let style = clone_str(style);
-    let text = clone_str(text);
+    let style = clone_string(style);
+    let text = clone_string(text);
     let out = if style_enabled() {
         match style_code(style.as_str()) {
             Some(code) => format!("\x1b[{code}m{text}\x1b[0m"),
@@ -518,8 +501,8 @@ extern "C" fn jet_jit_io_style(style: i64, text: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_io_style_force(style: i64, text: i64) -> i64 {
-    let style = clone_str(style);
-    let text = clone_str(text);
+    let style = clone_string(style);
+    let text = clone_string(text);
     let out = match style_code(style.as_str()) {
         Some(code) => format!("\x1b[{code}m{text}\x1b[0m"),
         None => text,
@@ -528,7 +511,7 @@ extern "C" fn jet_jit_io_style_force(style: i64, text: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_io_progress(text: i64) -> i64 {
-    let s = clone_str(text);
+    let s = clone_string(text);
     Concurrency::with_runtime_mut(|rt| {
         rt.stdout.push_str(&s);
         rt.stdout.push('\n');
@@ -542,8 +525,8 @@ fn jet_jit_io_progress_iter_with_total(
     format: i64,
     total: Option<usize>,
 ) -> i64 {
-    let description = clone_str(description);
-    let format = clone_str(format);
+    let description = clone_string(description);
+    let format = clone_string(format);
     let wrapped = Concurrency::with_runtime_mut(|rt| {
         let wrapped = rt.heap.clone_list(list).unwrap_or(list);
         wrapped
@@ -1171,11 +1154,11 @@ extern "C" fn jet_jit_io_progress_collect(list: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_io_confirm(prompt: i64) -> i8 {
-    i8::from(prompt_confirm(&clone_str(prompt)))
+    i8::from(prompt_confirm(&clone_string(prompt)))
 }
 
 extern "C" fn jet_jit_io_choose(prompt: i64, items: i64) -> i64 {
-    let prompt = clone_str(prompt);
+    let prompt = clone_string(prompt);
     let values = Concurrency::with_runtime_mut(|rt| {
         let len = rt.heap.list_len(items).unwrap_or(0);
         (0..len)
@@ -1190,17 +1173,17 @@ extern "C" fn jet_jit_io_choose(prompt: i64, items: i64) -> i64 {
     match prompt_choose(&prompt, &values) {
         Ok(item) => {
             let id = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(item));
-            result_ok_bits(id as u64)
+            result_ok(id as u64)
         }
         Err(error) => result_err(&error),
     }
 }
 
 extern "C" fn jet_jit_io_input_secret(prompt: i64) -> i64 {
-    match prompt_input_secret(&clone_str(prompt)) {
+    match prompt_input_secret(&clone_string(prompt)) {
         Ok(secret) => {
             let id = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(secret));
-            result_ok_bits(id as u64)
+            result_ok(id as u64)
         }
         Err(error) => result_err(&error),
     }
@@ -1253,7 +1236,7 @@ extern "C" fn jet_jit_file_lines(handle: i64) -> i64 {
 extern "C" fn jet_jit_file_writer_write_line(handle: i64, line: i64) -> i64 {
     use super::enc_stream::FileWriterSlot;
     use std::io::Write;
-    let text = clone_str(line);
+    let text = clone_string(line);
     let err = Concurrency::with_runtime_mut(|rt| {
         let idx = handle.saturating_sub(1) as usize;
         let Some(FileWriterSlot::Live(writer)) = rt.file_writers.get_mut(idx) else {

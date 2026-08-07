@@ -4,62 +4,38 @@
 
 use super::Concurrency;
 use jet_foundation::CoreArchive as runtime;
-
-fn clone_heap_string(id: i64) -> String {
-    Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(id).unwrap_or_default())
-}
-
-fn clone_heap_bytes(list: i64) -> Vec<u8> {
-    Concurrency::with_runtime_mut(|rt| {
-        let len = rt.heap.list_len(list).unwrap_or(0);
-        let mut out = Vec::with_capacity(len as usize);
-        for i in 0..len {
-            out.push(rt.heap.list_get_int(list, i).unwrap_or(0) as u8);
-        }
-        out
-    })
-}
-
-fn alloc_byte_list(bytes: &[u8]) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let list = rt.heap.alloc_empty_list();
-        for &b in bytes {
-            let _ = rt.heap.list_push_int(list, b as i64);
-        }
-        list
-    })
-}
+use crate::Marshal::{clone_string, clone_bytes, alloc_byte_list};
 
 extern "C" fn jet_jit_zip_compress(name: i64, bytes: i64) -> i64 {
     let out = runtime::jet_archive_zip_compress(
-        &clone_heap_string(name),
-        &clone_heap_bytes(bytes),
+        &clone_string(name),
+        &clone_bytes(bytes),
     );
     alloc_byte_list(&out)
 }
 
 extern "C" fn jet_jit_zip_decompress(bytes: i64) -> i64 {
-    let out = runtime::jet_archive_zip_decompress(&clone_heap_bytes(bytes));
+    let out = runtime::jet_archive_zip_decompress(&clone_bytes(bytes));
     alloc_byte_list(&out)
 }
 
 extern "C" fn jet_jit_tar_add(archive: i64, name: i64, bytes: i64) -> i64 {
     let out = runtime::jet_archive_tar_add(
-        &clone_heap_bytes(archive),
-        &clone_heap_string(name),
-        &clone_heap_bytes(bytes),
+        &clone_bytes(archive),
+        &clone_string(name),
+        &clone_bytes(bytes),
     );
     alloc_byte_list(&out)
 }
 
 extern "C" fn jet_jit_tar_get(archive: i64, name: i64) -> i64 {
     let out =
-        runtime::jet_archive_tar_get(&clone_heap_bytes(archive), &clone_heap_string(name));
+        runtime::jet_archive_tar_get(&clone_bytes(archive), &clone_string(name));
     alloc_byte_list(&out)
 }
 
 extern "C" fn jet_jit_tar_names_json(archive: i64) -> i64 {
-    let json = runtime::jet_archive_tar_names_json(&clone_heap_bytes(archive));
+    let json = runtime::jet_archive_tar_names_json(&clone_bytes(archive));
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(json))
 }
 

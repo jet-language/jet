@@ -7,6 +7,7 @@ use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
 use jet_foundation::AST::Type;
+use crate::Marshal::clone_string;
 
 pub(crate) mod runtime {
     #[allow(unused_imports)]
@@ -125,10 +126,6 @@ fn clone_bytes(handle: i64) -> Vec<u8> {
             .map(|index| rt.heap.list_get_int(handle, index).unwrap_or(0) as u8)
             .collect()
     })
-}
-
-fn clone_string(handle: i64) -> String {
-    Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(handle).unwrap_or_default())
 }
 
 fn path_string(handle: i64) -> String {

@@ -11,6 +11,7 @@ use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_void};
 use std::path::Path;
 use std::sync::Mutex;
+use crate::Marshal::{clone_string, alloc_string};
 
 #[cfg(unix)]
 #[link(name = "dl")]
@@ -81,14 +82,6 @@ fn ret_abi(ty: Option<&Type>) -> Option<RetAbi> {
         Some(Type::String) => Some(RetAbi::String),
         _ => None,
     }
-}
-
-fn clone_string(id: i64) -> String {
-    Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(id).unwrap_or_default())
-}
-
-fn alloc_string(s: String) -> i64 {
-    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s))
 }
 
 fn trap(msg: &str) {

@@ -9,6 +9,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use crate::Marshal::{alloc_string, clone_string, result_err_msg, result_ok};
 
 #[derive(Clone)]
 struct WatchEvent {
@@ -65,14 +66,6 @@ thread_local! {
     static NEXT_ID: AtomicU64 = const { AtomicU64::new(1) };
 }
 
-fn clone_str(id: i64) -> String {
-    Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(id).unwrap_or_default())
-}
-
-fn alloc_str(s: String) -> i64 {
-    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s))
-}
-
 fn event_record(ev: &WatchEvent) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let d = rt.heap.alloc_string(ev.domain.clone());
@@ -113,22 +106,8 @@ fn list_from_events(events: Vec<WatchEvent>) -> i64 {
     })
 }
 
-fn result_ok(bits: u64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        rt.results.push(super::JitResultValue { ok: true, bits });
-        rt.results.len() as i64
-    })
-}
-
 fn result_err(msg: &str) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let sid = rt.heap.alloc_string(msg.to_string());
-        rt.results.push(super::JitResultValue {
-            ok: false,
-            bits: sid as u64,
-        });
-        rt.results.len() as i64
-    })
+    result_err_msg(msg)
 }
 
 fn push_watch(state: WatchState) -> i64 {
@@ -399,7 +378,7 @@ extern "C" fn jet_jit_subscription_is_active(handle: i64) -> i8 {
 }
 
 extern "C" fn jet_jit_watcher_files(path: i64) -> i64 {
-    let root = clone_str(path);
+    let root = clone_string(path);
     match watch_snapshot(&root) {
         Ok(snapshot) => result_ok(push_watch(WatchState {
             target: WatchTarget::Files { root },
@@ -425,7 +404,7 @@ extern "C" fn jet_jit_watcher_process_pid(pid: i64) -> i64 {
 extern "C" fn jet_jit_watcher_port(host: i64, port: i64) -> i64 {
     push_watch(WatchState {
         target: WatchTarget::Port {
-            host: clone_str(host),
+            host: clone_string(host),
             port,
         },
         snapshot: Snapshot::new(),
@@ -477,7 +456,7 @@ extern "C" fn jet_jit_watch_summary(handle: i64) -> i64 {
             })
             .unwrap_or_default()
     });
-    alloc_str(text)
+    alloc_string(text)
 }
 
 extern "C" fn jet_jit_watch_on(
@@ -575,7 +554,7 @@ extern "C" fn jet_jit_watchset_summary(set: i64) -> i64 {
             .map(|h| h.len())
             .unwrap_or(0)
     });
-    alloc_str(format!("watchset handles={n}"))
+    alloc_string(format!("watchset handles={n}"))
 }
 
 pub(crate) fn clear_watcher_state() {

@@ -7,6 +7,7 @@ use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
 use std::cell::RefCell;
+use crate::Marshal::{clone_string, alloc_string};
 
 mod typed_text_semantics {
     #[allow(unused_imports)]
@@ -66,14 +67,6 @@ fn store_val(handle: i64, v: MathVal) {
             *entry = Some(v);
         }
     });
-}
-
-fn clone_string(id: i64) -> String {
-    Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(id).unwrap_or_default())
-}
-
-fn alloc_string(s: String) -> i64 {
-    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s))
 }
 
 fn f64_bits(x: f64) -> i64 {

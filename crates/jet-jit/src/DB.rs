@@ -7,6 +7,7 @@ use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
+use crate::Marshal::{clone_string, result_ok, result_err_msg};
 
 trait JetShow {
     fn jet_show(&self) -> String;
@@ -93,28 +94,6 @@ fn new_scope(connection: u64, table: String, expression: String, user: String) -
     id as i64
 }
 
-fn clone_heap_string(id: i64) -> String {
-    Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(id).unwrap_or_default())
-}
-
-fn result_ok_bits(bits: u64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        rt.results.push(super::JitResultValue { ok: true, bits });
-        rt.results.len() as i64
-    })
-}
-
-fn result_err_msg(msg: &str) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let sid = rt.heap.alloc_string(msg.to_string());
-        rt.results.push(super::JitResultValue {
-            ok: false,
-            bits: sid as u64,
-        });
-        rt.results.len() as i64
-    })
-}
-
 fn alloc_dbvalue_record(disc: i64, payload: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let h = rt.heap.alloc_record(2);
@@ -174,10 +153,10 @@ fn values_from_list(list: i64) -> Vec<wire::DBValue> {
 }
 
 extern "C" fn jet_jit_db_policy(table: i64, expression: i64) -> i64 {
-    let table = clone_heap_string(table);
-    let expression = clone_heap_string(expression);
+    let table = clone_string(table);
+    let expression = clone_string(expression);
     match wire::jet_db_policy_validate(&table, &expression) {
-        Ok(()) => result_ok_bits(alloc_policy_record(&table, &expression) as u64),
+        Ok(()) => result_ok(alloc_policy_record(&table, &expression) as u64),
         Err(message) => result_err_msg(&message),
     }
 }
@@ -190,7 +169,7 @@ extern "C" fn jet_jit_db_with_policy(connection: i64, policy: i64, user: i64) ->
         connection as u64,
         table,
         expression,
-        clone_heap_string(user),
+        clone_string(user),
     );
     scope
 }
@@ -248,7 +227,7 @@ extern "C" fn jet_jit_db_open_memory() -> i64 {
 }
 
 extern "C" fn jet_jit_db_open(path: i64) -> i64 {
-    runtime::jet_db_open(&clone_heap_string(path)) as i64
+    runtime::jet_db_open(&clone_string(path)) as i64
 }
 
 extern "C" fn jet_jit_db_close(handle: i64) -> i8 {
@@ -281,7 +260,7 @@ extern "C" fn jet_jit_db_execute(handle: i64, sql: i64, params: i64) -> i64 {
         return result_err_msg("database row operations require a policy scope");
     };
     let values = values_from_list(params);
-    let sql = clone_heap_string(sql);
+    let sql = clone_string(sql);
     let (sql, values) = match wire::jet_db_apply_policy(&sql, &values, &table, &expression, &user) {
         Ok(value) => value,
         Err(error) => return result_err_msg(&error.message),
@@ -289,7 +268,7 @@ extern "C" fn jet_jit_db_execute(handle: i64, sql: i64, params: i64) -> i64 {
     let wire_s = wire::jet_db_encode_params(&values);
     let out = runtime::jet_db_execute(base, &sql, &wire_s);
     match wire::jet_db_decode_execute_result(&out) {
-        Ok(n) => result_ok_bits(n as u64),
+        Ok(n) => result_ok(n as u64),
         Err(e) => result_err_msg(&e.message),
     }
 }
@@ -299,7 +278,7 @@ extern "C" fn jet_jit_db_query(handle: i64, sql: i64, params: i64) -> i64 {
         return result_err_msg("database row operations require a policy scope");
     };
     let values = values_from_list(params);
-    let sql = clone_heap_string(sql);
+    let sql = clone_string(sql);
     let (sql, values) = match wire::jet_db_apply_policy(&sql, &values, &table, &expression, &user) {
         Ok(value) => value,
         Err(error) => return result_err_msg(&error.message),
@@ -307,7 +286,7 @@ extern "C" fn jet_jit_db_query(handle: i64, sql: i64, params: i64) -> i64 {
     let wire_s = wire::jet_db_encode_params(&values);
     let out = runtime::jet_db_query(base, &sql, &wire_s);
     match wire::jet_db_decode_query_result(&out) {
-        Ok(rows) => result_ok_bits(rows_to_list_of_maps(rows) as u64),
+        Ok(rows) => result_ok(rows_to_list_of_maps(rows) as u64),
         Err(e) => result_err_msg(&e.message),
     }
 }
@@ -317,7 +296,7 @@ extern "C" fn jet_jit_db_query_one(handle: i64, sql: i64, params: i64) -> i64 {
         return result_err_msg("database row operations require a policy scope");
     };
     let values = values_from_list(params);
-    let sql = clone_heap_string(sql);
+    let sql = clone_string(sql);
     let (sql, values) = match wire::jet_db_apply_policy(&sql, &values, &table, &expression, &user) {
         Ok(value) => value,
         Err(error) => return result_err_msg(&error.message),
@@ -336,7 +315,7 @@ extern "C" fn jet_jit_db_query_one(handle: i64, sql: i64, params: i64) -> i64 {
                     map.wrapping_add(1)
                 }
             };
-            result_ok_bits(opt as u64)
+            result_ok(opt as u64)
         }
         Err(e) => result_err_msg(&e.message),
     }
@@ -435,11 +414,11 @@ extern "C" fn jet_jit_db_migrate(conn: i64, name: i64, steps: i64) -> i64 {
     if scope_parts(scope).is_none() {
         return result_err_msg("database migration requires a policy scope");
     }
-    let name_s = clone_heap_string(name);
+    let name_s = clone_string(name);
     let steps_v = list_of_strings(steps);
     let mut backend = JitDbBackend { scope };
     match wire::jet_db_migrate(&mut backend, &name_s, &steps_v) {
-        Ok(done) => result_ok_bits(done as u64),
+        Ok(done) => result_ok(done as u64),
         Err(error) => result_err_msg(&error.message),
     }
 }
@@ -449,11 +428,11 @@ extern "C" fn jet_jit_db_transaction(conn: i64, label: i64, steps: i64) -> i64 {
     if scope_parts(scope).is_none() {
         return result_err_msg("database transaction requires a policy scope");
     }
-    let label_s = clone_heap_string(label);
+    let label_s = clone_string(label);
     let steps_v = list_of_strings(steps);
     let mut backend = JitDbBackend { scope };
     match wire::jet_db_transaction(&mut backend, &label_s, &steps_v) {
-        Ok(done) => result_ok_bits(done as u64),
+        Ok(done) => result_ok(done as u64),
         Err(error) => result_err_msg(&error.message),
     }
 }
@@ -476,14 +455,14 @@ extern "C" fn jet_jit_db_params(sql: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_db_row_int(row: i64, key: i64) -> i64 {
-    let key_s = clone_heap_string(key);
+    let key_s = clone_string(key);
     let val = Concurrency::with_runtime_mut(|rt| {
         let kid = rt.heap.alloc_string(key_s.clone());
         rt.heap.map_get(row, kid)
     });
     match val.and_then(read_dbvalue) {
         Some(v) => match v.int() {
-            Ok(n) => result_ok_bits(n as u64),
+            Ok(n) => result_ok(n as u64),
             Err(e) => result_err_msg(&e),
         },
         None => result_err_msg(&format!("missing column `{key_s}`")),
@@ -491,7 +470,7 @@ extern "C" fn jet_jit_db_row_int(row: i64, key: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_db_row_text(row: i64, key: i64) -> i64 {
-    let key_s = clone_heap_string(key);
+    let key_s = clone_string(key);
     let val = Concurrency::with_runtime_mut(|rt| {
         let kid = rt.heap.alloc_string(key_s.clone());
         rt.heap.map_get(row, kid)
@@ -500,7 +479,7 @@ extern "C" fn jet_jit_db_row_text(row: i64, key: i64) -> i64 {
         Some(v) => match v.text() {
             Ok(s) => {
                 let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s));
-                result_ok_bits(sid as u64)
+                result_ok(sid as u64)
             }
             Err(e) => result_err_msg(&e),
         },
@@ -519,7 +498,7 @@ extern "C" fn jet_jit_dbvalue_pack(disc: i64, payload: i64) -> i64 {
 extern "C" fn jet_jit_dbvalue_int(handle: i64) -> i64 {
     match read_dbvalue(handle) {
         Some(v) => match v.int() {
-            Ok(n) => result_ok_bits(n as u64),
+            Ok(n) => result_ok(n as u64),
             Err(e) => result_err_msg(&e),
         },
         None => result_err_msg("invalid DBValue"),
@@ -529,7 +508,7 @@ extern "C" fn jet_jit_dbvalue_int(handle: i64) -> i64 {
 extern "C" fn jet_jit_dbvalue_float(handle: i64) -> i64 {
     match read_dbvalue(handle) {
         Some(v) => match v.float() {
-            Ok(f) => result_ok_bits(f.to_bits()),
+            Ok(f) => result_ok(f.to_bits()),
             Err(e) => result_err_msg(&e),
         },
         None => result_err_msg("invalid DBValue"),
@@ -541,7 +520,7 @@ extern "C" fn jet_jit_dbvalue_text(handle: i64) -> i64 {
         Some(v) => match v.text() {
             Ok(s) => {
                 let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s));
-                result_ok_bits(sid as u64)
+                result_ok(sid as u64)
             }
             Err(e) => result_err_msg(&e),
         },
@@ -552,7 +531,7 @@ extern "C" fn jet_jit_dbvalue_text(handle: i64) -> i64 {
 extern "C" fn jet_jit_dbvalue_bool(handle: i64) -> i64 {
     match read_dbvalue(handle) {
         Some(v) => match v.bool() {
-            Ok(b) => result_ok_bits(u64::from(b)),
+            Ok(b) => result_ok(u64::from(b)),
             Err(e) => result_err_msg(&e),
         },
         None => result_err_msg("invalid DBValue"),

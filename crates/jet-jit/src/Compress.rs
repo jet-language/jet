@@ -1,71 +1,32 @@
 //! `core.compress.gzip` / `zstd` host shims (#729).
 //! Calls the canonical FFI runtime via `include!` — no third algorithm.
 
-use super::Concurrency;
+use crate::Marshal::{clone_bytes, alloc_byte_list, result_ok, result_err_msg};
 
 mod runtime {
     include!("../../jet-pkg-model/src/Prelude/Compress.rs");
 }
 
-fn clone_heap_bytes(list: i64) -> Vec<u8> {
-    Concurrency::with_runtime_mut(|rt| {
-        let len = rt.heap.list_len(list).unwrap_or(0);
-        let mut out = Vec::with_capacity(len as usize);
-        for i in 0..len {
-            out.push(rt.heap.list_get_int(list, i).unwrap_or(0) as u8);
-        }
-        out
-    })
-}
-
-fn alloc_byte_list(bytes: &[u8]) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let list = rt.heap.alloc_empty_list();
-        for &b in bytes {
-            let _ = rt.heap.list_push_int(list, b as i64);
-        }
-        list
-    })
-}
-
-fn result_ok_bits(bits: u64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        rt.results.push(super::JitResultValue { ok: true, bits });
-        rt.results.len() as i64
-    })
-}
-
-fn result_err_msg(msg: &str) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let sid = rt.heap.alloc_string(msg.to_string());
-        rt.results.push(super::JitResultValue {
-            ok: false,
-            bits: sid as u64,
-        });
-        rt.results.len() as i64
-    })
-}
-
 extern "C" fn jet_jit_gzip_compress(bytes: i64) -> i64 {
-    let out = runtime::jet_compress_gzip_compress(&clone_heap_bytes(bytes));
+    let out = runtime::jet_compress_gzip_compress(&clone_bytes(bytes));
     alloc_byte_list(&out)
 }
 
 extern "C" fn jet_jit_gzip_decompress(bytes: i64) -> i64 {
-    match runtime::jet_compress_gzip_decompress(&clone_heap_bytes(bytes)) {
-        Ok(out) => result_ok_bits(alloc_byte_list(&out) as u64),
+    match runtime::jet_compress_gzip_decompress(&clone_bytes(bytes)) {
+        Ok(out) => result_ok(alloc_byte_list(&out) as u64),
         Err(e) => result_err_msg(&e),
     }
 }
 
 extern "C" fn jet_jit_zstd_compress(bytes: i64) -> i64 {
-    let out = runtime::jet_compress_zstd_compress(&clone_heap_bytes(bytes));
+    let out = runtime::jet_compress_zstd_compress(&clone_bytes(bytes));
     alloc_byte_list(&out)
 }
 
 extern "C" fn jet_jit_zstd_decompress(bytes: i64) -> i64 {
-    match runtime::jet_compress_zstd_decompress(&clone_heap_bytes(bytes)) {
-        Ok(out) => result_ok_bits(alloc_byte_list(&out) as u64),
+    match runtime::jet_compress_zstd_decompress(&clone_bytes(bytes)) {
+        Ok(out) => result_ok(alloc_byte_list(&out) as u64),
         Err(e) => result_err_msg(&e),
     }
 }
