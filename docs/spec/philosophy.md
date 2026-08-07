@@ -43,6 +43,53 @@ program. The same applies to modules. This is one feature with two entry
 points, not two features. The compiler treats them identically. Style guides
 and `jet fmt` can enforce a project preference; the language never forces one.
 
+## The one law on compiler-held facts
+
+*(D-FACT-LAW1=B, ratified 2026-08-07, card #1620.)*
+
+The compiler holds facts about values, places, scopes, and the build: a value's
+range, a scope's rights, a task's duty, a place's write window, a build setting.
+One law governs all of them:
+
+> A fact moves toward safety silently. Every move away from safety is one
+> written word, at the site, on the record. At runtime, no fact remains.
+
+Said to a beginner: **Jet learns facts for you, never forgets one behind your
+back, and every exception is one written word.**
+
+The safe direction differs per plane, and the law does not. Learning more about
+a value is safe. Giving up a right is safe. Discharging a duty is safe. Closing
+a write window is safe. Each already-ratified rule is a named instance of this
+one law, not a rule of its own:
+
+| Ratified rule | The law, in that plane |
+|---|---|
+| Knowledge is never lost silently (D-TYPE2-EXACT1) | losing certainty is the away-move |
+| Rights only shrink as scope nests (D-AUTHORITY-MODEL1) | gaining power is the away-move |
+| Package policy may only tighten safety (D-PACKAGE-POLICY-SCOPE1) | the same law at package scope |
+| Safety facts only tighten at every layer (D-CONF-MERGE1) | the same law on the build |
+| `x != None` narrows `T?` to `T` for free (D-FLOWTYPE1) | gaining certainty is the free move |
+| A bound task handle must be joined or detached (D-CONC-JOIN1) | abandoning a duty needs the word |
+| Taint spreads on its own; `#Scrub(Tag)` removes it (D-TAG-SURFACE1) | suspicion is gained free, spelled away |
+
+The words are **tighten** and **loosen** (D-FACT-WORD1=A). A fact tightens; a
+gate loosens it. `attenuate`, `conserve`, and law-level `narrow` are retired as
+law words. Operation names are untouched: flow narrowing keeps its name, and no
+user-typed spelling changes.
+
+The law is enforced, not only written. Every row in the one fact registry states
+its safe direction and its gate words, and a drift guard fails a row that states
+neither (D-FACT-LAW1=B). Every gate lands in one ledger, read by
+`jet inspect gates` (D-FACT-GATE1=A). Every registered fact is read with one
+mark, `T.$range`, `f.$effects`, `$build.profile` (D-FACT-READ1=A).
+
+Two walls stand on purpose. The borrow checker is a **prover**, never a plane:
+alias and flow analysis over places cannot be a fold of per-operation rules, so
+the engine stays its own, and the facts it publishes register as read-only rows
+(D-FACT-OWN1=A). The memory sigils `&`, `^`, and `~` obey the law's spirit —
+each grade of power costs one written mark — but they are the prover's surface,
+not gates, and they never enter the ledger.
+
 ## Ranked priorities
 
 1. **Memory & type safety.** Never traded away, never configurable.

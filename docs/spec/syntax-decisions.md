@@ -5655,3 +5655,95 @@ Retired rows also stop applying effects. `#Pure` set `is_pure` and
 `#InlineAlways` set `is_inline_always` *after* diagnosing, so both retired
 spellings kept working and the registry's status column lied about them. They
 now teach their replacement and apply nothing.
+
+**2026-08-07 — the compiler-facts slate: D-FACT-LAW1=B, D-FACT-WORD1=A,
+D-FACT-GATE1=A, D-FACT-READ1=A, D-FACT-HOME1=A, D-FACT-OWN1=A,
+D-FACT-FLOW1=A** *(card #1620, proposal `docs/proposals/compiler-facts-one-law.md`)*.
+The capstone over four ratified rethinks — type v2 knowledge, authority rights,
+concurrency state/duty/reach, and memory v5 ownership. It amends none of their
+decisions; it names the one law they each drew a corner of. The law itself is
+stated in `docs/spec/philosophy.md`.
+
+**D-FACT-LAW1 = B — one law, plus a guarded registry.** A fact moves toward
+safety silently; every move away is one written word, at the site, on the
+record; at runtime no fact remains. `D-TYPE2-EXACT1`, `D-AUTHORITY-MODEL1`,
+`D-PACKAGE-POLICY-SCOPE1`, `D-CONF-MERGE1`, `D-FLOWTYPE1`, and `D-CONC-JOIN1`
+are recorded as named instances, not as separate rules. The law is enforced by
+the registry: every row on the `D-META-REG1` table states its safe direction and
+its gate words, a row with no meaningful direction states `none`, and a row that
+states neither fails the build. The guard is the marker drift-guard, extended —
+one implementation, not a second. Existing rows are backfilled in the same
+change. Cards #1538 and #1460.
+
+**D-FACT-WORD1 = A — tighten and loosen.** One word pair names the law in
+diagnostics and docs. `attenuate`, `conserve`, and law-level `narrow` retire as
+law words. Operation names are untouched: flow narrowing keeps its name,
+widening conversions keep theirs, and no user-typed spelling changes. Duty
+diagnostics use the *owes* phrasing, which the ballot records as the one plane
+where `tighten` reads poorly: "this value still owes `join` — join it, or write
+`detach`". The E0140 family and the `#SingleUse` message speak with that one
+voice. Card #1624.
+
+**D-FACT-GATE1 = A — one full ledger, grouped by kind.** Every gate lands in one
+ledger: unsafe regions with obligation status, `#Impure` marks, dependency
+grants, trust grants, build and session flags, `.Force` pins, taint scrubs, duty
+drops, and precision demotions. `jet inspect gates` reads it, groups by kind with
+the security kinds first, and summarizes a large kind as a count so numeric code
+cannot bury the security rows. This generalizes `D-AUTHORITY-GATE1`:
+`jet inspect authority` stays as the rights-kind filter of the same ledger, and
+`jet unsafe` as another filter. Compile-time only, no runtime cost, no new write
+surface, and no gate gains new ceremony — reasons stay exactly where ratified law
+already puts them. Card #1571.
+
+**D-FACT-READ1 = A — the `$` mark reads every plane.** Reading a compiler-held
+fact is one act with one mark: `Severity.$range`, `send_report.$effects`,
+`Order.$states`, `Meters.$dimension`, and `$build.profile` as the same act with
+the build as its subject. This extends `D-META-STAGE1` from build facts and
+splices to member position on types and functions. Facts answer typed values
+from the registry. `reflect()` remains the aggregate view and loses its string
+fallback; the `"\0state:"` encoding is deleted. Comptime only: S26 holds, a fact
+is a value and never mints a type, and `D-FACTMODEL1` holds, facts classify and
+never dispatch. Card #1623.
+
+**D-FACT-HOME1 = A — home the user-facing orphans.** Send-safety, failure
+attribution, `#Track` origin (`D-PROVENANCE1`), view provenance
+(`D-MEMPROVENANCE3`), unit-scale provenance, and maturity become typed registry
+rows, readable like every other fact. Prover internals — uninit tracking and
+exhaustiveness — stay engine-side and gain no row, matching the wall in
+`D-FACT-OWN1`; the line is written down per fact rather than left to folklore.
+Phantom fact-menu names such as `Capability` are refused at the signature
+instead of compiling to a dead end at every call, and each refusal names its
+living counterpart (`Authority`, or a rights list) or says plainly that none
+exists. The census is about eighteen names, not the rule-arg seven. Cards #1622
+and #1501.
+
+**D-FACT-OWN1 = A — the ownership wall: prover, not plane.** The borrow checker
+is a prover and never a registered plane. Alias and flow analysis over places
+does not decompose into per-operation rules, so no card may re-express `&`, `^`,
+or `~` windows as plane algebra. Ownership checking continues to follow `D-MEM1`,
+`D-SHAPE-PLACE1`, and `D-MEM-VIEWRET1` as its own analysis. The facts it
+publishes — sendability, view provenance, moved-ness — enter the registry as
+read-only prover-supplied rows, so tools and other planes consume them like any
+other fact. The memory sigils obey the law's spirit but are the prover's surface,
+not gates, and they never enter the gate ledger. Cards #1538 and #1622.
+
+**D-FACT-FLOW1 = A — one flow-fact store, planes supply joins.** One store on the
+checker, keyed by binding and plane, replaces the six hand-written stores (moved,
+uninit, typestate, taint, narrowing, view facts) and the twelve one-off fact
+columns on `LocalInfo`. Each plane supplies only its join rule, and the shared
+walker applies joins at every `if`, loop, and arm-table merge point, so a
+forgotten join becomes impossible by construction. This closes the two dead joins
+— `State.rs` `join_after` and `UninitState::merge_paths`, both
+`#[allow(dead_code)]` — which today let typestate and partial-init keep whatever
+branch the walker saw last. The walker states its loop fixpoint rule once. Sema
+only: no TIR or codegen change, and generated Rust stays byte-identical. View
+facts are stored here while their invalidation logic stays with the ownership
+prover. Card #1621.
+
+**Sequencing (owner directive, 2026-08-07).** The substrate cards outrank every
+per-plane implementation card. Ranked order: #1538 (the guarded registry), #1621
+(the flow-fact store), #1539 (rows in readable Prelude source), #1547 (fact
+planes on the one registry), #1622 (home the orphans), #1501 (phantom-name
+refusal), #1623 (the `$` read surface), #1571 (the gate ledger), #1624 (the one
+law voice). No per-plane card in #1517–#1579 closes before its substrate
+prerequisite closes.
