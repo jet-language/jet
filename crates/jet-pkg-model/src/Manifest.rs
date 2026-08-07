@@ -443,6 +443,15 @@ fn to_diagnostic(path: &Path, err: &PackageParseError) -> Diagnostic {
         PackageParseError::UnknownOutputKind(kind) => {
             e1206(&file, &format!("unknown Output kind `{kind}`"))
         }
+        PackageParseError::InvalidValue { field, value } if field == "runtime" => e1206(
+            &file,
+            &format!(
+                "`runtime` must be `{}`, `{}`, or `{}`, not `{value}`",
+                Syntax::RuntimeLayer::CORE,
+                Syntax::RuntimeLayer::ALLOC,
+                Syntax::RuntimeLayer::HOSTED,
+            ),
+        ),
         PackageParseError::InvalidValue { field, value } => {
             e1206(&file, &format!("invalid value for `{field}`: `{value}`"))
         }

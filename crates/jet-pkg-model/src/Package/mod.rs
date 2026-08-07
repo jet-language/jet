@@ -1202,6 +1202,14 @@ fn parse_common(
             }
         }
         let Some((field, value)) = split_field(&entry) else {
+            // D-BUILDSCOPE1: a package's single `fn build` may live beside
+            // manifest fields in this same file. It has no `field:` shape,
+            // so the ordinary entry loop must step over it (the Driver reads
+            // it separately via `Blocks::build_entry_source`) instead of
+            // reporting it as a malformed manifest field.
+            if is_build_entry_decl(&entry) {
+                continue;
+            }
             return Err(PackageParseError::MalformedField(entry));
         };
         if let Some(previous) = seen.get(&field) {
@@ -1231,8 +1239,8 @@ fn parse_common(
             continue;
         }
         match field.as_str() {
-            "name" => facts.name = scalar(&value),
-            "version" => facts.version = Some(scalar(&value)),
+            crate::Syntax::MANIFEST_FIELD_NAME => facts.name = scalar(&value),
+            crate::Syntax::MANIFEST_FIELD_VERSION => facts.version = Some(scalar(&value)),
             "jet" if !config => facts.jet = Some(scalar(&value)),
             "jet" => return Err(PackageParseError::UnknownField(field.clone())),
             "source" => facts.source = Some(scalar(&value)),
@@ -1256,11 +1264,13 @@ fn parse_common(
                 )?);
             }
             "runtime" => return Err(PackageParseError::UnknownField(field.clone())),
-            "deps" => facts.deps = Blocks::parse_deps(record_body(&value, "deps")?)?,
+            crate::Syntax::MANIFEST_BLOCK_DEPS => {
+                facts.deps = Blocks::parse_deps(record_body(&value, crate::Syntax::MANIFEST_BLOCK_DEPS)?)?
+            }
             "packages" if config => return Err(PackageParseError::UnknownField(field.clone())),
             "packages" => facts.packages = Blocks::parse_packages(record_body(&value, "packages")?)?,
             "services" => facts.services = parse_services(&value)?,
-            "outputs" => {
+            crate::Syntax::MANIFEST_BLOCK_OUTPUTS => {
                 for (name, output) in parse_outputs(&value)? {
                     match facts.outputs.get(&name) {
                         None => {
@@ -1277,8 +1287,10 @@ fn parse_common(
             }
             "environments" => facts.environments = parse_environments(&value)?,
             "defaults" => facts.defaults = parse_string_map("defaults", &value)?,
-            "settings" if config => return Err(PackageParseError::UnknownField(field.clone())),
-            "settings" => facts.settings = parse_settings(&value)?,
+            crate::Syntax::MANIFEST_BLOCK_SETTINGS if config => {
+                return Err(PackageParseError::UnknownField(field.clone()))
+            }
+            crate::Syntax::MANIFEST_BLOCK_SETTINGS => facts.settings = parse_settings(&value)?,
             "build" if config => return Err(PackageParseError::UnknownField(field.clone())),
             "build" => {
                 let body = record_body(&value, "build")?;
@@ -1305,8 +1317,8 @@ fn parse_common(
                     lints_deny: Blocks::parse_lints_policy(body)?,
                 };
             }
-            "members" if config => return Err(PackageParseError::ConfigMembers),
-            "members" => facts.members = parse_members(&value)?,
+            crate::Syntax::MANIFEST_BLOCK_MEMBERS if config => return Err(PackageParseError::ConfigMembers),
+            crate::Syntax::MANIFEST_BLOCK_MEMBERS => facts.members = parse_members(&value)?,
             "configs" if config => {
                 return Err(PackageParseError::UnknownField(field.clone()))
             }
@@ -2652,6 +2664,22 @@ fn file_has_top_level_function(path: &std::path::Path, wanted: &str) -> bool {
         previous = ch.to_string();
     }
     false
+}
+
+/// Whether a top-level manifest entry is the package's `fn build` decl
+/// (D-BUILDSCOPE1) rather than a malformed `field:` line. Only this one
+/// declaration is tolerated here; every other bare Jet item is still a
+/// manifest shape error.
+fn is_build_entry_decl(entry: &str) -> bool {
+    let rest = entry.trim_start();
+    let Some(rest) = rest.strip_prefix("fn") else { return false };
+    let Some(next) = rest.chars().next() else { return false };
+    if !next.is_whitespace() {
+        return false;
+    }
+    let rest = rest.trim_start();
+    let Some(rest) = rest.strip_prefix("build") else { return false };
+    rest.chars().next().is_none_or(|c| !c.is_alphanumeric() && c != '_')
 }
 
 fn strip_comments(value: &str) -> String {

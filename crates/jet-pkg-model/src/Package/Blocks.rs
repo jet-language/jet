@@ -182,6 +182,24 @@ pub fn dep_display(source: &DepSource) -> String {
     }
 }
 
+fn bad_dep_value(name: &str, value: &str) -> PackageParseError {
+    err(format!(
+        "dependency `{name}` has value `{value}`, which is not a `name#version`, bare path, `target@provider` ref, or inline git struct"
+    ))
+}
+
+fn ref_error(name: &str, error: &RefSpec::RefError) -> PackageParseError {
+    match error {
+        RefSpec::RefError::ProviderFirst { raw, replacement } => err(format!(
+            "dependency `{name}` uses retired provider-first ref `{raw}`; write `{replacement}`"
+        )),
+        RefSpec::RefError::PathProviderRetired { raw, path } => err(format!(
+            "dependency `{name}` uses retired path-provider ref `{raw}`; write the bare path `{path}`"
+        )),
+        other => err(format!("dependency `{name}`'s ref is invalid: {other:?}")),
+    }
+}
+
 pub(super) fn parse_deps(body: &str) -> Result<BTreeMap<String, DepSource>, PackageParseError> {
     let mut deps = BTreeMap::new();
     for (name, value) in key_value_entries(body) {
@@ -203,22 +221,20 @@ pub(super) fn parse_deps(body: &str) -> Result<BTreeMap<String, DepSource>, Pack
                         provider: r.provider,
                         target: r.target,
                     },
-                    Err(error) => {
-                        return Err(err(format!("dependency `{name}` has an invalid source ref: {error:?}")))
-                    }
+                    Err(error) => return Err(ref_error(&name, &error)),
                 }
             } else if let Some((package, selector)) = unquoted.split_once('#') {
                 if package == name && !selector.is_empty() {
                     DepSource::Version(selector.to_string())
                 } else {
-                    return Err(err(format!("dependency `{name}` has an invalid value `{trimmed}`")));
+                    return Err(bad_dep_value(&name, trimmed));
                 }
             } else if trimmed.starts_with('"') {
                 // A bare quoted string with no `#`/`@`/path shape is a plain
                 // version selector (D-CONF-NAME1: `deps: .{ httpkit: "^2" }`).
                 DepSource::Version(unquoted)
             } else {
-                return Err(err(format!("dependency `{name}` has an invalid value `{trimmed}`")));
+                return Err(bad_dep_value(&name, trimmed));
             }
         };
         if deps.insert(name.clone(), source).is_some() {
