@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1603,
-    "rev": 28633,
+    "rev": 28647,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -24,7 +24,7 @@
         "board-ideas"
       ]
     },
-    "completionCursor": "2026-08-07T08:14:28.792Z"
+    "completionCursor": "2026-08-07T09:42:37.468Z"
   },
   "epochs": [
     {
@@ -87451,11 +87451,11 @@
       "track": "epoch",
       "epoch": "e2",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P0",
       "plan": "1) Classify PAYLOAD_FILE and WORKSPACE_FILE under tests/ui as config, matching the examples loop (run_supported_source_corpus, lines 1275-1283). 2) Delete the 22 pkg.jet lines from UI_PARSE_INVALID — all 22 tests/ui/**/pkg.jet files are currently pinned there (`find tests/ui -name pkg.jet` finds 22; `find tests/ui -name workspace.jet` finds none, so only pkg.jet needs the reclassification today). 3) Collect mismatches in the UI loop (currently lines 1311-1348) into a Vec and assert once at the end so a single bad fixture stops masking the rest. 4) No fix needed for examples/jetpack/epoch5/config/dev.jet — confirmed out of scope, see body.",
       "blockedBy": [],
-      "assignee": "bd3-tests",
+      "assignee": null,
       "log": [
         {
           "at": "2026-08-07",
@@ -87467,47 +87467,47 @@
         {
           "n": 1,
           "text": "cargo test --test fmt fmt_is_lossless_on_supported_source_corpus passes on master",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-tests",
-          "verifiedBy": null,
-          "evidence": "cargo test --test fmt fmt_is_lossless_on_supported_source_corpus: ok (also cargo test --test fmt full: 163 passed)",
-          "at": "2026-08-07T08:35:42.698Z"
+          "verifiedBy": "bd3-orch",
+          "evidence": "Fresh-context review (bd3-review) passed; grouped rerun on merged master: fmt 163/163, tir_collections_and_methods 32/32, comptime_diff 2/2, corelib json_canonical_stream 3/3.",
+          "at": "2026-08-07T09:42:44.201Z"
         },
         {
           "n": 2,
           "text": "tests/ui pkg.jet and workspace.jet are classified as config by the same rule the examples loop uses; no manifest entry names one",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-tests",
-          "verifiedBy": null,
-          "evidence": "UI loop now skips PAYLOAD_FILE/WORKSPACE_FILE/PACKAGE_FILE by name (same rule as examples loop); all 22 pkg.jet lines removed from UI_PARSE_INVALID; grep confirms zero pkg.jet/workspace.jet/package.jet entries remain in the manifest",
-          "at": "2026-08-07T08:35:43.460Z"
+          "verifiedBy": "bd3-orch",
+          "evidence": "Fresh-context review (bd3-review) passed; grouped rerun on merged master: fmt 163/163, tir_collections_and_methods 32/32, comptime_diff 2/2, corelib json_canonical_stream 3/3.",
+          "at": "2026-08-07T09:42:44.847Z"
         },
         {
           "n": 3,
           "text": "Adding a new tests/ui manifest fixture does not require touching UI_PARSE_INVALID (proved by adding one in the same run)",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-tests",
-          "verifiedBy": null,
-          "evidence": "Added tests/ui/_tmp_proof_manifest/pkg.jet (bare manifest, no UI_PARSE_INVALID entry), ran cargo test --test fmt fmt_is_lossless_on_supported_source_corpus: ok, then removed the fixture — no manifest edit needed",
-          "at": "2026-08-07T08:35:44.192Z"
+          "verifiedBy": "bd3-orch",
+          "evidence": "Fresh-context review (bd3-review) passed; grouped rerun on merged master: fmt 163/163, tir_collections_and_methods 32/32, comptime_diff 2/2, corelib json_canonical_stream 3/3.",
+          "at": "2026-08-07T09:42:45.411Z"
         },
         {
           "n": 4,
           "text": "A deliberately broken fixture makes the corpus report every mismatch it found, not just the first",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-tests",
-          "verifiedBy": null,
-          "evidence": "Temporarily removed 2 genuine entries (bad_escape.jet, unknown_char.jet) from UI_PARSE_INVALID; single run reported both mismatches together: 'UI corpus parser-validity mismatches (2 found)' listing both paths, not just the first; reverted after proof",
-          "at": "2026-08-07T08:35:44.546Z"
+          "verifiedBy": "bd3-orch",
+          "evidence": "Fresh-context review (bd3-review) passed; grouped rerun on merged master: fmt 163/163, tir_collections_and_methods 32/32, comptime_diff 2/2, corelib json_canonical_stream 3/3.",
+          "at": "2026-08-07T09:42:45.776Z"
         },
         {
           "n": 5,
           "text": "The remaining UI_PARSE_INVALID entries are all genuine program fixtures, sorted and duplicate-free",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-tests",
-          "verifiedBy": null,
-          "evidence": "Test's own sorted/dup-free assert passes; find tests/ui -name pkg.jet/workspace.jet/package.jet confirms zero remain in UI_PARSE_INVALID (all classified as config instead); every remaining pinned entry is a genuine .jet program fixture",
-          "at": "2026-08-07T08:35:44.890Z"
+          "verifiedBy": "bd3-orch",
+          "evidence": "Fresh-context review (bd3-review) passed; grouped rerun on merged master: fmt 163/163, tir_collections_and_methods 32/32, comptime_diff 2/2, corelib json_canonical_stream 3/3.",
+          "at": "2026-08-07T09:42:46.114Z"
         }
       ],
       "refs": [],
@@ -87519,9 +87519,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T10:10:46.025Z",
-      "updated": "2026-08-07T08:35:47.937Z",
-      "updatedBy": "bd3-tests",
-      "claimedAt": "2026-08-07T08:35:47.937Z"
+      "updated": "2026-08-07T09:42:46.511Z",
+      "updatedBy": "bd3-orch",
+      "completedAt": "2026-08-07T09:42:46.510Z"
     },
     {
       "id": "c0fcnl50",
@@ -96593,21 +96593,21 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
-      "assignee": "bd3-tests",
+      "assignee": null,
       "log": [],
       "criteria": [
         {
           "n": 1,
           "text": "cargo test --test comptime_diff comptime_matches_runtime passes (cases 42-44, the Map .keys()/.values() Iter-Display cases, are green)",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-tests",
-          "verifiedBy": null,
-          "evidence": "No ratified decision covers Display for lazy Iter (checked decision list + docs/spec grep — none found; D-ITER-DECLINE1 covers unrelated method-naming gaps only). Confirmed E0915 is a deliberate, correctly-worded diagnostic: Map.keys()/.values() return a one-pass lazy Iter with no Display, and the diagnostic's own fix text says 'materialize it first: add .to_list()'. Took the non-gated route per the card brief: appended .to_list() to CASES[42..45) (the two .keys() and one .values() map cases) in tests/comptime_diff.rs so the string interpolation materializes first, rather than changing compiler/Prelude semantics. cargo test --test comptime_diff comptime_matches_runtime: 2 passed, 0 failed (was previously failing at cases 42-44 with E0915). Full-file run (informational, not required): 24 passed / 1 failed — the 1 failure (yielding_loop_matches_comptime_and_runtime, native-library-link error) is unrelated, out of scope for #1582, and passes when run standalone (confirmed flaky under parallel execution, not a regression from this fix — verified via git stash on the same commit).",
-          "at": "2026-08-07T09:03:59.345Z"
+          "verifiedBy": "bd3-orch",
+          "evidence": "Fresh-context review (bd3-review) passed; grouped rerun on merged master: fmt 163/163, tir_collections_and_methods 32/32, comptime_diff 2/2, corelib json_canonical_stream 3/3.",
+          "at": "2026-08-07T09:42:47.594Z"
         }
       ],
       "refs": [],
@@ -96615,9 +96615,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T23:28:20.316Z",
-      "updated": "2026-08-07T09:04:18.530Z",
-      "updatedBy": "bd3-tests",
-      "claimedAt": "2026-08-07T09:04:18.529Z"
+      "updated": "2026-08-07T09:42:48.011Z",
+      "updatedBy": "bd3-orch",
+      "completedAt": "2026-08-07T09:42:48.010Z"
     },
     {
       "id": "c044atit",
@@ -96628,21 +96628,21 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
-      "assignee": "bd3-tests",
+      "assignee": null,
       "log": [],
       "criteria": [
         {
           "n": 1,
           "text": "cargo test --test corelib json_canonical_stream passes all 3 cases",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-tests",
-          "verifiedBy": null,
-          "evidence": "Investigated quick-run's existing file-IO policy: the shared deopt/interpreter ambient TIR evaluator (crates/jet-jit/src/jit/deopt.rs, crates/jet-codegen/src/Codegen/TIR/eval/) has no core.files.* handling at all (grepped for files/CORE_FILES handling in that module: zero hits) — this is a broad, structural gap (no file IO of any kind), not a narrow create-vs-read asymmetry, so implementing it is out of scope for a P2 test-health card and would be new capability work. Chose the harness-route option the card offered: json_canonical_stream_sorts_nested_objects_and_latches_rejections and json_canonical_stream_matches_every_finite_rfc8785_appendix_b_vector each carried a second dev_iteration(...) leg re-running the same file-IO-heavy source through quick-run to (incorrectly) prove tier parity for a capability that tier can't do. Removed that leg from both, matching the sibling json_canonical_stream_matches_rfc8785_numbers_key_order_and_domain test just below them, which is also file-IO-heavy and has never had a dev_iteration leg (AOT-only via build_and_run). No new policy invented; no I9 fork (nothing claims quick-run supports file IO in any tier now). cargo test --test corelib json_canonical_stream: 3 passed, 0 failed (was 1 passed / 2 failed).",
-          "at": "2026-08-07T09:07:18.109Z"
+          "verifiedBy": "bd3-orch",
+          "evidence": "Fresh-context review (bd3-review) passed; grouped rerun on merged master: fmt 163/163, tir_collections_and_methods 32/32, comptime_diff 2/2, corelib json_canonical_stream 3/3.",
+          "at": "2026-08-07T09:42:48.585Z"
         }
       ],
       "refs": [],
@@ -96650,9 +96650,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T23:28:20.681Z",
-      "updated": "2026-08-07T09:07:20.606Z",
-      "updatedBy": "bd3-tests",
-      "claimedAt": "2026-08-07T09:07:20.606Z"
+      "updated": "2026-08-07T09:42:49.464Z",
+      "updatedBy": "bd3-orch",
+      "completedAt": "2026-08-07T09:42:49.464Z"
     },
     {
       "id": "c0vgjxm5",
@@ -96962,21 +96962,21 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
-      "assignee": "bd3-tests",
+      "assignee": null,
       "log": [],
       "criteria": [
         {
           "n": 1,
           "text": "cargo test --test tir_collections_and_methods passes all cases (either fixtures updated to D-ENUMDOT1 dot-prefixed patterns, or the regression that broke them is found and fixed).",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-tests",
-          "verifiedBy": null,
-          "evidence": "cargo test --test tir_collections_and_methods: 32 passed, 0 failed. Root cause was NOT purely D-ENUMDOT1 drift: fixed a genuine parser regression in crates/jet-parser/src/Parser/Expressions/ptr_tuple.rs (parse_paren_primary, from #1319's stack-depth-bounding fast path) that silently mis-parsed any '((a + b) + c)'-shaped nested-then-continued paren expression, plus D-ENUMDOT1 leading-dot fixture fixes, a /→Float (D-INTDIV1) Int-division fix using /%, a retired-syntax None construction replaced with bare None in typed argument position, an unprintable built-in Error swapped for a printable custom enum, and one stale hardcoded stdout assertion updated to match the current example + its golden .out. No regression: cargo test --test fmt 163/163 pass; cargo test --test compiler_stack public_compile_accepts_depth_256_and_reports_depth_257 still passes (fast path preserved for pure nesting).",
-          "at": "2026-08-07T08:57:24.379Z"
+          "verifiedBy": "bd3-orch",
+          "evidence": "Fresh-context review (bd3-review) passed; grouped rerun on merged master: fmt 163/163, tir_collections_and_methods 32/32, comptime_diff 2/2, corelib json_canonical_stream 3/3.",
+          "at": "2026-08-07T09:42:46.834Z"
         }
       ],
       "refs": [],
@@ -96984,9 +96984,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T00:16:07.119Z",
-      "updated": "2026-08-07T08:57:24.951Z",
-      "updatedBy": "bd3-tests",
-      "claimedAt": "2026-08-07T08:57:24.951Z"
+      "updated": "2026-08-07T09:42:47.244Z",
+      "updatedBy": "bd3-orch",
+      "completedAt": "2026-08-07T09:42:47.244Z"
     },
     {
       "id": "c0g2j76x",
@@ -97353,11 +97353,11 @@
         {
           "n": 1,
           "text": "examples/canon.jet spells the single Doc marker bare (#Doc, no brackets) per E0999; release_gates test canon_compiles_and_runs passes",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd3-orch",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T08:31:42.875Z"
+          "evidence": "canon.jet bracket-marker migration shipped in commit 12a832cc9 (merged to master); reviewer confirmed the edit matches criterion 1. canon_compiles_and_runs still red pending #1602 (criterion 5).",
+          "at": "2026-08-07T09:42:50.099Z"
         },
         {
           "n": 2,
@@ -97406,8 +97406,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T02:53:48.807Z",
-      "updated": "2026-08-07T09:17:55.182Z",
-      "updatedBy": "bd3-tests",
+      "updated": "2026-08-07T09:42:50.100Z",
+      "updatedBy": "bd3-orch",
       "claimedAt": "2026-08-07T09:17:55.182Z"
     },
     {
@@ -132127,6 +132127,104 @@
   ],
   "events": [
     {
+      "at": "2026-08-07T09:42:50.100Z",
+      "by": "bd3-orch",
+      "action": "card.criteria-meet",
+      "ref": "c0ksjkvh",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T09:42:49.464Z",
+      "by": "bd3-orch",
+      "action": "card.update",
+      "ref": "c044atit",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T09:42:48.586Z",
+      "by": "bd3-orch",
+      "action": "card.criteria-verify",
+      "ref": "c044atit",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T09:42:48.011Z",
+      "by": "bd3-orch",
+      "action": "card.update",
+      "ref": "c0y2ybsv",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T09:42:47.594Z",
+      "by": "bd3-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0y2ybsv",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T09:42:47.244Z",
+      "by": "bd3-orch",
+      "action": "card.update",
+      "ref": "c0xrzvms",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T09:42:46.834Z",
+      "by": "bd3-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0xrzvms",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T09:42:46.511Z",
+      "by": "bd3-orch",
+      "action": "card.update",
+      "ref": "c0zlv32v",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T09:42:46.114Z",
+      "by": "bd3-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0zlv32v",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-07T09:42:45.777Z",
+      "by": "bd3-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0zlv32v",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-07T09:42:45.411Z",
+      "by": "bd3-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0zlv32v",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-07T09:42:44.847Z",
+      "by": "bd3-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0zlv32v",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-07T09:42:44.201Z",
+      "by": "bd3-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0zlv32v",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T09:42:37.468Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-07T09:42:37.468Z"
+    },
+    {
       "at": "2026-08-07T09:29:01.051Z",
       "by": "bd3-reader",
       "action": "card.claim",
@@ -135527,104 +135625,6 @@
       "action": "card.criteria-verify",
       "ref": "c0r2dfxz",
       "note": "#2"
-    },
-    {
-      "at": "2026-08-07T00:02:27.244Z",
-      "by": "bd2-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0r2dfxz",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-06T23:58:20.927Z",
-      "by": "bd2-iter",
-      "action": "card.update",
-      "ref": "c0r2dfxz",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T23:58:14.172Z",
-      "by": "bd2-iter",
-      "action": "card.criteria-meet",
-      "ref": "c0r2dfxz",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-06T23:58:13.805Z",
-      "by": "bd2-iter",
-      "action": "card.criteria-meet",
-      "ref": "c0r2dfxz",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-06T23:58:13.441Z",
-      "by": "bd2-iter",
-      "action": "card.criteria-meet",
-      "ref": "c0r2dfxz",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-06T23:58:12.821Z",
-      "by": "bd2-iter",
-      "action": "card.criteria-meet",
-      "ref": "c0r2dfxz",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-06T23:58:12.190Z",
-      "by": "bd2-iter",
-      "action": "card.criteria-meet",
-      "ref": "c0r2dfxz",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-06T23:55:32.158Z",
-      "by": "bd2-iter",
-      "action": "card.criteria-add",
-      "ref": "c0cvssmh",
-      "note": "#1 D-ITER-DECLINE1's ratified pick is applied: every one of the"
-    },
-    {
-      "at": "2026-08-06T23:55:27.267Z",
-      "by": "bd2-iter",
-      "action": "card.add",
-      "ref": "c0cvssmh",
-      "note": "Apply the Iter ballot outcome to the ledger"
-    },
-    {
-      "at": "2026-08-06T23:54:43.079Z",
-      "by": "bd2-iter",
-      "action": "decision.add",
-      "ref": "D-ITER-DECLINE1",
-      "note": "Iter's last six ledger gaps: decline or ship"
-    },
-    {
-      "at": "2026-08-06T23:41:49.136Z",
-      "by": "bd2-carrier",
-      "action": "card.claim",
-      "ref": "c0y4zx0d",
-      "note": ""
-    },
-    {
-      "at": "2026-08-06T23:40:44.035Z",
-      "by": "bd2-orch",
-      "action": "card.add",
-      "ref": "c0lue7u9",
-      "note": "JIT native coverage: closure methods deopt to interpreter for List"
-    },
-    {
-      "at": "2026-08-06T23:40:42.570Z",
-      "by": "bd2-orch",
-      "action": "card.update",
-      "ref": "c0m2slnf",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T23:37:20.278Z",
-      "by": "bd2-set",
-      "action": "card.update",
-      "ref": "c0m2slnf",
-      "note": "logEntry"
     }
   ],
   "nextNum": 368,
