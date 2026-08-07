@@ -95,6 +95,7 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/manifest_version_conflict/lib_v2/pkg.jet",
     "tests/ui/manifest_version_conflict/pkg.jet",
     "tests/ui/marker_argument_shape.jet",
+    "tests/ui/marker_decl_rejected_forms.jet",
     "tests/ui/marker_empty_arguments.jet",
     "tests/ui/marker_experimental_at.jet",
     "tests/ui/marker_experimental_hash.jet",
