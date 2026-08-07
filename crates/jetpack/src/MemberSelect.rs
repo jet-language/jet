@@ -493,7 +493,7 @@ mod tests {
         };
         std::fs::write(
             abs.join("pkg.jet"),
-            format!("payload: {{ name: \"{name}\", version: \"1.0.0\" }}\n{deps_block}"),
+            format!("name: \"{name}\"\nversion: \"1.0.0\"\n{deps_block}"),
         )
         .unwrap();
         // A source file so tree_hash is non-empty / change-sensitive.

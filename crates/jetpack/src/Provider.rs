@@ -2231,7 +2231,7 @@ mod tests {
         std::fs::create_dir_all(&repo).unwrap();
         std::fs::write(
             repo.join("pkg.jet"),
-            "payload: { name: \"p\", version: \"0.1.0\" }\npackages: { hello: executable, mathlib: library }\n",
+            "name: \"p\"\nversion: \"0.1.0\"\npackages: { hello: executable, mathlib: library }\n",
         )
         .unwrap();
         // executable: has a prebuilt bin/.
@@ -2382,7 +2382,7 @@ mod tests {
         let with = base.join("with-pack");
         if !init_git_repo(
             &with,
-            &[("pkg.jet", "payload: { name: \"p\", version: \"0.1.0\" }\n")],
+            &[("pkg.jet", "name: \"p\"\nversion: \"0.1.0\"\n")],
         ) {
             eprintln!("note: skipping remote probe test (git not found)");
             return;
@@ -2439,7 +2439,7 @@ mod tests {
         let repo = base.join("repo");
         if !init_git_repo(
             &repo,
-            &[("pkg.jet", "payload: { name: \"p\", version: \"0.1.0\" }\n")],
+            &[("pkg.jet", "name: \"p\"\nversion: \"0.1.0\"\n")],
         ) {
             eprintln!("note: skipping commit-sha probe test (git not found)");
             return;
@@ -2481,7 +2481,7 @@ mod tests {
         if !init_git_repo(
             &repo,
             &[
-                ("pkg.jet", "payload: { name: \"p\", version: \"0.1.0\" }\n"),
+                ("pkg.jet", "name: \"p\"\nversion: \"0.1.0\"\n"),
                 ("pkgs/hello/hello.jet", "module hello { }\n"),
                 ("pkgs/hello/bin/hello", "#!/bin/sh\necho hi-infer\n"),
             ],
@@ -2522,13 +2522,13 @@ mod tests {
                 ),
                 (
                     "packages/hello/pkg.jet",
-                    "payload: { name: \"hello\", version: \"0.1.0\" }\n",
+                    "name: \"hello\"\nversion: \"0.1.0\"\n",
                 ),
                 ("packages/hello/hello.jet", "module hello { }\n"),
                 ("packages/hello/bin/hello", "#!/bin/sh\necho hi\n"),
                 (
                     "packages/world/pkg.jet",
-                    "payload: { name: \"world\", version: \"0.1.0\" }\n",
+                    "name: \"world\"\nversion: \"0.1.0\"\n",
                 ),
                 ("packages/world/world.jet", "module world { }\n"),
             ],
@@ -2586,17 +2586,17 @@ mod tests {
                 // path-target resolution, not just name matching.
                 (
                     "packages/app/pkg.jet",
-                    "payload: { name: \"app\", version: \"0.1.0\" }\ndeps: { log: ../logging }\n",
+                    "name: \"app\"\nversion: \"0.1.0\"\ndeps: { log: ../logging }\n",
                 ),
                 ("packages/app/app.jet", "module app { }\n"),
                 (
                     "packages/logging/pkg.jet",
-                    "payload: { name: \"logging\", version: \"0.1.0\" }\n",
+                    "name: \"logging\"\nversion: \"0.1.0\"\n",
                 ),
                 ("packages/logging/logging.jet", "module logging { }\n"),
                 (
                     "packages/unrelated/pkg.jet",
-                    "payload: { name: \"unrelated\", version: \"0.1.0\" }\n",
+                    "name: \"unrelated\"\nversion: \"0.1.0\"\n",
                 ),
                 ("packages/unrelated/unrelated.jet", "module unrelated { }\n"),
             ],
@@ -2650,7 +2650,7 @@ mod tests {
                 // is NOT a workspace member (no pkg.jet of its own).
                 (
                     "packages/app/pkg.jet",
-                    "payload: { name: \"app\", version: \"0.1.0\" }\ndeps: { ghost: ../ghost }\n",
+                    "name: \"app\"\nversion: \"0.1.0\"\ndeps: { ghost: ../ghost }\n",
                 ),
                 ("packages/app/app.jet", "module app { }\n"),
                 ("packages/ghost/notes.txt", "not a package\n"),
@@ -2748,7 +2748,7 @@ mod tests {
         std::fs::create_dir_all(&repo).unwrap();
         std::fs::write(
             repo.join("pkg.jet"),
-            "payload: { name: \"p\", version: \"0.1.0\" }\npackages: { mathlib: library }\n",
+            "name: \"p\"\nversion: \"0.1.0\"\npackages: { mathlib: library }\n",
         )
         .unwrap();
         let lib = repo.join("lib/mathlib");

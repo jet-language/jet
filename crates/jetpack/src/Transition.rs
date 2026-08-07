@@ -532,8 +532,24 @@ fn legacy_plan(root: &Path) -> Result<TransitionPlan, TransitionError> {
         package_path.display().to_string(),
     )
     .map_err(|error| package_error(&package_path, error))?;
-    let before_facts = PackageFacts::load(&root)
-        .ok_or_else(|| TransitionError(format!("no typed Package root in {}", root.display())))?
+    // Compose from the in-memory `root_facts` rather than re-reading the
+    // Package root from disk: a migration-era `pkg.jet` still holds its raw
+    // `payload:`/`identity:` wrapper on disk until this fold writes the
+    // translated `package.jet`, so `PackageFacts::load` would re-parse that
+    // untranslated text and fail closed on a field the typed parser no
+    // longer recognizes.
+    let mut before_facts = root_facts.clone();
+    before_facts
+        .compose_configs(&root)
+        .map_err(|error| package_error(&package_path, error))?;
+    before_facts
+        .validate_defaults()
+        .map_err(|error| TransitionError(format!(
+            "typed Package {} is invalid: {error}",
+            package_path.display()
+        )))?;
+    before_facts
+        .validate_members_in(&root)
         .map_err(|error| package_error(&package_path, error))?;
     let mut configs = root_facts.configs.clone();
     let mut changes = Vec::new();

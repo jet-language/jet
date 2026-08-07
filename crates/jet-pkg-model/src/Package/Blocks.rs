@@ -989,6 +989,8 @@ const MANIFEST_SCALAR_FIELDS: &[&str] = &[
     "repository",
     "target",
     "runtime",
+    "members",
+    "configs",
 ];
 
 fn mask_manifest_blocks(text: &str, masked: &mut [u8]) {

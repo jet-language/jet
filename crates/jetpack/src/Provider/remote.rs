@@ -565,16 +565,26 @@ mod tests {
             "packages/logging".to_string(),
             "packages/tools".to_string(),
         ];
+        let path_dep = |target: &str| Package::DepSource::Provider {
+            provider: Source::Path,
+            target: target.to_string(),
+        };
         assert!(matches!(
-            classify_canonical_dep("log", "../logging", "packages/app", &members, &dirs),
+            classify_canonical_dep("log", &path_dep("../logging"), "packages/app", &members, &dirs),
             InRepoDep::Member(path) if path == "packages/logging"
         ));
         assert!(matches!(
-            classify_canonical_dep("ghost", "../tools", "packages/app", &members, &dirs),
+            classify_canonical_dep("ghost", &path_dep("../tools"), "packages/app", &members, &dirs),
             InRepoDep::OutsideWorkspace(path) if path == "packages/tools"
         ));
         assert!(matches!(
-            classify_canonical_dep("http", "4.2", "packages/app", &members, &dirs),
+            classify_canonical_dep(
+                "http",
+                &Package::DepSource::Version("4.2".to_string()),
+                "packages/app",
+                &members,
+                &dirs
+            ),
             InRepoDep::External
         ));
     }

@@ -607,7 +607,8 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             crate::Manifest::manifest_path_in(&dir),
-            r#"payload: { name: "p", version: "0.1.0" }
+            r#"name: "p"
+version: "0.1.0"
 policy: {
     providers: {
         ruby: {

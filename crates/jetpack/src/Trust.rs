@@ -1353,13 +1353,13 @@ mod tests {
         let allow_dir = scratch("policy_allow");
         std::fs::write(
             allow_dir.join(Syntax::PAYLOAD_FILE),
-            "payload: { name: \"app\", version: \"0.1.0\" }\npolicy: { trust: { default: allow } }\n",
+            "name: \"app\"\nversion: \"0.1.0\"\npolicy: { trust: { default: allow } }\n",
         )
         .unwrap();
         let deny_dir = scratch("policy_deny");
         std::fs::write(
             deny_dir.join(Syntax::PAYLOAD_FILE),
-            "payload: { name: \"app\", version: \"0.1.0\" }\npolicy: { trust: { default: deny } }\n",
+            "name: \"app\"\nversion: \"0.1.0\"\npolicy: { trust: { default: deny } }\n",
         )
         .unwrap();
         let refs = [ref_spec("fastfetch@nixpkgs")];

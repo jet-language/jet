@@ -1,11 +1,14 @@
 // D-CONF-PLANE1/D-CONF-NAME1 (card #1517): `outputs:` names the runnable
-// artifact and the file that defines it — `entry: run` means "the file at
-// this package's root with a top-level `fn run`", found by declaration, not
-// by a `main.jet`/`run.jet` filename convention. This package deliberately
-// has neither: its entry lives in `service.jet`. `jet run` (JIT) and
-// `jet build` (AOT) both resolve it the same way (I9) — rename `service.jet`
-// without updating `entry:` and the build stops naming the missing file,
-// it does not silently fall back to a convention name.
+// artifact and the checked function that defines it. A single-segment
+// `entry: run` can never prove `outputs:` drives anything — resolving it
+// runs the exact same "one root-level file with a top-level `fn run`" scan
+// as the migration-era fallback, so it always finds the same file whether
+// `outputs:` exists or not. The dotted form `entry: service.run` is
+// different in kind: it follows `entry.jet`'s `use service` import into
+// `service/module.jet`, a file the fallback structurally cannot reach (it
+// only ever scans root-level files, never imports). Delete `outputs:` here
+// and `jet run`/`jet build` stop resolving an entry at all — see
+// `tests/package_outputs.rs`'s negative test.
 name: "outputs_build_demo"
 version: "0.1.0"
-outputs: .{ demo: .Executable.{ entry: run } }
+outputs: .{ demo: .Executable.{ entry: service.run } }
