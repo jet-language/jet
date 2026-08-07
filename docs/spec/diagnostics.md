@@ -298,7 +298,7 @@ renumbered, and no new `W` code may be allocated.
 | E0325 | parse | teaching: external inherent method `~~` connector → `.` (D-EXTMETH1) |
 | E0326 | sema  | a partial struct destructure (`.{ … }`) with no trailing `..` (D-DESTRUCT1) |
 | E0327 | sema  | a redundant `..` on a destructure that already names every field (D-DESTRUCT1) |
-| E0328 | parse | ~~retired by D-IFDIST1=A~~ — `|` binds tighter than `&&`/`||` in arm heads; mixing needs no parens |
+| E0328 | parse | ~~retired by D-IFDIST1=A~~ — `\|` binds tighter than `&&`/`\|\|` in arm heads; mixing needs no parens |
 | E0329 | parse | direct braceless nesting in an arm table without a named subject (D-IFGUARD1=A) |
 | E0330 | sema  | leading-dot enum variant (`.Variant`) with no inferable type from context (D-ENUMDOT2=A) |
 | E0331 | parse | a payload on a variant group name (D-TAG1) |
