@@ -15,6 +15,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
 
+mod common;
+use common::Scratch;
+
 // Serialize tests that mutate process-global package environment or helper selection.
 static STORE_LOCK: Mutex<()> = Mutex::new(());
 
@@ -3750,32 +3753,6 @@ fn resolver_no_candidates_returns_e2602() {
 // concurrent test runs never collide on a bare label) and cleans up via
 // `Drop`. Kept separate rather than forced onto the shared helper.
 // ============================================================================
-
-struct Scratch {
-    path: PathBuf,
-}
-
-impl Scratch {
-    fn new(tag: &str) -> Scratch {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!("jet-pub-package-{tag}-{nanos}"));
-        fs::create_dir_all(&path).unwrap();
-        Scratch { path }
-    }
-
-    fn join(&self, path: &str) -> PathBuf {
-        self.path.join(path)
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.path);
-    }
-}
 
 #[test]
 fn pub_package_function_is_visible_inside_project_scope() {

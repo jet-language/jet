@@ -1,11 +1,11 @@
 //! U27 failed-build debuggability process tests.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 
 mod common;
-use common::jetpack_bin;
+use common::{jetpack_bin, Scratch};
 
 fn jetpack() -> Command {
     Command::new(jetpack_bin())
@@ -13,31 +13,6 @@ fn jetpack() -> Command {
 
 fn jet() -> Command {
     Command::new(env!("CARGO_BIN_EXE_jet"))
-}
-
-struct Scratch {
-    path: PathBuf,
-}
-
-impl Scratch {
-    fn new(tag: &str) -> Scratch {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!(
-            "jpk-build-debug-{tag}-{nanos}-{:?}",
-            std::thread::current().id()
-        ));
-        fs::create_dir_all(&path).unwrap();
-        Scratch { path }
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.path);
-    }
 }
 
 fn write_project(dir: &Path) {

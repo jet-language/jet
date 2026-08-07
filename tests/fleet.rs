@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 mod common;
-use common::jetpack_bin;
+use common::{jetpack_bin, Scratch};
 use jet_env_model::ModuleEval::evaluate_env;
 
 fn render(src: &str) -> (String, String) {
@@ -173,31 +173,6 @@ fn committed_fleet_example_field_checks_clean() {
 }
 
 // ── `jetpack push` engine verb ──────────────────────────────────────────────
-
-struct Scratch {
-    path: PathBuf,
-}
-
-impl Scratch {
-    fn new(tag: &str) -> Scratch {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!(
-            "fleet-it-{tag}-{nanos}-{:?}",
-            std::thread::current().id()
-        ));
-        fs::create_dir_all(&path).unwrap();
-        Scratch { path }
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.path);
-    }
-}
 
 fn write_fleet_project(dir: &std::path::Path) {
     fs::write(
