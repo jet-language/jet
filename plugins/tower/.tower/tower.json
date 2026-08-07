@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1615,
-    "rev": 28813,
+    "nextNum": 1617,
+    "rev": 28864,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -89417,11 +89417,11 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P1",
       "plan": "Root cause: neither ledger is lying on its own terms; the word `covered` is. tests/jet_gaps.txt says at the top that covered means `TIR lowered and Cranelift compiled end-to-end`, which is compile coverage. The tier-parity audit measures run coverage. Nothing cross-checks the two, so comptime/embed, comptime/embed_bytes, comptime/find and comptime/find_empty sit in jit_gaps.txt `covered:` and in tests/jit_corpus_gate.txt `frontend_rejected:` at the same time, while passing under `jet run --release`. Under I9 that is a real parity failure that is invisible to CI.\n\nWhat D-META-EFFECT1 and D-META-ONE1 change about the word: today `can this run at compile time` is membership in a closed Rust allow-list, which is what raises E0956. D-META-EFFECT1=A retires that allow-list and makes the effect set the answer, and it merges the two purity checkers. So `covered` must be keyed on tier and effect, not on a table, and E0956's compile-time wording must never surface from the run tier. That is why the four comptime rows are owed to the D-META-EFFECT1 card and not fixed here.\n\nBuild:\n1. In tests/jet_gaps.txt and in tests/dev.rs (jit_coverage_audit_inner, the JET_DUMP_JIT_GAPS writer, and parse_jit_gap_manifest), rename the `covered:` section to `compile_covered:` and update the header lines to say plainly that this file tracks compile coverage only. One word, and both ledgers stop claiming run coverage.\n2. Add one cross-check to the same test: a stem in `compile_covered:` may not appear in tests/jit_corpus_gate.txt under `frontend_rejected:`, nor under `deopt_interp:` carrying an error diagnostic, unless the stem is listed in a new `run_gaps:` section. The failure message quotes both ledger lines and the stem.\n3. Add the `run_gaps:` section to tests/jet_gaps.txt with the same shrink-only ratchet semantics the file already uses (D-LENS-RUN2), seeded with exactly the E0956 rows recorded in docs/audits/jit-run-tier-vs-aot-parity-audit-2026-07-28.md, each with its audit line as the reason. Growth fails CI.\n4. Comment the four comptime rows with the card that owes them: the D-META-EFFECT1 implementation card. Do not change the examples, the interpreter, or E0956 here.\n\nProof: one targeted check that a stem present in both ledgers fails the gate; `cargo test --test dev jit_coverage_audit` green; the four comptime rows visible in `run_gaps:` with the audit cited.\n\nDo not build: no new gate binary and no second manifest (I8), no per-example allow-list beyond the one shrink-only section, no silent removal of the four rows.",
       "blockedBy": [],
-      "assignee": "bd3-ledger",
+      "assignee": null,
       "log": [
         {
           "at": "2026-08-07",
@@ -89438,47 +89438,47 @@
         {
           "n": 1,
           "text": "tests/jet_gaps.txt names its section compile_covered: and its header says the file tracks compile coverage only; tests/dev.rs reads and writes the new name",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-ledger",
-          "verifiedBy": null,
-          "evidence": "tests/jit_gaps.txt names its section compile_covered: and its header now says the file tracks compile coverage only, names the corpus gate as the run-coverage ledger, and states that compiled is not the same as runs. tests/dev.rs reads the new name in parse_jit_gap_manifest_full and writes it in the JET_DUMP_JIT_GAPS branch of jit_coverage_audit_inner, along with the same header. That writer also carries the run_gaps: rows across, because it regenerates the whole file and would otherwise have deleted the ratchet while looking like a clean dump. Every stem row is byte-identical to master: diff of master's covered rows against the new compile_covered rows is empty, and the same for the gaps rows. tools/ci/jit-aot-parity.sh only copies the file and needed no change.",
-          "at": "2026-08-07T12:06:05.862Z"
+          "verifiedBy": "bd3-review",
+          "evidence": "Read d3c9fa1ce. tests/jit_gaps.txt heading is compile_covered: and the header states the file tracks COMPILE coverage only, names tests/jit_corpus_gate.txt as the run-coverage ledger, and says compiled is not the same as runs. tests/dev.rs reads the name in parse_jit_gap_manifest_full and writes it in the JET_DUMP_JIT_GAPS branch (dev.rs:7182), and the writer also re-emits the run_gaps: section (dev.rs:7191-7194), so regeneration no longer deletes the ratchet. Confirmed the rename is a rename: git diff master...bd3/ledger on jit_gaps.txt shows no added or removed stem rows outside the new run_gaps: block.",
+          "at": "2026-08-07T13:09:03.810Z"
         },
         {
           "n": 2,
           "text": "A stem in compile_covered: that also sits in the corpus gate's frontend_rejected: class, or in deopt_interp: with an error diagnostic, fails the gate unless it is listed in run_gaps:",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-ledger",
-          "verifiedBy": null,
-          "evidence": "tests/dev.rs::ledger_conflicts is the check and tests/dev.rs::ledger_cross_check_holds is the gate. A stem in compile_covered: fails when the corpus gate records it as failing at the run tier, which is either the frontend_rejected: class or the deopt_interp: class carrying a diagnostic, unless run_gaps: names it. A bare deopt_interp: row is a tier choice rather than a failure and does not trip it. The message quotes the jit_gaps.txt line and the jit_corpus_gate.txt line and names the stem. It reads manifest against manifest, so nothing is compiled or run and the check costs nothing; the corpus gate still measures the run tier itself. Reuses the existing parse_corpus_gate_manifest rather than adding a second reader or a new gate binary (I8). cargo test --test dev ledger_cross_check passes 2 of 2.",
-          "at": "2026-08-07T12:06:09.786Z"
+          "verifiedBy": "bd3-review",
+          "evidence": "Read ledger_conflicts at tests/dev.rs:7649. It fails a stem only when it is in compile_covered AND the corpus gate records it as FrontendRejected, or DeoptInterp with a non-empty detail, AND run_gaps does not name it. A bare deopt_interp row is correctly exempt (DeoptInterp => !record.detail.is_empty()). The message quotes the jit_gaps.txt compile_covered line and the jit_corpus_gate.txt class line verbatim and names the stem. Manifest-against-manifest, nothing compiled or run. ledger_cross_check_holds passes on master+jitfix+ledger.",
+          "at": "2026-08-07T13:09:04.183Z"
         },
         {
           "n": 3,
           "text": "tests/jet_gaps.txt carries a shrink-only run_gaps: section seeded with the E0956 rows from docs/audits/jit-run-tier-vs-aot-parity-audit-2026-07-28.md, each with its reason, and growth fails CI",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-ledger",
-          "verifiedBy": null,
-          "evidence": "tests/jit_gaps.txt carries a run_gaps: section holding all fifteen E0956 rows from docs/audits/jit-run-tier-vs-aot-parity-audit-2026-07-28.md, each quoting that audit's own reason: collections/dynamic-array-view, the four comptime stems, crypto/crypto_suite, io/args_audit, io/args_spec, io/db, io/dir_entry, the three lowlevel ExternCall stems, types/generic_constructor_inference and ui/events. The section comment states that each row works under jet build and dies under jet run, so each is a real I9 parity failure parked only so the cross-check can name its owner. Shrink-only is enforced in ledger_cross_check_holds by a RUN_GAPS_CEILING of 15: fix a row, delete it, lower the ceiling in the same diff, and adding a row without lowering it fails. The same test also requires every row to carry a reason after the colon. This mirrors the D-LENS-RUN2 ratchet the file already documents.",
-          "at": "2026-08-07T12:06:22.753Z"
+          "verifiedBy": "bd3-review",
+          "evidence": "Counted the run_gaps: section: 15 rows, matching the E0956 set in docs/audits/jit-run-tier-vs-aot-parity-audit-2026-07-28.md, each carrying that audit's reason. Shrink-only is enforced at tests/dev.rs:7718 by RUN_GAPS_CEILING = 15 with a growth assert, and a per-row assert requires a non-empty reason after the colon. NOTE for the follow-up: 2 of the 15 rows name stems that are in neither compile_covered: nor gaps: (collections/dynamic-array-view and io/db, both deopt_interp rows in the corpus gate). ledger_conflicts can never reach the parked check for a stem that is not compile_covered, so those 2 rows are inert and the honest ceiling is 13. Criterion as written (seed the audit's rows) is met; the ceiling is 2 notches loose.",
+          "at": "2026-08-07T13:09:18.807Z"
         },
         {
           "n": 4,
           "text": "One targeted check proves the cross-check fires: a stem listed in both ledgers fails with both ledger lines quoted",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-ledger",
-          "verifiedBy": null,
-          "evidence": "Proved two ways. First, tests/dev.rs::ledger_cross_check_fires_on_a_conflict is a unit negative control: a compile-covered stem the gate calls frontend_rejected and run_gaps does not name produces exactly one message, and the test asserts that message contains the stem, the jit_gaps.txt compile_covered line and the jit_corpus_gate.txt frontend_rejected line verbatim. It also asserts the three cases that must not fire: the stem parked in run_gaps, a healthy resident_jit stem, and a bare deopt_interp row; and the one that must, a deopt_interp row carrying a diagnostic. Second, an end-to-end injection against the real ledgers: deleting the comptime/embed row from run_gaps: made ledger_cross_check_holds fail with 'the tier ledgers disagree' and the full quoted pair, naming comptime/embed with the gate's real E0956 detail. The row was restored and the test is green again. Both checks pass: cargo test --test dev ledger_cross_check, 2 of 2.",
-          "at": "2026-08-07T12:06:26.256Z"
+          "verifiedBy": "bd3-review",
+          "evidence": "Read ledger_cross_check_fires_on_a_conflict (tests/dev.rs:7739). Synthetic inputs: a compile-covered stem the gate calls frontend_rejected and run_gaps does not name yields exactly one message, asserted to contain the stem plus both ledger lines verbatim. It also pins the three must-not-fire cases (stem parked in run_gaps, healthy resident_jit stem, bare deopt_interp row) and the second must-fire case (deopt_interp carrying a diagnostic). Passes on the composed tree: 'test ledger_cross_check_fires_on_a_conflict ... ok'.",
+          "at": "2026-08-07T13:09:19.576Z"
         },
         {
           "n": 5,
           "text": "The four comptime rows name the D-META-EFFECT1 implementation card as the owner of their fix, and no example, interpreter path or diagnostic is changed by this card",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-ledger",
-          "verifiedBy": null,
-          "evidence": "The four comptime rows in run_gaps: each end with 'owed to #1543 (D-META-EFFECT1)', and the section comment above them explains why: whether something can run at compile time is a closed Rust allow-list today, which is what raises E0956, and card #1543 (One effect model at both stages, D-META-EFFECT1=A) retires it. The comment also says not to fix them by reclassifying the stem. The diff is two files, tests/dev.rs and tests/jit_gaps.txt: no example, no interpreter path, no diagnostic and no compiler source is touched, and no stem moved class. Verified by git diff --stat on commit d3c9fa1ce.",
-          "at": "2026-08-07T12:06:35.792Z"
+          "verifiedBy": "bd3-review",
+          "evidence": "Confirmed the four comptime rows (embed, embed_bytes, find, find_empty) each end with 'owed to #1543 (D-META-EFFECT1)', and the ownership text lives in the row itself, so JET_WRITE_JIT_GAPS regeneration preserves it. git diff --stat master...bd3/ledger is exactly two files, tests/dev.rs and tests/jit_gaps.txt: no example, interpreter path, diagnostic or compiler source touched, and no stem changed class.",
+          "at": "2026-08-07T13:09:20.730Z"
         }
       ],
       "refs": [
@@ -89489,10 +89489,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T19:02:46.710Z",
-      "updated": "2026-08-07T12:06:56.377Z",
-      "updatedBy": "bd3-ledger",
+      "updated": "2026-08-07T13:09:40.459Z",
+      "updatedBy": "bd3-review",
       "workOrder": 100,
-      "claimedAt": "2026-08-07T12:06:56.377Z"
+      "completedAt": "2026-08-07T13:09:40.458Z"
     },
     {
       "id": "c0ath783",
@@ -90994,7 +90994,7 @@
       "priority": "P1",
       "plan": "Implements D-CONF-WORD1 — ratified 2026-08-06. Read each decision verbatim (tower brief on this card's parent proposal, or tower decision show) before building; the ratified outcome text is the law, this plan is the route. Every requirement is a discrete exit criterion below: meet each with targeted proof (tests, snapshots, examples with golden output), and keep I9 tier parity inside this card — AOT, default jet run (JIT), and the interpreter must agree on every surface this card ships before it closes. Delete every superseded form the decisions retire in the same change; do not leave compatibility shims or parallel spellings. Reference: docs/proposals/build-config-one-plane.md.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "bd3-profile",
       "log": [],
       "criteria": [
         {
@@ -91086,9 +91086,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:33:33.027Z",
-      "updated": "2026-08-06T21:41:42.907Z",
-      "updatedBy": "audit-apply",
-      "workOrder": 500
+      "updated": "2026-08-07T13:04:33.741Z",
+      "updatedBy": "bd3-profile",
+      "workOrder": 500,
+      "claimedAt": "2026-08-07T13:04:33.741Z"
     },
     {
       "id": "c0y4zx0d",
@@ -92944,11 +92945,11 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "building",
       "priority": "P1",
       "plan": "Implements D-META-EFFECT1 — ratified 2026-08-06. Read each decision verbatim (tower brief on this card's parent proposal, or tower decision show) before building; the ratified outcome text is the law, this plan is the route. Every requirement is a discrete exit criterion below: meet each with targeted proof (tests, snapshots, examples with golden output), and keep I9 tier parity inside this card — AOT, default jet run (JIT), and the interpreter must agree on every surface this card ships before it closes. Delete every superseded form the decisions retire in the same change; do not leave compatibility shims or parallel spellings. Reference: docs/proposals/metaprogramming-one-compile-time-program.md.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "bd3-effect",
       "log": [],
       "criteria": [
         {
@@ -93031,9 +93032,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:34:34.781Z",
-      "updated": "2026-08-06T21:41:46.178Z",
-      "updatedBy": "audit-apply",
-      "workOrder": 560
+      "updated": "2026-08-07T13:05:01.072Z",
+      "updatedBy": "bd3-effect",
+      "workOrder": 560,
+      "claimedAt": "2026-08-07T13:05:01.072Z"
     },
     {
       "id": "c0re71tf",
@@ -97676,26 +97678,60 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "building",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "bd3-tests",
       "log": [
+        {
+          "at": "2026-08-07",
+          "by": "bd3-tests",
+          "text": "2/3 fixtures fixed and match current compiler output exactly; view_mut_bounds_interpreter.stderr intentionally left red — it's a real I9 safety gap (interpreter silently skips a view-range bounds check that AOT correctly enforces), not stale text, logged as card #1616. cargo test --test diagnostic_snapshots will show 1 remaining failure (ui_snapshots, this one fixture) until #1616 lands. Leaving phase at building rather than verify since the underlying test isn't fully green."
+        },
         {
           "at": "2026-08-07",
           "by": "bd3-mark2",
           "text": "Correction from card #1456's work on branch bd2/mark: the stale diagnostic_snapshots fixture count is 32, not 3. cargo test --test diagnostic_snapshots reports 32 ui snapshot mismatches on this branch, covering compiler_fact_unknown_member, comptime_io_rejected, the core_* retirement family, db_read_query_hidden_write, duration_runtime_retired, effect_callback_bound, ffi_bad_path, hangar_verify_digest_mismatch, impure_tier2_no_gate, inline_dep_unresolved, the iter_* pair, lambda_param_unknown, layer_ceiling_exceeded, local_cell_crossing, manifest_toolchain, the marker_hardened and marker_tested pairs, module_unknown_namespace, os_target_build_context, print_lazy_iter_view, repl_effect_denied_e1803, serde_flatten_not_struct, source_owned_conversion_retired, struct_missing_field and view_mut_bounds_interpreter. Each one is Source/ emitting newer what/why/fix text than the committed .stderr fixture. #1456's parse-path and retention work moved the count from 32 to 31: published_schema_breaking now matches its fixture again, and nothing new broke."
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "struct_missing_field.stderr matches current E0303 text (D-FIELDDEF1=C default-field wording)",
+          "status": "met",
+          "metBy": "bd3-tests",
+          "verifiedBy": null,
+          "evidence": "struct_missing_field.stderr Why-line updated to current E0303 text ('every field without an = default must appear exactly once', D-FIELDDEF1=C).",
+          "at": "2026-08-07T13:08:14.088Z"
+        },
+        {
+          "n": 2,
+          "text": "source_owned_conversion_retired.stderr matches current output (.to_int() now works, returns Int ? ParseError; print on it correctly raises E0112)",
+          "status": "met",
+          "metBy": "bd3-tests",
+          "verifiedBy": null,
+          "evidence": "source_owned_conversion_retired.stderr's second error updated: .to_int() is no longer retired (returns Int ? ParseError); print() on that fallible value correctly raises E0112 'print doesn't know how to show Int ? ParseError'. Matches current jet::compile_with_path output exactly (verified via diagnostic_snapshots.rs's own diff output before editing).",
+          "at": "2026-08-07T13:08:14.443Z"
+        },
+        {
+          "n": 3,
+          "text": "view_mut_bounds_interpreter.stderr: not silently re-blessed to (no errors) — genuine I9 safety gap logged as card #1616 instead",
+          "status": "met",
+          "metBy": "bd3-tests",
+          "verifiedBy": null,
+          "evidence": "Confirmed via probe: default jet run still panics correctly (can't view 1 items from 2 to 2 (inclusive)); the forced interpreter tier (dev_iteration use_interpreter=true) silently returns Ran/no-errors instead. This is a real I9 safety gap, not text drift — did not re-bless to (no errors). Logged as card #1616 with root-cause/fix/re-bless criteria.",
+          "at": "2026-08-07T13:08:14.809Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T09:03:02.874Z",
-      "updated": "2026-08-07T10:54:56.901Z",
-      "updatedBy": "bd3-mark2"
+      "updated": "2026-08-07T13:08:26.223Z",
+      "updatedBy": "bd3-tests",
+      "claimedAt": "2026-08-07T13:08:26.223Z"
     },
     {
       "id": "c09qyavw",
@@ -97775,20 +97811,31 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "verify",
       "priority": "P3",
       "plan": null,
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "bd3-tests",
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "cargo test --test diagnostics_coverage passes all 11 assertions",
+          "status": "met",
+          "metBy": "bd3-tests",
+          "verifiedBy": null,
+          "evidence": "Registered E1320 in docs/spec/diagnostics.md's Error code registry table (jetpack external-hangar-root-changed error, package_hangar_vendor.rs). Added 19 new tests/ui-scanned snapshot fixtures for codes emitted with no proof: module-eval family (E1322,E1323,E1324,E1325,E1326,E1327,E1328,E1331,E1333,E1334) in tests/fixtures/module-eval-diagnostics/, jetpack E1330 in tests/fixtures/jetpack-diagnostics/, jet-prove-replay family (E3620,E3621,E3622,E3623,E3624,E3625,E3628,E3629) in tests/cli/ — each file's what/why/fix text copied verbatim from its real Diagnostic::error/emit_diag call site. Added E0416/E0428 (retired-with-historical-registry-row) and E2407/E3626 (genuinely unemitted, spec-ahead-of-impl) to EXPECTED_SPEC_AHEAD_OF_IMPL with reasons. Removed E3504 from ACKNOWLEDGED_COVERAGE_GAPS (now covered by tests/build_entry.rs's existing diagnostic.code==E3504 assertion). cargo test --test diagnostics_coverage: 11/11 pass (was 4 failing: acknowledged_gaps_are_still_unresolved, every_emitted_code_has_diagnostics_md_entry, every_emitted_code_has_snapshot, registered_unimplemented_codes_are_expected).",
+          "at": "2026-08-07T13:07:29.866Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T10:00:52.319Z",
-      "updated": "2026-08-07T10:00:52.319Z",
-      "updatedBy": "bd3-mark"
+      "updated": "2026-08-07T13:07:30.657Z",
+      "updatedBy": "bd3-tests",
+      "claimedAt": "2026-08-07T13:07:30.657Z"
     },
     {
       "id": "c03ouq0x",
@@ -98151,21 +98198,21 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "verify",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "bd3-tests",
       "log": [],
       "criteria": [
         {
           "n": 1,
           "text": "cargo test --test corelib decode_traced_migration_chain passes with the ratified => spelling",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd3-tests",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T11:17:51.730Z"
+          "evidence": "tests/corelib.rs:10726 migration block used retired -> arrow (rename name -> title, change score: Int -> Rank via {...}); moved both to ratified => per D-MIGRATE1/D-MIGRATE2E (crates/jet-parser/src/Parser/Items/states_protocols.rs:20-58). cargo test --test corelib decode_traced_migration_chain: ok.",
+          "at": "2026-08-07T12:44:46.924Z"
         }
       ],
       "refs": [],
@@ -98173,8 +98220,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T11:17:51.078Z",
-      "updated": "2026-08-07T11:17:51.730Z",
-      "updatedBy": "bd3-orch"
+      "updated": "2026-08-07T12:44:47.933Z",
+      "updatedBy": "bd3-tests",
+      "claimedAt": "2026-08-07T12:44:47.932Z"
     },
     {
       "id": "c0n02xfm",
@@ -98185,21 +98233,46 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
-      "assignee": "bd3-jitfix",
-      "log": [],
-      "criteria": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-07",
+          "by": "bd3-jitfix",
+          "text": "Re-blessed on branch bd3/jitfix (worktree .claude/worktrees/jitfix), commit 02971b564, based on master eecd1d016 only. Diff touches stem rows in tests/jit_gaps.txt and nothing else, so #1509's covered: to compile_covered: rename rebases over it trivially; whichever lands second takes the other's rows. I did not touch bd3/ledger. Found while proving this: a third test with the #1614 stack defect, yielding_and_result_loops_run_in_native_jit_without_fallback, which aborts the whole dev binary with SIGABRT and makes every sibling report FAILED. Logged as card #1615, not fixed here, to keep this diff minimal. [handoff] bd3/jitfix is unmerged and awaits review."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "tests/jit_gaps.txt records the measured compile-covered and gap sets, and jit_coverage_audit passes on master",
+          "status": "verified",
+          "metBy": "bd3-jitfix",
+          "verifiedBy": "bd3-review",
+          "evidence": "Read 02971b564. tests/jit_gaps.txt re-blessed 399->401 compile-covered and 26->36 gaps. Diff is stem rows only: header comments and section headings untouched, which is why #1509's rename composes without conflict. jit_coverage_audit passes on master+jitfix+ledger: 'test jit_coverage_audit ... ok'.",
+          "at": "2026-08-07T13:09:32.765Z"
+        },
+        {
+          "n": 2,
+          "text": "every arrival and departure is mapped to the merged feature that caused it, with no unexplained coverage loss",
+          "status": "verified",
+          "metBy": "bd3-jitfix",
+          "verifiedBy": "bd3-review",
+          "evidence": "Counted the diff independently: 10 arrivals and 8 departures, 18 movements, matching the mapping. Arrivals cluster on the marker merge (types/anonymous_unions and types/no_any_alternatives leave gaps; types/enum_dot and enum_dot_patterns change reason from 'if-let unsupported' to 'pattern match unsupported'). I cross-checked the departure story against the #1602/#1605 stream merge myself: forget_ct_bindings declines the implicit fold when an initializer advances a receiver, so the real calls stay in the program and meet JIT lowering gaps that folded constants used to hide. The named shapes match (effects/determinism reads a seeded rng twice, io/args_audit parses through args.spec(), math/random_audit walks rng.weighted_pick/split). 'No stem lost coverage the JIT previously had' is the correct framing: no gap appeared that the JIT could previously lower.",
+          "at": "2026-08-07T13:09:33.172Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T12:07:37.523Z",
-      "updated": "2026-08-07T12:34:55.842Z",
-      "updatedBy": "bd3-jitfix",
-      "claimedAt": "2026-08-07T12:34:55.842Z"
+      "updated": "2026-08-07T13:09:41.212Z",
+      "updatedBy": "bd3-review",
+      "completedAt": "2026-08-07T13:09:41.212Z"
     },
     {
       "id": "c0zebcjq",
@@ -98210,21 +98283,141 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P3",
       "plan": null,
       "blockedBy": [],
-      "assignee": "bd3-jitfix",
-      "log": [],
-      "criteria": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-07",
+          "by": "bd3-jitfix",
+          "text": "Fixed on branch bd3/jitfix (worktree .claude/worktrees/jitfix), commit 8164533eb. Same defect appears a third time in yielding_and_result_loops_run_in_native_jit_without_fallback, logged as card #1615 with the same one-line remedy. [handoff] bd3/jitfix is unmerged and awaits review."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "jit_try_compile_manifest_matches runs collect_jit_coverage on a 16MB thread like its sibling, and passes instead of overflowing",
+          "status": "verified",
+          "metBy": "bd3-jitfix",
+          "verifiedBy": "bd3-review",
+          "evidence": "Read 8164533eb. The body moved to jit_try_compile_manifest_matches_inner and the test spawns it with stack_size(16 * 1024 * 1024), the same shape jit_coverage_audit and cranelift_three_way_differential_battery already use. Passes on master+jitfix+ledger: 'test jit_try_compile_manifest_matches ... ok'.",
+          "at": "2026-08-07T13:09:33.531Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T12:07:40.449Z",
-      "updated": "2026-08-07T12:34:56.224Z",
-      "updatedBy": "bd3-jitfix",
-      "claimedAt": "2026-08-07T12:34:56.223Z"
+      "updated": "2026-08-07T13:09:41.958Z",
+      "updatedBy": "bd3-review",
+      "completedAt": "2026-08-07T13:09:41.958Z"
+    },
+    {
+      "id": "c0f7cuus",
+      "num": 1615,
+      "title": "yielding_and_result_loops_run_in_native_jit_without_fallback overflows its stack and aborts the dev test binary",
+      "body": "Third instance of the defect #1614 fixed: a tests/dev.rs test does JIT lowering work on the default test thread and overflows. This one aborts the whole process with SIGABRT, so every other test running beside it reports FAILED and the run produces no summary. Repro on bd3/jitfix (and on master, since neither of my commits touches this test): scripts/agent/jet-env cargo test --test dev jit_ — the filter pulls in the differential battery and the run ends with 'thread yielding_and_result_loops_run_in_native_jit_without_fallback has overflowed its stack, fatal runtime error: stack overflow, aborting'. Fix is the same one-liner #1614 used: move the body into an _inner function and spawn it on a 16MB thread, matching jit_coverage_audit. Worth a sweep of tests/dev.rs for any other test calling the JIT lowering helpers directly on the default stack.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "yielding_and_result_loops_run_in_native_jit_without_fallback runs its JIT work on a 16MB thread like jit_coverage_audit",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T12:43:18.572Z"
+        },
+        {
+          "n": 2,
+          "text": "tests/dev.rs has no remaining test that drives JIT lowering on the default test stack",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T12:43:18.927Z"
+        },
+        {
+          "n": 3,
+          "text": "cargo test --test dev jit_ completes with a summary instead of aborting",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T12:43:19.310Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-07T12:43:10.298Z",
+      "updated": "2026-08-07T12:43:19.310Z",
+      "updatedBy": "bd3-jitfix"
+    },
+    {
+      "id": "c0ftql8x",
+      "num": 1616,
+      "title": "Interpreter tier silently skips view-range bounds check (I9 gap)",
+      "body": "Found while closing #1601 (diagnostic_snapshots drift). tests/ui/view_mut_bounds_interpreter.jet ('// @dev_interpreter', values := [1]; outside :: [&values[0..0], &values[2..2]]) expects E0953 ('can't view 1 items from 2 to 2 (inclusive)') under the forced interpreter tier (dev_iteration(path, false, true)) — this is a genuine out-of-bounds view (values has 1 element, index 2 is out of range). Confirmed default jet run (AOT/JIT) still correctly panics with this exact message (verified via probe). The forced interpreter path now returns RunOutcome::Ran with no error at all — it silently accepts the out-of-bounds view instead of rejecting it. Checked crates/jet-codegen/src/Codegen/TIR/eval/{mod.rs,builtins.rs}: both view_bounds_diagnostic (mod.rs:211) and TBuiltinOp::ViewNew (builtins.rs:451-472) appear to implement the same bounds check the AOT Prelude uses (crates/jet-codegen/src/Prelude/Core.rs jet_view_new) — the exact interpreter code path that's skipping the check for THIS expression shape (a list literal of two view sub-expressions) wasn't pinned down; did not chase further given time budget. This is a safety-relevant I9 tier-parity gap (I1: memory-safe by default — an unchecked view bound is a wild read), not a text drift, so #1601 did NOT re-bless this fixture to '(no errors)' — it stays red pending this investigation.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Root cause found: the exact interpreter code path that skips the view-range bounds check for a list literal of view sub-expressions is identified",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T12:50:14.108Z"
+        },
+        {
+          "n": 2,
+          "text": "The interpreter tier (dev_iteration use_interpreter=true) rejects tests/ui/view_mut_bounds_interpreter.jet with E0953, matching AOT",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T12:50:14.480Z"
+        },
+        {
+          "n": 3,
+          "text": "tests/ui/view_mut_bounds_interpreter.stderr is restored to its original E0953 expectation and cargo test --test diagnostic_snapshots passes",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T12:50:14.838Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-07T12:50:06.101Z",
+      "updated": "2026-08-07T12:50:14.839Z",
+      "updatedBy": "bd3-tests"
     }
   ],
   "decisions": [
@@ -132777,6 +132970,363 @@
   ],
   "events": [
     {
+      "at": "2026-08-07T13:09:41.959Z",
+      "by": "bd3-review",
+      "action": "card.update",
+      "ref": "c0zebcjq",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T13:09:41.212Z",
+      "by": "bd3-review",
+      "action": "card.update",
+      "ref": "c0n02xfm",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T13:09:40.459Z",
+      "by": "bd3-review",
+      "action": "card.update",
+      "ref": "c05dihsu",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T13:09:33.531Z",
+      "by": "bd3-review",
+      "action": "card.criteria-verify",
+      "ref": "c0zebcjq",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T13:09:33.173Z",
+      "by": "bd3-review",
+      "action": "card.criteria-verify",
+      "ref": "c0n02xfm",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-07T13:09:32.766Z",
+      "by": "bd3-review",
+      "action": "card.criteria-verify",
+      "ref": "c0n02xfm",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T13:09:20.731Z",
+      "by": "bd3-review",
+      "action": "card.criteria-verify",
+      "ref": "c05dihsu",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-07T13:09:19.576Z",
+      "by": "bd3-review",
+      "action": "card.criteria-verify",
+      "ref": "c05dihsu",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-07T13:09:18.807Z",
+      "by": "bd3-review",
+      "action": "card.criteria-verify",
+      "ref": "c05dihsu",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-07T13:09:04.183Z",
+      "by": "bd3-review",
+      "action": "card.criteria-verify",
+      "ref": "c05dihsu",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-07T13:09:03.810Z",
+      "by": "bd3-review",
+      "action": "card.criteria-verify",
+      "ref": "c05dihsu",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T13:08:26.223Z",
+      "by": "bd3-tests",
+      "action": "card.update",
+      "ref": "c00jybyb",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T13:08:14.809Z",
+      "by": "bd3-tests",
+      "action": "card.criteria-meet",
+      "ref": "c00jybyb",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-07T13:08:14.443Z",
+      "by": "bd3-tests",
+      "action": "card.criteria-meet",
+      "ref": "c00jybyb",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-07T13:08:14.088Z",
+      "by": "bd3-tests",
+      "action": "card.criteria-meet",
+      "ref": "c00jybyb",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T13:07:30.657Z",
+      "by": "bd3-tests",
+      "action": "card.update",
+      "ref": "c0utog26",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T13:07:29.866Z",
+      "by": "bd3-tests",
+      "action": "card.criteria-meet",
+      "ref": "c0utog26",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T13:07:29.128Z",
+      "by": "bd3-tests",
+      "action": "card.criteria-add",
+      "ref": "c0utog26",
+      "note": "#1 cargo test --test diagnostics_coverage passes all 11 asserti"
+    },
+    {
+      "at": "2026-08-07T13:05:01.072Z",
+      "by": "bd3-effect",
+      "action": "card.update",
+      "ref": "c0c86cps",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T13:04:33.742Z",
+      "by": "bd3-profile",
+      "action": "card.claim",
+      "ref": "c0yxdp71",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T13:04:28.644Z",
+      "by": "bd3-effect",
+      "action": "card.claim",
+      "ref": "c0c86cps",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T12:52:31.668Z",
+      "by": "bd3-tests",
+      "action": "papercut.add",
+      "ref": "pc0b80fpf",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T12:50:23.608Z",
+      "by": "bd3-tests",
+      "action": "card.criteria-add",
+      "ref": "c00jybyb",
+      "note": "#3 view_mut_bounds_interpreter.stderr: not silently re-blessed "
+    },
+    {
+      "at": "2026-08-07T12:50:23.252Z",
+      "by": "bd3-tests",
+      "action": "card.criteria-add",
+      "ref": "c00jybyb",
+      "note": "#2 source_owned_conversion_retired.stderr matches current outpu"
+    },
+    {
+      "at": "2026-08-07T12:50:22.880Z",
+      "by": "bd3-tests",
+      "action": "card.criteria-add",
+      "ref": "c00jybyb",
+      "note": "#1 struct_missing_field.stderr matches current E0303 text (D-FI"
+    },
+    {
+      "at": "2026-08-07T12:50:14.839Z",
+      "by": "bd3-tests",
+      "action": "card.criteria-add",
+      "ref": "c0ftql8x",
+      "note": "#3 tests/ui/view_mut_bounds_interpreter.stderr is restored to i"
+    },
+    {
+      "at": "2026-08-07T12:50:14.480Z",
+      "by": "bd3-tests",
+      "action": "card.criteria-add",
+      "ref": "c0ftql8x",
+      "note": "#2 The interpreter tier (dev_iteration use_interpreter=true) re"
+    },
+    {
+      "at": "2026-08-07T12:50:14.108Z",
+      "by": "bd3-tests",
+      "action": "card.criteria-add",
+      "ref": "c0ftql8x",
+      "note": "#1 Root cause found: the exact interpreter code path that skips"
+    },
+    {
+      "at": "2026-08-07T12:50:06.102Z",
+      "by": "bd3-tests",
+      "action": "card.add",
+      "ref": "c0ftql8x",
+      "note": "Interpreter tier silently skips view-range bounds check (I9 gap)"
+    },
+    {
+      "at": "2026-08-07T12:45:19.281Z",
+      "by": "bd3-jitfix",
+      "action": "card.update",
+      "ref": "c0zebcjq",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T12:45:18.355Z",
+      "by": "bd3-jitfix",
+      "action": "card.update",
+      "ref": "c0n02xfm",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T12:45:17.446Z",
+      "by": "bd3-jitfix",
+      "action": "card.update",
+      "ref": "c0zebcjq",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T12:45:16.524Z",
+      "by": "bd3-jitfix",
+      "action": "card.update",
+      "ref": "c0n02xfm",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T12:45:04.344Z",
+      "by": "bd3-jitfix",
+      "action": "card.criteria-meet",
+      "ref": "c0n02xfm",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-07T12:44:47.933Z",
+      "by": "bd3-tests",
+      "action": "card.update",
+      "ref": "c0onzbon",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T12:44:47.634Z",
+      "by": "bd3-jitfix",
+      "action": "card.criteria-meet",
+      "ref": "c0n02xfm",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T12:44:46.924Z",
+      "by": "bd3-tests",
+      "action": "card.criteria-meet",
+      "ref": "c0onzbon",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T12:44:38.619Z",
+      "by": "bd3-jitfix",
+      "action": "card.criteria-add",
+      "ref": "c0n02xfm",
+      "note": "#2 every arrival and departure is mapped to the merged feature "
+    },
+    {
+      "at": "2026-08-07T12:44:37.789Z",
+      "by": "bd3-jitfix",
+      "action": "card.criteria-add",
+      "ref": "c0n02xfm",
+      "note": "#1 tests/jit_gaps.txt records the measured compile-covered and "
+    },
+    {
+      "at": "2026-08-07T12:44:31.554Z",
+      "by": "bd3-jitfix",
+      "action": "card.criteria-meet",
+      "ref": "c0zebcjq",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T12:44:30.818Z",
+      "by": "bd3-jitfix",
+      "action": "card.criteria-add",
+      "ref": "c0zebcjq",
+      "note": "#1 jit_try_compile_manifest_matches runs collect_jit_coverage o"
+    },
+    {
+      "at": "2026-08-07T12:44:05.318Z",
+      "by": "bd3-tests",
+      "action": "card.update",
+      "ref": "c0onzbon",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T12:44:00.889Z",
+      "by": "bd3-tests",
+      "action": "card.claim",
+      "ref": "c0onzbon",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T12:43:56.842Z",
+      "by": "bd3-tests",
+      "action": "card.update",
+      "ref": "c0utog26",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T12:43:47.498Z",
+      "by": "bd3-tests",
+      "action": "card.claim",
+      "ref": "c0utog26",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T12:43:39.867Z",
+      "by": "bd3-tests",
+      "action": "card.update",
+      "ref": "c00jybyb",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T12:43:29.557Z",
+      "by": "bd3-tests",
+      "action": "card.claim",
+      "ref": "c00jybyb",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T12:43:19.310Z",
+      "by": "bd3-jitfix",
+      "action": "card.criteria-add",
+      "ref": "c0f7cuus",
+      "note": "#3 cargo test --test dev jit_ completes with a summary instead "
+    },
+    {
+      "at": "2026-08-07T12:43:18.927Z",
+      "by": "bd3-jitfix",
+      "action": "card.criteria-add",
+      "ref": "c0f7cuus",
+      "note": "#2 tests/dev.rs has no remaining test that drives JIT lowering "
+    },
+    {
+      "at": "2026-08-07T12:43:18.573Z",
+      "by": "bd3-jitfix",
+      "action": "card.criteria-add",
+      "ref": "c0f7cuus",
+      "note": "#1 yielding_and_result_loops_run_in_native_jit_without_fallback"
+    },
+    {
+      "at": "2026-08-07T12:43:10.299Z",
+      "by": "bd3-jitfix",
+      "action": "card.add",
+      "ref": "c0f7cuus",
+      "note": "yielding_and_result_loops_run_in_native_jit_without_fallback overflows its stack and aborts the dev test binary"
+    },
+    {
       "at": "2026-08-07T12:34:56.224Z",
       "by": "bd3-jitfix",
       "action": "card.update",
@@ -135918,363 +136468,6 @@
       "action": "card.update",
       "ref": "c0pxsuic",
       "note": "logEntry"
-    },
-    {
-      "at": "2026-08-07T01:02:04.496Z",
-      "by": "prep-syntax",
-      "action": "card.criteria-add",
-      "ref": "c06k75xs",
-      "note": "#7 targeted test command passes: cargo test --test fenced_names"
-    },
-    {
-      "at": "2026-08-07T01:02:04.122Z",
-      "by": "prep-syntax",
-      "action": "card.criteria-add",
-      "ref": "c06k75xs",
-      "note": "#6 descending or non-integer-literal range entries keep today's"
-    },
-    {
-      "at": "2026-08-07T01:02:03.759Z",
-      "by": "prep-syntax",
-      "action": "card.criteria-add",
-      "ref": "c06k75xs",
-      "note": "#5 $[0..3]$ in an expression fence expands to 0,1,2,3 — tests/f"
-    },
-    {
-      "at": "2026-08-07T01:02:03.386Z",
-      "by": "prep-syntax",
-      "action": "card.update",
-      "ref": "c06k75xs",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-07T01:01:31.485Z",
-      "by": "prep-syntax",
-      "action": "card.criteria-add",
-      "ref": "c00zqair",
-      "note": "#7 targeted test command passes: cargo test --test fmt"
-    },
-    {
-      "at": "2026-08-07T01:01:30.964Z",
-      "by": "prep-syntax",
-      "action": "card.criteria-add",
-      "ref": "c00zqair",
-      "note": "#6 no in-repo .jet file or doc spells the map type as [K: V] af"
-    },
-    {
-      "at": "2026-08-07T01:01:30.579Z",
-      "by": "prep-syntax",
-      "action": "card.criteria-add",
-      "ref": "c00zqair",
-      "note": "#5 jet fmt emits [K:V] for map types in type position — tests/f"
-    },
-    {
-      "at": "2026-08-07T01:01:30.235Z",
-      "by": "prep-syntax",
-      "action": "card.update",
-      "ref": "c00zqair",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-07T01:01:04.819Z",
-      "by": "prep-syntax",
-      "action": "card.update",
-      "ref": "c0pxsuic",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-07T01:00:49.607Z",
-      "by": "prep-loops",
-      "action": "card.update",
-      "ref": "c0pibmpe",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-07T01:00:49.105Z",
-      "by": "prep-loops",
-      "action": "card.criteria-add",
-      "ref": "c0pibmpe",
-      "note": "#5 examples/features/basics/comprehension_forms.jet (new) shows"
-    },
-    {
-      "at": "2026-08-07T01:00:48.751Z",
-      "by": "prep-loops",
-      "action": "card.criteria-add",
-      "ref": "c0pibmpe",
-      "note": "#4 examples/features/basics/member_shorthand.jet or an extended"
-    },
-    {
-      "at": "2026-08-07T01:00:48.395Z",
-      "by": "prep-loops",
-      "action": "card.criteria-add",
-      "ref": "c0pibmpe",
-      "note": "#3 examples/features/basics/loop_bindingless.jet (from #1417) i"
-    },
-    {
-      "at": "2026-08-07T01:00:48.031Z",
-      "by": "prep-loops",
-      "action": "card.criteria-add",
-      "ref": "c0pibmpe",
-      "note": "#2 examples/features/basics/loop_values.jet's guard-form additi"
-    },
-    {
-      "at": "2026-08-07T01:00:47.689Z",
-      "by": "prep-loops",
-      "action": "card.criteria-add",
-      "ref": "c0pibmpe",
-      "note": "#1 docs/spec/syntax-decisions.md's 'A header guard filters item"
-    },
-    {
-      "at": "2026-08-07T01:00:47.366Z",
-      "by": "prep-syntax",
-      "action": "card.update",
-      "ref": "c0ywkxuc",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-07T01:00:39.707Z",
-      "by": "prep-loops",
-      "action": "card.update",
-      "ref": "c0pibmpe",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-07T00:59:33.269Z",
-      "by": "prep-loops",
-      "action": "card.update",
-      "ref": "c0s0594k",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-07T00:59:32.834Z",
-      "by": "prep-loops",
-      "action": "card.criteria-add",
-      "ref": "c0s0594k",
-      "note": "#2 A genuine numeric stride ('loop i, 0..10, 2 -> i') still par"
-    },
-    {
-      "at": "2026-08-07T00:59:32.435Z",
-      "by": "prep-loops",
-      "action": "card.criteria-add",
-      "ref": "c0s0594k",
-      "note": "#1 'loop u, users, if u > 1 -> u' (comma before if) no longer p"
-    },
-    {
-      "at": "2026-08-07T00:59:23.905Z",
-      "by": "prep-loops",
-      "action": "card.update",
-      "ref": "c0s0594k",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-07T00:59:01.783Z",
-      "by": "prep-loops",
-      "action": "card.update",
-      "ref": "c0oeuws4",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-07T00:58:58.565Z",
-      "by": "prep-loops",
-      "action": "card.update",
-      "ref": "c075z2hs",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-07T00:58:58.192Z",
-      "by": "prep-loops",
-      "action": "card.update",
-      "ref": "c0xsk2wa",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-07T00:58:54.215Z",
-      "by": "prep-loops",
-      "action": "card.criteria-add",
-      "ref": "c075z2hs",
-      "note": "#8 A bare member chain passed where the expected type is not a "
-    },
-    {
-      "at": "2026-08-07T00:58:53.657Z",
-      "by": "prep-loops",
-      "action": "card.criteria-add",
-      "ref": "c075z2hs",
-      "note": "#7 A bare member chain passed where a two-parameter callable is"
-    },
-    {
-      "at": "2026-08-07T00:58:53.001Z",
-      "by": "prep-loops",
-      "action": "card.criteria-add",
-      "ref": "c075z2hs",
-      "note": "#6 A method chain past the first member ('users.map(.name.to_up"
-    },
-    {
-      "at": "2026-08-07T00:58:52.467Z",
-      "by": "prep-loops",
-      "action": "card.criteria-add",
-      "ref": "c075z2hs",
-      "note": "#5 'users.filter(.active).map(.name)' compiles and its output p"
-    },
-    {
-      "at": "2026-08-07T00:58:46.326Z",
-      "by": "prep-loops",
-      "action": "card.update",
-      "ref": "c075z2hs",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-07T00:58:19.009Z",
-      "by": "prep-loops",
-      "action": "card.update",
-      "ref": "c0xsk2wa",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-07T00:58:18.600Z",
-      "by": "prep-loops",
-      "action": "card.criteria-add",
-      "ref": "c0xsk2wa",
-      "note": "#8 '(key, value)' two-name sources still require named bindings"
-    },
-    {
-      "at": "2026-08-07T00:58:18.260Z",
-      "by": "prep-loops",
-      "action": "card.criteria-add",
-      "ref": "c0xsk2wa",
-      "note": "#7 An inner bindingless loop nested under a bindingless outer l"
-    },
-    {
-      "at": "2026-08-07T00:58:17.906Z",
-      "by": "prep-loops",
-      "action": "card.criteria-add",
-      "ref": "c0xsk2wa",
-      "note": "#6 A scalar source ('loop n, nums -> n * 2') still requires a n"
-    },
-    {
-      "at": "2026-08-07T00:58:17.553Z",
-      "by": "prep-loops",
-      "action": "card.criteria-add",
-      "ref": "c0xsk2wa",
-      "note": "#5 examples/features/basics/loop_bindingless.jet (new) prints i"
-    },
-    {
-      "at": "2026-08-07T00:58:08.692Z",
-      "by": "prep-loops",
-      "action": "card.update",
-      "ref": "c0xsk2wa",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-07T00:57:30.959Z",
-      "by": "prep-loops",
-      "action": "card.update",
-      "ref": "c0oeuws4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-07T00:57:17.683Z",
-      "by": "prep-loops",
-      "action": "card.criteria-add",
-      "ref": "c0oeuws4",
-      "note": "#8 The D-LOOP-SUBJECT1 code-sample comma conflict is bridged: #"
-    },
-    {
-      "at": "2026-08-07T00:57:17.093Z",
-      "by": "prep-loops",
-      "action": "card.criteria-add",
-      "ref": "c0oeuws4",
-      "note": "#7 jet fmt round-trips the canonical comma-less guard form byte"
-    },
-    {
-      "at": "2026-08-07T00:57:16.534Z",
-      "by": "prep-loops",
-      "action": "card.criteria-add",
-      "ref": "c0oeuws4",
-      "note": "#6 'loop u, users, if u.active -> u.name' (comma before if) pro"
-    },
-    {
-      "at": "2026-08-07T00:57:15.925Z",
-      "by": "prep-loops",
-      "action": "card.criteria-add",
-      "ref": "c0oeuws4",
-      "note": "#5 examples/features/basics/loop_values.jet (updated) with a gu"
-    },
-    {
-      "at": "2026-08-07T00:57:14.234Z",
-      "by": "prep-security",
-      "action": "card.update",
-      "ref": "c02lvwje",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-07T00:57:05.505Z",
-      "by": "prep-loops",
-      "action": "card.update",
-      "ref": "c0oeuws4",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-07T00:57:04.490Z",
-      "by": "prep-security",
-      "action": "card.update",
-      "ref": "c0k0blpr",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-07T00:57:03.807Z",
-      "by": "prep-security",
-      "action": "card.update",
-      "ref": "c0f805q0",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-07T00:57:03.091Z",
-      "by": "prep-security",
-      "action": "card.update",
-      "ref": "c0a5ajib",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-07T00:57:02.390Z",
-      "by": "prep-security",
-      "action": "card.update",
-      "ref": "c055tbgu",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-07T00:57:01.970Z",
-      "by": "prep-security",
-      "action": "card.update",
-      "ref": "c003si59",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-07T00:57:01.554Z",
-      "by": "prep-security",
-      "action": "card.update",
-      "ref": "c0v0n8mh",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-07T00:57:01.140Z",
-      "by": "prep-security",
-      "action": "card.update",
-      "ref": "c0q3et2v",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-07T00:57:00.725Z",
-      "by": "prep-security",
-      "action": "card.update",
-      "ref": "c0kuhfjq",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-07T00:57:00.307Z",
-      "by": "prep-security",
-      "action": "card.update",
-      "ref": "c0fzojeh",
-      "note": "phase,logEntry"
     }
   ],
   "nextNum": 368,
@@ -136514,6 +136707,14 @@
       "text": "tests/comptime_diff.rs numbered rustc artifacts by per-test case index, so two tests both using index 0 raced for one output path and failed as a fake I2 miscompile; fixed on bd3/reader",
       "cardId": "c09qyavw",
       "created": "2026-08-07T11:34:35.325Z",
+      "status": "open"
+    },
+    {
+      "id": "pc0b80fpf",
+      "by": "bd3-tests",
+      "text": "CARGO_TARGET_DIR=<main>/target shared across worktrees caused a real build break (E0599: no variant ComptimeSplice for jet::AST::Expr in Source/CmdProve.rs) even though the variant exists in my worktree's own crates/jet-foundation/src/AST/expressions.rs — reproducible on retry, not transient. Likely stale rlib reuse across worktrees with divergent AST enum shapes. Fell back to the worktree-local target dir to unblock.",
+      "cardId": null,
+      "created": "2026-08-07T12:52:31.667Z",
       "status": "open"
     }
   ]
