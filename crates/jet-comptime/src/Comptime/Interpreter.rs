@@ -10,7 +10,7 @@ use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::{BindPattern, CtFloat, Expr, Func, Stmt, Type};
 
 use super::Diagnostics::comptime_panic;
-use super::Value::CtValue;
+use super::Value::{CtReport, CtValue};
 
 /// Default step budget per binding (S26 rule 3). Compiler-internal, not a
 /// user knob (philosophy: minimal configuration).
@@ -231,14 +231,14 @@ pub(super) fn coerce_value_to_type(value: CtValue, ty: &Type) -> CtValue {
                 .map(|(key, item)| (key, coerce_value_to_type(item, value)))
                 .collect(),
         ),
-        (CtValue::Some(value), Type::Option(inner)) => {
-            CtValue::Some(Box::new(coerce_value_to_type(*value, inner)))
+        (CtValue::Present(value), Type::Option(inner)) => {
+            CtValue::Present(Box::new(coerce_value_to_type(*value, inner)))
         }
-        (CtValue::ResOk(value), Type::Result { ok, .. }) => {
-            CtValue::ResOk(Box::new(coerce_value_to_type(*value, ok)))
+        (CtValue::Present(value), Type::Result { ok, .. }) => {
+            CtValue::Present(Box::new(coerce_value_to_type(*value, ok)))
         }
-        (CtValue::ResErr(value), Type::Result { err, .. }) => {
-            CtValue::ResErr(Box::new(coerce_value_to_type(*value, err)))
+        (CtValue::Failed(CtReport::Told(value)), Type::Result { err, .. }) => {
+            CtValue::failed(Box::new(coerce_value_to_type(*value, err)))
         }
         (CtValue::Struct { type_name, fields }, Type::Tuple(types)) => CtValue::Struct {
             type_name,

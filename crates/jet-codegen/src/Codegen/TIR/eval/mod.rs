@@ -60,7 +60,7 @@ use crate::Codegen::TIR::{
     self, JitProgram, LowerEnv, TExpr, TFunc, TJitSpawnBody, TJitSpawnLambda, TLocal, TStmt,
 };
 use super::build_cx_items;
-use crate::Comptime::{self, CtValue, DevSink};
+use crate::Comptime::{self, CtReport, CtValue, DevSink};
 use crate::Diagnostics::{Diagnostic, Span};
 
 /// Cross-tier hook: Cranelift-native functions callable from the TIR evaluator (#778).
@@ -675,7 +675,7 @@ fn rebase_view_mut_owners(
                 rebase_view_mut_owners(value, owners);
             }
         }
-        CtValue::Some(value) | CtValue::ResOk(value) | CtValue::ResErr(value) => {
+        CtValue::Present(value) | CtValue::Failed(CtReport::Told(value)) => {
             rebase_view_mut_owners(value, owners);
         }
         _ => {}

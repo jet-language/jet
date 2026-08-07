@@ -106,22 +106,22 @@ fn ct_to_auth(v: &CtValue, span: Span) -> Result<JetAuthApp, Diagnostic> {
 
 fn result_session(r: Result<JetAuthSession, String>) -> CtValue {
     match r {
-        Ok(s) => CtValue::ResOk(Box::new(session_to_ct(&s))),
-        Err(e) => CtValue::ResErr(Box::new(CtValue::Str(e))),
+        Ok(s) => CtValue::Present(Box::new(session_to_ct(&s))),
+        Err(e) => CtValue::failed(Box::new(CtValue::Str(e))),
     }
 }
 
 fn result_unit(r: Result<(), String>) -> CtValue {
     match r {
-        Ok(()) => CtValue::ResOk(Box::new(CtValue::Unit)),
-        Err(e) => CtValue::ResErr(Box::new(CtValue::Str(e))),
+        Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
+        Err(e) => CtValue::failed(Box::new(CtValue::Str(e))),
     }
 }
 
 fn result_str(r: Result<String, String>) -> CtValue {
     match r {
-        Ok(s) => CtValue::ResOk(Box::new(CtValue::Str(s))),
-        Err(e) => CtValue::ResErr(Box::new(CtValue::Str(e))),
+        Ok(s) => CtValue::Present(Box::new(CtValue::Str(s))),
+        Err(e) => CtValue::failed(Box::new(CtValue::Str(e))),
     }
 }
 

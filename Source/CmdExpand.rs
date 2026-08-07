@@ -486,7 +486,7 @@ fn ct_display(value: Option<&jet::CtValue>) -> String {
     match value {
         Some(jet::CtValue::Str(value)) => value.clone(),
         Some(jet::CtValue::Int(value)) => value.to_string(),
-        Some(jet::CtValue::None(_)) | None => "unknown".to_string(),
+        Some(jet::CtValue::Failed(jet::CtReport::Clean(_))) | None => "unknown".to_string(),
         Some(value) => value.jet_show(),
     }
 }
@@ -497,7 +497,7 @@ fn ct_to_expand(value: &jet::CtValue) -> ExpandValue {
         jet::CtValue::Int(value) => ExpandValue::String(value.to_string()),
         jet::CtValue::Bool(value) => ExpandValue::Bool(*value),
         jet::CtValue::Str(value) => ExpandValue::String(value.clone()),
-        jet::CtValue::None(_) => ExpandValue::Null,
+        jet::CtValue::Failed(jet::CtReport::Clean(_)) => ExpandValue::Null,
         jet::CtValue::List(values) => {
             ExpandValue::Array(values.iter().map(ct_to_expand).collect())
         }

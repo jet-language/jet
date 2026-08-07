@@ -172,7 +172,7 @@ fn compiler_check_json_is_the_typed_value_not_a_second_shape() {
     )
     .unwrap()
     .unwrap();
-    let jet::AST::CtValue::ResOk(parsed) = parsed else {
+    let jet::AST::CtValue::Present(parsed) = parsed else {
         panic!("parse must return a typed success value")
     };
     let checked = jet::Compiler::eval_core_call(
@@ -183,7 +183,7 @@ fn compiler_check_json_is_the_typed_value_not_a_second_shape() {
     )
     .unwrap()
     .unwrap();
-    let jet::AST::CtValue::ResOk(checked) = checked else {
+    let jet::AST::CtValue::Present(checked) = checked else {
         panic!("check must return a typed success value")
     };
     let typed_json = checked.to_json();
@@ -214,7 +214,7 @@ fn compiler_check_failure_keeps_semantic_index_absent() {
     )
     .unwrap()
     .unwrap();
-    let jet::AST::CtValue::ResOk(checked) = checked else {
+    let jet::AST::CtValue::Present(checked) = checked else {
         panic!("check must return a typed success value")
     };
     assert!(checked.to_json().contains("\"semantic_index\":null"));
@@ -292,7 +292,7 @@ fn compiler_api_failures_are_typed_and_schema_checked() {
     )
     .expect("compiler callback handles its module")
     .expect("failure is a typed Result value, not a host diagnostic");
-    let jet::AST::CtValue::ResErr(error) = bad_shape else {
+    let jet::AST::CtValue::Failed(jet::AST::CtReport::Told(error)) = bad_shape else {
         panic!("expected CompilerError result, got {bad_shape:?}");
     };
     assert!(matches!(
@@ -317,7 +317,7 @@ fn compiler_api_failures_are_typed_and_schema_checked() {
     )
     .unwrap()
     .unwrap();
-    assert!(matches!(stale, jet::AST::CtValue::ResErr(_)));
+    assert!(matches!(stale, jet::AST::CtValue::Failed(jet::AST::CtReport::Told(_))));
 }
 
 #[test]

@@ -34,7 +34,7 @@ fn unknown_layout_bytes() -> CtValue {
     // D-LAYOUT-FACTS1=B: byte facts stay absent until a canonical target
     // layout engine exists. `None(Int)` is the typed optional value used by
     // the public `LayoutInfo`/`LayoutField` model.
-    CtValue::None(crate::AST::Type::Int)
+    CtValue::absent(crate::AST::Type::Int)
 }
 
 fn layout_field_info(

@@ -83,9 +83,9 @@ pub(super) fn apply(
                     let CtValue::Enum { mut args, .. } = old else {
                         unreachable!("validated occupied Pool slot")
                     };
-                    CtValue::Some(Box::new(args.swap_remove(1).1))
+                    CtValue::Present(Box::new(args.swap_remove(1).1))
                 }
-                None => CtValue::None(match resolved_ret {
+                None => CtValue::absent(match resolved_ret {
                     Some(Type::Option(inner)) => (**inner).clone(),
                     _ => Type::Int,
                 }),

@@ -171,7 +171,7 @@ impl<'a> Checker<'a> {
         value: &crate::AST::CtValue,
         ty: &Type,
     ) -> bool {
-        use crate::AST::CtValue;
+        use crate::AST::{CtReport, CtValue};
         if !self.ct_value_is_emittable(value) {
             return false;
         }
@@ -180,16 +180,20 @@ impl<'a> Checker<'a> {
             (CtValue::List(_) | CtValue::Bytes(_), _) => false,
             (CtValue::Map(_), Type::Map { .. }) => true,
             (CtValue::Map(_), _) => false,
-            (CtValue::Some(_) | CtValue::None(_), Type::Option(_)) => true,
-            (CtValue::Some(_) | CtValue::None(_), _) => false,
-            (CtValue::ResOk(_) | CtValue::ResErr(_), Type::Result { .. }) => true,
-            (CtValue::ResOk(_) | CtValue::ResErr(_), _) => false,
+            // D-FAIL-CARRIER1=A: one carrier, so a payload fits either view of
+            // it; only the report says which view the value came from.
+            (CtValue::Present(_), Type::Option(_) | Type::Result { .. }) => true,
+            (CtValue::Present(_), _) => false,
+            (CtValue::Failed(CtReport::Clean(_)), Type::Option(_)) => true,
+            (CtValue::Failed(CtReport::Clean(_)), _) => false,
+            (CtValue::Failed(CtReport::Told(_)), Type::Result { .. }) => true,
+            (CtValue::Failed(CtReport::Told(_)), _) => false,
             _ => true,
         }
     }
 
     pub(crate) fn ct_value_is_emittable(&self, value: &crate::AST::CtValue) -> bool {
-        use crate::AST::CtValue;
+        use crate::AST::{CtReport, CtValue};
         match value {
             CtValue::Struct { type_name, fields } => {
                 self.registry.is_user_struct(type_name)
@@ -207,7 +211,7 @@ impl<'a> Checker<'a> {
             CtValue::Map(entries) => entries
                 .values()
                 .all(|entry| self.ct_value_is_emittable(entry)),
-            CtValue::Some(inner) | CtValue::ResOk(inner) | CtValue::ResErr(inner) => {
+            CtValue::Present(inner) | CtValue::Failed(CtReport::Told(inner)) => {
                 self.ct_value_is_emittable(inner)
             }
             // A closure has no literal form at all.

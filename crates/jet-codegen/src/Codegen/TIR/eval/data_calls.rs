@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, HashMap};
 use crate::AST::{CtFloat, Type};
 use crate::Codegen::TIR::TExpr;
 use crate::Comptime::Builtins::as_bool;
-use crate::Comptime::{apply_core_call, apply_data_line_call, CtValue};
+use crate::Comptime::{apply_core_call, apply_data_line_call, CtReport, CtValue};
 use crate::Diagnostics::{Diagnostic, Span};
 use jet_foundation::PackageEdition;
 
@@ -31,18 +31,18 @@ fn data_error_at(kind: &str, operation: &str, index: Option<i64>, reason: &str) 
                 },
             ),
             ("operation".to_string(), CtValue::Str(operation.to_string())),
-            ("row".to_string(), CtValue::None(Type::Int)),
-            ("column".to_string(), CtValue::None(Type::Int)),
+            ("row".to_string(), CtValue::absent(Type::Int)),
+            ("column".to_string(), CtValue::absent(Type::Int)),
             (
                 "index".to_string(),
                 index
-                    .map(|value| CtValue::Some(Box::new(CtValue::Int(value))))
-                    .unwrap_or(CtValue::None(Type::Int)),
+                    .map(|value| CtValue::Present(Box::new(CtValue::Int(value))))
+                    .unwrap_or(CtValue::absent(Type::Int)),
             ),
             ("reason".to_string(), CtValue::Str(reason.to_string())),
             (
                 "cause".to_string(),
-                CtValue::None(Type::Named("EncodingError".to_string())),
+                CtValue::absent(Type::Named("EncodingError".to_string())),
             ),
         ],
     }
@@ -79,11 +79,11 @@ fn checked_neumaier_sum(values: &[f64]) -> Result<f64, CtValue> {
 }
 
 fn ok(v: CtValue) -> CtValue {
-    CtValue::ResOk(Box::new(v))
+    CtValue::Present(Box::new(v))
 }
 
 fn err(v: CtValue) -> CtValue {
-    CtValue::ResErr(Box::new(v))
+    CtValue::failed(Box::new(v))
 }
 
 fn list_elem(ty: &Type) -> Option<&Type> {
@@ -496,7 +496,7 @@ impl<'a> EvalCtx<'a> {
                 {
                     missing += values
                         .iter()
-                        .filter(|value| matches!(value, CtValue::None(_)))
+                        .filter(|value| matches!(value, CtValue::Failed(CtReport::Clean(_))))
                         .count() as i64;
                 }
                 Ok(CtValue::Int(missing))

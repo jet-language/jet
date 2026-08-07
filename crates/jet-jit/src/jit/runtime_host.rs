@@ -412,7 +412,7 @@ extern "C" fn jet_jit_intn_binop(
     right_signed: i64,
 ) -> i64 {
     use jet_codegen::AST::BinOp;
-    use jet_codegen::Comptime::{CtValue, MathLayout};
+    use jet_codegen::Comptime::{CtReport, CtValue, MathLayout};
     let op = match op {
         INTN_OP_ADD => BinOp::Add,
         INTN_OP_SUB => BinOp::Sub,
@@ -488,13 +488,13 @@ extern "C" fn jet_jit_intn_binop(
     };
     match result {
         Ok(CtValue::Int(value)) => value,
-        Ok(CtValue::Some(value)) => {
+        Ok(CtValue::Present(value)) => {
             let CtValue::Int(value) = *value else {
                 return 0;
             };
             Concurrency::with_runtime_mut(|rt| alloc_jit_result(rt, true, value as u64))
         }
-        Ok(CtValue::None(_)) => 0,
+        Ok(CtValue::Failed(CtReport::Clean(_))) => 0,
         Ok(_) => 0,
         Err(_) if mode == INTN_MODE_CHECKED => 0,
         Err(_) => {

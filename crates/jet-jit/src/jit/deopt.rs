@@ -12,7 +12,7 @@ use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, Module};
 use jet_codegen::Codegen::TIR::{self, JitProgram, TFunc};
-use jet_codegen::Comptime::{self, CtValue, DevSink};
+use jet_codegen::Comptime::{self, CtReport, CtValue, DevSink};
 use jet_foundation::AST::{ProgramBundle, Type};
 use jet_foundation::Diagnostics::Diagnostic;
 use jet_foundation::JitBackend::RunOutcome;
@@ -294,7 +294,7 @@ pub(crate) fn run_whole_interp(bundle: &ProgramBundle, plan: &TierPlan) -> RunOu
         Some(crate::ambient_interp::ambient_core_call),
         Some(crate::ambient_interp::ambient_handle),
         || match Comptime::TirBridge::run_bundle(bundle, &mut sink, true) {
-            Ok(CtValue::ResErr(error)) => {
+            Ok(CtValue::Failed(CtReport::Told(error))) => {
                 sink.stderr.push_str(&error.jet_show());
                 sink.stderr.push('\n');
                 RunOutcome::Ran {

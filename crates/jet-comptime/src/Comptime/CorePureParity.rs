@@ -12,7 +12,7 @@ use crate::Diagnostics::{Diagnostic, Span};
 use crate::Comptime::Builtins::{as_bool, as_int};
 use crate::Comptime::Diagnostics::unsupported;
 use crate::Comptime::Methods::as_float;
-use crate::Comptime::Value::CtValue;
+use crate::Comptime::Value::{CtReport, CtValue};
 
 type EvalResult = Result<CtValue, Diagnostic>;
 
@@ -523,7 +523,7 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
             };
             let opt_int = |name: &str| -> Option<i64> {
                 match get(name)? {
-                    CtValue::Some(inner) => match inner.as_ref() {
+                    CtValue::Present(inner) => match inner.as_ref() {
                         CtValue::Int(n) => Some(*n),
                         _ => None,
                     },
@@ -585,14 +585,13 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
                 .collect();
             Some(format!("{ty}({})", parts.join(", ")))
         }
-        CtValue::Some(inner) => {
+        CtValue::Present(inner) => {
             // Option payloads in Address.display etc. show as the inner jet_show
             // (null for None is handled by jet_show); keep Some unwrapped in
             // nested core-struct display via the field map above.
             display(inner)
         }
-        CtValue::None(_) => Some("null".to_string()),
-        CtValue::ResOk(inner) => display(inner),
+        CtValue::Failed(CtReport::Clean(_)) => Some("null".to_string()),
         _ => {
             let CtValue::Float(measured) = field(value, "Measurement", "value")? else {
                 return None;
@@ -712,8 +711,8 @@ fn ui_node_value(
         ("label", CtValue::Str(label)),
         ("width", CtValue::Float(CtFloat::f64(width))),
         ("height", CtValue::Float(CtFloat::f64(height))),
-        ("role", role.map_or(CtValue::None(Type::Named("UiAriaRole".to_string())), |role| CtValue::Some(Box::new(role)))),
-        ("color", color.map_or(CtValue::None(Type::String), |color| CtValue::Some(Box::new(CtValue::Str(color))))),
+        ("role", role.map_or(CtValue::absent(Type::Named("UiAriaRole".to_string())), |role| CtValue::Present(Box::new(role)))),
+        ("color", color.map_or(CtValue::absent(Type::String), |color| CtValue::Present(Box::new(CtValue::Str(color))))),
         ("kind", ui_kind(kind)),
         ("children", CtValue::List(children)),
     ])
@@ -839,18 +838,18 @@ fn io_style_force(args: &[CtValue], span: Span) -> EvalResult {
 fn net_error(operation: &str, address: Option<String>, message: String) -> CtValue {
     structure("NetError", vec![
         ("operation", CtValue::Str(operation.to_string())),
-        ("address", address.map_or(CtValue::None(Type::String), |value| CtValue::Some(Box::new(CtValue::Str(value))))),
-        ("name", CtValue::None(Type::String)),
+        ("address", address.map_or(CtValue::absent(Type::String), |value| CtValue::Present(Box::new(CtValue::Str(value))))),
+        ("name", CtValue::absent(Type::String)),
         ("message", CtValue::Str(message)),
-        ("os_code", CtValue::None(Type::Int)),
+        ("os_code", CtValue::absent(Type::Int)),
     ])
 }
 
 fn net_ip_addr(args: &[CtValue], span: Span) -> EvalResult {
     let text = string_arg(args, 0, span)?;
     Ok(match text.parse::<std::net::IpAddr>() {
-        Ok(address) => CtValue::ResOk(Box::new(structure("IPAddr", vec![("text", CtValue::Str(address.to_string()))]))),
-        Err(error) => CtValue::ResErr(Box::new(net_error(
+        Ok(address) => CtValue::Present(Box::new(structure("IPAddr", vec![("text", CtValue::Str(address.to_string()))]))),
+        Err(error) => CtValue::failed(Box::new(net_error(
             "parse IP address",
             Some(text.to_string()),
             format!("invalid IP address `{text}`: {error}"),
@@ -869,12 +868,12 @@ fn net_ip_is_ipv4(args: &[CtValue], span: Span) -> EvalResult {
 fn net_socket_addr_parse(args: &[CtValue], span: Span) -> EvalResult {
     let text = string_arg(args, 0, span)?;
     Ok(match text.parse::<std::net::SocketAddr>() {
-        Ok(address) => CtValue::ResOk(Box::new(structure("SocketAddr", vec![
+        Ok(address) => CtValue::Present(Box::new(structure("SocketAddr", vec![
             ("host", CtValue::Str(address.ip().to_string())),
             ("port", CtValue::Int(i64::from(address.port()))),
             ("text", CtValue::Str(address.to_string())),
         ]))),
-        Err(error) => CtValue::ResErr(Box::new(net_error(
+        Err(error) => CtValue::failed(Box::new(net_error(
             "parse socket address",
             Some(text.to_string()),
             format!("invalid socket address `{text}`: {error}"),
@@ -913,7 +912,7 @@ fn crypto_error(reason: &str) -> CtValue {
 fn crypto_hkdf(args: &[CtValue], span: Span) -> EvalResult {
     let length = int_arg(args, 3, span)?;
     if !(0..=8_160).contains(&length) {
-        return Ok(CtValue::ResErr(Box::new(crypto_error("HKDF-SHA256 output length must be 0..8160"))));
+        return Ok(CtValue::failed(Box::new(crypto_error("HKDF-SHA256 output length must be 0..8160"))));
     }
     let bytes = crate::Comptime::CryptoLite::hkdf_sha256(
         &bytes_value(one(args, 0, "core.crypto.expert", "hkdf_sha256", span)?, span)?,
@@ -921,7 +920,7 @@ fn crypto_hkdf(args: &[CtValue], span: Span) -> EvalResult {
         &bytes_value(one(args, 2, "core.crypto.expert", "hkdf_sha256", span)?, span)?,
         length as usize,
     );
-    Ok(CtValue::ResOk(Box::new(crypto_secret("Secret", bytes))))
+    Ok(CtValue::Present(Box::new(crypto_secret("Secret", bytes))))
 }
 
 fn crypto_ed25519_verify(args: &[CtValue], span: Span) -> EvalResult {
@@ -929,19 +928,19 @@ fn crypto_ed25519_verify(args: &[CtValue], span: Span) -> EvalResult {
     let message = bytes_value(one(args, 1, "core.crypto.expert", "ed25519_verify_strict", span)?, span)?;
     let signature = bytes_value(one(args, 2, "core.crypto.expert", "ed25519_verify_strict", span)?, span)?;
     if public.len() != 32 {
-        return Ok(CtValue::ResErr(Box::new(crypto_error(&format!(
+        return Ok(CtValue::failed(Box::new(crypto_error(&format!(
             "expert.ed25519_verify_strict: public must be exactly 32; got {}",
             public.len()
         )))));
     }
     if signature.len() != 64 {
-        return Ok(CtValue::ResErr(Box::new(crypto_error(&format!(
+        return Ok(CtValue::failed(Box::new(crypto_error(&format!(
             "expert.ed25519_verify_strict: signature must be exactly 64; got {}",
             signature.len()
         )))));
     }
     if message.len() > 1_073_741_824 {
-        return Ok(CtValue::ResErr(Box::new(crypto_error(&format!(
+        return Ok(CtValue::failed(Box::new(crypto_error(&format!(
             "expert.ed25519_verify_strict: message must be at most 1073741824; got {}",
             message.len()
         )))));
@@ -949,8 +948,8 @@ fn crypto_ed25519_verify(args: &[CtValue], span: Span) -> EvalResult {
     let public: [u8; 32] = public.try_into().expect("length checked");
     let signature: [u8; 64] = signature.try_into().expect("length checked");
     match crate::Comptime::CryptoLite::ed25519_verify_strict(&public, &message, &signature) {
-        Ok(valid) => Ok(CtValue::ResOk(Box::new(CtValue::Bool(valid)))),
-        Err(()) => Ok(CtValue::ResErr(Box::new(crypto_error(
+        Ok(valid) => Ok(CtValue::Present(Box::new(CtValue::Bool(valid)))),
+        Err(()) => Ok(CtValue::failed(Box::new(crypto_error(
             "expert.ed25519_verify_strict: Ed25519 public key is not canonical",
         )))),
     }
@@ -960,20 +959,20 @@ fn crypto_ed25519_sign(args: &[CtValue], span: Span) -> EvalResult {
     let seed = bytes_value(one(args, 0, "core.crypto.expert", "ed25519_sign", span)?, span)?;
     let message = bytes_value(one(args, 1, "core.crypto.expert", "ed25519_sign", span)?, span)?;
     if seed.len() != 32 {
-        return Ok(CtValue::ResErr(Box::new(crypto_error(&format!(
+        return Ok(CtValue::failed(Box::new(crypto_error(&format!(
             "expert.ed25519_sign: seed must be exactly 32; got {}",
             seed.len()
         )))));
     }
     if message.len() > 1_073_741_824 {
-        return Ok(CtValue::ResErr(Box::new(crypto_error(&format!(
+        return Ok(CtValue::failed(Box::new(crypto_error(&format!(
             "expert.ed25519_sign: message must be at most 1073741824; got {}",
             message.len()
         )))));
     }
     let seed: [u8; 32] = seed.try_into().expect("length checked");
     let signature = crate::Comptime::CryptoLite::ed25519_sign(&seed, &message);
-    Ok(CtValue::ResOk(Box::new(crypto_secret(
+    Ok(CtValue::Present(Box::new(crypto_secret(
         "Signature",
         signature.to_vec(),
     ))))
@@ -989,7 +988,7 @@ fn crypto_aead_lengths(
     opening: bool,
 ) -> Option<CtValue> {
     if key.len() != 32 {
-        return Some(CtValue::ResErr(Box::new(crypto_error(&format!(
+        return Some(CtValue::failed(Box::new(crypto_error(&format!(
             "{operation}: key must be exactly 32; got {}",
             key.len()
         )))));
@@ -1000,7 +999,7 @@ fn crypto_aead_lengths(
         "exactly 12"
     };
     if nonce.len() != nonce_length {
-        return Some(CtValue::ResErr(Box::new(crypto_error(&format!(
+        return Some(CtValue::failed(Box::new(crypto_error(&format!(
             "{operation}: nonce must be {nonce_expected}; got {}",
             nonce.len()
         )))));
@@ -1011,13 +1010,13 @@ fn crypto_aead_lengths(
         (0usize, 1_073_741_824usize, "plaintext", "at most 1073741824")
     };
     if input.len() < minimum || input.len() > maximum {
-        return Some(CtValue::ResErr(Box::new(crypto_error(&format!(
+        return Some(CtValue::failed(Box::new(crypto_error(&format!(
             "{operation}: {label} must be {expected}; got {}",
             input.len()
         )))));
     }
     if aad.len() > 16_777_216 {
-        return Some(CtValue::ResErr(Box::new(crypto_error(&format!(
+        return Some(CtValue::failed(Box::new(crypto_error(&format!(
             "{operation}: aad must be at most 16777216; got {}",
             aad.len()
         )))));
@@ -1047,8 +1046,8 @@ fn crypto_aead_seal(
         crate::Comptime::CryptoLite::xchacha20poly1305_seal(&key, &nonce, &plaintext, &aad)
     };
     match sealed {
-        Ok(bytes) => Ok(CtValue::ResOk(Box::new(CtValue::Bytes(bytes)))),
-        Err(()) => Ok(CtValue::ResErr(Box::new(crypto_error(&format!(
+        Ok(bytes) => Ok(CtValue::Present(Box::new(CtValue::Bytes(bytes)))),
+        Err(()) => Ok(CtValue::failed(Box::new(crypto_error(&format!(
             "Jet could not preserve a cryptographic invariant; incident expert-{}-seal",
             if aes { "aes" } else { "xchacha" }
         ))))),
@@ -1076,8 +1075,8 @@ fn crypto_aead_open(
         crate::Comptime::CryptoLite::xchacha20poly1305_open(&key, &nonce, &ciphertext, &aad)
     };
     match opened {
-        Ok(bytes) => Ok(CtValue::ResOk(Box::new(CtValue::Bytes(bytes)))),
-        Err(()) => Ok(CtValue::ResErr(Box::new(crypto_error(
+        Ok(bytes) => Ok(CtValue::Present(Box::new(CtValue::Bytes(bytes)))),
+        Err(()) => Ok(CtValue::failed(Box::new(crypto_error(
             "encrypted data could not be opened",
         )))),
     }
@@ -1106,12 +1105,12 @@ fn crypto_argon2id(args: &[CtValue], span: Span) -> EvalResult {
     let lanes = int_arg(args, 4, span)?;
     let output_length = int_arg(args, 5, span)?;
     if password.len() > 1_048_576 {
-        return Ok(CtValue::ResErr(Box::new(crypto_error(
+        return Ok(CtValue::failed(Box::new(crypto_error(
             "password hash is outside Jet's accepted policy",
         ))));
     }
     if !(8..=64).contains(&salt.len()) {
-        return Ok(CtValue::ResErr(Box::new(crypto_error(&format!(
+        return Ok(CtValue::failed(Box::new(crypto_error(&format!(
             "expert.argon2id: salt must be 8..=64; got {}",
             salt.len()
         )))));
@@ -1122,12 +1121,12 @@ fn crypto_argon2id(args: &[CtValue], span: Span) -> EvalResult {
         || memory_kib < 8 * lanes
         || memory_kib.checked_mul(iterations).is_none_or(|value| value > 1_048_576)
     {
-        return Ok(CtValue::ResErr(Box::new(crypto_error(
+        return Ok(CtValue::failed(Box::new(crypto_error(
             "password hash is outside Jet's accepted policy",
         ))));
     }
     if !(16..=64).contains(&output_length) {
-        return Ok(CtValue::ResErr(Box::new(crypto_error(&format!(
+        return Ok(CtValue::failed(Box::new(crypto_error(&format!(
             "expert.argon2id: output length must be 16..64; got {output_length}"
         )))));
     }
@@ -1139,8 +1138,8 @@ fn crypto_argon2id(args: &[CtValue], span: Span) -> EvalResult {
         lanes as u32,
         output_length as usize,
     ) {
-        Ok(bytes) => Ok(CtValue::ResOk(Box::new(crypto_secret("Secret", bytes)))),
-        Err(()) => Ok(CtValue::ResErr(Box::new(crypto_error(
+        Ok(bytes) => Ok(CtValue::Present(Box::new(crypto_secret("Secret", bytes)))),
+        Err(()) => Ok(CtValue::failed(Box::new(crypto_error(
             "password hash is outside Jet's accepted policy",
         )))),
     }
@@ -1150,7 +1149,7 @@ fn crypto_x25519(args: &[CtValue], span: Span) -> EvalResult {
     let secret = bytes_value(one(args, 0, "core.crypto.expert", "x25519", span)?, span)?;
     let public = bytes_value(one(args, 1, "core.crypto.expert", "x25519", span)?, span)?;
     if secret.len() != 32 || public.len() != 32 {
-        return Ok(CtValue::ResErr(Box::new(crypto_error("X25519 keys must contain exactly 32 bytes"))));
+        return Ok(CtValue::failed(Box::new(crypto_error("X25519 keys must contain exactly 32 bytes"))));
     }
     let shared = crate::Comptime::CryptoLite::x25519(&secret, &public).expect("length checked");
     let reject_all_zero = match args.get(2) {
@@ -1158,9 +1157,9 @@ fn crypto_x25519(args: &[CtValue], span: Span) -> EvalResult {
         _ => return Err(unsupported("core.crypto.expert.x25519() needs a Bool third argument", span)),
     };
     if reject_all_zero && shared == [0; 32] {
-        return Ok(CtValue::ResErr(Box::new(crypto_error("X25519 peer key does not contribute to a shared secret"))));
+        return Ok(CtValue::failed(Box::new(crypto_error("X25519 peer key does not contribute to a shared secret"))));
     }
-    Ok(CtValue::ResOk(Box::new(crypto_secret("Secret", shared.to_vec()))))
+    Ok(CtValue::Present(Box::new(crypto_secret("Secret", shared.to_vec()))))
 }
 
 fn crypto_extract(args: &[CtValue], index: usize, type_name: &str, span: Span) -> EvalResult {
@@ -1317,19 +1316,19 @@ fn mime_param(value: &CtValue, args: &[CtValue], span: Span) -> EvalResult {
         .find_map(|param| match param {
             CtValue::List(pair) => match pair.as_slice() {
                 [CtValue::Str(key), CtValue::Str(value)] if key == &name => {
-                    Some(CtValue::Some(Box::new(CtValue::Str(value.clone()))))
+                    Some(CtValue::Present(Box::new(CtValue::Str(value.clone()))))
                 }
                 _ => None,
             },
             _ => None,
         })
-        .unwrap_or(CtValue::None(Type::String)))
+        .unwrap_or(CtValue::absent(Type::String)))
 }
 
 fn mime_parse(args: &[CtValue], span: Span) -> EvalResult {
     Ok(match parse_mime(string_arg(args, 0, span)?) {
-        Ok(value) => CtValue::ResOk(Box::new(value)),
-        Err(error) => CtValue::ResErr(Box::new(CtValue::Str(error))),
+        Ok(value) => CtValue::Present(Box::new(value)),
+        Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
     })
 }
 
@@ -1395,8 +1394,8 @@ fn mime_extension(args: &[CtValue], span: Span) -> EvalResult {
 }
 
 fn option_string(value: Option<&str>) -> CtValue {
-    value.map_or(CtValue::None(Type::String), |value| {
-        CtValue::Some(Box::new(CtValue::Str(value.to_string())))
+    value.map_or(CtValue::absent(Type::String), |value| {
+        CtValue::Present(Box::new(CtValue::Str(value.to_string())))
     })
 }
 
@@ -1774,8 +1773,8 @@ fn fraction_new(args: &[CtValue], span: Span) -> EvalResult {
         _ => return Err(unsupported("a ratio bottom that is not a whole number", span)),
     };
     Ok(match crate::Numeric::CtFraction::new(numerator, denominator) {
-        Some(value) => CtValue::Some(Box::new(value.to_value())),
-        None => CtValue::None(crate::AST::Type::Named(crate::Syntax::TYPE_FRACTION.to_string())),
+        Some(value) => CtValue::Present(Box::new(value.to_value())),
+        None => CtValue::absent(crate::AST::Type::Named(crate::Syntax::TYPE_FRACTION.to_string())),
     })
 }
 
@@ -1789,8 +1788,8 @@ fn decimal_from_value(value: &CtValue, span: Span) -> Result<crate::Numeric::CtD
 
 fn zone_named(args: &[CtValue], span: Span) -> EvalResult {
     Ok(match Zone::parse_name(string_arg(args, 0, span)?) {
-        Ok(zone) => CtValue::ResOk(Box::new(zone.value())),
-        Err(error) => CtValue::ResErr(Box::new(CtValue::Str(error))),
+        Ok(zone) => CtValue::Present(Box::new(zone.value())),
+        Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
     })
 }
 
@@ -1965,8 +1964,8 @@ fn date_new_call(args: &[CtValue], span: Span) -> EvalResult {
 
 fn date_parse_call(args: &[CtValue], span: Span) -> EvalResult {
     Ok(match Date::parse(string_arg(args, 0, span)?) {
-        Ok(date) => CtValue::ResOk(Box::new(date.value())),
-        Err(error) => CtValue::ResErr(Box::new(CtValue::Str(error))),
+        Ok(date) => CtValue::Present(Box::new(date.value())),
+        Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
     })
 }
 
@@ -2071,8 +2070,8 @@ fn parse_datetime(value: &str) -> Result<i64, String> {
 
 fn datetime_parse(args: &[CtValue], span: Span) -> EvalResult {
     Ok(match parse_datetime(string_arg(args, 0, span)?) {
-        Ok(seconds) => CtValue::ResOk(Box::new(datetime_value(seconds, 0))),
-        Err(error) => CtValue::ResErr(Box::new(CtValue::Str(error))),
+        Ok(seconds) => CtValue::Present(Box::new(datetime_value(seconds, 0))),
+        Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
     })
 }
 
@@ -2133,8 +2132,8 @@ fn duration_ctor(method: &str, args: &[CtValue], span: Span) -> EvalResult {
         _ => None,
     };
     Ok(match ns {
-        Some(ns) => CtValue::ResOk(Box::new(duration_value(ns))),
-        None => CtValue::ResErr(Box::new(structure(
+        Some(ns) => CtValue::Present(Box::new(duration_value(ns))),
+        None => CtValue::failed(Box::new(structure(
             crate::Syntax::DURATION_RANGE_ERROR_TYPE,
             vec![(
                 "reason",
@@ -2148,8 +2147,8 @@ fn duration_ctor(method: &str, args: &[CtValue], span: Span) -> EvalResult {
 
 fn local_time_parse(args: &[CtValue], span: Span) -> EvalResult {
     Ok(match LocalTime::parse(string_arg(args, 0, span)?) {
-        Ok(time) => CtValue::ResOk(Box::new(time.value())),
-        Err(error) => CtValue::ResErr(Box::new(CtValue::Str(error))),
+        Ok(time) => CtValue::Present(Box::new(time.value())),
+        Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
     })
 }
 
@@ -2228,7 +2227,7 @@ fn xml_canonical(args: &[CtValue], span: Span) -> EvalResult {
     let value = match crate::Comptime::EncodingLite::xml_from_ct(tree) {
         Ok(value) => value,
         Err(_) => {
-            return Ok(CtValue::ResErr(Box::new(xml_shape_error(
+            return Ok(CtValue::failed(Box::new(xml_shape_error(
                 "XML tree cannot contain Float or Bytes values",
             ))))
         }
@@ -2243,8 +2242,8 @@ fn xml_canonical(args: &[CtValue], span: Span) -> EvalResult {
         },
     );
     Ok(match canonical {
-        Ok(value) => CtValue::ResOk(Box::new(CtValue::Str(value))),
-        Err(error) => CtValue::ResErr(Box::new(
+        Ok(value) => CtValue::Present(Box::new(CtValue::Str(value))),
+        Err(error) => CtValue::failed(Box::new(
             crate::Comptime::EncodingLite::xml_error_value(error),
         )),
     })
@@ -2292,9 +2291,9 @@ fn xml_shape_error(reason: &str) -> CtValue {
                     args: Vec::new(),
                 },
             ),
-            ("byte_offset", CtValue::None(Type::Int)),
-            ("line", CtValue::None(Type::Int)),
-            ("column", CtValue::None(Type::Int)),
+            ("byte_offset", CtValue::absent(Type::Int)),
+            ("line", CtValue::absent(Type::Int)),
+            ("column", CtValue::absent(Type::Int)),
             ("path", CtValue::Str(String::new())),
             ("reason", CtValue::Str(reason.to_string())),
         ],
@@ -2430,9 +2429,9 @@ fn email_error_value(error: EmailError) -> CtValue {
             ),
             (
                 Some("server".to_string()),
-                CtValue::None(Type::String),
+                CtValue::absent(Type::String),
             ),
-            (Some("code".to_string()), CtValue::None(Type::Int)),
+            (Some("code".to_string()), CtValue::absent(Type::Int)),
             (Some("reason".to_string()), CtValue::Str(error.reason)),
         ],
     }
@@ -2440,8 +2439,8 @@ fn email_error_value(error: EmailError) -> CtValue {
 
 fn email_result(result: Result<CtValue, EmailError>) -> CtValue {
     match result {
-        Ok(value) => CtValue::ResOk(Box::new(value)),
-        Err(error) => CtValue::ResErr(Box::new(email_error_value(error))),
+        Ok(value) => CtValue::Present(Box::new(value)),
+        Err(error) => CtValue::failed(Box::new(email_error_value(error))),
     }
 }
 
@@ -2452,8 +2451,8 @@ fn address_value(address: &Address) -> CtValue {
             (
                 "display",
                 address.display.as_ref().map_or(
-                    CtValue::None(Type::String),
-                    |display| CtValue::Some(Box::new(CtValue::Str(display.clone()))),
+                    CtValue::absent(Type::String),
+                    |display| CtValue::Present(Box::new(CtValue::Str(display.clone()))),
                 ),
             ),
             ("mailbox", CtValue::Str(address.mailbox.clone())),
@@ -2467,11 +2466,11 @@ fn address_from_value(value: &CtValue, span: Span) -> Result<Address, Diagnostic
         _ => return Err(unsupported("email call expected Address", span)),
     };
     let display = match field(value, "Address", "display") {
-        Some(CtValue::Some(value)) => match value.as_ref() {
+        Some(CtValue::Present(value)) => match value.as_ref() {
             CtValue::Str(value) => Some(value.clone()),
             _ => return Err(unsupported("email Address display is invalid", span)),
         },
-        Some(CtValue::None(_)) => None,
+        Some(CtValue::Failed(CtReport::Clean(_))) => None,
         _ => return Err(unsupported("email Address display is invalid", span)),
     };
     Ok(Address { display, mailbox })
@@ -3958,7 +3957,7 @@ mod tests {
         .expect("invalid DataTree is a user Result error");
         assert_eq!(
             actual,
-            CtValue::ResErr(Box::new(xml_shape_error(
+            CtValue::failed(Box::new(xml_shape_error(
                 "XML tree cannot contain Float or Bytes values",
             )))
         );

@@ -18,7 +18,7 @@ use crate::Diagnostics::{Diagnostic, Span};
 use super::Diagnostics::unsupported;
 use super::Interpreter::Interp;
 use super::Methods::{as_float, as_string};
-use super::Value::CtValue;
+use super::Value::{CtReport, CtValue};
 
 fn ct_struct(type_name: &str, fields: Vec<(&str, CtValue)>) -> CtValue {
     CtValue::Struct {
@@ -120,9 +120,9 @@ fn ct_value_type_name(v: &CtValue) -> String {
         CtValue::List(_) => "List".to_string(),
         CtValue::Map(_) => "Map".to_string(),
         CtValue::Struct { type_name, .. } | CtValue::Enum { type_name, .. } => type_name.clone(),
-        CtValue::Some(inner) => format!("{}?", ct_value_type_name(inner)),
-        CtValue::None(ty) => format!("{}?", ty.name()),
-        CtValue::ResOk(_) | CtValue::ResErr(_) => "Result".to_string(),
+        CtValue::Present(inner) => format!("{}?", ct_value_type_name(inner)),
+        CtValue::Failed(CtReport::Clean(ty)) => format!("{}?", ty.name()),
+        CtValue::Failed(CtReport::Told(_)) => "Result".to_string(),
         CtValue::Unit => "()".to_string(),
         CtValue::Closure(_) => "Fn".to_string(),
     }
@@ -359,7 +359,7 @@ impl<'a> Interp<'a> {
             }
             "missing_count" => {
                 let (values, missing, _) = expect_struct(&argv[0], "Series", "missing_count", span)?;
-                let none_count = values.iter().filter(|v| matches!(v, CtValue::None(_))).count() as i64;
+                let none_count = values.iter().filter(|v| matches!(v, CtValue::Failed(CtReport::Clean(_)))).count() as i64;
                 Ok(CtValue::Int(missing + none_count))
             }
             "lazy" => {
@@ -517,7 +517,7 @@ impl<'a> Interp<'a> {
                                         (
                                             "right",
                                             if method == "left_join" {
-                                                CtValue::Some(Box::new(right_row.clone()))
+                                                CtValue::Present(Box::new(right_row.clone()))
                                             } else {
                                                 right_row.clone()
                                             },
@@ -528,7 +528,7 @@ impl<'a> Interp<'a> {
                         }
                         None if method == "left_join" => joined.push(ct_struct(
                             "DataJoin",
-                            vec![("left", left_row), ("right", CtValue::None(Type::Named("Unknown".to_string())))],
+                            vec![("left", left_row), ("right", CtValue::absent(Type::Named("Unknown".to_string())))],
                         )),
                         None => {}
                     }

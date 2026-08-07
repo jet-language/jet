@@ -48,7 +48,7 @@ use std::collections::{HashMap, HashSet};
 use std::io::{self, BufRead, Write};
 use std::path::Path;
 
-use crate::Comptime::{CtValue, DevSink, REPL_FUEL_BUDGET};
+use crate::Comptime::{CtReport, CtValue, DevSink, REPL_FUEL_BUDGET};
 use crate::Diagnostics::Diagnostic;
 use crate::AST::{AccessConvention, CallArg, Expr, Func, Item, Stmt, StructDef};
 
@@ -1923,8 +1923,8 @@ pub(crate) fn type_name(v: &CtValue) -> &str {
         CtValue::List(_) => "List",
         CtValue::Map(_) => "Map",
         CtValue::Struct { type_name, .. } | CtValue::Enum { type_name, .. } => type_name,
-        CtValue::Some(_) | CtValue::None(_) => "Option",
-        CtValue::ResOk(_) | CtValue::ResErr(_) => "Result",
+        CtValue::Present(_) | CtValue::Failed(CtReport::Clean(_)) => "Option",
+        CtValue::Failed(CtReport::Told(_)) => "Result",
         CtValue::Unit => "()",
         CtValue::Closure(_) => "Fn",
     }

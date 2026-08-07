@@ -1230,7 +1230,7 @@ pub fn compile_rust(src: &str) -> Result<String, Vec<Diagnostic>> {
     compile(src).map(|o| o.rust)
 }
 
-pub use Comptime::CtValue;
+pub use Comptime::{CtReport, CtValue};
 pub use Diagnostics::render_all as render_diagnostics;
 pub use Diagnostics::{render_all_colored, render_all_json, render_all_linked};
 pub use Sema::check_pure_program_root;

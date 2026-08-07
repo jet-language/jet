@@ -98,7 +98,7 @@ fn as_bytes(v: &CtValue, span: Span) -> Result<Vec<u8>, Diagnostic> {
 }
 
 fn option_none() -> CtValue {
-    CtValue::None(Type::Int)
+    CtValue::absent(Type::Int)
 }
 
 fn set_struct(type_name: &str, items: Vec<CtValue>) -> CtValue {
@@ -509,11 +509,11 @@ fn set_method(
         "first" => Ok(items
             .first()
             .cloned()
-            .map_or_else(option_none, |v| CtValue::Some(Box::new(v)))),
+            .map_or_else(option_none, |v| CtValue::Present(Box::new(v)))),
         "last" if sorted => Ok(items
             .last()
             .cloned()
-            .map_or_else(option_none, |v| CtValue::Some(Box::new(v)))),
+            .map_or_else(option_none, |v| CtValue::Present(Box::new(v)))),
         "union" => {
             let other = args.first().ok_or_else(|| {
                 unsupported(&format!("{type_name}.union missing argument"), span)
@@ -647,13 +647,13 @@ fn set_mutating(
                     None
                 }
             };
-            old.map_or_else(option_none, |v| CtValue::Some(Box::new(v)))
+            old.map_or_else(option_none, |v| CtValue::Present(Box::new(v)))
         }
         // #1478: native remove-and-return-if-present (Rust's `HashSet::take`).
         "take" => {
             let value = args.first().unwrap_or(&CtValue::Unit);
             match items.iter().position(|item| item == value) {
-                Some(index) => CtValue::Some(Box::new(items.remove(index))),
+                Some(index) => CtValue::Present(Box::new(items.remove(index))),
                 None => option_none(),
             }
         }
@@ -681,7 +681,7 @@ fn priority_queue_method(
         "peek" => Ok(items
             .first()
             .cloned()
-            .map_or_else(option_none, |v| CtValue::Some(Box::new(v)))),
+            .map_or_else(option_none, |v| CtValue::Present(Box::new(v)))),
         "to_sorted_list" => Ok(CtValue::List(items)),
         _ => Err(unsupported(
             &format!("PriorityQueue.{} at compile time", method),
@@ -709,7 +709,7 @@ fn priority_queue_mutating(
             CtValue::Unit
         }
         "pop" if items.is_empty() => option_none(),
-        "pop" => CtValue::Some(Box::new(items.remove(0))),
+        "pop" => CtValue::Present(Box::new(items.remove(0))),
         _ => {
             return Err(unsupported(
                 &format!("PriorityQueue.{} at compile time", method),
@@ -800,11 +800,11 @@ fn deque_method(
         "peek_front" => Ok(items
             .first()
             .cloned()
-            .map_or_else(option_none, |v| CtValue::Some(Box::new(v)))),
+            .map_or_else(option_none, |v| CtValue::Present(Box::new(v)))),
         "peek_back" => Ok(items
             .last()
             .cloned()
-            .map_or_else(option_none, |v| CtValue::Some(Box::new(v)))),
+            .map_or_else(option_none, |v| CtValue::Present(Box::new(v)))),
         "get" => {
             let idx = match args.first() {
                 Some(CtValue::Int(i)) if *i >= 0 => *i as usize,
@@ -813,7 +813,7 @@ fn deque_method(
             Ok(items
                 .get(idx)
                 .cloned()
-                .map_or_else(option_none, |v| CtValue::Some(Box::new(v))))
+                .map_or_else(option_none, |v| CtValue::Present(Box::new(v))))
         }
         "contains" => {
             let needle = args.first().cloned().unwrap_or(CtValue::Unit);
@@ -857,9 +857,9 @@ fn deque_mutating(
             CtValue::Unit
         }
         "pop_front" if items.is_empty() => option_none(),
-        "pop_front" => CtValue::Some(Box::new(items.remove(0))),
+        "pop_front" => CtValue::Present(Box::new(items.remove(0))),
         "pop_back" => match items.pop() {
-            Some(value) => CtValue::Some(Box::new(value)),
+            Some(value) => CtValue::Present(Box::new(value)),
             None => option_none(),
         },
         "delete" => {
@@ -974,7 +974,7 @@ fn lru_mutating(
                 if entries.len() > capacity {
                     entries.pop();
                 }
-                displaced.map_or_else(option_none, |v| CtValue::Some(Box::new(v)))
+                displaced.map_or_else(option_none, |v| CtValue::Present(Box::new(v)))
             }
         }
         "get" => match key_position(&entries, &key) {
@@ -985,7 +985,7 @@ fn lru_mutating(
                 };
                 let value = pair[1].clone();
                 entries.insert(0, entry);
-                CtValue::Some(Box::new(value))
+                CtValue::Present(Box::new(value))
             }
             None => option_none(),
         },
@@ -994,7 +994,7 @@ fn lru_mutating(
                 let CtValue::List(pair) = entries.remove(index) else {
                     unreachable!("Cache entries are pairs")
                 };
-                CtValue::Some(Box::new(pair[1].clone()))
+                CtValue::Present(Box::new(pair[1].clone()))
             }
             None => option_none(),
         },
@@ -1039,17 +1039,17 @@ fn byte_buffer_method(
         "to_string" | "string" => Ok(CtValue::Str(text)),
         "is_ascii" => Ok(CtValue::Bool(bytes.is_ascii())),
         "first" => Ok(match bytes.first() {
-            Some(b) => CtValue::Some(Box::new(CtValue::Int(*b as i64))),
-            None => CtValue::None(Type::Int),
+            Some(b) => CtValue::Present(Box::new(CtValue::Int(*b as i64))),
+            None => CtValue::absent(Type::Int),
         }),
         "get" => {
             let index = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
             Ok(if index < 0 {
-                CtValue::None(Type::Int)
+                CtValue::absent(Type::Int)
             } else {
                 match bytes.get(index as usize) {
-                    Some(b) => CtValue::Some(Box::new(CtValue::Int(*b as i64))),
-                    None => CtValue::None(Type::Int),
+                    Some(b) => CtValue::Present(Box::new(CtValue::Int(*b as i64))),
+                    None => CtValue::absent(Type::Int),
                 }
             })
         }
@@ -1097,15 +1097,15 @@ fn byte_buffer_method(
         "index_of" => {
             let needle = as_string(args.first().unwrap_or(&CtValue::Str(String::new())), span)?;
             Ok(match text.find(&needle) {
-                Some(i) => CtValue::Some(Box::new(CtValue::Int(i as i64))),
-                None => CtValue::None(Type::Int),
+                Some(i) => CtValue::Present(Box::new(CtValue::Int(i as i64))),
+                None => CtValue::absent(Type::Int),
             })
         }
         "last_index_of" => {
             let needle = as_string(args.first().unwrap_or(&CtValue::Str(String::new())), span)?;
             Ok(match text.rfind(&needle) {
-                Some(i) => CtValue::Some(Box::new(CtValue::Int(i as i64))),
-                None => CtValue::None(Type::Int),
+                Some(i) => CtValue::Present(Box::new(CtValue::Int(i as i64))),
+                None => CtValue::absent(Type::Int),
             })
         }
         "split" => {
@@ -1158,8 +1158,8 @@ fn byte_buffer_method(
             }))
         }
         "parse" => match text.trim().parse::<i64>() {
-            Ok(n) => Ok(CtValue::ResOk(Box::new(CtValue::Int(n)))),
-            Err(e) => Ok(CtValue::ResErr(Box::new(CtValue::Str(e.to_string())))),
+            Ok(n) => Ok(CtValue::Present(Box::new(CtValue::Int(n)))),
+            Err(e) => Ok(CtValue::failed(Box::new(CtValue::Str(e.to_string())))),
         },
         _ => Err(unsupported(
             &format!("ByteBuffer.{} at compile time", method),
@@ -1259,40 +1259,40 @@ fn byte_buffer_mutating(
         }
         "read_byte" | "next" => {
             if pos >= bytes.len() {
-                CtValue::None(Type::Int)
+                CtValue::absent(Type::Int)
             } else {
                 let b = bytes[pos];
                 pos += 1;
-                CtValue::Some(Box::new(CtValue::Int(b as i64)))
+                CtValue::Present(Box::new(CtValue::Int(b as i64)))
             }
         }
         "read" => {
             if pos >= bytes.len() {
-                CtValue::None(Type::List(Box::new(Type::IntN { signed: false, bits: 8 })))
+                CtValue::absent(Type::List(Box::new(Type::IntN { signed: false, bits: 8 })))
             } else {
                 let out = bytes[pos..].to_vec();
                 pos = bytes.len();
-                CtValue::Some(Box::new(CtValue::Bytes(out)))
+                CtValue::Present(Box::new(CtValue::Bytes(out)))
             }
         }
         "read_bytes" => {
             let n = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
             if n < 0 || pos + (n as usize) > bytes.len() {
-                CtValue::None(Type::List(Box::new(Type::IntN { signed: false, bits: 8 })))
+                CtValue::absent(Type::List(Box::new(Type::IntN { signed: false, bits: 8 })))
             } else {
                 let out = bytes[pos..pos + n as usize].to_vec();
                 pos += n as usize;
-                CtValue::Some(Box::new(CtValue::Bytes(out)))
+                CtValue::Present(Box::new(CtValue::Bytes(out)))
             }
         }
         "read_string" => {
             let n = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
             if n < 0 || pos + (n as usize) > bytes.len() {
-                CtValue::None(Type::String)
+                CtValue::absent(Type::String)
             } else {
                 let out = bytes[pos..pos + n as usize].to_vec();
                 pos += n as usize;
-                CtValue::Some(Box::new(CtValue::Str(
+                CtValue::Present(Box::new(CtValue::Str(
                     String::from_utf8_lossy(&out).into_owned(),
                 )))
             }

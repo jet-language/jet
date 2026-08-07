@@ -22,7 +22,7 @@ use crate::Diagnostics::{Diagnostic, Span};
 use super::Diagnostics::unsupported;
 use super::Interpreter::Interp;
 use super::JSONInterp::{json_payload, json_variant};
-use super::Value::CtValue;
+use super::Value::{CtReport, CtValue};
 
 // ── [FieldError] / MigrationStatus / DecodeResult CtValue shapes ───────────
 
@@ -254,8 +254,8 @@ fn encode_ct_value(v: &CtValue, structs: &std::collections::HashMap<String, &Str
             "Array",
             Some(CtValue::List(xs.iter().map(|x| encode_ct_value(x, structs)).collect())),
         ),
-        CtValue::Some(inner) => encode_ct_value(inner, structs),
-        CtValue::None(_) => json_variant("Null", None),
+        CtValue::Present(inner) => encode_ct_value(inner, structs),
+        CtValue::Failed(CtReport::Clean(_)) => json_variant("Null", None),
         CtValue::Struct { type_name, fields } => {
             let style = structs
                 .get(type_name.as_str())
@@ -394,9 +394,9 @@ pub(super) fn typed_decode_builtin_value(
         Type::String => Some(decode_string(tree)),
         Type::Char => Some(decode_char(tree)),
         Type::Option(inner) => match variant_of(tree) {
-            Some(("Null", _)) => Some(Ok(CtValue::None((**inner).clone()))),
+            Some(("Null", _)) => Some(Ok(CtValue::absent((**inner).clone()))),
             _ => typed_decode_builtin_value(inner, tree)
-                .map(|result| result.map(|value| CtValue::Some(Box::new(value)))),
+                .map(|result| result.map(|value| CtValue::Present(Box::new(value)))),
         },
         Type::List(inner) | Type::FixedList { elem: inner, .. } => {
             if matches!(
@@ -471,7 +471,7 @@ fn zero_value(ty: &Type) -> CtValue {
         Type::Char => CtValue::Char('\0'),
         Type::List(_) | Type::FixedList { .. } => CtValue::List(Vec::new()),
         Type::Map { .. } => CtValue::Map(std::collections::BTreeMap::new()),
-        Type::Option(inner) => CtValue::None((**inner).clone()),
+        Type::Option(inner) => CtValue::absent((**inner).clone()),
         _ => CtValue::Unit,
     }
 }
@@ -487,8 +487,8 @@ impl<'a> Interp<'a> {
         }
         match ty {
             Type::Option(inner) => match variant_of(tree) {
-                Some(("Null", _)) => Ok(CtValue::None((**inner).clone())),
-                _ => Ok(CtValue::Some(Box::new(self.typed_decode_value(inner, tree, span)?))),
+                Some(("Null", _)) => Ok(CtValue::absent((**inner).clone())),
+                _ => Ok(CtValue::Present(Box::new(self.typed_decode_value(inner, tree, span)?))),
             },
             Type::List(inner) | Type::FixedList { elem: inner, .. } => {
                 let Some(("Array", Some(CtValue::List(items)))) = variant_of(tree) else {
@@ -634,7 +634,7 @@ impl<'a> Interp<'a> {
                 },
                 None => {
                     if let Type::Option(inner) = &f.ty {
-                        CtValue::None((**inner).clone())
+                        CtValue::absent((**inner).clone())
                     } else if serde_marker(&f.serde_markers, crate::Syntax::MARKER_DEFAULT).is_some() {
                         self.field_default_value(f, span)
                     } else {
@@ -668,8 +668,8 @@ impl<'a> Interp<'a> {
             let mut frame = std::collections::HashMap::new();
             frame.insert(param.name.clone(), decoded.clone());
             match self.call_func(&format!("{name}.validate"), validate, frame) {
-                Ok(CtValue::ResOk(value)) => return Ok(*value),
-                Ok(CtValue::ResErr(error)) => return Err(*error),
+                Ok(CtValue::Present(value)) => return Ok(*value),
+                Ok(CtValue::Failed(CtReport::Told(error))) => return Err(*error),
                 Ok(other) => return Err(decode_error(format!(
                     "generated validate method returned {}",
                     other.jet_show()
@@ -892,17 +892,17 @@ impl<'a> Interp<'a> {
         };
         let tree = match parsed {
             Ok(t) => t,
-            Err(e) => return Ok(CtValue::ResErr(Box::new(e))),
+            Err(e) => return Ok(CtValue::failed(Box::new(e))),
         };
         match self.typed_decode_top(ty, &tree, span) {
             Ok((value, migration)) => {
                 if method == "decode_traced" {
-                    Ok(CtValue::ResOk(Box::new(decode_result(value, migration))))
+                    Ok(CtValue::Present(Box::new(decode_result(value, migration))))
                 } else {
-                    Ok(CtValue::ResOk(Box::new(value)))
+                    Ok(CtValue::Present(Box::new(value)))
                 }
             }
-            Err(e) => Ok(CtValue::ResErr(Box::new(e))),
+            Err(e) => Ok(CtValue::failed(Box::new(e))),
         }
     }
 
@@ -918,12 +918,12 @@ impl<'a> Interp<'a> {
     ) -> Result<CtValue, Diagnostic> {
         let rows = match super::EncodingLite::csv_parse(text) {
             Ok(r) => r,
-            Err(e) => return Ok(CtValue::ResErr(Box::new(decode_error(e)))),
+            Err(e) => return Ok(CtValue::failed(Box::new(decode_error(e)))),
         };
         let mut it = rows.into_iter();
         let Some(header) = it.next() else {
             let value = CtValue::List(Vec::new());
-            return Ok(CtValue::ResOk(Box::new(if method == "decode_traced" {
+            return Ok(CtValue::Present(Box::new(if method == "decode_traced" {
                 decode_result(value, migration_status_fresh())
             } else {
                 value
@@ -958,10 +958,10 @@ impl<'a> Interp<'a> {
             }
         }
         if !errors.is_empty() {
-            return Ok(CtValue::ResErr(Box::new(CtValue::List(errors))));
+            return Ok(CtValue::failed(Box::new(CtValue::List(errors))));
         }
         let value = CtValue::List(values);
-        Ok(CtValue::ResOk(Box::new(if method == "decode_traced" {
+        Ok(CtValue::Present(Box::new(if method == "decode_traced" {
             decode_result(value, migration)
         } else {
             value

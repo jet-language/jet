@@ -14,7 +14,7 @@ use crate::AST::{BinOp, CtFloat, Type};
 
 use super::Diagnostics::{comptime_panic, divide_by_zero, index_oob, overflow, unsupported};
 use super::Methods::as_string;
-use super::Value::{CtKey, CtValue};
+use super::Value::{CtKey, CtReport, CtValue};
 
 pub fn as_bool(v: &CtValue, span: Span) -> Result<bool, Diagnostic> {
     match v {
@@ -288,9 +288,9 @@ pub fn apply_static_type_method(
             };
             let fits = n.is_finite() && n >= -(f32::MAX as f64) && n <= f32::MAX as f64;
             return Some(Ok(if fits {
-                CtValue::ResOk(Box::new(CtValue::Float(CtFloat::f32(n as f32))))
+                CtValue::Present(Box::new(CtValue::Float(CtFloat::f32(n as f32))))
             } else {
-                CtValue::ResErr(Box::new(CtValue::Str(format!(
+                CtValue::failed(Box::new(CtValue::Str(format!(
                     "value doesn't fit in {type_name}"
                 ))))
             }));
@@ -300,9 +300,9 @@ pub fn apply_static_type_method(
             let n = n.as_f64();
             let in_range = n.is_finite() && n >= lo as f64 && n < (hi + 1) as f64;
             return Some(Ok(if in_range {
-                CtValue::ResOk(Box::new(CtValue::Int(n.trunc() as i64)))
+                CtValue::Present(Box::new(CtValue::Int(n.trunc() as i64)))
             } else {
-                CtValue::ResErr(Box::new(CtValue::Str(format!(
+                CtValue::failed(Box::new(CtValue::Str(format!(
                     "value doesn't fit in {type_name}"
                 ))))
             }));
@@ -332,9 +332,9 @@ pub fn apply_static_type_method(
             let (signed, bits) = int_kind(&target).unwrap();
             let (lo, hi) = crate::AST::int_range(signed, bits);
             return Some(Ok(if (lo..=hi).contains(&(n as i128)) {
-                CtValue::ResOk(Box::new(CtValue::Int(n)))
+                CtValue::Present(Box::new(CtValue::Int(n)))
             } else {
-                CtValue::ResErr(Box::new(CtValue::Str(format!(
+                CtValue::failed(Box::new(CtValue::Str(format!(
                     "value doesn't fit in {type_name}"
                 ))))
             }));
@@ -348,8 +348,8 @@ pub fn apply_static_type_method(
                 _ => return Some(Err(unsupported("Int.parse with a non-text argument", span))),
             };
             Some(Ok(match s.trim().parse::<i64>() {
-                Ok(n) => CtValue::ResOk(Box::new(CtValue::Int(n))),
-                Err(_) => CtValue::ResErr(Box::new(CtValue::Str(format!(
+                Ok(n) => CtValue::Present(Box::new(CtValue::Int(n))),
+                Err(_) => CtValue::failed(Box::new(CtValue::Str(format!(
                     "cannot parse `{}` as an integer",
                     s
                 )))),
@@ -366,8 +366,8 @@ pub fn apply_static_type_method(
                 }
             };
             Some(Ok(match s.trim().parse::<f64>() {
-                Ok(f) => CtValue::ResOk(Box::new(CtValue::Float(CtFloat::f64(f)))),
-                Err(_) => CtValue::ResErr(Box::new(CtValue::Str(format!(
+                Ok(f) => CtValue::Present(Box::new(CtValue::Float(CtFloat::f64(f)))),
+                Err(_) => CtValue::failed(Box::new(CtValue::Str(format!(
                     "cannot parse `{}` as a float",
                     s
                 )))),
@@ -403,8 +403,8 @@ pub fn apply_static_type_method(
                 }
             };
             Some(Ok(match String::from_utf8(bytes) {
-                Ok(text) => CtValue::ResOk(Box::new(CtValue::Str(text))),
-                Err(error) => CtValue::ResErr(Box::new(CtValue::Struct {
+                Ok(text) => CtValue::Present(Box::new(CtValue::Str(text))),
+                Err(error) => CtValue::failed(Box::new(CtValue::Struct {
                     type_name: "UTF8Error".to_string(),
                     fields: vec![(
                         "message".to_string(),
@@ -556,8 +556,8 @@ pub fn apply_mutating(
             Ok(CtValue::Unit)
         }
         (CtValue::List(xs), "pop") => Ok(match xs.pop() {
-            Some(v) => CtValue::Some(Box::new(v)),
-            None => CtValue::None(Type::Int),
+            Some(v) => CtValue::Present(Box::new(v)),
+            None => CtValue::absent(Type::Int),
         }),
         (CtValue::List(xs), "reverse") => {
             xs.reverse();
@@ -581,12 +581,12 @@ pub fn apply_mutating(
                 if i < 0 || i as usize >= xs.len() {
                     return Err(index_oob(xs.len(), i, span));
                 }
-                Ok(CtValue::Some(Box::new(xs.remove(i as usize))))
+                Ok(CtValue::Present(Box::new(xs.remove(i as usize))))
             } else {
                 let value = args.first().cloned().unwrap_or(CtValue::Unit);
                 Ok(match xs.iter().position(|item| *item == value) {
-                    Some(index) => CtValue::Some(Box::new(xs.remove(index))),
-                    None => CtValue::None(xs.first().map(|item| item.jet_type()).unwrap_or(Type::Int)),
+                    Some(index) => CtValue::Present(Box::new(xs.remove(index))),
+                    None => CtValue::absent(xs.first().map(|item| item.jet_type()).unwrap_or(Type::Int)),
                 })
             }
         }
@@ -603,8 +603,8 @@ pub fn apply_mutating(
                 .ok_or_else(|| unsupported("this map key type", span))?;
             let v = it.next().unwrap_or(CtValue::Unit);
             Ok(match m.insert(k, v) {
-                Some(old) => CtValue::Some(Box::new(old)),
-                None => CtValue::None(Type::Int),
+                Some(old) => CtValue::Present(Box::new(old)),
+                None => CtValue::absent(Type::Int),
             })
         }
         (CtValue::Map(m), "add_new") => {
@@ -623,8 +623,8 @@ pub fn apply_mutating(
             let k = CtKey::from_value(args.into_iter().next().unwrap_or(CtValue::Unit))
                 .ok_or_else(|| unsupported("this map key type", span))?;
             Ok(match m.remove(&k) {
-                Some(old) => CtValue::Some(Box::new(old)),
-                None => CtValue::None(Type::Int),
+                Some(old) => CtValue::Present(Box::new(old)),
+                None => CtValue::absent(Type::Int),
             })
         }
         (CtValue::Map(m), "clear") => {
@@ -654,8 +654,8 @@ fn ctvalue_type_name(v: &CtValue) -> String {
         CtValue::List(_) => "List".to_string(),
         CtValue::Map(_) => "Map".to_string(),
         CtValue::Struct { type_name, .. } | CtValue::Enum { type_name, .. } => type_name.clone(),
-        CtValue::Some(_) | CtValue::None(_) => "Option".to_string(),
-        CtValue::ResOk(_) | CtValue::ResErr(_) => "Result".to_string(),
+        CtValue::Present(_) | CtValue::Failed(CtReport::Clean(_)) => "Option".to_string(),
+        CtValue::Failed(CtReport::Told(_)) => "Result".to_string(),
         CtValue::Unit => "()".to_string(),
         CtValue::Closure(_) => "Fn".to_string(),
     }
@@ -752,16 +752,16 @@ pub fn apply_method(
                 .unwrap_or(CtValue::Unit))
         }
         // D-HOLE1: `.zip` — pair two `Option`s, `None` if either is absent.
-        // `(v, "zip")` rather than guarding to `CtValue::Some`/`None` because
+        // `(v, "zip")` rather than guarding to `CtValue::Present`/`Failed` because
         // both arms of the pairing need the same fallback.
-        (CtValue::Some(a), "zip") => Ok(match args.into_iter().next() {
-            Some(CtValue::Some(b)) => CtValue::Some(Box::new(CtValue::Struct {
+        (CtValue::Present(a), "zip") => Ok(match args.into_iter().next() {
+            Some(CtValue::Present(b)) => CtValue::Present(Box::new(CtValue::Struct {
                 type_name: "Pair".to_string(),
                 fields: vec![("a".to_string(), (**a).clone()), ("b".to_string(), *b)],
             })),
-            _ => CtValue::None(Type::Int),
+            _ => CtValue::absent(Type::Int),
         }),
-        (CtValue::None(t), "zip") => Ok(CtValue::None(t.clone())),
+        (CtValue::Failed(CtReport::Clean(t)), "zip") => Ok(CtValue::absent(t.clone())),
         // D-SERDE-ACCESS=B: dynamic `JSON`/`Data` accessors — `Option`-returning
         // reads over the tagged tree `JSONInterp::json_variant` builds
         // (`.parse()`'s result, or a value built by hand with `JSON.Object(…)`).
@@ -780,46 +780,46 @@ pub fn apply_method(
             };
             Ok(match super::JSONInterp::json_payload(v, "Object") {
                 Some(CtValue::Map(m)) => match m.get(&CtKey::Str(key)) {
-                    Some(found) => CtValue::Some(Box::new(found.clone())),
-                    None => CtValue::None(Type::Named("JSON".to_string())),
+                    Some(found) => CtValue::Present(Box::new(found.clone())),
+                    None => CtValue::absent(Type::Named("JSON".to_string())),
                 },
                 Some(CtValue::Struct { fields, .. }) => match fields.iter().find(|(n, _)| n == &key)
                 {
-                    Some((_, found)) => CtValue::Some(Box::new(found.clone())),
-                    None => CtValue::None(Type::Named("JSON".to_string())),
+                    Some((_, found)) => CtValue::Present(Box::new(found.clone())),
+                    None => CtValue::absent(Type::Named("JSON".to_string())),
                 },
-                _ => CtValue::None(Type::Named("JSON".to_string())),
+                _ => CtValue::absent(Type::Named("JSON".to_string())),
             })
         }
         (v @ CtValue::Enum { .. }, "at") => {
             let i = as_int(args.first().unwrap_or(&CtValue::Int(-1)), span)?;
             Ok(match super::JSONInterp::json_payload(v, "Array") {
                 Some(CtValue::List(xs)) if i >= 0 && (i as usize) < xs.len() => {
-                    CtValue::Some(Box::new(xs[i as usize].clone()))
+                    CtValue::Present(Box::new(xs[i as usize].clone()))
                 }
-                _ => CtValue::None(Type::Named("JSON".to_string())),
+                _ => CtValue::absent(Type::Named("JSON".to_string())),
             })
         }
         (v @ CtValue::Enum { .. }, "int") => Ok(match super::JSONInterp::json_payload(v, "Int") {
-            Some(n) => CtValue::Some(Box::new(n.clone())),
-            None => CtValue::None(Type::Int),
+            Some(n) => CtValue::Present(Box::new(n.clone())),
+            None => CtValue::absent(Type::Int),
         }),
         (v @ CtValue::Enum { .. }, "text") => {
             Ok(match super::JSONInterp::json_payload(v, "Text") {
-                Some(s) => CtValue::Some(Box::new(s.clone())),
-                None => CtValue::None(Type::String),
+                Some(s) => CtValue::Present(Box::new(s.clone())),
+                None => CtValue::absent(Type::String),
             })
         }
         (v @ CtValue::Enum { .. }, "bool") => {
             Ok(match super::JSONInterp::json_payload(v, "Bool") {
-                Some(b) => CtValue::Some(Box::new(b.clone())),
-                None => CtValue::None(Type::Bool),
+                Some(b) => CtValue::Present(Box::new(b.clone())),
+                None => CtValue::absent(Type::Bool),
             })
         }
         (v @ CtValue::Enum { .. }, "float") => {
             Ok(match super::JSONInterp::json_payload(v, "Float") {
-                Some(f) => CtValue::Some(Box::new(f.clone())),
-                None => CtValue::None(Type::Float),
+                Some(f) => CtValue::Present(Box::new(f.clone())),
+                None => CtValue::absent(Type::Float),
             })
         }
         (CtValue::Int(n), "abs") => n
@@ -856,9 +856,9 @@ pub fn apply_method(
         (CtValue::List(xs), "get") => {
             let i = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
             Ok(if i < 0 || i as usize >= xs.len() {
-                CtValue::None(xs.first().map(|v| v.jet_type()).unwrap_or(Type::Int))
+                CtValue::absent(xs.first().map(|v| v.jet_type()).unwrap_or(Type::Int))
             } else {
-                CtValue::Some(Box::new(xs[i as usize].clone()))
+                CtValue::Present(Box::new(xs[i as usize].clone()))
             })
         }
         (CtValue::List(xs), "contains") => {
@@ -955,8 +955,8 @@ pub fn apply_method(
             let needle = args.first().cloned().unwrap_or(CtValue::Int(0));
             let idx = xs.iter().rposition(|x| x == &needle);
             Ok(match idx {
-                Some(i) => CtValue::Some(Box::new(CtValue::Int(i as i64))),
-                None => CtValue::None(Type::Int),
+                Some(i) => CtValue::Present(Box::new(CtValue::Int(i as i64))),
+                None => CtValue::absent(Type::Int),
             })
         }
         (CtValue::List(xs), "average") => {
@@ -1030,12 +1030,12 @@ pub fn apply_method(
             ))
         }
         (CtValue::List(xs), "first") => Ok(match xs.first() {
-            Some(v) => CtValue::Some(Box::new(v.clone())),
-            None => CtValue::None(Type::Int),
+            Some(v) => CtValue::Present(Box::new(v.clone())),
+            None => CtValue::absent(Type::Int),
         }),
         (CtValue::List(xs), "last") => Ok(match xs.last() {
-            Some(v) => CtValue::Some(Box::new(v.clone())),
-            None => CtValue::None(Type::Int),
+            Some(v) => CtValue::Present(Box::new(v.clone())),
+            None => CtValue::absent(Type::Int),
         }),
         (CtValue::List(xs), "flatten") => {
             let mut out = Vec::new();
@@ -1067,25 +1067,25 @@ pub fn apply_method(
         }
         (CtValue::List(xs), "min") => {
             let Some(mut best) = xs.first().cloned() else {
-                return Ok(CtValue::None(Type::Int));
+                return Ok(CtValue::absent(Type::Int));
             };
             for candidate in xs.iter().skip(1) {
                 if cmp(best.clone(), candidate.clone(), span)? == std::cmp::Ordering::Greater {
                     best = candidate.clone();
                 }
             }
-            Ok(CtValue::Some(Box::new(best)))
+            Ok(CtValue::Present(Box::new(best)))
         }
         (CtValue::List(xs), "max") => {
             let Some(mut best) = xs.first().cloned() else {
-                return Ok(CtValue::None(Type::Int));
+                return Ok(CtValue::absent(Type::Int));
             };
             for candidate in xs.iter().skip(1) {
                 if cmp(best.clone(), candidate.clone(), span)? != std::cmp::Ordering::Greater {
                     best = candidate.clone();
                 }
             }
-            Ok(CtValue::Some(Box::new(best)))
+            Ok(CtValue::Present(Box::new(best)))
         }
         (CtValue::List(xs), "intersperse") => {
             let sep = args.into_iter().next().unwrap_or(CtValue::Unit);
@@ -1164,8 +1164,8 @@ pub fn apply_method(
         (CtValue::List(xs), "index_of") => {
             let needle = args.into_iter().next().unwrap_or(CtValue::Unit);
             Ok(match xs.iter().position(|x| *x == needle) {
-                Some(index) => CtValue::Some(Box::new(CtValue::Int(index as i64))),
-                None => CtValue::None(Type::Int),
+                Some(index) => CtValue::Present(Box::new(CtValue::Int(index as i64))),
+                None => CtValue::absent(Type::Int),
             })
         }
         // Bytes (`[U8]` from `embed_bytes`) — same surface as List, u8 elements.
@@ -1174,12 +1174,12 @@ pub fn apply_method(
         (CtValue::Bytes(bs), "get") => {
             let i = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
             Ok(if i < 0 || i as usize >= bs.len() {
-                CtValue::None(Type::IntN {
+                CtValue::absent(Type::IntN {
                     signed: false,
                     bits: 8,
                 })
             } else {
-                CtValue::Some(Box::new(CtValue::Int(bs[i as usize] as i64)))
+                CtValue::Present(Box::new(CtValue::Int(bs[i as usize] as i64)))
             })
         }
 
@@ -1215,8 +1215,8 @@ pub fn apply_method(
             let idx = xs.iter().position(|x| x == &needle);
             // only exact match path for eval (sorted assumed)
             Ok(match idx {
-                Some(i) => CtValue::Some(Box::new(CtValue::Int(i as i64))),
-                None => CtValue::None(Type::Int),
+                Some(i) => CtValue::Present(Box::new(CtValue::Int(i as i64))),
+                None => CtValue::absent(Type::Int),
             })
         }
         (CtValue::List(xs), "union") => {
@@ -1242,11 +1242,11 @@ pub fn apply_method(
             Ok(CtValue::List(xs.iter().filter(|x| !other.contains(x)).cloned().collect()))
         }
         (CtValue::List(xs), "random") => {
-            if xs.is_empty() { return Ok(CtValue::None(Type::Int)); }
+            if xs.is_empty() { return Ok(CtValue::absent(Type::Int)); }
             let mut state: u64 = 0xC0FF_EE42;
             state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
             let i = ((state >> 33) as usize) % xs.len();
-            Ok(CtValue::Some(Box::new(xs[i].clone())))
+            Ok(CtValue::Present(Box::new(xs[i].clone())))
         }
         (CtValue::List(xs), "replace") => {
             let old = args.first().cloned().unwrap_or(CtValue::Int(0));
@@ -1258,10 +1258,10 @@ pub fn apply_method(
             ))
         }
         (CtValue::List(xs), "min_max") => {
-            if xs.is_empty() { return Ok(CtValue::None(Type::Int)); }
+            if xs.is_empty() { return Ok(CtValue::absent(Type::Int)); }
             let min = xs.iter().min_by(|a,b| a.jet_show().cmp(&b.jet_show())).cloned().unwrap();
             let max = xs.iter().max_by(|a,b| a.jet_show().cmp(&b.jet_show())).cloned().unwrap();
-            Ok(CtValue::Some(Box::new(CtValue::Struct {
+            Ok(CtValue::Present(Box::new(CtValue::Struct {
                 type_name: String::new(),
                 fields: vec![
                     ("min".into(), min),
@@ -1281,8 +1281,8 @@ pub fn apply_method(
             let k = CtKey::from_value(args.into_iter().next().unwrap_or(CtValue::Unit))
                 .ok_or_else(|| unsupported("this map key type", span))?;
             Ok(match m.get(&k) {
-                Some(v) => CtValue::Some(Box::new(v.clone())),
-                None => CtValue::None(Type::Int),
+                Some(v) => CtValue::Present(Box::new(v.clone())),
+                None => CtValue::absent(Type::Int),
             })
         }
         (CtValue::Map(m), "keys") => Ok(CtValue::List(m.keys().map(|k| k.to_value()).collect())),
@@ -1313,8 +1313,8 @@ pub fn apply_method(
             Ok(CtValue::Bool(m == &other))
         }
         (CtValue::Map(m), "first") => Ok(match m.keys().next() {
-            Some(k) => CtValue::Some(Box::new(k.to_value())),
-            None => CtValue::None(Type::Int),
+            Some(k) => CtValue::Present(Box::new(k.to_value())),
+            None => CtValue::absent(Type::Int),
         }),
         (CtValue::Map(m), "to_list") => Ok(CtValue::List(
             m.iter().map(|(k,v)| CtValue::Struct {
@@ -1326,12 +1326,12 @@ pub fn apply_method(
             }).collect()
         )),
         (CtValue::Map(m), "min") => Ok(match m.values().min_by(|a,b| a.jet_show().cmp(&b.jet_show())) {
-            Some(v) => CtValue::Some(Box::new(v.clone())),
-            None => CtValue::None(Type::Int),
+            Some(v) => CtValue::Present(Box::new(v.clone())),
+            None => CtValue::absent(Type::Int),
         }),
         (CtValue::Map(m), "max") => Ok(match m.values().max_by(|a,b| a.jet_show().cmp(&b.jet_show())) {
-            Some(v) => CtValue::Some(Box::new(v.clone())),
-            None => CtValue::None(Type::Int),
+            Some(v) => CtValue::Present(Box::new(v.clone())),
+            None => CtValue::absent(Type::Int),
         }),
         (CtValue::Map(m), "intersection") => {
             let Some(CtValue::Map(other)) = args.into_iter().next() else {
@@ -1360,12 +1360,12 @@ pub fn apply_method(
         }
         (CtValue::Map(m), "pop_first") => {
             let Some(key) = m.keys().next().cloned() else {
-                return Ok(CtValue::None(Type::Int));
+                return Ok(CtValue::absent(Type::Int));
             };
             // Comp-time maps are immutable values; pop_first returns the first value without mutating.
             Ok(match m.get(&key) {
-                Some(v) => CtValue::Some(Box::new(v.clone())),
-                None => CtValue::None(Type::Int),
+                Some(v) => CtValue::Present(Box::new(v.clone())),
+                None => CtValue::absent(Type::Int),
             })
         }
 
@@ -1391,8 +1391,8 @@ pub fn apply_method(
         }
         (CtValue::Str(s), "index_of") => match args.into_iter().next() {
             Some(CtValue::Str(needle)) => Ok(match s.find(&needle) {
-                Some(byte) => CtValue::Some(Box::new(CtValue::Int(s[..byte].chars().count() as i64))),
-                None => CtValue::None(Type::Int),
+                Some(byte) => CtValue::Present(Box::new(CtValue::Int(s[..byte].chars().count() as i64))),
+                None => CtValue::absent(Type::Int),
             }),
             _ => Err(unsupported("index_of with a non-text argument", span)),
         },
@@ -1433,8 +1433,8 @@ pub fn apply_method(
         },
         (CtValue::Str(s), "last_index_of") => match args.into_iter().next() {
             Some(CtValue::Str(needle)) => Ok(match s.rfind(&needle) {
-                Some(byte) => CtValue::Some(Box::new(CtValue::Int(s[..byte].chars().count() as i64))),
-                None => CtValue::None(Type::Int),
+                Some(byte) => CtValue::Present(Box::new(CtValue::Int(s[..byte].chars().count() as i64))),
+                None => CtValue::absent(Type::Int),
             }),
             _ => Err(unsupported("last_index_of with a non-text argument", span)),
         },
@@ -1463,14 +1463,14 @@ pub fn apply_method(
         },
         (CtValue::Str(s), "split_once") => match args.into_iter().next() {
             Some(CtValue::Str(sep)) => Ok(match s.find(&sep) {
-                Some(at) => CtValue::Some(Box::new(CtValue::Struct {
+                Some(at) => CtValue::Present(Box::new(CtValue::Struct {
                     type_name: "(before,after)".to_string(),
                     fields: vec![
                         ("before".to_string(), CtValue::Str(s[..at].to_string())),
                         ("after".to_string(), CtValue::Str(s[at + sep.len()..].to_string())),
                     ],
                 })),
-                None => CtValue::None(Type::Tuple(vec![
+                None => CtValue::absent(Type::Tuple(vec![
                     ("before".to_string(), Box::new(Type::String)),
                     ("after".to_string(), Box::new(Type::String)),
                 ])),
@@ -1664,7 +1664,7 @@ pub fn apply_method(
                 list_field("spans")
                     .and_then(|spans| spans.get(index))
                     .and_then(|value| match value {
-                        CtValue::Some(value) => Some(value.as_ref()),
+                        CtValue::Present(value) => Some(value.as_ref()),
                         _ => None,
                     })
                     .and_then(|value| match value {
@@ -1681,7 +1681,7 @@ pub fn apply_method(
             match method {
                 "group" => Ok(index()
                     .and_then(|index| list_field("groups")?.get(index).cloned())
-                    .unwrap_or_else(|| CtValue::None(crate::AST::Type::String))),
+                    .unwrap_or_else(|| CtValue::absent(crate::AST::Type::String))),
                 "name" => {
                     let name = as_string(
                         args.first()
@@ -1693,13 +1693,13 @@ pub fn apply_method(
                             names.iter().position(|value| {
                                 matches!(
                                     value,
-                                    CtValue::Some(value)
+                                    CtValue::Present(value)
                                         if matches!(value.as_ref(), CtValue::Str(item) if item == name)
                                 )
                             })
                         })
                         .and_then(|index| list_field("groups")?.get(index).cloned());
-                    Ok(found.unwrap_or_else(|| CtValue::None(crate::AST::Type::String)))
+                    Ok(found.unwrap_or_else(|| CtValue::absent(crate::AST::Type::String)))
                 }
                 "start" => Ok(CtValue::Int(span_value(0, "start").unwrap_or(-1))),
                 "end" => Ok(CtValue::Int(span_value(0, "end").unwrap_or(-1))),
@@ -1711,8 +1711,8 @@ pub fn apply_method(
                     };
                     Ok(index()
                         .and_then(|index| span_value(index, field))
-                        .map(|value| CtValue::Some(Box::new(CtValue::Int(value))))
-                        .unwrap_or_else(|| CtValue::None(crate::AST::Type::Int)))
+                        .map(|value| CtValue::Present(Box::new(CtValue::Int(value))))
+                        .unwrap_or_else(|| CtValue::absent(crate::AST::Type::Int)))
                 }
                 _ => unreachable!("guarded Match method"),
             }
@@ -1732,10 +1732,10 @@ pub fn apply_method(
         (CtValue::Enum { type_name, variant, args }, "loaded") if type_name == "Loadable" => {
             Ok(if variant == "Loaded" {
                 args.first()
-                    .map(|(_, value)| CtValue::Some(Box::new(value.clone())))
-                    .unwrap_or_else(|| CtValue::None(crate::AST::Type::Named("Unit".to_string())))
+                    .map(|(_, value)| CtValue::Present(Box::new(value.clone())))
+                    .unwrap_or_else(|| CtValue::absent(crate::AST::Type::Named("Unit".to_string())))
             } else {
-                CtValue::None(crate::AST::Type::Named("Unit".to_string()))
+                CtValue::absent(crate::AST::Type::Named("Unit".to_string()))
             })
         }
         (CtValue::Enum { type_name, variant, args: values }, "or_else") if type_name == "Loadable" => {
@@ -1783,7 +1783,7 @@ pub fn apply_method(
                     },
                 _ => return Err(unsupported("Duration.in expects a DurationUnit", span)),
             };
-            Ok(CtValue::ResOk(Box::new(CtValue::Int(ns / scale))))
+            Ok(CtValue::Present(Box::new(CtValue::Int(ns / scale))))
         }
         _ => Err(unsupported(
             &format!("the method `.{}` at compile time", method),

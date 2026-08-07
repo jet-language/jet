@@ -774,8 +774,8 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
             as_str(2)?,
         ))),
         "map_get" => Ok(match jet_sync_map_get(&ct_to_map(one(0)?, span)?, &as_str(1)?) {
-            Some(s) => CtValue::Some(Box::new(CtValue::Str(s))),
-            None => CtValue::None(Type::String),
+            Some(s) => CtValue::Present(Box::new(CtValue::Str(s))),
+            None => CtValue::absent(Type::String),
         }),
         "map_merge" => Ok(map_to_ct(&jet_sync_map_merge(
             &ct_to_map(one(0)?, span)?,
@@ -796,8 +796,8 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
             one(0)?, span,
         )?))),
         "policy_new" => Ok(match jet_db_policy_new(as_str(0)?, as_str(1)?) {
-            Ok(p) => CtValue::ResOk(Box::new(policy_to_ct(&p))),
-            Err(e) => CtValue::ResErr(Box::new(CtValue::Str(e))),
+            Ok(p) => CtValue::Present(Box::new(policy_to_ct(&p))),
+            Err(e) => CtValue::failed(Box::new(CtValue::Str(e))),
         }),
         "policy_allows" => Ok(CtValue::Bool(jet_db_policy_allows(
             &ct_to_policy(one(0)?, span)?,

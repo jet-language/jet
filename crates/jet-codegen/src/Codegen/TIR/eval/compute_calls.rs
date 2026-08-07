@@ -30,9 +30,9 @@ impl<'a> EvalCtx<'a> {
                 }
                 return Ok(unit);
             }
-            // take_set_ok always returns Some for ResOk/ResErr shapes; fall through
+            // take_set_ok always answers a payload for carrier shapes; fall through
             // only if the payload was unexpected.
-            return Ok(CtValue::ResErr(Box::new(CtValue::Str(
+            return Ok(CtValue::failed(Box::new(CtValue::Str(
                 "core.compute.set: unexpected ambient payload".to_string(),
             ))));
         }

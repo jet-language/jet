@@ -518,14 +518,14 @@ pub fn core_event_async_result(
 ) -> Result<CtValue, Diagnostic> {
     let capacity = policy_capacity(policy).unwrap_or(0);
     if capacity <= 0 {
-        return Ok(CtValue::ResErr(Box::new(CtValue::Enum {
+        return Ok(CtValue::failed(Box::new(CtValue::Enum {
             type_name: "EventConfigError".to_string(),
             variant: "InvalidCapacity".to_string(),
             args: vec![],
         })));
     }
     let _ = span;
-    Ok(CtValue::ResOk(Box::new(handle_value(
+    Ok(CtValue::Present(Box::new(handle_value(
         "AsyncEvent",
         push_async_event(AsyncEventState {
             listeners: Vec::new(),

@@ -2591,8 +2591,8 @@ fn repl_core_url_dispatch() {
     assert!(out.contains("Url(scheme: https"), "got: {out}");
     // dot-segment normalization: `/a/../b` -> `/b`
     assert!(out.contains("path: /b,"), "got: {out}");
-    // invalid scheme-less input takes the `ResErr` branch (not E0956/panic) —
-    // `jet_show`'s generic `Result` display collapses any `ResErr` payload to
+    // invalid scheme-less input takes the `Failed` branch (not E0956/panic) —
+    // `jet_show`'s generic `Result` display collapses any `Failed` payload to
     // the literal `err` (`AST/comptime.rs`), so the specific message isn't
     // observable through plain auto-print; this only confirms the parser
     // rejected it rather than silently accepting garbage.

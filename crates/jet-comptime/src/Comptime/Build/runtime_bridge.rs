@@ -167,7 +167,7 @@ pub fn eval_program_build_input_method(
         )),
         "fetch" => Some(
             crate::Comptime::Methods::eval_net_fetch(args, embed_inputs, span)
-                .map(|value| CtValue::ResOk(Box::new(value))),
+                .map(|value| CtValue::Present(Box::new(value))),
         ),
         _ => None,
     }
@@ -696,7 +696,7 @@ fn eval_session_method(
             } else {
                 handle_arg(&args, 0, crate::Syntax::TYPE_BUILD_TARGET, id, span)?
             };
-            return Ok(CtValue::ResOk(Box::new(handle_value(
+            return Ok(CtValue::Present(Box::new(handle_value(
                 crate::Syntax::TYPE_BUILD_PLAN,
                 id,
                 default,
@@ -763,8 +763,8 @@ fn eval_session_method(
         _ => return None.ok_or_else(|| build_diag(&format!("unknown build method `{method}`"), span)),
     };
     Ok(match result {
-        Ok(value) => CtValue::ResOk(Box::new(value)),
-        Err(error) => CtValue::ResErr(Box::new(CtValue::Str(build_error_text(&error)))),
+        Ok(value) => CtValue::Present(Box::new(value)),
+        Err(error) => CtValue::failed(Box::new(CtValue::Str(build_error_text(&error)))),
     })
 }
 
@@ -849,7 +849,7 @@ fn build_session_id(value: &CtValue) -> Option<u64> {
 }
 
 fn returned_handle(value: &CtValue, type_name: &str) -> Option<(u64, i64)> {
-    let value = match value { CtValue::ResOk(value) => value.as_ref(), other => other };
+    let value = match value { CtValue::Present(value) => value.as_ref(), other => other };
     let CtValue::Struct { type_name: actual, fields } = value else { return None };
     if actual != type_name { return None; }
     let session = fields.iter().find_map(|(n, v)| match (n.as_str(), v) {

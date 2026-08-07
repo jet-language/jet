@@ -646,7 +646,7 @@ fn serde_source_default(f: &crate::AST::Field) -> Option<String> {
 }
 
 fn serde_ct_source(value: &crate::AST::CtValue) -> Option<String> {
-    use crate::AST::CtValue;
+    use crate::AST::{CtReport, CtValue};
     Some(match value {
         CtValue::Int(v) => v.to_string(),
         CtValue::Float(v) => format!("{v:?}"),
@@ -696,10 +696,10 @@ fn serde_ct_source(value: &crate::AST::CtValue) -> Option<String> {
                 )
             }
         }
-        CtValue::Some(value) => format!("Val({})", serde_ct_source(value)?),
-        CtValue::None(_) => "None".to_string(),
-        CtValue::ResOk(value) => format!("Ok({})", serde_ct_source(value)?),
-        CtValue::ResErr(value) => format!("Err({})", serde_ct_source(value)?),
+        // D-FAIL-CARRIER1=A: one carrier, so one pair of Rust spellings.
+        CtValue::Present(value) => format!("Ok({})", serde_ct_source(value)?),
+        CtValue::Failed(CtReport::Clean(_)) => "Err(JetAbsent)".to_string(),
+        CtValue::Failed(CtReport::Told(value)) => format!("Err({})", serde_ct_source(value)?),
         CtValue::Unit | CtValue::Closure(_) => return None,
     })
 }

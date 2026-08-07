@@ -48,23 +48,23 @@ pub(super) fn apply_repl_fs_call(
             .ok_or_else(|| unsupported("core.files call has the wrong number of arguments", span))
     };
     let path = as_string(one(0)?, span)?;
-    let io_error = |error| CtValue::ResErr(Box::new(io_error_value(&path, error)));
+    let io_error = |error| CtValue::failed(Box::new(io_error_value(&path, error)));
     match method {
         "read" => Ok(match authorizer.fs_read(&path) {
             Ok(bytes) => match String::from_utf8(bytes) {
-                Ok(text) => CtValue::ResOk(Box::new(CtValue::Str(text))),
+                Ok(text) => CtValue::Present(Box::new(CtValue::Str(text))),
                 Err(error) => io_error(std::io::Error::new(std::io::ErrorKind::InvalidData, error)),
             },
             Err(error) => io_error(error),
         }),
         "read_bytes" => Ok(match authorizer.fs_read(&path) {
-            Ok(bytes) => CtValue::ResOk(Box::new(CtValue::Bytes(bytes))),
+            Ok(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
             Err(error) => io_error(error),
         }),
         "write" | "append_all" => {
             let content = as_string(one(1)?, span)?;
             Ok(match authorizer.fs_write(&path, content.as_bytes(), method == "append_all") {
-                Ok(()) => CtValue::ResOk(Box::new(CtValue::Unit)),
+                Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
                 Err(error) => io_error(error),
             })
         }
@@ -77,11 +77,11 @@ pub(super) fn apply_repl_fs_call(
             .map(CtValue::Bool)
             .map_err(|error| unsupported(&format!("secure filesystem check failed: {error}"), span)),
         "create_dir" => Ok(match authorizer.fs_create_dir(&path) {
-            Ok(()) => CtValue::ResOk(Box::new(CtValue::Unit)),
+            Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
             Err(error) => io_error(error),
         }),
         "remove" => Ok(match authorizer.fs_remove(&path) {
-            Ok(()) => CtValue::ResOk(Box::new(CtValue::Unit)),
+            Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
             Err(error) => io_error(error),
         }),
         _ => Err(unsupported(&format!("core.files.{method}"), span)),
