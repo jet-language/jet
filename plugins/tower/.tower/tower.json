@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1613,
-    "rev": 28785,
+    "rev": 28795,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -89421,7 +89421,7 @@
       "priority": "P1",
       "plan": "Root cause: neither ledger is lying on its own terms; the word `covered` is. tests/jet_gaps.txt says at the top that covered means `TIR lowered and Cranelift compiled end-to-end`, which is compile coverage. The tier-parity audit measures run coverage. Nothing cross-checks the two, so comptime/embed, comptime/embed_bytes, comptime/find and comptime/find_empty sit in jit_gaps.txt `covered:` and in tests/jit_corpus_gate.txt `frontend_rejected:` at the same time, while passing under `jet run --release`. Under I9 that is a real parity failure that is invisible to CI.\n\nWhat D-META-EFFECT1 and D-META-ONE1 change about the word: today `can this run at compile time` is membership in a closed Rust allow-list, which is what raises E0956. D-META-EFFECT1=A retires that allow-list and makes the effect set the answer, and it merges the two purity checkers. So `covered` must be keyed on tier and effect, not on a table, and E0956's compile-time wording must never surface from the run tier. That is why the four comptime rows are owed to the D-META-EFFECT1 card and not fixed here.\n\nBuild:\n1. In tests/jet_gaps.txt and in tests/dev.rs (jit_coverage_audit_inner, the JET_DUMP_JIT_GAPS writer, and parse_jit_gap_manifest), rename the `covered:` section to `compile_covered:` and update the header lines to say plainly that this file tracks compile coverage only. One word, and both ledgers stop claiming run coverage.\n2. Add one cross-check to the same test: a stem in `compile_covered:` may not appear in tests/jit_corpus_gate.txt under `frontend_rejected:`, nor under `deopt_interp:` carrying an error diagnostic, unless the stem is listed in a new `run_gaps:` section. The failure message quotes both ledger lines and the stem.\n3. Add the `run_gaps:` section to tests/jet_gaps.txt with the same shrink-only ratchet semantics the file already uses (D-LENS-RUN2), seeded with exactly the E0956 rows recorded in docs/audits/jit-run-tier-vs-aot-parity-audit-2026-07-28.md, each with its audit line as the reason. Growth fails CI.\n4. Comment the four comptime rows with the card that owes them: the D-META-EFFECT1 implementation card. Do not change the examples, the interpreter, or E0956 here.\n\nProof: one targeted check that a stem present in both ledgers fails the gate; `cargo test --test dev jit_coverage_audit` green; the four comptime rows visible in `run_gaps:` with the audit cited.\n\nDo not build: no new gate binary and no second manifest (I8), no per-example allow-list beyond the one shrink-only section, no silent removal of the four rows.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "bd3-ledger",
       "log": [
         {
           "at": "2026-08-06",
@@ -89484,9 +89484,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T19:02:46.710Z",
-      "updated": "2026-08-06T21:41:26.311Z",
-      "updatedBy": "audit-apply",
-      "workOrder": 100
+      "updated": "2026-08-07T11:51:57.495Z",
+      "updatedBy": "bd3-ledger",
+      "workOrder": 100,
+      "claimedAt": "2026-08-07T11:51:57.495Z"
     },
     {
       "id": "c0ath783",
@@ -92233,7 +92234,7 @@
       "priority": "P1",
       "plan": "Implements D-META-STAGE1 — ratified 2026-08-06. Read each decision verbatim (tower brief on this card's parent proposal, or tower decision show) before building; the ratified outcome text is the law, this plan is the route. Every requirement is a discrete exit criterion below: meet each with targeted proof (tests, snapshots, examples with golden output), and keep I9 tier parity inside this card — AOT, default jet run (JIT), and the interpreter must agree on every surface this card ships before it closes. Delete every superseded form the decisions retire in the same change; do not leave compatibility shims or parallel spellings. Reference: docs/proposals/metaprogramming-one-compile-time-program.md.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "bd3-dollar",
       "log": [
         {
           "at": "2026-08-07",
@@ -92350,9 +92351,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:34:12.218Z",
-      "updated": "2026-08-07T11:13:29.263Z",
-      "updatedBy": "bd3-mark2",
-      "workOrder": 180
+      "updated": "2026-08-07T11:51:42.659Z",
+      "updatedBy": "bd3-dollar",
+      "workOrder": 180,
+      "claimedAt": "2026-08-07T11:51:42.659Z"
     },
     {
       "id": "c0pden89",
@@ -97384,11 +97386,11 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P2",
       "plan": "Two independent fixes. No owner decision is needed; both follow existing law and precedent.\n\nFix 1 - canon.jet marker brackets. examples/canon.jet:121 spells #[Doc(\"port to listen on\")] around one marker. The ratified E0999 rule says one marker stays bare; brackets group two or more. Change it to #Doc(\"port to listen on\"). This is the same fix #1331 applied to the semindex fixtures.\n\nFix 2 - the E0328 explain-gate failure is a Markdown escaping bug, not a policy question. Explain::index() in crates/jet-cli/src/Explain.rs keeps only registry rows that split into exactly 3 cells, and split_cells already honors \\| escapes. The E0328 row (docs/spec/diagnostics.md:301) contains raw pipes inside backticks, so it splits into more than 3 cells, the row is dropped, and E0328 never enters the explain index. Every other retired code stays in the index and passes the gate, so retired codes staying explainable is the established behavior (I4, old error logs). Fix: escape the in-cell pipes in that one row as \\|. Do not change the gate scan or Explain.rs.\n\nProof: scripts/agent/jet-env cargo test -p jet --test release_gates goes green; jet explain E0328 prints the retired notice; a grep shows no other registry row with an unescaped in-cell pipe.",
       "blockedBy": [],
-      "assignee": "bd3-tests",
+      "assignee": null,
       "log": [
         {
           "at": "2026-08-07",
@@ -97420,11 +97422,11 @@
         {
           "n": 1,
           "text": "examples/canon.jet spells the single Doc marker bare (#Doc, no brackets) per E0999; release_gates test canon_compiles_and_runs passes",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-orch",
-          "verifiedBy": null,
-          "evidence": "canon.jet bracket-marker migration shipped in commit 12a832cc9 (merged to master); reviewer confirmed the edit matches criterion 1. canon_compiles_and_runs still red pending #1602 (criterion 5).",
-          "at": "2026-08-07T09:42:50.099Z"
+          "verifiedBy": "bd3-review",
+          "evidence": "Independently confirmed on master 7b127acab: examples/canon.jet:121 and :122 spell the marker bare as #Doc(\"port to listen on\") and #Doc(\"print extra detail\") with no brackets; the retired #[Doc(...)] form is gone. cargo test -p jet --test release_gates on the same commit: 16 passed, 0 failed, so canon_compiles_and_runs is green.",
+          "at": "2026-08-07T11:52:10.600Z"
         },
         {
           "n": 2,
@@ -97456,11 +97458,11 @@
         {
           "n": 5,
           "text": "scripts/agent/jet-env cargo test -p jet --test release_gates is fully green",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-orch",
-          "verifiedBy": null,
-          "evidence": "release_gates fully green on master after #1602/#1605 merged: 16 passed, 0 failed (rerun by bd3-orch, log scratchpad/readerproof2.log).",
-          "at": "2026-08-07T11:48:46.798Z"
+          "verifiedBy": "bd3-review",
+          "evidence": "Independently rerun on master 7b127acab: scripts/agent/jet-env cargo test -p jet --test release_gates -> 'test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 153.03s'. Suite fully green.",
+          "at": "2026-08-07T11:52:17.196Z"
         }
       ],
       "refs": [
@@ -97473,9 +97475,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T02:53:48.807Z",
-      "updated": "2026-08-07T11:48:48.724Z",
-      "updatedBy": "bd3-orch",
-      "claimedAt": "2026-08-07T09:17:55.182Z"
+      "updated": "2026-08-07T11:52:21.117Z",
+      "updatedBy": "bd3-review",
+      "completedAt": "2026-08-07T11:52:21.117Z"
     },
     {
       "id": "c07ylf1g",
@@ -97572,20 +97574,31 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "verify",
       "priority": "P3",
       "plan": null,
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "bd3-tests",
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "cargo test -p jet-parser arrow_control_law_formats_canonical_forms_idempotently passes with assertions matching ratified D-BRACE1 (card #808) mandatory-brace output",
+          "status": "met",
+          "metBy": "bd3-tests",
+          "verifiedBy": null,
+          "evidence": "Updated the two stale braceless assertions to the current canonical output: 'if ready { send() } else { skip() }' and 'loop item, items { audit(item) }' (D-BRACE1=A + D-LOOP-COMMA1 canonical comma separator). cargo test -p jet-parser arrow_control_law_formats_canonical_forms_idempotently: ok.",
+          "at": "2026-08-07T11:52:28.036Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T08:33:29.113Z",
-      "updated": "2026-08-07T08:33:29.114Z",
-      "updatedBy": "bd3-mark"
+      "updated": "2026-08-07T11:52:28.445Z",
+      "updatedBy": "bd3-tests",
+      "claimedAt": "2026-08-07T11:52:28.445Z"
     },
     {
       "id": "c06qhbtc",
@@ -132699,6 +132712,76 @@
   ],
   "events": [
     {
+      "at": "2026-08-07T11:52:28.445Z",
+      "by": "bd3-tests",
+      "action": "card.update",
+      "ref": "c05sqin0",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T11:52:28.036Z",
+      "by": "bd3-tests",
+      "action": "card.criteria-meet",
+      "ref": "c05sqin0",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T11:52:27.659Z",
+      "by": "bd3-tests",
+      "action": "card.criteria-add",
+      "ref": "c05sqin0",
+      "note": "#1 cargo test -p jet-parser arrow_control_law_formats_canonical"
+    },
+    {
+      "at": "2026-08-07T11:52:21.117Z",
+      "by": "bd3-review",
+      "action": "card.update",
+      "ref": "c0ksjkvh",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T11:52:17.196Z",
+      "by": "bd3-review",
+      "action": "card.criteria-verify",
+      "ref": "c0ksjkvh",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-07T11:52:10.600Z",
+      "by": "bd3-review",
+      "action": "card.criteria-verify",
+      "ref": "c0ksjkvh",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T11:51:57.495Z",
+      "by": "bd3-ledger",
+      "action": "card.claim",
+      "ref": "c05dihsu",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T11:51:42.659Z",
+      "by": "bd3-dollar",
+      "action": "card.claim",
+      "ref": "c0z2jsot",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T11:51:31.875Z",
+      "by": "bd3-tests",
+      "action": "card.update",
+      "ref": "c05sqin0",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T11:51:26.355Z",
+      "by": "bd3-tests",
+      "action": "card.claim",
+      "ref": "c05sqin0",
+      "note": ""
+    },
+    {
       "at": "2026-08-07T11:48:48.724Z",
       "by": "bd3-orch",
       "action": "card.criteria-verify",
@@ -136127,76 +136210,6 @@
       "action": "card.update",
       "ref": "c0dmreif",
       "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-07T00:56:30.795Z",
-      "by": "prep-loops",
-      "action": "card.criteria-add",
-      "ref": "c0dmreif",
-      "note": "#11 A file with '#!' on any line other than byte offset 0 produc"
-    },
-    {
-      "at": "2026-08-07T00:56:30.448Z",
-      "by": "prep-loops",
-      "action": "card.criteria-add",
-      "ref": "c0dmreif",
-      "note": "#10 examples/features/cli/direct_launch.jet (golden at examples/"
-    },
-    {
-      "at": "2026-08-07T00:56:27.229Z",
-      "by": "prep-security",
-      "action": "card.update",
-      "ref": "c0v0n8mh",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-07T00:56:26.802Z",
-      "by": "prep-security",
-      "action": "card.update",
-      "ref": "c0q3et2v",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-07T00:56:26.385Z",
-      "by": "prep-security",
-      "action": "card.update",
-      "ref": "c0kuhfjq",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-07T00:56:25.958Z",
-      "by": "prep-security",
-      "action": "card.update",
-      "ref": "c0fzojeh",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-07T00:56:25.535Z",
-      "by": "prep-security",
-      "action": "card.update",
-      "ref": "c0b26l71",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-07T00:56:22.763Z",
-      "by": "prep-loops",
-      "action": "card.update",
-      "ref": "c0dmreif",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-07T00:55:58.315Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0vh9xhx",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-07T00:55:57.937Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0vh9xhx",
-      "note": "plan,logEntry"
     }
   ],
   "nextNum": 368,
