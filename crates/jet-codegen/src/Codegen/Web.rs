@@ -2299,9 +2299,11 @@ fn wasm_storage_ty(ty: &Type) -> Option<String> {
         Type::FixedList { elem, len, .. } => {
             format!("[{}; {len}]", wasm_storage_ty(elem)?)
         }
-        Type::Option(inner) => format!("Option<{}>", wasm_storage_ty(inner)?),
+        // D-FAIL-CARRIER1=A: the wasm module names the one carrier every
+        // other tier names. `T?` is the view whose report is the clean absence.
+        Type::Option(inner) => format!("JetOutcome<{}, JetAbsent>", wasm_storage_ty(inner)?),
         Type::Result { ok, err } => format!(
-            "Result<{}, {}>",
+            "JetOutcome<{}, {}>",
             wasm_storage_ty(ok)?,
             wasm_storage_ty(err)?
         ),
@@ -2321,9 +2323,9 @@ fn wasm_internal_ty(ty: &Type, bundle: &ProgramBundle) -> Option<String> {
         Type::FixedList { elem, len, .. } => {
             format!("[{}; {len}]", wasm_internal_ty(elem, bundle)?)
         }
-        Type::Option(inner) => format!("Option<{}>", wasm_internal_ty(inner, bundle)?),
+        Type::Option(inner) => format!("JetOutcome<{}, JetAbsent>", wasm_internal_ty(inner, bundle)?),
         Type::Result { ok, err } => format!(
-            "Result<{}, {}>",
+            "JetOutcome<{}, {}>",
             wasm_internal_ty(ok, bundle)?,
             wasm_internal_ty(err, bundle)?
         ),
@@ -2493,8 +2495,8 @@ fn wasm_match_arm_pattern(pattern: &TIR::TPattern) -> Result<String, ()> {
     match &pattern.pattern {
         crate::AST::Pattern::Ok { binding, .. } => Ok(format!("Ok({})", mangle(binding))),
         crate::AST::Pattern::Err { binding, .. } => Ok(format!("Err({})", mangle(binding))),
-        crate::AST::Pattern::Present { binding, .. } => Ok(format!("Some({})", mangle(binding))),
-        crate::AST::Pattern::Absent(_) => Ok("None".to_string()),
+        crate::AST::Pattern::Present { binding, .. } => Ok(format!("Ok({})", mangle(binding))),
+        crate::AST::Pattern::Absent(_) => Ok("Err(JetAbsent)".to_string()),
         crate::AST::Pattern::Variant {
             variant, bindings, ..
         } => {
@@ -2542,7 +2544,7 @@ fn emit_wasm_if_head(
         }
         TIR::TIfCond::IsNone { subj } => {
             format!(
-                "if ({}).is_none() {{",
+                "if ({}).is_err() {{",
                 wasm_emit_expr(subj, funcs, file_prefix, reconstructions)?
             )
         }
@@ -3256,10 +3258,10 @@ fn wasm_emit_expr(
             }
         }
         TIR::TExprKind::Present(inner) => format!(
-            "Some({})",
+            "Ok({})",
             wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?
         ),
-        TIR::TExprKind::Absent => "None".to_string(),
+        TIR::TExprKind::Absent => "Err(JetAbsent)".to_string(),
         TIR::TExprKind::Ok(inner) => format!(
             "Ok({})",
             wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?
@@ -4857,6 +4859,10 @@ const WASM_ARITH_PRELUDE: &str = concat!(
     "fn jet_panic(file: &str, line: u32, message: &str) -> ! {\n",
     "    panic!(\"{}:{}: {}\", file, line, message)\n",
     "}\n\n",
+    // D-FAIL-CARRIER1=A: the very same carrier file the native prelude puts
+    // first, so `T?` and `T ? E` mean one thing on the web tier too.
+    include_str!("../../../jet-foundation/src/Outcome.rs"),
+    "\n",
     include_str!("../Prelude/Core/Power.rs"),
     "\n",
     include_str!("../Prelude/Core/Division.rs"),

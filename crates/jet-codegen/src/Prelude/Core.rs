@@ -2128,7 +2128,7 @@ fn jet_list_remove_slot<T: Clone>(xs: &mut Vec<T>, i: i64, file: &str, line: u32
 fn jet_priority_queue_remove_value<T: Ord>(
     pq: &mut std::collections::BinaryHeap<T>,
     value: T,
-) -> Option<T> {
+) -> JetOutcome<T, JetAbsent> {
     let mut items: Vec<T> = std::mem::take(pq).into_sorted_vec();
     items.reverse();
     let found = items
@@ -2136,7 +2136,7 @@ fn jet_priority_queue_remove_value<T: Ord>(
         .position(|item| *item == value)
         .map(|index| items.remove(index));
     *pq = items.into_iter().collect();
-    found
+    jet_outcome_of(found)
 }
 
 fn jet_priority_queue_remove_slot<T: Ord>(
@@ -2144,7 +2144,7 @@ fn jet_priority_queue_remove_slot<T: Ord>(
     i: i64,
     file: &str,
     line: u32,
-) -> Option<T> {
+) -> JetOutcome<T, JetAbsent> {
     let mut items: Vec<T> = std::mem::take(pq).into_sorted_vec();
     items.reverse();
     let len = items.len() as i64;
@@ -2160,7 +2160,7 @@ fn jet_priority_queue_remove_slot<T: Ord>(
     }
     let removed = items.remove(i as usize);
     *pq = items.into_iter().collect();
-    Some(removed)
+    jet_present(removed)
 }
 
 fn jet_list_count<T: PartialEq>(xs: &[T], value: &T) -> i64 {

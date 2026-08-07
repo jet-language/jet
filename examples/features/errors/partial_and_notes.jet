@@ -5,7 +5,7 @@
 // know. The middle states are the ones real programs need and could not say:
 // a failure that still produced part of the result, and an outcome worth a
 // note. Both are the same carrier, so neither needs a third type.
-
+//
 // An error type keeps part of its work by carrying it under the name
 // `partial`. The payload it keeps is the payload the outcome carries, so the
 // two types are one.
@@ -17,9 +17,7 @@ struct ImportErr {
 fn import_rows(rows: [String]) => [String] ? ImportErr {
     good :: rows.filter((row) => row != "")
     broken :: rows.len() - good.len()
-    if broken > 0 {
-        return Err(ImportErr.{ broken: broken, partial: good })
-    }
+    if broken > 0 { return Err(ImportErr.{broken: broken, partial: good}) }
     return Ok(good)
 }
 
@@ -32,9 +30,7 @@ fn run() {
     print(kept.join(", "))
 
     // The note rode along with the outcome. Nothing was unwrapped to read it.
-    loop note, spotty.notes() {
-        print(note)
-    }
+    loop note, spotty.notes() { print(note) }
 
     // A clean import kept nothing back, so the same read answers an absence
     // and the fallback stands in. One carrier, one way to ask.

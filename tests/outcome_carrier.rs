@@ -148,6 +148,50 @@ fn run() {
     );
 }
 
+/// The web tier names the same carrier. The wasm module includes the very same
+/// `Outcome.rs` file the native prelude puts first — not a copy, and not a
+/// second representation — so an outcome means one thing on every tier.
+#[test]
+fn the_web_tier_reads_the_same_carrier() {
+    let src = r#"
+#WasmExport
+fn double(n: Int) => Int = n * 2
+
+#Target(JS)
+fn run() {
+    print(double(4))
+}
+"#;
+    let out = jet::compile_web_with_path(src, "main.jet")
+        .unwrap_or_else(|diags| panic!("web fixture rejected: {diags:?}"));
+    let web = out.web.expect("web target must produce artifacts");
+
+    assert!(
+        web.wasm_rust
+            .contains("pub type JetOutcome<T, E> = Result<T, E>;")
+            && web.wasm_rust.contains("pub struct JetAbsent;"),
+        "the wasm module must include the one carrier file:\n{}",
+        web.wasm_rust
+    );
+
+    // And the web emitter spells outcomes with that carrier, so a `T?` that
+    // reaches the wasm module can only be the same thing every other tier
+    // carries.
+    let emitter = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/crates/jet-codegen/src/Codegen/Web.rs"
+    ))
+    .expect("read the web emitter");
+    assert!(
+        emitter.contains("JetOutcome<{}, JetAbsent>") && emitter.contains("Err(JetAbsent)"),
+        "the web emitter must build the one carrier"
+    );
+    assert!(
+        !emitter.contains("format!(\"Option<{}>\""),
+        "no second representation may survive on the web tier"
+    );
+}
+
 /// The verdict erases from the happy path: reading a `T?` costs no allocation
 /// and no branch beyond the one the payload already needs.
 #[test]
