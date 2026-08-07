@@ -627,7 +627,7 @@ fn jet_data_left_join_checked<T, U, FL, FR>(
     left_key: FL,
     right_key: FR,
     limits: &jet_std::DataLimits,
-) -> Result<Vec<jet_std::DataJoin<T, Option<U>>>, jet_std::DataError>
+) -> Result<Vec<jet_std::DataJoin<T, JetOutcome<U, JetAbsent>>>, jet_std::DataError>
 where
     T: Clone,
     U: Clone,
@@ -653,7 +653,7 @@ where
                     }
                     joined.push(jet_std::DataJoin {
                         left: left_row.clone(),
-                        right: Some(right_row.clone()),
+                        right: Ok(right_row.clone()),
                     });
                 }
             }
@@ -667,7 +667,7 @@ where
                 }
                 joined.push(jet_std::DataJoin {
                     left: left_row,
-                    right: None,
+                    right: Err(JetAbsent),
                 });
             }
         }

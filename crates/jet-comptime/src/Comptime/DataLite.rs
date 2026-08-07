@@ -9,8 +9,15 @@
 //! Not here: none of the call-site-typed table/lazy pipeline names above —
 //! those live in `DataPipeline.rs` (including `schema`).
 
+#[allow(unused_imports)]
+use jet_foundation::Outcome::*;
+
 mod data_plot_rt {
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     pub(crate) mod jet_std {
+        #[allow(unused_imports)]
+        pub use jet_foundation::Outcome::*;
         #[derive(Clone, Debug)]
         pub(crate) struct DataGroup {
             pub(crate) key: String,
@@ -19,13 +26,13 @@ mod data_plot_rt {
             pub(crate) mean: f64,
         }
 
-        #[derive(Clone, Debug, Default)]
+        #[derive(Clone, Debug)]
         pub(crate) struct DataLineOptions {
             pub(crate) title: String,
             pub(crate) x_label: String,
             pub(crate) y_label: String,
             pub(crate) markers: bool,
-            pub(crate) reference: Option<f64>,
+            pub(crate) reference: JetOutcome<f64, JetAbsent>,
             pub(crate) style: String,
             pub(crate) color: String,
             pub(crate) legend: String,
@@ -328,7 +335,7 @@ pub(super) fn line_text(groups: &[(String, f64)], options: &LineOptions) -> Stri
         x_label: options.x_label.clone(),
         y_label: options.y_label.clone(),
         markers: options.markers,
-        reference: options.reference,
+        reference: jet_outcome_of(options.reference),
         style: options.style.clone(),
         color: options.color.clone(),
         legend: options.legend.clone(),
@@ -351,7 +358,7 @@ pub(super) fn line_svg(groups: &[(String, f64)], options: &LineOptions) -> Strin
         x_label: options.x_label.clone(),
         y_label: options.y_label.clone(),
         markers: options.markers,
-        reference: options.reference,
+        reference: jet_outcome_of(options.reference),
         style: options.style.clone(),
         color: options.color.clone(),
         legend: options.legend.clone(),
@@ -386,7 +393,7 @@ pub(super) fn line_text_checked(
         x_label: options.x_label.clone(),
         y_label: options.y_label.clone(),
         markers: options.markers,
-        reference: options.reference,
+        reference: jet_outcome_of(options.reference),
         style: options.style.clone(),
         color: options.color.clone(),
         legend: options.legend.clone(),
@@ -412,7 +419,7 @@ pub(super) fn line_svg_checked(
         x_label: options.x_label.clone(),
         y_label: options.y_label.clone(),
         markers: options.markers,
-        reference: options.reference,
+        reference: jet_outcome_of(options.reference),
         style: options.style.clone(),
         color: options.color.clone(),
         legend: options.legend.clone(),

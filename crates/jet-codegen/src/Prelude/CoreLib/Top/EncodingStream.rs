@@ -257,7 +257,7 @@ fn jet_encoding_io_error(
         reason: "file IO failed".to_string(),
         cause: Some(jet_std::EncodingCause {
             kind: format!("{:?}", error.kind()),
-            os_code: error.raw_os_error().map(i64::from),
+            os_code: jet_outcome_of(error.raw_os_error().map(i64::from)),
             message: error.to_string(),
         }),
     }
@@ -764,8 +764,10 @@ impl jet_std::JSONReader {
     }
 }
 
-fn jet_enc_json_reader_next(reader: &mut jet_std::JSONReader) -> Result<Option<jet_std::DataEvent>, jet_std::EncodingError> {
-    reader.next_event()
+// D-FAIL-CARRIER1=A: the reader answers `Event? ? EncodingError` — the stream
+// ends with a clean absence, and a broken stream with a report.
+fn jet_enc_json_reader_next(reader: &mut jet_std::JSONReader) -> Result<JetOutcome<jet_std::DataEvent, JetAbsent>, jet_std::EncodingError> {
+    reader.next_event().map(jet_outcome_of)
 }
 
 impl jet_std::JSONWriter {
@@ -1514,8 +1516,8 @@ impl jet_std::JSONLReader {
 
 fn jet_enc_jsonl_reader_next(
     reader: &mut jet_std::JSONLReader,
-) -> Result<Option<jet_std::DataTree>, jet_std::EncodingError> {
-    reader.next_record()
+) -> Result<JetOutcome<jet_std::DataTree, JetAbsent>, jet_std::EncodingError> {
+    reader.next_record().map(jet_outcome_of)
 }
 
 fn jet_enc_jsonl_writer(
@@ -1830,7 +1832,7 @@ fn jet_csv_io_error(error: std::io::Error, offset: i64, line: i64, column: i64, 
     let mut out = jet_csv_error(jet_std::EncodingErrorKind::IO, offset, line, column, path, "file IO failed");
     out.cause = Some(jet_std::EncodingCause {
         kind: format!("{:?}", error.kind()),
-        os_code: error.raw_os_error().map(i64::from),
+        os_code: jet_outcome_of(error.raw_os_error().map(i64::from)),
         message: error.to_string(),
     });
     out
@@ -1946,7 +1948,7 @@ fn jet_csv_finish_field(budget: &JetJSONAllocationBudget, row: &mut Vec<String>,
     Ok(())
 }
 
-fn jet_enc_csv_reader_next(reader: &mut jet_std::CSVReader) -> Result<Option<Vec<String>>, jet_std::EncodingError> { reader.next_record() }
+fn jet_enc_csv_reader_next(reader: &mut jet_std::CSVReader) -> Result<JetOutcome<Vec<String>, JetAbsent>, jet_std::EncodingError> { reader.next_record().map(jet_outcome_of) }
 
 fn jet_enc_csv_writer(output: JetFileWriter, limits: jet_std::EncodingLimits) -> Result<jet_std::CSVWriter, jet_std::EncodingError> {
     jet_encoding_validate_limits(&limits).map_err(|mut error| { error.format = jet_std::EncodingFormat::CSV; error })?;
@@ -2044,7 +2046,7 @@ fn jet_cbor_stream_error(kind: jet_std::EncodingErrorKind, offset: i64, path: St
 
 fn jet_cbor_stream_io(error: std::io::Error, offset: i64, path: String) -> jet_std::EncodingError {
     let mut out = jet_cbor_stream_error(jet_std::EncodingErrorKind::IO, offset, path, "file IO failed");
-    out.cause = Some(jet_std::EncodingCause { kind: format!("{:?}", error.kind()), os_code: error.raw_os_error().map(i64::from), message: error.to_string() });
+    out.cause = Some(jet_std::EncodingCause { kind: format!("{:?}", error.kind()), os_code: jet_outcome_of(error.raw_os_error().map(i64::from)), message: error.to_string() });
     out
 }
 
@@ -2122,7 +2124,7 @@ fn jet_xml_io_error(offset: i64, error: std::io::Error) -> jet_std::EncodingErro
         reason: "file IO failed".to_string(),
         cause: Some(jet_std::EncodingCause {
             kind: format!("{:?}", error.kind()),
-            os_code: error.raw_os_error().map(i64::from),
+            os_code: jet_outcome_of(error.raw_os_error().map(i64::from)),
             message: error.to_string(),
         }),
     }
@@ -2217,6 +2219,12 @@ fn jet_xml_heap_error(offset: i64) -> jet_std::EncodingError {
 }
 
 fn jet_enc_xml_reader_next(
+    reader: &mut jet_std::XMLReader,
+) -> Result<JetOutcome<jet_std::DataTree, JetAbsent>, jet_std::EncodingError> {
+    jet_enc_xml_reader_scan(reader).map(jet_outcome_of)
+}
+
+fn jet_enc_xml_reader_scan(
     reader: &mut jet_std::XMLReader,
 ) -> Result<Option<jet_std::DataTree>, jet_std::EncodingError> {
     if let Some(error) = &reader.terminal {
@@ -2694,7 +2702,7 @@ impl jet_std::CBORReader {
     }
 }
 
-fn jet_enc_cbor_reader_next(reader: &mut jet_std::CBORReader) -> Result<Option<jet_std::DataEvent>, jet_std::EncodingError> { reader.next_event() }
+fn jet_enc_cbor_reader_next(reader: &mut jet_std::CBORReader) -> Result<JetOutcome<jet_std::DataEvent, JetAbsent>, jet_std::EncodingError> { reader.next_event().map(jet_outcome_of) }
 
 fn jet_cbor_stream_len(out: &mut Vec<u8>, major: u8, n: u64) { if n < 24 { out.push((major << 5) | n as u8); } else if n <= 255 { out.extend_from_slice(&[(major << 5) | 24, n as u8]); } else if n <= 65535 { out.push((major << 5) | 25); out.extend_from_slice(&(n as u16).to_be_bytes()); } else if n <= u32::MAX as u64 { out.push((major << 5) | 26); out.extend_from_slice(&(n as u32).to_be_bytes()); } else { out.push((major << 5) | 27); out.extend_from_slice(&n.to_be_bytes()); } }
 fn jet_cbor_stream_len_size(n: u64) -> usize { if n < 24 { 1 } else if n <= u8::MAX as u64 { 2 } else if n <= u16::MAX as u64 { 3 } else if n <= u32::MAX as u64 { 5 } else { 9 } }

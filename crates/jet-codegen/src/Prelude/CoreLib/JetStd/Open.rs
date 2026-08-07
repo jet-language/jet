@@ -642,12 +642,14 @@ mod jet_std {
         pattern.is_match(text)
     }
 
-    pub fn jet_regex_match(pattern: &JetRegex, text: &str) -> JetOutcome<JetRegexMatch, JetAbsent> {
-        pattern.match_value(text)
+    // Core answers the emit boundary with Rust plumbing; `jet_outcome_of` at the
+    // call site turns it into the carrier, exactly once.
+    pub fn jet_regex_match(pattern: &JetRegex, text: &str) -> Option<JetRegexMatch> {
+        pattern.match_value(text).ok()
     }
 
-    pub fn jet_regex_find(pattern: &JetRegex, text: &str) -> JetOutcome<String, JetAbsent> {
-        pattern.find(text)
+    pub fn jet_regex_find(pattern: &JetRegex, text: &str) -> Option<String> {
+        pattern.find(text).ok()
     }
 
     pub fn jet_regex_find_all(pattern: &JetRegex, text: &str) -> Vec<String> {

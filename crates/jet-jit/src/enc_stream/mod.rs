@@ -7,6 +7,8 @@ use super::Encoding::{alloc_datatree, clone_heap_string, read_datatree, result_e
 /// Canonical stream runtime (jet_std types + EncodingStream algorithm).
 #[allow(dead_code, unused_imports, unused_variables, clippy::all)]
 pub(crate) mod runtime {
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     trait JetShow {
         fn jet_show(&self) -> String;
     }
@@ -24,6 +26,8 @@ pub(crate) mod runtime {
     }
 
     pub mod jet_std {
+        #[allow(unused_imports)]
+        pub use jet_foundation::Outcome::*;
         use super::{JetDisplay, JetShow};
 
         #[derive(Clone, Debug, PartialEq, Eq)]
@@ -68,7 +72,7 @@ pub(crate) mod runtime {
         #[derive(Clone, Debug, PartialEq, Eq)]
         pub struct EncodingCause {
             pub kind: String,
-            pub os_code: Option<i64>,
+            pub os_code: JetOutcome<i64, JetAbsent>,
             pub message: String,
         }
         #[derive(Clone, Debug, PartialEq, Eq)]
@@ -457,7 +461,7 @@ pub(crate) mod runtime {
     pub(crate) fn enc_json_reader_next(
         reader: &mut jet_std::JSONReader,
     ) -> Result<Option<jet_std::DataEvent>, jet_std::EncodingError> {
-        jet_enc_json_reader_next(reader)
+        jet_enc_json_reader_next(reader).map(|found| found.ok())
     }
     pub(crate) fn enc_jsonl_writer(
         output: JetFileWriter,
@@ -490,7 +494,7 @@ pub(crate) mod runtime {
     pub(crate) fn enc_jsonl_reader_next(
         reader: &mut jet_std::JSONLReader,
     ) -> Result<Option<jet_std::DataTree>, jet_std::EncodingError> {
-        jet_enc_jsonl_reader_next(reader)
+        jet_enc_jsonl_reader_next(reader).map(|found| found.ok())
     }
     pub(crate) fn enc_csv_writer(
         output: JetFileWriter,
@@ -523,7 +527,7 @@ pub(crate) mod runtime {
     pub(crate) fn enc_csv_reader_next(
         reader: &mut jet_std::CSVReader,
     ) -> Result<Option<Vec<String>>, jet_std::EncodingError> {
-        jet_enc_csv_reader_next(reader)
+        jet_enc_csv_reader_next(reader).map(|found| found.ok())
     }
     pub(crate) fn enc_cbor_writer(
         output: JetFileWriter,
@@ -556,7 +560,7 @@ pub(crate) mod runtime {
     pub(crate) fn enc_cbor_reader_next(
         reader: &mut jet_std::CBORReader,
     ) -> Result<Option<jet_std::DataEvent>, jet_std::EncodingError> {
-        jet_enc_cbor_reader_next(reader)
+        jet_enc_cbor_reader_next(reader).map(|found| found.ok())
     }
     pub(crate) fn enc_xml_writer(
         output: JetFileWriter,
@@ -591,7 +595,7 @@ pub(crate) mod runtime {
     pub(crate) fn enc_xml_reader_next(
         reader: &mut jet_std::XMLReader,
     ) -> Result<Option<jet_std::DataTree>, jet_std::EncodingError> {
-        jet_enc_xml_reader_next(reader)
+        jet_enc_xml_reader_next(reader).map(|found| found.ok())
     }
 }
 

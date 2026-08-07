@@ -91,7 +91,7 @@
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub enum EncodingErrorKind { Syntax, Truncated, Unsupported, Limit, IO, State }
     #[derive(Clone, Debug, PartialEq, Eq)]
-    pub struct EncodingCause { pub kind: String, pub os_code: Option<i64>, pub message: String }
+    pub struct EncodingCause { pub kind: String, pub os_code: JetOutcome<i64, JetAbsent>, pub message: String }
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub struct EncodingError {
         pub format: EncodingFormat, pub kind: EncodingErrorKind, pub byte_offset: i64,
@@ -442,7 +442,7 @@
         pub x_label: String,
         pub y_label: String,
         pub markers: bool,
-        pub reference: Option<f64>,
+        pub reference: JetOutcome<f64, JetAbsent>,
         pub style: String,
         pub color: String,
         pub legend: String,

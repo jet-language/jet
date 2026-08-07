@@ -6,8 +6,15 @@ use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
 use std::collections::BTreeMap;
 
+#[allow(unused_imports)]
+use jet_foundation::Outcome::*;
+
 mod data_plot_rt {
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     pub(crate) mod jet_std {
+        #[allow(unused_imports)]
+        pub use jet_foundation::Outcome::*;
         #[derive(Clone, Debug)]
         pub(crate) struct DataGroup {
             pub(crate) key: String,
@@ -16,16 +23,32 @@ mod data_plot_rt {
             pub(crate) mean: f64,
         }
 
-        #[derive(Clone, Debug, Default)]
+        #[derive(Clone, Debug)]
         pub(crate) struct DataLineOptions {
             pub(crate) title: String,
             pub(crate) x_label: String,
             pub(crate) y_label: String,
             pub(crate) markers: bool,
-            pub(crate) reference: Option<f64>,
+            pub(crate) reference: JetOutcome<f64, JetAbsent>,
             pub(crate) style: String,
             pub(crate) color: String,
             pub(crate) legend: String,
+        }
+        // `Default` by hand: an empty reference line is a clean absence, which the
+        // carrier spells rather than derives.
+        impl Default for DataLineOptions {
+            fn default() -> Self {
+                Self {
+                    title: String::new(),
+                    x_label: String::new(),
+                    y_label: String::new(),
+                    markers: false,
+                    reference: Err(JetAbsent),
+                    style: String::new(),
+                    color: String::new(),
+                    legend: String::new(),
+                }
+            }
         }
     }
 
@@ -678,9 +701,9 @@ fn load_line_options(options: i64) -> DataLineOptions {
             .record_get_string(options, 7)
             .and_then(|sid| rt.heap.clone_string(sid))
             .unwrap_or_default();
-        let reference = rt.heap.record_get_int(options, 4).and_then(|raw| {
+        let reference = jet_outcome_of(rt.heap.record_get_int(options, 4).and_then(|raw| {
             (raw != 0).then(|| f64::from_bits(raw.wrapping_sub(1) as u64))
-        });
+        }));
         let markers = rt.heap.record_get_bool(options, 3).unwrap_or(false);
         DataLineOptions {
             title,
