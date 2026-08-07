@@ -4137,19 +4137,12 @@ impl<'a> Checker<'a> {
                     return None;
                 }
             }
-            if recv_ty == Type::String && method == "to_int" {
-                self.diags.push(Diagnostic::error(
-                    "E0311",
-                    "source-owned text parsing `.to_int()` is retired".to_string(),
-                    "text interpretation belongs to the destination type's `parse` operation".to_string(),
-                    "write `Int.parse(text)`".to_string(),
-                    Some(span),
-                ));
-                for arg in args.iter_mut() {
-                    self.infer(&mut arg.expr);
-                }
-                return None;
-            }
+            // D-STR-DECLINE1=C (ratified 2026-08-07): `String.to_int`/`.to_float`
+            // ship directly as `Int.parse`/`Float.parse` spellings (see
+            // crates/jet-codegen/src/Codegen/TIR/lower/builtins.rs's
+            // `("to_int", 0) if is_string => TBuiltinOp::ParseInt`) — no
+            // "retired" guard here anymore; the builtin-method dispatch below
+            // resolves the call.
             if let Type::TraitObject(trait_names) = &recv_ty {
                 // D-ANY-JAI1: a multi-trait bound (`...[A, B]`) types its loop element as a
                 // multi-name `TraitObject` — check EVERY bound trait for the method, not
