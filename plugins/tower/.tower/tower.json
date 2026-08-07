@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1620,
-    "rev": 28917,
+    "rev": 28918,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -98605,7 +98605,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T13:48:33.873Z",
-      "updated": "2026-08-07T13:48:33.874Z",
+      "updated": "2026-08-07T13:49:25.918Z",
       "updatedBy": "bd3-orch"
     }
   ],
@@ -131552,6 +131552,82 @@
       "created": "2026-08-07T10:05:21.883Z",
       "outcome": "A",
       "ratifiedAt": "2026-08-07"
+    },
+    {
+      "id": "D-ENVFLAG1",
+      "cardId": "c0vypaig",
+      "group": "surface",
+      "title": "What the environment-module selector flag is called",
+      "gist": "The command-line flag that picks one environment module needs a name that no longer says profile.",
+      "lesson": "The ratified one-word ruling keeps the word profile for exactly one meaning and renames the rest. The rename card found a flag the ruling's fold list mislabeled: --env-profile does not select a preset composition, it selects one env.<name> module from the manifest. Folding it into --preset would make one flag mean two different things. The flag kept its old spelling, so a user still types the retired word today.",
+      "explainer": "",
+      "story": "Rowan keeps two environment modules in one package: env.dev with a local database and env.ci with a hermetic one. To enter the second, Rowan types jet enter --env-profile ci. Every other surface stopped saying profile; this flag still does, and Rowan wonders whether it is the old system or the new one.",
+      "inWild": "# package manifest\nenv.dev { db :: local_postgres() }\nenv.ci  { db :: hermetic_postgres() }\n\n$ jet enter --env-profile ci   # today: retired word survives\n$ jet enter --preset fast      # presets are a different axis: declared compositions",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "--env <name>",
+          "detail": "The flag names the axis it selects: an environment module. Short, matches the env.<name> spelling in the manifest, and cannot be confused with --preset. The loss: --env reads slightly generic next to commands that already live inside an environment.",
+          "technical": "Rename EnvProfileFlag and its parse row to Env; retired --env-profile teaches the replacement with a registered diagnostic, same pattern as the E1300 row --profile already has.",
+          "code": "$ jet enter --env ci\nentered env.ci (hermetic database)\n\n$ jet enter --env-profile ci\nerror[E1301]: `--env-profile` is retired\n  fix: type `--env ci` — the flag now names the environment module directly"
+        },
+        {
+          "key": "B",
+          "name": "--enter <name> positional on enter",
+          "detail": "jet enter ci: the subcommand already means entering an environment, so the module name rides as its positional argument and no flag exists at all. Smallest surface. The loss: other commands that accepted --env-profile (run, test) still need a spelled flag, so this option only removes the flag in one place.",
+          "technical": "enter takes an optional positional env module; other commands keep a flag (whatever this ballot picks for them) — so option B must pair with A or C for the general case.",
+          "code": "$ jet enter ci\nentered env.ci (hermetic database)\n\n$ jet test --env ci   # non-enter commands still need the flag"
+        },
+        {
+          "key": "C",
+          "name": "--environment <name>",
+          "detail": "The full word, no abbreviation. Unambiguous and self-teaching, at the cost of eleven characters where every sibling flag is short. Tab completion softens the cost.",
+          "technical": "Same mechanical rename as option A with the long spelling; --env could be accepted as its documented short form only if the owner wants both, which reintroduces two spellings for one thing.",
+          "code": "$ jet enter --environment ci\nentered env.ci (hermetic database)"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Nix",
+          "note": "nix develop .#ci selects a named devShell with a positional attribute — the enter command and the selector are one gesture, like option B.",
+          "code": "$ nix develop .#ci"
+        },
+        {
+          "lang": "docker compose",
+          "note": "--profile selects optional service groups; the overload of the word profile across tools is exactly why Jet retired it.",
+          "code": "$ docker compose --profile debug up"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The flag's whole job is picking an env.<name> module, and --env says exactly that in the manifest's own spelling. It works uniformly on every command, not just enter.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It only removes the flag on enter; every other command still needs a spelled flag, so the ballot's question returns immediately."
+          },
+          {
+            "key": "C",
+            "reason": "The long word buys no clarity over --env, because the manifest itself spells the axis env."
+          }
+        ],
+        "tradeoff": "--env is one more short global flag to learn. That is acceptable because it replaces a retired spelling users must unlearn anyway."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared --env, an enter positional, and --environment, and recommended --env for matching the manifest spelling on every command.",
+        "boilOcean": "The breadth review tested a namespaced preset value and keeping the old flag; neither joined the menu because one re-merges the two axes and the other keeps a retired word.",
+        "hybrid": "The hybrid review paired option B's positional on enter with option A's flag elsewhere. That is two spellings for one selection, so the combination was rejected and the options stayed separate.",
+        "cooperative": "The cooperative review strengthened B by noting enter is by far the most-typed site, and C by noting completion erases its length cost. Both stand as real choices.",
+        "adversarial": "The adversarial review attacked --env as colliding with the env.jet file and manifest env blocks. That is agreement — flag, file, and block name one axis — so A survives."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-07T13:49:25.918Z"
     }
   ],
   "questions": [
@@ -133158,6 +133234,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-07T13:49:25.918Z",
+      "by": "bd3-orch",
+      "action": "decision.add",
+      "ref": "D-ENVFLAG1",
+      "note": "What the environment-module selector flag is called"
+    },
     {
       "at": "2026-08-07T13:48:33.874Z",
       "by": "bd3-orch",
@@ -136649,13 +136732,6 @@
       "by": "bd2-apply",
       "action": "card.criteria-meet",
       "ref": "c0vgjxm5",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-07T01:31:39.845Z",
-      "by": "bd2-apply",
-      "action": "card.criteria-meet",
-      "ref": "c0zsjsdx",
       "note": "#1"
     }
   ],
