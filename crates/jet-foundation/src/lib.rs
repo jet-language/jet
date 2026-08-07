@@ -31,7 +31,7 @@ pub mod MatchScan;
 pub mod StreamCursor;
 pub mod StructuralDebug;
 pub mod Syntax;
-pub mod TargetProfile;
+pub mod TargetMachine;
 pub mod Terminal;
 pub mod Traits;
 pub mod WasmDebug;

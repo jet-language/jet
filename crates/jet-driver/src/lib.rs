@@ -3,7 +3,7 @@
 // Re-export all lower seams so driver source files can use `crate::AST`, `crate::Sema` etc.
 pub use jet_codegen::{
     CanonicalAST, Codegen, Collections, Comptime, Diagnostics, Formatter, Generics, Lexer, Parser,
-    Sema, Syntax, TargetProfile, Traits, AST, SHA256,
+    Sema, Syntax, TargetMachine, Traits, AST, SHA256,
 };
 
 /// Install the canonical TIR evaluator into comptime/REPL/dev entry points.

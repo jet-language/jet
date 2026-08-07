@@ -466,7 +466,8 @@ flags:
   --vendor-dir <path>          with vendor: directory to copy dependencies into
   --small                      with build/run: smallest binary (S15)
   --freestanding               with build/run: no OS; rejects std-only APIs (E2-M15)
-  --target=<triple>            with build: cross-compile for a rustc target triple (E2-M15)
+  --profile=<name>             how hard to optimize: release, debug, ci (D-BUILDPROFILE1)
+  --target=<triple|machine>    what machine this is for: a rustc triple or board.<name> (D-CONF-WORD1)
   --explain-partition          with build --target=web: print the JS/WASM partition report (D-WASM1)
   --locked                     with fetch: verify only, refuse network
   --verbose, -v                with build: print the bridge steps
@@ -944,7 +945,7 @@ fn main() {
     let fmt_check = jet_argv.iter().any(|a| a == "--check");
     let json = jet_argv.iter().any(|a| a == "--json");
     let small = jet_argv.iter().any(|a| a == "--small");
-    let freestanding = jet_argv.iter().any(|a| a == "--freestanding");
+    let freestanding_flag = jet_argv.iter().any(|a| a == "--freestanding");
     let allow_impure = jet_argv.iter().any(|a| a == "--allow-impure");
     let build_grants: Vec<String> = ["exec", "fs", "net", "env", "io", "db", "time", "rand", "log", "gpu"]
         .into_iter()
@@ -960,10 +961,32 @@ fn main() {
     let capabilities_json = jet_argv.iter().any(|a| a == "--capabilities-json");
     // D-SUPPLY1: `jet build --sbom` writes an SPDX SBOM next to the binary.
     let sbom = jet_argv.iter().any(|a| a == "--sbom");
-    // E2-M15: cross-compilation target triple (`--target=<triple>`).
-    let cross_target: Option<String> = jet_argv
+    // E2-M15 / D-CONF-WORD1=A: the machine axis. `--target=` takes a rustc
+    // triple or a declared machine name; a machine supplies its own triple and
+    // brings its no-OS facts with it.
+    let requested_target: Option<String> = jet_argv
         .iter()
         .find_map(|a| a.strip_prefix("--target=").map(str::to_string));
+    let selected_machine = requested_target
+        .as_deref()
+        .and_then(jet::Driver::target_machine_by_name);
+    if let Some(name) = requested_target.as_deref() {
+        if selected_machine.is_none() && name.starts_with("board.") {
+            eprintln!("error: unknown target machine `{name}`");
+            eprintln!(
+                " fix: use one of {}, or a rustc target triple",
+                jet::Driver::TARGET_MACHINE_NAMES.join(", ")
+            );
+            exit(ExitCodes::USAGE);
+        }
+    }
+    let cross_target: Option<String> = match &selected_machine {
+        Some(machine) => Some(machine.triple.clone()),
+        None => requested_target.clone(),
+    };
+    // A no-OS machine carries the freestanding fact, so naming it is enough.
+    let freestanding = freestanding_flag
+        || selected_machine.as_ref().is_some_and(|machine| machine.no_os);
     let remote_builder: Option<String> = jet_argv.iter().enumerate().find_map(|(index, arg)| {
         arg.strip_prefix("--builder=")
             .map(str::to_string)

@@ -17,9 +17,9 @@ use crate::AST::{
 use super::super::Merge::{self, EntryContribution, MergeError, MergedEntry, Scalar};
 use super::DevService::evaluate_dev_service;
 use super::Environment::{
-    files_from_value, lifecycle_from_field, languages_from_value, profiles_from_value,
+    files_from_value, lifecycle_from_field, languages_from_value, presets_from_value,
     qualified_call_name, EnvironmentIntegration, EnvironmentLifecycle, IntegrationKind,
-    LanguageSpec, PackageProfileSpec, ProfileSpec,
+    LanguageSpec, PackageProfileSpec, PresetSpec,
 };
 use super::Diagnostics::{
     not_a_namespace_literal, packages_not_a_list, prompt_bad_field, prompt_bad_value,
@@ -594,7 +594,7 @@ struct EnvCapture {
     secrets: Vec<String>,
     adapters: Vec<AdapterPlan>,
     lifecycle: EnvironmentLifecycle,
-    profiles: Vec<ProfileSpec>,
+    profiles: Vec<PresetSpec>,
     languages: Vec<LanguageSpec>,
     files: Vec<super::Environment::ManagedFile>,
 }
@@ -959,14 +959,14 @@ fn evaluate_env_fields(
                         .push(Scalar::normal(v.jet_show()));
                 }
             }
-        } else if name == Syntax::ENV_FIELD_PROFILES {
+        } else if name == Syntax::ENV_FIELD_PRESETS {
             if let Some(value) = resolved.get(name) {
-                profiles.extend(profiles_from_value(value).map_err(|error| {
+                profiles.extend(presets_from_value(value).map_err(|error| {
                     Diagnostic::error(
                         "E1332",
-                        format!("environment profile declaration is invalid: {error}"),
-                        "profiles are named typed records with string package, variable, and inheritance facts".to_string(),
-                        "use `profiles: { dev: .{ packages: [\"tool@nixpkgs\"] } }`".to_string(),
+                        format!("environment preset declaration is invalid: {error}"),
+                        "presets are named typed records with string package, variable, and inheritance facts".to_string(),
+                        "use `presets: { dev: .{ packages: [\"tool@nixpkgs\"] } }`".to_string(),
                         Some(*span),
                     )
                 })?);

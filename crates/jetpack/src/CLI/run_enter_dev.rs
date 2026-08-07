@@ -69,7 +69,7 @@ pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
                             Some(cmd) if !cmd.is_empty() => {
                                 let mut plan = match load_project_plan_with_selections(
                                     theme,
-                                    parsed.flags.profile.as_deref(),
+                                    parsed.flags.preset.as_deref(),
                                     parsed.flags.environment_profile.as_deref(),
                                 ) {
                                     Ok(plan) => plan,
@@ -147,7 +147,7 @@ pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
         },
         None => match load_project_plan_with_selections(
             theme,
-            parsed.flags.profile.as_deref(),
+            parsed.flags.preset.as_deref(),
             parsed.flags.environment_profile.as_deref(),
         ) {
             Ok(plan) => plan,
@@ -242,7 +242,7 @@ pub(super) fn run_project_task_with_mode(
     let mut plan = if has_env {
         match load_project_plan_with_selections(
             theme,
-            parsed.flags.profile.as_deref(),
+            parsed.flags.preset.as_deref(),
             parsed.flags.environment_profile.as_deref(),
         ) {
             Ok(plan) => plan,
@@ -1432,7 +1432,7 @@ pub(super) fn cmd_enter(theme: &Theme, parsed: &Parsed) -> i32 {
     let mut plan = if has_env_file || parsed.flags.packages.is_empty() {
         match load_project_plan_with_selections(
             theme,
-            parsed.flags.profile.as_deref(),
+            parsed.flags.preset.as_deref(),
             parsed.flags.environment_profile.as_deref(),
         ) {
             Ok(plan) => plan,
@@ -1529,7 +1529,7 @@ fn cmd_env_test(theme: &Theme, parsed: &Parsed) -> i32 {
     let roots = Store::resolve();
     let mut plan = match load_project_plan_with_selections(
         theme,
-        parsed.flags.profile.as_deref(),
+        parsed.flags.preset.as_deref(),
         parsed.flags.environment_profile.as_deref(),
     ) {
         Ok(plan) => plan,
@@ -1595,7 +1595,7 @@ fn cmd_env_sync(theme: &Theme, parsed: &Parsed) -> i32 {
     let project_dir = project_env_root(&cwd);
     let mut plan = match load_project_plan_with_selections(
         theme,
-        parsed.flags.profile.as_deref(),
+        parsed.flags.preset.as_deref(),
         parsed.flags.environment_profile.as_deref(),
     ) {
         Ok(plan) => plan,
@@ -1675,7 +1675,7 @@ fn cmd_env_sync(theme: &Theme, parsed: &Parsed) -> i32 {
 fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
     let plan = match load_project_plan_with_selections(
         theme,
-        parsed.flags.profile.as_deref(),
+        parsed.flags.preset.as_deref(),
         parsed.flags.environment_profile.as_deref(),
     ) {
         Ok(plan) => plan,
@@ -1683,19 +1683,19 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
     };
     let profile = plan
         .environment
-        .selected_profile
+        .selected_preset
         .as_ref()
         .map(|profile| profile.name.as_str())
         .unwrap_or("<none>");
-    let selected_profiles = plan
+    let selected_presets = plan
         .environment
-        .selected_profile
+        .selected_preset
         .as_ref()
-        .map(|profile| profile.selected_profiles.clone())
+        .map(|profile| profile.selected_presets.clone())
         .unwrap_or_default();
-    let applied_profiles = plan
+    let applied_presets = plan
         .environment
-        .selected_profile
+        .selected_preset
         .as_ref()
         .map(|profile| profile.applied.clone())
         .unwrap_or_default();
@@ -1726,7 +1726,7 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
             sources.push(source);
         }
     };
-    if let Some(profile) = &plan.environment.selected_profile {
+    if let Some(profile) = &plan.environment.selected_preset {
         for name in profile.variables.keys() {
             add_variable(name, "profile".to_string());
         }
@@ -2002,10 +2002,10 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
             .collect::<Vec<_>>()
             .join(",");
         println!(
-            "{{\"profile\":{},\"selected_profiles\":[{}],\"applied_profiles\":[{}],\"profiles\":[{}],\"package_profiles\":[{}],\"environments\":[{}],\"active_environment\":{},\"active_environment_provenance\":[{}],\"sources\":[{}],\"language_catalog\":{{\"source\":\"jet-env-model builtin\",\"fingerprint\":{},\"packs\":[{}]}},\"languages\":[{}],\"language_packs\":[{}],\"language_projections\":[{}],\"packages\":[{}],\"services\":[{}],\"tasks\":[{}],\"variables\":[{}],\"files\":[{}],\"dotenv\":[{}],\"integrations\":[{}]}}",
+            "{{\"preset\":{},\"selected_presets\":[{}],\"applied_presets\":[{}],\"presets\":[{}],\"package_profiles\":[{}],\"environments\":[{}],\"active_environment\":{},\"active_environment_provenance\":[{}],\"sources\":[{}],\"language_catalog\":{{\"source\":\"jet-env-model builtin\",\"fingerprint\":{},\"packs\":[{}]}},\"languages\":[{}],\"language_packs\":[{}],\"language_projections\":[{}],\"packages\":[{}],\"services\":[{}],\"tasks\":[{}],\"variables\":[{}],\"files\":[{}],\"dotenv\":[{}],\"integrations\":[{}]}}",
             crate::JSON::quote(profile),
-            quote_list(&selected_profiles.iter().map(String::as_str).collect::<Vec<_>>()),
-            quote_list(&applied_profiles.iter().map(String::as_str).collect::<Vec<_>>()),
+            quote_list(&selected_presets.iter().map(String::as_str).collect::<Vec<_>>()),
+            quote_list(&applied_presets.iter().map(String::as_str).collect::<Vec<_>>()),
             quote_list(&plan.environment.profiles.iter().map(|item| item.name.as_str()).collect::<Vec<_>>()),
             package_profiles.join(","),
             quote_list(&plan.environment.environment_names.iter().map(String::as_str).collect::<Vec<_>>()),
@@ -2041,19 +2041,19 @@ fn cmd_env_info(theme: &Theme, parsed: &Parsed) -> i32 {
     theme.status(&format!("profile: {profile}"));
     let applied = plan
         .environment
-        .selected_profile
+        .selected_preset
         .as_ref()
         .map(|profile| profile.applied.join(" -> "))
         .unwrap_or_else(|| "<none>".to_string());
-    let selected = if selected_profiles.is_empty() {
+    let selected = if selected_presets.is_empty() {
         "<none>".to_string()
     } else {
-        selected_profiles.join(", ")
+        selected_presets.join(", ")
     };
-    theme.detail(&format!("selected profiles: {selected}"));
-    theme.detail(&format!("profiles: {applied}"));
+    theme.detail(&format!("selected presets: {selected}"));
+    theme.detail(&format!("presets: {applied}"));
     theme.detail(&format!(
-        "package profiles: {}",
+        "package generations: {}",
         if plan.environment.package_profiles.is_empty() {
             "<none>".to_string()
         } else {
@@ -2221,7 +2221,7 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
         .and_then(|root| {
             EnvHook::definition_fingerprint_with_selections(
                 root,
-                parsed.flags.profile.as_deref(),
+                parsed.flags.preset.as_deref(),
                 parsed.flags.environment_profile.as_deref(),
             )
         });
@@ -2284,7 +2284,7 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
         let roots = Store::resolve();
         let mut plan = match load_project_plan_with_selections(
             theme,
-            parsed.flags.profile.as_deref(),
+            parsed.flags.preset.as_deref(),
             parsed.flags.environment_profile.as_deref(),
         ) {
             Ok(plan) => plan,
@@ -2355,7 +2355,7 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
         // new hash instead of emitting a plan assembled from mixed revisions.
         if EnvHook::definition_fingerprint_with_selections(
             &root,
-            parsed.flags.profile.as_deref(),
+            parsed.flags.preset.as_deref(),
             parsed.flags.environment_profile.as_deref(),
         )
         .as_deref()
@@ -2381,7 +2381,7 @@ fn cmd_env_export(theme: &Theme, parsed: &Parsed) -> i32 {
         }
         if EnvHook::definition_fingerprint_with_selections(
             &root,
-            parsed.flags.profile.as_deref(),
+            parsed.flags.preset.as_deref(),
             parsed.flags.environment_profile.as_deref(),
         )
         .as_deref()
@@ -2575,7 +2575,7 @@ pub(super) fn cmd_dev(theme: &Theme, parsed: &Parsed) -> i32 {
 
     let mut plan = match load_project_plan_with_selections(
         theme,
-        parsed.flags.profile.as_deref(),
+        parsed.flags.preset.as_deref(),
         parsed.flags.environment_profile.as_deref(),
     ) {
         Ok(plan) => plan,

@@ -21,6 +21,15 @@
 // optional public label ahead of its local name (`timeout seconds: Int`),
 // which needs no new token. Retires the S61 fixed-position label rule.
 //
+// D-CONF-WORD1=A gives the word `profile` one meaning, the optimize bundle
+// behind `--profile` and its `--release` sugar. The machine axis is
+// `--target`, which now takes a declared machine name (`board.<name>`) beside
+// a rustc triple. A named environment composition is a preset:
+// ENV_FIELD_PRESETS (`presets:`) and ENV_FLAG_PRESET (`--preset`) replace the
+// retired `profiles:` field and `--profile` flag, and package/user profiles
+// read as generations in prose. Retires ENV_FIELD_PROFILES and the env
+// namespace's `--profile`; ENV_FLAG_PROFILE_RETIRED exists only to teach.
+//
 // D-TRAILBLOCK2=A adds no token: retires D-TRAILBLOCK1 trailing `{ }` sugar.
 // Code arguments are ordinary `() => { … }` lambdas inside call parentheses;
 // a bare `{` after a call is E0335.

@@ -640,8 +640,8 @@ pub(super) fn load_project_plan_with_selections(
     if let Some(name) = requested_environment_profile {
         theme.error_coded(
             "E1337",
-            &format!("environment profile `{name}` is not declared"),
-            "the explicit environment-profile selector applies to typed `env.<name>` profiles",
+            &format!("environment module `{name}` is not declared"),
+            "the explicit selector applies to typed `env.<name>` modules",
             "use a typed env.jet module or omit `--env-profile`",
         );
         return Err(2);
@@ -717,12 +717,12 @@ fn typed_plan_with_defaults(
     // enable: true }` needs `redis-server` on PATH) — fold its ref in
     // alongside the author's own `packages:` so it realizes the same way.
     let mut package_refs = plan.package_refs;
-    let selected_profile = plan.selected_profile;
+    let selected_preset = plan.selected_preset;
     // `evaluate_env_with_profiles` already expanded the typed selections. Keep
     // that exact graph fact through realization; re-expanding here could make
     // planning, trust, and activation disagree if the catalog changes.
     let language_expansion = plan.language_expansion;
-    if let Some(profile) = &selected_profile {
+    if let Some(profile) = &selected_preset {
         for package in &profile.packages {
             if !package_refs.iter().any(|existing| existing == package) {
                 package_refs.push(package.clone());
@@ -772,7 +772,7 @@ fn typed_plan_with_defaults(
             lifecycle: plan.lifecycle,
             profiles: plan.profiles,
             languages: language_expansion.selections.clone(),
-            selected_profile,
+            selected_preset,
             language_expansion: language_expansion.clone(),
             language_packs: language_expansion.packs.clone(),
             language_projections: language_expansion.projections.clone(),

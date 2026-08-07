@@ -3,7 +3,7 @@
 // Re-export lower seams. Sema transitively includes Parser/Lexer/Comptime/Foundation.
 pub use jet_sema::{
     CanonicalAST, Collections, Comptime, Diagnostics, Formatter, Generics, Lexer, Parser, Sema,
-    Syntax, TargetProfile, Traits, AST, SHA256,
+    Syntax, TargetMachine, Traits, AST, SHA256,
 };
 pub mod Codegen;
 mod BrowserHost;

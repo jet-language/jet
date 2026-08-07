@@ -636,10 +636,10 @@ renumbered, and no new `W` code may be allocated.
 | E1329 | jetpack | a lifecycle hook is not explicitly trusted (D-ENV-LIFECYCLE2) |
 | E1330 | sema/jetpack | task metadata has the wrong shape or an unsafe project path (D-TASK-META1) |
 | E1331 | sema | an environment module import escapes its project root (D-ENV-FLAKEPARTS1) |
-| E1332 | sema | one environment or package profile is composed with conflicting definitions (D-ENV-PROFILE1/D-JPK-PROFILE1) |
+| E1332 | sema | one environment preset or package generation is composed with conflicting definitions (D-ENV-PROFILE1/D-JPK-PROFILE1) |
 | E1333 | sema | a typed environment fact, language-pack selection, or dotenv declaration is invalid or conflicting (D-ENV-LIFECYCLE2/D-ENV-LANGPACK1) |
 | E1334 | jetpack | an explicit workspace member is missing or is not a Package directory (D-ECO-MEMBERS1) |
-| E1335 | sema/jetpack | an environment integration or package-profile provider fact is conflicting, lossy, or invalid (D-ENV-INTEGRATIONS1/D-JPK-PROFILE1) |
+| E1335 | sema/jetpack | an environment integration or package-generation provider fact is conflicting, lossy, or invalid (D-ENV-INTEGRATIONS1/D-JPK-PROFILE1) |
 | E1336 | jetpack | an environment image cannot project a service or verified package output (D-ENV-IMAGE1) |
 | E1101 | sema  | task capture needs ownership              |
 | E1102 | sema  | value crossing task/channel boundary is not sendable |
@@ -758,6 +758,7 @@ renumbered, and no new `W` code may be allocated.
 | E1297 | jetpack | `jetpack tool install` bin name collides with a project `#Job fn` (JPK-TOOL-COLLIDE, D-JPK-TOOLRUN1) |
 | E1298 | jetpack | `jetpack tool` ref names an external provider with no hangar realization path yet (JPK-TOOL-PROVIDER, D-JPK-TOOLRUN1) |
 | E1299 | jetpack | Hangar Store v2 path law rejected a store path component (case-fold collision, reserved Windows name, trailing `.`/` `, absolute/dot components) (E4-JP1) |
+| E1300 | jetpack | the retired `--profile` spelling selected an environment composition; presets own that word now (D-CONF-WORD1) |
 | E1315 | jetpack | Hangar Store v2 ingest aborted (source mutated during race-safe copy, unsupported special object/xattr, or digest mismatch on verify) (E4-JP1) |
 | E1316 | jetpack | ambiguous or unmatched typed package variant selection (E4-JP15, D-JPK-VARIANT1) |
 | E1317 | jetpack | a direct CLI ref uses retired provider-first order or the retired `path@` prefix (D-JPK-REF1) |
@@ -909,12 +910,13 @@ membership, profile, managed-file, service, or task state is applied.
 | E1329 | a lifecycle hook is not explicitly trusted | Hooks execute project commands during activation. | Set `trusted: true` after review and approve the changed environment. |
 | E1330 | task metadata or a task path is invalid | Task packages, cache inputs/outputs, cwd, and limits must be deterministic and project-contained. | Use the typed metadata shape and project-relative paths without `..`. |
 | E1331 | an environment import escapes its root | One environment graph cannot import files outside its project boundary. | Use a relative import directory without `..` or an escaping symlink. |
-| E1332 | profile definitions conflict | Composition cannot silently choose one profile's packages, variables, parents, or collision choices over another's. | Merge equal facts or give the profiles different names. |
+| E1332 | preset or generation definitions conflict | Composition cannot silently choose one definition's packages, variables, parents, or collision choices over another's. | Merge equal facts or give them different names. |
 | E1333 | a typed environment fact is invalid | Language packs use one catalog with explicit host, platform, license, and required-tool facts. Dotenv paths stay inside the project, and expert allowlists make secret handling explicit. | Fix the language selection/catalog fact, or use a project-relative file and `Dotenv.{ file, allow, secrets }` with valid variable names. |
 | E1334 | an explicit workspace member is not a Package directory | Workspace membership names existing Package roots; a missing or manifest-free directory cannot become a stable graph node. | Create `package.jet` (or finish migration from `pkg.jet`), correct the path, or use `find("./packages")`. |
-| E1335 | an environment integration or package-profile provider fact is conflicting or lossy | Integrations and package profiles lower into shared typed facts; one graph cannot choose two policies or silently discard package identity, provider, or collision input. | Merge the declarations, use a supported package ref, or select a provider retained by the profile. |
+| E1335 | an environment integration or package-generation provider fact is conflicting or lossy | Integrations and package generations lower into shared typed facts; one graph cannot choose two policies or silently discard package identity, provider, or collision input. | Merge the declarations, use a supported package ref, or select a provider retained by the generation. |
 | E1336 | an environment image cannot project a service or verified package output | D-ENV-IMAGE1 keeps image layers tied to one verified Hangar package output. A service needs the typed supervisor, and an absent, empty, conflicting, or unsafe package `bin` projection cannot be copied into an image. | Run the declared service through `jetpack services`, or realize one executable package output and run `jet image` again. |
-| E1337 | the requested environment profile is not declared | One environment plan activates one `env.<name>` profile; silently merging sibling profiles would mix unrelated packages and variables. | Select one of the declared environment profile names, or omit `--env-profile` to use `dev`, then `default`, then lexical order. |
+| E1300 | `--profile` is retired | Profile answers how hard to optimize a build. A named environment composition is a preset, so one word never answers two questions. | Select the composition with `--preset <name>`, declared under `presets:`. |
+| E1337 | the requested environment module is not declared | One environment plan activates one `env.<name>` module; silently merging siblings would mix unrelated packages and variables. | Select one of the declared module names, or omit `--env-profile` to use `dev`, then `default`, then lexical order. |
 
 ## Dev-loop diagnostics (E2-M4, `jet dev`)
 

@@ -21,7 +21,7 @@ use super::Eval::{evaluate_modules, merge_all, parse_program, pkg_ref};
 use super::Environment::{
     qualified_call_name, EnvironmentIntegration, EnvironmentLifecycle, IntegrationFactProjection,
     IntegrationKind, LanguagePackCatalog, LanguageSpec, ManagedFile, PackageProfileFact,
-    PackageProfilePlan, PackageProfileSet, ProfileSet,
+    PackageProfilePlan, PackageProfileSet, PresetSet,
 };
 use super::Types::{
     AdapterPlan, EnvPlan, FleetPlan, ImageKind, ImagePlan, PromptPathMode, PromptStripMode,
@@ -250,7 +250,7 @@ pub fn evaluate_env_with_profiles(
     let mut secrets: Vec<String> = Vec::new();
     let mut adapters: Vec<AdapterPlan> = Vec::new();
     let mut lifecycle = EnvironmentLifecycle::default();
-    let mut profiles = ProfileSet::default();
+    let mut profiles = PresetSet::default();
     let mut package_profiles = PackageProfileSet::default();
     let mut languages = Vec::new();
     let mut files: Vec<ManagedFile> = Vec::new();
@@ -577,19 +577,19 @@ pub fn evaluate_env_with_profiles(
                     .unwrap_or_default(),
             )
         });
-    let selected_profile = (!selected_names.is_empty())
+    let selected_preset = (!selected_names.is_empty())
         .then(|| profiles.resolve_many(&selected_names))
         .transpose()
         .map_err(|error| {
             Diagnostic::error(
                 "E1332",
-                format!("environment profile could not be resolved: {error}"),
-                "profile inheritance is resolved parent-first and must remain acyclic".to_string(),
-                "fix the profile name, parent reference, or inheritance cycle".to_string(),
+                format!("environment preset could not be resolved: {error}"),
+                "preset inheritance is resolved parent-first and must remain acyclic".to_string(),
+                "fix the preset name, parent reference, or inheritance cycle".to_string(),
                 None,
             )
         })?;
-    if let Some(profile) = &selected_profile {
+    if let Some(profile) = &selected_preset {
         for package in &profile.packages {
             push_unique(&mut package_refs, package.clone());
         }
@@ -626,7 +626,7 @@ pub fn evaluate_env_with_profiles(
         lifecycle,
         profiles: profiles.profiles.values().cloned().collect(),
         languages,
-        selected_profile,
+        selected_preset,
         language_expansion,
         language_packs,
         language_projections,
@@ -650,9 +650,9 @@ fn select_active_environment(
         }
         return Err(Diagnostic::error(
             "E1337",
-            format!("environment profile `{name}` is not declared"),
-            "one environment plan activates one declared `env.<name>` profile; sibling profiles stay available for explicit selection".to_string(),
-            "choose one of the declared environment profile names".to_string(),
+            format!("environment module `{name}` is not declared"),
+            "one environment plan activates one declared `env.<name>` module; siblings stay available for explicit selection".to_string(),
+            "choose one of the declared `env.<name>` module names".to_string(),
             None,
         ));
     }

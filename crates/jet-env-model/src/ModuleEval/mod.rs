@@ -43,8 +43,8 @@ pub use Environment::{
     DotenvSpec, EnvironmentLifecycle, FileConflict, FileMode, HookAction, HookSpec, LanguageExpansion, LanguagePack,
     LanguagePackCatalog, LanguageProjection, LanguageSpec, ManagedFile, ManagedFileError,
     EnvironmentIntegration, IntegrationKind, PackageProfileError, PackageProfileFact,
-    PackageProfilePackage, PackageProfilePlan, PackageProfileSet, PackageProfileSpec, ProfileError,
-    ProfileSet, ProfileSpec, ReloadPolicy, ResolvedPackageProfile, ResolvedProfile, valid_env_name,
+    PackageProfilePackage, PackageProfilePlan, PackageProfileSet, PackageProfileSpec, PresetError,
+    PresetSet, PresetSpec, ReloadPolicy, ResolvedPackageProfile, ResolvedPreset, valid_env_name,
 };
 
 #[cfg(test)]
@@ -213,7 +213,7 @@ module profile.b { extends: ["a"] }
         let source = format!(
             r#"
 module env.dev {{
-    profiles: [
+    presets: [
         "ambient": .{{ hostname: "{hostname}", extends: ["cycle"] }},
         "cycle": .{{ extends: ["ambient"] }},
         "explicit": .{{ packages: ["git@nixpkgs"] }}
@@ -223,7 +223,7 @@ module env.dev {{
         );
         let plan = evaluate_env_with_profile(&source, &base_dir(), Some("explicit")).unwrap();
         assert_eq!(
-            plan.selected_profile.as_ref().map(|profile| profile.name.as_str()),
+            plan.selected_preset.as_ref().map(|profile| profile.name.as_str()),
             Some("explicit")
         );
         assert!(plan.package_refs.contains(&"git@nixpkgs".to_string()));

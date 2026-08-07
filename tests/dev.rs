@@ -5683,7 +5683,7 @@ fn lowlevel_and_safety_match_interpreter_jit_and_aot() {
         "lowlevel/pointer_cast_deref",
         "lowlevel/sized_floats",
         "lowlevel/swizzle",
-        "lowlevel/target_profile_board",
+        "lowlevel/target_machine_board",
         "lowlevel/unsafe_obligations",
         "safety/sh_typed_text",
         "safety/typed_sql",

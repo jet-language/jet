@@ -2152,12 +2152,34 @@ fn enter_flake_with_no_foreign_flake_present_is_friendly() {
 }
 
 #[test]
-fn env_info_json_discloses_selected_environment_profile_and_language_projection() {
+fn retired_profile_flag_teaches_preset() {
+    let project = Scratch::new("retired-profile-flag");
+    fs::write(
+        project.join("env.jet"),
+        "module env.dev {\n    packages: [nixpkgs.ripgrep]\n}\n",
+    )
+    .unwrap();
+    let output = jetpack()
+        .args(["enter", "info", "--profile", "work", "--no-color"])
+        .current_dir(&project.path)
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("E1300"), "stderr: {stderr}");
+    assert!(stderr.contains("--preset"), "stderr: {stderr}");
+    assert!(
+        !output.status.success(),
+        "the retired spelling must not select anything"
+    );
+}
+
+#[test]
+fn env_info_json_discloses_selected_preset_and_language_projection() {
     let project = Scratch::new("env-info-composition");
     fs::write(
         project.join("env.jet"),
         r#"module env.dev {
-    profiles: [
+    presets: [
         "host": .{ hostname: "epoch5-host", variables: { "MODE": "dev" } },
         "user": .{ user: "epoch5-user" }
     ]
@@ -2190,8 +2212,8 @@ module env.full {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("\"profile\":\"host+user\""), "stdout: {stdout}");
-    assert!(stdout.contains("\"selected_profiles\":[\"host\",\"user\"]"), "stdout: {stdout}");
+    assert!(stdout.contains("\"preset\":\"host+user\""), "stdout: {stdout}");
+    assert!(stdout.contains("\"selected_presets\":[\"host\",\"user\"]"), "stdout: {stdout}");
     assert!(stdout.contains("\"active_environment\":\"dev\""), "stdout: {stdout}");
     assert!(stdout.contains("\"active_environment_provenance\":[\"env.dev\"]"), "stdout: {stdout}");
     assert!(stdout.contains("\"language_catalog\""), "stdout: {stdout}");
