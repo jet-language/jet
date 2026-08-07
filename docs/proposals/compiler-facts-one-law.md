@@ -406,17 +406,19 @@ Only what wins on merit; nothing stays because it shipped.
 
 ## Decisions for the owner
 
-Direction-level; each stands alone; worked examples in the sections above.
+All seven ratified 2026-08-07 on card #1620. Outcomes are recorded in the
+`docs/spec/syntax-decisions.md` decision log, and the law is stated in
+`docs/spec/philosophy.md`. Worked examples remain in the sections above.
 
-| ID | Question | Recommendation |
+| ID | Question | Outcome |
 |---|---|---|
-| D-FACT-LAW1 | Ratify the one-way law as one spec law that EXACT1, AUTHORITY-MODEL1, CONF-MERGE1, POLICY-SCOPE1, FLOWTYPE1, and the duty rules instantiate | adopt with the guarded registry (option B) |
-| D-FACT-WORD1 | One law vocabulary in diagnostics and docs: facts tighten, a gate loosens; "attenuate/conserve" retire as law-words (flow narrowing keeps its operation name) | adopt tighten/loosen (option A) |
-| D-FACT-GATE1 | One ledger + `jet inspect gates` for every gate (generalizes D-AUTHORITY-GATE1); choose full ledger vs security-gates-only | full ledger |
-| D-FACT-READ1 | `$` reads every registered plane (`T.$range`, `f.$effects`, `x.$state`); extends D-CONF-READ1 / D-META-STAGE1; kills string reflection | adopt |
-| D-FACT-HOME1 | Home the user-facing orphans: attribution, `#Track`, view/unit provenance, maturity, send-safety become registry rows; prover internals (uninit, exhaustiveness) stay engine-side; phantom fact enums rejected at signatures with fix-its | adopt |
-| D-FACT-OWN1 | Ratify the wall: the borrow checker is a prover, never a plane; its published facts register; the sigil surface is closed | adopt |
-| D-FACT-FLOW1 | One flow-fact store and one join contract for moved/uninit/state/narrow/taint (machinery; fixes the dead joins) | adopt |
+| D-FACT-LAW1 | Ratify the one-way law as one spec law that EXACT1, AUTHORITY-MODEL1, CONF-MERGE1, POLICY-SCOPE1, FLOWTYPE1, and the duty rules instantiate | **B** — one law plus the guarded registry |
+| D-FACT-WORD1 | One law vocabulary in diagnostics and docs: facts tighten, a gate loosens; "attenuate/conserve" retire as law-words (flow narrowing keeps its operation name) | **A** — tighten/loosen |
+| D-FACT-GATE1 | One ledger + `jet inspect gates` for every gate (generalizes D-AUTHORITY-GATE1); choose full ledger vs security-gates-only | **A** — full ledger, grouped by kind |
+| D-FACT-READ1 | `$` reads every registered plane (`T.$range`, `f.$effects`, `x.$state`); extends D-CONF-READ1 / D-META-STAGE1; kills string reflection | **A** — adopted |
+| D-FACT-HOME1 | Home the user-facing orphans: attribution, `#Track`, view/unit provenance, maturity, send-safety become registry rows; prover internals (uninit, exhaustiveness) stay engine-side; phantom fact enums rejected at signatures with fix-its | **A** — adopted |
+| D-FACT-OWN1 | Ratify the wall: the borrow checker is a prover, never a plane; its published facts register; the sigil surface is closed | **A** — wall ratified |
+| D-FACT-FLOW1 | One flow-fact store and one join contract for moved/uninit/state/narrow/taint (machinery; fixes the dead joins) | **A** — adopted |
 
 ## Implementation shape
 
