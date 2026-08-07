@@ -10,7 +10,7 @@ are inventoried independently from their source registries by the same gate.
 | `claim.syntax-law` | Every current unbuilt syntax note has a machine-checked status-matrix row. |
 | `claim.examples-spec` | Every feature example has a declared expected-output artifact. |
 | `claim.native-language` | Jet compiles safe source to native programs with Jet-owned semantics. |
-| `claim.tier-parity` | AOT, Cranelift JIT (`jet run` / `jet dev`), interpreter, and web preserve one executable meaning (AGENTS.md I9). Semantics live only in `crates/jet-codegen/src/Prelude/**` and ratified CoreLib. Engines only marshal and call those functions; parallel validation, defaults, policy, and error behavior violate I9/R12. Closure proves AOT and default `jet run`, and deopt ambient calls the same Prelude symbol. AOT-only ships and durable `jit_gaps` entries are forbidden. |
+| `claim.tier-parity` | AOT, Cranelift JIT (`jet run` / `jet dev`), interpreter, and web preserve one executable meaning (AGENTS.md I9). Semantics live only in the embedded Prelude parts (`crates/jet-foundation` prelude modules and `crates/jet-codegen/src/Prelude/**`) and ratified CoreLib. Engines only marshal and call those functions; parallel validation, defaults, policy, and error behavior violate I9/R12. Closure proves AOT and default `jet run`, and deopt ambient calls the same Prelude symbol. AOT-only ships and durable `jit_gaps` entries are forbidden. |
 | `claim.static-guarantees` | Refinements, contracts, information flow, budgets, and replay share one facts engine. |
 | `claim.discard-control` | Ignoring a must-use or fallible value is explicit and audited. |
 | `claim.prelude-control` | Beginners get the prelude automatically and experts may opt out explicitly. |

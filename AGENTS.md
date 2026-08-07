@@ -137,8 +137,10 @@ Violating an invariant means stop and fix it.
 - **I9 — Execution-tier parity (one Prelude, dumb engines).** AOT, Cranelift
   JIT (`jet run` / `jet dev`), the interpreter (TIR-eval deopt / ambient), and
   web targets preserve one executable meaning for every language feature and
-  Core library API. **Semantics live only in** `crates/jet-codegen/src/Prelude/**`
-  (and ratified CoreLib). AOT emit, Cranelift hosts, and interpreter ambient are
+  Core library API. **Semantics live only in the embedded Prelude parts**
+  (`crates/jet-foundation` prelude modules and `crates/jet-codegen/src/Prelude/**`;
+  a part sits in `jet-foundation` when a comptime-reachable seam crate must call
+  it, per I6) (and ratified CoreLib). AOT emit, Cranelift hosts, and interpreter ambient are
   **marshalling adapters only**: they convert arguments/results and call those
   Prelude functions. Re-encoding validation, policy, defaults, or error meaning
   in an engine is an invariant violation — not a “host helper.” Parking work in
