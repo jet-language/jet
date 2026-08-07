@@ -1077,9 +1077,9 @@ impl<'a> EvalCtx<'a> {
         };
         let (value, migration) = match decoded {
             Ok(pair) => pair,
-            Err(error) => return Ok(CtValue::ResErr(Box::new(error))),
+            Err(error) => return Ok(CtValue::failed(Box::new(error))),
         };
-        Ok(CtValue::ResOk(Box::new(if traced {
+        Ok(CtValue::Present(Box::new(if traced {
             CtValue::Struct {
                 type_name: "DecodeResult".to_string(),
                 fields: vec![
@@ -1108,8 +1108,8 @@ impl<'a> EvalCtx<'a> {
             self.repl_mode,
         )?;
         let tree = match parsed {
-            CtValue::ResOk(tree) => *tree,
-            CtValue::ResErr(error) => {
+            CtValue::Present(tree) => *tree,
+            CtValue::Failed(CtReport::Told(error)) => {
                 return Ok(Err(crate::Comptime::codec_parse_error_for_tir(
                     codec_label(module),
                     *error,
@@ -1119,10 +1119,10 @@ impl<'a> EvalCtx<'a> {
         };
         let mut status = None;
         Ok(match self.eval_datatree_decode_status(tree, target, &mut status)? {
-            CtValue::ResOk(value) => {
+            CtValue::Present(value) => {
                 Ok((*value, status.unwrap_or_else(migration_status_fresh)))
             }
-            CtValue::ResErr(error) => Err(*error),
+            CtValue::Failed(CtReport::Told(error)) => Err(*error),
             _ => unreachable!("Decode protocol returns Result"),
         })
     }
@@ -1149,11 +1149,11 @@ impl<'a> EvalCtx<'a> {
             self.repl_mode,
         )?;
         let rows = match parsed {
-            CtValue::ResOk(rows) => match *rows {
+            CtValue::Present(rows) => match *rows {
                 CtValue::List(rows) => rows,
                 _ => return Err(unsupported("`core.encoding.csv.parse()` result", span)),
             },
-            CtValue::ResErr(error) => {
+            CtValue::Failed(CtReport::Told(error)) => {
                 return Ok(Err(decode_error("", string_cell(&error))))
             }
             _ => return Err(unsupported("`core.encoding.csv.parse()` result", span)),
@@ -1183,7 +1183,7 @@ impl<'a> EvalCtx<'a> {
             );
             let mut status = None;
             match self.eval_datatree_decode_status(tree, item, &mut status)? {
-                CtValue::ResOk(value) => {
+                CtValue::Present(value) => {
                     if let Some(status) = status {
                         if migration_did_run(&status) && !migration_did_run(&migration) {
                             migration = status;
@@ -1191,7 +1191,7 @@ impl<'a> EvalCtx<'a> {
                     }
                     values.push(*value);
                 }
-                CtValue::ResErr(error) => {
+                CtValue::Failed(CtReport::Told(error)) => {
                     if let CtValue::List(entries) =
                         decode_error_under(&format!("row {}", index + 1), *error)
                     {
@@ -1526,7 +1526,7 @@ impl<'a> EvalCtx<'a> {
                         Some(Ok((migrated, walked))) => {
                             let mut child = HashMap::new();
                             let out = self.run_func(func, vec![migrated], &mut child)?;
-                            if matches!(out, CtValue::ResOk(_)) {
+                            if matches!(out, CtValue::Present(_)) {
                                 *status = Some(walked);
                             }
                             return Ok(out);

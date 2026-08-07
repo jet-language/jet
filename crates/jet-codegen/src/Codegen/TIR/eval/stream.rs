@@ -104,9 +104,9 @@ pub(super) fn eval(
                     kernel::jet_cursor_take_pattern(&mut c, consumed);
                     let value = str_tuple(canonical, &binds);
                     *recv = cursor_ct(&c);
-                    CtValue::ResOk(Box::new(value))
+                    CtValue::Present(Box::new(value))
                 }
-                None => CtValue::ResErr(Box::new(CtValue::Str(
+                None => CtValue::failed(Box::new(CtValue::Str(
                     kernel::jet_cursor_pattern_miss(&c),
                 ))),
             })
@@ -120,9 +120,9 @@ pub(super) fn eval(
                     kernel::jet_reader_take_pattern(&mut r, consumed);
                     let value = bin_tuple(canonical, &binds);
                     *recv = reader_ct(&r);
-                    CtValue::ResOk(Box::new(value))
+                    CtValue::Present(Box::new(value))
                 }
-                None => CtValue::ResErr(Box::new(CtValue::Str(
+                None => CtValue::failed(Box::new(CtValue::Str(
                     kernel::jet_reader_pattern_miss(&r),
                 ))),
             })
@@ -237,8 +237,8 @@ fn with_cursor(
 
 fn result_ct(out: Result<CtValue, String>) -> CtValue {
     match out {
-        Ok(value) => CtValue::ResOk(Box::new(value)),
-        Err(message) => CtValue::ResErr(Box::new(CtValue::Str(message))),
+        Ok(value) => CtValue::Present(Box::new(value)),
+        Err(message) => CtValue::failed(Box::new(CtValue::Str(message))),
     }
 }
 
