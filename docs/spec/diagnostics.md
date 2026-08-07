@@ -624,6 +624,7 @@ renumbered, and no new `W` code may be allocated.
 | E1309 | sema  | `#Flag` on a `#CLI` field that is already flag-only (D-CLI-POS1) |
 | E1318 | sema  | a `#Short` value is not one ASCII letter, or two `#CLI` fields use the same short name (D-CLI-FIELD-MARKERS1) |
 | E1319 | sema  | `#Short` or `#Env` has no typed-CLI builder mapping at its field (D-CLI-FIELD-MARKERS1) |
+| E1320 | jetpack | an external hangar root changed between reading its etag and applying a requested mutation |
 | E1321 | sema  | a typed `Output` kind, payload, callable reference, callable contract, visibility, or singular selection is invalid (D-SHAPE-OUTPUT-CALLABLE1) |
 | E1322 | jetpack | workspace/package membership escapes its root (D-ECO-MEMBERS1) |
 | E1323 | jetpack | a nested Package declares `members` instead of leaving membership to the workspace root; the diagnostic names the member manifest source (D-ECO-MEMBERS1) |
