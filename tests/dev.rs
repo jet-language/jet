@@ -466,16 +466,28 @@ fn collect_jit_coverage() -> (Vec<String>, Vec<String>) {
 }
 
 fn parse_jit_gap_manifest() -> (Vec<String>, Vec<String>, Vec<String>) {
+    let (covered, gaps, divergences, _) = parse_jit_gap_manifest_full();
+    (covered, gaps, divergences)
+}
+
+/// #1509: the same manifest, including its `run_gaps:` rows.
+///
+/// `run_gaps` are the stems this file calls compile-covered that the corpus gate
+/// still records as failing at the run tier. They are read only by the ledger
+/// cross-check, so the four-value form stays out of the ratchet call sites.
+fn parse_jit_gap_manifest_full() -> (Vec<String>, Vec<String>, Vec<String>, Vec<String>) {
     enum Section {
         None,
-        Covered,
+        CompileCovered,
         Gaps,
+        RunGaps,
         ParityDivergences,
     }
 
     let mut section = Section::None;
     let mut covered = Vec::new();
     let mut gaps = Vec::new();
+    let mut run_gaps = Vec::new();
     let mut parity_divergences = Vec::new();
     for raw in include_str!("jit_gaps.txt").lines() {
         let line = raw.trim_end();
@@ -484,12 +496,18 @@ fn parse_jit_gap_manifest() -> (Vec<String>, Vec<String>, Vec<String>) {
             continue;
         }
         match trimmed {
-            "covered:" => {
-                section = Section::Covered;
+            // #1509: this file tracks compile coverage only. The old name,
+            // `covered:`, claimed run coverage it never measured.
+            "compile_covered:" => {
+                section = Section::CompileCovered;
                 continue;
             }
             "gaps:" => {
                 section = Section::Gaps;
+                continue;
+            }
+            "run_gaps:" => {
+                section = Section::RunGaps;
                 continue;
             }
             "parity_divergences:" => {
@@ -499,20 +517,22 @@ fn parse_jit_gap_manifest() -> (Vec<String>, Vec<String>, Vec<String>) {
             _ => {}
         }
         match section {
-            Section::Covered => covered.push(trimmed.to_string()),
+            Section::CompileCovered => covered.push(trimmed.to_string()),
             Section::Gaps => gaps.push(trimmed.to_string()),
+            Section::RunGaps => run_gaps.push(trimmed.to_string()),
             Section::ParityDivergences => parity_divergences.push(trimmed.to_string()),
             Section::None => panic!("manifest entry outside a section: {trimmed}"),
         }
     }
     covered.sort();
     gaps.sort();
+    run_gaps.sort();
     parity_divergences.sort();
     assert!(
         parity_divergences.is_empty(),
         "parity_divergences must stay empty: default dev and interpreter output must exactly match default AOT output; fix the shared semantics or use transparent fallback"
     );
-    (covered, gaps, parity_divergences)
+    (covered, gaps, run_gaps, parity_divergences)
 }
 
 fn is_manifested_parity_divergence(stem: &str, entries: &[String]) -> bool {
@@ -7135,14 +7155,31 @@ fn jit_coverage_audit() {
 fn jit_coverage_audit_inner() {
     let (covered, gaps) = collect_jit_coverage();
     if std::env::var("JET_DUMP_JIT_GAPS").as_deref() == Ok("1") {
+        // #1509: this writer regenerates the whole file, so it must carry the
+        // `run_gaps:` ratchet across. Rewriting the file without it would delete
+        // the cross-check's baseline and read as a clean dump.
+        let (_, _, run_gaps, _) = parse_jit_gap_manifest_full();
         let mut out = String::from(
-            "# Phase 3 JIT compile-gate ratchet baseline for Tower card #125 / #778.\n\
+            "# Compile-coverage ratchet baseline for Tower card #125 / #778.\n\
              # Format consumed by tests/dev.rs::jit_coverage_audit.\n\
-             # Covered means TIR lowered and Cranelift compiled end-to-end; gaps list the first compile/unsupported reason.\n\
-             # Shrink-only perf ratchet (D-LENS-RUN2 / #778): gaps may only shrink; silent growth fails CI.\n\
-             # Covered/gap movement is intentional only; update this file in the same diff.\n\
+             #\n\
+             # This file tracks COMPILE coverage only. compile_covered means TIR lowered and\n\
+             # Cranelift compiled end-to-end; it says nothing about whether the example runs.\n\
+             # Run coverage is measured by the corpus gate, tests/jit_corpus_gate.txt.\n\
+             # Compiled is not the same as runs, and #1509 was filed because the old section\n\
+             # name (`covered`) claimed both.\n\
+             #\n\
+             # gaps list the first compile/unsupported reason.\n\
+             # run_gaps list stems this file calls compile_covered that the corpus gate still\n\
+             # records as failing at the run tier. tests/dev.rs::ledger_cross_check_holds\n\
+             # fails on any such stem that is not listed here, so a new run-tier parity\n\
+             # failure cannot hide between the two ledgers.\n\
+             #\n\
+             # Shrink-only ratchet (D-LENS-RUN2 / #778): gaps and run_gaps may only shrink;\n\
+             # silent growth fails CI. Movement is intentional only; update this file in the\n\
+             # same diff.\n\
              \n\
-             covered:\n",
+             compile_covered:\n",
         );
         for s in &covered {
             out.push_str(&format!("  {s}\n"));
@@ -7150,6 +7187,10 @@ fn jit_coverage_audit_inner() {
         out.push_str("\ngaps:\n");
         for g in &gaps {
             out.push_str(&format!("  {g}\n"));
+        }
+        out.push_str("\nrun_gaps:\n");
+        for r in &run_gaps {
+            out.push_str(&format!("  {r}\n"));
         }
         eprint!("{out}");
         if std::env::var("JET_WRITE_JIT_GAPS").as_deref() == Ok("1") {
@@ -7593,6 +7634,156 @@ fn collect_corpus_gate_records() -> Vec<CorpusGateRecord> {
     let mut records = records.lock().unwrap().clone();
     records.sort_by(|left, right| left.stem.cmp(&right.stem));
     records
+}
+
+/// #1509: the ledgers measure different things, so cross-check them.
+///
+/// `tests/jit_gaps.txt` measures compile coverage and `tests/jit_corpus_gate.txt`
+/// measures run coverage. Nothing compared the two, so four comptime stems sat
+/// in `compile_covered:` and in the gate's `frontend_rejected:` at the same
+/// time — a real I9 run-tier parity failure that CI could not see.
+///
+/// A stem this file calls compile-covered may not also be a stem the gate
+/// records as failing at the run tier, unless `run_gaps:` names it and says why.
+/// Returns one message per conflict, quoting both ledger lines.
+fn ledger_conflicts(
+    compile_covered: &[String],
+    run_gaps: &[String],
+    gate: &[CorpusGateRecord],
+) -> Vec<String> {
+    let covered: std::collections::HashSet<&str> =
+        compile_covered.iter().map(String::as_str).collect();
+    let parked: std::collections::HashSet<&str> = run_gaps
+        .iter()
+        .map(|row| row.split_once(": ").map_or(row.as_str(), |(stem, _)| stem))
+        .collect();
+
+    let mut conflicts = Vec::new();
+    for record in gate {
+        // A run-tier failure is either a stem the gate could not put through the
+        // front end at all, or one that deopted to the interpreter carrying a
+        // diagnostic. A bare `deopt_interp:` row is a tier choice, not a failure.
+        let failing = match record.class {
+            CorpusGateClass::FrontendRejected => true,
+            CorpusGateClass::DeoptInterp => !record.detail.is_empty(),
+            _ => false,
+        };
+        if !failing
+            || !covered.contains(record.stem.as_str())
+            || parked.contains(record.stem.as_str())
+        {
+            continue;
+        }
+        let class = match record.class {
+            CorpusGateClass::FrontendRejected => "frontend_rejected",
+            _ => "deopt_interp",
+        };
+        let gate_line = if record.detail.is_empty() {
+            record.stem.clone()
+        } else {
+            format!("{}: {}", record.stem, record.detail)
+        };
+        conflicts.push(format!(
+            "{stem}: tests/jit_gaps.txt `compile_covered:` says `  {stem}`, but \
+             tests/jit_corpus_gate.txt `{class}:` says `  {gate_line}`. Compiled is not the \
+             same as runs. Fix the run tier, or park the stem in `run_gaps:` with the reason \
+             and the card that owes it.",
+            stem = record.stem,
+        ));
+    }
+    conflicts.sort();
+    conflicts
+}
+
+/// #1509 c2/c3: the two ledgers agree, and `run_gaps:` may only shrink.
+///
+/// Manifest against manifest — no example is compiled or run here, so this is
+/// the cheap gate that catches a new run-tier parity failure hiding between the
+/// ledgers. The corpus gate itself still measures the run tier.
+#[test]
+fn ledger_cross_check_holds() {
+    let (compile_covered, _, run_gaps, _) = parse_jit_gap_manifest_full();
+    let gate = parse_corpus_gate_manifest();
+
+    let conflicts = ledger_conflicts(&compile_covered, &run_gaps, &gate);
+    assert!(
+        conflicts.is_empty(),
+        "the tier ledgers disagree:\n{}",
+        conflicts.join("\n")
+    );
+
+    // Shrink-only ratchet (D-LENS-RUN2). Every row is a real I9 parity failure,
+    // so the count may fall and never rise: fix a row, delete it, lower this
+    // number in the same diff. Adding a row without lowering it fails here.
+    const RUN_GAPS_CEILING: usize = 15;
+    assert!(
+        run_gaps.len() <= RUN_GAPS_CEILING,
+        "tests/jit_gaps.txt `run_gaps:` grew to {} rows (ceiling {RUN_GAPS_CEILING}); run-tier \
+         parity gaps may only shrink",
+        run_gaps.len()
+    );
+    for row in &run_gaps {
+        assert!(
+            row.split_once(": ").is_some_and(|(_, why)| !why.is_empty()),
+            "every `run_gaps:` row needs its reason: `{row}`"
+        );
+    }
+}
+
+/// #1509 c4: negative control — the cross-check actually fires.
+///
+/// A gate class alone must not trip it, and a parked stem must not trip it;
+/// only a compile-covered stem the gate records as failing and `run_gaps:` does
+/// not name. Without this, `ledger_cross_check_holds` passing proves nothing.
+#[test]
+fn ledger_cross_check_fires_on_a_conflict() {
+    let compile_covered = vec!["comptime/embed".to_string(), "basics/hello".to_string()];
+    let gate = vec![
+        CorpusGateRecord {
+            stem: "comptime/embed".to_string(),
+            class: CorpusGateClass::FrontendRejected,
+            detail: "E0956: call `embed_file` can't run at compile time yet".to_string(),
+        },
+        CorpusGateRecord {
+            stem: "basics/hello".to_string(),
+            class: CorpusGateClass::ResidentJit,
+            detail: String::new(),
+        },
+    ];
+
+    // Unparked: one conflict, quoting both ledger lines and the stem.
+    let conflicts = ledger_conflicts(&compile_covered, &[], &gate);
+    assert_eq!(conflicts.len(), 1, "expected one conflict: {conflicts:?}");
+    let message = &conflicts[0];
+    assert!(
+        message.contains("comptime/embed")
+            && message.contains("tests/jit_gaps.txt `compile_covered:` says `  comptime/embed`")
+            && message.contains(
+                "tests/jit_corpus_gate.txt `frontend_rejected:` says \
+                 `  comptime/embed: E0956: call `embed_file` can't run at compile time yet`"
+            ),
+        "the failure must quote both ledger lines: {message}"
+    );
+
+    // Parked with a reason: tolerated, and the healthy stem never trips it.
+    let parked = vec!["comptime/embed: owed to #1543 (D-META-EFFECT1)".to_string()];
+    assert!(ledger_conflicts(&compile_covered, &parked, &gate).is_empty());
+
+    // A bare deopt row is a tier choice, not a failure.
+    let bare = vec![CorpusGateRecord {
+        stem: "basics/hello".to_string(),
+        class: CorpusGateClass::DeoptInterp,
+        detail: String::new(),
+    }];
+    assert!(ledger_conflicts(&compile_covered, &[], &bare).is_empty());
+
+    // A deopt row carrying a diagnostic is a failure.
+    let told = vec![CorpusGateRecord {
+        stem: "basics/hello".to_string(),
+        class: CorpusGateClass::DeoptInterp,
+        detail: "E0956: `core.event.scope()` at comptime".to_string(),
+    }];
+    assert_eq!(ledger_conflicts(&compile_covered, &[], &told).len(), 1);
 }
 
 fn corpus_gate_manifest_from_records(records: &[CorpusGateRecord]) -> String {
