@@ -10723,8 +10723,8 @@ migration Profile {
 }
 
 migration Profile {
-    rename name -> title
-    change score: Int -> Rank via { (n) => Rank.{ value: n } }
+    rename name => title
+    change score: Int => Rank via { (n) => Rank.{ value: n } }
 }
 
 fn run() {
