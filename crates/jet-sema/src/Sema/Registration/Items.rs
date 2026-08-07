@@ -398,6 +398,7 @@ pub(crate) fn comptime_context_from_items(
                 }
             }
             Item::EffectDecl(_)
+            | Item::MarkerDecl(_)
             | Item::Test(_)
             | Item::Bench(_)
             | Item::Const(_)

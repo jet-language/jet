@@ -349,13 +349,13 @@ fn item_span_start(item: &Item, src: &str) -> usize {
                     .rfind(&format!("#{}", Syntax::MARKER_PERSIST))
                     .unwrap_or(c.name_span.start)
             } else if c.is_comptime {
-                // Prefer force markers, then the live `#Known` marker. Retired
-                // keywords remain last-resort recovery starts.
+                // Prefer force markers; the compile-time mark rides the name.
+                // Retired keywords remain last-resort recovery starts.
                 let before = &src[..c.name_span.start];
                 before
                     .rfind("#Static")
                     .or_else(|| before.rfind("#Inline"))
-                    .or_else(|| before.rfind(&format!("#{}", Syntax::MARKER_KNOWN)))
+                    .or_else(|| before.rfind(&format!("#{}", Syntax::RETIRED_MARKER_KNOWN)))
                     .or_else(|| before.rfind(Syntax::KW_COMPTIME))
                     .or_else(|| before.rfind(Syntax::KW_CONST))
                     .unwrap_or(c.name_span.start)
@@ -376,6 +376,7 @@ fn item_span_start(item: &Item, src: &str) -> usize {
         // D-QUAL2: tag declarations use their own span.
         Item::Tag(t) => t.span.start,
         Item::EffectDecl(declaration) => declaration.span.start,
+        Item::MarkerDecl(declaration) => declaration.span.start,
         Item::Module(m) => src[..m.name_span.start]
             .rfind(Syntax::KW_MODULE)
             .unwrap_or(m.span.start),
@@ -459,6 +460,7 @@ fn item_span_end(item: &Item) -> usize {
             .unwrap_or(t.name_span.end),
         Item::Tag(t) => t.span.end,
         Item::EffectDecl(declaration) => declaration.span.end,
+        Item::MarkerDecl(declaration) => declaration.span.end,
         Item::Module(m) => m.span.end,
         Item::CModule(cm) => cm.span.end,
         Item::CodeModule(cm) => cm.span.end,
@@ -515,8 +517,7 @@ fn stmt_end(stmt: &Stmt) -> usize {
         Stmt::Impure { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
         Stmt::Reactive { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
         Stmt::Shield { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
-        Stmt::Off { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
-        Stmt::DebugOnly { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
+        Stmt::Switched { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
         Stmt::Region { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
         Stmt::Policy { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
         Stmt::TaskGroup { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
@@ -966,8 +967,7 @@ fn stmt_start(stmt: &Stmt) -> usize {
         Stmt::Impure { span, .. } => span.start,
         Stmt::Reactive { span, .. } => span.start,
         Stmt::Shield { span, .. } => span.start,
-        Stmt::Off { span, .. } => span.start,
-        Stmt::DebugOnly { span, .. } => span.start,
+        Stmt::Switched { span, .. } => span.start,
         Stmt::Region { span, .. } => span.start,
         Stmt::Policy { span, .. } => span.start,
         Stmt::TaskGroup { span, .. } => span.start,

@@ -122,7 +122,7 @@ pub fn os_target_unmatched_call(
     )
 }
 
-/// E-OSTARGET-BUILD-CONTEXT (D-OSTARGET2=B): a `#Known if … == { }` OS
+/// E-OSTARGET-BUILD-CONTEXT (D-OSTARGET2=B): a `$if … == { }` OS
 /// dispatch whose subject is not `build.os`. The comptime dispatch that reaches
 /// OS-gated `impl`s only branches on the compiler-known `build.os` value.
 pub fn os_target_build_context(
@@ -132,7 +132,7 @@ pub fn os_target_build_context(
         "E-OSTARGET-BUILD-CONTEXT",
         format!(
             "a `{} {} … == {{ … }}` dispatch branches on `{}.{}`",
-            format!("{}{}", Syntax::MARKER_PREFIX, Syntax::MARKER_KNOWN),
+            Syntax::COMPTIME_MARK,
             Syntax::KW_IF,
             Syntax::BUILD_INFO,
             Syntax::BUILD_INFO_OS,
@@ -144,7 +144,7 @@ pub fn os_target_build_context(
         ),
         format!(
             "write `{} {} {}.{} == {{ .{} -> … .{} -> … .{} -> … }}`, or use a plain runtime `{}` for a value that isn't known at compile time",
-            format!("{}{}", Syntax::MARKER_PREFIX, Syntax::MARKER_KNOWN),
+            Syntax::COMPTIME_MARK,
             Syntax::KW_IF,
             Syntax::BUILD_INFO,
             Syntax::BUILD_INFO_OS,

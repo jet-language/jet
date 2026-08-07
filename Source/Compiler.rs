@@ -206,6 +206,7 @@ fn syntax_node_value(node: &SyntaxNode) -> CtValue {
         SyntaxNodeKind::Distinct => "distinct",
         SyntaxNodeKind::TypeAlias => "type_alias",
         SyntaxNodeKind::UnitFamily => "unit_family",
+        SyntaxNodeKind::Marker => "marker",
     };
     ct_struct(
         "CompilerNode",
@@ -892,6 +893,7 @@ pub enum SyntaxNodeKind {
     Distinct,
     TypeAlias,
     UnitFamily,
+    Marker,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1198,6 +1200,7 @@ fn json_syntax_tree(tree: &SyntaxTree) -> String {
                     SyntaxNodeKind::Distinct => "distinct",
                     SyntaxNodeKind::TypeAlias => "type_alias",
                     SyntaxNodeKind::UnitFamily => "unit_family",
+                    SyntaxNodeKind::Marker => "marker",
                 }),
                 node.name
                     .as_deref()
@@ -1400,6 +1403,7 @@ fn item_node(item: &AST::Item) -> SyntaxNode {
             Some(m.name.clone()),
             m.name_span,
         ),
+        AST::Item::MarkerDecl(m) => (SyntaxNodeKind::Marker, Some(m.name.clone()), m.name_span),
     };
     SyntaxNode {
         kind,

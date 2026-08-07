@@ -27,7 +27,7 @@ pub use items::{
     SystemFieldValue, ServiceEntry, OptionEntry, ImageLit, ImageField, ImageFromRef,
     ImageFieldValue, FleetLit, FleetField, FleetFieldValue, HostEntry, VmTestLit, VmTestField,
     VmTestFieldValue, PerfLit, ProfileLit, BudgetDecl, BudgetField, Namespace, TypeParam, TraitDef, TagDef, ProtocolDirection, ProtocolMessage,
-    ProtocolDecl, StateDecl, EffectDecl, DeriveDef, TraitMethodSig, TraitImplBlock, ExternRustBlock, ExternFn,
+    ProtocolDecl, StateDecl, EffectDecl, MarkerDecl, MarkerDeclParam, DeriveDef, TraitMethodSig, TraitImplBlock, ExternRustBlock, ExternFn,
     TestDef, BenchDef, MaturityTag, KernelMode, KernelProof, KernelMarker, Func, TaskMetadata, TaskSkip, TaskCachePolicy, InlineForeign, ContractClause, StateTransition, EveryMarker,
     EveryArg, EverySchedule, EveryScheduleError, Param, ParamZone, StructLayout, CEnumTag,
     Marker, StructDef, TypeAliasDef, DistinctDef, QuantityKind, UnitDimensionDecl, UnitFamilyDef, UnitFamilyMember, UnitRatio, UnitScaleProvenance, EnumDef,
@@ -48,7 +48,7 @@ pub use patterns::{
 mod statements;
 pub use statements::{
     ElseBranch, IfStmt, Stmt, SwitchArm, is_subjectless_guard, noelse_terminated,
-    uses_classic_if_spelling,
+    switched_off, uses_classic_if_spelling,
 };
 
 #[path = "AST/lvalues.rs"]

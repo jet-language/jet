@@ -863,14 +863,14 @@ impl<'a> Checker<'a> {
                     param_conv: None,
                     decl_loop_depth: self.loop_depth,
                     sendable: binding_sendable,
-                    reactive_local: b.reactive_local,
-                    reactive_shared: b.reactive_shared,
+                    reactive_local: b.reactive_local(),
+                    reactive_shared: b.reactive_shared(),
                     task_lint_span,
                     single_use_span,
                     constant_value,
                 },
             );
-            if b.reactive_shared && crate::Sema::CheckerInfer::is_reactive_handle_ty(&final_ty) {
+            if b.reactive_shared() && crate::Sema::CheckerInfer::is_reactive_handle_ty(&final_ty) {
                 self.note_reactive_upgrade(&b.name, &final_ty, "#Shared pin");
                 b.reactive_upgrade = true;
             }

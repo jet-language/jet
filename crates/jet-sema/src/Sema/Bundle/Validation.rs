@@ -464,6 +464,7 @@ pub(crate) fn collect_used_core(
                 Item::Bench(b) => collect_core_stmts(&b.body, imports, &mut used, &mut spans, &mut ffi_cb),
                 Item::Const(c) => collect_core_expr(&c.value, imports, &mut used, &mut spans, &mut ffi_cb),
                 Item::EffectDecl(_)
+                | Item::MarkerDecl(_)
                 | Item::Trait(_)
                 | Item::Tag(_) // D-QUAL2: tags use no core imports
                 | Item::ExternRust(_)
@@ -631,8 +632,7 @@ pub(crate) fn collect_core_stmts(
             Stmt::Loop { body, .. }
             | Stmt::Unsafe { body, .. }
             | Stmt::Impure { body, .. }
-            | Stmt::Off { body, .. }
-            | Stmt::DebugOnly { body, .. }
+            | Stmt::Switched { body, .. }
             | Stmt::Region { body, .. }
         | Stmt::Policy { body, .. }
             | Stmt::TaskGroup { body, .. }
@@ -2469,7 +2469,7 @@ fn apply_reactive_upgrade_flags(stmts: &mut [Stmt], names: &std::collections::Ha
         for stmt in stmts {
             match stmt {
                 Stmt::Val(b) => {
-                    if names.contains(&b.name) || b.reactive_shared {
+                    if names.contains(&b.name) || b.reactive_shared() {
                         b.reactive_upgrade = true;
                     }
                 }
@@ -2491,8 +2491,7 @@ fn apply_reactive_upgrade_flags(stmts: &mut [Stmt], names: &std::collections::Ha
                 | Stmt::Live { body, .. }
                 | Stmt::AssumeDet { body, .. }
                 | Stmt::Transact { body, .. }
-                | Stmt::Off { body, .. }
-                | Stmt::DebugOnly { body, .. } => walk(body, names),
+                | Stmt::Switched { body, .. } => walk(body, names),
                 Stmt::Switch { arms, else_body, .. }
                 | Stmt::ComptimeSwitch { arms, else_body, .. } => {
                     for arm in arms.iter_mut() {

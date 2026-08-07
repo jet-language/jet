@@ -1434,8 +1434,7 @@ fn find_pattern_target_in_children<'a>(
         | Stmt::Impure { body, .. }
         | Stmt::Reactive { body, .. }
         | Stmt::Shield { body, .. }
-        | Stmt::Off { body, .. }
-        | Stmt::DebugOnly { body, .. }
+        | Stmt::Switched { body, .. }
         | Stmt::Region { body, .. }
         | Stmt::Policy { body, .. }
         | Stmt::TaskGroup { body, .. }
@@ -1545,8 +1544,7 @@ fn find_pattern_arm_remove_span_in_children(
         | Stmt::Impure { body, .. }
         | Stmt::Reactive { body, .. }
         | Stmt::Shield { body, .. }
-        | Stmt::Off { body, .. }
-        | Stmt::DebugOnly { body, .. }
+        | Stmt::Switched { body, .. }
         | Stmt::Region { body, .. }
         | Stmt::Policy { body, .. }
         | Stmt::TaskGroup { body, .. }
@@ -1650,8 +1648,7 @@ fn find_pattern_span_in_children(
         | Stmt::Impure { body, .. }
         | Stmt::Reactive { body, .. }
         | Stmt::Shield { body, .. }
-        | Stmt::Off { body, .. }
-        | Stmt::DebugOnly { body, .. }
+        | Stmt::Switched { body, .. }
         | Stmt::Region { body, .. }
         | Stmt::Policy { body, .. }
         | Stmt::TaskGroup { body, .. }
@@ -1762,8 +1759,7 @@ fn find_multi_input_in_stmt(stmt: &Stmt, node_span: SourceSpan, out: &mut Option
         | Stmt::Impure { body, .. }
         | Stmt::Reactive { body, .. }
         | Stmt::Shield { body, .. }
-        | Stmt::Off { body, .. }
-        | Stmt::DebugOnly { body, .. }
+        | Stmt::Switched { body, .. }
         | Stmt::Region { body, .. }
         | Stmt::Policy { body, .. }
         | Stmt::TaskGroup { body, .. }
@@ -2294,8 +2290,7 @@ fn collect_child_statement_locs(
         | Stmt::Impure { body, .. }
         | Stmt::Reactive { body, .. }
         | Stmt::Shield { body, .. }
-        | Stmt::Off { body, .. }
-        | Stmt::DebugOnly { body, .. }
+        | Stmt::Switched { body, .. }
         | Stmt::Region { body, .. }
         | Stmt::Policy { body, .. }
         | Stmt::TaskGroup { body, .. }

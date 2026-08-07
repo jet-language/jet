@@ -13,12 +13,7 @@ impl<'a> Parser<'a> {
             let init = self.expr()?;
             return Ok(Binding {
                 mutable,
-                track: false,
-                track_span: None,
-                reactive_local: false,
-                reactive_local_span: None,
-                reactive_shared: false,
-                reactive_shared_span: None,
+                markers: Vec::new(),
                 reactive_upgrade: false,
                 meta: None,
                 name: String::new(),
@@ -89,12 +84,7 @@ impl<'a> Parser<'a> {
             if let Some((ty, ty_span, marker_span)) = typed_lit_uninit_head(&init) {
                 return Ok(Binding {
                     mutable: true,
-                    track: false,
-                    track_span: None,
-                reactive_local: false,
-                reactive_local_span: None,
-                reactive_shared: false,
-                reactive_shared_span: None,
+                    markers: Vec::new(),
                 reactive_upgrade: false,
                     meta: None,
                     name,
@@ -115,12 +105,7 @@ impl<'a> Parser<'a> {
         }
         Ok(Binding {
             mutable,
-            track: false,
-            track_span: None,
-                reactive_local: false,
-                reactive_local_span: None,
-                reactive_shared: false,
-                reactive_shared_span: None,
+            markers: Vec::new(),
                 reactive_upgrade: false,
             meta: None,
             name,
@@ -427,7 +412,7 @@ impl<'a> Parser<'a> {
     /// D-VERDICT-1308-1: parse `#Known { … }`; recover retired `comptime`.
     /// Erases at codegen (build-time only). `$name` splice deferred to c155.
     pub(super) fn comptime_block_stmt(&mut self) -> Result<Stmt, Diagnostic> {
-        let start = self.take_known_lead()?;
+        let start = self.take_mark()?;
         self.expect(TokKind::LBrace, "to open the `#Known` block body")?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
@@ -437,12 +422,26 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// D-META-STAGE1=B: `$loop …` is the ratified `loop` verb at compile time,
+    /// not a second iteration form. It is one compile-time block holding one
+    /// loop, so it folds through the same path as `$ { … }` and emits no
+    /// runtime code.
+    pub(super) fn comptime_loop_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+        let start = self.take_mark()?;
+        let body = self.loop_stmt(None)?;
+        let end = self.toks[self.pos - 1].span.end;
+        Ok(Stmt::ComptimeBlock {
+            body: vec![body],
+            span: Span::new(start.start, end),
+        })
+    }
+
     /// D-VERDICT-1308-2: parse `#Known if <cond> { … } else { … }`.
     /// Both arms require `{ }` (braceless bodies are not allowed for `#Known if`).
     /// `else` is optional in statement position. Sema selects the arm; codegen
     /// emits only the selected arm (D-WHEN2: dropped arm is name-resolved only).
     pub(super) fn comptime_if_stmt(&mut self) -> Result<Stmt, Diagnostic> {
-        let start = self.take_known_lead()?;
+        let start = self.take_mark()?;
         self.bump(); // `if`
 
         // D-OSTARGET2=B (ratified 2026-07-03): the dispatch form
@@ -489,9 +488,11 @@ impl<'a> Parser<'a> {
         let then_body = self.block_stmts();
         let else_body = if matches!(self.peek().kind, TokKind::KwElse) {
             self.bump();
-            // Allow `else if` chained with another `#Known if`.
-            if (matches!(self.peek().kind, TokKind::KwComptime)
-                && matches!(self.peek2().kind, TokKind::KwIf))
+            // Allow `else if` chained with another `$if`.
+            if (matches!(
+                self.peek().kind,
+                TokKind::Dollar | TokKind::KwComptime
+            ) && matches!(self.peek2().kind, TokKind::KwIf))
                 || (self.at_known_lead() && matches!(self.peek3().kind, TokKind::KwIf))
             {
                 let chain = self.comptime_if_stmt()?;
@@ -516,7 +517,7 @@ impl<'a> Parser<'a> {
 
     pub(super) fn comptime_binding(&mut self) -> Result<Binding, Diagnostic> {
         let retired = matches!(self.peek().kind, TokKind::KwComptime);
-        self.take_known_lead()?;
+        self.take_mark()?;
         let (name, name_span) = self.expect_ident("after `#Known`")?;
         if retired {
             self.expect(TokKind::Eq, "in the retired comptime binding")?;
@@ -526,12 +527,7 @@ impl<'a> Parser<'a> {
         let init = self.expr()?;
         Ok(Binding {
             mutable: false,
-            track: false,
-            track_span: None,
-                reactive_local: false,
-                reactive_local_span: None,
-                reactive_shared: false,
-                reactive_shared_span: None,
+            markers: Vec::new(),
                 reactive_upgrade: false,
             meta: None,
             name,
@@ -550,12 +546,20 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// D-VERDICT-1308-1/2: true when `#Known` is at the cursor.
     pub(in crate::Parser) fn at_known_lead(&self) -> bool {
         matches!(self.peek().kind, TokKind::Hash)
-            && matches!(&self.peek2().kind, TokKind::Ident(name) if name == Syntax::MARKER_KNOWN)
+            && matches!(&self.peek2().kind, TokKind::Ident(name) if name == Syntax::RETIRED_MARKER_KNOWN)
     }
 
-    fn take_known_lead(&mut self) -> Result<Span, Diagnostic> {
+    /// B5 revert (card #1456): #1537's own checkpoint made this teach E0377-
+    /// E0379 as retired spellings, but #1537 hasn't landed its migration of
+    /// the 327 in-repo `#Known` uses yet. `#Known` parses like master again —
+    /// silently, no diagnostic — until #1537 lands the full retirement.
+    /// `comptime` stays taught (pre-existing, unrelated to this revert). The
+    /// bare `$` mark this checkpoint also added ($ blocks, $if, $loop) still
+    /// parses too — it's a new, additive spelling, not a hard-error source.
+    fn take_mark(&mut self) -> Result<Span, Diagnostic> {
         if matches!(self.peek().kind, TokKind::KwComptime) {
             let span = self.bump().span;
             self.diags.push(Diagnostic::error(
@@ -569,10 +573,12 @@ impl<'a> Parser<'a> {
             ));
             return Ok(span);
         }
-        let start = self.peek().span;
-        self.expect(TokKind::Hash, "to start `#Known`")?;
-        let (_, end) = self.expect_ident("after `#`")?;
-        Ok(Span::new(start.start, end.end))
+        if matches!(self.peek().kind, TokKind::Dollar) {
+            return Ok(self.bump().span);
+        }
+        // The control keyword still reads its `#Known` head through the one
+        // shared marker reader; the name it accepts is not a registry question.
+        Ok(self.read_marker_head()?.span)
     }
 
     // --- expressions -----------------------------------------------------

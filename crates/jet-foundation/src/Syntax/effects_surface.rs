@@ -92,6 +92,16 @@ pub const KW_PROTOCOL: &str = "protocol"; // D-PROTO1, D-PROTO2
 pub const PROTO_CLIENT: &str = "client"; // D-PROTO2
 pub const PROTO_SERVER: &str = "server"; // D-PROTO2
 
+/// D-META-NAME1=A: the rule-declaration contextual keyword —
+/// `marker Name(params…)`. Declares one applied rule as an ordinary Jet
+/// declaration in Prelude (or, later, library) source; the rule's own
+/// arguments and facts about the rule (`$sites`, `$repeatable`, …) share one
+/// named-parameter list under D-META-FORM1=A, the facts marked with the
+/// compile-time sigil. Contextual like `state`/`protocol`. Declaration-side
+/// parse only (card #1456); lowering the parsed declaration into the runtime
+/// registry row the rest of the compiler consumes is #1457's and #1458's job.
+pub const KW_MARKER: &str = "marker"; // D-META-NAME1, D-META-FORM1
+
 /// D-STATE1: the entry-transition placeholder — `#Transition(_, Pending)` means
 /// "from no prior state". Reuses the existing `_` wildcard glyph.
 pub const STATE_ENTRY: &str = "_";

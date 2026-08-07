@@ -289,12 +289,8 @@ impl<'a> Parser<'a> {
 
     pub(in super::super) fn at_stdlib_dsl_block_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.peek().span;
-        self.expect(TokKind::Hash, "before a stdlib DSL block")?;
-        let marker = self.bump();
-        let (name, name_span) = match marker.kind {
-            TokKind::Ident(name) => (name, marker.span),
-            _ => unreachable!("DSL marker lookahead already validated"),
-        };
+        let head = self.read_marker_head()?;
+        let (name, name_span) = (head.name, head.name_span);
         let mut args = Vec::new();
         let mut args_span = None;
         if matches!(self.peek().kind, TokKind::Lt) {
@@ -390,6 +386,14 @@ impl<'a> Parser<'a> {
         let Some(i) = self.meta_attr_next_index() else {
             return false;
         };
+        // D-META-STAGE1=B: `#Meta(...) $name :: …` is a marked compile-time
+        // binding; the retired `#Known` lead still routes here to teach.
+        if matches!(
+            self.toks.get(i).map(|t| &t.kind),
+            Some(TokKind::Ident(n)) if Syntax::is_comptime_name(n)
+        ) {
+            return true;
+        }
         matches!(self.toks.get(i).map(|t| &t.kind), Some(TokKind::Hash))
             && matches!(
                 self.toks.get(i + 1).map(|t| &t.kind),
@@ -524,10 +528,9 @@ impl<'a> Parser<'a> {
     /// D-UNINIT-SENTINEL1/2: `#Uninit name: Type` is retired — teaching error
     /// E0426 points at `name := Type.{ uninit }`.
     fn retired_uninit_marker(&mut self) -> Result<Stmt, Diagnostic> {
-        let hash_span = self.peek().span;
-        self.bump(); // `#`
-        let marker = self.bump(); // `Uninit`
-        let mut end = marker.span.end;
+        let head = self.read_marker_head()?;
+        let hash_span = head.span;
+        let mut end = head.name_span.end;
         let mut name_hint = String::new();
         if let TokKind::Ident(n) = &self.peek().kind {
             name_hint = n.clone();
@@ -665,11 +668,10 @@ impl<'a> Parser<'a> {
         )
     }
 
-    pub(super) fn at_statement_switch_stmt(&mut self, marker: &str) -> Result<Stmt, Diagnostic> {
-        let start = self.peek().span;
-        self.expect(TokKind::Hash, "expected `#`")?;
-        let name_tok = self.bump();
-        let attr_span = Span::new(start.start, name_tok.span.end);
+    pub(super) fn at_statement_switch_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+        let switch = self.parse_rule_marker()?;
+        let attr_span = switch.span;
+        let marker = switch.name.as_str();
 
         if matches!(self.peek().kind, TokKind::Hash)
             && matches!(
@@ -710,11 +712,11 @@ impl<'a> Parser<'a> {
             (vec![stmt], end)
         };
         let span = Span::new(attr_span.start, end);
-        if marker == Syntax::MARKER_OFF {
-            Ok(Stmt::Off { body, span })
-        } else {
-            Ok(Stmt::DebugOnly { body, span })
-        }
+        Ok(Stmt::Switched {
+            marker: switch,
+            body,
+            span,
+        })
     }
 
     fn at_policy_stmt(&mut self) -> Result<Stmt, Diagnostic> {
@@ -866,9 +868,7 @@ impl<'a> Parser<'a> {
     /// D-REACTCORE1 (ratified 2026-06-27, opt D): parse `#Reactive { … }` in
     /// statement position. Lowers to a reactive effect scope at codegen.
     pub(super) fn at_reactive_stmt(&mut self) -> Result<Stmt, Diagnostic> {
-        let start = self.peek().span;
-        self.expect(TokKind::Hash, "expected `#`")?;
-        let _ = self.expect_ident(&format!("`#{}`", Syntax::KW_REACTIVE))?;
+        let start = self.read_marker_head()?.span;
         self.expect(TokKind::LBrace, "after `#Reactive`")?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
@@ -882,9 +882,8 @@ impl<'a> Parser<'a> {
     /// position. Bare block only — no argument list. `#Shield(...)` is E0430.
     /// Lowers to `jet_scheduler_shield_enter`/`_leave` around the body at codegen.
     pub(super) fn at_shield_stmt(&mut self) -> Result<Stmt, Diagnostic> {
-        let start = self.peek().span;
-        self.expect(TokKind::Hash, "expected `#`")?;
-        let name_tok = self.bump(); // `Shield`
+        let head = self.read_marker_head()?;
+        let start = head.span;
         if matches!(self.peek().kind, TokKind::LParen) {
             let lparen = self.peek().span;
             return Err(Diagnostic::error(
@@ -893,7 +892,7 @@ impl<'a> Parser<'a> {
                 "a shield region protects whatever runs inside it; there is nothing to configure"
                     .to_string(),
                 "write `#Shield { … }`".to_string(),
-                Some(Span::new(name_tok.span.start, lparen.end)),
+                Some(Span::new(head.name_span.start, lparen.end)),
             ));
         }
         self.expect(TokKind::LBrace, "after `#Shield`")?;
@@ -1543,6 +1542,17 @@ impl<'a> Parser<'a> {
                 self.finish_stmt()?;
                 Ok(Stmt::Val(binding))
             }
+            // D-META-STAGE1=B: the bare mark opens a compile-time block and
+            // precedes the `if` and `loop` verbs at compile time.
+            TokKind::Dollar => {
+                if matches!(self.peek2().kind, TokKind::KwIf) {
+                    return self.comptime_if_stmt();
+                }
+                if matches!(self.peek2().kind, TokKind::KwLoop) {
+                    return self.comptime_loop_stmt();
+                }
+                self.comptime_block_stmt()
+            }
             TokKind::Ident(n) if false && n == Syntax::FOREIGN_MATCH => {
                 let t = self.bump();
                 self.diags.push(Diagnostic::error(
@@ -1989,41 +1999,15 @@ impl<'a> Parser<'a> {
                 self.finish_stmt()?;
                 Ok(Stmt::Val(binding))
             }
-            TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_TRACK) =>
-            {
-                let marker_span = self.peek().span;
-                self.bump(); // `#`
-                let (_, name_span) = self.expect_ident(&format!("`#{}`", Syntax::MARKER_TRACK))?;
-                let mut binding = self.sigil_binding()?;
-                binding.track = true;
-                binding.track_span = Some(Span::new(marker_span.start, name_span.end));
-                self.finish_stmt()?;
-                Ok(Stmt::Val(binding))
-            }
+            // D-VERDICT-1455-1: a binding-level marker is read and retained, not
+            // turned into a flag here. Sema and the formatter read the marker.
             TokKind::Hash
-                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_LOCAL) =>
+                if matches!(&self.peek2().kind, TokKind::Ident(n) if matches!(n.as_str(),
+                    Syntax::MARKER_TRACK | Syntax::MARKER_LOCAL | Syntax::MARKER_SHARED)) =>
             {
-                let marker_span = self.peek().span;
-                self.bump(); // `#`
-                let (_, name_span) = self.expect_ident(&format!("`#{}`", Syntax::MARKER_LOCAL))?;
+                let marker = self.parse_rule_marker()?;
                 let mut binding = self.sigil_binding()?;
-                binding.reactive_local = true;
-                binding.reactive_local_span =
-                    Some(Span::new(marker_span.start, name_span.end));
-                self.finish_stmt()?;
-                Ok(Stmt::Val(binding))
-            }
-            TokKind::Hash
-                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_SHARED) =>
-            {
-                let marker_span = self.peek().span;
-                self.bump(); // `#`
-                let (_, name_span) = self.expect_ident(&format!("`#{}`", Syntax::MARKER_SHARED))?;
-                let mut binding = self.sigil_binding()?;
-                binding.reactive_shared = true;
-                binding.reactive_shared_span =
-                    Some(Span::new(marker_span.start, name_span.end));
-                binding.reactive_upgrade = true;
+                binding.markers.push(marker);
                 self.finish_stmt()?;
                 Ok(Stmt::Val(binding))
             }
@@ -2147,11 +2131,10 @@ impl<'a> Parser<'a> {
                     return self.at_reactive_stmt();
                 }
                 // D-CANVASSTATE1=D: statement switch-off attributes.
-                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_OFF) {
-                    return self.at_statement_switch_stmt(Syntax::MARKER_OFF);
-                }
-                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_DEBUG_ONLY) {
-                    return self.at_statement_switch_stmt(Syntax::MARKER_DEBUG_ONLY);
+                if matches!(&self.peek2().kind, TokKind::Ident(n)
+                    if n == Syntax::MARKER_OFF || n == Syntax::MARKER_DEBUG_ONLY)
+                {
+                    return self.at_statement_switch_stmt();
                 }
                 // D-UNSAFE2: `#Unsafe("reason") { … }` (or retired `#Audit("…") #Unsafe`).
                 self.at_unsafe_stmt()
@@ -2162,14 +2145,13 @@ impl<'a> Parser<'a> {
             // below for the same reason as the directive-marker guard.
             TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_PERSIST) =>
             {
-                let t = self.bump(); // `@`
-                let name_tok = self.bump(); // `Persist`
+                let head = self.read_marker_head()?;
                 Err(Diagnostic::error(
                     "E0145",
                     "only module-level state can persist across reloads".to_string(),
                     "persistence is keyed by module + name; a local has no stable identity across a reload".to_string(),
                     "move it to module level, or drop `#Persist`".to_string(),
-                    Some(Span::new(t.span.start, name_tok.span.end)),
+                    Some(head.span),
                 ))
             }
             TokKind::At => {
@@ -2391,8 +2373,7 @@ fn rewrite_collect_root_exits(stmts: &mut [Stmt], target: &str, nested_loop_dept
             | Stmt::Impure { body, .. }
             | Stmt::Reactive { body, .. }
             | Stmt::Shield { body, .. }
-            | Stmt::Off { body, .. }
-            | Stmt::DebugOnly { body, .. }
+            | Stmt::Switched { body, .. }
             | Stmt::Region { body, .. }
             | Stmt::Policy { body, .. }
             | Stmt::TaskGroup { body, .. }

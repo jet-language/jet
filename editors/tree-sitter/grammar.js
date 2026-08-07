@@ -13,7 +13,7 @@
 
 // BEGIN GENERATED JET SYNTAX HIGHLIGHTS
 const JET_HIGHLIGHT_KEYWORD_CONTROL = ["break", "defer", "else", "if", "loop", "return"];
-const JET_HIGHLIGHT_KEYWORD_DECLARATION = ["Bench", "Context", "Impure", "Reactive", "Scrub", "State", "Test", "Todo", "Transact", "Transition", "Unsafe", "add", "alias", "as", "change", "client", "derive", "distinct", "effect", "enum", "extern", "fn", "impl", "migration", "module", "priv", "protocol", "pub", "remove", "rename", "rust", "server", "state", "struct", "tag", "taskgroup", "trait", "use", "validate", "via"];
+const JET_HIGHLIGHT_KEYWORD_DECLARATION = ["Bench", "Context", "Impure", "Reactive", "Scrub", "State", "Test", "Todo", "Transact", "Transition", "Unsafe", "add", "alias", "as", "change", "client", "derive", "distinct", "effect", "enum", "extern", "fn", "impl", "marker", "migration", "module", "priv", "protocol", "pub", "remove", "rename", "rust", "server", "state", "struct", "tag", "taskgroup", "trait", "use", "validate", "via"];
 const JET_HIGHLIGHT_KEYWORD_OWNERSHIP = ["uninit"];
 const JET_HIGHLIGHT_KEYWORD_OTHER = ["it", "self"];
 const JET_HIGHLIGHT_LITERAL = ["None", "Val", "false", "true"];

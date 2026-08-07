@@ -107,25 +107,28 @@ impl<'a> Parser<'a> {
                 self.emit_numeric_field_error(span);
                 return Ok(("0".to_string(), span));
             }
-            // D-LAYOUT-FACTS1=B: `$layout` is the one compiler-owned fact
-            // member. `$name` remains the separate comptime splice form; a
-            // dollar after `.` is not a general user-member escape hatch.
-            if matches!(self.peek().kind, TokKind::Dollar) {
-                let dollar = self.bump().span;
-                let (name, name_span) = self.expect_ident("after `$` in a compiler fact")?;
-                let member = format!("${name}");
-                if member != Syntax::COMPILER_FACT_LAYOUT {
+            // D-LAYOUT-FACTS1=B / D-META-STAGE1=B: a marked member after `.` is
+            // a compiler-owned fact, and the registry is closed. The mark is
+            // not a general user-member escape hatch.
+            if matches!(&self.peek().kind, TokKind::Ident(n) if Syntax::is_comptime_name(n)) {
+                let (member, member_span) = self.expect_ident("in a compiler fact")?;
+                if Syntax::compiler_fact_member(&member).is_none() {
                     return Err(Diagnostic::error(
                         "E0302",
                         format!("`{member}` is not a compiler-owned fact"),
-                        "focused compiler facts use the ratified `$layout` member"
-                            .to_string(),
-                        "write `T.$layout`, or use `T.reflect()` for full reflection"
-                            .to_string(),
-                        Some(Span::new(dollar.start, name_span.end)),
+                        format!(
+                            "the compiler-owned facts are {}",
+                            Syntax::COMPILER_FACTS
+                                .iter()
+                                .map(|(name, _)| format!("`{name}`"))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        ),
+                        "write `T.$layout`, `T.$name`, or `T.$fields`".to_string(),
+                        Some(member_span),
                     ));
                 }
-                return Ok((member, Span::new(dollar.start, name_span.end)));
+                return Ok((member, member_span));
             }
             // D-ITER1: `take` is `KwMove` in the lexer but is valid as a method name
             // in dot position (`xs.take(n)`). Accept it as an identifier here.

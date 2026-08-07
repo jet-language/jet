@@ -496,9 +496,8 @@ impl<'a> Fmt<'a> {
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
             }
-            Stmt::Off { body, .. } => self.fmt_statement_switch_attr(Syntax::MARKER_OFF, body),
-            Stmt::DebugOnly { body, .. } => {
-                self.fmt_statement_switch_attr(Syntax::MARKER_DEBUG_ONLY, body)
+            Stmt::Switched { marker, body, .. } => {
+                self.fmt_statement_switch_attr(&marker.name, body)
             }
             // D-REACTCORE1: `#Reactive { … }` round-trips verbatim.
             Stmt::Reactive { body, .. } => {
@@ -598,7 +597,7 @@ impl<'a> Fmt<'a> {
             }
             // D-VERDICT-1308-1: `#Known { … }` demand block.
             Stmt::ComptimeBlock { body, .. } => {
-                self.write(&format!("#{} {{", Syntax::MARKER_KNOWN));
+                self.write(&format!("#{} {{", Syntax::RETIRED_MARKER_KNOWN));
                 self.newline();
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
@@ -610,7 +609,7 @@ impl<'a> Fmt<'a> {
                 else_body,
                 ..
             } => {
-                self.write(&format!("#{} {} ", Syntax::MARKER_KNOWN, Syntax::KW_IF));
+                self.write(&format!("#{} {} ", Syntax::RETIRED_MARKER_KNOWN, Syntax::KW_IF));
                 self.fmt_cond(cond);
                 self.write(" {");
                 self.newline();
@@ -632,7 +631,7 @@ impl<'a> Fmt<'a> {
                 else_body,
                 ..
             } => {
-                self.write(&format!("#{} {} ", Syntax::MARKER_KNOWN, Syntax::KW_IF));
+                self.write(&format!("#{} {} ", Syntax::RETIRED_MARKER_KNOWN, Syntax::KW_IF));
                 self.fmt_dispatch(subject, arms, else_body.as_deref());
             }
             // D-CTX1 (ratified 2026-06-22, G2): `#Context(field: value, …) { … }`.
@@ -1147,18 +1146,12 @@ impl<'a> Fmt<'a> {
             self.fmt_meta_attr(meta);
             self.write(" ");
         }
-        if b.track {
-            self.write(&format!("#{} ", Syntax::MARKER_TRACK));
-        }
-        if b.reactive_local {
-            self.write(&format!("#{} ", Syntax::MARKER_LOCAL));
-        }
-        if b.reactive_shared {
-            self.write(&format!("#{} ", Syntax::MARKER_SHARED));
+        for marker in &b.markers {
+            self.write(&format!("#{} ", marker.name));
         }
         // D-VERDICT-1308-1: explicit compile-time demand is marker-led.
         if b.is_comptime {
-            self.write(&format!("#{} ", Syntax::MARKER_KNOWN));
+            self.write(&format!("#{} ", Syntax::RETIRED_MARKER_KNOWN));
             self.write(&b.name);
             self.write(" :: ");
             self.fmt_expr(&b.init, Prec::OrFallback);

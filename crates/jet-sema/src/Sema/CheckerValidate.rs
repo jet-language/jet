@@ -177,12 +177,7 @@ fn build_validate_impl(s: &StructDef, rules: &[ValidateRule], span: Span) -> Imp
 
     let errors_binding = Stmt::Val(Binding {
         mutable: true,
-        track: false,
-        track_span: None,
-                reactive_local: false,
-                reactive_local_span: None,
-                reactive_shared: false,
-                reactive_shared_span: None,
+        markers: Vec::new(),
                 reactive_upgrade: false,
         meta: None,
         name: ERRORS_VAR.to_string(),

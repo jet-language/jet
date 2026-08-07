@@ -67,7 +67,7 @@
   "return"
 ] @keyword.control
 
-; keyword.declaration: Bench Context Impure Reactive Scrub State Test Todo Transact Transition Unsafe add alias as change client derive distinct effect enum extern fn impl migration module priv protocol pub remove rename rust server state struct tag taskgroup trait use validate via
+; keyword.declaration: Bench Context Impure Reactive Scrub State Test Todo Transact Transition Unsafe add alias as change client derive distinct effect enum extern fn impl marker migration module priv protocol pub remove rename rust server state struct tag taskgroup trait use validate via
 [
   "Bench"
   "Test"

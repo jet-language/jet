@@ -381,12 +381,7 @@ impl<'a> Checker<'a> {
         );
         *stmt = Stmt::Val(crate::AST::Binding {
             mutable: false,
-            track: false,
-            track_span: None,
-                reactive_local: false,
-                reactive_local_span: None,
-                reactive_shared: false,
-                reactive_shared_span: None,
+            markers: Vec::new(),
                 reactive_upgrade: false,
             meta: None,
             name: synth.clone(),

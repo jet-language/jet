@@ -143,6 +143,14 @@ impl<'a> Fmt<'a> {
                 self.newline();
                 self.skip_verbatim_comments(declaration.span.end);
             }
+            // D-META-NAME1/FORM1: emitted verbatim, like `EffectDecl` — parse-only
+            // (card #1456); canonical reformatting is #1457's/#1458's job.
+            Item::MarkerDecl(declaration) => {
+                let text = self.src[declaration.span.start..declaration.span.end].to_string();
+                self.write(&text);
+                self.newline();
+                self.skip_verbatim_comments(declaration.span.end);
+            }
             // Stage 1a: modules are emitted verbatim (non-destructive). A
             // canonical module formatter lands with the eval pipeline.
             Item::Module(m) => {
@@ -1244,14 +1252,14 @@ impl<'a> Fmt<'a> {
             return;
         }
         if c.is_comptime {
-            // D-CONSTMARK1: `#Static` / `#Inline` precede `#Known`.
+            // D-CONSTMARK1: `#Static` / `#Inline` precede the marked name.
             for attr in &c.attrs {
                 match attr {
                     ConstAttr::ForceStatic => self.write("#Static "),
                     ConstAttr::ForceInline => self.write("#Inline "),
                 }
             }
-            self.write(&format!("#{} ", Syntax::MARKER_KNOWN));
+            self.write(&format!("#{} ", Syntax::RETIRED_MARKER_KNOWN));
             self.write(&c.name);
             self.write(" :: ");
             self.fmt_expr(&c.value, Prec::OrFallback);
@@ -1274,7 +1282,7 @@ impl<'a> Fmt<'a> {
             return;
         }
         // Fallback: treat as an explicit known value.
-        self.write(&format!("#{} ", Syntax::MARKER_KNOWN));
+        self.write(&format!("#{} ", Syntax::RETIRED_MARKER_KNOWN));
         self.write(&c.name);
         self.write(" :: ");
         self.fmt_expr(&c.value, Prec::OrFallback);

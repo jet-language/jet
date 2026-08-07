@@ -852,6 +852,10 @@ impl<'a> Parser<'a> {
             TokKind::Hash if self.at_persist_binding() => self.persist_def().map(Item::Const),
             TokKind::Hash if self.at_comptime_marker() => self.comptime_def().map(Item::Const),
             TokKind::Hash if self.at_known_lead() => self.comptime_def().map(Item::Const),
+            // D-META-STAGE1=B: a module-level `$name :: expr` binding.
+            TokKind::Ident(ref n) if Syntax::is_comptime_name(n) => {
+                self.comptime_def().map(Item::Const)
+            }
             TokKind::KwUse => {
                 let span = self.peek().span;
                 self.sync_stmt();

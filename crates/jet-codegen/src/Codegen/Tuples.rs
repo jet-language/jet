@@ -367,8 +367,7 @@ fn collect_tuple_shapes_from_stmt(stmt: &Stmt, out: &mut CollectedTypeShapes) {
         Stmt::Region { body, .. }
         | Stmt::Policy { body, .. }
         | Stmt::Shield { body, .. }
-        | Stmt::Off { body, .. }
-        | Stmt::DebugOnly { body, .. }
+        | Stmt::Switched { body, .. }
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
         | Stmt::Caps { body, .. }
@@ -515,6 +514,7 @@ pub(crate) fn collect_type_shapes(items: &[Item]) -> CollectedTypeShapes {
                 }
             }
             Item::EffectDecl(_)
+            | Item::MarkerDecl(_)
             | Item::Trait(_) | Item::ExternRust(_) | Item::Module(_) | Item::CModule(_)
             | Item::CodeModule(_) | Item::Distinct(_) | Item::TypeAlias(_) | Item::UnitFamily(_) | Item::ErrorConv(_)
             | Item::Tag(_) // D-QUAL2: tags erase

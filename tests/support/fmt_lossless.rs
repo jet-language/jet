@@ -76,6 +76,7 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/loop_header_semicolon_retired.jet",
     "tests/ui/loop_label_prefix_old_form.jet",
     "tests/ui/marker_argument_shape.jet",
+    "tests/ui/marker_decl_rejected_forms.jet",
     "tests/ui/marker_empty_arguments.jet",
     "tests/ui/marker_experimental_at.jet",
     "tests/ui/marker_experimental_hash.jet",

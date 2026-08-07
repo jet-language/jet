@@ -429,4 +429,220 @@ impl<'a> Parser<'a> {
                 span: Span::new(start, end),
             })
         }
+
+        /// D-META-NAME1=A: true when `marker Name(` is at the cursor (contextual,
+        /// like `state`/`protocol`).
+        pub(super) fn at_marker_decl(&self) -> bool {
+            matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_MARKER)
+                && matches!(&self.peek2().kind, TokKind::Ident(_))
+                && matches!(&self.peek3().kind, TokKind::LParen)
+        }
+
+        /// D-META-FORM1=A: parse `marker Name(params…)`. The rule's own
+        /// arguments and facts about the rule ($sites, $repeatable, …) share
+        /// one named-parameter list, told apart by the `$` mark the lexer
+        /// already carried into the name (`marker_decl_param_list`).
+        /// D-META-FORM1=A rejected a trailing `on` clause, a second parameter
+        /// list, and a scope block by name — each teaches the ratified form.
+        pub(super) fn marker_decl(&mut self) -> Result<crate::AST::MarkerDecl, Diagnostic> {
+            let start = self.peek().span;
+            self.bump(); // consume `marker`
+            let (name, name_span) =
+                self.expect_ident("the marker name in `marker Name(params…)`")?;
+            self.expect(TokKind::LParen, "to open the marker's parameter list")?;
+            let params = self.marker_decl_param_list()?;
+            let mut end = self.toks[self.pos - 1].span.end;
+            if let Some(diagnostic) = self.reject_marker_decl_trailer() {
+                self.diags.push(diagnostic);
+                end = self.toks[self.pos - 1].span.end;
+            }
+            if matches!(self.peek().kind, TokKind::Semi) {
+                self.bump();
+            }
+            Ok(crate::AST::MarkerDecl {
+                name,
+                name_span,
+                params,
+                span: Span::new(start.start, end),
+            })
+        }
+
+        /// D-META-FORM1=A: the rule's own arguments read `name: Type [=
+        /// default]`, the same shape as an ordinary function parameter. A
+        /// fact about the rule reads `$name: value` instead — it is a fixed
+        /// property of the declaration, not something a use site supplies,
+        /// so it carries a value directly rather than a type.
+        fn marker_decl_param_list(&mut self) -> Result<Vec<crate::AST::MarkerDeclParam>, Diagnostic> {
+            let mut params = Vec::new();
+            if !matches!(self.peek().kind, TokKind::RParen) {
+                loop {
+                    let marked =
+                        matches!(&self.peek().kind, TokKind::Ident(n) if Syntax::is_comptime_name(n));
+                    let (name, name_span) = self.expect_ident(if marked {
+                        "a marker fact name"
+                    } else {
+                        "a marker parameter name"
+                    })?;
+                    self.expect(
+                        TokKind::Colon,
+                        "between the parameter name and its type or value",
+                    )?;
+                    let (ty, value) = if marked {
+                        (None, Some(Box::new(self.expr_no_struct_lit()?)))
+                    } else {
+                        let (ty, _ty_span) = self.type_()?;
+                        let default = if matches!(self.peek().kind, TokKind::Eq) {
+                            self.bump();
+                            Some(Box::new(self.expr_no_struct_lit()?))
+                        } else {
+                            None
+                        };
+                        (Some(ty), default)
+                    };
+                    params.push(crate::AST::MarkerDeclParam {
+                        name,
+                        name_span,
+                        ty,
+                        value,
+                    });
+                    if matches!(self.peek().kind, TokKind::RParen) {
+                        break;
+                    }
+                    self.expect(TokKind::Comma, "between marker parameters")?;
+                }
+            }
+            self.expect(TokKind::RParen, "to close the marker's parameter list")?;
+            Ok(params)
+        }
+
+        /// D-META-FORM1=A rejected three spellings for facts about a rule —
+        /// a trailing `on` clause, a second parameter list, and a scope
+        /// block — in favor of ordinary `$`-marked named parameters in the
+        /// one list `marker_decl` already read. Recognize and consume each
+        /// so the writer sees one teaching error naming the ratified fix,
+        /// not a cascade of unrelated parse errors.
+        fn reject_marker_decl_trailer(&mut self) -> Option<Diagnostic> {
+            let (code, what, why, fix): (&str, &str, &str, String) = match &self.peek().kind {
+                TokKind::Ident(n) if n == "on" => (
+                    "E0381",
+                    "a trailing `on` clause isn't how a marker states a fact",
+                    "D-META-FORM1=A: a fact about the rule (its legal sites, whether it repeats) is an ordinary named parameter in the same list, marked with the compile-time `$` sigil — not a clause after the list",
+                    "move the sites into the parameter list as `$sites: [.Function, …]`".to_string(),
+                ),
+                TokKind::LParen => (
+                    "E0381",
+                    "a second parameter list isn't how a marker states a fact",
+                    "D-META-FORM1=A: the rule's own arguments and facts about the rule share one named-parameter list, told apart by the compile-time `$` sigil — not two parameter lists",
+                    "fold the second list's facts into the first as `$sites: […]`, `$repeatable: true`".to_string(),
+                ),
+                TokKind::LBrace => (
+                    "E0381",
+                    "a scope block isn't how a marker states a fact",
+                    "D-META-FORM1=A: a fact about the rule is an ordinary `$`-marked named parameter in the declaration's own parameter list — not a member line in a trailing block",
+                    "write the facts as parameters, e.g. `$sites: [.Function, …], $repeatable: true`".to_string(),
+                ),
+                _ => return None,
+            };
+            let span = self.peek().span;
+            self.skip_marker_trailer_balanced();
+            Some(Diagnostic::error(code, what.to_string(), why.to_string(), fix, Some(span)))
+        }
+
+        /// Consume the rejected trailer `reject_marker_decl_trailer` just
+        /// identified — the `on` word plus its bracketed list, the second
+        /// parameter list, or the scope block — so parsing resumes cleanly
+        /// after the one teaching diagnostic.
+        fn skip_marker_trailer_balanced(&mut self) {
+            let mut depth: i32 = 0;
+            let mut opened = false;
+            loop {
+                match &self.peek().kind {
+                    TokKind::Eof => return,
+                    TokKind::LParen | TokKind::LBrace | TokKind::LBracket => {
+                        depth += 1;
+                        opened = true;
+                        self.bump();
+                    }
+                    TokKind::RParen | TokKind::RBrace | TokKind::RBracket => {
+                        if depth == 0 {
+                            return; // don't eat an enclosing close
+                        }
+                        self.bump();
+                        depth -= 1;
+                        if depth == 0 {
+                            return;
+                        }
+                    }
+                    TokKind::Semi if depth == 0 => {
+                        self.bump();
+                        return;
+                    }
+                    _ => {
+                        if depth == 0 && opened {
+                            return;
+                        }
+                        self.bump();
+                    }
+                }
+            }
+        }
+}
+
+#[cfg(test)]
+mod marker_decl_tests {
+    use crate::{AST, Lexer, Parser};
+
+    /// D-META-NAME1=A / D-META-FORM1=A: the ratified shape from the ballot's
+    /// own worked example — named parameters, a fact marked with `$`.
+    #[test]
+    fn ratified_named_parameter_form_parses_with_a_dollar_marked_fact() {
+        let source = "marker Inline(mode: InlineMode, $sites: [.Function, .Method, .Constant])\nfn run() {}\n";
+        let (tokens, lex_diags) = Lexer::lex(source);
+        assert!(lex_diags.is_empty(), "{lex_diags:?}");
+        let program = Parser::parse(&tokens).expect("ratified marker declaration must parse");
+        let decl = program
+            .items
+            .iter()
+            .find_map(|item| match item {
+                AST::Item::MarkerDecl(decl) => Some(decl),
+                _ => None,
+            })
+            .expect("a MarkerDecl item");
+        assert_eq!(decl.name, "Inline");
+        assert_eq!(decl.params.len(), 2);
+        assert_eq!(decl.params[0].name, "mode");
+        assert_eq!(decl.params[1].name, "$sites");
+    }
+
+    /// D-META-FORM1=A rejected a trailing `on` clause, a second parameter
+    /// list, and a scope block by name, in favor of `$`-marked named
+    /// parameters in the declaration's own list.
+    #[test]
+    fn rejected_spellings_each_teach_the_ratified_named_parameter_form() {
+        let source = r#"
+marker Inline(mode: String) on [.Function]
+
+marker Pre(condition: String)(sites: [.Function])
+
+marker Unsafe(reason: String) {
+    .sites [.Function]
+}
+
+fn run() {}
+"#;
+        let (tokens, lex_diags) = Lexer::lex(source);
+        assert!(lex_diags.is_empty(), "{lex_diags:?}");
+        let diagnostics = match Parser::parse(&tokens) {
+            Ok(_) => Vec::new(),
+            Err(diagnostics) => diagnostics,
+        };
+        let codes: Vec<_> = diagnostics.iter().map(|d| d.code.as_str()).collect();
+        assert_eq!(codes, ["E0381", "E0381", "E0381"], "{diagnostics:?}");
+        for diagnostic in &diagnostics {
+            assert!(
+                diagnostic.fix.contains('$'),
+                "fix must name the ratified $-marked named-parameter form: {diagnostic:?}"
+            );
+        }
+    }
 }

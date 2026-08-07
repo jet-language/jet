@@ -103,6 +103,19 @@ impl<'a> Parser<'a> {
         pub(super) fn field(&mut self) -> Result<Field, Diagnostic> {
             let (is_pub, is_package_pub) = self.parse_pub_qualifier();
             let (name, name_span) = self.expect_ident("for a field name")?;
+            // D-META-STAGE1=B: the compile-time mark rides the name, so `$word`
+            // now lexes as one identifier. A field never carries it — the
+            // `$`-marked members belong to the compiler (`T.$layout`).
+            if Syntax::is_comptime_name(&name) {
+                return Err(Diagnostic::error(
+                    "E0003",
+                    format!("`{name}` is not a field name"),
+                    "the compile-time mark `$` belongs to the compiler's own members and to compile-time bindings, never to a declared field"
+                        .to_string(),
+                    format!("drop the `$`, or read the compiler fact as `T.{name}`"),
+                    Some(name_span),
+                ));
+            }
             self.expect(TokKind::Colon, "after a field name")?;
             let (ty, ty_span) = self.type_()?;
             // D-FIELDPOL1: `name: T => expr` — a computed field. `expr` is a
@@ -398,16 +411,28 @@ impl<'a> Parser<'a> {
                         Some(kw.span),
                     ));
                 }
+                // B5 revert (card #1456): `#Known` parses like master again — see
+                // Statements/bindings.rs::take_mark for why.
                 TokKind::Hash if known => {
                     self.bump();
                     self.bump();
                 }
+                // D-META-STAGE1=B: `$name :: expr` — the mark rides the name.
+                // Additive new spelling from #1537's checkpoint; kept, not part
+                // of the B5 revert (it doesn't hard-error anything in the
+                // existing `#Known` corpus).
+                TokKind::Ident(ref n) if Syntax::is_comptime_name(n) => {}
                 _ => {
                     self.expect_kw(TokKind::KwComptime, "to start a comptime binding")?;
                 }
             }
-            let (name, name_span) = self.expect_ident("after `#Known`")?;
-            if known {
+            let marked = matches!(&self.peek().kind, TokKind::Ident(n) if Syntax::is_comptime_name(n));
+            let (name, name_span) = self.expect_ident(if known || marked {
+                "after `#Known`"
+            } else {
+                "for the compile-time binding name"
+            })?;
+            if known || marked {
                 self.expect(TokKind::ColonColon, "after the `#Known` name")?;
             } else {
                 self.expect(TokKind::Eq, "after the retired comptime name")?;

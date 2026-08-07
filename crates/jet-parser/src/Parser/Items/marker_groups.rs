@@ -2,6 +2,17 @@ use super::super::{
     Diagnostic, Item, Marker, Parser, Span, Syntax, TagDef, TokKind, TraitDef, describe,
 };
 
+/// D-VERDICT-1455-1: what the one shared marker reader returns before any
+/// registry question is asked. The name is whatever was written.
+pub(in crate::Parser) struct MarkerHead {
+    pub(in crate::Parser) name: String,
+    pub(in crate::Parser) name_span: Span,
+    /// The written marker head: `#` (or `!`, inside a `#[…]` group) to the end
+    /// of the name.
+    pub(in crate::Parser) span: Span,
+    pub(in crate::Parser) negated_span: Option<Span>,
+}
+
 pub(in crate::Parser) struct BoundRuleArguments<'m> {
     marker: &'m Marker,
     bindings: Vec<crate::Policy::RuleArgumentBinding>,
@@ -68,51 +79,76 @@ impl<'a> Parser<'a> {
                 _ => None,
             }
         }
-        /// D-MARKSIG1=A: parse one marker with the ordinary call-argument
-        /// reader; cursor sits on the name.
-        pub(super) fn parse_one_marker(&mut self) -> Result<Marker, Diagnostic> {
-            let negated = matches!(self.peek().kind, TokKind::Bang);
-            let negated_span = self.peek().span;
-            if negated {
-                self.bump();
-            }
+        /// D-VERDICT-1455-1: the one reader for a written marker name. It runs
+        /// at every marker position — item, statement, expression — and accepts
+        /// any name, keyword-lexed ones included. The registry is consulted
+        /// after the read, never during it. Cursor sits on `!` or the name.
+        pub(in crate::Parser) fn read_marker_name(&mut self) -> Result<MarkerHead, Diagnostic> {
+            let negated_span = matches!(self.peek().kind, TokKind::Bang)
+                .then(|| self.bump().span);
             let name_token = self.bump();
-            let (name, name_span) = match name_token.kind {
-                TokKind::Ident(name) => (name, name_token.span),
-                _ => {
-                    return Err(Diagnostic::error(
-                        "E0003",
-                        "expected a marker name".to_string(),
-                        "marker names follow `#` and use the registered applied-rule vocabulary"
-                            .to_string(),
-                        "write a registered marker name after `#`".to_string(),
-                        Some(name_token.span),
-                    ));
-                }
+            let TokKind::Ident(name) = name_token.kind else {
+                return Err(Diagnostic::error(
+                    "E0003",
+                    "expected a marker name".to_string(),
+                    "marker names follow `#` and use the registered applied-rule vocabulary"
+                        .to_string(),
+                    "write a registered marker name after `#`".to_string(),
+                    Some(name_token.span),
+                ));
             };
-            if negated
-                && !matches!(
-                    name.as_str(),
+            let start = negated_span.unwrap_or(name_token.span).start;
+            Ok(MarkerHead {
+                name,
+                name_span: name_token.span,
+                span: Span::new(start, name_token.span.end),
+                negated_span,
+            })
+        }
+
+        /// The same reader with the leading `#` — every `#Name` position uses
+        /// this, whatever the marker turns out to mean.
+        pub(in crate::Parser) fn read_marker_head(&mut self) -> Result<MarkerHead, Diagnostic> {
+            let hash = self.peek().span;
+            self.expect(TokKind::Hash, "before a marker")?;
+            let mut head = self.read_marker_name()?;
+            head.span = Span::new(hash.start, head.name_span.end);
+            Ok(head)
+        }
+
+        /// D-MARKSIG1=A: complete a read head with the ordinary call-argument
+        /// reader.
+        fn marker_from_head(&mut self, head: MarkerHead) -> Result<Marker, Diagnostic> {
+            if let Some(negated_span) = head.negated_span {
+                if !matches!(
+                    head.name.as_str(),
                     crate::Generics::PRINTABLE
                         | crate::Generics::EQUATABLE
                         | crate::Generics::DEBUG
-                )
-            {
-                return Err(Diagnostic::error(
-                    "E0931",
-                    format!("`!{name}` is not a signed auto-derive trait"),
-                    "`!` rejects compiler generation only for Printable, Equatable, or Debug"
-                        .to_string(),
-                    format!("remove `!` from `#{name}`, or use it with an auto-derived trait"),
-                    Some(Span::new(negated_span.start, name_span.end)),
-                ));
+                ) {
+                    return Err(Diagnostic::error(
+                        "E0931",
+                        format!("`!{}` is not a signed auto-derive trait", head.name),
+                        "`!` rejects compiler generation only for Printable, Equatable, or Debug"
+                            .to_string(),
+                        format!("remove `!` from `#{}`, or use it with an auto-derived trait", head.name),
+                        Some(Span::new(negated_span.start, head.name_span.end)),
+                    ));
+                }
             }
-            let mut marker = self.finish_rule_marker(name, name_span)?;
+            let negated = head.negated_span.is_some();
+            let mut marker = self.finish_rule_marker(head.name, head.name_span)?;
             marker.negated = negated;
             if let Some(application) = self.rule_facts.last_mut() {
                 application.marker.negated = negated;
             }
             Ok(marker)
+        }
+
+        /// Parse one marker whose `#` was already consumed by the group form.
+        pub(super) fn parse_one_marker(&mut self) -> Result<Marker, Diagnostic> {
+            let head = self.read_marker_name()?;
+            self.marker_from_head(head)
         }
 
         /// Complete a marker after its name was consumed by a placement parser.
@@ -302,9 +338,9 @@ impl<'a> Parser<'a> {
 
         /// Shared entry for a bare `#Name` / `#Name(args)` application.
         pub(in crate::Parser) fn parse_rule_marker(&mut self) -> Result<Marker, Diagnostic> {
-            let start = self.peek().span.start;
-            self.expect(TokKind::Hash, "before a marker")?;
-            let mut marker = self.parse_one_marker()?;
+            let head = self.read_marker_head()?;
+            let start = head.span.start;
+            let mut marker = self.marker_from_head(head)?;
             marker.span.start = start;
             Ok(marker)
         }

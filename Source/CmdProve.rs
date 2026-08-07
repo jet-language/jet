@@ -1002,8 +1002,7 @@ fn collect_capture_statements(
             }
             Stmt::Loop { body, .. }
             | Stmt::Shield { body, .. }
-            | Stmt::Off { body, .. }
-            | Stmt::DebugOnly { body, .. }
+            | Stmt::Switched { body, .. }
             | Stmt::Region { body, .. }
             | Stmt::Policy { body, .. }
             | Stmt::Layout { body, .. }

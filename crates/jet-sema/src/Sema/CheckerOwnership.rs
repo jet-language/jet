@@ -1516,11 +1516,13 @@ impl<'a> Checker<'a> {
                         );
                     }
                 }
+                // D-CANVASSTATE1=D: an `#Off` body never reaches runtime.
+                Stmt::Switched { marker, .. } if crate::AST::switched_off(marker) => {}
                 Stmt::Loop { body, .. }
                 | Stmt::Unsafe { body, .. }
                 | Stmt::Impure { body, .. }
                 | Stmt::Shield { body, .. }
-                | Stmt::DebugOnly { body, .. }
+                | Stmt::Switched { body, .. }
                 | Stmt::Region { body, .. }
                 | Stmt::Policy { body, .. }
                 | Stmt::TaskGroup { body, .. }
@@ -1601,8 +1603,7 @@ impl<'a> Checker<'a> {
                 }
                 // These forms erase before runtime evaluation. `Off` never
                 // runs; comptime bodies run in the separate interpreter.
-                Stmt::Off { .. }
-                | Stmt::ComptimeIf { .. }
+                Stmt::ComptimeIf { .. }
                 | Stmt::ComptimeSwitch { .. }
                 | Stmt::ComptimeBlock { .. }
                 | Stmt::Break(_)

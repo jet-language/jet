@@ -738,8 +738,7 @@ fn statement_is_flow_boundary(statement: &jet::AST::Stmt) -> bool {
         | jet::AST::Stmt::Impure { .. }
         | jet::AST::Stmt::Reactive { .. }
         | jet::AST::Stmt::Shield { .. }
-        | jet::AST::Stmt::Off { .. }
-        | jet::AST::Stmt::DebugOnly { .. }
+        | jet::AST::Stmt::Switched { .. }
         | jet::AST::Stmt::Region { .. }
         | jet::AST::Stmt::Policy { .. }
         | jet::AST::Stmt::TaskGroup { .. }
@@ -881,8 +880,7 @@ fn visit_stmt_calls(statement: &jet::AST::Stmt, calls: &mut impl FnMut(&jet::AST
         | Stmt::Impure { body, .. }
         | Stmt::Reactive { body, .. }
         | Stmt::Shield { body, .. }
-        | Stmt::Off { body, .. }
-        | Stmt::DebugOnly { body, .. }
+        | Stmt::Switched { body, .. }
         | Stmt::Region { body, .. }
         | Stmt::Policy { body, .. }
         | Stmt::TaskGroup { body, .. }

@@ -1624,10 +1624,10 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
         // build time and erases entirely — no runtime Rust is emitted (I3).
         Stmt::ComptimeBlock { .. } => TStmt::Inline(vec![]),
         // D-CANVASSTATE1=D: `#Off` type-checks in sema but emits no runtime TIR.
-        Stmt::Off { .. } => TStmt::Inline(vec![]),
+        Stmt::Switched { marker, .. } if crate::AST::switched_off(marker) => TStmt::Inline(vec![]),
         // D-CANVASSTATE1=D: `#DebugOnly` is a lexical debug-only region. Lower
         // on a cloned env so declarations cannot be required by release code.
-        Stmt::DebugOnly { body, .. } => {
+        Stmt::Switched { body, .. } => {
             let mut scoped = clone_env(env);
             TStmt::DebugOnly(lower_stmts(body, cx, &mut scoped))
         }

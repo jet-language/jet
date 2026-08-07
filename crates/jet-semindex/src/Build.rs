@@ -514,6 +514,7 @@ fn item_shape(item: &AST::Item) -> String {
 fn item_span(item: &AST::Item) -> Span {
     match item {
         AST::Item::EffectDecl(x) => x.span,
+        AST::Item::MarkerDecl(x) => x.span,
         AST::Item::Func(x) => x.span,
         AST::Item::Struct(x) => x.span,
         AST::Item::Enum(x) => x.span,
@@ -893,7 +894,7 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
     );
     if let Some(id) = structural_id { ctx.structural_parents.push(id); }
     match item {
-        Item::EffectDecl(_) => {}
+        Item::EffectDecl(_) | Item::MarkerDecl(_) => {}
         Item::Func(f) => {
             record_func_type_nodes(f, mp, ctx);
             let fn_identity = callable_identity(&ctx.scope_identity, None, &f.name, f);
@@ -1817,8 +1818,7 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
         AST::Stmt::Impure { body, .. }
         | AST::Stmt::Reactive { body, .. }
         | AST::Stmt::Shield { body, .. }
-        | AST::Stmt::Off { body, .. }
-        | AST::Stmt::DebugOnly { body, .. }
+        | AST::Stmt::Switched { body, .. }
         | AST::Stmt::Region { body, .. }
         | AST::Stmt::Policy { body, .. }
         | AST::Stmt::TaskGroup { body, .. }
