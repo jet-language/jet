@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1605,
-    "rev": 28670,
+    "rev": 28675,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -84023,12 +84023,22 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-language-coherence",
-      "phase": "verify",
+      "phase": "building",
       "priority": "P1",
       "plan": "Implement D-VERDICT-1455-1 (D-MARK-REG1) structurally. One shared marker reader runs at every node start, accepts any name including keyword-lexed ones, and attaches Marker nodes to the owning AST node for every use site. Delete every hand-bumped marker token, both function-marker applicators, the marker_sequence_leads_to_function heuristic, the three shadow site tables, and all lexer marker-name knowledge. Sema receives markers; parse-time desugaring into flags ends. (This half of the card is unchanged from the original scope and is already in progress per its own criteria evidence.)\n\nAdded scope, ratified 2026-08-06 (D-META-ONE1=A, D-META-FORM1=A, D-META-NAME1=A): parse the declaration side too, since D-META-ONE1 explicitly \"fulfills D-VERDICT-1455-1\" by moving rule rows from Rust into Jet. A rule row is now written as an ordinary Jet declaration in Prelude source:\n\n  marker Inline(mode: InlineMode = .Hint, $sites: [.Function, .Method, .Constant])\n  marker Pre(condition: Any, message: String, $sites: [.Function, .Method], $repeatable: true)\n\nThe introducing keyword is \"marker\" (D-META-NAME1=A -- already the project's word everywhere else, no rename). Facts about the rule ($sites, $repeatable) are ordinary named parameters carrying the compile-time sigil \"$\", the same mark used by \"$limit\" and \"T.$layout\" -- there is no \"on\" keyword, no \"repeatable\" trailing word, no second parameter list, and no scope-block form (D-META-FORM1=A rejected all three of those spellings by name). This needs no new grammar beyond an ordinary named-parameter declaration list plus the existing \"$\" sigil applied to a parameter.\n\nNot in scope for this card: lowering the parsed \"marker\" declarations into whatever runtime structure sema/formatter/tree-sitter consume as \"registry rows\" -- that is #1457's and #1458's job; do not duplicate that work here. Also not in scope: implementing D-META-STAGE1's retirement of \"#Known\" (a separate ballot, tracked on its own new card) -- do not special-case \"#Known\" here beyond whatever the existing keyword-lexed-marker-name handling already covers generically.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-07",
+          "by": "bd3-mark",
+          "text": "[handoff] B5-B8 fixed and committed (268ac7819). Worktree /home/nate/Projects/Github/jet/.claude/worktrees/mark, branch bd2/mark, 3 commits ahead of master (eab7c8713). Phase=building (not verify -- c1/c3 status shows 'met' only because Tower has no criteria-reopen verb; both are NOT actually satisfied, see their evidence text and the card log for exact scope). c4 and c5 still hold: re-ran all 5 targeted suites + diagnostics_coverage after the B5-B8 fixes, back to the same pre-existing-only failure set (#1599, #1601, #1603). Next: either (a) a follow-up pass finishes c1 (statement/expression-position marker unification in Statements/control.rs and Expressions/primary.rs -- distinct large slice, own scoping needed) and re-verifies c3, or (b) this card closes with c1/c3 honestly documented as the known remainder and a new card carries that slice forward -- owner/orchestrator call, not mine to decide unilaterally. Do not phase this to verify/done until that's resolved. Worktree still needed for the next pass; not merged, not pushed."
+        },
+        {
+          "at": "2026-08-07",
+          "by": "bd3-mark",
+          "text": "Fixed 4 blocking review findings on bd2/mark. B5 (unmergeable branch): reverted the hard-error slices of #1537's checkpoint -- #Known parses like master again (no error), restored Policy.rs's Known rule row, and (this required going further than the coordinator's minimal ask once verified) restored the deleted Expr::ComptimeSplice AST node + all ~20 match-site arms across sema/codegen/formatter, since the checkpoint's lexer change ($word merges into one token) meant simply un-erroring #Known left $name-splice examples (e.g. comptime_block.jet's $ratio) broken with E0107 instead of a teaching error -- same corpus, same root cause. Verified: examples/features/comptime/*.jet and lowlevel/os_target_gating.jet all  clean; jet run comptime_block.jet produces correct output. B6 (I4 violation): E0377-E0380 no longer emitted (part of the B5 revert), confirmed absent from every diagnostics_coverage.rs list; unrelated pre-existing gaps (E1320-series, E3620-series, stale E0416/E0428/E2407/E3626/E3504 rows) logged as card #1603, not fixed here. B7/B8 (false c1/c3 records): re-investigated by inspection -- criterion 1 is genuinely NOT done outside callables + already-shared-reader item-dispatch sites; real remaining hand-bumped Hash+Ident parsing lives in Statements/control.rs (statement-switch markers) and Expressions/primary.rs (#Todo/#Tainted/#Meta-misuse/#Off-misuse/open-vocabulary #Tag-value), a distinct large slice with real regression risk (golden-tested diagnostic text, and #Tag-value can't use the closed-registry shared reader as-is). No CLI verb exists to reopen a met criterion (papercut pc0l35wty logged) so c1/c3 stay status=met with evidence rewritten to state exactly what's proven vs not -- treat both as NOT actually satisfied pending a dedicated follow-up pass. Re-ran c4's five targeted suites plus diagnostics_coverage after every fix; all back to the same pre-existing-only failure set (cards #1599, #1601, #1603). c5 (marker Name(...) parsing) unaffected by any of this, still fully green. Commit pending."
+        },
         {
           "at": "2026-08-07",
           "by": "bd3-mark",
@@ -84065,10 +84075,10 @@
           "n": 1,
           "text": "The shared reader is the only marker parse path; a search proves no hand-bumped marker token remains in parser or lexer",
           "status": "met",
-          "metBy": "bd-markers",
+          "metBy": "bd3-mark",
           "verifiedBy": null,
-          "evidence": "Met for callables. Deleted the 200-line duplicate applicator in func(), 17 marker-named dispatcher arms, 12 shadow predicates and the three remaining hand-bumped function parsers. Proved dead by measurement, not assertion: a probe on the prologue fired 0 times across examples, tests/ui and tests/fuzz, while the same probe moved to the token func() actually sees fired 842 times. Statement, binding and expression sites are not done.",
-          "at": "2026-08-06T03:00:22.892Z"
+          "evidence": "REOPENED BY REVIEW (B7, no CLI unmeet verb exists -- see card log for status): NOT fully done. Met only for callables (apply_callable_markers, unchanged from before this session) plus item-dispatch sites that already delegate to the shared reader (parse_one_marker/parse_attached_marker_sequence/parse_rule_marker) -- confirmed by inspection: enums_traits.rs variant/field markers, visibility_items.rs's #UnitFamily dispatch (calls parse_rule_marker directly), Modules.rs top-level dispatch. NOT done, confirmed by inspection, genuinely distinct large slices: (1) statement-position hand-bumped Hash+Ident consumption in Statements/control.rs (at_statement_switch_stmt's own self.expect(Hash)+bump for #Off/#DebugOnly, plus similar at ~678/878/894) and Statements/bindings.rs (take_mark's #Known handling -- legitimately exempt per B5: #Known is a retired-but-restored control keyword like comptime/if/loop, not an applied-rule marker, so it predates and sits outside the shared-reader mechanism by design); (2) expression-position hand-bumped Hash+Ident in Expressions/primary.rs lines ~35-154 (#Meta misuse teaching, #Off/#DebugOnly misuse teaching, #Todo, retired #Tainted, and the open-vocabulary #TagName-value tag-prefix operator -- the last one can never route through parse_one_marker/finish_rule_marker as-is since that machinery validates against the closed Policy::APPLIED_RULES table, while declared tags are an open, module-scoped vocabulary; #Todo and #Tainted ARE registered rows (EXPR_SITE, Operation) so they could route through the shared reader, but doing so safely without changing the E0343/meta_attr_wrong_place_diag/E0054 golden-tested diagnostic text is nontrivial). Card phase set back to building; this criterion needs its own scoped pass, not folded into #1456's remaining time.",
+          "at": "2026-08-07T10:11:48.445Z"
         },
         {
           "n": 2,
@@ -84083,10 +84093,10 @@
           "n": 3,
           "text": "Marker nodes are retained on every AST target site and reach sema intact",
           "status": "met",
-          "metBy": "bd-markers",
+          "metBy": "bd3-mark",
           "verifiedBy": null,
-          "evidence": "Func.markers is a retained Vec<Marker>, populated in apply_callable_markers, and reaches sema.",
-          "at": "2026-08-06T03:00:23.201Z"
+          "evidence": "Re-evidenced after B8 (prior evidence covered Func.markers only, an overclaim against the criterion's 'every AST target site' text). Verified by inspection (crates/jet-foundation/src/AST/items.rs): six markers: Vec<Marker>-shaped fields exist and are reachable at parse+sema time -- Func.markers (direct: populated in apply_callable_markers, unchanged), StructDef.{serde_markers,type_markers}, DistinctDef.type_markers, EnumDef.{serde_markers,type_markers}, Variant.serde_markers, Field.serde_markers (these six: parser collects markers via the shared reader into self.rule_facts at parse time, sema's CheckerMarkers.rs::resolve_static_rule_products + apply_all reconcile them into the field by name_span.start before codegen). Functionally proven reaching sema for Struct/Field/Enum/Variant by tests/marker_rule_signatures.rs::static_type_and_field_strings_use_the_same_signature_gate (Discriminant on enum type, Rename on struct field and enum variant, all resolve; 24/24 passing). NOT covered, tracks c1's open remainder: statement-position markers (#Track/#Persist/#Context/#Transact/#Off/#DebugOnly) and expression-position markers (#Todo/#Tainted/#TagName-value/#Meta) have no markers:Vec<Marker> retention at all -- they lower directly into dedicated Stmt/Expr variants (Stmt::ComptimeBlock, Expr::Todo, Expr::Tainted, Expr::ReduceMarker, E0343/E0344 teaching errors) rather than being retained as generic Marker nodes on an owning AST node, so 'every AST target site' is not yet true for those. This criterion cannot close ahead of c1's remainder.",
+          "at": "2026-08-07T10:11:59.707Z"
         },
         {
           "n": 4,
@@ -84117,7 +84127,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T22:45:07.350Z",
-      "updated": "2026-08-07T09:18:20.968Z",
+      "updated": "2026-08-07T10:13:12.759Z",
       "updatedBy": "bd3-mark",
       "workOrder": 370
     },
@@ -132262,6 +132272,41 @@
   ],
   "events": [
     {
+      "at": "2026-08-07T10:13:12.759Z",
+      "by": "bd3-mark",
+      "action": "card.release",
+      "ref": "c0556cxe",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-08-07T10:12:18.312Z",
+      "by": "bd3-mark",
+      "action": "card.update",
+      "ref": "c0556cxe",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-07T10:11:59.707Z",
+      "by": "bd3-mark",
+      "action": "card.criteria-meet",
+      "ref": "c0556cxe",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-07T10:11:48.445Z",
+      "by": "bd3-mark",
+      "action": "card.criteria-meet",
+      "ref": "c0556cxe",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T10:11:36.058Z",
+      "by": "bd3-mark",
+      "action": "papercut.add",
+      "ref": "pc0l35wty",
+      "note": ""
+    },
+    {
       "at": "2026-08-07T10:07:42.037Z",
       "by": "bd3-orch",
       "action": "card.update",
@@ -135725,41 +135770,6 @@
       "action": "card.criteria-meet",
       "ref": "c0gv6ghj",
       "note": "#2"
-    },
-    {
-      "at": "2026-08-07T00:23:40.039Z",
-      "by": "bd2-sweep",
-      "action": "card.criteria-meet",
-      "ref": "c0gv6ghj",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-07T00:16:07.692Z",
-      "by": "bd2-sweep",
-      "action": "card.criteria-add",
-      "ref": "c0xrzvms",
-      "note": "#1 cargo test --test tir_collections_and_methods passes all cas"
-    },
-    {
-      "at": "2026-08-07T00:16:07.120Z",
-      "by": "bd2-sweep",
-      "action": "card.add",
-      "ref": "c0xrzvms",
-      "note": "tir_collections_and_methods: 7 pre-existing test failures (D-ENUMDOT1 match-arm syntax)"
-    },
-    {
-      "at": "2026-08-07T00:11:38.611Z",
-      "by": "bd2-sweep",
-      "action": "card.criteria-add",
-      "ref": "c0z6ssoi",
-      "note": "#2 core.tls's ciphersuites and tlsversion rows are either shipp"
-    },
-    {
-      "at": "2026-08-07T00:11:38.235Z",
-      "by": "bd2-sweep",
-      "action": "card.criteria-add",
-      "ref": "c0z6ssoi",
-      "note": "#1 Every one of the 75 rows D-CORESURF-SMALL1 covers carries ve"
     }
   ],
   "nextNum": 368,
@@ -135913,6 +135923,14 @@
       "text": "rustfmt not on PATH in either 'nix develop' or 'nix develop .#full' devshell (cargo fmt / rustfmt --check both fail with 'not found'); D-CI2's rustfmt gate can't be wired until flake.nix adds the rustfmt component.",
       "cardId": null,
       "created": "2026-08-07T02:58:54.819Z",
+      "status": "open"
+    },
+    {
+      "id": "pc0l35wty",
+      "by": "bd3-mark",
+      "text": "tower card criteria has no reopen/unmeet verb — once --meet sets a criterion to met, only --verify can move it further; a builder who discovers a criterion was falsely marked met (found via fresh review) has no CLI way to set it back to open, only to overwrite evidence text while status stays met.",
+      "cardId": null,
+      "created": "2026-08-07T10:11:36.057Z",
       "status": "open"
     }
   ]
