@@ -222,6 +222,13 @@ Worktrees are allowed for isolated or concurrent writes. Record ownership before
 the intended branch promptly, verify it there, then remove the worktree and temporary branch immediately. Never park
 finished work unmerged. Paused work keeps a named coherent handoff branch and resume note, not an orphaned worktree.
 
+Build-heavy agent tasks reuse the persistent builder worktree at `.claude/worktrees/builder` instead of a fresh
+random-path worktree: cargo fingerprints embed absolute paths, so a fresh path means a full cold workspace rebuild
+(~15-20 minutes) while the fixed path rebuilds only what changed. Claim it with
+`scripts/agent/builder-sync.sh <claimant>` (refreshes to master HEAD; exits 75 when busy), release with
+`--release`, and never remove it or its `target/`. One build agent at a time; doc-only and board-only tasks keep
+disposable isolated worktrees.
+
 Worktree location is absolute (no exceptions for cloud agents, Cursor, Claude, or temp names):
 
 - The only top-level Jet checkout is the main clone (e.g. `…/Github/jet`). Never create sibling
