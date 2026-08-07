@@ -285,13 +285,22 @@ pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
         let mut i = start;
         let mut end = src.len();
         let mut seen_brace = false;
+        // Generated Rust bodies are full of `format!("{...}")`/error-string
+        // literals — a `{`/`}` inside a `"..."` string isn't a brace, and
+        // counting it desyncs the depth tracker, cutting the module short
+        // and leaving its tail (e.g. `unsafe impl … Send for JetSharedCell`)
+        // behind as unstripped, falsely-flagged "user" code.
+        let mut in_string = false;
         while i < bytes.len() {
             match bytes[i] {
-                b'{' => {
+                b'"' if !in_string => in_string = true,
+                b'"' if in_string => in_string = false,
+                b'\\' if in_string => i += 1, // skip the escaped byte too
+                b'{' if !in_string => {
                     depth += 1;
                     seen_brace = true;
                 }
-                b'}' => {
+                b'}' if !in_string => {
                     depth -= 1;
                     if seen_brace && depth == 0 {
                         end = i + 1;

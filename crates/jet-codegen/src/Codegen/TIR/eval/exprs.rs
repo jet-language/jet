@@ -2887,8 +2887,22 @@ impl<'a> EvalCtx<'a> {
                 // AOT lowers to `(&place as *const _ as usize as i64)`. The
                 // interpreter has no real addresses, so mint a stable non-zero
                 // identity from the place path (I9: same non-zero / inequality
-                // facts a program can observe).
+                // facts a program can observe) — but ONLY when this evaluator is
+                // actually running the program (`runtime_execution`). A sema-time
+                // comptime fold (D-VERDICT-1308-1's implicit fold, or an explicit
+                // `#Known`) calls this exact same code path to *try* folding the
+                // binding; baking the synthetic identity as an AOT `i64` literal
+                // there would compile a wild-pointer dereference into the
+                // program — a real memory-safety bug, not just a wrong value.
+                // Refuse so the fold declines and the call lowers to real runtime
+                // codegen instead (I1).
                 if module == "core.mem" && method == "address_of" && args.len() == 1 {
+                    if !self.runtime_execution {
+                        return Err(unsupported(
+                            "`mem.address_of` at compile time",
+                            *source_span,
+                        ));
+                    }
                     let key = tir_place_address_key(&args[0]);
                     return Ok(CtValue::Int(stable_place_address(&key)));
                 }

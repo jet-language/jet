@@ -14,6 +14,7 @@ fn direct_fixed_constructor(expr: &Expr) -> bool {
     )
 }
 
+
 fn contains_taskgroup(ty: &Type) -> bool {
     match ty {
         Type::Named(name) => name == Syntax::TYPE_TASKGROUP,
@@ -706,6 +707,13 @@ impl<'a> Checker<'a> {
                 // D-VERDICT-1308-1: an ordinary immutable binding is an
                 // implicit folding opportunity. Failure is silent; only
                 // explicit `#Known` demands a compile-time answer.
+                // (mem.address_of specifically always declines to fold — see
+                // the runtime_execution guard at its mint point in
+                // crates/jet-codegen/src/Codegen/TIR/eval/exprs.rs, which
+                // covers this path, the #Known path above, method_calls.rs's
+                // evaluate_constant, and any Expr::Paren-wrapped spelling —
+                // one guard where the value is minted, not a syntactic
+                // pattern match here that a stray `(...)` could dodge.)
                 let globals = self.current_ct_globals();
                 let mut mutated = std::collections::HashMap::new();
                 let folded = crate::Comptime::evaluate_owned_with_imports_opts_collecting(
