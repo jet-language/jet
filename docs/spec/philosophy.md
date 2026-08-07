@@ -90,6 +90,12 @@ the engine stays its own, and the facts it publishes register as read-only rows
 each grade of power costs one written mark — but they are the prover's surface,
 not gates, and they never enter the ledger.
 
+## The corpus law: say it once
+
+*(D-ONCE-LAW1=A, ratified 2026-08-07, card #1656.)*
+
+The fact law's discipline extends to the corpus itself. Every truth — a semantic, a table, a message, a spelling, a decision — has exactly one home. Every other appearance is rendered from that home. A law ships with its guard, or it is prose: every registered truth names its home, its renderers, and a guard test, and an underivable second copy is a build failure. Engines compile one source (D-ONCE-TIER1=A restores full tier parity, superseding D-VERDICT-1254-1). Retired spellings ship their retirement as code: renames auto-rewrite, semantic changes hard-error, and every retirement carries an adoption ratchet (D-ONCE-RETIRE1=C). The full slate of fourteen rulings lives in Tower on card #1656 and renders in `docs/spec/syntax-decisions.md`.
+
 ## Ranked priorities
 
 1. **Memory & type safety.** Never traded away, never configurable.

@@ -5885,3 +5885,22 @@ law voice). No per-plane card in #1517–#1579 closes before its substrate
 prerequisite closes.
 
 **2026-08-07 — D-NAME-FILES1 = C** *(card #1625, proposal `docs/proposals/names-one-tree.md`)*. Manual named imports stay: every cross-file name keeps an explicit import line, and no invisible auto-import of project files ships. Owner's words: "Let's just stick with manual named imports like we used to have rather than the magic auto imports that are invisible." D-NAME-AUDIT1 (the refuse-the-magic switch) is withdrawn as moot. The rest of the D-NAME slate stays open on the card.
+
+## The say-it-once slate (D-ONCE-*, ratified 2026-08-07, card #1656)
+
+The corpus-wide first-principles audit's rulings. Tower is the decision home (D-ONCE-LEDGER1=A); this block is the spec render.
+
+- **D-ONCE-LAW1=A** — the corpus law: every truth has one home with named renderers and a guard; a guardless law row fails lint; a hand-written second copy fails the build.
+- **D-ONCE-TIER1=A** — full tier parity; the interpreter is a first-class tier; supersedes D-VERDICT-1254-1's interpreter carve-out.
+- **D-ONCE-RETIRE1=C** — retirements ship as code, split by category: pure renames auto-rewrite with a notice; semantic changes hard-error with a fix line; every retirement carries an adoption ratchet that ends at zero.
+- **D-ONCE-WORD1=A** — `Stream<T>` owns the word stream; codec modes are readers and writers; events are events; eager loop comprehensions are collecting loops. One vocabulary page; the retired senses are doc-lint errors.
+- **D-ONCE-DERIVE1=A** — the marker (`#Comparable`) is the one spelling to request a derived capability; the body-line `derive X` retires; the `derive` keyword keeps only its provider-definition meaning (amends D-USERDERIVE1; keeps D-METADERIVE1).
+- **D-ONCE-SANDBOX1=A** — the isolated package kind is `target: sandbox`; `target: plugin` retires as a rename (amends D-PLUGIN1 naming).
+- **D-ONCE-GATE1=A** — one org-policy ladder governs every audited escape (`#Unsafe`, `#Impure`, `#Nondeterministic`); `--gate <name>=allow` is the per-invocation escape the org file can refuse; `--allow-impure` retires. The shared ledger is D-FACT-GATE1's.
+- **D-ONCE-LEDGER1=A** — Tower is the one decision home; spec text renders it; `tower lint --docs` walks `docs/spec/**`; supersession links are mandatory on verdicts.
+- **D-ONCE-VERB1=A** — one verb per job across collections: `pop` is remove-and-return everywhere; `replace` keeps only the List swap meaning; bare `.from()` is the blessed conversion constructor, `from_x()` for source-qualified variants (amends the D-API-STORE1 table and D-STDRUBRIC1 idioms).
+- **D-ONCE-AT1=D** — `@` is the word *at*, in space and time: infix `@` stays the package-source separator (D-JPK-REF1, unchanged); prefix `@` becomes the compile-time mark and the fact-read glyph (`@config`, `T.@range`, `@build.profile`), amending D-FACT-READ1's spelling half and the `$` comptime-mention mark. The location reservation rides the same word, minted by a future ballot.
+- **D-ONCE-DOLLAR1=B** — the freed `$` becomes typed environment access in config surfaces (`$HOME` in `env.jet` and deploy files, listed by `jet inspect env`); outside config surfaces it is a teaching error.
+- **D-ONCE-UITREE1=C** — the ratified-but-unbuilt `.Button.{ }` UI-tree spelling is marked unbuilt in the spec; the spelling decision reopens with card #1588's architecture result.
+- **D-ONCE-CASE1=A** — one naming lexicon (plain words, the blessed-abbreviation list, fixed acronym casing) governs every surface: source, CLI verbs and flags, manifest keys, and file names. New abbreviations earn a row by ballot.
+- **D-ONCE-HASH1=B** — interpolation format selectors respell to colon (`{x:Fixed(2)}`, `{user:Debug}`); `#` keeps its three non-colliding jobs: applied rules, fixed-size lists (`[T#4]`), and package version pins.
