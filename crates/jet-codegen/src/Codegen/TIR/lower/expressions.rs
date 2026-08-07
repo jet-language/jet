@@ -2751,14 +2751,10 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 },
             }
         }
-        // c109 Phase 8: the `??` fallback operator. `is_option` is the total sema fact
-        // (Result vs Option). The value + fallback are lowered; the result type is the
-        // unwrapped value type (Some/Ok payload). Mirrors `emit_or_fallback`.
+        // c109 Phase 8: the `??` fallback operator. D-FAIL-CARRIER1=A: one carrier,
+        // so the value type alone gives the payload type. Mirrors `emit_or_fallback`.
         Expr::OrFallback {
-            value,
-            fallback,
-            is_option,
-            ..
+            value, fallback, ..
         } => {
             let value_t = lower_expr(value, cx, env);
             let result_ty = match &value_t.ty {
@@ -2791,7 +2787,6 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 kind: TExprKind::OrFallback {
                     value: Box::new(value_t),
                     fallback: tfallback,
-                    is_option: *is_option,
                 },
             }
         }

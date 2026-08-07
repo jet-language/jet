@@ -13075,12 +13075,8 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host_ref, &[recv_list, after_list]);
                 Ok(self.finish_wait_call(self.b.inst_results(call)[0]))
             }
-            TExprKind::OrFallback {
-                value,
-                fallback,
-                is_option,
-            } => {
-                if *is_option {
+            TExprKind::OrFallback { value, fallback } => {
+                if matches!(value.ty, Type::Option(_)) {
                     let status = self.lower_list_get_opt_status(value)?;
                     let ok_block = self.b.create_block();
                     let fail_block = self.b.create_block();

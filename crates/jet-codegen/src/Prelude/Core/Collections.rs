@@ -633,8 +633,10 @@ where
 fn jet_iter_empty<T: 'static>() -> JetIter<T> {
     JetIter(Box::new(std::iter::empty()))
 }
-fn jet_iter_some<T: 'static>(it: JetIter<T>) -> JetIter<Option<T>> {
-    JetIter(Box::new(it.0.map(Some)))
+// D-FAIL-CARRIER1=A: padding a short side yields carrier values, so a zip
+// column reads as `T?` and nothing else.
+fn jet_iter_some<T: 'static>(it: JetIter<T>) -> JetIter<JetOutcome<T, JetAbsent>> {
+    JetIter(Box::new(it.0.map(Ok)))
 }
 fn jet_iter_zip_strict<A: 'static, B: 'static, O: 'static, F: 'static>(
     mut a: JetIter<A>,
@@ -757,26 +759,26 @@ where
 {
     xs.into_iter().fold(init, |acc, x| f(&acc, &x))
 }
-fn jet_list_position<T, F, I>(xs: I, mut f: F) -> Option<i64>
+fn jet_list_position<T, F, I>(xs: I, mut f: F) -> JetOutcome<i64, JetAbsent>
 where
     I: IntoIterator<Item = T>,
     F: FnMut(&T) -> bool,
 {
-    xs.into_iter().position(|x| f(&x)).map(|i| i as i64)
+    jet_outcome_of(xs.into_iter().position(|x| f(&x)).map(|i| i as i64))
 }
-fn jet_list_min_by<T, K: Ord, F, I>(xs: I, f: F) -> Option<T>
+fn jet_list_min_by<T, K: Ord, F, I>(xs: I, f: F) -> JetOutcome<T, JetAbsent>
 where
     I: IntoIterator<Item = T>,
     F: FnMut(&T) -> K,
 {
-    xs.into_iter().min_by_key(f)
+    jet_outcome_of(xs.into_iter().min_by_key(f))
 }
-fn jet_list_max_by<T, K: Ord, F, I>(xs: I, f: F) -> Option<T>
+fn jet_list_max_by<T, K: Ord, F, I>(xs: I, f: F) -> JetOutcome<T, JetAbsent>
 where
     I: IntoIterator<Item = T>,
     F: FnMut(&T) -> K,
 {
-    xs.into_iter().max_by_key(f)
+    jet_outcome_of(xs.into_iter().max_by_key(f))
 }
 fn jet_list_group_by<T: Clone, K: Ord + Clone, F, I>(xs: I, mut f: F) -> JetMap<K, Vec<T>>
 where
@@ -876,9 +878,9 @@ where
     jet_iter_from_vec(out)
 }
 
-fn jet_iter_last_index_of<T: 'static + PartialEq>(it: JetIter<T>, needle: T) -> Option<i64> {
+fn jet_iter_last_index_of<T: 'static + PartialEq>(it: JetIter<T>, needle: T) -> JetOutcome<i64, JetAbsent> {
     let xs = it.to_list();
-    xs.iter().rposition(|x| x == &needle).map(|i| i as i64)
+    jet_outcome_of(xs.iter().rposition(|x| x == &needle).map(|i| i as i64))
 }
 
 fn jet_iter_average_int(it: JetIter<i64>) -> f64 {
@@ -951,12 +953,12 @@ fn jet_list_slice<T: Clone>(xs: &[T], start: i64, end: i64) -> Vec<T> {
     let e = end.clamp(0, len) as usize;
     if e <= s { Vec::new() } else { xs[s..e].to_vec() }
 }
-fn jet_list_binary_search<T: Ord>(xs: &[T], needle: &T) -> Option<i64> {
-    xs.binary_search(needle).ok().map(|i| i as i64)
+fn jet_list_binary_search<T: Ord>(xs: &[T], needle: &T) -> JetOutcome<i64, JetAbsent> {
+    jet_outcome_of(xs.binary_search(needle).ok().map(|i| i as i64))
 }
-fn jet_list_binary_search_by<T, F>(xs: &[T], mut f: F) -> Option<i64>
+fn jet_list_binary_search_by<T, F>(xs: &[T], mut f: F) -> JetOutcome<i64, JetAbsent>
 where F: FnMut(&T) -> std::cmp::Ordering {
-    xs.binary_search_by(|x| f(x)).ok().map(|i| i as i64)
+    jet_outcome_of(xs.binary_search_by(|x| f(x)).ok().map(|i| i as i64))
 }
 fn jet_list_union<T: Clone + Eq>(left: &[T], right: &[T]) -> Vec<T> {
     let mut out = left.to_vec();
@@ -973,20 +975,26 @@ fn jet_list_intersection<T: Clone + Eq>(left: &[T], right: &[T]) -> Vec<T> {
 fn jet_list_difference<T: Clone + Eq>(left: &[T], right: &[T]) -> Vec<T> {
     left.iter().filter(|x| !right.contains(x)).cloned().collect()
 }
-fn jet_list_random<T: Clone>(xs: &[T]) -> Option<T> {
-    if xs.is_empty() { return None; }
+fn jet_list_random<T: Clone>(xs: &[T]) -> JetOutcome<T, JetAbsent> {
+    if xs.is_empty() { return Err(JetAbsent); }
     let mut state: u64 = 0xC0FF_EE42;
     state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-    Some(xs[((state >> 33) as usize) % xs.len()].clone())
+    Ok(xs[((state >> 33) as usize) % xs.len()].clone())
 }
 fn jet_list_replace<T: Clone + PartialEq>(xs: &[T], old: &T, new: T) -> Vec<T> {
     xs.iter().map(|x| if x == old { new.clone() } else { x.clone() }).collect()
 }
-fn jet_list_min_max<T: Ord + Clone, R>(xs: &[T], build: impl FnOnce(T, T) -> R) -> Option<R> {
-    Some(build(xs.iter().min()?.clone(), xs.iter().max()?.clone()))
+fn jet_list_min_max<T: Ord + Clone, R>(xs: &[T], build: impl FnOnce(T, T) -> R) -> JetOutcome<R, JetAbsent> {
+    match (xs.iter().min(), xs.iter().max()) {
+        (Some(lo), Some(hi)) => Ok(build(lo.clone(), hi.clone())),
+        _ => Err(JetAbsent),
+    }
 }
-fn jet_list_min_max_by<T: Clone, K: Ord, F, R>(xs: &[T], mut f: F, build: impl FnOnce(T, T) -> R) -> Option<R>
+fn jet_list_min_max_by<T: Clone, K: Ord, F, R>(xs: &[T], mut f: F, build: impl FnOnce(T, T) -> R) -> JetOutcome<R, JetAbsent>
 where F: FnMut(&T) -> K {
-    Some(build(xs.iter().min_by_key(|x| f(x))?.clone(), xs.iter().max_by_key(|x| f(x))?.clone()))
+    match (xs.iter().min_by_key(|x| f(x)).cloned(), xs.iter().max_by_key(|x| f(x)).cloned()) {
+        (Some(lo), Some(hi)) => Ok(build(lo, hi)),
+        _ => Err(JetAbsent),
+    }
 }
 

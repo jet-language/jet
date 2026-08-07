@@ -3292,16 +3292,14 @@ pub enum TExprKind {
         /// Pre-escaped Rust string literal for the enclosing function name.
         fn_name: String,
     },
-    /// c109 Phase 8: the `??` fallback operator (`Expr::OrFallback`). `is_option`
-    /// is the TOTAL sema fact: `true` → the value is `T?` and lowers to a
-    /// `match … { Some(v) => v, None => fb }`; `false` → the value is `T ? E` and
-    /// lowers to `match … { Ok(v) => v, Err(_) => fb }`. The fallback is a value or
-    /// an early `return` (the panic form is deferred — its `safe_locals_expr`
-    /// reproduction is out of subset).
+    /// c109 Phase 8: the `??` fallback operator (`Expr::OrFallback`).
+    /// D-FAIL-CARRIER1=A: one carrier, so one lowering —
+    /// `match … { Ok(v) => v, Err(_) => fb }` reads `T?` and `T ? E` alike.
+    /// The fallback is a value or an early `return` (the panic form is deferred —
+    /// its `safe_locals_expr` reproduction is out of subset).
     OrFallback {
         value: Box<TExpr>,
         fallback: TOrFallback,
-        is_option: bool,
     },
     /// c109 Phase 8: optional field/chain `base?.member` (`Expr::OptField`). The
     /// `flatten` fact (TOTAL, from sema) picks the combinator: `true` → `.and_then`

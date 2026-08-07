@@ -1727,14 +1727,14 @@ pub(crate) fn emit_synthetic_iter_index_traits(
     if has_iterator {
         out.push_str("pub trait user_Iterator {\n");
         out.push_str("    type Item;\n");
-        out.push_str("    fn next(&mut self) -> Option<Self::Item>;\n");
+        out.push_str("    fn next(&mut self) -> JetOutcome<Self::Item, JetAbsent>;\n");
         out.push_str("}\n\n");
     }
     if has_index {
         out.push_str("pub trait user_Index {\n");
         out.push_str("    type Key;\n");
         out.push_str("    type Value;\n");
-        out.push_str("    fn get(&self, k: Self::Key) -> Option<Self::Value>;\n");
+        out.push_str("    fn get(&self, k: Self::Key) -> JetOutcome<Self::Value, JetAbsent>;\n");
         out.push_str("}\n\n");
     }
     if has_index_mut {

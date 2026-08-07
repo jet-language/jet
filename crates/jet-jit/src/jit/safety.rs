@@ -849,12 +849,8 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                 && args_ok
                 && resident_safe_handle_op(op, recv, args)
         }
-        TExprKind::OrFallback {
-            value,
-            fallback,
-            is_option,
-        } => {
-            if *is_option {
+        TExprKind::OrFallback { value, fallback } => {
+            if matches!(value.ty, Type::Option(_)) {
                 resident_safe_expr(value, callees)
                     && matches!(
                         fallback,

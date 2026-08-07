@@ -2096,13 +2096,15 @@ fn jet_list_remove_value<T: Clone + PartialEq>(
     value: T,
     _file: &str,
     _line: u32,
-) -> Option<T> {
-    xs.iter()
-        .position(|item| *item == value)
-        .map(|index| xs.remove(index))
+) -> JetOutcome<T, JetAbsent> {
+    jet_outcome_of(
+        xs.iter()
+            .position(|item| *item == value)
+            .map(|index| xs.remove(index)),
+    )
 }
 
-fn jet_list_remove_slot<T: Clone>(xs: &mut Vec<T>, i: i64, file: &str, line: u32) -> Option<T> {
+fn jet_list_remove_slot<T: Clone>(xs: &mut Vec<T>, i: i64, file: &str, line: u32) -> JetOutcome<T, JetAbsent> {
     let len = xs.len() as i64;
     if i < 0 || i >= len {
         jet_panic(
@@ -2114,7 +2116,7 @@ fn jet_list_remove_slot<T: Clone>(xs: &mut Vec<T>, i: i64, file: &str, line: u32
             ),
         );
     }
-    Some(xs.remove(i as usize))
+    Ok(xs.remove(i as usize))
 }
 
 fn jet_list_count<T: PartialEq>(xs: &[T], value: &T) -> i64 {
@@ -2233,12 +2235,12 @@ where
         f(&x);
     }
 }
-fn jet_list_find<T, F, I>(xs: I, mut f: F) -> Option<T>
+fn jet_list_find<T, F, I>(xs: I, mut f: F) -> JetOutcome<T, JetAbsent>
 where
     I: IntoIterator<Item = T>,
     F: FnMut(&T) -> bool,
 {
-    xs.into_iter().find(|x| f(x))
+    jet_outcome_of(xs.into_iter().find(|x| f(x)))
 }
 fn jet_list_any<T, F, I>(xs: I, mut f: F) -> bool
 where
@@ -2279,7 +2281,7 @@ where
 // #1477 Map ledger surface
 fn jet_map_copy<K: Ord + Clone, V: Clone>(m: &JetMap<K, V>) -> JetMap<K, V> { m.clone() }
 fn jet_map_equal<K: Ord + PartialEq, V: PartialEq>(a: &JetMap<K, V>, b: &JetMap<K, V>) -> bool { a == b }
-fn jet_map_first_key<K: Ord + Clone, V>(m: &JetMap<K, V>) -> Option<K> { m.keys().next().cloned() }
+fn jet_map_first_key<K: Ord + Clone, V>(m: &JetMap<K, V>) -> JetOutcome<K, JetAbsent> { jet_outcome_of(m.keys().next().cloned()) }
 fn jet_map_to_list<K: Ord + Clone, V: Clone, R>(m: &JetMap<K, V>, build: impl Fn(K, V) -> R) -> Vec<R> {
     m.iter().map(|(k, v)| build(k.clone(), v.clone())).collect()
 }
@@ -2315,8 +2317,8 @@ where F: FnMut(&K, &V) -> JetMap<K, V> {
     }
     out
 }
-fn jet_map_max_value<K: Ord, V: Ord + Clone>(m: &JetMap<K, V>) -> Option<V> { m.values().max().cloned() }
-fn jet_map_min_value<K: Ord, V: Ord + Clone>(m: &JetMap<K, V>) -> Option<V> { m.values().min().cloned() }
+fn jet_map_max_value<K: Ord, V: Ord + Clone>(m: &JetMap<K, V>) -> JetOutcome<V, JetAbsent> { jet_outcome_of(m.values().max().cloned()) }
+fn jet_map_min_value<K: Ord, V: Ord + Clone>(m: &JetMap<K, V>) -> JetOutcome<V, JetAbsent> { jet_outcome_of(m.values().min().cloned()) }
 fn jet_map_intersection<K: Ord + Clone, V: Clone>(left: &JetMap<K, V>, right: &JetMap<K, V>) -> JetMap<K, V> {
     JetMap(std::sync::Arc::new(left.iter().filter(|(k,_)| right.contains_key(k)).map(|(k,v)|(k.clone(),v.clone())).collect()))
 }
@@ -2333,8 +2335,8 @@ fn jet_map_from_keys<K: Ord + Clone, V: Clone>(keys: Vec<K>, default: V) -> JetM
 fn jet_map_contains_value<K: Ord, V: PartialEq>(m: &JetMap<K, V>, needle: &V) -> bool {
     m.values().any(|v| v == needle)
 }
-fn jet_map_pop_first<K: Ord + Clone, V: Clone>(m: &mut JetMap<K, V>) -> Option<V> {
-    let key = m.keys().next()?.clone();
-    m.remove(&key)
+fn jet_map_pop_first<K: Ord + Clone, V: Clone>(m: &mut JetMap<K, V>) -> JetOutcome<V, JetAbsent> {
+    let Some(key) = m.keys().next().cloned() else { return Err(JetAbsent) };
+    jet_outcome_of(m.remove(&key))
 }
 

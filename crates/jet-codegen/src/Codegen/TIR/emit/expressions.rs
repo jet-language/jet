@@ -1082,9 +1082,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     }
                 }
                 TBuiltinOp::Push => format!("({}).push({})", recv, a(0)),
-                TBuiltinOp::Pop => format!("({}).pop()", recv),
+                TBuiltinOp::Pop => format!("jet_outcome_of(({}).pop())", recv),
                 TBuiltinOp::InsertMap => {
-                    format!("({}).insert(({}).clone(), {})", recv, a(0), a(1))
+                    format!("jet_outcome_of(({}).insert(({}).clone(), {}))", recv, a(0), a(1))
                 }
                 TBuiltinOp::AddNewMap => format!(
                     "match ({}).entry(({}).clone()) {{ std::collections::btree_map::Entry::Vacant(e) => {{ e.insert({}); true }}, std::collections::btree_map::Entry::Occupied(_) => false }}",
@@ -1105,7 +1105,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TBuiltinOp::InsertList => {
                     format!("({}).insert({} as usize, {})", recv, a(0), a(1))
                 }
-                TBuiltinOp::RemoveMap => format!("({}).remove(&({}).clone())", recv, a(0)),
+                TBuiltinOp::RemoveMap => format!("jet_outcome_of(({}).remove(&({}).clone()))", recv, a(0)),
                 TBuiltinOp::RemoveList { line, mode } => match mode {
                     crate::Codegen::TIR::ListRemoveMode::Value => format!(
                         "jet_list_remove_value(&mut ({}), {}, {:?}, {})",
@@ -1135,13 +1135,13 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TBuiltinOp::ConcatList => {
                     format!("jet_list_concat(&({}), &({}))", recv, a(0))
                 }
-                TBuiltinOp::GetMap => format!("({}).get(&({}).clone()).cloned()", recv, a(0)),
-                TBuiltinOp::GetList => format!("({}).get({} as usize).cloned()", recv, a(0)),
-                TBuiltinOp::First => format!("({}).first().cloned()", recv),
-                TBuiltinOp::Last => format!("({}).last().cloned()", recv),
+                TBuiltinOp::GetMap => format!("jet_outcome_of(({}).get(&({}).clone()).cloned())", recv, a(0)),
+                TBuiltinOp::GetList => format!("jet_outcome_of(({}).get({} as usize).cloned())", recv, a(0)),
+                TBuiltinOp::First => format!("jet_outcome_of(({}).first().cloned())", recv),
+                TBuiltinOp::Last => format!("jet_outcome_of(({}).last().cloned())", recv),
                 TBuiltinOp::Contains => format!("({}).contains(&{})", recv, a(0)),
                 TBuiltinOp::IndexOf => format!(
-                    "({}).iter().position(|x| *x == {}).map(|i| i as i64)",
+                    "jet_outcome_of(({}).iter().position(|x| *x == {}).map(|i| i as i64))",
                     recv,
                     a(0)
                 ),
@@ -1175,13 +1175,13 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     format!("jet_list_product({vec_src})")
                 }
                 TBuiltinOp::Min { float: true } => {
-                    format!("{vec_src}.into_iter().reduce(|a, b| a.min(b))")
+                    format!("jet_outcome_of({vec_src}.into_iter().reduce(|a, b| a.min(b)))")
                 }
                 TBuiltinOp::Max { float: true } => {
-                    format!("{vec_src}.into_iter().reduce(|a, b| a.max(b))")
+                    format!("jet_outcome_of({vec_src}.into_iter().reduce(|a, b| a.max(b)))")
                 }
-                TBuiltinOp::Min { float: false } => format!("{vec_src}.into_iter().min()"),
-                TBuiltinOp::Max { float: false } => format!("{vec_src}.into_iter().max()"),
+                TBuiltinOp::Min { float: false } => format!("jet_outcome_of({vec_src}.into_iter().min())"),
+                TBuiltinOp::Max { float: false } => format!("jet_outcome_of({vec_src}.into_iter().max())"),
                 TBuiltinOp::Flatten => format!("jet_iter_flatten({as_iter})"),
                 TBuiltinOp::Intersperse => {
                     format!("jet_iter_intersperse({as_iter}, {})", a(0))
@@ -1339,7 +1339,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TBuiltinOp::SetCopy => format!("({}).clone()", recv),
                 TBuiltinOp::SetEqual => format!("({}) == ({})", recv, a(0)),
                 TBuiltinOp::SetCapacity => format!("({}).capacity() as i64", recv),
-                TBuiltinOp::SetFirst => format!("({}).iter().next().cloned()", recv),
+                TBuiltinOp::SetFirst => format!("jet_outcome_of(({}).iter().next().cloned())", recv),
                 // #1478: `values()` is the same materialization as `to_list()`,
                 // wrapped lazy (I8 — one mechanism, `Iter<T>` typed).
                 TBuiltinOp::SetValues => format!(
@@ -1348,9 +1348,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 ),
                 // #1478: native swap-in — inserts `a0`, returns the old equal
                 // element if one was present (Rust's own `HashSet::replace`).
-                TBuiltinOp::SetReplace => format!("({}).replace({})", recv, a(0)),
+                TBuiltinOp::SetReplace => format!("jet_outcome_of(({}).replace({}))", recv, a(0)),
                 // #1478: native remove-and-return — Rust's own `HashSet::take`.
-                TBuiltinOp::SetTake => format!("({}).take(&({}))", recv, a(0)),
+                TBuiltinOp::SetTake => format!("jet_outcome_of(({}).take(&({})))", recv, a(0)),
                 TBuiltinOp::SortedSetFrom => {
                     format!(
                         "({}).into_iter().collect::<std::collections::BTreeSet<_>>()",
@@ -1389,13 +1389,13 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         recv
                     )
                 }
-                TBuiltinOp::PriorityQueuePeek => format!("({}).peek().cloned()", recv),
+                TBuiltinOp::PriorityQueuePeek => format!("jet_outcome_of(({}).peek().cloned())", recv),
                 TBuiltinOp::PriorityQueueToSortedList => {
                     format!("({}).clone().into_sorted_vec().into_iter().rev().collect::<Vec<_>>()", recv)
                 }
                 TBuiltinOp::LruPut => format!("({}).put({}, {})", recv, a(0), a(1)),
                 TBuiltinOp::LruAddNew => format!("({}).add_new({}, {})", recv, a(0), a(1)),
-                TBuiltinOp::LruGet => format!("({}).get(&{})", recv, a(0)),
+                TBuiltinOp::LruGet => format!("jet_outcome_of(({}).get(&{}))", recv, a(0)),
                 TBuiltinOp::LruCapacity => format!("({}).capacity()", recv),
                 TBuiltinOp::LruKeys => format!("({}).keys()", recv),
                 TBuiltinOp::BitSetAdd => format!("({}).add({})", recv, a(0)),
@@ -1458,16 +1458,16 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 // D-COLLBREADTH1=A: Deque<T> operations.
                 TBuiltinOp::DequePushFront => format!("({}).push_front({})", recv, a(0)),
                 TBuiltinOp::DequePushBack => format!("({}).push_back({})", recv, a(0)),
-                TBuiltinOp::DequePopFront => format!("({}).pop_front()", recv),
-                TBuiltinOp::DequePopBack => format!("({}).pop_back()", recv),
-                TBuiltinOp::DequePeekFront => format!("({}).front().cloned()", recv),
-                TBuiltinOp::DequePeekBack => format!("({}).back().cloned()", recv),
+                TBuiltinOp::DequePopFront => format!("jet_outcome_of(({}).pop_front())", recv),
+                TBuiltinOp::DequePopBack => format!("jet_outcome_of(({}).pop_back())", recv),
+                TBuiltinOp::DequePeekFront => format!("jet_outcome_of(({}).front().cloned())", recv),
+                TBuiltinOp::DequePeekBack => format!("jet_outcome_of(({}).back().cloned())", recv),
                 TBuiltinOp::DequeCapacity => format!("({}).capacity() as i64", recv),
                 TBuiltinOp::DequeContains => {
                     format!("({}).iter().any(|__x| *__x == ({}))", recv, a(0))
                 }
                 TBuiltinOp::DequeGet => {
-                    format!("({}).get(({}) as usize).cloned()", recv, a(0))
+                    format!("jet_outcome_of(({}).get(({}) as usize).cloned())", recv, a(0))
                 }
                 TBuiltinOp::DequeDelete => format!(
                     "{{ let __dq = &mut ({}); let __v = ({}); if let Some(__i) = __dq.iter().position(|__x| *__x == __v) {{ __dq.remove(__i); }} }}",
@@ -1702,7 +1702,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     }
                     let fill_expr = |index: usize| -> String {
                         match fill_mode {
-                            crate::Codegen::TIR::TZipFillMode::DefaultNone => "None".to_string(),
+                            crate::Codegen::TIR::TZipFillMode::DefaultNone => {
+                                format!("Err({}JetAbsent)", cx.root_prefix)
+                            }
                             crate::Codegen::TIR::TZipFillMode::Common => {
                                 args.get(*input_count - 1)
                                     .map(|expr| {
@@ -1713,7 +1715,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                                             cx,
                                         )
                                     })
-                                    .unwrap_or_else(|| "None".to_string())
+                                    .unwrap_or_else(|| format!("Err({}JetAbsent)", cx.root_prefix))
                             }
                             crate::Codegen::TIR::TZipFillMode::Columns => {
                                 let Some(tuple) = args.get(*input_count - 1) else {
@@ -2549,7 +2551,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             let b = emit_tir_expr(base, cx);
             let i = emit_tir_expr(index, cx);
             format!(
-                "{{ match <{ty} as user_Index>::get(&({b}), {i}) {{ Some(_jet_v) => _jet_v, None => {root}jet_panic({:?}, {}, \"index miss\") }} }}",
+                "{{ match <{ty} as user_Index>::get(&({b}), {i}) {{ Ok(_jet_v) => _jet_v, Err(_) => {root}jet_panic({:?}, {}, \"index miss\") }} }}",
                 cx.file,
                 line,
                 root = cx.root_prefix,
@@ -2674,24 +2676,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             }
         }
         // c109 Phase 8: the `??` fallback operator. Mirrors `emit_or_fallback`
-        // (Statement.rs): a `Result` value unwraps `Ok`, an `Option` value unwraps
-        // `Some`; the fallback runs on `Err(_)`/`None`. Decision read off the total
-        // `is_option` flag — no re-inference.
-        TExprKind::OrFallback {
-            value,
-            fallback,
-            is_option,
-        } => {
+        // (Statement.rs). D-FAIL-CARRIER1=A: one carrier, so one unwrap — the value
+        // side is the payload and the report side runs the fallback.
+        TExprKind::OrFallback { value, fallback } => {
             let v = emit_tir_expr(value, cx);
             let fb = emit_tir_orfallback_rhs(fallback, cx);
-            if *is_option {
-                format!("match {} {{ Some(__jet_v) => __jet_v, None => {} }}", v, fb)
-            } else {
-                format!(
-                    "match {} {{ Ok(__jet_ok) => __jet_ok, Err(_) => {} }}",
-                    v, fb
-                )
-            }
+            format!("match {} {{ Ok(__jet_ok) => __jet_ok, Err(_) => {} }}", v, fb)
         }
         // c109 Phase 8: optional chaining `base?.member`. Mirrors `Expr::OptField`:
         // `(base).clone().{and_then|map}(|__optv| __optv.{member})`. The combinator is
@@ -4850,7 +4840,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     a(1)
                 ),
                 THandleOp::DBQueryOne => format!(
-                    "{{ let __jet_scope = &({recv}); let __jet_sql = ({}).clone(); let __jet_params = ({}).clone(); jet_db_scope_query(__jet_scope, &__jet_sql, &__jet_params).map(|__rows| __rows.into_iter().next()) }}",
+                    "{{ let __jet_scope = &({recv}); let __jet_sql = ({}).clone(); let __jet_params = ({}).clone(); jet_db_scope_query(__jet_scope, &__jet_sql, &__jet_params).map(|__rows| jet_outcome_of(__rows.into_iter().next())) }}",
                     a(0),
                     a(1)
                 ),

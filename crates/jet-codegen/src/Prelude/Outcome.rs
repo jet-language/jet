@@ -104,3 +104,12 @@ pub fn jet_present<T, E>(value: T) -> JetOutcome<T, E> {
 pub fn jet_absent<T>() -> JetOutcome<T, JetAbsent> {
     Err(JetAbsent)
 }
+
+/// Marshal a Rust plumbing `Option` into the carrier at a Core boundary.
+///
+/// Rust's own collections answer with `Option`, the same way they hold their
+/// elements in `Vec`. This is the one place that shape becomes a Jet outcome;
+/// past it, `T?` is the carrier and nothing else.
+pub fn jet_outcome_of<T>(value: Option<T>) -> JetOutcome<T, JetAbsent> {
+    value.ok_or(JetAbsent)
+}

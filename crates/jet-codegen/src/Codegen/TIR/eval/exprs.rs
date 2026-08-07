@@ -3608,17 +3608,11 @@ impl<'a> EvalCtx<'a> {
                     other => Ok(other),
                 }
             }
-            TExprKind::OrFallback {
-                value,
-                fallback,
-                is_option,
-            } => {
+            TExprKind::OrFallback { value, fallback } => {
                 let v = self.eval_expr(value, scope)?;
-                // Always treat `None` as a miss: fragment lowering can leave
-                // `is_option=false` when the Option return type is unknown, and
-                // `??` must still unwrap (SortedSet.first() ?? -1, etc.).
-                let miss = matches!(v, CtValue::None(_))
-                    || (!*is_option && matches!(v, CtValue::ResErr(_)));
+                // D-FAIL-CARRIER1=A: one carrier — the report side is the miss,
+                // whether the report is a clean absence or a failure.
+                let miss = matches!(v, CtValue::None(_) | CtValue::ResErr(_));
                 if !miss {
                     return match v {
                         CtValue::Some(inner) | CtValue::ResOk(inner) => Ok(*inner),
