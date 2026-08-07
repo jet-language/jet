@@ -133,11 +133,21 @@ pub(crate) fn lower_core_closure_call(
         }
         ("core.scope", "guard") => {
             let lam = lam_at(0)?;
-            let executable = Box::new(lower_lambda(lam, cx, env));
-            let closure = render_lambda_str(lam, cx, env);
+            // `jet_scope_guard<F: FnOnce()>` takes the closure by value, single-use.
+            // Build the closure text directly (not via `render_lambda_str`, which
+            // Rc-wraps an escaping closure for reusable `Fn` call sites — `Rc<F>`
+            // does not implement `FnOnce`) — mirrors `on_commit`/`on_rollback`'s
+            // identical FnOnce hook rendering above (#1592).
+            let tl = lower_lambda(lam, cx, env);
+            let inner = format!("move |{}| {}", tl.params.join(", "), tl.body);
+            let closure = if tl.prep.is_empty() {
+                inner
+            } else {
+                format!("{{ {} {} }}", tl.prep, inner)
+            };
             TCoreClosureKind::Guard {
                 closure,
-                executable,
+                executable: Box::new(tl),
             }
         }
         ("core.data", "filter" | "sort_by") => {
