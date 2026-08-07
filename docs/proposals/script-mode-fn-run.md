@@ -38,7 +38,7 @@ Hello World
 
 ## The design
 
-**The law.** Bare statements in a file are the body of an implicit `fn run()`. Declarations stay declarations. `jet run` treats the implicit entry exactly like an explicit one: same sema, same diagnostics, same meaning on AOT, JIT, interpreter, and web (I9). This spelling desugars, so nothing about `fn run` changes:
+**The law.** Bare statements in a file are the body of an implicit `fn run()`. Declarations stay declarations. `jet run` treats the implicit entry exactly like an explicit one: same sema, same diagnostics, same meaning on AOT, JIT, interpreter, and web (I9). The implicit entry is the fallible form (`fn run() => () ?`, D-S80-RUN1), so `?` works at a script's top level and a failure stops the script with the standard report (proposed). This spelling desugars, so nothing about `fn run` changes:
 
 ```jet
 // script spelling                 // means exactly
@@ -48,11 +48,11 @@ print("Hello {name}")                  name :: ask("Name?")
                                    }
 ```
 
-Precedent: Jetpack already synthesizes a `fn run { task(…) }` wrapper for a selected `#Job fn` (D-JPK-TASKRUN1 shipped work). U7 stays law: a lone script never needs a manifest.
+Precedent: the Jetpack task path already synthesizes a `fn run { task(…) }` wrapper for a selected `#Job fn` (D-JPK-TASKRUN1 family, shipped card #476). U7 stays law (reaffirmed by D-ECO14): a lone script never needs a manifest.
 
 **The verb rhyme.** `jet run` ↔ `fn run` (S12), `jet build` ↔ `fn build` (D-BUILDSCOPE1), `jet dev` ↔ `fn dev` (U19). Script mode adds a second spelling of `fn run` only. The other entry fns are declarations and stay legal inside a script file. D-ENTRY-SCRIPT1 option B extends the rhyme: `jet test file.jet` runs the script's `#Test` blocks, `jet dev file.jet` hot-reloads it.
 
-**Rung 1 — promotion.** The promotion step is moving the loose code inside `fn run()`. You take it when the program grows past a toy: typed CLI args (D-CLIFLAG1), failure with `fn run() => () ?` (D-S80-RUN1), tests, or a second file. Docs and diagnostics point at this step; nothing forces it.
+**Rung 1 — promotion.** The promotion step is moving the loose code inside `fn run()`. You take it when the program grows past a toy: typed CLI args (D-CLIFLAG1), a named signature for its failure story, or a second file. Docs and diagnostics point at this step; nothing forces it.
 
 **Mixing rule (owner ruling 2).** Both bare code and `fn run` in one file is an error with an auto-wrap fix:
 
@@ -62,7 +62,7 @@ Error [E0621]: this file has both loose code and `fn run`
  Fix: move the loose code into `fn run` — `jet fix hello.jet` does it for you
 ```
 
-`jet fix file.jet` performs the wrap: loose statements move into `fn run` in written order — statements above the declaration go before its current body, statements below go after. This reuses the one ratified rewrite authority (D-REL5: only `jet fix` rewrites user source); the LSP quick-fix applies the same rewrite. When no `fn run` exists yet, the same action wraps the loose code into a new `fn run()` — the one-keystroke promotion.
+`jet fix file.jet` performs the wrap: loose statements move into `fn run` in written order — statements above the declaration go before its current body, statements below go after. This reuses the ratified rewrite authority (D-REL5: only `jet fix` rewrites user source); the editor quick-fix offers the same `jet fix` rewrite. When no `fn run` exists yet, the same action wraps the loose code into a new `fn run()` — the one-keystroke promotion.
 
 **Rung 2 — multi-file and the import rule (owner ruling 1).** "NEVER run an imported script." A file with bare code can be run, never imported:
 
@@ -81,7 +81,7 @@ Error [E0620]: `tools.jet` is a script, so importing it is not allowed
 
 The exact rule: a file with any bare statement is a script. A script executes only as the direct target of `jet run` / `jet dev` / `jet test`. Every other consumption path — `use`, package module discovery — reports E0620. Remove the last bare statement and the file is an ordinary module; its `pub` functions import normally. The import spelling itself belongs to the open D-NAME-FILES1 slate (card #1625); this rule attaches to whichever spelling wins there.
 
-**What a script may contain.** Bare statements plus any top-level declaration: `fn`, `struct`, `#Test`, `use`, `#Known` constants, `#Job` fns, `fn build`, `fn dev`. Only an explicit `fn run` conflicts with bare code (E0621), because both claim the entry.
+**What a script may contain (under D-ENTRY-SCRIPT1 option B, recommended).** Bare statements plus any top-level declaration: `fn`, `struct`, `#Test`, `use`, `$` constants, `#Job` fns, `fn build`, `fn dev`. Only an explicit `fn run` conflicts with bare code (E0621), because both claim the entry. Option A narrows this to `jet run` only; option C of the ordering ballot would forbid declarations entirely.
 
 **One shared rule under both ordering options.** A bare binding is a local of the implicit `fn run` body. A top-level `fn` never sees it — otherwise scripts would grow hidden mutable globals:
 
@@ -94,18 +94,18 @@ print(total(10.0))
 ```text
 Error [E0622]: `tax` is script code, so `total` cannot use it
  Why: loose bindings live in the script body; a function sees only its parameters and file-wide declarations
- Fix: pass `tax` as a parameter, or lift it to a `#Known` constant
+ Fix: pass `tax` as a parameter, or make it a `$` constant
 ```
 
 ```jet
-#Known tax :: 0.2                                          // fixed: file-wide constant (S57)
-fn total(price: Float) => Float { price * (1.0 + tax) }
+$tax :: 0.2                                                // fixed: file-wide comptime constant (D-META-STAGE1=B)
+fn total(price: Float) => Float { price * (1.0 + $tax) }
 print(total(10.0))
 ```
 
 ## The open choice: what a name sees inside a script
 
-Jet's current file law is order-independent: a top-level declaration is visible anywhere in its file, before or after its line (verified against the shipped compiler; the same law is stated for generic-module lookup, E0855 text, and D-MODCOMPUTE1 field evaluation). Statements inside a function body run in written order. A script file holds both kinds, so it must pick a visibility law. Three real options, worked on programs a beginner actually writes.
+Jet's current file law is order-independent: a top-level declaration is visible anywhere in its file, before or after its line (verified against the shipped compiler; the same law is stated for generic-module lookup and D-MODCOMPUTE1 field evaluation). Statements inside a function body run in written order. A script file holds both kinds, so it must pick a visibility law. Three real options, worked on programs a beginner actually writes.
 
 **P1 — helper below its use:**
 
@@ -118,8 +118,8 @@ fn greet(name: String) { print("Hello {name}") }
 
 ```jet
 print(even(10))
-fn even(n: Int) => Bool { if n == 0 { true } else { odd(n - 1) } }
-fn odd(n: Int) => Bool { if n == 0 { false } else { even(n - 1) } }
+fn even(n: Int) => Bool { if n == 0 -> true else -> odd(n - 1) }
+fn odd(n: Int) => Bool { if n == 0 -> false else -> even(n - 1) }
 ```
 
 **P3 — a binding defined mid-file:**
@@ -152,7 +152,7 @@ Costs. The reader must know the two categories: `fn greet` is reachable from lin
 
 ### Option C — statements only
 
-A script admits no declarations at all; the first `fn` or `struct` forces full promotion. One category, no visibility question.
+A script admits loose statements and `use` imports, nothing else; the first `fn` or `struct` forces full promotion. One category, no visibility question.
 
 - P1, P2 are errors: `a script holds only statements — move to fn run to define functions`.
 - P3 works.
