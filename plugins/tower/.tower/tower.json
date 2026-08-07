@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1617,
-    "rev": 28864,
+    "rev": 28866,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -24,7 +24,7 @@
         "board-ideas"
       ]
     },
-    "completionCursor": "2026-08-07T12:03:08.301Z"
+    "completionCursor": "2026-08-07T13:15:13.404Z"
   },
   "epochs": [
     {
@@ -89425,6 +89425,11 @@
       "log": [
         {
           "at": "2026-08-07",
+          "by": "bd3-orch",
+          "text": "Follow-up from review: the three inert run_gaps rows (collections/dynamic-array-view, io/db, io/args_audit — stems not in compile_covered, so the cross-check can never reach them) are dropped and the ceiling is lowered from 15 to 12. Proof: ledger_cross_check 2/2 and both jit audit tests green in one run on master."
+        },
+        {
+          "at": "2026-08-07",
           "by": "bd3-ledger",
           "text": "[handoff] All five criteria met. Branch bd3/ledger, head d3c9fa1ce, worktree .claude/worktrees/ledger, cut fresh from master 7b127acab. Not merged; ready for review and integration. Two files changed: tests/dev.rs and tests/jit_gaps.txt.\n\nWHAT LANDED\nThe word covered was the bug. jit_gaps.txt measures compile coverage, the corpus gate measures run coverage, and nothing compared them, so four comptime stems sat in both covered: and the gate's frontend_rejected: at once. The section is now compile_covered: with a header that says what the file measures and names the gate as the other ledger. ledger_cross_check_holds fails when a compile_covered stem is one the gate records as failing at the run tier, quoting both ledger lines, unless run_gaps: names it. run_gaps: holds the fifteen E0956 rows from the 2026-07-28 parity audit with their reasons, shrink-only behind a ceiling of 15. The four comptime rows name card #1543 (D-META-EFFECT1) as the owner of their fix.\n\nThe cross-check reads manifest against manifest, so it compiles and runs nothing. It reuses the existing parse_corpus_gate_manifest; no second reader and no new gate binary (I8).\n\nTESTS\n- cargo test --test dev ledger_cross_check: 2 of 2 pass.\n- Negative control end to end: deleting the comptime/embed row from run_gaps: turned ledger_cross_check_holds red with the full quoted pair; restoring it turned it green.\n- cargo test --test dev example_corpus_strict_jit_aot_differential_gate: the manifest still parses and classifies; its only two failures are concurrency/shield_commit and io/terminal_parity, unrelated and pre-existing (the same two failed on master during card #1527).\n- cargo test --test dev --no-run: clean.\n\nPRE-EXISTING RED FOUND, NOT THIS CARD\n- jit_coverage_audit fails on master today: the measured compile-covered set has moved to 401 stems while the file records 399 (8 stems left, 10 arrived, among them collections/iter_adapters, effects/taint, io/args_audit leaving and errors/u8_divide_zero, net/dns_lookup, types/anonymous_unions arriving). This is not the rename: the compile_covered stem rows and the gaps rows are byte-identical to master, verified by diff, and this card touches no example and no compiler source. Someone owes the ratchet a re-bless after the recent feature merges; worth its own card.\n- jit_try_compile_manifest_matches overflows its stack. It calls collect_jit_coverage directly on the default test stack while its sibling jit_coverage_audit runs the same work inside a 16 MB thread. Structural and pre-existing; a one-line thread wrapper would fix it, but it is outside this card's scope.\n\nFull suite not run, per instruction."
         },
@@ -89489,8 +89494,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T19:02:46.710Z",
-      "updated": "2026-08-07T13:09:40.459Z",
-      "updatedBy": "bd3-review",
+      "updated": "2026-08-07T13:11:34.357Z",
+      "updatedBy": "bd3-orch",
       "workOrder": 100,
       "completedAt": "2026-08-07T13:09:40.458Z"
     },
@@ -132970,6 +132975,20 @@
   ],
   "events": [
     {
+      "at": "2026-08-07T13:15:13.404Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-07T13:15:13.404Z"
+    },
+    {
+      "at": "2026-08-07T13:11:34.358Z",
+      "by": "bd3-orch",
+      "action": "card.update",
+      "ref": "c05dihsu",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-08-07T13:09:41.959Z",
       "by": "bd3-review",
       "action": "card.update",
@@ -136454,20 +136473,6 @@
       "action": "card.update",
       "ref": "c0ywkxuc",
       "note": "phase"
-    },
-    {
-      "at": "2026-08-07T01:02:11.640Z",
-      "by": "prep-syntax",
-      "action": "card.update",
-      "ref": "c06k75xs",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-07T01:02:11.231Z",
-      "by": "prep-syntax",
-      "action": "card.update",
-      "ref": "c0pxsuic",
-      "note": "logEntry"
     }
   ],
   "nextNum": 368,
