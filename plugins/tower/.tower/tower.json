@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1621,
-    "rev": 28972,
+    "nextNum": 1625,
+    "rev": 29024,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -92259,12 +92259,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P1",
       "plan": "Implements D-META-STAGE1 — ratified 2026-08-06. Read each decision verbatim (tower brief on this card's parent proposal, or tower decision show) before building; the ratified outcome text is the law, this plan is the route. Every requirement is a discrete exit criterion below: meet each with targeted proof (tests, snapshots, examples with golden output), and keep I9 tier parity inside this card — AOT, default jet run (JIT), and the interpreter must agree on every surface this card ships before it closes. Delete every superseded form the decisions retire in the same change; do not leave compatibility shims or parallel spellings. Reference: docs/proposals/metaprogramming-one-compile-time-program.md.",
       "blockedBy": [],
-      "assignee": "bd3-dollar3",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-08-07",
+          "by": "bd3-orch",
+          "text": "Merged to master as 3d3fa9d3d with the two review-proven conflict resolutions (mint-point comment reworded to $, superseded stderr fixture deleted). The reviewer verified all suites on the identical composed tree: comptime_diff 26/26, diagnostics_coverage 11/11, fmt 163/163, grammar 18/18, golden 61 against the 63 baseline."
+        },
         {
           "at": "2026-08-07",
           "by": "bd3-dollar2",
@@ -92415,10 +92420,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:34:12.218Z",
-      "updated": "2026-08-07T14:34:20.174Z",
-      "updatedBy": "bd3-review",
+      "updated": "2026-08-07T14:35:45.883Z",
+      "updatedBy": "bd3-orch",
       "workOrder": 180,
-      "claimedAt": "2026-08-07T13:44:00.019Z"
+      "completedAt": "2026-08-07T14:35:45.883Z"
     },
     {
       "id": "c0pden89",
@@ -92998,8 +93003,13 @@
       "priority": "P1",
       "plan": "Implements D-META-EFFECT1 — ratified 2026-08-06. Read each decision verbatim (tower brief on this card's parent proposal, or tower decision show) before building; the ratified outcome text is the law, this plan is the route. Every requirement is a discrete exit criterion below: meet each with targeted proof (tests, snapshots, examples with golden output), and keep I9 tier parity inside this card — AOT, default jet run (JIT), and the interpreter must agree on every surface this card ships before it closes. Delete every superseded form the decisions retire in the same change; do not leave compatibility shims or parallel spellings. Reference: docs/proposals/metaprogramming-one-compile-time-program.md.",
       "blockedBy": [],
-      "assignee": "bd3-effect",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-08-07",
+          "by": "bd3-orch",
+          "text": "[handoff] Backbone landed on branch bd3/effect (2 commits: effect facts moved to jet-foundation; tier-2 allow-list retired for the declared-effect rule). Remaining route is on the card log: merge the two purity walks (criterion 3) first, then declared effects authorize Tier 1, then the four comptime stems as proof, then docs and snapshots. Worktree removed; branch retained."
+        },
         {
           "at": "2026-08-07",
           "by": "bd3-effect",
@@ -93092,10 +93102,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:34:34.781Z",
-      "updated": "2026-08-07T13:24:47.320Z",
-      "updatedBy": "bd3-effect",
-      "workOrder": 560,
-      "claimedAt": "2026-08-07T13:24:47.319Z"
+      "updated": "2026-08-07T14:36:04.975Z",
+      "updatedBy": "bd3-orch",
+      "workOrder": 560
     },
     {
       "id": "c0re71tf",
@@ -98750,6 +98759,523 @@
       "created": "2026-08-07T13:50:00.598Z",
       "updated": "2026-08-07T14:18:40.448Z",
       "updatedBy": "owner"
+    },
+    {
+      "id": "c0lexr00",
+      "num": 1621,
+      "title": "One flow-fact store with one join rule",
+      "body": "Six stores track facts that change along control flow: moved bindings, uninit fields, typestate, optional narrowing, taint and view windows. Each hand-writes its own branch merge, and two of those merges are dead code, so typestate and partial init keep whatever branch the walker saw last. Build one store keyed by binding and plane. Each plane supplies only its join rule, and the shared walker applies joins at every merge point. Sema only; nothing a user types changes. This is substrate: it lands before any per-plane card builds on it.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "workOrder": 2,
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "One flow-fact store on the checker holds every per-binding fact, keyed by binding and plane",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:34:59.879Z"
+        },
+        {
+          "n": 2,
+          "text": "The six stores migrate in: moved, uninit, typestate, taint, narrowing and view facts, together with the twelve one-off fact columns on LocalInfo",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:35:00.247Z"
+        },
+        {
+          "n": 3,
+          "text": "Each plane supplies only its join rule, and the shared walker calls join at every if, loop and arm-table merge point",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:35:00.615Z"
+        },
+        {
+          "n": 4,
+          "text": "The two dead joins are gone as a class: State.rs join_after and UninitState::merge_paths are live or deleted, and no join carries #[allow(dead_code)]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:35:01.350Z"
+        },
+        {
+          "n": 5,
+          "text": "A branch that confirms an order in one arm and cancels it in the other reports the divergence instead of keeping the last-walked arm, with a UI snapshot",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:35:02.168Z"
+        },
+        {
+          "n": 6,
+          "text": "A value initialised in one arm and not the other merges to the intersection of initialised fields, with a targeted test",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:35:02.941Z"
+        },
+        {
+          "n": 7,
+          "text": "The shared walker states its loop fixpoint rule once, in one place",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:35:03.692Z"
+        },
+        {
+          "n": 8,
+          "text": "View facts are stored here while their invalidation logic stays with the ownership prover, per D-FACT-OWN1",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:35:04.283Z"
+        },
+        {
+          "n": 9,
+          "text": "Sema only: no TIR or codegen change, and generated Rust for the existing corpus is byte-identical to the pre-change output",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:35:05.051Z"
+        },
+        {
+          "n": 10,
+          "text": "No user-visible surface changes in this card",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:35:05.859Z"
+        },
+        {
+          "n": 11,
+          "text": "Greenfield: the six replaced stores are deleted in the same change, and no seventh private store remains",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:35:06.721Z"
+        },
+        {
+          "n": 12,
+          "text": "Tier parity (I9) is proved inside this card: parser, sema, TIR, AOT, JIT/dev, comptime, REPL and web all show the same behavior, with one test per tier.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:35:07.141Z"
+        }
+      ],
+      "refs": [
+        "docs/proposals/compiler-facts-one-law.md"
+      ],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-07T14:34:59.517Z",
+      "updated": "2026-08-07T14:35:07.142Z",
+      "updatedBy": "facts-reconciler"
+    },
+    {
+      "id": "c0jeuiwf",
+      "num": 1622,
+      "title": "Home the orphan facts on the one registry",
+      "body": "Some facts the compiler holds live outside every registry. Send-safety is a stray flag on the checker. #Track origin, view provenance and unit-scale provenance are recorded but unreadable. Failure attribution and maturity are unregistered. Each fact a user can meet becomes a typed row on the one registration table and is readable like every other fact. Prover internals stay engine-side, per the ownership wall.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "workOrder": 5,
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Send-safety is a registered row, and the stray sendable flag on LocalInfo is deleted",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:35:08.956Z"
+        },
+        {
+          "n": 2,
+          "text": "Failure attribution is a registered row and reads as report.$attribution",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:35:09.866Z"
+        },
+        {
+          "n": 3,
+          "text": "#Track origin (D-PROVENANCE1) is a registered row and is readable",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:35:10.529Z"
+        },
+        {
+          "n": 4,
+          "text": "View provenance (D-MEMPROVENANCE3) is a prover-supplied row, per the ownership wall in D-FACT-OWN1",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:35:11.295Z"
+        },
+        {
+          "n": 5,
+          "text": "Unit-scale provenance is a registered row",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:35:12.157Z"
+        },
+        {
+          "n": 6,
+          "text": "Maturity is a registered row",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:35:12.937Z"
+        },
+        {
+          "n": 7,
+          "text": "Uninit tracking and exhaustiveness stay engine-side and gain no registry row, matching the same wall",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:35:13.591Z"
+        },
+        {
+          "n": 8,
+          "text": "docs/spec states, fact by fact, which facts are user-facing and which stay prover internals, so the line is written down rather than folklore",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:35:13.946Z"
+        },
+        {
+          "n": 9,
+          "text": "Every homed row is readable through the $ read surface and through reflect(), with a targeted test per row",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:35:14.299Z"
+        },
+        {
+          "n": 10,
+          "text": "Greenfield: each stray field and private table is deleted in the same change",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:35:15.026Z"
+        },
+        {
+          "n": 11,
+          "text": "Tier parity (I9) is proved inside this card: parser, sema, TIR, AOT, JIT/dev, comptime, REPL and web all show the same behavior, with one test per tier.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:35:15.821Z"
+        }
+      ],
+      "refs": [
+        "docs/proposals/compiler-facts-one-law.md"
+      ],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-07T14:35:08.103Z",
+      "updated": "2026-08-07T14:35:15.822Z",
+      "updatedBy": "facts-reconciler"
+    },
+    {
+      "id": "c0ihiv43",
+      "num": 1623,
+      "title": "The $ fact read: one act for every registered plane",
+      "body": "Reading what the compiler knows becomes one act with one mark. Severity.$range, send_report.$effects, Order.$states and Meters.$dimension answer typed values from the one registry, and $build.profile is the same act with the build as its subject. The string fallback in reflection dies, and reflect() stays as the aggregate view over the same typed facts. Comptime only: a fact is a value, it never mints a type and it never dispatches.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "workOrder": 7,
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "$ in member position reads any registered plane: Severity.$range, send_report.$effects, Order.$states and Meters.$dimension each answer a typed value, not a string",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:35:17.181Z"
+        },
+        {
+          "n": 2,
+          "text": "$build.* is the same act with the build as its subject, so no second reading story remains",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:35:17.539Z"
+        },
+        {
+          "n": 3,
+          "text": "State names are readable as values and the \"\\0state:\" string encoding is deleted",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:35:18.404Z"
+        },
+        {
+          "n": 4,
+          "text": "Fact reads work in comptime code and in derive bodies",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:35:19.175Z"
+        },
+        {
+          "n": 5,
+          "text": "A fact read in a runtime position is refused with a teaching diagnostic; the mark stays compile-time only",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:35:19.856Z"
+        },
+        {
+          "n": 6,
+          "text": "A fact never creates or selects a type (S26); a targeted test proves a fact in type position is rejected",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:35:20.263Z"
+        },
+        {
+          "n": 7,
+          "text": "Facts classify and never dispatch (D-FACTMODEL1); a targeted test proves no runtime dispatch is emitted",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:35:20.613Z"
+        },
+        {
+          "n": 8,
+          "text": "The reflection string fallback at crates/jet-sema/src/Sema/Reflect.rs is deleted, and reflect() stays as the aggregate view over the same typed facts",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:35:21.246Z"
+        },
+        {
+          "n": 9,
+          "text": "One golden-tested example under examples/features/reflection/ reads a fact from four different planes",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:35:22.112Z"
+        },
+        {
+          "n": 10,
+          "text": "I9 parity inside this card: the reads fold before codegen, so AOT, jet run and the interpreter see one folded program",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:35:22.892Z"
+        },
+        {
+          "n": 11,
+          "text": "Syntax.rs entry updated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:35:23.507Z"
+        },
+        {
+          "n": 12,
+          "text": "syntax-decisions.md log entry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:35:23.866Z"
+        },
+        {
+          "n": 13,
+          "text": "jet devtools grammars regenerated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:35:24.705Z"
+        },
+        {
+          "n": 14,
+          "text": "snapshots re-blessed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:35:25.547Z"
+        }
+      ],
+      "refs": [
+        "docs/proposals/compiler-facts-one-law.md"
+      ],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-07T14:35:16.754Z",
+      "updated": "2026-08-07T14:35:25.547Z",
+      "updatedBy": "facts-reconciler"
+    },
+    {
+      "id": "c0vpo1uf",
+      "num": 1624,
+      "title": "One law voice: facts tighten, gates loosen",
+      "body": "Five words name the same one-way rule today: tighten, attenuate, narrow, conserve and erase. Diagnostics and docs adopt one pair. A fact tighten silently; a gate loosens it, and loosening is always written. Operation names are untouched: flow narrowing keeps its name, widening conversions keep theirs, and no user-typed spelling changes.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "workOrder": 9,
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Diagnostic copy in the config, rights, flow, knowledge and duty families uses one shape: the fact only tightens here, and the message names the gate word that loosens it",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:35:26.923Z"
+        },
+        {
+          "n": 2,
+          "text": "attenuate, conserve and law-level narrow retire from docs and from diagnostic prose",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:35:27.397Z"
+        },
+        {
+          "n": 3,
+          "text": "Duty diagnostics use the owes phrasing: this value still owes join, join it or write detach; and this value still owes send, send it or write .drop with a reason",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:35:27.824Z"
+        },
+        {
+          "n": 4,
+          "text": "The E0140 family and the #SingleUse message speak with one duty voice, not two",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:35:28.270Z"
+        },
+        {
+          "n": 5,
+          "text": "Flow narrowing keeps its operation name, widening conversions keep theirs, and no user-typed spelling changes",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:35:28.726Z"
+        },
+        {
+          "n": 6,
+          "text": "Every plane chapter in docs/spec cites the one law rather than restating its own rule in its own words",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:35:29.087Z"
+        },
+        {
+          "n": 7,
+          "text": "The affected snapshots are re-blessed in the same change",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:35:29.466Z"
+        },
+        {
+          "n": 8,
+          "text": "syntax-decisions.md log entry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T14:35:29.822Z"
+        }
+      ],
+      "refs": [
+        "docs/proposals/compiler-facts-one-law.md"
+      ],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-07T14:35:26.261Z",
+      "updated": "2026-08-07T14:35:29.822Z",
+      "updatedBy": "facts-reconciler"
     }
   ],
   "decisions": [
@@ -133875,6 +134401,370 @@
   ],
   "events": [
     {
+      "at": "2026-08-07T14:36:04.975Z",
+      "by": "bd3-orch",
+      "action": "card.release",
+      "ref": "c0c86cps",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-08-07T14:35:45.883Z",
+      "by": "bd3-orch",
+      "action": "card.update",
+      "ref": "c0z2jsot",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T14:35:45.467Z",
+      "by": "bd3-orch",
+      "action": "card.update",
+      "ref": "c0z2jsot",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T14:35:29.822Z",
+      "by": "facts-reconciler",
+      "action": "card.criteria-add",
+      "ref": "c0vpo1uf",
+      "note": "#8 syntax-decisions.md log entry"
+    },
+    {
+      "at": "2026-08-07T14:35:29.467Z",
+      "by": "facts-reconciler",
+      "action": "card.criteria-add",
+      "ref": "c0vpo1uf",
+      "note": "#7 The affected snapshots are re-blessed in the same change"
+    },
+    {
+      "at": "2026-08-07T14:35:29.087Z",
+      "by": "facts-reconciler",
+      "action": "card.criteria-add",
+      "ref": "c0vpo1uf",
+      "note": "#6 Every plane chapter in docs/spec cites the one law rather th"
+    },
+    {
+      "at": "2026-08-07T14:35:28.726Z",
+      "by": "facts-reconciler",
+      "action": "card.criteria-add",
+      "ref": "c0vpo1uf",
+      "note": "#5 Flow narrowing keeps its operation name, widening conversion"
+    },
+    {
+      "at": "2026-08-07T14:35:28.270Z",
+      "by": "facts-reconciler",
+      "action": "card.criteria-add",
+      "ref": "c0vpo1uf",
+      "note": "#4 The E0140 family and the #SingleUse message speak with one d"
+    },
+    {
+      "at": "2026-08-07T14:35:27.824Z",
+      "by": "facts-reconciler",
+      "action": "card.criteria-add",
+      "ref": "c0vpo1uf",
+      "note": "#3 Duty diagnostics use the owes phrasing: this value still owe"
+    },
+    {
+      "at": "2026-08-07T14:35:27.397Z",
+      "by": "facts-reconciler",
+      "action": "card.criteria-add",
+      "ref": "c0vpo1uf",
+      "note": "#2 attenuate, conserve and law-level narrow retire from docs an"
+    },
+    {
+      "at": "2026-08-07T14:35:26.924Z",
+      "by": "facts-reconciler",
+      "action": "card.criteria-add",
+      "ref": "c0vpo1uf",
+      "note": "#1 Diagnostic copy in the config, rights, flow, knowledge and d"
+    },
+    {
+      "at": "2026-08-07T14:35:26.261Z",
+      "by": "facts-reconciler",
+      "action": "card.add",
+      "ref": "c0vpo1uf",
+      "note": "One law voice: facts tighten, gates loosen"
+    },
+    {
+      "at": "2026-08-07T14:35:25.547Z",
+      "by": "facts-reconciler",
+      "action": "card.criteria-add",
+      "ref": "c0ihiv43",
+      "note": "#14 snapshots re-blessed"
+    },
+    {
+      "at": "2026-08-07T14:35:24.705Z",
+      "by": "facts-reconciler",
+      "action": "card.criteria-add",
+      "ref": "c0ihiv43",
+      "note": "#13 jet devtools grammars regenerated"
+    },
+    {
+      "at": "2026-08-07T14:35:23.866Z",
+      "by": "facts-reconciler",
+      "action": "card.criteria-add",
+      "ref": "c0ihiv43",
+      "note": "#12 syntax-decisions.md log entry"
+    },
+    {
+      "at": "2026-08-07T14:35:23.507Z",
+      "by": "facts-reconciler",
+      "action": "card.criteria-add",
+      "ref": "c0ihiv43",
+      "note": "#11 Syntax.rs entry updated"
+    },
+    {
+      "at": "2026-08-07T14:35:22.892Z",
+      "by": "facts-reconciler",
+      "action": "card.criteria-add",
+      "ref": "c0ihiv43",
+      "note": "#10 I9 parity inside this card: the reads fold before codegen, s"
+    },
+    {
+      "at": "2026-08-07T14:35:22.112Z",
+      "by": "facts-reconciler",
+      "action": "card.criteria-add",
+      "ref": "c0ihiv43",
+      "note": "#9 One golden-tested example under examples/features/reflection"
+    },
+    {
+      "at": "2026-08-07T14:35:21.246Z",
+      "by": "facts-reconciler",
+      "action": "card.criteria-add",
+      "ref": "c0ihiv43",
+      "note": "#8 The reflection string fallback at crates/jet-sema/src/Sema/R"
+    },
+    {
+      "at": "2026-08-07T14:35:20.613Z",
+      "by": "facts-reconciler",
+      "action": "card.criteria-add",
+      "ref": "c0ihiv43",
+      "note": "#7 Facts classify and never dispatch (D-FACTMODEL1); a targeted"
+    },
+    {
+      "at": "2026-08-07T14:35:20.263Z",
+      "by": "facts-reconciler",
+      "action": "card.criteria-add",
+      "ref": "c0ihiv43",
+      "note": "#6 A fact never creates or selects a type (S26); a targeted tes"
+    },
+    {
+      "at": "2026-08-07T14:35:19.856Z",
+      "by": "facts-reconciler",
+      "action": "card.criteria-add",
+      "ref": "c0ihiv43",
+      "note": "#5 A fact read in a runtime position is refused with a teaching"
+    },
+    {
+      "at": "2026-08-07T14:35:19.175Z",
+      "by": "facts-reconciler",
+      "action": "card.criteria-add",
+      "ref": "c0ihiv43",
+      "note": "#4 Fact reads work in comptime code and in derive bodies"
+    },
+    {
+      "at": "2026-08-07T14:35:18.404Z",
+      "by": "facts-reconciler",
+      "action": "card.criteria-add",
+      "ref": "c0ihiv43",
+      "note": "#3 State names are readable as values and the \"\\0state:\" string"
+    },
+    {
+      "at": "2026-08-07T14:35:17.539Z",
+      "by": "facts-reconciler",
+      "action": "card.criteria-add",
+      "ref": "c0ihiv43",
+      "note": "#2 $build.* is the same act with the build as its subject, so n"
+    },
+    {
+      "at": "2026-08-07T14:35:17.182Z",
+      "by": "facts-reconciler",
+      "action": "card.criteria-add",
+      "ref": "c0ihiv43",
+      "note": "#1 $ in member position reads any registered plane: Severity.$r"
+    },
+    {
+      "at": "2026-08-07T14:35:16.754Z",
+      "by": "facts-reconciler",
+      "action": "card.add",
+      "ref": "c0ihiv43",
+      "note": "The $ fact read: one act for every registered plane"
+    },
+    {
+      "at": "2026-08-07T14:35:15.822Z",
+      "by": "facts-reconciler",
+      "action": "card.criteria-add",
+      "ref": "c0jeuiwf",
+      "note": "#11 Tier parity (I9) is proved inside this card: parser, sema, T"
+    },
+    {
+      "at": "2026-08-07T14:35:15.026Z",
+      "by": "facts-reconciler",
+      "action": "card.criteria-add",
+      "ref": "c0jeuiwf",
+      "note": "#10 Greenfield: each stray field and private table is deleted in"
+    },
+    {
+      "at": "2026-08-07T14:35:14.299Z",
+      "by": "facts-reconciler",
+      "action": "card.criteria-add",
+      "ref": "c0jeuiwf",
+      "note": "#9 Every homed row is readable through the $ read surface and t"
+    },
+    {
+      "at": "2026-08-07T14:35:13.946Z",
+      "by": "facts-reconciler",
+      "action": "card.criteria-add",
+      "ref": "c0jeuiwf",
+      "note": "#8 docs/spec states, fact by fact, which facts are user-facing "
+    },
+    {
+      "at": "2026-08-07T14:35:13.591Z",
+      "by": "facts-reconciler",
+      "action": "card.criteria-add",
+      "ref": "c0jeuiwf",
+      "note": "#7 Uninit tracking and exhaustiveness stay engine-side and gain"
+    },
+    {
+      "at": "2026-08-07T14:35:12.937Z",
+      "by": "facts-reconciler",
+      "action": "card.criteria-add",
+      "ref": "c0jeuiwf",
+      "note": "#6 Maturity is a registered row"
+    },
+    {
+      "at": "2026-08-07T14:35:12.157Z",
+      "by": "facts-reconciler",
+      "action": "card.criteria-add",
+      "ref": "c0jeuiwf",
+      "note": "#5 Unit-scale provenance is a registered row"
+    },
+    {
+      "at": "2026-08-07T14:35:11.296Z",
+      "by": "facts-reconciler",
+      "action": "card.criteria-add",
+      "ref": "c0jeuiwf",
+      "note": "#4 View provenance (D-MEMPROVENANCE3) is a prover-supplied row,"
+    },
+    {
+      "at": "2026-08-07T14:35:10.529Z",
+      "by": "facts-reconciler",
+      "action": "card.criteria-add",
+      "ref": "c0jeuiwf",
+      "note": "#3 #Track origin (D-PROVENANCE1) is a registered row and is rea"
+    },
+    {
+      "at": "2026-08-07T14:35:09.867Z",
+      "by": "facts-reconciler",
+      "action": "card.criteria-add",
+      "ref": "c0jeuiwf",
+      "note": "#2 Failure attribution is a registered row and reads as report."
+    },
+    {
+      "at": "2026-08-07T14:35:08.956Z",
+      "by": "facts-reconciler",
+      "action": "card.criteria-add",
+      "ref": "c0jeuiwf",
+      "note": "#1 Send-safety is a registered row, and the stray sendable flag"
+    },
+    {
+      "at": "2026-08-07T14:35:08.103Z",
+      "by": "facts-reconciler",
+      "action": "card.add",
+      "ref": "c0jeuiwf",
+      "note": "Home the orphan facts on the one registry"
+    },
+    {
+      "at": "2026-08-07T14:35:07.142Z",
+      "by": "facts-reconciler",
+      "action": "card.criteria-add",
+      "ref": "c0lexr00",
+      "note": "#12 Tier parity (I9) is proved inside this card: parser, sema, T"
+    },
+    {
+      "at": "2026-08-07T14:35:06.721Z",
+      "by": "facts-reconciler",
+      "action": "card.criteria-add",
+      "ref": "c0lexr00",
+      "note": "#11 Greenfield: the six replaced stores are deleted in the same "
+    },
+    {
+      "at": "2026-08-07T14:35:05.859Z",
+      "by": "facts-reconciler",
+      "action": "card.criteria-add",
+      "ref": "c0lexr00",
+      "note": "#10 No user-visible surface changes in this card"
+    },
+    {
+      "at": "2026-08-07T14:35:05.051Z",
+      "by": "facts-reconciler",
+      "action": "card.criteria-add",
+      "ref": "c0lexr00",
+      "note": "#9 Sema only: no TIR or codegen change, and generated Rust for "
+    },
+    {
+      "at": "2026-08-07T14:35:04.283Z",
+      "by": "facts-reconciler",
+      "action": "card.criteria-add",
+      "ref": "c0lexr00",
+      "note": "#8 View facts are stored here while their invalidation logic st"
+    },
+    {
+      "at": "2026-08-07T14:35:03.693Z",
+      "by": "facts-reconciler",
+      "action": "card.criteria-add",
+      "ref": "c0lexr00",
+      "note": "#7 The shared walker states its loop fixpoint rule once, in one"
+    },
+    {
+      "at": "2026-08-07T14:35:02.941Z",
+      "by": "facts-reconciler",
+      "action": "card.criteria-add",
+      "ref": "c0lexr00",
+      "note": "#6 A value initialised in one arm and not the other merges to t"
+    },
+    {
+      "at": "2026-08-07T14:35:02.168Z",
+      "by": "facts-reconciler",
+      "action": "card.criteria-add",
+      "ref": "c0lexr00",
+      "note": "#5 A branch that confirms an order in one arm and cancels it in"
+    },
+    {
+      "at": "2026-08-07T14:35:01.350Z",
+      "by": "facts-reconciler",
+      "action": "card.criteria-add",
+      "ref": "c0lexr00",
+      "note": "#4 The two dead joins are gone as a class: State.rs join_after "
+    },
+    {
+      "at": "2026-08-07T14:35:00.616Z",
+      "by": "facts-reconciler",
+      "action": "card.criteria-add",
+      "ref": "c0lexr00",
+      "note": "#3 Each plane supplies only its join rule, and the shared walke"
+    },
+    {
+      "at": "2026-08-07T14:35:00.247Z",
+      "by": "facts-reconciler",
+      "action": "card.criteria-add",
+      "ref": "c0lexr00",
+      "note": "#2 The six stores migrate in: moved, uninit, typestate, taint, "
+    },
+    {
+      "at": "2026-08-07T14:34:59.879Z",
+      "by": "facts-reconciler",
+      "action": "card.criteria-add",
+      "ref": "c0lexr00",
+      "note": "#1 One flow-fact store on the checker holds every per-binding f"
+    },
+    {
+      "at": "2026-08-07T14:34:59.517Z",
+      "by": "facts-reconciler",
+      "action": "card.add",
+      "ref": "c0lexr00",
+      "note": "One flow-fact store with one join rule"
+    },
+    {
       "at": "2026-08-07T14:34:49.315Z",
       "by": "facts-reconciler",
       "action": "papercut.add",
@@ -137009,370 +137899,6 @@
       "action": "card.update",
       "ref": "c0pd9rd4",
       "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-07T03:37:50.909Z",
-      "by": "bd2-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0pd9rd4",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-07T03:35:48.745Z",
-      "by": "bd2-fix",
-      "action": "card.add",
-      "ref": "c07ylf1g",
-      "note": "Fix additional master HEAD compile breaks beyond #1596: tls_tier2, jetpack_services, jet-sema/jet-comptime lib tests"
-    },
-    {
-      "at": "2026-08-07T03:35:38.956Z",
-      "by": "bd2-fix",
-      "action": "card.update",
-      "ref": "c0pd9rd4",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-07T03:35:33.160Z",
-      "by": "bd2-fix",
-      "action": "card.criteria-meet",
-      "ref": "c0pd9rd4",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-07T03:35:20.300Z",
-      "by": "bd2-fix",
-      "action": "card.update",
-      "ref": "c0pd9rd4",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-07T03:35:13.145Z",
-      "by": "bd2-fix",
-      "action": "card.criteria-add",
-      "ref": "c0pd9rd4",
-      "note": "#1 The three named test targets compile on master; cargo build "
-    },
-    {
-      "at": "2026-08-07T03:25:45.880Z",
-      "by": "bd2-manifest2",
-      "action": "card.update",
-      "ref": "c0ejda8e",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-07T03:21:43.760Z",
-      "by": "bd2-fix",
-      "action": "card.claim",
-      "ref": "c0pd9rd4",
-      "note": ""
-    },
-    {
-      "at": "2026-08-07T03:21:17.927Z",
-      "by": "bd2-orch",
-      "action": "card.update",
-      "ref": "c0wa2hf8",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-07T03:21:17.434Z",
-      "by": "bd2-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0wa2hf8",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-07T03:21:16.968Z",
-      "by": "bd2-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0wa2hf8",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-07T03:21:16.588Z",
-      "by": "bd2-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0wa2hf8",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-07T03:21:16.196Z",
-      "by": "bd2-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0wa2hf8",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-07T03:21:15.721Z",
-      "by": "bd2-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0wa2hf8",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-07T03:07:13.981Z",
-      "by": "bd2-ci",
-      "action": "card.update",
-      "ref": "c0wa2hf8",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-07T03:07:12.683Z",
-      "by": "bd2-ci",
-      "action": "card.update",
-      "ref": "c0wa2hf8",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-07T03:07:06.068Z",
-      "by": "bd2-ci",
-      "action": "card.criteria-meet",
-      "ref": "c0wa2hf8",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-07T03:07:05.203Z",
-      "by": "bd2-ci",
-      "action": "card.criteria-meet",
-      "ref": "c0wa2hf8",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-07T03:06:55.743Z",
-      "by": "bd2-ci",
-      "action": "card.update",
-      "ref": "c0wa2hf8",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-07T03:06:44.948Z",
-      "by": "bd2-ci",
-      "action": "card.criteria-meet",
-      "ref": "c0wa2hf8",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-07T03:06:40.970Z",
-      "by": "bd2-ci",
-      "action": "card.criteria-meet",
-      "ref": "c0wa2hf8",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-07T03:06:38.980Z",
-      "by": "bd2-ci",
-      "action": "card.criteria-meet",
-      "ref": "c0wa2hf8",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-07T02:58:54.825Z",
-      "by": "bd2-ci",
-      "action": "papercut.add",
-      "ref": "pc05oaqzm",
-      "note": ""
-    },
-    {
-      "at": "2026-08-07T02:53:48.864Z",
-      "by": "bd2-ci",
-      "action": "card.add",
-      "ref": "c0ksjkvh",
-      "note": "release_gates.rs pre-existing failures: canon.jet E0999 marker brackets, E0328 explain gap"
-    },
-    {
-      "at": "2026-08-07T02:51:45.007Z",
-      "by": "bd2-ci",
-      "action": "card.add",
-      "ref": "c0pd9rd4",
-      "note": "Fix master HEAD compile breaks: tests/pure.rs, tests/jetpack_engine.rs, tests/ws_law.rs"
-    },
-    {
-      "at": "2026-08-07T02:44:59.722Z",
-      "by": "bd2-rev3",
-      "action": "card.criteria-verify",
-      "ref": "c0ejda8e",
-      "note": "#9"
-    },
-    {
-      "at": "2026-08-07T02:44:43.056Z",
-      "by": "bd2-rev3",
-      "action": "card.criteria-verify",
-      "ref": "c0ejda8e",
-      "note": "#8"
-    },
-    {
-      "at": "2026-08-07T02:44:42.337Z",
-      "by": "bd2-rev3",
-      "action": "card.criteria-verify",
-      "ref": "c0ejda8e",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-07T02:44:41.687Z",
-      "by": "bd2-rev3",
-      "action": "card.criteria-verify",
-      "ref": "c0ejda8e",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-07T02:44:33.609Z",
-      "by": "bd2-rev3",
-      "action": "card.criteria-verify",
-      "ref": "c0ejda8e",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-07T02:44:33.232Z",
-      "by": "bd2-rev3",
-      "action": "card.criteria-verify",
-      "ref": "c0ejda8e",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-07T02:44:24.520Z",
-      "by": "bd2-rev3",
-      "action": "card.criteria-verify",
-      "ref": "c0ejda8e",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-07T02:44:16.654Z",
-      "by": "bd2-rev3",
-      "action": "card.update",
-      "ref": "c0ejda8e",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-07T02:44:08.732Z",
-      "by": "bd2-rev3",
-      "action": "card.update",
-      "ref": "c0ejda8e",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-07T02:44:00.713Z",
-      "by": "bd2-rev3",
-      "action": "card.update",
-      "ref": "c0ejda8e",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-07T02:29:18.426Z",
-      "by": "bd2-ci",
-      "action": "card.claim",
-      "ref": "c0wa2hf8",
-      "note": ""
-    },
-    {
-      "at": "2026-08-07T02:28:48.316Z",
-      "by": "bd2-carrier3",
-      "action": "card.claim",
-      "ref": "c0y4zx0d",
-      "note": ""
-    },
-    {
-      "at": "2026-08-07T02:28:16.714Z",
-      "by": "bd2-orch",
-      "action": "card.update",
-      "ref": "c0o5w74b",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-07T02:28:16.164Z",
-      "by": "bd2-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0o5w74b",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-07T02:28:15.668Z",
-      "by": "bd2-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0o5w74b",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-07T02:28:15.303Z",
-      "by": "bd2-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0o5w74b",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-07T02:28:14.779Z",
-      "by": "bd2-orch",
-      "action": "card.update",
-      "ref": "c0g2j76x",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-07T02:28:14.353Z",
-      "by": "bd2-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0g2j76x",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-07T02:28:13.993Z",
-      "by": "bd2-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0g2j76x",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-07T02:28:13.516Z",
-      "by": "bd2-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0g2j76x",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-07T02:28:12.929Z",
-      "by": "bd2-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0g2j76x",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-07T02:28:12.456Z",
-      "by": "bd2-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0g2j76x",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-07T02:28:11.904Z",
-      "by": "bd2-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0g2j76x",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-07T02:26:42.213Z",
-      "by": "bd2-carrier2",
-      "action": "card.release",
-      "ref": "c0y4zx0d",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-08-07T02:26:36.539Z",
-      "by": "bd2-carrier2",
-      "action": "card.update",
-      "ref": "c0y4zx0d",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-07T02:26:18.621Z",
-      "by": "bd2-carrier2",
-      "action": "card.criteria-meet",
-      "ref": "c0y4zx0d",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-07T02:25:55.446Z",
-      "by": "bd2-bugs",
-      "action": "card.release",
-      "ref": "c0o5w74b",
-      "note": ""
     }
   ],
   "nextNum": 368,
