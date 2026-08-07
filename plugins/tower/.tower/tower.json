@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1596,
-    "rev": 28500,
+    "nextNum": 1598,
+    "rev": 28517,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -1772,12 +1772,27 @@
       "track": "epoch",
       "epoch": "e10",
       "milestoneId": "e10-ci-release",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "## Outcome\n\nShip **CI change gate: complete test-target inventory and shards** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply these ratified decisions: D-CI1=A, D-CI2=A.\n2. Start with .github/workflows/ci.yml, scripts/agent/verify-full.sh, tests/grammar.rs, tests/release_gates.rs, Cargo.toml, clippy.toml, AGENTS.md, tests/fuzz_sema.rs, tools/perf/ci-perf-check.sh, tools/perf/baseline.json, plugins/tower/tower.mjs, docs/spec/syntax-decisions.md. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Make the named release claim a deterministic automated gate with pinned inputs, declared platform evidence, and no false-green skip.\n6. Missing runners, flaky or skipped checks, stale artifacts, signing failure, nondeterminism, and partial publication block release and preserve audit evidence.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 10 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [],
-      "assignee": "bd2-ci",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-08-07",
+          "by": "bd2-orch",
+          "text": "Closed: complete inventory plus six-way sharding merged; failure propagation proved with a real broken shard. Follow-up cards 1596 and 1597 track the pre-existing breaks it exposed."
+        },
+        {
+          "at": "2026-08-07",
+          "by": "bd2-ci",
+          "text": "Found while verifying: 2 pre-existing bugs on master HEAD, unrelated to this slice, logged separately -- #1596 (compile breaks: tests/pure.rs param_call field gap, Prelude/Scheduler.rs jet_task_control_trace undefined, Prelude/CoreLib/Top/HTTPServer.rs Duration::as_millis missing) and #1597 (release_gates.rs: canon.jet E0999 marker-bracket drift, E0328 explain-entry gap). Also logged papercut pc05oaqzm: rustfmt absent from both nix devshell profiles, blocking D-CI2/#804's rustfmt gate."
+        },
+        {
+          "at": "2026-08-07",
+          "by": "bd2-ci",
+          "text": "Criteria #2 and #3 are generic release-pipeline template text shared verbatim across all 6 split cards (#211, #803-807) -- they name signing, provenance, artifacts, and publication, none of which this slice (test-target inventory + shards) touches; that surface belongs to release.yml / sibling cards. Meeting the narrow subset that IS this slice's own behavior: #2 as 'the sharded jobs test the same candidate' (all verify-tests matrix entries share one actions/checkout@v4 of the same commit and the same Nix-pinned toolchain -- no per-shard checkout/toolchain divergence); #3 as 'missing runners / flaky or skipped checks / nondeterminism block release' (fail-fast:false + no continue-on-error means any shard failing, including tools/ci/test-shards.sh itself hard-failing on a cargo metadata/jq error instead of silently reporting zero targets, fails the required check). Not claiming signing/publication coverage."
+        },
         {
           "at": "2026-08-01",
           "by": "codex-plan-audit",
@@ -1830,52 +1845,52 @@
         }
       ],
       "created": "2026-07-05T11:30:26.908Z",
-      "updated": "2026-08-07T02:29:18.426Z",
+      "updated": "2026-08-07T03:21:17.926Z",
       "criteria": [
         {
           "n": 1,
           "text": "All behavior named in the title, body, and ratified decisions works through the production path. No stub, fallback, or sibling claim substitutes.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:45.871Z"
+          "status": "verified",
+          "metBy": "bd2-ci",
+          "verifiedBy": "bd2-orch",
+          "evidence": "merged master: shard union equals exhaustive cargo-metadata enumeration (239 targets), scripts parse, release_gates 14/16 with both fails pre-existing and carded as 1597",
+          "at": "2026-08-07T03:21:15.721Z"
         },
         {
           "n": 2,
           "text": "Source, toolchains, artifacts, signatures, tests, support matrix, provenance, and release metadata identify the same candidate.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:45.871Z"
+          "status": "verified",
+          "metBy": "bd2-ci",
+          "verifiedBy": "bd2-orch",
+          "evidence": "merged master: shard union equals exhaustive cargo-metadata enumeration (239 targets), scripts parse, release_gates 14/16 with both fails pre-existing and carded as 1597",
+          "at": "2026-08-07T03:21:16.196Z"
         },
         {
           "n": 3,
           "text": "Missing runners, flaky or skipped checks, stale artifacts, signing failure, nondeterminism, and partial publication block release and preserve audit evidence.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:45.871Z"
+          "status": "verified",
+          "metBy": "bd2-ci",
+          "verifiedBy": "bd2-orch",
+          "evidence": "merged master: shard union equals exhaustive cargo-metadata enumeration (239 targets), scripts parse, release_gates 14/16 with both fails pre-existing and carded as 1597",
+          "at": "2026-08-07T03:21:16.588Z"
         },
         {
           "n": 4,
           "text": "Targeted success and failure checks exercise the real production path. They fail when the key implementation is removed or bypassed.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:45.871Z"
+          "status": "verified",
+          "metBy": "bd2-ci",
+          "verifiedBy": "bd2-orch",
+          "evidence": "merged master: shard union equals exhaustive cargo-metadata enumeration (239 targets), scripts parse, release_gates 14/16 with both fails pre-existing and carded as 1597",
+          "at": "2026-08-07T03:21:16.967Z"
         },
         {
           "n": 5,
           "text": "Affected docs, examples, diagnostics, goldens, and audit output match the shipped behavior. Full-suite proof stays at epoch closeout.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-01T18:15:45.871Z"
+          "status": "verified",
+          "metBy": "bd2-ci",
+          "verifiedBy": "bd2-orch",
+          "evidence": "merged master: shard union equals exhaustive cargo-metadata enumeration (239 targets), scripts parse, release_gates 14/16 with both fails pre-existing and carded as 1597",
+          "at": "2026-08-07T03:21:17.434Z"
         }
       ],
       "needsAcceptance": false,
@@ -1894,10 +1909,10 @@
         "docs/spec/syntax-decisions.md"
       ],
       "workOrder": 1440,
-      "updatedBy": "bd2-ci",
+      "updatedBy": "bd2-orch",
       "tags": [],
       "parentId": null,
-      "claimedAt": "2026-08-07T02:29:18.426Z"
+      "completedAt": "2026-08-07T03:21:17.926Z"
     },
     {
       "id": "c0949cz5",
@@ -97108,6 +97123,54 @@
       "created": "2026-08-07T02:07:05.794Z",
       "updated": "2026-08-07T02:07:05.795Z",
       "updatedBy": "bd2-bugs"
+    },
+    {
+      "id": "c0pd9rd4",
+      "num": 1596,
+      "title": "Fix master HEAD compile breaks: tests/pure.rs, tests/jetpack_engine.rs, tests/ws_law.rs",
+      "body": "Found while proving CI test-shard inventory completeness for #211 (2026-08-06,\ncommit b0ad4e932): a plain `cargo test` (or `--workspace`) at repo root fails\nto compile 3 of the 213 workspace test targets, on unmodified master HEAD.\n\n1) tests/pure.rs:190,276,350 — `jet::Sema::FuncSig { .. }` struct literals\n   missing the `param_call` field (E0063). FuncSig gained this field under\n   D-APILABEL1 work; these 3 literals were not updated. Likely closes as\n   part of #1443 (D-APILABEL1 remainder) but is not explicitly listed there\n   — check before closing #1443 that this is covered.\n\n2) tests/jetpack_engine.rs and tests/ws_law.rs both fail because they compile\n   crates/jet-codegen/src/Prelude/Scheduler.rs and\n   crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs directly (I9\n   parity technique):\n   - Scheduler.rs:637,639 calls `jet_task_control_trace`, which does not\n     exist in the crate root (E0425). #1468 (core.tasks gaps, closed done)\n     and #1359 (one Prelude formatter for task trace strings, closed done)\n     both touched this file/area; one of them likely renamed or removed the\n     function without updating this call site.\n   - HTTPServer.rs:866,4558 calls `.as_millis()` on `&jet_std::Duration`,\n     which has no such method (E0599). fe8f7989c \"feat(core.time): close\n     civil and Duration gaps (D-TIMERES1)\" likely changed Duration's API\n     without updating this caller.\n\nBoth (2) issues are in Prelude source itself (I9's sole semantics home), not\ntest code — a real regression, not a test-only fix.\n\nRepro: `scripts/agent/jet-env cargo test --workspace -- --list` (or plain\n`cargo test -- --list`) from repo root on master HEAD.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-07T02:51:45.007Z",
+      "updated": "2026-08-07T02:51:45.007Z",
+      "updatedBy": "bd2-ci"
+    },
+    {
+      "id": "c0ksjkvh",
+      "num": 1597,
+      "title": "release_gates.rs pre-existing failures: canon.jet E0999 marker brackets, E0328 explain gap",
+      "body": "Found while proving CI test-shard coverage for #211 (2026-08-06, commit\nb0ad4e932): tests/release_gates.rs has 2 pre-existing failures unrelated to\nCI sharding, on unmodified master HEAD (cargo test -p jet --test\nrelease_gates):\n\n1) canon_compiles_and_runs: examples/canon.jet:121 uses `#[Doc(\"port to\n   listen on\")] port: Int = 3000` — bracketed single-marker form, rejected by\n   the ratified E0999 single-marker-bracket rule (\"one marker stays bare,\n   brackets group two or more\"). Card #1331 (done) fixed this same pattern\n   for semindex dossier fixtures; examples/canon.jet was apparently missed,\n   or regressed after #1331 closed. Fix: `#Doc(\"port to listen on\") port:\n   Int = 3000`.\n\n2) ga_every_diagnostic_has_explain: the M17 GA gate scans docs/spec/\n   diagnostics.md for codes lacking a `jet explain` entry and flags E0328.\n   diagnostics.md:301 marks E0328 `~~retired by D-IFDIST1=A~~` (strikethrough)\n   — either the scan should skip retired codes and doesn't, or a retired\n   code legitimately needs to stay explainable for old error logs and its\n   explain entry was dropped. Needs a decision, not a blind fix.\n\nRepro: scripts/agent/jet-env cargo test -p jet --test release_gates",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-07T02:53:48.807Z",
+      "updated": "2026-08-07T02:53:48.864Z",
+      "updatedBy": "bd2-ci"
     }
   ],
   "decisions": [
@@ -131587,6 +131650,125 @@
   ],
   "events": [
     {
+      "at": "2026-08-07T03:21:17.927Z",
+      "by": "bd2-orch",
+      "action": "card.update",
+      "ref": "c0wa2hf8",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-07T03:21:17.434Z",
+      "by": "bd2-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0wa2hf8",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-07T03:21:16.968Z",
+      "by": "bd2-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0wa2hf8",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-07T03:21:16.588Z",
+      "by": "bd2-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0wa2hf8",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-07T03:21:16.196Z",
+      "by": "bd2-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0wa2hf8",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-07T03:21:15.721Z",
+      "by": "bd2-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0wa2hf8",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T03:07:13.981Z",
+      "by": "bd2-ci",
+      "action": "card.update",
+      "ref": "c0wa2hf8",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T03:07:12.683Z",
+      "by": "bd2-ci",
+      "action": "card.update",
+      "ref": "c0wa2hf8",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T03:07:06.068Z",
+      "by": "bd2-ci",
+      "action": "card.criteria-meet",
+      "ref": "c0wa2hf8",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-07T03:07:05.203Z",
+      "by": "bd2-ci",
+      "action": "card.criteria-meet",
+      "ref": "c0wa2hf8",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-07T03:06:55.743Z",
+      "by": "bd2-ci",
+      "action": "card.update",
+      "ref": "c0wa2hf8",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T03:06:44.948Z",
+      "by": "bd2-ci",
+      "action": "card.criteria-meet",
+      "ref": "c0wa2hf8",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-07T03:06:40.970Z",
+      "by": "bd2-ci",
+      "action": "card.criteria-meet",
+      "ref": "c0wa2hf8",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-07T03:06:38.980Z",
+      "by": "bd2-ci",
+      "action": "card.criteria-meet",
+      "ref": "c0wa2hf8",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T02:58:54.825Z",
+      "by": "bd2-ci",
+      "action": "papercut.add",
+      "ref": "pc05oaqzm",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T02:53:48.864Z",
+      "by": "bd2-ci",
+      "action": "card.add",
+      "ref": "c0ksjkvh",
+      "note": "release_gates.rs pre-existing failures: canon.jet E0999 marker brackets, E0328 explain gap"
+    },
+    {
+      "at": "2026-08-07T02:51:45.007Z",
+      "by": "bd2-ci",
+      "action": "card.add",
+      "ref": "c0pd9rd4",
+      "note": "Fix master HEAD compile breaks: tests/pure.rs, tests/jetpack_engine.rs, tests/ws_law.rs"
+    },
+    {
       "at": "2026-08-07T02:44:59.722Z",
       "by": "bd2-rev3",
       "action": "card.criteria-verify",
@@ -134966,125 +135148,6 @@
       "action": "card.update",
       "ref": "c0nnh6tu",
       "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:42:55.157Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0wo4jnm",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:42:54.751Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0apkoqo",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:42:54.337Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0m0umdf",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:42:53.913Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0xenv6u",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:42:53.497Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0x46oba",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:42:53.093Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0v3yofo",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:42:52.681Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0pzumap",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:42:52.259Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0fsjhdc",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:42:51.846Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0ai0h4w",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:42:51.437Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c04czzvb",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:42:51.015Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0z2v4l9",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:42:50.600Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c05y3gfw",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:42:50.185Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0zpske1",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:42:49.763Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0rcv8n1",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:42:49.348Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0todzv8",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:42:34.929Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-ALIAS-OP1",
-      "note": "B"
-    },
-    {
-      "at": "2026-08-06T21:42:27.329Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-ALIAS-OP1",
-      "note": "B"
     }
   ],
   "nextNum": 368,
@@ -135230,6 +135293,14 @@
       "text": "master has pre-existing jet-pkg-model unit test failures unrelated to manifest work (confirmed on master HEAD in main checkout, cargo test -p jet-pkg-model): LintPolicy::tests::undenied_lint_stays_a_warning (looks like a genuine test bug -- asserts empty output but its deny list includes the exact lint code it fires), Manifest::tests::latest_edition_is_last_supported_and_drives_banner, Overlay::tests::keyed_overrides_merge_typed_environment_by_priority, PhpBind::tests (3), PowerShellBind::tests::rejects_generated_powershell_helper_and_alias_collisions, plus an apparently-flaky FFI::http_server_tls_persist_tests::session_preserves_pipelined_leftover_bytes.",
       "cardId": null,
       "created": "2026-08-07T02:12:16.650Z",
+      "status": "open"
+    },
+    {
+      "id": "pc05oaqzm",
+      "by": "bd2-ci",
+      "text": "rustfmt not on PATH in either 'nix develop' or 'nix develop .#full' devshell (cargo fmt / rustfmt --check both fail with 'not found'); D-CI2's rustfmt gate can't be wired until flake.nix adds the rustfmt component.",
+      "cardId": null,
+      "created": "2026-08-07T02:58:54.819Z",
       "status": "open"
     }
   ]
