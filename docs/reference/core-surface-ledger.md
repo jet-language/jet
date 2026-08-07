@@ -7,7 +7,7 @@ This page is the durable review index. The JSON file beside it is the
 machine-readable source that card #1398 reads. Do not keep a second
 hand-written workflow inventory.
 
-Generated on: 2026-08-06
+Generated on: 2026-08-07
 
 ## What decides a row
 
@@ -52,15 +52,15 @@ Generated on: 2026-08-06
 | Shared containers | 54 |
 | Core modules | 85 |
 | Module members | 1137 |
-| Collection method rows | 713 |
-| Jet-side rows | 1851 |
-| Total rows | 10431 |
+| Collection method rows | 715 |
+| Jet-side rows | 1853 |
+| Total rows | 10433 |
 
 ## Verdicts
 
 | Verdict | Rows |
 | --- | ---: |
-| Jet wins | 401 |
+| Jet wins | 403 |
 | Equal | 861 |
 | Jet loses (two or more languages agree) | 307 |
 | Single witness (recorded, not scored) | 8273 |

@@ -4014,7 +4014,7 @@ pub enum TBuiltinOp {
     // #1479: remaining Iter ledger surface (non-closure).
     /// `repeat(n)` → `jet_iter_repeat({as_iter}, n)`.
     IterRepeat,
-    /// `cycle()` → `jet_iter_cycle({as_iter})`.
+    /// `cycle(n)` → `jet_iter_cycle({as_iter}, n)` — exactly `n` items.
     IterCycle,
     /// `drop_last(n)` → `jet_iter_drop_last({as_iter}, n)`.
     IterDropLast,

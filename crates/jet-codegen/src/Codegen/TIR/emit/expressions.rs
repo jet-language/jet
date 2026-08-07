@@ -1596,7 +1596,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TBuiltinOp::Chunks => format!("jet_iter_chunks({as_iter}, {})", a(0)),
                 TBuiltinOp::Windows => format!("jet_iter_windows({as_iter}, {})", a(0)),
                 TBuiltinOp::IterRepeat => format!("jet_iter_repeat({as_iter}, {})", a(0)),
-                TBuiltinOp::IterCycle => format!("jet_iter_cycle({as_iter})"),
+                TBuiltinOp::IterCycle => format!("jet_iter_cycle({as_iter}, {})", a(0)),
                 TBuiltinOp::IterDropLast => format!("jet_iter_drop_last({as_iter}, {})", a(0)),
                 TBuiltinOp::IterShuffle => format!("jet_iter_shuffle({as_iter})"),
                 TBuiltinOp::IterIsSorted => format!("jet_iter_is_sorted({as_iter})"),

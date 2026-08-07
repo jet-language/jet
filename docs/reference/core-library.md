@@ -214,12 +214,19 @@ methods for all of the above.
 Example: `examples/features/collections/iter_adapters.jet` covers adapters
 including the #1479 surface (`repeat`, `cycle`, `drop_last`, `shuffle`,
 `is_sorted`/`is_sorted_by`, `dedup_by`, `last_index_of`, `average`, `compare`,
-`split`, `chunk_while`, `to_set`). `cycle` is infinite — call `.take(n)` (or
-another finite adapter) before `to_list`. `shuffle` uses a fixed demo seed so
-examples stay deterministic; use `Rng` when you need a real random shuffle.
-Synonyms in the Core surface ledger map competitor spellings such as `fill`→
-`repeat`, `cmp`→`compare`, `next`→`first`, `size_hint`→`len`, `compact`→
-`filter`, `tostring`→`join`, and `clip`/`iterator`→`to_list`.
+`split`, `chunk_while`, `to_set`). `cycle(n)` produces exactly `n` items by
+looping the source — bounded by the count, unlike `repeat(n)`'s "loop n
+times." (A 0-arg infinite `cycle()` has no safe representation across
+AOT/JIT/interpreter, so the bounded form is the only one shipped.) `shuffle`
+uses a fixed demo seed so examples stay deterministic; use `Rng` when you need
+a real random shuffle.
+
+D-ITER-DECLINE1 declines Iter's remaining six ledger names: `fill`,
+`cycle_n`, and `duplicate` route to `repeat`; `tostring` routes to `join`;
+`clip` and `iterator` route to `to_list`/`collect`; `compact` routes to
+`filter`; `next` is declined outright — Iter has no held cursor to pull one
+item and remember where you stopped outside a loop; use a for-loop, `each`,
+or the lazy adapters (`take`, `skip`, `take_while`) instead.
 Also: `examples/features/collections/iter_tools_audit.jet` covers the
 adapter and specialized-container surface. Lazy protocol:
 `examples/features/collections/lazy_iter.jet`.
