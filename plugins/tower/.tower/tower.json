@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1619,
-    "rev": 28904,
+    "nextNum": 1620,
+    "rev": 28917,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -24,7 +24,7 @@
         "board-ideas"
       ]
     },
-    "completionCursor": "2026-08-07T13:15:13.404Z"
+    "completionCursor": "2026-08-07T13:47:14.506Z"
   },
   "epochs": [
     {
@@ -90995,93 +90995,99 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P1",
       "plan": "Implements D-CONF-WORD1 — ratified 2026-08-06. Read each decision verbatim (tower brief on this card's parent proposal, or tower decision show) before building; the ratified outcome text is the law, this plan is the route. Every requirement is a discrete exit criterion below: meet each with targeted proof (tests, snapshots, examples with golden output), and keep I9 tier parity inside this card — AOT, default jet run (JIT), and the interpreter must agree on every surface this card ships before it closes. Delete every superseded form the decisions retire in the same change; do not leave compatibility shims or parallel spellings. Reference: docs/proposals/build-config-one-plane.md.",
       "blockedBy": [],
       "assignee": "bd3-profile",
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-07",
+          "by": "bd3-profile",
+          "text": "[handoff] Commit 000293f0a on branch bd3/profile, worktree .claude/worktrees/profile, off master 47bbc25be, unmerged. 34 files, 617 insertions and 498 deletions. All nine criteria are met with evidence; one slice inside criterion 2 is an owner gate and is named in that evidence and below. Every proof was measured against a stashed baseline in the same worktree, because this base carries pre-existing failures that would otherwise read as regressions. Combined proof run and its baseline, same worktree, same command each time: cargo test -p jet --test target_machines is 14 passed 1 failed against a baseline of tests/target_profiles.rs at 14 passed 1 failed, the same MMIO case, which fails on core.mem intrinsic availability outside the full environment. cargo test -p jet --test jetpack_engine is 70 passed 24 failed against a baseline of 69 passed 24 failed: the same 24 pre-existing failures, one more pass, which is this card's new E1300 test. cargo test -p jet-env-model --lib is 107 passed 6 failed against an identical 107 passed 6 failed baseline, the six being OCI image cases unrelated to this rename. cargo test -p jet --test diagnostics_coverage is 7 passed 4 failed with the same code lists as baseline, all owned by card #1603, and E1300 appears in none of them. cargo test -p jet --lib is 25 failed, and the same LSP bundle failure reproduces with this card's changes stashed, so it predates the branch. cargo build --workspace is clean with no new warnings. THE GATE, needing an owner word: the ruling folds both --env-profile and the env-namespace --profile into --preset, but they select different things. The env --profile selected a declared composition, so it is now --preset, which is unambiguous. --env-profile selects one env.<name> module, and calling that --preset too would give one name two answers. I left --env-profile untouched and moved its prose off the retired word, so nothing in the repository now calls an environment composition a profile. The replacement word for the module selector is the open question; --env reads as the obvious candidate but the ruling does not say it, so it is not mine to pick."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "TargetProfile renames into the machine axis and is selected with --target=<triple|board>; the targets: manifest field and build-graph targets keep their own words and E1216 is unchanged",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd3-profile",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:33.365Z"
+          "evidence": "TargetProfile renamed to TargetMachine in commit 000293f0a: the type, TargetMachineError, TargetMachineUse, TargetMachineCompileError and its Machine variant, the file crates/jet-foundation/src/TargetMachine.rs, the test file tests/target_machines.rs, and every lowercase machine word inside those three files. Selection is the machine axis: Driver::target_machine_by_name resolves board.sensor_v1, board.virt_aarch64 and hosted, Source/main.rs routes --target= through it, a machine supplies its own triple, and a no-OS machine sets freestanding by itself. An unrecognised board.* name exits with the list of machines that exist. The targets: manifest field and build-graph targets are untouched, and git diff shows no change to E1216 (rg confirms its only homes are crates/jet-pkg-model/src/Manifest.rs and the two spec docs, none of them in the diff). Proof: cargo build --workspace clean; cargo test -p jet --test target_machines is 14 passed 1 failed, byte-identical to the pre-change baseline of tests/target_profiles.rs measured on the stashed tree in the same worktree (14 passed 1 failed, same selected_target_machine_validates_direct_mmio_accesses case, which fails on core.mem intrinsic availability and needs the full environment).",
+          "at": "2026-08-07T13:46:17.545Z"
         },
         {
           "n": 2,
           "text": "profiles: becomes presets: and --env-profile and the env-namespace --profile become --preset, with a teaching diagnostic on each retired spelling",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd3-profile",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:33.903Z"
+          "evidence": "Two of the three renames landed; the third is an owner gate, logged below and reported. Done: ENV_FIELD_PROFILES becomes ENV_FIELD_PRESETS so the field is written presets:, and the env-namespace ENV_FLAG_PROFILE becomes ENV_FLAG_PRESET so the selector is --preset. The retired --profile spelling selects nothing and teaches E1300 with a what/why/fix that names --preset and presets:, registered in docs/spec/diagnostics.md and proved by tests/jetpack_engine.rs::retired_profile_flag_teaches_preset, which passes. The model followed the word: ProfileSpec, ProfileSet, ResolvedProfile and ProfileError are PresetSpec, PresetSet, ResolvedPreset and PresetError, ResolvedPreset.selected_profiles is selected_presets, and the enter info JSON keys and human lines read preset. Every in-repo consumer moved in the same change, including examples/jetpack/epoch5/env.jet, the in-crate fixtures, and tests/jetpack_engine.rs. NOT done, and the gate: the ruling also folds --env-profile into --preset, but --env-profile selects one env.<name> module while --preset now selects a declared preset, so one name cannot answer both. Renaming it needs a word the ruling does not supply, which is an owner call. The flag is left exactly as it was, and its diagnostic prose now says module rather than profile so it no longer uses the retired word for an environment composition.",
+          "at": "2026-08-07T13:47:11.266Z"
         },
         {
           "n": 3,
           "text": "Package and user profile prose adopts generation in docs and diagnostics; no flag changes there",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd3-profile",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:34.373Z"
+          "evidence": "Wording only, exactly as the ruling scopes D-JPK-PROFILE1. docs/reference/jetpack-epoch5.md now reads 'Source-backed package generations', 'a package generation is separate from a shell environment preset', and 'parent generations'. docs/spec/diagnostics.md reads generation in both rows that describe the engine: E1332's summary and what/why/fix, and E1335's summary and what/why/fix. The jetpack human output line reads 'package generations:'. No flag, field, or on-disk schema moved: PackageProfileSpec, PackageProfileSet, ResolvedPackageProfile, PackageProfilePlan, their selected_profiles fields, the profile.<name> and user.<name> declarations, the jetpack profile subcommand, and the jet-profile-current-v1 and jet-profile-generation-v2 schema strings are all unchanged, which git diff confirms.",
+          "at": "2026-08-07T13:46:30.714Z"
         },
         {
           "n": 4,
           "text": "jet build --profile=release --target=board.sensor_v1 works and the help text explains the two axes in one line each",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd3-profile",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:34.982Z"
+          "evidence": "jet help now prints the two axes one line each: '--profile=<name>  how hard to optimize: release, debug, ci (D-BUILDPROFILE1)' and '--target=<triple|machine>  what machine this is for: a rustc triple or board.<name> (D-CONF-WORD1)'. jet build --profile=release --target=board.sensor_v1 resolves the machine, takes its thumbv7em-none-eabihf triple and its no-OS fact, and enters the freestanding build path; --target=board.nope exits with the usage code and lists board.sensor_v1, board.virt_aarch64, hosted. Both flags are read independently in Source/main.rs, so neither axis shadows the other.",
+          "at": "2026-08-07T13:46:45.695Z"
         },
         {
           "n": 5,
           "text": "A repository-wide search shows no remaining use of profile for a machine, an environment composition or a generation",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd3-profile",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:35.585Z"
+          "evidence": "A repository search finds no remaining use of the word for a machine, an environment composition, or a generation, outside decision history and the one gated flag. rg for TargetProfile, ENV_FIELD_PROFILES and the env --profile constant across the tree, excluding docs/proposals, returns three hits, all of them deliberate: the retirement notes in crates/jet-foundation/src/Syntax.rs and docs/spec/syntax-decisions.md, and the gated --env-profile. docs/reference/embedded.md reads machine throughout, including its heading, its table column and its TargetMachineError reference. The uses that keep the word are untouched and correct: --profile and --release for the optimize bundle, BudgetSpecs' profiles: field whose values are .Release and friends, and the package generation engine's own identifiers, which criterion 3 scopes to prose. docs/proposals keeps its original wording as decision history, which the greenfield rule preserves.",
+          "at": "2026-08-07T13:47:22.320Z"
         },
         {
           "n": 6,
           "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd3-profile",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:35.978Z"
+          "evidence": "crates/jet-foundation/src/Syntax.rs carries a D-CONF-WORD1=A block in the root decision log: it states the one meaning profile keeps, names --target as the machine axis with the board.<name> shape, names ENV_FIELD_PRESETS and ENV_FLAG_PRESET as the replacements, records that package and user profiles read as generations in prose, and names the retired ENV_FIELD_PROFILES and env --profile with ENV_FLAG_PROFILE_RETIRED as the teaching-only constant. The constants themselves in crates/jet-foundation/src/Syntax/jetpack_config.rs carry the same decision ID on their doc comments.",
+          "at": "2026-08-07T13:46:31.646Z"
         },
         {
           "n": 7,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd3-profile",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:36.322Z"
+          "evidence": "docs/spec/syntax-decisions.md gains a D-CONF-WORD1=A section dated 2026-08-06 and attributed to this card. It records what keeps the word, the TargetProfile to TargetMachine rename with the machine names --target accepts, the presets: field and --preset flag with E1300 for the retired spelling, the four renamed model types, the wording-only scope of the generation change, and the one slice left open for the owner.",
+          "at": "2026-08-07T13:46:44.887Z"
         },
         {
           "n": 8,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd3-profile",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:36.655Z"
+          "evidence": "No grammar regeneration was owed. The renamed words are not Jet grammar tokens: presets: is a typed field name inside an env.jet module and --preset is a CLI flag, so neither reaches the tree-sitter or editor grammars. A repository search over editors/ for the renamed words returns only two unrelated lines, both quoting Nix's own 'nix profile install' command in a README. tests/grammar.rs inputs are unchanged by this card's diff.",
+          "at": "2026-08-07T13:46:57.105Z"
         },
         {
           "n": 9,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd3-profile",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:36.994Z"
+          "evidence": "No snapshot re-blessing was owed and none drifted. A search over tests/ui for TargetProfile, env-profile and profiles: returns nothing, so no UI fixture quotes a renamed word. The one new diagnostic, E1300, is a jetpack CLI error, which this repository proves the way it proves E1225: a registry row in docs/spec/diagnostics.md plus a stderr assertion in tests/jetpack_engine.rs. That new test, retired_profile_flag_teaches_preset, passes. tests/diagnostics_coverage.rs reports the same 4 pre-existing failures as the stashed baseline, with the same code lists (E0416, E0428, E2407, E3626 unexpected; the E1322-E1334 and E3620-series snapshot gaps that card #1603 owns) and E1300 appears in none of them.",
+          "at": "2026-08-07T13:47:00.551Z"
         }
       ],
       "refs": [
@@ -91091,10 +91097,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:33:33.027Z",
-      "updated": "2026-08-07T13:04:33.741Z",
+      "updated": "2026-08-07T13:47:37.371Z",
       "updatedBy": "bd3-profile",
       "workOrder": 500,
-      "claimedAt": "2026-08-07T13:04:33.741Z"
+      "claimedAt": "2026-08-07T13:47:37.371Z"
     },
     {
       "id": "c0y4zx0d",
@@ -92249,6 +92255,11 @@
       "log": [
         {
           "at": "2026-08-07",
+          "by": "bd3-dollar3",
+          "text": "[bd3-dollar3] Criteria 1 and 6 stay open. I tried the prescribed fix, measured it twice, and it is not sufficient — the branch is back at d22b848d1 with no net change from me, because a half-fix here is worse than none. Recording what I proved so the next worker does not spend the same two build cycles.\n\nWHAT I CONFIRMED\nThe reproducer prints 7|7|7|9 on d22b848d1, as logged.\n\nThe TIR side is not missing a marked-name concept. crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs has three ComptimeName arms; the first, guarded on value: Some(..), lowers every mention to TExprKind::CtLit. A CtLit is a value, not a place, so no write-back can reach it — that is why the marked reader never advances while the plain one does. The plain one advances because Expr::Ident lowers a seeded comptime binding to TExprKind::ConstRef, and ConstRef both reads (eval/exprs.rs:2157) and writes back (eval/exprs.rs:5476, added for card #1602). So the shape of the fix looked obvious: give ComptimeName the same treatment Ident gets.\n\nWHY THAT ALONE FAILS\nI tried it two ways: reordering so the eval-fragment arm wins, and mirroring the Ident const branch exactly (lower_comptime_scalar, else ConstRef(name)). Both build clean and both produce the identical result — three E0107 'a name must be declared before it's used' on the marked names, instead of 7|9|7|9.\n\nThe reason is in jet-comptime, not jet-codegen. A repository search for ComptimeName across crates/jet-comptime returns exactly two hits: Purity.rs:244, which ignores it, and Methods/dispatch.rs:1601, the write_back arm added in d22b848d1. There is no read arm anywhere in jet-comptime that resolves Expr::ComptimeName to a value. Today the fold only works because sema stamps value: Some(..) on each mention and the CtLit arm hands that stamp back. The moment a marked name resolves as a place instead of the stamp, nothing can read it, the fold of  :: .read_u8() fails,  never gets a value, and its later mentions report E0107.\n\nTHE FIX NEEDS BOTH HALVES IN ONE CHANGE\nFirst, jet-comptime needs a read arm for Expr::ComptimeName that resolves from the comptime scope by the marked name, mirroring its Expr::Ident arm — the mark is part of the identifier, so the scope key carries it. Second, once a marked name can be read as a binding, TIR lowering can resolve it as a place the way Ident does, and the write_back arm already in place closes the loop. Landing the second without the first is what I measured, twice.\n\nWorth checking while doing it: whether the comptime scope stores the binding under the marked key or the bare one, because ConstRef lookup goes through self.globals and a key mismatch would look exactly like this failure too."
+        },
+        {
+          "at": "2026-08-07",
           "by": "bd3-dollar2",
           "text": "[handoff] Head d22b848d1 on bd3/dollar. Criteria 1 and 6 still open. I prescribed the fix last session and it was only half right, so here is the sharpened diagnosis with the evidence, because the next worker should not re-derive it.\n\nWHAT I CONFIRMED\nA marked name is resolved and written back on TWO independent evaluator paths, not one, and my earlier note named only the first.\n\n1. jet-comptime's dispatcher. Its write_back matched Expr::Ident and Expr::Field but not Expr::ComptimeName, so a marked receiver never advanced. Fixed in d22b848d1: the arm now reads Expr::Ident(name, _) | Expr::ComptimeName { name, .. }, which is what D-META-STAGE1=B means by the mark being part of the identifier.\n\n2. The TIR evaluator in jet-codegen, reached through Comptime::TirBridge. This is the one that actually folds the failing fixture: read_u8 is implemented in crates/jet-codegen/src/Codegen/TIR/eval/handles.rs and nowhere in jet-comptime (a repository search for \"read_u8\" returns jet-sema's signature table, the TIR subset gate, and jet-foundation's StreamCursor — no comptime arm). A search for ComptimeName under crates/jet-codegen/src/Codegen/TIR/eval/ returns nothing, so that evaluator has no marked-name concept at all and resolves marked names by some other route without write-back.\n\nSo the remaining work is to give the TIR evaluator the same treatment: a marked name resolves and writes back as an ordinary name whose identifier includes the mark. Until both paths agree, criterion 1's second clause and criterion 6 cannot be claimed.\n\nREPRODUCER, small and self-contained\nfn run() {\n    $ct :: Reader.over([U8].{7, 9, 11})\n    $ct_a :: $ct.read_u8() ?? panic(\"ct a\")\n    $ct_b :: $ct.read_u8() ?? panic(\"ct b\")\n    rt :: Reader.over([U8].{7, 9, 11})\n    rt_a :: rt.read_u8() ?? panic(\"rt a\")\n    rt_b :: rt.read_u8() ?? panic(\"rt b\")\n    print(\"{$ct_a}|{$ct_b}|{rt_a}|{rt_b}\")\n}\nPrints 7|7|7|9. It must print 7|9|7|9. The marked reader does not advance; the plain one does.\n\nThe other two failures are the same root cause seen from different sides: comptime_loadable_matches_runtime types a module-level marked name from the folded value rather than its binding, so Loadable.Idle loses its methods; reusable_regex reports E0956 on replace_all_with. Both fixtures are faithful migrations of master's text, verified with git show master:tests/comptime_diff.rs.\n\nCOMBINED PROOF RUN, one cargo invocation, worktree-local target per the new policy\n- comptime_diff 23 of 26, the three above.\n- fmt 163 of 163. grammar 18 of 18. diagnostic_snapshots 4 of 4.\n- golden 63 failures, exactly the branch baseline, and zero comptime examples among them.\nEight of ten criteria stay met and are unaffected by the open two."
         },
@@ -92382,10 +92393,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:34:12.218Z",
-      "updated": "2026-08-07T13:37:46.619Z",
+      "updated": "2026-08-07T13:44:00.020Z",
       "updatedBy": "bd3-dollar3",
       "workOrder": 180,
-      "claimedAt": "2026-08-07T13:37:46.618Z"
+      "claimedAt": "2026-08-07T13:44:00.019Z"
     },
     {
       "id": "c0pden89",
@@ -98572,6 +98583,30 @@
       "created": "2026-08-07T13:26:49.378Z",
       "updated": "2026-08-07T13:27:04.121Z",
       "updatedBy": "bd3-tests"
+    },
+    {
+      "id": "c0vypaig",
+      "num": 1619,
+      "title": "The environment-module selector flag still spells the retired word profile",
+      "body": "Card #1526 renamed every profile meaning per the ratified one-word ruling, but the ruling's fold list assumed --env-profile and the env --profile select the same thing. They do not: --profile selected a declared composition (now --preset), while --env-profile selects one env.<name> module. One name cannot answer both, so --env-profile kept its spelling and only its prose moved off the retired word. The flag a user types still says profile. Ballot D-ENVFLAG1 attached.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-07T13:48:33.873Z",
+      "updated": "2026-08-07T13:48:33.874Z",
+      "updatedBy": "bd3-orch"
     }
   ],
   "decisions": [
@@ -133124,6 +133159,97 @@
   ],
   "events": [
     {
+      "at": "2026-08-07T13:48:33.874Z",
+      "by": "bd3-orch",
+      "action": "card.add",
+      "ref": "c0vypaig",
+      "note": "The environment-module selector flag still spells the retired word profile"
+    },
+    {
+      "at": "2026-08-07T13:47:37.371Z",
+      "by": "bd3-profile",
+      "action": "card.update",
+      "ref": "c0yxdp71",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-07T13:47:22.320Z",
+      "by": "bd3-profile",
+      "action": "card.criteria-meet",
+      "ref": "c0yxdp71",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-07T13:47:14.506Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-07T13:47:14.506Z"
+    },
+    {
+      "at": "2026-08-07T13:47:11.266Z",
+      "by": "bd3-profile",
+      "action": "card.criteria-meet",
+      "ref": "c0yxdp71",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-07T13:47:00.551Z",
+      "by": "bd3-profile",
+      "action": "card.criteria-meet",
+      "ref": "c0yxdp71",
+      "note": "#9"
+    },
+    {
+      "at": "2026-08-07T13:46:57.106Z",
+      "by": "bd3-profile",
+      "action": "card.criteria-meet",
+      "ref": "c0yxdp71",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-07T13:46:45.696Z",
+      "by": "bd3-profile",
+      "action": "card.criteria-meet",
+      "ref": "c0yxdp71",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-07T13:46:44.888Z",
+      "by": "bd3-profile",
+      "action": "card.criteria-meet",
+      "ref": "c0yxdp71",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-07T13:46:31.646Z",
+      "by": "bd3-profile",
+      "action": "card.criteria-meet",
+      "ref": "c0yxdp71",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-07T13:46:30.714Z",
+      "by": "bd3-profile",
+      "action": "card.criteria-meet",
+      "ref": "c0yxdp71",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-07T13:46:17.545Z",
+      "by": "bd3-profile",
+      "action": "card.criteria-meet",
+      "ref": "c0yxdp71",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T13:44:00.020Z",
+      "by": "bd3-dollar3",
+      "action": "card.update",
+      "ref": "c0z2jsot",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-08-07T13:37:46.619Z",
       "by": "bd3-dollar3",
       "action": "card.claim",
@@ -136531,97 +136657,6 @@
       "action": "card.criteria-meet",
       "ref": "c0zsjsdx",
       "note": "#1"
-    },
-    {
-      "at": "2026-08-07T01:29:49.409Z",
-      "by": "bd2-apply",
-      "action": "papercut.add",
-      "ref": "pc0id5hqt",
-      "note": ""
-    },
-    {
-      "at": "2026-08-07T01:26:06.593Z",
-      "by": "bd2-apply",
-      "action": "card.add",
-      "ref": "c05dt49c",
-      "note": "core.tls ciphersuites/tlsversion: native TLS-bridge extension"
-    },
-    {
-      "at": "2026-08-07T01:25:50.519Z",
-      "by": "bd2-apply",
-      "action": "card.update",
-      "ref": "c0z6ssoi",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-07T01:25:50.105Z",
-      "by": "bd2-apply",
-      "action": "card.update",
-      "ref": "c0cvssmh",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-07T01:25:49.710Z",
-      "by": "bd2-apply",
-      "action": "card.update",
-      "ref": "c0vgjxm5",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-07T01:25:49.321Z",
-      "by": "bd2-apply",
-      "action": "card.update",
-      "ref": "c0zsjsdx",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-07T01:25:45.042Z",
-      "by": "bd2-apply",
-      "action": "card.claim",
-      "ref": "c0z6ssoi",
-      "note": ""
-    },
-    {
-      "at": "2026-08-07T01:25:44.688Z",
-      "by": "bd2-apply",
-      "action": "card.claim",
-      "ref": "c0cvssmh",
-      "note": ""
-    },
-    {
-      "at": "2026-08-07T01:25:44.341Z",
-      "by": "bd2-apply",
-      "action": "card.claim",
-      "ref": "c0vgjxm5",
-      "note": ""
-    },
-    {
-      "at": "2026-08-07T01:25:37.578Z",
-      "by": "bd2-apply",
-      "action": "card.claim",
-      "ref": "c0zsjsdx",
-      "note": ""
-    },
-    {
-      "at": "2026-08-07T01:25:12.514Z",
-      "by": "bd2-apply",
-      "action": "card.claim",
-      "ref": "c0z6ssoi",
-      "note": ""
-    },
-    {
-      "at": "2026-08-07T01:25:12.158Z",
-      "by": "bd2-apply",
-      "action": "card.claim",
-      "ref": "c0cvssmh",
-      "note": ""
-    },
-    {
-      "at": "2026-08-07T01:25:11.793Z",
-      "by": "bd2-apply",
-      "action": "card.claim",
-      "ref": "c0vgjxm5",
-      "note": ""
     }
   ],
   "nextNum": 368,
