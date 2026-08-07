@@ -10,7 +10,7 @@ The one idea: **Jet has one run and one claim. Verbs pick the observer of the ru
 
 Why now. The landing zone is already ratified and unbuilt: D-REPORT-TEST1=A gives test failures the one report frame, D-FAIL-BREACH1=A binds `require` into the one stop family, D-CORE-PRELUDE1=A adds `assert`/`assert_eq`, D-PERFBUDGET-BENCHMIGRATE1 orders the bench prototypes deleted, D-ENTRY-SCRIPT1=B makes bare code runnable, and D-BENCH-PARITY1=B makes `jet bench` accept what `jet test` accepts. If those cards build on today's seams, they build seven coats again. If they build on one substrate, the whole area collapses into one small grid.
 
-What the ballots ask: one word for assertions (D-CLAIM-WORD1), benchmarks as measured tests (D-CLAIM-BENCH1), watch as a modifier on every runnable verb (D-RUN-WATCH1), one resident session with in-session keys (D-RUN-SESSION1), and the recording observer as the Epoch 6 time-travel on-ramp (D-RUN-RECORD1). D-RUN-LAW1 adopts the model itself. Each ballot stands alone.
+What the ballots ask: one word for assertions (D-CLAIM-WORD1), benchmarks as measured tests — one marker, one verb (D-CLAIM-BENCH1), table-driven claims (D-CLAIM-CASES1), watch as a modifier on every runnable verb (D-RUN-WATCH1), one resident session with in-session keys (D-RUN-SESSION1), and the recording observer as the Epoch 6 time-travel on-ramp (D-RUN-RECORD1). D-RUN-LAW1 adopts the model itself. Each ballot stands alone, and every element lands on a rail a sibling audit already ratified — the report frame, the stop family, the settings plane, the member grammar, the script-mode entry law, the machine report shape — so nothing here founds a second mechanism.
 
 What does not change: I9 tier parity, `#Test` as the only test syntax (D-TESTKIT1=A), `jet dev` as the one dev loop (D-CLI-DEVSERVE1=A), silent deopt with `--trace-tiers` (D-LENS-RUN2=A), the nine Output kinds, the `jet prove` evidence words, and the Epoch 6 deferral of per-variable time travel (D-TIMETRAVEL1=C).
 
@@ -68,6 +68,23 @@ The claim grid — every check is one cell of "who supplies inputs × what evide
 | the prover | range/refinement facts; erased contracts | proved |
 
 Everything on both grids already exists. The proposal deletes the seams between the cells, not any cell.
+
+### The rails this rides — sibling audits, one substrate
+
+Five sibling first-principles audits ratified this month, and each one owns a rail this proposal lands on instead of inventing. This table is the cross-reference: no element below builds a mechanism a sibling slate already founded.
+
+| Element of this proposal | Rides | What the sibling ratified |
+|--------------------------|-------|---------------------------|
+| test failures get the full frame | D-REPORT-TEST1=A, D-FAIL-BREACH1=A | one report frame, one renderer, one stop family (`Stop [E3001]`) on every tier |
+| `jet test --json` and live dev output | D-REPORT-MACHINE1=A | one self-contained JSON report object per line, streamed as they happen — "live test runs and the dev loop included" is its own wording |
+| `.expect_fail(E…)` asserting a stop | D-FAIL-BREACH1=A | tests assert a specific registered stop code |
+| ambient `case` binding in `.cases` | D-FAIL-BIND1=A precedent | ambient `err` inside a fallback, no lambda — the same no-ceremony binding shape |
+| project switches (refuse doctests, pin modes) | D-CONF-KEY1=A, D-CONF-READ1=A | declared typed settings in `package.jet` (`settings: .{ … }`), read anywhere via the one `$build.settings.*` splice |
+| new members `.measure`, `.cases` | D-DOTSCOPE1=B | members are the only spelling for scope vocabulary; "each addition is an API decision, not a syntax one" |
+| REPL lines, notebook cells, script files | D-ENTRY-SCRIPT1=B | bare code under one entry law — the session's attachment substrate |
+| `assert`/`assert_eq` rich diff | D-CORE-PRELUDE1=A | prelude assertions with structural diff (the D-CLAIM-WORD1 ballot resolves the word) |
+| claims graded in one ledger | D-PROVE facets (ratified) | `tests` facet owns unit, property, doctest, generated-case, shrink, and caught-assertion evidence; words proved/passed/observed/met |
+| recording and replay | D-JREPLAY1=A, D-REPLAY1 | the closed `.jetproof-replay` format, virtual clock, capture preflight — amended only where the record ballot names it |
 
 ### One claim word — ballot D-CLAIM-WORD1
 
@@ -131,9 +148,9 @@ The same substrate gives `jet test --json` (D-REPORT-MACHINE1=A owns the shape),
 
 ### Benchmarks are measured tests — ballot D-CLAIM-BENCH1
 
-The code already says it: a `#Bench` body "type-checks exactly like a `#Test` body". The model says why: a benchmark is a claim whose inputs are a measurement and whose limit is a `Budget`. Unifying them deletes the marker seam, gives benches the full member vocabulary for free, and completes the ratified order to delete the bench-budget prototypes (D-PERFBUDGET-BENCHMIGRATE1).
+The code already says it: a `#Bench` body "type-checks exactly like a `#Test` body". The model says why: a benchmark is a claim whose evidence is a measurement and whose limit is a `Budget`. Taken seriously, that means the second marker and the second verb both go. A measured test is still a test — it is spelled as one, collected as one, and reported as one. Measuring is a member (`.measure`), because D-DOTSCOPE1 already ratified members as the only spelling for scope vocabulary and says new members are API decisions, not syntax ones.
 
-Before (today — no members allowed, E0614):
+Before (today — a second marker, no members allowed, a second verb on the wrong profile):
 
 ```jet
 #Bench("parse") {
@@ -141,24 +158,82 @@ Before (today — no members allowed, E0614):
 }
 ```
 
-After (proposed — one marker family; members come free):
+```
+$ jet bench app.jet              # BuildProfile::Default — spec promises optimized
+```
+
+After (proposed — one marker, one verb; `.measure` marks the claim as measured):
 
 ```jet
 use core.testing as testing
 
-#Bench("parse") {
+#Test("parse stays fast") {
     .setup { input :: testing.fixture("big.json") }
+    .measure
     parse(input)
 }
 ```
 
-Enforcement is only ever a `Budget` row (ratified direction: D-PERFBUDGET-BENCHMIGRATE1=B and its paired game-budget decision, D-PERFBUDGET-GAMEMIGRATE1). `jet bench` reaches test parity (D-BENCH-PARITY1=B: directories, projects, `--filter`) and runs the optimized profile the spec already promises, labeling the tier in every line and artifact:
+```
+$ jet test app.jet               # runs it once as a correctness claim, like any test
+$ jet test app.jet --measure     # measurement mode: warmups, iterations, optimized profile
+parse stays fast   142.1 ns/iter (±3.4)   7,036,000 ops/sec   [aot, optimized]
+```
+
+Plain `jet test` runs a measured claim once — a measured test that crashes is a failing test, caught before any timing happens. `--measure` is the measurer observer: warmups, auto-scaled iterations, the optimized profile the spec already promises, and the tier labeled in every line and artifact. Enforcement is only ever a `Budget` row (ratified direction: D-PERFBUDGET-BENCHMIGRATE1=B and its paired game-budget decision, D-PERFBUDGET-GAMEMIGRATE1); the `Budget` scope spelling `.Bench("parse")` migrates with the marker. D-BENCH-PARITY1=B (bench accepts what test accepts) is subsumed — one verb cannot disagree with itself.
+
+Options: **A** — `.measure` member; `#Bench` and `jet bench` both retire; `jet test --measure` is measurement mode (recommended — the model's own spelling). **B** — `.measure` member; `#Bench` retires but `jet bench` survives as sugar for `jet test --measure`. **C** — keep `#Bench` as a marker that is sugar for a measured test. **D** — status quo plus the profile fix and tier label only.
+
+### The claim grammar — one construct, one extension axis
+
+This is the surface pass: what the one construct looks like on the page, and the rule that keeps it modular forever. The rule: **`#Test` is the only marker, and every capability is a D-DOTSCOPE1 member.** Members compose, complete after a typed `.`, and teach their vocabulary on a typo — that grammar is already ratified and shipped. Nothing in this area ever needs a new marker, keyword, or sigil again; growth is API rows in one table.
+
+The full member vocabulary under this proposal — four shipped, two proposed:
+
+```jet
+#Test("name") {
+    .setup    { … }        // shipped — runs first, its bindings visible below
+    .timeout(500ms) { … }  // shipped
+    .skip("reason") { … }  // shipped
+    .expect_fail(E3001) { … } // shipped shape, code argument per D-FAIL-BREACH1
+    .measure               // proposed (D-CLAIM-BENCH1) — this claim is measured
+    .cases([…])            // proposed (D-CLAIM-CASES1) — table-driven inputs
+}
+```
+
+The missing cell the sweep found: table-driven tests. The surface-frequency audit watchlisted them ("a Go convention with no cross-language equivalent measured") and Jet has nothing between one literal test and a full property generator. The gap closes with one member and one ambient binding — `case`, shaped exactly like the ratified ambient `err` (D-FAIL-BIND1): no lambda, no loop, no registration.
+
+Before (today — copy the block or hand-roll a loop that dies at the first failure):
+
+```jet
+#Test("round half up") { require_eq(round(1.5), 2) }
+#Test("round half down stays") { require_eq(round(1.4), 1) }
+#Test("round negative half") { require_eq(round(-1.5), -2) }
+```
+
+After (proposed — one claim, three rows, each row reported on its own line):
+
+```jet
+#Test("rounding") {
+    .cases([
+        .{ give: 1.5,  want: 2 },
+        .{ give: 1.4,  want: 1 },
+        .{ give: -1.5, want: -2 },
+    ])
+    require_eq(round(case.give), case.want)
+}
+```
 
 ```
-parse   142.1 ns/iter (±3.4)   7,036,000 ops/sec   [aot, optimized]
+$ jet test app.jet
+rounding[give: 1.5]: pass
+rounding[give: 1.4]: pass
+rounding[give: -1.5]: FAIL …
 ```
 
-Options: **A** — keep the `#Bench` spelling as the measured-test marker (recommended; the word earns its place). **B** — delete `#Bench`; spell it `#Test` with a `.measure` member. **C** — status quo (separate node, no members). All options adopt the profile fix and tier label.
+The same grid slot explains the whole input axis on one line each: literals are the block body, tables are `.cases`, generators are the typed parameter (`#Test fn prop(xs: [Int])`), documents are the doctest fence, stored artifacts are `expect(...).snapshot()`. Five input sources, one construct, no new grammar.
+
+Two tooling rows complete the ergonomics, both proposed as cards, not ballots, because they add no syntax: failing generated cases persist beside the test and replay first on the next run (the fuzz corpus already does exactly this — the mechanism extends to property tests unchanged), and `jet test --review` walks snapshot diffs with accept/reject instead of the blind `--update-snapshots` blanket.
 
 ### One collection, one selection — defect fixes, no ballot
 
@@ -220,7 +295,7 @@ Options: **A** — `--record=` on run/dev/test + `jet debug --replay=` now (reco
 
 ### The verb space itself
 
-A tooling audit owes the same sweep a syntax audit owes: what is claimed, reserved, or squatting. `jet serve` sits in the command registry, completions, and the man page as a verb whose only action is to refuse ("Use `jet dev --swap` instead") — it should leave the registry and live only as a typo teaching error, keeping the word reserved. The observer flags become one named family — `--watch`, `--record`, `--trace-tiers`, `--json` — documented together as "observers" so the next verb inherits them instead of reinventing them. The in-session keystroke space (`r R t f q`) is claimed here; future lenses (`b` bench, `p` profile) extend it by ballot, not by drift.
+A tooling audit owes the same sweep a syntax audit owes: what is claimed, reserved, or squatting. `jet serve` sits in the command registry, completions, and the man page as a verb whose only action is to refuse ("Use `jet dev --swap` instead") — it should leave the registry and live only as a typo teaching error, keeping the word reserved. The observer flags become one named family — `--watch`, `--record`, `--trace-tiers`, `--json` — documented together as "observers" so the next verb inherits them instead of reinventing them. The in-session keystroke space (`r R t f q`) is claimed here; future lenses (`m` measure, `p` profile) extend it by ballot, not by drift.
 
 ### The ladder — beginner magic to expert control
 
@@ -258,7 +333,7 @@ Every magic default keeps its three exits:
 | Magic | See it | Spell it | Refuse it |
 |-------|--------|----------|-----------|
 | dev auto-detect (resident vs re-run) | the `[hot-swap]`/`[restart]` lines name the choice and reason | `--swap` or `--restart` pins the mode; `--interpret` pins the tier | pinning a mode is the refusal of auto-detect; `--watch=off` refuses the loop itself |
-| claim discovery | `jet test --list` (proposed) | `--filter=`, `-p member` | no refusal exists today; proposed: a package `settings` switch that excludes doctest or path-scoped collection |
+| claim discovery | `jet test --list` (proposed) | `--filter=`, `-p member` | no refusal exists today; proposed on the D-CONF rails: `settings: .{ testing: .{ doctests: Bool = true } }` in `package.jet`, read via `$build.settings.*` |
 | build/run caching | `jet explain-build` (D-BUILDQUERY1=A) | pinned profiles | `--no-cache` (D-BUILDCACHE1=A) |
 | tier selection | `--trace-tiers` | `jet build` for pure AOT | no exit by ratified choice — deopt is silent (D-LENS-RUN2=A); `jet build` sidesteps the tier choice entirely |
 | affected-only watch re-run | the "N claims re-run (affected)" line | plain `jet test` for the full suite | proposed: `--watch --all` re-runs the full suite on every change |
@@ -274,23 +349,26 @@ fn price(qty: Int) => Int { qty * 3 }
 print(price(14))
 
 #Test("price scales") {
-    require_eq(price(2), 6)
+    .cases([ .{ give: 2, want: 6 }, .{ give: 0, want: 0 } ])
+    require_eq(price(case.give), case.want)
 }
 
-#Bench("price hot path") {
+#Test("price hot path") {
     .setup { q :: 1000 }
+    .measure
     price(q)
 }
 ```
 
 ```
 $ jet feed.jet            # runs it            $ jet test feed.jet      # claims, full frames
-42                                             price scales: pass (0.1 ms)
-                                               1 passed
-$ jet dev feed.jet        # the session
-watching feed.jet …                            $ jet bench feed.jet
-✓ ran in 31 ms                                 price hot path  2.9 ns/iter  [aot, optimized]
-  r re-run  t tests  f failed  q quit
+42                                             price scales[give: 2]: pass (0.1 ms)
+                                               price scales[give: 0]: pass (0.1 ms)
+$ jet dev feed.jet        # the session        price hot path: pass (0.1 ms)
+watching feed.jet …                            3 passed
+✓ ran in 31 ms
+  r re-run  t tests  f failed  q quit          $ jet test feed.jet --measure
+                                               price hot path  2.9 ns/iter  [aot, optimized]
 ```
 
 The expert extreme, same machine, no new mechanism:
@@ -300,7 +378,7 @@ $ jet test . -p core --affected --shuffle=7 --json > claims.json   # -p/--affect
 $ jet test app.jet --record=flaky         # proposed producer flag
 $ jet debug app.jet --replay=flaky        # proposed; deterministic, ratified replay adapters
 $ jet prove app.jet --lens tests          # every claim, graded: proved / passed / observed / met
-$ jet bench . --filter=parse --json       # proposed parity: optimized tier, labeled, budget-gated in CI
+$ jet test . --measure --filter=parse --json   # proposed: optimized tier, labeled, budget-gated in CI
 ```
 
 The end-state shape of the whole area:
@@ -312,18 +390,19 @@ one program (I9: one meaning on every tier)
 │     jet run          none
 │     jet dev          watcher + resident session (keys: r R t f q)
 │     jet test         claim harness         ┐
-│     jet bench        measurer              │ one generated harness,
+│     jet test --measure  measurer           │ one generated harness,
 │     jet debug        stepper               │ one report frame,
 │     jet repl / nb    prompt (script law)   │ one collection
-│     --record         recorder (.jetproof-replay)
+│     --record=        recorder (.jetproof-replay)
 │
 └── the claim ──────── inputs × evidence ──────────────────────
       require(x)       caller      → observed
       #Test            author      → passed
+      #Test .cases     table       → passed (one line per row)
       /// doctest      docs        → passed
       #Test fn (p: T)  generated   → passed (sampled)
       snapshot/golden  stored      → passed
-      #Bench + Budget  measured    → met
+      #Test .measure + Budget  measured → met
       refinements      prover      → proved
       … all graded in one ledger: jet prove
 ```
@@ -356,7 +435,8 @@ one program (I9: one meaning on every tier)
 |--------|----------|-------------------------------|--------|
 | D-RUN-LAW1 | Adopt "one run, one claim" as the law of this domain? | A adopt / B dev-loop half only / C testing half only / D decline | none (names the model) |
 | D-CLAIM-WORD1 | One assertion word? | B `assert` family / A `require` family / C fresh `claim` family / D keep both | A: D-CORE-PRELUDE1. B/C: S43, D-PRELUDE-LAW1, D-FAIL-BREACH1 wording |
-| D-CLAIM-BENCH1 | Benchmarks are measured tests? | A keep `#Bench` as the measured-test marker / B spell as `#Test` + `.measure` / C status quo | D-BENCH-MARKER1 wording; completes D-PERFBUDGET-BENCHMIGRATE1=B and GAMEMIGRATE1; fixes spec.md:2235 drift |
+| D-CLAIM-BENCH1 | Benchmarks are measured tests? | A `.measure` member, retire `#Bench` and `jet bench` / B `.measure`, keep `jet bench` as sugar / C keep `#Bench` as sugar / D status quo + profile fix | D-BENCH-MARKER1=A, D-BENCH1 wording; subsumes D-BENCH-PARITY1=B; completes D-PERFBUDGET-BENCHMIGRATE1=B and GAMEMIGRATE1; fixes spec.md:2235 drift |
+| D-CLAIM-CASES1 | Table-driven claims via `.cases` with ambient `case`? | A adopt `.cases` + ambient `case` / B `.cases` with an explicit parameter name / C decline (literals and generators only) | none — rides D-DOTSCOPE1 ("addition is an API decision") and the D-FAIL-BIND1 ambient-binding precedent |
 | D-RUN-WATCH1 | Watch as a modifier on every runnable verb? | A `--watch` everywhere + `jet dev` stays / B fold into `jet dev` lenses / C status quo | none (extends D-CLI-BARE1 pattern) |
 | D-RUN-SESSION1 | One resident session with in-session keys and attaching tools? | A full session model / B keys only / C status quo | none |
 | D-RUN-RECORD1 | Recorder on user verbs now, as the Epoch 6 on-ramp? | A `--record=` + `jet debug --replay=` / B `jet debug --replay=` only / C wait for Epoch 6 | A amends two D-JREPLAY1 clauses (producer: "no option changes `jet run`"; consumer: "consumption stays exactly `jet prove --replay`"); B amends the consumer clause only; respects D-TIMETRAVEL1=C |
