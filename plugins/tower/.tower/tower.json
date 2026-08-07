@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1593,
-    "rev": 28393,
+    "rev": 28400,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -88873,7 +88873,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T17:14:30.623Z",
-      "updated": "2026-08-07T01:10:38.659Z",
+      "updated": "2026-08-07T01:17:52.176Z",
       "updatedBy": "fable",
       "workOrder": 410
     },
@@ -89706,7 +89706,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P3",
       "plan": "## Gate\n\nBallot D-FMT-SIMPLIFY1 on this card picks the catalog, the surface, and the default. No implementation before it is ratified. Card #1512 is the first concrete slice and lands under whatever surface the owner picks.\n\n## Starter catalog (each cites its law; all proven by AST equality: emit, re-parse, compare)\n\n- R1 — braced single-return body becomes a one-liner (card #1512).\n  Before: `fn mirror(p: Point) => Point { return .{x: -p.x, y: p.y} }`\n  After:  `fn mirror(p: Point) => Point = .{x: -p.x, y: p.y}`\n- R2 — else-if chain becomes one ordered arm table (S68, D-BRANCH-PREF1, the shape L0507 teaches).\n  Before: `if code == 200 { ok() } else if code == 301 { redirect() } else { log(code) }`\n  After:  `if code == { 200 -> ok()  301 -> redirect()  else -> log(code) }`\n- R3 — struct literal drops a type name the context already knows (dot-construction law).\n  Before: `p :: Point.{x: 1, y: 2}` where the binding or parameter already fixes Point... only when the context types it.\n  After:  `p: Point :: .{x: 1, y: 2}` / argument position `draw(.{x: 1, y: 2})`\n- R4 — listed run of integers in an expression fence becomes a range (D-FENCE-RANGE1=A, card #1516; gated on #1516 shipping).\n  Before: `$[0, 1, 2, 3]$`   After: `$[0..3]$`\n\n## After ratification\n\n1. Implement per the chosen surface. Reuse the fmt engine and emitters. One catalog module, one rewrite per entry, each tagged with its decision ID.\n2. Every rewrite gets the AST-equality check and a fmt stability test case.\n3. Run the chosen mode over the in-repo corpus once and re-bless goldens/snapshots in the same change if the owner picked a batch surface.\n4. Targeted proof: `scripts/agent/jet-env cargo test --test fmt` once at the end.",
       "blockedBy": [
@@ -89714,6 +89714,11 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-07",
+          "by": "fable",
+          "text": "D-FMT-SIMPLIFY1 ratified A: opt-in --simplify flag, default fmt frozen; gate closed, card ready to build per plan"
+        },
         {
           "at": "2026-08-07",
           "by": "fable",
@@ -89742,11 +89747,11 @@
         {
           "n": 2,
           "text": "Flag spelling and default-versus-opt-in behavior are balloted and ratified before implementation starts",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "fable",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:18:46.365Z"
+          "evidence": "D-FMT-SIMPLIFY1 ratified outcome A (jet fmt --simplify opt-in flag, catalog R1-R4 approved); no ratification comment",
+          "at": "2026-08-07T01:17:59.823Z"
         }
       ],
       "refs": [],
@@ -89756,7 +89761,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:18:20.747Z",
-      "updated": "2026-08-07T01:10:34.176Z",
+      "updated": "2026-08-07T01:18:00.253Z",
       "updatedBy": "fable",
       "workOrder": 1080
     },
@@ -129661,6 +129666,13 @@
           "code": "evt :: tasks.select2(jobs, control, after: 100ms)\nif evt == {\n    .First(job)  -> handle(job)\n    .Second(msg) -> obey(msg)\n    .TimedOut    -> retry()\n}"
         },
         {
+          "key": "D",
+          "name": "The readiness table rides subjectless if",
+          "detail": "No new keyword. A subjectless if table whose arm heads are a binding and a source is the wait. A comma head can never be a Bool expression, so the parser knows this table waits. The table shape, the after arm, and the else arm are exactly option A's. The cost: an if statement can now block, and the reader learns that from the arm shape, not the keyword.",
+          "technical": "Amends the subjectless table law (D-IFGUARD1): a table whose every head is binding, source is one atomic readiness wait. Mixing readiness heads and Bool heads in one table is a registered diagnostic. after takes a Time delta expression (D-TYPE2-TIME1=A). else fires when no source is ready at entry. Expression position follows the if value-table law. The whole table compiles to one wait, so there is no test-then-read race. select stays a free identifier everywhere. Cancellation at the wait follows D-CANCELMODEL1=C. A closed source stops matching.",
+          "code": "if {\n    job, jobs    -> handle(job)\n    msg, control -> obey(msg)\n    after 100ms  -> retry()\n}\n\n// expression form, like an if value table\nnext :: if {\n    job, jobs   -> job\n    after 50ms  -> -1\n}"
+        },
+        {
           "key": "C",
           "name": "Merge the sources, loop the result",
           "detail": "Waiting on several sources becomes stream composition. A merge builtin joins the sources into one stream, a tick source supplies the timeout, and the drain loop is the wait. Repeating waits read well. A single one-shot wait still needs the merge, a next call, and the same positional variant names as option B.",
@@ -129680,10 +129692,14 @@
           "code": "tokio::select! {\n    Some(job) = jobs.recv() => handle(job),\n    Some(msg) = control.recv() => obey(msg),\n    _ = sleep(Duration::from_millis(100)) => retry(),\n}"
         }
       ],
-      "rec": "A",
+      "rec": "D",
       "recommendation": {
-        "why": "The wait reads as control flow in the one table shape Jet already teaches. The arm head is the drain loop head, so learning one form teaches the other. Source names stay visible in every arm.",
+        "why": "One branching keyword stays the whole law. The wait keeps option A's table shape, named sources and all, without reserving a word or amending the S68 keyword sentence. The comma head marks the wait, and the arm head is the drain loop head, so learning one form teaches the other.",
         "whyNot": [
+          {
+            "key": "A",
+            "reason": "It reads the same as D but reserves select and adds a second branching keyword, which costs an S68 amendment for no extra clarity."
+          },
           {
             "key": "B",
             "reason": "The arms lose the source names, an arity family of functions grows without bound, and every wait costs an extra binding line."
@@ -129693,17 +129709,17 @@
             "reason": "It answers a control-flow question with stream plumbing. A single wait needs a merge call, a next call, and nameless positional variants."
           }
         ],
-        "tradeoff": "select becomes a reserved statement head and a new table form, with parser, formatter, grammar, and snapshot work. Accepted: you already chose a wait that reads as control flow, and this spelling finishes that choice inside the arm-table law."
+        "tradeoff": "An if can now block. The arm shape announces it, but readers must learn that one table form waits. Accepted: the shape is loud, the after and else arms flag it further, and the keyword count stays at one."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "reviewPasses": {
         "base": "The first draft compared a select keyword table, an arity function family dispatched by if, and merged streams. It recommended the keyword table because the wait stays control flow with named sources.",
-        "boilOcean": "The breadth review tested readiness heads inside a plain if table and an alternation form in the loop head. The if shape lies about atomicity and the loop alternation cannot format, so both were folded out.",
-        "hybrid": "A hybrid keeping a Core select function that formats as a table was tested. That is two spellings of one wait and fails the one-mechanism rule, so it was rejected.",
+        "boilOcean": "The breadth review tested Bool readiness heads inside a plain if table and an alternation form in the loop head. Bool heads lie about atomicity and the loop alternation cannot format, so both were folded out.",
+        "hybrid": "Option D came from your direction on this ballot: it merges the if keyword with option A arm shape. The comma head keeps the whole table one atomic wait, so the earlier atomicity objection does not apply.",
         "cooperative": "Option B gained a named TimedOut variant and keyword arguments, and option C gained every(duration) ticks that make timeouts ordinary sources. Positional variant names remain the floor for both.",
-        "adversarial": "The attack targeted keyword collisions, close behavior, and the S68 amendment. Head-only reservation keeps query.select() legal and a closed source stops matching under the ratified close law, so the recommendation survives."
+        "adversarial": "The attack on D asked whether a reader can mistake a waiting if for a testing if. The comma heads, the after arm, and the mixed-table diagnostic mark the wait, so the recommendation survives."
       },
       "checkInstructions": null,
       "draft": false,
@@ -129794,8 +129810,10 @@
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-08-07T00:55:35.715Z"
+      "status": "ratified",
+      "created": "2026-08-07T00:55:35.715Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-08-07"
     }
   ],
   "questions": [
@@ -130997,6 +131015,19 @@
       "created": "2026-08-07T00:24:33.288Z",
       "answeredAt": "2026-08-07",
       "answeredBy": "fable"
+    },
+    {
+      "id": "qazwd61s",
+      "cardId": "c0vzadss",
+      "decisionId": "D-CONC-CHAN2",
+      "by": "owner",
+      "kind": "question",
+      "text": "I want to use if but have a nicer native  syntax like option a’s select.",
+      "status": "answered",
+      "answer": "Done: the ballot now has option D, and it is the recommendation. The wait is a subjectless if table with option A's exact arms: if { job, jobs -> handle(job)  msg, control -> obey(msg)  after 100ms -> retry() }. No new keyword and no S68 amendment. A comma head can never be a Bool expression, so the parser knows the table waits, and the whole table compiles to one atomic wait. select stays a free name everywhere.",
+      "created": "2026-08-07T01:13:06.973Z",
+      "answeredAt": "2026-08-07",
+      "answeredBy": "fable"
     }
   ],
   "ideas": [
@@ -131389,6 +131420,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-07T01:18:00.253Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0vh9xhx",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-07T01:17:59.823Z",
+      "by": "fable",
+      "action": "card.criteria-meet",
+      "ref": "c0vh9xhx",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-07T01:17:58.550Z",
+      "by": "bd2-manifest",
+      "action": "papercut.add",
+      "ref": "pc0y20tm3",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T01:17:52.176Z",
+      "by": "fable",
+      "action": "question.answer",
+      "ref": "qazwd61s",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T01:17:41.744Z",
+      "by": "fable",
+      "action": "decision.update",
+      "ref": "D-CONC-CHAN2",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T01:13:06.973Z",
+      "by": "owner",
+      "action": "question.add",
+      "ref": "qazwd61s",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T01:10:51.555Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-FMT-SIMPLIFY1",
+      "note": "A"
+    },
     {
       "at": "2026-08-07T01:10:38.659Z",
       "by": "fable",
@@ -134839,55 +134919,6 @@
       "action": "card.update",
       "ref": "c0b4fyko",
       "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:41:33.805Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0qijk9s",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:41:33.385Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0w38v39",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:41:32.962Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0gqalzc",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:41:32.543Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c082569u",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:41:32.135Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0y3l5yy",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:41:31.736Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0onk8jk",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:41:31.317Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0fb7yl5",
-      "note": "workOrder"
     }
   ],
   "nextNum": 368,
@@ -134985,6 +135016,14 @@
       "text": "master has 5 more pre-existing tests/pkg.rs failures unrelated to manifest work: cli_keygen_entropy_failure_is_exact_e1292_and_artifact_free, cli_publish_auto_keygen_entropy_failure_mutates_nothing, cli_publish_no_sign_leaves_signature_empty (crypto entropy-simulation helper flakiness/exit-code mismatch), physical_unit_api_freeze_and_semver_share_one_canonical_signature, physical_unit_trait_methods_use_canonical_dimensions (unrelated physical-units API-freeze signature format mismatch). Also 3 tests assert jet new creates literal file 'pkg.jet' but Source/CmdCompile.rs run_new has long written Syntax::PACKAGE_FILE ('package.jet') -- stale test expectation, pre-existing and unrelated to D-CONF-PLANE1/NAME1.",
       "cardId": null,
       "created": "2026-08-07T01:05:25.304Z",
+      "status": "open"
+    },
+    {
+      "id": "pc0y20tm3",
+      "by": "bd2-manifest",
+      "text": "master has pre-existing tests/canvas.rs failure canvas_parity_matrix_tracks_ast_language_forms: Canvas parity matrix missing [Expr::NoElse] from crates/jet-foundation/src/AST/expressions.rs. Confirmed unrelated to manifest work.",
+      "cardId": null,
+      "created": "2026-08-07T01:17:58.550Z",
       "status": "open"
     }
   ]
