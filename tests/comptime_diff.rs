@@ -68,10 +68,12 @@ const CASES: &[&str] = &[
     "[10, 20, 30][1]",
     "[\"x\", \"y\", \"z\"]",
     "loop value, [1, 2, 3] -> value * 2",
-    // Map ordering via derived lists (BTreeMap is sorted by key)
-    "[\"b\": 2, \"a\": 1, \"c\": 3].keys()",
-    "[\"b\": 2, \"a\": 1, \"c\": 3].values()",
-    "[2: \"two\", 1: \"one\"].keys()",
+    // Map ordering via derived lists (BTreeMap is sorted by key). `.keys()`/
+    // `.values()` return a lazy one-pass `Iter` (no `Display`, E0915) —
+    // `.to_list()` materializes it for the differential's string print.
+    "[\"b\": 2, \"a\": 1, \"c\": 3].keys().to_list()",
+    "[\"b\": 2, \"a\": 1, \"c\": 3].values().to_list()",
+    "[2: \"two\", 1: \"one\"].keys().to_list()",
     "SortedSet.from([1, 2, 3]).intersection(SortedSet.from([2, 3, 4])).to_list()",
     "SortedSet.from([1, 2, 3]).difference(SortedSet.from([2, 3, 4])).to_list()",
     "SortedSet.from([1, 2, 3]).symmetric_difference(SortedSet.from([2, 3, 4])).to_list()",
