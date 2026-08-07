@@ -110,7 +110,7 @@ fn web_app_expand_facts_web() {
 
 #[test]
 fn web_app_routes_from_exhaustive() {
-    let tmp = repo_root().join("target/webapp-routes-test");
+    let tmp = std::env::temp_dir().join(format!("jet-webapp-routes-test-{}", std::process::id()));
     let _ = fs::remove_dir_all(&tmp);
     fs::create_dir_all(tmp.join("routes/orders")).unwrap();
     fs::write(
@@ -186,7 +186,7 @@ fn web_app_dev_forced_interpreter_serves_callbacks() {
 
 #[test]
 fn web_app_dev_auto_serves_with_reload_without_dev_function() {
-    let tmp = repo_root().join("target/webapp-reload-test");
+    let tmp = std::env::temp_dir().join(format!("jet-webapp-reload-test-{}", std::process::id()));
     let _ = fs::remove_dir_all(&tmp);
     fs::create_dir_all(&tmp).unwrap();
     let source = fs::read_to_string(repo_root().join("examples/features/web/web_app.jet")).unwrap();

@@ -5,9 +5,12 @@ repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 fixture="$repo/tests/fixtures/nix-compat/authority-escape/Cargo.toml"
 build_fixture="$repo/tests/fixtures/nix-compat/build-script-escape/Cargo.toml"
 manifest="$repo/crates/jet-nix-eval/Cargo.toml"
-target="${CARGO_TARGET_DIR:-$repo/target}/nix-eval-authority-escape"
-log="${TMPDIR:-$repo/target/test-tmp}/nix-eval-authority-escape.log"
-mkdir -p "$(dirname "$log")"
+# card 1640: fixture builds and logs never live inside target/ — bounded
+# scratch, cleaned on exit.
+scratch="$(mktemp -d "${TMPDIR:-/tmp}/nix-eval-stopline.XXXXXX")"
+trap 'rm -rf -- "$scratch"' EXIT
+target="$scratch/target"
+log="$scratch/nix-eval-authority-escape.log"
 
 if ! grep -Eq '^build[[:space:]]*=[[:space:]]*false[[:space:]]*$' "$manifest"; then
   echo "error: native Nix evaluator must set package.build = false" >&2
