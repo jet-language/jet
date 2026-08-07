@@ -31,7 +31,7 @@ are inventoried independently from their source registries by the same gate.
 | `claim.core-ui-web` | Reactive UI and web targets run one typed component model. |
 | `claim.game-product` | Jet ships a playable game runtime plus source-backed editor workflow. |
 | `claim.plugin-ffi` | Foreign libraries use one typed, safe interop structure. |
-| `claim.embedded` | Typed target profiles produce real firmware and kernel artifacts. |
+| `claim.embedded` | Typed target machines produce real firmware and kernel artifacts. |
 | `claim.adaptive-runtime` | Applications choose runtime fidelity through one explicit manual signal. |
 | `claim.logic-programming` | `core.solve` records finite Boolean constraints deterministically. |
 | `claim.structural-merge` | Jet has a checked structural diff and merge path keyed by semantic identity. |

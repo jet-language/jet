@@ -204,7 +204,7 @@ cell :: 1337
 fn volatile_write_emit_is_byte_exact() {
     let src = "\
 use core.mem
-#Unsafe(\"UART TX register is mapped by the target profile\")
+#Unsafe(\"UART TX register is mapped by the target machine\")
 fn write_reg(value: Int) {
     p :: mem.Ptr<Int>.from_addr(0x40000100)
     mem.volatile_write(p, value)

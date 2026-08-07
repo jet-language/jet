@@ -15,7 +15,7 @@ pub(crate) fn run_dossier(args: &[String], json: bool) {
         }
     }
 
-    // D-TARGET-AUDIT1=A: `jet inspect dossier target <profile>`
+    // D-TARGET-AUDIT1=A: `jet inspect dossier target <machine>`
     if positional.first().copied() == Some("target") {
         let name = positional.get(1).copied().unwrap_or("board.sensor_v1");
         match jet::Driver::target_machine_dossier_json(name) {
@@ -23,7 +23,7 @@ pub(crate) fn run_dossier(args: &[String], json: bool) {
                 if json {
                     println!("{audit}");
                 } else {
-                    println!("target profile: {name}");
+                    println!("target machine: {name}");
                     println!("{audit}");
                 }
             }
