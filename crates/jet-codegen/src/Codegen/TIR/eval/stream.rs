@@ -27,7 +27,7 @@ pub(super) fn eval(
 ) -> Result<CtValue, Diagnostic> {
     match op {
         THandleOp::ReaderOver => {
-            let bytes = bytes_of(recv).ok_or_else(|| bad("Reader.over subject", span))?;
+            let bytes = bytes_of(recv).ok_or_else(|| unsupported("Reader.over subject", span))?;
             Ok(reader_ct(&kernel::jet_reader_over(&bytes)))
         }
         THandleOp::ReaderReadU8 => {
@@ -54,7 +54,7 @@ pub(super) fn eval(
         }),
         THandleOp::ReaderTake => {
             let CtValue::Int(n) = arg(args, 0, span)? else {
-                return Err(bad("Reader.take length", span));
+                return Err(unsupported("Reader.take length", span));
             };
             let n = *n;
             with_reader(recv, span, |r| {
@@ -62,22 +62,22 @@ pub(super) fn eval(
             })
         }
         THandleOp::ReaderRemaining => {
-            let r = reader_of(recv).ok_or_else(|| bad("Reader receiver", span))?;
+            let r = reader_of(recv).ok_or_else(|| unsupported("Reader receiver", span))?;
             Ok(CtValue::Int(kernel::jet_reader_remaining(&r)))
         }
         THandleOp::ReaderAtEnd => {
-            let r = reader_of(recv).ok_or_else(|| bad("Reader receiver", span))?;
+            let r = reader_of(recv).ok_or_else(|| unsupported("Reader receiver", span))?;
             Ok(CtValue::Bool(kernel::jet_reader_at_end(&r)))
         }
         THandleOp::CursorOver => {
             let CtValue::Str(text) = recv else {
-                return Err(bad("Cursor.over subject", span));
+                return Err(unsupported("Cursor.over subject", span));
             };
             Ok(cursor_ct(&kernel::jet_cursor_over(text)))
         }
         THandleOp::CursorTakeUntil => {
             let CtValue::Str(delim) = arg(args, 0, span)? else {
-                return Err(bad("Cursor.take_until delimiter", span));
+                return Err(unsupported("Cursor.take_until delimiter", span));
             };
             let delim = delim.clone();
             with_cursor(recv, span, |c| {
@@ -85,13 +85,13 @@ pub(super) fn eval(
             })
         }
         THandleOp::CursorSkipWs => {
-            let mut c = cursor_of(recv).ok_or_else(|| bad("Cursor receiver", span))?;
+            let mut c = cursor_of(recv).ok_or_else(|| unsupported("Cursor receiver", span))?;
             kernel::jet_cursor_skip_ws(&mut c);
             *recv = cursor_ct(&c);
             Ok(CtValue::Unit)
         }
         THandleOp::CursorTakePattern { parts, canonical } => {
-            let mut c = cursor_of(recv).ok_or_else(|| bad("Cursor receiver", span))?;
+            let mut c = cursor_of(recv).ok_or_else(|| unsupported("Cursor receiver", span))?;
             let tail = c.buf[c.pos..].to_string();
             match str_match_scan(&tail, parts, true) {
                 Some(binds) => {
@@ -107,7 +107,7 @@ pub(super) fn eval(
             }
         }
         THandleOp::ReaderTakePattern { parts, canonical } => {
-            let mut r = reader_of(recv).ok_or_else(|| bad("Reader receiver", span))?;
+            let mut r = reader_of(recv).ok_or_else(|| unsupported("Reader receiver", span))?;
             let tail = r.buf[r.pos..].to_vec();
             match bin_match_scan(&tail, parts, true) {
                 Some((bit_pos, binds)) if bit_pos % 8 == 0 => {
@@ -126,13 +126,9 @@ pub(super) fn eval(
     }
 }
 
-fn bad(what: &str, span: Span) -> Diagnostic {
-    unsupported(what, span)
-}
-
 fn arg(args: &[CtValue], index: usize, span: Span) -> Result<&CtValue, Diagnostic> {
     args.get(index)
-        .ok_or_else(|| bad("stream handle argument", span))
+        .ok_or_else(|| unsupported("stream handle argument", span))
 }
 
 fn bytes_of(value: &CtValue) -> Option<Vec<u8>> {
@@ -217,7 +213,7 @@ fn with_reader(
     span: Span,
     call: impl FnOnce(&mut kernel::JetReader) -> Result<CtValue, String>,
 ) -> Result<CtValue, Diagnostic> {
-    let mut r = reader_of(recv).ok_or_else(|| bad("Reader receiver", span))?;
+    let mut r = reader_of(recv).ok_or_else(|| unsupported("Reader receiver", span))?;
     let out = call(&mut r);
     *recv = reader_ct(&r);
     Ok(result_ct(out))
@@ -228,7 +224,7 @@ fn with_cursor(
     span: Span,
     call: impl FnOnce(&mut kernel::JetCursor) -> Result<CtValue, String>,
 ) -> Result<CtValue, Diagnostic> {
-    let mut c = cursor_of(recv).ok_or_else(|| bad("Cursor receiver", span))?;
+    let mut c = cursor_of(recv).ok_or_else(|| unsupported("Cursor receiver", span))?;
     let out = call(&mut c);
     *recv = cursor_ct(&c);
     Ok(result_ct(out))
