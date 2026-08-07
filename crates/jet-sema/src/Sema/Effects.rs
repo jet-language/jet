@@ -1596,7 +1596,7 @@ fn expr_handle_escape(e: &crate::AST::Expr, handle: &str) -> Option<Span> {
         | Expr::Todo { .. }
         | Expr::NoElse(_)
         | Expr::UnitLit { .. }
-        | Expr::ComptimeSplice { .. }
+        | Expr::ComptimeName { .. }
         // D-SHIFT1 (c7shift) / D-BINPAT1 (card #506 follow-up): a leaf
         // literal, no nested `Expr` to recurse into.
         | Expr::StrMatchLit(_, _)

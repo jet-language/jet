@@ -67,7 +67,7 @@ pub(super) fn substitute_expr(
         | Expr::Todo { .. }
         | Expr::NoElse(_)
         | Expr::UnitLit { .. }
-        | Expr::ComptimeSplice { .. }
+        | Expr::ComptimeName { .. }
         | Expr::StrMatchLit(..)
         | Expr::BinMatchLit(..) => {}
         Expr::Str(parts, _) => parts.iter_mut().for_each(|part| {

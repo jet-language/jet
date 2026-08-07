@@ -411,11 +411,15 @@ impl<'a> Parser<'a> {
                         Some(kw.span),
                     ));
                 }
-                // B5 revert (card #1456): `#Known` parses like master again — see
-                // Statements/bindings.rs::take_mark for why.
+                // D-META-STAGE1=B: `#Known` is retired. Recover it so the rest
+                // of the file still parses, and teach the `$` form once.
                 TokKind::Hash if known => {
-                    self.bump();
-                    self.bump();
+                    let head = self.read_marker_head()?;
+                    let fix = match &self.peek().kind {
+                        TokKind::Ident(name) => format!("write `${name} :: …`"),
+                        _ => "write the mark on the name: `$name :: …`".to_string(),
+                    };
+                    self.diags.push(self.retired_known_error(head.span, fix));
                 }
                 // D-META-STAGE1=B: `$name :: expr` — the mark rides the name.
                 // Additive new spelling from #1537's checkpoint; kept, not part

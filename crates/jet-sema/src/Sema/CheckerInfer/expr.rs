@@ -1950,9 +1950,12 @@ impl<'a> Checker<'a> {
                 })
             }
             Expr::CallValue { callee, args, span } => self.infer_call_value(callee, args, *span),
-            // D-CTMARKER1=C: `$name` comptime splice. Valid only in comptime contexts;
-            // the Comptime interpreter resolves the value. In runtime code: E2712.
-            Expr::ComptimeSplice { name, span, value } => {
+            // D-META-STAGE1=B: a compile-time name resolves from the values the
+            // compiler already computed, under the name as written. There is no
+            // stage boundary to check — inside a compile-time context the
+            // interpreter reads it, and outside one sema folds it here so
+            // codegen only ever sees the value.
+            Expr::ComptimeName { name, span, value } => {
                 if !self.in_comptime {
                     let globals = self.current_ct_globals();
                     if let Some(v) = globals.get(name).cloned() {
@@ -1960,13 +1963,8 @@ impl<'a> Checker<'a> {
                         *value = Some(v);
                         return Some(ty);
                     }
-                    self.diags.push(Diagnostic::error(
-                        "E2713",
-                        format!("there is no comptime value named `{}`", name),
-                        "`$name` splices a value that was computed by a `comptime` binding or `#Known {}` block".to_string(),
-                        format!("define `#Known {name} :: ...` before using `${name}`"),
-                        Some(*span),
-                    ));
+                    let (name, span) = (name.clone(), *span);
+                    self.unknown_name(&name, span);
                 }
                 None
             }

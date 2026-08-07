@@ -517,12 +517,16 @@ impl<'a> Parser<'a> {
 
     pub(super) fn comptime_binding(&mut self) -> Result<Binding, Diagnostic> {
         let retired = matches!(self.peek().kind, TokKind::KwComptime);
-        self.take_mark()?;
-        let (name, name_span) = self.expect_ident("after `#Known`")?;
+        // D-META-STAGE1=B: the mark rides the name, so nothing is consumed
+        // before the name. A retired spelling is taken here only to teach.
+        if retired || self.at_known_lead() {
+            self.take_mark()?;
+        }
+        let (name, name_span) = self.expect_ident("for the compile-time binding")?;
         if retired {
             self.expect(TokKind::Eq, "in the retired comptime binding")?;
         } else {
-            self.expect(TokKind::ColonColon, "in a `#Known` binding")?;
+            self.expect(TokKind::ColonColon, "after a compile-time binding name")?;
         }
         let init = self.expr()?;
         Ok(Binding {
@@ -546,20 +550,46 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// D-VERDICT-1308-1/2: true when `#Known` is at the cursor.
+    /// D-META-STAGE1=B: true when the retired `#Known` spelling is at the
+    /// cursor. It parses only far enough to teach the `$` form.
     pub(in crate::Parser) fn at_known_lead(&self) -> bool {
         matches!(self.peek().kind, TokKind::Hash)
             && matches!(&self.peek2().kind, TokKind::Ident(name) if name == Syntax::RETIRED_MARKER_KNOWN)
     }
 
-    /// B5 revert (card #1456): #1537's own checkpoint made this teach E0377-
-    /// E0379 as retired spellings, but #1537 hasn't landed its migration of
-    /// the 327 in-repo `#Known` uses yet. `#Known` parses like master again —
-    /// silently, no diagnostic — until #1537 lands the full retirement.
-    /// `comptime` stays taught (pre-existing, unrelated to this revert). The
-    /// bare `$` mark this checkpoint also added ($ blocks, $if, $loop) still
-    /// parses too — it's a new, additive spelling, not a hard-error source.
+    /// D-META-STAGE1=B: `#Known` retired in favour of the `$` mark. One
+    /// teaching error covers all three of its forms, because the fix is the
+    /// same move in each: put the mark on the name, or open the block with a
+    /// bare mark.
+    pub(in crate::Parser) fn retired_known_error(&self, span: Span, fix: String) -> Diagnostic {
+        Diagnostic::error(
+            "E0377",
+            format!("`#{}` is retired", Syntax::RETIRED_MARKER_KNOWN),
+            "compile time has one mark, `$`, and the mark belongs to the name, so it is written at every mention"
+                .to_string(),
+            fix,
+            Some(span),
+        )
+    }
+
+    /// D-META-STAGE1=B: consume whatever opened a compile-time construct. The
+    /// ratified mark is `$`; the retired `#Known` and `comptime` spellings are
+    /// recovered here so each teaches its replacement once.
     fn take_mark(&mut self) -> Result<Span, Diagnostic> {
+        if self.at_known_lead() {
+            let head = self.read_marker_head()?;
+            let fix = if matches!(self.peek().kind, TokKind::KwIf) {
+                "write `$if <condition> { … }`".to_string()
+            } else if matches!(self.peek().kind, TokKind::LBrace) {
+                "write `$ { … }`".to_string()
+            } else if let TokKind::Ident(name) = &self.peek().kind {
+                format!("write `${name} :: …`")
+            } else {
+                "write the mark on the name: `$name :: …`".to_string()
+            };
+            self.diags.push(self.retired_known_error(head.span, fix));
+            return Ok(head.span);
+        }
         if matches!(self.peek().kind, TokKind::KwComptime) {
             let span = self.bump().span;
             self.diags.push(Diagnostic::error(

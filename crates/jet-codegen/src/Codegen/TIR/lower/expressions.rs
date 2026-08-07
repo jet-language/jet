@@ -255,7 +255,7 @@ fn expr_tag(e: &Expr) -> &'static str {
         Expr::TypedLit { .. } => "TypedLit",
         Expr::Paren(..) => "Paren",
         Expr::PatternTest { .. } => "PatternTest",
-        Expr::ComptimeSplice { .. } => "ComptimeSplice",
+        Expr::ComptimeName { .. } => "ComptimeName",
         Expr::CallValue { .. } => "CallValue",
         Expr::IncDec { .. } => "IncDec",
     }
@@ -518,13 +518,13 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 kind: TExprKind::Local(env.local_of(name)),
             }
         }
-        Expr::ComptimeSplice {
+        Expr::ComptimeName {
             value: Some(value), ..
         } => TExpr {
             ty: value.jet_type(),
             kind: TExprKind::CtLit(value.clone()),
         },
-        Expr::ComptimeSplice { name, .. } if super::is_eval_fragment() => {
+        Expr::ComptimeName { name, .. } if super::is_eval_fragment() => {
             // `$name` resolves from the comptime scope at eval time (D-CTMARKER1=C).
             if !env.locals.contains_key(name) {
                 env.bind(name, TLocal::user(name), None);
@@ -534,7 +534,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 kind: TExprKind::Local(env.local_of(name)),
             }
         }
-        Expr::ComptimeSplice { .. } => TExpr {
+        Expr::ComptimeName { .. } => TExpr {
             ty: Type::Int,
             kind: TExprKind::DefaultLit,
         },

@@ -108,7 +108,7 @@ pub const MARKER_TRACK: &str = "Track";
 /// it is written at every mention — `$limit :: 1000` then `print("{$limit}")`.
 /// A bare mark opens a compile-time block (`$ { … }`) and precedes the `if` and
 /// `loop` verbs at compile time (`$if`, `$loop`). Ordinary foldable expressions
-/// need no mark. The retired `#Known` spellings teach E0377/E0378/E0379.
+/// need no mark. The retired `#Known` spellings teach E0377.
 pub const COMPTIME_MARK: &str = "$";
 
 /// Is this identifier a compile-time name? The mark is part of the identifier,
@@ -117,11 +117,9 @@ pub fn is_comptime_name(name: &str) -> bool {
     name.starts_with('$')
 }
 
-/// D-VERDICT-1308-1/2: demand compile-time knowledge for a binding, block, or
-/// conditional. Ordinary foldable expressions need no marker. B5 revert
-/// (card #1456): #1537's checkpoint renamed this to "retired" ahead of its
-/// own migration of the 327 in-repo uses; still the live, working spelling
-/// until #1537 lands that migration in one change.
+/// D-META-STAGE1=B: the retired marker spelling for compile-time demand. It is
+/// kept only so the parser can recognize it and teach the `$` mark (E0377); no
+/// current Jet source writes it.
 pub const RETIRED_MARKER_KNOWN: &str = "Known";
 
 /// D-CANVASSTATE1=D (ratified 2026-07-09): statement switch-off attribute.

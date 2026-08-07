@@ -1,19 +1,19 @@
-#Known limit :: 1000
+$limit :: 1000
 
-#Known base :: 10
+$base :: 10
 
 fn run() {
-    // D-CTMARKER1: `#Known { … }` runs in the comptime interpreter and emits
+    // D-CTMARKER1: `$ { … }` runs in the comptime interpreter and emits
     // no runtime Rust (I3). Its local known bindings can be spliced afterward.
     // Build-time assertion: verify constants are valid before compiling.
-    #Known {
-        #Known ratio :: limit /% base
-        if ratio < 1 { panic("limit must be >= base") }
+    $ {
+        $ratio :: $limit /% $base
+        if $ratio < 1 { panic("limit must be >= base") }
     }
     // The block ran at build time and produced no runtime code. Its comptime
     // binding leaks into the surrounding comptime scope, so `$ratio` splices a
     // runtime literal.
-    print("limit: {limit}")
-    print("base: {base}")
+    print("limit: {$limit}")
+    print("base: {$base}")
     print("ratio: {$ratio}")
 }

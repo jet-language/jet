@@ -179,7 +179,7 @@ pub(crate) fn rewrite_inline_calls_expr(
         | Expr::Todo { .. }
         | Expr::NoElse(_)
         | Expr::UnitLit { .. }
-        | Expr::ComptimeSplice { .. }
+        | Expr::ComptimeName { .. }
         // D-SHIFT1 (c7shift) / D-BINPAT1 (card #506 follow-up): a leaf
         // literal, no nested `Expr` to recurse into.
         | Expr::StrMatchLit(_, _)

@@ -597,7 +597,7 @@ impl<'a> Fmt<'a> {
             }
             // D-VERDICT-1308-1: `#Known { … }` demand block.
             Stmt::ComptimeBlock { body, .. } => {
-                self.write(&format!("#{} {{", Syntax::RETIRED_MARKER_KNOWN));
+                self.write(&format!("{} {{", Syntax::COMPTIME_MARK));
                 self.newline();
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
@@ -609,7 +609,7 @@ impl<'a> Fmt<'a> {
                 else_body,
                 ..
             } => {
-                self.write(&format!("#{} {} ", Syntax::RETIRED_MARKER_KNOWN, Syntax::KW_IF));
+                self.write(&format!("{}{} ", Syntax::COMPTIME_MARK, Syntax::KW_IF));
                 self.fmt_cond(cond);
                 self.write(" {");
                 self.newline();
@@ -631,7 +631,7 @@ impl<'a> Fmt<'a> {
                 else_body,
                 ..
             } => {
-                self.write(&format!("#{} {} ", Syntax::RETIRED_MARKER_KNOWN, Syntax::KW_IF));
+                self.write(&format!("{}{} ", Syntax::COMPTIME_MARK, Syntax::KW_IF));
                 self.fmt_dispatch(subject, arms, else_body.as_deref());
             }
             // D-CTX1 (ratified 2026-06-22, G2): `#Context(field: value, …) { … }`.
@@ -1151,7 +1151,6 @@ impl<'a> Fmt<'a> {
         }
         // D-VERDICT-1308-1: explicit compile-time demand is marker-led.
         if b.is_comptime {
-            self.write(&format!("#{} ", Syntax::RETIRED_MARKER_KNOWN));
             self.write(&b.name);
             self.write(" :: ");
             self.fmt_expr(&b.init, Prec::OrFallback);
