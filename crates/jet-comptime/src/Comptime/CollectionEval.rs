@@ -9,6 +9,8 @@ use super::Diagnostics::unsupported;
 use super::Value::CtValue;
 
 mod set_semantics {
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../../../jet-codegen/src/Prelude/Core/SetAlgebra.rs");
 }
 

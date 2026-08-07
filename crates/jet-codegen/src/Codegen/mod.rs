@@ -50,7 +50,7 @@ pub use Web::{
 const PRELUDE_PARTS: &[&str] = &[
     // D-FAIL-CARRIER1=A: the one carrier under `T?` and `T ? E`. First, because
     // every other part builds outcomes on top of it.
-    include_str!("../Prelude/Outcome.rs"),
+    include_str!("../../../jet-foundation/src/Outcome.rs"),
     include_str!("../Prelude/Core/UnicodeString.rs"),
     include_str!("../Prelude/Core/Values.rs"),
     include_str!("../Prelude/Core/RangeBounds.rs"),

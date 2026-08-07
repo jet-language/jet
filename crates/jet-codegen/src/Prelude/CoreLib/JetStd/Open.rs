@@ -262,17 +262,20 @@ mod jet_std {
     }
 
     impl JetRegexMatch {
-        pub fn group(&self, n: i64) -> Option<String> {
-            let n = usize::try_from(n).ok()?;
-            let (start, end) = self.spans.get(n).copied().flatten()?;
-            Some(self.text[start..end].to_string())
+        pub fn group(&self, n: i64) -> JetOutcome<String, JetAbsent> {
+            let Ok(n) = usize::try_from(n) else { return Err(JetAbsent) };
+            let Some((start, end)) = self.spans.get(n).copied().flatten() else { return Err(JetAbsent) };
+            Ok(self.text[start..end].to_string())
         }
 
-        pub fn name(&self, name: &str) -> Option<String> {
-            let idx = self
+        pub fn name(&self, name: &str) -> JetOutcome<String, JetAbsent> {
+            let Some(idx) = self
                 .names
                 .iter()
-                .position(|n| n.as_deref() == Some(name))?;
+                .position(|n| n.as_deref() == Some(name))
+            else {
+                return Err(JetAbsent);
+            };
             self.group(idx as i64)
         }
 
@@ -284,22 +287,26 @@ mod jet_std {
             self.group_end(0).unwrap_or(-1)
         }
 
-        pub fn group_start(&self, n: i64) -> Option<i64> {
-            let n = usize::try_from(n).ok()?;
-            self.spans
-                .get(n)
-                .copied()
-                .flatten()
-                .map(|(start, _)| start as i64)
+        pub fn group_start(&self, n: i64) -> JetOutcome<i64, JetAbsent> {
+            let Ok(n) = usize::try_from(n) else { return Err(JetAbsent) };
+            jet_outcome_of(
+                self.spans
+                    .get(n)
+                    .copied()
+                    .flatten()
+                    .map(|(start, _)| start as i64),
+            )
         }
 
-        pub fn group_end(&self, n: i64) -> Option<i64> {
-            let n = usize::try_from(n).ok()?;
-            self.spans
-                .get(n)
-                .copied()
-                .flatten()
-                .map(|(_, end)| end as i64)
+        pub fn group_end(&self, n: i64) -> JetOutcome<i64, JetAbsent> {
+            let Ok(n) = usize::try_from(n) else { return Err(JetAbsent) };
+            jet_outcome_of(
+                self.spans
+                    .get(n)
+                    .copied()
+                    .flatten()
+                    .map(|(_, end)| end as i64),
+            )
         }
 
         /// Named capture pairs as `[[name, value], …]` (unnamed groups omitted).
@@ -309,7 +316,7 @@ mod jet_std {
                 .enumerate()
                 .filter_map(|(i, n)| {
                     let name = n.as_ref()?.clone();
-                    let value = self.group(i as i64)?;
+                    let value = self.group(i as i64).ok()?;
                     Some(vec![name, value])
                 })
                 .collect()
@@ -355,18 +362,18 @@ mod jet_std {
             self.find_match(text).is_some()
         }
 
-        pub fn match_value(&self, text: &str) -> Option<JetRegexMatch> {
-            self.find_match(text)
+        pub fn match_value(&self, text: &str) -> JetOutcome<JetRegexMatch, JetAbsent> {
+            jet_outcome_of(self.find_match(text))
         }
 
-        pub fn find(&self, text: &str) -> Option<String> {
-            self.find_match(text).and_then(|m| m.group(0))
+        pub fn find(&self, text: &str) -> JetOutcome<String, JetAbsent> {
+            jet_outcome_of(self.find_match(text).and_then(|m| m.group(0).ok()))
         }
 
         pub fn find_all(&self, text: &str) -> Vec<String> {
             self.matches(text)
                 .into_iter()
-                .filter_map(|m| m.group(0))
+                .filter_map(|m| m.group(0).ok())
                 .collect()
         }
 
@@ -631,11 +638,11 @@ mod jet_std {
         pattern.is_match(text)
     }
 
-    pub fn jet_regex_match(pattern: &JetRegex, text: &str) -> Option<JetRegexMatch> {
+    pub fn jet_regex_match(pattern: &JetRegex, text: &str) -> JetOutcome<JetRegexMatch, JetAbsent> {
         pattern.match_value(text)
     }
 
-    pub fn jet_regex_find(pattern: &JetRegex, text: &str) -> Option<String> {
+    pub fn jet_regex_find(pattern: &JetRegex, text: &str) -> JetOutcome<String, JetAbsent> {
         pattern.find(text)
     }
 
@@ -1272,7 +1279,7 @@ mod jet_std {
                         }
                         name.push(c);
                     }
-                    if let Some(value) = mat.name(&name) {
+                    if let Ok(value) = mat.name(&name) {
                         out.push_str(&value);
                     }
                 }
@@ -1282,7 +1289,7 @@ mod jet_std {
                         num.push(chars.next().unwrap());
                     }
                     if let Ok(idx) = num.parse::<i64>() {
-                        if let Some(value) = mat.group(idx) {
+                        if let Ok(value) = mat.group(idx) {
                             out.push_str(&value);
                         }
                     }

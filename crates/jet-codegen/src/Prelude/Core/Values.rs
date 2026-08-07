@@ -456,11 +456,11 @@ impl<T: Clone, E: Clone> JetLoadable<T, E> {
     fn is_failed(&self) -> bool {
         matches!(self, JetLoadable::Failed(_))
     }
-    fn loaded(&self) -> Option<T> {
+    fn loaded(&self) -> JetOutcome<T, JetAbsent> {
         if let JetLoadable::Loaded(v) = self {
-            Some(v.clone())
+            Ok(v.clone())
         } else {
-            None
+            Err(JetAbsent)
         }
     }
     fn or_else(&self, default: T) -> T {

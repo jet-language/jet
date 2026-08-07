@@ -9,6 +9,8 @@ use cranelift_module::{FuncId, Linkage, Module};
 use std::cell::RefCell;
 
 mod typed_text_semantics {
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/TypedText.rs");
 }
 

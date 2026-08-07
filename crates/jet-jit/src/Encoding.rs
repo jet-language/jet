@@ -79,8 +79,14 @@ pub(crate) mod json_rt {
         Other(IOContext),
     }
 
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/DataTree.rs");
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/JSON.rs");
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/TOML.rs");
 
     /// D-JSON3 coerce walk — same as `jet_std_json_coerce_walk` (MathRandomTime.rs).
@@ -162,6 +168,8 @@ pub(crate) mod json_rt {
 /// Canonical YAML via build.rs-stripped include (trailing prelude brace removed).
 mod yaml_rt {
     use super::json_rt::DataTree;
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!(concat!(env!("OUT_DIR"), "/yaml_std.rs"));
 }
 

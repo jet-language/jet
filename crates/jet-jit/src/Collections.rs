@@ -4,19 +4,27 @@ use super::Concurrency;
 use std::collections::{BTreeSet, BinaryHeap, HashMap, HashSet, VecDeque};
 
 mod set_semantics {
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/Core/SetAlgebra.rs");
 }
 
 mod range_semantics {
     use jet_foundation::StructuralDebug::jet_debug_range;
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/Core/RangeBounds.rs");
 }
 
 pub(crate) mod byte_buffer_semantics {
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/Core/ByteBuffer.rs");
 }
 
 mod disjoint_semantics {
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/Core/Disjoint.rs");
 
     pub(super) fn split(
@@ -2465,21 +2473,21 @@ extern "C" fn jet_jit_byte_buffer_method(
                 rt,
                 rt.byte_buffers
                     .get(idx)
-                    .and_then(|b| b.first())
+                    .and_then(|b| b.first().ok())
                     .map(|b| b as i64),
             ),
             26 | 27 => {
                 let byte = rt.byte_buffers.get_mut(idx).and_then(|b| {
                     if method == 26 {
-                        b.next()
+                        b.next().ok()
                     } else {
-                        b.read_byte()
+                        b.read_byte().ok()
                     }
                 });
                 option_i64(rt, byte.map(|b| b as i64))
             }
             28 => {
-                let out = rt.byte_buffers.get_mut(idx).and_then(|b| b.read());
+                let out = rt.byte_buffers.get_mut(idx).and_then(|b| b.read().ok());
                 match out {
                     Some(bytes) => {
                         let values = bytes.into_iter().map(i64::from).collect::<Vec<_>>();
@@ -2508,7 +2516,7 @@ extern "C" fn jet_jit_byte_buffer_method(
                 rt,
                 rt.byte_buffers
                     .get(idx)
-                    .and_then(|b| b.get(arg0))
+                    .and_then(|b| b.get(arg0).ok())
                     .map(|b| b as i64),
             ),
             41 => {
@@ -2517,7 +2525,7 @@ extern "C" fn jet_jit_byte_buffer_method(
                 }
                 0
             }
-            42 => match rt.byte_buffers.get_mut(idx).and_then(|b| b.read_bytes(arg0)) {
+            42 => match rt.byte_buffers.get_mut(idx).and_then(|b| b.read_bytes(arg0).ok()) {
                 Some(bytes) => {
                     let values = bytes.into_iter().map(i64::from).collect::<Vec<_>>();
                     copy_list(rt, values) + 1
@@ -2527,7 +2535,7 @@ extern "C" fn jet_jit_byte_buffer_method(
             43 => match rt
                 .byte_buffers
                 .get_mut(idx)
-                .and_then(|b| b.read_string(arg0))
+                .and_then(|b| b.read_string(arg0).ok())
             {
                 Some(s) => rt.heap.alloc_string(s) + 1,
                 None => 0,
@@ -2548,9 +2556,9 @@ extern "C" fn jet_jit_byte_buffer_method(
                 };
                 option_packed(rt.byte_buffers.get(idx).and_then(|b| {
                     if method == 47 {
-                        b.index_of(&needle)
+                        b.index_of(&needle).ok()
                     } else {
-                        b.last_index_of(&needle)
+                        b.last_index_of(&needle).ok()
                     }
                 }))
             }

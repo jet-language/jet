@@ -807,31 +807,31 @@ fn jet_parsed_flag(parsed: &JetParsedArgs, name: &String) -> bool {
     *parsed.flags.get(name.as_str()).unwrap_or(&false)
 }
 
-fn jet_parsed_option(parsed: &JetParsedArgs, name: &String) -> Option<String> {
-    parsed.options.get(name.as_str()).and_then(|v| v.last().cloned())
+fn jet_parsed_option(parsed: &JetParsedArgs, name: &String) -> JetOutcome<String, JetAbsent> {
+    jet_outcome_of(parsed.options.get(name.as_str()).and_then(|v| v.last().cloned()))
 }
 
-fn jet_parsed_option_int(parsed: &JetParsedArgs, name: &String) -> Option<i64> {
-    jet_parsed_option(parsed, name).and_then(|v| v.parse::<i64>().ok())
+fn jet_parsed_option_int(parsed: &JetParsedArgs, name: &String) -> JetOutcome<i64, JetAbsent> {
+    jet_outcome_of(jet_parsed_option(parsed, name).ok().and_then(|v| v.parse::<i64>().ok()))
 }
 
-fn jet_parsed_option_float(parsed: &JetParsedArgs, name: &String) -> Option<f64> {
-    jet_parsed_option(parsed, name).and_then(|v| v.parse::<f64>().ok())
+fn jet_parsed_option_float(parsed: &JetParsedArgs, name: &String) -> JetOutcome<f64, JetAbsent> {
+    jet_outcome_of(jet_parsed_option(parsed, name).ok().and_then(|v| v.parse::<f64>().ok()))
 }
 
 fn jet_parsed_options(parsed: &JetParsedArgs, name: &String) -> Vec<String> {
     parsed.options.get(name.as_str()).cloned().unwrap_or_default()
 }
 
-fn jet_parsed_positional(parsed: &JetParsedArgs, idx: i64) -> Option<String> {
+fn jet_parsed_positional(parsed: &JetParsedArgs, idx: i64) -> JetOutcome<String, JetAbsent> {
     if idx < 0 {
-        return None;
+        return Err(JetAbsent);
     }
-    parsed.positionals.get(idx as usize).cloned()
+    jet_outcome_of(parsed.positionals.get(idx as usize).cloned())
 }
 
-fn jet_parsed_subcommand(parsed: &JetParsedArgs) -> Option<String> {
-    parsed.subcommand.clone()
+fn jet_parsed_subcommand(parsed: &JetParsedArgs) -> JetOutcome<String, JetAbsent> {
+    jet_outcome_of(parsed.subcommand.clone())
 }
 
 impl JetShow for JetArgsSpec {

@@ -310,9 +310,11 @@ fn jet_std_xml_expanded_name(
 fn jet_std_xml_attribute(
     element: &jet_std::DataTree,
     name: &String,
-) -> Result<Option<String>, jet_std::XMLError> {
+) -> Result<JetOutcome<String, JetAbsent>, jet_std::XMLError> {
     let value = jet_xml_from_data_tree(element).map_err(jet_xml_shape_error)?;
-    crate::jet_xml_pull::lookup_attribute(&value, name).map_err(jet_xml_error)
+    crate::jet_xml_pull::lookup_attribute(&value, name)
+        .map(jet_outcome_of)
+        .map_err(jet_xml_error)
 }
 
 fn jet_std_xml_content(element: &jet_std::DataTree) -> Result<Vec<jet_std::DataTree>, jet_std::XMLError> {

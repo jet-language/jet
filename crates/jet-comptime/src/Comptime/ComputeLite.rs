@@ -19,6 +19,8 @@ trait JetDisplay {
 // small range carrier and panic adapter needed to include that core source.
 mod compute_range_semantics {
     use jet_foundation::StructuralDebug::jet_debug_range;
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../../../jet-codegen/src/Prelude/Core/RangeBounds.rs");
 }
 use compute_range_semantics::jet_range_bounds;
@@ -34,6 +36,8 @@ fn jet_panic(file: &str, line: u32, msg: &str) -> ! {
     jet_foundation::ice!(None, "{} (at {}:{})", msg, file, line)
 }
 
+#[allow(unused_imports)]
+pub use jet_foundation::Outcome::*;
 include!("../../../jet-codegen/src/Prelude/CoreLib/Top/Compute.rs");
 
 fn device_to_ct(device: JetComputeDevice) -> CtValue {

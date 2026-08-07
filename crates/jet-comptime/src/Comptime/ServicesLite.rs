@@ -16,10 +16,20 @@ trait JetDebug {
     fn jet_debug(&self) -> String;
 }
 
+#[allow(unused_imports)]
+pub use jet_foundation::Outcome::*;
 include!("../../../jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs");
+#[allow(unused_imports)]
+pub use jet_foundation::Outcome::*;
 include!("../../../jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs");
+#[allow(unused_imports)]
+pub use jet_foundation::Outcome::*;
 include!("../../../jet-codegen/src/Prelude/TaskGroup.rs");
+#[allow(unused_imports)]
+pub use jet_foundation::Outcome::*;
 include!("../../../jet-codegen/src/Prelude/CoreLib/Top/ServiceAuthority.rs");
+#[allow(unused_imports)]
+pub use jet_foundation::Outcome::*;
 include!("../../../jet-codegen/src/Prelude/CoreLib/Top/Services.rs");
 
 fn restart_to_ct(r: JetServiceRestart) -> CtValue {

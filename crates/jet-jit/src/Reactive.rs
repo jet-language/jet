@@ -12,6 +12,8 @@ use std::sync::Arc;
 /// Canonical reactive core (JetSignal / JetDerived / jet_reactive_effect*).
 #[allow(dead_code, unused_imports)]
 pub(crate) mod reactive_rt {
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!(concat!(env!("OUT_DIR"), "/reactive_rt.rs"));
 }
 

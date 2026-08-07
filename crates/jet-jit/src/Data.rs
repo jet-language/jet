@@ -29,6 +29,8 @@ mod data_plot_rt {
         }
     }
 
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs");
 }
 

@@ -19,6 +19,8 @@ mod runtime {
     trait JetShow {
         fn jet_show(&self) -> String;
     }
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/Args.rs");
 
     #[derive(Clone)]
@@ -91,7 +93,7 @@ mod runtime {
     }
 
     pub(super) fn option_val(parsed: &Parsed, name: &str) -> Option<String> {
-        jet_parsed_option(&parsed.0, &name.to_string())
+        jet_parsed_option(&parsed.0, &name.to_string()).ok()
     }
 }
 

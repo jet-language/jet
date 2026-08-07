@@ -10,6 +10,8 @@ mod native {
     trait JetShow {
         fn jet_show(&self) -> String;
     }
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/Args.rs");
 
     thread_local! {
@@ -398,7 +400,7 @@ mod native {
                     Ok(s) => s,
                     Err(e) => return Some(Err(e)),
                 };
-                Ok(match with_parsed(id, |p| jet_parsed_option(p, &name)).flatten() {
+                Ok(match with_parsed(id, |p| jet_parsed_option(p, &name)).and_then(|r| r.ok()) {
                     Some(s) => CtValue::Some(Box::new(CtValue::Str(s))),
                     None => CtValue::None(crate::AST::Type::String),
                 })
@@ -410,7 +412,7 @@ mod native {
                     Err(e) => return Some(Err(e)),
                 };
                 Ok(
-                    match with_parsed(id, |p| jet_parsed_option_int(p, &name)).flatten() {
+                    match with_parsed(id, |p| jet_parsed_option_int(p, &name)).and_then(|r| r.ok()) {
                         Some(n) => CtValue::Some(Box::new(CtValue::Int(n))),
                         None => CtValue::None(crate::AST::Type::Int),
                     },
@@ -423,7 +425,7 @@ mod native {
                     Err(e) => return Some(Err(e)),
                 };
                 Ok(
-                    match with_parsed(id, |p| jet_parsed_option_float(p, &name)).flatten() {
+                    match with_parsed(id, |p| jet_parsed_option_float(p, &name)).and_then(|r| r.ok()) {
                         Some(n) => {
                             CtValue::Some(Box::new(CtValue::Float(crate::AST::CtFloat::f64(n))))
                         }
@@ -443,7 +445,7 @@ mod native {
             "ParsedArgsSubcommand" => {
                 let id = parsed_id(recv)?;
                 Ok(
-                    match with_parsed(id, |p| jet_parsed_subcommand(p)).flatten() {
+                    match with_parsed(id, |p| jet_parsed_subcommand(p)).and_then(|r| r.ok()) {
                         Some(s) => CtValue::Some(Box::new(CtValue::Str(s))),
                         None => CtValue::None(crate::AST::Type::String),
                     },
@@ -456,7 +458,7 @@ mod native {
                     _ => return Some(Err(unsupported("ParsedArgs.positional expects Int", span))),
                 };
                 Ok(
-                    match with_parsed(id, |p| jet_parsed_positional(p, idx)).flatten() {
+                    match with_parsed(id, |p| jet_parsed_positional(p, idx)).and_then(|r| r.ok()) {
                         Some(s) => CtValue::Some(Box::new(CtValue::Str(s))),
                         None => CtValue::None(crate::AST::Type::String),
                     },

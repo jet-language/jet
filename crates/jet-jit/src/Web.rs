@@ -14,7 +14,11 @@ pub(crate) mod web_rt {
         jet_webapp_http_mux_new, jet_webapp_http_page, jet_webapp_http_reload,
         jet_webapp_http_serve,
     };
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/WebApp.rs");
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/DevServer.rs");
 }
 

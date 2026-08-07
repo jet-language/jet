@@ -24,6 +24,8 @@ trait user_Decode: Sized {
 }
 
 mod jet_std {
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/DataTree.rs");
 
     fn quote_json(s: &str) -> String {
@@ -192,6 +194,8 @@ impl user_Decode for f64 {
     }
 }
 
+#[allow(unused_imports)]
+pub use jet_foundation::Outcome::*;
 include!("../../../jet-codegen/src/Prelude/CoreLib/Top/Sync.rs");
 
 fn text_to_ct(doc: &JetSyncText) -> CtValue {

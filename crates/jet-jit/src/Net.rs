@@ -1,6 +1,8 @@
 //! Native JIT adapters for `core.url` / `core.mime` / `core.browser` (and later
 //! net/http/email/ws). Algorithms come from the same prelude sources AOT emits.
 
+#[allow(unused_imports)]
+pub use jet_foundation::Outcome::*;
 use super::Concurrency;
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_jit::{JITBuilder, JITModule};
@@ -45,7 +47,11 @@ mod runtime {
             Object(std::collections::BTreeMap<String, JSON>),
         }
 
+        #[allow(unused_imports)]
+        pub use jet_foundation::Outcome::*;
         include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/UrlMime.rs");
+        #[allow(unused_imports)]
+        pub use jet_foundation::Outcome::*;
         include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/JSONCodec.rs");
     }
 
@@ -53,12 +59,18 @@ mod runtime {
         None
     }
 
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/WsClient.rs");
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/Browser.rs");
 
     fn jet_sha256_raw(data: &[u8]) -> [u8; 32] {
         crate::Crypto::runtime::jet_crypto_email_sha256_impl(data)
     }
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/CoreLib/Email.rs");
 
     pub use jet_std::{JetMIME, JetURL};
@@ -375,7 +387,7 @@ extern "C" fn jet_jit_url_host(recv: i64) -> i64 {
     option_string(with_net(recv, |v| match v {
         NetValue::Url(u) => Some(u.host()),
         _ => None,
-    }).flatten())
+    }).and_then(|r| r.ok()))
 }
 
 extern "C" fn jet_jit_url_path(recv: i64) -> i64 {
@@ -412,7 +424,7 @@ extern "C" fn jet_jit_url_fragment(recv: i64) -> i64 {
     option_string(with_net(recv, |v| match v {
         NetValue::Url(u) => Some(u.fragment()),
         _ => None,
-    }).flatten())
+    }).and_then(|r| r.ok()))
 }
 
 extern "C" fn jet_jit_url_username(recv: i64) -> i64 {
@@ -460,7 +472,7 @@ extern "C" fn jet_jit_url_default_port(recv: i64) -> i64 {
         NetValue::Url(u) => Some(u.default_port()),
         _ => None,
     })
-    .flatten()
+    .and_then(|r| r.ok())
     {
         Some(v) => v.wrapping_add(1),
         None => 0,
@@ -496,7 +508,7 @@ extern "C" fn jet_jit_mime_param(recv: i64, name: i64) -> i64 {
     option_string(with_net(recv, |v| match v {
         NetValue::Mime(m) => Some(m.param(&name)),
         _ => None,
-    }).flatten())
+    }).and_then(|r| r.ok()))
 }
 
 extern "C" fn jet_jit_browser_profile(name: i64) -> i64 {
@@ -617,9 +629,9 @@ fn unpack_smtp_config(config: i64) -> Option<runtime::jet_email::SMTPConfig<Vec<
     let limits = unpack_limits(record_get_i64(config, 6));
     let dkim_opt = record_get_i64(config, 7);
     let dkim = if dkim_opt == 0 {
-        None
+        Err(JetAbsent)
     } else {
-        unpack_dkim(dkim_opt - 1)
+        jet_outcome_of(unpack_dkim(dkim_opt - 1))
     };
     Some(runtime::jet_email::SMTPConfig {
         host,
@@ -776,7 +788,7 @@ extern "C" fn jet_jit_email_smtp(config: i64) -> i64 {
             if let runtime::jet_email::SMTPAuth::Password { password, .. } = &mut config.auth {
                 crate::Crypto::runtime::jet_crypto_zeroize_email_impl(password);
             }
-            if let Some(dkim) = &mut config.dkim {
+            if let Ok(dkim) = &mut config.dkim {
                 crate::Crypto::runtime::jet_crypto_zeroize_email_impl(&mut dkim.private_key);
             }
             result_ok(push(NetValue::EmailMailer(mailer)) as u64)
@@ -785,7 +797,7 @@ extern "C" fn jet_jit_email_smtp(config: i64) -> i64 {
             if let runtime::jet_email::SMTPAuth::Password { password, .. } = &mut config.auth {
                 crate::Crypto::runtime::jet_crypto_zeroize_email_impl(password);
             }
-            if let Some(dkim) = &mut config.dkim {
+            if let Ok(dkim) = &mut config.dkim {
                 crate::Crypto::runtime::jet_crypto_zeroize_email_impl(&mut dkim.private_key);
             }
             email_err(err)

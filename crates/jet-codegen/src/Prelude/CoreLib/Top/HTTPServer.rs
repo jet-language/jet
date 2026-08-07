@@ -4044,8 +4044,8 @@ fn jet_http_srv_req_method(req: &JetHTTPRequest) -> String {
 fn jet_http_srv_req_path(req: &JetHTTPRequest) -> String {
     req.path.clone()
 }
-fn jet_http_srv_req_param(req: &JetHTTPRequest, name: &String) -> Option<String> {
-    req.params.get(name).cloned()
+fn jet_http_srv_req_param(req: &JetHTTPRequest, name: &String) -> JetOutcome<String, JetAbsent> {
+    jet_outcome_of(req.params.get(name).cloned())
 }
 fn jet_http_srv_req_body(req: &JetHTTPRequest) -> JetHTTPBody {
     req.body.clone()
@@ -4060,8 +4060,8 @@ fn jet_http_srv_req_trailers(req: &JetHTTPRequest) -> Result<JetHTTPHeaders, Jet
         }
     })
 }
-fn jet_http_srv_req_header(req: &JetHTTPRequest, name: &String) -> Option<String> {
-    req.headers.get(name).cloned()
+fn jet_http_srv_req_header(req: &JetHTTPRequest, name: &String) -> JetOutcome<String, JetAbsent> {
+    jet_outcome_of(req.headers.get(name).cloned())
 }
 
 fn jet_http_srv_req_body_len(req: &JetHTTPRequest) -> i64 {
@@ -4120,7 +4120,7 @@ fn jet_http_srv_static_file_range(
         return Err(format!("static file `{path}` could not be opened with held identity"));
     };
     let file_len = usize::try_from(metadata.len()).map_err(|_| format!("static file `{path}` is too large"))?;
-    let Some(range) = jet_http_srv_req_header(req, &"range".to_string()) else {
+    let Ok(range) = jet_http_srv_req_header(req, &"range".to_string()) else {
         let mut response = jet_http_srv_response(200, &String::new());
         response.body = JetHTTPBody::file(file, file_len);
         return Ok(jet_http_srv_response_header(response, &"content-type".to_string(), mime));

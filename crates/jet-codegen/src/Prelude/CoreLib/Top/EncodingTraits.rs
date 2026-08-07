@@ -431,8 +431,8 @@ fn jet_data_series_values<T: Clone>(series: &jet_std::DataSeries<T>) -> Vec<T> {
     series.values.clone()
 }
 
-fn jet_data_missing_count<T>(series: &jet_std::DataSeries<Option<T>>) -> i64 {
-    series.missing + series.values.iter().filter(|v| v.is_none()).count() as i64
+fn jet_data_missing_count<T>(series: &jet_std::DataSeries<JetOutcome<T, JetAbsent>>) -> i64 {
+    series.missing + series.values.iter().filter(|v| v.is_err()).count() as i64
 }
 
 fn jet_data_lazy<T: Clone>(table: &jet_std::DataTable<T>) -> jet_std::DataLazyFrame<T> {

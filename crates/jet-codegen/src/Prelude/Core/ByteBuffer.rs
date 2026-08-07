@@ -98,47 +98,47 @@ impl JetByteBuffer {
             self.pos = index as usize;
         }
     }
-    pub(crate) fn get(&self, index: i64) -> Option<u8> {
+    pub(crate) fn get(&self, index: i64) -> JetOutcome<u8, JetAbsent> {
         if index < 0 {
-            return None;
+            return Err(JetAbsent);
         }
-        self.bytes.get(index as usize).copied()
+        jet_outcome_of(self.bytes.get(index as usize).copied())
     }
-    pub(crate) fn first(&self) -> Option<u8> {
-        self.bytes.first().copied()
+    pub(crate) fn first(&self) -> JetOutcome<u8, JetAbsent> {
+        jet_outcome_of(self.bytes.first().copied())
     }
-    pub(crate) fn next(&mut self) -> Option<u8> {
+    pub(crate) fn next(&mut self) -> JetOutcome<u8, JetAbsent> {
         self.read_byte()
     }
-    pub(crate) fn read_byte(&mut self) -> Option<u8> {
+    pub(crate) fn read_byte(&mut self) -> JetOutcome<u8, JetAbsent> {
         if self.pos >= self.bytes.len() {
-            return None;
+            return Err(JetAbsent);
         }
         let b = self.bytes[self.pos];
         self.pos += 1;
-        Some(b)
+        Ok(b)
     }
-    pub(crate) fn read_bytes(&mut self, n: i64) -> Option<Vec<u8>> {
+    pub(crate) fn read_bytes(&mut self, n: i64) -> JetOutcome<Vec<u8>, JetAbsent> {
         if n < 0 {
-            return None;
+            return Err(JetAbsent);
         }
         let n = n as usize;
         if self.pos + n > self.bytes.len() {
-            return None;
+            return Err(JetAbsent);
         }
         let out = self.bytes[self.pos..self.pos + n].to_vec();
         self.pos += n;
-        Some(out)
+        Ok(out)
     }
-    pub(crate) fn read(&mut self) -> Option<Vec<u8>> {
+    pub(crate) fn read(&mut self) -> JetOutcome<Vec<u8>, JetAbsent> {
         if self.eof() {
-            return None;
+            return Err(JetAbsent);
         }
         let out = self.bytes[self.pos..].to_vec();
         self.pos = self.bytes.len();
-        Some(out)
+        Ok(out)
     }
-    pub(crate) fn read_string(&mut self, n: i64) -> Option<String> {
+    pub(crate) fn read_string(&mut self, n: i64) -> JetOutcome<String, JetAbsent> {
         self.read_bytes(n)
             .map(|b| String::from_utf8_lossy(&b).into_owned())
     }
@@ -220,15 +220,11 @@ impl JetByteBuffer {
     pub(crate) fn lines(&self) -> Vec<String> {
         self.as_text().lines().map(|s| s.to_string()).collect()
     }
-    pub(crate) fn index_of(&self, needle: &String) -> Option<i64> {
-        self.as_text()
-            .find(needle.as_str())
-            .map(|i| i as i64)
+    pub(crate) fn index_of(&self, needle: &String) -> JetOutcome<i64, JetAbsent> {
+        jet_outcome_of(self.as_text().find(needle.as_str()).map(|i| i as i64))
     }
-    pub(crate) fn last_index_of(&self, needle: &String) -> Option<i64> {
-        self.as_text()
-            .rfind(needle.as_str())
-            .map(|i| i as i64)
+    pub(crate) fn last_index_of(&self, needle: &String) -> JetOutcome<i64, JetAbsent> {
+        jet_outcome_of(self.as_text().rfind(needle.as_str()).map(|i| i as i64))
     }
     pub(crate) fn is_ascii(&self) -> bool {
         self.bytes.is_ascii()

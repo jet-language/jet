@@ -20,6 +20,8 @@ trait JetShow {
 }
 
 mod wire {
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/DBPluginWire.rs");
 }
 

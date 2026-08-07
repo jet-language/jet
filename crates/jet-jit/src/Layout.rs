@@ -11,6 +11,8 @@ use cranelift_module::{FuncId, Linkage, Module};
 /// Canonical Cassowary-style layout solver (extracted from Prelude/Layout.rs).
 #[allow(dead_code, unused_imports)]
 pub(crate) mod jet_layout {
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!(concat!(env!("OUT_DIR"), "/layout_rt.rs"));
 }
 

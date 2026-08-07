@@ -12,6 +12,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 
 mod progress_semantics {
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/Core/Progress.rs");
 }
 
@@ -52,6 +54,8 @@ mod io_line_stream {
         }
     }
 
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/IoLineStream.rs");
 
     pub(super) extern "C" fn jet_jit_io_sprint(text: i64) -> i64 {

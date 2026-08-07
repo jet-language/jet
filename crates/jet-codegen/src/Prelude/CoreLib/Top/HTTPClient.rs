@@ -263,8 +263,8 @@ fn jet_http_client_response_new(
 fn jet_http_client_response_body(resp: &JetHTTPResponse) -> JetHTTPBody {
     resp.body.clone()
 }
-fn jet_http_client_response_header(resp: &JetHTTPResponse, name: &String) -> Option<String> {
-    resp.headers.get(name).cloned()
+fn jet_http_client_response_header(resp: &JetHTTPResponse, name: &String) -> JetOutcome<String, JetAbsent> {
+    jet_outcome_of(resp.headers.get(name).cloned())
 }
 
 fn jet_http_response_cookies(resp: &JetHTTPResponse) -> Vec<String> {

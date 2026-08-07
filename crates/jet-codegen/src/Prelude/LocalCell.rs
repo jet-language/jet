@@ -151,15 +151,17 @@ pub trait JetCellOptionLike: Clone {
     fn store(&mut self, value: Self::Value);
 }
 
-impl<T: Clone> JetCellOptionLike for Option<T> {
+// D-FAIL-CARRIER1=A: a cell holds the one carrier, so an empty cell is a clean
+// absence rather than a second optional shape.
+impl<T: Clone> JetCellOptionLike for JetOutcome<T, JetAbsent> {
     type Value = T;
 
     fn value(&self) -> Option<&T> {
-        self.as_ref()
+        self.as_ref().ok()
     }
 
     fn store(&mut self, value: T) {
-        *self = Some(value);
+        *self = Ok(value);
     }
 }
 

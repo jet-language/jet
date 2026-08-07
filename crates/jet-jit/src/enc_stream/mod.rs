@@ -412,7 +412,11 @@ pub(crate) mod runtime {
         }
     }
 
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/EncodingHostileIo.rs");
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs");
 
     pub(crate) fn enc_json_writer(

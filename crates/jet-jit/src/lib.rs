@@ -45,6 +45,8 @@ mod Sketch;
 mod Solver;
 mod Text;
 mod testing_shared {
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/TestingShared.rs");
 }
 mod Time;

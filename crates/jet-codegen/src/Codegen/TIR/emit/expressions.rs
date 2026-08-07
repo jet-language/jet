@@ -1217,7 +1217,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TBuiltinOp::Replace => format!("({}).replace(&{}, &{})", recv, a(0), a(1)),
                 TBuiltinOp::PadStart => format!("{}jet_text_pad_start(&({}), {}, &({}))", cx.root_prefix, recv, a(0), a(1)),
                 TBuiltinOp::PadEnd => format!("{}jet_text_pad_end(&({}), {}, &({}))", cx.root_prefix, recv, a(0), a(1)),
-                TBuiltinOp::StringIndexOf => format!("{}jet_unicode_index_of(&({}), &({}))", cx.root_prefix, recv, a(0)),
+                TBuiltinOp::StringIndexOf => format!("{0}jet_outcome_of({0}jet_unicode_index_of(&({1}), &({2})))", cx.root_prefix, recv, a(0)),
                 TBuiltinOp::StringCount => format!("{}jet_unicode_count(&({}), &({}))", cx.root_prefix, recv, a(0)),
                 TBuiltinOp::StringIsAlphabetic => format!("{}jet_text_is_alphabetic(&({}))", cx.root_prefix, recv),
                 TBuiltinOp::StringIsNumeric => format!("{}jet_text_is_numeric(&({}))", cx.root_prefix, recv),
@@ -1226,7 +1226,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 TBuiltinOp::StringToTitle => format!("{}jet_text_title(&({}))", cx.root_prefix, recv),
                 TBuiltinOp::StringMethod { method } => match method.as_str() {
                     "last_index_of" => format!(
-                        "{}jet_unicode_last_index_of(&({}), &({}))",
+                        "{0}jet_outcome_of({0}jet_unicode_last_index_of(&({1}), &({2})))",
                         cx.root_prefix,
                         recv,
                         a(0)
@@ -1266,7 +1266,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     ),
                 },
                 TBuiltinOp::StringSplitOnce { tuple_struct } => format!(
-                    "{}jet_unicode_split_once(&({}), &({})).map(|(__before, __after)| {} {{ user_before: __before, user_after: __after }})",
+                    "{0}jet_outcome_of({0}jet_unicode_split_once(&({1}), &({2})).map(|(__before, __after)| {3} {{ user_before: __before, user_after: __after }}))",
                     cx.root_prefix, recv, a(0), tuple_struct
                 ),
                 TBuiltinOp::ToUpper => format!("jet_unicode_upper(&({}))", recv),
@@ -1835,7 +1835,15 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         } => {
             let ls = emit_tir_expr(lhs, cx);
             let rs = emit_tir_expr(rhs, cx);
-            format!("({}).{}_{}({})", ls, prefix, op, rs)
+            let call = format!("({}).{}_{}({})", ls, prefix, op, rs);
+            // D-FAIL-CARRIER1=A: `checked_*` answers Rust's plumbing `Option`;
+            // `wrapping_*`/`saturating_*` answer the value itself. Only the
+            // first is a `T?`, so only the first becomes the carrier.
+            if matches!(e.ty, Type::Option(_)) {
+                format!("{}jet_outcome_of({call})", cx.root_prefix)
+            } else {
+                call
+            }
         }
         // c109 Phase 10: a core/stdlib module call. Reproduces `emit_core_call`
         // (Source/Codegen/Expression.rs) byte-for-byte. `module`/`method` were

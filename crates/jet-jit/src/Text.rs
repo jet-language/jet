@@ -113,11 +113,19 @@ pub(crate) mod text_rt {
         }
 
         // D-REGEXENGINE1: canonical regex engine from JetStd/Open.rs (build.rs extract).
+        #[allow(unused_imports)]
+        pub use jet_foundation::Outcome::*;
         include!(concat!(env!("OUT_DIR"), "/regex_rt.rs"));
     }
 
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/UnicodeTables.rs");
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/Core/UnicodeString.rs");
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/Text.rs");
 
     pub(crate) fn lower(s: &str) -> String {
@@ -530,7 +538,7 @@ extern "C" fn jet_jit_regex_is_match(pat: i64, text: i64) -> i8 {
 extern "C" fn jet_jit_regex_find(pat: i64, text: i64) -> i64 {
     let t = clone_string(text);
     clone_compiled_regex(pat)
-        .map(|regex| option_string_bits(regex.find(&t)))
+        .map(|regex| option_string_bits(regex.find(&t).ok()))
         .unwrap_or_default()
 }
 
@@ -559,7 +567,7 @@ extern "C" fn jet_jit_regex_matches(pat: i64, text: i64) -> i64 {
 extern "C" fn jet_jit_regex_match(pat: i64, text: i64) -> i64 {
     let t = clone_string(text);
     clone_compiled_regex(pat)
-        .and_then(|regex| regex.match_value(&t))
+        .and_then(|regex| regex.match_value(&t).ok())
         .map(|found| push_regex(RegexValue::Match(found)).wrapping_add(1))
         .unwrap_or_default()
 }
@@ -623,10 +631,10 @@ extern "C" fn jet_jit_regex_method(recv: i64, method: i64, arg0: i64, arg1: i64)
     with_regex(recv, |v| match (v, method.as_str()) {
         (RegexValue::Regex(rx), "is_match") => i64::from(rx.is_match(&clone_string(arg0))),
         (RegexValue::Regex(rx), "match") => match rx.match_value(&clone_string(arg0)) {
-            None => 0,
-            Some(m) => push_regex(RegexValue::Match(m)).wrapping_add(1),
+            Err(JetAbsent) => 0,
+            Ok(m) => push_regex(RegexValue::Match(m)).wrapping_add(1),
         },
-        (RegexValue::Regex(rx), "find") => option_string_bits(rx.find(&clone_string(arg0))),
+        (RegexValue::Regex(rx), "find") => option_string_bits(rx.find(&clone_string(arg0)).ok()),
         (RegexValue::Regex(rx), "find_all") => list_strings(rx.find_all(&clone_string(arg0))),
         (RegexValue::Regex(rx), "matches") => {
             let list = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_empty_list());
@@ -660,8 +668,8 @@ extern "C" fn jet_jit_regex_method(recv: i64, method: i64, arg0: i64, arg1: i64)
         }
         (RegexValue::Regex(rx), "names") => list_strings(rx.names()),
         (RegexValue::Regex(rx), "count") => rx.count(&clone_string(arg0)),
-        (RegexValue::Match(m), "group") => option_string_bits(m.group(arg0)),
-        (RegexValue::Match(m), "name") => option_string_bits(m.name(&clone_string(arg0))),
+        (RegexValue::Match(m), "group") => option_string_bits(m.group(arg0).ok()),
+        (RegexValue::Match(m), "name") => option_string_bits(m.name(&clone_string(arg0)).ok()),
         (RegexValue::Match(m), "start") => m.start(),
         (RegexValue::Match(m), "end") => m.end(),
         (RegexValue::Match(m), "named_captures") => {

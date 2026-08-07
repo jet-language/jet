@@ -6,6 +6,8 @@ use crate::Diagnostics::{Diagnostic, Span};
 #[allow(dead_code)]
 mod range_semantics {
     use jet_foundation::StructuralDebug::jet_debug_range;
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../../../jet-codegen/src/Prelude/Core/RangeBounds.rs");
 }
 use crate::AST::{BinOp, CtFloat, Type};
