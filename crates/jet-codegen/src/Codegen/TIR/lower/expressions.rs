@@ -518,6 +518,22 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 kind: TExprKind::Local(env.local_of(name)),
             }
         }
+        // Fragment eval must win over the sema value stamp: a baked CtLit is a
+        // value, not a place, so a marked receiver could never advance
+        // (`$r.read_u8()` folded the same byte forever). Mirror the Ident
+        // consts branch: scalars inline, everything else is a ConstRef place
+        // that the evaluator reads and writes back through the comptime scope.
+        Expr::ComptimeName { name, .. }
+            if super::is_eval_fragment() && cx.const_values.contains_key(name) =>
+        {
+            let value = cx.const_values.get(name);
+            let ty = value.map(crate::AST::CtValue::jet_type).unwrap_or(Type::Int);
+            TExpr {
+                kind: lower_comptime_scalar(value, Some(&ty))
+                    .unwrap_or_else(|| TExprKind::ConstRef(name.clone())),
+                ty,
+            }
+        }
         Expr::ComptimeName {
             value: Some(value), ..
         } => TExpr {

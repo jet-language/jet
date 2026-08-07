@@ -1969,6 +1969,12 @@ impl<'a> Checker<'a> {
                         let ty = self
                             .lookup(name)
                             .map(|info| info.ty.clone())
+                            // A module-level marked const types like any other
+                            // module const: from the registered signature, not
+                            // the folded value (which loses generic arguments —
+                            // `Loadable.idle()` would come back a bare
+                            // `Loadable` and lose its methods).
+                            .or_else(|| self.consts.get(name).cloned())
                             .unwrap_or_else(|| v.jet_type());
                         *value = Some(v);
                         return Some(ty);

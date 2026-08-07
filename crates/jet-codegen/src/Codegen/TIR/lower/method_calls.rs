@@ -734,22 +734,27 @@ pub(crate) fn lower_method_call(
     // the two opaque regex receiver types from that canonical value instead
     // of misclassifying `binding.method()` as a static call.
     let fragment_recv_type = if recv_type.is_none() && super::is_eval_fragment() {
-        match receiver {
-            Expr::Ident(name, _) => match cx.const_values.get(name) {
-                Some(crate::Comptime::CtValue::Struct { type_name, .. })
-                    if type_name == "__JetRegex" =>
-                {
-                    Some(Syntax::TYPE_REGEX.to_string())
-                }
-                Some(crate::Comptime::CtValue::Struct { type_name, .. })
-                    if type_name == "Match" =>
-                {
-                    Some("Match".to_string())
-                }
-                _ => None,
-            },
+        let recv_name = match receiver {
+            Expr::Ident(name, _) => Some(name),
+            // D-META-STAGE1=B: a marked name is an ordinary name for dispatch.
+            Expr::ComptimeName { name, .. } => Some(name),
             _ => None,
-        }
+        };
+        recv_name
+            .and_then(|name| cx.const_values.get(name))
+            .and_then(|value| match value {
+                crate::Comptime::CtValue::Struct { type_name, .. } => match type_name.as_str() {
+                    "__JetRegex" => Some(Syntax::TYPE_REGEX.to_string()),
+                    "Match" => Some("Match".to_string()),
+                    // Any handle the shared op table knows (Reader, Cursor,
+                    // FileReader, …) recovers its receiver type the same way.
+                    other if handle_method_op(other, method, args.len()).is_some() => {
+                        Some(other.to_string())
+                    }
+                    _ => None,
+                },
+                _ => None,
+            })
     } else {
         None
     };

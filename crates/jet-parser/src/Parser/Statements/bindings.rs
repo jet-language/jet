@@ -108,13 +108,15 @@ impl<'a> Parser<'a> {
             markers: Vec::new(),
                 reactive_upgrade: false,
             meta: None,
+            // D-META-STAGE1=B: the mark rides the name. The lexer hands `$x` as
+            // one Ident token, so the ordinary path must read stage from it.
+            is_comptime: Syntax::is_comptime_name(&name),
             name,
             name_span,
             pattern: None,
             ty: None,
             ty_span: None,
             init,
-            is_comptime: false,
             ct: None,
             uninit: false,
             arena_view: false,
