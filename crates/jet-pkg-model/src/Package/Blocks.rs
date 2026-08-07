@@ -975,6 +975,22 @@ const MANIFEST_BLOCKS: &[&str] = &[
     "workspace",
 ];
 
+/// D-CONF-NAME1: the bare top-level identity/metadata fields — unlike
+/// `MANIFEST_BLOCKS`, these have no `{ … }` body to balance, so masking them
+/// means blanking to the next top-level separator instead.
+const MANIFEST_SCALAR_FIELDS: &[&str] = &[
+    Syntax::MANIFEST_FIELD_NAME,
+    Syntax::MANIFEST_FIELD_VERSION,
+    "jet",
+    "source",
+    "edition",
+    "description",
+    "license",
+    "repository",
+    "target",
+    "runtime",
+];
+
 fn mask_manifest_blocks(text: &str, masked: &mut [u8]) {
     let bytes = text.as_bytes();
     let mut i = 0;
@@ -1014,6 +1030,11 @@ fn mask_manifest_blocks(text: &str, masked: &mut [u8]) {
                     i = end;
                     continue;
                 }
+            }
+            if let Some((start, end)) = manifest_scalar_start(bytes, i) {
+                blank_range(masked, start, end);
+                i = end;
+                continue;
             }
         }
         if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
@@ -1064,6 +1085,75 @@ fn manifest_block_start(bytes: &[u8], at: usize) -> Option<(usize, usize)> {
         if bytes.get(cursor) == Some(&b'{') {
             return Some((at, cursor));
         }
+    }
+    None
+}
+
+/// Like `manifest_block_start`, but for a bare `field: value` entry with no
+/// `{ … }` body — the end is the next top-level separator (`,`/`\n`) or EOF.
+fn manifest_scalar_start(bytes: &[u8], at: usize) -> Option<(usize, usize)> {
+    for key in MANIFEST_SCALAR_FIELDS {
+        let Some(end) = at.checked_add(key.len()) else { continue };
+        if bytes.get(at..end) != Some(key.as_bytes()) {
+            continue;
+        }
+        let before_ok = at == 0 || !is_ident_byte(bytes[at - 1]);
+        let after_ok = end == bytes.len() || !is_ident_byte(bytes[end]);
+        if !before_ok || !after_ok {
+            continue;
+        }
+        let mut cursor = end;
+        while bytes.get(cursor).is_some_and(u8::is_ascii_whitespace) {
+            cursor += 1;
+        }
+        if bytes.get(cursor) != Some(&b':') {
+            continue;
+        }
+        // A colon that starts a *block* (`{`/`.{`) belongs to
+        // `manifest_block_start` instead — never true for these field names
+        // today, but stay out of its way if that ever changes.
+        let mut value_start = cursor + 1;
+        while bytes.get(value_start).is_some_and(u8::is_ascii_whitespace) {
+            value_start += 1;
+        }
+        let peek = bytes.get(value_start).copied();
+        let after_dot = (peek == Some(b'.')).then(|| {
+            let mut c = value_start + 1;
+            while bytes.get(c).is_some_and(u8::is_ascii_whitespace) {
+                c += 1;
+            }
+            bytes.get(c).copied()
+        });
+        if peek == Some(b'{') || after_dot == Some(Some(b'{')) {
+            continue;
+        }
+        let mut i = value_start;
+        let mut depth = 0i32;
+        let mut quoted = false;
+        let mut escaped = false;
+        while i < bytes.len() {
+            let byte = bytes[i];
+            if quoted {
+                if escaped {
+                    escaped = false;
+                } else if byte == b'\\' {
+                    escaped = true;
+                } else if byte == b'"' {
+                    quoted = false;
+                }
+                i += 1;
+                continue;
+            }
+            match byte {
+                b'"' => quoted = true,
+                b'{' | b'[' | b'(' => depth += 1,
+                b'}' | b']' | b')' => depth -= 1,
+                b',' | b'\n' if depth == 0 => return Some((at, i)),
+                _ => {}
+            }
+            i += 1;
+        }
+        return Some((at, bytes.len()));
     }
     None
 }
