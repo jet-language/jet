@@ -255,8 +255,8 @@ enum Light {
 
     fn code(self) => Int {
         if self == {
-            Red -> { return 1 }
-            Green -> { return 2 }
+            .Red -> { return 1 }
+            .Green -> { return 2 }
         }
     }
 }
@@ -372,9 +372,9 @@ enum Sign {
     }
     fn to_num(self) => Int {
         if self == {
-            Pos -> { return 1 }
-            Neg -> { return 0 }
-            Zero -> { return 0 }
+            .Pos -> { return 1 }
+            .Neg -> { return 0 }
+            .Zero -> { return 0 }
         }
     }
 }
@@ -475,7 +475,7 @@ fn checked(x: Int) => Int ? Error {
     if x == 0 {
         return Err(\"zero\")
     }
-    return Ok((100 / x))
+    return Ok((100 /% x))
 }
 fn safe(x: Int) => Int {
     return checked(x) ?? return -1
@@ -538,8 +538,7 @@ fn run() {
     p :: Profile.{ handle: Val(\"jay\") }
     acct :: Account.{ profile: p }
     print(handle_of(Val(acct)) ?? \"none\")
-missing :: (Account?).{ None }
-    print(handle_of(missing) ?? \"none\")
+    print(handle_of(None) ?? \"none\")
 }
 ";
     let (code, stdout) = build_and_run("tir_optchain", src);
@@ -825,9 +824,12 @@ fn list_surface_forced_interpreter() {
         } => {
             assert_eq!(exit_code, 0);
             assert_eq!(stderr, "");
+            // Matches examples/features/expected/collections/list_surface.out
+            // (the full #1477 List surface — this assertion was stale, left
+            // over from a smaller version of the fixture).
             assert_eq!(
                 stdout,
-                "1\n1\n2\n4\n0\n0\n[a, b]\n[1, 2]\n"
+                "true\ntrue\n[2, 3, 4]\ntrue\n2\n[1, 2, 3, 4, 5, 6]\n[2, 4]\n[1, 3, 5]\n5\n1\n5\n1\n1\n[9, 2, 9]\n"
             );
         }
         RunOutcome::Problems(diagnostics) => {
@@ -897,9 +899,12 @@ fn fallible_when_match() {
         return;
     }
     let src = "\
-fn classify(x: Int) => Int ? Error {
+enum ClassifyError {
+    Bad(String)
+}
+fn classify(x: Int) => Int ? ClassifyError {
     if x == 0 {
-        return Err(\"bad\")
+        return Err(ClassifyError.Bad(\"bad\"))
     }
     return Ok((x + 10))
 }
@@ -924,5 +929,5 @@ fn run() {
 ";
     let (code, stdout) = build_and_run("tir_fallible_when", src);
     assert_eq!(code, 0);
-    assert_eq!(stdout, "15\nbad\n");
+    assert_eq!(stdout, "15\nBad(\"bad\")\n");
 }

@@ -316,12 +316,7 @@ fn version_banner() {
 fn edition_too_new() {
     // A real pkg.jet asking for a future edition triggers E2001 through the
     // manifest loader path. We render the diagnostic the way the CLI would.
-    let raw = r#"payload: {
-    name: "wordstats",
-    version: "0.1.0",
-    edition: "2099",
-}
-"#;
+    let raw = "name: \"wordstats\"\nversion: \"0.1.0\"\nedition: \"2099\"\n";
     let path = std::path::Path::new("pkg.jet");
     let mf = Manifest::parse(path, raw).expect("manifest should parse");
     let err = Manifest::check_edition_support(&mf, "pkg.jet")
@@ -334,7 +329,7 @@ fn edition_too_new() {
 #[test]
 fn supported_edition_is_accepted() {
     let raw = format!(
-        "payload: {{ name: \"x\", version: \"0.1.0\", edition: \"{}\" }}\n",
+        "name: \"x\"\nversion: \"0.1.0\"\nedition: \"{}\"\n",
         Manifest::latest_edition()
     );
     let mf = Manifest::parse(std::path::Path::new("pkg.jet"), &raw).unwrap();
@@ -344,7 +339,7 @@ fn supported_edition_is_accepted() {
 #[test]
 fn no_edition_field_is_accepted() {
     // A manifest with no edition tracks the toolchain's newest stable edition.
-    let raw = "payload: { name: \"x\", version: \"0.1.0\" }\n";
+    let raw = "name: \"x\"\nversion: \"0.1.0\"\n";
     let mf = Manifest::parse(std::path::Path::new("pkg.jet"), raw).unwrap();
     assert_eq!(mf.package.edition, None);
     assert!(Manifest::check_edition_support(&mf, "pkg.jet").is_ok());

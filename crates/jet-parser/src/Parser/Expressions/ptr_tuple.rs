@@ -210,18 +210,22 @@ impl<'a> Parser<'a> {
         }
     
         pub(super) fn parse_paren_primary(&mut self, _allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
-            let mut opens = vec![self.bump().span];
+            let open = self.bump().span;
             if self.looks_like_named_tuple(true) {
-                let open = opens[0];
                 return self.parse_tuple_lit(open);
             }
             if self.after_lparen_is_positional_tuple() {
-                let open = opens[0];
                 self.emit_positional_tuple_error(open);
                 self.sync_to_rparen();
                 return Ok(Expr::Int(0, open, None, None));
             }
+            let pos_after_first_open = self.pos;
 
+            // Collect every immediately-consecutive `(` that opens a bare nested
+            // group (not a lambda param list or named tuple) so purely redundant
+            // nesting (`((((expr))))`) can fold into one `expr()` call below and
+            // cost one nesting level, not N (#1319).
+            let mut opens = vec![open];
             while matches!(self.peek().kind, TokKind::LParen)
                 && !self.after_lparen_is_lambda()
                 && !self.looks_like_named_tuple(false)
@@ -235,21 +239,56 @@ impl<'a> Parser<'a> {
                 opens.push(candidate);
             }
 
-            let mut inner = self.expr()?;
-            for open in opens.into_iter().rev() {
-                if matches!(self.peek().kind, TokKind::Comma) {
-                    self.emit_positional_tuple_error(open);
-                    self.sync_to_rparen();
-                    return Ok(Expr::Int(0, open, None, None));
+            if opens.len() > 1 {
+                let diags_before = self.diags.len();
+                if let Some(folded) = self.try_fold_paren_run(&opens) {
+                    return Ok(folded);
                 }
-                self.expect(TokKind::RParen, "to close this `(`")?;
+                // Not pure nesting after all — e.g. `((a + b) + c)`, where the
+                // inner `(a + b)` closes but the group keeps growing before the
+                // outer `)`. Discard whatever the failed attempt parsed/recorded
+                // and fall through to ordinary one-level-at-a-time recursion,
+                // which handles this correctly (still bounded by
+                // MAX_SOURCE_NESTING via `expr()`'s `with_nesting`).
+                self.diags.truncate(diags_before);
+                self.pos = pos_after_first_open;
+            }
+
+            let inner = self.expr()?;
+            if matches!(self.peek().kind, TokKind::Comma) {
+                self.emit_positional_tuple_error(open);
+                self.sync_to_rparen();
+                return Ok(Expr::Int(0, open, None, None));
+            }
+            self.expect(TokKind::RParen, "to close this `(`")?;
+            let close_span = self.toks[self.pos - 1].span;
+            let span = Span::new(open.start, close_span.end);
+            // D-FMTPARENS1=A: preserve author parens as a distinct AST node so
+            // the formatter can always re-emit them, even when redundant.
+            Ok(Expr::Paren(Box::new(inner), span))
+        }
+
+        /// Fast path for `opens.len()` immediately-consecutive `(` tokens: parse
+        /// exactly one inner expression, then require that many `)` back to
+        /// back. Returns `None` the moment a close doesn't immediately follow —
+        /// the caller rewinds `self.pos` and falls back to naive recursion.
+        fn try_fold_paren_run(&mut self, opens: &[Span]) -> Option<Expr> {
+            let mut inner = self.expr().ok()?;
+            if matches!(self.peek().kind, TokKind::Comma) {
+                return None;
+            }
+            for &open in opens.iter().rev() {
+                if !matches!(self.peek().kind, TokKind::RParen) {
+                    return None;
+                }
+                self.bump();
                 let close_span = self.toks[self.pos - 1].span;
                 let span = Span::new(open.start, close_span.end);
                 // D-FMTPARENS1=A: preserve author parens as distinct AST nodes so
                 // the formatter can always re-emit them, even when redundant.
                 inner = Expr::Paren(Box::new(inner), span);
             }
-            Ok(inner)
+            Some(inner)
         }
     
         /// True when `(` starts `( expr , … )` without member names — rejected (S73).

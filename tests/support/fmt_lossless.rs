@@ -11,15 +11,11 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/E2714_derive_old_for.jet",
     "tests/ui/assign_in_condition.jet",
     "tests/ui/auto_derive_invalid_sign.jet",
-    "tests/ui/auto_derive_policy_invalid/pkg.jet",
     "tests/ui/bad_escape.jet",
     "tests/ui/binpat_bad_width.jet",
     "tests/ui/binpat_multibyte_needs_endian.jet",
     "tests/ui/binpat_rest_not_final.jet",
     "tests/ui/binpat_take_pattern_bad_width.jet",
-    "tests/ui/build_entry_conflict/pkg.jet",
-    "tests/ui/cbor_encode_deprecated/pkg.jet",
-    "tests/ui/cbor_encode_removed/pkg.jet",
     "tests/ui/cffi_e3206_reserved_segment.jet",
     "tests/ui/cffi_e3207_bindgen_outside_cache.jet",
     "tests/ui/cffi_retired_at_extern.jet",
@@ -71,7 +67,6 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/interp_empty.jet",
     "tests/ui/interp_unclosed.jet",
     "tests/ui/label_not_on_loop.jet",
-    "tests/ui/layer_ceiling_exceeded/pkg.jet",
     "tests/ui/layout_columnar_partial.jet",
     "tests/ui/layout_columnar_prefix_reserved.jet",
     "tests/ui/layout_keyword_retired.jet",
@@ -80,20 +75,6 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/loop_counter_form_retired.jet",
     "tests/ui/loop_header_semicolon_retired.jet",
     "tests/ui/loop_label_prefix_old_form.jet",
-    "tests/ui/manifest_bad_layer/pkg.jet",
-    "tests/ui/manifest_bad_package_kind/pkg.jet",
-    "tests/ui/manifest_bad_target_field/pkg.jet",
-    "tests/ui/manifest_lock_stale/pkg.jet",
-    "tests/ui/manifest_malformed_package_entry/pkg.jet",
-    "tests/ui/manifest_package_ambiguous/pkg.jet",
-    "tests/ui/manifest_package_not_found/pkg.jet",
-    "tests/ui/manifest_provider_target_flip/pkg.jet",
-    "tests/ui/manifest_reserved_section/pkg.jet",
-    "tests/ui/manifest_syntax_error/pkg.jet",
-    "tests/ui/manifest_toolchain/pkg.jet",
-    "tests/ui/manifest_version_conflict/lib_v1/pkg.jet",
-    "tests/ui/manifest_version_conflict/lib_v2/pkg.jet",
-    "tests/ui/manifest_version_conflict/pkg.jet",
     "tests/ui/marker_argument_shape.jet",
     "tests/ui/marker_empty_arguments.jet",
     "tests/ui/marker_experimental_at.jet",
@@ -197,13 +178,10 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/unknown_char.jet",
     "tests/ui/unsafe_extern_rust_teaching.jet",
     "tests/ui/unsafe_fn_missing_reason.jet",
-    "tests/ui/unsafe_forbidden/pkg.jet",
     "tests/ui/unsafe_missing_reason.jet",
-    "tests/ui/unsafe_per_site/pkg.jet",
     "tests/ui/unterminated_block_comment.jet",
     "tests/ui/unterminated_string.jet",
     "tests/ui/unterminated_triple_string.jet",
-    "tests/ui/use_unrealized_library/pkg.jet",
     "tests/ui/value_dispatch_missing_else.jet",
     "tests/ui/variadic_not_last.jet",
     "tests/ui/web_target_web_on_module.jet",
@@ -1276,7 +1254,9 @@ fn run_supported_source_corpus() {
         let name = path.file_name().and_then(|name| name.to_str());
         if matches!(
             name,
-            Some(jet::Syntax::PAYLOAD_FILE) | Some(jet::Syntax::WORKSPACE_FILE)
+            Some(jet::Syntax::PAYLOAD_FILE)
+                | Some(jet::Syntax::WORKSPACE_FILE)
+                | Some(jet::Syntax::PACKAGE_FILE)
         ) {
             example_configs += 1;
             continue;
@@ -1307,8 +1287,23 @@ fn run_supported_source_corpus() {
     }
     let mut ui_parse_valid = 0usize;
     let mut ui_parse_invalid = 0usize;
+    let mut ui_configs = 0usize;
     let mut actual_invalid = Vec::new();
+    let mut mismatches = Vec::new();
     for path in &ui_files {
+        let name = path.file_name().and_then(|name| name.to_str());
+        if matches!(
+            name,
+            Some(jet::Syntax::PAYLOAD_FILE)
+                | Some(jet::Syntax::WORKSPACE_FILE)
+                | Some(jet::Syntax::PACKAGE_FILE)
+        ) {
+            // Package/workspace manifests are config, never program source — the
+            // same rule the examples loop above applies. They are not pinned in
+            // UI_PARSE_INVALID; a new manifest fixture needs no manifest entry.
+            ui_configs += 1;
+            continue;
+        }
         let src = fs::read_to_string(path).unwrap();
         let parsed = jet::Compiler::parse_source(&src);
         let relative = path
@@ -1318,11 +1313,12 @@ fn run_supported_source_corpus() {
             .replace('\\', "/");
         let expected_invalid = UI_PARSE_INVALID.binary_search(&relative.as_str()).is_ok();
         let actual_is_invalid = !parsed.diagnostics.is_empty();
-        assert_eq!(
-            actual_is_invalid,
-            expected_invalid,
-            "UI parser-validity changed for {relative}; update the pinned manifest only after review"
-        );
+        if actual_is_invalid != expected_invalid {
+            mismatches.push(format!(
+                "UI parser-validity changed for {relative}; update the pinned manifest only after review (expected_invalid={expected_invalid}, actual_is_invalid={actual_is_invalid})"
+            ));
+            continue;
+        }
         if expected_invalid {
             actual_invalid.push(relative);
             ui_parse_invalid += 1;
@@ -1346,6 +1342,12 @@ fn run_supported_source_corpus() {
             ui_parse_valid += 1;
         }
     }
+    assert!(
+        mismatches.is_empty(),
+        "UI corpus parser-validity mismatches ({} found):\n{}",
+        mismatches.len(),
+        mismatches.join("\n")
+    );
     assert_eq!(
         example_files.len(),
         example_programs + example_configs,
@@ -1353,7 +1355,7 @@ fn run_supported_source_corpus() {
     );
     assert_eq!(
         ui_files.len(),
-        ui_parse_valid + ui_parse_invalid,
+        ui_parse_valid + ui_parse_invalid + ui_configs,
         "every UI .jet fixture must be classified by its actual formatter parse result"
     );
     assert!(
@@ -1367,7 +1369,8 @@ fn run_supported_source_corpus() {
     );
     eprintln!(
         "formatter corpus: {example_programs} example programs, {example_configs} configs, \
-         {ui_parse_valid} parse-valid UI fixtures, {ui_parse_invalid} parse-invalid UI fixtures"
+         {ui_parse_valid} parse-valid UI fixtures, {ui_parse_invalid} parse-invalid UI fixtures, \
+         {ui_configs} UI manifest configs"
     );
 }
 
