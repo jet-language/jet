@@ -1369,11 +1369,13 @@ pub(super) fn canvas_authority_context(path: &Path) -> CanvasAuthority {
     if let Some(root) = jet_driver::Loader::find_manifest_root(dir) {
         let manifest_path = root.join(jet_driver::Syntax::PAYLOAD_FILE);
         if let Ok(raw) = fs::read_to_string(&manifest_path) {
-            if let Ok(manifest) = jet_driver::PackageManifest::parse(&raw) {
+            if let Ok(manifest) =
+                jet_driver::Package::PackageFacts::parse(&raw, manifest_path.display().to_string())
+            {
                 return CanvasAuthority {
                     grant: "canvas.source_edit:package".to_string(),
-                    package_id: manifest.package.name,
-                    version: manifest.package.version,
+                    package_id: manifest.name,
+                    version: manifest.version.unwrap_or_else(|| "unversioned".to_string()),
                     touched_file: rel_path(&root, path),
                     project_root: root,
                 };

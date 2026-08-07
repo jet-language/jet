@@ -127,18 +127,15 @@ impl PkgResolution {
 /// "run `jetpack build`" (E0983), never a silent network fetch.
 fn collect_pkg_resolution(raw: &str) -> PkgResolution {
     let mut declared_deps = HashSet::new();
-    if let Ok(pm) = crate::PackageManifest::parse(raw) {
-        for dep in &pm.deps {
+    if let Ok(facts) = crate::Package::PackageFacts::parse(raw, "package.jet") {
+        for (name, source) in &facts.deps {
             // S59/D-CFFI2: a `c@…` native-library dep is a link dep, not a Jet
             // package — it must not shadow `use <pkg>` resolution (e.g. a dep
             // named `c`). Skip it here; CFFI.rs reads it for link flags.
-            if matches!(
-                dep.source,
-                crate::PackageManifest::DepSource::CLib { .. }
-            ) {
+            if matches!(source, crate::Package::DepSource::CLib { .. }) {
                 continue;
             }
-            declared_deps.insert(dep.name.clone());
+            declared_deps.insert(name.clone());
         }
     }
 
@@ -326,7 +323,7 @@ fn load_entry_with_overlays_mode_with_sink(
         package_auto_derive,
     ) = if let Some(manifest_dir) = manifest_root
     {
-        if crate::PackageManifest::PackManifest::has_both_manifests(&manifest_dir) {
+        if Manifest::has_both_manifests(&manifest_dir) {
             return Err(vec![Diagnostic::error(
                 "E1206",
                 "the package has two manifest roots".to_string(),
@@ -346,9 +343,9 @@ fn load_entry_with_overlays_mode_with_sink(
         // Found a Package root — validate it and collect dep source paths.
         let pack_path = manifest_path(&manifest_dir).expect("manifest root has a manifest");
         let raw = fs::read_to_string(&pack_path).unwrap_or_default();
-        let package_manifest = match crate::PackageManifest::parse(&raw) {
-            Ok(manifest) => manifest,
-            Err(crate::PackageManifest::ManifestError::BadMemoryPolicy { detail }) => {
+        let package_manifest = match crate::Package::PackageFacts::parse(&raw, pack_path.display().to_string()) {
+            Ok(facts) => facts,
+            Err(crate::Package::PackageParseError::BadMemoryPolicy { detail }) => {
                 return Err(record_loader_error(
                     &mut sink,
                     LoaderError::at(
@@ -358,13 +355,13 @@ fn load_entry_with_overlays_mode_with_sink(
                             "E0355",
                             "invalid package memory policy".to_string(),
                             detail,
-                            "use `policy: .{ no_alloc: true, zero_rc: true, arena_bounded: 65536, gc: true, unsafe: .Forbid }` in `pkg.jet`".to_string(),
+                            "use `policy: .{ no_alloc: true, zero_rc: true, arena_bounded: 65536, gc: true, unsafe: .Forbid }` in `package.jet`".to_string(),
                             None,
                         )],
                     ),
                 ));
             }
-            Err(crate::PackageManifest::ManifestError::BadAutoDerivePolicy { detail }) => {
+            Err(crate::Package::PackageParseError::BadAutoDerivePolicy { detail }) => {
                 return Err(record_loader_error(
                     &mut sink,
                     LoaderError::at(
@@ -374,13 +371,13 @@ fn load_entry_with_overlays_mode_with_sink(
                             "E0355",
                             "invalid package auto-derive policy".to_string(),
                             detail,
-                            "set `policy: .{ auto_derive: true }` or `policy: .{ auto_derive: false }` in `pkg.jet`".to_string(),
+                            "set `policy: .{ auto_derive: true }` or `policy: .{ auto_derive: false }` in `package.jet`".to_string(),
                             None,
                         )],
                     ),
                 ));
             }
-            Err(_) => crate::PackageManifest::PackManifest::default(),
+            Err(_) => crate::Package::PackageFacts::default(),
         };
         match Manifest::parse(&pack_path, &raw) {
             Err(d) => {
@@ -457,12 +454,12 @@ fn load_entry_with_overlays_mode_with_sink(
                 // module declaration in the source tree (U10 Chunk 3).
                 {
                     for pkg in &package_manifest.packages {
-                        match crate::PackageManifest::discover_module_in(
+                        match crate::Package::discover_module_in(
                             &manifest_dir,
                             &pkg.name,
                         ) {
                             Ok(_) => {}
-                            Err(crate::PackageManifest::DiscoveryError::NotFound {
+                            Err(crate::Package::DiscoveryError::NotFound {
                                 name,
                             }) => {
                                 return Err(record_loader_error(
@@ -477,7 +474,7 @@ fn load_entry_with_overlays_mode_with_sink(
                                     ),
                                 ));
                             }
-                            Err(crate::PackageManifest::DiscoveryError::Ambiguous {
+                            Err(crate::Package::DiscoveryError::Ambiguous {
                                 name,
                                 paths,
                             }) => {
@@ -503,8 +500,8 @@ fn load_entry_with_overlays_mode_with_sink(
                 // U17: declared package kinds + realized library staging dirs.
                 let resolution = collect_pkg_resolution(&raw);
                 let mut policy = organization_policy.clone();
-                let auto_derive = package_manifest.auto_derive.unwrap_or(true);
-                policy.extend(package_manifest.memory_policy);
+                let auto_derive = package_manifest.policy.auto_derive.unwrap_or(true);
+                policy.extend(package_manifest.policy.memory);
                 let source = pack_path.display().to_string();
                 for declaration in policy.iter_mut().filter(|declaration| declaration.scope == crate::Policy::PolicyScope::Package) { declaration.source = source.clone(); }
                 (manifest_dir, dep_dirs, resolution, policy, auto_derive)
@@ -861,7 +858,7 @@ fn load_organization_unsafe_policy() -> Result<Vec<crate::Policy::PolicyDeclarat
             ));
         }
     };
-    let mut declarations = match crate::PackageManifest::parse_policy_document(&source) {
+    let mut declarations = match crate::Package::parse_policy_document(&source) {
         Ok(declarations) => declarations,
         Err(error) => {
             return Err(LoaderError::at(
@@ -903,7 +900,7 @@ fn load_organization_unsafe_policy() -> Result<Vec<crate::Policy::PolicyDeclarat
 /// Return the manifest path owned by `root`, preferring canonical
 /// `package.jet` over migration-era `pkg.jet`.
 pub fn manifest_path(root: &Path) -> Option<PathBuf> {
-    let path = crate::PackageManifest::PackManifest::path_in(root);
+    let path = Manifest::manifest_path_in(root);
     path.is_file().then_some(path)
 }
 
@@ -1097,9 +1094,9 @@ fn auto_derive_default_for_file(
         .filter(|dependency| path.starts_with(&dependency.source_root))
         .max_by_key(|dependency| dependency.source_root.components().count());
     if let Some(dependency) = dependency {
-        return crate::PackageManifest::PackManifest::load(&dependency.manifest_root)
+        return crate::Package::PackageFacts::load(&dependency.manifest_root)
             .and_then(Result::ok)
-            .and_then(|manifest| manifest.auto_derive)
+            .and_then(|facts| facts.policy.auto_derive)
             .unwrap_or(true);
     }
     if path.starts_with(project_root) {

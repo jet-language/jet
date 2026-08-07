@@ -577,9 +577,22 @@ pub const PAYLOAD_FILE: &str = "pkg.jet";
 /// metadata: `[repo]`/`[sources]`) and does not belong on this list.
 pub const STALE_MANIFEST_NAMES: &[&str] = &["pack.jet", "payload.jet", "jet.toml"];
 
-/// U10 (ratified 2026-06-16): manifest identity block keyword — `payload: { name,
-/// version, … }` (was `package:`).
-pub const MANIFEST_BLOCK_PAYLOAD: &str = "payload";
+/// D-CONF-PLANE1/D-CONF-NAME1=A (ratified 2026-08-06): the top-level
+/// identity fields — bare `name:`/`version:`, no wrapper. Supersedes the
+/// U10 `payload: { name, version, … }` block and the D-SHAPE5 `identity: .{
+/// }` block; both are retired to a normal unknown-field error (E1206).
+pub const MANIFEST_FIELD_NAME: &str = "name";
+pub const MANIFEST_FIELD_VERSION: &str = "version";
+
+/// D-CONF-NAME1=A: the block nouns of the one Package manifest vocabulary,
+/// alongside `MANIFEST_BLOCK_PACKAGES`/`MANIFEST_BLOCK_BUILD`/
+/// `MANIFEST_BLOCK_EFFECTS`/`MANIFEST_BLOCK_GRANTS`/`MANIFEST_BLOCK_POLICY`
+/// (each already declared with its own decision). `settings:` is structural
+/// only until D-CONF-KEY1 (typed reads) is ratified.
+pub const MANIFEST_BLOCK_DEPS: &str = "deps";
+pub const MANIFEST_BLOCK_OUTPUTS: &str = "outputs";
+pub const MANIFEST_BLOCK_SETTINGS: &str = "settings";
+pub const MANIFEST_BLOCK_MEMBERS: &str = "members";
 
 /// U10 (ratified 2026-06-16): the block listing a payload's packages —
 /// `packages: { name: kind }`. Each `name` is a top-level `module` (the package),

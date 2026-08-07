@@ -172,7 +172,8 @@ fn package_manifest_build_entry_uses_the_same_pipeline_as_a_file_entry() {
     write(
         &root.join("pkg.jet"),
         r#"
-payload: { name: "package-entry", version: "0.1.0" }
+name: "package-entry"
+version: "0.1.0"
 fn build(b: BuildContext) => BuildPlan ? {
     b.generate("package_message", "fn package_message() => String {{ return \"package\" }}")?
     app :: b.add_executable("app", ["main.jet", ".jet/generated/package-entry/package_message.jet"], [])?
@@ -198,7 +199,7 @@ fn package_and_file_build_entries_are_rejected_as_one_unit() {
     let root = project("package-entry-conflict");
     write(
         &root.join("pkg.jet"),
-        "payload: { name: \"package-entry-conflict\", version: \"0.1.0\" }\nfn build(b: BuildContext) => BuildPlan ? { return b.plan() }\n",
+        "name: \"package-entry-conflict\"\nversion: \"0.1.0\"\nfn build(b: BuildContext) => BuildPlan ? { return b.plan() }\n",
     );
     let entry = root.join("main.jet");
     write(
@@ -412,7 +413,8 @@ fn build(b: BuildContext) => BuildPlan ? {
     write(
         &packages.join("a").join("pkg.jet"),
         r#"
-payload: { name: "a", version: "0.1.0" }
+name: "a"
+version: "0.1.0"
     fn build(b: BuildContext) => BuildPlan ? {
     b.generate("a_generated", "fn a_generated() => String {{ return \"a\" }}")?
     target :: b.add_library("a", [".jet/generated/a/a_generated.jet"], [])?
@@ -422,7 +424,7 @@ payload: { name: "a", version: "0.1.0" }
     );
     write(
         &packages.join("b").join("pkg.jet"),
-        "payload: { name: \"b\", version: \"0.1.0\" }\ndeps: { a: ../a }\n",
+        "name: \"b\"\nversion: \"0.1.0\"\ndeps: { a: ../a }\n",
     );
     write(
         &packages.join("b").join("run.jet"),
@@ -460,7 +462,7 @@ fn workspace_cli_grant_does_not_authorize_member_builds() {
     );
     write(
         &member.join("pkg.jet"),
-        "payload: { name: \"member\", version: \"0.1.0\" }\n",
+        "name: \"member\"\nversion: \"0.1.0\"\n",
     );
     write(
         &member.join("run.jet"),
@@ -1289,7 +1291,7 @@ fn package_grant_and_workspace_ceiling_resolve_before_execution() {
     let entry = root.join("main.jet");
     write(
         &root.join("pkg.jet"),
-        "payload: { name: \"policy-chain\", version: \"0.1.0\" }\nbuild: { allow: #(Exec) }\n",
+        "name: \"policy-chain\"\nversion: \"0.1.0\"\nbuild: { allow: #(Exec) }\n",
     );
     write(
         &entry,
@@ -1330,7 +1332,7 @@ fn workspace_subject_grant_authorizes_a_package_without_cli_flags() {
     let entry = root.join("main.jet");
     write(
         &root.join("pkg.jet"),
-        "payload: { name: \"workspace-app\", version: \"0.1.0\" }\n",
+        "name: \"workspace-app\"\nversion: \"0.1.0\"\n",
     );
     write(
         &root.join("workspace.jet"),
@@ -1379,12 +1381,12 @@ fn build(b: BuildContext) =[Exec]=> BuildPlan ? {
 }
 fn run() {}
 "#);
-    write(&root.join("pkg.jet"), "payload: { name: \"bad\", version: \"0.1.0\" }\nbuild: { allow: Exec }\n");
+    write(&root.join("pkg.jet"), "name: \"bad\"\nversion: \"0.1.0\"\nbuild: { allow: Exec }\n");
     let errors = jet::compile_programmable_build_opts(entry.to_str().unwrap(), &[], false, true, false, false, false, None).unwrap_err();
     assert!(errors.iter().any(|diagnostic| diagnostic.code == "E1221"), "{errors:#?}");
     assert!(!root.join("stamp").exists());
 
-    write(&root.join("pkg.jet"), "payload: { name: \"bad\", version: \"0.1.0\" }\nbuild: { allow: #(Exec) }\n");
+    write(&root.join("pkg.jet"), "name: \"bad\"\nversion: \"0.1.0\"\nbuild: { allow: #(Exec) }\n");
     write(&root.join("workspace.jet"), "module workspace { policy: .{ trust: .{ note: \"nested } text\" }, deny: #(Exec) }\n");
     let errors = jet::compile_programmable_build_opts(entry.to_str().unwrap(), &[], false, true, false, false, false, None).unwrap_err();
     assert!(errors.iter().any(|diagnostic| diagnostic.code == "E3503" && diagnostic.what.contains("malformed")), "{errors:#?}");
@@ -1396,7 +1398,7 @@ fn outer_package_grant_cannot_override_inner_workspace_deny() {
     let root = project("policy-precedence");
     let child = root.join("child");
     fs::create_dir_all(&child).unwrap();
-    write(&root.join("pkg.jet"), "payload: { name: \"parent\", version: \"0.1.0\" }\nbuild: { allow: #(Exec) }\n");
+    write(&root.join("pkg.jet"), "name: \"parent\"\nversion: \"0.1.0\"\nbuild: { allow: #(Exec) }\n");
     write(&child.join("workspace.jet"), "module workspace { policy_note: .{ deny: #(FS) }, policy: .{ trust: .{ nested: .{ deny: #(FS) } }, deny: #(Exec) } }\n");
     let entry = child.join("main.jet");
     write(&entry, r#"

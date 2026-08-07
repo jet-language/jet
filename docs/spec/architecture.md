@@ -181,7 +181,7 @@ loader never needs Jetpack's provider/network/shell engine to resolve
 
 The root `jet` package (`Source/`) routes the same way: it no longer carries a
 blanket `pub use jetpack as Jetpack` re-export (card #367 slice 3). Read-only
-model needs (`PackageManifest`, `Manifest`, `ScriptDeps`, `Lock`, `CBind`,
+model needs (`PackageFacts`, `Manifest`, `ScriptDeps`, `Lock`, `CBind`,
 `CFFI`, `FFI`, `EffectBudget`, `LintPolicy`, and the hangar-listing half of
 `Store` as `PkgStore`) come from `jet-driver`'s `jet-pkg-model` re-export, the
 same seam the compiler itself uses. Genuine `jetpack`-engine calls that

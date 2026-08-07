@@ -1891,10 +1891,11 @@ mod tests {
         let repo = base.join("repo");
         fs::create_dir_all(&project).unwrap();
         fs::create_dir_all(&repo).unwrap();
-        let manifest = crate::PackageManifest::PackManifest::path_in(&project);
+        let manifest = crate::Manifest::manifest_path_in(&project);
         let write_policy = |registry: &Path, allow: &str, deny: &str| {
-            fs::write(&manifest, format!(r#"payload: {{ name: "p", version: "1" }}
-policy: {{ providers: {{ ruby: {{ registry: "file://{}", allow: [{allow}], deny: [{deny}] }} }} }}
+            fs::write(&manifest, format!(r#"name: "p"
+version: "1"
+policy: .{{ providers: .{{ ruby: {{ registry: "file://{}", allow: [{allow}], deny: [{deny}] }} }} }}
 "#, registry.display())).unwrap();
         };
         write_policy(&repo, "\"dist.example.test\"", "");

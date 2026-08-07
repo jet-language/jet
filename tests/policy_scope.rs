@@ -6,18 +6,18 @@ fn fixture(path: &str) -> String {
 
 #[test]
 fn package_policy_cannot_authorize_unsafe() {
-    let error = jet::PackageManifest::parse(&fixture("policy_package_unsafe_allow/package.jet")).unwrap_err();
-    assert!(matches!(error, jet::PackageManifest::ManifestError::BadMemoryPolicy { .. }));
+    let error = jet::Package::PackageFacts::parse(&fixture("policy_package_unsafe_allow/package.jet"), "test").unwrap_err();
+    assert!(matches!(error, jet::Package::PackageParseError::BadMemoryPolicy { .. }));
 }
 
 #[test]
 fn package_module_function_block_policy_has_one_explainable_chain() {
-    let package = jet::PackageManifest::parse(&fixture("policy_scope_chain/package.jet")).unwrap();
+    let package = jet::Package::PackageFacts::parse(&fixture("policy_scope_chain/package.jet"), "test").unwrap();
     let source = fixture("policy_scope_chain/main.jet");
     let (tokens, lex) = jet::Lexer::lex(&source);
     assert!(lex.is_empty());
     let program = jet::Parser::parse(&tokens).unwrap();
-    let mut declarations = package.memory_policy;
+    let mut declarations = package.policy.memory;
     declarations.extend(program.policy_declarations.iter().filter(|d| d.key == PolicyKey::ArenaBounded).cloned());
     let effective = Policy::resolve(PolicyKey::ArenaBounded, declarations).unwrap().unwrap();
     assert_eq!(effective.value, PolicyValue::Limit(8192));
@@ -29,12 +29,12 @@ fn package_module_function_block_policy_has_one_explainable_chain() {
 
 #[test]
 fn package_to_module_widening_is_e0355_policy_error() {
-    let package = jet::PackageManifest::parse(&fixture("policy_package_module_widen/package.jet")).unwrap();
+    let package = jet::Package::PackageFacts::parse(&fixture("policy_package_module_widen/package.jet"), "test").unwrap();
     let source = fixture("policy_package_module_widen/main.jet");
     let (tokens, lex) = jet::Lexer::lex(&source);
     assert!(lex.is_empty());
     let program = jet::Parser::parse(&tokens).unwrap();
-    let declarations = package.memory_policy.into_iter().chain(program.policy_declarations).collect::<Vec<_>>();
+    let declarations = package.policy.memory.into_iter().chain(program.policy_declarations).collect::<Vec<_>>();
     assert!(matches!(Policy::resolve(PolicyKey::ArenaBounded, declarations), Err(Policy::PolicyError::Widening { .. })));
 }
 
@@ -84,16 +84,16 @@ fn organization_obligations_floor_rejects_package_relaxation() {
 
 #[test]
 fn organization_policy_document_is_exact_and_fails_closed() {
-    let valid = jet::PackageManifest::parse_policy_document("policy: .{ unsafe: .Obligations }\n").unwrap();
+    let valid = jet::Package::parse_policy_document("policy: .{ unsafe: .Obligations }\n").unwrap();
     assert_eq!(valid.len(), 1);
     assert_eq!(valid[0].value, PolicyValue::UnsafeObligations);
-    assert!(jet::PackageManifest::parse_policy_document("policy: .{ unsafe: .Obligations").is_err());
-    assert!(jet::PackageManifest::parse_policy_document("policy: .{ unsafe: .Obligations }\npackage: .{}").is_err());
+    assert!(jet::Package::parse_policy_document("policy: .{ unsafe: .Obligations").is_err());
+    assert!(jet::Package::parse_policy_document("policy: .{ unsafe: .Obligations }\npackage: .{}").is_err());
 }
 
 #[test]
 fn package_policy_document_accepts_explicit_units() {
-    let declarations = jet::PackageManifest::parse_policy_document(
+    let declarations = jet::Package::parse_policy_document(
         "policy: .{ explicit_units: true }\n",
     )
     .unwrap();

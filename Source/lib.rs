@@ -61,7 +61,6 @@ pub use jet_driver::{
     Lock,
     Manifest,
     Package,
-    PackageManifest,
     Parser,
     Policy,
     PhaseTiming,
@@ -654,8 +653,8 @@ fn workspace_member_entry(
             return Ok(candidate);
         }
     }
-    if let Some(Ok(manifest)) = PackageManifest::PackManifest::load(&member_root) {
-        let candidate = member_root.join(format!("{}.{}", manifest.package.name, Syntax::FILE_EXT));
+    if let Some(Ok(manifest)) = Package::PackageFacts::load(&member_root) {
+        let candidate = member_root.join(format!("{}.{}", manifest.name, Syntax::FILE_EXT));
         if candidate.is_file() {
             return Ok(candidate);
         }
@@ -663,7 +662,7 @@ fn workspace_member_entry(
     let package_manifest = Loader::manifest_path(&member_root)
         .unwrap_or_else(|| member_root.join(Syntax::PACKAGE_FILE));
     if let Ok(source) = std::fs::read_to_string(&package_manifest) {
-        if PackageManifest::build_entry_source(&source).is_some() {
+        if Package::build_entry_source(&source).is_some() {
             // A package may own build authority without a runtime entry file.
             // Pass the manifest through the normal Driver path so its selected
             // build function is checked and run with the package root context.
@@ -687,16 +686,6 @@ fn package_output_entry(root: &std::path::Path) -> Result<Option<std::path::Path
     };
     let package = match package {
         Ok(package) => package,
-        Err(_error)
-            if !root.join(Syntax::PACKAGE_FILE).is_file()
-                && PackageManifest::PackManifest::load(root)
-                    .is_some_and(|manifest| manifest.is_ok()) =>
-        {
-            // A legacy `pkg.jet` manifest still owns package identity and
-            // publish metadata, but it is not a typed Package output. Let
-            // the normal entry-file fallback handle that project shape.
-            return Ok(None);
-        }
         Err(error) => {
             let source = Loader::manifest_path(root)
                 .unwrap_or_else(|| root.join(Syntax::PACKAGE_FILE));
@@ -870,7 +859,7 @@ fn resolve_build_grants(file: &str, cli: &[String]) -> Result<Vec<String>, Vec<D
     };
     let mut directory = absolute.parent();
     while let Some(dir) = directory {
-        let package_path = PackageManifest::PackManifest::path_in(dir);
+        let package_path = Manifest::manifest_path_in(dir);
         if !package_path.is_file() {
             directory = dir.parent();
             continue;
@@ -878,9 +867,9 @@ fn resolve_build_grants(file: &str, cli: &[String]) -> Result<Vec<String>, Vec<D
         if !package_seen {
             if let Ok(source) = std::fs::read_to_string(&package_path) {
                 package_seen = true;
-                match PackageManifest::parse(&source) {
+                match Package::PackageFacts::parse(&source, package_path.display().to_string()) {
                     Ok(package) => {
-                        package_name = Some(package.package.name.clone());
+                        package_name = Some(package.name.clone());
                         for effect in package.build_allow {
                             if let Some(capability) =
                                 Comptime::Build::BuildCapability::parse(&effect)

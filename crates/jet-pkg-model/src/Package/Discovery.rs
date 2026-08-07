@@ -1,7 +1,7 @@
 //! Package discovery (U10 Chunk 3): resolve a package name to its source
 //! directory by finding the unique `.jet` file that declares `module <name>`.
 
-use super::Helpers::strip_line_comments;
+use super::strip_comments as strip_line_comments;
 use crate::Syntax;
 use std::path::{Path, PathBuf};
 

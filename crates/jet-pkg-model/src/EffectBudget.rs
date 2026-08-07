@@ -18,7 +18,7 @@
 //! `use <pkg>` libraries (U17).
 
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::PackageManifest::PackManifest;
+use crate::Package::PackageFacts;
 use crate::Sema::{effect_covers, parse_effect_name, EffectSet};
 use crate::AST::{Item, ProgramBundle};
 use std::collections::{BTreeMap, HashMap};
@@ -142,7 +142,7 @@ pub fn provenance_for(entries: &[PackageEffects], name: &str) -> Vec<String> {
 /// supply chain) whose effect set has something outside `allow` or inside
 /// `deny`, unless `grants:` covers it for that dependency. Returns E1220 per
 /// offending (dependency, effect) pair.
-pub fn enforce(entries: &[PackageEffects], manifest: &PackManifest) -> Vec<Diagnostic> {
+pub fn enforce(entries: &[PackageEffects], manifest: &PackageFacts) -> Vec<Diagnostic> {
     if !manifest.effects_enabled {
         return Vec::new();
     }
@@ -203,7 +203,7 @@ pub fn enforce(entries: &[PackageEffects], manifest: &PackManifest) -> Vec<Diagn
 pub fn update_lock_provenance(
     lock: &mut crate::Lock::LockFile,
     entries: &[PackageEffects],
-    manifest: &PackManifest,
+    manifest: &PackageFacts,
 ) {
     for pkg in &mut lock.packages {
         let key = if pkg.source == crate::Lock::LockSource::Root {

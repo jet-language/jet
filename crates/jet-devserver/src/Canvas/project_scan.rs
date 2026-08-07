@@ -420,7 +420,7 @@ fn package_targets_project_json(project_root: &Path, dir: &Path) -> Option<Vec<S
     }
     let manifest_path = dir.join(jet_driver::Syntax::PAYLOAD_FILE);
     let raw = fs::read_to_string(&manifest_path).ok()?;
-    let manifest = jet_driver::PackageManifest::parse(&raw).ok()?;
+    let manifest = jet_driver::Package::PackageFacts::parse(&raw, manifest_path.display().to_string()).ok()?;
     let package_path = rel_path(project_root, dir);
     let manifest_rel = rel_path(project_root, &manifest_path);
     Some(
@@ -450,16 +450,16 @@ fn package_project_json(project_root: &Path, entry_path: &Path, dir: &Path) -> O
     }
     let manifest_path = dir.join(jet_driver::Syntax::PAYLOAD_FILE);
     let raw = fs::read_to_string(&manifest_path).ok()?;
-    match jet_driver::PackageManifest::parse(&raw) {
+    match jet_driver::Package::PackageFacts::parse(&raw, manifest_path.display().to_string()) {
         Ok(manifest) => {
             let deps = manifest
                 .deps
                 .iter()
-                .map(|d| {
+                .map(|(name, source)| {
                     format!(
                         "{{\"name\":{},\"source\":{}}}",
-                        json_str(&d.name),
-                        json_str(&dep_source_label(&d.source))
+                        json_str(name),
+                        json_str(&dep_source_label(source))
                     )
                 })
                 .collect::<Vec<_>>()
@@ -482,9 +482,9 @@ fn package_project_json(project_root: &Path, entry_path: &Path, dir: &Path) -> O
                 "{{\"path\":{},\"manifest\":{},\"name\":{},\"version\":{},\"target\":{},\"deps\":[{}],\"targets\":[{}],\"effects_enabled\":{},\"diagnostics\":[]}}",
                 json_str(&rel_path(project_root, dir)),
                 json_str(&rel_path(project_root, &manifest_path)),
-                json_str(&manifest.package.name),
-                json_str(&manifest.package.version),
-                json_str(manifest.package.target.as_deref().unwrap_or("native")),
+                json_str(&manifest.name),
+                json_str(manifest.version.as_deref().unwrap_or("")),
+                json_str(manifest.target.as_deref().unwrap_or("native")),
                 deps,
                 targets,
                 if manifest.effects_enabled { "true" } else { "false" }
@@ -702,7 +702,7 @@ fn canonical_package_project_json(
             format!(
                 "{{\"name\":{},\"source\":{}}}",
                 json_str(name),
-                json_str(source)
+                json_str(&jet_driver::Package::dep_display(source))
             )
         })
         .collect::<Vec<_>>()
@@ -915,28 +915,28 @@ pub(super) fn lock_project_json(project_root: &Path) -> String {
     )
 }
 
-fn dep_source_label(source: &jet_driver::PackageManifest::DepSource) -> String {
+fn dep_source_label(source: &jet_driver::Package::DepSource) -> String {
     match source {
-        jet_driver::PackageManifest::DepSource::Version(v) => format!("version:{v}"),
-        jet_driver::PackageManifest::DepSource::Provider { provider, target } => {
+        jet_driver::Package::DepSource::Version(v) => format!("version:{v}"),
+        jet_driver::Package::DepSource::Provider { provider, target } => {
             format!("{provider:?}@{target}")
         }
-        jet_driver::PackageManifest::DepSource::Git { url, selector } => {
+        jet_driver::Package::DepSource::Git { url, selector } => {
             format!("git:{url}@{selector:?}")
         }
-        jet_driver::PackageManifest::DepSource::CLib { target } => {
+        jet_driver::Package::DepSource::CLib { target } => {
             format!("c:{target}")
         }
     }
 }
 
-fn target_label(target: &jet_driver::PackageManifest::Target) -> String {
+fn target_label(target: &jet_driver::Package::Target) -> String {
     match target {
-        jet_driver::PackageManifest::Target::Library => "library".to_string(),
-        jet_driver::PackageManifest::Target::Executable => "executable".to_string(),
-        jet_driver::PackageManifest::Target::Test => "test".to_string(),
-        jet_driver::PackageManifest::Target::Example => "example".to_string(),
-        jet_driver::PackageManifest::Target::Benchmark => "benchmark".to_string(),
-        jet_driver::PackageManifest::Target::Plugin { .. } => "plugin".to_string(),
+        jet_driver::Package::Target::Library => "library".to_string(),
+        jet_driver::Package::Target::Executable => "executable".to_string(),
+        jet_driver::Package::Target::Test => "test".to_string(),
+        jet_driver::Package::Target::Example => "example".to_string(),
+        jet_driver::Package::Target::Benchmark => "benchmark".to_string(),
+        jet_driver::Package::Target::Plugin { .. } => "plugin".to_string(),
     }
 }

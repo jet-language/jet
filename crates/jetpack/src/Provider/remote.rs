@@ -1,7 +1,7 @@
 //! Remote package source discovery, fetching, caching, and staging.
 
 use super::{ensure_network_allowed, Ctx, ProviderError};
-use crate::PackageManifest;
+use crate::Package;
 use crate::RefSpec::Source;
 use crate::SHA256;
 use jet_pkg_model::Package::PackageFacts;
@@ -12,16 +12,16 @@ use std::process::Command;
 /// of the package's `.jet` files means `executable`; otherwise `library`. The
 /// source is lexed (not string-matched) so `fn run` inside a comment or string
 /// literal never produces a false positive.
-pub(super) fn infer_package_kind(dir: &Path) -> PackageManifest::PackageKind {
+pub(super) fn infer_package_kind(dir: &Path) -> Package::PackageKind {
     // A staged, non-empty `bin/` is the realized-package convention for "installs
     // on PATH" — executable, regardless of source shape.
     let has_bin = std::fs::read_dir(dir.join("bin"))
         .map(|mut d| d.next().is_some())
         .unwrap_or(false);
     if has_bin || dir_has_top_level_run(dir) {
-        PackageManifest::PackageKind::Executable
+        Package::PackageKind::Executable
     } else {
-        PackageManifest::PackageKind::Library
+        Package::PackageKind::Library
     }
 }
 
@@ -262,26 +262,6 @@ fn try_sparse_member_fetch(
                     InRepoDep::External => {}
                 }
             }
-        } else if let Ok(manifest) = PackageManifest::parse(&marker) {
-            for dep in &manifest.deps {
-                match classify_in_repo_dep(dep, &target, &member_dirs, &all_dirs) {
-                    InRepoDep::Member(path) => {
-                        if !wanted.contains(&path) {
-                            wanted.push(path);
-                        }
-                    }
-                    InRepoDep::OutsideWorkspace(path) => {
-                        return SparseOutcome::DepOutside(ProviderError::MemberOutsideWorkspace(
-                            format!(
-                                "package `{want_package}` depends on in-repo `{path}`, which is \
-                                 not a workspace member of `{}`",
-                                remote.label
-                            ),
-                        ));
-                    }
-                    InRepoDep::External => {}
-                }
-            }
         }
     }
 
@@ -342,7 +322,7 @@ fn member_dirs_from_listing(listing: &str) -> Vec<String> {
 
 fn classify_canonical_dep(
     name: &str,
-    source: &str,
+    source: &Package::DepSource,
     member_dir: &str,
     member_dirs: &[String],
     all_dirs: &[String],
@@ -350,12 +330,8 @@ fn classify_canonical_dep(
     if let Some(member) = member_dirs.iter().find(|dir| dir_basename(dir) == name) {
         return InRepoDep::Member(member.clone());
     }
-    let path_like = source == "."
-        || source == ".."
-        || source.starts_with("./")
-        || source.starts_with("../");
-    if path_like {
-        let resolved = join_repo_relative(member_dir, source);
+    if let Package::DepSource::Provider { provider: Source::Path, target } = source {
+        let resolved = join_repo_relative(member_dir, target);
         if let Some(resolved) = resolved {
             if member_dirs.contains(&resolved) {
                 return InRepoDep::Member(resolved);
@@ -397,38 +373,6 @@ enum InRepoDep {
     OutsideWorkspace(String),
     /// Not an in-repo dependency (registry/git/nixpkgs/clib/external path).
     External,
-}
-
-/// Classify a member's dependency for sparse-subtree scoping. Only bare path
-/// deps that resolve *inside the repo* are relevant; everything else is fetched
-/// by its own provider and does not widen the sparse checkout.
-fn classify_in_repo_dep(
-    dep: &PackageManifest::Dep,
-    member_dir: &str,
-    member_dirs: &[String],
-    all_dirs: &[String],
-) -> InRepoDep {
-    // A bare dep alias that matches a member name is an in-repo dep.
-    if let Some(m) = member_dirs.iter().find(|d| dir_basename(d) == dep.name) {
-        return InRepoDep::Member(m.clone());
-    }
-    if let PackageManifest::DepSource::Provider {
-        provider: Source::Path,
-        target,
-    } = &dep.source
-    {
-        let resolved = join_repo_relative(member_dir, target);
-        if let Some(resolved) = resolved {
-            if member_dirs.contains(&resolved) {
-                return InRepoDep::Member(resolved);
-            }
-            if all_dirs.contains(&resolved) {
-                // A real directory inside the repo, but not a package member.
-                return InRepoDep::OutsideWorkspace(resolved);
-            }
-        }
-    }
-    InRepoDep::External
 }
 
 /// Resolve a bare path relative to a member directory, staying inside the
@@ -621,16 +565,26 @@ mod tests {
             "packages/logging".to_string(),
             "packages/tools".to_string(),
         ];
+        let path_dep = |target: &str| Package::DepSource::Provider {
+            provider: Source::Path,
+            target: target.to_string(),
+        };
         assert!(matches!(
-            classify_canonical_dep("log", "../logging", "packages/app", &members, &dirs),
+            classify_canonical_dep("log", &path_dep("../logging"), "packages/app", &members, &dirs),
             InRepoDep::Member(path) if path == "packages/logging"
         ));
         assert!(matches!(
-            classify_canonical_dep("ghost", "../tools", "packages/app", &members, &dirs),
+            classify_canonical_dep("ghost", &path_dep("../tools"), "packages/app", &members, &dirs),
             InRepoDep::OutsideWorkspace(path) if path == "packages/tools"
         ));
         assert!(matches!(
-            classify_canonical_dep("http", "4.2", "packages/app", &members, &dirs),
+            classify_canonical_dep(
+                "http",
+                &Package::DepSource::Version("4.2".to_string()),
+                "packages/app",
+                &members,
+                &dirs
+            ),
             InRepoDep::External
         ));
     }

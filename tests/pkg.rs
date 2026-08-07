@@ -206,7 +206,7 @@ fn with_store<T, F: FnOnce() -> T>(store_dir: &Path, f: F) -> T {
 // Minimal `pkg.jet` (Jet syntax, U1) for a named package with no deps.
 fn min_manifest(name: &str, version: &str) -> String {
     format!(
-        "payload: {{\n    name: \"{}\",\n    version: \"{}\",\n    jet: \">=0.1.0\",\n    description: \"\",\n    license: \"MIT\",\n    repository: \"\",\n}}\n",
+        "name: \"{}\"\nversion: \"{}\"\njet: \">=0.1.0\"\ndescription: \"\"\nlicense: \"MIT\"\nrepository: \"\"\n",
         name, version
     )
 }
@@ -1101,15 +1101,13 @@ fn replacement_importer_reports_replacement_progress() {
 
 #[test]
 fn manifest_parse_valid_fields() {
-    let raw = r#"payload: {
-    name:    "myapp",
-    version: "1.2.3",
-    jet:     ">=0.1.0",
-    description: "A test package",
-    license: "MIT OR Apache-2.0",
-    repository: "https://example.com",
-}
-deps: {
+    let raw = r#"name:    "myapp"
+version: "1.2.3"
+jet:     ">=0.1.0"
+description: "A test package"
+license: "MIT OR Apache-2.0"
+repository: "https://example.com"
+deps: .{
 }
 "#;
     let path = PathBuf::from("pkg.jet");
@@ -1151,11 +1149,23 @@ fn manifest_parse_dep_git_tag() {
 
 #[test]
 fn manifest_parse_e1206_missing_required_field() {
-    // `package` with no `version` is a shape error (E1206).
-    let raw = "payload: {\n    name: \"myapp\",\n}\n";
+    // No `name:` at all is a shape error (E1206, D-CONF-NAME1: bare `name`/
+    // `version`, `version:` alone is optional).
+    let raw = "version: \"0.1.0\"\n";
     let err = jet::Manifest::parse(&PathBuf::from("pkg.jet"), raw)
-        .expect_err("missing version should fail");
+        .expect_err("missing name should fail");
     assert_eq!(err.code, "E1206");
+}
+
+#[test]
+fn manifest_parse_e1206_unknown_field() {
+    // The retired `payload:` wrapper is now a normal unknown-field error
+    // (D-CONF-PLANE1/D-CONF-NAME1).
+    let raw = "payload: {\n    name: \"myapp\",\n    version: \"0.1.0\",\n}\n";
+    let err = jet::Manifest::parse(&PathBuf::from("pkg.jet"), raw)
+        .expect_err("payload: wrapper should fail");
+    assert_eq!(err.code, "E1206");
+    assert!(err.what.contains("payload"));
 }
 
 #[test]
@@ -1173,8 +1183,8 @@ fn manifest_parse_e1209_reserved_nonempty() {
 #[test]
 fn manifest_parse_effects_block() {
     let raw = min_manifest("app", "0.1.0")
-        + "\neffects: {\n    allow: [FS, Time],\n    deny: [Net],\n}\n";
-    let pm = jetpack::PackageManifest::parse(&raw).expect("effects block should parse");
+        + "\neffects: .{\n    allow: [FS, Time],\n    deny: [Net],\n}\n";
+    let pm = jetpack::Package::PackageFacts::parse(&raw, "test").expect("effects block should parse");
     assert!(pm.effects_enabled);
     assert_eq!(
         pm.effects_allow,
@@ -1185,8 +1195,8 @@ fn manifest_parse_effects_block() {
 
 #[test]
 fn manifest_parse_grants_block() {
-    let raw = min_manifest("app", "0.1.0") + "\ngrants: {\n    \"pdf-lib\": [Net],\n}\n";
-    let pm = jetpack::PackageManifest::parse(&raw).expect("grants block should parse");
+    let raw = min_manifest("app", "0.1.0") + "\ngrants: .{\n    \"pdf-lib\": [Net],\n}\n";
+    let pm = jetpack::Package::PackageFacts::parse(&raw, "test").expect("grants block should parse");
     assert_eq!(
         pm.grants,
         vec![("pdf-lib".to_string(), vec!["Net".to_string()])]
@@ -1196,56 +1206,56 @@ fn manifest_parse_grants_block() {
 #[test]
 fn manifest_parse_policy_trust_block() {
     let raw = min_manifest("app", "0.1.0")
-        + "\npolicy: { trust: { default: prompt, ci: { prompt: deny }, services: { postgres: prompt } } }\n";
-    let pm = jetpack::PackageManifest::parse(&raw).expect("policy.trust block should parse");
-    let policy = pm.trust_policy.expect("trust policy should be stored");
+        + "\npolicy: .{ trust: .{ default: prompt, ci: .{ prompt: deny }, services: .{ postgres: prompt } } }\n";
+    let pm = jetpack::Package::PackageFacts::parse(&raw, "test").expect("policy.trust block should parse");
+    let policy = pm.policy.trust.expect("trust policy should be stored");
     assert_eq!(
         policy.default,
-        Some(jetpack::PackageManifest::TrustDecision::Prompt)
+        Some(jetpack::Package::TrustDecision::Prompt)
     );
     assert_eq!(
         policy.ci_prompt,
-        Some(jetpack::PackageManifest::TrustDecision::Deny)
+        Some(jetpack::Package::TrustDecision::Deny)
     );
     assert_eq!(
         policy.services,
         vec![(
             "postgres".to_string(),
-            jetpack::PackageManifest::TrustDecision::Prompt
+            jetpack::Package::TrustDecision::Prompt
         )]
     );
 }
 
 #[test]
 fn manifest_policy_trust_rejects_unknown_decision() {
-    let raw = min_manifest("app", "0.1.0") + "\npolicy: { trust: { default: maybe } }\n";
+    let raw = min_manifest("app", "0.1.0") + "\npolicy: .{ trust: .{ default: maybe } }\n";
     let err =
-        jetpack::PackageManifest::parse(&raw).expect_err("unknown trust decision should fail");
+        jetpack::Package::PackageFacts::parse(&raw, "test").expect_err("unknown trust decision should fail");
     assert!(matches!(
         err,
-        jetpack::PackageManifest::ManifestError::BadTrustPolicy { .. }
+        jetpack::Package::PackageParseError::Composition(_)
     ));
 }
 
 #[test]
 fn manifest_no_effects_block_disables_enforcement() {
     let raw = min_manifest("app", "0.1.0");
-    let pm = jetpack::PackageManifest::parse(&raw).expect("valid manifest should parse");
+    let pm = jetpack::Package::PackageFacts::parse(&raw, "test").expect("valid manifest should parse");
     assert!(!pm.effects_enabled);
     assert_eq!(pm.effects_allow, None);
 }
 
 #[test]
 fn manifest_parse_effects_e1221_unknown_effect() {
-    let raw = min_manifest("app", "0.1.0") + "\neffects: {\n    allow: [NotAnEffect],\n}\n";
-    let err = jetpack::PackageManifest::parse(&raw)
+    let raw = min_manifest("app", "0.1.0") + "\neffects: .{\n    allow: [NotAnEffect],\n}\n";
+    let err = jetpack::Package::PackageFacts::parse(&raw, "test")
         .expect_err("unknown effect name should fail E1221");
     let diag = jet::Manifest::parse(&PathBuf::from("pkg.jet"), &raw)
         .expect_err("should surface through Manifest::parse too");
     assert_eq!(diag.code, "E1221");
     assert!(matches!(
         err,
-        jetpack::PackageManifest::ManifestError::BadEffectsBlock { .. }
+        jetpack::Package::PackageParseError::BadEffectsBlock { .. }
     ));
 }
 
@@ -1494,7 +1504,7 @@ fn manifest_toolchain_ok() {
 #[test]
 fn manifest_toolchain_e1208_future_version() {
     let raw =
-        "payload: {\n    name: \"myapp\",\n    version: \"0.1.0\",\n    jet: \">=99.0.0\",\n}\n";
+        "name: \"myapp\"\nversion: \"0.1.0\"\njet: \">=99.0.0\"\n";
     let mf = jet::Manifest::parse(&PathBuf::from("pkg.jet"), raw).unwrap();
     let err = jet::Manifest::check_toolchain(&mf, "pkg.jet").expect_err("E1208");
     assert_eq!(err.code, "E1208");
@@ -2066,7 +2076,7 @@ fn toolchain_mismatch_emits_e1208() {
     write(
         &tmp,
         "pkg.jet",
-        "payload: {\n    name: \"app\",\n    version: \"0.1.0\",\n    jet: \">=99.0.0\",\n}\n",
+        "name: \"app\"\nversion: \"0.1.0\"\njet: \">=99.0.0\"\n",
     );
     let entry = tmp.join("main.jet");
     fs::write(&entry, "fn run() { print(\"hi\"); }\n").unwrap();
@@ -2456,8 +2466,8 @@ fn cli_jet_new_creates_project_structure() {
 
     let proj = tmp.join("myapp");
     assert!(
-        proj.join("pkg.jet").is_file(),
-        "jet new must create pkg.jet"
+        proj.join("package.jet").is_file(),
+        "jet new must create package.jet"
     );
     assert!(
         proj.join("run.jet").is_file(),
@@ -2573,8 +2583,8 @@ fn cli_jet_new_annotated_has_dep_comments() {
 
     jet_cmd(&["new", "annotated_app", "--annotated"], &tmp, &store);
 
-    let manifest = fs::read_to_string(tmp.join("annotated_app/pkg.jet"))
-        .expect("pkg.jet must exist after jet new --annotated");
+    let manifest = fs::read_to_string(tmp.join("annotated_app/package.jet"))
+        .expect("package.jet must exist after jet new --annotated");
     assert!(
         manifest.contains("// Jet package dependencies:"),
         "annotated template should have dep comments:\n{}",
@@ -2617,11 +2627,11 @@ fn cli_end_to_end_new_then_add_path() {
         String::from_utf8_lossy(&out.stderr)
     );
 
-    // pkg.jet must now reference mylib.
-    let manifest = fs::read_to_string(proj.join("pkg.jet")).unwrap();
+    // package.jet must now reference mylib.
+    let manifest = fs::read_to_string(proj.join("package.jet")).unwrap();
     assert!(
         manifest.contains("mylib"),
-        "pkg.jet should list mylib after jet add"
+        "package.jet should list mylib after jet add"
     );
 
     let _ = fs::remove_dir_all(&tmp);
@@ -3797,7 +3807,7 @@ fn pub_package_function_is_hidden_from_path_dependency_consumer() {
     fs::create_dir_all(&dep).unwrap();
     fs::write(
         app.join("pkg.jet"),
-        "payload: { name: \"app\", version: \"0.1.0\" }\ndeps: { dep: ../dep }\n",
+        "name: \"app\"\nversion: \"0.1.0\"\ndeps: .{ dep: ../dep }\n",
     )
     .unwrap();
     fs::write(
@@ -3807,7 +3817,7 @@ fn pub_package_function_is_hidden_from_path_dependency_consumer() {
     .unwrap();
     fs::write(
         dep.join("pkg.jet"),
-        "payload: { name: \"dep\", version: \"0.1.0\" }\n",
+        "name: \"dep\"\nversion: \"0.1.0\"\n",
     )
     .unwrap();
     fs::write(

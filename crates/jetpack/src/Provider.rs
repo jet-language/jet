@@ -10,7 +10,7 @@
 //! instead of shelling out — exactly the Forge fixture pattern.
 
 use jet_env_model::ModuleEval::{AdapterPlan, AdapterRecipe};
-use super::PackageManifest;
+use super::Package;
 use super::Recipe::{self, BuildContext, BuildRecipe, BuildStep};
 use super::RefSpec::{ProviderKind, RefSpec, Source, SourceTable};
 use super::JSON;
@@ -234,7 +234,7 @@ pub fn cache_expectation(
             let src_dir = canonical_package
                 .as_ref()
                 .and_then(|(root, facts)| canonical_source_dir(root, facts))
-                .or_else(|| PackageManifest::discover_module_in(&repo, &spec.package).ok())?;
+                .or_else(|| Package::discover_module_in(&repo, &spec.package).ok())?;
             validate_core_source_tree(&src_dir).ok()?;
             let toolchain = super::Toolchain::Toolchain::resolve_for_core(ctx.offline);
             if ctx.offline
@@ -247,7 +247,7 @@ pub fn cache_expectation(
             let (manifest, canonical) = if canonical.is_some() {
                 (None, canonical)
             } else {
-                let manifest = match PackageManifest::PackManifest::load(&repo) {
+                let manifest = match Package::PackageFacts::load(&repo) {
                     None => None,
                     Some(Ok(manifest)) => Some(manifest),
                     Some(Err(_)) => return None,
@@ -918,16 +918,16 @@ impl Provider for CoreProvider {
                     facts.version.clone().unwrap_or_default(),
                 )
             } else {
-                let source_dir = PackageManifest::discover_module_in(&repo, &spec.package)
+                let source_dir = Package::discover_module_in(&repo, &spec.package)
                     .map_err(|e| match e {
-                        PackageManifest::DiscoveryError::NotFound { name } => {
+                        Package::DiscoveryError::NotFound { name } => {
                             ProviderError::CoreBuild(format!(
                                 "source repo at {} has no `module {name}` — add a .{} file declaring it",
                                 repo.display(),
                                 crate::Syntax::FILE_EXT,
                             ))
                         }
-                        PackageManifest::DiscoveryError::Ambiguous { name, paths } => {
+                        Package::DiscoveryError::Ambiguous { name, paths } => {
                             let list = paths
                                 .iter()
                                 .map(|p| p.display().to_string())
@@ -975,14 +975,14 @@ impl Provider for CoreProvider {
         let manifest = match if canonical.is_some() {
             None
         } else {
-            PackageManifest::PackManifest::load(&repo)
+            Package::PackageFacts::load(&repo)
         } {
             None => None,
             Some(Ok(manifest)) => Some(manifest),
             Some(Err(error)) => {
                 return Err(ProviderError::CoreBuild(format!(
                     "package manifest {} is invalid: {error:?}",
-                    PackageManifest::PackManifest::path_in(&repo).display()
+                    crate::Manifest::manifest_path_in(&repo).display()
                 )));
             }
         };
@@ -1003,16 +1003,16 @@ impl Provider for CoreProvider {
         } else {
             manifest
             .as_ref()
-            .map(|pm| pm.package.version.clone())
+            .and_then(|pm| pm.version.clone())
             .unwrap_or_default()
         };
         let (bin, rlib, recipe_id) = match kind {
-            PackageManifest::PackageKind::Executable => (
+            Package::PackageKind::Executable => (
                 out_dir.join("bin").to_string_lossy().into_owned(),
                 String::new(),
                 "core-source",
             ),
-            PackageManifest::PackageKind::Library => {
+            Package::PackageKind::Library => {
                 // D-BFS1: if the package ships a Cargo.toml, compile it to an
                 // rlib now. The rlib lands *inside* the hangar object (`out_dir`)
                 // so the object is self-contained and content-addressed; the
@@ -2231,7 +2231,7 @@ mod tests {
         std::fs::create_dir_all(&repo).unwrap();
         std::fs::write(
             repo.join("pkg.jet"),
-            "payload: { name: \"p\", version: \"0.1.0\" }\npackages: { hello: executable, mathlib: library }\n",
+            "name: \"p\"\nversion: \"0.1.0\"\npackages: { hello: executable, mathlib: library }\n",
         )
         .unwrap();
         // executable: has a prebuilt bin/.
@@ -2382,7 +2382,7 @@ mod tests {
         let with = base.join("with-pack");
         if !init_git_repo(
             &with,
-            &[("pkg.jet", "payload: { name: \"p\", version: \"0.1.0\" }\n")],
+            &[("pkg.jet", "name: \"p\"\nversion: \"0.1.0\"\n")],
         ) {
             eprintln!("note: skipping remote probe test (git not found)");
             return;
@@ -2439,7 +2439,7 @@ mod tests {
         let repo = base.join("repo");
         if !init_git_repo(
             &repo,
-            &[("pkg.jet", "payload: { name: \"p\", version: \"0.1.0\" }\n")],
+            &[("pkg.jet", "name: \"p\"\nversion: \"0.1.0\"\n")],
         ) {
             eprintln!("note: skipping commit-sha probe test (git not found)");
             return;
@@ -2481,7 +2481,7 @@ mod tests {
         if !init_git_repo(
             &repo,
             &[
-                ("pkg.jet", "payload: { name: \"p\", version: \"0.1.0\" }\n"),
+                ("pkg.jet", "name: \"p\"\nversion: \"0.1.0\"\n"),
                 ("pkgs/hello/hello.jet", "module hello { }\n"),
                 ("pkgs/hello/bin/hello", "#!/bin/sh\necho hi-infer\n"),
             ],
@@ -2522,13 +2522,13 @@ mod tests {
                 ),
                 (
                     "packages/hello/pkg.jet",
-                    "payload: { name: \"hello\", version: \"0.1.0\" }\n",
+                    "name: \"hello\"\nversion: \"0.1.0\"\n",
                 ),
                 ("packages/hello/hello.jet", "module hello { }\n"),
                 ("packages/hello/bin/hello", "#!/bin/sh\necho hi\n"),
                 (
                     "packages/world/pkg.jet",
-                    "payload: { name: \"world\", version: \"0.1.0\" }\n",
+                    "name: \"world\"\nversion: \"0.1.0\"\n",
                 ),
                 ("packages/world/world.jet", "module world { }\n"),
             ],
@@ -2586,17 +2586,17 @@ mod tests {
                 // path-target resolution, not just name matching.
                 (
                     "packages/app/pkg.jet",
-                    "payload: { name: \"app\", version: \"0.1.0\" }\ndeps: { log: ../logging }\n",
+                    "name: \"app\"\nversion: \"0.1.0\"\ndeps: { log: ../logging }\n",
                 ),
                 ("packages/app/app.jet", "module app { }\n"),
                 (
                     "packages/logging/pkg.jet",
-                    "payload: { name: \"logging\", version: \"0.1.0\" }\n",
+                    "name: \"logging\"\nversion: \"0.1.0\"\n",
                 ),
                 ("packages/logging/logging.jet", "module logging { }\n"),
                 (
                     "packages/unrelated/pkg.jet",
-                    "payload: { name: \"unrelated\", version: \"0.1.0\" }\n",
+                    "name: \"unrelated\"\nversion: \"0.1.0\"\n",
                 ),
                 ("packages/unrelated/unrelated.jet", "module unrelated { }\n"),
             ],
@@ -2650,7 +2650,7 @@ mod tests {
                 // is NOT a workspace member (no pkg.jet of its own).
                 (
                     "packages/app/pkg.jet",
-                    "payload: { name: \"app\", version: \"0.1.0\" }\ndeps: { ghost: ../ghost }\n",
+                    "name: \"app\"\nversion: \"0.1.0\"\ndeps: { ghost: ../ghost }\n",
                 ),
                 ("packages/app/app.jet", "module app { }\n"),
                 ("packages/ghost/notes.txt", "not a package\n"),
@@ -2748,7 +2748,7 @@ mod tests {
         std::fs::create_dir_all(&repo).unwrap();
         std::fs::write(
             repo.join("pkg.jet"),
-            "payload: { name: \"p\", version: \"0.1.0\" }\npackages: { mathlib: library }\n",
+            "name: \"p\"\nversion: \"0.1.0\"\npackages: { mathlib: library }\n",
         )
         .unwrap();
         let lib = repo.join("lib/mathlib");

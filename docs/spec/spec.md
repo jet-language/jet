@@ -3714,7 +3714,8 @@ conflate them (I8).
 
 ```jet
 // pkg.jet
-payload: { name: "mathkit", version: "0.1.0" }
+name: "mathkit"
+version: "0.1.0"
 ```
 
 ```jet

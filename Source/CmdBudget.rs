@@ -649,7 +649,7 @@ fn applicable(spec:&BudgetSpec,target:&str,profile:&str)->bool{fn one(axis:&Budg
 fn axis(axis:&BudgetAxis,current:&str)->Vec<CanonicalJson>{match axis{BudgetAxis::Current=>vec![CanonicalJson::String(current.into())],BudgetAxis::All=>vec![CanonicalJson::String("all".into())],BudgetAxis::Only(v)=>v.iter().cloned().map(CanonicalJson::String).collect()}}
 fn title(s:&str)->String{let mut c=s.chars();c.next().map(|x|x.to_ascii_uppercase().to_string()+c.as_str()).unwrap_or_default()}
 fn project_entry(root:&Path)->PathBuf{crate::find_project_entry(root)}
-fn package_name(root:&Path)->String{jet::PackageManifest::PackManifest::load(root).and_then(Result::ok).map(|m|m.package.name).unwrap_or_else(||"package".into())}
+fn package_name(root:&Path)->String{jet::Package::PackageFacts::load(root).and_then(Result::ok).map(|m|m.name).unwrap_or_else(||"package".into())}
 trait BudgetSource {
     fn spec(&self) -> &BudgetSpec;
     fn module_index(&self, bundle: &jet::AST::ProgramBundle) -> usize;

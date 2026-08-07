@@ -39,7 +39,7 @@ pub fn fetch(
     opts: &FetchOptions,
 ) -> Result<(LockFile, HashMap<String, PathBuf>), Vec<Diagnostic>> {
     // Validate toolchain constraint.
-    let manifest_path = crate::PackageManifest::PackManifest::path_in(project_root)
+    let manifest_path = crate::Manifest::manifest_path_in(project_root)
         .display()
         .to_string();
     if let Err(d) = check_toolchain(manifest, &manifest_path) {

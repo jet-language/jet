@@ -1021,7 +1021,7 @@ fn gate_with_hash(
         return Ok(());
     }
     if let Some(policy) = project_trust_policy(project_dir) {
-        use super::PackageManifest::TrustDecision;
+        use super::Package::TrustDecision;
         let ci = std::env::var_os("CI").is_some();
         let decision = if ci {
             policy.ci_prompt.or(policy.default)
@@ -1106,10 +1106,10 @@ fn gate_with_hash(
     }
 }
 
-fn project_trust_policy(project_dir: &Path) -> Option<super::PackageManifest::TrustPolicy> {
-    super::PackageManifest::PackManifest::load(project_dir)
+fn project_trust_policy(project_dir: &Path) -> Option<super::Package::TrustPolicy> {
+    super::Package::PackageFacts::load(project_dir)
         .and_then(Result::ok)
-        .and_then(|m| m.trust_policy)
+        .and_then(|m| m.policy.trust)
 }
 
 /// A stable hash over a foreign flake/devenv file's content (U16) — the same
@@ -1353,13 +1353,13 @@ mod tests {
         let allow_dir = scratch("policy_allow");
         std::fs::write(
             allow_dir.join(Syntax::PAYLOAD_FILE),
-            "payload: { name: \"app\", version: \"0.1.0\" }\npolicy: { trust: { default: allow } }\n",
+            "name: \"app\"\nversion: \"0.1.0\"\npolicy: { trust: { default: allow } }\n",
         )
         .unwrap();
         let deny_dir = scratch("policy_deny");
         std::fs::write(
             deny_dir.join(Syntax::PAYLOAD_FILE),
-            "payload: { name: \"app\", version: \"0.1.0\" }\npolicy: { trust: { default: deny } }\n",
+            "name: \"app\"\nversion: \"0.1.0\"\npolicy: { trust: { default: deny } }\n",
         )
         .unwrap();
         let refs = [ref_spec("fastfetch@nixpkgs")];
