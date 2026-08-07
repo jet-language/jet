@@ -1849,7 +1849,17 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             args,
             widen_to_vec,
             ..
-        } => emit_tir_core_call(module, method, args, widen_to_vec, &e.ty, cx),
+        } => {
+            let call = emit_tir_core_call(module, method, args, widen_to_vec, &e.ty, cx);
+            // D-FAIL-CARRIER1=A: Core answers a `T?` with Rust's own `Option`,
+            // the same plumbing shape it holds lists in. This is the one place
+            // that shape becomes the carrier.
+            if matches!(e.ty, Type::Option(_)) {
+                format!("{}jet_outcome_of({call})", cx.root_prefix)
+            } else {
+                call
+            }
+        }
         TExprKind::Binary {
             op,
             overflow,
