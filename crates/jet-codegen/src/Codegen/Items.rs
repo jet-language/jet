@@ -1589,16 +1589,15 @@ fn emit_migration_chain_walker(cx: &Cx, s: &StructDef, style: Option<&str>, out:
                 i + 1
             ));
             out.push_str(&format!(
-                "            __steps.push(\"v{}->v{}\".to_string());\n",
-                i + 1,
-                i + 2
+                "            __steps.push({:?}.to_string());\n",
+                crate::Codegen::TIR::migration_step_name(i)
             ));
         }
         out.push_str("            let __tree = jet_std::DataTree::Object(__pairs);\n");
         out.push_str("            let __v = Self::jet_decode(&__tree)?;\n");
         out.push_str(&format!(
-            "            return Ok((__v, jet_std::MigrationStatus {{ migrated: true, from: \"v{}\".to_string(), steps: __steps }}));\n",
-            j + 1
+            "            return Ok((__v, jet_std::MigrationStatus {{ migrated: true, from: {:?}.to_string(), steps: __steps }}));\n",
+            crate::Codegen::TIR::migration_shape_name(j)
         ));
         out.push_str("        }\n");
     }

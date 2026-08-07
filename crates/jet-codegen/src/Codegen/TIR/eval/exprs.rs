@@ -635,14 +635,14 @@ fn migration_status_fresh() -> CtValue {
 }
 
 /// D-MIGRATE4: `MigrationStatus` for a record that entered the chain at
-/// historical shape `start` and was walked forward through `total` steps.
-/// Version names are 1-based, matching the generated chain-walker.
+/// historical shape `start` and was walked forward through `total` steps. The
+/// names come from the same vocabulary codegen bakes into the chain-walker.
 fn migration_status(start: usize, total: usize) -> CtValue {
     migration_status_value(
         true,
-        format!("v{}", start + 1),
+        crate::Codegen::TIR::migration_shape_name(start),
         (start..total)
-            .map(|step| CtValue::Str(format!("v{}->v{}", step + 1, step + 2)))
+            .map(|step| CtValue::Str(crate::Codegen::TIR::migration_step_name(step)))
             .collect(),
     )
 }

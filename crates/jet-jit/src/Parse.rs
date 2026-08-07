@@ -8,7 +8,9 @@ use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
 use jet_foundation::AST::{BinMatchPart, StrMatchPart, Type};
-use jet_foundation::MatchScan::{bin_match_scan, str_match_consumed, str_match_scan, BinBind};
+use jet_foundation::MatchScan::{
+    bin_match_consumed, bin_match_scan, str_match_consumed, str_match_scan, BinBind,
+};
 use jet_foundation::StreamCursor as kernel;
 use std::sync::Mutex;
 
@@ -273,14 +275,17 @@ extern "C" fn jet_jit_cursor_take_pattern(handle: i64, pattern: i64) -> i64 {
         return result_err("Cursor.take_pattern: bad pattern".into());
     };
     match with_cursor_mut(handle, |c| {
-        let tail = &c.buf[c.pos..];
-        match str_match_scan(tail, &parts, true) {
-            Some(binds) => {
-                let consumed = str_match_consumed(tail, &parts).unwrap_or(0);
-                c.pos += consumed;
+        let hit = {
+            let tail = kernel::jet_cursor_tail(c);
+            str_match_scan(tail, &parts, true)
+                .map(|binds| (str_match_consumed(tail, &parts).unwrap_or(0), binds))
+        };
+        match hit {
+            Some((consumed, binds)) => {
+                kernel::jet_cursor_take_pattern(c, consumed);
                 Ok(binds)
             }
-            None => Err(format!("pattern did not match at cursor position {}", c.pos)),
+            None => Err(kernel::jet_cursor_pattern_miss(c)),
         }
     }) {
         Some(Ok(binds)) => result_ok(pack_str_binds(&binds)),
@@ -295,13 +300,14 @@ extern "C" fn jet_jit_reader_take_pattern(handle: i64, pattern: i64) -> i64 {
         return result_err("Reader.take_pattern: bad pattern".into());
     };
     match with_reader_mut(handle, |r| {
-        let tail = &r.buf[r.pos..];
-        match bin_match_scan(tail, &parts, true) {
-            Some((bit_pos, binds)) if bit_pos % 8 == 0 => {
-                r.pos += bit_pos / 8;
+        let hit = bin_match_scan(kernel::jet_reader_tail(r), &parts, true)
+            .and_then(|(bit_pos, binds)| bin_match_consumed(bit_pos).map(|n| (n, binds)));
+        match hit {
+            Some((consumed, binds)) => {
+                kernel::jet_reader_take_pattern(r, consumed);
                 Ok(binds)
             }
-            _ => Err(format!("pattern did not match at reader position {}", r.pos)),
+            None => Err(kernel::jet_reader_pattern_miss(r)),
         }
     }) {
         Some(Ok(binds)) => result_ok(pack_bin_binds(&binds)),

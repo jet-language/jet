@@ -114,9 +114,43 @@ pub fn jet_cursor_take_until(c: &mut JetCursor, delim: &String) -> Result<String
 }
 
 pub fn jet_cursor_skip_ws(c: &mut JetCursor) {
-    let tail = &c.buf[c.pos..];
+    let tail = jet_cursor_tail(c);
     let skipped = tail.len() - tail.trim_start().len();
     c.pos += skipped;
+}
+
+// `take_pattern` runs a different match engine on every tier: AOT inlines a
+// closure specialized to the pattern, the Cranelift host and the interpreter
+// walk the pattern as data. What surrounds the match is the same everywhere,
+// so it lives here: what the scan may look at, how far a hit advances, and
+// what a miss reports. A tier supplies the match and projects the bindings;
+// it decides nothing else.
+
+pub fn jet_cursor_tail(c: &JetCursor) -> &str {
+    &c.buf[c.pos..]
+}
+
+pub fn jet_reader_tail(r: &JetReader) -> &[u8] {
+    &r.buf[r.pos..]
+}
+
+/// A matched prefix is consumed. `consumed` counts bytes from the tail.
+pub fn jet_cursor_take_pattern(c: &mut JetCursor, consumed: usize) {
+    c.pos += consumed;
+}
+
+pub fn jet_reader_take_pattern(r: &mut JetReader, consumed: usize) {
+    r.pos += consumed;
+}
+
+/// A miss leaves the position untouched and names it, so a caller can see
+/// where the parse stalled.
+pub fn jet_cursor_pattern_miss(c: &JetCursor) -> String {
+    format!("pattern did not match at cursor position {}", c.pos)
+}
+
+pub fn jet_reader_pattern_miss(r: &JetReader) -> String {
+    format!("pattern did not match at reader position {}", r.pos)
 }
 
 #[cfg(test)]

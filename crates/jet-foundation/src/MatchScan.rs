@@ -96,6 +96,12 @@ pub fn str_match_consumed(subject: &str, parts: &[StrMatchPart]) -> Option<usize
     Some(i)
 }
 
+/// Bytes a successful `bin_match_scan` consumed. A pattern that ends mid-byte
+/// leaves no position a reader can hold, so it counts as a miss.
+pub fn bin_match_consumed(bit_pos: usize) -> Option<usize> {
+    (bit_pos % 8 == 0).then_some(bit_pos / 8)
+}
+
 /// Byte-mode sibling of `str_match_scan`. Returns the bit position reached
 /// plus the bound holes.
 pub fn bin_match_scan(

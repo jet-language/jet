@@ -13,7 +13,9 @@ use crate::AST::{CtFloat, Type};
 use crate::Codegen::TIR::THandleOp;
 use crate::Comptime::CtValue;
 use crate::Diagnostics::{Diagnostic, Span};
-use jet_foundation::MatchScan::{bin_match_scan, str_match_consumed, str_match_scan, BinBind};
+use jet_foundation::MatchScan::{
+    bin_match_consumed, bin_match_scan, str_match_consumed, str_match_scan, BinBind,
+};
 use jet_foundation::StreamCursor as kernel;
 
 const READER: &str = "Reader";
@@ -92,35 +94,38 @@ pub(super) fn eval(
         }
         THandleOp::CursorTakePattern { parts, canonical } => {
             let mut c = cursor_of(recv).ok_or_else(|| unsupported("Cursor receiver", span))?;
-            let tail = c.buf[c.pos..].to_string();
-            match str_match_scan(&tail, parts, true) {
-                Some(binds) => {
-                    c.pos += str_match_consumed(&tail, parts).unwrap_or(0);
+            let hit = {
+                let tail = kernel::jet_cursor_tail(&c);
+                str_match_scan(tail, parts, true)
+                    .map(|binds| (str_match_consumed(tail, parts).unwrap_or(0), binds))
+            };
+            Ok(match hit {
+                Some((consumed, binds)) => {
+                    kernel::jet_cursor_take_pattern(&mut c, consumed);
                     let value = str_tuple(canonical, &binds);
                     *recv = cursor_ct(&c);
-                    Ok(CtValue::ResOk(Box::new(value)))
+                    CtValue::ResOk(Box::new(value))
                 }
-                None => Ok(CtValue::ResErr(Box::new(CtValue::Str(format!(
-                    "pattern did not match at cursor position {}",
-                    c.pos
-                ))))),
-            }
+                None => CtValue::ResErr(Box::new(CtValue::Str(
+                    kernel::jet_cursor_pattern_miss(&c),
+                ))),
+            })
         }
         THandleOp::ReaderTakePattern { parts, canonical } => {
             let mut r = reader_of(recv).ok_or_else(|| unsupported("Reader receiver", span))?;
-            let tail = r.buf[r.pos..].to_vec();
-            match bin_match_scan(&tail, parts, true) {
-                Some((bit_pos, binds)) if bit_pos % 8 == 0 => {
-                    r.pos += bit_pos / 8;
+            let hit = bin_match_scan(kernel::jet_reader_tail(&r), parts, true)
+                .and_then(|(bit_pos, binds)| bin_match_consumed(bit_pos).map(|n| (n, binds)));
+            Ok(match hit {
+                Some((consumed, binds)) => {
+                    kernel::jet_reader_take_pattern(&mut r, consumed);
                     let value = bin_tuple(canonical, &binds);
                     *recv = reader_ct(&r);
-                    Ok(CtValue::ResOk(Box::new(value)))
+                    CtValue::ResOk(Box::new(value))
                 }
-                _ => Ok(CtValue::ResErr(Box::new(CtValue::Str(format!(
-                    "pattern did not match at reader position {}",
-                    r.pos
-                ))))),
-            }
+                None => CtValue::ResErr(Box::new(CtValue::Str(
+                    kernel::jet_reader_pattern_miss(&r),
+                ))),
+            })
         }
         _ => Err(unsupported("handle `stream`", span)),
     }
