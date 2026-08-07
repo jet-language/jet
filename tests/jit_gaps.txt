@@ -1,10 +1,23 @@
-# Phase 3 JIT compile-gate ratchet baseline for Tower card #125 / #778.
+# Compile-coverage ratchet baseline for Tower card #125 / #778.
 # Format consumed by tests/dev.rs::jit_coverage_audit.
-# Covered means TIR lowered and Cranelift compiled end-to-end; gaps list the first compile/unsupported reason.
-# Shrink-only perf ratchet (D-LENS-RUN2 / #778): gaps may only shrink; silent growth fails CI.
-# Covered/gap movement is intentional only; update this file in the same diff.
+#
+# This file tracks COMPILE coverage only. compile_covered means TIR lowered and
+# Cranelift compiled end-to-end; it says nothing about whether the example runs.
+# Run coverage is measured by the corpus gate, tests/jit_corpus_gate.txt.
+# Compiled is not the same as runs, and #1509 was filed because the old section
+# name (`covered`) claimed both.
+#
+# gaps list the first compile/unsupported reason.
+# run_gaps list stems this file calls compile_covered that the corpus gate still
+# records as failing at the run tier. tests/dev.rs::ledger_cross_check_holds
+# fails on any such stem that is not listed here, so a new run-tier parity
+# failure cannot hide between the two ledgers.
+#
+# Shrink-only ratchet (D-LENS-RUN2 / #778): gaps and run_gaps may only shrink;
+# silent growth fails CI. Movement is intentional only; update this file in the
+# same diff.
 
-covered:
+compile_covered:
   basics/bare_lambda_param
   basics/branches
   basics/callbacks
@@ -444,3 +457,31 @@ gaps:
   types/enums: next: jit if-expression pattern match unsupported
   types/traits: run: jit print type unsupported
   ui/ui_component_kit: paint_form: jit call to unknown function `button_view`
+
+# Run-tier gaps: stems this file calls compile_covered that the corpus gate
+# still records as failing under default `jet run`. Every row is an E0956 row
+# from docs/audits/jit-run-tier-vs-aot-parity-audit-2026-07-28.md, quoting that
+# audit's reason. Each one works under `jet build` / `--release` and dies under
+# `jet run`, so each is a real I9 parity failure, parked here only so the
+# cross-check can name its owner instead of the conflict staying invisible.
+#
+# The four comptime rows are owed to card #1543 (D-META-EFFECT1=A, one effect
+# model at both stages): `can this run at compile time` is a closed Rust
+# allow-list today, which is what raises E0956, and #1543 retires it. Do not fix
+# them by reclassifying the stem.
+run_gaps:
+  collections/dynamic-array-view: split views can't run at compile time yet
+  comptime/embed: call `embed_file` can't run at compile time yet — owed to #1543 (D-META-EFFECT1)
+  comptime/embed_bytes: call `embed_bytes` can't run at compile time yet — owed to #1543 (D-META-EFFECT1)
+  comptime/find: call `find` can't run at compile time yet — owed to #1543 (D-META-EFFECT1)
+  comptime/find_empty: call `find` can't run at compile time yet — owed to #1543 (D-META-EFFECT1)
+  crypto/crypto_suite: `jet.crypto.sha512_bytes()` at comptime (#1254 repro)
+  io/args_audit: `core.args.spec()` at comptime
+  io/args_spec: `core.args.spec()` at comptime
+  io/db: `jet.db.open_memory()` at comptime
+  io/dir_entry: `core.files.list_dir()` at comptime (impure tier)
+  lowlevel/ffi: expr `ExternCall`
+  lowlevel/inline_asm: expr `ExternCall`
+  lowlevel/inline_c: expr `ExternCall`
+  types/generic_constructor_inference: static `Box.new` (#1254 repro)
+  ui/events: `core.event.scope()` at comptime
