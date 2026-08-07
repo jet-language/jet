@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1621,
-    "rev": 28930,
+    "rev": 28942,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -90998,9 +90998,16 @@
       "phase": "verify",
       "priority": "P1",
       "plan": "Implements D-CONF-WORD1 — ratified 2026-08-06. Read each decision verbatim (tower brief on this card's parent proposal, or tower decision show) before building; the ratified outcome text is the law, this plan is the route. Every requirement is a discrete exit criterion below: meet each with targeted proof (tests, snapshots, examples with golden output), and keep I9 tier parity inside this card — AOT, default jet run (JIT), and the interpreter must agree on every surface this card ships before it closes. Delete every superseded form the decisions retire in the same change; do not leave compatibility shims or parallel spellings. Reference: docs/proposals/build-config-one-plane.md.",
-      "blockedBy": [],
+      "blockedBy": [
+        "#1619"
+      ],
       "assignee": "bd3-profile",
       "log": [
+        {
+          "at": "2026-08-07",
+          "by": "bd3-profile",
+          "text": "[handoff] Review findings addressed. Commit 3530ae9ca on branch bd3/profile, on top of 000293f0a, worktree .claude/worktrees/profile, unmerged. CRITERION 2 IS NOT SATISFIED and must not be read as met: the board store has no verb to un-meet a criterion (papercut pc0l35wty), so its status still says met while its evidence now states the truth. The presets: and --preset half shipped with E1300; the --env-profile half is open and waits on ballot D-ENVFLAG1, card #1619, because the ruling folds two different selectors into one name. Do not close this card until #1619 ratifies and that flag is renamed. Criterion 5's survivor is fixed in one commit, greenfield: the lowlevel board example, its golden, its prose, its printed string, the two references to the renamed test file, and the three corpus stems all move together. The printed line really did change, from target-profile: to target-machine:, so the golden is re-blessed to the new output rather than papered over. Scoped proof, one invocation over the targets the rename touches: golden filtered to lowlevel/target_machine_board is 5 passed 0 failed; target_machines is 14 passed 1 failed, the same pre-existing MMIO case measured at 14 passed 1 failed on the stashed tree earlier; dev.rs aborts on a stack overflow in array_of_structs_field_mutation_three_way, which I confirmed reproduces with my one-line corpus edit reverted, so it predates this card and is unrelated to it. cargo build --workspace clean."
+        },
         {
           "at": "2026-08-07",
           "by": "bd3-profile",
@@ -91023,8 +91030,8 @@
           "status": "met",
           "metBy": "bd3-profile",
           "verifiedBy": null,
-          "evidence": "Two of the three renames landed; the third is an owner gate, logged below and reported. Done: ENV_FIELD_PROFILES becomes ENV_FIELD_PRESETS so the field is written presets:, and the env-namespace ENV_FLAG_PROFILE becomes ENV_FLAG_PRESET so the selector is --preset. The retired --profile spelling selects nothing and teaches E1300 with a what/why/fix that names --preset and presets:, registered in docs/spec/diagnostics.md and proved by tests/jetpack_engine.rs::retired_profile_flag_teaches_preset, which passes. The model followed the word: ProfileSpec, ProfileSet, ResolvedProfile and ProfileError are PresetSpec, PresetSet, ResolvedPreset and PresetError, ResolvedPreset.selected_profiles is selected_presets, and the enter info JSON keys and human lines read preset. Every in-repo consumer moved in the same change, including examples/jetpack/epoch5/env.jet, the in-crate fixtures, and tests/jetpack_engine.rs. NOT done, and the gate: the ruling also folds --env-profile into --preset, but --env-profile selects one env.<name> module while --preset now selects a declared preset, so one name cannot answer both. Renaming it needs a word the ruling does not supply, which is an owner call. The flag is left exactly as it was, and its diagnostic prose now says module rather than profile so it no longer uses the retired word for an environment composition.",
-          "at": "2026-08-07T13:47:11.266Z"
+          "evidence": "HALF SHIPPED, NOT SATISFIED — treat this criterion as open. Shipped: presets: replaces profiles: (ENV_FIELD_PRESETS), --preset replaces the env-namespace --profile (ENV_FLAG_PRESET), the retired --profile selects nothing and teaches E1300 with a registry row and a passing test, tests/jetpack_engine.rs::retired_profile_flag_teaches_preset, and the model, JSON keys and human lines follow the word. Open: the --env-profile half. The ruling folds it into --preset as well, but --env-profile selects one env.<name> module while --preset now selects a declared preset, so one name cannot answer both questions. The replacement word is an owner call and is now on ballot D-ENVFLAG1, card #1619. The flag is untouched until that ratifies; only its prose moved off the retired word. This criterion closes when #1619 lands and the flag is renamed.",
+          "at": "2026-08-07T13:56:34.781Z"
         },
         {
           "n": 3,
@@ -91050,8 +91057,8 @@
           "status": "met",
           "metBy": "bd3-profile",
           "verifiedBy": null,
-          "evidence": "A repository search finds no remaining use of the word for a machine, an environment composition, or a generation, outside decision history and the one gated flag. rg for TargetProfile, ENV_FIELD_PROFILES and the env --profile constant across the tree, excluding docs/proposals, returns three hits, all of them deliberate: the retirement notes in crates/jet-foundation/src/Syntax.rs and docs/spec/syntax-decisions.md, and the gated --env-profile. docs/reference/embedded.md reads machine throughout, including its heading, its table column and its TargetMachineError reference. The uses that keep the word are untouched and correct: --profile and --release for the optimize bundle, BudgetSpecs' profiles: field whose values are .Release and friends, and the package generation engine's own identifiers, which criterion 3 scopes to prose. docs/proposals keeps its original wording as decision history, which the greenfield rule preserves.",
-          "at": "2026-08-07T13:47:22.320Z"
+          "evidence": "Amended after review found a survivor the first sweep missed. Commit 3530ae9ca renames examples/features/lowlevel/target_profile_board.jet to target_machine_board.jet with its golden, moves its prose from 'Board profiles' to 'target machines', repoints its two references to the renamed tests/target_machines.rs, and changes the string the program prints from 'target-profile:' to 'target-machine:' — a real output change, so examples/features/expected/lowlevel/target_machine_board.out is re-blessed to the new line rather than left stale. The three corpus references follow the new stem: tests/jit_gaps.txt, tests/jit_corpus_gate.txt and tests/dev.rs. examples/features/lowlevel/mmio_board_write.jet's reference to the old test file moves too. The first sweep missed all of this because it grepped identifiers (TargetProfile, ENV_FIELD_PROFILES, ENV_FLAG_PROFILE) and never filenames or printed text; the sweep now greps target_profile, target-profile and TargetProfile as well. That search across the tree, excluding docs/proposals and the deliberate retirement notes in Syntax.rs and syntax-decisions.md, returns nothing. Proof: cargo test -p jet --test golden with JET_GOLDEN_FILTER=lowlevel/target_machine_board is 5 passed 0 failed, and the freshly built binary prints the re-blessed line exactly.",
+          "at": "2026-08-07T13:56:45.607Z"
         },
         {
           "n": 6,
@@ -91097,10 +91104,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:33:33.027Z",
-      "updated": "2026-08-07T13:47:37.371Z",
-      "updatedBy": "bd3-profile",
+      "updated": "2026-08-07T13:57:35.247Z",
+      "updatedBy": "bd3-orch",
       "workOrder": 500,
-      "claimedAt": "2026-08-07T13:47:37.371Z"
+      "claimedAt": "2026-08-07T13:57:03.861Z"
     },
     {
       "id": "c0y4zx0d",
@@ -98397,7 +98404,13 @@
       "plan": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-07",
+          "by": "bd3-orch",
+          "text": "Another instance found while proving #1526's example rename: tests/dev.rs array_of_structs_field_mutation_three_way aborts with a stack overflow on the default test thread (pre-existing on master, reproduced with the branch edit reverted). Include it in this card's sweep."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -98432,8 +98445,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T12:43:10.298Z",
-      "updated": "2026-08-07T12:43:19.310Z",
-      "updatedBy": "bd3-jitfix"
+      "updated": "2026-08-07T13:57:35.970Z",
+      "updatedBy": "bd3-orch"
     },
     {
       "id": "c0ftql8x",
@@ -98688,7 +98701,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T13:50:00.598Z",
-      "updated": "2026-08-07T13:50:23.265Z",
+      "updated": "2026-08-07T13:55:49.884Z",
       "updatedBy": "fact-planes-audit"
     }
   ],
@@ -131713,6 +131726,487 @@
       "created": "2026-08-07T13:49:25.918Z",
       "outcome": "A",
       "ratifiedAt": "2026-08-07"
+    },
+    {
+      "id": "D-FACT-LAW1",
+      "cardId": "c0q81flf",
+      "group": "safety",
+      "title": "One law for every compiler-held fact",
+      "gist": "Whether one written law governs every fact the compiler holds.",
+      "lesson": "The compiler proves facts about the program: a value's range, a scope's rights, a task's duty, a place's write window, a build setting. Four ratified rethinks each gave their facts a rule, and all four rules say the same thing in different words. A fact may move toward safety silently. Every move away from safety needs one written word at the site. This ballot decides whether that sentence becomes one recorded law, or stays as four separate rules.",
+      "explainer": "",
+      "story": "Ana learns Jet from the book. The numbers chapter says knowledge is conserved. The security chapter says rights only shrink. The packages chapter says policy only tightens. The concurrency chapter says a task must be joined. Four chapters, four rules to memorize. Her teammate asks what the safety model is, and she cannot answer in one sentence.",
+      "inWild": "// Four ratified rules, one shape:\n\n// 1. Knowledge (D-TYPE2-EXACT1): losing certainty is spelled\nwire :: approx(reading)          // exact -> Float, one word\n\n// 2. Rights (D-AUTHORITY-MODEL1): gaining power is spelled\n#Unsafe(\"MMIO: board manual 4.2\") { mem.volatile_write(reg, 1) }\n\n// 3. Build facts (D-CONF-MERGE1): safety facts only tighten\n// pkg.jet: policy: .{ unsafe: .Forbid }   .Force is the audited exception\n\n// 4. Duty (D-CONC-JOIN1): abandoning a duty is spelled\nh :: task compute()\nh.detach()                       // or the drop is an error",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "One written law in the spec",
+          "detail": "The spec states the law once: a fact moves toward safety silently, and every move away is one written word, recorded for audit. The four ratified per-plane rules become named instances of it. Teaching, docs, and diagnostics can point at one sentence. Gain: one safety story. Loss: the law is prose only, so a future plane could forget to follow it.",
+          "technical": "The law enters docs/spec/philosophy.md and syntax-decisions.md as a recorded decision. D-TYPE2-EXACT1, D-AUTHORITY-MODEL1, D-PACKAGE-POLICY-SCOPE1, D-CONF-MERGE1, D-FLOWTYPE1, and D-CONC-JOIN1 are listed as instances. No ruling changes.",
+          "code": "// The whole safety story, one sentence:\n// \"Jet learns facts for you, never forgets one behind your\n//  back, and every exception is one written word.\"\n\n// Every existing rule is now an instance:\nlevel: Int(0..100) = dial.read()?   // certainty gained free\nwire :: approx(reading)             // certainty lost: spelled"
+        },
+        {
+          "key": "B",
+          "name": "Law plus a guarded registry",
+          "detail": "Everything in option A, and the plane registry enforces it. Every registered fact plane must name its safe direction and its gate words in its registry row. A plane without them fails the same guard that already protects marker law zero. Gain: no future plane can drift from the law. Loss: registry rows carry two more required columns.",
+          "technical": "The D-META-REG1 table gains two columns per plane: safe_direction and gates[]. A CI guard mirrors the marker drift-guard: a plane row missing either column fails the build. Existing planes are backfilled in the same change.",
+          "code": "// A plane row states its law (readable prelude source):\n// plane Exactness {\n//   safe_direction: gain      // learning more is free\n//   gates: [approx, raw, from_rounded]\n// }\n// plane Rights {\n//   safe_direction: shrink    // giving up power is free\n//   gates: [Unsafe, grants, Force]\n// }\n// CI fails a plane that does not say which way is safe."
+        },
+        {
+          "key": "C",
+          "name": "Keep four separate rules",
+          "detail": "No umbrella law. Each rethink keeps its own rule, vocabulary, and chapter. Gain: nothing moves, and no wording debate happens now. Loss: the same law stays written four times, new planes copy whichever wording their author read last, and the one-sentence safety story never exists.",
+          "code": "// The book keeps four rules:\n// numbers:     \"knowledge is conserved\"\n// security:    \"rights only attenuate\"\n// packages:    \"policy may only tighten\"\n// concurrency: \"a bound handle must be joined\"\n// A fifth rethink would mint a fifth wording."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Pony",
+          "note": "Pony unified its concurrency and memory safety into one deny-capability table. One rule made the system teachable where prior actor languages had scattered rules.",
+          "code": "// Pony reference capabilities: one matrix of what is denied.\n// iso, trn, ref, val, box, tag - every alias rule reads off one table."
+        },
+        {
+          "lang": "Rust",
+          "note": "Rust never stated one law across borrow checking, Send/Sync, const rules, and unsafe. Each is taught separately, and learners report the total model as the hard part.",
+          "code": "// Rust: five systems, five chapters, no shared sentence.\n// let r = &mut x;      // borrow rules\n// unsafe { ... }       // its own contract\n// T: Send + Sync       // auto-trait rules"
+        }
+      ],
+      "rec": "B",
+      "recommendation": {
+        "why": "The registry guard is what made marker law zero real, and the same guard makes this law real. Implementation cards #1517-#1579 are about to add planes, so the check must exist before they land.",
+        "whyNot": [
+          {
+            "key": "A",
+            "reason": "A prose-only law repeats the pre-law-zero marker story, where five ad-hoc forms grew because nothing checked new arrivals."
+          },
+          {
+            "key": "C",
+            "reason": "Keeping four wordings leaves the fifth rethink free to mint a fifth, and the one-sentence safety story never exists."
+          }
+        ],
+        "tradeoff": "Every plane author must declare a safe direction and gate list, even for a plane with no gates. That is two lines per plane, and it is the audit trail working."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared a spec-prose law with keeping four separate rules and recommended the written law for the one-sentence safety story.",
+        "boilOcean": "The breadth review added the guarded-registry option and considered a diagnostics-only variant. The diagnostics-only variant was folded into the vocabulary ballot D-FACT-WORD1, where it belongs.",
+        "hybrid": "The hybrid review tested prose law now with a guard later. It collapsed into option B, because the guard is two registry columns and delaying it invites drift during the #1517-#1579 builds.",
+        "cooperative": "The cooperative review strengthened option C: it costs nothing today and avoids a wording debate. It still leaves the law unwritten while sixty implementation cards build fact planes.",
+        "adversarial": "The adversarial review attacked B with planes that have no meaningful safe direction, such as pure bookkeeping rows. The registry accepts a declared none value for such planes, so the guard survives and B stands."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-07T13:55:16.014Z"
+    },
+    {
+      "id": "D-FACT-WORD1",
+      "cardId": "c0q81flf",
+      "group": "tooling",
+      "title": "One word for the one-way rule",
+      "gist": "Which word names the safe move and the escape in errors and docs.",
+      "lesson": "Five words currently name the same one-way rule. Policy and config say tighten. Rights say attenuate. Flow types say narrow. Number knowledge says conserve. Facts erase. A user who meets all five reasonably believes Jet has five different rules. This ballot picks one word pair for the law in diagnostics and docs. Exact operation names stay: flow narrowing keeps its technical name, and no user-typed spelling changes.",
+      "explainer": "",
+      "story": "Sam hits three errors in one afternoon. One says a package may only tighten policy. One says rights may only attenuate. One says a conversion would lose knowledge. He searches the docs for three different rules and files a confused issue asking how they relate. They are the same rule.",
+      "inWild": "// Three error messages, one rule, three vocabularies:\n\n// E1220: \"package policy may only tighten safety\"\n// E0741: \"this block does not hold the Net right\"  (docs: attenuation)\n// (types): \"this conversion would lose knowledge; write approx(x)\"\n\n// A fourth voice for duty:\n// E0140: \"unjoined task\" vs \"single-use value dropped\" - two spellings",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Tighten and loosen",
+          "detail": "Facts tighten silently. A gate loosens, and loosening is always spelled. Two ratified rules already say tighten, so this option renames the least. Plain everyday words. Gain: smallest migration, reads naturally at every plane. Loss: tighten reads oddly for duty, where the safe move is finishing a job rather than shrinking something.",
+          "technical": "Diagnostic copy and docs adopt tighten and loosen as the law words. attenuate, conserve, and law-level narrow retire from prose. Operation names stay: flow narrowing, widening conversions, and every user-typed spelling are untouched.",
+          "code": "// One error shape everywhere:\n// \"this call would loosen the range 0..10.\n//  To allow it, write approx(x).\"\n// \"this block would loosen its rights to include Net.\n//  To allow it, write #Caps(Net) at a scope that holds it.\"\n// \"this value still owes join.\n//  Join it, or write detach.\""
+        },
+        {
+          "key": "B",
+          "name": "The ratchet and the release",
+          "detail": "Facts ratchet toward safety. Every escape word is a release, and a release is always written. One vivid picture that works for all four planes, including duty. Gain: memorable, teaches itself, names the gate family too. Loss: ratchet is a workshop metaphor, not a plain word, and it translates poorly.",
+          "technical": "Docs name the law the ratchet. Diagnostic copy says moves toward safety and names the release word. The gate ledger and the release family share the release name.",
+          "code": "// The book: \"Facts ratchet toward safety. Every release\n// is one written word, on the record.\"\n// Error: \"this call releases the range 0..10.\n//         To allow it, write approx(x).\""
+        },
+        {
+          "key": "C",
+          "name": "Toward safety and away",
+          "detail": "No metaphor at all. Diagnostics say a fact only moves toward safety here, and name the written word that allows the move away. Gain: nothing to learn, no metaphor to translate, works for every plane including duty. Loss: longer phrases in error text, and no single noun for the law when docs need to cite it.",
+          "technical": "Diagnostic copy adopts the toward-safety phrase. Docs cite the law as the one-way law. attenuate, conserve, and tighten retire from law-level prose but stay legal in local descriptions.",
+          "code": "// Error shape:\n// \"this conversion moves away from safety: the range 0..10\n//  would be lost. To allow it, write approx(x).\"\n// Docs: \"the one-way law\""
+        },
+        {
+          "key": "D",
+          "name": "Keep the five words",
+          "detail": "Each plane keeps its own vocabulary and only the docs note the family resemblance. Gain: zero migration, each word stays locally precise. Loss: the confusion in the story stays real, error copy never converges, and every future plane picks a sixth word.",
+          "code": "// Status quo: tighten (policy), attenuate (rights),\n// narrow (flow), conserve (knowledge), erase (facts).\n// The docs add a footnote that these are one rule."
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "Tighten is already ratified language in two places, it is a plain everyday word, and one word pair makes every error teach the same law. The duty plane reads acceptably as tightening what the value may still do.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Ratchet is a metaphor the simple-prose rule would flag, and it adds a word to learn where a plain one exists."
+          },
+          {
+            "key": "C",
+            "reason": "The toward-safety phrase is honest but wordy, and the law still needs a noun the docs can cite."
+          },
+          {
+            "key": "D",
+            "reason": "Keeping five words preserves the exact confusion this ballot exists to end."
+          }
+        ],
+        "tradeoff": "Duty errors fit the tighten frame least naturally, so their copy leans on the owes phrasing rather than the law word. That is one plane with softer wording, against four that align exactly."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared tighten, ratchet, and keeping five words, and recommended tighten for continuity with ratified text.",
+        "boilOcean": "The breadth review added the no-metaphor toward-safety option and tested narrow and widen as the pair. Narrow lost because flow narrowing already owns that word as an operation name.",
+        "hybrid": "The hybrid review tested tighten in errors with ratchet as the doc nickname. Two names for one law recreates the original problem, so the hybrid was dropped.",
+        "cooperative": "The cooperative review strengthened D: local words are locally precise, and attenuate is standard security vocabulary. It still leaves users finding five rules where there is one.",
+        "adversarial": "The adversarial review attacked tighten with the duty plane, where nothing shrinks. The owes phrasing repairs duty copy without breaking the law word, so A survives with that carve-out recorded."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-07T13:55:22.270Z"
+    },
+    {
+      "id": "D-FACT-GATE1",
+      "cardId": "c0q81flf",
+      "group": "tooling",
+      "title": "One ledger for every gate",
+      "gist": "Which escape words land in the one audit list.",
+      "lesson": "A gate is one written word that moves a fact away from safety: #Unsafe, #Scrub, approx, .Force, grants, detach. The ratified authority ledger (D-AUTHORITY-GATE1) already collects the rights gates behind jet inspect authority. The other gate families, such as taint scrubs and precision drops, live only in source text. This ballot decides how far the one ledger reaches. It generalizes D-AUTHORITY-GATE1 and changes no gate spelling.",
+      "explainer": "",
+      "story": "Priya reviews a payment service before a compliance audit. She needs every place the code stepped off the safe path: unsafe regions, dependency grants, scrubbed customer data, forced build settings, and precision drops in the interest math. Today that is one CLI command, a lockfile diff, a trust file, and a repo-wide grep, assembled by hand into a spreadsheet.",
+      "inWild": "# today - the exceptions live in four places\njet unsafe\ngit diff jet.lock\ncat ~/.jet/trust\nrg \"#Scrub|approx\\(|wrapping\\(\" src/\n\n# the authority ledger (ratified) covers only the rights rows:\njet inspect authority",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Full ledger, grouped by kind",
+          "detail": "Every gate lands in one ledger: unsafe regions, impure marks, grants, trust and .Force, taint scrubs, duty drops, and precision demotions. jet inspect gates prints counts per kind with security kinds expanded first, and filters select one kind. Gain: one list is the whole audit, and CI can refuse new gates without sign-off. Loss: numeric code can log thousands of demotion rows, so the tool must summarize well.",
+          "technical": "The gate record generalizes D-AUTHORITY-GATE1. Each entry: site, gate word, kind, reason where ratified law requires one. Compile-time only; no runtime cost. jet inspect authority remains as the rights-kind filter of the same ledger.",
+          "code": "$ jet inspect gates\nrights   2   src/dma.jet:41 #Unsafe \"MMIO: manual 4.2\"\n              pkg.jet grants image-codec: FS.Read\ntaint    1   src/etl.jet:88 #Scrub(Pii) hash_email\nbuild    1   pkg.jet stamp.at forced via .Force\nexact   214  (summarized; jet inspect gates --kind exact)\nduty     1   src/jobs.jet:12 detach"
+        },
+        {
+          "key": "B",
+          "name": "Security gates only",
+          "detail": "The ledger holds the gates a security reviewer needs: unsafe, impure, grants, trust, .Force, and taint scrubs. Precision demotions and duty drops stay in code only, found by grep. Gain: a short, high-signal list with no numeric noise. Loss: simulation and money code lose the precision audit, and the law's on-the-record clause holds for only half the gate family.",
+          "technical": "Same record shape as A, restricted to the rights and taint kinds plus .Force. approx, wrapping, and detach never enter the ledger.",
+          "code": "$ jet inspect gates\nsrc/dma.jet:41  #Unsafe \"MMIO: manual 4.2\"\nsrc/etl.jet:88  #Scrub(Pii) hash_email\npkg.jet         grants image-codec: FS.Read\npkg.jet         stamp.at forced via .Force\n# precision drops: rg \"approx\\(\" src/   (outside the ledger)"
+        },
+        {
+          "key": "C",
+          "name": "Keep the authority ledger as ratified",
+          "detail": "No generalization. jet inspect authority ships as D-AUTHORITY-GATE1 wrote it, and other gates stay source-only. Gain: nothing new to build or decide. Loss: the audit crawl in the story stays real for every non-rights gate, and each future plane will propose its own inspector.",
+          "code": "$ jet inspect authority\ngates:\n  src/dma.jet:41  #Unsafe \"MMIO: manual 4.2\"\n  pkg.jet         grants image-codec: FS.Read\n# scrubs, demotions, forced settings: grep by hand"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "cargo-geiger counts unsafe but nothing collects allows, feature forcing, and lossy casts in one place. Auditors assemble the picture from separate tools.",
+          "code": "$ cargo geiger        # unsafe only\n$ rg \"as f32\" src/    # lossy casts by grep"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The law says every gate is on the record, and one grouped ledger is that clause made real. Certification work reads one list, and the kind grouping keeps numeric rows from burying security rows.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Half a ledger reopens the audit crawl for exactness and duty, exactly where money and simulation code need the record."
+          },
+          {
+            "key": "C",
+            "reason": "Stopping at the ratified rights ledger invites one bespoke inspector per future plane, which is the fragmentation this slate exists to end."
+          }
+        ],
+        "tradeoff": "Heavy numeric code produces large exact-kind sections, so the default view must summarize them to counts. That is a presentation cost, accepted to keep the record complete."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared a full ledger with the ratified rights-only ledger and recommended the full ledger for the one-list audit.",
+        "boilOcean": "The breadth review added the security-only middle option and considered a per-plane inspector family. The inspector family was rejected as the fragmentation pattern itself.",
+        "hybrid": "The hybrid review moved the kind grouping and summarized counts from a separate presentation idea into option A, so the full ledger ships with noise control built in.",
+        "cooperative": "The cooperative review strengthened B: a short list auditors actually read beats a complete list they skim. The counts-first default in A answers the same concern.",
+        "adversarial": "The adversarial review attacked A with ledger bloat from hot numeric loops and with reason-ceremony creep. Summarized counts answer bloat, no gate gains a new required reason, and A survives."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-07T13:55:26.027Z"
+    },
+    {
+      "id": "D-FACT-READ1",
+      "cardId": "c0q81flf",
+      "group": "syntax",
+      "title": "One way to read what the compiler knows",
+      "gist": "How code reads a compiler-held fact: the $ sigil, reflection methods, or tools only.",
+      "lesson": "The compiler knows a value's range, a function's effects, a type's states and units. Reading that knowledge is currently uneven. Build facts read as $build.profile (D-CONF-READ1). The metaprogramming rethink made $ the one mark for a compile-time name (D-META-STAGE1). Type reflection is partly typed and partly strings, and state names cannot be written at all. This ballot picks the one reading surface. It extends D-CONF-READ1 and D-META-STAGE1 and completes D-TYPE2-PLANE1's typed reflection.",
+      "explainer": "",
+      "story": "Marco writes a derive that generates an audit table for every type in his payments package. He needs each field's range, unit, and tags. Today the ranges are readable, the units arrive through a different call, and the state names come back as mangled strings he must parse.",
+      "inWild": "// today - three reading stories in one derive body\ninfo :: T.reflect()\n// info.state_names: [\"\\0state:Confirmed\", ...]  <- string fallback\n// dimensions: not reflectable as typed data yet\n// $build.profile                                 <- typed, ratified, build only",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "The $ mark reads every plane",
+          "detail": "Reading a fact is one act, one mark: T.$range, f.$effects, Order.$states, $build.profile. Every registered plane answers as typed values, in comptime code and derive bodies. The string fallback dies. Gain: one lesson covers every fact read, and the build-fact spelling generalizes instead of staying special. Loss: the $ position grammar grows from build facts and splices to member position on types and functions.",
+          "technical": "Extends D-META-STAGE1: $ marks a compile-time name, so a fact read is $ in member position. Facts return typed values from the D-META-REG1 registry. Comptime only; S26 holds, facts are values and never mint types. TypeInfo remains the aggregate view and loses its string fallback.",
+          "code": "// one act, every plane (proposed):\nSeverity.$range          // 0..10\nsend_report.$effects     // [Net, DB.Read]\nOrder.$states            // [.Draft, .Confirmed, .Shipped]\nMeters.$dimension        // Length\n$build.profile           // ratified today - same act, build subject"
+        },
+        {
+          "key": "B",
+          "name": "Typed reflection methods only",
+          "detail": "Complete D-TYPE2-PLANE1 as written: T.reflect() returns fully typed data for every plane, and the string fallback dies. The $ mark stays where it is ratified, on build facts and splices. Gain: no grammar change, one aggregate object per type. Loss: two reading stories remain, because build facts read with $ and type facts read with a method.",
+          "technical": "TypeInfo gains typed fields per registered plane: ranges, dimensions, states, effects, marker args. No new $ positions. Reflect.rs string paths are deleted.",
+          "code": "// reflection completes, $ stays build-only:\ninfo :: Order.reflect()\ninfo.states              // [.Draft, .Confirmed, .Shipped] - typed\ninfo.fields[0].range     // 0..10\n$build.profile           // still the separate build spelling"
+        },
+        {
+          "key": "C",
+          "name": "Tools read facts, code does not",
+          "detail": "jet explain and the language server answer what is known here, but programs cannot read facts beyond today's ratified surfaces. Gain: zero language change, and no risk of programs depending on checker internals. Loss: derives and comptime code keep parsing strings or go without, and the phantom reflection gap stays.",
+          "code": "$ jet explain value order\norder: Order   state: Confirmed (set at line 12)\n               tags: Pii (from field email)\n// in code: only today's partial reflect() remains"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "The metaprogramming rethink already ratified $ as the one mark for a compile-time name, and a fact is a compile-time name. One act for one idea is the whole point of the capstone.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It keeps two reading stories, so the build plane stays a special case forever and the one-lesson claim fails."
+          },
+          {
+            "key": "C",
+            "reason": "It leaves derive authors parsing strings, which is the exact defect the evidence table documents."
+          }
+        ],
+        "tradeoff": "The $ member-position grammar must be specified carefully so it cannot be mistaken for runtime field access. Accepted: the mark is already defined as compile-time-only, and the checker rejects runtime positions."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared $ reads with completing typed reflection and recommended $ reads for the one-act story.",
+        "boilOcean": "The breadth review added the tools-only option and tested a facts() standard-library call. The library call was folded into option B as the same design behind a longer name.",
+        "hybrid": "The hybrid review confirmed A already contains B: the aggregate reflect() view remains as the bulk read, and $ is the per-fact read. No separate hybrid option was needed.",
+        "cooperative": "The cooperative review strengthened C: tools cover the human questions and freeze no surface. It still leaves generated code without typed fact access, which derives need today.",
+        "adversarial": "The adversarial review attacked A for grammar creep and for programs branching on checker internals. The mark stays comptime-only under S26 and facts never dispatch under D-FACTMODEL1, so the walls hold and A survives."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-07T13:55:34.969Z"
+    },
+    {
+      "id": "D-FACT-HOME1",
+      "cardId": "c0q81flf",
+      "group": "safety",
+      "title": "Home the orphan facts, retire the phantom types",
+      "gist": "Which stray compiler facts join the registry, and phantom fact names stop compiling in signatures.",
+      "lesson": "Some compiler-held facts live outside every registry: send-safety is a stray flag, #Track provenance and view provenance are unreadable, maturity and failure attribution are unregistered. Separately, about eighteen fact-menu names such as Capability and State are accepted in function signatures today, then every call fails, and no value can ever exist. This ballot decides which orphans become registry rows and confirms that phantom names are refused at the signature with a fix-it.",
+      "explainer": "",
+      "story": "Lena writes fn audit(c: Capability) after reading an error message that mentioned Capability. It compiles. Every call site then fails with a type error, and there is no way to make the value. She loses an hour before learning the name was never a type.",
+      "inWild": "// compiles today, then dead-ends at every call (E0112):\nfn audit(c: Capability) { ... }\n\n// meanwhile, real facts nobody can read:\n// send-safety: a stray bool on the checker (mod.rs:1124)\n// #Track origin: recorded, invisible (D-PROVENANCE1)\n// view provenance: in the API snapshot only (D-MEMPROVENANCE3)",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Home the user-facing orphans",
+          "detail": "Facts with user-visible meaning join the registry as typed, readable rows: send-safety, failure attribution, #Track and view and unit-scale provenance, and maturity. Prover internals such as uninit tracking and exhaustiveness stay engine-side, matching the prover wall in D-FACT-OWN1. Phantom fact-menu names are refused at the signature with a fix-it naming the real path. Gain: every fact a user can meet is nameable and readable. Loss: prover internals stay unreflectable.",
+          "technical": "Each homed fact becomes a D-META-REG1 registry row with typed members. Marker-argument menus stop resolving as general types in core_type_known; the diagnostic names the real value type where one exists, such as the authority value.",
+          "code": "// after (proposed):\nfn audit(c: Capability) { ... }\n// error: Capability is a fact menu, not a type.\n// fix: take Authority (the rights value) or [Right].\n\nStats.$reach        // .Sendable - the stray bool, now a fact\nreport.$attribution // .World | .Code | .Substrate"
+        },
+        {
+          "key": "B",
+          "name": "Home everything",
+          "detail": "Every fact the compiler holds joins the registry, including uninit tracking and exhaustiveness. Phantom rejection lands the same way. Gain: complete uniformity, and tools can show even prover internals. Loss: registry rows for facts no user can act on, and the prover wall blurs, because engine-internal state becomes a public surface the checker must keep stable.",
+          "technical": "As A, plus registry rows for definite-assignment and exhaustiveness facts. Those rows expose intermediate prover state, which then falls under reflection stability rules.",
+          "code": "// everything reflects, including prover internals:\nbuf.$init_state     // .Partial(indexes: [0, 1])\nmatch_expr.$covered // .Exhaustive\n// the checker can no longer change these shapes freely"
+        },
+        {
+          "key": "C",
+          "name": "Phantom fix only",
+          "detail": "Refuse phantom names in signatures with fix-its, and home nothing. Gain: the user trap closes with the smallest change. Loss: send-safety stays a stray flag while the concurrency cards build on it, and provenance, attribution, and maturity stay unreadable.",
+          "code": "fn audit(c: Capability) { ... }\n// error: Capability is a fact menu, not a type.\n// send-safety, provenance, attribution: still unregistered"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "Homing the user-facing orphans finishes what the four rethinks started, and the prover wall keeps engine internals free to change. The phantom fix closes a real beginner trap the audit documented.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Publishing prover internals freezes checker implementation details as API, trading engine freedom for reflection nobody asked for."
+          },
+          {
+            "key": "C",
+            "reason": "It leaves send-safety as a stray flag exactly while cards #1557-#1565 build the crossing checker on top of it."
+          }
+        ],
+        "tradeoff": "The line between user-facing fact and prover internal is a judgment call recorded per fact. Accepted: the ballot lists the assignment explicitly, so the line is written down, not folklore."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft homed every orphan and refused phantoms. The recommendation later narrowed after the prover wall took shape.",
+        "boilOcean": "The breadth review split homing into user-facing and everything variants and added the phantom-only floor. It also checked for further orphans and confirmed maturity and unit-scale provenance belong on the list.",
+        "hybrid": "The hybrid review tested phantom fix now with homing later. That is option C wearing a schedule, and it leaves the concurrency cards building on the stray flag, so it was dropped.",
+        "cooperative": "The cooperative review strengthened B: complete uniformity is the simplest rule and tools benefit. The stability cost to the checker stands, because published shapes cannot change freely.",
+        "adversarial": "The adversarial review attacked A's fix-it quality: a refusal without a real alternative just moves the dead end. Each refused name must name its living counterpart, the menu without one says so plainly, and A survives with that requirement recorded."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-07T13:55:39.433Z"
+    },
+    {
+      "id": "D-FACT-OWN1",
+      "cardId": "c0q81flf",
+      "group": "safety",
+      "title": "The ownership wall: prover, not plane",
+      "gist": "Whether the borrow checker stays its own engine or becomes a registered fact plane.",
+      "lesson": "Fact planes fold facts through code with small per-operation rules: ranges add, units multiply, rights meet as sets. The borrow checker is different. It tracks places, aliases, and time: which windows overlap, which owner moved, which view outlives what. That is flow analysis, not algebra. This ballot decides whether that difference becomes a recorded wall, so no future card tries to rebuild ownership as a plane, while the facts ownership proves still register like all others.",
+      "explainer": "",
+      "story": "Next spring an agent picks up a card that says unify the fact planes. Without a recorded wall it spends a week flattening the borrow checker into plane rules, breaks view invalidation, and the review has no ratified sentence to point at when rejecting the patch.",
+      "inWild": "// the ownership surface (ratified, memory v5):\nfn tally(items: [Item], out: &Report, log: ^Logger)\n//        bare = read   & = write window   ^ = take\n\n// what the checker proves is flow, not algebra:\n// - many read windows may overlap; a write window is exclusive\n// - moving an owner is rejected while a view is live\n// - the facts it publishes: sendability, provenance, moved-ness",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Ratify the wall",
+          "detail": "The borrow checker is a prover, never a plane. The sigil surface stays closed as ratified. The facts the prover publishes, such as sendability, view provenance, and moved-ness, register as read-only rows so tools and other planes can consume them. Gain: the engine stays free to be a real program analysis, and its outputs still join the one model. Loss: one mechanism is formally outside the plane registry.",
+          "technical": "Records: ownership checking follows D-MEM1, D-SHAPE-PLACE1, and D-MEM-VIEWRET1 as its own analysis. Published facts enter the D-META-REG1 table as prover-supplied rows. No plane algebra is defined for windows.",
+          "code": "// unchanged surface, published facts readable:\nStats.$reach          // .Sendable (prover-supplied row)\nslice.$provenance     // from self  (D-MEMPROVENANCE3 fact)\n// and no card may re-express & / ^ windows as plane rules"
+        },
+        {
+          "key": "B",
+          "name": "Ownership becomes a plane",
+          "detail": "Windows and moves register as a plane with combination rules, and the checker becomes that plane's algebra engine. Gain: complete uniformity, one registry with no exceptions, and window facts reflect like all others. Loss: alias analysis does not decompose into per-operation rules, so the plane would be a label over a special engine anyway, and forcing the frame invites a rebuild that loses precision.",
+          "code": "// plane Ownership { safe_direction: close, gates: [&, ^, ~] }\n// but: \"may these two windows overlap\" depends on paths,\n// loops, and time - not on any per-operation rule table.\n// The plane frame adds a name, not a mechanism."
+        },
+        {
+          "key": "C",
+          "name": "Leave it undecided",
+          "detail": "No ruling either way. Gain: no decision to maintain. Loss: the question returns on every unification card, and the next agent has no ratified sentence to cite, which is how the week in the story gets spent.",
+          "code": "// status quo: the boundary lives in reviewers' heads"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Rust's borrow checker is its own engine, and Send/Sync are auto-derived facts published from it. The split works and nobody proposes merging the two frames.",
+          "code": "// borrowck: flow analysis over MIR\n// Send/Sync: structural facts other systems consume"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The evidence shows ownership already obeys the one-way law at its surface while its engine is genuinely different inside. Naming that split keeps both truths and stops future rebuild attempts.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It gains a registry entry and risks a precision-losing rebuild, because alias analysis has no per-operation rule table to register."
+          },
+          {
+            "key": "C",
+            "reason": "It spends future reviewer time relitigating a boundary this audit has already proved twice."
+          }
+        ],
+        "tradeoff": "The registry carries prover-supplied rows that no plane algebra backs, a small irregularity accepted to keep the engine honest."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft stated the wall and recommended it, with full absorption as the alternative.",
+        "boilOcean": "The breadth review added the leave-undecided option and checked whether duty should sit behind the same wall. Duty stays a plane, because discharge rules are per-operation and D-CONC-UNIT1 already ratified that.",
+        "hybrid": "The hybrid review moved the published-facts-register clause from a separate idea into option A, so the wall and the registry stop being rivals.",
+        "cooperative": "The cooperative review strengthened B with the uniformity argument and the reflection gain. Both survive in A through the published rows, without forcing the engine into the plane frame.",
+        "adversarial": "The adversarial review attacked A as an excuse wall that future proposals could hide behind. The wall is scoped to the alias engine only, and its published facts must register, so nothing else can shelter under it and A survives."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-07T13:55:43.800Z"
+    },
+    {
+      "id": "D-FACT-FLOW1",
+      "cardId": "c0q81flf",
+      "group": "safety",
+      "title": "One flow-fact store with one join rule",
+      "gist": "How the checker stores per-binding facts that change along control flow.",
+      "lesson": "Six separate stores track facts that change as code flows: moved bindings, uninit fields, typestate, optional narrowing, taint, and view windows. Each store hand-writes its own branch-merge logic, and two of the merges are dead code, so typestate and partial-init simply keep whatever the last-walked branch left. This is machinery, but it decides whether the concurrency and type-v2 cards build one engine or six more copies.",
+      "explainer": "",
+      "story": "A user writes an if/else where one branch confirms an order and the other cancels it. After the join the compiler believes whichever branch it happened to walk last. The bug report lands next winter, and the fix gets written twice, once per store, because there is no shared join.",
+      "inWild": "// six stores today (file:line from the code sweep):\n// moved:        HashMap<String, Span>        mod.rs:1253\n// uninit:       HashMap<String, UninitState> mod.rs:1375\n// typestate:    StateCtx { states }          State.rs:246\n// taint:        TaintCtx { locals }          Taint.rs:33\n// narrowing:    scope shadowing              switches.rs:144\n// views:        ViewFactGraph (linear vec)   mod.rs:882\n// dead joins:   State.rs:712, mod.rs:44  (#[allow(dead_code)])",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "One store, planes supply joins",
+          "detail": "One flow-fact store on the checker holds every per-binding fact. Each plane supplies only its join rule for branch merges, and the walker applies joins uniformly at every if, loop, and arm table. The six stores and the twelve one-off checker columns migrate in. Gain: joins can no longer be forgotten, and new planes get flow tracking for free. Loss: one large internal migration through the checker.",
+          "technical": "Store keyed by binding and plane. Join called at every control-flow merge point by the shared walker. Sema-only; no TIR or codegen change; generated Rust stays byte-identical. Lands as phase A of the implementation shape, before cards #1517-#1579 build on it.",
+          "code": "// after: one walker, one merge point, per-plane joins\n// join(moved):  union\n// join(uninit): intersection of initialized indexes\n// join(state):  automaton meet, else divergence error\n// join(taint):  union of tags\n// a forgotten join is now impossible by construction"
+        },
+        {
+          "key": "B",
+          "name": "Shared join contract, separate stores",
+          "detail": "The stores stay where they are, but each must implement one join interface, and a guard test lists every store and asserts its join is live. Gain: the dead-join class of bug dies with a much smaller change. Loss: six data shapes remain, new planes still hand-roll storage, and the walker still calls six merge paths.",
+          "technical": "A JoinFacts trait over the existing stores plus a registry-driven test that fails when a store lacks a live join. No storage migration.",
+          "code": "// each store implements join(); a guard test enumerates them\n// State.rs join_after: now called, or the build fails"
+        },
+        {
+          "key": "C",
+          "name": "Fix the two dead joins as bugs",
+          "detail": "Wire up the typestate and uninit merges, change nothing structural. Gain: the known soundness holes close this week. Loss: the seventh store gets hand-written by the next card, and the next forgotten join waits there.",
+          "code": "// State.rs:712 join_after: called at branch merges\n// UninitState::merge_paths: called in if/else lowering\n// everything else unchanged"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "The concurrency and type-v2 cards are about to add more flow-tracked planes. One store built first means those cards add join rules, not storage engines, and the forgotten-join bug class ends.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It keeps six shapes and six merge paths, so every new plane still pays the storage tax the capstone exists to delete."
+          },
+          {
+            "key": "C",
+            "reason": "It patches two symptoms of a structure that has already produced dead code twice, and leaves the structure."
+          }
+        ],
+        "tradeoff": "One wide internal migration through the checker before feature cards land. Accepted: effort is expendable, and the migration is phase A with every test staying green."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared the unified store with fixing the dead joins and recommended the store for the by-construction guarantee.",
+        "boilOcean": "The breadth review added the shared-contract middle option and checked whether view facts belong in the store. They do as storage, while their invalidation logic stays with the ownership prover per D-FACT-OWN1.",
+        "hybrid": "The hybrid review tested contract-now, store-later. Sequencing both costs more than building the store once before the feature cards, so the hybrid was dropped.",
+        "cooperative": "The cooperative review strengthened C: it is the honest minimal soundness fix and ships immediately. It still leaves the next plane hand-rolling store number seven.",
+        "adversarial": "The adversarial review attacked A over loop fixpoints and merge-order subtleties that six bespoke stores currently dodge. The shared walker must document its fixpoint rule once, which is strictly fewer places to get it wrong than six, so A survives."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-07T13:55:49.884Z"
     }
   ],
   "questions": [
@@ -133319,6 +133813,90 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-07T13:57:35.970Z",
+      "by": "bd3-orch",
+      "action": "card.update",
+      "ref": "c0f7cuus",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T13:57:35.247Z",
+      "by": "bd3-orch",
+      "action": "card.update",
+      "ref": "c0yxdp71",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-08-07T13:57:03.861Z",
+      "by": "bd3-profile",
+      "action": "card.update",
+      "ref": "c0yxdp71",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-07T13:56:45.607Z",
+      "by": "bd3-profile",
+      "action": "card.criteria-meet",
+      "ref": "c0yxdp71",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-07T13:56:34.781Z",
+      "by": "bd3-profile",
+      "action": "card.criteria-meet",
+      "ref": "c0yxdp71",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-07T13:55:49.884Z",
+      "by": "fact-planes-audit",
+      "action": "decision.add",
+      "ref": "D-FACT-FLOW1",
+      "note": "One flow-fact store with one join rule"
+    },
+    {
+      "at": "2026-08-07T13:55:43.800Z",
+      "by": "fact-planes-audit",
+      "action": "decision.add",
+      "ref": "D-FACT-OWN1",
+      "note": "The ownership wall: prover, not plane"
+    },
+    {
+      "at": "2026-08-07T13:55:39.433Z",
+      "by": "fact-planes-audit",
+      "action": "decision.add",
+      "ref": "D-FACT-HOME1",
+      "note": "Home the orphan facts, retire the phantom types"
+    },
+    {
+      "at": "2026-08-07T13:55:34.969Z",
+      "by": "fact-planes-audit",
+      "action": "decision.add",
+      "ref": "D-FACT-READ1",
+      "note": "One way to read what the compiler knows"
+    },
+    {
+      "at": "2026-08-07T13:55:26.027Z",
+      "by": "fact-planes-audit",
+      "action": "decision.add",
+      "ref": "D-FACT-GATE1",
+      "note": "One ledger for every gate"
+    },
+    {
+      "at": "2026-08-07T13:55:22.270Z",
+      "by": "fact-planes-audit",
+      "action": "decision.add",
+      "ref": "D-FACT-WORD1",
+      "note": "One word for the one-way rule"
+    },
+    {
+      "at": "2026-08-07T13:55:16.014Z",
+      "by": "fact-planes-audit",
+      "action": "decision.add",
+      "ref": "D-FACT-LAW1",
+      "note": "One law for every compiler-held fact"
+    },
     {
       "at": "2026-08-07T13:51:54.759Z",
       "by": "bd3-tests",
@@ -136734,90 +137312,6 @@
       "action": "card.claim",
       "ref": "c0o5w74b",
       "note": ""
-    },
-    {
-      "at": "2026-08-07T01:37:58.986Z",
-      "by": "bd2-bugs",
-      "action": "card.claim",
-      "ref": "c044atit",
-      "note": ""
-    },
-    {
-      "at": "2026-08-07T01:37:58.623Z",
-      "by": "bd2-bugs",
-      "action": "card.claim",
-      "ref": "c0g2j76x",
-      "note": ""
-    },
-    {
-      "at": "2026-08-07T01:37:04.792Z",
-      "by": "bd2-orch",
-      "action": "card.update",
-      "ref": "c0z6ssoi",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-07T01:37:04.191Z",
-      "by": "bd2-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0z6ssoi",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-07T01:37:03.547Z",
-      "by": "bd2-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0z6ssoi",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-07T01:37:02.830Z",
-      "by": "bd2-orch",
-      "action": "card.update",
-      "ref": "c0cvssmh",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-07T01:37:02.226Z",
-      "by": "bd2-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0cvssmh",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-07T01:37:01.537Z",
-      "by": "bd2-orch",
-      "action": "card.update",
-      "ref": "c0vgjxm5",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-07T01:37:01.016Z",
-      "by": "bd2-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0vgjxm5",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-07T01:37:00.383Z",
-      "by": "bd2-orch",
-      "action": "card.update",
-      "ref": "c0zsjsdx",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-07T01:36:59.874Z",
-      "by": "bd2-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0zsjsdx",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-07T01:36:49.879Z",
-      "by": "bd2-orch",
-      "action": "card.add",
-      "ref": "c0o5w74b",
-      "note": "quick-run: for-in over method collections raises E0956"
     }
   ],
   "nextNum": 368,
