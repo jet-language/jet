@@ -12,7 +12,7 @@ use crate::Diagnostics::{Diagnostic, Span};
 use crate::Comptime::Builtins::{as_bool, as_int};
 use crate::Comptime::Diagnostics::unsupported;
 use crate::Comptime::Methods::as_float;
-use crate::Comptime::Value::{CtReport, CtValue};
+use crate::AST::{CtReport, CtValue};
 
 type EvalResult = Result<CtValue, Diagnostic>;
 

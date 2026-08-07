@@ -18,7 +18,7 @@ use crate::Diagnostics::{Diagnostic, Span};
 use super::Diagnostics::unsupported;
 use super::Interpreter::Interp;
 use super::Methods::{as_float, as_string};
-use super::Value::{CtReport, CtValue};
+use crate::AST::{CtReport, CtValue};
 
 fn ct_struct(type_name: &str, fields: Vec<(&str, CtValue)>) -> CtValue {
     CtValue::Struct {

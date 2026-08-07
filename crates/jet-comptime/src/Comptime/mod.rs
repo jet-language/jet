@@ -46,7 +46,6 @@ mod RegexLite;
 mod TextLite;
 mod TypedDecode;
 mod UrlLite;
-mod Value;
 pub mod TirBridge;
 
 pub use AmbientRuntime::{
@@ -103,7 +102,7 @@ pub use Reflect::{
     build_enum_layout_info, build_program_info, build_struct_layout_info, build_struct_type_info,
     build_struct_type_info_with_states, ProgramSemanticFacts,
 };
-pub use Value::{CtReport, CtValue};
+pub use crate::AST::{CtReport, CtValue};
 
 static REPL_INTERRUPT_COUNT: AtomicUsize = AtomicUsize::new(0);
 static REPL_RUNTIME_CALL_ACTIVE: AtomicBool = AtomicBool::new(false);

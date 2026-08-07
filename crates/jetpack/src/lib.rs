@@ -49,7 +49,6 @@ pub mod JetOS;
 pub mod JetPin;
 pub mod ManifestTOML;
 pub mod MemberSelect;
-pub mod Merge;
 pub mod MigrationImport;
 // Card #367 slice 4: `ModuleEval` (the computed-modules evaluator + plan
 // types) now lives in `jet-env-model` (L2, pure eval) — both realizers,

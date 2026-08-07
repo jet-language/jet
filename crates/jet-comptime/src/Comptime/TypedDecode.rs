@@ -22,7 +22,7 @@ use crate::Diagnostics::{Diagnostic, Span};
 use super::Diagnostics::unsupported;
 use super::Interpreter::Interp;
 use super::JSONInterp::{json_payload, json_variant};
-use super::Value::{CtReport, CtValue};
+use crate::AST::{CtReport, CtValue};
 
 // ── [FieldError] / MigrationStatus / DecodeResult CtValue shapes ───────────
 
