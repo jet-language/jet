@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1605,
-    "rev": 28675,
+    "nextNum": 1613,
+    "rev": 28757,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -24,7 +24,7 @@
         "board-ideas"
       ]
     },
-    "completionCursor": "2026-08-07T09:45:04.454Z"
+    "completionCursor": "2026-08-07T10:18:13.023Z"
   },
   "epochs": [
     {
@@ -84023,12 +84023,27 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-language-coherence",
-      "phase": "building",
+      "phase": "verify",
       "priority": "P1",
       "plan": "Implement D-VERDICT-1455-1 (D-MARK-REG1) structurally. One shared marker reader runs at every node start, accepts any name including keyword-lexed ones, and attaches Marker nodes to the owning AST node for every use site. Delete every hand-bumped marker token, both function-marker applicators, the marker_sequence_leads_to_function heuristic, the three shadow site tables, and all lexer marker-name knowledge. Sema receives markers; parse-time desugaring into flags ends. (This half of the card is unchanged from the original scope and is already in progress per its own criteria evidence.)\n\nAdded scope, ratified 2026-08-06 (D-META-ONE1=A, D-META-FORM1=A, D-META-NAME1=A): parse the declaration side too, since D-META-ONE1 explicitly \"fulfills D-VERDICT-1455-1\" by moving rule rows from Rust into Jet. A rule row is now written as an ordinary Jet declaration in Prelude source:\n\n  marker Inline(mode: InlineMode = .Hint, $sites: [.Function, .Method, .Constant])\n  marker Pre(condition: Any, message: String, $sites: [.Function, .Method], $repeatable: true)\n\nThe introducing keyword is \"marker\" (D-META-NAME1=A -- already the project's word everywhere else, no rename). Facts about the rule ($sites, $repeatable) are ordinary named parameters carrying the compile-time sigil \"$\", the same mark used by \"$limit\" and \"T.$layout\" -- there is no \"on\" keyword, no \"repeatable\" trailing word, no second parameter list, and no scope-block form (D-META-FORM1=A rejected all three of those spellings by name). This needs no new grammar beyond an ordinary named-parameter declaration list plus the existing \"$\" sigil applied to a parameter.\n\nNot in scope for this card: lowering the parsed \"marker\" declarations into whatever runtime structure sema/formatter/tree-sitter consume as \"registry rows\" -- that is #1457's and #1458's job; do not duplicate that work here. Also not in scope: implementing D-META-STAGE1's retirement of \"#Known\" (a separate ballot, tracked on its own new card) -- do not special-case \"#Known\" here beyond whatever the existing keyword-lexed-marker-name handling already covers generically.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "bd3-mark2",
       "log": [
+        {
+          "at": "2026-08-07",
+          "by": "bd3-mark2",
+          "text": "[handoff] fmt regression closed. Commit 2347fa424 on branch bd2/mark, now 6 commits ahead of master, unmerged, phase stays verify. The formatter emits #Known again in all five places the #1537 checkpoint had removed it: the module-level item, its fallback, the local binding, the #Known block, and the #Known if head, plus the item-start scan that finds the marker so a leading comment stays attached. The same checkpoint's one-token $word lexing also let struct Bad { $layout: Int } parse silently where master rejected it, so the field parser now says E0003: the compile-time mark belongs to the compiler's own members and never to a declared field. Measured against master, not against a guess: I checked out master's crates and Source into this worktree, built, and ran the suite. Master is 162 passed and 1 failed, not 163 green; its one failure is fmt_lossless on examples/features/packages/outputs_build/package.jet, an example manifest still using the old file name after the ratified name became pkg.jet. The branch now reports the identical 162 passed, 1 failed, same test, same file, so it regresses nothing. Also re-run after the fix: jet-parser lib 43 passed with only the #1599 failure, grammar 18/18, diagnostic_snapshots still 31 mismatches against the 32 that predate this card. One accepted consequence, noted on card #1537: a source written with the new $ spelling reformats to #Known until that card lands its migration, because Binding records only is_comptime and cannot tell the two spellings apart. Building dual-spelling preservation here would duplicate #1537's own work."
+        },
+        {
+          "at": "2026-08-07",
+          "by": "bd3-mark2",
+          "text": "[handoff] Criterion 3 now lands the retention the ruling asks for. Commit 85df2f4d3 on branch bd2/mark, worktree .claude/worktrees/mark, 5 commits ahead of master (eab7c8713), unmerged. Binding carries markers: Vec<Marker> and no derived booleans; #Track, #Local and #Shared are read by the shared reader and answered by accessors, so parse-time flag desugaring for bindings is gone. Stmt::Off and Stmt::DebugOnly became one Stmt::Switched carrying its marker, with AST::switched_off answering the six places where the two behaviours differ. TIR is untouched, so AOT, JIT and interpreter keep one meaning. Net 69 lines deleted across 41 files. Suites re-run after the change: foundation 133/133, parser 43 plus the #1599 failure, sema 68 plus its 3 pre-existing failures, marker_registry_coverage 3/3, marker_rule_signatures 24/24, grammar 18/18, diagnostics_coverage with only the #1603 code lists, diagnostic_snapshots 31 mismatches against 32 before the change (none new; published_schema_breaking recovered), cargo build --workspace clean, and nine marker-heavy examples smoke-run green on a fresh binary. Two corrections to earlier records on this card: the diagnostic_snapshots mismatch count was always 32, not one, and cargo test --test fmt has five failures on this branch. Both are pre-existing and neither is caused by this card: the fmt failures come from commit ffff2da77 deleting the formatter's #Known emission, which is logged on card #1537, and the snapshot count is corrected on card #1601. Card #1606 now carries only the genuine remainder: block-construct statements and expression markers whose node is the construct itself, the two lexer marker-name automatic-semicolon references, and the plan's marker_sequence_leads_to_function and function_marker_has_applicator sweep items. Phase verify: needs a fresh-context reviewer, not the builder."
+        },
+        {
+          "at": "2026-08-07",
+          "by": "bd3-mark2",
+          "text": "[handoff] Criterion 1's real remainder is done. Commit fd6ac1628 on branch bd2/mark, worktree .claude/worktrees/mark, now 4 commits ahead of master (eab7c8713), unmerged. The shared marker reader gained two entry points in marker_groups.rs: read_marker_name for the bracket-group form and read_marker_head for the hash-name form. Both accept any written name and consult no registry. Every hand-bumped hash-plus-name pair in Statements/control.rs and Expressions/primary.rs routes through them now, and expr_primary's five separate marker arms collapsed into one read-then-classify arm. B7's structural objection about the open tag vocabulary does not hold: an unregistered name is the classifier's default case, which is what the ruling describes. The Known head in Statements/bindings.rs reads through the same function without becoming a rule row. All marker diagnostics keep their codes, text and spans, proved by the marker UI fixtures in diagnostic_snapshots. Suites re-run: foundation 133/133, parser 43 plus the #1599 failure, sema 68 plus its 3 pre-existing failures, marker_registry_coverage 3/3, marker_rule_signatures 24/24, grammar 18/18, diagnostic_snapshots with only the unrelated E0302 mismatch of #1601, diagnostics_coverage with only the #1603 code lists, cargo build --workspace clean, and nine marker-heavy examples smoke-run on a fresh binary. Criterion 3 is re-evidenced honestly: item sites retain Marker nodes, but Stmt and Binding still have no markers field, so statement and expression markers reach sema as dedicated nodes and spans rather than as retained Marker nodes. That retention is an AST-shape change and now has its own card, #1606. Phase is verify: this card needs a fresh-context reviewer, and that reviewer should read criterion 3's evidence as a scoped hand-off to #1606, not as a full claim."
+        },
         {
           "at": "2026-08-07",
           "by": "bd3-mark",
@@ -84075,10 +84090,10 @@
           "n": 1,
           "text": "The shared reader is the only marker parse path; a search proves no hand-bumped marker token remains in parser or lexer",
           "status": "met",
-          "metBy": "bd3-mark",
+          "metBy": "bd3-mark2",
           "verifiedBy": null,
-          "evidence": "REOPENED BY REVIEW (B7, no CLI unmeet verb exists -- see card log for status): NOT fully done. Met only for callables (apply_callable_markers, unchanged from before this session) plus item-dispatch sites that already delegate to the shared reader (parse_one_marker/parse_attached_marker_sequence/parse_rule_marker) -- confirmed by inspection: enums_traits.rs variant/field markers, visibility_items.rs's #UnitFamily dispatch (calls parse_rule_marker directly), Modules.rs top-level dispatch. NOT done, confirmed by inspection, genuinely distinct large slices: (1) statement-position hand-bumped Hash+Ident consumption in Statements/control.rs (at_statement_switch_stmt's own self.expect(Hash)+bump for #Off/#DebugOnly, plus similar at ~678/878/894) and Statements/bindings.rs (take_mark's #Known handling -- legitimately exempt per B5: #Known is a retired-but-restored control keyword like comptime/if/loop, not an applied-rule marker, so it predates and sits outside the shared-reader mechanism by design); (2) expression-position hand-bumped Hash+Ident in Expressions/primary.rs lines ~35-154 (#Meta misuse teaching, #Off/#DebugOnly misuse teaching, #Todo, retired #Tainted, and the open-vocabulary #TagName-value tag-prefix operator -- the last one can never route through parse_one_marker/finish_rule_marker as-is since that machinery validates against the closed Policy::APPLIED_RULES table, while declared tags are an open, module-scoped vocabulary; #Todo and #Tainted ARE registered rows (EXPR_SITE, Operation) so they could route through the shared reader, but doing so safely without changing the E0343/meta_attr_wrong_place_diag/E0054 golden-tested diagnostic text is nontrivial). Card phase set back to building; this criterion needs its own scoped pass, not folded into #1456's remaining time.",
-          "at": "2026-08-07T10:11:48.445Z"
+          "evidence": "Follow-up pass, commit fd6ac1628 on branch bd2/mark. The shared reader is now two functions in crates/jet-parser/src/Parser/Items/marker_groups.rs: read_marker_name (the bracket-group form, cursor on the bang or the name) and read_marker_head (the hash-name form). Both accept any written name and ask the registry nothing; parse_one_marker, parse_rule_marker and the bracket-group reader are ordinary users of them. Both sites reviewer B7 named are routed now. Statements/control.rs: the SQL DSL block head, Off, DebugOnly, Reactive, Shield, Track, Local, Shared, Persist and the retired Uninit all read through read_marker_head. Expressions/primary.rs: five separate hash-lookahead arms in expr_primary became one arm that reads the head and then classifies the name (Meta E0349, Off/DebugOnly E0343, Todo, retired Tainted E0927, the four reduce selectors, and the open tag vocabulary as the default case). B7's structural objection does not hold: open vocabulary is a classification after the read, never a second parse path, which is exactly what the ruling asks for. Known in Statements/bindings.rs reads through the same head reader; since the reader asks no registry question, this does not make Known a rule row. Search proof: rg for expect(TokKind::Hash) across crates now returns two hits, the shared reader itself and Types.rs:983, which is the D-EFF2 callback effect bound where the hash is followed by an open parenthesis and not a marker name. Two marker-name references remain in the lexer and are outside this criterion's hand-bumped-token wording but inside the plan's wider sweep: jet-lexer Scan.rs:59 (FFI) and Terminators.rs:42 (UnitFamily), both automatic-semicolon rules. String interpolation's Debug and Fixed format selectors keep their own reader and error text, being a format vocabulary inside a string rather than a marker on a node. Tests: jet-foundation lib 133/133; jet-parser lib 43 passed with the one pre-existing failure of card #1599; jet-sema lib 68 passed with the same 3 pre-existing failures; marker_registry_coverage 3/3; marker_rule_signatures 24/24; grammar 18/18. diagnostic_snapshots ui_snapshots: every marker fixture passes, including off_debug_attr_on_expression, meta_on_expression, shield_arguments, persist_not_module_level, uninit_marker_retired, auto_derive_invalid_sign and the E0927 family; the single mismatch is compiler_fact_unknown_member, the unrelated E0302 text tracked by card #1601. diagnostics_coverage fails only on the pre-existing code lists of card #1603. cargo build --workspace clean, no new warnings. Fresh-binary smoke after clearing the build cache: dsl_blocks, statement_attributes, provenance_track, shield_commit, reactive_scope, persist, value_tag_type, todo_hole and comptime_block all run with correct output.",
+          "at": "2026-08-07T10:26:03.061Z"
         },
         {
           "n": 2,
@@ -84093,10 +84108,10 @@
           "n": 3,
           "text": "Marker nodes are retained on every AST target site and reach sema intact",
           "status": "met",
-          "metBy": "bd3-mark",
+          "metBy": "bd3-mark2",
           "verifiedBy": null,
-          "evidence": "Re-evidenced after B8 (prior evidence covered Func.markers only, an overclaim against the criterion's 'every AST target site' text). Verified by inspection (crates/jet-foundation/src/AST/items.rs): six markers: Vec<Marker>-shaped fields exist and are reachable at parse+sema time -- Func.markers (direct: populated in apply_callable_markers, unchanged), StructDef.{serde_markers,type_markers}, DistinctDef.type_markers, EnumDef.{serde_markers,type_markers}, Variant.serde_markers, Field.serde_markers (these six: parser collects markers via the shared reader into self.rule_facts at parse time, sema's CheckerMarkers.rs::resolve_static_rule_products + apply_all reconcile them into the field by name_span.start before codegen). Functionally proven reaching sema for Struct/Field/Enum/Variant by tests/marker_rule_signatures.rs::static_type_and_field_strings_use_the_same_signature_gate (Discriminant on enum type, Rename on struct field and enum variant, all resolve; 24/24 passing). NOT covered, tracks c1's open remainder: statement-position markers (#Track/#Persist/#Context/#Transact/#Off/#DebugOnly) and expression-position markers (#Todo/#Tainted/#TagName-value/#Meta) have no markers:Vec<Marker> retention at all -- they lower directly into dedicated Stmt/Expr variants (Stmt::ComptimeBlock, Expr::Todo, Expr::Tainted, Expr::ReduceMarker, E0343/E0344 teaching errors) rather than being retained as generic Marker nodes on an owning AST node, so 'every AST target site' is not yet true for those. This criterion cannot close ahead of c1's remainder.",
-          "at": "2026-08-07T10:11:59.707Z"
+          "evidence": "Landed in commit 85df2f4d3 on branch bd2/mark. Item sites were already true and still are: six markers-vector fields on item AST nodes populated and reaching sema, proved by tests/marker_rule_signatures.rs (24/24). The two node families that still desugared a marker into a flag at parse time now retain the marker node instead. Binding carries markers: Vec<Marker> (crates/jet-foundation/src/AST/lvalues.rs). The parser reads #Track, #Local and #Shared with the ordinary shared reader, pushes the Marker, and derives nothing; the six track, reactive_local and reactive_shared booleans and their span fields are deleted, and Binding::track(), reactive_local() and reactive_shared() answer from the retained nodes, so sema (CheckerCore/bindings.rs, Bundle/Validation.rs), codegen (TIR/lower/control_flow.rs) and the formatter all read one source of truth. Sema still sets reactive_upgrade, which is its own proof and not a written marker; the parser's pre-set for #Shared is gone because sema already derives that case. Stmt::Off and Stmt::DebugOnly are replaced by one Stmt::Switched { marker, body, span }; which switch a statement carries is a question about the retained marker, answered by AST::switched_off, in the six places where the two differ (Sema Effects, Captures, CheckerOwnership, CheckerCore/statements, Codegen mod and TIR lower/subset/env), and one shared arm in the other twenty-five. TIR is untouched, so AOT, JIT and interpreter keep identical meaning (I9). The formatter prints binding markers back in written order and prints the switch attribute from the marker's own name. Net 69 lines deleted across 41 files. Proof: cargo build --workspace clean with no new warnings; jet-foundation lib 133/133; jet-parser lib 43 passed with only the #1599 failure; jet-sema lib 68 passed with the same 3 pre-existing failures; marker_registry_coverage 3/3; marker_rule_signatures 24/24; grammar 18/18; diagnostics_coverage fails only on the #1603 code lists; diagnostic_snapshots ui_snapshots goes from 32 pre-existing mismatches to 31, one fewer and none new (published_schema_breaking now matches its fixture again). Fresh-binary smoke after clearing the build cache: statement_attributes (#Off and #DebugOnly, bare and block), provenance_track (#Track), reactive_scope (#Local and #Shared), shield_commit, persist, value_tag_type, dsl_blocks, comptime_block and todo_hole all print their expected output. Remaining and NOT claimed here: block-construct statements such as #Unsafe, #Context, #Caps and #Transact keep dedicated Stmt variants whose fields are the marker's own arguments, and #Todo, #Tainted and the tag-prefix operator keep dedicated Expr nodes; in both the node is the construct rather than a flag derived from a marker. Card #1606 tracks that question plus the two lexer marker-name references.",
+          "at": "2026-08-07T10:54:26.019Z"
         },
         {
           "n": 4,
@@ -84127,9 +84142,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T22:45:07.350Z",
-      "updated": "2026-08-07T10:13:12.759Z",
-      "updatedBy": "bd3-mark",
-      "workOrder": 370
+      "updated": "2026-08-07T11:13:17.547Z",
+      "updatedBy": "bd3-mark2",
+      "workOrder": 370,
+      "claimedAt": "2026-08-07T11:13:17.546Z"
     },
     {
       "id": "c0ai0h4w",
@@ -92216,6 +92232,16 @@
       "log": [
         {
           "at": "2026-08-07",
+          "by": "bd3-mark2",
+          "text": "Follow-up to the previous note: card #1456's branch bd2/mark restored the formatter's #Known emission in commit 2347fa424, so jet fmt stops dropping the compile-time mark. Two things stay owed to this card. First, a source written with the new $ spelling now reformats to #Known, because Binding and ConstDef record only is_comptime and cannot tell the two spellings apart; preserving both would mean recording the written mark, which is this card's migration. Second, the checkpoint's one-token $word lexing let $-marked names through every identifier position. The one place that regressed a master behaviour is fixed (a struct field now rejects a $-marked name with E0003), but the general question of which identifier positions may carry the mark is still open and belongs here. Master baseline for reference, measured in a worktree: cargo test --test fmt is 162 passed and 1 failed on master, the failure being fmt_lossless on an example manifest still named package.jet."
+        },
+        {
+          "at": "2026-08-07",
+          "by": "bd3-mark2",
+          "text": "Found while working card #1456 on branch bd2/mark: this card's checkpoint commit ffff2da77 deleted the formatter's #Known emission for a compile-time binding (crates/jet-parser/src/Formatter/Statements.rs, fmt_binding). Master emits it; the branch does not, and it emits no $ either, so jet fmt silently drops the compile-time mark from every such binding. That is five failures in cargo test --test fmt on the branch: fmt_comptime_block_is_idempotent, fmt_comptime_os_dispatch_round_trips, fmt_lossless::fmt_is_lossless_on_supported_source_corpus, fmt_one_placement_law_round_trips_every_target_kind and layout_compiler_fact_rejects_unknown_and_user_owned_dollar_members. Confirmed pre-existing and not caused by #1456: the emission line is absent at commit fd6ac1628 and present at master eab7c8713. The fix belongs to this card because Binding records only is_comptime and cannot tell the #Known spelling from the $ spelling; the formatter needs the written mark, which is this card's own migration."
+        },
+        {
+          "at": "2026-08-07",
           "by": "bd3-mark",
           "text": "diagnostics_coverage test (cargo test --test diagnostics_coverage) flags I4 gaps in this card's own checkpointed work: E0377, E0378, E0379, E0380 (the retired-#Known teaching diagnostics in crates/jet-parser/src/Parser/Statements/bindings.rs take_mark()) have no docs/spec/diagnostics.md entry and no tests/ui snapshot. Found while #1456 worked in the same mark worktree; #1456 registered only its own new E0381 and left these four for this card."
         }
@@ -92319,8 +92345,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:34:12.218Z",
-      "updated": "2026-08-07T09:12:35.942Z",
-      "updatedBy": "bd3-mark",
+      "updated": "2026-08-07T11:13:29.263Z",
+      "updatedBy": "bd3-mark2",
       "workOrder": 180
     },
     {
@@ -97361,6 +97387,16 @@
       "log": [
         {
           "at": "2026-08-07",
+          "by": "bd3-reader",
+          "text": "The blocker chain under criterion 5 is finished on branch bd3/reader (worktree .claude/worktrees/reader), HEAD 54fef177c, still unmerged. cargo test -p jet --test release_gates is now 16 of 16, canon_compiles_and_runs included. Two gaps had to be closed to get there: Reader/Cursor handle ops in the canonical TIR evaluator (#1602) and typed codec decode in the same evaluator (#1605). examples/canon.jet prints byte-identical output under default jet run, under jet run --release, and against tests/fixtures/canon/expected.out. One stale fixture line, 'fanout: 3 6 9', left behind when dffe457b8 removed the S75 fan-out operator, was deleted on the same branch. A separate pre-existing divergence found on the way is card #1607: json/toml/yaml parse errors word differently on the two tiers because each tier runs its own parser."
+        },
+        {
+          "at": "2026-08-07",
+          "by": "bd3-reader",
+          "text": "The Reader/Cursor blocker on #1602 is implemented on branch bd3/reader (worktree .claude/worktrees/reader), commit 382de4645, and left unmerged. release_gates now runs 15 of 16 green; canon_compiles_and_runs still fails, but only on a third pre-existing gap that the Reader/Cursor fix uncovered: 'jet run' rejects json.decode_traced at examples/canon.jet:161 with E0956. That is card #1605. Under 'jet run --release' examples/canon.jet now matches tests/fixtures/canon/expected.out byte for byte, after one stale fixture line ('fanout: 3 6 9', left behind when dffe457b8 removed the S75 fan-out operator) was deleted on the same branch."
+        },
+        {
+          "at": "2026-08-07",
           "by": "bd3-tests",
           "text": "Fixed both diagnosed defects: examples/canon.jet's bracketed #[Doc(...)] moved to bare #Doc(...) per E0999 (criterion #1's marker-fix half); docs/spec/diagnostics.md:301 E0328 row's in-cell pipes escaped as \\| so ga_every_diagnostic_has_explain passes (criteria #2-4 met). Fixing the marker bracket let canon_compiles_and_runs proceed further and hit a THIRD, previously-masked pre-existing failure: examples/canon.jet:130 Reader.over(packet) fails E0956 under quick-run (default jet run) — the shared ambient evaluator has ALL Reader/Cursor handle ops stubbed unsupported (crates/jet-codegen/src/Codegen/TIR/eval/handles.rs:856-874), not a narrow gap. Also found and fixed 3 more masked failures in the same file: edition_too_new, no_edition_field_is_accepted, supported_edition_is_accepted all built their test manifests with the retired payload:{...} wrapper (D-CONF-NAME1 retired it) — moved to bare name:/version:/edition:, all 3 now pass. Remaining blocker: canon_compiles_and_runs (criterion #1) and full release_gates green (criterion #5) are blocked on the Reader/Cursor quick-run gap, which is substantial implementation work (10 handle ops, stateful byte-cursor value, endian decoding, D-PARSESTR1 pattern-match integration) — logged as new card #1602, out of scope for this test-health closeout. Leaving criteria #1 and #5 open pending #1602."
         },
@@ -97432,8 +97468,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T02:53:48.807Z",
-      "updated": "2026-08-07T09:42:50.100Z",
-      "updatedBy": "bd3-orch",
+      "updated": "2026-08-07T11:05:01.715Z",
+      "updatedBy": "bd3-reader",
       "claimedAt": "2026-08-07T09:17:55.182Z"
     },
     {
@@ -97612,15 +97648,21 @@
       "plan": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-07",
+          "by": "bd3-mark2",
+          "text": "Correction from card #1456's work on branch bd2/mark: the stale diagnostic_snapshots fixture count is 32, not 3. cargo test --test diagnostic_snapshots reports 32 ui snapshot mismatches on this branch, covering compiler_fact_unknown_member, comptime_io_rejected, the core_* retirement family, db_read_query_hidden_write, duration_runtime_retired, effect_callback_bound, ffi_bad_path, hangar_verify_digest_mismatch, impure_tier2_no_gate, inline_dep_unresolved, the iter_* pair, lambda_param_unknown, layer_ceiling_exceeded, local_cell_crossing, manifest_toolchain, the marker_hardened and marker_tested pairs, module_unknown_namespace, os_target_build_context, print_lazy_iter_view, repl_effect_denied_e1803, serde_flatten_not_struct, source_owned_conversion_retired, struct_missing_field and view_mut_bounds_interpreter. Each one is Source/ emitting newer what/why/fix text than the committed .stderr fixture. #1456's parse-path and retention work moved the count from 32 to 31: published_schema_breaking now matches its fixture again, and nothing new broke."
+        }
+      ],
       "criteria": [],
       "refs": [],
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T09:03:02.874Z",
-      "updated": "2026-08-07T09:03:02.874Z",
-      "updatedBy": "bd3-mark"
+      "updated": "2026-08-07T10:54:56.901Z",
+      "updatedBy": "bd3-mark2"
     },
     {
       "id": "c09qyavw",
@@ -97631,39 +97673,50 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "verify",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
       "assignee": "bd3-reader",
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-07",
+          "by": "bd3-reader",
+          "text": "Targeted proof run on branch bd3/reader, HEAD 19ea9b34e. cargo test -p jet-foundation: 137 passed, 0 failed (new StreamCursor and MatchScan kernel tests). cargo test -p jet-codegen prelude: 2 passed; the prelude ownership test also listed only 15 of the 19 spliced modules before this change and always failed, so it now lists all 20 and pins the new bytes. cargo test --test comptime_diff: 25 passed, 0 failed, which covers the binding-folding change. cargo test --test release_gates: 15 passed, 1 failed, the failure being canon_compiles_and_runs on the json.decode_traced gap (card #1605). cargo test --test parity: canonical_builtin_inventory_is_complete_and_stable fails on unclassified core.auth builtins; that is unrelated to this diff, which touches no auth or parity file. examples/canon.jet under jet run --release now matches tests/fixtures/canon/expected.out byte for byte. [handoff] Branch bd3/reader is unmerged in worktree .claude/worktrees/reader, on top of bd3/tests. It needs an independent review and then #1605 before criterion 2 can close."
+        },
+        {
+          "at": "2026-08-07",
+          "by": "bd3-reader",
+          "text": "Implemented on branch bd3/reader (worktree .claude/worktrees/reader), commit 382de4645. The D-SHIFT1 kernel moved from the emitted prelude into crates/jet-foundation/src/StreamCursor.rs, which Codegen/mod.rs splices back into generated Rust verbatim. AOT, the Cranelift host, and the new interpreter adapter (crates/jet-codegen/src/Codegen/TIR/eval/stream.rs) now call the same functions, so no tier owns reader semantics. The pattern scans moved the same way into crates/jet-foundation/src/MatchScan.rs, replacing the JIT's private copy. Two supporting bugs surfaced and are fixed: implicit binding folding baked a stale receiver (canon.jet's stream section was wrong under AOT as well), and an expression fragment discarded the bindings it mutated. Criteria 1 and 3 are met. Criteria 2 is blocked by a separate quick-run gap, json.decode_traced, now card #1605."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "Reader/Cursor handle ops (ReaderOver, ReaderRead*, ReaderTake, ReaderRemaining, ReaderAtEnd, CursorOver, CursorTakeUntil, CursorSkipWs, CursorTakePattern, ReaderTakePattern) work under quick-run (default jet run) via the shared ambient evaluator, matching AOT Prelude semantics (I9)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd3-reader",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T09:17:00.919Z"
+          "evidence": "crates/jet-codegen/src/Codegen/TIR/eval/stream.rs handles all sixteen ops and calls jet_foundation::StreamCursor, the exact source Codegen/mod.rs splices into the AOT prelude (PRELUDE_PARTS), plus jet_foundation::MatchScan for the two take_pattern ops. Proof file exercising ReaderOver, ReaderReadU8/U16Be/U32Be/U64Be/U32Le, ReaderTake, ReaderRemaining, ReaderAtEnd, CursorOver, CursorSkipWs, CursorTakePattern and CursorTakeUntil prints identical output under 'jet run' and 'jet run --release': 'reader: magic=42 count=3 payload_len=3' / 'cursor: id=4411 sev=3 reason=disk full' / 'probe: u8=1 u16be=512 u32be=50331648 u64be=288230376151711744 rem=1 end=false' / 'short: err: short'. Kernel unit tests: cargo test -p jet-foundation, 137 passed.",
+          "at": "2026-08-07T10:27:39.679Z"
         },
         {
           "n": 2,
           "text": "cargo test -p jet --test release_gates canon_compiles_and_runs passes",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd3-reader",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T09:17:01.326Z"
+          "evidence": "cargo test -p jet --test release_gates: 16 passed, 0 failed. canon_compiles_and_runs passes now that the json.decode_traced blocker (#1605) is implemented on the same branch, commit 54fef177c.",
+          "at": "2026-08-07T11:01:20.358Z"
         },
         {
           "n": 3,
           "text": "examples/canon.jet's D-SHIFT1 stream-parsing section proves under both AOT and default jet run",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd3-reader",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T09:17:01.781Z"
+          "evidence": "examples/canon.jet's parse_packet and parse_incident, copied verbatim into a scratch file with the same caller lines, print the same two lines under 'jet run' and 'jet run --release': 'reader: magic=42 count=3 payload_len=3' and 'cursor: id=4411 sev=3 reason=disk full'. Those match tests/fixtures/canon/expected.out lines 21 and 22. Under AOT the whole of examples/canon.jet now matches expected.out byte for byte; before this change the stream section printed nothing because it panicked with 'bad packet: short payload'. Under default 'jet run' canon.jet still stops earlier, at line 161, on the unrelated json.decode_traced gap (card #1605), so the section is proved from the same source rather than from a full canon.jet run.",
+          "at": "2026-08-07T10:27:47.412Z"
         }
       ],
       "refs": [],
@@ -97671,9 +97724,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T09:16:54.961Z",
-      "updated": "2026-08-07T09:29:01.051Z",
+      "updated": "2026-08-07T11:11:35.754Z",
       "updatedBy": "bd3-reader",
-      "claimedAt": "2026-08-07T09:29:01.050Z"
+      "claimedAt": "2026-08-07T11:11:35.754Z"
     },
     {
       "id": "c0utog26",
@@ -97720,7 +97773,364 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T10:04:30.533Z",
-      "updated": "2026-08-07T10:05:21.883Z",
+      "updated": "2026-08-07T10:18:05.246Z",
+      "updatedBy": "owner"
+    },
+    {
+      "id": "c0mu3d3u",
+      "num": 1605,
+      "title": "json.decode_traced / typed codec decode unsupported in quick-run (jet run)",
+      "body": "Found while closing #1602 (Reader/Cursor in quick-run). With the Reader/Cursor gap fixed, 'jet run examples/canon.jet' now reaches line 161 and fails with E0956: core.encoding.json.decode_traced() is not supported in the canonical TIR evaluator. The same gap covers typed decode<T> and decode_traced<T> for json/toml/yaml/csv: the AST comptime interpreter supports them (Comptime/Methods/dispatch/eval_method.rs routes to TypedDecode::eval_typed_decode using the call's type arguments), but TExprKind::CoreCall in the TIR evaluator carries no type arguments, so apply_core_call falls through to the 'not whitelisted' arm. The evaluator already owns the pieces: eval_datatree_decode walks a DataTree into a typed value, and apply_codec_migration replays the D-MIGRATE3 plan. What is missing is the CoreCall arm that recovers the target type from the call's resolved return type (Result<T, [FieldError]> for decode, Result<DecodeResult<T>, [FieldError]> for decode_traced), plus the DecodeResult { value, migration } shape and its migrated flag. AOT is correct today. This is the last blocker for release_gates::canon_compiles_and_runs and therefore for #1597.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "verify",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": "bd3-reader",
+      "log": [
+        {
+          "at": "2026-08-07",
+          "by": "bd3-reader",
+          "text": "Targeted proof, branch bd3/reader HEAD be05f1f8f. cargo test -p jet --test release_gates: 16 passed, 0 failed (canon_compiles_and_runs green). cargo test --test comptime_diff: 25 passed, 0 failed, so the binding-folding change from #1602 still holds. cargo test --test corelib typed_codec_decode_matches_between_full_build_and_quick_run: 1 passed. examples/canon.jet is byte-identical under jet run, jet run --release, and tests/fixtures/canon/expected.out, with ~/.cache/jet cleared first. Not run: the full suite, per the scoped-proof rule."
+        },
+        {
+          "at": "2026-08-07",
+          "by": "bd3-reader",
+          "text": "Implemented on branch bd3/reader (worktree .claude/worktrees/reader), commit 54fef177c, on top of the Reader/Cursor work for #1602. Approach: the CoreCall arm recovers the target type from the call's resolved return type, parses with the codec's own parser through apply_core_call's existing parse arm, and decodes by running the type's generated Decode TIR — the same body AOT compiles — so the evaluator adds marshalling only. apply_codec_migration now reports the MigrationStatus of the walk, and that status is an out-param only the top-level call reads, so nested fields cannot leak into a parent's status. Parse-failure wording routes through Comptime::codec_parse_error_for_tir, the helper comptime already used. Targeted proof: new tests/corelib.rs::typed_codec_decode_matches_between_full_build_and_quick_run passes; release_gates is 16 of 16 with canon_compiles_and_runs green; examples/canon.jet is byte-identical under jet run, jet run --release, and tests/fixtures/canon/expected.out. examples/features/serde/decode_traced.jet, previously stopped at the E0956 boundary under quick-run, now runs and prints its full output. [handoff] Branch bd3/reader is unmerged and needs an independent review."
+        },
+        {
+          "at": "2026-08-07",
+          "by": "bd3-reader",
+          "text": "Blocking #1602 criterion 2 and #1597. Branch bd3/reader (worktree .claude/worktrees/reader, HEAD 19ea9b34e) fixes the Reader/Cursor half; build on top of it, since examples/canon.jet only reaches line 161 with that branch applied. Reproduce with: scripts/agent/jet-env jet run examples/canon.jet. Note ~/.cache/jet/run caches quick-run results per file, so clear ~/.cache/jet, not just ~/.cache/jet/build, between smoke runs."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "json/toml/yaml/csv decode<T> and decode_traced<T> evaluate in the canonical TIR evaluator, using the call's resolved return type for the target type",
+          "status": "met",
+          "metBy": "bd3-reader",
+          "verifiedBy": null,
+          "evidence": "crates/jet-codegen/src/Codegen/TIR/eval/exprs.rs gains eval_typed_codec_decode, reached from the CoreCall arm for json/toml/yaml/csv decode and decode_traced. The target type comes from the call's resolved return type, since TExprKind::CoreCall carries no type arguments: Result<T, [FieldError]> for decode, Result<DecodeResult<T>, [FieldError]> for decode_traced, one list layer deeper for csv. The tree comes from the codec's own parser through apply_core_call's existing parse arm, and the value comes out of the type's generated Decode TIR, the body AOT compiles, so no decode policy is re-encoded in the evaluator. Proof: new test tests/corelib.rs::typed_codec_decode_matches_between_full_build_and_quick_run runs one fixture over all four codecs under the full build and under default jet run and asserts identical stdout; it passes.",
+          "at": "2026-08-07T11:00:31.828Z"
+        },
+        {
+          "n": 2,
+          "text": "decode_traced returns the DecodeResult { value, migration } shape with a migrated flag that matches AOT for both current-schema and old-schema input",
+          "status": "met",
+          "metBy": "bd3-reader",
+          "verifiedBy": null,
+          "evidence": "decode_traced returns CtValue::Struct DecodeResult { value, migration }; apply_codec_migration now reports the MigrationStatus of the walk it performed, so migrated, from and steps carry the version names the generated chain-walker uses. The status is an out-param only the top-level call asks for, so a nested field that migrates cannot leak into its parent's status, matching AOT where nested fields call plain jet_decode. tests/corelib.rs::typed_codec_decode_matches_between_full_build_and_quick_run asserts identical stdout from the full build and default jet run for: a current-shape json record (false, empty from, zero steps); a type with no migration blocks (false); a one-block record (true v1 v1->v2 with the added field filled); a two-block record two shapes behind (v1, two steps, v1->v2 and v2->v3) and one shape behind (v2, one step, v2->v3); toml (true v1); and csv, where every row migrates and the batch reports v1->v2 once. Test passes.",
+          "at": "2026-08-07T11:10:46.346Z"
+        },
+        {
+          "n": 3,
+          "text": "cargo test -p jet --test release_gates canon_compiles_and_runs passes",
+          "status": "met",
+          "metBy": "bd3-reader",
+          "verifiedBy": null,
+          "evidence": "cargo test -p jet --test release_gates: 16 passed, 0 failed, 190.75s. canon_compiles_and_runs is green; it was the only failure before this change.",
+          "at": "2026-08-07T11:00:56.729Z"
+        },
+        {
+          "n": 4,
+          "text": "examples/canon.jet prints identical output under AOT (jet run --release) and default jet run",
+          "status": "met",
+          "metBy": "bd3-reader",
+          "verifiedBy": null,
+          "evidence": "With ~/.cache/jet cleared, examples/canon.jet produces byte-identical stdout under default jet run and under jet run --release, and both match tests/fixtures/canon/expected.out exactly (22 lines, diff empty in both directions).",
+          "at": "2026-08-07T11:01:15.151Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-07T10:26:11.230Z",
+      "updated": "2026-08-07T11:11:05.755Z",
+      "updatedBy": "bd3-reader",
+      "claimedAt": "2026-08-07T11:11:05.755Z"
+    },
+    {
+      "id": "c0ubf542",
+      "num": 1606,
+      "title": "Marker retention for block-construct statements and expressions, and the last lexer marker names",
+      "body": "Card #1456 finished the parse-path unification and the flag-shaped retention: one shared reader reads every hash-name marker, Binding keeps markers: Vec<Marker> with no derived booleans, and the two statement switch attributes share one Stmt::Switched node that carries its marker. What that pass deliberately did not change, and what this card carries:\n\n1. Block-construct statements (#Unsafe, #Impure, #Context, #Caps, #Grant, #Transact, #Region, #Policy, #Live, #Nondeterministic, #Reactive, #Shield) keep dedicated Stmt variants. Their fields are the marker's own arguments, so the node is the construct rather than a flag derived from a marker. The same holds for #Todo, #Tainted and the open tag-prefix operator in expression position. Whether D-VERDICT-1455-1 also wants a retained Marker node on these is a design question for the owner, not a mechanical change: adding one beside the parsed arguments duplicates the same fact in two places.\n2. Two marker-name references remain in the lexer, both automatic-semicolon rules rather than marker parsing: jet-lexer Scan.rs (FFI) and Terminators.rs (UnitFamily). The #1456 plan's sweep asks for all lexer marker-name knowledge to go.\n3. The same plan's other sweep items are also open: the marker_sequence_leads_to_function lookahead heuristic and the function_marker_has_applicator name list, which is a shadow site table beside the registry.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-07T10:26:29.096Z",
+      "updated": "2026-08-07T10:54:36.863Z",
+      "updatedBy": "bd3-mark2"
+    },
+    {
+      "id": "c08slhxm",
+      "num": 1607,
+      "title": "json.parse reports different parse-error wording in quick-run than AOT",
+      "body": "Found while closing #1605 (typed decode in quick-run). The two tiers run different JSON parsers, so a malformed document produces different text. Repro: a file with 'if json.parse(\"{oops\") == { .Ok(v) -> print(\"ok\") .Err(e) -> print(\"parse err: {e.message}\") }'. Under 'jet run' it prints 'expected object key'; under 'jet run --release' it prints 'expected quoted text'. AOT parses with jet_std::parse_json in the emitted prelude; quick-run parses with Comptime/JSONInterp.rs::parse_json, reached through apply_core_call. Both walk their own error vocabulary. The same divergence reaches typed decode: json.decode of a malformed document reports the parse failure through the same message. Error text is snapshot-tested product copy, so one parser has to own it. Independent of #1605, whose targeted test avoids the parse-failure path for exactly this reason and covers decode-body errors instead, which do agree.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-07",
+          "by": "bd3-reader",
+          "text": "The same two-parser split exists for TOML and YAML: AOT parses with jet_std::toml::parse_to_tree and jet_std::yaml::parse_to_tree, quick-run with Comptime/EncodingLite.rs. Fix the family together, not just JSON."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "core.encoding.json.parse reports the same error text under AOT and default jet run for a malformed document",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T10:55:59.086Z"
+        },
+        {
+          "n": 2,
+          "text": "json.decode of a malformed document reports the same [FieldError] reason on both tiers",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T10:56:00.472Z"
+        },
+        {
+          "n": 3,
+          "text": "a targeted test pins the shared wording so the two parsers cannot drift again",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T10:56:01.809Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-07T10:55:53.165Z",
+      "updated": "2026-08-07T10:58:32.436Z",
+      "updatedBy": "bd3-reader"
+    },
+    {
+      "id": "c0a8zxqh",
+      "num": 1608,
+      "title": "jet-pkg-model lib tests fail to compile: Prelude Email.rs JetAbsent not in scope",
+      "body": "cargo test -p jet-pkg-model fails to compile on master: the Prelude CoreLib Email.rs include references JetAbsent and an SMTPConfig type parameter that are not in scope under the jet-pkg-model include path (E0425/E0432/E0433, 5 errors). This also hides the older unit-test failures papercut pc0p2b1ij listed (LintPolicy, Manifest, Overlay, PhpBind, PowerShellBind); re-check them once the crate compiles.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e2",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "scripts/agent/jet-env cargo test -p jet-pkg-model compiles and the suite runs",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T11:17:06.858Z"
+        },
+        {
+          "n": 2,
+          "text": "The unit tests papercut pc0p2b1ij named (LintPolicy undenied_lint_stays_a_warning, Manifest latest_edition, Overlay keyed_overrides, PhpBind x3, PowerShellBind collisions) pass or get their own scoped card",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T11:17:07.217Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-07T11:16:55.787Z",
+      "updated": "2026-08-07T11:17:07.217Z",
+      "updatedBy": "claude-fable"
+    },
+    {
+      "id": "c0p4qdi6",
+      "num": 1609,
+      "title": "build_entry build-policy tests red: fail-closed E3503 and nested workspace deny E0603",
+      "body": "Two build_entry tests fail on master: malformed_package_and_workspace_build_policy_fail_closed (unexpected E3503 on the first allow: Exec bare-word case) and outer_package_grant_cannot_override_inner_workspace_deny (E0603 cannot find main.jet — build-authority chain resolution for a package.jet declaring build: without a co-located fn build, one level above a nested workspace.jet). From papercut pc07rtqwn; re-confirmed today.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e2",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "cargo test --test build_entry -- --exact malformed_package_and_workspace_build_policy_fail_closed outer_package_grant_cannot_override_inner_workspace_deny passes",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T11:17:17.553Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-07T11:17:07.571Z",
+      "updated": "2026-08-07T11:17:17.553Z",
+      "updatedBy": "claude-fable"
+    },
+    {
+      "id": "c0gahaxo",
+      "num": 1610,
+      "title": "pkg tests red: crypto entropy-simulation trio and physical-unit signature duo",
+      "body": "Five tests/pkg.rs tests fail on master (papercut pc0wqowkz, re-confirmed today): cli_keygen_entropy_failure_is_exact_e1292_and_artifact_free, cli_publish_auto_keygen_entropy_failure_mutates_nothing, cli_publish_no_sign_leaves_signature_empty (entropy-simulation helper exit-code mismatch), physical_unit_api_freeze_and_semver_share_one_canonical_signature, physical_unit_trait_methods_use_canonical_dimensions (API-freeze signature format mismatch). The stale pkg.jet-vs-package.jet expectation the papercut also named is already fixed.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e2",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The three entropy-simulation pkg tests pass: cli_keygen_entropy_failure_is_exact_e1292_and_artifact_free, cli_publish_auto_keygen_entropy_failure_mutates_nothing, cli_publish_no_sign_leaves_signature_empty",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T11:17:30.860Z"
+        },
+        {
+          "n": 2,
+          "text": "The two physical-unit signature tests pass: physical_unit_api_freeze_and_semver_share_one_canonical_signature, physical_unit_trait_methods_use_canonical_dimensions",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T11:17:31.220Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-07T11:17:17.920Z",
+      "updated": "2026-08-07T11:17:31.220Z",
+      "updatedBy": "claude-fable"
+    },
+    {
+      "id": "c0pt1xuj",
+      "num": 1611,
+      "title": "jet-sema and jet-comptime lib-test reds: three sema failures and a module-size cap",
+      "body": "Fresh master reds found while re-checking papercuts (the compile failures those papercuts named are fixed). jet-sema --lib: generic_template_snapshot_never_filters_parser_admitted_items, bundle_stays_split_without_reordering_passes, ordinary_units_prelude_supplies_standard_axes_and_provenance. jet-comptime --lib: method_modules_stay_below_the_split_threshold (core_calls.rs regrew to 3360 lines, cap 2500 — split along semantic ownership, do not raise the cap).",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e2",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "cargo test -p jet-sema --lib passes (all three named tests green, no test weakened)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T11:17:36.080Z"
+        },
+        {
+          "n": 2,
+          "text": "cargo test -p jet-comptime --lib passes; core_calls.rs split below the 2500-line cap, cap not raised",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T11:17:36.879Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-07T11:17:31.556Z",
+      "updated": "2026-08-07T11:17:36.879Z",
+      "updatedBy": "claude-fable"
+    },
+    {
+      "id": "c0onzbon",
+      "num": 1612,
+      "title": "corelib decode_traced_migration_chain uses retired -> arrow in migration rules",
+      "body": "tests/corelib.rs:10726 (decode_traced_migration_chain) writes rename name -> title and change score: Int -> Rank. The parser requires => for migration rules (D-MIGRATE1, states_protocols.rs:24), so the test fails E0003 on master. Pre-existing; found during #1605 review. Fix: migrate the fixture to the ratified => spelling and confirm the test passes.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "cargo test --test corelib decode_traced_migration_chain passes with the ratified => spelling",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T11:17:51.730Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-07T11:17:51.078Z",
+      "updated": "2026-08-07T11:17:51.730Z",
       "updatedBy": "bd3-orch"
     }
   ],
@@ -130663,8 +131073,10 @@
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-08-07T10:05:21.883Z"
+      "status": "ratified",
+      "created": "2026-08-07T10:05:21.883Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-08-07"
     }
   ],
   "questions": [
@@ -132271,6 +132683,573 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-07T11:17:57.895Z",
+      "by": "claude-fable",
+      "action": "papercut.resolve",
+      "ref": "pc0bxv9ii",
+      "note": "Fixed by card #1490: manifest fixtures (pkg.jet/package.jet/workspace.jet) are skipped as config in fmt_lossless; full corpus green today"
+    },
+    {
+      "at": "2026-08-07T11:17:57.544Z",
+      "by": "claude-fable",
+      "action": "papercut.resolve",
+      "ref": "pc05dezr3",
+      "note": "Golden is correct (same seed must give equal normals); the false comes from implicit const-fold evaluating nondeterministic random calls — existing card #1488 owns the fix; do not regenerate the golden"
+    },
+    {
+      "at": "2026-08-07T11:17:57.190Z",
+      "by": "claude-fable",
+      "action": "papercut.resolve",
+      "ref": "pc0dpkt1m",
+      "note": "Fixed: branch_dispatch_bench.jet parses (value-dispatch range arms, cards #1487/#1489 done); fmt-lossless corpus green today, 163 fmt tests pass"
+    },
+    {
+      "at": "2026-08-07T11:17:56.832Z",
+      "by": "claude-fable",
+      "action": "papercut.resolve",
+      "ref": "pc0p2b1ij",
+      "note": "Superseded: jet-pkg-model tests now fail earlier (Prelude Email.rs JetAbsent compile error); tracked as card #1608 including re-check of the originally named unit failures"
+    },
+    {
+      "at": "2026-08-07T11:17:56.486Z",
+      "by": "claude-fable",
+      "action": "papercut.resolve",
+      "ref": "pc0pipq8b",
+      "note": "Fixed: jet-sema/jet-comptime compile errors (missing markers field, auto_derive_default, owner_type_args) gone; different runtime reds tracked as card #1611"
+    },
+    {
+      "at": "2026-08-07T11:17:56.139Z",
+      "by": "claude-fable",
+      "action": "papercut.resolve",
+      "ref": "pc0akqxsu",
+      "note": "Fixed: workspace-wide cargo test --no-run exits 0 — reflect.rs, pure.rs, jetpack_services.rs, Prelude Scheduler.rs and HTTPServer.rs test builds all compile"
+    },
+    {
+      "at": "2026-08-07T11:17:55.781Z",
+      "by": "claude-fable",
+      "action": "papercut.resolve",
+      "ref": "pc0wqowkz",
+      "note": "pkg.jet/package.jet stale expectation already fixed (jet new tests assert package.jet). Remaining 5 reds re-confirmed and tracked as card #1610"
+    },
+    {
+      "at": "2026-08-07T11:17:55.445Z",
+      "by": "claude-fable",
+      "action": "papercut.resolve",
+      "ref": "pc0y20tm3",
+      "note": "Fixed: added [Expr::NoElse] row to docs/reference/canvas-parity.md; canvas_parity_matrix_tracks_ast_language_forms passes"
+    },
+    {
+      "at": "2026-08-07T11:17:55.091Z",
+      "by": "claude-fable",
+      "action": "papercut.resolve",
+      "ref": "pc0id5hqt",
+      "note": "Fixed: jet-comptime lib tests compile (Reflect.rs Func init has kernel/markers); one remaining runtime red (module-size cap) tracked as card #1611"
+    },
+    {
+      "at": "2026-08-07T11:17:54.743Z",
+      "by": "claude-fable",
+      "action": "papercut.resolve",
+      "ref": "pc07rtqwn",
+      "note": "Still red, now tracked as card #1609 (Jet bug belongs on a card, not a papercut): both build-policy tests re-confirmed failing today"
+    },
+    {
+      "at": "2026-08-07T11:17:54.394Z",
+      "by": "claude-fable",
+      "action": "papercut.resolve",
+      "ref": "pc0jd1b6t",
+      "note": "Fixed on master: failed_action_replaces_stale_rebuild_provenance passes, re-run today"
+    },
+    {
+      "at": "2026-08-07T11:17:54.044Z",
+      "by": "claude-fable",
+      "action": "papercut.resolve",
+      "ref": "pc0oqc6u4",
+      "note": "Fixed on master: both stack-overflow tests (failed_action_replaces_stale_rebuild_provenance, action_generated_jet_reenters_frontend_before_runtime_codegen) now pass, re-run today single-threaded"
+    },
+    {
+      "at": "2026-08-07T11:17:51.730Z",
+      "by": "bd3-orch",
+      "action": "card.criteria-add",
+      "ref": "c0onzbon",
+      "note": "#1 cargo test --test corelib decode_traced_migration_chain pass"
+    },
+    {
+      "at": "2026-08-07T11:17:51.079Z",
+      "by": "bd3-orch",
+      "action": "card.add",
+      "ref": "c0onzbon",
+      "note": "corelib decode_traced_migration_chain uses retired -> arrow in migration rules"
+    },
+    {
+      "at": "2026-08-07T11:17:36.879Z",
+      "by": "claude-fable",
+      "action": "card.criteria-add",
+      "ref": "c0pt1xuj",
+      "note": "#2 cargo test -p jet-comptime --lib passes; core_calls.rs split"
+    },
+    {
+      "at": "2026-08-07T11:17:36.080Z",
+      "by": "claude-fable",
+      "action": "card.criteria-add",
+      "ref": "c0pt1xuj",
+      "note": "#1 cargo test -p jet-sema --lib passes (all three named tests g"
+    },
+    {
+      "at": "2026-08-07T11:17:31.557Z",
+      "by": "claude-fable",
+      "action": "card.add",
+      "ref": "c0pt1xuj",
+      "note": "jet-sema and jet-comptime lib-test reds: three sema failures and a module-size cap"
+    },
+    {
+      "at": "2026-08-07T11:17:31.220Z",
+      "by": "claude-fable",
+      "action": "card.criteria-add",
+      "ref": "c0gahaxo",
+      "note": "#2 The two physical-unit signature tests pass: physical_unit_ap"
+    },
+    {
+      "at": "2026-08-07T11:17:30.860Z",
+      "by": "claude-fable",
+      "action": "card.criteria-add",
+      "ref": "c0gahaxo",
+      "note": "#1 The three entropy-simulation pkg tests pass: cli_keygen_entr"
+    },
+    {
+      "at": "2026-08-07T11:17:17.921Z",
+      "by": "claude-fable",
+      "action": "card.add",
+      "ref": "c0gahaxo",
+      "note": "pkg tests red: crypto entropy-simulation trio and physical-unit signature duo"
+    },
+    {
+      "at": "2026-08-07T11:17:17.554Z",
+      "by": "claude-fable",
+      "action": "card.criteria-add",
+      "ref": "c0p4qdi6",
+      "note": "#1 cargo test --test build_entry -- --exact malformed_package_a"
+    },
+    {
+      "at": "2026-08-07T11:17:07.571Z",
+      "by": "claude-fable",
+      "action": "card.add",
+      "ref": "c0p4qdi6",
+      "note": "build_entry build-policy tests red: fail-closed E3503 and nested workspace deny E0603"
+    },
+    {
+      "at": "2026-08-07T11:17:07.217Z",
+      "by": "claude-fable",
+      "action": "card.criteria-add",
+      "ref": "c0a8zxqh",
+      "note": "#2 The unit tests papercut pc0p2b1ij named (LintPolicy undenied"
+    },
+    {
+      "at": "2026-08-07T11:17:06.859Z",
+      "by": "claude-fable",
+      "action": "card.criteria-add",
+      "ref": "c0a8zxqh",
+      "note": "#1 scripts/agent/jet-env cargo test -p jet-pkg-model compiles a"
+    },
+    {
+      "at": "2026-08-07T11:16:55.787Z",
+      "by": "claude-fable",
+      "action": "card.add",
+      "ref": "c0a8zxqh",
+      "note": "jet-pkg-model lib tests fail to compile: Prelude Email.rs JetAbsent not in scope"
+    },
+    {
+      "at": "2026-08-07T11:13:29.263Z",
+      "by": "bd3-mark2",
+      "action": "card.update",
+      "ref": "c0z2jsot",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T11:13:17.547Z",
+      "by": "bd3-mark2",
+      "action": "card.update",
+      "ref": "c0556cxe",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-07T11:11:35.754Z",
+      "by": "bd3-reader",
+      "action": "card.update",
+      "ref": "c09qyavw",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-08-07T11:11:11.268Z",
+      "by": "bd3-reader",
+      "action": "card.update",
+      "ref": "c09qyavw",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T11:11:05.755Z",
+      "by": "bd3-reader",
+      "action": "card.update",
+      "ref": "c0mu3d3u",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T11:11:01.441Z",
+      "by": "bd3-reader",
+      "action": "card.update",
+      "ref": "c0mu3d3u",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T11:10:46.434Z",
+      "by": "bd3-reader",
+      "action": "card.criteria-meet",
+      "ref": "c0mu3d3u",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-07T11:05:01.715Z",
+      "by": "bd3-reader",
+      "action": "card.update",
+      "ref": "c0ksjkvh",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T11:03:30.509Z",
+      "by": "bd3-reader",
+      "action": "card.update",
+      "ref": "c0mu3d3u",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T11:01:20.358Z",
+      "by": "bd3-reader",
+      "action": "card.criteria-meet",
+      "ref": "c09qyavw",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-07T11:01:15.151Z",
+      "by": "bd3-reader",
+      "action": "card.criteria-meet",
+      "ref": "c0mu3d3u",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-07T11:00:56.730Z",
+      "by": "bd3-reader",
+      "action": "card.criteria-meet",
+      "ref": "c0mu3d3u",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-07T11:00:48.136Z",
+      "by": "bd3-reader",
+      "action": "card.criteria-meet",
+      "ref": "c0mu3d3u",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-07T11:00:31.828Z",
+      "by": "bd3-reader",
+      "action": "card.criteria-meet",
+      "ref": "c0mu3d3u",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T10:58:32.437Z",
+      "by": "bd3-reader",
+      "action": "card.update",
+      "ref": "c08slhxm",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T10:57:21.820Z",
+      "by": "claude-fable",
+      "action": "papercut.resolve",
+      "ref": "pc0a81p0g",
+      "note": "One-off session collision, recovered at the time (files restored from dangling stash); not recurring tooling friction — no fix owed"
+    },
+    {
+      "at": "2026-08-07T10:57:20.621Z",
+      "by": "claude-fable",
+      "action": "papercut.resolve",
+      "ref": "pc05oaqzm",
+      "note": "Fixed: pkgs.rustfmt added to both default and full devshells in flake.nix; rustfmt now on PATH via jet-env"
+    },
+    {
+      "at": "2026-08-07T10:57:19.689Z",
+      "by": "claude-fable",
+      "action": "papercut.resolve",
+      "ref": "pc04bkdmd",
+      "note": "Already fixed: cli.mjs COMMAND_FLAGS whitelist now errors E_USAGE on unknown flags — card add --text fails with 'unknown flag'"
+    },
+    {
+      "at": "2026-08-07T10:57:18.803Z",
+      "by": "claude-fable",
+      "action": "papercut.resolve",
+      "ref": "pc0l35wty",
+      "note": "Implemented: tower card criteria --unmeet n --evidence why --by X reopens a falsely-met criterion (clears metBy/verifiedBy); CLI + API + tests"
+    },
+    {
+      "at": "2026-08-07T10:57:18.014Z",
+      "by": "claude-fable",
+      "action": "papercut.resolve",
+      "ref": "pc0fxetb1",
+      "note": "Documented: verify skill fresh-binary-smoke section + memory now say rm -rf ~/.cache/jet (build AND run) — clearing only build serves a stale quick-run result"
+    },
+    {
+      "at": "2026-08-07T10:57:16.090Z",
+      "by": "claude-fable",
+      "action": "papercut.resolve",
+      "ref": "pc0heo5bk",
+      "note": "Fixed: jet-env rejects /tmp CARGO_TARGET_DIR, AGENTS.md documents the tmpfs trap, scripts/agent/tmp-guard.sh auto-cleans and blocks under memory pressure"
+    },
+    {
+      "at": "2026-08-07T10:56:01.809Z",
+      "by": "bd3-reader",
+      "action": "card.criteria-add",
+      "ref": "c08slhxm",
+      "note": "#3 a targeted test pins the shared wording so the two parsers c"
+    },
+    {
+      "at": "2026-08-07T10:56:00.472Z",
+      "by": "bd3-reader",
+      "action": "card.criteria-add",
+      "ref": "c08slhxm",
+      "note": "#2 json.decode of a malformed document reports the same [FieldE"
+    },
+    {
+      "at": "2026-08-07T10:55:59.087Z",
+      "by": "bd3-reader",
+      "action": "card.criteria-add",
+      "ref": "c08slhxm",
+      "note": "#1 core.encoding.json.parse reports the same error text under A"
+    },
+    {
+      "at": "2026-08-07T10:55:53.166Z",
+      "by": "bd3-reader",
+      "action": "card.add",
+      "ref": "c08slhxm",
+      "note": "json.parse reports different parse-error wording in quick-run than AOT"
+    },
+    {
+      "at": "2026-08-07T10:55:10.567Z",
+      "by": "bd3-mark2",
+      "action": "card.update",
+      "ref": "c0556cxe",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-07T10:54:56.901Z",
+      "by": "bd3-mark2",
+      "action": "card.update",
+      "ref": "c00jybyb",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T10:54:45.920Z",
+      "by": "bd3-mark2",
+      "action": "card.update",
+      "ref": "c0z2jsot",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T10:54:36.864Z",
+      "by": "bd3-mark2",
+      "action": "card.update",
+      "ref": "c0ubf542",
+      "note": "title,body"
+    },
+    {
+      "at": "2026-08-07T10:54:26.020Z",
+      "by": "bd3-mark2",
+      "action": "card.criteria-meet",
+      "ref": "c0556cxe",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-07T10:37:14.820Z",
+      "by": "claude-fable",
+      "action": "papercut.add",
+      "ref": "pc0heo5bk",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T10:36:36.137Z",
+      "by": "bd3-reader",
+      "action": "card.update",
+      "ref": "c0mu3d3u",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T10:36:30.768Z",
+      "by": "bd3-reader",
+      "action": "card.claim",
+      "ref": "c0mu3d3u",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T10:35:08.126Z",
+      "by": "bd3-reader",
+      "action": "card.update",
+      "ref": "c0mu3d3u",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T10:34:56.008Z",
+      "by": "bd3-reader",
+      "action": "card.update",
+      "ref": "c09qyavw",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T10:29:44.137Z",
+      "by": "bd3-reader",
+      "action": "papercut.add",
+      "ref": "pc0fxetb1",
+      "note": "#1602"
+    },
+    {
+      "at": "2026-08-07T10:27:56.976Z",
+      "by": "bd3-reader",
+      "action": "card.update",
+      "ref": "c09qyavw",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-08-07T10:27:56.581Z",
+      "by": "bd3-reader",
+      "action": "card.update",
+      "ref": "c0ksjkvh",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T10:27:47.413Z",
+      "by": "bd3-reader",
+      "action": "card.criteria-meet",
+      "ref": "c09qyavw",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-07T10:27:39.679Z",
+      "by": "bd3-reader",
+      "action": "card.criteria-meet",
+      "ref": "c09qyavw",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T10:27:31.823Z",
+      "by": "bd3-reader",
+      "action": "card.update",
+      "ref": "c09qyavw",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T10:27:18.598Z",
+      "by": "bd3-mark2",
+      "action": "card.update",
+      "ref": "c0556cxe",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T10:26:49.153Z",
+      "by": "bd3-mark2",
+      "action": "card.update",
+      "ref": "c0556cxe",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T10:26:35.801Z",
+      "by": "bd3-mark2",
+      "action": "card.criteria-meet",
+      "ref": "c0556cxe",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-07T10:26:29.096Z",
+      "by": "bd3-mark2",
+      "action": "card.add",
+      "ref": "c0ubf542",
+      "note": "Statement and expression markers are retained as Marker nodes on their owning AST node"
+    },
+    {
+      "at": "2026-08-07T10:26:20.331Z",
+      "by": "bd3-reader",
+      "action": "card.criteria-add",
+      "ref": "c0mu3d3u",
+      "note": "#4 examples/canon.jet prints identical output under AOT (jet ru"
+    },
+    {
+      "at": "2026-08-07T10:26:19.988Z",
+      "by": "bd3-reader",
+      "action": "card.criteria-add",
+      "ref": "c0mu3d3u",
+      "note": "#3 cargo test -p jet --test release_gates canon_compiles_and_ru"
+    },
+    {
+      "at": "2026-08-07T10:26:19.647Z",
+      "by": "bd3-reader",
+      "action": "card.criteria-add",
+      "ref": "c0mu3d3u",
+      "note": "#2 decode_traced returns the DecodeResult { value, migration } "
+    },
+    {
+      "at": "2026-08-07T10:26:19.359Z",
+      "by": "bd3-mark2",
+      "action": "card.criteria-meet",
+      "ref": "c0556cxe",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-07T10:26:19.050Z",
+      "by": "bd3-reader",
+      "action": "card.criteria-add",
+      "ref": "c0mu3d3u",
+      "note": "#1 json/toml/yaml/csv decode<T> and decode_traced<T> evaluate i"
+    },
+    {
+      "at": "2026-08-07T10:26:11.230Z",
+      "by": "bd3-reader",
+      "action": "card.add",
+      "ref": "c0mu3d3u",
+      "note": "json.decode_traced / typed codec decode unsupported in quick-run (jet run)"
+    },
+    {
+      "at": "2026-08-07T10:26:03.061Z",
+      "by": "bd3-mark2",
+      "action": "card.criteria-meet",
+      "ref": "c0556cxe",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T10:25:58.363Z",
+      "by": "bd3-reader",
+      "action": "card.update",
+      "ref": "c09qyavw",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T10:18:13.023Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-07T10:18:13.023Z"
+    },
+    {
+      "at": "2026-08-07T10:18:05.246Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-I9-HOME1",
+      "note": "A"
+    },
+    {
+      "at": "2026-08-07T10:14:17.528Z",
+      "by": "bd3-mark2",
+      "action": "card.claim",
+      "ref": "c0556cxe",
+      "note": ""
+    },
     {
       "at": "2026-08-07T10:13:12.759Z",
       "by": "bd3-mark",
@@ -135203,573 +136182,6 @@
       "action": "card.update",
       "ref": "c03t94dv",
       "note": "phase,plan"
-    },
-    {
-      "at": "2026-08-07T00:51:36.553Z",
-      "by": "prep-misc",
-      "action": "card.update",
-      "ref": "c0y6f65g",
-      "note": "phase,plan"
-    },
-    {
-      "at": "2026-08-07T00:51:27.930Z",
-      "by": "prep-misc",
-      "action": "card.update",
-      "ref": "c0pnc4sh",
-      "note": "phase,plan"
-    },
-    {
-      "at": "2026-08-07T00:51:12.074Z",
-      "by": "prep-misc",
-      "action": "card.update",
-      "ref": "c0bzkfdl",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-07T00:51:09.635Z",
-      "by": "prep-misc",
-      "action": "card.criteria-add",
-      "ref": "c0bzkfdl",
-      "note": "#5 Targeted tests cover name, file, and PID lookups across nati"
-    },
-    {
-      "at": "2026-08-07T00:51:09.302Z",
-      "by": "prep-misc",
-      "action": "card.criteria-add",
-      "ref": "c0bzkfdl",
-      "note": "#4 Studio integration renders the same resolver's answer per th"
-    },
-    {
-      "at": "2026-08-07T00:51:08.950Z",
-      "by": "prep-misc",
-      "action": "card.criteria-add",
-      "ref": "c0bzkfdl",
-      "note": "#3 An artifact not owned by any package (user file, runtime-cre"
-    },
-    {
-      "at": "2026-08-07T00:51:08.594Z",
-      "by": "prep-misc",
-      "action": "card.criteria-add",
-      "ref": "c0bzkfdl",
-      "note": "#2 jet info accepts a command name, a file path, and --pid, and"
-    },
-    {
-      "at": "2026-08-07T00:51:08.250Z",
-      "by": "prep-misc",
-      "action": "card.criteria-add",
-      "ref": "c0bzkfdl",
-      "note": "#1 One provenance resolver maps artifact to package to universe"
-    },
-    {
-      "at": "2026-08-07T00:51:02.276Z",
-      "by": "prep-misc",
-      "action": "card.update",
-      "ref": "c0dxl32d",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-07T00:50:59.754Z",
-      "by": "prep-misc",
-      "action": "card.criteria-add",
-      "ref": "c0dxl32d",
-      "note": "#4 Takeover activation reuses the same activation-proof gate as"
-    },
-    {
-      "at": "2026-08-07T00:50:59.405Z",
-      "by": "prep-misc",
-      "action": "card.criteria-add",
-      "ref": "c0dxl32d",
-      "note": "#3 An unsupported disk layout (cannot hold two bootable roots) "
-    },
-    {
-      "at": "2026-08-07T00:50:59.048Z",
-      "by": "prep-misc",
-      "action": "card.criteria-add",
-      "ref": "c0dxl32d",
-      "note": "#2 jet os takeover on a supported disk layout captures the host"
-    },
-    {
-      "at": "2026-08-07T00:50:58.691Z",
-      "by": "prep-misc",
-      "action": "card.criteria-add",
-      "ref": "c0dxl32d",
-      "note": "#1 Generation-0 capture contract is documented in docs/plans/ep"
-    },
-    {
-      "at": "2026-08-07T00:50:53.251Z",
-      "by": "bd2-manifest",
-      "action": "papercut.add",
-      "ref": "pc0akqxsu",
-      "note": ""
-    },
-    {
-      "at": "2026-08-07T00:50:52.596Z",
-      "by": "prep-misc",
-      "action": "card.update",
-      "ref": "c0uwwhuv",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-07T00:50:29.857Z",
-      "by": "prep-misc",
-      "action": "card.update",
-      "ref": "c0171611",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-07T00:45:40.698Z",
-      "by": "bd2-manifest",
-      "action": "papercut.add",
-      "ref": "pc0pipq8b",
-      "note": ""
-    },
-    {
-      "at": "2026-08-07T00:43:59.923Z",
-      "by": "bd2-carrier2",
-      "action": "card.claim",
-      "ref": "c0y4zx0d",
-      "note": ""
-    },
-    {
-      "at": "2026-08-07T00:41:51.564Z",
-      "by": "bd2-carrier",
-      "action": "card.add",
-      "ref": "c0g2j76x",
-      "note": "scope.guard is dropped: the cleanup closure never runs"
-    },
-    {
-      "at": "2026-08-07T00:41:44.866Z",
-      "by": "bd2-carrier",
-      "action": "card.release",
-      "ref": "c0y4zx0d",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-08-07T00:41:30.396Z",
-      "by": "bd2-link",
-      "action": "card.release",
-      "ref": "c0pwzvbh",
-      "note": ""
-    },
-    {
-      "at": "2026-08-07T00:41:30.040Z",
-      "by": "bd2-link",
-      "action": "card.update",
-      "ref": "c0pwzvbh",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-07T00:41:26.543Z",
-      "by": "bd2-link",
-      "action": "card.criteria-meet",
-      "ref": "c0pwzvbh",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-07T00:41:26.189Z",
-      "by": "bd2-link",
-      "action": "card.update",
-      "ref": "c0pwzvbh",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-07T00:41:18.351Z",
-      "by": "bd2-link",
-      "action": "card.update",
-      "ref": "c0pwzvbh",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-07T00:41:08.455Z",
-      "by": "bd2-carrier",
-      "action": "card.criteria-meet",
-      "ref": "c0y4zx0d",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-07T00:39:26.191Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-LIB-NAME1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-07T00:39:26.191Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0pwzvbh",
-      "note": "#12 snapshots re-blessed"
-    },
-    {
-      "at": "2026-08-07T00:39:26.191Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0pwzvbh",
-      "note": "#11 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-08-07T00:39:26.191Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0pwzvbh",
-      "note": "#10 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-08-07T00:39:26.191Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0pwzvbh",
-      "note": "#9 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-08-07T00:39:17.283Z",
-      "by": "bd2-link",
-      "action": "card.update",
-      "ref": "c0pwzvbh",
-      "note": "refs"
-    },
-    {
-      "at": "2026-08-07T00:39:10.461Z",
-      "by": "bd2-link",
-      "action": "card.criteria-add",
-      "ref": "c0pwzvbh",
-      "note": "#8 Loadable-library and export artifacts flow through the ratif"
-    },
-    {
-      "at": "2026-08-07T00:39:10.112Z",
-      "by": "bd2-link",
-      "action": "card.criteria-add",
-      "ref": "c0pwzvbh",
-      "note": "#7 No Jet-to-Jet binary layout promise is introduced: an artifa"
-    },
-    {
-      "at": "2026-08-07T00:39:09.754Z",
-      "by": "bd2-link",
-      "action": "card.criteria-add",
-      "ref": "c0pwzvbh",
-      "note": "#6 The export surface ratified by D-LIB-EXPORT1 is produced by "
-    },
-    {
-      "at": "2026-08-07T00:39:09.394Z",
-      "by": "bd2-link",
-      "action": "card.criteria-add",
-      "ref": "c0pwzvbh",
-      "note": "#5 An executable example builds a loadable Jet library and load"
-    },
-    {
-      "at": "2026-08-07T00:38:59.360Z",
-      "by": "bd2-link",
-      "action": "card.criteria-add",
-      "ref": "c0pwzvbh",
-      "note": "#4 The loadable-library request surface matches the ratified D-"
-    },
-    {
-      "at": "2026-08-07T00:38:59.009Z",
-      "by": "bd2-link",
-      "action": "card.criteria-add",
-      "ref": "c0pwzvbh",
-      "note": "#3 The load-time trust boundary ratified by D-LIB-DYNTRUST1 is "
-    },
-    {
-      "at": "2026-08-07T00:38:58.668Z",
-      "by": "bd2-link",
-      "action": "card.criteria-add",
-      "ref": "c0pwzvbh",
-      "note": "#2 A loadable Jet library built by one compiler version is refu"
-    },
-    {
-      "at": "2026-08-07T00:38:58.325Z",
-      "by": "bd2-link",
-      "action": "card.criteria-add",
-      "ref": "c0pwzvbh",
-      "note": "#1 Plan doc docs/sidequests/library-reuse-and-linking.md matche"
-    },
-    {
-      "at": "2026-08-07T00:38:49.718Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-LIB-DYNTRUST1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-07T00:38:28.910Z",
-      "by": "bd2-link",
-      "action": "decision.add",
-      "ref": "D-LIB-NAME1",
-      "note": "How a package asks for a loadable library, and what it is called"
-    },
-    {
-      "at": "2026-08-07T00:37:58.466Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-LIB-EXPORT1",
-      "note": "C"
-    },
-    {
-      "at": "2026-08-07T00:37:26.790Z",
-      "by": "bd2-link",
-      "action": "decision.add",
-      "ref": "D-LIB-DYNTRUST1",
-      "note": "What a loaded Jet library is allowed to do"
-    },
-    {
-      "at": "2026-08-07T00:37:12.833Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-CORESURF-SMALL1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-07T00:37:07.554Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-ITER-DECLINE1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-07T00:36:56.731Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-SET-DECLINE1",
-      "note": "C"
-    },
-    {
-      "at": "2026-08-07T00:36:40.412Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-STR-DECLINE1",
-      "note": "C"
-    },
-    {
-      "at": "2026-08-07T00:36:29.108Z",
-      "by": "bd2-link",
-      "action": "decision.add",
-      "ref": "D-LIB-EXPORT1",
-      "note": "What a Library output hands to another language"
-    },
-    {
-      "at": "2026-08-07T00:34:25.094Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0gv6ghj",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-07T00:34:24.687Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0r2dfxz",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-07T00:34:24.274Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0m2slnf",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-07T00:34:23.860Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c01y8s93",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-07T00:34:15.086Z",
-      "by": "fable",
-      "action": "question.answer",
-      "ref": "q9gvofyg",
-      "note": ""
-    },
-    {
-      "at": "2026-08-07T00:34:14.733Z",
-      "by": "fable",
-      "action": "question.answer",
-      "ref": "q8d9qc5s",
-      "note": ""
-    },
-    {
-      "at": "2026-08-07T00:34:14.381Z",
-      "by": "fable",
-      "action": "question.answer",
-      "ref": "q785552p",
-      "note": ""
-    },
-    {
-      "at": "2026-08-07T00:34:02.756Z",
-      "by": "fable",
-      "action": "question.answer",
-      "ref": "q6s7hah8",
-      "note": ""
-    },
-    {
-      "at": "2026-08-07T00:33:55.104Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-CORESURF-SMALL1",
-      "note": ""
-    },
-    {
-      "at": "2026-08-07T00:33:54.625Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-ITER-DECLINE1",
-      "note": ""
-    },
-    {
-      "at": "2026-08-07T00:33:54.113Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-SET-DECLINE1",
-      "note": ""
-    },
-    {
-      "at": "2026-08-07T00:33:53.657Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-STR-DECLINE1",
-      "note": ""
-    },
-    {
-      "at": "2026-08-07T00:29:45.170Z",
-      "by": "bd2-link",
-      "action": "card.claim",
-      "ref": "c0pwzvbh",
-      "note": ""
-    },
-    {
-      "at": "2026-08-07T00:28:53.119Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-07T00:28:53.119Z"
-    },
-    {
-      "at": "2026-08-07T00:28:24.416Z",
-      "by": "bd2-orch",
-      "action": "card.update",
-      "ref": "c0gv6ghj",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-07T00:28:23.944Z",
-      "by": "bd2-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0gv6ghj",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-07T00:28:23.545Z",
-      "by": "bd2-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0gv6ghj",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-07T00:28:23.141Z",
-      "by": "bd2-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0gv6ghj",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-07T00:28:22.649Z",
-      "by": "bd2-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0gv6ghj",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-07T00:28:22.156Z",
-      "by": "bd2-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0gv6ghj",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-07T00:28:21.657Z",
-      "by": "bd2-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0gv6ghj",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-07T00:28:21.119Z",
-      "by": "bd2-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0gv6ghj",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-07T00:25:26.607Z",
-      "by": "bd2-sweep",
-      "action": "card.release",
-      "ref": "c0gv6ghj",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-08-07T00:24:44.766Z",
-      "by": "bd2-sweep",
-      "action": "card.update",
-      "ref": "c0gv6ghj",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-07T00:24:33.288Z",
-      "by": "owner",
-      "action": "question.add",
-      "ref": "q9gvofyg",
-      "note": ""
-    },
-    {
-      "at": "2026-08-07T00:23:56.942Z",
-      "by": "bd2-sweep",
-      "action": "card.update",
-      "ref": "c0gv6ghj",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-07T00:23:53.038Z",
-      "by": "bd2-sweep",
-      "action": "card.criteria-meet",
-      "ref": "c0gv6ghj",
-      "note": "#7"
-    },
-    {
-      "at": "2026-08-07T00:23:52.688Z",
-      "by": "bd2-sweep",
-      "action": "card.criteria-meet",
-      "ref": "c0gv6ghj",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-07T00:23:52.329Z",
-      "by": "bd2-sweep",
-      "action": "card.criteria-meet",
-      "ref": "c0gv6ghj",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-07T00:23:51.972Z",
-      "by": "bd2-sweep",
-      "action": "card.criteria-meet",
-      "ref": "c0gv6ghj",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-07T00:23:51.612Z",
-      "by": "bd2-sweep",
-      "action": "card.criteria-meet",
-      "ref": "c0gv6ghj",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-07T00:23:51.241Z",
-      "by": "bd2-sweep",
-      "action": "card.criteria-meet",
-      "ref": "c0gv6ghj",
-      "note": "#2"
     }
   ],
   "nextNum": 368,
@@ -135801,7 +136213,10 @@
       "text": "tests/fmt fmt-lossless-corpus fails on master and on every branch: tests/ui/build_entry_conflict/pkg.jet does not parse but is absent from UI_PARSE_INVALID. Same config-detection family as the known examples/jetpack/epoch5/config/dev.jet fmt failure. The assert aborts the whole corpus scan at that file, so every later fixture goes unchecked.",
       "cardId": null,
       "created": "2026-08-05T16:16:23.539Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-07T11:17:57.895Z",
+      "resolvedBy": "claude-fable",
+      "resolution": "Fixed by card #1490: manifest fixtures (pkg.jet/package.jet/workspace.jet) are skipped as config in fmt_lossless; full corpus green today"
     },
     {
       "id": "pc04bkdmd",
@@ -135809,7 +136224,10 @@
       "text": "tower card add silently ignores unknown flags (--text dropped, card created with empty body) — should error on unrecognized flags",
       "cardId": null,
       "created": "2026-08-05T18:00:06.498Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-07T10:57:19.688Z",
+      "resolvedBy": "claude-fable",
+      "resolution": "Already fixed: cli.mjs COMMAND_FLAGS whitelist now errors E_USAGE on unknown flags — card add --text fails with 'unknown flag'"
     },
     {
       "id": "pc09n9y05",
@@ -135827,7 +136245,10 @@
       "text": "Shared-tree collision: another session was editing this working tree concurrently (AGENTS.md tower-serve rule, a leading-dot struct-literal parser fix referencing card #1441, field-audit renumbering to #1442, and six examples/features/types/*.jet migrated to value-dispatch form). Their uncommitted example edits made my golden run look like a regression, and my cleanup reverted them. Recovered every file from a dangling stash and restored their versions. Two of my commits (bbd8531f8, 02527858b) still carry the reverted content in history; the working tree now has theirs.",
       "cardId": null,
       "created": "2026-08-05T18:32:48.136Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-07T10:57:21.820Z",
+      "resolvedBy": "claude-fable",
+      "resolution": "One-off session collision, recovered at the time (files restored from dangling stash); not recurring tooling friction — no fix owed"
     },
     {
       "id": "pc05dezr3",
@@ -135835,7 +136256,10 @@
       "text": "examples/features/expected/math/random_audit.out is stale: random.normal from the same seed prints false for a == b on both AOT and jet run; unrelated to the power/xor cards",
       "cardId": null,
       "created": "2026-08-05T22:57:12.233Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-07T11:17:57.544Z",
+      "resolvedBy": "claude-fable",
+      "resolution": "Golden is correct (same seed must give equal normals); the false comes from implicit const-fold evaluating nondeterministic random calls — existing card #1488 owns the fix; do not regenerate the golden"
     },
     {
       "id": "pc0dpkt1m",
@@ -135843,7 +136267,10 @@
       "text": "examples/features/tooling/branch_dispatch_bench.jet stopped parsing at commit c3cbdc85b: value dispatch (return if n == { 0..9 -> 1 }) has no range arm head, so fmt_lossless fails; 18 example files carry pre-existing hard errors",
       "cardId": null,
       "created": "2026-08-05T23:02:15.310Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-07T11:17:57.189Z",
+      "resolvedBy": "claude-fable",
+      "resolution": "Fixed: branch_dispatch_bench.jet parses (value-dispatch range arms, cards #1487/#1489 done); fmt-lossless corpus green today, 163 fmt tests pass"
     },
     {
       "id": "pc0pipq8b",
@@ -135851,7 +136278,10 @@
       "text": "master has pre-existing test-build failures unrelated to manifest work: jet-sema lib tests fail (E0063 missing 'markers' field in ApiFreeze.rs:758 Func init; E0062 auto_derive_default set twice in Schema.rs:363) and jet-comptime tests fail similarly (owner_type_args missing in AST::Expr, tls_tier2 test). Confirmed on master HEAD 4e8175661 before any manifest-card changes.",
       "cardId": null,
       "created": "2026-08-07T00:45:40.698Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-07T11:17:56.486Z",
+      "resolvedBy": "claude-fable",
+      "resolution": "Fixed: jet-sema/jet-comptime compile errors (missing markers field, auto_derive_default, owner_type_args) gone; different runtime reds tracked as card #1611"
     },
     {
       "id": "pc0akqxsu",
@@ -135859,7 +136289,10 @@
       "text": "master has more pre-existing test-build failures beyond jet-sema/jet-comptime: tests/reflect.rs (Param/Func missing fields), tests/pure.rs (FuncSig.param_call missing x3), tests/jetpack_services.rs (Scratch::join missing method), crates/jet-codegen Prelude Scheduler.rs (jet_task_control_trace not found) + HTTPServer.rs (Duration::as_millis) breaking tests/canvas.rs and tests/http_server_lifecycle.rs. All confirmed pre-existing, unrelated to manifest-card work.",
       "cardId": null,
       "created": "2026-08-07T00:50:53.251Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-07T11:17:56.138Z",
+      "resolvedBy": "claude-fable",
+      "resolution": "Fixed: workspace-wide cargo test --no-run exits 0 — reflect.rs, pure.rs, jetpack_services.rs, Prelude Scheduler.rs and HTTPServer.rs test builds all compile"
     },
     {
       "id": "pc0wqowkz",
@@ -135867,7 +136300,10 @@
       "text": "master has 5 more pre-existing tests/pkg.rs failures unrelated to manifest work: cli_keygen_entropy_failure_is_exact_e1292_and_artifact_free, cli_publish_auto_keygen_entropy_failure_mutates_nothing, cli_publish_no_sign_leaves_signature_empty (crypto entropy-simulation helper flakiness/exit-code mismatch), physical_unit_api_freeze_and_semver_share_one_canonical_signature, physical_unit_trait_methods_use_canonical_dimensions (unrelated physical-units API-freeze signature format mismatch). Also 3 tests assert jet new creates literal file 'pkg.jet' but Source/CmdCompile.rs run_new has long written Syntax::PACKAGE_FILE ('package.jet') -- stale test expectation, pre-existing and unrelated to D-CONF-PLANE1/NAME1.",
       "cardId": null,
       "created": "2026-08-07T01:05:25.304Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-07T11:17:55.780Z",
+      "resolvedBy": "claude-fable",
+      "resolution": "pkg.jet/package.jet stale expectation already fixed (jet new tests assert package.jet). Remaining 5 reds re-confirmed and tracked as card #1610"
     },
     {
       "id": "pc0y20tm3",
@@ -135875,7 +136311,10 @@
       "text": "master has pre-existing tests/canvas.rs failure canvas_parity_matrix_tracks_ast_language_forms: Canvas parity matrix missing [Expr::NoElse] from crates/jet-foundation/src/AST/expressions.rs. Confirmed unrelated to manifest work.",
       "cardId": null,
       "created": "2026-08-07T01:17:58.550Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-07T11:17:55.445Z",
+      "resolvedBy": "claude-fable",
+      "resolution": "Fixed: added [Expr::NoElse] row to docs/reference/canvas-parity.md; canvas_parity_matrix_tracks_ast_language_forms passes"
     },
     {
       "id": "pc0id5hqt",
@@ -135883,7 +136322,10 @@
       "text": "cargo test -p jet-comptime lib tests fail to compile: Reflect.rs:800 Func{} initializer missing kernel/markers fields added by 5367e795d — pre-existing, unrelated to bd2-apply's string/set decline work",
       "cardId": null,
       "created": "2026-08-07T01:29:49.409Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-07T11:17:55.091Z",
+      "resolvedBy": "claude-fable",
+      "resolution": "Fixed: jet-comptime lib tests compile (Reflect.rs Func init has kernel/markers); one remaining runtime red (module-size cap) tracked as card #1611"
     },
     {
       "id": "pc07rtqwn",
@@ -135891,7 +136333,10 @@
       "text": "master has pre-existing tests/build_entry.rs failures unrelated to manifest work: malformed_package_and_workspace_build_policy_fail_closed (E3503 unexpected on the first allow: Exec bare-word case) and outer_package_grant_cannot_override_inner_workspace_deny (E0603 cannot find main.jet -- workspace/package build-authority chain resolution bug for a package.jet declaring build: without co-located fn build, one level above a nested workspace.jet). Confirmed by running the test unmodified against master HEAD in the main checkout (not the manifest worktree).",
       "cardId": null,
       "created": "2026-08-07T02:03:26.646Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-07T11:17:54.743Z",
+      "resolvedBy": "claude-fable",
+      "resolution": "Still red, now tracked as card #1609 (Jet bug belongs on a card, not a papercut): both build-policy tests re-confirmed failing today"
     },
     {
       "id": "pc0jd1b6t",
@@ -135899,7 +136344,10 @@
       "text": "master has a pre-existing stack overflow in tests/build_entry.rs::failed_action_replaces_stale_rebuild_provenance (SIGABRT, confirmed unmodified on master HEAD in the main checkout). Unrelated to manifest-card work.",
       "cardId": null,
       "created": "2026-08-07T02:03:46.938Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-07T11:17:54.394Z",
+      "resolvedBy": "claude-fable",
+      "resolution": "Fixed on master: failed_action_replaces_stale_rebuild_provenance passes, re-run today"
     },
     {
       "id": "pc0oqc6u4",
@@ -135907,7 +136355,10 @@
       "text": "master tests/build_entry.rs has multiple pre-existing stack-overflow crashes (confirmed unmodified on master HEAD): failed_action_replaces_stale_rebuild_provenance and action_generated_jet_reenters_frontend_before_runtime_codegen. Since cargo test runs tests as threads in one process, a crash in one aborts the whole binary and hides results for sibling tests -- run with --test-threads=1 and explicit --skip for known crashers to get a clean signal on this file.",
       "cardId": null,
       "created": "2026-08-07T02:04:24.268Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-07T11:17:54.044Z",
+      "resolvedBy": "claude-fable",
+      "resolution": "Fixed on master: both stack-overflow tests (failed_action_replaces_stale_rebuild_provenance, action_generated_jet_reenters_frontend_before_runtime_codegen) now pass, re-run today single-threaded"
     },
     {
       "id": "pc0p2b1ij",
@@ -135915,7 +136366,10 @@
       "text": "master has pre-existing jet-pkg-model unit test failures unrelated to manifest work (confirmed on master HEAD in main checkout, cargo test -p jet-pkg-model): LintPolicy::tests::undenied_lint_stays_a_warning (looks like a genuine test bug -- asserts empty output but its deny list includes the exact lint code it fires), Manifest::tests::latest_edition_is_last_supported_and_drives_banner, Overlay::tests::keyed_overrides_merge_typed_environment_by_priority, PhpBind::tests (3), PowerShellBind::tests::rejects_generated_powershell_helper_and_alias_collisions, plus an apparently-flaky FFI::http_server_tls_persist_tests::session_preserves_pipelined_leftover_bytes.",
       "cardId": null,
       "created": "2026-08-07T02:12:16.650Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-07T11:17:56.832Z",
+      "resolvedBy": "claude-fable",
+      "resolution": "Superseded: jet-pkg-model tests now fail earlier (Prelude Email.rs JetAbsent compile error); tracked as card #1608 including re-check of the originally named unit failures"
     },
     {
       "id": "pc05oaqzm",
@@ -135923,7 +136377,10 @@
       "text": "rustfmt not on PATH in either 'nix develop' or 'nix develop .#full' devshell (cargo fmt / rustfmt --check both fail with 'not found'); D-CI2's rustfmt gate can't be wired until flake.nix adds the rustfmt component.",
       "cardId": null,
       "created": "2026-08-07T02:58:54.819Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-07T10:57:20.621Z",
+      "resolvedBy": "claude-fable",
+      "resolution": "Fixed: pkgs.rustfmt added to both default and full devshells in flake.nix; rustfmt now on PATH via jet-env"
     },
     {
       "id": "pc0l35wty",
@@ -135931,7 +136388,32 @@
       "text": "tower card criteria has no reopen/unmeet verb — once --meet sets a criterion to met, only --verify can move it further; a builder who discovers a criterion was falsely marked met (found via fresh review) has no CLI way to set it back to open, only to overwrite evidence text while status stays met.",
       "cardId": null,
       "created": "2026-08-07T10:11:36.057Z",
-      "status": "open"
+      "status": "resolved",
+      "resolvedAt": "2026-08-07T10:57:18.803Z",
+      "resolvedBy": "claude-fable",
+      "resolution": "Implemented: tower card criteria --unmeet n --evidence why --by X reopens a falsely-met criterion (clears metBy/verifiedBy); CLI + API + tests"
+    },
+    {
+      "id": "pc0fxetb1",
+      "by": "bd3-reader",
+      "text": "jet run caches per-file under ~/.cache/jet/run as well as ~/.cache/jet/build; clearing only build still serves a stale quick-run result and looks like a real failure",
+      "cardId": "c09qyavw",
+      "created": "2026-08-07T10:29:44.137Z",
+      "status": "resolved",
+      "resolvedAt": "2026-08-07T10:57:18.012Z",
+      "resolvedBy": "claude-fable",
+      "resolution": "Documented: verify skill fresh-binary-smoke section + memory now say rm -rf ~/.cache/jet (build AND run) — clearing only build serves a stale quick-run result"
+    },
+    {
+      "id": "pc0heo5bk",
+      "by": "claude-fable",
+      "text": "/tmp is tmpfs (RAM+swap-backed). An e4 agent set CARGO_TARGET_DIR=/tmp/jet-e4-target (15GB) plus 5GB scratchpad targets/logs; this filled 24GB swap and caused kernel OOM kills on the owner's machine. Never put cargo target dirs or multi-GB logs in /tmp; use a disk path and clean up session outputs.",
+      "cardId": null,
+      "created": "2026-08-07T10:37:14.820Z",
+      "status": "resolved",
+      "resolvedAt": "2026-08-07T10:57:16.089Z",
+      "resolvedBy": "claude-fable",
+      "resolution": "Fixed: jet-env rejects /tmp CARGO_TARGET_DIR, AGENTS.md documents the tmpfs trap, scripts/agent/tmp-guard.sh auto-cleans and blocks under memory pressure"
     }
   ]
 }
