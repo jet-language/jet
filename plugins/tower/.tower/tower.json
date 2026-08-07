@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1599,
-    "rev": 28562,
+    "nextNum": 1603,
+    "rev": 28632,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -18312,16 +18312,23 @@
       "track": "epoch",
       "epoch": "e11",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "frozen",
       "priority": "P1",
       "plan": "When the owner unfreezes this card, use docs/plans/compiler-speed.md and #666's checked corpus as the only compiler-speed architecture and benchmark runner. Add a traceable evidence crosswalk, hostile cache-invalidation cases, construct-scale cliffs, environment isolation, and bounded cause reporting. Feed fixes to each canonical owner; do not duplicate its mechanism. Measure first, preserve one executable TIR and feature parity, and reject any speedup that silently boxes, deoptimizes, weakens diagnostics, changes observable semantics, or hides unsupported paths.",
-      "blockedBy": [
-        "c0md55xu",
-        "ccq07pav"
-      ],
+      "blockedBy": [],
       "workOrder": 950,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-07",
+          "by": "fable",
+          "text": "prep: frozen per owner instruction 2026-07-16 (add the mined recommendations, but freeze them for now); unfreeze to start"
+        },
+        {
+          "at": "2026-08-07",
+          "by": "fable",
+          "text": "prep: cleared satisfied blockers - #441 (done, retired to history, displayed as unknown ref c0md55xu) and #241 (done). Plan and 8 criteria already in place."
+        },
         {
           "at": "2026-08-07",
           "by": "prep-misc",
@@ -18421,10 +18428,10 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-16T18:00:25.417Z",
-      "updated": "2026-08-07T00:50:29.857Z",
+      "updated": "2026-08-07T08:33:05.420Z",
       "tags": [],
       "parentId": null,
-      "updatedBy": "prep-misc"
+      "updatedBy": "fable"
     },
     {
       "id": "c0be4wgi",
@@ -84016,12 +84023,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-language-coherence",
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P1",
       "plan": "Implement D-VERDICT-1455-1 (D-MARK-REG1) structurally. One shared marker reader runs at every node start, accepts any name including keyword-lexed ones, and attaches Marker nodes to the owning AST node for every use site. Delete every hand-bumped marker token, both function-marker applicators, the marker_sequence_leads_to_function heuristic, the three shadow site tables, and all lexer marker-name knowledge. Sema receives markers; parse-time desugaring into flags ends. (This half of the card is unchanged from the original scope and is already in progress per its own criteria evidence.)\n\nAdded scope, ratified 2026-08-06 (D-META-ONE1=A, D-META-FORM1=A, D-META-NAME1=A): parse the declaration side too, since D-META-ONE1 explicitly \"fulfills D-VERDICT-1455-1\" by moving rule rows from Rust into Jet. A rule row is now written as an ordinary Jet declaration in Prelude source:\n\n  marker Inline(mode: InlineMode = .Hint, $sites: [.Function, .Method, .Constant])\n  marker Pre(condition: Any, message: String, $sites: [.Function, .Method], $repeatable: true)\n\nThe introducing keyword is \"marker\" (D-META-NAME1=A -- already the project's word everywhere else, no rename). Facts about the rule ($sites, $repeatable) are ordinary named parameters carrying the compile-time sigil \"$\", the same mark used by \"$limit\" and \"T.$layout\" -- there is no \"on\" keyword, no \"repeatable\" trailing word, no second parameter list, and no scope-block form (D-META-FORM1=A rejected all three of those spellings by name). This needs no new grammar beyond an ordinary named-parameter declaration list plus the existing \"$\" sigil applied to a parameter.\n\nNot in scope for this card: lowering the parsed \"marker\" declarations into whatever runtime structure sema/formatter/tree-sitter consume as \"registry rows\" -- that is #1457's and #1458's job; do not duplicate that work here. Also not in scope: implementing D-META-STAGE1's retirement of \"#Known\" (a separate ballot, tracked on its own new card) -- do not special-case \"#Known\" here beyond whatever the existing keyword-lexed-marker-name handling already covers generically.",
       "blockedBy": [],
-      "assignee": "bd3-mark",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-08-07",
+          "by": "bd3-mark",
+          "text": "Criteria 4-5 complete in the mark worktree (bd2/mark). Checkpointed prior session's uncommitted D-META-STAGE1 ($ compile-time mark, card #1537) work first, rebased onto master cleanly, then fixed build breaks it left (Expr::ComptimeSplice removal touched Source/CmdProve.rs, TIR test fixtures, marker_rule_signatures.rs fixtures). Added declaration-side 'marker Name(...)' parsing per D-META-FORM1=A/D-META-NAME1=A -- new MarkerDecl/MarkerDeclParam AST, contextual 'marker' keyword, E0381 for the three rejected spellings, threaded as an erasing item everywhere Item is matched exhaustively. Logged unrelated pre-existing drift as cards #1599 (stale fmt idempotence test) and #1601 (3 stale diagnostic_snapshots fixtures) rather than fixing out of scope; logged #1537's own I4 gap (E0377-E0380) on that card."
+        },
         {
           "at": "2026-08-06",
           "by": "audit-markers-misc",
@@ -84079,20 +84091,20 @@
         {
           "n": 4,
           "text": "Foundation, parser, sema, marker, and grammar targeted suites green",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd3-mark",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-05T22:45:32.026Z"
+          "evidence": "cargo test -p jet-foundation --lib: 133 passed 0 failed. cargo test -p jet-parser --lib: 43 passed, 1 pre-existing failure (arrow_control_law_formats_canonical_forms_idempotently, confirmed identical on master eab7c8713 -- stale test asserting retired braceless control bodies against done card #808's mandatory-braces fmt; logged as card #1599). cargo test -p jet-sema --lib: 68 passed, 3 pre-existing failures confirmed identical on master (module line-budget assertion + one unrelated unwrap). cargo test --test marker_registry_coverage: 3/3. cargo test --test marker_rule_signatures: 24/24 (migrated its #Known fixtures to $name under D-META-STAGE1 so they exercise real syntax again). cargo test --test grammar: 18/18. cargo build --workspace: clean.",
+          "at": "2026-08-07T09:17:14.797Z"
         },
         {
           "n": 5,
           "text": "marker Name(...) Prelude declarations parse under D-META-FORM1/NAME1's ratified shape: named parameters, $sites/$repeatable (and any future rule fact) are ordinary named parameters marked with $, with no on/repeatable trailing clause, no second parameter list, and no scope-block form. A UI fixture proves each rejected spelling (trailing clause, two lists, block form) is an error naming the ratified named-parameter form as the fix.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd3-mark",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:32:15.955Z"
+          "evidence": "marker Name(params...) parses under D-META-FORM1=A/D-META-NAME1=A verbatim: crates/jet-parser/src/Parser/Items/states_protocols.rs adds at_marker_decl/marker_decl/marker_decl_param_list -- an ordinary arg is 'name: Type [= default]', a fact is '$name: value' (told apart by Syntax::is_comptime_name), no on/second-list/block. New AST::MarkerDecl/MarkerDeclParam (crates/jet-foundation/src/AST/items.rs), threaded as an erasing item through every exhaustive Item match (sema Bundle/Registration/Casing, codegen Context/Imports/Tuples/mod, semindex Build, Formatter -- verbatim emission, formatter round-trips clean via jet fmt --check). KW_MARKER registered in Syntax.rs/effects_surface.rs/highlights.rs/package_files.rs; grammars regenerated (jet self devtools grammars), tests/grammar.rs 18/18. Parser unit tests (Parser::Items::states_protocols::marker_decl_tests, 2/2): positive parse of the ballot's own worked example, plus all three rejected spellings (trailing on clause, second parameter list, scope block) each produce E0381 naming the $-marked named-parameter form as the fix. UI fixture tests/ui/marker_decl_rejected_forms.jet + .stderr proves the same three under cargo test --test diagnostic_snapshots ui_snapshots (passing). E0381 fully I4-compliant: docs/spec/diagnostics.md registry + what/why/fix rows added, explain page auto-derives from the spec, tests/diagnostics_coverage.rs no longer lists E0381 as a gap.",
+          "at": "2026-08-07T09:17:25.123Z"
         }
       ],
       "refs": [
@@ -84105,10 +84117,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T22:45:07.350Z",
-      "updated": "2026-08-07T08:27:15.847Z",
+      "updated": "2026-08-07T09:18:20.968Z",
       "updatedBy": "bd3-mark",
-      "workOrder": 370,
-      "claimedAt": "2026-08-07T08:27:15.846Z"
+      "workOrder": 370
     },
     {
       "id": "c0ai0h4w",
@@ -87440,11 +87451,11 @@
       "track": "epoch",
       "epoch": "e2",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P0",
       "plan": "1) Classify PAYLOAD_FILE and WORKSPACE_FILE under tests/ui as config, matching the examples loop (run_supported_source_corpus, lines 1275-1283). 2) Delete the 22 pkg.jet lines from UI_PARSE_INVALID — all 22 tests/ui/**/pkg.jet files are currently pinned there (`find tests/ui -name pkg.jet` finds 22; `find tests/ui -name workspace.jet` finds none, so only pkg.jet needs the reclassification today). 3) Collect mismatches in the UI loop (currently lines 1311-1348) into a Vec and assert once at the end so a single bad fixture stops masking the rest. 4) No fix needed for examples/jetpack/epoch5/config/dev.jet — confirmed out of scope, see body.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "bd3-tests",
       "log": [
         {
           "at": "2026-08-07",
@@ -87456,47 +87467,47 @@
         {
           "n": 1,
           "text": "cargo test --test fmt fmt_is_lossless_on_supported_source_corpus passes on master",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd3-tests",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:10:58.564Z"
+          "evidence": "cargo test --test fmt fmt_is_lossless_on_supported_source_corpus: ok (also cargo test --test fmt full: 163 passed)",
+          "at": "2026-08-07T08:35:42.698Z"
         },
         {
           "n": 2,
           "text": "tests/ui pkg.jet and workspace.jet are classified as config by the same rule the examples loop uses; no manifest entry names one",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd3-tests",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:10:58.885Z"
+          "evidence": "UI loop now skips PAYLOAD_FILE/WORKSPACE_FILE/PACKAGE_FILE by name (same rule as examples loop); all 22 pkg.jet lines removed from UI_PARSE_INVALID; grep confirms zero pkg.jet/workspace.jet/package.jet entries remain in the manifest",
+          "at": "2026-08-07T08:35:43.460Z"
         },
         {
           "n": 3,
           "text": "Adding a new tests/ui manifest fixture does not require touching UI_PARSE_INVALID (proved by adding one in the same run)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd3-tests",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:10:59.210Z"
+          "evidence": "Added tests/ui/_tmp_proof_manifest/pkg.jet (bare manifest, no UI_PARSE_INVALID entry), ran cargo test --test fmt fmt_is_lossless_on_supported_source_corpus: ok, then removed the fixture — no manifest edit needed",
+          "at": "2026-08-07T08:35:44.192Z"
         },
         {
           "n": 4,
           "text": "A deliberately broken fixture makes the corpus report every mismatch it found, not just the first",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd3-tests",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:10:59.757Z"
+          "evidence": "Temporarily removed 2 genuine entries (bad_escape.jet, unknown_char.jet) from UI_PARSE_INVALID; single run reported both mismatches together: 'UI corpus parser-validity mismatches (2 found)' listing both paths, not just the first; reverted after proof",
+          "at": "2026-08-07T08:35:44.546Z"
         },
         {
           "n": 5,
           "text": "The remaining UI_PARSE_INVALID entries are all genuine program fixtures, sorted and duplicate-free",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd3-tests",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:11:00.255Z"
+          "evidence": "Test's own sorted/dup-free assert passes; find tests/ui -name pkg.jet/workspace.jet/package.jet confirms zero remain in UI_PARSE_INVALID (all classified as config instead); every remaining pinned entry is a genuine .jet program fixture",
+          "at": "2026-08-07T08:35:44.890Z"
         }
       ],
       "refs": [],
@@ -87508,8 +87519,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T10:10:46.025Z",
-      "updated": "2026-08-07T01:07:30.696Z",
-      "updatedBy": "prep-bugs"
+      "updated": "2026-08-07T08:35:47.937Z",
+      "updatedBy": "bd3-tests",
+      "claimedAt": "2026-08-07T08:35:47.937Z"
     },
     {
       "id": "c0fcnl50",
@@ -88705,9 +88717,9 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P1",
-      "plan": "## State\n\nTwelve D-CONC-* decisions are ratified: UNIT1, JOIN1, GROUP1, OUTCOME1, CROSS1, STM1, SCHED1, STREAM1, CHAN1, SHARE1, SPAWN1 (option D), FAIL1 (option A). The old gap is closed: SPAWN1 and FAIL1 are now law, so the dangling citations inside JOIN1 and SCHED1 point at a real ruling.\n\nOne gate is open. The owner ratified CHAN1 with a note: the worked select spelling is not valid Jet. Ballot D-CONC-CHAN2 on this card answers it. It picks the valid spelling for the select wait. Do not touch the channel or select surface in Syntax.rs before CHAN2 is ratified.\n\n## Work that may start now (no gate)\n\n1. Record every ratified D-CONC-* outcome in docs/spec/syntax-decisions.md. One entry per decision. Each entry names the option, the surface, and the decision IDs it amends (the amendment map is in each ballot's technical text).\n2. Record SPAWN1=D: the spawn surface is the task keyword family — `task f()`, `task.all { }`, `task.race { }`, `task.any { }`, `task.group g(limit: n)`. Only `task` is reserved.\n3. Record FAIL1=A: `join()` returns `T ? TaskFailure`. TaskFailure is a normal enum (.Cancelled, .DeadlineBlown, .Panicked). trace(), exception(), TaskOutcome, and TaskStatus are deleted.\n4. Correct the stale S53 tombstone in docs/spec/syntax-decisions.md. Concurrency is live law, not deferred past v1.0. Point it at the recorded entries.\n5. Update crates/jet-foundation/src/Syntax.rs for the ratified non-select surface only: the task keyword family (SPAWN1=D) with decision-ID comments. Delete trace()/exception() surface entries per FAIL1.\n6. Confirm one implementation card exists per ratified decision and link them from this card's refs. Known impl cards: #1557-#1565. Log the decision-to-card map.\n\n## Work gated on D-CONC-CHAN2\n\n7. After ratification: update Syntax.rs for the chosen select spelling, builtin channel<T>(), the drain loop source form, and delete the select builder chain, the .read arm, and the dead Channel entry.\n8. Regenerate devtools grammars. Re-bless touched snapshots. Formatter round-trip for any new form.\n\n## Proof\n\nRecord steps: rg shows one syntax-decisions.md entry per ratified D-CONC-* ID, and no S53 deferred-concurrency text remains. Syntax chores: grammars regenerated, snapshots re-blessed, targeted fmt stability test run once. This card ships records and surface registration only. The runtime work lives on the impl cards.",
+      "plan": "## State\n\nThirteen D-CONC-* decisions are ratified: UNIT1, JOIN1, GROUP1, OUTCOME1, CROSS1, STM1, SCHED1, STREAM1, CHAN1, SHARE1, SPAWN1 (D), FAIL1 (A), CHAN2 (D). Every gate is closed. All work below may start now.\n\n## Record work\n\n1. Record every ratified D-CONC-* outcome in docs/spec/syntax-decisions.md. One entry per decision, naming the option, the surface, and the decision IDs it amends (the amendment map is in each ballot).\n2. SPAWN1=D: the spawn surface is the task keyword family - task f(), task.all { }, task.race { }, task.any { }, task.group g(limit: n). Only task is reserved.\n3. FAIL1=A: join() returns T ? TaskFailure. TaskFailure is a normal enum (.Cancelled, .DeadlineBlown, .Panicked). trace(), exception(), TaskOutcome, and TaskStatus are deleted.\n4. CHAN2=D: no new keyword. The readiness wait is a subjectless if table whose arm heads are binding, source pairs; an after arm takes a Time delta; an optional else arm makes the wait non-blocking; the whole table is one atomic wait; mixing readiness heads and Bool heads in one table is a registered diagnostic. select stays a free identifier everywhere. This amends the subjectless table law (D-IFGUARD1); record that amendment.\n5. Correct the stale S53 tombstone: concurrency is live law, not deferred past v1.0. Point it at the recorded entries.\n\n## Surface work\n\n6. crates/jet-foundation/src/Syntax.rs: register the task keyword family (SPAWN1=D) with decision-ID comments; register builtin channel<T>() and the drain loop source form (CHAN1/CHAN2); delete the select builder chain, the .read arm, the dead Channel entry, the shared closure forms (SHARE1), and the trace()/exception() surface (FAIL1). select is not reserved.\n7. Regenerate devtools grammars. Re-bless touched snapshots. Formatter round-trip for any changed form.\n\n## Card work\n\n8. Map all thirteen ratified decisions to implementation cards. Known impl cards are #1557-#1565; mint homed, criteria-carrying cards for any decision without one (SPAWN1, FAIL1, CHAN2 are the likely gaps). Link the map from this card and log it.\n\n## Proof\n\nrg shows one syntax-decisions.md entry per ratified D-CONC-* ID and no deferred-concurrency S53 text. Grammars regenerated, snapshots re-blessed, one targeted fmt stability run. This card ships records and surface registration only; runtime work lives on the impl cards.",
       "blockedBy": [
         "D-CONC-SPAWN1",
         "D-CONC-FAIL1",
@@ -88715,6 +88727,11 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-07",
+          "by": "fable",
+          "text": "prep: D-CONC-CHAN2 ratified outcome D (readiness table rides subjectless if, no new keyword) - last gate closed; plan rewritten fully ungated with the CHAN2=D surface spelled out; ready to implement"
+        },
         {
           "at": "2026-08-07",
           "by": "fable",
@@ -88890,8 +88907,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T17:14:30.623Z",
-      "updated": "2026-08-07T01:19:44.784Z",
-      "updatedBy": "owner",
+      "updated": "2026-08-07T08:32:57.125Z",
+      "updatedBy": "fable",
       "workOrder": 410
     },
     {
@@ -91045,12 +91062,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P1",
       "plan": "Implements D-FAIL-CARRIER1, D-FAIL-MODEL1 — ratified 2026-08-06. Read each decision verbatim (tower brief on this card's parent proposal, or tower decision show) before building; the ratified outcome text is the law, this plan is the route. Every requirement is a discrete exit criterion below: meet each with targeted proof (tests, snapshots, examples with golden output), and keep I9 tier parity inside this card — AOT, default jet run (JIT), and the interpreter must agree on every surface this card ships before it closes. Delete every superseded form the decisions retire in the same change; do not leave compatibility shims or parallel spellings. Reference: docs/proposals/failure-one-report-three-routes.md.",
       "blockedBy": [],
-      "assignee": "bd2-carrier3",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-08-07",
+          "by": "bd3-carrier",
+          "text": "[handoff] All ten criteria met. Branch bd2/carrier, head e580c8064, worktree .claude/worktrees/carrier. Not merged; ready for review and integration.\n\nCOMMITS THIS SESSION\n- af487b194 wip: .or_err lifts a clean absence into a failure (checkpoint of the prior session's uncommitted work)\n- 3d57f72da merge: master fixture repairs into bd2/carrier. Three conflicts, each master adding a feature beside a line the carrier had rewritten; every resolution keeps master's feature and states it in the carrier's vocabulary. Rebase was not cheap: master moved 178 files with 20 overlapping this branch.\n- 19e0718a5 feat(carrier): the outcome's middle states are readable from Jet\n- e580c8064 feat(carrier): the web tier and the priority queue join the one carrier\n\nWHAT LANDED\n- .or_err(\"why\"), .partial(), .noting(\"...\") and .notes(). Semantics live only in crates/jet-foundation/src/Outcome.rs, which is prelude part one. AOT emit, the TIR interpreter and the comptime interpreter marshal onto them, and both interpreters call the very same jet_noting and jet_notes symbols.\n- A failure keeps part of its work by carrying it on its report under the field name partial, at the same type the outcome carries. That is the ratified opt-in-per-error-type shape. An error type that declined gets the ordinary E0302.\n- The web tier stopped spelling T? as Rust's own Option. Its wasm module now includes the same Outcome.rs file the native prelude puts first.\n- PriorityQueue.remove arrived from master answering a plain Option; it now answers the carrier.\n\nTESTS\n- cargo test --test outcome_carrier: 5 of 5 pass, including the two new middle-state and web-tier proofs.\n- cargo test --test golden: 61 failures, down from the 63 the branch inherited. Neither new example is among them and no example was edited to pass.\n- cargo test --test dev example_corpus_strict_jit_aot_differential_gate: both examples pass in the deopt_interp AOT-oracle class, so pure interpreter, default tiered run and AOT agree on each. The gate's only two failures, concurrency/shield_commit and io/terminal_parity, are unrelated and pre-existing.\n- cargo test --test grammar: 18 of 18 pass. jet fmt --check clean on all three new files. cargo build clean throughout.\n\nKNOWN UNRELATED RED, NOT THIS CARD\n- tests/fmt.rs fmt_is_lossless_on_supported_source_corpus fails on examples/features/packages/outputs_build/package.jet, which the fmt corpus cannot parse. That file arrived with master's manifest work (card #1517).\n- 28 ui_snapshots mismatches are master's diagnostic-text drift. A scan of the full run shows none mentions the carrier, or_err, partial or notes, so blessing them here would accept another card's change.\n- 20 web test failures in web_build, web_partition and web_tir_contract. Measured with and without this card's web change: the failure sets are identical, so they are pre-existing fixture drift.\n\nNOTE FOR LATER CARDS\nThe web tier's TIR support does not lower an optional inside a wasm function at all today (E-WEB-TIR-UNSUPPORTED). That is a pre-existing web gap, not one this card opened. The carrier is in place for when web lowers one."
+        },
         {
           "at": "2026-08-07",
           "by": "bd2-carrier2",
@@ -91088,65 +91110,65 @@
         {
           "n": 4,
           "text": "A failure may carry a partial payload and an outcome may carry notes that join the journey; both are readable from Jet, with a golden-tested example under examples/features/errors/",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd3-carrier",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:38.673Z"
+          "evidence": "The carrier's middle states are readable from Jet. A failure keeps part of its work by carrying it on its report under the field name partial, at the same type the outcome carries; the outcome answers .partial() as T?, and a success answers a clean absence. An outcome collects notes with .noting(\"…\"), which hands the outcome straight back, and reads them with .notes(). Neither needs a third type. Semantics live in crates/jet-foundation/src/Outcome.rs (prelude part one): jet_partial, jet_noting, jet_notes. AOT emit, the TIR interpreter and the comptime interpreter marshal onto them, and both interpreters call the very same jet_noting/jet_notes symbols. Golden example: examples/features/errors/partial_and_notes.jet with expected/errors/partial_and_notes.out, proved on AOT and on default jet run. tests/outcome_carrier.rs::the_middle_states_read_off_the_same_carrier passes. An error type that never kept a payload gets the ordinary E0302, covered by tests/ui/carrier_partial_not_kept.jet.",
+          "at": "2026-08-07T09:22:40.023Z"
         },
         {
           "n": 5,
           "text": ".or_err(\"why\") lifts absence into failure, with a golden-tested example",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd3-carrier",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:39.007Z"
+          "evidence": ".or_err(\"why\") lifts a clean absence into a failure. The payload rides through untouched and only the report changes, because the two views are one carrier. Sema types it, TIR lowers it, and every tier reaches the prelude's JetOptionalView::or_err in crates/jet-foundation/src/Outcome.rs. Golden example: examples/features/errors/or_err.jet with expected/errors/or_err.out, proved on AOT (build/or_err) and on default jet run, same three lines. tests/outcome_carrier.rs::or_err_lifts_a_clean_absence_into_a_failure passes and asserts no ok_or, Some or None survives in the emitted Rust.",
+          "at": "2026-08-07T09:22:49.328Z"
         },
         {
           "n": 6,
           "text": "I9 parity inside this card: AOT, jet run, the interpreter and the web tier all use the same Prelude carrier; the parity ledger records the example on every tier",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd3-carrier",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:39.335Z"
+          "evidence": "One Prelude carrier on every tier. crates/jet-foundation/src/Outcome.rs is prelude part one for native builds and is now included verbatim in the wasm module too, so the web tier stopped spelling T? as Rust's own Option and stopped building Some/None. The corpus gate records both examples: tests/jit_corpus_gate.txt lists errors/or_err and errors/partial_and_notes under deopt_interp, which is an AOT-oracle class, and the gate proves pure-interpreter, default tiered run and AOT produce identical stdout, stderr and exit for each. Gate run: cargo test --test dev example_corpus_strict_jit_aot_differential_gate. Neither example appears among its failures; the only two are concurrency/shield_commit and io/terminal_parity, both unrelated and pre-existing. tests/outcome_carrier.rs::the_web_tier_reads_the_same_carrier proves the wasm module carries the carrier file and that the web emitter builds no second representation.",
+          "at": "2026-08-07T09:22:54.540Z"
         },
         {
           "n": 7,
           "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd3-carrier",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:39.677Z"
+          "evidence": "crates/jet-foundation/src/Syntax/package_files.rs carries the entry, cited to D-FAIL-CARRIER1=A: METHOD_OUTCOME_OR_ERR, METHOD_OUTCOME_PARTIAL, METHOD_OUTCOME_NOTING, METHOD_OUTCOME_NOTES and FIELD_OUTCOME_PARTIAL. Sema and TIR lowering read the constants rather than repeating the strings. No keyword or sigil changed: the four names are ordinary method identifiers and the two ratified type spellings T? and T ? E are untouched.",
+          "at": "2026-08-07T09:23:06.292Z"
         },
         {
           "n": 8,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd3-carrier",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:40.019Z"
+          "evidence": "docs/spec/syntax-decisions.md gains the D-FAIL-CARRIER1 entry beside D-ERRCTX1. It states the law: two views of one carrier, the three facts, the four methods and what each answers, the opt-in field an error type declares, the E0302 an error type that declined receives, and the happy-path erasure. It names the Syntax constants, the carrier file and both examples. The file's own rule is that new ratifications append their law to the topical sections rather than restart a dated log, so no log row is added.",
+          "at": "2026-08-07T09:23:09.007Z"
         },
         {
           "n": 9,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd3-carrier",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:40.355Z"
+          "evidence": "Ran scripts/agent/jet-env jet self devtools grammars against a fresh binary. It rewrote editors/vscode/syntaxes/jet.tmLanguage.json, editors/jet.tmGrammar, editors/tree-sitter/grammar.js and editors/zed/languages/jet/highlights.scm. The four files now match Syntax.rs; the only difference is two marker names that Syntax.rs had already dropped and the committed grammars still listed. cargo test --test grammar passes 18 of 18.",
+          "at": "2026-08-07T09:23:21.964Z"
         },
         {
           "n": 10,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd3-carrier",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:40.682Z"
+          "evidence": "This card adds one piece of product copy: the report an error type gets when it never kept a partial payload. tests/ui/carrier_partial_not_kept.jet and its blessed tests/ui/carrier_partial_not_kept.stderr cover it, reusing E0302 rather than minting a code. No existing snapshot changed meaning under this card: the 28 ui_snapshots mismatches on this branch are master's diagnostic-text drift, and a scan of the whole run shows none of them mentions the carrier, or_err, partial or notes. Blessing them here would accept another card's change, so they are left for their owner. The formatter's canonical form is applied to both examples and jet fmt --check is clean on all three new files.",
+          "at": "2026-08-07T09:23:25.694Z"
         }
       ],
       "refs": [
@@ -91156,10 +91178,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:33:37.333Z",
-      "updated": "2026-08-07T03:38:31.465Z",
-      "updatedBy": "bd2-carrier3",
-      "workOrder": 140,
-      "claimedAt": "2026-08-07T02:28:48.315Z"
+      "updated": "2026-08-07T09:24:27.908Z",
+      "updatedBy": "bd3-carrier",
+      "workOrder": 140
     },
     {
       "id": "c0nb4bwv",
@@ -92166,7 +92187,13 @@
       "plan": "Implements D-META-STAGE1 — ratified 2026-08-06. Read each decision verbatim (tower brief on this card's parent proposal, or tower decision show) before building; the ratified outcome text is the law, this plan is the route. Every requirement is a discrete exit criterion below: meet each with targeted proof (tests, snapshots, examples with golden output), and keep I9 tier parity inside this card — AOT, default jet run (JIT), and the interpreter must agree on every surface this card ships before it closes. Delete every superseded form the decisions retire in the same change; do not leave compatibility shims or parallel spellings. Reference: docs/proposals/metaprogramming-one-compile-time-program.md.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-07",
+          "by": "bd3-mark",
+          "text": "diagnostics_coverage test (cargo test --test diagnostics_coverage) flags I4 gaps in this card's own checkpointed work: E0377, E0378, E0379, E0380 (the retired-#Known teaching diagnostics in crates/jet-parser/src/Parser/Statements/bindings.rs take_mark()) have no docs/spec/diagnostics.md entry and no tests/ui snapshot. Found while #1456 worked in the same mark worktree; #1456 registered only its own new E0381 and left these four for this card."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -92266,8 +92293,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:34:12.218Z",
-      "updated": "2026-08-06T21:41:29.608Z",
-      "updatedBy": "audit-apply",
+      "updated": "2026-08-07T09:12:35.942Z",
+      "updatedBy": "bd3-mark",
       "workOrder": 180
     },
     {
@@ -96566,20 +96593,31 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "bd3-tests",
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "cargo test --test comptime_diff comptime_matches_runtime passes (cases 42-44, the Map .keys()/.values() Iter-Display cases, are green)",
+          "status": "met",
+          "metBy": "bd3-tests",
+          "verifiedBy": null,
+          "evidence": "No ratified decision covers Display for lazy Iter (checked decision list + docs/spec grep — none found; D-ITER-DECLINE1 covers unrelated method-naming gaps only). Confirmed E0915 is a deliberate, correctly-worded diagnostic: Map.keys()/.values() return a one-pass lazy Iter with no Display, and the diagnostic's own fix text says 'materialize it first: add .to_list()'. Took the non-gated route per the card brief: appended .to_list() to CASES[42..45) (the two .keys() and one .values() map cases) in tests/comptime_diff.rs so the string interpolation materializes first, rather than changing compiler/Prelude semantics. cargo test --test comptime_diff comptime_matches_runtime: 2 passed, 0 failed (was previously failing at cases 42-44 with E0915). Full-file run (informational, not required): 24 passed / 1 failed — the 1 failure (yielding_loop_matches_comptime_and_runtime, native-library-link error) is unrelated, out of scope for #1582, and passes when run standalone (confirmed flaky under parallel execution, not a regression from this fix — verified via git stash on the same commit).",
+          "at": "2026-08-07T09:03:59.345Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T23:28:20.316Z",
-      "updated": "2026-08-06T23:28:20.316Z",
-      "updatedBy": "bd2-orch"
+      "updated": "2026-08-07T09:04:18.530Z",
+      "updatedBy": "bd3-tests",
+      "claimedAt": "2026-08-07T09:04:18.529Z"
     },
     {
       "id": "c044atit",
@@ -96590,20 +96628,31 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "bd3-tests",
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "cargo test --test corelib json_canonical_stream passes all 3 cases",
+          "status": "met",
+          "metBy": "bd3-tests",
+          "verifiedBy": null,
+          "evidence": "Investigated quick-run's existing file-IO policy: the shared deopt/interpreter ambient TIR evaluator (crates/jet-jit/src/jit/deopt.rs, crates/jet-codegen/src/Codegen/TIR/eval/) has no core.files.* handling at all (grepped for files/CORE_FILES handling in that module: zero hits) — this is a broad, structural gap (no file IO of any kind), not a narrow create-vs-read asymmetry, so implementing it is out of scope for a P2 test-health card and would be new capability work. Chose the harness-route option the card offered: json_canonical_stream_sorts_nested_objects_and_latches_rejections and json_canonical_stream_matches_every_finite_rfc8785_appendix_b_vector each carried a second dev_iteration(...) leg re-running the same file-IO-heavy source through quick-run to (incorrectly) prove tier parity for a capability that tier can't do. Removed that leg from both, matching the sibling json_canonical_stream_matches_rfc8785_numbers_key_order_and_domain test just below them, which is also file-IO-heavy and has never had a dev_iteration leg (AOT-only via build_and_run). No new policy invented; no I9 fork (nothing claims quick-run supports file IO in any tier now). cargo test --test corelib json_canonical_stream: 3 passed, 0 failed (was 1 passed / 2 failed).",
+          "at": "2026-08-07T09:07:18.109Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T23:28:20.681Z",
-      "updated": "2026-08-07T01:49:40.349Z",
-      "updatedBy": "bd2-bugs"
+      "updated": "2026-08-07T09:07:20.606Z",
+      "updatedBy": "bd3-tests",
+      "claimedAt": "2026-08-07T09:07:20.606Z"
     },
     {
       "id": "c0vgjxm5",
@@ -96913,21 +96962,21 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "bd3-tests",
       "log": [],
       "criteria": [
         {
           "n": 1,
           "text": "cargo test --test tir_collections_and_methods passes all cases (either fixtures updated to D-ENUMDOT1 dot-prefixed patterns, or the regression that broke them is found and fixed).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd3-tests",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T00:16:07.692Z"
+          "evidence": "cargo test --test tir_collections_and_methods: 32 passed, 0 failed. Root cause was NOT purely D-ENUMDOT1 drift: fixed a genuine parser regression in crates/jet-parser/src/Parser/Expressions/ptr_tuple.rs (parse_paren_primary, from #1319's stack-depth-bounding fast path) that silently mis-parsed any '((a + b) + c)'-shaped nested-then-continued paren expression, plus D-ENUMDOT1 leading-dot fixture fixes, a /→Float (D-INTDIV1) Int-division fix using /%, a retired-syntax None construction replaced with bare None in typed argument position, an unprintable built-in Error swapped for a printable custom enum, and one stale hardcoded stdout assertion updated to match the current example + its golden .out. No regression: cargo test --test fmt 163/163 pass; cargo test --test compiler_stack public_compile_accepts_depth_256_and_reports_depth_257 still passes (fast path preserved for pure nesting).",
+          "at": "2026-08-07T08:57:24.379Z"
         }
       ],
       "refs": [],
@@ -96935,8 +96984,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T00:16:07.119Z",
-      "updated": "2026-08-07T00:16:07.692Z",
-      "updatedBy": "bd2-sweep"
+      "updated": "2026-08-07T08:57:24.951Z",
+      "updatedBy": "bd3-tests",
+      "claimedAt": "2026-08-07T08:57:24.951Z"
     },
     {
       "id": "c0g2j76x",
@@ -97038,20 +97088,94 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P2",
-      "plan": null,
+      "plan": "Extend the native TLS bridge so TLSPeerIdentity exposes the negotiated cipher suite and protocol version. D-CORESURF-SMALL1 (ratified) names both as real gaps deferred to this card. No new syntax, no new dependency, no ballot needed.\n\nSurface: stream.peer_identity().cipher_suite -> String (for example TLS13_AES_128_GCM_SHA256); stream.peer_identity().tls_version -> TLSVersion (the existing enum: .Tls12 / .Tls13).\n\nSteps:\n1. crates/jet-pkg-model/src/Prelude/NetTls.rs: widen JetTLSPeerSnapshot from 8 to 10 elements, appending the cipher suite name (String) and the negotiated version (i64, the same coding with_version_bounds already uses). In jet_net_tls_peer_identity_impl read conn.negotiated_cipher_suite() and conn.protocol_version(); both are present after a finished handshake; map an absent value to an Err exactly like the existing missing-chain case.\n2. crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs: update the mirrored JetTLSPeerSnapshot alias and jet_net_tls_peer_identity_from_snapshot so JetTLSPeerIdentity carries the two new fields. The tuple widening makes the compiler flag every remaining construction and destructuring site; fix each one. All tiers share this one Prelude path (I9); no engine re-encodes anything.\n3. crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs: in core_struct_field add cipher_suite -> String and tls_version -> Named TLSVersion to the TLSPeerIdentity arm.\n4. Docs: extend the stream.peer_identity() row in docs/reference/core-library.md and rewrite the ledger-declined note in the core.tls section so ciphersuites and tlsversion are shipped, not gaps. In docs/reference/core-surface-ledger.json give gap.network.ciphersuites and gap.network.tlsversion the shipped jetSpelling and a winning verdict, copying the shape of an already-resolved gap row.\n5. Proof: extend core_tls_expert_config_peer_identity_and_directional_close_are_real in tests/corelib.rs. Pin .Tls13 version bounds in the fixture, print both new fields, assert tls_version is Tls13 and cipher_suite starts with TLS13_ (the exact suite can vary with rustls defaults, so assert the prefix). Add the same two prints to the localhost TLS harness in tests/dev.rs to prove the default jet run tier returns the same values through the same Prelude symbol.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
-      "criteria": [],
-      "refs": [],
+      "log": [
+        {
+          "at": "2026-08-07",
+          "by": "fable",
+          "text": "prep: plan and 6 exit criteria set; sanctioned by ratified D-CORESURF-SMALL1; ready to implement"
+        },
+        {
+          "at": "2026-08-07",
+          "by": "fable",
+          "text": "prep: plan written from code inspection - snapshot tuple widening in NetTls.rs + NetHTTP.rs, sema field typing, ledger + core-library.md closure, deterministic localhost-TLS proof on AOT and dev tiers. No owner gate."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "JetTLSPeerSnapshot in crates/jet-pkg-model/src/Prelude/NetTls.rs and the mirrored alias in crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs both carry two new trailing elements (cipher-suite String, negotiated-version i64); jet_net_tls_peer_identity_impl fills them from the rustls connection and errors like the missing-chain case when absent",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T08:32:26.162Z"
+        },
+        {
+          "n": 2,
+          "text": "jet_net_tls_peer_identity_from_snapshot maps the two new elements onto JetTLSPeerIdentity fields cipher_suite (String) and tls_version (TLSVersion enum); the conversion lives only in the shared Prelude path, no engine-side re-encoding (I9)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T08:32:26.535Z"
+        },
+        {
+          "n": 3,
+          "text": "core_struct_field in crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs types cipher_suite as String and tls_version as TLSVersion on TLSPeerIdentity",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T08:32:27.242Z"
+        },
+        {
+          "n": 4,
+          "text": "tests/corelib.rs TLS expert test pins .Tls13 bounds, prints both new fields, and asserts tls_version is Tls13 and cipher_suite starts with TLS13_; targeted run passes via scripts/agent/jet-env",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T08:32:27.854Z"
+        },
+        {
+          "n": 5,
+          "text": "tests/dev.rs localhost TLS harness prints the same two fields under default jet run and matches the AOT values; targeted run passes",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T08:32:28.427Z"
+        },
+        {
+          "n": 6,
+          "text": "docs/reference/core-library.md core.tls section documents both fields and no longer calls them gaps; ledger rows gap.network.ciphersuites and gap.network.tlsversion carry the shipped jetSpelling and a winning verdict",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T08:32:29.173Z"
+        }
+      ],
+      "refs": [
+        "docs/reference/core-surface-ledger.json",
+        "docs/reference/core-library.md",
+        "crates/jet-pkg-model/src/Prelude/NetTls.rs",
+        "crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs",
+        "crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs",
+        "tests/corelib.rs",
+        "tests/dev.rs"
+      ],
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T01:26:06.592Z",
-      "updated": "2026-08-07T01:26:06.593Z",
-      "updatedBy": "bd2-apply"
+      "updated": "2026-08-07T08:32:32.539Z",
+      "updatedBy": "fable"
     },
     {
       "id": "c0o5w74b",
@@ -97203,20 +97327,88 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "building",
       "priority": "P2",
-      "plan": null,
+      "plan": "Two independent fixes. No owner decision is needed; both follow existing law and precedent.\n\nFix 1 - canon.jet marker brackets. examples/canon.jet:121 spells #[Doc(\"port to listen on\")] around one marker. The ratified E0999 rule says one marker stays bare; brackets group two or more. Change it to #Doc(\"port to listen on\"). This is the same fix #1331 applied to the semindex fixtures.\n\nFix 2 - the E0328 explain-gate failure is a Markdown escaping bug, not a policy question. Explain::index() in crates/jet-cli/src/Explain.rs keeps only registry rows that split into exactly 3 cells, and split_cells already honors \\| escapes. The E0328 row (docs/spec/diagnostics.md:301) contains raw pipes inside backticks, so it splits into more than 3 cells, the row is dropped, and E0328 never enters the explain index. Every other retired code stays in the index and passes the gate, so retired codes staying explainable is the established behavior (I4, old error logs). Fix: escape the in-cell pipes in that one row as \\|. Do not change the gate scan or Explain.rs.\n\nProof: scripts/agent/jet-env cargo test -p jet --test release_gates goes green; jet explain E0328 prints the retired notice; a grep shows no other registry row with an unescaped in-cell pipe.",
       "blockedBy": [],
-      "assignee": null,
-      "log": [],
-      "criteria": [],
-      "refs": [],
+      "assignee": "bd3-tests",
+      "log": [
+        {
+          "at": "2026-08-07",
+          "by": "bd3-tests",
+          "text": "Fixed both diagnosed defects: examples/canon.jet's bracketed #[Doc(...)] moved to bare #Doc(...) per E0999 (criterion #1's marker-fix half); docs/spec/diagnostics.md:301 E0328 row's in-cell pipes escaped as \\| so ga_every_diagnostic_has_explain passes (criteria #2-4 met). Fixing the marker bracket let canon_compiles_and_runs proceed further and hit a THIRD, previously-masked pre-existing failure: examples/canon.jet:130 Reader.over(packet) fails E0956 under quick-run (default jet run) — the shared ambient evaluator has ALL Reader/Cursor handle ops stubbed unsupported (crates/jet-codegen/src/Codegen/TIR/eval/handles.rs:856-874), not a narrow gap. Also found and fixed 3 more masked failures in the same file: edition_too_new, no_edition_field_is_accepted, supported_edition_is_accepted all built their test manifests with the retired payload:{...} wrapper (D-CONF-NAME1 retired it) — moved to bare name:/version:/edition:, all 3 now pass. Remaining blocker: canon_compiles_and_runs (criterion #1) and full release_gates green (criterion #5) are blocked on the Reader/Cursor quick-run gap, which is substantial implementation work (10 handle ops, stateful byte-cursor value, endian decoding, D-PARSESTR1 pattern-match integration) — logged as new card #1602, out of scope for this test-health closeout. Leaving criteria #1 and #5 open pending #1602."
+        },
+        {
+          "at": "2026-08-07",
+          "by": "fable",
+          "text": "prep: plan and 5 exit criteria set; no owner gate; ready to implement"
+        },
+        {
+          "at": "2026-08-07",
+          "by": "fable",
+          "text": "prep: root causes pinned - E0999 bare-marker fix in canon.jet, and raw in-cell pipes dropping the E0328 row from the explain index (split_cells already supports \\| escapes). No ballot needed: retired codes keep explain entries by precedent."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "examples/canon.jet spells the single Doc marker bare (#Doc, no brackets) per E0999; release_gates test canon_compiles_and_runs passes",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T08:31:42.875Z"
+        },
+        {
+          "n": 2,
+          "text": "The E0328 row in docs/spec/diagnostics.md escapes its in-cell pipes as \\| so the row splits into exactly 3 cells; release_gates test ga_every_diagnostic_has_explain passes",
+          "status": "met",
+          "metBy": "bd3-tests",
+          "verifiedBy": null,
+          "evidence": "docs/spec/diagnostics.md:301 E0328 row's raw in-cell pipes escaped as \\|; cargo test -p jet --test release_gates ga_every_diagnostic_has_explain: ok",
+          "at": "2026-08-07T09:17:29.921Z"
+        },
+        {
+          "n": 3,
+          "text": "jet explain E0328 (fresh target/debug/jet) resolves and prints the standard retired notice",
+          "status": "met",
+          "metBy": "bd3-tests",
+          "verifiedBy": null,
+          "evidence": "target/debug/jet explain E0328 (fresh build) prints: 'E0328\\n\\nThis code is retired: it is no longer produced by the current\\ncompiler, and is kept here only so old build logs stay readable.'",
+          "at": "2026-08-07T09:17:30.576Z"
+        },
+        {
+          "n": 4,
+          "text": "A grep over docs/spec/diagnostics.md proves no other registry row carries an unescaped raw pipe inside a cell; evidence logged on this card",
+          "status": "met",
+          "metBy": "bd3-tests",
+          "verifiedBy": null,
+          "evidence": "awk over docs/spec/diagnostics.md lines 96-806 (the 3-cell Explain registry table) counting pipe chars per row after stripping \\| escapes: every row has exactly 4 raw '|' chars (3 cells), zero anomalies after the E0328 fix. Command: awk 'NR==96,NR==806' docs/spec/diagnostics.md | awk '/^\\| [EL][0-9]/{line=$0; gsub(/\\\\\\|/,\"\",line); n=gsub(/\\|/,\"|\",line); if(n!=4) print n\" pipes: \"$0}' -> empty output.",
+          "at": "2026-08-07T09:17:31.081Z"
+        },
+        {
+          "n": 5,
+          "text": "scripts/agent/jet-env cargo test -p jet --test release_gates is fully green",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T08:31:53.095Z"
+        }
+      ],
+      "refs": [
+        "tests/release_gates.rs",
+        "examples/canon.jet",
+        "docs/spec/diagnostics.md",
+        "crates/jet-cli/src/Explain.rs"
+      ],
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T02:53:48.807Z",
-      "updated": "2026-08-07T02:53:48.864Z",
-      "updatedBy": "bd2-ci"
+      "updated": "2026-08-07T09:17:55.182Z",
+      "updatedBy": "bd3-tests",
+      "claimedAt": "2026-08-07T09:17:55.182Z"
     },
     {
       "id": "c07ylf1g",
@@ -97303,6 +97495,158 @@
       "updated": "2026-08-07T08:26:30.067Z",
       "updatedBy": "bd3-orch",
       "completedAt": "2026-08-07T08:26:30.067Z"
+    },
+    {
+      "id": "c05sqin0",
+      "num": 1599,
+      "title": "fmt idempotence test stale: arrow_control_law expects retired braceless control bodies",
+      "body": "crates/jet-parser/src/Parser/mod.rs Parser::s61_tests::arrow_control_law_formats_canonical_forms_idempotently asserts formatter output keeps 'if ready send() else skip()' and 'loop item; items audit(item)' braceless. Card #808 (c08mu840, done) made braces mandatory and fmt now auto-wraps single-statement bodies, so the formatter correctly emits 'if ready { send() } else { skip() }' and the test's fixture/assertions are stale, not a formatter bug. Fails identically on master HEAD (eab7c8713), unrelated to markers/D-META-STAGE1 work in the mark worktree.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-07T08:33:29.113Z",
+      "updated": "2026-08-07T08:33:29.114Z",
+      "updatedBy": "bd3-mark"
+    },
+    {
+      "id": "c06qhbtc",
+      "num": 1600,
+      "title": "tir_core_and_closures / tir_unsafe_and_runtime / compiler_stack: pre-existing test failures",
+      "body": "Found while closing #1591 (tir_collections_and_methods test-health). Three more targets have pre-existing red on master, unrelated to #1591's D-ENUMDOT1/paren-parser fix (verified via git stash before touching anything). (1) cargo test --test tir_core_and_closures: trait_impl_method_bodies and trait_object_call_keeps_non_scalar_arg_and_return_type fail — one with an E0308 rustc type mismatch in generated code, one with empty stdout vs expected \"1337\\n1337\\n\". (2) cargo test --test tir_unsafe_and_runtime: foreign_struct_construction, generic_struct_fns, optional_flow_narrowing_after_none_check, unsafe_fn_block_and_ptr_ops, unsafe_tier_emit_is_byte_exact fail (polymorphic_core_specials in the same file was ALSO failing here but is now fixed as a side effect of #1591's parser fix). (3) cargo test --test compiler_stack: known_regressions_keep_their_results_on_a_two_mib_embedder_stack fails — LOCAL_CELL_SOURCE fixture's struct named Cache now hits E0106 'the name Cache is built in and cannot be redefined' (plus cascading E0119/E0308/E0302), so either Cache became a reserved core name after this fixture was written, or the fixture needs a rename.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "cargo test --test tir_core_and_closures passes all cases",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T08:58:17.439Z"
+        },
+        {
+          "n": 2,
+          "text": "cargo test --test tir_unsafe_and_runtime passes all cases",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T08:58:17.803Z"
+        },
+        {
+          "n": 3,
+          "text": "cargo test --test compiler_stack passes all cases",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T08:58:18.163Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-07T08:58:13.736Z",
+      "updated": "2026-08-07T08:58:18.164Z",
+      "updatedBy": "bd3-tests"
+    },
+    {
+      "id": "c00jybyb",
+      "num": 1601,
+      "title": "diagnostic_snapshots drift: struct_missing_field, view_mut_bounds_interpreter, source_owned_conversion_retired",
+      "body": "cargo test --test diagnostic_snapshots (ui_snapshots) has 3 stale golden .stderr fixtures unrelated to markers/D-META-STAGE1: tests/ui/struct_missing_field.stderr expects 'every non-ref field must appear exactly once' but actual says 'every field without an = default must appear exactly once' (ownership/default-field rework drift); tests/ui/view_mut_bounds_interpreter.stderr expects an E0953 comptime-panic error but actual now produces no errors (interpreter view-bounds behavior changed); tests/ui/source_owned_conversion_retired.stderr expects E0311 for '\"7\".to_int()' but actual raises E0112 (print doesn't know how to show Int ? ParseError) instead, and drops the to_float() line. Found while blessing tests/ui/const_retired.stderr and tests/ui/comptime_keyword_retired.stderr for card #1456's E0146/E0374 text update; confirmed unrelated by content (no #Known/$/comptime/marker touch).",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-07T09:03:02.874Z",
+      "updated": "2026-08-07T09:03:02.874Z",
+      "updatedBy": "bd3-mark"
+    },
+    {
+      "id": "c09qyavw",
+      "num": 1602,
+      "title": "canon.jet: Reader/Cursor handle ops unsupported in quick-run (jet run)",
+      "body": "Found while closing #1597 (release_gates.rs test-health). Fixing that card's original 2 bugs (E0999 marker brackets in canon.jet, E0328 explain-gate escaping) let canon_compiles_and_runs proceed further and hit a THIRD, previously-masked pre-existing failure: 'jet run examples/canon.jet' (the default quick-run/JIT tier) fails with E0956 'handle ReaderOver isn't supported in Jet's quick-run mode yet' at examples/canon.jet:130, Reader.over(packet). This is not a narrow gap: crates/jet-codegen/src/Codegen/TIR/eval/handles.rs stubs ALL Reader/Cursor handle ops as unsupported() in the shared deopt/interpreter ambient evaluator — ReaderOver, ReaderReadU8, ReaderReadU16Le/Be, ReaderReadU32Le/Be, ReaderReadU64Le/Be, ReaderTake, ReaderRemaining, ReaderAtEnd, CursorOver, CursorTakeUntil, CursorSkipWs, CursorTakePattern, ReaderTakePattern (crates/jet-codegen/src/Codegen/TIR/eval/handles.rs:856-874). canon.jet is the flagship canonical example (I5: every feature ships an example proving the same meaning on every applicable execution tier) and its stream-parsing section (D-SHIFT1, 'the shift kernel for linear stream parsing') currently only works under AOT/full build, not the default jet run tier — an I9 gap. This is substantial implementation work (wiring a stateful byte-cursor value into the shared CtValue-based ambient evaluator, endian-aware decoding, D-PARSESTR1 pattern-match integration for CursorTakePattern/ReaderTakePattern), not a test-fixture fix, so it was left out of #1597's scope. Repro: scripts/agent/jet-env cargo test -p jet --test release_gates canon_compiles_and_runs (after #1597's other 2 fixes land).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Reader/Cursor handle ops (ReaderOver, ReaderRead*, ReaderTake, ReaderRemaining, ReaderAtEnd, CursorOver, CursorTakeUntil, CursorSkipWs, CursorTakePattern, ReaderTakePattern) work under quick-run (default jet run) via the shared ambient evaluator, matching AOT Prelude semantics (I9)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T09:17:00.919Z"
+        },
+        {
+          "n": 2,
+          "text": "cargo test -p jet --test release_gates canon_compiles_and_runs passes",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T09:17:01.326Z"
+        },
+        {
+          "n": 3,
+          "text": "examples/canon.jet's D-SHIFT1 stream-parsing section proves under both AOT and default jet run",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T09:17:01.781Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-07T09:16:54.961Z",
+      "updated": "2026-08-07T09:17:01.781Z",
+      "updatedBy": "bd3-tests"
     }
   ],
   "decisions": [
@@ -131782,6 +132126,496 @@
   ],
   "events": [
     {
+      "at": "2026-08-07T09:24:27.908Z",
+      "by": "bd3-carrier",
+      "action": "card.update",
+      "ref": "c0y4zx0d",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T09:23:55.181Z",
+      "by": "bd3-carrier",
+      "action": "card.update",
+      "ref": "c0y4zx0d",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T09:23:25.694Z",
+      "by": "bd3-carrier",
+      "action": "card.criteria-meet",
+      "ref": "c0y4zx0d",
+      "note": "#10"
+    },
+    {
+      "at": "2026-08-07T09:23:21.965Z",
+      "by": "bd3-carrier",
+      "action": "card.criteria-meet",
+      "ref": "c0y4zx0d",
+      "note": "#9"
+    },
+    {
+      "at": "2026-08-07T09:23:09.007Z",
+      "by": "bd3-carrier",
+      "action": "card.criteria-meet",
+      "ref": "c0y4zx0d",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-07T09:23:06.292Z",
+      "by": "bd3-carrier",
+      "action": "card.criteria-meet",
+      "ref": "c0y4zx0d",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-07T09:22:54.540Z",
+      "by": "bd3-carrier",
+      "action": "card.criteria-meet",
+      "ref": "c0y4zx0d",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-07T09:22:49.328Z",
+      "by": "bd3-carrier",
+      "action": "card.criteria-meet",
+      "ref": "c0y4zx0d",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-07T09:22:40.023Z",
+      "by": "bd3-carrier",
+      "action": "card.criteria-meet",
+      "ref": "c0y4zx0d",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-07T09:18:20.968Z",
+      "by": "bd3-mark",
+      "action": "card.release",
+      "ref": "c0556cxe",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-08-07T09:17:55.182Z",
+      "by": "bd3-tests",
+      "action": "card.update",
+      "ref": "c0ksjkvh",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T09:17:33.542Z",
+      "by": "bd3-mark",
+      "action": "card.update",
+      "ref": "c0556cxe",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T09:17:33.045Z",
+      "by": "bd3-mark",
+      "action": "card.update",
+      "ref": "c0556cxe",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T09:17:31.081Z",
+      "by": "bd3-tests",
+      "action": "card.criteria-meet",
+      "ref": "c0ksjkvh",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-07T09:17:30.576Z",
+      "by": "bd3-tests",
+      "action": "card.criteria-meet",
+      "ref": "c0ksjkvh",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-07T09:17:29.921Z",
+      "by": "bd3-tests",
+      "action": "card.criteria-meet",
+      "ref": "c0ksjkvh",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-07T09:17:25.124Z",
+      "by": "bd3-mark",
+      "action": "card.criteria-meet",
+      "ref": "c0556cxe",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-07T09:17:14.797Z",
+      "by": "bd3-mark",
+      "action": "card.criteria-meet",
+      "ref": "c0556cxe",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-07T09:17:01.781Z",
+      "by": "bd3-tests",
+      "action": "card.criteria-add",
+      "ref": "c09qyavw",
+      "note": "#3 examples/canon.jet's D-SHIFT1 stream-parsing section proves "
+    },
+    {
+      "at": "2026-08-07T09:17:01.326Z",
+      "by": "bd3-tests",
+      "action": "card.criteria-add",
+      "ref": "c09qyavw",
+      "note": "#2 cargo test -p jet --test release_gates canon_compiles_and_ru"
+    },
+    {
+      "at": "2026-08-07T09:17:00.919Z",
+      "by": "bd3-tests",
+      "action": "card.criteria-add",
+      "ref": "c09qyavw",
+      "note": "#1 Reader/Cursor handle ops (ReaderOver, ReaderRead*, ReaderTak"
+    },
+    {
+      "at": "2026-08-07T09:16:54.961Z",
+      "by": "bd3-tests",
+      "action": "card.add",
+      "ref": "c09qyavw",
+      "note": "canon.jet: Reader/Cursor handle ops unsupported in quick-run (jet run)"
+    },
+    {
+      "at": "2026-08-07T09:12:35.942Z",
+      "by": "bd3-mark",
+      "action": "card.update",
+      "ref": "c0z2jsot",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T09:07:44.504Z",
+      "by": "bd3-tests",
+      "action": "card.update",
+      "ref": "c0ksjkvh",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T09:07:39.213Z",
+      "by": "bd3-tests",
+      "action": "card.claim",
+      "ref": "c0ksjkvh",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T09:07:20.606Z",
+      "by": "bd3-tests",
+      "action": "card.update",
+      "ref": "c044atit",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T09:07:18.109Z",
+      "by": "bd3-tests",
+      "action": "card.criteria-meet",
+      "ref": "c044atit",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T09:07:08.327Z",
+      "by": "bd3-tests",
+      "action": "card.criteria-add",
+      "ref": "c044atit",
+      "note": "#1 cargo test --test corelib json_canonical_stream passes all 3"
+    },
+    {
+      "at": "2026-08-07T09:04:18.530Z",
+      "by": "bd3-tests",
+      "action": "card.update",
+      "ref": "c0y2ybsv",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T09:03:59.346Z",
+      "by": "bd3-tests",
+      "action": "card.criteria-meet",
+      "ref": "c0y2ybsv",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T09:03:51.190Z",
+      "by": "bd3-tests",
+      "action": "card.criteria-add",
+      "ref": "c0y2ybsv",
+      "note": "#1 cargo test --test comptime_diff comptime_matches_runtime pas"
+    },
+    {
+      "at": "2026-08-07T09:03:02.874Z",
+      "by": "bd3-mark",
+      "action": "card.add",
+      "ref": "c00jybyb",
+      "note": "diagnostic_snapshots drift: struct_missing_field, view_mut_bounds_interpreter, source_owned_conversion_retired"
+    },
+    {
+      "at": "2026-08-07T09:02:45.578Z",
+      "by": "bd3-tests",
+      "action": "card.claim",
+      "ref": "c044atit",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T08:58:22.453Z",
+      "by": "bd3-tests",
+      "action": "card.claim",
+      "ref": "c0y2ybsv",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T08:58:18.164Z",
+      "by": "bd3-tests",
+      "action": "card.criteria-add",
+      "ref": "c06qhbtc",
+      "note": "#3 cargo test --test compiler_stack passes all cases"
+    },
+    {
+      "at": "2026-08-07T08:58:17.803Z",
+      "by": "bd3-tests",
+      "action": "card.criteria-add",
+      "ref": "c06qhbtc",
+      "note": "#2 cargo test --test tir_unsafe_and_runtime passes all cases"
+    },
+    {
+      "at": "2026-08-07T08:58:17.439Z",
+      "by": "bd3-tests",
+      "action": "card.criteria-add",
+      "ref": "c06qhbtc",
+      "note": "#1 cargo test --test tir_core_and_closures passes all cases"
+    },
+    {
+      "at": "2026-08-07T08:58:13.736Z",
+      "by": "bd3-tests",
+      "action": "card.add",
+      "ref": "c06qhbtc",
+      "note": "tir_core_and_closures / tir_unsafe_and_runtime / compiler_stack: pre-existing test failures"
+    },
+    {
+      "at": "2026-08-07T08:57:24.951Z",
+      "by": "bd3-tests",
+      "action": "card.update",
+      "ref": "c0xrzvms",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T08:57:24.382Z",
+      "by": "bd3-tests",
+      "action": "card.criteria-meet",
+      "ref": "c0xrzvms",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T08:35:54.310Z",
+      "by": "bd3-tests",
+      "action": "card.update",
+      "ref": "c0xrzvms",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T08:35:50.754Z",
+      "by": "bd3-tests",
+      "action": "card.claim",
+      "ref": "c0xrzvms",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T08:35:47.938Z",
+      "by": "bd3-tests",
+      "action": "card.update",
+      "ref": "c0zlv32v",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T08:35:44.890Z",
+      "by": "bd3-tests",
+      "action": "card.criteria-meet",
+      "ref": "c0zlv32v",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-07T08:35:44.546Z",
+      "by": "bd3-tests",
+      "action": "card.criteria-meet",
+      "ref": "c0zlv32v",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-07T08:35:44.192Z",
+      "by": "bd3-tests",
+      "action": "card.criteria-meet",
+      "ref": "c0zlv32v",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-07T08:35:43.460Z",
+      "by": "bd3-tests",
+      "action": "card.criteria-meet",
+      "ref": "c0zlv32v",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-07T08:35:42.698Z",
+      "by": "bd3-tests",
+      "action": "card.criteria-meet",
+      "ref": "c0zlv32v",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T08:33:29.114Z",
+      "by": "bd3-mark",
+      "action": "card.add",
+      "ref": "c05sqin0",
+      "note": "fmt idempotence test stale: arrow_control_law expects retired braceless control bodies"
+    },
+    {
+      "at": "2026-08-07T08:33:05.420Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0171611",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-07T08:33:04.810Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0171611",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-08-07T08:32:57.126Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0vzadss",
+      "note": "phase,plan,logEntry"
+    },
+    {
+      "at": "2026-08-07T08:32:32.539Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c05dt49c",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-07T08:32:29.173Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c05dt49c",
+      "note": "#6 docs/reference/core-library.md core.tls section documents bo"
+    },
+    {
+      "at": "2026-08-07T08:32:28.427Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c05dt49c",
+      "note": "#5 tests/dev.rs localhost TLS harness prints the same two field"
+    },
+    {
+      "at": "2026-08-07T08:32:27.854Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c05dt49c",
+      "note": "#4 tests/corelib.rs TLS expert test pins .Tls13 bounds, prints "
+    },
+    {
+      "at": "2026-08-07T08:32:27.242Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c05dt49c",
+      "note": "#3 core_struct_field in crates/jet-sema/src/Sema/CheckerCoreLib"
+    },
+    {
+      "at": "2026-08-07T08:32:26.536Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c05dt49c",
+      "note": "#2 jet_net_tls_peer_identity_from_snapshot maps the two new ele"
+    },
+    {
+      "at": "2026-08-07T08:32:26.163Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c05dt49c",
+      "note": "#1 JetTLSPeerSnapshot in crates/jet-pkg-model/src/Prelude/NetTl"
+    },
+    {
+      "at": "2026-08-07T08:32:15.394Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c05dt49c",
+      "note": "plan,logEntry,refs"
+    },
+    {
+      "at": "2026-08-07T08:32:01.451Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0ksjkvh",
+      "note": "phase,logEntry,refs"
+    },
+    {
+      "at": "2026-08-07T08:31:53.095Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0ksjkvh",
+      "note": "#5 scripts/agent/jet-env cargo test -p jet --test release_gates"
+    },
+    {
+      "at": "2026-08-07T08:31:50.693Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0ksjkvh",
+      "note": "#4 A grep over docs/spec/diagnostics.md proves no other registr"
+    },
+    {
+      "at": "2026-08-07T08:31:48.721Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0ksjkvh",
+      "note": "#3 jet explain E0328 (fresh target/debug/jet) resolves and prin"
+    },
+    {
+      "at": "2026-08-07T08:31:46.631Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0ksjkvh",
+      "note": "#2 The E0328 row in docs/spec/diagnostics.md escapes its in-cel"
+    },
+    {
+      "at": "2026-08-07T08:31:42.875Z",
+      "by": "fable",
+      "action": "card.criteria-add",
+      "ref": "c0ksjkvh",
+      "note": "#1 examples/canon.jet spells the single Doc marker bare (#Doc, "
+    },
+    {
+      "at": "2026-08-07T08:31:35.130Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0ksjkvh",
+      "note": "plan,logEntry"
+    },
+    {
+      "at": "2026-08-07T08:31:21.371Z",
+      "by": "bd3-carrier",
+      "action": "card.update",
+      "ref": "c0y4zx0d",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T08:29:44.233Z",
+      "by": "bd2-carrier3",
+      "action": "card.release",
+      "ref": "c0y4zx0d",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-08-07T08:28:04.204Z",
+      "by": "bd3-tests",
+      "action": "card.claim",
+      "ref": "c0zlv32v",
+      "note": ""
+    },
+    {
       "at": "2026-08-07T08:27:15.847Z",
       "by": "bd3-mark",
       "action": "card.claim",
@@ -134790,496 +135624,6 @@
       "action": "card.criteria-add",
       "ref": "c0vgjxm5",
       "note": "#1 Each declined Set row carries verdict declined with the rati"
-    },
-    {
-      "at": "2026-08-06T23:30:35.118Z",
-      "by": "bd2-set",
-      "action": "card.add",
-      "ref": "c0vgjxm5",
-      "note": "Apply the Set order-ops ballot outcome to the ledger"
-    },
-    {
-      "at": "2026-08-06T23:30:28.614Z",
-      "by": "bd2-set",
-      "action": "decision.update",
-      "ref": "D-SET-DECLINE1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-08-06T23:30:28.275Z",
-      "by": "bd2-set",
-      "action": "decision.update",
-      "ref": "D-SET-DECLINE1",
-      "note": ""
-    },
-    {
-      "at": "2026-08-06T23:30:02.780Z",
-      "by": "bd2-set",
-      "action": "decision.update",
-      "ref": "D-SET-DECLINE1",
-      "note": ""
-    },
-    {
-      "at": "2026-08-06T23:29:43.749Z",
-      "by": "bd2-sweep",
-      "action": "card.claim",
-      "ref": "c0gv6ghj",
-      "note": ""
-    },
-    {
-      "at": "2026-08-06T23:28:48.391Z",
-      "by": "bd2-set",
-      "action": "decision.add",
-      "ref": "D-SET-DECLINE1",
-      "note": "Set's last 4 order-dependent methods: decline or ship with arbitrary order (draft)"
-    },
-    {
-      "at": "2026-08-06T23:28:20.681Z",
-      "by": "bd2-orch",
-      "action": "card.add",
-      "ref": "c044atit",
-      "note": "corelib json_canonical_stream tests fail under quick-run E0956"
-    },
-    {
-      "at": "2026-08-06T23:28:20.316Z",
-      "by": "bd2-orch",
-      "action": "card.add",
-      "ref": "c0y2ybsv",
-      "note": "comptime_diff: Iter values have no Display in comptime cases 42-44"
-    },
-    {
-      "at": "2026-08-06T23:27:32.600Z",
-      "by": "bd2-rev2",
-      "action": "card.update",
-      "ref": "c00sqr4z",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T23:27:21.857Z",
-      "by": "bd2-rev2",
-      "action": "card.criteria-verify",
-      "ref": "c00sqr4z",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-06T23:27:16.663Z",
-      "by": "bd2-json",
-      "action": "card.criteria-meet",
-      "ref": "c00sqr4z",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-06T23:26:52.678Z",
-      "by": "bd2-rev2",
-      "action": "card.criteria-meet",
-      "ref": "c00sqr4z",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-06T23:26:45.279Z",
-      "by": "bd2-rev2",
-      "action": "card.criteria-verify",
-      "ref": "c00sqr4z",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-06T23:26:44.929Z",
-      "by": "bd2-rev2",
-      "action": "card.criteria-verify",
-      "ref": "c00sqr4z",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-06T23:26:44.169Z",
-      "by": "bd2-rev2",
-      "action": "card.criteria-verify",
-      "ref": "c00sqr4z",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-06T23:23:43.192Z",
-      "by": "bd2-iter",
-      "action": "card.claim",
-      "ref": "c0r2dfxz",
-      "note": ""
-    },
-    {
-      "at": "2026-08-06T23:23:42.523Z",
-      "by": "e3-coll",
-      "action": "card.release",
-      "ref": "c0r2dfxz",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-08-06T23:22:03.211Z",
-      "by": "bd2-orch",
-      "action": "card.update",
-      "ref": "c01y8s93",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T23:22:02.799Z",
-      "by": "bd2-orch",
-      "action": "card.criteria-verify",
-      "ref": "c01y8s93",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-06T23:22:02.449Z",
-      "by": "bd2-orch",
-      "action": "card.criteria-verify",
-      "ref": "c01y8s93",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-06T23:21:41.197Z",
-      "by": "bd2-json",
-      "action": "card.criteria-meet",
-      "ref": "c00sqr4z",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-06T23:21:40.697Z",
-      "by": "bd2-json",
-      "action": "card.criteria-meet",
-      "ref": "c00sqr4z",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-06T23:21:16.578Z",
-      "by": "bd2-json",
-      "action": "card.update",
-      "ref": "c00sqr4z",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-06T23:19:53.457Z",
-      "by": "bd2-str",
-      "action": "card.update",
-      "ref": "c01y8s93",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-06T23:19:49.366Z",
-      "by": "bd2-str",
-      "action": "card.criteria-meet",
-      "ref": "c01y8s93",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-06T23:19:49.014Z",
-      "by": "bd2-str",
-      "action": "card.criteria-meet",
-      "ref": "c01y8s93",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-06T23:14:35.267Z",
-      "by": "bd2-str",
-      "action": "card.update",
-      "ref": "c01y8s93",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-06T23:13:23.116Z",
-      "by": "bd2-str",
-      "action": "card.criteria-add",
-      "ref": "c0zsjsdx",
-      "note": "#1 Every String jet_loses row this card owns carries verdict de"
-    },
-    {
-      "at": "2026-08-06T23:13:19.231Z",
-      "by": "bd2-str",
-      "action": "card.add",
-      "ref": "c0zsjsdx",
-      "note": "Apply the String ballot outcome to the ledger"
-    },
-    {
-      "at": "2026-08-06T23:13:04.157Z",
-      "by": "bd2-str",
-      "action": "decision.update",
-      "ref": "D-STR-DECLINE1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-08-06T23:12:45.932Z",
-      "by": "bd2-str",
-      "action": "decision.add",
-      "ref": "D-STR-DECLINE1",
-      "note": "String's remaining 34 ledger gaps: decline or ship (draft)"
-    },
-    {
-      "at": "2026-08-06T23:05:14.716Z",
-      "by": "bd2-str",
-      "action": "card.claim",
-      "ref": "c01y8s93",
-      "note": ""
-    },
-    {
-      "at": "2026-08-06T23:02:20.485Z",
-      "by": "bd2-rev2",
-      "action": "card.update",
-      "ref": "c00sqr4z",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-06T23:02:03.904Z",
-      "by": "bd2-rev2",
-      "action": "card.criteria-verify",
-      "ref": "c00sqr4z",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-06T23:02:03.548Z",
-      "by": "bd2-rev2",
-      "action": "card.criteria-verify",
-      "ref": "c00sqr4z",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-06T23:01:11.556Z",
-      "by": "bd2-rev1",
-      "action": "card.update",
-      "ref": "c0vzbf5f",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-06T23:00:54.914Z",
-      "by": "bd2-rev1",
-      "action": "card.update",
-      "ref": "c01ssx12",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-06T23:00:40.911Z",
-      "by": "bd2-rev1",
-      "action": "card.criteria-verify",
-      "ref": "c0vzbf5f",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-06T23:00:40.553Z",
-      "by": "bd2-rev1",
-      "action": "card.criteria-verify",
-      "ref": "c0vzbf5f",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-06T23:00:40.212Z",
-      "by": "bd2-rev1",
-      "action": "card.criteria-verify",
-      "ref": "c0vzbf5f",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-06T23:00:39.861Z",
-      "by": "bd2-rev1",
-      "action": "card.criteria-verify",
-      "ref": "c0vzbf5f",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-06T23:00:18.989Z",
-      "by": "bd2-rev1",
-      "action": "card.update",
-      "ref": "c01ssx12",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-06T23:00:11.372Z",
-      "by": "bd2-rev1",
-      "action": "card.criteria-verify",
-      "ref": "c01ssx12",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-06T23:00:11.032Z",
-      "by": "bd2-rev1",
-      "action": "card.criteria-verify",
-      "ref": "c01ssx12",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-06T23:00:10.688Z",
-      "by": "bd2-rev1",
-      "action": "card.criteria-verify",
-      "ref": "c01ssx12",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-06T23:00:07.974Z",
-      "by": "bd2-rev1",
-      "action": "card.criteria-verify",
-      "ref": "c01ssx12",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-06T23:00:07.618Z",
-      "by": "bd2-rev1",
-      "action": "card.criteria-verify",
-      "ref": "c01ssx12",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-06T23:00:07.273Z",
-      "by": "bd2-rev1",
-      "action": "card.criteria-verify",
-      "ref": "c01ssx12",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-06T22:29:28.006Z",
-      "by": "bd2-orch",
-      "action": "card.criteria-add",
-      "ref": "c01y8s93",
-      "note": "#2 node scripts/agent/check-core-surface-ledger.mjs --check exi"
-    },
-    {
-      "at": "2026-08-06T22:29:27.664Z",
-      "by": "bd2-orch",
-      "action": "card.criteria-add",
-      "ref": "c01y8s93",
-      "note": "#1 Every String jet_loses row in docs/reference/core-surface-le"
-    },
-    {
-      "at": "2026-08-06T22:29:05.864Z",
-      "by": "bd2-orch",
-      "action": "card.add",
-      "ref": "c01y8s93",
-      "note": "Close the remaining String gaps after card #1476"
-    },
-    {
-      "at": "2026-08-06T22:19:26.498Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-AUTHORITY-MEM2",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-06T22:19:20.355Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-CONC-SPAWN1",
-      "note": "D"
-    },
-    {
-      "at": "2026-08-06T22:19:07.526Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-CALLPOLICY2",
-      "note": "C"
-    },
-    {
-      "at": "2026-08-06T22:16:00.016Z",
-      "by": "bd2-io",
-      "action": "card.update",
-      "ref": "c0vzbf5f",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-08-06T22:03:37.891Z",
-      "by": "fable",
-      "action": "question.answer",
-      "ref": "q2zzopmh",
-      "note": ""
-    },
-    {
-      "at": "2026-08-06T22:03:37.549Z",
-      "by": "fable",
-      "action": "question.answer",
-      "ref": "q57y8uci",
-      "note": ""
-    },
-    {
-      "at": "2026-08-06T22:03:37.210Z",
-      "by": "fable",
-      "action": "question.answer",
-      "ref": "q4i062hj",
-      "note": ""
-    },
-    {
-      "at": "2026-08-06T22:03:36.861Z",
-      "by": "fable",
-      "action": "question.answer",
-      "ref": "q3bebnsm",
-      "note": ""
-    },
-    {
-      "at": "2026-08-06T22:03:26.977Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-CONC-SPAWN1",
-      "note": ""
-    },
-    {
-      "at": "2026-08-06T22:03:26.627Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-AUTHORITY-MEM2",
-      "note": ""
-    },
-    {
-      "at": "2026-08-06T22:03:26.267Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-CALLPOLICY2",
-      "note": ""
-    },
-    {
-      "at": "2026-08-06T21:55:39.098Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-CONC-FAIL1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-06T21:55:10.935Z",
-      "by": "owner",
-      "action": "question.add",
-      "ref": "q57y8uci",
-      "note": ""
-    },
-    {
-      "at": "2026-08-06T21:54:06.240Z",
-      "by": "owner",
-      "action": "question.add",
-      "ref": "q4i062hj",
-      "note": ""
-    },
-    {
-      "at": "2026-08-06T21:54:05.840Z",
-      "by": "owner",
-      "action": "question.add",
-      "ref": "q3bebnsm",
-      "note": ""
-    },
-    {
-      "at": "2026-08-06T21:51:17.538Z",
-      "by": "owner",
-      "action": "question.add",
-      "ref": "q2zzopmh",
-      "note": ""
-    },
-    {
-      "at": "2026-08-06T21:47:13.548Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-FENCE-RANGE1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-06T21:47:13.548Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c06k75xs",
-      "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-08-06T21:47:13.548Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c06k75xs",
-      "note": "#3 jet devtools grammars regenerated"
     }
   ],
   "nextNum": 368,
