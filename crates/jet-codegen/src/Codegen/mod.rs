@@ -1308,8 +1308,18 @@ fn strip_unused_os_signal_prelude(out: String) -> String {
     s
 }
 
+/// Rust identifier for a Jet name.
+///
+/// D-META-STAGE1=B: the compile-time mark rides the name, so a Jet name may
+/// begin with `$`, which Rust cannot spell. A marked name gets its own prefix
+/// rather than losing the mark. That keeps the mapping injective, which the
+/// ratified text requires: a plain name and a marked name can never denote the
+/// same binding, so they can never mangle to the same Rust place either.
 pub(crate) fn mangle(name: &str) -> String {
-    format!("user_{}", name)
+    match name.strip_prefix(crate::Syntax::COMPTIME_MARK) {
+        Some(rest) => format!("userct_{}", rest),
+        None => format!("user_{}", name),
+    }
 }
 
 /// D-TAG1: Rust identifier for an enum variant. A grouped leaf's Jet name is a
@@ -2813,7 +2823,7 @@ fn emit_test_body(cx: &Cx, body: &[crate::AST::Stmt], out: &mut String) {
 
 /// D-UIDEVSHELL1=A (c134 Phase 8): true when the native GTK4 backend prelude
 /// should be emitted — the program constructs `core.ui.gtk_backend()` AND the
-/// active target OS is Linux. `used_core` is collected before `#Known if
+/// active target OS is Linux. `used_core` is collected before `$if
 /// build.os` folds, so a Linux-only backend used under a `.Linux` arm still
 /// shows up on a macOS/Windows build; the `active_os` gate is what actually
 /// keeps the gtk `extern "C"` surface out of a non-Linux target (the backend is

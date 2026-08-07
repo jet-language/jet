@@ -129,7 +129,7 @@ fn comptime_watcher_files_keeps_comptime_voice() {
         &file,
         r#"use core.watcher as watcher
 
-#Known w :: watcher.files(".") ?? panic("x")
+$w :: watcher.files(".") ?? panic("x")
 
 fn run() {
     print(w)

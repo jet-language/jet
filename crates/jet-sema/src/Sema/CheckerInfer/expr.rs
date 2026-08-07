@@ -1950,23 +1950,37 @@ impl<'a> Checker<'a> {
                 })
             }
             Expr::CallValue { callee, args, span } => self.infer_call_value(callee, args, *span),
-            // D-CTMARKER1=C: `$name` comptime splice. Valid only in comptime contexts;
-            // the Comptime interpreter resolves the value. In runtime code: E2712.
-            Expr::ComptimeSplice { name, span, value } => {
+            // D-META-STAGE1=B: a compile-time name resolves from the values the
+            // compiler already computed, under the name as written. There is no
+            // stage boundary to check — inside a compile-time context the
+            // interpreter reads it, and outside one sema folds it here so
+            // codegen only ever sees the value.
+            Expr::ComptimeName { name, span, value } => {
                 if !self.in_comptime {
                     let globals = self.current_ct_globals();
                     if let Some(v) = globals.get(name).cloned() {
-                        let ty = v.jet_type();
+                        // D-META-STAGE1=B: the mark is part of the identifier,
+                        // so a marked name is looked up like any other name and
+                        // answers the type its binding was given. The folded
+                        // value's own shape is the fallback, not the authority:
+                        // it cannot recover a generic argument the value does
+                        // not carry, so `Loadable.Idle` would come back as a
+                        // bare `Loadable` and lose its methods.
+                        let ty = self
+                            .lookup(name)
+                            .map(|info| info.ty.clone())
+                            // A module-level marked const types like any other
+                            // module const: from the registered signature, not
+                            // the folded value (which loses generic arguments —
+                            // `Loadable.idle()` would come back a bare
+                            // `Loadable` and lose its methods).
+                            .or_else(|| self.consts.get(name).cloned())
+                            .unwrap_or_else(|| v.jet_type());
                         *value = Some(v);
                         return Some(ty);
                     }
-                    self.diags.push(Diagnostic::error(
-                        "E2713",
-                        format!("there is no comptime value named `{}`", name),
-                        "`$name` splices a value that was computed by a `comptime` binding or `#Known {}` block".to_string(),
-                        format!("define `#Known {name} :: ...` before using `${name}`"),
-                        Some(*span),
-                    ));
+                    let (name, span) = (name.clone(), *span);
+                    self.unknown_name(&name, span);
                 }
                 None
             }
@@ -2998,6 +3012,21 @@ impl<'a> Checker<'a> {
             if let Some(nt) = crate::AST::numeric_type_from_name(type_name) {
                 if let Some(cty) = numeric_const_type(&nt, member) {
                     return Some(cty);
+                }
+            }
+            // D-LAYOUT-FACTS1=B / D-META-STAGE1=B: the compiler-owned facts a
+            // type carries. `T.$layout`, `T.$name` and `T.$fields` are one
+            // spelling, and each projects the matching `TypeInfo` member, so
+            // the fact answers the same type reflection already answers.
+            if let Some(projected) = crate::Syntax::compiler_fact_member(member) {
+                if self.is_known_enum(type_name) || self.struct_owner_module(type_name, None).is_some()
+                {
+                    if let Some(ty) = core_struct_field(
+                        crate::Syntax::TYPE_TYPE_INFO,
+                        projected,
+                    ) {
+                        return Some(ty);
+                    }
                 }
             }
             if self.is_known_enum(type_name) {

@@ -315,7 +315,7 @@ fn stmt_references_ident(s: &Stmt, name: &str) -> bool {
         Stmt::Return(None, _) | Stmt::Break(_) | Stmt::Continue(_) => false,
         Stmt::BreakLabel(_, _) | Stmt::ContinueLabel(_, _) => false,
         // Every other statement kind (lexical-scope wrappers like `#Unsafe { }`,
-        // `region`, `#Transact`, `#Known { }`, …) — conservatively assume a
+        // `region`, `#Transact`, `$ { }`, …) — conservatively assume a
         // reference so an unsupported-but-undetected body shape becomes a loud
         // internal-compiler-error, never silently-wrong Rust (I2).
         _ => true,

@@ -622,11 +622,14 @@ pub enum Expr {
         span: Span,
     },
     /// D-CTMARKER1=C: `$name` — comptime splice expression. In a comptime
-    /// context (derive body, `#Known {}` block, comptime binding RHS), looks
-    /// up `name` in the comptime scope. Outside comptime context: E2712.
-    /// Inside `emit("… $name …")` strings, `$name` is handled by
-    /// `apply_dollar_splices` (string interpolation, not this AST node).
-    ComptimeSplice {
+    /// D-META-STAGE1=B: a compile-time name, `$limit`. The mark is part of the
+    /// name and is written at every mention, so this is an ordinary identifier
+    /// read that happens to name a value the compiler already computed. `name`
+    /// holds the written text, mark included, and never denotes the same
+    /// binding as the unmarked spelling. There is no scope to cross and nothing
+    /// to carry: sema folds the value into `value` before codegen, and codegen
+    /// emits it as a literal.
+    ComptimeName {
         name: String,
         span: Span,
         value: Option<CtValue>,
@@ -689,7 +692,7 @@ impl Expr {
             | Expr::If { span: s, .. }
             | Expr::CallValue { span: s, .. }
             | Expr::PtrFromAddr { span: s, .. }
-            | Expr::ComptimeSplice { span: s, .. }
+            | Expr::ComptimeName { span: s, .. }
             | Expr::CompareChain { span: s, .. }
             | Expr::UnitLit { span: s, .. }
             | Expr::IncDec { span: s, .. } => *s,

@@ -108,13 +108,15 @@ impl<'a> Parser<'a> {
             markers: Vec::new(),
                 reactive_upgrade: false,
             meta: None,
+            // D-META-STAGE1=B: the mark rides the name. The lexer hands `$x` as
+            // one Ident token, so the ordinary path must read stage from it.
+            is_comptime: Syntax::is_comptime_name(&name),
             name,
             name_span,
             pattern: None,
             ty: None,
             ty_span: None,
             init,
-            is_comptime: false,
             ct: None,
             uninit: false,
             arena_view: false,
@@ -409,11 +411,11 @@ impl<'a> Parser<'a> {
     /// so this only catches the REDUNDANT case structurally — cases genuinely
     /// requiring the struct's field count are re-checked in sema, which has
     /// the registry. A `..` present with zero named fields is never redundant.
-    /// D-VERDICT-1308-1: parse `#Known { … }`; recover retired `comptime`.
+    /// D-VERDICT-1308-1: parse `$ { … }`; recover retired `comptime`.
     /// Erases at codegen (build-time only). `$name` splice deferred to c155.
     pub(super) fn comptime_block_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.take_mark()?;
-        self.expect(TokKind::LBrace, "to open the `#Known` block body")?;
+        self.expect(TokKind::LBrace, "to open the `$` block body")?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
         Ok(Stmt::ComptimeBlock {
@@ -436,8 +438,8 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// D-VERDICT-1308-2: parse `#Known if <cond> { … } else { … }`.
-    /// Both arms require `{ }` (braceless bodies are not allowed for `#Known if`).
+    /// D-VERDICT-1308-2: parse `$if <cond> { … } else { … }`.
+    /// Both arms require `{ }` (braceless bodies are not allowed for `$if`).
     /// `else` is optional in statement position. Sema selects the arm; codegen
     /// emits only the selected arm (D-WHEN2: dropped arm is name-resolved only).
     pub(super) fn comptime_if_stmt(&mut self) -> Result<Stmt, Diagnostic> {
@@ -445,7 +447,7 @@ impl<'a> Parser<'a> {
         self.bump(); // `if`
 
         // D-OSTARGET2=B (ratified 2026-07-03): the dispatch form
-        // `#Known if build.os == { .Linux -> … .MacOS -> … }`. Detected the
+        // `$if build.os == { .Linux -> … .MacOS -> … }`. Detected the
         // same way `if_or_dispatch` does — parse the subject below comparison
         // precedence so a trailing `== {` marker survives; reuse `if_arms` for
         // the arm grammar, then repackage the resulting `Stmt::Switch` as a
@@ -457,7 +459,7 @@ impl<'a> Parser<'a> {
                 && matches!(self.peek2().kind, TokKind::LBrace)
             {
                 self.bump(); // `==`
-                self.expect(TokKind::LBrace, "to open the `#Known if` dispatch body")?;
+                self.expect(TokKind::LBrace, "to open the `$if` dispatch body")?;
                 let switch = self.if_arms(subject, start, BinOp::Eq)?;
                 let Stmt::Switch {
                     subject,
@@ -477,14 +479,14 @@ impl<'a> Parser<'a> {
                 });
             }
         }
-        // Not the dispatch form — rewind and parse the boolean `#Known if`.
+        // Not the dispatch form — rewind and parse the boolean `$if`.
         self.pos = probe;
         self.diags.truncate(probe_diags);
 
         let cond_start = self.peek().span;
         let cond = self.expr_no_struct_lit()?;
         let cond_span = Span::new(cond_start.start, self.toks[self.pos - 1].span.end);
-        self.expect(TokKind::LBrace, "to open the `#Known if` body")?;
+        self.expect(TokKind::LBrace, "to open the `$if` body")?;
         let then_body = self.block_stmts();
         let else_body = if matches!(self.peek().kind, TokKind::KwElse) {
             self.bump();
@@ -498,7 +500,7 @@ impl<'a> Parser<'a> {
                 let chain = self.comptime_if_stmt()?;
                 Some(vec![chain])
             } else {
-                self.expect(TokKind::LBrace, "to open the `#Known if` else body")?;
+                self.expect(TokKind::LBrace, "to open the `$if` else body")?;
                 Some(self.block_stmts())
             }
         } else {
@@ -517,12 +519,16 @@ impl<'a> Parser<'a> {
 
     pub(super) fn comptime_binding(&mut self) -> Result<Binding, Diagnostic> {
         let retired = matches!(self.peek().kind, TokKind::KwComptime);
-        self.take_mark()?;
-        let (name, name_span) = self.expect_ident("after `#Known`")?;
+        // D-META-STAGE1=B: the mark rides the name, so nothing is consumed
+        // before the name. A retired spelling is taken here only to teach.
+        if retired || self.at_known_lead() {
+            self.take_mark()?;
+        }
+        let (name, name_span) = self.expect_ident("for the compile-time binding")?;
         if retired {
             self.expect(TokKind::Eq, "in the retired comptime binding")?;
         } else {
-            self.expect(TokKind::ColonColon, "in a `#Known` binding")?;
+            self.expect(TokKind::ColonColon, "after a compile-time binding name")?;
         }
         let init = self.expr()?;
         Ok(Binding {
@@ -546,20 +552,46 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// D-VERDICT-1308-1/2: true when `#Known` is at the cursor.
+    /// D-META-STAGE1=B: true when the retired `#Known` spelling is at the
+    /// cursor. It parses only far enough to teach the `$` form.
     pub(in crate::Parser) fn at_known_lead(&self) -> bool {
         matches!(self.peek().kind, TokKind::Hash)
             && matches!(&self.peek2().kind, TokKind::Ident(name) if name == Syntax::RETIRED_MARKER_KNOWN)
     }
 
-    /// B5 revert (card #1456): #1537's own checkpoint made this teach E0377-
-    /// E0379 as retired spellings, but #1537 hasn't landed its migration of
-    /// the 327 in-repo `#Known` uses yet. `#Known` parses like master again —
-    /// silently, no diagnostic — until #1537 lands the full retirement.
-    /// `comptime` stays taught (pre-existing, unrelated to this revert). The
-    /// bare `$` mark this checkpoint also added ($ blocks, $if, $loop) still
-    /// parses too — it's a new, additive spelling, not a hard-error source.
+    /// D-META-STAGE1=B: `#Known` retired in favour of the `$` mark. One
+    /// teaching error covers all three of its forms, because the fix is the
+    /// same move in each: put the mark on the name, or open the block with a
+    /// bare mark.
+    pub(in crate::Parser) fn retired_known_error(&self, span: Span, fix: String) -> Diagnostic {
+        Diagnostic::error(
+            "E0377",
+            format!("`#{}` is retired", Syntax::RETIRED_MARKER_KNOWN),
+            "compile time has one mark, `$`, and the mark belongs to the name, so it is written at every mention"
+                .to_string(),
+            fix,
+            Some(span),
+        )
+    }
+
+    /// D-META-STAGE1=B: consume whatever opened a compile-time construct. The
+    /// ratified mark is `$`; the retired `#Known` and `comptime` spellings are
+    /// recovered here so each teaches its replacement once.
     fn take_mark(&mut self) -> Result<Span, Diagnostic> {
+        if self.at_known_lead() {
+            let head = self.read_marker_head()?;
+            let fix = if matches!(self.peek().kind, TokKind::KwIf) {
+                "write `$if <condition> { … }`".to_string()
+            } else if matches!(self.peek().kind, TokKind::LBrace) {
+                "write `$ { … }`".to_string()
+            } else if let TokKind::Ident(name) = &self.peek().kind {
+                format!("write `${name} :: …`")
+            } else {
+                "write the mark on the name: `$name :: …`".to_string()
+            };
+            self.diags.push(self.retired_known_error(head.span, fix));
+            return Ok(head.span);
+        }
         if matches!(self.peek().kind, TokKind::KwComptime) {
             let span = self.bump().span;
             self.diags.push(Diagnostic::error(
@@ -567,7 +599,7 @@ impl<'a> Parser<'a> {
                 "`comptime` is retired".to_string(),
                 "Jet folds ordinary foldable expressions automatically; explicit compile-time demand lives on the marker plane"
                     .to_string(),
-                "remove the keyword for ordinary code, or replace it with `#Known` when failure to compute now must stop the build"
+                "remove the keyword for ordinary code, or replace it with `$` when failure to compute now must stop the build"
                     .to_string(),
                 Some(span),
             ));

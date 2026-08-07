@@ -3140,7 +3140,7 @@ impl<'a> Checker<'a> {
                     if method == "new" {
                         let direct_size = match &args[0].expr {
                             Expr::Int(value, _, _, _) => Some(*value),
-                            Expr::ComptimeSplice {
+                            Expr::ComptimeName {
                                 value: Some(CtValue::Int(value)),
                                 ..
                             } => Some(*value),

@@ -1,3 +1,11 @@
+Error [E0106]: the name `Cache` is built in and can't be redefined
+  --> tests/ui/local_cell_crossing.jet:14:8
+    |
+ 14 | struct Cache {
+    |        ^^^^^
+ Why: `Cache` is provided by the language itself
+ Fix: choose a different name for this struct
+
 Error [E1102]: `cell` can't cross into a task because `Cell<Int>` isn't sendable
   --> tests/ui/local_cell_crossing.jet:4:27
     |
@@ -22,10 +30,10 @@ Error [E1102]: `Cell`<Int> cannot be stored in `Shared<T>`
  Why: a Cell and its guards own one-thread borrow state; wrapping that state does not make it synchronized
  Fix: store the value itself in `Shared<T>`, and use `Shared.read` or `Shared.edit`
 
-Error [E1102]: `Cache` cannot be stored in `Shared<T>`
-  --> tests/ui/local_cell_crossing.jet:19:22
+Error [E0119]: there's no type called `Cache`
+  --> tests/ui/local_cell_crossing.jet:18:31
     |
- 19 |     _ :: Shared.new(^cache)
-    |                      ^^^^^
- Why: a Cell and its guards own one-thread borrow state; wrapping that state does not make it synchronized
- Fix: store the value itself in `Shared<T>`, and use `Shared.read` or `Shared.edit`
+ 18 | fn cross_shared_nested(cache: Cache) {
+    |                               ^^^^^
+ Why: the types are `Int`, `Float`, `Bool`, and `String` (plus types you define)
+ Fix: check the spelling, or define the struct or enum first

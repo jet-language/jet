@@ -439,9 +439,10 @@ impl<'a> Checker<'a> {
                 self.lambda_escapes = true;
                 self.lambda_binding = Some(b.name.clone());
             }
-            // D-CTMARKER1=C: `$name` in a comptime binding RHS is valid; set
-            // `in_comptime` before `infer()` so E2712 is suppressed during type
-            // inference of the RHS (the evaluator runs after, independently).
+            // D-META-STAGE1=B: a marked name in a compile-time binding RHS is an
+            // ordinary read of a marked name; set
+            // `in_comptime` before `infer()` so the RHS types in the compile-time
+            // world (the evaluator runs after, independently).
             if b.is_comptime {
                 self.in_comptime = true;
             }
@@ -706,11 +707,11 @@ impl<'a> Checker<'a> {
             } else if !b.mutable {
                 // D-VERDICT-1308-1: an ordinary immutable binding is an
                 // implicit folding opportunity. Failure is silent; only
-                // explicit `#Known` demands a compile-time answer.
+                // explicit `$` demands a compile-time answer.
                 // (mem.address_of specifically always declines to fold — see
                 // the runtime_execution guard at its mint point in
                 // crates/jet-codegen/src/Codegen/TIR/eval/exprs.rs, which
-                // covers this path, the #Known path above, method_calls.rs's
+                // covers this path, the `$` path above, method_calls.rs's
                 // evaluate_constant, and any Expr::Paren-wrapped spelling —
                 // one guard where the value is minted, not a syntactic
                 // pattern match here that a stray `(...)` could dodge.)

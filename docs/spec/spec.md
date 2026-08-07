@@ -641,9 +641,9 @@ fn integrate(e: &Entity, dt: Float) { e.pos += e.vel * dt }
 Card #644 owns the implementation migration from the shipped module-local
 `no_alloc` denylist to this transitive contract.
 
-`#Known name :: value` is the explicit compile-time-demand binding
+`$name :: value` is the explicit compile-time-demand binding
 (S57 / D-VERDICT-1308-1); ordinary foldable expressions need no marker.
-`#Static #Known` emits a Rust `static`
+`#Static $` emits a Rust `static`
 when a stable address is required. `#Persist name := value` marks hot-reload
 state on a bare binding (D-PERSIST1).
 
@@ -804,7 +804,7 @@ impl Circle {
 - **Applied rules (D-SHAPE2/D-ATTR2):** `#Rule` or `#[A, B]` on the
   line before a declaration. Block markers use PascalCase and parenthesized
   arguments when arguments exist. An explicit empty effect row is `=[]=>`;
-  compile-time demand is the prefix marker `#Known`.
+  compile-time demand is the prefix marker `$`.
 - **Statement switch attributes (D-CANVASSTATE1):** `#Off <stmt>` parses and
   type-checks one statement, including block-shaped statements, then emits no
   code in every build. `#DebugOnly <stmt>` parses and type-checks the statement
@@ -819,7 +819,7 @@ impl Circle {
   |MacOS|Windows)` gates one `impl` block to a native OS; `jet build
   --target=<triple>` emits only the matching build's impls (host OS by default).
   Ungated code reaches the surviving impl through the compile-time switch
-  **`#Known if build.os == { .Linux -> … .MacOS -> … .Windows -> … [else -> …]
+  **`$if build.os == { .Linux -> … .MacOS -> … .Windows -> … [else -> …]
   }`** — `build.os` is a compiler-known comptime value, the switch folds to the
   arm matching the build's target OS and discards the rest before any gating
   check runs. Arms must cover every OS or carry an `else`
@@ -827,7 +827,7 @@ impl Circle {
   (**E-OSTARGET-BUILD-CONTEXT**); arm heads are bare OS variants
   (**E-OSTARGET-DISPATCH-ARM**). See syntax-decisions.md → D-OSTARGET2 for the
   full rules.
-- **Build-time embedding (D-CTIO1/D-CTFIND1/2):** inside a `#Known` binding,
+- **Build-time embedding (D-CTIO1/D-CTFIND1/2):** inside a `$` binding,
   **`embed_file("path") => String`** bakes a file's UTF-8 text into the binary
   and **`embed_bytes("path") => [U8]`** bakes its raw bytes (binary-safe, no
   UTF-8 requirement — images, fonts, any blob). **`find("glob") => [String]`**
@@ -2078,7 +2078,7 @@ Safe facts: `name`, `family`, `arch`, `cpu_count`, `temp_dir`, `executable`,
 `sync`, `set_current_dir`, `on_interrupt`.
 
 POSIX process/session control requires an audited `#Unsafe("…")` region and a
-host-OS gate (`#Known if build.os` / `#Target(OS.*)`): `fork`, `setuid`,
+host-OS gate (`$if build.os` / `#Target(OS.*)`): `fork`, `setuid`,
 `setgid`, `setpgid`, `setpgrp`, `setsid`, `initgroups`, `kill`, `wait`,
 `waitpid`, `pipe`, `close_fd`, `mkfifo`, `umask`, `getpriority`,
 `setpriority`, `utime`, `atexit`, `stop`. Those helpers do not fake POSIX

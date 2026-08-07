@@ -24,7 +24,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
     }
     match e {
         Expr::Int(..) | Expr::Float(..) | Expr::Bool(..) | Expr::Char(..) => true,
-        Expr::ComptimeSplice { value, .. } => value.is_some(),
+        Expr::ComptimeName { value, .. } => value.is_some(),
         Expr::Str(parts, _) => parts.iter().all(|p| match p {
             StrPart::Lit(_) => true,
             StrPart::Interp(e, _) => expr_in_subset(e, cx, locals),
@@ -510,7 +510,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                 {
                     return true;
                 }
-                // c109: a comptime-const receiver (`#Known pair_value :: Pair{…}`; then
+                // c109: a comptime-const receiver (`$pair_value :: Pair{…}`; then
                 // `pair_value.left`).
                 // The const inlines to its pre-rendered Rust value string (`cx.consts[P]`
                 // = `user_Pair { … }`) at the use site, and reading a field off it is a

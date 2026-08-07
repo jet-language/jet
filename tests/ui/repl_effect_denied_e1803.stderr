@@ -4,6 +4,6 @@ Error [E3410]: `core.files.write()` is a Tier-2 comptime effect — it requires 
     |
   1 | #Grant(caps: FS) { fs.write("denied.txt", "must not run") ?? panic("write failed") }
     |                                                 ^^^^^
- Why: ambient I/O (filesystem, environment, process) is not allowed in pure comptime evaluation
- Fix: wrap the comptime binding in `#Impure("reason") { … }` and pass `--allow-impure` to the build
+ Why: ambient I/O and storeful Core APIs are not allowed in pure comptime evaluation
+ Fix: wrap the comptime binding in `#Impure("reason") { … }` and pass `--allow-impure` to the build, or keep the call at runtime
 1 problem found

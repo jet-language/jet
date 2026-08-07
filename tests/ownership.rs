@@ -696,7 +696,7 @@ fn run() {
 #[test]
 fn const_address_taken_emits_static() {
     let src = r#"
-#Static #Known limit :: 10
+#Static $limit :: 10
 
 fn show(n: Int) {
     print(n)

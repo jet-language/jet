@@ -1310,9 +1310,10 @@ impl<'a> Fmt<'a> {
                 self.fmt_expr(addr, Prec::OrFallback);
                 self.write(")");
             }
-            // D-CTMARKER1=C: `$name` comptime splice expression.
-            Expr::ComptimeSplice { name, .. } => {
-                self.write(&format!("${}", name));
+            // D-META-STAGE1=B: the mark is part of the name, so the name is
+            // written back exactly as it was read.
+            Expr::ComptimeName { name, .. } => {
+                self.write(name);
             }
             // D-FMTPARENS1=A: author-written grouping parens are always re-emitted.
             Expr::Paren(inner, _) => {

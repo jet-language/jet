@@ -404,7 +404,7 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     KW_TAG,
     KW_EFFECT_DECL,
     KW_DERIVE,
-    // D-VERDICT-1308-1: `comptime` is retired teaching-only (E0374 → `#Known`).
+    // D-VERDICT-1308-1: `comptime` is retired teaching-only (E0374 → `$`).
     KW_DISTINCT,
     // Schema migrations (D-MIGRATE1 / D-MIGRATE2)
     KW_MIGRATION,

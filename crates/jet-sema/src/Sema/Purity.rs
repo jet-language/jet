@@ -270,7 +270,7 @@ pub(crate) fn check_pure_stmt(
         Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => None,
         // D-CTMARKER1: comptime block is build-time only; pure by construction.
         Stmt::ComptimeBlock { .. } => None,
-        // D-WHEN1: check both arms of a #Known if for purity (conservative).
+        // D-WHEN1: check both arms of a $if for purity (conservative).
         Stmt::ComptimeIf {
             cond,
             then_body,

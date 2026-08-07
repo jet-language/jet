@@ -1,7 +1,23 @@
-Error [E0740]: `touch` uses the effect `DB.Write`, which its signature doesn't allow
-  --> tests/ui/db_read_query_hidden_write.jet:8:32
+Error [E0405]: `??` only works on a fallible value, not `DBScope`
+  --> tests/ui/db_read_query_hidden_write.jet:15:20
     |
-  8 | fn touch(conn: DBConnection) =[DB.Read]=> {
-    |                                ^^^^^^^
+ 15 |     scoped :: conn.with_policy(policy, "owner") ?? panic("scope")
+    |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: the left side must be a `Result` or optional value
+ Fix: call something that can fail, then write `... ?? fallback`
+
+Error [E0112]: `touch` wants `DBScope` for argument 1, but this is Int (a whole number)
+  --> tests/ui/db_read_query_hidden_write.jet:16:11
+    |
+ 16 |     touch(scoped)
+    |           ^^^^^^
+ Why: every argument must match its parameter's type
+ Fix: use `DBScope` here
+
+Error [E0740]: `touch` uses the effect `DB.Write`, which its signature doesn't allow
+  --> tests/ui/db_read_query_hidden_write.jet:8:27
+    |
+  8 | fn touch(conn: DBScope) =[DB.Read]=> {
+    |                           ^^^^^^^
  Why: the signature declares `=[DB.Read]=>`, so the body may only use those; `DB.Write` is outside that set
  Fix: add `DB.Write` to the effect list, or stop using it in `touch`

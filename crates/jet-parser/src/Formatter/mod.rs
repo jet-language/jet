@@ -349,15 +349,14 @@ fn item_span_start(item: &Item, src: &str) -> usize {
                     .rfind(&format!("#{}", Syntax::MARKER_PERSIST))
                     .unwrap_or(c.name_span.start)
             } else if c.is_comptime {
-                // Prefer force markers; the compile-time mark rides the name.
-                // Retired keywords remain last-resort recovery starts.
+                // D-META-STAGE1=B: the compile-time mark rides the name, so the
+                // name span already covers it and only a force marker can sit
+                // in front. Scanning back for a retired keyword would find the
+                // word inside a leading comment and split the comment off.
                 let before = &src[..c.name_span.start];
                 before
                     .rfind("#Static")
                     .or_else(|| before.rfind("#Inline"))
-                    .or_else(|| before.rfind(&format!("#{}", Syntax::RETIRED_MARKER_KNOWN)))
-                    .or_else(|| before.rfind(Syntax::KW_COMPTIME))
-                    .or_else(|| before.rfind(Syntax::KW_CONST))
                     .unwrap_or(c.name_span.start)
             } else {
                 c.name_span.start

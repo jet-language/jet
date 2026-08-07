@@ -102,6 +102,23 @@ fn emit_shared_guard_projection(cx: &Cx, guard_ty: &Type, path: &[String]) -> St
     projection
 }
 
+/// #1537 / I2: does this folded value's Rust spelling leave a type parameter
+/// for rustc to guess?
+///
+/// `Ok(…)` and `Err(…)` name the carrier but pin only the side they carry, and
+/// an empty collection pins nothing at all. Everywhere else the spelling is
+/// self-describing, so most folded values need no annotation and keep reading
+/// as plain literals in the generated Rust.
+fn ct_lit_needs_its_type(value: &crate::AST::CtValue) -> bool {
+    use crate::AST::CtValue;
+    match value {
+        CtValue::Present(_) | CtValue::Failed(_) => true,
+        CtValue::List(items) => items.is_empty(),
+        CtValue::Map(entries) => entries.is_empty(),
+        _ => false,
+    }
+}
+
 fn shared_lock_receipt_id(recv: &TExpr, cx: &Cx) -> String {
     if let TExprKind::Local(local) = &recv.kind {
         return local.rust_name();
@@ -703,7 +720,22 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     return format!("[{}]", parts.join(", "));
                 }
             }
-            value.serialize()
+            let baked = value.clone().serialize();
+            // #1537 / I2: some folded values spell a generic constructor that
+            // pins none of its parameters — the carrier's `Ok(6i64)` says
+            // nothing about the report type, and an empty collection says
+            // nothing about its element. In a position that gives rustc no
+            // other clue it answers E0282, which reaches the user as an
+            // internal compiler error. The folded value's own type is known
+            // here, so say it. Ascription only: this never coerces, it names
+            // the type the fold already decided.
+            if ct_lit_needs_its_type(value) {
+                return format!(
+                    "{{ let __jet_ct: {} = {baked}; __jet_ct }}",
+                    cx.rust_type(&e.ty)
+                );
+            }
+            baked
         }
         TExprKind::HostCall(call) => emit_host_call(call, None, cx),
         // A declared const's Rust static name, resolved from its Jet name here so
