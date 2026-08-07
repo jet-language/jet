@@ -1173,7 +1173,7 @@ fn rewrite_json_canonical_calls(src: &str) -> String {
 /// `src` fallible (S34 `-> T ? E` / bare `T ?`)? Walks outward through
 /// nested `{ }` scopes — `if`/`for`/`match`/struct-literal bodies aren't
 /// functions — until a scope's header text parses as a `fn` signature, or
-/// there is no enclosing scope (top-level, e.g. a `#Known` initializer:
+/// there is no enclosing scope (top-level, e.g. a `$` initializer:
 /// not fallible, since `?` propagation requires an enclosing fallible fn).
 fn enclosing_fn_is_fallible(src: &str, at: usize) -> bool {
     let mut scan_from = at;

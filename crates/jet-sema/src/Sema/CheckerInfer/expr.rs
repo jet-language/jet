@@ -1959,7 +1959,17 @@ impl<'a> Checker<'a> {
                 if !self.in_comptime {
                     let globals = self.current_ct_globals();
                     if let Some(v) = globals.get(name).cloned() {
-                        let ty = v.jet_type();
+                        // D-META-STAGE1=B: the mark is part of the identifier,
+                        // so a marked name is looked up like any other name and
+                        // answers the type its binding was given. The folded
+                        // value's own shape is the fallback, not the authority:
+                        // it cannot recover a generic argument the value does
+                        // not carry, so `Loadable.Idle` would come back as a
+                        // bare `Loadable` and lose its methods.
+                        let ty = self
+                            .lookup(name)
+                            .map(|info| info.ty.clone())
+                            .unwrap_or_else(|| v.jet_type());
                         *value = Some(v);
                         return Some(ty);
                     }
@@ -2996,6 +3006,21 @@ impl<'a> Checker<'a> {
             if let Some(nt) = crate::AST::numeric_type_from_name(type_name) {
                 if let Some(cty) = numeric_const_type(&nt, member) {
                     return Some(cty);
+                }
+            }
+            // D-LAYOUT-FACTS1=B / D-META-STAGE1=B: the compiler-owned facts a
+            // type carries. `T.$layout`, `T.$name` and `T.$fields` are one
+            // spelling, and each projects the matching `TypeInfo` member, so
+            // the fact answers the same type reflection already answers.
+            if let Some(projected) = crate::Syntax::compiler_fact_member(member) {
+                if self.is_known_enum(type_name) || self.struct_owner_module(type_name, None).is_some()
+                {
+                    if let Some(ty) = core_struct_field(
+                        crate::Syntax::TYPE_TYPE_INFO,
+                        projected,
+                    ) {
+                        return Some(ty);
+                    }
                 }
             }
             if self.is_known_enum(type_name) {

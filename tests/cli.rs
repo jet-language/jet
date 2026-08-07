@@ -4129,7 +4129,7 @@ fn check_fixed_dynamic_size_reports_e0103_without_internal_failure() {
 
     fs::write(
         dir.join("compare_chain.jet"),
-        "fn helper() => Int { return 1 }\nfn run() {\n #Known if 0 < helper() < 2 {\n  print(\"reachable\")\n }\n}\n",
+        "fn helper() => Int { return 1 }\nfn run() {\n $if 0 < helper() < 2 {\n  print(\"reachable\")\n }\n}\n",
     )
     .unwrap();
     let compare_chain = Command::new(jet())
@@ -4183,7 +4183,7 @@ fn check_fixed_dynamic_size_reports_e0103_without_internal_failure() {
 
     fs::write(
         dir.join("lambda_value.jet"),
-        "fn run() {\n #Known callback :: () => print(\"not called\")\n print(\"ok\")\n}\n",
+        "fn run() {\n $callback :: () => print(\"not called\")\n print(\"ok\")\n}\n",
     )
     .unwrap();
     let lambda_value = Command::new(jet())

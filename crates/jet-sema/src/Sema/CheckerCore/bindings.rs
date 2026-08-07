@@ -705,7 +705,7 @@ impl<'a> Checker<'a> {
             } else if !b.mutable {
                 // D-VERDICT-1308-1: an ordinary immutable binding is an
                 // implicit folding opportunity. Failure is silent; only
-                // explicit `#Known` demands a compile-time answer.
+                // explicit `$` demands a compile-time answer.
                 let globals = self.current_ct_globals();
                 let mut mutated = std::collections::HashMap::new();
                 let folded = crate::Comptime::evaluate_owned_with_imports_opts_collecting(

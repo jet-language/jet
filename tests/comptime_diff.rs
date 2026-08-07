@@ -138,7 +138,7 @@ $expected :: f32_value_flow()
 
 fn run() {
     actual :: f32_value_flow()
-    print("{expected}")
+    print("{$expected}")
     print("{actual}")
 }
 "#;
@@ -349,7 +349,7 @@ $expected :: codec_probe()
 
 fn run() {
     actual :: codec_probe()
-    print("{expected}")
+    print("{$expected}")
     print("{actual}")
 }
 "#;
@@ -370,7 +370,7 @@ $expected :: zstd.decompress($encoded) ?? [U8].{}
 
 fn run() {
     restored :: zstd.decompress($encoded) ?? [U8].{}
-    print("{expected}")
+    print("{$expected}")
     print("{restored}")
 }
 "#;
@@ -389,7 +389,7 @@ $expected :: zstd.decompress([40, 181, 47, 253, 0, 129, 41, 0, 0, 104, 101, 108,
 
 fn run() {
     actual :: zstd.decompress([40, 181, 47, 253, 0, 129, 41, 0, 0, 104, 101, 108, 108, 111]) ?? [U8].{ 255 }
-    print("{expected}")
+    print("{$expected}")
     print("{actual}")
 }
 "#;
@@ -439,14 +439,14 @@ fn reusable_regex_matches_across_comptime_tir_and_runtime() {
         "typed Regex methods and canonical grammar",
         r#"
 $ct_regex :: Regex.{"(?<word>\\p{{Alphabetic}}+)_(\\d{{2,4}})"}
-$ct_match :: ct_regex.match("xx Jet_2026 yy") ?? panic("missing comptime match")
-$comptime_value :: "{ct_match.group(2) ?? "none"}|{ct_match.name("word") ?? "none"}|{ct_match.start()}|{ct_match.end()}|{ct_match.group_start(1) ?? -1}|{ct_match.group_end(1) ?? -1}|{ct_regex.replace_all("Jet_2026 Rust_2025", "${{word}}:$2")}|{ct_regex.replace_all_with("Jet_2026 Rust_2025", (m: Match) => m.name("word") ?? "none")}"
+$ct_match :: $ct_regex.match("xx Jet_2026 yy") ?? panic("missing comptime match")
+$comptime_value :: "{$ct_match.group(2) ?? "none"}|{$ct_match.name("word") ?? "none"}|{$ct_match.start()}|{$ct_match.end()}|{$ct_match.group_start(1) ?? -1}|{$ct_match.group_end(1) ?? -1}|{$ct_regex.replace_all("Jet_2026 Rust_2025", "${{word}}:$2")}|{$ct_regex.replace_all_with("Jet_2026 Rust_2025", (m: Match) => m.name("word") ?? "none")}"
 
 fn run() {
     rt_regex :: Regex.{"(?<word>\\p{{Alphabetic}}+)_(\\d{{2,4}})"}
     rt_match :: rt_regex.match("xx Jet_2026 yy") ?? panic("missing runtime match")
     runtime_value :: "{rt_match.group(2) ?? "none"}|{rt_match.name("word") ?? "none"}|{rt_match.start()}|{rt_match.end()}|{rt_match.group_start(1) ?? -1}|{rt_match.group_end(1) ?? -1}|{rt_regex.replace_all("Jet_2026 Rust_2025", "${{word}}:$2")}|{rt_regex.replace_all_with("Jet_2026 Rust_2025", (m: Match) => m.name("word") ?? "none")}"
-    print("{comptime_value}")
+    print("{$comptime_value}")
     print("{runtime_value}")
 }
 "#,
@@ -466,15 +466,15 @@ fn sequential_comptime_reads_advance_the_shared_reader() {
 fn run() {
     $ct :: Reader.over([U8].{7, 9, 11})
     $ct_a :: $ct.read_u8() ?? panic("ct a")
-    $ct_b :: ct.read_u8() ?? panic("ct b")
-    $comptime_value :: "{ct_a}|{ct_b}|{ct.remaining()}"
+    $ct_b :: $ct.read_u8() ?? panic("ct b")
+    $comptime_value :: "{$ct_a}|{$ct_b}|{$ct.remaining()}"
 
     rt :: Reader.over([U8].{7, 9, 11})
     rt_a :: rt.read_u8() ?? panic("rt a")
     rt_b :: rt.read_u8() ?? panic("rt b")
     runtime_value :: "{rt_a}|{rt_b}|{rt.remaining()}"
 
-    print("{comptime_value}")
+    print("{$comptime_value}")
     print("{runtime_value}")
 }
 "#,
@@ -734,7 +734,7 @@ $expected_mismatch :: show(xml.parse("<root>\n<a></root>"))
 
 fn run() {
     actual_mismatch :: show(xml.parse("<root>\n<a></root>"))
-    print("{expected_mismatch}")
+    print("{$expected_mismatch}")
     print("{actual_mismatch}")
 }
 "#;
@@ -792,7 +792,7 @@ fn run() {
     if actual_floats != "83f93e00fa47c35000f98000" { panic("preferred Float width drift") }
     if actual_nan != "f97e00" { panic("canonical NaN drift") }
     if actual_typed != "a262696407677061796c6f616442dead" { panic("typed byte-string drift") }
-    print("{expected_map}|{expected_floats}|{expected_nan}|{expected_typed}")
+    print("{$expected_map}|{$expected_floats}|{$expected_nan}|{$expected_typed}")
     print("{actual_map}|{actual_floats}|{actual_nan}|{actual_typed}")
 }
 "#;
@@ -890,7 +890,7 @@ fn run() {
     actual_items := show_items(items_wire)
     actual_bytes := show_bytes(items_wire)
     actual_alloc := show_alloc(items_wire)
-    print("{expected_malformed}~{expected_truncated}~{expected_noncanonical}~{expected_unsupported}~{expected_mismatch}~{expected_depth}~{expected_items}~{expected_bytes}~{expected_alloc}")
+    print("{$expected_malformed}~{$expected_truncated}~{$expected_noncanonical}~{$expected_unsupported}~{$expected_mismatch}~{$expected_depth}~{$expected_items}~{$expected_bytes}~{$expected_alloc}")
     print("{actual_malformed}~{actual_truncated}~{actual_noncanonical}~{actual_unsupported}~{actual_mismatch}~{actual_depth}~{actual_items}~{actual_bytes}~{actual_alloc}")
 }
 "#;
@@ -904,19 +904,19 @@ fn build() => [Int] {
     xs := [Int].{}
     loop i, 1..5, 2 {
         if i == 3 { next }
-        $xs.push(i * 10)
+        xs.push(i * 10)
     }
     loop cursor, 0..<3 {
         if cursor == 1 { next }
-        $xs.push(cursor)
+        xs.push(cursor)
     }
-    return $xs
+    return xs
 }
 
 fn run() {
     $xs :: build()
     runtime :: build()
-    print("{xs}")
+    print("{$xs}")
     print("{runtime}")
 }
 "#,
@@ -947,11 +947,11 @@ $light_value :: Light.Green
 fn run() {
     p :: Pair.{left: 7, right: "seven"}
     l :: Light.Green
-    print("{pair_value.left}")
+    print("{$pair_value.left}")
     print("{p.left}")
-    print("{pair_value.right}")
+    print("{$pair_value.right}")
     print("{p.right}")
-    print("{light_value == Light.Green}")
+    print("{$light_value == Light.Green}")
     print("{l == Light.Green}")
 }
 "#,
@@ -972,9 +972,9 @@ $false_value :: if 1 > 2 -> 10 else -> 20
 fn run() {
     c :: if 3 > 2 -> 10 else -> 20
     d :: if 1 > 2 -> 10 else -> 20
-    print("{true_value}")
+    print("{$true_value}")
     print("{c}")
-    print("{false_value}")
+    print("{$false_value}")
     print("{d}")
 }
 "#,

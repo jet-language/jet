@@ -362,7 +362,7 @@ fn run() {
     assert_eq!(stdout, "1\n");
 }
 
-/// c109 (S57/M9.5): a comptime LOCAL `#Known name :: expr` in a function body. Sema
+/// c109 (S57/M9.5): a comptime LOCAL `$name :: expr` in a function body. Sema
 /// evaluates `build()` at compile time and codegen emits the result as literal data
 /// (`let user_xs: Vec<i64> = vec![10i64, 20i64, 30i64];`). The TIR reproduces that
 /// serialized literal verbatim; the runtime `init` expr is never emitted. Mirrors
@@ -381,7 +381,7 @@ fn build() => [Int] {
     return xs
 }
 fn run() {
-    #Known xs :: build()
+    $xs :: build()
     print(\"{xs}\")
     print(\"{xs[1]}\")
 }
@@ -568,8 +568,8 @@ fn run() {
     assert_eq!(stdout, "0\n");
 }
 
-/// c109: a field read off a comptime-const STRUCT value (`#Known pair_value :: Pair{…}`;
-/// `pair_value.left`) and an `==` against a comptime-const ENUM value (`#Known light_value ::
+/// c109: a field read off a comptime-const STRUCT value (`$pair_value :: Pair{…}`;
+/// `pair_value.left`) and an `==` against a comptime-const ENUM value (`$light_value ::
 /// Light.Green`; `light_value == Light.Green`). Each const inlines to its pre-rendered
 /// Rust value; the field read / comparison matches the old emitter baseline.
 /// `main` routes through the TIR; runs to the round-trip output.
@@ -589,8 +589,8 @@ enum Light {
     Green
 }
 
-#Known pair_value :: Pair.{left: 7, right: \"seven\"}
-#Known light_value :: Light.Green
+$pair_value :: Pair.{left: 7, right: \"seven\"}
+$light_value :: Light.Green
 
 fn run() {
     p :: Pair.{left: 7, right: \"seven\"}

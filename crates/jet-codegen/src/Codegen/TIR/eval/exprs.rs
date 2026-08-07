@@ -3237,41 +3237,38 @@ impl<'a> EvalCtx<'a> {
                 // the TypeInfo value bound to a derive type parameter. It is
                 // not a second stored TypeInfo member; ordinary `.layout`
                 // remains the full-reflection projection.
-                if field == crate::Syntax::COMPILER_FACT_LAYOUT {
+                if let Some(projected) = crate::Syntax::compiler_fact_member(field) {
                     let CtValue::Struct { type_name, fields } = r else {
                         return Err(Diagnostic::error(
                             "E0302",
-                            "`$layout` needs a reflected type value".to_string(),
+                            format!("`{field}` needs a reflected type value"),
                             "compiler facts attach to the type parameter in a derive body"
                                 .to_string(),
-                            "use `T.$layout`, or use `T.reflect().layout` for full reflection"
-                                .to_string(),
+                            format!("use `T.{field}`, or `T.reflect().{projected}` for full reflection"),
                             Some(self.span()),
                         ));
                     };
                     if type_name != crate::Syntax::TYPE_TYPE_INFO {
                         return Err(Diagnostic::error(
                             "E0302",
-                            "`$layout` needs a reflected type value".to_string(),
+                            format!("`{field}` needs a reflected type value"),
                             "compiler facts attach to the type parameter in a derive body"
                                 .to_string(),
-                            "use `T.$layout`, or use `T.reflect().layout` for full reflection"
-                                .to_string(),
+                            format!("use `T.{field}`, or `T.reflect().{projected}` for full reflection"),
                             Some(self.span()),
                         ));
                     }
                     return fields
                         .into_iter()
-                        .find(|(name, _)| name == "layout")
+                        .find(|(name, _)| name == projected)
                         .map(|(_, value)| value)
                         .ok_or_else(|| {
                             Diagnostic::error(
                                 "E0302",
-                                "the reflected type has no `$layout` fact".to_string(),
+                                format!("the reflected type has no `{field}` fact"),
                                 "the compiler fact projection is fixed by D-LAYOUT-FACTS1"
                                     .to_string(),
-                                "use `T.reflect().layout` for the full reflection object"
-                                    .to_string(),
+                                format!("use `T.reflect().{projected}` for the full reflection object"),
                                 Some(self.span()),
                             )
                         });

@@ -1,3 +1,37 @@
+Error [E2710]: built-in codec derive generated invalid Jet for `Order`
+  --> tests/ui/serde_flatten_not_struct.jet:3:2
+    |
+  3 | #Codable
+    |  ^^^^^^^
+ Why: generated source did not pass the ordinary lexer and parser: expected `::` or `:=` in a binding, found `:` at Some(Span { start: 53, end: 54 }); generated source:
+impl Order.Encode {
+fn encode(self) => DataTree {
+out: [String: DataTree] := []
+nested :: self.count.encode()
+if nested == .Object(entries) { loop (key, value), entries { out[key] = value } }
+return DataTree.Object(out)
+}
+}
+impl Order.Decode {
+fn decode(tree: DataTree) => Order ? [FieldError] {
+jet_serde_errors := [FieldError].{}
+jet_serde_is_object := false
+if (~tree) == .Object(jet_serde_root_entries) { jet_serde_is_object = true }
+if !jet_serde_is_object { return Err([FieldError.{ path: "", reason: "expected an object" }]) }
+jet_serde_decode_count := tree.decode<Int>()
+if (~jet_serde_decode_count) == .Err(jet_serde_field_errors_0) { loop jet_serde_field_error_0, jet_serde_field_errors_0 { jet_serde_errors.push(jet_serde_field_error_0) } }
+if jet_serde_errors.is_empty() {
+if (~jet_serde_decode_count) == .Ok(jet_serde_decoded_value_0) {
+decoded :: Order.{ count: jet_serde_decoded_value_0 }
+return Ok(decoded)
+}
+}
+return Err(jet_serde_errors)
+}
+}
+
+ Fix: report this compiler bug; built-in derives must emit valid ordinary Jet
+
 Error [E2408]: `#[Flatten]` on `count` needs a struct-typed field
   --> tests/ui/serde_flatten_not_struct.jet:5:14
     |

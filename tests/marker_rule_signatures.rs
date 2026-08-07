@@ -428,9 +428,9 @@ fn run() {}
 #[test]
 fn static_string_products_resolve_before_consumers() {
     let source = r#"
-#Known label :: "shared"
-#Known invariant :: "value >= 0 && value < 4"
-#Known page :: "index.html"
+$label :: "shared"
+$invariant :: "value >= 0 && value < 4"
+$page :: "index.html"
 #HTML(page)
 #Invariant(invariant)
 Tiny :: distinct Int
@@ -470,10 +470,10 @@ fn run() {}
 #[test]
 fn static_string_products_report_one_shared_type_error_each() {
     for source in [
-        "#Known value :: 42\n#HTML(value)\nfn run() {}",
-        "#Known value :: 42\n#Invariant(value)\nTiny :: distinct Int\nfn run() {}",
-        "#Known value :: 42\n#Test(value) {}\nfn run() {}",
-        "#Known value :: 42\n#Bench(value) {}\nfn run() {}",
+        "$value :: 42\n#HTML(value)\nfn run() {}",
+        "$value :: 42\n#Invariant(value)\nTiny :: distinct Int\nfn run() {}",
+        "$value :: 42\n#Test(value) {}\nfn run() {}",
+        "$value :: 42\n#Bench(value) {}\nfn run() {}",
     ] {
         let diagnostics = codes(source);
         assert_eq!(
@@ -491,9 +491,9 @@ fn static_string_products_report_one_shared_type_error_each() {
 fn static_type_and_field_strings_use_the_same_signature_gate() {
     let valid = codes(
         r#"
-#Known tag_name :: "kind"
-#Known field_name :: "identifier"
-#Known variant_name :: "ready"
+$tag_name :: "kind"
+$field_name :: "identifier"
+$variant_name :: "ready"
 #[Codable, Discriminant(tag_name)]
 enum Event { #Rename(variant_name) Ready }
 #Codable
@@ -504,9 +504,9 @@ fn run() {}
     assert!(!valid.iter().any(|code| code == "E0930"), "{valid:?}");
 
     for source in [
-        "#Known value :: 42\n#[Codable, Discriminant(value)] enum Event { Ready }\nfn run() {}",
-        "#Known value :: 42\n#Codable struct Row { #Rename(value) id: Int }\nfn run() {}",
-        "#Known value :: 42\n#Codable enum Event { #Rename(value) Ready }\nfn run() {}",
+        "$value :: 42\n#[Codable, Discriminant(value)] enum Event { Ready }\nfn run() {}",
+        "$value :: 42\n#Codable struct Row { #Rename(value) id: Int }\nfn run() {}",
+        "$value :: 42\n#Codable enum Event { #Rename(value) Ready }\nfn run() {}",
     ] {
         let diagnostics = codes(source);
         assert_eq!(
@@ -547,7 +547,7 @@ fn static_string_products_reject_nonstatic_expressions_once() {
 fn resolved_invariant_text_keeps_domain_validation() {
     let diagnostics = codes(
         r#"
-#Known invariant :: "value != 3"
+$invariant :: "value != 3"
 #Invariant(invariant)
 Tiny :: distinct Int
 fn run() {}
@@ -567,8 +567,8 @@ fn run() {}
 #[test]
 fn duplicate_html_markers_still_fail_before_resolution() {
     let source = r#"
-#Known first :: "first.html"
-#Known second :: "second.html"
+$first :: "first.html"
+$second :: "second.html"
 #HTML(first)
 #HTML(second)
 fn run() {}
@@ -632,7 +632,7 @@ fn run() {}
 fn resolved_test_names_keep_duplicate_identity() {
     let diagnostics = codes(
         r#"
-#Known name :: "same"
+$name :: "same"
 #Test(name) {}
 #Test("same") {}
 fn run() {}
@@ -650,7 +650,7 @@ fn run() {}
 
 #[test]
 fn formatter_preserves_static_rule_expressions() {
-    let source = "#Known name :: \"case\"\n#Test(name) {}\n#Bench(name) {}\n#HTML(name)\nfn run() {}\n";
+    let source = "$name :: \"case\"\n#Test(name) {}\n#Bench(name) {}\n#HTML(name)\nfn run() {}\n";
     let formatted = jet::format_source(source).expect("static rule expressions should format");
     assert!(formatted.contains("#Test(name)"), "{formatted}");
     assert!(formatted.contains("#Bench(name)"), "{formatted}");

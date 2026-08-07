@@ -6202,12 +6202,12 @@ fn comptime_scalar_examples_match_interpreter_resident_jit_and_aot() {
     }
 
     let source = r#"
-#Known f32_nan :: F32.NAN
-#Known f32_inf :: F32.INFINITY
-#Known f32_neg_inf :: F32.NEG_INFINITY
-#Known f64_nan :: Float.NAN
-#Known f64_inf :: Float.INFINITY
-#Known f64_neg_inf :: Float.NEG_INFINITY
+$f32_nan :: F32.NAN
+$f32_inf :: F32.INFINITY
+$f32_neg_inf :: F32.NEG_INFINITY
+$f64_nan :: Float.NAN
+$f64_inf :: Float.INFINITY
+$f64_neg_inf :: Float.NEG_INFINITY
 
 fn run() {
     print(f32_nan)

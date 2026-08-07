@@ -447,7 +447,7 @@ pub const TARGET_OS_MACOS: &str = "MacOS";
 pub const TARGET_OS_WINDOWS: &str = "Windows";
 
 /// D-OSTARGET2=B (ratified 2026-07-03): the compiler-known comptime value
-/// `build` and its `.os` field — the subject of a `#Known if build.os == { }`
+/// `build` and its `.os` field — the subject of a `$if build.os == { }`
 /// switch that folds to the arm matching the build's active OS. `build` is not
 /// a reserved keyword: it is recognized only in that syntactic position (an
 /// ordinary local named `build` is still fine); a `build.os` anywhere else has

@@ -1,15 +1,7 @@
-Error [E3410]: `core.files.read()` is a Tier-2 comptime effect — it requires a `#Impure` gate
-  --> tests/ui/impure_tier2_no_gate.jet:4:22
-    |
-  4 |     #Known cfg :: fs.read("config.txt")
-    |                      ^^^^
- Why: ambient I/O (filesystem, environment, process) is not allowed in pure comptime evaluation
- Fix: wrap the comptime binding in `#Impure("reason") { … }` and pass `--allow-impure` to the build
-
-Error [E0915]: `String ? IOError` has no `Display` implementation
+Error [E0107]: nothing named `$cfg` exists here
   --> tests/ui/impure_tier2_no_gate.jet:5:13
     |
-  5 |     print("{cfg}")
-    |             ^^^
- Why: bare `{value}` interpolation calls `Display` — there is no default for user types
- Fix: add `impl String ? IOError.Display { fn display(self) => String { … } }`, or use `{value#Debug}` for debug output
+  5 |     print("{$cfg}")
+    |             ^^^^
+ Why: a name must be declared before it's used
+ Fix: did you mean `$cfg`?

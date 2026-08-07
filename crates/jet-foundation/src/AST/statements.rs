@@ -281,7 +281,7 @@ pub enum Stmt {
         body: Vec<Stmt>,
         span: Span,
     },
-    /// D-WHEN1/D-WHEN2 (ratified 2026-06-19): `#Known if <cond> { … } else { … }`.
+    /// D-WHEN1/D-WHEN2 (ratified 2026-06-19): `$if <cond> { … } else { … }`.
     /// The condition is evaluated at compile time; only the selected arm is
     /// type-checked and lowered (D-WHEN2: the dropped arm is name-resolved only).
     /// `else_body` is None when no `else` clause is written (statement position
@@ -296,7 +296,7 @@ pub enum Stmt {
         /// None before sema runs.
         selected_then: Option<bool>,
     },
-    /// D-OSTARGET2 (=B, ratified 2026-07-03): `#Known if build.os == { .Linux
+    /// D-OSTARGET2 (=B, ratified 2026-07-03): `$if build.os == { .Linux
     /// -> … .MacOS -> … .Windows -> … [else -> …] }` — the compile-time switch
     /// that lets ungated code reach an OS-gated `impl`. `build.os` is a
     /// compiler-known comptime value; the switch folds to the arm matching the
@@ -313,7 +313,7 @@ pub enum Stmt {
         else_body: Option<Vec<Stmt>>,
         span: Span,
     },
-    /// D-CTMARKER1 (ratified 2026-06-25, piece 2): `#Known { … }` — a
+    /// D-CTMARKER1 (ratified 2026-06-25, piece 2): `$ { … }` — a
     /// build-time execution block. Runs at compile time via the tree-walking
     /// comptime interpreter; erases entirely (no runtime Rust emitted, I3).
     /// Pure-only in Stage A (D-CTCORE1 whitelist + E0951/E0958/E0953/E0956);

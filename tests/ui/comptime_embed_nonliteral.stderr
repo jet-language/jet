@@ -1,15 +1,15 @@
 Error [E0957]: `embed_file` path must be a string literal
-  --> tests/ui/comptime_embed_nonliteral.jet:1:13
+  --> tests/ui/comptime_embed_nonliteral.jet:1:7
     |
-  1 | #Known d :: embed_file("a" + "b")
-    |             ^^^^^^^^^^
+  1 | $d :: embed_file("a" + "b")
+    |       ^^^^^^^^^^
  Why: a computed path can't be audited at build time, so the compiler can't tell which file it reads
  Fix: pass the path inline, e.g. `embed_file("data/file")`
 
-Error [E0107]: nothing named `d` exists here
+Error [E0107]: nothing named `$d` exists here
   --> tests/ui/comptime_embed_nonliteral.jet:4:13
     |
-  4 |     print("{d}")
-    |             ^
+  4 |     print("{$d}")
+    |             ^^
  Why: a name must be declared before it's used
- Fix: declare it first: `d :: ...`
+ Fix: declare it first: `$d :: ...`

@@ -1407,7 +1407,7 @@ bracket group, is written immediately before its target. The registry says
 which targets each rule accepts. Parentheses appear exactly when arguments are
 written; empty parentheses are an error the formatter fixes.
 
-That one sentence covers every position. `#Codable struct …`, `#Known limit ::
+That one sentence covers every position. `#Codable struct …`, `$limit ::
 32`, `#Inline fn hot(…)`, and `#Unsafe("reason") { … }` are the same shape —
 marker, then target — differing only in what the target is. The five written
 forms (`Bare`, `Call`, `BareOrCall`, `Block`, `Prefix`) are retired; they
@@ -2042,14 +2042,48 @@ results lower to constant data. Permanent differential CI: interpreter and
 compiled runtime must agree bit-for-bit. **Rejected forever**: token/AST/
 attribute macros, custom syntax, comptime types, const generics in v1.
 
-**S57 — Compile-time demand** (amended by D-VERDICT-1308-1/2):
-ordinary foldable expressions fold implicitly. `#Known x :: f()` demands an
-immutable value now and fails the build if evaluation cannot complete.
-`#Known { … }` is the execution-block form (Jai `#run` analog); bindings
-inside leak to the enclosing scope as `$name` (E2713). `#Known if` is the
-conditional form. The `comptime` keyword is retired (E0374).
-**D-CTMARKER1**: `$name` is reserved **only** for compile-time splices into
-generated code.
+**S57 — Compile-time demand** *(as amended by D-META-STAGE1=B,
+ratified 2026-08-06, card #1537)*: ordinary foldable expressions fold
+implicitly. Compile time has one mark, `$`, and **the mark belongs to the
+name**, so it is written at every mention:
+
+```jet
+$limit :: 1000
+
+fn run() {
+    $ {
+        $ratio :: $limit /% 10
+    }
+    $if debug { … }
+    print("limit: {$limit}")
+    print("ratio: {$ratio}")
+}
+```
+
+`$name :: expr` demands an immutable value now and fails the build if
+evaluation cannot complete. A bare mark opens the execution block (`$ { … }`,
+the Jai `#run` analog) and precedes the compile-time verbs `$if` and
+`$loop`. Sema treats the mark as part of the identifier, so a plain name and
+a marked name can never denote the same binding, and codegen keeps them apart:
+a marked name spells `userct_<name>` in generated Rust where a plain name
+spells `user_<name>`.
+
+Because the name is the same name inside and outside a compile-time block,
+there is nothing to carry out. **D-CTMARKER1 retires outright** — the splice
+concept, its carry-out rule, and E2713 are deleted rather than generalized; an
+unresolved marked name now reports the ordinary E0107. `#Known`, `#Known if`
+and the `#Known` block retire together and teach E0377, and `#Known` leaves
+the marker registry because a stage is not a rule about a target. The
+`comptime` keyword stays retired (E0374).
+
+Constants: `COMPTIME_MARK` and `is_comptime_name` in
+`crates/jet-foundation/src/Syntax/core_surface.rs`. Examples:
+`examples/features/comptime/comptime_block.jet` and `comptime_if.jet`.
+
+**D-LAYOUT-FACTS1=B — Compiler-owned type facts**: `T.$layout`, `T.$name`
+and `T.$fields` are one closed spelling, each projecting the matching
+`TypeInfo` member. The mark after `.` is not a general user-member escape:
+any other marked member reports E0302 and names the three facts.
 
 **D-CTCORE1 / D-CTIO1 / D-PURE2 — Comptime I/O**: only a curated whitelist of
 pure Core functions evaluates at comptime; the sole I/O escapes are
@@ -2397,7 +2431,7 @@ inputs (`{parameter}`), the single integer return is anchored by
 Every declared parameter must be referenced and exactly one return anchor is
 required. Requires `use core.mem`
 plus an enclosing `#Unsafe("reason")` (S58); outside the gate is E0208-class.
-Target variants select via the existing `#Known if build.os ==` /
+Target variants select via the existing `$if build.os ==` /
 `#Target` machinery. Lowering emits Rust `asm!` so rustc verifies
 register/clobber facts per target; every user-facing error stays a Jet
 diagnostic (I2). `core.mem.intrinsics` may wrap popular cases as named
@@ -3428,12 +3462,12 @@ arms; non-matching arms are discarded before OS-gating checks run.
 fn-level `#Target(OS.*)` gating (option A) rejected.
 *Shipped spelling (2026-07-03):* the ballot wrote the dispatch loosely as `match
 build.os { … }`; reconciled to Jet's one canonical branching form (D-IF1/D-IF3
-`if subject == { }` if-table) with the existing `#Known if` lead (D-WHEN1) —
+`if subject == { }` if-table) with the existing `$if` lead (D-WHEN1) —
 **no `match` keyword was added** (I8). Statement-position dispatch:
 
 ```jet
 fn run() {
-    #Known if build.os == {
+    $if build.os == {
         .Linux   -> { b :: LinuxBackend.{ name: "gtk" }    print(b.label()) }
         .MacOS   -> { b :: MacOSBackend.{ name: "appkit" } print(b.label()) }
         .Windows -> { b :: WinBackend.{ name: "win32" }    print(b.label()) }
@@ -3443,7 +3477,7 @@ fn run() {
 
 `build.os` resolves to `ProgramBundle.active_os` (the `--target=<triple>` OS
 bucket, host OS when omitted; a web/wasm target falls back to the host per
-`OSTarget::active`). Sema desugars the dispatch into a `#Known if` chain
+`OSTarget::active`). Sema desugars the dispatch into a `$if` chain
 (D-WHEN1/D-WHEN2 machinery) as the *first* step of `check_bundle`, folding to
 the arm matching `active_os` and discarding the rest before any OS-gating
 check, type-check, or codegen sees a body — so constructing an OS-gated type
@@ -3467,7 +3501,7 @@ handle, `set_text`/`set_size`/`set_color` mutate a live widget, `on_click(id,
 handler)` wires a button, `present(title)` opens the window and runs the GLib
 loop. The flagship example is a live counter — a button click sets a
 `reactive.signal` and the `ui.reactive_render` effect updates the label text
-in place (the shipped reactive core, I8). Selected by the shipped `#Known if
+in place (the shipped reactive core, I8). Selected by the shipped `$if
 build.os` dispatch (D-OSTARGET2=B) and emitted only on a Linux target; all gtk
 C-ABI calls are confined to the vetted `jet_gtk` prelude module (I1 — user
 code writes no low-level tier). The native link (`-lgtk-4 …`) is named by `use

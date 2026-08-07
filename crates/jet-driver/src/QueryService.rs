@@ -700,7 +700,7 @@ fn run() {{}}
     #[test]
     fn comptime_local_disables_replay() {
         let mut service = CompilerQueries::new();
-        let source = "fn run() {\n    #Known value :: 1\n    print(\"{value}\")\n}\n";
+        let source = "fn run() {\n    $value :: 1\n    print(\"{value}\")\n}\n";
         assert!(service.check_text("comptime.jet", source, true).diagnostics.is_empty());
         assert!(service.check_text("comptime.jet", source, true).diagnostics.is_empty());
         assert_eq!(service.recompute_count(&checked_key("comptime.jet")), 2);
@@ -716,7 +716,7 @@ fn run() {{}}
         let main = root.join("main.jet");
         let asset = root.join("message.txt");
         let source = concat!(
-            "#Known message :: embed_file(\"message.txt\")\n",
+            "$message :: embed_file(\"message.txt\")\n",
             "fn read() => String { return message }\n"
         );
         std::fs::write(&asset, "first").unwrap();

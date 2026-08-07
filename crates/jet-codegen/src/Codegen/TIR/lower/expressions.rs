@@ -1885,10 +1885,10 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 }
                 _ => false,
             };
-            if member == Syntax::COMPILER_FACT_LAYOUT && compiler_fact_receiver {
+            if Syntax::compiler_fact_member(member).is_some() && compiler_fact_receiver {
                 let recv = lower_expr(receiver, cx, env);
                 return TExpr {
-                    ty: Type::Named(Syntax::TYPE_LAYOUT_INFO.to_string()),
+                    ty: compiler_fact_type(member),
                     kind: TExprKind::Field {
                         recv: Box::new(recv),
                         field: member.clone(),
@@ -3228,4 +3228,18 @@ fn bind_arg_temporaries(
         });
     }
     stmts
+}
+
+/// D-LAYOUT-FACTS1=B / D-META-STAGE1=B: the type a compiler fact answers.
+///
+/// Each fact projects one `TypeInfo` member, so its type is that member's type
+/// and the three facts stay one spelling with one table behind them.
+fn compiler_fact_type(fact: &str) -> Type {
+    match fact {
+        f if f == Syntax::COMPILER_FACT_NAME => Type::String,
+        f if f == Syntax::COMPILER_FACT_FIELDS => {
+            Type::List(Box::new(Type::Named("FieldInfo".to_string())))
+        }
+        _ => Type::Named(Syntax::TYPE_LAYOUT_INFO.to_string()),
+    }
 }

@@ -2974,7 +2974,7 @@ fn compile_bundle_path_opts_full(
     let timing = crate::PhaseTiming::enabled();
     let mut timer = crate::PhaseTiming::PhaseTimer::new();
     let mut bundle = crate::Loader::load_entry_with_overlay(file, None, false)?;
-    // D-OSTARGET2=B: the `#Known if build.os == { … }` desugar (run in sema)
+    // D-OSTARGET2=B: the `$if build.os == { … }` desugar (run in sema)
     // must fold to the same OS bucket codegen filters `impl`s by, so seed the
     // bundle from the same resolved `active_os` as `emit_bundle`.
     bundle.active_os = active_os;

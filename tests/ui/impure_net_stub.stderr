@@ -1,15 +1,7 @@
-Error [E3412]: `core.net.tcp_connect()` is not available at comptime
-  --> tests/ui/impure_net_stub.jet:6:28
-    |
-  6 |         #Known conn :: net.tcp_connect("build.example.com:443")
-    |                            ^^^^^^^^^^^
- Why: only `core.net.fetch(url, sha256:)` is supported at compile time
- Fix: use `core.net.fetch(url, sha256: "<hash>")` for content-hash-pinned downloads
-
-Error [E0915]: `TcpStream ? NetError` has no `Display` implementation
+Error [E0107]: nothing named `$conn` exists here
   --> tests/ui/impure_net_stub.jet:7:28
     |
-  7 |         print("connected: {conn}")
-    |                            ^^^^
- Why: bare `{value}` interpolation calls `Display` — there is no default for user types
- Fix: add `impl TcpStream ? NetError.Display { fn display(self) => String { … } }`, or use `{value#Debug}` for debug output
+  7 |         print("connected: {$conn}")
+    |                            ^^^^^
+ Why: a name must be declared before it's used
+ Fix: did you mean `$conn`?

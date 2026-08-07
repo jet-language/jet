@@ -710,6 +710,8 @@ fn parse_invariant_clause(clause: &str) -> Option<(i64, i64)> {
 }
 
 const NO_POLICY_SCOPES: &[PolicyScope] = &[];
+/// D-META-STAGE1=B: a retired rule that keeps no legal site.
+const NO_SITES: &[RuleSite] = &[];
 const FILE_SITE: &[RuleSite] = &[RuleSite::File];
 const MODULE_SITE: &[RuleSite] = &[RuleSite::Module];
 const FUNCTION_SITE: &[RuleSite] = &[RuleSite::Function];
@@ -912,10 +914,13 @@ pub const APPLIED_RULES: &[AppliedRule] = &[
     rule!("Persist", sig!(), DECLARATION_SITE),
     rule!("Track", sig!(), DECLARATION_SITE),
     // B5 revert (card #1456): #1537's own checkpoint dropped this row to retire
-    // `#Known`, but #1537 hasn't landed its migration of the 327 in-repo uses
-    // yet. Restored so `#Known` stays a recognized, working spelling until
+    // `$`, but #1537 hasn't landed its migration of the 327 in-repo uses
+    // yet. Restored so `$` stays a recognized, working spelling until
     // #1537 lands the full retirement + migration in one change.
-    rule!("Known", sig!(), &[RuleSite::Declaration, RuleSite::Constant, RuleSite::Block, RuleSite::Statement]),
+    // D-META-STAGE1=B: a stage is not a rule about a target, so the compile-time
+    // mark leaves the marker plane. The Prefix form and its four legal sites go
+    // with it; the replacement is the mark on the name.
+    rule!(retired "Known", sig!(), NO_SITES, "$name :: …"),
     rule!("Local", sig!(), DECLARATION_SITE),
     rule!("Shared", sig!(), DECLARATION_SITE),
     rule!("Meta", sig!(param!("category", String, "\"\""), param!("tunable", Bool, "false"), param!("maturity", Ident => "Maturity", ".Tested")), &[RuleSite::Function, RuleSite::Method, RuleSite::Declaration, RuleSite::Constant]),

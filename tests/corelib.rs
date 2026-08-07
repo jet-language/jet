@@ -3261,7 +3261,7 @@ fn comptime_find_glob_records_sorted_lock_inputs() {
     fs::write(dir.join("inputs/nested/gamma-3.txt"), "gamma").unwrap();
     fs::write(dir.join("inputs/nested/beta-2.md"), "skip").unwrap();
     let src = r#"
-#Known paths :: find("inputs/**/{{alpha,beta}}-[0-9].t?t")
+$paths :: find("inputs/**/{{alpha,beta}}-[0-9].t?t")
 
 fn run() {
     print(paths.join("|"))
@@ -8013,7 +8013,7 @@ fn summarize() => String {
     return "unreachable"
 }
 
-#Known expected :: summarize()
+$expected :: summarize()
 
 fn run() {
     print(expected)
@@ -8063,9 +8063,9 @@ fn show(result: DataTree ? XMLError) => String {
     return "unreachable"
 }
 
-#Known numeric :: show(xml.parse("<r>&#0;</r>"))
-#Known attribute :: show(xml.parse("<r a='&#0;'/>"))
-#Known namespace :: show(xml.parse("<r xmlns='&#0;'/>"))
+$numeric :: show(xml.parse("<r>&#0;</r>"))
+$attribute :: show(xml.parse("<r a='&#0;'/>"))
+$namespace :: show(xml.parse("<r xmlns='&#0;'/>"))
 
 fn run() {
     runtime_numeric :: show(xml.parse("<r>&#0;</r>"))
@@ -8126,10 +8126,10 @@ fn summarize(source: String) => String {
     return "{namespace_ok}|{literal_ok}|{reference.len()}|{lexical_ok}"
 }
 
-#Known cr :: String.from_bytes([13]) ?? panic("CR")
-#Known close :: "/>"
-#Known source :: "<r xmlns='urn:\tfoo\nbar' a='A\tB\nC{cr}\nD{cr}E' b='&#xD;&#xA;&#x9;'{close}"
-#Known normalized :: summarize(source)
+$cr :: String.from_bytes([13]) ?? panic("CR")
+$close :: "/>"
+$source :: "<r xmlns='urn:\tfoo\nbar' a='A\tB\nC{cr}\nD{cr}E' b='&#xD;&#xA;&#x9;'{close}"
+$normalized :: summarize(source)
 
 fn run() {
     runtime := summarize(source)
@@ -8201,24 +8201,24 @@ fn show32(text: String) => String {
     return "unreachable"
 }
 
-#Known standard_ws :: show64("Z g = =\n")
-#Known standard_unpadded :: show64("Zg")
-#Known standard_interior :: show64("Zg=A")
-#Known standard_excess :: show64("Zg====")
-#Known standard_bits :: show64("Zh==")
-#Known standard_padding :: show64("=AAA")
-#Known standard_alphabet :: show64("Zg-=")
-#Known standard_size :: show64("A")
-#Known url_outer_ws :: show64url(" \tZg==\n")
-#Known url_interior :: show64url("Zg=A")
-#Known url_standard_alphabet :: show64url("+w")
-#Known url_bits :: show64url("Zh")
-#Known url_padding :: show64url("=AAA")
-#Known url_size :: show64url("A")
-#Known base32_loose :: show32("m=y======\n")
-#Known base32_bits :: show32("MZ======")
-#Known base32_short :: show32("A")
-#Known base32_alphabet :: show32("M0======")
+$standard_ws :: show64("Z g = =\n")
+$standard_unpadded :: show64("Zg")
+$standard_interior :: show64("Zg=A")
+$standard_excess :: show64("Zg====")
+$standard_bits :: show64("Zh==")
+$standard_padding :: show64("=AAA")
+$standard_alphabet :: show64("Zg-=")
+$standard_size :: show64("A")
+$url_outer_ws :: show64url(" \tZg==\n")
+$url_interior :: show64url("Zg=A")
+$url_standard_alphabet :: show64url("+w")
+$url_bits :: show64url("Zh")
+$url_padding :: show64url("=AAA")
+$url_size :: show64url("A")
+$base32_loose :: show32("m=y======\n")
+$base32_bits :: show32("MZ======")
+$base32_short :: show32("A")
+$base32_alphabet :: show32("M0======")
 
 fn run() {
     r_standard_ws := show64("Z g = =\n")

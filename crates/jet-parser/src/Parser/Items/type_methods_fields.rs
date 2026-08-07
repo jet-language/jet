@@ -370,7 +370,7 @@ impl<'a> Parser<'a> {
             })
         }
     
-        /// S57 (M9.5): `#Known name :: expr;` — a compile-time constant binding.
+        /// S57 (M9.5): `$name :: expr;` — a compile-time constant binding.
         /// D-CONSTMARK1: optional `#Static` / `#Inline` precede `comptime`.
         /// D-CONST-RETIRE1: bare/`#Static`/`#Inline` `const` teaches E0146 and recovers.
         pub(in crate::Parser) fn comptime_def(&mut self) -> Result<ConstDef, Diagnostic> {
@@ -394,7 +394,7 @@ impl<'a> Parser<'a> {
                         "`comptime` is retired".to_string(),
                         "Jet folds ordinary foldable expressions automatically; explicit compile-time demand lives on the marker plane"
                             .to_string(),
-                        "remove the keyword for ordinary code, or replace it with `#Known` when failure to compute now must stop the build"
+                        "remove the keyword for ordinary code, or replace it with `$` when failure to compute now must stop the build"
                             .to_string(),
                         Some(span),
                     ));
@@ -403,15 +403,15 @@ impl<'a> Parser<'a> {
                     let kw = self.bump();
                     self.diags.push(Diagnostic::error(
                         "E0146",
-                        format!("`{}` is retired — write `#Known`", Syntax::KW_CONST),
+                        format!("`{}` is retired — write `$`", Syntax::KW_CONST),
                         "explicit compile-time demand is a marker on an immutable binding"
                             .to_string(),
-                        "write `#Known name :: …` (or `#Persist name := …` for hot-reload state)"
+                        "write `$name :: …` (or `#Persist name := …` for hot-reload state)"
                             .to_string(),
                         Some(kw.span),
                     ));
                 }
-                // D-META-STAGE1=B: `#Known` is retired. Recover it so the rest
+                // D-META-STAGE1=B: `$` is retired. Recover it so the rest
                 // of the file still parses, and teach the `$` form once.
                 TokKind::Hash if known => {
                     let head = self.read_marker_head()?;
@@ -424,7 +424,7 @@ impl<'a> Parser<'a> {
                 // D-META-STAGE1=B: `$name :: expr` — the mark rides the name.
                 // Additive new spelling from #1537's checkpoint; kept, not part
                 // of the B5 revert (it doesn't hard-error anything in the
-                // existing `#Known` corpus).
+                // existing `$` corpus).
                 TokKind::Ident(ref n) if Syntax::is_comptime_name(n) => {}
                 _ => {
                     self.expect_kw(TokKind::KwComptime, "to start a comptime binding")?;
@@ -432,12 +432,12 @@ impl<'a> Parser<'a> {
             }
             let marked = matches!(&self.peek().kind, TokKind::Ident(n) if Syntax::is_comptime_name(n));
             let (name, name_span) = self.expect_ident(if known || marked {
-                "after `#Known`"
+                "after `$`"
             } else {
                 "for the compile-time binding name"
             })?;
             if known || marked {
-                self.expect(TokKind::ColonColon, "after the `#Known` name")?;
+                self.expect(TokKind::ColonColon, "after the `$` name")?;
             } else {
                 self.expect(TokKind::Eq, "after the retired comptime name")?;
             }

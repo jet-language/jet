@@ -409,11 +409,11 @@ impl<'a> Parser<'a> {
     /// so this only catches the REDUNDANT case structurally — cases genuinely
     /// requiring the struct's field count are re-checked in sema, which has
     /// the registry. A `..` present with zero named fields is never redundant.
-    /// D-VERDICT-1308-1: parse `#Known { … }`; recover retired `comptime`.
+    /// D-VERDICT-1308-1: parse `$ { … }`; recover retired `comptime`.
     /// Erases at codegen (build-time only). `$name` splice deferred to c155.
     pub(super) fn comptime_block_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.take_mark()?;
-        self.expect(TokKind::LBrace, "to open the `#Known` block body")?;
+        self.expect(TokKind::LBrace, "to open the `$` block body")?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
         Ok(Stmt::ComptimeBlock {
@@ -436,8 +436,8 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// D-VERDICT-1308-2: parse `#Known if <cond> { … } else { … }`.
-    /// Both arms require `{ }` (braceless bodies are not allowed for `#Known if`).
+    /// D-VERDICT-1308-2: parse `$if <cond> { … } else { … }`.
+    /// Both arms require `{ }` (braceless bodies are not allowed for `$if`).
     /// `else` is optional in statement position. Sema selects the arm; codegen
     /// emits only the selected arm (D-WHEN2: dropped arm is name-resolved only).
     pub(super) fn comptime_if_stmt(&mut self) -> Result<Stmt, Diagnostic> {
@@ -445,7 +445,7 @@ impl<'a> Parser<'a> {
         self.bump(); // `if`
 
         // D-OSTARGET2=B (ratified 2026-07-03): the dispatch form
-        // `#Known if build.os == { .Linux -> … .MacOS -> … }`. Detected the
+        // `$if build.os == { .Linux -> … .MacOS -> … }`. Detected the
         // same way `if_or_dispatch` does — parse the subject below comparison
         // precedence so a trailing `== {` marker survives; reuse `if_arms` for
         // the arm grammar, then repackage the resulting `Stmt::Switch` as a
@@ -457,7 +457,7 @@ impl<'a> Parser<'a> {
                 && matches!(self.peek2().kind, TokKind::LBrace)
             {
                 self.bump(); // `==`
-                self.expect(TokKind::LBrace, "to open the `#Known if` dispatch body")?;
+                self.expect(TokKind::LBrace, "to open the `$if` dispatch body")?;
                 let switch = self.if_arms(subject, start, BinOp::Eq)?;
                 let Stmt::Switch {
                     subject,
@@ -477,14 +477,14 @@ impl<'a> Parser<'a> {
                 });
             }
         }
-        // Not the dispatch form — rewind and parse the boolean `#Known if`.
+        // Not the dispatch form — rewind and parse the boolean `$if`.
         self.pos = probe;
         self.diags.truncate(probe_diags);
 
         let cond_start = self.peek().span;
         let cond = self.expr_no_struct_lit()?;
         let cond_span = Span::new(cond_start.start, self.toks[self.pos - 1].span.end);
-        self.expect(TokKind::LBrace, "to open the `#Known if` body")?;
+        self.expect(TokKind::LBrace, "to open the `$if` body")?;
         let then_body = self.block_stmts();
         let else_body = if matches!(self.peek().kind, TokKind::KwElse) {
             self.bump();
@@ -498,7 +498,7 @@ impl<'a> Parser<'a> {
                 let chain = self.comptime_if_stmt()?;
                 Some(vec![chain])
             } else {
-                self.expect(TokKind::LBrace, "to open the `#Known if` else body")?;
+                self.expect(TokKind::LBrace, "to open the `$if` else body")?;
                 Some(self.block_stmts())
             }
         } else {
@@ -597,7 +597,7 @@ impl<'a> Parser<'a> {
                 "`comptime` is retired".to_string(),
                 "Jet folds ordinary foldable expressions automatically; explicit compile-time demand lives on the marker plane"
                     .to_string(),
-                "remove the keyword for ordinary code, or replace it with `#Known` when failure to compute now must stop the build"
+                "remove the keyword for ordinary code, or replace it with `$` when failure to compute now must stop the build"
                     .to_string(),
                 Some(span),
             ));

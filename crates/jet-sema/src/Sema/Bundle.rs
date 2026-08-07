@@ -1084,10 +1084,10 @@ fn check_bundle_opts_for_output_inner(
     diags.extend(inject_units_prelude(bundle));
     diags.extend(super::Casing::validate_bundle(bundle));
     diags.extend(resolve_unit_dimensions(bundle));
-    // D-OSTARGET2=B (ratified 2026-07-03): fold every `#Known if build.os == {
+    // D-OSTARGET2=B (ratified 2026-07-03): fold every `$if build.os == {
     // … }` switch to the arm matching this build's active OS *before* any other
     // pass sees a body — so OS-gating checks, the type-checker, and codegen only
-    // meet the taken arm. Rewrites into a `#Known if` chain (reuses D-WHEN1).
+    // meet the taken arm. Rewrites into a `$if` chain (reuses D-WHEN1).
     diags.extend(super::desugar_os_switches(bundle));
     // D-MIGRATE4: desugar each `change … via { (old) => … }` converter on a
     // decodable `#PublishedSchema` type into a synthetic top-level converter

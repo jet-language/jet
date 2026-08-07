@@ -327,7 +327,7 @@ pub fn scheduled_tasks(bundle: &ProgramBundle) -> Vec<(String, crate::AST::Every
 /// tree-walker (see module doc), so a construct it can't run leaks the
 /// comptime evaluator's own E0956 ("unsupported")/E0951 ("impurity") /
 /// E3410/E3412 (Tier-2 / live-net comptime) codes — correct for a real
-/// `#Known { }` block, but wrong voice here: the "compute this at runtime"
+/// `$ { }` block, but wrong voice here: the "compute this at runtime"
 /// / "only fetch at comptime" fix advice is nonsense when the user is already
 /// trying to run this at runtime via `jet dev`. Rewrap as the dev-loop's own
 /// E2201 boundary diagnostic instead, preserving what construct tripped it.
