@@ -134,4 +134,25 @@ fi
 
 "$repo/scripts/agent/verify-nix-eval-stopline.sh"
 
-cargo test "$@"
+# #211 (D-CI1=A): default run covers the complete workspace test-target
+# inventory (`--workspace` — not just the `.`/jet-driver/jetpack-bin/jetos
+# default-members plain `cargo test` silently limited itself to). CI sets
+# JET_TEST_SHARD/JET_TEST_SHARD_COUNT to run one balanced shard of that same
+# inventory per job instead (see tools/ci/test-shards.sh); local/nightly runs
+# leave them unset and get everything in one pass.
+if [ -n "${JET_TEST_SHARD:-}" ]; then
+  shard_count="${JET_TEST_SHARD_COUNT:?JET_TEST_SHARD requires JET_TEST_SHARD_COUNT}"
+  # Plain assignment (not `< <(...)` process substitution, whose failure a
+  # downstream `while read` loop would silently ignore under 0 iterations):
+  # `set -e` aborts this script immediately if test-shards.sh itself fails,
+  # instead of reporting a false-green empty shard.
+  shard_targets="$("$repo/tools/ci/test-shards.sh" "$JET_TEST_SHARD" "$shard_count")"
+  status=0
+  while IFS= read -r shard_args; do
+    # shellcheck disable=SC2086
+    cargo test $shard_args "$@" || status=$?
+  done <<<"$shard_targets"
+  exit "$status"
+else
+  cargo test --workspace "$@"
+fi
