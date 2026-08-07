@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1613,
-    "rev": 28757,
+    "rev": 28764,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -84023,12 +84023,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-language-coherence",
-      "phase": "verify",
+      "phase": "done",
       "priority": "P1",
       "plan": "Implement D-VERDICT-1455-1 (D-MARK-REG1) structurally. One shared marker reader runs at every node start, accepts any name including keyword-lexed ones, and attaches Marker nodes to the owning AST node for every use site. Delete every hand-bumped marker token, both function-marker applicators, the marker_sequence_leads_to_function heuristic, the three shadow site tables, and all lexer marker-name knowledge. Sema receives markers; parse-time desugaring into flags ends. (This half of the card is unchanged from the original scope and is already in progress per its own criteria evidence.)\n\nAdded scope, ratified 2026-08-06 (D-META-ONE1=A, D-META-FORM1=A, D-META-NAME1=A): parse the declaration side too, since D-META-ONE1 explicitly \"fulfills D-VERDICT-1455-1\" by moving rule rows from Rust into Jet. A rule row is now written as an ordinary Jet declaration in Prelude source:\n\n  marker Inline(mode: InlineMode = .Hint, $sites: [.Function, .Method, .Constant])\n  marker Pre(condition: Any, message: String, $sites: [.Function, .Method], $repeatable: true)\n\nThe introducing keyword is \"marker\" (D-META-NAME1=A -- already the project's word everywhere else, no rename). Facts about the rule ($sites, $repeatable) are ordinary named parameters carrying the compile-time sigil \"$\", the same mark used by \"$limit\" and \"T.$layout\" -- there is no \"on\" keyword, no \"repeatable\" trailing word, no second parameter list, and no scope-block form (D-META-FORM1=A rejected all three of those spellings by name). This needs no new grammar beyond an ordinary named-parameter declaration list plus the existing \"$\" sigil applied to a parameter.\n\nNot in scope for this card: lowering the parsed \"marker\" declarations into whatever runtime structure sema/formatter/tree-sitter consume as \"registry rows\" -- that is #1457's and #1458's job; do not duplicate that work here. Also not in scope: implementing D-META-STAGE1's retirement of \"#Known\" (a separate ballot, tracked on its own new card) -- do not special-case \"#Known\" here beyond whatever the existing keyword-lexed-marker-name handling already covers generically.",
       "blockedBy": [],
-      "assignee": "bd3-mark2",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-08-07",
+          "by": "bd3-orch",
+          "text": "Closed with a named remainder: #1606 carries the block-construct/expression marker-retention design question, two lexer ASI marker-name references, and the shadow-table cleanup. The criteria-3 carve-out is recorded there, not silently dropped."
+        },
         {
           "at": "2026-08-07",
           "by": "bd3-mark2",
@@ -84089,47 +84094,47 @@
         {
           "n": 1,
           "text": "The shared reader is the only marker parse path; a search proves no hand-bumped marker token remains in parser or lexer",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-mark2",
-          "verifiedBy": null,
-          "evidence": "Follow-up pass, commit fd6ac1628 on branch bd2/mark. The shared reader is now two functions in crates/jet-parser/src/Parser/Items/marker_groups.rs: read_marker_name (the bracket-group form, cursor on the bang or the name) and read_marker_head (the hash-name form). Both accept any written name and ask the registry nothing; parse_one_marker, parse_rule_marker and the bracket-group reader are ordinary users of them. Both sites reviewer B7 named are routed now. Statements/control.rs: the SQL DSL block head, Off, DebugOnly, Reactive, Shield, Track, Local, Shared, Persist and the retired Uninit all read through read_marker_head. Expressions/primary.rs: five separate hash-lookahead arms in expr_primary became one arm that reads the head and then classifies the name (Meta E0349, Off/DebugOnly E0343, Todo, retired Tainted E0927, the four reduce selectors, and the open tag vocabulary as the default case). B7's structural objection does not hold: open vocabulary is a classification after the read, never a second parse path, which is exactly what the ruling asks for. Known in Statements/bindings.rs reads through the same head reader; since the reader asks no registry question, this does not make Known a rule row. Search proof: rg for expect(TokKind::Hash) across crates now returns two hits, the shared reader itself and Types.rs:983, which is the D-EFF2 callback effect bound where the hash is followed by an open parenthesis and not a marker name. Two marker-name references remain in the lexer and are outside this criterion's hand-bumped-token wording but inside the plan's wider sweep: jet-lexer Scan.rs:59 (FFI) and Terminators.rs:42 (UnitFamily), both automatic-semicolon rules. String interpolation's Debug and Fixed format selectors keep their own reader and error text, being a format vocabulary inside a string rather than a marker on a node. Tests: jet-foundation lib 133/133; jet-parser lib 43 passed with the one pre-existing failure of card #1599; jet-sema lib 68 passed with the same 3 pre-existing failures; marker_registry_coverage 3/3; marker_rule_signatures 24/24; grammar 18/18. diagnostic_snapshots ui_snapshots: every marker fixture passes, including off_debug_attr_on_expression, meta_on_expression, shield_arguments, persist_not_module_level, uninit_marker_retired, auto_derive_invalid_sign and the E0927 family; the single mismatch is compiler_fact_unknown_member, the unrelated E0302 text tracked by card #1601. diagnostics_coverage fails only on the pre-existing code lists of card #1603. cargo build --workspace clean, no new warnings. Fresh-binary smoke after clearing the build cache: dsl_blocks, statement_attributes, provenance_track, shield_commit, reactive_scope, persist, value_tag_type, todo_hole and comptime_block all run with correct output.",
-          "at": "2026-08-07T10:26:03.061Z"
+          "verifiedBy": "bd3-orch",
+          "evidence": "Reviewer (bd3-review) passed after two recheck rounds. Merged to master (813810c55); grouped rerun: fmt 163/163, grammar 18/18, marker_registry_coverage 3/3, marker_rule_signatures 24/24, outcome_carrier 5/5.",
+          "at": "2026-08-07T11:26:15.991Z"
         },
         {
           "n": 2,
           "text": "Keyword-named markers need zero special cases; the six Unsafe keyword workarounds are deleted",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd-markers",
-          "verifiedBy": null,
-          "evidence": "The #Unsafe keyword workarounds are gone. grep for KwUnsafe across crates returns no hit outside the lexer token definition, so parse_one_marker, marker_name_at, bracket_group_allows_site, validate_registered_rule_marker, validate_registered_rule_arguments and rule_signature_bindings no longer special-case it. cargo build is clean.",
-          "at": "2026-08-06T10:11:21.788Z"
+          "verifiedBy": "bd3-orch",
+          "evidence": "Reviewer (bd3-review) passed after two recheck rounds. Merged to master (813810c55); grouped rerun: fmt 163/163, grammar 18/18, marker_registry_coverage 3/3, marker_rule_signatures 24/24, outcome_carrier 5/5.",
+          "at": "2026-08-07T11:26:16.712Z"
         },
         {
           "n": 3,
           "text": "Marker nodes are retained on every AST target site and reach sema intact",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-mark2",
-          "verifiedBy": null,
-          "evidence": "Landed in commit 85df2f4d3 on branch bd2/mark. Item sites were already true and still are: six markers-vector fields on item AST nodes populated and reaching sema, proved by tests/marker_rule_signatures.rs (24/24). The two node families that still desugared a marker into a flag at parse time now retain the marker node instead. Binding carries markers: Vec<Marker> (crates/jet-foundation/src/AST/lvalues.rs). The parser reads #Track, #Local and #Shared with the ordinary shared reader, pushes the Marker, and derives nothing; the six track, reactive_local and reactive_shared booleans and their span fields are deleted, and Binding::track(), reactive_local() and reactive_shared() answer from the retained nodes, so sema (CheckerCore/bindings.rs, Bundle/Validation.rs), codegen (TIR/lower/control_flow.rs) and the formatter all read one source of truth. Sema still sets reactive_upgrade, which is its own proof and not a written marker; the parser's pre-set for #Shared is gone because sema already derives that case. Stmt::Off and Stmt::DebugOnly are replaced by one Stmt::Switched { marker, body, span }; which switch a statement carries is a question about the retained marker, answered by AST::switched_off, in the six places where the two differ (Sema Effects, Captures, CheckerOwnership, CheckerCore/statements, Codegen mod and TIR lower/subset/env), and one shared arm in the other twenty-five. TIR is untouched, so AOT, JIT and interpreter keep identical meaning (I9). The formatter prints binding markers back in written order and prints the switch attribute from the marker's own name. Net 69 lines deleted across 41 files. Proof: cargo build --workspace clean with no new warnings; jet-foundation lib 133/133; jet-parser lib 43 passed with only the #1599 failure; jet-sema lib 68 passed with the same 3 pre-existing failures; marker_registry_coverage 3/3; marker_rule_signatures 24/24; grammar 18/18; diagnostics_coverage fails only on the #1603 code lists; diagnostic_snapshots ui_snapshots goes from 32 pre-existing mismatches to 31, one fewer and none new (published_schema_breaking now matches its fixture again). Fresh-binary smoke after clearing the build cache: statement_attributes (#Off and #DebugOnly, bare and block), provenance_track (#Track), reactive_scope (#Local and #Shared), shield_commit, persist, value_tag_type, dsl_blocks, comptime_block and todo_hole all print their expected output. Remaining and NOT claimed here: block-construct statements such as #Unsafe, #Context, #Caps and #Transact keep dedicated Stmt variants whose fields are the marker's own arguments, and #Todo, #Tainted and the tag-prefix operator keep dedicated Expr nodes; in both the node is the construct rather than a flag derived from a marker. Card #1606 tracks that question plus the two lexer marker-name references.",
-          "at": "2026-08-07T10:54:26.019Z"
+          "verifiedBy": "bd3-orch",
+          "evidence": "Reviewer (bd3-review) passed after two recheck rounds. Merged to master (813810c55); grouped rerun: fmt 163/163, grammar 18/18, marker_registry_coverage 3/3, marker_rule_signatures 24/24, outcome_carrier 5/5. Criterion 3 holds with a named carve-out: block-construct and expression nodes carry their marker facts as the node itself; card #1606 records that design question and the remaining lexer ASI references.",
+          "at": "2026-08-07T11:26:18.458Z"
         },
         {
           "n": 4,
           "text": "Foundation, parser, sema, marker, and grammar targeted suites green",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-mark",
-          "verifiedBy": null,
-          "evidence": "cargo test -p jet-foundation --lib: 133 passed 0 failed. cargo test -p jet-parser --lib: 43 passed, 1 pre-existing failure (arrow_control_law_formats_canonical_forms_idempotently, confirmed identical on master eab7c8713 -- stale test asserting retired braceless control bodies against done card #808's mandatory-braces fmt; logged as card #1599). cargo test -p jet-sema --lib: 68 passed, 3 pre-existing failures confirmed identical on master (module line-budget assertion + one unrelated unwrap). cargo test --test marker_registry_coverage: 3/3. cargo test --test marker_rule_signatures: 24/24 (migrated its #Known fixtures to $name under D-META-STAGE1 so they exercise real syntax again). cargo test --test grammar: 18/18. cargo build --workspace: clean.",
-          "at": "2026-08-07T09:17:14.797Z"
+          "verifiedBy": "bd3-orch",
+          "evidence": "Reviewer (bd3-review) passed after two recheck rounds. Merged to master (813810c55); grouped rerun: fmt 163/163, grammar 18/18, marker_registry_coverage 3/3, marker_rule_signatures 24/24, outcome_carrier 5/5.",
+          "at": "2026-08-07T11:26:17.747Z"
         },
         {
           "n": 5,
           "text": "marker Name(...) Prelude declarations parse under D-META-FORM1/NAME1's ratified shape: named parameters, $sites/$repeatable (and any future rule fact) are ordinary named parameters marked with $, with no on/repeatable trailing clause, no second parameter list, and no scope-block form. A UI fixture proves each rejected spelling (trailing clause, two lists, block form) is an error naming the ratified named-parameter form as the fix.",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-mark",
-          "verifiedBy": null,
-          "evidence": "marker Name(params...) parses under D-META-FORM1=A/D-META-NAME1=A verbatim: crates/jet-parser/src/Parser/Items/states_protocols.rs adds at_marker_decl/marker_decl/marker_decl_param_list -- an ordinary arg is 'name: Type [= default]', a fact is '$name: value' (told apart by Syntax::is_comptime_name), no on/second-list/block. New AST::MarkerDecl/MarkerDeclParam (crates/jet-foundation/src/AST/items.rs), threaded as an erasing item through every exhaustive Item match (sema Bundle/Registration/Casing, codegen Context/Imports/Tuples/mod, semindex Build, Formatter -- verbatim emission, formatter round-trips clean via jet fmt --check). KW_MARKER registered in Syntax.rs/effects_surface.rs/highlights.rs/package_files.rs; grammars regenerated (jet self devtools grammars), tests/grammar.rs 18/18. Parser unit tests (Parser::Items::states_protocols::marker_decl_tests, 2/2): positive parse of the ballot's own worked example, plus all three rejected spellings (trailing on clause, second parameter list, scope block) each produce E0381 naming the $-marked named-parameter form as the fix. UI fixture tests/ui/marker_decl_rejected_forms.jet + .stderr proves the same three under cargo test --test diagnostic_snapshots ui_snapshots (passing). E0381 fully I4-compliant: docs/spec/diagnostics.md registry + what/why/fix rows added, explain page auto-derives from the spec, tests/diagnostics_coverage.rs no longer lists E0381 as a gap.",
-          "at": "2026-08-07T09:17:25.123Z"
+          "verifiedBy": "bd3-orch",
+          "evidence": "Reviewer (bd3-review) passed after two recheck rounds. Merged to master (813810c55); grouped rerun: fmt 163/163, grammar 18/18, marker_registry_coverage 3/3, marker_rule_signatures 24/24, outcome_carrier 5/5.",
+          "at": "2026-08-07T11:26:18.104Z"
         }
       ],
       "refs": [
@@ -84142,10 +84147,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T22:45:07.350Z",
-      "updated": "2026-08-07T11:13:17.547Z",
-      "updatedBy": "bd3-mark2",
+      "updated": "2026-08-07T11:26:19.285Z",
+      "updatedBy": "bd3-orch",
       "workOrder": 370,
-      "claimedAt": "2026-08-07T11:13:17.546Z"
+      "completedAt": "2026-08-07T11:26:19.284Z"
     },
     {
       "id": "c0ai0h4w",
@@ -132684,6 +132689,55 @@
   ],
   "events": [
     {
+      "at": "2026-08-07T11:26:19.285Z",
+      "by": "bd3-orch",
+      "action": "card.update",
+      "ref": "c0556cxe",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T11:26:18.883Z",
+      "by": "bd3-orch",
+      "action": "card.update",
+      "ref": "c0556cxe",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T11:26:18.458Z",
+      "by": "bd3-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0556cxe",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-07T11:26:18.104Z",
+      "by": "bd3-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0556cxe",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-07T11:26:17.747Z",
+      "by": "bd3-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0556cxe",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-07T11:26:16.713Z",
+      "by": "bd3-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0556cxe",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-07T11:26:15.992Z",
+      "by": "bd3-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0556cxe",
+      "note": "#1"
+    },
+    {
       "at": "2026-08-07T11:17:57.895Z",
       "by": "claude-fable",
       "action": "papercut.resolve",
@@ -136133,55 +136187,6 @@
       "action": "card.update",
       "ref": "c0hil8nx",
       "note": "logEntry"
-    },
-    {
-      "at": "2026-08-07T00:53:23.820Z",
-      "by": "prep-records",
-      "action": "card.criteria-add",
-      "ref": "c0hil8nx",
-      "note": "#9 Decision-to-card map logged: each of the 7 D-CORE-* ids name"
-    },
-    {
-      "at": "2026-08-07T00:53:23.330Z",
-      "by": "prep-records",
-      "action": "card.update",
-      "ref": "c0hil8nx",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-07T00:53:16.514Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0vzadss",
-      "note": "#10"
-    },
-    {
-      "at": "2026-08-07T00:53:16.183Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0vzadss",
-      "note": "#9"
-    },
-    {
-      "at": "2026-08-07T00:53:15.838Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0vzadss",
-      "note": "plan,logEntry"
-    },
-    {
-      "at": "2026-08-07T00:52:40.528Z",
-      "by": "fable",
-      "action": "decision.add",
-      "ref": "D-CONC-CHAN2",
-      "note": "The select wait in valid Jet syntax"
-    },
-    {
-      "at": "2026-08-07T00:51:44.526Z",
-      "by": "prep-misc",
-      "action": "card.update",
-      "ref": "c03t94dv",
-      "note": "phase,plan"
     }
   ],
   "nextNum": 368,
