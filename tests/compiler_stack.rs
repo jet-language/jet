@@ -41,7 +41,7 @@ struct Pair {
     right: Int,
 }
 
-struct Cache {
+struct ValueCache {
     value: Cell<String?>,
 }
 
@@ -115,7 +115,7 @@ fn run() {
     edit_returned_split(cell)
     print(cell.get().left + cell.get().right)
 
-    cache :: Cache.{ value: Cell.new(None) }
+    cache :: ValueCache.{ value: Cell.new(None) }
     print(cache.value.get_or_set(() => "built"))
     print(cache.value.get_or_set(() => "unused"))
 
