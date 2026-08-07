@@ -208,6 +208,11 @@ fn run() {
                         .iter()
                         .map(|p| (p.name.clone(), p.default.is_some()))
                         .collect(),
+                    param_call: f
+                        .params
+                        .iter()
+                        .map(|p| (p.call_label().to_string(), p.zone))
+                        .collect(),
                     defaults: f
                         .params
                         .iter()
@@ -294,6 +299,11 @@ fn run() {
                         .iter()
                         .map(|p| (p.name.clone(), p.default.is_some()))
                         .collect(),
+                    param_call: f
+                        .params
+                        .iter()
+                        .map(|p| (p.call_label().to_string(), p.zone))
+                        .collect(),
                     defaults: f
                         .params
                         .iter()
@@ -367,6 +377,11 @@ fn run() {
                         .params
                         .iter()
                         .map(|p| (p.name.clone(), p.default.is_some()))
+                        .collect(),
+                    param_call: f
+                        .params
+                        .iter()
+                        .map(|p| (p.call_label().to_string(), p.zone))
                         .collect(),
                     defaults: f
                         .params

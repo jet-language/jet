@@ -195,7 +195,7 @@ fn binary_cache_local_publish_verify_and_reject_corruption() {
     let nar = mirror
         .join("nar")
         .join(format!("{}.nar", entry.envelope.output_hash));
-    let info = mirror.join(format!(
+    let info = mirror.join(&format!(
         "{}-{}.narinfo",
         entry.envelope.output_hash, entry.id
     ));
