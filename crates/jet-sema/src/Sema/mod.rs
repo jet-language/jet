@@ -1335,7 +1335,7 @@ pub(crate) struct Checker<'a> {
     /// is E0144 instead of the normal "undefined name" error.
     in_pre_clause: bool,
     /// True while inferring a comptime binding's RHS or inside a comptime
-    /// context — suppresses E2712 for `$name` comptime splice expressions.
+    /// context (D-META-STAGE1=B).
     in_comptime: bool,
     /// True only while checking the selected package/workspace `fn build`.
     /// This is passed by the Driver's build authority, never inferred from a

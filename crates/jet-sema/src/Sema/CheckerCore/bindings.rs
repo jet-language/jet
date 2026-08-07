@@ -438,9 +438,10 @@ impl<'a> Checker<'a> {
                 self.lambda_escapes = true;
                 self.lambda_binding = Some(b.name.clone());
             }
-            // D-CTMARKER1=C: `$name` in a comptime binding RHS is valid; set
-            // `in_comptime` before `infer()` so E2712 is suppressed during type
-            // inference of the RHS (the evaluator runs after, independently).
+            // D-META-STAGE1=B: a marked name in a compile-time binding RHS is an
+            // ordinary read of a marked name; set
+            // `in_comptime` before `infer()` so the RHS types in the compile-time
+            // world (the evaluator runs after, independently).
             if b.is_comptime {
                 self.in_comptime = true;
             }

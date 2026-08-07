@@ -851,7 +851,6 @@ fn registered_unimplemented_codes_are_expected() {
         "E2412", // D-SERDE: runtime decode error (unknown field under #[DenyUnknownFields]) — emitted as a FieldError string, not a compile Diagnostic
         "E2413", // retired (D-SERDE12): generic #[Codable] is first-class; no gate
         "E2701", // E2-M9 (ring library) — staged
-        "E2712", // retired by D-CTBLOCKEXPOSE1; runtime `$name` now uses E2713 only on missing comptime value
         "E2801", // E2-M10 (networking) — staged
         "E2802", // E2-M10 — staged
         "E2803", // E2-M10 — staged
