@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1592,
-    "rev": 28197,
+    "nextNum": 1593,
+    "rev": 28237,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -80281,14 +80281,135 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P2",
       "plan": "Decide how Jet reuses compiled dependency work and whether Jet ships its own static or dynamic libraries. Sourced from mining Low Level's 'why rust libraries may never exist' (2024): Rust's source-only distribution drives clean-build cost; comment corrections show version-keyed binary reuse works without a public stable ABI, and a public ABI is a permanent evolution tax (Swift). Jet already has the machinery: E4-JP2 action IR with complete cache identity, E4-JP5 binary caches, ratified D-JPK-CACHEAUTH1/CACHECONFIG1/REPROCACHE1/STOREBACKEND1. Open owner choice: reuse model and any Jet-to-Jet linking promise. Ballot D-LIB-REUSE1 attached.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
-      "criteria": [],
+      "log": [
+        {
+          "at": "2026-08-07",
+          "by": "bd2-link",
+          "text": "Two findings that changed the shape. First, the ratified pinned dynamic library overlapped the already-ratified sandboxed wasm plugin target (D-PLUGIN1=B, E1258 zero capabilities); D-LIB-DYNTRUST1=A settles that boundary and keeps I8. Second, the reuse ballot's example diagnostic E0912 is retired by D-MEM1/S2, so the version-mismatch error needs a fresh registered code. Also confirmed the cache tiers need no new law: D-JPK-CACHECONFIG1=D, CACHEAUTH1=D, STOREBACKEND1=D and REPROCACHE1=D already cover local, team and public mirrors."
+        },
+        {
+          "at": "2026-08-07",
+          "by": "bd2-link",
+          "text": "Plan written at docs/sidequests/library-reuse-and-linking.md, indexed in docs/sidequests/README.md. Raised D-LIB-EXPORT1, D-LIB-DYNTRUST1 and D-LIB-NAME1; the owner ratified all three the same day (C, A, A). The doc now states the ratified outcomes, so no option text describes an unchosen path. Implementation is #1422 for sealed objects, then the loadable library and loader, then native export and bindings."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Plan doc docs/sidequests/library-reuse-and-linking.md matches the ratified outcomes of D-LIB-EXPORT1, D-LIB-DYNTRUST1 and D-LIB-NAME1, with no text left describing an unchosen path",
+          "status": "met",
+          "metBy": "bd2-link",
+          "verifiedBy": null,
+          "evidence": "docs/sidequests/library-reuse-and-linking.md states D-LIB-REUSE1=B, D-LIB-EXPORT1=C, D-LIB-DYNTRUST1=A and D-LIB-NAME1=A as ratified law, with the ratified-answers table and build order rewritten to match. No unchosen option text remains.",
+          "at": "2026-08-07T00:41:26.543Z"
+        },
+        {
+          "n": 2,
+          "text": "A loadable Jet library built by one compiler version is refused before mapping when loaded by another, with a freshly registered diagnostic carrying what/why/fix text and a UI snapshot; retired E0912 is not reused",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T00:38:58.667Z"
+        },
+        {
+          "n": 3,
+          "text": "The load-time trust boundary ratified by D-LIB-DYNTRUST1 is enforced at the load site, with a registered diagnostic and a test proving a refused load",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T00:38:59.009Z"
+        },
+        {
+          "n": 4,
+          "text": "The loadable-library request surface matches the ratified D-LIB-NAME1 spelling; any user-typeable form has a Syntax.rs entry with its decision id, formatter round-trip, and grammar coverage (I7)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T00:38:59.360Z"
+        },
+        {
+          "n": 5,
+          "text": "An executable example builds a loadable Jet library and loads it from a host program, with golden-tested output proving one meaning on AOT and on default jet run (I5, I9)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T00:39:09.394Z"
+        },
+        {
+          "n": 6,
+          "text": "The export surface ratified by D-LIB-EXPORT1 is produced by jet build and consumed by a real foreign caller in an example or test; if that ballot rejects native export, no native artifact path ships and the card records the refusal",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T00:39:09.754Z"
+        },
+        {
+          "n": 7,
+          "text": "No Jet-to-Jet binary layout promise is introduced: an artifact carrying a different compiler identity is never linked or mapped, proven by test",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T00:39:10.111Z"
+        },
+        {
+          "n": 8,
+          "text": "Loadable-library and export artifacts flow through the ratified store law unchanged: writer authority (D-JPK-CACHEAUTH1=D) and mirror trust (D-JPK-CACHECONFIG1=D) are reused, not re-encoded",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T00:39:10.461Z"
+        },
+        {
+          "n": 9,
+          "text": "Syntax.rs entry updated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T00:39:26.191Z"
+        },
+        {
+          "n": 10,
+          "text": "syntax-decisions.md log entry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T00:39:26.191Z"
+        },
+        {
+          "n": 11,
+          "text": "jet devtools grammars regenerated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T00:39:26.191Z"
+        },
+        {
+          "n": 12,
+          "text": "snapshots re-blessed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T00:39:26.191Z"
+        }
+      ],
       "refs": [
+        "docs/sidequests/library-reuse-and-linking.md",
         "docs/plans/compiler-speed.md",
         "docs/plans/epoch-4/world-class-package-manager.md"
       ],
@@ -80299,8 +80420,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-04T19:37:03.322Z",
-      "updated": "2026-08-04T19:41:01.608Z",
-      "updatedBy": "owner"
+      "updated": "2026-08-07T00:41:30.396Z",
+      "updatedBy": "bd2-link"
     },
     {
       "id": "c0nwijdh",
@@ -85622,6 +85743,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-08-07",
+          "by": "fable",
+          "text": "ballot revised per owner philosophy question (frequency-weighted); question answered"
+        },
+        {
           "at": "2026-08-06",
           "by": "bd2-orch",
           "text": "Closed: eleven methods shipped on all tiers and proved on merged master (set example golden byte-identical, ledger check exit 0, core_surface_ledger 2/2). Five order-dependent names await ballot D-SET-DECLINE1; card 1584 applies the outcome."
@@ -85701,7 +85827,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T02:13:47.049Z",
-      "updated": "2026-08-07T00:08:52.390Z",
+      "updated": "2026-08-07T00:36:56.731Z",
       "updatedBy": "owner",
       "workOrder": 20,
       "completedAt": "2026-08-06T23:40:42.570Z"
@@ -85721,6 +85847,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-07",
+          "by": "fable",
+          "text": "ballot revised per owner philosophy question (frequency-weighted); question answered"
+        },
         {
           "at": "2026-08-07",
           "by": "bd2-orch",
@@ -85801,7 +85932,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T02:13:47.351Z",
-      "updated": "2026-08-07T00:09:23.175Z",
+      "updated": "2026-08-07T00:37:07.554Z",
       "updatedBy": "owner",
       "workOrder": 30,
       "completedAt": "2026-08-07T00:02:29.052Z"
@@ -85928,6 +86059,11 @@
       "log": [
         {
           "at": "2026-08-07",
+          "by": "fable",
+          "text": "ballot revised per owner philosophy question (frequency-weighted); question answered"
+        },
+        {
+          "at": "2026-08-07",
           "by": "bd2-orch",
           "text": "Closed: four real gaps shipped with tier parity; seventy-five declines await ballot D-CORESURF-SMALL1; card 1590 applies the outcome and owns the two deferred TLS rows."
         },
@@ -86024,8 +86160,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T02:21:21.682Z",
-      "updated": "2026-08-07T00:28:24.416Z",
-      "updatedBy": "bd2-orch",
+      "updated": "2026-08-07T00:37:12.833Z",
+      "updatedBy": "owner",
       "workOrder": 870,
       "completedAt": "2026-08-07T00:28:24.416Z"
     },
@@ -90091,7 +90227,7 @@
       "priority": "P1",
       "plan": "Implements D-FAIL-CARRIER1, D-FAIL-MODEL1 — ratified 2026-08-06. Read each decision verbatim (tower brief on this card's parent proposal, or tower decision show) before building; the ratified outcome text is the law, this plan is the route. Every requirement is a discrete exit criterion below: meet each with targeted proof (tests, snapshots, examples with golden output), and keep I9 tier parity inside this card — AOT, default jet run (JIT), and the interpreter must agree on every surface this card ships before it closes. Delete every superseded form the decisions retire in the same change; do not leave compatibility shims or parallel spellings. Reference: docs/proposals/failure-one-report-three-routes.md.",
       "blockedBy": [],
-      "assignee": "bd2-carrier",
+      "assignee": null,
       "log": [],
       "criteria": [
         {
@@ -90115,11 +90251,11 @@
         {
           "n": 3,
           "text": "Verdict and notes erase from the happy path: a targeted test proves an unused verdict costs no allocation and no branch in the emitted code",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd2-carrier",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:38.327Z"
+          "evidence": "tests/outcome_carrier.rs::an_unread_verdict_costs_nothing passes. It proves the clean report is zero-sized, so JetOutcome<T, JetAbsent> keeps the payload's own size, and it reads the emitted Rust for a T? function: no allocation and one branch to read the payload.",
+          "at": "2026-08-07T00:41:08.455Z"
         },
         {
           "n": 4,
@@ -90192,10 +90328,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:33:37.333Z",
-      "updated": "2026-08-06T23:41:49.136Z",
+      "updated": "2026-08-07T00:41:44.866Z",
       "updatedBy": "bd2-carrier",
-      "workOrder": 140,
-      "claimedAt": "2026-08-06T23:41:49.136Z"
+      "workOrder": 140
     },
     {
       "id": "c0nb4bwv",
@@ -95508,6 +95643,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-08-07",
+          "by": "fable",
+          "text": "ballot revised per owner philosophy question (frequency-weighted); question answered"
+        },
+        {
           "at": "2026-08-06",
           "by": "bd2-orch",
           "text": "Closed: decline slate shipped via ballot D-STR-DECLINE1; card 1581 applies the outcome after the owner votes."
@@ -95543,7 +95683,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T22:29:05.864Z",
-      "updated": "2026-08-07T00:06:49.526Z",
+      "updated": "2026-08-07T00:36:40.412Z",
       "updatedBy": "owner",
       "completedAt": "2026-08-06T23:22:03.210Z"
     },
@@ -95940,6 +96080,30 @@
       "created": "2026-08-07T00:16:07.119Z",
       "updated": "2026-08-07T00:16:07.692Z",
       "updatedBy": "bd2-sweep"
+    },
+    {
+      "id": "c0g2j76x",
+      "num": 1592,
+      "title": "scope.guard is dropped: the cleanup closure never runs",
+      "body": "A scope.guard binding lowers to a bare unit, so its cleanup never runs. Generated Rust for examples/features/errors/must_use.jet shows 'let user__g: _ = ();' where the jet_scope_guard call should be. Reproduces at 9f2f9f2a1, before any carrier work, so it is not a regression from card #1527. Two golden examples fail on it: errors/must_use and io/scope_guard.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-07T00:41:51.564Z",
+      "updated": "2026-08-07T00:41:51.564Z",
+      "updatedBy": "bd2-carrier"
     }
   ],
   "decisions": [
@@ -128048,19 +128212,19 @@
       "id": "D-STR-DECLINE1",
       "cardId": "c01y8s93",
       "group": "stdlib",
-      "title": "String's remaining 34 ledger gaps: decline or ship",
-      "gist": "Whether Jet adds 34 more String methods that copy features it already has under a different name.",
-      "lesson": "Card #1476 gave String 30 methods. The surface ledger still lists 34 more names that other languages ship on their string type. Every one of those 34 already has a Jet answer somewhere else. Convert text to a list first, then use List or Iter. Match patterns with core.regex. Parse numbers with Int.parse or Float.parse. Build text with the plus operator or interpolation. Adding a second spelling on String for each name would give every text workflow two ways to reach the same result.",
+      "title": "String's remaining 34 ledger gaps: decline, ship, or ship the high-frequency few",
+      "gist": "Which of String's 34 remaining ledger names ship directly on String, and which route to an existing mechanism.",
+      "lesson": "Card #1476 gave String 30 methods. The surface ledger still lists 34 more names other languages ship on their string type. Each name already has a Jet route somewhere else. The usage-frequency report (docs/research/corelib-api-usage-frequency-2026-08-06.md) ranks how often real code performs each operation. Jet's philosophy sets friction in proportion to that frequency: the most common work must be the shortest call.",
       "explainer": "",
-      "story": "Priya is writing a log cleaner in Jet. She wants to check whether each character is printable before the line ships to a file, the way Go's unicode.IsPrint works. She finds no isprint on String and wonders whether Jet forgot a basic text check or expects a different route.",
-      "inWild": "fn clean_log_line(line: String) => String {\n    // Priya first reaches for a method String does not have.\n    letters :: line.chars().filter(c => c != ' ')\n    return line.trim() + \" (\" + letters.len().to_string() + \" chars)\"\n}",
+      "story": "Priya is writing a log cleaner in Jet. She trims a line, then wants the number inside it. She types line.trim().to_int(), the way Ruby's to_i chains, and wonders whether Jet forgot number parsing on text or expects a detour through another type.",
+      "inWild": "fn read_port(line: String) => Int {\n    // Priya's first instinct: parse straight off the cleaned text.\n    // port :: line.trim().to_int() ?? 8080\n\n    // Today's route detours through the destination type instead.\n    port :: Int.parse(line.trim()) ?? 8080\n    return port\n}",
       "detail": "",
       "options": [
         {
           "key": "A",
           "name": "Decline all 34, route each to what Jet already ships",
           "detail": "None of the 34 names add a workflow Jet is missing. Mutation verbs like clear and push do not fit an immutable String. Sequence names like map, fold, and first already exist on List and Iter once text becomes a list of characters or bytes. parse, tofloat, match, and matches already live on Int, Float, and core.regex. concat duplicates the plus operator and interpolation. The rest are niche buffer operations two languages ship, covered today by slice, replace, and the shipped surface.",
-          "technical": "Immutable-string declines: clear, push, pop, remove, and write. String is an immutable value. Rebuild text with plus, replace, or slice instead of mutating it in place.\n\nIter and List declines: all, map, fold, skip, chunk, droplast, indexed, flatmap, each, max, min, scan, first, last, get, and codepointat. These are sequence operations, not text operations. Call chars or bytes first, then use the existing List or Iter method, per the one-mechanism rule.\n\nNumber-parsing declines: parse and tofloat. Int.parse and Float.parse already convert text to a number with one error type. A second parse path on String would duplicate that mechanism.\n\nPattern-matching declines: match and matches. core.regex already owns pattern matching under D-REGEXENGINE1. A match method on String would open a second matching mechanism.\n\nConcatenation decline: concat. The plus operator and string interpolation already join text. concat would spell the same operation a second way.\n\nValidity decline: isvalid. A live String is always valid UTF-8 by construction. String.from_bytes already reports invalid bytes as an error when text is built from a byte buffer.\n\nNiche buffer declines: replacerange, isprint, intern, indexofany, lastindexofany, chop, and rpartition. Each is a low-traffic operation only two of eleven compared languages ship. Slice, replace, and the shipped surface already cover the common cases.",
+          "technical": "Immutable-string declines: clear, push, pop, remove, and write. String is an immutable value. Rebuild text with plus, replace, or slice instead of mutating it in place.\n\nIter and List declines: all, map, fold, skip, chunk, droplast, indexed, flatmap, each, max, min, scan, first, last, get, and codepointat. These are sequence operations, not text operations. Call chars or bytes first, then use the existing List or Iter method.\n\nNumber-parsing declines: parse and tofloat. Int.parse and Float.parse already convert text to a number with one error type.\n\nPattern-matching declines: match and matches. core.regex already owns pattern matching under D-REGEXENGINE1.\n\nConcatenation decline: concat. The plus operator and string interpolation already join text.\n\nValidity decline: isvalid. A live String is always valid UTF-8 by construction. String.from_bytes already reports invalid bytes as an error when text is built from a byte buffer.\n\nNiche buffer declines: replacerange, isprint, intern, indexofany, lastindexofany, chop, and rpartition. Each is a low-traffic operation only two of eleven compared languages ship.",
           "code": "line := \"  Hello, World!  \"\n\n// Immutable text: rebuild instead of mutating.\ncleaned :: line.trim() + \"!\"\n\n// Sequence vocabulary: convert to chars, then use List/Iter.\nvowels :: line.chars().filter(c => c == 'e' || c == 'o')\nprint(vowels.len())\n\n// Number parsing: the destination type owns parse.\nn :: Int.parse(\"42\") ?? 0\n\n// Pattern matching: core.regex owns match.\nuse core.regex as re\nprint(re.is_match(\"[0-9]\", line) ?? panic(\"bad pattern\"))\n\n// Concatenation: plus and interpolation, not concat.\ngreeting :: \"{line.trim()}!\"\nprint(greeting)"
         },
         {
@@ -128069,9 +128233,21 @@
           "detail": "String grows a second copy of the Iter vocabulary, a second parse path, and a second match method, all living beside the mechanisms Jet already ships elsewhere. Every text tutorial now has to say which of two spellings to use for map, parse, or match, and the answer changes by container.",
           "technical": "Each of the 34 names ships as a string_method_return case in Collections.rs plus a matching jet_str_* Prelude function in UnicodeString.rs. Sequence names like map, fold, and first duplicate the List/Iter case arms already registered for those same names. parse and tofloat duplicate Int.parse and Float.parse. match and matches duplicate core.regex.is_match and core.regex.matches. concat duplicates the existing plus operator lowering for String plus Add.",
           "code": "line := \"  Hello, World!  \"\n\n// A second, String-only copy of the Iter vocabulary.\nvowels := line.filter(c => c == 'e' || c == 'o')\nfirst := line.first()\ntop := line.max()\n\n// A second parse path, now living on String too.\nn := line.tofloat() ?? 0.0\n\n// A second match mechanism, now living on String too.\nfound := line.match(\"[0-9]\")\n\n// A second way to join text, now living on String too.\ngreeting := line.concat(\"!\")"
+        },
+        {
+          "key": "C",
+          "name": "Ship the high-frequency names as direct spellings; route the rest",
+          "detail": "The frequency report marks parse-to-number as a dominant string operation and regex tests as heavy, recurring work. Those names ship directly on String: to_int and to_float (the ledger's parse and tofloat, spelled to match to_string) plus match and matches. Each one is a spelling of a mechanism Jet already ships — Int.parse, Float.parse, and the one core.regex engine — so no second mechanism appears.\n\nEvery other name stays routed. Mutation verbs clash with immutable String. Char-level sequence work sits below the frequency line, where one chars() call is proportional friction. concat stays declined because plus and interpolation are already the shortest spelling.",
+          "technical": "to_int() and to_float() call the same Prelude parse functions Int.parse and Float.parse use today. They return the same result with the same error meaning. matches(pattern) answers a yes-or-no test by routing to core.regex.is_match. match(pattern) returns the first match through the same engine. Both carry the engine's existing bad-pattern error shape.\n\nDeclines unchanged from option A: mutation verbs (clear, push, pop, remove, write); the sequence family, still one chars() or bytes() call away; concat; isvalid; and the niche buffer names.",
+          "code": "line := \"  42  \"\n\n// Dominant path: parse straight off the text you just cleaned.\nn :: line.trim().to_int() ?? 0\nprice :: \"19.95\".to_float() ?? 0.0\n\n// Regex reads at the call site; one engine underneath.\nhas_digit :: line.matches(\"[0-9]\") ?? panic(\"bad pattern\")\nphone :: \"call 555-0134\".match(\"[0-9]{3}-[0-9]{4}\") ?? \"\"\n\n// Below the frequency line: sequence work still routes through chars.\nvowels :: line.chars().filter(c => c == 'e' || c == 'o')"
         }
       ],
       "comparisons": [
+        {
+          "lang": "Ruby",
+          "note": "Ruby puts number parsing and regex tests straight on String, the shape option C adopts. Jet keeps the parse error where Ruby's to_i silently returns 0 on junk.",
+          "code": "\"42\".to_i\n\"call 555\".match?(/[0-9]+/)"
+        },
         {
           "lang": "Kotlin",
           "note": "Kotlin's CharSequence mirrors most of Iterable, so all, map, and first exist twice: once as a sequence operation and once as a string operation.",
@@ -128079,20 +128255,24 @@
         },
         {
           "lang": "Rust",
-          "note": "Rust keeps text parsing on the destination type through FromStr, the same split Jet already uses for Int.parse and Float.parse.",
+          "note": "Rust keeps text parsing on the destination type through FromStr, the route option A keeps and option C shortens with a direct String spelling.",
           "code": "let n: i32 = \"42\".parse().unwrap();"
         }
       ],
-      "rec": "A",
+      "rec": "C",
       "recommendation": {
-        "why": "Every one of the 34 names already reaches a working answer through a mechanism Jet ships today. Declining keeps one path per capability, which is what I8 asks for.",
+        "why": "The frequency report shows parse-to-number is everyday string work and regex tests recur constantly. Option C makes those the shortest possible calls, which is what friction-proportional-to-frequency demands. Underneath, each new name is a spelling of one existing mechanism, so the expert model stays single-engine.",
         "whyNot": [
           {
+            "key": "A",
+            "reason": "It weighs all 34 names the same and leaves dominant operations behind a detour, taxing the most common text work to keep a rule tidy."
+          },
+          {
             "key": "B",
-            "reason": "Shipping all 34 gives String a second copy of Iter, parse, and regex vocabulary. Every future reader has to learn which of two spellings to use."
+            "reason": "It ships a second copy of the sequence vocabulary and synonyms that save no keystrokes, growing what a beginner must learn without cutting friction anywhere."
           }
         ],
-        "tradeoff": "A programmer who expects isprint or indexofany by muscle memory from another language has to write one extra line: convert with chars or bytes, or reach for core.regex or slice."
+        "tradeoff": "Docs must say plainly that to_int, to_float, match, and matches are the one parse mechanism and the one regex engine. Char-level sequence work still detours through chars()."
       },
       "hybrid": null,
       "ballotMode": "full",
@@ -128100,32 +128280,34 @@
       "reviewPasses": {
         "base": "The first draft grouped the 34 names into six families, each already answered by an existing Jet mechanism, and recommended declining all of them.",
         "boilOcean": "The breadth pass checked isprint and indexofany for a real gap instead of a duplicate. Both still routed to an existing mechanism or a two-witness niche buffer method.",
-        "hybrid": "A hybrid that ships only isprint and indexofany was tested. It was dropped because both still fit inside the existing predicate and slice mechanisms without a new code path.",
-        "cooperative": "Steelmanning option B: shipping the full 34 would let a newcomer type the name they already know without detouring through chars or bytes first.",
-        "adversarial": "The adversarial pass asked whether declining orphans a real workflow. Every declined name still reaches its answer in one extra call, so no workflow is left without a route."
+        "hybrid": "After the owner's philosophy question, this pass was rerun with the usage-frequency report as the scale. Parse-to-number and regex tests crossed the dominance line, and that split became option C, now the recommendation.",
+        "cooperative": "Steelmanning option B: shipping the full 34 would let a newcomer type any name they already know without a detour. Option C keeps that welcome exactly where the traffic justifies it.",
+        "adversarial": "The adversarial pass attacked option C as reopening dual mechanisms. It survives: the four new names call the one parse mechanism and the one regex engine, and every still-declined name keeps a one-call route."
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-08-06T23:12:45.928Z"
+      "status": "ratified",
+      "created": "2026-08-06T23:12:45.928Z",
+      "outcome": "C",
+      "ratifiedAt": "2026-08-07"
     },
     {
       "id": "D-SET-DECLINE1",
       "cardId": "c0m2slnf",
       "group": "stdlib",
-      "title": "Set's last 4 order-dependent methods: decline or ship with arbitrary order",
-      "gist": "Whether Jet's Set adds shuffle, sort, indexof, and indexed, when a Set has no position.",
-      "lesson": "Card #1478 shipped 11 more Set methods and closed most of the surface ledger. Four names remain: shuffle, sort, indexof, and indexed. A Set is a hash-backed collection with no position, so each name needs a real position or a stable order to mean anything. Every one already has a working answer: call to_list, then use List's own version. A fifth name, flatten, stays declined either way: Jet requires Set elements to be Hash and Eq, so a Set can never hold a nested list or set.",
+      "title": "Set's last 4 order-dependent methods: decline, ship all, or ship the order-producing pair",
+      "gist": "Whether Set answers shuffle, sort, indexof, and indexed directly, when a Set keeps no positions.",
+      "lesson": "Card #1478 shipped 11 more Set methods and closed most of the surface ledger. Four names remain: shuffle, sort, indexof, and indexed. A hash-backed Set keeps no positions, so today all four route through to_list. The usage-frequency report ranks sorting among the most common operations in all real code, and dedupe-then-sort is an everyday idiom. A fifth name, flatten, stays declined either way: Set elements must be Hash and Eq, so a Set can never hold nested containers.",
       "explainer": "",
       "story": "Sam is building a card-shuffling game in Jet. The deck lives in a Set so duplicate cards are impossible. Sam types deck.shuffle() expecting a shuffled hand back, the way deck.to_list().shuffle() already works, and wonders why Set itself has no shuffle.",
-      "inWild": "deck := Set.from([\"2H\", \"3H\", \"4H\", \"5H\"])\n\n// Sam's first instinct: shuffle directly on the Set.\n// hand := deck.shuffle()\n\n// Set has no position, so shuffle/sort/indexof/indexed\n// live on the list Set already knows how to become.\nhand := deck.to_list().shuffle()\nprint(hand)",
+      "inWild": "deck := Set.from([\"2H\", \"3H\", \"4H\", \"5H\"])\n\n// Sam's first instinct: shuffle directly on the Set.\n// hand := deck.shuffle()\n\n// Today the order-producing step detours through to_list first.\nhand := deck.to_list().shuffle()\nprint(hand)",
       "detail": "",
       "options": [
         {
           "key": "A",
           "name": "Decline all 4, route through to_list",
           "detail": "None of the 4 names add a workflow Jet is missing. shuffle and sort already exist on List. Calling to_list first, then shuffle or sort, reaches the exact result Set.shuffle or Set.sort would compute. indexof and indexed ask for a position, and a hash Set keeps no position for any element. A direct answer would only expose an implementation detail, not a meaning a caller can rely on.",
-          "technical": "shuffle, sort: I8 says one canonical mechanism per capability. Both already exist on List, and Set already converts to a list. A Set-native shuffle or sort would be a second spelling of the same List call, reached one method earlier.\n\nindexof, indexed: Rust's HashSet keeps no stable enumeration order across inserts and removals. A Set-native indexof or indexed would return a real Int, but that Int would carry no meaning beyond this one call. A List's index or enumerate answers over a sequence with a real position instead.\n\nflatten: declined regardless of A or B. Diagnostic E0506 requires Set elements to implement Hash and Eq, so a Set element can never be a list or another set. flatten needs a Set of nested containers to unpack, and Jet's type checker never allows that Set to exist.",
+          "technical": "shuffle, sort: both already exist on List, and Set already converts to a list. A Set-native shuffle or sort would be a second spelling of the same List call, reached one method earlier.\n\nindexof, indexed: Rust's HashSet keeps no stable enumeration order across inserts and removals. A Set-native indexof or indexed would return a real Int, but that Int would carry no meaning beyond this one call. A List's index or enumerate answers over a sequence with a real position instead.\n\nflatten: declined regardless of outcome. Diagnostic E0506 requires Set elements to implement Hash and Eq, so a Set element can never be a list or another set. flatten needs a Set of nested containers to unpack, and Jet's type checker never allows that Set to exist.",
           "code": "deck := Set.from([\"2H\", \"3H\", \"4H\", \"5H\"])\n\n// shuffle / sort: convert first, exactly like today.\nshuffled := deck.to_list().shuffle().to_list()\nsorted := deck.to_list()\nsorted.sort()\n\n// indexof / indexed: same route — position lives on the list.\ncards := deck.to_list()\nposition := cards.index_of(\"3H\")\nfor pair in cards.indexed() {\n    print(\"{pair.idx}: {pair.item}\")\n}"
         },
         {
@@ -128134,6 +128316,13 @@
           "detail": "Set gains shuffle, sort, indexof, and indexed directly. Each one runs by first walking the Set in whatever order Rust's HashSet currently keeps, then applying the same List logic. The docs would say the starting order before shuffle or sort is arbitrary, and that indexof or indexed answers that same arbitrary order.",
           "technical": "Each of the 4 names ships as a new sema case, routed through the same to-list-then-List machinery already built for filter, map, fold, each, all, min, and max. indexof and indexed need one more caveat in the docs: the position they return stays valid only until the next add or remove on that Set.",
           "code": "deck := Set.from([\"2H\", \"3H\", \"4H\", \"5H\"])\n\n// A new second spelling for each, mirrors List's directly.\nshuffled := deck.shuffle()\nsorted := deck.sort()\nposition := deck.indexof(\"3H\")   // arbitrary order, undocumented until now\nfor pair in deck.indexed() { print(\"{pair.idx}: {pair.item}\") }"
+        },
+        {
+          "key": "C",
+          "name": "Ship sort and shuffle, each returning a List; decline indexof and indexed",
+          "detail": "sort and shuffle both turn an unordered Set into an ordered List, and that is a real, common step: dedupe with a Set, then sort the result. Both ship directly on Set and return a new List, running the same List logic to_list plus sort runs today.\n\nindexof and indexed stay declined for meaning, not tidiness. A hash Set has no positions, so the number they return changes after any add or remove. Code that needs positions converts to a List, where the position is real.",
+          "technical": "Set.sort() and Set.shuffle() route through the same to-list-then-List machinery already built for filter, map, fold, each, all, min, and max. Each returns a fresh List and never mutates the Set. sort's output is deterministic no matter what internal order the Set walks. shuffle's output is uniform for the same reason.\n\nindexof and indexed stay declined: Rust's HashSet keeps no stable enumeration order, so any Set-native position is an implementation leak dressed as an answer.",
+          "code": "deck := Set.from([\"2H\", \"3H\", \"4H\", \"5H\"])\n\n// Dedupe-then-sort, the everyday idiom, now one call.\nsorted := deck.sort()\n\n// Same shape: unordered Set in, ordered List out.\nhand := deck.shuffle()\n\n// Positions still live where positions are real.\ncards := deck.to_list()\nposition := cards.index_of(\"3H\")"
         }
       ],
       "comparisons": [
@@ -128148,39 +128337,45 @@
           "code": "let s: Set = [3, 1, 2]\ns.sorted()\ns.enumerated()"
         }
       ],
-      "rec": "A",
+      "rec": "C",
       "recommendation": {
-        "why": "Every one of the 4 names already reaches a working answer through List, one call after to_list. Declining keeps one path per capability, which is what I8 asks for, and never hands a caller a position number that means nothing tomorrow.",
+        "why": "Sorting is a top-tier operation in the usage-frequency report, and a Set exists to dedupe, so Set-to-sorted-List is among the most common things a Set does. Option C makes that one call while running the same List mechanism underneath. It still refuses to hand back a position that means nothing.",
         "whyNot": [
           {
+            "key": "A",
+            "reason": "It keeps a top-tier operation behind a to_list detour on every dedupe-then-sort, taxing the most common Set workflow to avoid a second spelling of one mechanism."
+          },
+          {
             "key": "B",
-            "reason": "Shipping shuffle and sort on Set gives every reader two spellings for the same result. Shipping indexof and indexed hands back a position that is not stable across the Set's own mutations, which reads as a real index but is not one."
+            "reason": "indexof and indexed would return positions that silently change after any mutation. That reads like a real index, and a beginner has no way to know it is not."
           }
         ],
-        "tradeoff": "A programmer who expects Set.shuffle or Set.sort by muscle memory from Kotlin or Swift writes one extra call: to_list first."
+        "tradeoff": "Set gains two names whose results are Lists, not Sets. Docs must say the input order never matters: sort is deterministic and shuffle is uniform."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "reviewPasses": {
         "base": "The first draft grouped shuffle/sort with indexof/indexed as one order-dependent family and recommended declining all four through to_list.",
-        "boilOcean": "The breadth pass checked whether sort deserves its own bucket, since a sorted result is deterministic regardless of a Set's internal order. It still declines: List already owns sort, and Set.to_list already exists, so shipping it on Set duplicates a mechanism rather than filling a gap.",
-        "hybrid": "A hybrid that ships only sort, since its output is deterministic, and declines shuffle/indexof/indexed was tested. Dropped because sort's own reason to decline is duplication, not disorder, and a single hybrid rule would need two different justifications for two of four names.",
+        "boilOcean": "The breadth pass checked whether sort deserves its own bucket, since a sorted result is deterministic regardless of a Set's internal order. That split later became the seam option C ships along.",
+        "hybrid": "After the owner's philosophy question, this pass was rerun with frequency as the scale: sort and shuffle ship directly, while indexof and indexed stay out. The earlier sort-only hybrid grew to include shuffle because both produce an order rather than pretending to read one.",
         "cooperative": "Steelmanning option B: shipping all four lets a newcomer from Kotlin or Swift type the name they already know without a to_list detour, and matches those two languages exactly.",
-        "adversarial": "The adversarial pass asked whether declining indexof and indexed hides a real bug class: code that silently relies on Set order today. Declining is safer — it forces that code through to_list, where the arbitrary order is visible, instead of a Set-native index that quietly changes after every mutation."
+        "adversarial": "The adversarial pass asked whether Set.sort hides the arbitrary internal order from learners; the output is fully determined by the elements, so it does not. It re-confirmed declining indexof and indexed, since to_list keeps the arbitrary order visible instead of minting an index that quietly changes."
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-08-06T23:28:48.391Z"
+      "status": "ratified",
+      "created": "2026-08-06T23:28:48.391Z",
+      "outcome": "C",
+      "ratifiedAt": "2026-08-07"
     },
     {
       "id": "D-ITER-DECLINE1",
       "cardId": "c0r2dfxz",
       "group": "stdlib",
       "title": "Iter's last six ledger gaps: decline or ship",
-      "gist": "Whether Jet adds six more Iter methods that copy features it already has under a different name or a different model.",
-      "lesson": "Card #1479 gave Iter thirteen new methods. The surface ledger still lists six more names other languages ship on their iterator type. Five of the six already have a Jet answer under a different name: fill, cycle_n, and duplicate are all repeat. A join-based text render already covers tostring, and clip/iterator both already mean to_list/collect, and compact already means filter with a predicate. The sixth, next, asks for a manual pull-one-item cursor. Jet's Iter has no such cursor outside a loop.",
+      "gist": "Whether Jet adds six more Iter methods that rename features it already has, or add a second consumption model.",
+      "lesson": "Card #1479 gave Iter thirteen new methods. The surface ledger still lists six more names other languages ship on their iterator type. Five of the six are synonyms: fill, cycle_n, and duplicate are repeat; tostring is join; clip and iterator are to_list and collect; compact is filter. The sixth, next, asks for a hand-held cursor Jet's Iter model does not have. Jet's philosophy sets friction in proportion to frequency, and a synonym cuts no friction: the canonical call is already the same length.",
       "explainer": "",
       "story": "Sam is porting a Python generator pipeline to Jet. Python's iterator protocol calls next(it) by hand to pull one item at a time and keep the cursor between calls. Sam reaches for it.next() on a Jet Iter and finds nothing, then wonders whether Jet's iterators are missing basic stepping.",
       "inWild": "fn read_pairs(rows: Iter<Int>) => [Int] {\n    // Sam wants manual stepping, the way Python's next(it) works.\n    out := [Int].{}\n    it := rows\n    a := it.next()\n    b := it.next()\n    return out\n}",
@@ -128189,14 +128384,14 @@
         {
           "key": "A",
           "name": "Decline all six, route each to what Jet already ships",
-          "detail": "fill, cycle_n, and duplicate are declined as repeat under a different name. tostring is declined as join, which already renders a sequence to text. clip and iterator are declined as to_list/collect, which already turn a lazy Iter into a concrete value. compact is declined as filter with a predicate. next is declined because Jet's Iter has no cursor to hold between calls. A for-loop, each, or the lazy adapters (take, skip, take_while) already walk a sequence step by step, with no hand-held pointer.",
-          "technical": "Synonym declines (ratified by the Core surface ledger's own pooling): fill/cycle_n/duplicate -> Iter.repeat(n). tostring -> Iter.join(sep). clip/iterator -> Iter.to_list()/collect(). compact -> Iter.filter(f).\n\nConsumption-model decline: next. Jet's for-loop and iterator adapters consume a full Iter value each time; there is no live cursor object a caller holds and advances by hand. Adding next(self) would need a second, stateful iterator protocol running beside the existing one, which is a second mechanism for the same job (I8).",
-          "code": "nums :: [1, 2, 3, 4, 5]\n\n// fill / cycle_n / duplicate -> repeat\nfive_pairs :: nums.repeat(2).to_list()\n\n// tostring -> join\nline :: nums.join(\", \")\n\n// clip / iterator -> to_list / collect\nmaterialized :: nums.to_list()\n\n// compact -> filter\nnonzero :: nums.filter((n: Int) => (n != 0)).to_list()\n\n// next -> step with a for-loop or the lazy adapters instead of a\n// hand-held cursor\nloop n, nums {\n    print(n)\n}"
+          "detail": "None of the six cuts any friction. The five synonyms rename calls that are already one short method under the canonical name, so shipping them saves zero keystrokes and doubles what a reader must learn for each capability. next would add a second, stateful way to consume a sequence beside the for-loop and the lazy adapters. Every workflow next serves already has a one-call route: chunk for pairwise reads, take and skip for bounded steps, a loop for walking.",
+          "technical": "Synonym declines: fill/cycle_n/duplicate -> Iter.repeat(n). tostring -> Iter.join(sep). clip/iterator -> Iter.to_list()/collect(). compact -> Iter.filter(f).\n\nConsumption-model decline: next. Jet's for-loop and iterator adapters consume a full Iter value each time; there is no live cursor object a caller holds and advances by hand. Adding next(self) would need a second, stateful iterator protocol running beside the existing one — a second mechanism for the same job, unlike the one-mechanism spellings above.",
+          "code": "nums :: [1, 2, 3, 4, 5]\n\n// fill / cycle_n / duplicate -> repeat\nfive_pairs :: nums.repeat(2).to_list()\n\n// tostring -> join\nline :: nums.join(\", \")\n\n// clip / iterator -> to_list / collect\nmaterialized :: nums.to_list()\n\n// compact -> filter\nnonzero :: nums.filter((n: Int) => (n != 0)).to_list()\n\n// next -> pairwise reads are one chunk call, no cursor needed\npairs :: nums.chunk(2).to_list()\n\nloop n, nums {\n    print(n)\n}"
         },
         {
           "key": "B",
           "name": "Ship all six as new Iter methods",
-          "detail": "Iter grows five methods that duplicate repeat, join, to_list, and filter under new names. It also grows a sixth, next, that adds a stateful cursor object living beside the existing for-loop and lazy-adapter model. Every sequence workflow now has two ways to repeat, render, materialize, and filter text. It also gains a new way to walk a sequence that behaves differently from every other Iter consumer.",
+          "detail": "Iter grows five methods that duplicate repeat, join, to_list, and filter under new names. It also grows a sixth, next, that adds a stateful cursor object living beside the existing for-loop and lazy-adapter model. Every sequence workflow now has two ways to repeat, render, materialize, and filter. It also gains a new way to walk a sequence that behaves differently from every other Iter consumer.",
           "technical": "fill, cycle_n, and duplicate each ship as one more case in Iter's method table. Every one calls the same repeat logic repeat already uses.\n\ntostring ships as a second text-rendering method beside join. clip and iterator ship as two more spellings of to_list and collect. compact ships as filter with a fixed predicate.\n\nnext ships as a new stateful method with a held cursor value and a new Prelude function. It also needs matching AOT, JIT, and interpreter lowering that mutates and returns that cursor across calls. No other Iter method has this shape.",
           "code": "nums :: [1, 2, 3, 4, 5]\n\nfive_pairs := nums.fill(2)\nline := nums.tostring()\nmaterialized := nums.clip()\nnonzero := nums.compact()\n\nit := nums\nfirst := it.next()\nsecond := it.next()"
         }
@@ -128215,14 +128410,14 @@
       ],
       "rec": "A",
       "recommendation": {
-        "why": "Five of the six names already reach a working answer through repeat, join, to_list/collect, or filter. The sixth asks for a stateful cursor Jet's Iter model does not use. Declining keeps one path per capability and keeps the for-loop and lazy adapters as the only way to walk a sequence, which is what I8 asks for.",
+        "why": "Friction in Jet shrinks in proportion to frequency, and every operation these six names cover is already one short call under its canonical name. A synonym cuts nothing and grows the beginner surface. next would buy a second consumption model whose workflows already have one-call routes.",
         "whyNot": [
           {
             "key": "B",
-            "reason": "Shipping all six gives Iter five duplicate spellings of repeat, join, to_list, and filter, plus a stateful cursor method that behaves unlike every other Iter consumer."
+            "reason": "Shipping the six saves no keystrokes anywhere, since repeat, join, to_list, and filter are already the same length. It adds five duplicate names to learn plus a stateful cursor unlike every other Iter consumer."
           }
         ],
-        "tradeoff": "A programmer who expects next() by muscle memory from Python, or fill/compact/tostring/clip by muscle memory from another language, has to write one call to an existing method instead."
+        "tradeoff": "A programmer arriving with fill, compact, tostring, clip, or next as muscle memory looks up the canonical name once. If a stepping workflow ever appears with no one-call route, the answer is a new adapter, not a cursor."
       },
       "hybrid": null,
       "ballotMode": "full",
@@ -128230,14 +128425,16 @@
       "reviewPasses": {
         "base": "The first draft grouped the six names into a synonym set (four names already answered by repeat, join, to_list, or filter) and a model-mismatch case (next), recommending decline for both groups.",
         "boilOcean": "The breadth pass checked whether next could ship as a read-only peek instead of a full stateful cursor. A peek still needs somewhere to remember the last position between calls, which is the same held-cursor problem, so the finding stood.",
-        "hybrid": "A hybrid shipping only the four synonym names as thin aliases was tested and dropped. An alias is still a second spelling for one capability, which I8 already rules out elsewhere in this ledger sweep.",
+        "hybrid": "A hybrid shipping the synonym names as thin aliases was tested and dropped. An alias saves no keystrokes, since the canonical call is the same length, so it fails the friction-per-frequency test while doubling the names a beginner must learn.",
         "cooperative": "Steelmanning option B: a newcomer typing fill, compact, tostring, clip, or next by muscle memory from another language would find it immediately instead of detouring to repeat, filter, join, or a for-loop.",
-        "adversarial": "The adversarial pass asked whether declining next leaves a real workflow stranded. Every consumption pattern the six names cover (materialize, render, filter, repeat, and manual stepping) already has one working route in Jet, so no workflow is left without an answer."
+        "adversarial": "The adversarial pass asked whether declining next leaves a real workflow stranded. Every pattern the six names cover already has one working route — pairwise stepping is one chunk call — so no workflow is stranded."
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-08-06T23:54:43.079Z"
+      "status": "ratified",
+      "created": "2026-08-06T23:54:43.079Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-08-07"
     },
     {
       "id": "D-CORESURF-SMALL1",
@@ -128245,7 +128442,7 @@
       "group": "stdlib",
       "title": "The small-cluster ledger's 75 remaining names: decline or ship anyway",
       "gist": "Whether Jet adds 75 competitor names across 15 small modules that a check already found a working route for.",
-      "lesson": "Card #1481 checked 81 rows the surface ledger flagged as missing across 17 small modules. Four were real gaps and now ship. The other 75 already have a working Jet route. Four reasons repeat: already shipped under another spelling, a duplicate of an existing mechanism, a name from an unrelated package, or out of scope by design.",
+      "lesson": "Card #1481 checked 81 rows the surface ledger flagged as missing across 17 small modules. Four were real gaps and now ship. The other 75 already have a working Jet route. Two lenses grade every row. First, frequency: does declining tax a path real code takes often? Second, name quality: is Jet's existing spelling actually the better API? Where a competitor's spelling is better, Jet replaces its own name outright — it never keeps two.",
       "explainer": "",
       "story": "Priya ports a Go service to Jet. She reaches for sync.Lock, testing.Run, and reflect.Set out of habit, and cannot find any of them under core.sync, core.testing, or core.reflect. Each time the missing name turns out to already have a working Jet answer, once she knows where to look.",
       "inWild": "// Priya's first instinct, from Go:\n// use core.sync as sync\n// lk := sync.Lock.new()\n// lk.lock()\n\n// core.sync in Jet is CRDT data sync (SyncMap/SyncList/SyncCounter),\n// not OS locks. Jet's concurrency-safety story is message passing:\nuse core.tasks as tasks\nch := tasks.channel()\n// no shared mutable state to lock in the first place",
@@ -128253,8 +128450,8 @@
       "options": [
         {
           "key": "A",
-          "name": "Decline all 75, name the existing route for each",
-          "detail": "Every one of the 75 names already reaches a working result in Jet today, under a name the ledger's word-for-word match missed. Shipping a second spelling for an already-working capability breaks I8's one-mechanism rule. It also gives every reader two ways to reach the same place, one of them new and unfamiliar.",
+          "name": "Decline all 75; keep whichever spelling is the better API",
+          "detail": "Every one of the 75 names already reaches its result in equal or fewer keystrokes under Jet's canonical name, so declining taxes no frequent path. The only cost is one docs lookup, and the core-library reference names the existing route beside each declined name.\n\nEach pair was also judged on merit: had a competitor spelling been the better API, Jet's would be replaced outright, never aliased. In this sweep the current names win or tie every head-to-head: v4 over uuid4, query_one over first, next over read, float_range over uniform.",
           "technical": "core.sync (12 names: broadcast, clear, lock, put, rlock, signal, trylock, unlock, wait, thread, timer, locked). Jet's core.sync is CRDT data sync — SyncText, SyncCounter, SyncMap, SyncList. The competitor evidence is Go, Python, and Ruby's sync or threading package: Mutex, RWMutex, Cond, Event. That is a different domain; it only shares the word \"sync\". Jet's safety design omits raw shared-memory locks. core.tasks owns concurrency instead. put duplicates the already-shipped map_set.\n\ncore.encoding.xml (9 names: close, copy, end, flush, indent, name, nodetype, write, clear). close, flush, and write already ship as XMLWriter.finish, flush, and write. end, indent, name, and nodetype ask for incremental SAX-style tag control. Jet parses every format into one shared DataTree value instead, by design (D-SERDE13=B). copy and clear each have one witness language and no consistent competitor meaning.\n\ncore.process (8 of 9 names: id, kill, wait, spawn, output, success, exitcode, start). id, kill, wait, spawn, output, and success already ship on ProcessChild, ProcessResult, and ProcessSpec. exitcode already ships as ProcessResult.code. start already ships as ProcessSpec.spawn(). Only exited, a non-blocking poll, was a real gap. It ships with this card.\n\ncore.db (8 names: close, commit, name, first, raw, rollback, copy, count). close, commit, and rollback already ship on DBConnection and DBScope. first already ships as query_one(). count duplicates query(...).len(). raw would open an unaudited escape from the portable DB-plugin-wire protocol every backend goes through. name and copy have no consistent competitor meaning.\n\ncore.testing (7 names: benchmark, fail, main, run, runtests, skip, stop). Jet already defines and runs tests through #Test and #Bench marker blocks, plus the jet test and jet bench commands. Every one of these 7 names asks for that same capability, spelled as a function call instead of a marker.\n\ncore.reflect (8 names: clear, copy, equal, get, set, getfile, getmodule, loadfile). reflect.of(x) is deliberately a read-only structural snapshot. It keeps no runtime type registry and allows no field write by string name (I1). get, set, clear, copy, and equal would all need that registry. getfile, getmodule, and loadfile ask for dynamic runtime code loading, which a compiled, ahead-of-time language does not do.\n\ncore.http (4 names: cancelrequest, copy, first, postform). first already ships as HTTPHeaders.first. postform already ships as the request builder's .form(...) call. cancelrequest duplicates the deadline every request already takes. copy has one witness language.\n\ncore.tls (4 of 6 names: start, handshake, verifyhostname, copy). start already ships as tls.client(). handshake happens inside client() automatically, by design; there is no separate step. verifyhostname is mandatory already, visible as TLSPeerIdentity.verified_server_name; Jet gives no way to turn it off. copy has one witness language. The other 2, ciphersuites and tlsversion, are real gaps needing a native TLS-bridge change; they move to a follow-up card, not this ballot.\n\ncore.uuid (3 of 5 names: join, uuid1, uuid4). uuid4 already ships as v4. uuid1 is MAC-address-based, an older and weaker format; Jet declines it in favor of the already-shipped, safer v7. join matches no real UUID operation in any compared language. parse and v5 were real gaps. They ship with this card.\n\ncore.binary (2 names: pipe, readchar). JetReader is a fixed in-memory byte-buffer parser (D-SHIFT1), not a stream. pipe asks for a stream-to-stream copy, a different mechanism. readchar asks for character decoding, which belongs to core.text's Cursor, not a byte reader.\n\ncore.encoding.csv (3 names: flush, read, fieldsizelimit). flush already ships as CSVWriter.flush. read already ships as CSVReader.next, matching every other stream reader's name. fieldsizelimit already ships as the shared EncodingLimits.max_item_bytes, one cross-format limit instead of a CSV-only one.\n\ncore.random (2 names: random, uniform). Both already ship, as float() and float_range(a, b).\n\ncore.args (2 names: parse, parseargs). Both already ship as ArgsSpec.parse(argv), Jet's one declarative CLI-parsing route.\n\ncore.encoding.json (1 name: dump). Already reachable as to_string() plus a file write, or the streaming JSONWriter.\n\ncore.mem (2 names: replace, copy). replace duplicates the take operator (^) plus assignment, which already swaps a value out. copy has one witness language and duplicates plain assignment for Copy values.",
           "code": "// core.testing — Go: t.Run/t.Skip/t.Fail. Jet: markers, not calls.\n#Test(\"parses input\") {\n    .skip(\"needs fixture\")\n    require(parse(\"x\") == 1)\n}\n// no testing.run()/.skip()/.fail() to add — `jet test` already runs this\n\n// core.uuid — Python: uuid.uuid4(). Jet already has v4().\nid := uuid.v4()          // uuid4 declines: same call, existing name\n\n// core.encoding.csv — Go: reader.Read(). Jet already has .next().\nrow := reader.next() ?? panic(\"eof\")   // read declines: same call\n\n// core.reflect — Go: reflect.ValueOf(x).Set(y). Jet's reflect.of is read-only.\nv := reflect.of(config)\nprint(v.display())        // no v.set(y) — I1: no field write by string name\n\n// core.db — Go: rows.First(). Jet already has query_one().\nrow := db.query_one(\"select 1\") ?? panic(\"none\")   // first declines\n\n// core.mem — Rust: mem::replace(&mut x, y). Jet's take operator does this.\nold := x^\nx = new_value              // replace declines: same result, existing operator"
         },
@@ -128280,11 +128477,11 @@
       ],
       "rec": "A",
       "recommendation": {
-        "why": "Every one of the 75 names already reaches a working result in Jet, once a reader knows the existing spelling or module boundary. Declining keeps one mechanism per capability (I8) and keeps reflection and TLS verification safe by construction (I1), instead of teaching two routes to the same place.",
+        "why": "Declining costs no friction anywhere: every one of the 75 results is already equal or fewer keystrokes under Jet's canonical name. The sweep's four real gaps ship with the card, and the two real TLS gaps moved to a follow-up card, so real friction still gets fixed. Safety declines (raw locks, reflect writes) keep the beginner default safe: concurrency routes through core.tasks, and reflection stays read-only by design.",
         "whyNot": [
           {
             "key": "B",
-            "reason": "Shipping a second spelling for an already-working capability gives every reader two names to learn for one result. For core.sync and core.reflect it also reopens raw locks and string-keyed field writes that Jet's safety design deliberately left out."
+            "reason": "It gives every reader two names for one result while cutting no friction, since the existing call is already as short. For core.sync and core.reflect it also reopens raw locks and string-keyed field writes that Jet's safety design deliberately left out."
           }
         ],
         "tradeoff": "A reader who reaches for a familiar name from Go, Python, or Ruby and does not find it must learn Jet's existing spelling once. docs/reference/core-library.md names the existing route right next to every declined name."
@@ -128295,14 +128492,312 @@
       "reviewPasses": {
         "base": "The first draft grouped the 75 names by module and matched each to its existing Jet route, recommending a decline with the route named for every one.",
         "boilOcean": "The breadth pass checked whether any module deserved a partial ship — for example shipping core.sync's raw lock as an expert escape hatch. Declined: Jet's whole concurrency story routes through core.tasks, and a second raw-lock mechanism would fork that story for one competitor package.",
-        "hybrid": "A hybrid that ships the pure, easy names (uuid4, random, uniform) while declining the rest was tested and dropped. Every one of those is already reachable under its Jet name today, so shipping a synonym is the same duplication as any other name on the list, just smaller to build.",
+        "hybrid": "After the owner's philosophy question, every pair was regraded by frequency and by name quality, and no declined name beats its Jet route on either scale. The regrade also fixed the standing rule: when a competitor's spelling is the better API, Jet renames its own, never aliases.",
         "cooperative": "Steelmanning option B: a beginner arriving from Go or Python reaches for the name their prior language taught them, and if that name does not exist, they have to search. That friction is real for exactly one lookup per name, once.",
         "adversarial": "Shipping reflect.set or a raw core.sync lock as an audited #Unsafe escape hatch was tested and dropped. No request for either has ever reached the backlog, so it would be speculative scope, not a real gap."
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-08-07T00:10:41.688Z"
+      "status": "ratified",
+      "created": "2026-08-07T00:10:41.688Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-08-07"
+    },
+    {
+      "id": "D-LIB-EXPORT1",
+      "cardId": "c0pwzvbh",
+      "group": "tooling",
+      "title": "What a Library output hands to another language",
+      "gist": "Whether Jet can be compiled into a library that C, Python, or Swift calls directly.",
+      "lesson": "D-LIB-REUSE1=B already settled how Jet reuses Jet. Sealed package objects restore from cache, and no binary layout is promised. It said nothing about the other direction. Today nothing lets a C or Python program call into compiled Jet code. Jet's foreign-function work all runs inbound: Jet calls C, Python, Dart, and Rust through generated bridges. This choice decides whether the arrow ever points outward, and through which door.",
+      "explainer": "",
+      "story": "Marcus maintains a log parser for a data team. He rewrote it in Jet and it is four times faster. The team's pipeline is Python and will stay Python for years. He wants to ship the parser as something their Python code imports, without rewriting the pipeline or standing up a server.",
+      "inWild": "# what Marcus wants to hand his team\nimport flightlog\n\nrecords = flightlog.parse(open(\"gate.log\", \"rb\").read())\nprint(len(records), \"records\")\n\n# what he can do today: nothing.\n# Jet reads C, Python, Dart and Rust.\n# Nothing reads Jet.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "WebAssembly is the only door out",
+          "detail": "Library stays a Jet-to-Jet output. Any other language reaches Jet through the sandboxed WebAssembly component Jet already builds. One export path, one safety story, no new memory contract. Marcus ships a component, and his team loads it with a Python WebAssembly runtime.",
+          "technical": "Reuses target: plugin (D-PLUGIN1=B, D-DEP-WASM1=A) and its ApiFreeze-frozen pub surface (D-PLUGIN-EXPORT1=A). No native artifact, no header, no calling convention of Jet's own. Host capabilities stay at zero, so the guest cannot open files or sockets.",
+          "code": "# pkg.jet\nname: \"flightlog\"\ntarget: plugin\n\npub fn parse(bytes: [Byte]) -> [Record] { … }\n\n$ jet build\n  built target/flightlog.wasm (component)\n\n# Python side needs a wasm runtime and a byte copy per call\nimport wasmtime"
+        },
+        {
+          "key": "B",
+          "name": "Native library plus a C header",
+          "detail": "Library can also produce a static and a shared native library, with a generated C header beside it. The exported surface is the entry module's pub items. Any language with a foreign-function interface can call it. Marcus gets a .so and a .h, and writes the Python wrapper himself.",
+          "technical": "The boundary uses the C calling convention, not a Jet ABI. Jet promises nothing about its own layout, so the no-stable-ABI stance under D-LIB-REUSE1=B is unaffected. The exported surface freezes through Sema::ApiFreeze, so a breaking change is a diagnostic. Ownership of returned buffers is stated in the header and enforced in sema.",
+          "code": "# pkg.jet\noutputs: .{ core: .Library.{ native: true, entry: Flightlog } }\n\n$ jet build\n  built target/libflightlog.so, libflightlog.a, flightlog.h\n\n// flightlog.h\ntypedef struct FlightlogRecords FlightlogRecords;\nFlightlogRecords* flightlog_parse(const uint8_t* bytes, size_t len);\nvoid flightlog_records_free(FlightlogRecords*);"
+        },
+        {
+          "key": "C",
+          "name": "Native library plus generated bindings per language",
+          "detail": "Everything in the header option, plus Jet generates the caller-side binding file for each language you name. Marcus writes no wrapper. He names python in the output, and jet build produces the module his team imports. The same generator that reads foreign libraries today runs in reverse.",
+          "technical": "Mirrors the ratified inbound binder direction (D-FFI-UNIFY1=A, D-FFI-PY1=A) with one shared surface description. The native artifact and the C header are still produced, so a language with no generator is never blocked. Binding files are build outputs, never checked-in source. The frozen pub surface is the single source for header, bindings, and version check.",
+          "code": "# pkg.jet\noutputs: .{\n  core: .Library.{ native: true, entry: Flightlog, bindings: [c, python, swift] }\n}\n\n$ jet build\n  built target/libflightlog.so, flightlog.h\n  built target/bindings/flightlog.py, Flightlog.swift\n\n# Marcus's team, unchanged pipeline\nimport flightlog\nrecords = flightlog.parse(data)"
+        },
+        {
+          "key": "D",
+          "name": "Cross a process boundary, never a memory boundary",
+          "detail": "Jet never links into a foreign process. Other languages reach Jet by running it as a service and calling it. Jet generates the client for the caller's language. No memory contract ever crosses a language line, so no foreign bug can corrupt Jet's heap. Marcus ships a small service and a Python client.",
+          "technical": "Reuses the ratified Service output and service topology (D-SERVICE1=D, D-ECO-OUTPUT-KINDS1=A). Transport is local by default. No header, no calling convention, no shared allocator. Every call pays serialisation and a context switch.",
+          "code": "# pkg.jet\noutputs: .{ api: .Service.{ entry: serve, clients: [python] } }\n\n$ jet build\n  built target/flightlog-service\n  built target/clients/flightlog.py\n\n# Python side\nimport flightlog\nrecords = flightlog.connect().parse(data)   # over a local socket"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Emits staticlib and cdylib with a C boundary. Callers get a header, and each ecosystem builds its own wrapper generator on top, such as PyO3 or cbindgen.",
+          "code": "[lib]\ncrate-type = [\"cdylib\", \"staticlib\"]"
+        },
+        {
+          "lang": "Go",
+          "note": "c-archive and c-shared build modes generate the header for you, but the runtime must start before the first call.",
+          "code": "go build -buildmode=c-shared -o libparse.so"
+        },
+        {
+          "lang": "Swift",
+          "note": "Exports to C only through explicit annotations, and its own stable interface stays Swift-to-Swift.",
+          "code": "@_cdecl(\"parse\") public func parse(_ p: UnsafePointer<UInt8>) -> Int32"
+        },
+        {
+          "lang": "Zig",
+          "note": "export fn produces a C symbol, and the generated header is a first-class build output rather than a side tool.",
+          "code": "export fn parse(ptr: [*]const u8, len: usize) callconv(.C) i32 { … }"
+        }
+      ],
+      "rec": "C",
+      "recommendation": {
+        "why": "Generated bindings are the only option where the caller writes no glue. It also finishes an arrow Jet already draws in the other direction, using the same frozen public surface for the header, the bindings, and the version check.",
+        "whyNot": [
+          {
+            "key": "A",
+            "reason": "A WebAssembly component forces the caller to adopt a runtime and copy bytes across the guest boundary. Marcus cannot hand his team something they simply import."
+          },
+          {
+            "key": "B",
+            "reason": "A raw header stops one step short of usable. Every ecosystem then writes its own wrapper generator, which is the same work done many times outside Jet."
+          },
+          {
+            "key": "D",
+            "reason": "A process boundary adds a socket, a lifecycle, and serialisation cost to a call that was a function. It also cannot serve a caller who must run in one process, such as a game host."
+          }
+        ],
+        "tradeoff": "Jet takes on the ownership rules at the boundary: who frees a returned buffer, and what a foreign caller may hold across calls. That contract is stated in the exported surface and checked in sema, so it is a design cost, not a safety hole."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared no native export, a C header, generated bindings, and a service boundary. It recommended generated bindings because the caller writes no glue and the inbound binder machinery already exists.",
+        "boilOcean": "The breadth review also tested a Jet-specific foreign protocol, a C++ class surface, and a Python-only special case. All three folded into the bindings option as generator targets rather than separate owner choices.",
+        "hybrid": "The hybrid review confirmed the bindings option already contains the header option, so both artifacts ship together and a language with no generator is never blocked. It also kept the WebAssembly path alive for untrusted callers, since that path is already ratified law.",
+        "cooperative": "The cooperative review strengthened each option: WebAssembly gives one safety story, a header is the widest common denominator, and a service isolates faults completely. Each remains the strongest choice for its own audience.",
+        "adversarial": "The adversarial review attacked layout leakage and buffer ownership. The boundary uses C's frozen convention rather than Jet's, and the exported surface must state ownership so sema can check it."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-08-07T00:36:29.108Z",
+      "outcome": "C",
+      "ratifiedAt": "2026-08-07"
+    },
+    {
+      "id": "D-LIB-DYNTRUST1",
+      "cardId": "c0pwzvbh",
+      "group": "safety",
+      "title": "What a loaded Jet library is allowed to do",
+      "gist": "The powers a Jet library gets when a running Jet program loads it.",
+      "lesson": "D-LIB-REUSE1=B ratified that a Jet program can load a Jet library while it runs. Both sides must come from the same compiler version, and a mismatch is a checked error. It did not say what the loaded code may then do. Jet already has a second way to load code: a sandboxed WebAssembly plugin with zero host powers, and no gate to widen that. Two ways to load code need one clear boundary between them.",
+      "explainer": "",
+      "story": "Rosa ships a flight-sim game in Jet. She wants community aircraft mods that run at full speed inside her render loop. A mod needs to read its own model and texture files. It must never read her players' save files or open a network socket she did not expect.",
+      "inWild": "// Rosa's game host\nmods := Mod.load_all(\"./mods\")?\n\nfor mod in mods {\n    mod.on_frame(dt)          // runs in the render loop, 90 times a second\n}\n\n// a community mod\npub fn on_frame(dt: Float) {\n    texture := File.read(\"./mods/f16/skin.png\")?   // should this work?\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Declared effects, granted at load",
+          "detail": "A loadable library declares what it does, in the same way any Jet package does. The host states what it grants when it loads one. A library asking for more than the host grants is refused before it runs, with a clear error. Rosa grants read access to the mods folder, and nothing else.",
+          "technical": "Reuses the existing package effect declaration and effect checking (the machinery behind E1258). The compiler already proves a package cannot use an effect it did not declare, so the declaration in the artifact is enforceable, not advisory. Load compares the artifact's declared effect set against the host's grant, then refuses or proceeds. Artifact provenance and signature verification come from D-JPK-CACHEAUTH1=D.",
+          "code": "// the mod declares what it needs\neffects: .{ read: [\"./mods/f16\"] }\n\n// Rosa's host grants a narrower or equal set\nmods := Mod.load_all(\"./mods\", grant: .{ read: [\"./mods\"] })?\n\n// a mod that asks for more\nerror[E1xxx]: mod 'skyhawk' declares effect 'net', which this host does not grant\n  granted here: read\n  fix: remove the effect, or widen the grant at the load site"
+        },
+        {
+          "key": "B",
+          "name": "Loading native code is an audited trust decision",
+          "detail": "Loading a Jet library is a trust act the host author signs, in an audited region with a written reason. The loaded code then runs with the host's full powers. Untrusted third-party code must use the sandboxed WebAssembly plugin instead. Rosa writes one audited line, and accepts every mod she ships.",
+          "technical": "Spelled like the existing audited region: an explicit block with a required reason string, which appears in audit output. No effect comparison happens at load. The sandboxed plugin path stays the only route for code the host author has not vetted.",
+          "code": "#Trusted(\"first-party mods, reviewed before release\") {\n    mods := Mod.load_all(\"./mods\")?\n}\n\n// audit output\n$ jet audit\n  1 trusted load site: src/game.jet:44 — \"first-party mods, reviewed before release\""
+        },
+        {
+          "key": "C",
+          "name": "Same powers as linking",
+          "detail": "A loaded library behaves exactly like a library linked at build time. Same process, same powers, no gate and no ceremony. Whoever loads it takes responsibility. Rosa writes one line and every mod can do whatever her game can do.",
+          "code": "mods := Mod.load_all(\"./mods\")?\n\n// nothing stops this mod\npub fn on_frame(dt: Float) {\n    saves := File.read(\"~/.local/share/skyhigh/save1.dat\")?\n    Http.post(\"https://collect.example\", saves)?\n}"
+        },
+        {
+          "key": "D",
+          "name": "Same contract as the sandboxed plugin",
+          "detail": "A loaded Jet library gets exactly what a WebAssembly plugin gets: no host powers at all. The host passes in every value the library needs, and takes back every result. The two loading paths then differ only in speed and portability, never in what code may do. Rosa hands each mod its textures and gets back draw commands.",
+          "technical": "One capability law across both substrates, matching the ratified zero-capability plugin contract and its E1258 refusal to widen. All input and output crosses the boundary as values. No ambient file, network, process, or clock access exists inside a loaded library.",
+          "code": "// the host reads the files, the mod never does\nassets := File.read_dir(\"./mods/f16\")?\nmod := Mod.load(\"./mods/f16\", assets)?\n\ndraws := mod.on_frame(dt)      // pure in, pure out\n\n// inside the mod\nerror[E1258]: this library uses effect 'read'; loadable libraries have no host capabilities"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "C and POSIX",
+          "note": "dlopen gives the loaded object every power the process holds. Nothing is declared and nothing is checked.",
+          "code": "void* h = dlopen(\"./mod.so\", RTLD_NOW);"
+        },
+        {
+          "lang": "WebAssembly components",
+          "note": "A guest gets only the imports the host passes in. This is the model Jet's ratified plugin target already follows.",
+          "code": "// host chooses which imports exist; the guest cannot reach anything else"
+        },
+        {
+          "lang": "Java",
+          "note": "The security manager tried to police loaded code at run time with a policy file. It was deprecated for removal because run-time policy proved unenforceable in practice.",
+          "code": "grant codeBase \"file:./mods/-\" { permission java.io.FilePermission \"./mods/-\", \"read\"; };"
+        },
+        {
+          "lang": "Lua in games",
+          "note": "Mod hosts hand the guest a restricted environment table. Enforcement is a convention of the host, not the language.",
+          "code": "setfenv(mod_chunk, restricted_env)"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Jet's compiler already proves a package cannot use an effect it did not declare. That turns the declaration inside an artifact into an enforceable fact, so the host can grant a precise set instead of choosing between all powers and none.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "An audited trust act is all-or-nothing at the load site. It teaches hosts to sign one blanket reason rather than say what a mod may do."
+          },
+          {
+            "key": "C",
+            "reason": "A mod can then read save files and open sockets the host never intended, and nothing in the artifact or the audit output says so."
+          },
+          {
+            "key": "D",
+            "reason": "Zero powers blocks the ordinary case of a mod reading its own assets, and it copies the WebAssembly contract without adding anything the WebAssembly path lacks."
+          }
+        ],
+        "tradeoff": "The grant is only as good as the artifact's provenance, because a file that was not built by this compiler could claim anything. That is acceptable because the load already verifies compiler identity, digest, and signature before mapping anything."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared granted effects, an audited trust act, unrestricted loading, and full sandbox parity. It recommended granted effects because Jet's effect checking makes a declared set enforceable rather than advisory.",
+        "boilOcean": "The breadth review also tested a signed publisher allowlist, a per-call permission prompt, and a separate process per mod. The first folded into provenance checks, and the other two were dropped as run-time policy Java already proved unworkable.",
+        "hybrid": "The hybrid review tested granted effects combined with an audited region for hosts that want no gate. The audited form collapses into a grant of everything, so it needs no separate spelling.",
+        "cooperative": "The cooperative review strengthened each option on its own terms. Unrestricted loading is simplest, sandbox parity gives one law for both substrates, and an audited act names a human behind every load.",
+        "adversarial": "The adversarial review attacked forged effect declarations and stale grants. Compiler identity, digest, and signature verification happen before mapping, so a forged artifact fails the pin rather than the grant."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-08-07T00:37:26.789Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-08-07"
+    },
+    {
+      "id": "D-LIB-NAME1",
+      "cardId": "c0pwzvbh",
+      "group": "syntax",
+      "title": "How a package asks for a loadable library, and what it is called",
+      "gist": "The word for a loadable Jet library artifact, and where a person asks for one.",
+      "lesson": "D-LIB-REUSE1=B ratified that Jet can build a library another Jet program loads while it runs. Nothing yet says how a person asks for one, or what the file is called. Jet already has nine closed output kinds, and Library is one of them. The manifest vocabulary is also settled: a package states its facts in text, and commands act on them. This choice fits the new artifact into that vocabulary before any parser work starts.",
+      "explainer": "",
+      "story": "Rosa is setting up her flight-sim game for community mods. She opens a mod package's manifest to say what it should build. She wants one obvious line, and she wants a reader of that manifest to know at a glance that this package ships something loadable.",
+      "inWild": "# a community mod package, today\nname: \"skyhawk\"\nversion: \"0.3.1\"\ndeps: .{ simkit: \"^4\" }\noutputs: .{ ??? }        # nothing here means \"a thing Rosa's game loads\"\n\n# and on the command line\n$ jet build\n  built target/skyhawk          # an executable. not what Rosa needs.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "A field on the Library output",
+          "detail": "Library already exists as an output kind. A field on it says this library is also loadable at run time. No new word enters the language, and a reader sees the fact in the manifest. The file is called skyhawk.jetlib.",
+          "technical": "Adds one manifest field to the ratified Library output payload under D-ECO-OUTPUT-PAYLOAD1=A. The closed nine-kind set from D-ECO-OUTPUT-KINDS1=A stays closed. No token, keyword, or sigil enters Syntax.rs, so I7 needs only this decision identifier. Suffix candidates for the owner: .jetlib, .jlib, .jetso, .pylon.",
+          "code": "# pkg.jet\nname: \"skyhawk\"\noutputs: .{ mod: .Library.{ entry: Skyhawk, loadable: true } }\n\n$ jet build\n  built target/skyhawk.jetlib (Jet 1.4.2)\n\n# the host\nmod := Mod.load(\"./mods/skyhawk.jetlib\")?"
+        },
+        {
+          "key": "B",
+          "name": "Its own output kind, named for the mount",
+          "detail": "A loadable library is a different thing from a library you link, so it gets its own name in the closed set. An aircraft carries an external store on a pylon, and a pylon is cleared for one airframe. That matches a file cleared for one compiler version. The file is called skyhawk.pylon.",
+          "technical": "Adds a tenth kind to the closed Output set, which D-ECO-OUTPUT-KINDS1=A explicitly allows by ratified addition. Kind-name candidates for the owner: Pylon, Hardpoint, Jetway, Pod, Attach. Matching suffix follows the chosen noun.",
+          "code": "# pkg.jet\nname: \"skyhawk\"\noutputs: .{ mod: .Pylon.{ entry: Skyhawk } }\n\n$ jet build\n  built target/skyhawk.pylon (Jet 1.4.2)\n\n# the host\nmod := Mod.load(\"./mods/skyhawk.pylon\")?\n\n# a stale file\nerror[E1xxx]: skyhawk.pylon was built by Jet 1.4.1; this program uses Jet 1.4.2\n  fix: rebuild the mod with the same Jet version"
+        },
+        {
+          "key": "C",
+          "name": "A build flag, nothing in the manifest",
+          "detail": "The package says nothing. Whoever builds it asks for the loadable form on the command line. This keeps the manifest vocabulary untouched, and lets one package be built either way. The file is called skyhawk.jetso.",
+          "technical": "One new value on an existing build flag, with no manifest field and no new output kind. The fact lives only in a build invocation, so a reader of the package cannot see it. Suffix candidates for the owner: .jetso, .jso, .jetlib.",
+          "code": "# pkg.jet — unchanged\nname: \"skyhawk\"\noutputs: .{ mod: .Library.{ entry: Skyhawk } }\n\n$ jet build --emit shared\n  built target/skyhawk.jetso (Jet 1.4.2)\n\n# and Rosa's build script must remember the flag, forever\n$ jet build          # silently builds the linkable form instead"
+        },
+        {
+          "key": "D",
+          "name": "Any library is loadable, with no declaration",
+          "detail": "Nothing is declared and no flag is passed. Any Library output can be loaded, and the compiler produces the loadable form when a host asks for it. The least ceremony possible. A package cannot state that it is not meant to be loaded.",
+          "technical": "The loadable artifact becomes a derived output of every Library, produced on demand and cached under the same artifact identity. No manifest field, no flag, no new kind. Package authors lose the ability to refuse run-time loading.",
+          "code": "# pkg.jet — unchanged, nothing added ever\nname: \"skyhawk\"\noutputs: .{ mod: .Library.{ entry: Skyhawk } }\n\n# the host names a package, not a file\nmod := Mod.load(\"skyhawk\")?\n  # builds or restores the loadable form on first use"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "The manifest declares the artifact shapes, and the file suffix follows the platform.",
+          "code": "[lib]\ncrate-type = [\"dylib\"]"
+        },
+        {
+          "lang": "Go",
+          "note": "A build mode flag decides, and nothing in the module file records the choice.",
+          "code": "go build -buildmode=plugin -o skyhawk.so"
+        },
+        {
+          "lang": "Swift",
+          "note": "The package manifest names the product and its kind explicitly.",
+          "code": ".library(name: \"Skyhawk\", type: .dynamic, targets: [\"Skyhawk\"])"
+        },
+        {
+          "lang": "Erlang",
+          "note": "Loadable code is the normal unit and needs no separate declaration, which is the closest match to the no-declaration option.",
+          "code": "code:load_file(skyhawk)."
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A field on Library keeps one word for one concept and keeps the ratified nine-kind set closed. The fact stays in the manifest where a reader finds it, which is the settled rule that facts live in text.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A tenth kind splits one concept into two words. Every reader must then learn when a library stops being a Library."
+          },
+          {
+            "key": "C",
+            "reason": "The manifest no longer says what the package ships. The fact survives only in build scripts, which is exactly where facts get lost."
+          },
+          {
+            "key": "D",
+            "reason": "Every library silently becomes a loading target, and an author has no way to refuse. Run-time loading is a real surface and should be stated."
+          }
+        ],
+        "tradeoff": "The word Library then covers both a package you link and a file you load. That is acceptable because both are the same code, and the field says which artifacts the build produces."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared a field on Library, a new output kind, a build flag, and no declaration at all. It recommended the field because it adds no new word and keeps the fact in the manifest.",
+        "boilOcean": "The breadth review also tested a marker on the entry module, a separate loadable manifest file, and a naming convention by folder. All three moved the fact away from the output list without making it clearer.",
+        "hybrid": "The hybrid review tested a field plus an override flag for one-off builds. The flag adds a second source for one fact, so the field alone stands.",
+        "cooperative": "The cooperative review strengthened each option. A dedicated noun reads well aloud, a flag keeps one package flexible, and no declaration is the shortest path for a mod author.",
+        "adversarial": "The adversarial review attacked the field for overloading one word across two artifact shapes. Both shapes come from the same code and the same frozen surface, so one word stays honest."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-08-07T00:38:28.910Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-08-07"
     }
   ],
   "questions": [
@@ -129460,9 +129955,11 @@
       "by": "owner",
       "kind": "question",
       "text": "This misses the philosophies of jet. Minimizes friction proportionally to frequency of use (most common things should be easiest/fastest) and beginner friendliness with magic and ergonomics out of the box but allow full expert control",
-      "status": "open",
-      "answer": "",
-      "created": "2026-08-07T00:06:49.526Z"
+      "status": "answered",
+      "answer": "Agreed, and the ballot is revised. Every name is now weighed by the usage-frequency report (docs/research/corelib-api-usage-frequency-2026-08-06.md), not by a flat rule. New recommended option C ships the high-traffic names directly on String: to_int and to_float (parse-to-number is a dominant string operation, and they chain: line.trim().to_int()) plus match and matches for regex. Each is a spelling of the one existing mechanism (Int.parse, Float.parse, core.regex), so beginners get the zero-ceremony call and experts keep one engine. The rest stay routed: mutation verbs clash with immutable String, and char-level sequence work sits below the frequency line, where one chars() call is proportional friction.",
+      "created": "2026-08-07T00:06:49.526Z",
+      "answeredAt": "2026-08-07",
+      "answeredBy": "fable"
     },
     {
       "id": "q785552p",
@@ -129471,9 +129968,11 @@
       "by": "owner",
       "kind": "question",
       "text": "This misses the philosophies of jet. Minimizes friction proportionally to frequency of use (most common things should be easiest/fastest) and beginner friendliness with magic and ergonomics out of the box but allow full expert control",
-      "status": "open",
-      "answer": "",
-      "created": "2026-08-07T00:08:52.390Z"
+      "status": "answered",
+      "answer": "Agreed, and the ballot is revised. New recommended option C ships Set.sort() and Set.shuffle(), each returning a List. Sorting is a top-tier operation in the usage-frequency report, and dedupe-then-sort is an everyday idiom, so the most common Set step becomes one call. Both are spellings of the existing List mechanism, so no second engine appears. indexof and indexed stay declined for meaning, not purity: a hash Set has no positions, and the number they return silently changes after any add or remove — a beginner trap, not a friction cut. Positions stay on List, where they are real.",
+      "created": "2026-08-07T00:08:52.390Z",
+      "answeredAt": "2026-08-07",
+      "answeredBy": "fable"
     },
     {
       "id": "q8d9qc5s",
@@ -129482,9 +129981,11 @@
       "by": "owner",
       "kind": "question",
       "text": "This misses the philosophies of jet. Minimizes friction proportionally to frequency of use (most common things should be easiest/fastest) and beginner friendliness with magic and ergonomics out of the box but allow full expert control",
-      "status": "open",
-      "answer": "",
-      "created": "2026-08-07T00:09:23.175Z"
+      "status": "answered",
+      "answer": "Applied the frequency lens; the decline survives it, so the ballot now argues from friction, not rule-citing. Five of the six names (fill, cycle_n, duplicate, tostring, clip/iterator, compact) are synonyms of repeat, join, to_list, and filter. The canonical call is already the same length, so shipping them cuts zero friction and only grows what a beginner must learn. next would add a second, stateful consumption model beside loops and adapters, and its workflows already have one-call routes: chunk for pairwise reads, take and skip for bounded steps. If a real stepping workflow ever appears without a route, the answer is a new adapter, not a cursor.",
+      "created": "2026-08-07T00:09:23.175Z",
+      "answeredAt": "2026-08-07",
+      "answeredBy": "fable"
     },
     {
       "id": "q9gvofyg",
@@ -129493,9 +129994,11 @@
       "by": "owner",
       "kind": "question",
       "text": "This misses the philosophies of jet. Minimizes friction proportionally to frequency of use (most common things should be easiest/fastest) and beginner friendliness with magic and ergonomics out of the box but allow full expert control. We want the BEST APIs/surfaces/methods/etc of any language. If we can improve our APIs, then we should do so even if it means updating the existing one",
-      "status": "open",
-      "answer": "",
-      "created": "2026-08-07T00:24:33.288Z"
+      "status": "answered",
+      "answer": "Applied both lenses; ballot revised. Frequency: every one of the 75 already reaches its result in equal or fewer keystrokes under Jet's canonical name, so declining taxes no frequent path — the cost is one docs lookup, and the reference names the route beside each declined name. Best-API: the ballot now commits to your rule — when a competitor's spelling beats ours, we replace ours outright (greenfield), never alias. This sweep's head-to-heads all came out win-or-tie for the current names (v4 vs uuid4, query_one vs first, next vs read, float_range vs uniform). The four real gaps found ship with the card, and the two real TLS gaps have a follow-up card. Locks and reflect writes stay out by the safety design: concurrency routes through core.tasks, and reflection stays read-only.",
+      "created": "2026-08-07T00:24:33.288Z",
+      "answeredAt": "2026-08-07",
+      "answeredBy": "fable"
     }
   ],
   "ideas": [
@@ -129888,6 +130391,314 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-07T00:41:51.564Z",
+      "by": "bd2-carrier",
+      "action": "card.add",
+      "ref": "c0g2j76x",
+      "note": "scope.guard is dropped: the cleanup closure never runs"
+    },
+    {
+      "at": "2026-08-07T00:41:44.866Z",
+      "by": "bd2-carrier",
+      "action": "card.release",
+      "ref": "c0y4zx0d",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-08-07T00:41:30.396Z",
+      "by": "bd2-link",
+      "action": "card.release",
+      "ref": "c0pwzvbh",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T00:41:30.040Z",
+      "by": "bd2-link",
+      "action": "card.update",
+      "ref": "c0pwzvbh",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T00:41:26.543Z",
+      "by": "bd2-link",
+      "action": "card.criteria-meet",
+      "ref": "c0pwzvbh",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T00:41:26.189Z",
+      "by": "bd2-link",
+      "action": "card.update",
+      "ref": "c0pwzvbh",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T00:41:18.351Z",
+      "by": "bd2-link",
+      "action": "card.update",
+      "ref": "c0pwzvbh",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T00:41:08.455Z",
+      "by": "bd2-carrier",
+      "action": "card.criteria-meet",
+      "ref": "c0y4zx0d",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-07T00:39:26.191Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-LIB-NAME1",
+      "note": "A"
+    },
+    {
+      "at": "2026-08-07T00:39:26.191Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0pwzvbh",
+      "note": "#12 snapshots re-blessed"
+    },
+    {
+      "at": "2026-08-07T00:39:26.191Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0pwzvbh",
+      "note": "#11 jet devtools grammars regenerated"
+    },
+    {
+      "at": "2026-08-07T00:39:26.191Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0pwzvbh",
+      "note": "#10 syntax-decisions.md log entry"
+    },
+    {
+      "at": "2026-08-07T00:39:26.191Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0pwzvbh",
+      "note": "#9 Syntax.rs entry updated"
+    },
+    {
+      "at": "2026-08-07T00:39:17.283Z",
+      "by": "bd2-link",
+      "action": "card.update",
+      "ref": "c0pwzvbh",
+      "note": "refs"
+    },
+    {
+      "at": "2026-08-07T00:39:10.461Z",
+      "by": "bd2-link",
+      "action": "card.criteria-add",
+      "ref": "c0pwzvbh",
+      "note": "#8 Loadable-library and export artifacts flow through the ratif"
+    },
+    {
+      "at": "2026-08-07T00:39:10.112Z",
+      "by": "bd2-link",
+      "action": "card.criteria-add",
+      "ref": "c0pwzvbh",
+      "note": "#7 No Jet-to-Jet binary layout promise is introduced: an artifa"
+    },
+    {
+      "at": "2026-08-07T00:39:09.754Z",
+      "by": "bd2-link",
+      "action": "card.criteria-add",
+      "ref": "c0pwzvbh",
+      "note": "#6 The export surface ratified by D-LIB-EXPORT1 is produced by "
+    },
+    {
+      "at": "2026-08-07T00:39:09.394Z",
+      "by": "bd2-link",
+      "action": "card.criteria-add",
+      "ref": "c0pwzvbh",
+      "note": "#5 An executable example builds a loadable Jet library and load"
+    },
+    {
+      "at": "2026-08-07T00:38:59.360Z",
+      "by": "bd2-link",
+      "action": "card.criteria-add",
+      "ref": "c0pwzvbh",
+      "note": "#4 The loadable-library request surface matches the ratified D-"
+    },
+    {
+      "at": "2026-08-07T00:38:59.009Z",
+      "by": "bd2-link",
+      "action": "card.criteria-add",
+      "ref": "c0pwzvbh",
+      "note": "#3 The load-time trust boundary ratified by D-LIB-DYNTRUST1 is "
+    },
+    {
+      "at": "2026-08-07T00:38:58.668Z",
+      "by": "bd2-link",
+      "action": "card.criteria-add",
+      "ref": "c0pwzvbh",
+      "note": "#2 A loadable Jet library built by one compiler version is refu"
+    },
+    {
+      "at": "2026-08-07T00:38:58.325Z",
+      "by": "bd2-link",
+      "action": "card.criteria-add",
+      "ref": "c0pwzvbh",
+      "note": "#1 Plan doc docs/sidequests/library-reuse-and-linking.md matche"
+    },
+    {
+      "at": "2026-08-07T00:38:49.718Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-LIB-DYNTRUST1",
+      "note": "A"
+    },
+    {
+      "at": "2026-08-07T00:38:28.910Z",
+      "by": "bd2-link",
+      "action": "decision.add",
+      "ref": "D-LIB-NAME1",
+      "note": "How a package asks for a loadable library, and what it is called"
+    },
+    {
+      "at": "2026-08-07T00:37:58.466Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-LIB-EXPORT1",
+      "note": "C"
+    },
+    {
+      "at": "2026-08-07T00:37:26.790Z",
+      "by": "bd2-link",
+      "action": "decision.add",
+      "ref": "D-LIB-DYNTRUST1",
+      "note": "What a loaded Jet library is allowed to do"
+    },
+    {
+      "at": "2026-08-07T00:37:12.833Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-CORESURF-SMALL1",
+      "note": "A"
+    },
+    {
+      "at": "2026-08-07T00:37:07.554Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-ITER-DECLINE1",
+      "note": "A"
+    },
+    {
+      "at": "2026-08-07T00:36:56.731Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-SET-DECLINE1",
+      "note": "C"
+    },
+    {
+      "at": "2026-08-07T00:36:40.412Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-STR-DECLINE1",
+      "note": "C"
+    },
+    {
+      "at": "2026-08-07T00:36:29.108Z",
+      "by": "bd2-link",
+      "action": "decision.add",
+      "ref": "D-LIB-EXPORT1",
+      "note": "What a Library output hands to another language"
+    },
+    {
+      "at": "2026-08-07T00:34:25.094Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0gv6ghj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T00:34:24.687Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0r2dfxz",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T00:34:24.274Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c0m2slnf",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T00:34:23.860Z",
+      "by": "fable",
+      "action": "card.update",
+      "ref": "c01y8s93",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T00:34:15.086Z",
+      "by": "fable",
+      "action": "question.answer",
+      "ref": "q9gvofyg",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T00:34:14.733Z",
+      "by": "fable",
+      "action": "question.answer",
+      "ref": "q8d9qc5s",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T00:34:14.381Z",
+      "by": "fable",
+      "action": "question.answer",
+      "ref": "q785552p",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T00:34:02.756Z",
+      "by": "fable",
+      "action": "question.answer",
+      "ref": "q6s7hah8",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T00:33:55.104Z",
+      "by": "fable",
+      "action": "decision.update",
+      "ref": "D-CORESURF-SMALL1",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T00:33:54.625Z",
+      "by": "fable",
+      "action": "decision.update",
+      "ref": "D-ITER-DECLINE1",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T00:33:54.113Z",
+      "by": "fable",
+      "action": "decision.update",
+      "ref": "D-SET-DECLINE1",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T00:33:53.657Z",
+      "by": "fable",
+      "action": "decision.update",
+      "ref": "D-STR-DECLINE1",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T00:29:45.170Z",
+      "by": "bd2-link",
+      "action": "card.claim",
+      "ref": "c0pwzvbh",
+      "note": ""
+    },
     {
       "at": "2026-08-07T00:28:53.119Z",
       "by": "owner",
@@ -133079,314 +133890,6 @@
       "action": "card.criteria-add",
       "ref": "c0v0qz26",
       "note": "#5 The bypass law from D-LINTPOLICY1's recording clause is gene"
-    },
-    {
-      "at": "2026-08-06T21:35:57.850Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0v0qz26",
-      "note": "#4 The ledger keeps provenance for every entry and adds no new "
-    },
-    {
-      "at": "2026-08-06T21:35:57.510Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0v0qz26",
-      "note": "#3 jet unsafe keeps working as a filtered view of the same ledg"
-    },
-    {
-      "at": "2026-08-06T21:35:57.154Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0v0qz26",
-      "note": "#2 jet inspect authority reads the whole ledger and supports --"
-    },
-    {
-      "at": "2026-08-06T21:35:56.804Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0v0qz26",
-      "note": "#1 Every gate kind records to one ledger: unsafe gates with obl"
-    },
-    {
-      "at": "2026-08-06T21:35:56.459Z",
-      "by": "audit-rethinks-b",
-      "action": "card.add",
-      "ref": "c0v0qz26",
-      "note": "One audit ledger for every authority gate"
-    },
-    {
-      "at": "2026-08-06T21:35:56.111Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0exxobe",
-      "note": "#8 Tier parity (I9) is proved inside this card: parser, sema, T"
-    },
-    {
-      "at": "2026-08-06T21:35:55.704Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0exxobe",
-      "note": "#7 docs/spec records the amendments to D-EFFBUDGET1, D-JPK-POLI"
-    },
-    {
-      "at": "2026-08-06T21:35:55.374Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0exxobe",
-      "note": "#6 The E1220 and E1221 semantics are unchanged: only the key sp"
-    },
-    {
-      "at": "2026-08-06T21:35:55.017Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0exxobe",
-      "note": "#5 The lockfile and the authority ledger mirror the block's sha"
-    },
-    {
-      "at": "2026-08-06T21:35:54.676Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0exxobe",
-      "note": "#4 One parser and one malformed-block diagnostic family serve t"
-    },
-    {
-      "at": "2026-08-06T21:35:54.320Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0exxobe",
-      "note": "#3 The policy key keeps only floors and unsafe mode"
-    },
-    {
-      "at": "2026-08-06T21:35:53.989Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0exxobe",
-      "note": "#2 The old grant, trust and provider keys are migrated in one p"
-    },
-    {
-      "at": "2026-08-06T21:35:53.650Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0exxobe",
-      "note": "#1 pkg.jet accepts one authority block with holds, grants, trus"
-    },
-    {
-      "at": "2026-08-06T21:35:53.310Z",
-      "by": "audit-rethinks-b",
-      "action": "card.add",
-      "ref": "c0exxobe",
-      "note": "One authority block in the package manifest"
-    },
-    {
-      "at": "2026-08-06T21:35:52.967Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0zjmtah",
-      "note": "#8 Tier parity (I9) is proved inside this card: parser, sema, T"
-    },
-    {
-      "at": "2026-08-06T21:35:52.629Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0zjmtah",
-      "note": "#7 Greenfield: the replaced form is deleted in the same change,"
-    },
-    {
-      "at": "2026-08-06T21:35:52.289Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0zjmtah",
-      "note": "#6 ProcessAuthority is renamed to Authority everywhere, while P"
-    },
-    {
-      "at": "2026-08-06T21:35:51.939Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0zjmtah",
-      "note": "#5 The grant handle, process.run, plugin.load and session holde"
-    },
-    {
-      "at": "2026-08-06T21:35:51.595Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0zjmtah",
-      "note": "#4 Authority never participates in type selection or dispatch, "
-    },
-    {
-      "at": "2026-08-06T21:35:51.244Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0zjmtah",
-      "note": "#3 with and without are the only operation family: with narrows"
-    },
-    {
-      "at": "2026-08-06T21:35:50.909Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0zjmtah",
-      "note": "#2 Authority.workspace() constructs one, using the PascalCase c"
-    },
-    {
-      "at": "2026-08-06T21:35:50.551Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0zjmtah",
-      "note": "#1 Authority is a prelude type carrying a rights set"
-    },
-    {
-      "at": "2026-08-06T21:35:50.202Z",
-      "by": "audit-rethinks-b",
-      "action": "card.add",
-      "ref": "c0zjmtah",
-      "note": "The Authority value: one named type that crosses boundaries"
-    },
-    {
-      "at": "2026-08-06T21:35:49.855Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0pdzfiu",
-      "note": "#7 Tier parity (I9) is proved inside this card: parser, sema, T"
-    },
-    {
-      "at": "2026-08-06T21:35:49.501Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0pdzfiu",
-      "note": "#6 Greenfield: the replaced form is deleted in the same change,"
-    },
-    {
-      "at": "2026-08-06T21:35:49.146Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0pdzfiu",
-      "note": "#5 docs/spec records the amendments to D-MEM-FACTS1 and D-POLIC"
-    },
-    {
-      "at": "2026-08-06T21:35:48.804Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0pdzfiu",
-      "note": "#4 A bounded arena limit has one stated home, decided by the ow"
-    },
-    {
-      "at": "2026-08-06T21:35:48.456Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0pdzfiu",
-      "note": "#3 The friendly floor words are deleted with a tombstone naming"
-    },
-    {
-      "at": "2026-08-06T21:35:48.108Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0pdzfiu",
-      "note": "#2 The memory keys are removed from the policy marker and the m"
-    },
-    {
-      "at": "2026-08-06T21:35:47.759Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0pdzfiu",
-      "note": "#1 Memory floors are written as effect denials on function sign"
-    },
-    {
-      "at": "2026-08-06T21:35:47.411Z",
-      "by": "audit-rethinks-b",
-      "action": "card.add",
-      "ref": "c0pdzfiu",
-      "note": "Memory floors ride the rights tree as effect denials"
-    },
-    {
-      "at": "2026-08-06T21:35:47.073Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c09mc3y7",
-      "note": "#8 Tier parity (I9) is proved inside this card: parser, sema, T"
-    },
-    {
-      "at": "2026-08-06T21:35:46.735Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c09mc3y7",
-      "note": "#7 docs/spec records the amendments to D-EFF4, D-EFF5 and the e"
-    },
-    {
-      "at": "2026-08-06T21:35:46.384Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c09mc3y7",
-      "note": "#6 The E1221 explain text and the stale Effects.rs comments are"
-    },
-    {
-      "at": "2026-08-06T21:35:46.022Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c09mc3y7",
-      "note": "#5 The flat language spellings are deleted and no longer parse"
-    },
-    {
-      "at": "2026-08-06T21:35:45.668Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c09mc3y7",
-      "note": "#4 A package manifest can deny FFI in one line and the whole pa"
-    },
-    {
-      "at": "2026-08-06T21:35:45.320Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c09mc3y7",
-      "note": "#3 A bound that forbids FFI forbids every language leaf, proved"
-    },
-    {
-      "at": "2026-08-06T21:35:44.971Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c09mc3y7",
-      "note": "#2 Every language effect is a leaf under FFI, including the pre"
-    },
-    {
-      "at": "2026-08-06T21:35:44.641Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c09mc3y7",
-      "note": "#1 EFFECT_ROOTS holds exactly thirteen roots: the ratified ten "
-    },
-    {
-      "at": "2026-08-06T21:35:44.281Z",
-      "by": "audit-rethinks-b",
-      "action": "card.add",
-      "ref": "c09mc3y7",
-      "note": "Effect roots: one FFI root with languages as leaves"
-    },
-    {
-      "at": "2026-08-06T21:35:43.924Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c04rht5r",
-      "note": "#6 Tier parity (I9) is proved inside this card: parser, sema, T"
-    },
-    {
-      "at": "2026-08-06T21:35:43.577Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c04rht5r",
-      "note": "#5 No user-visible surface changes in this card"
-    },
-    {
-      "at": "2026-08-06T21:35:43.223Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c04rht5r",
-      "note": "#4 Generated Rust for the existing corpus is byte-identical to "
-    },
-    {
-      "at": "2026-08-06T21:35:42.872Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c04rht5r",
-      "note": "#3 A test asks the same authority question at compile, build, s"
     }
   ],
   "nextNum": 368,

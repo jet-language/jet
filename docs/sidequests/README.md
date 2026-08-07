@@ -8,6 +8,8 @@ or delete via Tower when the plan is exhausted; do not leave finished research
 here.
 
 - [`generic-modules.md`](generic-modules.md) — keep until spec/examples cover it.
+- [`library-reuse-and-linking.md`](library-reuse-and-linking.md) — #1421; all
+  four decisions ratified, unbuilt.
 - [`web-backend-wasm.md`](web-backend-wasm.md) — PARTIAL; criterion 5 / #705 open.
 
 See [`../plans/docs-cleanup-sweep.md`](../plans/docs-cleanup-sweep.md) for the

@@ -112,7 +112,10 @@ Card #666 (interim + instrumentation + closeout). Cards #1023–#1028 are the
 split delivery slices. #669 owns self-host architecture evidence. #1498 owns
 Theo/Xcode anti-goal crosswalk and the D-INCR-UNIT1 / D-TYPECHECK-BOUND1
 ballots. Frozen #676 stays scoped to its own video source. Epoch bootstrapping
-cards carry the self-hosted architecture bets.
+cards carry the self-hosted architecture bets. Sealed package objects, library
+export, and the no-stable-ABI stance live in
+[`../sidequests/library-reuse-and-linking.md`](../sidequests/library-reuse-and-linking.md)
+(#1421, ratified).
 
 ## Script-speed warm reuse (#741)
 
