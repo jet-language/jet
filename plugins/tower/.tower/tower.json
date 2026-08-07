@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1586,
-    "rev": 28139,
+    "nextNum": 1587,
+    "rev": 28155,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -85715,12 +85715,22 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "plan": "Scope: Iter ships in iter_method_return (crates/jet-foundation/src/Collections.rs:970), backed by jet_iter_* in crates/jet-codegen/src/Prelude/Core/Collections.rs. Card #1400 closed the zip family. The ledger now scores 19 remaining jet_loses rows for Iter. Verified 2026-08-06 directly against iter_method_return: all 19 names are absent, none exist under another spelling.\n\nApproach:\n1. Group the 19 names (docs/reference/core-surface-ledger.json, container=Iter, verdict=jet_loses) into families and add to iter_method_return + jet_iter_* in crates/jet-codegen/src/Prelude/Core/Collections.rs:\n   - Constructors (not adapters on an existing Iter, but ways to produce one): fill, cycle, repeat -> these are static/free constructors like the existing Iter.range() family (jet_iter_indexes/jet_iter_from_vec pattern), not methods taking `self`; scope as Iter.fill(value, n), Iter.repeat(value), receiver.cycle() (cycle is a genuine adapter, wraps an existing finite iterator to loop it — needs an explicit terminal guard so `.cycle().to_list()` on an infinite iterator does not hang; require `.take(n)` before `.to_list()` or make `.to_list()` on an unbounded cycle a diagnosed error).\n   - Predicates: issorted, issortedby -> extend the existing all/any family.\n   - Terminal/consumption: next, split, compact -> `next` implies a stateful pull-one-item API; confirm this doesn't collide with Jet's for-loop-based consumption model (D-ITER1) before adding a public `.next()` — if Iter is currently pull-only internally and not exposed as a manual-step API, this may need a decision id since it changes what \"iterator\" means to the user, or decline in favor of the existing for-loop/each().\n   - Comparison/output: compare, tostring -> extend existing eq/format conventions; tostring likely folds into the existing \"{x}\" interpolation path already used elsewhere (String.to_string, per #1409) rather than adding a bespoke Iter.to_string().\n   - List-shaped adapters ported from List (List already has or is gaining droplast, lastindexof, findlast, shuffle, average, toset per #1477/#1478's own gap lists): mirror the same names/signatures once those land, so Iter and List stay consistent (I8 one mechanism) rather than diverging.\n   - dedupby -> extend the existing dedup adapter with a key-function overload, same pattern as min_by/max_by.\n   - chunkwhile -> extend chunks/windows family with a predicate-driven variant.\n   - clip -> Go's slices.Clip trims backing capacity; Iter is lazy and has no backing capacity to trim, likely a genuine decline (no analog in a lazy pull model).\n2. Rebuild jet after Prelude edits: scripts/agent/jet-env cargo build.\n3. Extend examples/features/collections/iter_adapters.jet (or iter_tools_audit.jet, whichever already covers the adjacent adapter) with every shipped addition; regenerate the matching .out golden.\n4. Record a decision id for any name that changes Iter's consumption model (next) or is declined (clip); everything else is an ordinary additive method needing no owner gate.\n5. Run node scripts/agent/check-core-surface-ledger.mjs --refresh then --check.\n6. Update docs/reference/core-library.md Iter section.\n\nProof:\n- scripts/agent/jet-env cargo test --test core_surface_ledger\n- scripts/agent/jet-env cargo test --test tir_collections_and_methods\n- scripts/agent/jet-env jet run examples/features/collections/iter_adapters.jet, diff against examples/features/expected/collections/iter_adapters.out\n- AOT build of the same example, diff against the same golden, to prove I9 parity between AOT and default jet run\n- node scripts/agent/check-core-surface-ledger.mjs --check\n\nOwned paths: crates/jet-foundation/src/Collections.rs, crates/jet-codegen/src/Prelude/Core/Collections.rs, examples/features/collections/iter_adapters.jet, examples/features/expected/collections/iter_adapters.out, docs/reference/core-library.md, docs/reference/core-surface-ledger.json, docs/reference/core-surface-ledger.md.",
       "blockedBy": [],
-      "assignee": "bd2-iter",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-08-07",
+          "by": "bd2-orch",
+          "text": "Closed: thirteen adapters shipped with full tier parity, including interpreter lowerings the dead session skipped and typed ordering for compare. Six names await ballot D-ITER-DECLINE1; card 1586 applies the outcome."
+        },
+        {
+          "at": "2026-08-06",
+          "by": "bd2-iter",
+          "text": "Shipped: 13 methods already typed by the dead session were finished for real I9 parity (dedup_by/is_sorted_by/chunk_while gained interpreter lowering; cycle rebuilt as bounded cycle(n), was infinite-unsafe and silently wrong under JIT/interpreter; compare() interpreter path fixed from text-order to Ord-order). Declined via D-ITER-DECLINE1 (open, not yet ratified): fill, tostring, clip, compact, findlast (synonym-satisfied), next (contradicts for-loop consumption model). Follow-up card #1586 applies the ratified outcome and CLUSTER_OWNER.Iter now points to it. tir_collections_and_methods has 7 pre-existing failures unrelated to Iter/Collections (enum methods, optional chaining, Result division, list_surface.jet drift from #1477) — not touched, not caused by this card."
+        },
         {
           "at": "2026-08-06",
           "by": "e3-coll",
@@ -85741,47 +85751,47 @@
         {
           "n": 1,
           "text": "Every one of the 19 Iter gap rows in docs/reference/core-surface-ledger.json (verdict jet_loses) is either shipped as an iter_method_return case (or Iter free-function constructor) with a working jet_iter_* Prelude implementation, or recorded as a named decline with a reason.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:19:31.172Z"
+          "status": "verified",
+          "metBy": "bd2-iter",
+          "verifiedBy": "bd2-orch",
+          "evidence": "merged master: iter_adapters golden byte-identical on jet run + AOT lens, ledger check exit 0 with Iter losses 0, core_surface_ledger 2/2, docs updated (independent proof run by orchestrator)",
+          "at": "2026-08-07T00:02:27.243Z"
         },
         {
           "n": 2,
           "text": "scripts/agent/jet-env cargo test --test core_surface_ledger passes, and node scripts/agent/check-core-surface-ledger.mjs --check exits 0 against the refreshed ledger.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:19:31.482Z"
+          "status": "verified",
+          "metBy": "bd2-iter",
+          "verifiedBy": "bd2-orch",
+          "evidence": "merged master: iter_adapters golden byte-identical on jet run + AOT lens, ledger check exit 0 with Iter losses 0, core_surface_ledger 2/2, docs updated (independent proof run by orchestrator)",
+          "at": "2026-08-07T00:02:27.591Z"
         },
         {
           "n": 3,
           "text": "examples/features/collections/iter_adapters.jet exercises every shipped addition and scripts/agent/jet-env jet run examples/features/collections/iter_adapters.jet matches examples/features/expected/collections/iter_adapters.out exactly.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:19:31.789Z"
+          "status": "verified",
+          "metBy": "bd2-iter",
+          "verifiedBy": "bd2-orch",
+          "evidence": "merged master: iter_adapters golden byte-identical on jet run + AOT lens, ledger check exit 0 with Iter losses 0, core_surface_ledger 2/2, docs updated (independent proof run by orchestrator)",
+          "at": "2026-08-07T00:02:27.940Z"
         },
         {
           "n": 4,
           "text": "The same example produces byte-identical output under AOT build and default jet run (I9 parity).",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:19:32.087Z"
+          "status": "verified",
+          "metBy": "bd2-iter",
+          "verifiedBy": "bd2-orch",
+          "evidence": "merged master: iter_adapters golden byte-identical on jet run + AOT lens, ledger check exit 0 with Iter losses 0, core_surface_ledger 2/2, docs updated (independent proof run by orchestrator)",
+          "at": "2026-08-07T00:02:28.292Z"
         },
         {
           "n": 5,
           "text": "docs/reference/core-library.md Iter section lists every newly shipped method and every declined name with its reason.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:19:32.395Z"
+          "status": "verified",
+          "metBy": "bd2-iter",
+          "verifiedBy": "bd2-orch",
+          "evidence": "merged master: iter_adapters golden byte-identical on jet run + AOT lens, ledger check exit 0 with Iter losses 0, core_surface_ledger 2/2, docs updated (independent proof run by orchestrator)",
+          "at": "2026-08-07T00:02:28.641Z"
         }
       ],
       "refs": [
@@ -85791,10 +85801,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T02:13:47.351Z",
-      "updated": "2026-08-06T23:23:43.192Z",
-      "updatedBy": "bd2-iter",
+      "updated": "2026-08-07T00:02:29.052Z",
+      "updatedBy": "bd2-orch",
       "workOrder": 30,
-      "claimedAt": "2026-08-06T23:23:43.191Z"
+      "completedAt": "2026-08-07T00:02:29.052Z"
     },
     {
       "id": "c0vzbf5f",
@@ -90071,7 +90081,7 @@
       "priority": "P1",
       "plan": "Implements D-FAIL-CARRIER1, D-FAIL-MODEL1 — ratified 2026-08-06. Read each decision verbatim (tower brief on this card's parent proposal, or tower decision show) before building; the ratified outcome text is the law, this plan is the route. Every requirement is a discrete exit criterion below: meet each with targeted proof (tests, snapshots, examples with golden output), and keep I9 tier parity inside this card — AOT, default jet run (JIT), and the interpreter must agree on every surface this card ships before it closes. Delete every superseded form the decisions retire in the same change; do not leave compatibility shims or parallel spellings. Reference: docs/proposals/failure-one-report-three-routes.md.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "bd2-carrier",
       "log": [],
       "criteria": [
         {
@@ -90172,9 +90182,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:33:37.333Z",
-      "updated": "2026-08-06T21:41:27.967Z",
-      "updatedBy": "audit-apply",
-      "workOrder": 140
+      "updated": "2026-08-06T23:41:49.136Z",
+      "updatedBy": "bd2-carrier",
+      "workOrder": 140,
+      "claimedAt": "2026-08-06T23:41:49.136Z"
     },
     {
       "id": "c0nb4bwv",
@@ -95665,6 +95676,45 @@
       "created": "2026-08-06T23:40:44.035Z",
       "updated": "2026-08-06T23:40:44.035Z",
       "updatedBy": "bd2-orch"
+    },
+    {
+      "id": "c0cvssmh",
+      "num": 1586,
+      "title": "Apply the Iter ballot outcome to the ledger",
+      "body": "D-ITER-DECLINE1 (card #1479) covers Iter's last six ledger names: fill, tostring, clip, compact, findlast, next. When the owner ratifies it, apply the outcome to the surface ledger and the CLUSTER_OWNER table.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": "Read D-ITER-DECLINE1's ratified pick. Option A: mark each of the six rows declined with the decision id as its reason in docs/reference/core-surface-ledger.json (or confirm the synonym pooling already marks them equal/declined and just record the id in docs/reference/core-library.md's Iter section). Option B: ship the six as new Iter methods following card #1479's shipped-method pattern (sema in iter_method_return, Prelude jet_iter_* implementation, TIR lower/emit, JIT marshal, interpreter parity, example + golden). Either way, run node scripts/agent/check-core-surface-ledger.mjs --refresh then --check and confirm it exits 0.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "D-ITER-DECLINE1's ratified pick is applied: every one of the six rows (fill, tostring, clip, compact, findlast, next) carries verdict declined with the ratified decision id, or ships as a new Iter method on option B; node scripts/agent/check-core-surface-ledger.mjs --check exits 0.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-06T23:55:32.158Z"
+        }
+      ],
+      "refs": [
+        "docs/reference/core-surface-ledger.json",
+        "crates/jet-foundation/src/Collections.rs",
+        "scripts/agent/check-core-surface-ledger.mjs",
+        "docs/reference/core-library.md"
+      ],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-06T23:55:27.267Z",
+      "updated": "2026-08-06T23:55:32.158Z",
+      "updatedBy": "bd2-iter"
     }
   ],
   "decisions": [
@@ -127898,6 +127948,71 @@
       "draft": false,
       "status": "open",
       "created": "2026-08-06T23:28:48.391Z"
+    },
+    {
+      "id": "D-ITER-DECLINE1",
+      "cardId": "c0r2dfxz",
+      "group": "stdlib",
+      "title": "Iter's last six ledger gaps: decline or ship",
+      "gist": "Whether Jet adds six more Iter methods that copy features it already has under a different name or a different model.",
+      "lesson": "Card #1479 gave Iter thirteen new methods. The surface ledger still lists six more names other languages ship on their iterator type. Five of the six already have a Jet answer under a different name: fill, cycle_n, and duplicate are all repeat. A join-based text render already covers tostring, and clip/iterator both already mean to_list/collect, and compact already means filter with a predicate. The sixth, next, asks for a manual pull-one-item cursor. Jet's Iter has no such cursor outside a loop.",
+      "explainer": "",
+      "story": "Sam is porting a Python generator pipeline to Jet. Python's iterator protocol calls next(it) by hand to pull one item at a time and keep the cursor between calls. Sam reaches for it.next() on a Jet Iter and finds nothing, then wonders whether Jet's iterators are missing basic stepping.",
+      "inWild": "fn read_pairs(rows: Iter<Int>) => [Int] {\n    // Sam wants manual stepping, the way Python's next(it) works.\n    out := [Int].{}\n    it := rows\n    a := it.next()\n    b := it.next()\n    return out\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Decline all six, route each to what Jet already ships",
+          "detail": "fill, cycle_n, and duplicate are declined as repeat under a different name. tostring is declined as join, which already renders a sequence to text. clip and iterator are declined as to_list/collect, which already turn a lazy Iter into a concrete value. compact is declined as filter with a predicate. next is declined because Jet's Iter has no cursor to hold between calls. A for-loop, each, or the lazy adapters (take, skip, take_while) already walk a sequence step by step, with no hand-held pointer.",
+          "technical": "Synonym declines (ratified by the Core surface ledger's own pooling): fill/cycle_n/duplicate -> Iter.repeat(n). tostring -> Iter.join(sep). clip/iterator -> Iter.to_list()/collect(). compact -> Iter.filter(f).\n\nConsumption-model decline: next. Jet's for-loop and iterator adapters consume a full Iter value each time; there is no live cursor object a caller holds and advances by hand. Adding next(self) would need a second, stateful iterator protocol running beside the existing one, which is a second mechanism for the same job (I8).",
+          "code": "nums :: [1, 2, 3, 4, 5]\n\n// fill / cycle_n / duplicate -> repeat\nfive_pairs :: nums.repeat(2).to_list()\n\n// tostring -> join\nline :: nums.join(\", \")\n\n// clip / iterator -> to_list / collect\nmaterialized :: nums.to_list()\n\n// compact -> filter\nnonzero :: nums.filter((n: Int) => (n != 0)).to_list()\n\n// next -> step with a for-loop or the lazy adapters instead of a\n// hand-held cursor\nloop n, nums {\n    print(n)\n}"
+        },
+        {
+          "key": "B",
+          "name": "Ship all six as new Iter methods",
+          "detail": "Iter grows five methods that duplicate repeat, join, to_list, and filter under new names. It also grows a sixth, next, that adds a stateful cursor object living beside the existing for-loop and lazy-adapter model. Every sequence workflow now has two ways to repeat, render, materialize, and filter text. It also gains a new way to walk a sequence that behaves differently from every other Iter consumer.",
+          "technical": "fill, cycle_n, and duplicate each ship as one more case in Iter's method table. Every one calls the same repeat logic repeat already uses.\n\ntostring ships as a second text-rendering method beside join. clip and iterator ship as two more spellings of to_list and collect. compact ships as filter with a fixed predicate.\n\nnext ships as a new stateful method with a held cursor value and a new Prelude function. It also needs matching AOT, JIT, and interpreter lowering that mutates and returns that cursor across calls. No other Iter method has this shape.",
+          "code": "nums :: [1, 2, 3, 4, 5]\n\nfive_pairs := nums.fill(2)\nline := nums.tostring()\nmaterialized := nums.clip()\nnonzero := nums.compact()\n\nit := nums\nfirst := it.next()\nsecond := it.next()"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Python",
+          "note": "Python's next(it) advances a live generator/iterator object and raises StopIteration at the end; Jet's for-loop and lazy adapters already own that walk without exposing a mutable cursor.",
+          "code": "it = iter([1, 2, 3])\nfirst = next(it)\nsecond = next(it)"
+        },
+        {
+          "lang": "Ruby",
+          "note": "Ruby's Array#cycle(3) repeats the whole array three times, the same job Jet's repeat(n) already does under a different name.",
+          "code": "[1, 2].cycle(3) { |x| puts x }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Five of the six names already reach a working answer through repeat, join, to_list/collect, or filter. The sixth asks for a stateful cursor Jet's Iter model does not use. Declining keeps one path per capability and keeps the for-loop and lazy adapters as the only way to walk a sequence, which is what I8 asks for.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Shipping all six gives Iter five duplicate spellings of repeat, join, to_list, and filter, plus a stateful cursor method that behaves unlike every other Iter consumer."
+          }
+        ],
+        "tradeoff": "A programmer who expects next() by muscle memory from Python, or fill/compact/tostring/clip by muscle memory from another language, has to write one call to an existing method instead."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft grouped the six names into a synonym set (four names already answered by repeat, join, to_list, or filter) and a model-mismatch case (next), recommending decline for both groups.",
+        "boilOcean": "The breadth pass checked whether next could ship as a read-only peek instead of a full stateful cursor. A peek still needs somewhere to remember the last position between calls, which is the same held-cursor problem, so the finding stood.",
+        "hybrid": "A hybrid shipping only the four synonym names as thin aliases was tested and dropped. An alias is still a second spelling for one capability, which I8 already rules out elsewhere in this ledger sweep.",
+        "cooperative": "Steelmanning option B: a newcomer typing fill, compact, tostring, clip, or next by muscle memory from another language would find it immediately instead of detouring to repeat, filter, join, or a for-loop.",
+        "adversarial": "The adversarial pass asked whether declining next leaves a real workflow stranded. Every consumption pattern the six names cover (materialize, render, filter, repeat, and manual stepping) already has one working route in Jet, so no workflow is left without an answer."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-06T23:54:43.079Z"
     }
   ],
   "questions": [
@@ -129439,6 +129554,118 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-07T00:02:29.052Z",
+      "by": "bd2-orch",
+      "action": "card.update",
+      "ref": "c0r2dfxz",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-07T00:02:28.641Z",
+      "by": "bd2-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0r2dfxz",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-07T00:02:28.293Z",
+      "by": "bd2-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0r2dfxz",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-07T00:02:27.940Z",
+      "by": "bd2-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0r2dfxz",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-07T00:02:27.592Z",
+      "by": "bd2-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0r2dfxz",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-07T00:02:27.244Z",
+      "by": "bd2-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0r2dfxz",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-06T23:58:20.927Z",
+      "by": "bd2-iter",
+      "action": "card.update",
+      "ref": "c0r2dfxz",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-06T23:58:14.172Z",
+      "by": "bd2-iter",
+      "action": "card.criteria-meet",
+      "ref": "c0r2dfxz",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-06T23:58:13.805Z",
+      "by": "bd2-iter",
+      "action": "card.criteria-meet",
+      "ref": "c0r2dfxz",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-06T23:58:13.441Z",
+      "by": "bd2-iter",
+      "action": "card.criteria-meet",
+      "ref": "c0r2dfxz",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-06T23:58:12.821Z",
+      "by": "bd2-iter",
+      "action": "card.criteria-meet",
+      "ref": "c0r2dfxz",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-06T23:58:12.190Z",
+      "by": "bd2-iter",
+      "action": "card.criteria-meet",
+      "ref": "c0r2dfxz",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-06T23:55:32.158Z",
+      "by": "bd2-iter",
+      "action": "card.criteria-add",
+      "ref": "c0cvssmh",
+      "note": "#1 D-ITER-DECLINE1's ratified pick is applied: every one of the"
+    },
+    {
+      "at": "2026-08-06T23:55:27.267Z",
+      "by": "bd2-iter",
+      "action": "card.add",
+      "ref": "c0cvssmh",
+      "note": "Apply the Iter ballot outcome to the ledger"
+    },
+    {
+      "at": "2026-08-06T23:54:43.079Z",
+      "by": "bd2-iter",
+      "action": "decision.add",
+      "ref": "D-ITER-DECLINE1",
+      "note": "Iter's last six ledger gaps: decline or ship"
+    },
+    {
+      "at": "2026-08-06T23:41:49.136Z",
+      "by": "bd2-carrier",
+      "action": "card.claim",
+      "ref": "c0y4zx0d",
+      "note": ""
+    },
     {
       "at": "2026-08-06T23:40:44.035Z",
       "by": "bd2-orch",
@@ -132826,118 +133053,6 @@
       "action": "card.criteria-add",
       "ref": "c0gyn86h",
       "note": "#3 #Transact groups several statements into one commit, and the"
-    },
-    {
-      "at": "2026-08-06T21:35:27.991Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0gyn86h",
-      "note": "#2 The read and edit closure forms are deleted and no longer pa"
-    },
-    {
-      "at": "2026-08-06T21:35:27.650Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0gyn86h",
-      "note": "#1 config :: shared AppConfig.{...} then config.name reads and "
-    },
-    {
-      "at": "2026-08-06T21:35:27.311Z",
-      "by": "audit-rethinks-b",
-      "action": "card.add",
-      "ref": "c0gyn86h",
-      "note": "Shared values read and write like values, and the transaction law matches the runtime"
-    },
-    {
-      "at": "2026-08-06T21:35:26.965Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0p0jpo1",
-      "note": "#10 Tier parity (I9) is proved inside this card: parser, sema, T"
-    },
-    {
-      "at": "2026-08-06T21:35:26.620Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0p0jpo1",
-      "note": "#9 Greenfield: the replaced form is deleted in the same change,"
-    },
-    {
-      "at": "2026-08-06T21:35:26.278Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0p0jpo1",
-      "note": "#8 Cancellation at a select wait follows D-CANCELMODEL1 unchang"
-    },
-    {
-      "at": "2026-08-06T21:35:25.922Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0p0jpo1",
-      "note": "#7 select works on the interpreter tier; the tier gap is closed"
-    },
-    {
-      "at": "2026-08-06T21:35:25.577Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0p0jpo1",
-      "note": "#6 after 100ms takes a Duration literal on the one time rail"
-    },
-    {
-      "at": "2026-08-06T21:35:25.229Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0p0jpo1",
-      "note": "#5 The fluent select builder, the dead Channel table entry and "
-    },
-    {
-      "at": "2026-08-06T21:35:24.878Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0p0jpo1",
-      "note": "#4 Receiver<T> and Sender<T> can be written in a signature"
-    },
-    {
-      "at": "2026-08-06T21:35:24.521Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0p0jpo1",
-      "note": "#3 select is an arm table usable anywhere in a task on plain en"
-    },
-    {
-      "at": "2026-08-06T21:35:24.169Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0p0jpo1",
-      "note": "#2 loop job, rx drains until the channel closes, and the manual"
-    },
-    {
-      "at": "2026-08-06T21:35:23.799Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0p0jpo1",
-      "note": "#1 (tx, rx) :: channel<Int>(capacity: 8) compiles with no impor"
-    },
-    {
-      "at": "2026-08-06T21:35:23.444Z",
-      "by": "audit-rethinks-b",
-      "action": "card.add",
-      "ref": "c0p0jpo1",
-      "note": "Channels, draining, and select as an arm table"
-    },
-    {
-      "at": "2026-08-06T21:35:23.103Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0fxc599",
-      "note": "#7 Tier parity (I9) is proved inside this card: parser, sema, T"
-    },
-    {
-      "at": "2026-08-06T21:35:22.758Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0fxc599",
-      "note": "#6 Unbound spawns are untouched by this card"
     }
   ],
   "nextNum": 368,
