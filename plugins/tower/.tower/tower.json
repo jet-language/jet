@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1603,
-    "rev": 28647,
+    "nextNum": 1605,
+    "rev": 28659,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -24,7 +24,7 @@
         "board-ideas"
       ]
     },
-    "completionCursor": "2026-08-07T09:42:37.468Z"
+    "completionCursor": "2026-08-07T09:45:04.454Z"
   },
   "epochs": [
     {
@@ -91070,6 +91070,21 @@
       "log": [
         {
           "at": "2026-08-07",
+          "by": "bd3-orch",
+          "text": "Log correction: .noting() was removed in review round 1. It was an invented write spelling that duplicated the ratified ? \"note\" hop (D-FAIL-CTX1, card #1532). Notes are read-only on this card: they live on the outcome value, opt-in per error type like partial. Review passed after the fix. The carrier home deviation from I9's named folder is balloted as D-I9-HOME1 on card #1604."
+        },
+        {
+          "at": "2026-08-07",
+          "by": "bd3-carrier",
+          "text": "[review-fixes] Fresh-context review raised four blocking findings on bd2/carrier; all four are fixed on commit 4e898cd4f.\n\nB1 notes bag. jet_noting pushed into a thread-local and jet_notes drained it, so two outcomes shared one set of notes, a second read came back empty, and notes did not cross a thread. Notes now live on the outcome value, opted into per error type exactly as partial results already were: an error type carries them under the field name notes. The thread-local is deleted. .noting is deleted with it — writing a note is the ? hop D-FAIL-CTX1 ratifies, which is card #1532's; criterion 4 asks for the read, and the read is what shipped.\n\nB2 false green. The example now holds three outcomes at once with distinct notes, reads one of them twice, and its golden output shows people, ports, then people again. The targeted test does the same and also asserts the program's actual output on the interpreter tier, so a shared bag cannot pass it.\n\nB3 engine drift. One TIR node, CarrierFact, now carries both middle states. AOT emit spells the projection onto the report; both interpreters call one marshaller, Comptime::Builtins::carrier_fact, which hands that projection to the prelude's jet_partial or jet_notes. What a success and a failure each answer is stated once, in the prelude. The hardcoded field name in the comptime arm is gone; every path takes the name from the same Syntax constant.\n\nB4 tautology. The erasure test imports jet::Outcome::{JetAbsent, JetOutcome} instead of declaring local copies, so it fails if either type grows a field. Source/lib.rs re-exports the module for it.\n\nProof after the fixes: cargo build clean. cargo test --test outcome_carrier 5 of 5. Golden 61 failures, unchanged from before the fixes, neither example among them, and the re-blessed partial_and_notes.out matches AOT and default jet run line for line. Corpus parity gate: both examples pass; its only two failures remain concurrency/shield_commit and io/terminal_parity, unrelated and pre-existing. jet fmt --check clean on all three new files. The carrier_partial_not_kept UI snapshot still matches."
+        },
+        {
+          "at": "2026-08-07",
+          "by": "bd3-carrier",
+          "text": "[deviation] The one carrier lives in crates/jet-foundation/src/Outcome.rs, not under crates/jet-codegen/src/Prelude/** as criterion 1 and the I9 text say. Reason: the comptime interpreter must name the same Rust type, and jet-comptime cannot depend on jet-codegen, so jet-foundation is the only crate both sides already share. The file is still prelude part one — Codegen/mod.rs includes it verbatim, ahead of every other part, for native builds, and Codegen/Web.rs includes the same file for the wasm module. It is also a real module in jet-foundation, which is what lets the compiler's own interpreters call the very same jet_partial and jet_notes the generated program calls; that is the mechanism that keeps the tiers from drifting rather than a way around I9. Flagging it for the owner: either the invariant text should say Prelude parts may live in jet-foundation when a seam crate must share them, or the carrier needs a different home."
+        },
+        {
+          "at": "2026-08-07",
           "by": "bd3-carrier",
           "text": "[handoff] All ten criteria met. Branch bd2/carrier, head e580c8064, worktree .claude/worktrees/carrier. Not merged; ready for review and integration.\n\nCOMMITS THIS SESSION\n- af487b194 wip: .or_err lifts a clean absence into a failure (checkpoint of the prior session's uncommitted work)\n- 3d57f72da merge: master fixture repairs into bd2/carrier. Three conflicts, each master adding a feature beside a line the carrier had rewritten; every resolution keeps master's feature and states it in the carrier's vocabulary. Rebase was not cheap: master moved 178 files with 20 overlapping this branch.\n- 19e0718a5 feat(carrier): the outcome's middle states are readable from Jet\n- e580c8064 feat(carrier): the web tier and the priority queue join the one carrier\n\nWHAT LANDED\n- .or_err(\"why\"), .partial(), .noting(\"...\") and .notes(). Semantics live only in crates/jet-foundation/src/Outcome.rs, which is prelude part one. AOT emit, the TIR interpreter and the comptime interpreter marshal onto them, and both interpreters call the very same jet_noting and jet_notes symbols.\n- A failure keeps part of its work by carrying it on its report under the field name partial, at the same type the outcome carries. That is the ratified opt-in-per-error-type shape. An error type that declined gets the ordinary E0302.\n- The web tier stopped spelling T? as Rust's own Option. Its wasm module now includes the same Outcome.rs file the native prelude puts first.\n- PriorityQueue.remove arrived from master answering a plain Option; it now answers the carrier.\n\nTESTS\n- cargo test --test outcome_carrier: 5 of 5 pass, including the two new middle-state and web-tier proofs.\n- cargo test --test golden: 61 failures, down from the 63 the branch inherited. Neither new example is among them and no example was edited to pass.\n- cargo test --test dev example_corpus_strict_jit_aot_differential_gate: both examples pass in the deopt_interp AOT-oracle class, so pure interpreter, default tiered run and AOT agree on each. The gate's only two failures, concurrency/shield_commit and io/terminal_parity, are unrelated and pre-existing.\n- cargo test --test grammar: 18 of 18 pass. jet fmt --check clean on all three new files. cargo build clean throughout.\n\nKNOWN UNRELATED RED, NOT THIS CARD\n- tests/fmt.rs fmt_is_lossless_on_supported_source_corpus fails on examples/features/packages/outputs_build/package.jet, which the fmt corpus cannot parse. That file arrived with master's manifest work (card #1517).\n- 28 ui_snapshots mismatches are master's diagnostic-text drift. A scan of the full run shows none mentions the carrier, or_err, partial or notes, so blessing them here would accept another card's change.\n- 20 web test failures in web_build, web_partition and web_tir_contract. Measured with and without this card's web change: the failure sets are identical, so they are pre-existing fixture drift.\n\nNOTE FOR LATER CARDS\nThe web tier's TIR support does not lower an optional inside a wasm function at all today (E-WEB-TIR-UNSUPPORTED). That is a pre-existing web gap, not one this card opened. The carrier is in place for when web lowers one."
         },
@@ -91102,10 +91117,10 @@
           "n": 3,
           "text": "Verdict and notes erase from the happy path: a targeted test proves an unused verdict costs no allocation and no branch in the emitted code",
           "status": "met",
-          "metBy": "bd2-carrier",
+          "metBy": "bd3-carrier",
           "verifiedBy": null,
-          "evidence": "tests/outcome_carrier.rs::an_unread_verdict_costs_nothing passes. It proves the clean report is zero-sized, so JetOutcome<T, JetAbsent> keeps the payload's own size, and it reads the emitted Rust for a T? function: no allocation and one branch to read the payload.",
-          "at": "2026-08-07T00:41:08.455Z"
+          "evidence": "tests/outcome_carrier.rs::an_unread_verdict_costs_nothing passes, and it now names the real carrier: it imports jet::Outcome::{JetAbsent, JetOutcome} rather than declaring local copies, so the size asserts fail if either type grows a field. It proves the clean report is zero-sized, so JetOutcome<T, JetAbsent> keeps the payload's own size and its niche still holds the absence, and it reads the emitted Rust for a T? function: no allocation and one branch to read the payload. The middle states do not change this: they live on the error type's report, so an error type that opts into neither pays for neither.",
+          "at": "2026-08-07T10:00:26.348Z"
         },
         {
           "n": 4,
@@ -91113,8 +91128,8 @@
           "status": "met",
           "metBy": "bd3-carrier",
           "verifiedBy": null,
-          "evidence": "The carrier's middle states are readable from Jet. A failure keeps part of its work by carrying it on its report under the field name partial, at the same type the outcome carries; the outcome answers .partial() as T?, and a success answers a clean absence. An outcome collects notes with .noting(\"…\"), which hands the outcome straight back, and reads them with .notes(). Neither needs a third type. Semantics live in crates/jet-foundation/src/Outcome.rs (prelude part one): jet_partial, jet_noting, jet_notes. AOT emit, the TIR interpreter and the comptime interpreter marshal onto them, and both interpreters call the very same jet_noting/jet_notes symbols. Golden example: examples/features/errors/partial_and_notes.jet with expected/errors/partial_and_notes.out, proved on AOT and on default jet run. tests/outcome_carrier.rs::the_middle_states_read_off_the_same_carrier passes. An error type that never kept a payload gets the ordinary E0302, covered by tests/ui/carrier_partial_not_kept.jet.",
-          "at": "2026-08-07T09:22:40.023Z"
+          "evidence": "The carrier's middle states are readable from Jet, and both live on the outcome value. An error type opts in by carrying them on its report: the surviving payload under the field name partial, at the same type the outcome carries, and what it had to say under notes. Nothing is stored beside the value, so two outcomes alive at once never share a fact, reading one twice answers the same thing, and an outcome that crosses a thread takes its facts with it. A success has no report, so .partial() answers a clean absence and .notes() answers an empty list. An error type that declined either one gets the ordinary E0302, covered by tests/ui/carrier_partial_not_kept.jet. Semantics live in crates/jet-foundation/src/Outcome.rs: jet_partial and jet_notes each decide, in one place, what a success and a failure answer. Golden example examples/features/errors/partial_and_notes.jet holds three outcomes at once, reads one twice, and prints the same eight lines on AOT and on default jet run. tests/outcome_carrier.rs::the_middle_states_read_off_the_same_carrier checks both the emitted marshalling and the program's actual output on the interpreter tier, so a shared bag cannot pass it. Writing a note as a ? hop is D-FAIL-CTX1's journey and belongs to card #1532; c4 asks for the read.",
+          "at": "2026-08-07T10:00:05.356Z"
         },
         {
           "n": 5,
@@ -91131,8 +91146,8 @@
           "status": "met",
           "metBy": "bd3-carrier",
           "verifiedBy": null,
-          "evidence": "One Prelude carrier on every tier. crates/jet-foundation/src/Outcome.rs is prelude part one for native builds and is now included verbatim in the wasm module too, so the web tier stopped spelling T? as Rust's own Option and stopped building Some/None. The corpus gate records both examples: tests/jit_corpus_gate.txt lists errors/or_err and errors/partial_and_notes under deopt_interp, which is an AOT-oracle class, and the gate proves pure-interpreter, default tiered run and AOT produce identical stdout, stderr and exit for each. Gate run: cargo test --test dev example_corpus_strict_jit_aot_differential_gate. Neither example appears among its failures; the only two are concurrency/shield_commit and io/terminal_parity, both unrelated and pre-existing. tests/outcome_carrier.rs::the_web_tier_reads_the_same_carrier proves the wasm module carries the carrier file and that the web emitter builds no second representation.",
-          "at": "2026-08-07T09:22:54.540Z"
+          "evidence": "One Prelude carrier and one reader on every tier. crates/jet-foundation/src/Outcome.rs is prelude part one for native builds and is included verbatim in the wasm module, so the web tier stopped spelling T? as Rust's own Option and stopped building Some/None. One TIR node, CarrierFact, carries both middle states; AOT emit spells the projection onto the report, and both interpreters call one marshaller that hands that projection to the same jet_partial or jet_notes. No engine repeats the rule about what a success and a failure answer. Corpus gate: tests/jit_corpus_gate.txt lists errors/or_err and errors/partial_and_notes under deopt_interp, an AOT-oracle class, and cargo test --test dev example_corpus_strict_jit_aot_differential_gate proves pure interpreter, default tiered run and AOT produce identical stdout, stderr and exit for each. Neither example appears among its failures; the only two are concurrency/shield_commit and io/terminal_parity, both unrelated and pre-existing. tests/outcome_carrier.rs::the_web_tier_reads_the_same_carrier proves the wasm module carries the carrier file and the web emitter builds no second representation.",
+          "at": "2026-08-07T10:00:10.877Z"
         },
         {
           "n": 7,
@@ -91140,8 +91155,8 @@
           "status": "met",
           "metBy": "bd3-carrier",
           "verifiedBy": null,
-          "evidence": "crates/jet-foundation/src/Syntax/package_files.rs carries the entry, cited to D-FAIL-CARRIER1=A: METHOD_OUTCOME_OR_ERR, METHOD_OUTCOME_PARTIAL, METHOD_OUTCOME_NOTING, METHOD_OUTCOME_NOTES and FIELD_OUTCOME_PARTIAL. Sema and TIR lowering read the constants rather than repeating the strings. No keyword or sigil changed: the four names are ordinary method identifiers and the two ratified type spellings T? and T ? E are untouched.",
-          "at": "2026-08-07T09:23:06.292Z"
+          "evidence": "crates/jet-foundation/src/Syntax/package_files.rs carries the entry, cited to D-FAIL-CARRIER1=A: METHOD_OUTCOME_OR_ERR, METHOD_OUTCOME_PARTIAL, METHOD_OUTCOME_NOTES, and the two report field names FIELD_OUTCOME_PARTIAL and FIELD_OUTCOME_NOTES. Sema and TIR lowering read the constants rather than repeating the strings. No keyword or sigil changed: the three method names are ordinary identifiers and the two ratified type spellings T? and T ? E are untouched.",
+          "at": "2026-08-07T10:00:27.043Z"
         },
         {
           "n": 8,
@@ -91149,8 +91164,8 @@
           "status": "met",
           "metBy": "bd3-carrier",
           "verifiedBy": null,
-          "evidence": "docs/spec/syntax-decisions.md gains the D-FAIL-CARRIER1 entry beside D-ERRCTX1. It states the law: two views of one carrier, the three facts, the four methods and what each answers, the opt-in field an error type declares, the E0302 an error type that declined receives, and the happy-path erasure. It names the Syntax constants, the carrier file and both examples. The file's own rule is that new ratifications append their law to the topical sections rather than restart a dated log, so no log row is added.",
-          "at": "2026-08-07T09:23:09.007Z"
+          "evidence": "docs/spec/syntax-decisions.md carries the D-FAIL-CARRIER1 entry beside D-ERRCTX1. It states the law: two views of one carrier, the three facts, the three reads and what each answers, the two report fields an error type opts into, the E0302 an error type that declined receives, why nothing is stored beside the value, and the happy-path erasure. It hands the write side of notes to D-FAIL-CTX1 by name. It names the Syntax constants, the carrier file and both examples. The file's own rule is that new ratifications append their law to the topical sections rather than restart a dated log, so no log row is added.",
+          "at": "2026-08-07T10:00:29.579Z"
         },
         {
           "n": 9,
@@ -91178,8 +91193,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:33:37.333Z",
-      "updated": "2026-08-07T09:24:27.908Z",
-      "updatedBy": "bd3-carrier",
+      "updated": "2026-08-07T10:05:37.003Z",
+      "updatedBy": "bd3-orch",
       "workOrder": 140
     },
     {
@@ -97648,6 +97663,54 @@
       "updated": "2026-08-07T09:29:01.051Z",
       "updatedBy": "bd3-reader",
       "claimedAt": "2026-08-07T09:29:01.050Z"
+    },
+    {
+      "id": "c0utog26",
+      "num": 1603,
+      "title": "diagnostics_coverage I4 gaps unrelated to markers: E1320/E1322-1334, E3620-3629, E0416/E0428/E2407/E3626, E3504",
+      "body": "cargo test --test diagnostics_coverage fails 4 assertions unrelated to #Known/markers/D-META-STAGE1: E1320 has no docs/spec/diagnostics.md entry; E1322-E1328,E1330,E1331,E1333,E1334,E3620-E3625,E3628,E3629 are emitted with no tests/ui snapshot; E0416,E0428,E2407,E3626 are registered in diagnostics.md but not emitted (stale rows, not in EXPECTED_SPEC_AHEAD_OF_IMPL); E3504 is listed in ACKNOWLEDGED_COVERAGE_GAPS but now has snapshot coverage (stale acknowledgment, should be removed from that list). Found on the mark worktree (bd2/mark) while closing out card #1456's B6 finding; confirmed present both before and after that card's #Known-revert, so unrelated to markers.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-07T10:00:52.319Z",
+      "updated": "2026-08-07T10:00:52.319Z",
+      "updatedBy": "bd3-mark"
+    },
+    {
+      "id": "c03ouq0x",
+      "num": 1604,
+      "title": "I9 text names the wrong home for shared Prelude semantics",
+      "body": "Invariant I9 says semantics live only in crates/jet-codegen/src/Prelude/**. The outcome carrier (#1527) had to live in crates/jet-foundation/src/Outcome.rs instead, because the comptime interpreter may depend only on jet-foundation (I6 seam). The code keeps I9's purpose: one home, every engine marshals onto the same jet_* functions. Only the owner may amend invariant text. Ballot D-I9-HOME1 attached.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-07T10:04:30.533Z",
+      "updated": "2026-08-07T10:05:21.883Z",
+      "updatedBy": "bd3-orch"
     }
   ],
   "decisions": [
@@ -130520,6 +130583,77 @@
       "created": "2026-08-07T00:55:35.715Z",
       "outcome": "A",
       "ratifiedAt": "2026-08-07"
+    },
+    {
+      "id": "D-I9-HOME1",
+      "cardId": "c03ouq0x",
+      "group": "architecture",
+      "title": "Where shared Prelude semantics live in the source tree",
+      "gist": "Which folder holds the one shared implementation every execution tier calls.",
+      "lesson": "Invariant I9 demands one implementation of every language behavior, and it names the folder: crates/jet-codegen/src/Prelude. The compile-time interpreter lives in a crate that is not allowed to depend on the codegen crate. So a behavior that the compile-time interpreter must also run cannot live in the named folder. The outcome carrier hit this wall. The code now lives in the foundation crate, which every engine can reach. The invariant's purpose is intact; only its named path is wrong.",
+      "explainer": "",
+      "story": "An agent finishes the outcome carrier and must make the compile-time interpreter call the same jet_partial function the compiled program calls. The named Prelude folder is unreachable from that interpreter's crate. The agent either duplicates the function, breaks the crate seam, or moves the file. Duplication is the exact drift I9 exists to prevent, so the agent moved the file and flagged the invariant text.",
+      "inWild": "// crates/jet-foundation/src/Outcome.rs — shipped home, prelude part one\npub fn jet_partial<T, E>(outcome: &JetOutcome<T, E>, kept: impl Fn(&E) -> Option<String>) -> Option<String> {\n    match outcome { Ok(_) => None, Err(report) => kept(report) }\n}\n// crates/jet-comptime/Cargo.toml — may depend on jet-foundation only (I6 seam)\n// crates/jet-codegen embeds Outcome.rs verbatim as the first prelude part.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Amend I9: shared semantics live in the Prelude parts",
+          "detail": "The invariant stops naming one folder. It instead says: semantics live only in the embedded Prelude parts, and today those parts live in jet-foundation and crates/jet-codegen/src/Prelude. Every engine must call those functions. Nothing moves. The carrier stays where every tier can already reach it.",
+          "technical": "I9 text change only. The prelude assembly order in Codegen/mod.rs and Codegen/Web.rs remains the single source of truth for what is a Prelude part. A new part is legal in either crate; the comptime-reachable parts must sit in jet-foundation.",
+          "code": "// I9 (amended): Semantics live only in the embedded Prelude parts\n// (crates/jet-foundation prelude modules and crates/jet-codegen/src/Prelude/**).\n// AOT emit, Cranelift hosts, and interpreter ambient are marshalling adapters only."
+        },
+        {
+          "key": "B",
+          "name": "Move every Prelude part into jet-foundation",
+          "detail": "One folder again, but a reachable one: all Prelude semantics migrate from the codegen crate into jet-foundation. The invariant keeps naming exactly one home. Larger one-time move; the codegen crate keeps only emit and marshalling.",
+          "technical": "Relocate crates/jet-codegen/src/Prelude/** into jet-foundation prelude modules; codegen includes them verbatim as it already does for Outcome.rs. No behavior change; include order preserved; golden output byte-identical.",
+          "code": "// I9 (amended): Semantics live only in crates/jet-foundation/src/prelude/**.\n// jet-codegen embeds those files verbatim; no semantic code remains in codegen."
+        },
+        {
+          "key": "C",
+          "name": "Keep I9's folder; carve out the carrier by name",
+          "detail": "The invariant text stays. A ratified carve-out names Outcome.rs as the one permitted exception, with its reason. Every future comptime-reachable behavior needs its own carve-out, so this choice recurs.",
+          "technical": "No code change. The carve-out record must name the file, the I6 seam reason, and its removal condition (a future dependency restructure that makes the named folder reachable).",
+          "code": "// I9 unchanged + ratified exception:\n// \"crates/jet-foundation/src/Outcome.rs is a Prelude part; permitted because\n// jet-comptime may not depend on jet-codegen.\""
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Rust's core library sits below every backend for the same reason: the lowest crate everyone may depend on holds the shared meaning.",
+          "code": "// libcore is reachable from every consumer; codegen backends never define language semantics."
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Option A states the real rule the code already follows: one embedded Prelude, every engine marshals onto it. It fixes the text without moving working code or inviting repeat exceptions.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A large file move with zero behavior change; the single-folder purity it buys is cosmetic, and the move risks churn in every open branch."
+          },
+          {
+            "key": "C",
+            "reason": "A named exception recurs every time the compile-time tier needs a new behavior, and a growing exception list is weaker law than an accurate rule."
+          }
+        ],
+        "tradeoff": "Two legal homes instead of one folder. That is acceptable because the prelude assembly list, not the folder path, is what engines actually share."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft compared amending the text, moving all parts to the foundation crate, and a named carve-out, and recommended the amendment because it matches the shipped, working shape.",
+        "boilOcean": "The breadth review tested two more shapes: letting comptime depend on codegen, and duplicating the carrier per crate. Both die on ratified law — the I6 seam and I9's anti-drift purpose — so neither joined the menu.",
+        "hybrid": "The hybrid review tried A now with B as a scheduled migration. That adds a standing obligation with no behavior gain, so the passes stayed separate options.",
+        "cooperative": "The cooperative review strengthened B by noting verbatim embedding makes the move mechanical, and C by giving the carve-out a concrete removal condition. Both stand as their best selves.",
+        "adversarial": "The adversarial review attacked A: two homes could invite semantic code sprawl into any foundation file. The repair names the prelude assembly list as the authority — a file is a Prelude part only when embedded — so A survives."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-07T10:05:21.883Z"
     }
   ],
   "questions": [
@@ -132126,6 +132260,90 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-07T10:05:37.004Z",
+      "by": "bd3-orch",
+      "action": "card.update",
+      "ref": "c0y4zx0d",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T10:05:21.883Z",
+      "by": "bd3-orch",
+      "action": "decision.add",
+      "ref": "D-I9-HOME1",
+      "note": "Where shared Prelude semantics live in the source tree"
+    },
+    {
+      "at": "2026-08-07T10:04:30.533Z",
+      "by": "bd3-orch",
+      "action": "card.add",
+      "ref": "c03ouq0x",
+      "note": "I9 text names the wrong home for shared Prelude semantics"
+    },
+    {
+      "at": "2026-08-07T10:00:58.053Z",
+      "by": "bd3-carrier",
+      "action": "card.update",
+      "ref": "c0y4zx0d",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T10:00:52.319Z",
+      "by": "bd3-mark",
+      "action": "card.add",
+      "ref": "c0utog26",
+      "note": "diagnostics_coverage I4 gaps unrelated to markers: E1320/E1322-1334, E3620-3629, E0416/E0428/E2407/E3626, E3504"
+    },
+    {
+      "at": "2026-08-07T10:00:40.716Z",
+      "by": "bd3-carrier",
+      "action": "card.update",
+      "ref": "c0y4zx0d",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T10:00:29.579Z",
+      "by": "bd3-carrier",
+      "action": "card.criteria-meet",
+      "ref": "c0y4zx0d",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-07T10:00:27.043Z",
+      "by": "bd3-carrier",
+      "action": "card.criteria-meet",
+      "ref": "c0y4zx0d",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-07T10:00:26.348Z",
+      "by": "bd3-carrier",
+      "action": "card.criteria-meet",
+      "ref": "c0y4zx0d",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-07T10:00:10.877Z",
+      "by": "bd3-carrier",
+      "action": "card.criteria-meet",
+      "ref": "c0y4zx0d",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-07T10:00:05.357Z",
+      "by": "bd3-carrier",
+      "action": "card.criteria-meet",
+      "ref": "c0y4zx0d",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-07T09:45:04.454Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-07T09:45:04.454Z"
+    },
     {
       "at": "2026-08-07T09:42:50.100Z",
       "by": "bd3-orch",
@@ -135541,90 +135759,6 @@
       "action": "card.criteria-add",
       "ref": "c0y6f65g",
       "note": "#2 Lazy view-render caching is evaluated as a default (skip re-"
-    },
-    {
-      "at": "2026-08-07T00:07:19.318Z",
-      "by": "claude-fable",
-      "action": "card.criteria-add",
-      "ref": "c0y6f65g",
-      "note": "#1 Design doc for the user-facing UI framework surface includes"
-    },
-    {
-      "at": "2026-08-07T00:07:09.479Z",
-      "by": "claude-fable",
-      "action": "card.add",
-      "ref": "c0y6f65g",
-      "note": "Evaluate one canonical UI architecture (TEA-style) for Jet's user-facing UI framework"
-    },
-    {
-      "at": "2026-08-07T00:07:08.798Z",
-      "by": "claude-fable",
-      "action": "card.criteria-add",
-      "ref": "c0pnc4sh",
-      "note": "#2 The statement is linked from the primary adopter-facing entr"
-    },
-    {
-      "at": "2026-08-07T00:07:08.148Z",
-      "by": "claude-fable",
-      "action": "card.criteria-add",
-      "ref": "c0pnc4sh",
-      "note": "#1 A canonical doc (release-policy or successor) states release"
-    },
-    {
-      "at": "2026-08-07T00:06:58.079Z",
-      "by": "claude-fable",
-      "action": "card.add",
-      "ref": "c0pnc4sh",
-      "note": "Publish stability-signaling statement at 1.0 (quiet is not dead)"
-    },
-    {
-      "at": "2026-08-07T00:06:49.526Z",
-      "by": "owner",
-      "action": "question.add",
-      "ref": "q6s7hah8",
-      "note": ""
-    },
-    {
-      "at": "2026-08-07T00:04:21.369Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-07T00:04:21.369Z"
-    },
-    {
-      "at": "2026-08-07T00:02:29.052Z",
-      "by": "bd2-orch",
-      "action": "card.update",
-      "ref": "c0r2dfxz",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-07T00:02:28.641Z",
-      "by": "bd2-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0r2dfxz",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-07T00:02:28.293Z",
-      "by": "bd2-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0r2dfxz",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-07T00:02:27.940Z",
-      "by": "bd2-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0r2dfxz",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-07T00:02:27.592Z",
-      "by": "bd2-orch",
-      "action": "card.criteria-verify",
-      "ref": "c0r2dfxz",
-      "note": "#2"
     }
   ],
   "nextNum": 368,
