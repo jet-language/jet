@@ -1,13 +1,36 @@
 trait JetShow {
     fn jet_show(&self) -> String;
+    /// D-FAIL-CARRIER1=A: is this the carrier's clean report? The optional view
+    /// answers yes, so `T?` prints its payload bare and its absence as `null`;
+    /// every failure report answers no, so `T ? E` prints its verdict.
+    fn jet_report_is_clean() -> bool
+    where
+        Self: Sized,
+    {
+        false
+    }
 }
 /// D-DISPLAYDBG1: user-facing interpolation (`{value}`).
 trait JetDisplay {
     fn jet_display(&self) -> String;
+    /// D-FAIL-CARRIER1=A: see `JetShow::jet_report_is_clean`.
+    fn jet_report_is_clean() -> bool
+    where
+        Self: Sized,
+    {
+        false
+    }
 }
 /// D-ATTR4=A: developer interpolation (`{value#Debug}`).
 trait JetDebug {
     fn jet_debug(&self) -> String;
+    /// D-FAIL-CARRIER1=A: see `JetShow::jet_report_is_clean`.
+    fn jet_report_is_clean() -> bool
+    where
+        Self: Sized,
+    {
+        false
+    }
 }
 
 /// D-QUANTITY-TYPE1=A: internal compile-time bridge for physical-unit generic
@@ -352,50 +375,62 @@ impl<K: Ord + JetDebug, V: JetDebug> JetDebug for JetMap<K, V> {
         jet_debug_map(self.iter().map(|(key, value)| (key.jet_debug(), value.jet_debug())))
     }
 }
-impl<T: JetShow> JetShow for Option<T> {
+// D-FAIL-CARRIER1=A: one carrier, so one printer. The report type says which
+// view is being read: the clean report prints the payload bare and `null` for
+// an absence; a failure report prints the verdict around them.
+impl JetShow for JetAbsent {
     fn jet_show(&self) -> String {
-        match self {
-            Some(v) => v.jet_show(),
-            None => "null".to_string(),
-        }
+        "null".to_string()
+    }
+    fn jet_report_is_clean() -> bool {
+        true
     }
 }
-impl<T: JetDisplay> JetDisplay for Option<T> {
+impl JetDisplay for JetAbsent {
     fn jet_display(&self) -> String {
-        match self {
-            Some(v) => v.jet_display(),
-            None => "null".to_string(),
-        }
+        "null".to_string()
+    }
+    fn jet_report_is_clean() -> bool {
+        true
     }
 }
-impl<T: JetDebug> JetDebug for Option<T> {
+impl JetDebug for JetAbsent {
     fn jet_debug(&self) -> String {
-        match self {
-            Some(v) => v.jet_debug(),
-            None => "null".to_string(),
-        }
+        "null".to_string()
+    }
+    fn jet_report_is_clean() -> bool {
+        true
     }
 }
-impl<T: JetShow, E: JetShow> JetShow for Result<T, E> {
+impl<T: JetShow, E: JetShow> JetShow for JetOutcome<T, E> {
     fn jet_show(&self) -> String {
+        let clean = <E as JetShow>::jet_report_is_clean();
         match self {
+            Ok(v) if clean => v.jet_show(),
             Ok(v) => format!("Ok({})", v.jet_show()),
+            Err(e) if clean => e.jet_show(),
             Err(e) => format!("Err({})", e.jet_show()),
         }
     }
 }
-impl<T: JetDisplay, E: JetDisplay> JetDisplay for Result<T, E> {
+impl<T: JetDisplay, E: JetDisplay> JetDisplay for JetOutcome<T, E> {
     fn jet_display(&self) -> String {
+        let clean = <E as JetDisplay>::jet_report_is_clean();
         match self {
+            Ok(v) if clean => v.jet_display(),
             Ok(v) => format!("Ok({})", v.jet_display()),
+            Err(e) if clean => e.jet_display(),
             Err(e) => format!("Err({})", e.jet_display()),
         }
     }
 }
-impl<T: JetDebug, E: JetDebug> JetDebug for Result<T, E> {
+impl<T: JetDebug, E: JetDebug> JetDebug for JetOutcome<T, E> {
     fn jet_debug(&self) -> String {
+        let clean = <E as JetDebug>::jet_report_is_clean();
         match self {
+            Ok(v) if clean => v.jet_debug(),
             Ok(v) => format!("Ok({})", v.jet_debug()),
+            Err(e) if clean => e.jet_debug(),
             Err(e) => format!("Err({})", e.jet_debug()),
         }
     }

@@ -2611,10 +2611,10 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 format!("jet_slice_vec(&({}), {}, {}, {:?}, {})", b, a, e, cx.file, line)
             }
         }
-        // c109 Phase 8: `value(x)` → `Some(x)` / `null` → `None`. Mirrors the AST
-        // `Expr::Present`/`Expr::Absent` exactly.
-        TExprKind::Present(inner) => format!("Some({})", emit_tir_expr(inner, cx)),
-        TExprKind::Absent => "None".to_string(),
+        // D-FAIL-CARRIER1=A: the optional view builds the one carrier. A present
+        // payload is the value side; an absence is the clean report.
+        TExprKind::Present(inner) => format!("Ok({})", emit_tir_expr(inner, cx)),
+        TExprKind::Absent => format!("Err({}JetAbsent)", cx.root_prefix),
         // c109 Phase 23: a `#Todo` typed hole → diverging `todo!(…)`. Byte-for-byte the
         // AST `Expr::Todo` arm (Expression.rs): file/line/expected-type baked into the
         // panic string. `cx.file` is program-level (read here, like every other use).
@@ -2813,7 +2813,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 }
                 // D-HOLE1/D-MEM-PARAM1: `.map` on `T?` lends the payload to
                 // its plain callback instead of cloning/moving it.
-                TClosureOp::OptionMap => format!("({}).as_ref().map({})", recv, a(0)),
+                TClosureOp::OptionMap => format!("({}).map_ref({})", recv, a(0)),
                 TClosureOp::Filter => {
                     if recv_is_iter {
                         format!("jet_iter_filter({as_iter}, {})", a(0))

@@ -1073,10 +1073,19 @@ impl Cx {
                     render(cx, inner, base)
                 ),
                 Type::Option(inner) if cx.type_contains_view(inner) => {
-                    format!("Option<{}>", render(cx, inner, base))
+                    format!(
+                        "{0}JetOutcome<{1}, {0}JetAbsent>",
+                        cx.root_prefix,
+                        render(cx, inner, base)
+                    )
                 }
                 Type::Result { ok, err } if cx.type_contains_view(ty) => {
-                    format!("Result<{}, {}>", render(cx, ok, base), render(cx, err, base))
+                    format!(
+                        "{}JetOutcome<{}, {}>",
+                        cx.root_prefix,
+                        render(cx, ok, base),
+                        render(cx, err, base)
+                    )
                 }
                 Type::Tuple(fields) if cx.type_contains_view(ty) => {
                     add_type_lifetime(tuple_struct_name(&tuple_fields_plain(fields)))
@@ -1286,9 +1295,20 @@ impl Cx {
                 self.root_prefix,
                 self.rust_type(inner)
             ),
-            Type::Option(inner) => format!("Option<{}>", self.rust_type(inner)),
+            // D-FAIL-CARRIER1=A: `T?` and `T ? E` are two views of one carrier.
+            // The optional view's report is `JetAbsent` — absence is clean.
+            Type::Option(inner) => format!(
+                "{0}JetOutcome<{1}, {0}JetAbsent>",
+                self.root_prefix,
+                self.rust_type(inner)
+            ),
             Type::Result { ok, err } => {
-                format!("Result<{}, {}>", self.rust_type(ok), self.rust_type(err))
+                format!(
+                    "{}JetOutcome<{}, {}>",
+                    self.root_prefix,
+                    self.rust_type(ok),
+                    self.rust_type(err)
+                )
             }
             // Items inside an imported file live in `mod user_<alias>`; the
             // module provides the namespace, so item names stay plain.

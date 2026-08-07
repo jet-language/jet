@@ -734,9 +734,9 @@ impl CtValue {
                     .collect();
                 format!("{{{}}}", parts.join(", "))
             }
-            CtValue::Some(v) => format!("Some({})", v.debug_rust()),
-            CtValue::None(_) => "None".to_string(),
-            CtValue::ResOk(v) => format!("Ok({})", v.debug_rust()),
+            // D-FAIL-CARRIER1=A: one carrier, so one pair of Rust spellings.
+            CtValue::Some(v) | CtValue::ResOk(v) => format!("Ok({})", v.debug_rust()),
+            CtValue::None(_) => "Err(JetAbsent)".to_string(),
             CtValue::ResErr(v) => format!("Err({})", v.debug_rust()),
             CtValue::Struct { type_name, fields } => {
                 let ty = type_name.strip_prefix("user_").unwrap_or(type_name);
@@ -1034,9 +1034,9 @@ impl CtValue {
                     s
                 }
             }
-            CtValue::Some(v) => format!("Some({})", v.serialize()),
-            CtValue::None(_) => "None".to_string(),
-            CtValue::ResOk(v) => format!("Ok({})", v.serialize()),
+            // D-FAIL-CARRIER1=A: one carrier, so one pair of Rust spellings.
+            CtValue::Some(v) | CtValue::ResOk(v) => format!("Ok({})", v.serialize()),
+            CtValue::None(_) => "Err(JetAbsent)".to_string(),
             CtValue::ResErr(e) => format!("Err({})", e.serialize()),
             CtValue::Struct { type_name, fields } => {
                 let parts: Vec<String> = fields
