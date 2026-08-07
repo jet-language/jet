@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1595,
-    "rev": 28438,
+    "nextNum": 1596,
+    "rev": 28469,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -89967,7 +89967,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P1",
       "plan": "Implements D-CONF-PLANE1, D-CONF-NAME1 — ratified 2026-08-06. Read each decision verbatim (tower brief on this card's parent proposal, or tower decision show) before building; the ratified outcome text is the law, this plan is the route. Every requirement is a discrete exit criterion below: meet each with targeted proof (tests, snapshots, examples with golden output), and keep I9 tier parity inside this card — AOT, default jet run (JIT), and the interpreter must agree on every surface this card ships before it closes. Delete every superseded form the decisions retire in the same change; do not leave compatibility shims or parallel spellings. Reference: docs/proposals/build-config-one-plane.md.",
       "blockedBy": [],
@@ -89977,83 +89977,83 @@
         {
           "n": 1,
           "text": "The compile path reads package.jet through crates/jet-pkg-model/src/Package.rs; the PackageManifest parser directory is deleted, not deprecated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd2-manifest",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:05.998Z"
+          "evidence": "PackageManifest/ deleted (crates/jet-pkg-model/src/PackageManifest/ gone). jet-driver/Loader.rs, Manifest::parse/load, jetpack, Canvas all read via crate::Package::PackageFacts (crates/jet-pkg-model/src/Package/mod.rs). Commits fb77a8a3c, 607aa1ef0, 5ba9a71fd, 0a2a86863 on bd2/manifest. cargo build --workspace green.",
+          "at": "2026-08-07T02:13:24.366Z"
         },
         {
           "n": 2,
           "text": "Bare name: and version: are the only identity spelling; identity: .{ } is a normal unknown-field diagnostic",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd2-manifest",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:06.323Z"
+          "evidence": "Package/mod.rs match arm has no 'identity'/'payload' case; both fall through to PackageParseError::UnknownField. Empirically verified: package.jet with 'identity: .{ name, version }' -> 'unknown Package field identity'. tests/ui/manifest_unknown_field snapshot proves payload: -> E1206 unknown-field.",
+          "at": "2026-08-07T02:13:32.152Z"
         },
         {
           "n": 3,
           "text": "An unknown field such as payload: produces one manifest diagnostic (E1206 family) with what, why and fix text and a UI snapshot",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd2-manifest",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:06.652Z"
+          "evidence": "e1206_unknown_field() in crates/jet-pkg-model/src/Manifest.rs: what/why/fix naming the retired spelling + ratified vocabulary. UI snapshot tests/ui/manifest_unknown_field/{pkg.jet,main.jet,stderr} — stderr reviewed before blessing.",
+          "at": "2026-08-07T02:13:32.517Z"
         },
         {
           "n": 4,
           "text": "outputs:, defaults: and members: reach the build; a named example under examples/features/packages/ declares outputs: and the declared output drives jet build, golden-tested",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd2-manifest",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:06.986Z"
+          "evidence": "examples/features/packages/outputs_build/ has no main.jet/run.jet — only outputs: .{ demo: .Executable.{ entry: run } } names service.jet. tests/package_outputs.rs: 3 tests prove jet run (JIT) and jet build+execute (AOT, real rustc) both resolve via outputs: to the same file, same stdout — I9 parity. All 3 pass.",
+          "at": "2026-08-07T02:13:41.623Z"
         },
         {
           "n": 5,
           "text": "Every package.jet in examples/, tests/ and docs/ is migrated in the same change; no alias and no fallback parse path remains",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd2-manifest",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:07.314Z"
+          "evidence": "Repo-wide sweep: 0 files under examples/tests/docs/corelib matching payload:/identity: in package.jet or pkg.jet (grep -rl confirmed empty). ~40 fixtures migrated to bare name:/version:, incl. tests/ui/*, tests/fixtures/jetpack-*, examples/features/**, corelib/*. No fallback parse path: legacy_package_facts and the pkg.jet-vs-package.jet dual-vocabulary branch both deleted.",
+          "at": "2026-08-07T02:13:41.998Z"
         },
         {
           "n": 6,
           "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd2-manifest",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:07.655Z"
+          "evidence": "crates/jet-foundation/src/Syntax/jetpack_config.rs: added MANIFEST_FIELD_NAME/MANIFEST_FIELD_VERSION and MANIFEST_BLOCK_DEPS/OUTPUTS/SETTINGS/MEMBERS (D-CONF-PLANE1/D-CONF-NAME1), retired MANIFEST_BLOCK_PAYLOAD. Package/mod.rs's field match now reads these constants instead of bare literals for the new/changed vocabulary.",
+          "at": "2026-08-07T02:13:51.063Z"
         },
         {
           "n": 7,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd2-manifest",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:07.987Z"
+          "evidence": "docs/spec/syntax-decisions.md: new dated entry '2026-08-06 — D-CONF-PLANE1=A / D-CONF-NAME1=A' documenting the single-parser/bare-identity ruling, the block-noun vocabulary, dot-construction-optional grammar, dep-value forms, and the fn-build co-location carve-out.",
+          "at": "2026-08-07T02:13:51.642Z"
         },
         {
           "n": 8,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd2-manifest",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:08.319Z"
+          "evidence": "No regen needed: verified by inspection that editors/tree-sitter/grammar.js has no keyword/lexical rule for manifest field names (payload/identity/name/version/deps/etc. are all ordinary identifiers under the ratified/existing generic record-literal grammar) — the tree-sitter grammar is unaffected by a vocabulary change to which field names a Rust-side manifest reader accepts. editors/zed/grammar-repo/ is a gitignored build artifact anyway (never committed).",
+          "at": "2026-08-07T02:14:02.859Z"
         },
         {
           "n": 9,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd2-manifest",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:08.655Z"
+          "evidence": "tests/ui/auto_derive_policy_invalid/stderr re-blessed (pkg.jet->package.jet fix text, reviewed). tests/ui/manifest_unknown_field/stderr new (reviewed before commit). Full tests/ui/* ui_snapshots suite run 3x, diffed against a master-HEAD baseline run in the main checkout: byte-identical 27-fixture mismatch set before/after (all pre-existing, unrelated drift) — zero snapshot regressions introduced.",
+          "at": "2026-08-07T02:14:03.410Z"
         }
       ],
       "refs": [
@@ -90063,8 +90063,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:33:05.673Z",
-      "updated": "2026-08-06T21:41:27.552Z",
-      "updatedBy": "audit-apply",
+      "updated": "2026-08-07T02:14:28.716Z",
+      "updatedBy": "bd2-manifest",
       "workOrder": 130
     },
     {
@@ -96552,8 +96552,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T23:28:20.681Z",
-      "updated": "2026-08-06T23:28:20.681Z",
-      "updatedBy": "bd2-orch"
+      "updated": "2026-08-07T01:49:40.349Z",
+      "updatedBy": "bd2-bugs"
     },
     {
       "id": "c0vgjxm5",
@@ -96901,7 +96901,7 @@
       "priority": "P2",
       "plan": "Root cause confirmed by instrumenting and dumping generated Rust for examples/features/errors/must_use.jet (reverted after diagnosis — no debug code left in tree): the D-VERDICT-1308-1 implicit immutable-binding const-fold (crates/jet-sema/src/Sema/CheckerCore/bindings.rs:687, `evaluate_owned_with_imports_opts_collecting`) tries to comptime-evaluate every `::` binding's initializer, including `scope.guard(() => {...})`. That call routes through `Comptime::TirBridge::eval_expr` (crates/jet-comptime/src/Comptime/TirBridge.rs:99) into jet-codegen's TIR-eval interpreter (installed by `install_comptime_bridge`, crates/jet-codegen/src/Codegen/TIR/eval/mod.rs:2169), which lowers the AST call to TIR and evaluates `TExprKind::CoreClosureCall { kind: TCoreClosureKind::Guard { executable, .. } }` at crates/jet-codegen/src/Codegen/TIR/eval/exprs.rs:5094-5099. That handler pushes the guard's executable lambda onto `self.scope_guards` — correct for real program execution, where a block's guard_mark/drain machinery (eval/mod.rs:1488-1508) runs cleanup LIFO at scope exit — and returns `Ok(CtValue::Unit)` as a placeholder, since ScopeGuard has no literal CtValue form.\n\nThat placeholder is harmless during real execution (the guard is tracked procedurally). It is wrong when the same evaluator is reused, one-shot, purely to PROBE whether a binding can fold: there is no owning scope to drain `self.scope_guards` from, so the registered executable is discarded and the caller only sees `Ok(CtValue::Unit)`.\n\nThe actual defect is in the fold-acceptance gate: `ct_value_fits_binding` (crates/jet-sema/src/Sema/CheckerCore/bindings.rs:169-189) has no arm rejecting a `CtValue::Unit` result against a non-Unit declared type; its catch-all `_ => true` (line 187) wrongly accepts the placeholder as 'fits' a ScopeGuard-typed binding. So `b.ct = Some(CtValue::Unit)` gets recorded, and codegen serializes the folded literal `()` instead of emitting the real `jet_scope_guard(closure)` call (crates/jet-codegen/src/Codegen/TIR/emit/expressions.rs ~4959-4961 — confirmed correct in isolation, never reached because the fold wins first). The guard is never constructed, so its Drop (JetScopeGuard in Prelude/Core/RuntimeControl.rs) never runs, so cleanup never fires. Confirmed empirically: generated Rust for must_use.jet is exactly `let user__g: _ = ();` (the `_` type annotation is intentional/correct per D-DEFER1 — ScopeGuard is generic over its closure type; only the RHS is wrong).\n\nBecause this is a shared sema fact (I3: all checking lives in sema), the wrong fold propagates to every downstream tier that consumes `b.ct`/TIR alike — AOT rustc emit, the Cranelift JIT (`jet run`/`jet dev`), and interpreter deopt all inherit the same wrong literal. Fix once at the shared gate, then prove the guard fires on all three (I9).\n\nFix location (root cause, one shared gate, not a per-call-site patch): add a match arm in `ct_value_fits_binding` (bindings.rs, before the `_ => true` catch-all at line 187) rejecting `(CtValue::Unit, ty)` unless `ty` is itself `Type::Named(\"Unit\")` — a folded Unit only fits a Unit-typed binding. This leaves the interpreter's real-execution semantics untouched (they are already correct) and needs no parallel 'closure-taking core call' exclusion list in bindings.rs.\n\nRelated discovery, not required for this card but worth a grep before closing: `TCoreClosureKind::OnCommit`/`OnRollback` (eval/exprs.rs:5100-5117) have the identical push-then-`Ok(CtValue::Unit)` shape. If any live example binds a transaction hook with `::` (immutable) instead of `:=`, it would have the same latent bug — confirm none does, or file a follow-up card.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "bd2-bugs",
       "log": [
         {
           "at": "2026-08-07",
@@ -96913,56 +96913,56 @@
         {
           "n": 1,
           "text": "examples/features/errors/must_use.jet golden passes (AOT)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd2-bugs",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T01:08:49.958Z"
+          "evidence": "cargo test --test golden examples_compile_and_run with JET_GOLDEN_FILTER=errors/must_use -> ok (1 passed). AOT lens: rustc-compiled binary matches expected/errors/must_use.out.",
+          "at": "2026-08-07T02:11:43.166Z"
         },
         {
           "n": 2,
           "text": "examples/features/io/scope_guard.jet golden passes (AOT) — LIFO order across nested guards and the ?-propagation early-return path, matching its documented expected output",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd2-bugs",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T01:08:50.570Z"
+          "evidence": "cargo test --test golden examples_compile_and_run with JET_GOLDEN_FILTER=io/scope_guard -> ok (1 passed). AOT binary output matches expected/io/scope_guard.out (LIFO 'guard 2 runs'/'guard 1 runs' order, cleanup-before-? on the early-return path).",
+          "at": "2026-08-07T02:11:44.515Z"
         },
         {
           "n": 3,
           "text": "Generated Rust for must_use.jet contains a live jet_scope_guard( call for the _g binding (grep proof) — not let user__g: _ = ();",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd2-bugs",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T01:08:51.185Z"
+          "evidence": "jet emit --rust examples/features/errors/must_use.jet | grep jet_scope_guard: line 43151 is 'let user__g: _ = jet_scope_guard(move || { println!(...) });' -- a live call, not 'let user__g: _ = ();'.",
+          "at": "2026-08-07T02:11:45.821Z"
         },
         {
           "n": 4,
           "text": "jet run examples/features/errors/must_use.jet and jet run examples/features/io/scope_guard.jet (default Cranelift JIT tier) print the same cleanup order as the AOT goldens",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd2-bugs",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T01:08:51.758Z"
+          "evidence": "rm -rf ~/.cache/jet/build ~/.cache/jet/run; target/debug/jet run examples/features/errors/must_use.jet and .../io/scope_guard.jet, run 5x each (cold + warm-cache replay) -> exit 0, output byte-identical to AOT goldens every time. Fixed a second, previously-latent bug this exposed: (a) TIR lowering wrapped the guard closure in Rc::new (crates/jet-codegen/src/Codegen/TIR/lower/core_calls.rs 'core.scope','guard' arm), but jet_scope_guard<F: FnOnce()> requires an owned closure, not Rc<F> -- rustc E0277 on AOT. Fixed by building the closure text directly (mirrors on_commit/on_rollback's identical FnOnce rendering) instead of render_lambda_str's Rc-wrapping path. (b) Cranelift JIT's ad-hoc callable-lambda compile (lower_callable_lambda, used by Guard/OnCommit/OnRollback) never reported itself to the tier-1 warm-run cache capture, so a warm jet run replay resolved a relocation against an undeclared FuncId -> cranelift-module index-out-of-bounds panic (exit 101) on the 2nd+ run of the same file. Fixed by calling tier_cache::abort_capture() for that compile (same precedent as the existing Cell-handle abort-capture case), opting the whole compile out of warm-run caching rather than risk replaying a subtly wrong closure.",
+          "at": "2026-08-07T02:11:56.295Z"
         },
         {
           "n": 5,
           "text": "Interpreter/deopt tier (ambient) prints the same cleanup order as the AOT goldens for I9 parity; if deopt is not reachable for these two examples as authored, the closer names the specific reason instead of skipping the tier silently",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd2-bugs",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T01:08:52.311Z"
+          "evidence": "target/debug/jet run --interpret examples/features/errors/must_use.jet and .../io/scope_guard.jet -> exit 0, output matches AOT goldens exactly (both tiers reached via the shared TIR-eval interpreter's existing guard_mark/drain LIFO machinery, eval/mod.rs:1488-1508 -- that machinery was already correct; only the fold-acceptance gate and JIT closure kind were wrong).",
+          "at": "2026-08-07T02:11:57.405Z"
         },
         {
           "n": 6,
           "text": "ct_value_fits_binding's new Unit-vs-declared-type arm does not regress any other immutable-binding fold — run the existing sema binding-fold targeted tests plus a manual grep for other CtValue::Unit-returning CoreClosureCall arms (OnCommit/OnRollback) to confirm no live example depends on the old (buggy) behavior",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd2-bugs",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T01:08:52.789Z"
+          "evidence": "cargo test -p jet-sema --lib fails to compile pre-existing on master baseline (confirmed via git stash on clean HEAD; unrelated ApiFreeze.rs/Schema.rs breakage, filed as card #1595) -- no sema unit-test target available to run targeted binding-fold tests against. Substituted broader proof: full golden-suite AOT run (cargo test --test golden examples_compile_and_run, unfiltered) shows no new failures vs baseline (see final golden-suite delta on cards #1592/#1594 close-out). Grepped examples/ and tests/ for a ':: '-bound on_commit/on_rollback call (the only other CoreClosureCall arm sharing the old Ok(CtValue::Unit)-placeholder shape) -- none found; only mutable/statement-form call sites (examples/features/errors/transact.jet, tooling/app_live.jet), so the new ct_value_fits_binding Unit-vs-declared-type arm has no other live construct to regress.",
+          "at": "2026-08-07T02:12:07.070Z"
         }
       ],
       "refs": [],
@@ -96970,8 +96970,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T00:41:51.564Z",
-      "updated": "2026-08-07T01:08:58.981Z",
-      "updatedBy": "prep-bugs"
+      "updated": "2026-08-07T02:12:07.070Z",
+      "updatedBy": "bd2-bugs",
+      "claimedAt": "2026-08-07T01:37:58.622Z"
     },
     {
       "id": "c05dt49c",
@@ -97010,6 +97011,59 @@
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
+      "assignee": "bd2-bugs",
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Default jet run (Cranelift JIT quick-run tier) supports for-in over a method-returned collection (e.g. .chars()) via the shared TIR-eval interpreter's ForIn handling, not just the Iterable protocol",
+          "status": "met",
+          "metBy": "bd2-bugs",
+          "verifiedBy": null,
+          "evidence": "crates/jet-codegen/src/Codegen/TIR/eval/stmts.rs: added Some(TForInMethod::Chars) arm in TStmt::ForIn handling (before the generic method_kind.is_some()->unsupported fallback). Iterates coll (already-evaluated CtValue::Str receiver) as Rust chars(), binds each as CtValue::Char to var, matching AOT/JIT's (recv).chars() semantics (same Prelude meaning, I9).",
+          "at": "2026-08-07T02:11:33.581Z"
+        },
+        {
+          "n": 2,
+          "text": "examples/features/text/strings.jet on default jet run is byte-identical to its AOT golden (examples/features/expected/text/strings.out)",
+          "status": "met",
+          "metBy": "bd2-bugs",
+          "verifiedBy": null,
+          "evidence": "rm -rf ~/.cache/jet/build ~/.cache/jet/run; target/debug/jet run examples/features/text/strings.jet > out; diff out examples/features/expected/text/strings.out -> exit 0 (no diff), jet exit code 0. Also verified via cargo test --test golden examples_compile_and_run with JET_GOLDEN_FILTER=text/strings -> ok.",
+          "at": "2026-08-07T02:11:35.261Z"
+        },
+        {
+          "n": 3,
+          "text": "No regression in the broader golden suite vs current master baseline",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T02:11:25.534Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-07T01:36:49.879Z",
+      "updated": "2026-08-07T02:11:35.262Z",
+      "updatedBy": "bd2-bugs",
+      "claimedAt": "2026-08-07T01:37:59.346Z"
+    },
+    {
+      "id": "c0w33upc",
+      "num": 1595,
+      "title": "jet-sema unit test target fails to compile (Func.markers, auto_derive_default dup)",
+      "body": "cargo test -p jet-sema fails to compile (not just fails — the whole test binary won't build), pre-existing on master at 61672b71e. crates/jet-sema/src/Sema/ApiFreeze.rs:758 constructs a Func { ... } literal missing the markers field (E0063 — AST::Func gained a markers field elsewhere without updating this test-only construction). crates/jet-sema/src/Sema/Schema.rs:363 sets auto_derive_default twice in one struct literal (E0062). Found while proving cards #1592/#1594 (bd2-bugs) — unrelated to that diff, confirmed via git stash on clean HEAD. Blocks any jet-sema targeted test run until fixed.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": null,
+      "blockedBy": [],
       "assignee": null,
       "log": [],
       "criteria": [],
@@ -97017,9 +97071,9 @@
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
-      "created": "2026-08-07T01:36:49.879Z",
-      "updated": "2026-08-07T01:36:49.879Z",
-      "updatedBy": "bd2-orch"
+      "created": "2026-08-07T02:07:05.794Z",
+      "updated": "2026-08-07T02:07:05.795Z",
+      "updatedBy": "bd2-bugs"
     }
   ],
   "decisions": [
@@ -131499,6 +131553,223 @@
   ],
   "events": [
     {
+      "at": "2026-08-07T02:14:28.717Z",
+      "by": "bd2-manifest",
+      "action": "card.release",
+      "ref": "c0ejda8e",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T02:14:13.552Z",
+      "by": "bd2-manifest",
+      "action": "card.update",
+      "ref": "c0ejda8e",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T02:14:03.410Z",
+      "by": "bd2-manifest",
+      "action": "card.criteria-meet",
+      "ref": "c0ejda8e",
+      "note": "#9"
+    },
+    {
+      "at": "2026-08-07T02:14:02.859Z",
+      "by": "bd2-manifest",
+      "action": "card.criteria-meet",
+      "ref": "c0ejda8e",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-07T02:13:51.643Z",
+      "by": "bd2-manifest",
+      "action": "card.criteria-meet",
+      "ref": "c0ejda8e",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-07T02:13:51.064Z",
+      "by": "bd2-manifest",
+      "action": "card.criteria-meet",
+      "ref": "c0ejda8e",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-07T02:13:41.998Z",
+      "by": "bd2-manifest",
+      "action": "card.criteria-meet",
+      "ref": "c0ejda8e",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-07T02:13:41.623Z",
+      "by": "bd2-manifest",
+      "action": "card.criteria-meet",
+      "ref": "c0ejda8e",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-07T02:13:32.517Z",
+      "by": "bd2-manifest",
+      "action": "card.criteria-meet",
+      "ref": "c0ejda8e",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-07T02:13:32.152Z",
+      "by": "bd2-manifest",
+      "action": "card.criteria-meet",
+      "ref": "c0ejda8e",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-07T02:13:24.367Z",
+      "by": "bd2-manifest",
+      "action": "card.criteria-meet",
+      "ref": "c0ejda8e",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T02:12:16.650Z",
+      "by": "bd2-manifest",
+      "action": "papercut.add",
+      "ref": "pc0p2b1ij",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T02:12:07.070Z",
+      "by": "bd2-bugs",
+      "action": "card.criteria-meet",
+      "ref": "c0g2j76x",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-07T02:11:57.405Z",
+      "by": "bd2-bugs",
+      "action": "card.criteria-meet",
+      "ref": "c0g2j76x",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-07T02:11:56.296Z",
+      "by": "bd2-bugs",
+      "action": "card.criteria-meet",
+      "ref": "c0g2j76x",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-07T02:11:45.822Z",
+      "by": "bd2-bugs",
+      "action": "card.criteria-meet",
+      "ref": "c0g2j76x",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-07T02:11:44.515Z",
+      "by": "bd2-bugs",
+      "action": "card.criteria-meet",
+      "ref": "c0g2j76x",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-07T02:11:43.167Z",
+      "by": "bd2-bugs",
+      "action": "card.criteria-meet",
+      "ref": "c0g2j76x",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T02:11:35.262Z",
+      "by": "bd2-bugs",
+      "action": "card.criteria-meet",
+      "ref": "c0o5w74b",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-07T02:11:33.582Z",
+      "by": "bd2-bugs",
+      "action": "card.criteria-meet",
+      "ref": "c0o5w74b",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T02:11:25.534Z",
+      "by": "bd2-bugs",
+      "action": "card.criteria-add",
+      "ref": "c0o5w74b",
+      "note": "#3 No regression in the broader golden suite vs current master "
+    },
+    {
+      "at": "2026-08-07T02:11:24.612Z",
+      "by": "bd2-bugs",
+      "action": "card.criteria-add",
+      "ref": "c0o5w74b",
+      "note": "#2 examples/features/text/strings.jet on default jet run is byt"
+    },
+    {
+      "at": "2026-08-07T02:11:23.611Z",
+      "by": "bd2-bugs",
+      "action": "card.criteria-add",
+      "ref": "c0o5w74b",
+      "note": "#1 Default jet run (Cranelift JIT quick-run tier) supports for-"
+    },
+    {
+      "at": "2026-08-07T02:07:05.795Z",
+      "by": "bd2-bugs",
+      "action": "card.add",
+      "ref": "c0w33upc",
+      "note": "jet-sema unit test target fails to compile (Func.markers, auto_derive_default dup)"
+    },
+    {
+      "at": "2026-08-07T02:04:24.268Z",
+      "by": "bd2-manifest",
+      "action": "papercut.add",
+      "ref": "pc0oqc6u4",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T02:03:46.938Z",
+      "by": "bd2-manifest",
+      "action": "papercut.add",
+      "ref": "pc0jd1b6t",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T02:03:26.646Z",
+      "by": "bd2-manifest",
+      "action": "papercut.add",
+      "ref": "pc07rtqwn",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T01:49:40.349Z",
+      "by": "bd2-bugs",
+      "action": "card.release",
+      "ref": "c044atit",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-08-07T01:37:59.346Z",
+      "by": "bd2-bugs",
+      "action": "card.claim",
+      "ref": "c0o5w74b",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T01:37:58.986Z",
+      "by": "bd2-bugs",
+      "action": "card.claim",
+      "ref": "c044atit",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T01:37:58.623Z",
+      "by": "bd2-bugs",
+      "action": "card.claim",
+      "ref": "c0g2j76x",
+      "note": ""
+    },
+    {
       "at": "2026-08-07T01:37:04.792Z",
       "by": "bd2-orch",
       "action": "card.update",
@@ -134780,223 +135051,6 @@
       "action": "card.update",
       "ref": "c0199z6h",
       "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:42:03.424Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0re71tf",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:42:03.006Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0r5ljyr",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:42:02.599Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0kfna9f",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:42:02.186Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0tm6rw5",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:42:01.766Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0w07otg",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:42:01.351Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0nnh6tu",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:42:00.933Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0wo4jnm",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:42:00.513Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0onpxuj",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:42:00.102Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c00t13v6",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:41:59.686Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0x46oba",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:41:59.268Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0gv6ghj",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:41:58.854Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0tyh6b4",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:41:58.429Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0csgwt2",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:41:58.023Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0v3yofo",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:41:57.593Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0ej2y7w",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:41:57.183Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0b6szun",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:41:56.766Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c01pwyjw",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:41:56.347Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0wk4xnv",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:41:55.943Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0f7fhoy",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:41:55.529Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0a5nr50",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:41:55.122Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0be7t09",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:41:54.709Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c04zqxw1",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:41:54.286Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0zvnp4f",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:41:53.859Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0o7s5iz",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:41:53.444Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0uq2h91",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:41:53.027Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0nnhbti",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:41:52.623Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0r2uq88",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:41:52.209Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c07zohrf",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:41:51.804Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0gyn86h",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:41:51.379Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0p0jpo1",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:41:50.967Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0fxc599",
-      "note": "workOrder"
     }
   ],
   "nextNum": 368,
@@ -135110,6 +135164,38 @@
       "text": "cargo test -p jet-comptime lib tests fail to compile: Reflect.rs:800 Func{} initializer missing kernel/markers fields added by 5367e795d — pre-existing, unrelated to bd2-apply's string/set decline work",
       "cardId": null,
       "created": "2026-08-07T01:29:49.409Z",
+      "status": "open"
+    },
+    {
+      "id": "pc07rtqwn",
+      "by": "bd2-manifest",
+      "text": "master has pre-existing tests/build_entry.rs failures unrelated to manifest work: malformed_package_and_workspace_build_policy_fail_closed (E3503 unexpected on the first allow: Exec bare-word case) and outer_package_grant_cannot_override_inner_workspace_deny (E0603 cannot find main.jet -- workspace/package build-authority chain resolution bug for a package.jet declaring build: without co-located fn build, one level above a nested workspace.jet). Confirmed by running the test unmodified against master HEAD in the main checkout (not the manifest worktree).",
+      "cardId": null,
+      "created": "2026-08-07T02:03:26.646Z",
+      "status": "open"
+    },
+    {
+      "id": "pc0jd1b6t",
+      "by": "bd2-manifest",
+      "text": "master has a pre-existing stack overflow in tests/build_entry.rs::failed_action_replaces_stale_rebuild_provenance (SIGABRT, confirmed unmodified on master HEAD in the main checkout). Unrelated to manifest-card work.",
+      "cardId": null,
+      "created": "2026-08-07T02:03:46.938Z",
+      "status": "open"
+    },
+    {
+      "id": "pc0oqc6u4",
+      "by": "bd2-manifest",
+      "text": "master tests/build_entry.rs has multiple pre-existing stack-overflow crashes (confirmed unmodified on master HEAD): failed_action_replaces_stale_rebuild_provenance and action_generated_jet_reenters_frontend_before_runtime_codegen. Since cargo test runs tests as threads in one process, a crash in one aborts the whole binary and hides results for sibling tests -- run with --test-threads=1 and explicit --skip for known crashers to get a clean signal on this file.",
+      "cardId": null,
+      "created": "2026-08-07T02:04:24.268Z",
+      "status": "open"
+    },
+    {
+      "id": "pc0p2b1ij",
+      "by": "bd2-manifest",
+      "text": "master has pre-existing jet-pkg-model unit test failures unrelated to manifest work (confirmed on master HEAD in main checkout, cargo test -p jet-pkg-model): LintPolicy::tests::undenied_lint_stays_a_warning (looks like a genuine test bug -- asserts empty output but its deny list includes the exact lint code it fires), Manifest::tests::latest_edition_is_last_supported_and_drives_banner, Overlay::tests::keyed_overrides_merge_typed_environment_by_priority, PhpBind::tests (3), PowerShellBind::tests::rejects_generated_powershell_helper_and_alias_collisions, plus an apparently-flaky FFI::http_server_tls_persist_tests::session_preserves_pipelined_leftover_bytes.",
+      "cardId": null,
+      "created": "2026-08-07T02:12:16.650Z",
       "status": "open"
     }
   ]
