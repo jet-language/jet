@@ -1,0 +1,11 @@
+// D-CONF-PLANE1/D-CONF-NAME1 (card #1517): `outputs:` names the runnable
+// artifact and the file that defines it — `entry: run` means "the file at
+// this package's root with a top-level `fn run`", found by declaration, not
+// by a `main.jet`/`run.jet` filename convention. This package deliberately
+// has neither: its entry lives in `service.jet`. `jet run` (JIT) and
+// `jet build` (AOT) both resolve it the same way (I9) — rename `service.jet`
+// without updating `entry:` and the build stops naming the missing file,
+// it does not silently fall back to a convention name.
+name: "outputs_build_demo"
+version: "0.1.0"
+outputs: .{ demo: .Executable.{ entry: run } }

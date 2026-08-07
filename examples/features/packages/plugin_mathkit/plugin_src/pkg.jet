@@ -1,22 +1,20 @@
 // c81 / D-PLUGIN1=B / D-DEP-WASM1=A / D-PLUGIN-EXPORT1=A: `--target=plugin`
 // builds this package's entry file to a sandboxed WASM Component Model
 // module instead of a native binary. No `export:` override here — the `.wit`
-// world name defaults to the payload name (`mathkit`, D-PLUGIN-EXPORT1=A);
+// world name defaults to the package name (`mathkit`, D-PLUGIN-EXPORT1=A);
 // see `tests/ui/plugin_e1257_version_mismatch` and
-// `Jetpack::PackageManifest::tests::plugin_target_export_field` for the
-// `export:` field itself. The host at `../main.jet` loads the *compiled*
-// `../mathkit.wasm` this package produces (rebuild it with the command below;
-// the compiled artifact is committed so the golden test never needs a wasm32
-// toolchain to just RUN the example).
+// `jet_pkg_model::Package::Blocks` for the `export:` field itself. The host
+// at `../main.jet` loads the *compiled* `../mathkit.wasm` this package
+// produces (rebuild it with the command below; the compiled artifact is
+// committed so the golden test never needs a wasm32 toolchain to just RUN
+// the example).
 //
 // Rebuild after editing main.jet:
 //   nix develop -c ./target/debug/jet build \
 //     examples/features/packages/plugin_mathkit/plugin_src/main.jet \
 //     --target=plugin
 //   cp build/main.wasm examples/features/packages/plugin_mathkit/mathkit.wasm
-payload: {
-    name: "mathkit",
-    version: "0.1.0",
-    description: "Demonstrates target: plugin (c81) — a sandboxed WASM Component Model math library.",
-    license: "MIT OR Apache-2.0",
-}
+name: "mathkit"
+version: "0.1.0"
+description: "Demonstrates target: plugin (c81) — a sandboxed WASM Component Model math library."
+license: "MIT OR Apache-2.0"
