@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1618,
-    "rev": 28883,
+    "nextNum": 1619,
+    "rev": 28904,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -92245,8 +92245,13 @@
       "priority": "P1",
       "plan": "Implements D-META-STAGE1 — ratified 2026-08-06. Read each decision verbatim (tower brief on this card's parent proposal, or tower decision show) before building; the ratified outcome text is the law, this plan is the route. Every requirement is a discrete exit criterion below: meet each with targeted proof (tests, snapshots, examples with golden output), and keep I9 tier parity inside this card — AOT, default jet run (JIT), and the interpreter must agree on every surface this card ships before it closes. Delete every superseded form the decisions retire in the same change; do not leave compatibility shims or parallel spellings. Reference: docs/proposals/metaprogramming-one-compile-time-program.md.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "bd3-dollar3",
       "log": [
+        {
+          "at": "2026-08-07",
+          "by": "bd3-dollar2",
+          "text": "[handoff] Head d22b848d1 on bd3/dollar. Criteria 1 and 6 still open. I prescribed the fix last session and it was only half right, so here is the sharpened diagnosis with the evidence, because the next worker should not re-derive it.\n\nWHAT I CONFIRMED\nA marked name is resolved and written back on TWO independent evaluator paths, not one, and my earlier note named only the first.\n\n1. jet-comptime's dispatcher. Its write_back matched Expr::Ident and Expr::Field but not Expr::ComptimeName, so a marked receiver never advanced. Fixed in d22b848d1: the arm now reads Expr::Ident(name, _) | Expr::ComptimeName { name, .. }, which is what D-META-STAGE1=B means by the mark being part of the identifier.\n\n2. The TIR evaluator in jet-codegen, reached through Comptime::TirBridge. This is the one that actually folds the failing fixture: read_u8 is implemented in crates/jet-codegen/src/Codegen/TIR/eval/handles.rs and nowhere in jet-comptime (a repository search for \"read_u8\" returns jet-sema's signature table, the TIR subset gate, and jet-foundation's StreamCursor — no comptime arm). A search for ComptimeName under crates/jet-codegen/src/Codegen/TIR/eval/ returns nothing, so that evaluator has no marked-name concept at all and resolves marked names by some other route without write-back.\n\nSo the remaining work is to give the TIR evaluator the same treatment: a marked name resolves and writes back as an ordinary name whose identifier includes the mark. Until both paths agree, criterion 1's second clause and criterion 6 cannot be claimed.\n\nREPRODUCER, small and self-contained\nfn run() {\n    $ct :: Reader.over([U8].{7, 9, 11})\n    $ct_a :: $ct.read_u8() ?? panic(\"ct a\")\n    $ct_b :: $ct.read_u8() ?? panic(\"ct b\")\n    rt :: Reader.over([U8].{7, 9, 11})\n    rt_a :: rt.read_u8() ?? panic(\"rt a\")\n    rt_b :: rt.read_u8() ?? panic(\"rt b\")\n    print(\"{$ct_a}|{$ct_b}|{rt_a}|{rt_b}\")\n}\nPrints 7|7|7|9. It must print 7|9|7|9. The marked reader does not advance; the plain one does.\n\nThe other two failures are the same root cause seen from different sides: comptime_loadable_matches_runtime types a module-level marked name from the folded value rather than its binding, so Loadable.Idle loses its methods; reusable_regex reports E0956 on replace_all_with. Both fixtures are faithful migrations of master's text, verified with git show master:tests/comptime_diff.rs.\n\nCOMBINED PROOF RUN, one cargo invocation, worktree-local target per the new policy\n- comptime_diff 23 of 26, the three above.\n- fmt 163 of 163. grammar 18 of 18. diagnostic_snapshots 4 of 4.\n- golden 63 failures, exactly the branch baseline, and zero comptime examples among them.\nEight of ten criteria stay met and are unaffected by the open two."
+        },
         {
           "at": "2026-08-07",
           "by": "bd3-dollar2",
@@ -92377,9 +92382,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:34:12.218Z",
-      "updated": "2026-08-07T13:22:33.539Z",
-      "updatedBy": "bd3-dollar2",
-      "workOrder": 180
+      "updated": "2026-08-07T13:37:46.619Z",
+      "updatedBy": "bd3-dollar3",
+      "workOrder": 180,
+      "claimedAt": "2026-08-07T13:37:46.618Z"
     },
     {
       "id": "c0pden89",
@@ -92960,7 +92966,18 @@
       "plan": "Implements D-META-EFFECT1 — ratified 2026-08-06. Read each decision verbatim (tower brief on this card's parent proposal, or tower decision show) before building; the ratified outcome text is the law, this plan is the route. Every requirement is a discrete exit criterion below: meet each with targeted proof (tests, snapshots, examples with golden output), and keep I9 tier parity inside this card — AOT, default jet run (JIT), and the interpreter must agree on every surface this card ships before it closes. Delete every superseded form the decisions retire in the same change; do not leave compatibility shims or parallel spellings. Reference: docs/proposals/metaprogramming-one-compile-time-program.md.",
       "blockedBy": [],
       "assignee": "bd3-effect",
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-07",
+          "by": "bd3-effect",
+          "text": "[handoff] Branch bd3/effect, HEAD 165340a39, unmerged, worktree kept and its cargo cache warm. Route for the remaining six criteria, in the order the dependencies fall. Criterion 3 (merge the checkers) is the backbone and blocks 1 and 4: crates/jet-sema/src/Sema/Purity.rs (1297 lines, E3401/E3402/E3403) and crates/jet-comptime/src/Comptime/Purity.rs (612 lines, E0951 through Diagnostics::impurity_diag) both walk a call graph proving everything reachable is pure. jet-sema depends on jet-comptime, so the merged walk belongs in jet-comptime or jet-foundation, not in sema. Retire one family and redirect its codes. Criterion 1 then needs a declared =[FS]=> on a comptime-reached function to authorise the Tier-1 effect instead of tripping the purity walk. Criterion 5 has a sequencing note, not a blocker: tests/run_gaps.txt does not exist on master, it arrives with #1509 on branch bd3/ledger. I did not touch that branch. Whoever merges second deletes the four comptime rows; if bd3/ledger lands first, the rows are there to delete, and if this lands first, #1509 should not add them. Criterion 6 is the real proof and can be measured today: examples/features/comptime/{embed,embed_bytes,find,find_empty}.jet under AOT, default jet run and the interpreter. Build with the worktree's own target/ (unset CARGO_TARGET_DIR) — the shared cache clashes with other worktrees' branches and produced phantom errors from code I had not touched (papercut pc08xq6wo)."
+        },
+        {
+          "at": "2026-08-07",
+          "by": "bd3-effect",
+          "text": "In progress on branch bd3/effect (worktree .claude/worktrees/effect), commits 1e953a25f and 165340a39. Two of the eight criteria have their mechanism in place; the card stays in building because six are not met yet. Done: the effect facts (Effect, EffectSet, core_effect, builtin_effect, is_irreversible_effect) moved from jet-sema to jet-foundation, because jet-sema depends on jet-comptime and so only one stage could read the table. Sema re-exports them, so every existing Sema::Effect path still resolves. On top of that, criterion 2's mechanism: is_pure_tier2_call and the module list inside is_tier2_core_call are deleted, and a Core call is Tier 2 when its declared effect is ambient (FS, Env, IO, Exec, Net, Secret, DB, Browser). The facts the list held that the table lacked are now declared in the table: the pure core.net address/packet helpers and core.io.style_force carry no effect, the seven storeful core.auth session APIs carry DB. Workspace builds clean. One judgement worth challenging: I read 'the tiers keep their ratified meaning' as holding today's membership fixed, so Time and Rand stay outside the gate (determinism already governs them through E3403) and Log/GPU do too. Reading it as 'any non-empty effect is Tier 2' would instead newly gate time.now, log, compute, raylib and ui at compile time — a surface change I did not make on my own authority. Still open: criteria 1, 3, 4, 5, 6, 7, 8."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -93042,10 +93059,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:34:34.781Z",
-      "updated": "2026-08-07T13:05:01.072Z",
+      "updated": "2026-08-07T13:24:47.320Z",
       "updatedBy": "bd3-effect",
       "workOrder": 560,
-      "claimedAt": "2026-08-07T13:05:01.072Z"
+      "claimedAt": "2026-08-07T13:24:47.319Z"
     },
     {
       "id": "c0re71tf",
@@ -97600,21 +97617,21 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P3",
       "plan": null,
       "blockedBy": [],
-      "assignee": "bd3-tests",
+      "assignee": null,
       "log": [],
       "criteria": [
         {
           "n": 1,
           "text": "cargo test -p jet-parser arrow_control_law_formats_canonical_forms_idempotently passes with assertions matching ratified D-BRACE1 (card #808) mandatory-brace output",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-tests",
-          "verifiedBy": null,
-          "evidence": "Updated the two stale braceless assertions to the current canonical output: 'if ready { send() } else { skip() }' and 'loop item, items { audit(item) }' (D-BRACE1=A + D-LOOP-COMMA1 canonical comma separator). cargo test -p jet-parser arrow_control_law_formats_canonical_forms_idempotently: ok.",
-          "at": "2026-08-07T11:52:28.036Z"
+          "verifiedBy": "bd3-review",
+          "evidence": "Read 9f0336dd2. crates/jet-parser/src/Parser/mod.rs: the two stale idempotence assertions now expect the D-BRACE1=A canonical form -- 'if ready { send() } else { skip() }' and 'loop item, items { audit(item) }' -- replacing the retired braceless spellings and the retired semicolon loop-header separator. Card #808 (done) made braces mandatory and fmt auto-wraps, so the old expectations asserted output the formatter can no longer produce. This is a stale-assertion repair, not a weakened test: both asserts still pin exact formatter output, and the cited decision is recorded inline.",
+          "at": "2026-08-07T13:36:35.103Z"
         }
       ],
       "refs": [],
@@ -97622,9 +97639,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T08:33:29.113Z",
-      "updated": "2026-08-07T11:52:28.445Z",
-      "updatedBy": "bd3-tests",
-      "claimedAt": "2026-08-07T11:52:28.445Z"
+      "updated": "2026-08-07T13:36:50.705Z",
+      "updatedBy": "bd3-review",
+      "completedAt": "2026-08-07T13:36:50.705Z"
     },
     {
       "id": "c06qhbtc",
@@ -97638,18 +97655,26 @@
       "phase": "building",
       "priority": "P2",
       "plan": null,
-      "blockedBy": [],
+      "blockedBy": [
+        "#1617"
+      ],
       "assignee": "bd3-tests",
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-07",
+          "by": "bd3-tests",
+          "text": "tir_unsafe_and_runtime (criterion #2) is NOT closed: cargo test --test tir_unsafe_and_runtime is 20/24 (was 19/24) — unsafe_fn_block_and_ptr_ops and polymorphic_core_specials fixed as a side effect of the mem.address_of comptime-bake fix (a real memory-safety bug: sema's implicit fold baked the TIR-eval bridge's synthetic FNV-1a 'stable place identity' for mem.address_of as a real AOT i64 literal, so the compiled program dereferenced a wild address). 4 remain red: generic_struct_fns (Clone-bound codegen gap after fixing the real ~a/~b/~s ownership-sigil bug), foreign_struct_construction (check_struct_lit's import-qualified nominal name breaks 3 different bare-name-keyed consumers — reverted the fixture to its original, non-regressed E0113 state rather than ship the ICE my first attempt caused), optional_flow_narrowing_after_none_check (D-FLOWTYPE1 else-branch narrowing has no statement-if equivalent of the value-if swap that already exists), unsafe_tier_emit_is_byte_exact (strip_vetted_prelude_modules's brace counter still desyncs somewhere past string literals). All 4 root-caused and logged as card #1617 for a follow-up pass."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "cargo test --test tir_core_and_closures passes all cases",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd3-tests",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T08:58:17.439Z"
+          "evidence": "cargo test --test tir_core_and_closures: 25/25 pass (was 23/25). Root cause: preserve_typed_list_shape (trait-object list-element boxing) only ran for explicitly-typed bindings; extended it to also use the literal's own inferred type when there's no declared b.ty.",
+          "at": "2026-08-07T13:29:02.596Z"
         },
         {
           "n": 2,
@@ -97663,11 +97688,11 @@
         {
           "n": 3,
           "text": "cargo test --test compiler_stack passes all cases",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd3-tests",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T08:58:18.163Z"
+          "evidence": "cargo test --test compiler_stack: 5/5 pass (was 4/5). Cache is now a reserved core name (E0106); renamed the fixture's colliding struct to ValueCache.",
+          "at": "2026-08-07T13:29:03.034Z"
         }
       ],
       "refs": [],
@@ -97675,9 +97700,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T08:58:13.736Z",
-      "updated": "2026-08-07T11:52:43.777Z",
-      "updatedBy": "bd3-tests",
-      "claimedAt": "2026-08-07T11:52:43.777Z"
+      "updated": "2026-08-07T13:30:45.160Z",
+      "updatedBy": "bd3-orch",
+      "claimedAt": "2026-08-07T13:29:03.490Z"
     },
     {
       "id": "c00jybyb",
@@ -97691,7 +97716,9 @@
       "phase": "building",
       "priority": "P2",
       "plan": null,
-      "blockedBy": [],
+      "blockedBy": [
+        "#1616"
+      ],
       "assignee": "bd3-tests",
       "log": [
         {
@@ -97739,8 +97766,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T09:03:02.874Z",
-      "updated": "2026-08-07T13:08:26.223Z",
-      "updatedBy": "bd3-tests",
+      "updated": "2026-08-07T13:30:45.975Z",
+      "updatedBy": "bd3-orch",
       "claimedAt": "2026-08-07T13:08:26.223Z"
     },
     {
@@ -97821,21 +97848,21 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P3",
       "plan": null,
       "blockedBy": [],
-      "assignee": "bd3-tests",
+      "assignee": null,
       "log": [],
       "criteria": [
         {
           "n": 1,
           "text": "cargo test --test diagnostics_coverage passes all 11 assertions",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-tests",
-          "verifiedBy": null,
-          "evidence": "Registered E1320 in docs/spec/diagnostics.md's Error code registry table (jetpack external-hangar-root-changed error, package_hangar_vendor.rs). Added 19 new tests/ui-scanned snapshot fixtures for codes emitted with no proof: module-eval family (E1322,E1323,E1324,E1325,E1326,E1327,E1328,E1331,E1333,E1334) in tests/fixtures/module-eval-diagnostics/, jetpack E1330 in tests/fixtures/jetpack-diagnostics/, jet-prove-replay family (E3620,E3621,E3622,E3623,E3624,E3625,E3628,E3629) in tests/cli/ — each file's what/why/fix text copied verbatim from its real Diagnostic::error/emit_diag call site. Added E0416/E0428 (retired-with-historical-registry-row) and E2407/E3626 (genuinely unemitted, spec-ahead-of-impl) to EXPECTED_SPEC_AHEAD_OF_IMPL with reasons. Removed E3504 from ACKNOWLEDGED_COVERAGE_GAPS (now covered by tests/build_entry.rs's existing diagnostic.code==E3504 assertion). cargo test --test diagnostics_coverage: 11/11 pass (was 4 failing: acknowledged_gaps_are_still_unresolved, every_emitted_code_has_diagnostics_md_entry, every_emitted_code_has_snapshot, registered_unimplemented_codes_are_expected).",
-          "at": "2026-08-07T13:07:29.866Z"
+          "verifiedBy": "bd3-review",
+          "evidence": "Ran cargo test --test diagnostics_coverage on bd3/tests2 myself: 'test result: ok. 11 passed; 0 failed' (was 7/11). Audited all four stale-code resolutions for laundering and each is justified, not reclassified: E0416/E0428 -- docs/spec/diagnostics.md:366,378 literally read '*retired by D-MARK-REPEAT1=A*', D-MARK-REPEAT1 is a real ratified decision, and neither code has an emission site. E2407/E3626 -- grep for the quoted codes across crates/ and Source/ returns zero emission sites, so 'registered ahead of implementation' is literally true. E3504 -- de-listing from ACKNOWLEDGED_COVERAGE_GAPS is required, not evasive: the code is genuinely covered by an assertion in tests/build_entry.rs, which snapshot_codes() picks up through its legacy tests/*.rs extract_assert_codes scan, so acknowledged_gaps_are_still_unresolved correctly demanded the stale acknowledgement be dropped. E1320 gained a real registry row and the 19 new .stderr fixtures are genuine rendered snapshots under module-eval-diagnostics, jetpack-diagnostics and tests/cli.",
+          "at": "2026-08-07T13:36:50.276Z"
         }
       ],
       "refs": [],
@@ -97843,9 +97870,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T10:00:52.319Z",
-      "updated": "2026-08-07T13:07:30.657Z",
-      "updatedBy": "bd3-tests",
-      "claimedAt": "2026-08-07T13:07:30.657Z"
+      "updated": "2026-08-07T13:36:52.134Z",
+      "updatedBy": "bd3-review",
+      "completedAt": "2026-08-07T13:36:52.133Z"
     },
     {
       "id": "c03ouq0x",
@@ -98208,21 +98235,21 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
-      "assignee": "bd3-tests",
+      "assignee": null,
       "log": [],
       "criteria": [
         {
           "n": 1,
           "text": "cargo test --test corelib decode_traced_migration_chain passes with the ratified => spelling",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd3-tests",
-          "verifiedBy": null,
-          "evidence": "tests/corelib.rs:10726 migration block used retired -> arrow (rename name -> title, change score: Int -> Rank via {...}); moved both to ratified => per D-MIGRATE1/D-MIGRATE2E (crates/jet-parser/src/Parser/Items/states_protocols.rs:20-58). cargo test --test corelib decode_traced_migration_chain: ok.",
-          "at": "2026-08-07T12:44:46.924Z"
+          "verifiedBy": "bd3-review",
+          "evidence": "Read 58d4d5f49. tests/corelib.rs migration block now uses 'rename name => title' and 'change score: Int => Rank via { … }'. Confirmed against the parser: crates/jet-parser/src/Parser/Items/states_protocols.rs expects TokKind::LambdaArrow for rename (D-MIGRATE1) and the same => for change (D-MIGRATE2E), so the old '->' spelling was rejected outright. I independently flagged this exact line as pre-existing red during the bd3/reader review; the fixture now matches the ratified spelling rather than the test being relaxed.",
+          "at": "2026-08-07T13:36:36.449Z"
         }
       ],
       "refs": [],
@@ -98230,9 +98257,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T11:17:51.078Z",
-      "updated": "2026-08-07T12:44:47.933Z",
-      "updatedBy": "bd3-tests",
-      "claimedAt": "2026-08-07T12:44:47.932Z"
+      "updated": "2026-08-07T13:36:51.481Z",
+      "updatedBy": "bd3-review",
+      "completedAt": "2026-08-07T13:36:51.481Z"
     },
     {
       "id": "c0n02xfm",
@@ -98432,7 +98459,7 @@
     {
       "id": "c0h9h1pl",
       "num": 1617,
-      "title": "tir_unsafe_and_runtime: foreign-struct qualified-name cascade + generic Stack<T> Clone bound",
+      "title": "tir_unsafe_and_runtime: 3 remaining failures (qualified-name cascade, Clone bound, D-FLOWTYPE1 else-branch narrowing)",
       "body": "Found while closing #1600. Two separate remaining tir_unsafe_and_runtime.rs failures, deeper than originally scoped: (1) foreign_struct_construction (E0113: fn make() => Note declared but note.Note.{...} construction infers Type::Named(\"note.Note\") — check_struct_lit's import_ns qualification (crates/jet-sema/src/Sema/CheckerInfer/expr.rs check_struct_lit, nominal_name = import_ns.map(|alias| format!(\"{alias}.{type_name}\"))) disambiguates same-named structs across modules but breaks THREE downstream consumers that expect bare registry-keyed names: field_type (fixed in #1600, splits qualified names back apart before struct_owner_module lookup), return-type assignability (E0113, still broken — check_type_assignable doesn't know alias.Type equals Type), and TIR subset coverage (is_covered_struct_ty/tir_covers in crates/jet-codegen/src/Codegen/TIR/subset/entry.rs also expects bare names — using note.Note as a DECLARED return type annotation to dodge E0113 makes tir_covers wrongly return false, producing an ICE 'codegen reached a construct the typed IR does not cover (make)' since the AST-fallback path is retired). Root cause needs one fix, not three patches: either make check_type_assignable/is_covered_struct_ty also split-and-compare qualified names (matching the field_type fix's approach), or reconsider whether check_struct_lit should qualify the nominal name at all for the common case. Left the fixture at its ORIGINAL bare  return type (still red, E0113) to avoid shipping the ICE regression. (2) generic_struct_fns (E0277 rustc rejection): after fixing the real ownership-sigil bug (D-MEM1 struct-literal field fill/rebind from a read-only param needs ~a/~b/~s, not bare — this part IS fixed and committed), a new codegen gap surfaced: struct Stack<T> { items: [T] } derives a Rust  bound on the struct, but fn empty_stack<T>() => Stack<T> doesn't get that same bound propagated to its own generic parameter, so rustc rejects the generated  (I2). Needs the same bound-propagation fix generic struct-returning functions elsewhere presumably already have — or doesn't, if this is the first generic-struct-with-list-field-returning-function case exercised end to end.",
       "kind": "task",
       "track": "epoch",
@@ -98444,6 +98471,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-07",
+          "by": "bd3-tests",
+          "text": "Also covers optional_flow_narrowing_after_none_check (was already failing before this batch, never fixed): D-FLOWTYPE1=A promises x == None narrows x to T in the else branch, matching the true-branch (!= None) narrowing crates/jet-sema/src/Sema/CheckerInfer/expr.rs already implements for value-position Expr::If (lines ~487-505, swaps then/else and rewrites the condition to a Present pattern test). The STATEMENT-position if/else (Stmt::If, CheckerCore/statements.rs) doesn't have the equivalent swap — 'if x == None { return 0 } else { return x + 2 }' fails E0109 in the else branch because x stays Int? there. Root cause found, not fixed (time)."
+        },
         {
           "at": "2026-08-07",
           "by": "bd3-tests",
@@ -98486,6 +98518,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-08-07T13:22:51.434Z"
+        },
+        {
+          "n": 5,
+          "text": "optional_flow_narrowing_after_none_check passes: statement-position if/else gets the same D-FLOWTYPE1 else-branch narrowing value-position if already has",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T13:28:47.960Z"
         }
       ],
       "refs": [],
@@ -98493,7 +98534,43 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T13:20:32.509Z",
-      "updated": "2026-08-07T13:22:52.129Z",
+      "updated": "2026-08-07T13:28:47.960Z",
+      "updatedBy": "bd3-tests"
+    },
+    {
+      "id": "c0lzyla1",
+      "num": 1618,
+      "title": "corelib.rs: 49 pre-existing test failures across email/TLS/DB/codec/CBOR/XML/CSV/os fixtures",
+      "body": "Found while closing the bd3-tests2 batch's combined proof run (cargo test --test corelib, --no-fail-fast). Confirmed unrelated to any of this batch's 5 cards: the only corelib.rs edit this batch touched was 2 lines in decode_traced_migration_chain (card #1612, itself passing) — none of these 49 failing tests call that function or share its fixture. This is large-scale, pre-existing drift across many DIFFERENT root causes, not one bug: sampling the front-end-rejection messages shows at least value-if-without-arrow (D-SG2, 5+ occurrences: 'expected -> after the condition of a value-producing if'), retired loop-header semicolon (D-LOOP-COMMA1-family, 3+: 'this loop header uses a semicolon'), D-ENUMDOT1 bare variant patterns needing a leading dot (E0367, 5+), bare None ambiguity (E0308, 3+), plus rustc-rejection (I2) and assertion-mismatch failures in the codec/CBOR/XML/CSV/email/TLS/DB/os-interrupt families. 49 distinct #[test] functions fail; full list attached as refs. Given the scale (comparable to or larger than this whole batch's combined 5 cards) this needs its own dedicated pass, likely split into several cards by root-cause family (value-if arrow, loop-semicolon, enum-dot, and the rustc/assertion-mismatch group needing individual triage).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "cargo test --test corelib passes (no --no-fail-fast needed); full failing-test list captured 2026-08-07: builtin_codec_expansion_has_no_ast_transplant_or_rust_fallback, consuming_core_constructor_copies_borrowed_field_explicitly, core_email_address_and_mime_are_bounded_and_deterministic, core_email_mailer_surface_constructs_with_real_secret, core_email_policy_envelope_and_reports_are_real_jet_values, async_event_scope_cancel_and_inherited_deadline_are_single_terminal, core_ioerror_native_flush_preserves_operation, cbor_whole_requested_allocation_stays_under_counting_allocator_ceiling, base_decoders_preserve_2026_union_with_comptime_aot_and_dev_parity, core_db_implements_driver_trait, cbor_stream_is_incremental_bounded_deterministic_and_terminal, core_http_nominal_message_and_body_surface_is_executable, core_auth_strict_jwt_and_paseto_hostile_matrix, cbor_stream_drop_and_codec_heap_ceiling_are_enforced, core_net_unix_stream_implements_nominal_io_reader_writer, core_auth_expiry_equality_and_subsecond_skew, core_ioerror_debug_renders_in_aot_and_dev, core_os_interrupt_runtime_failures_use_the_boundary_aware_helpers, core_ioerror_preserves_kind_operation_and_resource, core_tls_byte_stream_runs_real_local_handshake_and_close_notify, core_tls_expert_config_peer_identity_and_directional_close_are_real, core_net_udp_and_unix_waits_use_typed_scheduler_interrupts, core_net_udp_same_handle_readiness_cancels_and_close_is_idempotent, decode_traced_json_plain_and_published_fresh, core_os_facts_and_interrupt_hook_compile, core_os_interrupt_deadline_diagnostic_unwinds_inside_handler_boundary, generated_internal_tagged_enum_round_trips_every_variant_shape, core_os_interrupt_handlers_are_additive_and_ordered, generated_enum_codecs_reenter_jet_pipeline, generated_struct_codecs_preserve_flatten_rename_and_default, generated_struct_decode_accumulates_nested_errors_and_validation, generated_struct_decode_denies_unknown_fields, invariant_refinement_proves_fixed_array_index, json_decode_lenient_surfaces_coercions, csv_stream_drop_and_codec_heap_ceiling_are_enforced, generated_struct_encode_preserves_order_with_rename_and_option, db_checked_sql_params_feed_parameterized_execute, hand_written_encode_decode_round_trips, generated_decode_dispatches_across_module_boundaries, option_zip_and_lift2_combinators, csv_stream_records_are_incremental_rfc4180_bounded_and_terminal, tracked_float_origin_reports_binding_site_and_plain_float_is_untracked, json_stream_drop_and_codec_heap_ceiling_are_enforced, xml_whole_byte_verbs_match_comptime_aot_and_dev, jsonl_stream_drop_and_codec_heap_ceiling_are_enforced, xml_attribute_whitespace_normalization_matches_comptime_aot_and_dev, yaml_full_nested_decode_and_features, xml_stream_drop_and_codec_heap_ceiling_are_enforced, core_tls_identity_drop_and_protocol_mapping_use_shared_runtime_laws",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T13:27:04.121Z"
+        }
+      ],
+      "refs": [
+        "tests/corelib.rs"
+      ],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-07T13:26:49.378Z",
+      "updated": "2026-08-07T13:27:04.121Z",
       "updatedBy": "bd3-tests"
     }
   ],
@@ -133047,6 +133124,153 @@
   ],
   "events": [
     {
+      "at": "2026-08-07T13:37:46.619Z",
+      "by": "bd3-dollar3",
+      "action": "card.claim",
+      "ref": "c0z2jsot",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T13:36:52.134Z",
+      "by": "bd3-review",
+      "action": "card.update",
+      "ref": "c0utog26",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T13:36:51.482Z",
+      "by": "bd3-review",
+      "action": "card.update",
+      "ref": "c0onzbon",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T13:36:50.705Z",
+      "by": "bd3-review",
+      "action": "card.update",
+      "ref": "c05sqin0",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T13:36:50.276Z",
+      "by": "bd3-review",
+      "action": "card.criteria-verify",
+      "ref": "c0utog26",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T13:36:36.449Z",
+      "by": "bd3-review",
+      "action": "card.criteria-verify",
+      "ref": "c0onzbon",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T13:36:35.817Z",
+      "by": "bd3-dollar2",
+      "action": "card.update",
+      "ref": "c0z2jsot",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T13:36:35.104Z",
+      "by": "bd3-review",
+      "action": "card.criteria-verify",
+      "ref": "c05sqin0",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T13:30:45.975Z",
+      "by": "bd3-orch",
+      "action": "card.update",
+      "ref": "c00jybyb",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-08-07T13:30:45.161Z",
+      "by": "bd3-orch",
+      "action": "card.update",
+      "ref": "c06qhbtc",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-08-07T13:29:03.490Z",
+      "by": "bd3-tests",
+      "action": "card.update",
+      "ref": "c06qhbtc",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T13:29:03.035Z",
+      "by": "bd3-tests",
+      "action": "card.criteria-meet",
+      "ref": "c06qhbtc",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-07T13:29:02.596Z",
+      "by": "bd3-tests",
+      "action": "card.criteria-meet",
+      "ref": "c06qhbtc",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T13:28:47.960Z",
+      "by": "bd3-tests",
+      "action": "card.criteria-add",
+      "ref": "c0h9h1pl",
+      "note": "#5 optional_flow_narrowing_after_none_check passes: statement-p"
+    },
+    {
+      "at": "2026-08-07T13:28:47.226Z",
+      "by": "bd3-tests",
+      "action": "card.update",
+      "ref": "c0h9h1pl",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T13:28:46.797Z",
+      "by": "bd3-tests",
+      "action": "card.update",
+      "ref": "c0h9h1pl",
+      "note": "title"
+    },
+    {
+      "at": "2026-08-07T13:27:04.121Z",
+      "by": "bd3-tests",
+      "action": "card.criteria-add",
+      "ref": "c0lzyla1",
+      "note": "#1 cargo test --test corelib passes (no --no-fail-fast needed);"
+    },
+    {
+      "at": "2026-08-07T13:26:49.379Z",
+      "by": "bd3-tests",
+      "action": "card.add",
+      "ref": "c0lzyla1",
+      "note": "corelib.rs: 49 pre-existing test failures across email/TLS/DB/codec/CBOR/XML/CSV/os fixtures"
+    },
+    {
+      "at": "2026-08-07T13:25:32.481Z",
+      "by": "bd3-tests",
+      "action": "papercut.add",
+      "ref": "pc0a9eg3x",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T13:24:47.320Z",
+      "by": "bd3-effect",
+      "action": "card.update",
+      "ref": "c0c86cps",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T13:24:33.349Z",
+      "by": "bd3-effect",
+      "action": "card.update",
+      "ref": "c0c86cps",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-08-07T13:22:52.129Z",
       "by": "bd3-tests",
       "action": "card.update",
@@ -136398,153 +136622,6 @@
       "action": "card.claim",
       "ref": "c0vgjxm5",
       "note": ""
-    },
-    {
-      "at": "2026-08-07T01:25:11.409Z",
-      "by": "bd2-apply",
-      "action": "card.claim",
-      "ref": "c0zsjsdx",
-      "note": ""
-    },
-    {
-      "at": "2026-08-07T01:19:44.784Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-CONC-CHAN2",
-      "note": "D"
-    },
-    {
-      "at": "2026-08-07T01:18:00.253Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0vh9xhx",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-07T01:17:59.823Z",
-      "by": "fable",
-      "action": "card.criteria-meet",
-      "ref": "c0vh9xhx",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-07T01:17:58.550Z",
-      "by": "bd2-manifest",
-      "action": "papercut.add",
-      "ref": "pc0y20tm3",
-      "note": ""
-    },
-    {
-      "at": "2026-08-07T01:17:52.176Z",
-      "by": "fable",
-      "action": "question.answer",
-      "ref": "qazwd61s",
-      "note": ""
-    },
-    {
-      "at": "2026-08-07T01:17:41.744Z",
-      "by": "fable",
-      "action": "decision.update",
-      "ref": "D-CONC-CHAN2",
-      "note": ""
-    },
-    {
-      "at": "2026-08-07T01:13:06.973Z",
-      "by": "owner",
-      "action": "question.add",
-      "ref": "qazwd61s",
-      "note": ""
-    },
-    {
-      "at": "2026-08-07T01:10:51.555Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-FMT-SIMPLIFY1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-07T01:10:38.659Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0vzadss",
-      "note": "logEntry,blockedBy"
-    },
-    {
-      "at": "2026-08-07T01:10:34.176Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0vh9xhx",
-      "note": "logEntry,blockedBy"
-    },
-    {
-      "at": "2026-08-07T01:10:33.741Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c0eoxyz7",
-      "note": "logEntry,blockedBy"
-    },
-    {
-      "at": "2026-08-07T01:10:33.315Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c09nnvak",
-      "note": "logEntry,blockedBy"
-    },
-    {
-      "at": "2026-08-07T01:10:32.878Z",
-      "by": "fable",
-      "action": "card.update",
-      "ref": "c03fqwro",
-      "note": "logEntry,blockedBy"
-    },
-    {
-      "at": "2026-08-07T01:08:58.981Z",
-      "by": "prep-bugs",
-      "action": "card.update",
-      "ref": "c0g2j76x",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-07T01:08:52.789Z",
-      "by": "prep-bugs",
-      "action": "card.criteria-add",
-      "ref": "c0g2j76x",
-      "note": "#6 ct_value_fits_binding's new Unit-vs-declared-type arm does n"
-    },
-    {
-      "at": "2026-08-07T01:08:52.311Z",
-      "by": "prep-bugs",
-      "action": "card.criteria-add",
-      "ref": "c0g2j76x",
-      "note": "#5 Interpreter/deopt tier (ambient) prints the same cleanup ord"
-    },
-    {
-      "at": "2026-08-07T01:08:51.759Z",
-      "by": "prep-bugs",
-      "action": "card.criteria-add",
-      "ref": "c0g2j76x",
-      "note": "#4 jet run examples/features/errors/must_use.jet and jet run ex"
-    },
-    {
-      "at": "2026-08-07T01:08:51.185Z",
-      "by": "prep-bugs",
-      "action": "card.criteria-add",
-      "ref": "c0g2j76x",
-      "note": "#3 Generated Rust for must_use.jet contains a live jet_scope_gu"
-    },
-    {
-      "at": "2026-08-07T01:08:50.570Z",
-      "by": "prep-bugs",
-      "action": "card.criteria-add",
-      "ref": "c0g2j76x",
-      "note": "#2 examples/features/io/scope_guard.jet golden passes (AOT) — L"
-    },
-    {
-      "at": "2026-08-07T01:08:49.958Z",
-      "by": "prep-bugs",
-      "action": "card.criteria-add",
-      "ref": "c0g2j76x",
-      "note": "#1 examples/features/errors/must_use.jet golden passes (AOT)"
     }
   ],
   "nextNum": 368,
@@ -136808,6 +136885,14 @@
       "text": "Sharing CARGO_TARGET_DIR across git worktrees lets another worktree's build replace target/debug/jet and shared dep artifacts mid-session: a stale binary made a working sema fix look broken, and a lib test failed with 'no variant named ComptimeName in jet_lexer::AST::Expr' from another branch's artifacts. Build and run in one command, or verify the binary is yours.",
       "cardId": null,
       "created": "2026-08-07T13:22:46.110Z",
+      "status": "open"
+    },
+    {
+      "id": "pc0a9eg3x",
+      "by": "bd3-tests",
+      "text": "git stash push -- <one-file> with no local changes to that file reports 'No local changes to save' but a following git stash pop still pops whatever is on TOP of the stash stack (an unrelated old stash from a prior session) and can conflict — hit this in the main repo's stash list (foreign-eval-builtins, foreign-wip-during-1478-abi-fix, cleanup-session entries pre-date this session). Resolved safely by restoring the one conflicted file to HEAD; stash entries left untouched. Avoid stash push/pop entirely when just wanting a scoped before/after diff — use git show HEAD:<path> instead.",
+      "cardId": null,
+      "created": "2026-08-07T13:25:32.481Z",
       "status": "open"
     }
   ]
