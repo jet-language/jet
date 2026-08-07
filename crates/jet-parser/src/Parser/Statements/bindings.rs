@@ -596,10 +596,9 @@ impl<'a> Parser<'a> {
         if matches!(self.peek().kind, TokKind::Dollar) {
             return Ok(self.bump().span);
         }
-        let start = self.peek().span;
-        self.expect(TokKind::Hash, "to start `#Known`")?;
-        let (_, end) = self.expect_ident("after `#`")?;
-        Ok(Span::new(start.start, end.end))
+        // The control keyword still reads its `#Known` head through the one
+        // shared marker reader; the name it accepts is not a registry question.
+        Ok(self.read_marker_head()?.span)
     }
 
     // --- expressions -----------------------------------------------------

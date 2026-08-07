@@ -289,12 +289,8 @@ impl<'a> Parser<'a> {
 
     pub(in super::super) fn at_stdlib_dsl_block_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.peek().span;
-        self.expect(TokKind::Hash, "before a stdlib DSL block")?;
-        let marker = self.bump();
-        let (name, name_span) = match marker.kind {
-            TokKind::Ident(name) => (name, marker.span),
-            _ => unreachable!("DSL marker lookahead already validated"),
-        };
+        let head = self.read_marker_head()?;
+        let (name, name_span) = (head.name, head.name_span);
         let mut args = Vec::new();
         let mut args_span = None;
         if matches!(self.peek().kind, TokKind::Lt) {
@@ -532,10 +528,9 @@ impl<'a> Parser<'a> {
     /// D-UNINIT-SENTINEL1/2: `#Uninit name: Type` is retired — teaching error
     /// E0426 points at `name := Type.{ uninit }`.
     fn retired_uninit_marker(&mut self) -> Result<Stmt, Diagnostic> {
-        let hash_span = self.peek().span;
-        self.bump(); // `#`
-        let marker = self.bump(); // `Uninit`
-        let mut end = marker.span.end;
+        let head = self.read_marker_head()?;
+        let hash_span = head.span;
+        let mut end = head.name_span.end;
         let mut name_hint = String::new();
         if let TokKind::Ident(n) = &self.peek().kind {
             name_hint = n.clone();
@@ -674,10 +669,7 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn at_statement_switch_stmt(&mut self, marker: &str) -> Result<Stmt, Diagnostic> {
-        let start = self.peek().span;
-        self.expect(TokKind::Hash, "expected `#`")?;
-        let name_tok = self.bump();
-        let attr_span = Span::new(start.start, name_tok.span.end);
+        let attr_span = self.read_marker_head()?.span;
 
         if matches!(self.peek().kind, TokKind::Hash)
             && matches!(
@@ -874,9 +866,7 @@ impl<'a> Parser<'a> {
     /// D-REACTCORE1 (ratified 2026-06-27, opt D): parse `#Reactive { … }` in
     /// statement position. Lowers to a reactive effect scope at codegen.
     pub(super) fn at_reactive_stmt(&mut self) -> Result<Stmt, Diagnostic> {
-        let start = self.peek().span;
-        self.expect(TokKind::Hash, "expected `#`")?;
-        let _ = self.expect_ident(&format!("`#{}`", Syntax::KW_REACTIVE))?;
+        let start = self.read_marker_head()?.span;
         self.expect(TokKind::LBrace, "after `#Reactive`")?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
@@ -890,9 +880,8 @@ impl<'a> Parser<'a> {
     /// position. Bare block only — no argument list. `#Shield(...)` is E0430.
     /// Lowers to `jet_scheduler_shield_enter`/`_leave` around the body at codegen.
     pub(super) fn at_shield_stmt(&mut self) -> Result<Stmt, Diagnostic> {
-        let start = self.peek().span;
-        self.expect(TokKind::Hash, "expected `#`")?;
-        let name_tok = self.bump(); // `Shield`
+        let head = self.read_marker_head()?;
+        let start = head.span;
         if matches!(self.peek().kind, TokKind::LParen) {
             let lparen = self.peek().span;
             return Err(Diagnostic::error(
@@ -901,7 +890,7 @@ impl<'a> Parser<'a> {
                 "a shield region protects whatever runs inside it; there is nothing to configure"
                     .to_string(),
                 "write `#Shield { … }`".to_string(),
-                Some(Span::new(name_tok.span.start, lparen.end)),
+                Some(Span::new(head.name_span.start, lparen.end)),
             ));
         }
         self.expect(TokKind::LBrace, "after `#Shield`")?;
@@ -2010,38 +1999,30 @@ impl<'a> Parser<'a> {
             }
             TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_TRACK) =>
             {
-                let marker_span = self.peek().span;
-                self.bump(); // `#`
-                let (_, name_span) = self.expect_ident(&format!("`#{}`", Syntax::MARKER_TRACK))?;
+                let head = self.read_marker_head()?;
                 let mut binding = self.sigil_binding()?;
                 binding.track = true;
-                binding.track_span = Some(Span::new(marker_span.start, name_span.end));
+                binding.track_span = Some(head.span);
                 self.finish_stmt()?;
                 Ok(Stmt::Val(binding))
             }
             TokKind::Hash
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_LOCAL) =>
             {
-                let marker_span = self.peek().span;
-                self.bump(); // `#`
-                let (_, name_span) = self.expect_ident(&format!("`#{}`", Syntax::MARKER_LOCAL))?;
+                let head = self.read_marker_head()?;
                 let mut binding = self.sigil_binding()?;
                 binding.reactive_local = true;
-                binding.reactive_local_span =
-                    Some(Span::new(marker_span.start, name_span.end));
+                binding.reactive_local_span = Some(head.span);
                 self.finish_stmt()?;
                 Ok(Stmt::Val(binding))
             }
             TokKind::Hash
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_SHARED) =>
             {
-                let marker_span = self.peek().span;
-                self.bump(); // `#`
-                let (_, name_span) = self.expect_ident(&format!("`#{}`", Syntax::MARKER_SHARED))?;
+                let head = self.read_marker_head()?;
                 let mut binding = self.sigil_binding()?;
                 binding.reactive_shared = true;
-                binding.reactive_shared_span =
-                    Some(Span::new(marker_span.start, name_span.end));
+                binding.reactive_shared_span = Some(head.span);
                 binding.reactive_upgrade = true;
                 self.finish_stmt()?;
                 Ok(Stmt::Val(binding))
@@ -2181,14 +2162,13 @@ impl<'a> Parser<'a> {
             // below for the same reason as the directive-marker guard.
             TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_PERSIST) =>
             {
-                let t = self.bump(); // `@`
-                let name_tok = self.bump(); // `Persist`
+                let head = self.read_marker_head()?;
                 Err(Diagnostic::error(
                     "E0145",
                     "only module-level state can persist across reloads".to_string(),
                     "persistence is keyed by module + name; a local has no stable identity across a reload".to_string(),
                     "move it to module level, or drop `#Persist`".to_string(),
-                    Some(Span::new(t.span.start, name_tok.span.end)),
+                    Some(head.span),
                 ))
             }
             TokKind::At => {

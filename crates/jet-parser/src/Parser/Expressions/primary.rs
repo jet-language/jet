@@ -32,125 +32,85 @@ impl<'a> Parser<'a> {
                     let span = self.bump().span;
                     return Ok(Expr::Absent(span));
                 }
+                // D-VERDICT-1455-1: one marker read at expression position. The
+                // shared reader takes the name — any name, open vocabulary
+                // included — and only then does this classify what it means.
                 TokKind::Hash
                     if matches!(
                         self.toks.get(self.pos + 1).map(|t| &t.kind),
-                        Some(TokKind::Ident(n)) if n == Syntax::MARKER_META
+                        Some(TokKind::Ident(_))
                     ) =>
                 {
-                    let hash = self.bump().span;
-                    let name_tok = self.bump();
-                    return Err(self.meta_attr_wrong_place_diag(
-                        Span::new(hash.start, name_tok.span.end),
-                        "binding or function",
-                    ));
-                }
-                TokKind::Hash
-                    if matches!(
-                        self.toks.get(self.pos + 1).map(|t| &t.kind),
-                        Some(TokKind::Ident(n))
-                            if n == Syntax::MARKER_OFF || n == Syntax::MARKER_DEBUG_ONLY
-                    ) =>
-                {
-                    let hash = self.bump().span;
-                    let name_tok = self.bump();
-                    let name = match &name_tok.kind {
-                        TokKind::Ident(n) => n.clone(),
-                        _ => String::new(),
-                    };
-                    return Err(Diagnostic::error(
-                        "E0343",
-                        format!("`#{}` does not produce a value", name),
-                        "statement switch attributes control a whole statement; expressions must still produce values in every build".to_string(),
-                        format!("put it before the statement: `#{} <statement>`", name),
-                        Some(Span::new(hash.start, name_tok.span.end)),
-                    ));
-                }
-                TokKind::Hash
-                    if matches!(
-                        self.toks.get(self.pos + 1).map(|t| &t.kind),
-                        Some(TokKind::Ident(n)) if n == Syntax::KW_TODO
-                    ) =>
-                {
-                    // D-TOOL2 (D-CASING1 follow-on): `#Todo` typed hole — valid in any
-                    // expression position; sema fills `expected_type`; codegen emits a
-                    // panic.
-                    let start = self.bump().span.start; // `#`
-                    let span = Span::new(start, self.bump().span.end); // `Todo`
-                    return Ok(Expr::Todo {
-                        span,
-                        expected_type: None,
-                    });
-                }
-                TokKind::Hash
-                    if matches!(
-                        self.toks.get(self.pos + 1).map(|t| &t.kind),
-                        Some(TokKind::Ident(n)) if n == Syntax::KW_TAINTED
-                    ) =>
-                {
-                    // D-TAG-SURFACE1=A: recover retired `#Tainted[(Kind)] value`
-                    // as the corresponding ordinary tag application.
-                    let start = self.bump().span.start; // `#`
-                    let name_span = self.bump().span; // `Tainted`
-                    // Optional `(Kind)` argument after the keyword.
-                    let kind: Option<String> =
-                        if matches!(self.toks.get(self.pos).map(|t| &t.kind), Some(TokKind::LParen)) {
-                            self.bump(); // `(`
-                            let kind_name = if let Some(tok) = self.toks.get(self.pos) {
-                                if let TokKind::Ident(n) = &tok.kind {
-                                    let n = n.clone();
-                                    self.bump();
-                                    n
+                    let head = self.read_marker_head()?;
+                    let start = head.span.start;
+                    return match head.name.as_str() {
+                        Syntax::MARKER_META => {
+                            Err(self.meta_attr_wrong_place_diag(head.span, "binding or function"))
+                        }
+                        Syntax::MARKER_OFF | Syntax::MARKER_DEBUG_ONLY => Err(Diagnostic::error(
+                            "E0343",
+                            format!("`#{}` does not produce a value", head.name),
+                            "statement switch attributes control a whole statement; expressions must still produce values in every build".to_string(),
+                            format!("put it before the statement: `#{} <statement>`", head.name),
+                            Some(head.span),
+                        )),
+                        // D-TOOL2 (D-CASING1 follow-on): `#Todo` typed hole — valid in any
+                        // expression position; sema fills `expected_type`; codegen emits a
+                        // panic.
+                        Syntax::KW_TODO => Ok(Expr::Todo {
+                            span: head.span,
+                            expected_type: None,
+                        }),
+                        // D-TAG-SURFACE1=A: recover retired `#Tainted[(Kind)] value`
+                        // as the corresponding ordinary tag application.
+                        Syntax::KW_TAINTED => {
+                            // Optional `(Kind)` argument after the keyword.
+                            let kind: Option<String> =
+                                if matches!(self.toks.get(self.pos).map(|t| &t.kind), Some(TokKind::LParen)) {
+                                    self.bump(); // `(`
+                                    let kind_name = if let Some(tok) = self.toks.get(self.pos) {
+                                        if let TokKind::Ident(n) = &tok.kind {
+                                            let n = n.clone();
+                                            self.bump();
+                                            n
+                                        } else {
+                                            String::new()
+                                        }
+                                    } else {
+                                        String::new()
+                                    };
+                                    // Consume the closing `)`.
+                                    if matches!(self.toks.get(self.pos).map(|t| &t.kind), Some(TokKind::RParen)) {
+                                        self.bump();
+                                    }
+                                    if kind_name.is_empty() { None } else { Some(kind_name) }
                                 } else {
-                                    String::new()
-                                }
-                            } else {
-                                String::new()
-                            };
-                            // Consume the closing `)`.
-                            if matches!(self.toks.get(self.pos).map(|t| &t.kind), Some(TokKind::RParen)) {
-                                self.bump();
-                            }
-                            if kind_name.is_empty() { None } else { Some(kind_name) }
-                        } else {
-                            None
-                        };
-                    let tag = kind.unwrap_or_else(|| "Input".to_string());
-                    self.diags.push(Diagnostic::error(
-                        "E0927",
-                        "`#Tainted` is retired".to_string(),
-                        "taint kinds are ordinary declared fact tags".to_string(),
-                        format!("write `#{tag} value`"),
-                        Some(Span::new(start, name_span.end)),
-                    ));
-                    let inner = self.expr_primary(allow_struct_lit)?;
-                    let span = Span::new(start, inner.span().end);
-                    return Ok(Expr::Tainted(Box::new(inner), Some(tag), span));
-                }
-                TokKind::Hash
-                    if matches!(
-                        self.toks.get(self.pos + 1).map(|t| &t.kind),
+                                    None
+                                };
+                            let tag = kind.unwrap_or_else(|| "Input".to_string());
+                            self.diags.push(Diagnostic::error(
+                                "E0927",
+                                "`#Tainted` is retired".to_string(),
+                                "taint kinds are ordinary declared fact tags".to_string(),
+                                format!("write `#{tag} value`"),
+                                Some(head.span),
+                            ));
+                            let inner = self.expr_primary(allow_struct_lit)?;
+                            let span = Span::new(start, inner.span().end);
+                            Ok(Expr::Tainted(Box::new(inner), Some(tag), span))
+                        }
+                        // The four old SIMD reduce selectors remain parser
+                        // recovery nodes until their retirement diagnostic fires.
+                        "Add" | "Mul" | "Min" | "Max" => {
+                            Ok(Expr::ReduceMarker(head.name.clone(), head.span))
+                        }
                         // D-TAG-SURFACE1=A: any declared tag may prefix a value.
-                        // The four old SIMD reduce selectors remain parser recovery
-                        // nodes until their existing retirement diagnostic fires.
-                        Some(TokKind::Ident(n))
-                            if n != Syntax::KW_TODO && n != Syntax::KW_TAINTED
-                    ) =>
-                {
-                    let start = self.bump().span.start; // `#`
-                    let tok = self.bump(); // the op name
-                    let name = if let TokKind::Ident(n) = &tok.kind {
-                        n.clone()
-                    } else {
-                        String::new()
+                        _ => {
+                            let inner = self.expr_primary(allow_struct_lit)?;
+                            let span = Span::new(start, inner.span().end);
+                            Ok(Expr::Tainted(Box::new(inner), Some(head.name.clone()), span))
+                        }
                     };
-                    if matches!(name.as_str(), "Add" | "Mul" | "Min" | "Max") {
-                        let span = Span::new(start, tok.span.end);
-                        return Ok(Expr::ReduceMarker(name, span));
-                    }
-                    let inner = self.expr_primary(allow_struct_lit)?;
-                    let span = Span::new(start, inner.span().end);
-                    return Ok(Expr::Tainted(Box::new(inner), Some(name), span));
                 }
                 TokKind::At => {
                     let span = self.bump().span;
