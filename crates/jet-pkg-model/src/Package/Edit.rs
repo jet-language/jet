@@ -41,8 +41,11 @@ fn block_line_range(lines: &[String], key: &str) -> Option<(usize, usize)> {
     for (i, line) in lines.iter().enumerate() {
         if start.is_none() {
             let trimmed = line.trim_start();
-            if trimmed.starts_with(&header) && trimmed[header.len()..].trim_start().starts_with('{')
-            {
+            let after_header = trimmed
+                .starts_with(&header)
+                .then(|| trimmed[header.len()..].trim_start())
+                .map(|rest| rest.strip_prefix('.').unwrap_or(rest).trim_start());
+            if after_header.is_some_and(|rest| rest.starts_with('{')) {
                 depth = brace_delta(line);
                 start = Some(i + 1);
                 if depth <= 0 {
@@ -90,7 +93,7 @@ fn insert_or_replace_in_block(raw: &str, key: &str, name: &str, new_line: &str) 
             out.push(String::new());
         }
         out.push(String::new());
-        out.push(format!("{key}: {{"));
+        out.push(format!("{key}: .{{"));
         out.push(new_line.to_string());
         out.push("}".to_string());
     }
@@ -135,20 +138,21 @@ mod tests {
     #[test]
     fn block_line_range_checks_started_state_for_hostile_nesting() {
         let nested = [
-            "payload: { name: \"x\", version: \"1\" }",
-            "deps: {",
+            "name: \"x\"",
+            "version: \"1\"",
+            "deps: .{",
             "    git_dep: { git: \"https://example.test/repo\", tag: \"v1\" },",
             "    nested: {",
             "        inner: { value: \"kept\" },",
             "    },",
             "}",
-            "packages: { x: library }",
+            "outputs: .{ x: .Library.{} }",
         ]
         .map(str::to_string);
-        assert_eq!(block_line_range(&nested, "deps"), Some((2, 6)));
+        assert_eq!(block_line_range(&nested, "deps"), Some((3, 7)));
 
         let truncated = [
-            "deps: {",
+            "deps: .{",
             "    git_dep: { git: \"https://example.test/repo\", tag: \"v1\" },",
             "    nested: {",
             "        inner: { value: \"unterminated\" },",

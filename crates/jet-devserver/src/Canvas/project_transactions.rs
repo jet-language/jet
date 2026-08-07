@@ -80,22 +80,10 @@ pub(super) fn apply_project_add_dependency(
     let name = required_project_string(request, "name")?;
     validate_ident_for_project(&name)?;
     let spec_text = required_project_string(request, "spec")?;
-    let spec = project_dep_spec(&spec_text)?;
+    project_dep_spec(&spec_text)?;
     let manifest_path = ctx.project_root.join(&manifest_rel);
     let before = fs::read_to_string(&manifest_path).map_err(|e| project_edit_error("io", &e.to_string()))?;
-    if is_canonical_package_file(&manifest_rel) {
-        return apply_canonical_dependency(ctx, request, &manifest_rel, before, &name, Some(spec_text));
-    }
-    let after = jet_driver::Manifest::add_dependency(&before, &name, &spec);
-    jet_driver::PackageManifest::parse(&after)
-        .map_err(|e| project_edit_error("diagnostic", &format!("{:?}", e)))?;
-    let change = ProjectChange {
-        path: manifest_path,
-        rel: manifest_rel,
-        before,
-        after,
-    };
-    finish_project_changes(ctx, request, "add_dependency", vec![change])
+    apply_canonical_dependency(ctx, request, &manifest_rel, before, &name, Some(spec_text))
 }
 
 pub(super) fn apply_project_remove_dependency(
@@ -114,19 +102,7 @@ pub(super) fn apply_project_remove_dependency(
     validate_ident_for_project(&name)?;
     let manifest_path = ctx.project_root.join(&manifest_rel);
     let before = fs::read_to_string(&manifest_path).map_err(|e| project_edit_error("io", &e.to_string()))?;
-    if is_canonical_package_file(&manifest_rel) {
-        return apply_canonical_dependency(ctx, request, &manifest_rel, before, &name, None);
-    }
-    let after = jet_driver::Manifest::remove_dependency(&before, &name);
-    jet_driver::PackageManifest::parse(&after)
-        .map_err(|e| project_edit_error("diagnostic", &format!("{:?}", e)))?;
-    let change = ProjectChange {
-        path: manifest_path,
-        rel: manifest_rel,
-        before,
-        after,
-    };
-    finish_project_changes(ctx, request, "remove_dependency", vec![change])
+    apply_canonical_dependency(ctx, request, &manifest_rel, before, &name, None)
 }
 
 pub(super) fn apply_project_edit_pkg_field(
@@ -146,29 +122,13 @@ pub(super) fn apply_project_edit_pkg_field(
     validate_payload_field(&field, &value)?;
     let manifest_path = ctx.project_root.join(&manifest_rel);
     let before = fs::read_to_string(&manifest_path).map_err(|e| project_edit_error("io", &e.to_string()))?;
-    if is_canonical_package_file(&manifest_rel) {
-        let after = replace_top_level_field(
-            &before,
-            &field,
-            &format!("\"{}\"", manifest_string(&value)),
-        );
-        jet_driver::Package::PackageFacts::parse(&after, manifest_rel.clone())
-            .map_err(|error| project_edit_error("diagnostic", &error.to_string()))?;
-        return finish_project_changes(
-            ctx,
-            request,
-            "edit_pkg_field",
-            vec![ProjectChange {
-                path: manifest_path,
-                rel: manifest_rel,
-                before,
-                after,
-            }],
-        );
-    }
-    let after = set_manifest_payload_field(&before, &field, &value)?;
-    jet_driver::PackageManifest::parse(&after)
-        .map_err(|e| project_edit_error("diagnostic", &format!("{:?}", e)))?;
+    let after = replace_top_level_field(
+        &before,
+        &field,
+        &format!("\"{}\"", manifest_string(&value)),
+    );
+    jet_driver::Package::PackageFacts::parse(&after, manifest_rel.clone())
+        .map_err(|error| project_edit_error("diagnostic", &error.to_string()))?;
     finish_project_changes(
         ctx,
         request,
@@ -201,48 +161,32 @@ pub(super) fn apply_project_add_target(
     )?;
     let manifest_path = ctx.project_root.join(&manifest_rel);
     let before = fs::read_to_string(&manifest_path).map_err(|e| project_edit_error("io", &e.to_string()))?;
-    if is_canonical_package_file(&manifest_rel) {
-        let facts = jet_driver::Package::PackageFacts::parse(&before, manifest_rel.clone())
-            .map_err(|error| project_edit_error("diagnostic", &error.to_string()))?;
-        if facts.outputs.contains_key(&name) {
-            return Err(project_edit_error(
-                "conflict",
-                "the canonical Package already declares this Output",
-            ));
-        }
-        let kind = match target {
-            "library" => "Library",
-            "test" => "Check",
-            "executable" | "example" | "benchmark" => "Executable",
-            _ => "Executable",
-        };
-        let entry = json_string_field(request, "entry").unwrap_or_else(|| "run".to_string());
-        validate_ident_for_project(entry.rsplit('.').next().unwrap_or(&entry))?;
-        let mut after = before.clone();
-        if !after.ends_with('\n') {
-            after.push('\n');
-        }
-        after.push_str(&format!(
-            "{name}: Output :: .{kind}.{{ name: \"{}\", entry: {entry} }}\n",
-            manifest_string(&name)
+    let facts = jet_driver::Package::PackageFacts::parse(&before, manifest_rel.clone())
+        .map_err(|error| project_edit_error("diagnostic", &error.to_string()))?;
+    if facts.outputs.contains_key(&name) {
+        return Err(project_edit_error(
+            "conflict",
+            "the Package already declares this Output",
         ));
-        jet_driver::Package::PackageFacts::parse(&after, manifest_rel.clone())
-            .map_err(|error| project_edit_error("diagnostic", &error.to_string()))?;
-        return finish_project_changes(
-            ctx,
-            request,
-            "add_target",
-            vec![ProjectChange {
-                path: manifest_path,
-                rel: manifest_rel,
-                before,
-                after,
-            }],
-        );
     }
-    let after = add_manifest_target(&before, &name, target)?;
-    jet_driver::PackageManifest::parse(&after)
-        .map_err(|e| project_edit_error("diagnostic", &format!("{:?}", e)))?;
+    let kind = match target {
+        "library" => "Library",
+        "test" => "Check",
+        "executable" | "example" | "benchmark" => "Executable",
+        _ => "Executable",
+    };
+    let entry = json_string_field(request, "entry").unwrap_or_else(|| "run".to_string());
+    validate_ident_for_project(entry.rsplit('.').next().unwrap_or(&entry))?;
+    let mut after = before.clone();
+    if !after.ends_with('\n') {
+        after.push('\n');
+    }
+    after.push_str(&format!(
+        "{name}: Output :: .{kind}.{{ name: \"{}\", entry: {entry} }}\n",
+        manifest_string(&name)
+    ));
+    jet_driver::Package::PackageFacts::parse(&after, manifest_rel.clone())
+        .map_err(|error| project_edit_error("diagnostic", &error.to_string()))?;
     finish_project_changes(
         ctx,
         request,
@@ -636,7 +580,11 @@ fn apply_canonical_dependency(
     let adding = add.is_some();
     let facts = jet_driver::Package::PackageFacts::parse(&before, manifest_rel.to_string())
         .map_err(|error| project_edit_error("diagnostic", &error.to_string()))?;
-    let mut deps = facts.deps;
+    let mut deps: std::collections::BTreeMap<String, String> = facts
+        .deps
+        .iter()
+        .map(|(key, value)| (key.clone(), jet_driver::Package::dep_display(value)))
+        .collect();
     match add {
         Some(spec) => {
             if let Some(existing) = deps.get(name) {
@@ -691,7 +639,7 @@ fn replace_top_level_field(src: &str, field: &str, replacement: &str) -> String 
         let Some(colon) = trimmed.find(':') else { return };
         if trimmed[..colon].trim() == field {
             let start = entry_start + trimmed_start + trimmed[..colon].find(field).unwrap_or(0);
-            let end = entry_start + entry.len() - entry.trim_end().len();
+            let end = entry_start + trimmed_start + trimmed.len();
             span = Some((start, end));
         }
     };
@@ -741,24 +689,6 @@ fn replace_top_level_field(src: &str, field: &str, replacement: &str) -> String 
     }
 }
 
-fn set_manifest_payload_field(src: &str, field: &str, value: &str) -> Result<String, String> {
-    let (start, end) = block_body_span(src, "payload:")
-        .ok_or_else(|| project_edit_error("diagnostic", "pkg.jet has no payload block"))?;
-    set_block_field(src, start, end, field, &format!("\"{}\"", manifest_string(value)))
-}
-
-fn add_manifest_target(src: &str, name: &str, target: &str) -> Result<String, String> {
-    if let Some((start, end)) = block_body_span(src, "packages:") {
-        return set_block_field(src, start, end, name, target);
-    }
-    let mut out = src.to_string();
-    if !out.ends_with('\n') {
-        out.push('\n');
-    }
-    out.push_str(&format!("packages: {{\n    {name}: {target},\n}}\n"));
-    Ok(out)
-}
-
 fn block_body_span(src: &str, label: &str) -> Option<(usize, usize)> {
     let label_pos = src.find(label)?;
     let open = label_pos + src[label_pos..].find('{')?;
@@ -791,43 +721,6 @@ fn block_body_span(src: &str, label: &str) -> Option<(usize, usize)> {
         }
     }
     None
-}
-
-fn set_block_field(
-    src: &str,
-    start: usize,
-    end: usize,
-    field: &str,
-    value: &str,
-) -> Result<String, String> {
-    validate_ident_for_project(field)?;
-    let body = &src[start..end];
-    let mut offset = start;
-    for line in body.split_inclusive('\n') {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with(&format!("{field}:")) {
-            let indent_len = line.len() - trimmed.len();
-            let indent = &line[..indent_len];
-            let newline = if line.ends_with('\n') { "\n" } else { "" };
-            let replacement = format!("{indent}{field}: {value},{newline}");
-            let mut out = String::with_capacity(src.len() + replacement.len());
-            out.push_str(&src[..offset]);
-            out.push_str(&replacement);
-            out.push_str(&src[offset + line.len()..]);
-            return Ok(out);
-        }
-        offset += line.len();
-    }
-    let insertion = if body.trim().is_empty() {
-        format!("\n    {field}: {value},")
-    } else {
-        format!("    {field}: {value},\n")
-    };
-    let mut out = String::with_capacity(src.len() + insertion.len());
-    out.push_str(&src[..end]);
-    out.push_str(&insertion);
-    out.push_str(&src[end..]);
-    Ok(out)
 }
 
 fn manifest_string(value: &str) -> String {
@@ -998,14 +891,12 @@ fn normalize_and_validate_project_changes(
         if change.before == change.after {
             continue;
         }
-        if is_canonical_package_file(&change.rel) {
-            jet_driver::Package::PackageFacts::parse(&change.after, change.rel.clone())
-                .map_err(|error| project_edit_error("diagnostic", &error.to_string()))?;
-        } else if change.rel.ends_with(&format!("/{}", jet_driver::Syntax::PAYLOAD_FILE))
+        if is_canonical_package_file(&change.rel)
+            || change.rel.ends_with(&format!("/{}", jet_driver::Syntax::PAYLOAD_FILE))
             || change.rel == jet_driver::Syntax::PAYLOAD_FILE
         {
-            jet_driver::PackageManifest::parse(&change.after)
-                .map_err(|e| project_edit_error("diagnostic", &format!("{:?}", e)))?;
+            jet_driver::Package::PackageFacts::parse(&change.after, change.rel.clone())
+                .map_err(|error| project_edit_error("diagnostic", &error.to_string()))?;
         } else if change.rel.ends_with(&format!("/{}", jet_driver::Syntax::WORKSPACE_FILE))
             || change.rel == jet_driver::Syntax::WORKSPACE_FILE
         {

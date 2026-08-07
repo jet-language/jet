@@ -525,7 +525,7 @@ fn declare_local_c_dep(root: &Path, lib: &str) {
     fs::write(
         root.join("pkg.jet"),
         format!(
-            "payload: {{ name: \"cffi_{lib}\", version: \"0.1.0\" }}\ndeps: {{ {lib}: c@\"{}\" }}\n",
+            "name: \"cffi_{lib}\"\nversion: \"0.1.0\"\ndeps: .{{ {lib}: c@\"{}\" }}\n",
             root.display()
         ),
     )
@@ -1037,7 +1037,7 @@ fn cffi_named_pure_callback_has_stable_c_symbol() {
     fs::write(
         root.join("pkg.jet"),
         format!(
-            "payload: {{ name: \"cffi_cb\", version: \"0.1.0\" }}\ndeps: {{ cb: c@\"{}\" }}\n",
+            "name: \"cffi_cb\"\nversion: \"0.1.0\"\ndeps: .{{ cb: c@\"{}\" }}\n",
             root.display()
         ),
     )
@@ -1715,32 +1715,31 @@ fn parse_pkg_config_defaults_link_name() {
 #[test]
 fn deps_block_parses_c_lib_refs() {
     // S59/D-CFFI2: native C deps live in the Jet `deps:` block as `c@<target>`
-    // refs, parsed by the real PackageManifest parser (not an ad-hoc reader).
-    use jetpack::PackageManifest::{parse, DepSource};
+    // refs, parsed by the one Package parser (not an ad-hoc reader).
+    use jetpack::Package::{DepSource, PackageFacts};
     let manifest = r#"
-payload: { name: "p", version: "0.1.0" }
-deps: {
+name: "p"
+version: "0.1.0"
+deps: .{
     raylib: c@system,
     foo:    c@"/opt/foo",
 }
 "#;
-    let pm = parse(manifest).expect("manifest parses");
-    let raylib = pm.deps.iter().find(|d| d.name == "raylib").unwrap();
+    let pm = PackageFacts::parse(manifest, "test").expect("manifest parses");
     assert_eq!(
-        raylib.source,
-        DepSource::CLib {
+        pm.deps.get("raylib"),
+        Some(&DepSource::CLib {
             target: "system".into()
-        }
+        })
     );
-    let foo = pm.deps.iter().find(|d| d.name == "foo").unwrap();
     assert_eq!(
-        foo.source,
-        DepSource::CLib {
+        pm.deps.get("foo"),
+        Some(&DepSource::CLib {
             target: "/opt/foo".into()
-        }
+        })
     );
     // A non-C dep stays a normal Jet dep, not a CLib.
-    assert!(pm.deps.iter().all(|d| d.name != "sqlite3"));
+    assert!(!pm.deps.contains_key("sqlite3"));
 }
 
 #[test]
@@ -1923,7 +1922,7 @@ fn inline_ffi_pin_works_inside_manifest_project() {
     fs::create_dir_all(&root).unwrap();
     fs::write(
         root.join("pkg.jet"),
-        "payload: {\n    name: \"ffi_app\",\n    version: \"0.1.0\",\n}\n",
+        "name: \"ffi_app\"\nversion: \"0.1.0\"\n",
     )
     .unwrap();
     let path = root.join("main.jet");

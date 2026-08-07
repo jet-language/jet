@@ -1057,8 +1057,8 @@ pub(super) fn find_project_entry(project_dir: &Path) -> PathBuf {
     if src_default.is_file() {
         return src_default;
     }
-    if let Some(Ok(manifest)) = crate::PackageManifest::PackManifest::load(project_dir) {
-        let named = project_dir.join(format!("{}.{}", manifest.package.name, Syntax::FILE_EXT));
+    if let Some(Ok(manifest)) = jet_pkg_model::Package::PackageFacts::load(project_dir) {
+        let named = project_dir.join(format!("{}.{}", manifest.name, Syntax::FILE_EXT));
         if named.is_file() {
             return named;
         }
@@ -1086,16 +1086,6 @@ fn package_output_entry(project_dir: &Path) -> Result<Option<PathBuf>, String> {
     };
     let package = match package {
         Ok(package) => package,
-        Err(_error)
-            if !project_dir.join(Syntax::PACKAGE_FILE).is_file()
-                && crate::PackageManifest::PackManifest::load(project_dir)
-                    .is_some_and(|manifest| manifest.is_ok()) =>
-        {
-            // A legacy `pkg.jet` manifest still owns package identity and
-            // publish metadata, but it is not a typed Package output. Let
-            // the normal entry-file fallback handle that project shape.
-            return Ok(None);
-        }
         Err(error) => {
         let source = if project_dir.join(Syntax::PACKAGE_FILE).is_file() {
             project_dir.join(Syntax::PACKAGE_FILE)

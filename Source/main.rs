@@ -134,12 +134,12 @@ impl OptimizeLevel {
 }
 
 /// Convert from the manifest `BuildOptimize` enum to the driver `OptimizeLevel`.
-impl From<jet::PackageManifest::BuildOptimize> for OptimizeLevel {
-    fn from(v: jet::PackageManifest::BuildOptimize) -> Self {
+impl From<jet::Package::BuildOptimize> for OptimizeLevel {
+    fn from(v: jet::Package::BuildOptimize) -> Self {
         match v {
-            jet::PackageManifest::BuildOptimize::None => OptimizeLevel::None,
-            jet::PackageManifest::BuildOptimize::Basic => OptimizeLevel::Basic,
-            jet::PackageManifest::BuildOptimize::Full => OptimizeLevel::Full,
+            jet::Package::BuildOptimize::None => OptimizeLevel::None,
+            jet::Package::BuildOptimize::Basic => OptimizeLevel::Basic,
+            jet::Package::BuildOptimize::Full => OptimizeLevel::Full,
         }
     }
 }
@@ -189,8 +189,8 @@ impl ProfileConfig {
         }
     }
 
-    pub(crate) fn from_def(def: &jet::PackageManifest::BuildProfileDef) -> Self {
-        use jet::PackageManifest::BuildPanic;
+    pub(crate) fn from_def(def: &jet::Package::BuildProfileDef) -> Self {
+        use jet::Package::BuildPanic;
         Self {
             optimize: OptimizeLevel::from(def.optimize),
             debug_info: def.debug_info,
@@ -2410,8 +2410,8 @@ fn manifest_default_target(file: &str) -> Option<String> {
     let root = jet::Loader::find_manifest_root(start)?;
     let pack_path = jet::Loader::manifest_path(&root)?;
     let raw = fs::read_to_string(&pack_path).ok()?;
-    let manifest = jet::PackageManifest::parse(&raw).ok()?;
-    manifest.package.target
+    let manifest = jet::Package::PackageFacts::parse(&raw, pack_path.display().to_string()).ok()?;
+    manifest.target
 }
 
 pub(crate) fn resolve_source_path(raw: &str) -> String {
@@ -2472,10 +2472,10 @@ pub(crate) fn find_project_entry(root: &Path) -> PathBuf {
     if src_default.is_file() {
         return src_default;
     }
-    if let Some(Ok(manifest)) = jet::PackageManifest::PackManifest::load(root) {
+    if let Some(Ok(manifest)) = jet::Package::PackageFacts::load(root) {
         let named = root.join(format!(
             "{}.{}",
-            manifest.package.name,
+            manifest.name,
             jet::Syntax::FILE_EXT
         ));
         if named.is_file() {
@@ -2505,16 +2505,6 @@ fn package_output_entry(root: &Path) -> Result<Option<PathBuf>, String> {
     };
     let package = match package {
         Ok(package) => package,
-        Err(_error)
-            if !root.join(jet::Syntax::PACKAGE_FILE).is_file()
-                && jet::PackageManifest::PackManifest::load(root)
-                    .is_some_and(|manifest| manifest.is_ok()) =>
-        {
-            // A legacy `pkg.jet` manifest still owns package identity and
-            // publish metadata, but it is not a typed Package output. Let
-            // the normal entry-file fallback handle that project shape.
-            return Ok(None);
-        }
         Err(error) => {
             let source = jet::Loader::manifest_path(root)
                 .unwrap_or_else(|| root.join(jet::Syntax::PACKAGE_FILE));

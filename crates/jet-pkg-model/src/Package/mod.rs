@@ -3,6 +3,26 @@
 //! `Package` is the checked meaning of one source tree. `Config` is a typed
 //! contribution to that Package. Both are plain data: parsing is structural,
 //! composition is deterministic, and realization stays in `jetpack`.
+//!
+//! This is the **only** reader of `package.jet` (D-CONF-PLANE1, ratified
+//! 2026-08-06): the compile path (`jet-driver`), tooling, and Canvas all
+//! parse through `PackageFacts::parse`/`load`. There is no second,
+//! legacy-vocabulary parser — `deps:`/`packages:`/`build:`/`effects:`/
+//! `grants:`/`policy:` block grammar lives in `Blocks`.
+
+pub mod Blocks;
+mod Convert;
+mod Discovery;
+mod Edit;
+
+pub use Blocks::{
+    build_entry_source, dep_display, parse_policy_document, BuildOptimize, BuildPanic,
+    BuildProfileDef, DepSource, PackageEntry, PackageKind, ProviderAuthority, Target,
+    TrustDecision, TrustPolicy,
+};
+pub use Convert::{new_template, to_manifest};
+pub use Discovery::{discover_module_in, DiscoveryError};
+pub use Edit::{add_dep, remove_dep};
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -95,11 +115,37 @@ pub struct PackageFacts {
     /// not a Config contribution (D-JPK-TOOLCHAIN1, D-ECO-FILEROOT1).
     pub jet: Option<String>,
     pub source: Option<String>,
-    pub deps: BTreeMap<String, String>,
+    pub edition: Option<String>,
+    pub description: Option<String>,
+    pub license: Option<String>,
+    pub repository: Option<String>,
+    /// D-WEBDEFAULT1: this package's default CLI backend target.
+    pub target: Option<String>,
+    /// D-RINGLAYER1=A: optional runtime ceiling (`core`/`alloc`/`hosted`).
+    pub layer: Option<crate::Syntax::RuntimeLayer>,
+    pub deps: BTreeMap<String, Blocks::DepSource>,
+    /// U10/D-TGT1: the `packages: { name: kind }` block.
+    pub packages: Vec<Blocks::PackageEntry>,
     pub services: BTreeMap<String, ServiceFact>,
     pub outputs: BTreeMap<String, OutputFact>,
     pub environments: BTreeMap<String, EnvironmentFact>,
     pub defaults: BTreeMap<String, String>,
+    /// D-BUILDPROFILE1: named build profiles from `build: .{ … }`.
+    pub build_profiles: Vec<Blocks::BuildProfileDef>,
+    /// D-CTEFFECT1: standing capabilities granted to this package's `fn build`.
+    pub build_allow: Vec<String>,
+    /// D-EFFBUDGET1: whether an `effects: .{ … }` block is present at all.
+    pub effects_enabled: bool,
+    pub effects_allow: Option<Vec<String>>,
+    pub effects_deny: Option<Vec<String>>,
+    /// D-EFFBUDGET1: the audited per-dependency escape from `effects:`.
+    pub grants: Vec<(String, Vec<String>)>,
+    /// D-POLICY-WORD1=A: the one governance namespace (`policy: .{ … }`).
+    pub policy: PackagePolicy,
+    /// D-CONF-NAME1: typed settings declared in `settings: .{ … }`. Stored
+    /// structurally; runtime `$build.settings.*` reads are a separate,
+    /// unratified ballot (D-CONF-KEY1) and are not wired here.
+    pub settings: BTreeMap<String, SettingDecl>,
     pub configs: Vec<String>,
     /// Resolved file-backed Config paths. These are relative to the Package
     /// root and keep discovery provenance available to source enumeration.
@@ -116,12 +162,40 @@ pub struct PackageFacts {
     pub origin: String,
 }
 
+/// D-POLICY-WORD1=A: the package's governance namespace — package-scope
+/// only (never a Config contribution), same as the ratified D-MARK-SCOPE1
+/// package rung.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PackagePolicy {
+    /// D-PACKAGE-POLICY-SCOPE1: typed, tighten-only memory-policy facts
+    /// (`no_alloc`, `zero_rc`, `arena_bounded`, `gc`, `unsafe`).
+    pub memory: Vec<crate::Policy::PolicyDeclaration>,
+    /// D-AUTODERIVE1=E: absent means the safe beginner default, enabled.
+    pub auto_derive: Option<bool>,
+    /// D-JPK-GRANTSCHEMA1=A: `policy.trust`.
+    pub trust: Option<Blocks::TrustPolicy>,
+    /// D-JPK-PROVIDERAUTH1=A: `policy.providers`.
+    pub providers: Vec<Blocks::ProviderAuthority>,
+    /// D-LINTPOLICY1=A: `policy.lints.deny`. `None` means no `lints:` block
+    /// at all (warn-never-block stays the default).
+    pub lints_deny: Option<Vec<String>>,
+}
+
+/// D-CONF-NAME1: one declared `settings:` entry — a name, a Tier-0 type, and
+/// an optional default. Structural only in this card; typed reads and
+/// `--set`/profile contribution are D-CONF-KEY1/D-CONF-READ1 (unratified).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SettingDecl {
+    pub ty: String,
+    pub default: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ConfigFacts {
     pub name: Option<String>,
     pub version: Option<String>,
     pub source: Option<String>,
-    pub deps: BTreeMap<String, String>,
+    pub deps: BTreeMap<String, Blocks::DepSource>,
     pub services: BTreeMap<String, ServiceFact>,
     pub outputs: BTreeMap<String, OutputFact>,
     pub environments: BTreeMap<String, EnvironmentFact>,
@@ -179,6 +253,22 @@ pub enum PackageParseError {
     InvalidValue { field: String, value: String },
     ConfigMembers,
     Composition(String),
+    /// D-TGT1/D-TGT2/D-TGT3: a `packages:` entry names an unknown or
+    /// not-yet-shipped target.
+    BadTarget { name: String, value: String, reserved: bool },
+    /// D-TGT1: a `packages:` entry uses the removed `kind:` field.
+    KindFieldRemoved { name: String },
+    /// D-TGT3/D-TGT4: a target block carries an unknown field.
+    BadTargetField { name: String, detail: String },
+    /// U1/S52/E1209: a reserved top-level key (`dev_deps`/`patch`/`workspace`)
+    /// was used non-empty.
+    ReservedSection(&'static str),
+    /// D-EFFBUDGET1: a malformed `effects:`/`grants:`/`build.allow:` block.
+    BadEffectsBlock(String),
+    /// D-PACKAGE-POLICY-SCOPE1: malformed or widening package memory policy.
+    BadMemoryPolicy { detail: String },
+    /// D-AUTODERIVE-SYNTAX1=D: malformed `policy.auto_derive`.
+    BadAutoDerivePolicy { detail: String },
 }
 
 impl fmt::Display for PackageParseError {
@@ -194,6 +284,19 @@ impl fmt::Display for PackageParseError {
             }
             Self::ConfigMembers => f.write_str("Config cannot declare `members`"),
             Self::Composition(value) => f.write_str(value),
+            Self::BadTarget { name, value, reserved } => write!(
+                f,
+                "package `{name}` names {} target `{value}`",
+                if *reserved { "the reserved" } else { "the unknown" }
+            ),
+            Self::KindFieldRemoved { name } => {
+                write!(f, "package `{name}` uses the removed `kind:` field")
+            }
+            Self::BadTargetField { name, detail } => write!(f, "package `{name}`: {detail}"),
+            Self::ReservedSection(section) => write!(f, "`{section}` is reserved"),
+            Self::BadEffectsBlock(detail) => f.write_str(detail),
+            Self::BadMemoryPolicy { detail } => f.write_str(detail),
+            Self::BadAutoDerivePolicy { detail } => f.write_str(detail),
         }
     }
 }
@@ -241,6 +344,22 @@ impl PackageFacts {
             .expect("writing to a String cannot fail");
         }
         crate::SHA256::sha256_hex(semantic.as_bytes())
+    }
+
+    /// The declared kind of package `name`, derived from its `targets:` list
+    /// in the `packages: { … }` block (D-TGT1): an `executable` target wins,
+    /// else a `library` target. `None` when the package is not listed *or*
+    /// declares no library/executable target (D-ILE1) — both leave the kind
+    /// to be inferred from the source at realize time.
+    pub fn package_kind(&self, name: &str) -> Option<Blocks::PackageKind> {
+        let entry = self.packages.iter().find(|p| p.name == name)?;
+        if entry.targets.iter().any(|t| *t == Blocks::Target::Executable) {
+            Some(Blocks::PackageKind::Executable)
+        } else if entry.targets.iter().any(|t| *t == Blocks::Target::Library) {
+            Some(Blocks::PackageKind::Library)
+        } else {
+            None
+        }
     }
 
     /// Parse the canonical `package.jet` root shape.
@@ -291,14 +410,7 @@ impl PackageFacts {
             }
             Err(_) => return None,
         };
-        let parsed = Self::parse_uncomposed(&text, path.display().to_string())
-            .or_else(|error| {
-                if path.file_name().and_then(|name| name.to_str()) == Some("pkg.jet") {
-                    legacy_package_facts(&text, &path, error)
-                } else {
-                    Err(error)
-                }
-            });
+        let parsed = Self::parse_uncomposed(&text, path.display().to_string());
         Some(parsed.and_then(|mut facts| {
             facts.compose_configs(dir)?;
             facts
@@ -1050,74 +1162,6 @@ fn package_manifest_path(dir: &std::path::Path) -> Option<std::path::PathBuf> {
     }
 }
 
-fn legacy_package_facts(
-    text: &str,
-    path: &std::path::Path,
-    canonical_error: PackageParseError,
-) -> Result<PackageFacts, PackageParseError> {
-    let manifest = crate::PackageManifest::parse(text).map_err(|error| {
-        PackageParseError::Composition(format!(
-            "migration-era Package `{}` is not a valid Package ({canonical_error}): {error:?}",
-            path.display()
-        ))
-    })?;
-    let mut facts = PackageFacts {
-        name: manifest.package.name,
-        version: Some(manifest.package.version),
-        jet: manifest.package.jet_constraint,
-        origin: path.display().to_string(),
-        ..PackageFacts::default()
-    };
-    for dependency in manifest.deps {
-        facts
-            .deps
-            .insert(dependency.name, legacy_dependency_value(&dependency.source));
-    }
-    let origin = facts.origin.clone();
-    record_provenance(&mut facts.provenance, "name", &origin);
-    record_provenance(&mut facts.provenance, "version", &origin);
-    if facts.jet.is_some() {
-        record_provenance(&mut facts.provenance, "jet", &origin);
-    }
-    for name in facts.deps.keys() {
-        record_provenance(&mut facts.provenance, &format!("deps.{name}"), &origin);
-    }
-    Ok(facts)
-}
-
-fn legacy_dependency_value(source: &crate::PackageManifest::DepSource) -> String {
-    match source {
-        crate::PackageManifest::DepSource::Version(value) => value.clone(),
-        crate::PackageManifest::DepSource::Provider { provider, target } => {
-            if matches!(provider, crate::RefSpec::Source::Path) {
-                target.clone()
-            } else {
-                format!("{target}@{}", provider.label())
-            }
-        }
-        crate::PackageManifest::DepSource::Git { url, selector } => {
-            let (field, value) = match selector {
-                crate::Manifest::GitSelector::Tag(value) => ("tag", value),
-                crate::Manifest::GitSelector::Branch(value) => ("branch", value),
-                crate::Manifest::GitSelector::Rev(value) => ("rev", value),
-            };
-            format!("{{ git: {url:?}, {field}: {value:?} }}")
-        }
-        crate::PackageManifest::DepSource::CLib { target } => format!("lib: {target}"),
-    }
-}
-
-fn legacy_package_name(text: &str, dir: &std::path::Path) -> String {
-    text.lines()
-        .find_map(|line| {
-            let rest = line.trim().strip_prefix("name:")?;
-            let value = rest.trim().trim_end_matches(',').trim().trim_matches('"');
-            (!value.is_empty() && !value.contains('{')).then(|| value.to_string())
-        })
-        .or_else(|| dir.file_name().map(|name| name.to_string_lossy().into_owned()))
-        .unwrap_or_default()
-}
-
 fn package_member_identity(
     dir: &std::path::Path,
 ) -> Result<(String, bool), PackageParseError> {
@@ -1133,16 +1177,8 @@ fn package_member_identity(
             manifest.display()
         ))
     })?;
-    if manifest.file_name().and_then(|name| name.to_str()) == Some("package.jet") {
-        let facts = PackageFacts::parse_uncomposed(&text, manifest.display().to_string())?;
-        Ok((facts.name, !facts.members.is_empty()))
-    } else {
-        Ok((
-            legacy_package_name(&text, dir),
-            text.lines()
-                .any(|line| line.trim_start().starts_with("members:")),
-        ))
-    }
+    let facts = PackageFacts::parse_uncomposed(&text, manifest.display().to_string())?;
+    Ok((facts.name, !facts.members.is_empty()))
 }
 
 fn parse_common(
@@ -1200,7 +1236,29 @@ fn parse_common(
             "jet" if !config => facts.jet = Some(scalar(&value)),
             "jet" => return Err(PackageParseError::UnknownField(field.clone())),
             "source" => facts.source = Some(scalar(&value)),
-            "deps" => facts.deps = parse_string_map("deps", &value)?,
+            "edition" if !config => facts.edition = Some(scalar(&value)),
+            "edition" => return Err(PackageParseError::UnknownField(field.clone())),
+            "description" if !config => facts.description = Some(scalar(&value)),
+            "description" => return Err(PackageParseError::UnknownField(field.clone())),
+            "license" if !config => facts.license = Some(scalar(&value)),
+            "license" => return Err(PackageParseError::UnknownField(field.clone())),
+            "repository" if !config => facts.repository = Some(scalar(&value)),
+            "repository" => return Err(PackageParseError::UnknownField(field.clone())),
+            "target" if !config => facts.target = Some(scalar(&value)),
+            "target" => return Err(PackageParseError::UnknownField(field.clone())),
+            "runtime" if !config => {
+                let raw = scalar(&value);
+                facts.layer = Some(crate::Syntax::RuntimeLayer::parse_manifest(&raw).ok_or_else(
+                    || PackageParseError::InvalidValue {
+                        field: "runtime".to_string(),
+                        value: raw.clone(),
+                    },
+                )?);
+            }
+            "runtime" => return Err(PackageParseError::UnknownField(field.clone())),
+            "deps" => facts.deps = Blocks::parse_deps(record_body(&value, "deps")?)?,
+            "packages" if config => return Err(PackageParseError::UnknownField(field.clone())),
+            "packages" => facts.packages = Blocks::parse_packages(record_body(&value, "packages")?)?,
             "services" => facts.services = parse_services(&value)?,
             "outputs" => {
                 for (name, output) in parse_outputs(&value)? {
@@ -1219,13 +1277,52 @@ fn parse_common(
             }
             "environments" => facts.environments = parse_environments(&value)?,
             "defaults" => facts.defaults = parse_string_map("defaults", &value)?,
+            "settings" if config => return Err(PackageParseError::UnknownField(field.clone())),
+            "settings" => facts.settings = parse_settings(&value)?,
+            "build" if config => return Err(PackageParseError::UnknownField(field.clone())),
+            "build" => {
+                let body = record_body(&value, "build")?;
+                facts.build_profiles = Blocks::parse_build(body)?;
+                facts.build_allow = Blocks::parse_build_allow(body)?;
+            }
+            "effects" if config => return Err(PackageParseError::UnknownField(field.clone())),
+            "effects" => {
+                facts.effects_enabled = true;
+                let (allow, deny) = Blocks::parse_effects(record_body(&value, "effects")?)?;
+                facts.effects_allow = allow;
+                facts.effects_deny = deny;
+            }
+            "grants" if config => return Err(PackageParseError::UnknownField(field.clone())),
+            "grants" => facts.grants = Blocks::parse_grants(record_body(&value, "grants")?)?,
+            "policy" if config => return Err(PackageParseError::UnknownField(field.clone())),
+            "policy" => {
+                let body = record_body(&value, "policy")?;
+                facts.policy = PackagePolicy {
+                    memory: Blocks::parse_memory_policy(body)?,
+                    auto_derive: Blocks::parse_auto_derive_policy(body)?,
+                    trust: Blocks::parse_trust_policy(body)?,
+                    providers: Blocks::parse_provider_policy(body)?,
+                    lints_deny: Blocks::parse_lints_policy(body)?,
+                };
+            }
             "members" if config => return Err(PackageParseError::ConfigMembers),
             "members" => facts.members = parse_members(&value)?,
             "configs" if config => {
                 return Err(PackageParseError::UnknownField(field.clone()))
             }
             "configs" => facts.configs = parse_list(&value),
-            "description" | "license" | "edition" | "repository" => {}
+            // U1/S52/E1209: reserved for a future Jet feature — legal only
+            // when declared empty.
+            "dev_deps" | "patch" | "workspace" => {
+                let reserved: &'static str = match field.as_str() {
+                    "dev_deps" => "dev_deps",
+                    "patch" => "patch",
+                    _ => "workspace",
+                };
+                if !record_entries(&value, reserved).unwrap_or_default().is_empty() {
+                    return Err(PackageParseError::ReservedSection(reserved));
+                }
+            }
             other => return Err(PackageParseError::UnknownField(other.to_string())),
         }
         let origin = facts.origin.clone();
@@ -1257,7 +1354,7 @@ fn merge_config(root: &mut PackageFacts, config: &ConfigFacts) -> Result<(), Com
         &config.origin,
         &mut root.provenance,
     )?;
-    merge_string_map(
+    merge_dep_map(
         &mut root.deps,
         &config.deps,
         "deps",
@@ -1369,6 +1466,37 @@ fn merge_optional_field(
         }
     }
     record_provenance(provenance, field, origin);
+    Ok(())
+}
+
+fn merge_dep_map(
+    current: &mut BTreeMap<String, Blocks::DepSource>,
+    incoming: &BTreeMap<String, Blocks::DepSource>,
+    field: &str,
+    fallback: &str,
+    origin: &str,
+    provenance: &mut BTreeMap<String, Vec<String>>,
+) -> Result<(), ComposeError> {
+    for (key, value) in incoming {
+        let path = format!("{field}.{key}");
+        let left_origin = provenance_origin(provenance, &path, fallback);
+        match current.get(key) {
+            None => {
+                current.insert(key.clone(), value.clone());
+            }
+            Some(existing) if existing == value => {}
+            Some(existing) => {
+                return Err(ComposeError::Conflict {
+                    field: path,
+                    left_origin,
+                    right_origin: origin.to_string(),
+                    left: Blocks::dep_display(existing),
+                    right: Blocks::dep_display(value),
+                })
+            }
+        }
+        record_provenance(provenance, &path, origin);
+    }
     Ok(())
 }
 
@@ -2070,6 +2198,27 @@ fn service_field_allowed(field: &str) -> bool {
             | "limits"
             | "logs"
     )
+}
+
+/// `settings: .{ tls: Bool = true, api_base: String }` — a name, a Tier-0
+/// type, and an optional default (D-CONF-NAME1). Structural only.
+fn parse_settings(value: &str) -> Result<BTreeMap<String, SettingDecl>, PackageParseError> {
+    let mut out = BTreeMap::new();
+    for (key, raw) in record_entries(value, "settings")? {
+        let key = key.trim_matches('"').to_string();
+        let (ty, default) = match raw.split_once('=') {
+            Some((ty, default)) => (ty.trim().to_string(), Some(scalar(default))),
+            None => (raw.trim().to_string(), None),
+        };
+        if ty.is_empty() {
+            return Err(PackageParseError::InvalidValue {
+                field: format!("settings.{key}"),
+                value: raw,
+            });
+        }
+        out.insert(key, SettingDecl { ty, default });
+    }
+    Ok(out)
 }
 
 fn parse_string_map(

@@ -10,7 +10,7 @@
 //! instead of shelling out — exactly the Forge fixture pattern.
 
 use jet_env_model::ModuleEval::{AdapterPlan, AdapterRecipe};
-use super::PackageManifest;
+use super::Package;
 use super::Recipe::{self, BuildContext, BuildRecipe, BuildStep};
 use super::RefSpec::{ProviderKind, RefSpec, Source, SourceTable};
 use super::JSON;
@@ -234,7 +234,7 @@ pub fn cache_expectation(
             let src_dir = canonical_package
                 .as_ref()
                 .and_then(|(root, facts)| canonical_source_dir(root, facts))
-                .or_else(|| PackageManifest::discover_module_in(&repo, &spec.package).ok())?;
+                .or_else(|| Package::discover_module_in(&repo, &spec.package).ok())?;
             validate_core_source_tree(&src_dir).ok()?;
             let toolchain = super::Toolchain::Toolchain::resolve_for_core(ctx.offline);
             if ctx.offline
@@ -247,7 +247,7 @@ pub fn cache_expectation(
             let (manifest, canonical) = if canonical.is_some() {
                 (None, canonical)
             } else {
-                let manifest = match PackageManifest::PackManifest::load(&repo) {
+                let manifest = match Package::PackageFacts::load(&repo) {
                     None => None,
                     Some(Ok(manifest)) => Some(manifest),
                     Some(Err(_)) => return None,
@@ -918,16 +918,16 @@ impl Provider for CoreProvider {
                     facts.version.clone().unwrap_or_default(),
                 )
             } else {
-                let source_dir = PackageManifest::discover_module_in(&repo, &spec.package)
+                let source_dir = Package::discover_module_in(&repo, &spec.package)
                     .map_err(|e| match e {
-                        PackageManifest::DiscoveryError::NotFound { name } => {
+                        Package::DiscoveryError::NotFound { name } => {
                             ProviderError::CoreBuild(format!(
                                 "source repo at {} has no `module {name}` — add a .{} file declaring it",
                                 repo.display(),
                                 crate::Syntax::FILE_EXT,
                             ))
                         }
-                        PackageManifest::DiscoveryError::Ambiguous { name, paths } => {
+                        Package::DiscoveryError::Ambiguous { name, paths } => {
                             let list = paths
                                 .iter()
                                 .map(|p| p.display().to_string())
@@ -975,14 +975,14 @@ impl Provider for CoreProvider {
         let manifest = match if canonical.is_some() {
             None
         } else {
-            PackageManifest::PackManifest::load(&repo)
+            Package::PackageFacts::load(&repo)
         } {
             None => None,
             Some(Ok(manifest)) => Some(manifest),
             Some(Err(error)) => {
                 return Err(ProviderError::CoreBuild(format!(
                     "package manifest {} is invalid: {error:?}",
-                    PackageManifest::PackManifest::path_in(&repo).display()
+                    crate::Manifest::manifest_path_in(&repo).display()
                 )));
             }
         };
@@ -1003,16 +1003,16 @@ impl Provider for CoreProvider {
         } else {
             manifest
             .as_ref()
-            .map(|pm| pm.package.version.clone())
+            .and_then(|pm| pm.version.clone())
             .unwrap_or_default()
         };
         let (bin, rlib, recipe_id) = match kind {
-            PackageManifest::PackageKind::Executable => (
+            Package::PackageKind::Executable => (
                 out_dir.join("bin").to_string_lossy().into_owned(),
                 String::new(),
                 "core-source",
             ),
-            PackageManifest::PackageKind::Library => {
+            Package::PackageKind::Library => {
                 // D-BFS1: if the package ships a Cargo.toml, compile it to an
                 // rlib now. The rlib lands *inside* the hangar object (`out_dir`)
                 // so the object is self-contained and content-addressed; the

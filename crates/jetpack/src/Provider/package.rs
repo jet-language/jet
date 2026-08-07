@@ -1,6 +1,6 @@
 //! Canonical Jet package facts used by the core provider.
 
-use super::{PackageManifest, SHA256};
+use super::{Package, SHA256};
 use jet_pkg_model::Package::{MemberRef, PackageFacts, PackageOutputKind};
 use std::path::{Path, PathBuf};
 
@@ -228,8 +228,8 @@ fn collect_core_files(
 pub(super) fn core_recipe_identity(
     src_dir: &Path,
     package: &str,
-    manifest: Option<&PackageManifest::PackManifest>,
-    kind: PackageManifest::PackageKind,
+    manifest: Option<&Package::PackageFacts>,
+    kind: Package::PackageKind,
     canonical: Option<&PackageFacts>,
     toolchain: Option<&crate::Toolchain::Toolchain>,
 ) -> Result<String, String> {
@@ -238,18 +238,18 @@ pub(super) fn core_recipe_identity(
     // same manifest but a changed nested source tree cannot reuse a stale
     // realization.
     let source_tree = core_tree_fingerprint(src_dir)?;
-    let artifact = if kind == PackageManifest::PackageKind::Library
+    let artifact = if kind == Package::PackageKind::Library
         && src_dir.join("Cargo.toml").is_file()
     {
         "cargo-rlib"
-    } else if kind == PackageManifest::PackageKind::Library {
+    } else if kind == Package::PackageKind::Library {
         "jet-library-source"
     } else {
         "executable-tree"
     };
     let version = canonical
         .and_then(|facts| facts.version.as_deref())
-        .or_else(|| manifest.map(|manifest| manifest.package.version.as_str()))
+        .or_else(|| manifest.and_then(|manifest| manifest.version.as_deref()))
         .unwrap_or("");
     let semantics = canonical.map_or_else(
         || normalized_manifest_semantics(manifest),
@@ -282,15 +282,15 @@ fn canonical_package_semantics(facts: &PackageFacts) -> String {
 pub(super) fn canonical_package_kind(
     facts: &PackageFacts,
     package: &str,
-) -> Option<PackageManifest::PackageKind> {
+) -> Option<Package::PackageKind> {
     let output = facts
         .outputs
         .get(package)
         .or_else(|| facts.select_output("run", None, None).ok())?;
     match output.kind {
-        PackageOutputKind::Library => Some(PackageManifest::PackageKind::Library),
+        PackageOutputKind::Library => Some(Package::PackageKind::Library),
         PackageOutputKind::Executable | PackageOutputKind::Service => {
-            Some(PackageManifest::PackageKind::Executable)
+            Some(Package::PackageKind::Executable)
         }
         PackageOutputKind::Check
         | PackageOutputKind::Environment
@@ -340,13 +340,13 @@ pub(super) fn validate_core_source_tree(root: &Path) -> Result<(), String> {
 }
 
 fn normalized_manifest_semantics(
-    manifest: Option<&PackageManifest::PackManifest>,
+    manifest: Option<&Package::PackageFacts>,
 ) -> String {
     let Some(manifest) = manifest else {
         return "manifest=absent".to_string();
     };
     let mut manifest = manifest.clone();
-    manifest.deps.sort_by(|a, b| a.name.cmp(&b.name));
+    // `deps` is a `BTreeMap`, already key-sorted.
     manifest.packages.sort_by(|a, b| a.name.cmp(&b.name));
     for package in &mut manifest.packages {
         package.targets.sort_by_key(|target| format!("{target:?}"));
@@ -362,7 +362,7 @@ fn normalized_manifest_semantics(
     if let Some(effects) = &mut manifest.effects_deny {
         effects.sort();
     }
-    if let Some(policy) = &mut manifest.trust_policy {
+    if let Some(policy) = &mut manifest.policy.trust {
         policy.services.sort_by(|a, b| a.0.cmp(&b.0));
     }
     format!("{manifest:?}")

@@ -221,7 +221,7 @@ impl CompilerQueries {
                     .map(|input| canonical_path(&bundle.project_root.join(&input.path))),
             );
             files.extend([
-                crate::PackageManifest::PackManifest::path_in(&bundle.project_root),
+                crate::Manifest::manifest_path_in(&bundle.project_root),
                 bundle.project_root.join(".jet/lock"),
             ]);
             if bundle.project_root.join("package.jet").is_file()
@@ -262,7 +262,7 @@ fn external_input(root: &Path) -> InputKey {
 fn default_external_files(root: &Path) -> Vec<PathBuf> {
     let project = root.parent().unwrap_or_else(|| Path::new("."));
     let mut files = vec![
-        crate::PackageManifest::PackManifest::path_in(project),
+        crate::Manifest::manifest_path_in(project),
         project.join(".jet/lock"),
     ];
     if project.join("package.jet").is_file() && project.join("pkg.jet").is_file() {

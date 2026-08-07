@@ -15,7 +15,7 @@
 //! Both depend *down* on this crate for the shared plan model (layering, not
 //! surgery — `ModuleEval` was already pure before this split).
 //!
-//! Deps: `jet-pkg-model` (the `Merge`/`RefSpec`/`PackageManifest`/`Recipe`
+//! Deps: `jet-pkg-model` (the `Merge`/`RefSpec`/`Package`/`Recipe`
 //! data types this crate's plans embed) + `jet-codegen` (the compiler frontend
 //! funnel `jetpack` already uses: AST/Comptime/Parser/Lexer/Diagnostics/Sema/
 //! Syntax) — both path-only (I6). No provider/store/network/shell dep.
@@ -31,11 +31,11 @@
 pub use jet_codegen::{Comptime, Diagnostics, Lexer, Parser, Sema, Syntax, AST};
 
 // Re-export the L1 plan-data types so `ModuleEval`'s internal
-// `super::super::{Merge,RefSpec,PackageManifest,Recipe}` paths (unchanged
-// from their original `jetpack`-relative depth: `ModuleEval/*.rs` sits one
-// level under this crate root, exactly as it did under `jetpack`'s) resolve
-// without a text rewrite.
-pub use jet_pkg_model::{Merge, PackageManifest, Recipe, RefSpec};
+// `super::super::{Merge,Package,RefSpec,Recipe}` paths (unchanged from their
+// original `jetpack`-relative depth: `ModuleEval/*.rs` sits one level under
+// this crate root, exactly as it did under `jetpack`'s) resolve without a
+// text rewrite.
+pub use jet_pkg_model::{Merge, Package, Recipe, RefSpec};
 
 // Card #367 slice 5: `WorkspaceFile` (load/evaluate) now lives here — L2
 // eval layer on top of L1 plan types (`WorkspacePlan`/`WorkspaceMember` in

@@ -1,7 +1,7 @@
 //! One policy-bound, credential-clean fetch path for native registries.
 
 use super::Ctx;
-use crate::PackageManifest::PackManifest;
+use crate::Package::PackageFacts;
 use std::collections::BTreeSet;
 use std::io::{BufRead, Read};
 use std::path::Component;
@@ -51,12 +51,13 @@ impl Authority {
     ) -> Result<Self, String> {
         let configured = ctx
             .project_dir
-            .and_then(PackManifest::load)
+            .and_then(PackageFacts::load)
             .transpose()
             .map_err(|error| format!("could not parse policy.providers: {error:?}"))?
             .and_then(|manifest| {
                 manifest
-                    .provider_policy
+                    .policy
+                    .providers
                     .into_iter()
                     .find(|authority| authority.provider == provider)
             });
@@ -605,7 +606,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
-            crate::PackageManifest::PackManifest::path_in(&dir),
+            crate::Manifest::manifest_path_in(&dir),
             r#"payload: { name: "p", version: "0.1.0" }
 policy: {
     providers: {

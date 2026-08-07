@@ -22,11 +22,11 @@ pub use jet_codegen::{
 // touches network/provider/shell), lives in `jet-pkg-model` so `jet-driver`
 // (and now `jet` itself) can depend on it without pulling in this crate's
 // provider/network/shell engine. Re-exported under their historical paths so
-// every internal call site in this crate (`crate::PackageManifest`,
+// every internal call site in this crate (`crate::Package`,
 // `super::RefSpec`, `crate::EffectBudget`, etc.) is unchanged.
 pub use jet_pkg_model::{
     AdaBind, CBind, CFFI, ComBind, CppBind, DartBind, DotNetBind, EffectBudget, Envelope, FFI, FortranBind,
-    JavaBind, JSON, LintPolicy, Lock, Manifest, Package, PackageManifest, PascalBind, Platform,
+    JavaBind, JSON, LintPolicy, Lock, Manifest, Package, PascalBind, Platform,
     PowerShellBind, RefSpec, ScriptDeps, TclBind, Variant,
 };
 // Card #367 slice 5: WorkspacePlan/WorkspaceMember + WorkspaceLock read path
