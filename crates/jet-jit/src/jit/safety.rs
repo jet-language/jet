@@ -3819,7 +3819,7 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         THandleOp::ProcessChildMethod { method } => {
             matches!(
                 (method.as_str(), args.len()),
-                ("wait" | "id" | "kill" | "terminate" | "interrupt", 0)
+                ("wait" | "id" | "exited" | "kill" | "terminate" | "interrupt", 0)
             )
         }
         THandleOp::TerminalSessionResize => args.len() == 1,

@@ -11148,6 +11148,13 @@ impl LowerCtx<'_, '_> {
                         "v7" if args.len() == 1 => {
                             (self.host.encoding.uuid_v7, vec![self.lower_expr(&args[0])?])
                         }
+                        "parse" if args.len() == 1 => {
+                            (self.host.encoding.uuid_parse, vec![self.lower_expr(&args[0])?])
+                        }
+                        "v5" if args.len() == 2 => (
+                            self.host.encoding.uuid_v5,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
                         _ => return Err("jit core call unsupported".to_string()),
                     };
                     let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
@@ -15823,6 +15830,7 @@ impl LowerCtx<'_, '_> {
             // return and cannot carry the new Option<T> value/remove-by mode.
             // Deopt keeps the same Prelude semantics as AOT and interpreter.
             TBuiltinOp::RemoveList { .. }
+            | TBuiltinOp::PriorityQueueRemove { .. }
             | TBuiltinOp::CountList
             | TBuiltinOp::ExtendList
             | TBuiltinOp::ConcatList => Err("jit builtin method unsupported".to_string()),
@@ -18909,6 +18917,13 @@ impl LowerCtx<'_, '_> {
                     let host = self
                         .module
                         .declare_func_in_func(self.host.process.child_id, self.b.func);
+                    let call = self.b.ins().call(host, &[recv_val]);
+                    Ok(self.b.inst_results(call)[0])
+                }
+                "exited" if args.is_empty() => {
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.process.child_exited, self.b.func);
                     let call = self.b.ins().call(host, &[recv_val]);
                     Ok(self.b.inst_results(call)[0])
                 }

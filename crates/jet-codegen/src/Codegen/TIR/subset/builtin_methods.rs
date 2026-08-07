@@ -217,7 +217,7 @@ pub(crate) fn is_process_handle_method_name(
         ),
         Some("ProcessChild") => matches!(
             (method, nargs),
-            ("id" | "wait" | "kill" | "terminate" | "interrupt", 0)
+            ("id" | "wait" | "exited" | "kill" | "terminate" | "interrupt", 0)
         ),
         Some("TerminalSession") => matches!((method, nargs), ("resize", 1)),
         // D-PROCESS1=A: `.write(text)` on `child.stdin`.

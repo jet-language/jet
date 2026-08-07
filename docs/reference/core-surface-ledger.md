@@ -51,18 +51,18 @@ Generated on: 2026-08-07
 | Languages compared | 11 |
 | Shared containers | 54 |
 | Core modules | 85 |
-| Module members | 1137 |
-| Collection method rows | 715 |
-| Jet-side rows | 1853 |
-| Total rows | 10433 |
+| Module members | 1139 |
+| Collection method rows | 716 |
+| Jet-side rows | 1856 |
+| Total rows | 10434 |
 
 ## Verdicts
 
 | Verdict | Rows |
 | --- | ---: |
-| Jet wins | 403 |
-| Equal | 861 |
-| Jet loses (two or more languages agree) | 307 |
+| Jet wins | 404 |
+| Equal | 863 |
+| Jet loses (two or more languages agree) | 305 |
 | Single witness (recorded, not scored) | 8273 |
 | Exported type, not an operation | 169 |
 | Not compared | 420 |
@@ -73,16 +73,16 @@ Generated on: 2026-08-07
 | Language | Surface read from | Recorded operations | Jet rows matched | Loss rows |
 | --- | --- | ---: | ---: | ---: |
 | Rust | standard-library source (rust-src component) | 1032 | 359 | 26 |
-| Go | official frozen API files (GOROOT/api/go1*.txt) | 1878 | 406 | 112 |
+| Go | official frozen API files (GOROOT/api/go1*.txt) | 1878 | 407 | 111 |
 | Swift | official documentation JSON (developer.apple.com) | 505 | 183 | 24 |
 | Kotlin | official API reference (kotlinlang.org) | 1141 | 240 | 51 |
-| C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1267 | 327 | 47 |
+| C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1267 | 329 | 45 |
 | TypeScript | runtime introspection | 724 | 221 | 64 |
 | Ruby | runtime introspection | 1294 | 342 | 78 |
 | Elixir | runtime introspection | 1270 | 370 | 74 |
 | Julia | official documentation search index (docs.julialang.org) | 1132 | 282 | 79 |
 | R | official R manual package index (stat.ethz.ch R-devel) | 1768 | 51 | 0 |
-| Python | runtime introspection | 2232 | 419 | 158 |
+| Python | runtime introspection | 2232 | 420 | 157 |
 
 ## Loss clusters
 
@@ -100,32 +100,31 @@ while losses remain.
 | core.archive | 16 | #1470 | ready | live |
 | core.time | 14 | #1466 | done | closed |
 | core.tasks | 13 | #1468 | done | closed |
-| core.sync | 12 | #1481 | ready | live |
+| core.sync | 12 | #1590 | ready | live |
 | core.math | 10 | #1464 | done | closed |
 | core.os | 10 | #1465 | done | closed |
-| core.encoding.xml | 9 | #1481 | ready | live |
+| core.encoding.xml | 9 | #1590 | ready | live |
 | core.log | 9 | #1474 | done | closed |
 | core.net | 9 | #1469 | done | closed |
 | core.path | 9 | #288 | building | live |
-| core.process | 9 | #1481 | ready | live |
+| core.process | 9 | #1590 | ready | live |
 | ByteBuffer | 8 | #1467 | done | closed |
-| core.db | 8 | #1481 | ready | live |
-| core.reflect | 8 | #1481 | ready | live |
-| core.testing | 7 | #1481 | ready | live |
-| core.tls | 6 | #1481 | ready | live |
-| core.uuid | 5 | #1481 | ready | live |
+| core.db | 8 | #1590 | ready | live |
+| core.reflect | 8 | #1590 | ready | live |
+| core.testing | 7 | #1590 | ready | live |
+| core.tls | 6 | #1590 | ready | live |
 | Set | 5 | #1584 | ready | live |
-| core.http | 4 | #1481 | ready | live |
+| core.http | 4 | #1590 | ready | live |
 | core.regex | 4 | #1471 | done | closed |
-| core.encoding.csv | 3 | #1481 | ready | live |
-| core.args | 2 | #1481 | ready | live |
-| core.binary | 2 | #1481 | ready | live |
-| core.mem | 2 | #1481 | ready | live |
-| core.random | 2 | #1481 | ready | live |
+| core.uuid | 4 | #1590 | ready | live |
+| core.encoding.csv | 3 | #1590 | ready | live |
+| core.args | 2 | #1590 | ready | live |
+| core.binary | 2 | #1590 | ready | live |
+| core.mem | 2 | #1590 | ready | live |
+| core.random | 2 | #1590 | ready | live |
 | BitSet | 1 | #1493 | ready | live |
-| core.encoding.json | 1 | #1481 | ready | live |
+| core.encoding.json | 1 | #1590 | ready | live |
 | Deque | 1 | #1475 | done | closed |
-| PriorityQueue | 1 | #1481 | ready | live |
 
 ## Containers indexed per package
 

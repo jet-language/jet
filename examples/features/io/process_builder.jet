@@ -16,6 +16,8 @@ fn run() {
     loop line, child.stdout.lines() { print(line.trim()) }
     waited :: child.wait() ?? panic("wait failed")
     print(waited.success)
+    // #1481 core.process: a non-blocking poll alongside the blocking `wait()`.
+    print(child.exited() ?? panic("exited failed"))
     terminal_spec :: process.cmd(["echo", "terminal-api"]).terminal(TerminalPolicy.{
         size: TerminalSize.{ cols: 100, rows: 30 },
         mode: .Cooked
