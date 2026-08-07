@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1587,
-    "rev": 28155,
+    "nextNum": 1592,
+    "rev": 28196,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -24,7 +24,7 @@
         "board-ideas"
       ]
     },
-    "completionCursor": "2026-08-06T19:36:39.863Z"
+    "completionCursor": "2026-08-07T00:04:21.369Z"
   },
   "epochs": [
     {
@@ -85701,8 +85701,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T02:13:47.049Z",
-      "updated": "2026-08-06T23:40:42.570Z",
-      "updatedBy": "bd2-orch",
+      "updated": "2026-08-07T00:08:52.390Z",
+      "updatedBy": "owner",
       "workOrder": 20,
       "completedAt": "2026-08-06T23:40:42.570Z"
     },
@@ -85801,8 +85801,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T02:13:47.351Z",
-      "updated": "2026-08-07T00:02:29.052Z",
-      "updatedBy": "bd2-orch",
+      "updated": "2026-08-07T00:09:23.175Z",
+      "updatedBy": "owner",
       "workOrder": 30,
       "completedAt": "2026-08-07T00:02:29.052Z"
     },
@@ -85920,12 +85920,22 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "Scope: 17 small containers, each too small for its own card. Verified 2026-08-06 directly against docs/reference/core-surface-ledger.json lossClusters: the live counts are core.sync 11, core.encoding.xml 8, core.process 9, core.db 7, core.testing 7, core.reflect 6, core.http 5, core.tls 5, core.uuid 4, core.binary 3, core.encoding.csv 3, core.random 2, PriorityQueue 2, core.args 2, core.encoding.json 1, core.mem 1, core.mime 1 = 77 rows, not the 75 the card body states. The delta is core.process (9 now vs 8 in the body) and core.args (2 now vs 1) — the ledger moved since the body was written; work the live 77, not the stale 75. All 17 modules already exist in source (located below); this is real gap-filling, not new-module bootstrap.\n\nReal source per container (module_items.rs entry for module-level containers, Collections.rs for the one collection-method container):\n- core.sync -> crates/jet-codegen/src/Prelude/CoreLib/Top/Sync.rs; module_items.rs \"core.sync\" entry\n- core.encoding.xml -> crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingCodecs.rs + EncodingStream.rs (jet_xml_*); module_items.rs \"core.encoding.xml\" entry\n- core.process -> crates/jet-codegen/src/Prelude/CoreLib/Top/Process.rs; module_items.rs \"core.process\" entry\n- core.db -> crates/jet-codegen/src/Prelude/CoreLib/JetStd/DBPluginWire.rs; module_items.rs \"core.db\" entry\n- core.testing -> crates/jet-codegen/src/Prelude/CoreLib/Top/TestingShared.rs (+ FSIoEnvOsTesting.rs); module_items.rs \"core.testing\" entry\n- core.reflect -> crates/jet-codegen/src/Prelude/CoreLib/Top/Reflect.rs; module_items.rs \"core.reflect\" entry\n- core.http -> crates/jet-codegen/src/Prelude/CoreLib/Top/{HTTPClient,HTTPServer,NetHTTP,HTTPRoute}.rs; module_items.rs \"core.http\" entry\n- core.tls -> crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs (jet_tls_*); module_items.rs \"core.tls\" entry (line ~726)\n- core.uuid -> crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingCodecs.rs (jet_uuid_*); module_items.rs \"core.uuid\" entry (line ~223)\n- core.binary -> module_items.rs \"core.binary\" => &[\"Reader\"] (a discoverability-only entry per its own comment: `Reader.over(bytes)` is a bare static constructor). Real methods live on JetReader in crates/jet-codegen/src/Prelude/Core/Collections.rs (jet_reader_*).\n- core.encoding.csv -> crates/jet-codegen/src/Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs\n- core.random -> crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs + MathRandomFns.rs\n- PriorityQueue -> crates/jet-foundation/src/Collections.rs (collection_method_return, like Set/List) + matching Prelude jet_priority_queue_* implementation\n- core.args -> crates/jet-codegen/src/Prelude/CoreLib/Top/Args.rs\n- core.encoding.json -> crates/jet-codegen/src/Prelude/CoreLib/JetStd/{JSON,JSONCodec,JSONDataTree}.rs\n- core.mem -> crates/jet-codegen/src/Prelude/Mem.rs + CoreLib/JetStd/MathTaskMem.rs\n- core.mime -> crates/jet-codegen/src/Prelude/CoreLib/JetStd/UrlMime.rs\n\nVerified gap names per container (docs/reference/core-surface-ledger.json, verdict jet_loses):\n- core.sync (11): broadcast, clear, lock, rlock, signal, trylock, unlock, wait, thread, timer, locked\n- core.encoding.xml (8): close, end, flush, indent, name, nodetype, push, write\n- core.process (9): id, kill, output, spawn, success, wait, exitcode, exited, start\n- core.db (7): close, commit, len, name, raw, rollback, merge\n- core.testing (7): benchmark, fail, main, run, runtests, skip, stop\n- core.reflect (6): get, set, getfile, getmodule, loadfile, tostring\n- core.http (5): cancelrequest, remove, first, postform, set\n- core.tls (5): ciphersuites, handshake, start, verifyhostname, tlsversion\n- core.uuid (4): parse, uuid1, uuid4, uuid5\n- core.binary (3): tostring, pipe, readchar\n- core.encoding.csv (3): flush, read, fieldsizelimit\n- core.random (2): random, uniform\n- PriorityQueue (2): capacity, remove\n- core.args (2): parse, parseargs\n- core.encoding.json (1): dump\n- core.mem (1): replace\n- core.mime (1): tostring\n\nApproach:\n1. For each container, confirm each name against real Jet source before adding (some rows are container-attribution artifacts per the card's own warning — e.g. core.reflect's \"get\"/\"set\"/\"tostring\" might already be answered by generic reflect.of(x) plus String interpolation, and core.testing's \"run\"/\"main\" might collide with Jet's own program entrypoint conventions; check before adding a second mechanism per I8).\n2. Ship real gaps as functions/methods in the file listed above for that container, following each file's existing naming and error-handling conventions (Result<T, IOError> for fallible IO, plain return for pure functions).\n3. For any row that is a container-attribution artifact, a duplicate of an existing mechanism, or out of scope for this pillar (e.g. a name that only makes sense inside a different container Jet already owns under another name), record a named decline with a reason instead of adding code.\n4. Rebuild jet after Prelude edits: scripts/agent/jet-env cargo build.\n5. Extend the nearest existing example per container (only add a new file where none exists close enough): core.sync -> examples/features/tooling/sync_crdt.jet; core.encoding.xml -> find or add under examples/features/serde/ (no xml example currently exists — verify before assuming); core.process -> examples/features/io/process_builder.jet; core.db -> examples/features/io/db.jet; core.testing -> examples/features/tooling/testing_helpers.jet; core.reflect -> examples/features/comptime/reflect.jet or examples/features/reflection/reflect-value.jet; core.http -> examples/features/net/http_client.jet; core.tls -> examples/features/net/http_client.jet (no dedicated tls example exists; add one under examples/features/net/ if the surface warrants it); core.uuid -> examples/features/text/uuid.jet; core.binary -> examples/features/parsing/binary-reader.jet; core.encoding.csv -> examples/features/serde/csv.jet or encoding_csv_stream.jet; core.random -> find the existing random example under examples/features/math/ (verify exact name before editing); PriorityQueue -> examples/features/collections/iter_tools_audit.jet; core.args -> examples/features/io/args_audit.jet; core.encoding.json -> find the existing json example under examples/features/serde/ (verify exact name before editing); core.mem -> examples/features/memory/ (pick the nearest arena/pool example, verify exact name); core.mime -> examples/features/net/url_mime.jet. Regenerate every touched golden.\n6. Run node scripts/agent/check-core-surface-ledger.mjs --refresh then --check.\n7. Update docs/reference/core-library.md for every touched container.\n\nProof:\n- scripts/agent/jet-env cargo test --test core_surface_ledger\n- scripts/agent/jet-env jet run <each touched example>, diff against its golden, per touched container\n- AOT build of each touched example, diff against the same golden, to prove I9 parity between AOT and default jet run\n- node scripts/agent/check-core-surface-ledger.mjs --check\n\nOwned paths: the per-container Prelude files listed above, crates/jet-foundation/src/Collections.rs (PriorityQueue only), the touched examples/features/**/*.jet and examples/features/expected/**/*.out files, docs/reference/core-library.md, docs/reference/core-surface-ledger.json, docs/reference/core-surface-ledger.md.",
       "blockedBy": [],
-      "assignee": "bd2-sweep",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-08-07",
+          "by": "bd2-orch",
+          "text": "Closed: four real gaps shipped with tier parity; seventy-five declines await ballot D-CORESURF-SMALL1; card 1590 applies the outcome and owns the two deferred TLS rows."
+        },
+        {
+          "at": "2026-08-07",
+          "by": "bd2-sweep",
+          "text": "Shipped 4 real gaps with full AOT/JIT/I9 parity: PriorityQueue.remove (D-LISTREMOVE1/F shape), ProcessChild.exited (non-blocking poll), core.uuid.parse, core.uuid.v5 (RFC4122 SHA-1, verified against the Python reference vector for python.org). Declined the other 75 rows across 15 clusters via ballot D-CORESURF-SMALL1 (ready, awaiting owner). Deferred core.tls ciphersuites/tlsversion (2 rows) to follow-up card #1590 -- needs a native TLS-bridge (JetTLSPeerSnapshot) change. Repointed CLUSTER_OWNER for all 16 non-mime clusters from 1481 to 1590. Logged #1591 for 7 pre-existing tir_collections_and_methods failures found unrelated to this work."
+        },
         {
           "at": "2026-08-06",
           "by": "audit-corelib",
@@ -85946,65 +85956,65 @@
         {
           "n": 1,
           "text": "Every one of the 77 live gap rows across the 17 clusters in docs/reference/core-surface-ledger.json (verdict jet_loses, containers core.sync/core.encoding.xml/core.process/core.db/core.testing/core.reflect/core.http/core.tls/core.uuid/core.binary/core.encoding.csv/core.random/PriorityQueue/core.args/core.encoding.json/core.mem/core.mime) is either shipped in its real Prelude/module_items.rs location with a working implementation, or recorded as a named decline with a reason.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:23:39.359Z"
+          "status": "verified",
+          "metBy": "bd2-sweep",
+          "verifiedBy": "bd2-orch",
+          "evidence": "merged master: three touched example goldens byte-identical on jet run + AOT, ledger check exit 0, core_surface_ledger 2/2; declines carried by ballot D-CORESURF-SMALL1 with successor card 1590 owning rows (orchestrator independent proof run)",
+          "at": "2026-08-07T00:28:21.119Z"
         },
         {
           "n": 2,
           "text": "scripts/agent/jet-env cargo test --test core_surface_ledger passes, and node scripts/agent/check-core-surface-ledger.mjs --check exits 0 against the refreshed ledger.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:23:39.664Z"
+          "status": "verified",
+          "metBy": "bd2-sweep",
+          "verifiedBy": "bd2-orch",
+          "evidence": "merged master: three touched example goldens byte-identical on jet run + AOT, ledger check exit 0, core_surface_ledger 2/2; declines carried by ballot D-CORESURF-SMALL1 with successor card 1590 owning rows (orchestrator independent proof run)",
+          "at": "2026-08-07T00:28:21.656Z"
         },
         {
           "n": 3,
           "text": "Every touched example (per the plan's file map, e.g. examples/features/tooling/sync_crdt.jet, examples/features/io/db.jet, examples/features/text/uuid.jet, examples/features/parsing/binary-reader.jet) exercises its container's shipped additions and scripts/agent/jet-env jet run <example> matches its regenerated golden exactly.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:23:39.966Z"
+          "status": "verified",
+          "metBy": "bd2-sweep",
+          "verifiedBy": "bd2-orch",
+          "evidence": "merged master: three touched example goldens byte-identical on jet run + AOT, ledger check exit 0, core_surface_ledger 2/2; declines carried by ballot D-CORESURF-SMALL1 with successor card 1590 owning rows (orchestrator independent proof run)",
+          "at": "2026-08-07T00:28:22.156Z"
         },
         {
           "n": 4,
           "text": "Every touched example produces byte-identical output under AOT build and default jet run (I9 parity).",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:23:40.275Z"
+          "status": "verified",
+          "metBy": "bd2-sweep",
+          "verifiedBy": "bd2-orch",
+          "evidence": "merged master: three touched example goldens byte-identical on jet run + AOT, ledger check exit 0, core_surface_ledger 2/2; declines carried by ballot D-CORESURF-SMALL1 with successor card 1590 owning rows (orchestrator independent proof run)",
+          "at": "2026-08-07T00:28:22.649Z"
         },
         {
           "n": 5,
           "text": "docs/reference/core-library.md lists every newly shipped member and every declined name with its reason, for each of the 17 touched containers.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T10:23:40.582Z"
+          "status": "verified",
+          "metBy": "bd2-sweep",
+          "verifiedBy": "bd2-orch",
+          "evidence": "merged master: three touched example goldens byte-identical on jet run + AOT, ledger check exit 0, core_surface_ledger 2/2; declines carried by ballot D-CORESURF-SMALL1 with successor card 1590 owning rows (orchestrator independent proof run)",
+          "at": "2026-08-07T00:28:23.141Z"
         },
         {
           "n": 6,
           "text": "PriorityQueue.remove follows D-LISTREMOVE1's shape: fn remove(x: T, by: RemoveBy = .Val) => T?, deleting the first equal value by default and a positional slot only when by is .Slot, reusing the existing JetRemoveBy enum and jet_list_remove_value/jet_list_remove_slot pattern already shipped for List (crates/jet-codegen/src/Prelude/Core.rs, crates/jet-foundation/src/Syntax/math_layout.rs TYPE_REMOVE_BY) rather than inventing a second remove convention.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:32:06.837Z"
+          "status": "verified",
+          "metBy": "bd2-sweep",
+          "verifiedBy": "bd2-orch",
+          "evidence": "merged master: three touched example goldens byte-identical on jet run + AOT, ledger check exit 0, core_surface_ledger 2/2; declines carried by ballot D-CORESURF-SMALL1 with successor card 1590 owning rows (orchestrator independent proof run)",
+          "at": "2026-08-07T00:28:23.545Z"
         },
         {
           "n": 7,
           "text": "Every container/module this card touches that D-CORE-TREE1 relocates in its target tree (core.random -> core.math.random, core.uuid -> core.crypto.uuid, core.tls/core.mime -> nested under core.net, core.binary -> deleted in favor of Reader-only) is built and shipped under its CURRENT name and file location; the card does not rename or move any namespace, since no tree-migration implementation card exists yet (see newCards).",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:32:07.203Z"
+          "status": "verified",
+          "metBy": "bd2-sweep",
+          "verifiedBy": "bd2-orch",
+          "evidence": "merged master: three touched example goldens byte-identical on jet run + AOT, ledger check exit 0, core_surface_ledger 2/2; declines carried by ballot D-CORESURF-SMALL1 with successor card 1590 owning rows (orchestrator independent proof run)",
+          "at": "2026-08-07T00:28:23.943Z"
         }
       ],
       "refs": [
@@ -86014,10 +86024,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T02:21:21.682Z",
-      "updated": "2026-08-06T23:29:43.749Z",
-      "updatedBy": "bd2-sweep",
+      "updated": "2026-08-07T00:28:24.416Z",
+      "updatedBy": "bd2-orch",
       "workOrder": 870,
-      "claimedAt": "2026-08-06T23:29:43.749Z"
+      "completedAt": "2026-08-07T00:28:24.416Z"
     },
     {
       "id": "c01wl24t",
@@ -95533,8 +95543,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T22:29:05.864Z",
-      "updated": "2026-08-06T23:22:03.211Z",
-      "updatedBy": "bd2-orch",
+      "updated": "2026-08-07T00:06:49.526Z",
+      "updatedBy": "owner",
       "completedAt": "2026-08-06T23:22:03.210Z"
     },
     {
@@ -95715,6 +95725,221 @@
       "created": "2026-08-06T23:55:27.267Z",
       "updated": "2026-08-06T23:55:32.158Z",
       "updatedBy": "bd2-iter"
+    },
+    {
+      "id": "c0pnc4sh",
+      "num": 1587,
+      "title": "Publish stability-signaling statement at 1.0 (quiet is not dead)",
+      "body": "Video-mining evidence (Elm retrospective, bashbunni 2026-08-06): Elm's 6-year release gap read as 'project is dead' despite being feature-complete; verified against elm/compiler 0.19.2 (July 2026). Release policy (D-REL1..5) covers compatibility but not public cadence communication. At 1.0, publish an explicit statement of release cadence and what feature-complete means, so low release volume signals stability, not abandonment.",
+      "kind": "idea",
+      "track": "epoch",
+      "epoch": "e10",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A canonical doc (release-policy or successor) states release cadence expectations and defines feature-complete in plain language",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T00:07:08.148Z"
+        },
+        {
+          "n": 2,
+          "text": "The statement is linked from the primary adopter-facing entry point (README or site) at 1.0",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T00:07:08.797Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-07T00:06:58.079Z",
+      "updated": "2026-08-07T00:07:08.798Z",
+      "updatedBy": "claude-fable"
+    },
+    {
+      "id": "c0y6f65g",
+      "num": 1588,
+      "title": "Evaluate one canonical UI architecture (TEA-style) for Jet's user-facing UI framework",
+      "body": "Video-mining evidence (Elm retrospective, 2026-08-06): a single prescribed model-update-view architecture with one mutation site is Elm's most-exported asset (Bubble Tea, iced, Redux, Lustre), and Gleam's lack of one pushes an extra architecture decision onto every user. Jet has no ratified user-facing UI framework; Canopy/blueprint (#182) is a projection editor, not a stdlib UI architecture. When the UI framework surface is designed, evaluate a TEA-style single canonical architecture (fits I8 one-mechanism) including micro details: the minimal init/update/view function triad and lazy view-render caching (skip re-render when inputs are unchanged). Owner-gated surface; ballot rides the design, not this card. Re-home if a dedicated UI-framework epoch appears.",
+      "kind": "idea",
+      "track": "epoch",
+      "epoch": "e8",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Design doc for the user-facing UI framework surface includes a worked TEA-style option (init/update/view triad, single mutation site) with before/after examples",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T00:07:19.318Z"
+        },
+        {
+          "n": 2,
+          "text": "Lazy view-render caching is evaluated as a default (skip re-render on unchanged inputs) with beginner/expert passes",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T00:07:19.796Z"
+        },
+        {
+          "n": 3,
+          "text": "Owner ballot slate covers the architecture choice; no implementation before ratification",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T00:07:20.206Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-07T00:07:09.478Z",
+      "updated": "2026-08-07T00:07:20.206Z",
+      "updatedBy": "claude-fable"
+    },
+    {
+      "id": "c03t94dv",
+      "num": 1589,
+      "title": "Benchmark agent codegen quality on Jet (strict-typing hypothesis)",
+      "body": "Video-mining evidence (Elm retrospective, 2026-08-06): untested hypothesis that rigid typed languages yield better AI-generated code; an experienced commenter counters that typed declarative architectures mostly reduce how much codegen is needed. Jet bets on typed diagnostics helping agents but has no measurement. Run an internal benchmark: agent codegen success rate on Jet example tasks vs a control language, measuring compile-first-try, diagnostic-guided repair rounds, and semantic correctness. Internal instrumentation only; no product claim before data.",
+      "kind": "idea",
+      "track": "epoch",
+      "epoch": "e7",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Benchmark harness defined: task set, control language, metrics (compile-first-try rate, repair rounds to green, semantic correctness)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T00:07:29.183Z"
+        },
+        {
+          "n": 2,
+          "text": "Results written to docs/research with raw data; any adopted claim cites the measurement",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T00:07:29.819Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-07T00:07:20.703Z",
+      "updated": "2026-08-07T00:07:29.819Z",
+      "updatedBy": "claude-fable"
+    },
+    {
+      "id": "c0z6ssoi",
+      "num": 1590,
+      "title": "Apply the small-cluster ballot outcome to the ledger",
+      "body": "D-CORESURF-SMALL1 declines 75 of the 81 small-cluster ledger rows from #1481, or ships them on outcome B. This card applies whatever the owner ratifies to docs/reference/core-surface-ledger.json, plus resolves core.tls's 2 rows left open by #1481 (ciphersuites, tlsversion), which need a native TLS-bridge change beyond that closeout.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Every one of the 75 rows D-CORESURF-SMALL1 covers carries verdict declined with the ratified decision id in docs/reference/core-surface-ledger.json, or ships if the owner ratified outcome B; node scripts/agent/check-core-surface-ledger.mjs --refresh then --check exits 0.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T00:11:38.235Z"
+        },
+        {
+          "n": 2,
+          "text": "core.tls's ciphersuites and tlsversion rows are either shipped through the native TLS bridge (extending the JetTLSPeerSnapshot handoff) with full AOT/JIT parity, or recorded as a named decline with a reason; docs/reference/core-library.md documents the outcome.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T00:11:38.610Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-07T00:11:32.930Z",
+      "updated": "2026-08-07T00:11:38.611Z",
+      "updatedBy": "bd2-sweep"
+    },
+    {
+      "id": "c0xrzvms",
+      "num": 1591,
+      "title": "tir_collections_and_methods: 7 pre-existing test failures (D-ENUMDOT1 match-arm syntax)",
+      "body": "cargo test --test tir_collections_and_methods fails 7/32 on a clean master build (verified via git stash), unrelated to #1481's work. Failures: enum_method_body_and_static_call, fallible_when_match, list_surface_forced_interpreter, optional_chaining, or_fallback_return_form, user_method_on_covered_enum, user_method_with_scalar_args. Sample error: match patterns take a leading dot so the name isn't read as a variable or call (D-ENUMDOT1) -- the test fixtures use bare Green -> instead of .Green ->.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "cargo test --test tir_collections_and_methods passes all cases (either fixtures updated to D-ENUMDOT1 dot-prefixed patterns, or the regression that broke them is found and fixed).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T00:16:07.692Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-07T00:16:07.119Z",
+      "updated": "2026-08-07T00:16:07.692Z",
+      "updatedBy": "bd2-sweep"
     }
   ],
   "decisions": [
@@ -128013,6 +128238,71 @@
       "draft": false,
       "status": "open",
       "created": "2026-08-06T23:54:43.079Z"
+    },
+    {
+      "id": "D-CORESURF-SMALL1",
+      "cardId": "c0gv6ghj",
+      "group": "stdlib",
+      "title": "The small-cluster ledger's 75 remaining names: decline or ship anyway",
+      "gist": "Whether Jet adds 75 competitor names across 15 small modules that a check already found a working route for.",
+      "lesson": "Card #1481 checked 81 rows the surface ledger flagged as missing across 17 small modules. Four were real gaps and now ship. The other 75 already have a working Jet route. Four reasons repeat: already shipped under another spelling, a duplicate of an existing mechanism, a name from an unrelated package, or out of scope by design.",
+      "explainer": "",
+      "story": "Priya ports a Go service to Jet. She reaches for sync.Lock, testing.Run, and reflect.Set out of habit, and cannot find any of them under core.sync, core.testing, or core.reflect. Each time the missing name turns out to already have a working Jet answer, once she knows where to look.",
+      "inWild": "// Priya's first instinct, from Go:\n// use core.sync as sync\n// lk := sync.Lock.new()\n// lk.lock()\n\n// core.sync in Jet is CRDT data sync (SyncMap/SyncList/SyncCounter),\n// not OS locks. Jet's concurrency-safety story is message passing:\nuse core.tasks as tasks\nch := tasks.channel()\n// no shared mutable state to lock in the first place",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Decline all 75, name the existing route for each",
+          "detail": "Every one of the 75 names already reaches a working result in Jet today, under a name the ledger's word-for-word match missed. Shipping a second spelling for an already-working capability breaks I8's one-mechanism rule. It also gives every reader two ways to reach the same place, one of them new and unfamiliar.",
+          "technical": "core.sync (12 names: broadcast, clear, lock, put, rlock, signal, trylock, unlock, wait, thread, timer, locked). Jet's core.sync is CRDT data sync — SyncText, SyncCounter, SyncMap, SyncList. The competitor evidence is Go, Python, and Ruby's sync or threading package: Mutex, RWMutex, Cond, Event. That is a different domain; it only shares the word \"sync\". Jet's safety design omits raw shared-memory locks. core.tasks owns concurrency instead. put duplicates the already-shipped map_set.\n\ncore.encoding.xml (9 names: close, copy, end, flush, indent, name, nodetype, write, clear). close, flush, and write already ship as XMLWriter.finish, flush, and write. end, indent, name, and nodetype ask for incremental SAX-style tag control. Jet parses every format into one shared DataTree value instead, by design (D-SERDE13=B). copy and clear each have one witness language and no consistent competitor meaning.\n\ncore.process (8 of 9 names: id, kill, wait, spawn, output, success, exitcode, start). id, kill, wait, spawn, output, and success already ship on ProcessChild, ProcessResult, and ProcessSpec. exitcode already ships as ProcessResult.code. start already ships as ProcessSpec.spawn(). Only exited, a non-blocking poll, was a real gap. It ships with this card.\n\ncore.db (8 names: close, commit, name, first, raw, rollback, copy, count). close, commit, and rollback already ship on DBConnection and DBScope. first already ships as query_one(). count duplicates query(...).len(). raw would open an unaudited escape from the portable DB-plugin-wire protocol every backend goes through. name and copy have no consistent competitor meaning.\n\ncore.testing (7 names: benchmark, fail, main, run, runtests, skip, stop). Jet already defines and runs tests through #Test and #Bench marker blocks, plus the jet test and jet bench commands. Every one of these 7 names asks for that same capability, spelled as a function call instead of a marker.\n\ncore.reflect (8 names: clear, copy, equal, get, set, getfile, getmodule, loadfile). reflect.of(x) is deliberately a read-only structural snapshot. It keeps no runtime type registry and allows no field write by string name (I1). get, set, clear, copy, and equal would all need that registry. getfile, getmodule, and loadfile ask for dynamic runtime code loading, which a compiled, ahead-of-time language does not do.\n\ncore.http (4 names: cancelrequest, copy, first, postform). first already ships as HTTPHeaders.first. postform already ships as the request builder's .form(...) call. cancelrequest duplicates the deadline every request already takes. copy has one witness language.\n\ncore.tls (4 of 6 names: start, handshake, verifyhostname, copy). start already ships as tls.client(). handshake happens inside client() automatically, by design; there is no separate step. verifyhostname is mandatory already, visible as TLSPeerIdentity.verified_server_name; Jet gives no way to turn it off. copy has one witness language. The other 2, ciphersuites and tlsversion, are real gaps needing a native TLS-bridge change; they move to a follow-up card, not this ballot.\n\ncore.uuid (3 of 5 names: join, uuid1, uuid4). uuid4 already ships as v4. uuid1 is MAC-address-based, an older and weaker format; Jet declines it in favor of the already-shipped, safer v7. join matches no real UUID operation in any compared language. parse and v5 were real gaps. They ship with this card.\n\ncore.binary (2 names: pipe, readchar). JetReader is a fixed in-memory byte-buffer parser (D-SHIFT1), not a stream. pipe asks for a stream-to-stream copy, a different mechanism. readchar asks for character decoding, which belongs to core.text's Cursor, not a byte reader.\n\ncore.encoding.csv (3 names: flush, read, fieldsizelimit). flush already ships as CSVWriter.flush. read already ships as CSVReader.next, matching every other stream reader's name. fieldsizelimit already ships as the shared EncodingLimits.max_item_bytes, one cross-format limit instead of a CSV-only one.\n\ncore.random (2 names: random, uniform). Both already ship, as float() and float_range(a, b).\n\ncore.args (2 names: parse, parseargs). Both already ship as ArgsSpec.parse(argv), Jet's one declarative CLI-parsing route.\n\ncore.encoding.json (1 name: dump). Already reachable as to_string() plus a file write, or the streaming JSONWriter.\n\ncore.mem (2 names: replace, copy). replace duplicates the take operator (^) plus assignment, which already swaps a value out. copy has one witness language and duplicates plain assignment for Copy values.",
+          "code": "// core.testing — Go: t.Run/t.Skip/t.Fail. Jet: markers, not calls.\n#Test(\"parses input\") {\n    .skip(\"needs fixture\")\n    require(parse(\"x\") == 1)\n}\n// no testing.run()/.skip()/.fail() to add — `jet test` already runs this\n\n// core.uuid — Python: uuid.uuid4(). Jet already has v4().\nid := uuid.v4()          // uuid4 declines: same call, existing name\n\n// core.encoding.csv — Go: reader.Read(). Jet already has .next().\nrow := reader.next() ?? panic(\"eof\")   // read declines: same call\n\n// core.reflect — Go: reflect.ValueOf(x).Set(y). Jet's reflect.of is read-only.\nv := reflect.of(config)\nprint(v.display())        // no v.set(y) — I1: no field write by string name\n\n// core.db — Go: rows.First(). Jet already has query_one().\nrow := db.query_one(\"select 1\") ?? panic(\"none\")   // first declines\n\n// core.mem — Rust: mem::replace(&mut x, y). Jet's take operator does this.\nold := x^\nx = new_value              // replace declines: same result, existing operator"
+        },
+        {
+          "key": "B",
+          "name": "Ship all 75 as new, second spellings",
+          "detail": "Every declined name ships anyway, even where Jet already reaches the same result another way. A newcomer from Go, Python, or Ruby can type the exact name they already know, in every one of the 15 modules, without learning Jet's existing spelling first.",
+          "technical": "Each name ships as its own new function or method. Where a Jet spelling already exists, the new name routes to the same result. v4 stays, and uuid4 becomes a second name for it; query_one stays, and first becomes a second name for it. Where none exists yet, real new surface ships instead: raw shared-memory locks for core.sync, dynamic module loading for core.reflect, a second XML DOM alongside DataTree for core.encoding.xml.",
+          "code": "// Every module keeps its existing name AND gains the competitor's name.\nuuid.v4()\nuuid.uuid4()              // new: identical result, second spelling\n\nreader.next()\nreader.read()              // new: identical result, second spelling\n\n// Modules with no existing answer gain a new mechanism outright.\nlk := sync.Lock.new()\nlk.lock()                  // new: a raw mutex, alongside CRDT SyncMap\n\nv := reflect.of(config)\nv.set(\"port\", 9090)        // new: field write by string name, breaks I1"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "Go's sync package is OS-level locking; its separate CRDT-style types live in third-party packages. Jet keeps the CRDT half under core.sync and the safety half under core.tasks, never both under one name.",
+          "code": "var mu sync.Mutex\nmu.Lock()"
+        },
+        {
+          "lang": "Python",
+          "note": "unittest defines a test as a class with methods Python's own runner discovers and runs. Jet's #Test marker plus jet test plays the same role without a base class to inherit.",
+          "code": "class T(unittest.TestCase):\n    def test_x(self): self.assertEqual(1, 1)"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Every one of the 75 names already reaches a working result in Jet, once a reader knows the existing spelling or module boundary. Declining keeps one mechanism per capability (I8) and keeps reflection and TLS verification safe by construction (I1), instead of teaching two routes to the same place.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Shipping a second spelling for an already-working capability gives every reader two names to learn for one result. For core.sync and core.reflect it also reopens raw locks and string-keyed field writes that Jet's safety design deliberately left out."
+          }
+        ],
+        "tradeoff": "A reader who reaches for a familiar name from Go, Python, or Ruby and does not find it must learn Jet's existing spelling once. docs/reference/core-library.md names the existing route right next to every declined name."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "reviewPasses": {
+        "base": "The first draft grouped the 75 names by module and matched each to its existing Jet route, recommending a decline with the route named for every one.",
+        "boilOcean": "The breadth pass checked whether any module deserved a partial ship — for example shipping core.sync's raw lock as an expert escape hatch. Declined: Jet's whole concurrency story routes through core.tasks, and a second raw-lock mechanism would fork that story for one competitor package.",
+        "hybrid": "A hybrid that ships the pure, easy names (uuid4, random, uniform) while declining the rest was tested and dropped. Every one of those is already reachable under its Jet name today, so shipping a synonym is the same duplication as any other name on the list, just smaller to build.",
+        "cooperative": "Steelmanning option B: a beginner arriving from Go or Python reaches for the name their prior language taught them, and if that name does not exist, they have to search. That friction is real for exactly one lookup per name, once.",
+        "adversarial": "Shipping reflect.set or a raw core.sync lock as an audited #Unsafe escape hatch was tested and dropped. No request for either has ever reached the backlog, so it would be speculative scope, not a real gap."
+      },
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-08-07T00:10:41.688Z"
     }
   ],
   "questions": [
@@ -129162,6 +129452,50 @@
       "created": "2026-08-06T21:55:10.935Z",
       "answeredAt": "2026-08-06",
       "answeredBy": "fable"
+    },
+    {
+      "id": "q6s7hah8",
+      "cardId": "c01y8s93",
+      "decisionId": "D-STR-DECLINE1",
+      "by": "owner",
+      "kind": "question",
+      "text": "This misses the philosophies of jet. Minimizes friction proportionally to frequency of use (most common things should be easiest/fastest) and beginner friendliness with magic and ergonomics out of the box but allow full expert control",
+      "status": "open",
+      "answer": "",
+      "created": "2026-08-07T00:06:49.526Z"
+    },
+    {
+      "id": "q785552p",
+      "cardId": "c0m2slnf",
+      "decisionId": "D-SET-DECLINE1",
+      "by": "owner",
+      "kind": "question",
+      "text": "This misses the philosophies of jet. Minimizes friction proportionally to frequency of use (most common things should be easiest/fastest) and beginner friendliness with magic and ergonomics out of the box but allow full expert control",
+      "status": "open",
+      "answer": "",
+      "created": "2026-08-07T00:08:52.390Z"
+    },
+    {
+      "id": "q8d9qc5s",
+      "cardId": "c0r2dfxz",
+      "decisionId": "D-ITER-DECLINE1",
+      "by": "owner",
+      "kind": "question",
+      "text": "This misses the philosophies of jet. Minimizes friction proportionally to frequency of use (most common things should be easiest/fastest) and beginner friendliness with magic and ergonomics out of the box but allow full expert control",
+      "status": "open",
+      "answer": "",
+      "created": "2026-08-07T00:09:23.175Z"
+    },
+    {
+      "id": "q9gvofyg",
+      "cardId": "c0gv6ghj",
+      "decisionId": "D-CORESURF-SMALL1",
+      "by": "owner",
+      "kind": "question",
+      "text": "This misses the philosophies of jet. Minimizes friction proportionally to frequency of use (most common things should be easiest/fastest) and beginner friendliness with magic and ergonomics out of the box but allow full expert control. We want the BEST APIs/surfaces/methods/etc of any language. If we can improve our APIs, then we should do so even if it means updating the existing one",
+      "status": "open",
+      "answer": "",
+      "created": "2026-08-07T00:24:33.288Z"
     }
   ],
   "ideas": [
@@ -129554,6 +129888,293 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-07T00:28:24.416Z",
+      "by": "bd2-orch",
+      "action": "card.update",
+      "ref": "c0gv6ghj",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-07T00:28:23.944Z",
+      "by": "bd2-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0gv6ghj",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-07T00:28:23.545Z",
+      "by": "bd2-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0gv6ghj",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-07T00:28:23.141Z",
+      "by": "bd2-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0gv6ghj",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-07T00:28:22.649Z",
+      "by": "bd2-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0gv6ghj",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-07T00:28:22.156Z",
+      "by": "bd2-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0gv6ghj",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-07T00:28:21.657Z",
+      "by": "bd2-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0gv6ghj",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-07T00:28:21.119Z",
+      "by": "bd2-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0gv6ghj",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T00:25:26.607Z",
+      "by": "bd2-sweep",
+      "action": "card.release",
+      "ref": "c0gv6ghj",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-08-07T00:24:44.766Z",
+      "by": "bd2-sweep",
+      "action": "card.update",
+      "ref": "c0gv6ghj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T00:24:33.288Z",
+      "by": "owner",
+      "action": "question.add",
+      "ref": "q9gvofyg",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T00:23:56.942Z",
+      "by": "bd2-sweep",
+      "action": "card.update",
+      "ref": "c0gv6ghj",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T00:23:53.038Z",
+      "by": "bd2-sweep",
+      "action": "card.criteria-meet",
+      "ref": "c0gv6ghj",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-07T00:23:52.688Z",
+      "by": "bd2-sweep",
+      "action": "card.criteria-meet",
+      "ref": "c0gv6ghj",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-07T00:23:52.329Z",
+      "by": "bd2-sweep",
+      "action": "card.criteria-meet",
+      "ref": "c0gv6ghj",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-07T00:23:51.972Z",
+      "by": "bd2-sweep",
+      "action": "card.criteria-meet",
+      "ref": "c0gv6ghj",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-07T00:23:51.612Z",
+      "by": "bd2-sweep",
+      "action": "card.criteria-meet",
+      "ref": "c0gv6ghj",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-07T00:23:51.241Z",
+      "by": "bd2-sweep",
+      "action": "card.criteria-meet",
+      "ref": "c0gv6ghj",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-07T00:23:40.039Z",
+      "by": "bd2-sweep",
+      "action": "card.criteria-meet",
+      "ref": "c0gv6ghj",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T00:16:07.692Z",
+      "by": "bd2-sweep",
+      "action": "card.criteria-add",
+      "ref": "c0xrzvms",
+      "note": "#1 cargo test --test tir_collections_and_methods passes all cas"
+    },
+    {
+      "at": "2026-08-07T00:16:07.120Z",
+      "by": "bd2-sweep",
+      "action": "card.add",
+      "ref": "c0xrzvms",
+      "note": "tir_collections_and_methods: 7 pre-existing test failures (D-ENUMDOT1 match-arm syntax)"
+    },
+    {
+      "at": "2026-08-07T00:11:38.611Z",
+      "by": "bd2-sweep",
+      "action": "card.criteria-add",
+      "ref": "c0z6ssoi",
+      "note": "#2 core.tls's ciphersuites and tlsversion rows are either shipp"
+    },
+    {
+      "at": "2026-08-07T00:11:38.235Z",
+      "by": "bd2-sweep",
+      "action": "card.criteria-add",
+      "ref": "c0z6ssoi",
+      "note": "#1 Every one of the 75 rows D-CORESURF-SMALL1 covers carries ve"
+    },
+    {
+      "at": "2026-08-07T00:11:32.930Z",
+      "by": "bd2-sweep",
+      "action": "card.add",
+      "ref": "c0z6ssoi",
+      "note": "Apply the small-cluster ballot outcome to the ledger"
+    },
+    {
+      "at": "2026-08-07T00:11:21.800Z",
+      "by": "bd2-sweep",
+      "action": "decision.update",
+      "ref": "D-CORESURF-SMALL1",
+      "note": "marked ready"
+    },
+    {
+      "at": "2026-08-07T00:11:21.196Z",
+      "by": "bd2-sweep",
+      "action": "decision.update",
+      "ref": "D-CORESURF-SMALL1",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T00:10:41.689Z",
+      "by": "bd2-sweep",
+      "action": "decision.add",
+      "ref": "D-CORESURF-SMALL1",
+      "note": "The small-cluster ledger's 75 remaining names: decline or ship anyway (draft)"
+    },
+    {
+      "at": "2026-08-07T00:09:23.175Z",
+      "by": "owner",
+      "action": "question.add",
+      "ref": "q8d9qc5s",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T00:08:52.390Z",
+      "by": "owner",
+      "action": "question.add",
+      "ref": "q785552p",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T00:07:29.819Z",
+      "by": "claude-fable",
+      "action": "card.criteria-add",
+      "ref": "c03t94dv",
+      "note": "#2 Results written to docs/research with raw data; any adopted "
+    },
+    {
+      "at": "2026-08-07T00:07:29.184Z",
+      "by": "claude-fable",
+      "action": "card.criteria-add",
+      "ref": "c03t94dv",
+      "note": "#1 Benchmark harness defined: task set, control language, metri"
+    },
+    {
+      "at": "2026-08-07T00:07:20.703Z",
+      "by": "claude-fable",
+      "action": "card.add",
+      "ref": "c03t94dv",
+      "note": "Benchmark agent codegen quality on Jet (strict-typing hypothesis)"
+    },
+    {
+      "at": "2026-08-07T00:07:20.206Z",
+      "by": "claude-fable",
+      "action": "card.criteria-add",
+      "ref": "c0y6f65g",
+      "note": "#3 Owner ballot slate covers the architecture choice; no implem"
+    },
+    {
+      "at": "2026-08-07T00:07:19.797Z",
+      "by": "claude-fable",
+      "action": "card.criteria-add",
+      "ref": "c0y6f65g",
+      "note": "#2 Lazy view-render caching is evaluated as a default (skip re-"
+    },
+    {
+      "at": "2026-08-07T00:07:19.318Z",
+      "by": "claude-fable",
+      "action": "card.criteria-add",
+      "ref": "c0y6f65g",
+      "note": "#1 Design doc for the user-facing UI framework surface includes"
+    },
+    {
+      "at": "2026-08-07T00:07:09.479Z",
+      "by": "claude-fable",
+      "action": "card.add",
+      "ref": "c0y6f65g",
+      "note": "Evaluate one canonical UI architecture (TEA-style) for Jet's user-facing UI framework"
+    },
+    {
+      "at": "2026-08-07T00:07:08.798Z",
+      "by": "claude-fable",
+      "action": "card.criteria-add",
+      "ref": "c0pnc4sh",
+      "note": "#2 The statement is linked from the primary adopter-facing entr"
+    },
+    {
+      "at": "2026-08-07T00:07:08.148Z",
+      "by": "claude-fable",
+      "action": "card.criteria-add",
+      "ref": "c0pnc4sh",
+      "note": "#1 A canonical doc (release-policy or successor) states release"
+    },
+    {
+      "at": "2026-08-07T00:06:58.079Z",
+      "by": "claude-fable",
+      "action": "card.add",
+      "ref": "c0pnc4sh",
+      "note": "Publish stability-signaling statement at 1.0 (quiet is not dead)"
+    },
+    {
+      "at": "2026-08-07T00:06:49.526Z",
+      "by": "owner",
+      "action": "question.add",
+      "ref": "q6s7hah8",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T00:04:21.369Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-07T00:04:21.369Z"
+    },
     {
       "at": "2026-08-07T00:02:29.052Z",
       "by": "bd2-orch",
@@ -132766,293 +133387,6 @@
       "action": "card.criteria-add",
       "ref": "c04rht5r",
       "note": "#2 crates/jet-sema/src/Sema/Effects.rs, crates/jet-foundation/s"
-    },
-    {
-      "at": "2026-08-06T21:35:42.164Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c04rht5r",
-      "note": "#1 One foundation module in crates/jet-foundation owns the root"
-    },
-    {
-      "at": "2026-08-06T21:35:41.811Z",
-      "by": "audit-rethinks-b",
-      "action": "card.add",
-      "ref": "c04rht5r",
-      "note": "Authority substrate: one rights tree, one holds relation, one gate record"
-    },
-    {
-      "at": "2026-08-06T21:35:41.466Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0pb8211",
-      "note": "#8 Tier parity (I9) is proved inside this card: parser, sema, T"
-    },
-    {
-      "at": "2026-08-06T21:35:41.107Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0pb8211",
-      "note": "#7 Greenfield: the replaced form is deleted in the same change,"
-    },
-    {
-      "at": "2026-08-06T21:35:40.761Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0pb8211",
-      "note": "#6 The string forms are gone from every example, test, doc and "
-    },
-    {
-      "at": "2026-08-06T21:35:40.417Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0pb8211",
-      "note": "#5 Select results and event dispatch states use the same outcom"
-    },
-    {
-      "at": "2026-08-06T21:35:40.092Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0pb8211",
-      "note": "#4 trace() and exception() are deleted, not aliased, and no lon"
-    },
-    {
-      "at": "2026-08-06T21:35:39.748Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0pb8211",
-      "note": "#3 outcome() consumes the handle and status() borrows it"
-    },
-    {
-      "at": "2026-08-06T21:35:39.397Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0pb8211",
-      "note": "#2 TaskStatus covers the control-plane states trace() encodes t"
-    },
-    {
-      "at": "2026-08-06T21:35:39.042Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0pb8211",
-      "note": "#1 TaskOutcome covers Finished with the value, Panicked with a "
-    },
-    {
-      "at": "2026-08-06T21:35:38.700Z",
-      "by": "audit-rethinks-b",
-      "action": "card.add",
-      "ref": "c0pb8211",
-      "note": "Typed task outcome and status replace the trace strings"
-    },
-    {
-      "at": "2026-08-06T21:35:38.359Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0r2uq88",
-      "note": "#5 Tier parity (I9) is proved inside this card: parser, sema, T"
-    },
-    {
-      "at": "2026-08-06T21:35:38.020Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0r2uq88",
-      "note": "#4 docs/spec records that this amends D-TASKGROUP-PARAM1 by lif"
-    },
-    {
-      "at": "2026-08-06T21:35:37.676Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0r2uq88",
-      "note": "#3 Spawns through a parameter group still own their captures, p"
-    },
-    {
-      "at": "2026-08-06T21:35:37.335Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0r2uq88",
-      "note": "#2 Storing a group in a field, returning it, or capturing it is"
-    },
-    {
-      "at": "2026-08-06T21:35:36.983Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0r2uq88",
-      "note": "#1 A taskgroup parameter compiles on a method, not only on a na"
-    },
-    {
-      "at": "2026-08-06T21:35:36.630Z",
-      "by": "audit-rethinks-b",
-      "action": "card.add",
-      "ref": "c0r2uq88",
-      "note": "A taskgroup may be named in any borrow position"
-    },
-    {
-      "at": "2026-08-06T21:35:36.285Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0be7t09",
-      "note": "#8 Tier parity (I9) is proved inside this card: parser, sema, T"
-    },
-    {
-      "at": "2026-08-06T21:35:35.942Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0be7t09",
-      "note": "#7 No new service mechanism is added in this card"
-    },
-    {
-      "at": "2026-08-06T21:35:35.585Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0be7t09",
-      "note": "#6 docs/spec records that this amends the value grammar of D-SC"
-    },
-    {
-      "at": "2026-08-06T21:35:35.230Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0be7t09",
-      "note": "#5 Job and task are one vocabulary across surfaces, docs and di"
-    },
-    {
-      "at": "2026-08-06T21:35:34.889Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0be7t09",
-      "note": "#4 jet dev, the service runtime and the jetos timer path all re"
-    },
-    {
-      "at": "2026-08-06T21:35:34.542Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0be7t09",
-      "note": "#3 #[Job, Every(2h)] compiles, and so does #[Job, Every(\"03:00\""
-    },
-    {
-      "at": "2026-08-06T21:35:34.191Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0be7t09",
-      "note": "#2 The schedule marker's value is a typed Duration or wall-cloc"
-    },
-    {
-      "at": "2026-08-06T21:35:33.840Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0be7t09",
-      "note": "#1 The private suffix table in crates/jet-sema/src/Sema/Checker"
-    },
-    {
-      "at": "2026-08-06T21:35:33.504Z",
-      "by": "audit-rethinks-b",
-      "action": "card.add",
-      "ref": "c0be7t09",
-      "note": "Typed schedules and one word for a unit of work"
-    },
-    {
-      "at": "2026-08-06T21:35:33.168Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c07zohrf",
-      "note": "#6 Tier parity (I9) is proved inside this card: parser, sema, T"
-    },
-    {
-      "at": "2026-08-06T21:35:32.821Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c07zohrf",
-      "note": "#5 A drift guard or shared test proves the stream path and the "
-    },
-    {
-      "at": "2026-08-06T21:35:32.483Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c07zohrf",
-      "note": "#4 yield is a wait point and drop-close is a cancel, both state"
-    },
-    {
-      "at": "2026-08-06T21:35:32.134Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c07zohrf",
-      "note": "#3 D-STREAMYIELD1's independent pull-and-cancellation wording i"
-    },
-    {
-      "at": "2026-08-06T21:35:31.805Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c07zohrf",
-      "note": "#2 Breaking out of loop l, lines(\"big.log\") cancels the produce"
-    },
-    {
-      "at": "2026-08-06T21:35:31.460Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c07zohrf",
-      "note": "#1 The stream producer is a scheduler child on the task cancel "
-    },
-    {
-      "at": "2026-08-06T21:35:31.122Z",
-      "by": "audit-rethinks-b",
-      "action": "card.add",
-      "ref": "c07zohrf",
-      "note": "A stream is a task: one cancellation and cleanup law"
-    },
-    {
-      "at": "2026-08-06T21:35:30.767Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0gyn86h",
-      "note": "#10 Tier parity (I9) is proved inside this card: parser, sema, T"
-    },
-    {
-      "at": "2026-08-06T21:35:30.427Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0gyn86h",
-      "note": "#9 Greenfield: the replaced form is deleted in the same change,"
-    },
-    {
-      "at": "2026-08-06T21:35:30.076Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0gyn86h",
-      "note": "#8 A contention test proves a log line inside a transaction is "
-    },
-    {
-      "at": "2026-08-06T21:35:29.729Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0gyn86h",
-      "note": "#7 The transaction law in docs/spec is amended: the body runs e"
-    },
-    {
-      "at": "2026-08-06T21:35:29.377Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0gyn86h",
-      "note": "#6 A statement touching several shared cells acquires locks in "
-    },
-    {
-      "at": "2026-08-06T21:35:29.030Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0gyn86h",
-      "note": "#5 Expert guards from D-SHAREDGUARD1 and Condition still work"
-    },
-    {
-      "at": "2026-08-06T21:35:28.679Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0gyn86h",
-      "note": "#4 on_commit and on_rollback still attach to the named #Transac"
-    },
-    {
-      "at": "2026-08-06T21:35:28.337Z",
-      "by": "audit-rethinks-b",
-      "action": "card.criteria-add",
-      "ref": "c0gyn86h",
-      "note": "#3 #Transact groups several statements into one commit, and the"
     }
   ],
   "nextNum": 368,
