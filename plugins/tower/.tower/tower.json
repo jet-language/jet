@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1598,
-    "rev": 28517,
+    "nextNum": 1599,
+    "rev": 28526,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -89991,6 +89991,11 @@
       "log": [
         {
           "at": "2026-08-07",
+          "by": "bd2-manifest2",
+          "text": "Fixed both reviewer blockers on bd2/manifest (commit 15f6bec8d, worktree .claude/worktrees/manifest).\n\nBLOCKER 1: remote.rs's #[cfg(test)] callers now build DepSource::Provider{provider:Source::Path,..}/DepSource::Version values instead of string literals. cargo test -p jetpack --lib now compiles. But fixing compile surfaced 12 further failures the broken build had hidden: MemberSelect, Provider/fetch, Provider::tests, Trust::tests fixtures all still wrote payload:-wrapped pkg.jet (pre-rewrite syntax the new strict parser rejects) and Transition::legacy_plan re-read the Package root from disk (re-parsing the untranslated legacy payload: text) instead of composing from the already-translated in-memory root_facts. Migrated every stale fixture to bare name:/version: and fixed the disk re-read. Final: 556 passed, 5 failed (script_registry needs-php/needs-ruby, Shell fish pty, Store::Broker peer-creds, Store::Tests module-boundary — all env-flaky, exact same 5 that fail on master).\n\nBLOCKER 2: outputs_build fixture rewritten. entry: run (single segment) can never prove outputs: drives anything: entry_path and legacy_run_entry run the literally identical root-file scan for that case (confirmed by testing — renaming the fn to a non-run name just fails compile with E0101, since sema independently requires a literal fn run regardless of the manifest). Used the dotted form instead: entry: service.run, where entry.jet's use service import leads entry_path into service/module.jet, a directory module the legacy fallback structurally cannot reach (it only scans root-level files). Verified manually both tiers (jet run + jet build/AOT) resolve and produce the expected output, and that deleting outputs: fails closed (can't find the file run.jet). Added entry_resolution_requires_the_outputs_block as the negative proof. All 4 tests in tests/package_outputs.rs pass.\n\nNon-blockers taken: (1) Blocks.rs MANIFEST_SCALAR_FIELDS now also masks members:/configs: (defaults/environments/services were already in MANIFEST_BLOCKS, contra the review note; only members/configs were genuinely missing). (4) docs/spec/architecture.md:184 and tests/workspace_crates.rs:217,273 PackageManifest -> PackageFacts.\nSkipped: (2) Transition.rs:1672 nameless-pkg.jet already fails closed downstream via PackageFacts::MissingName (not silent success, just a less specific message); real fix isn't a one-liner, left for follow-up. (3) auto_derive_policy_invalid stderr saying package.jet for a pkg.jet fixture: other diagnostics in the same file hardcode package.jet in fix text the same way, may be an intentional canonical-name nudge rather than a bug; skipped rather than guess.\n\nVerified: cargo build --workspace clean; cargo test -p jetpack --lib 556/5 (matches master shape); cargo test --test package_outputs 4/4; cargo test -p jet-pkg-model --lib unaffected by Blocks.rs change (diffed with/without the edit, same failure set as master aside from one flaky FFI test). Not merged; branch left at bd2/manifest for integration."
+        },
+        {
+          "at": "2026-08-07",
           "by": "bd2-rev3",
           "text": "REVIEW non-blocking notes (do not need to hold the merge): (1) MANIFEST_SCALAR_FIELDS (crates/jet-pkg-model/src/Package/Blocks.rs:979) omits members, configs, defaults, environments and services, so a package.jet with a co-located fn build plus e.g. members: find(\"./packages\") still leaks unmasked manifest text into the build-entry parse — same shape as the bug 0a2a86863 fixed, left half closed. (2) crates/jetpack/src/Transition.rs:1672 render_legacy_package_root now hand-rolls a payload:/identity: reader; it is a one-way migration splice guarded by a following canonical parse, but a pkg.jet with no name now emits name: \"\" and fails downstream with MissingName instead of master's explicit migration error. (3) tests/ui/auto_derive_policy_invalid/stderr now tells the user to fix package.jet while the fixture file is literally pkg.jet. (4) docs/spec/architecture.md:184 and tests/workspace_crates.rs:217,273 still name PackageManifest as a live seam touch point (comments only)."
         },
@@ -90095,8 +90100,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:33:05.673Z",
-      "updated": "2026-08-07T02:44:59.722Z",
-      "updatedBy": "bd2-rev3",
+      "updated": "2026-08-07T03:25:45.880Z",
+      "updatedBy": "bd2-manifest2",
       "workOrder": 130
     },
     {
@@ -97133,20 +97138,37 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
-      "criteria": [],
+      "log": [
+        {
+          "at": "2026-08-07",
+          "by": "bd2-orch",
+          "text": "Closed: four test targets compile again on master; remaining broken targets tracked on card 1598."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The three named test targets compile on master; cargo build green; no runtime behavior change",
+          "status": "verified",
+          "metBy": "bd2-fix",
+          "verifiedBy": "bd2-orch",
+          "evidence": "merged master: pure, ws_law, http_server_lifecycle, jetpack_engine all compile (cargo test --no-run), pure runs 21/21, build green",
+          "at": "2026-08-07T03:37:50.909Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T02:51:45.007Z",
-      "updated": "2026-08-07T02:51:45.007Z",
-      "updatedBy": "bd2-ci"
+      "updated": "2026-08-07T03:37:53.370Z",
+      "updatedBy": "bd2-orch",
+      "completedAt": "2026-08-07T03:37:53.370Z"
     },
     {
       "id": "c0ksjkvh",
@@ -97171,6 +97193,30 @@
       "created": "2026-08-07T02:53:48.807Z",
       "updated": "2026-08-07T02:53:48.864Z",
       "updatedBy": "bd2-ci"
+    },
+    {
+      "id": "c07ylf1g",
+      "num": 1598,
+      "title": "Fix additional master HEAD compile breaks beyond #1596: tls_tier2, jetpack_services, jet-sema/jet-comptime lib tests",
+      "body": "Found while proving #1596's fix with a full `cargo test --workspace --no-run`\non master HEAD (worktree bd2/fix, 2026-08-07): more workspace test targets\nfail to compile than the 3 named on #1596. Same category of bug (struct\nliteral / stub drift after a field was added upstream), different call\nsites. Not fixed as part of #1596 — out of that card's named scope.\n\n1) crates/jet-comptime/tests/tls_tier2.rs:12,112 — `Expr::MethodCall { .. }`\n   struct literals missing the `owner_type_args` field (E0063).\n\n2) tests/jetpack_services.rs:270 — `proj.join(\"src/nested\")` where `proj` is\n   the test-support `Scratch` struct, which has no `join` method (only\n   `.path.join(...)` works). E0599.\n\n3) crates/jet-sema (lib test) — Sema/ApiFreeze.rs:758 missing `markers` field\n   in a `Func` initializer (E0063); Sema/Schema.rs:363 `auto_derive_default`\n   specified twice in one initializer (E0062).\n\n4) crates/jet-comptime (lib test) — Comptime/Reflect.rs:800 missing `kernel`\n   and `markers` fields in a `Func` initializer (E0063).\n\nRepro: `scripts/agent/jet-env cargo test --workspace --no-run` from repo root\non master HEAD.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-07T03:35:48.745Z",
+      "updated": "2026-08-07T03:35:48.745Z",
+      "updatedBy": "bd2-fix"
     }
   ],
   "decisions": [
@@ -131650,6 +131696,69 @@
   ],
   "events": [
     {
+      "at": "2026-08-07T03:37:53.370Z",
+      "by": "bd2-orch",
+      "action": "card.update",
+      "ref": "c0pd9rd4",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-07T03:37:50.909Z",
+      "by": "bd2-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0pd9rd4",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T03:35:48.745Z",
+      "by": "bd2-fix",
+      "action": "card.add",
+      "ref": "c07ylf1g",
+      "note": "Fix additional master HEAD compile breaks beyond #1596: tls_tier2, jetpack_services, jet-sema/jet-comptime lib tests"
+    },
+    {
+      "at": "2026-08-07T03:35:38.956Z",
+      "by": "bd2-fix",
+      "action": "card.update",
+      "ref": "c0pd9rd4",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T03:35:33.160Z",
+      "by": "bd2-fix",
+      "action": "card.criteria-meet",
+      "ref": "c0pd9rd4",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T03:35:20.300Z",
+      "by": "bd2-fix",
+      "action": "card.update",
+      "ref": "c0pd9rd4",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T03:35:13.145Z",
+      "by": "bd2-fix",
+      "action": "card.criteria-add",
+      "ref": "c0pd9rd4",
+      "note": "#1 The three named test targets compile on master; cargo build "
+    },
+    {
+      "at": "2026-08-07T03:25:45.880Z",
+      "by": "bd2-manifest2",
+      "action": "card.update",
+      "ref": "c0ejda8e",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T03:21:43.760Z",
+      "by": "bd2-fix",
+      "action": "card.claim",
+      "ref": "c0pd9rd4",
+      "note": ""
+    },
+    {
       "at": "2026-08-07T03:21:17.927Z",
       "by": "bd2-orch",
       "action": "card.update",
@@ -135084,69 +135193,6 @@
       "by": "audit-apply",
       "action": "card.update",
       "ref": "c0kfna9f",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:42:58.850Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0tm6rw5",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:42:58.438Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0o7s5iz",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:42:58.029Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0mjxw0l",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:42:57.618Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0bdf0ly",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:42:57.200Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0qin2v4",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:42:56.790Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0cqliqk",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:42:56.386Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0nb4bwv",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:42:55.978Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0w07otg",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:42:55.575Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0nnh6tu",
       "note": "blockedBy"
     }
   ],
