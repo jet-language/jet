@@ -7275,6 +7275,15 @@ fn cranelift_three_way_differential_battery_inner() {
 /// reason.
 #[test]
 fn jit_try_compile_manifest_matches() {
+    std::thread::Builder::new()
+        .stack_size(16 * 1024 * 1024)
+        .spawn(jit_try_compile_manifest_matches_inner)
+        .expect("JIT compile manifest thread")
+        .join()
+        .expect("JIT compile manifest thread panicked");
+}
+
+fn jit_try_compile_manifest_matches_inner() {
     let (covered, gaps) = collect_jit_coverage();
     let (expected_covered, expected_gaps, _) = parse_jit_gap_manifest();
     assert_eq!(

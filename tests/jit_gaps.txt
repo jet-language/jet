@@ -45,16 +45,13 @@ covered:
   collections/fixed_arrays
   collections/fn_dispatch_map
   collections/index_hook
-  collections/iter_adapters
   collections/iter_hook
-  collections/iter_tools_audit
   collections/lazy_iter
   collections/list_bounds
   collections/lists
   collections/map_key
   collections/map_merge
   collections/member_spread
-  collections/set
   collections/sketch
   collections/struct_list_mutation
   collections/wordcount
@@ -115,7 +112,6 @@ covered:
   effects/all_sigils
   effects/asset_pipeline
   effects/capability_sigils
-  effects/determinism
   effects/effect_caps
   effects/effect_declarations
   effects/effect_grant
@@ -136,8 +132,8 @@ covered:
   effects/single_use
   effects/single_use_discard
   effects/smart_context
-  effects/taint
   errors/discard_fallible
+  errors/env_divisor_trap
   errors/error_context
   errors/errors
   errors/fallible_run
@@ -147,12 +143,14 @@ covered:
   errors/rollback_trait
   errors/transact
   errors/typed_error_families
+  errors/u8_divide_zero
   functions/root_calls
+  functions/variadic_method
   game/core_game_headless
   game/raylib_window
   io/archive
-  io/args_audit
   io/args_spec
+  io/byte_buffer
   io/cli
   io/cli_args
   io/compress_gzip
@@ -163,7 +161,9 @@ covered:
   io/files
   io/files_depth
   io/io_prelude
+  io/io_surface
   io/log
+  io/log_fatal
   io/log_human
   io/log_job
   io/log_structured
@@ -206,7 +206,6 @@ covered:
   math/numeric_floor
   math/power_operator
   math/power_semantics
-  math/random_audit
   math/xor_operator
   memory/arena
   memory/arena_parse
@@ -249,6 +248,7 @@ covered:
   net/browser_matrix
   net/browser_network
   net/browser_privacy
+  net/dns_lookup
   net/email_dkim
   net/email_message
   net/http_client
@@ -282,7 +282,6 @@ covered:
   serde/decode_traced
   serde/encoding
   serde/encoding_base
-  serde/encoding_breadth
   serde/encoding_cbor_stream
   serde/encoding_csv_stream
   serde/encoding_json_stream
@@ -320,6 +319,7 @@ covered:
   text/unicode_text_audit
   text/uuid
   tooling/bench
+  tooling/canvas_blueprint_demo
   tooling/compute_kernel
   tooling/data_analysis
   tooling/data_bridges
@@ -349,6 +349,7 @@ covered:
   tooling/tests
   tooling/todo_hole
   types/affine_unit_types
+  types/anonymous_unions
   types/associated_types
   types/capability_bundles
   types/computed_field
@@ -361,6 +362,7 @@ covered:
   types/generic_types
   types/inferred_new
   types/measurement
+  types/no_any_alternatives
   types/option
   types/option_combinators
   types/optional_result_variants
@@ -406,14 +408,26 @@ covered:
   web/web_wasm_string_param
 
 gaps:
-  collections/list_surface: run: jit builtin method unsupported
+  collections/iter_adapters: run: jit #1477 list/map builtin pending host
+  collections/iter_tools_audit: run: jit builtin method unsupported
+  collections/list_surface: run: jit #1477 list/map builtin pending host
+  collections/map_surface: run: jit let type unsupported: Map { key: Int, key_span: None, value: Int }
+  collections/set: run: jit closure method unsupported
   collections/zip_family: jit compile panicked before returning an unsupported reason: index out of bounds: the len is 0 but the index is 0
   crypto/auth_sessions: run: jit core call unsupported: core.auth.register_user
+  effects/determinism: coin_and_card: jit result ?? operand is not Result
+  effects/taint: shell_arg: jit #1477 list/map builtin pending host
+  errors/or_err: birth_year: jit method on Option(String)
+  errors/partial_and_notes: run: jit host call unsupported
+  io/args_audit: run: jit result ?? operand is not Result
   io/db_policy: run: jit let type unsupported: Result { ok: List(Map { key: String, key_span: None, value: Named("DBValue") }), err: Named("DBError") }
+  math/random_audit: run: jit result ?? operand is not Result
   memory/pin: wire_self: jit address_of needs a local place
   memory/shared_weak_cycle: run: jit clone unsupported type: Apply { name: "Shared.Weak", args: [Named("Node")] }
+  serde/encoding_breadth: run: jit core call unsupported: core.encoding.json.canonical
   serde/serde_generic: run: jit missing encode `Wrap::encode`
   tooling/app_live: run: jit core call unsupported: app.live
+  tooling/branch_dispatch_bench: enum_dispatch: jit if-expression pattern match unsupported
   tooling/compute_autodiff: run: jit core call unsupported: core.compute.from_list
   tooling/compute_device: run: jit core call unsupported: core.compute.ones
   tooling/compute_linalg: run: jit core call unsupported: core.compute.matrix
@@ -425,10 +439,8 @@ gaps:
   tooling/service_runtime: run: jit core call unsupported: core.services.tree
   tooling/service_tree: run: jit core call unsupported: core.services.tree
   tooling/sync_crdt: run: jit core call unsupported: core.sync.text_new
-  types/anonymous_unions: take_number: jit call to unknown function `describe`
-  types/enum_dot: area: jit if-expression if-let unsupported
-  types/enum_dot_patterns: area: jit if-expression if-let unsupported
+  types/enum_dot: label: jit if-expression pattern match unsupported
+  types/enum_dot_patterns: area: jit if-expression pattern match unsupported
   types/enums: next: jit if-expression pattern match unsupported
-  types/no_any_alternatives: label: jit if-expression if-let unsupported
   types/traits: run: jit print type unsupported
   ui/ui_component_kit: paint_form: jit call to unknown function `button_view`
