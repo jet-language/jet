@@ -632,8 +632,7 @@ pub(crate) fn collect_core_stmts(
             Stmt::Loop { body, .. }
             | Stmt::Unsafe { body, .. }
             | Stmt::Impure { body, .. }
-            | Stmt::Off { body, .. }
-            | Stmt::DebugOnly { body, .. }
+            | Stmt::Switched { body, .. }
             | Stmt::Region { body, .. }
         | Stmt::Policy { body, .. }
             | Stmt::TaskGroup { body, .. }
@@ -2470,7 +2469,7 @@ fn apply_reactive_upgrade_flags(stmts: &mut [Stmt], names: &std::collections::Ha
         for stmt in stmts {
             match stmt {
                 Stmt::Val(b) => {
-                    if names.contains(&b.name) || b.reactive_shared {
+                    if names.contains(&b.name) || b.reactive_shared() {
                         b.reactive_upgrade = true;
                     }
                 }
@@ -2492,8 +2491,7 @@ fn apply_reactive_upgrade_flags(stmts: &mut [Stmt], names: &std::collections::Ha
                 | Stmt::Live { body, .. }
                 | Stmt::AssumeDet { body, .. }
                 | Stmt::Transact { body, .. }
-                | Stmt::Off { body, .. }
-                | Stmt::DebugOnly { body, .. } => walk(body, names),
+                | Stmt::Switched { body, .. } => walk(body, names),
                 Stmt::Switch { arms, else_body, .. }
                 | Stmt::ComptimeSwitch { arms, else_body, .. } => {
                     for arm in arms.iter_mut() {

@@ -277,7 +277,7 @@ fn stmt_names(stmts: &[Stmt], out: &mut Vec<Diagnostic>) {
                 stmt_names(body, out);
             }
             Stmt::Unsafe { body, .. } | Stmt::Impure { body, .. } | Stmt::Reactive { body, .. }
-            | Stmt::Shield { body, .. } | Stmt::Off { body, .. } | Stmt::DebugOnly { body, .. }
+            | Stmt::Shield { body, .. } | Stmt::Switched { body, .. }
             | Stmt::Policy { body, .. } | Stmt::Caps { body, .. } | Stmt::ComptimeBlock { body, .. }
             | Stmt::Live { body, .. } | Stmt::AssumeDet { body, .. } => stmt_names(body, out),
             Stmt::BreakValue(value, _) | Stmt::BreakLabelValue(_, _, value, _) => {

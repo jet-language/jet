@@ -48,7 +48,7 @@ pub use patterns::{
 mod statements;
 pub use statements::{
     ElseBranch, IfStmt, Stmt, SwitchArm, is_subjectless_guard, noelse_terminated,
-    uses_classic_if_spelling,
+    switched_off, uses_classic_if_spelling,
 };
 
 #[path = "AST/lvalues.rs"]

@@ -318,8 +318,8 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
         Stmt::Shield { body, .. } => scoped_stmts_in_subset(body, cx, locals),
         // D-CANVASSTATE1=D: `#Off` erases; `#DebugOnly` lowers in a lexical
         // debug-only block, so its local declarations do not extend `locals`.
-        Stmt::Off { .. } => true,
-        Stmt::DebugOnly { body, .. } => {
+        Stmt::Switched { marker, .. } if crate::AST::switched_off(marker) => true,
+        Stmt::Switched { body, .. } => {
             let mut scoped = locals.clone();
             body.iter().all(|s| stmt_in_subset(s, cx, &mut scoped))
         }

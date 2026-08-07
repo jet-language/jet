@@ -933,7 +933,7 @@ fn project_stmt(
             add_region(g, ordinal, "shield", "#Shield", *span);
             project_stmt_block(g, index, src, body, ordinal * 100 + 115, x + 230, y + 70);
         }
-        Stmt::Off { body, .. } | Stmt::DebugOnly { body, .. } => {
+        Stmt::Switched { body, .. } => {
             project_stmt_block(g, index, src, body, ordinal * 100 + 125, x + 230, y + 70);
         }
         Stmt::Region {

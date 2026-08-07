@@ -624,8 +624,7 @@ impl<'a> TaintCtx<'a> {
             | Stmt::Impure { body, .. }
             | Stmt::Reactive { body, .. }
             | Stmt::Shield { body, .. }
-            | Stmt::Off { body, .. }
-            | Stmt::DebugOnly { body, .. }
+            | Stmt::Switched { body, .. }
             | Stmt::Region { body, .. }
         | Stmt::Policy { body, .. }
             | Stmt::TaskGroup { body, .. }

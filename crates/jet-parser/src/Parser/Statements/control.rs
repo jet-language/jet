@@ -668,8 +668,10 @@ impl<'a> Parser<'a> {
         )
     }
 
-    pub(super) fn at_statement_switch_stmt(&mut self, marker: &str) -> Result<Stmt, Diagnostic> {
-        let attr_span = self.read_marker_head()?.span;
+    pub(super) fn at_statement_switch_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+        let switch = self.parse_rule_marker()?;
+        let attr_span = switch.span;
+        let marker = switch.name.as_str();
 
         if matches!(self.peek().kind, TokKind::Hash)
             && matches!(
@@ -710,11 +712,11 @@ impl<'a> Parser<'a> {
             (vec![stmt], end)
         };
         let span = Span::new(attr_span.start, end);
-        if marker == Syntax::MARKER_OFF {
-            Ok(Stmt::Off { body, span })
-        } else {
-            Ok(Stmt::DebugOnly { body, span })
-        }
+        Ok(Stmt::Switched {
+            marker: switch,
+            body,
+            span,
+        })
     }
 
     fn at_policy_stmt(&mut self) -> Result<Stmt, Diagnostic> {
@@ -1997,33 +1999,15 @@ impl<'a> Parser<'a> {
                 self.finish_stmt()?;
                 Ok(Stmt::Val(binding))
             }
-            TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_TRACK) =>
-            {
-                let head = self.read_marker_head()?;
-                let mut binding = self.sigil_binding()?;
-                binding.track = true;
-                binding.track_span = Some(head.span);
-                self.finish_stmt()?;
-                Ok(Stmt::Val(binding))
-            }
+            // D-VERDICT-1455-1: a binding-level marker is read and retained, not
+            // turned into a flag here. Sema and the formatter read the marker.
             TokKind::Hash
-                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_LOCAL) =>
+                if matches!(&self.peek2().kind, TokKind::Ident(n) if matches!(n.as_str(),
+                    Syntax::MARKER_TRACK | Syntax::MARKER_LOCAL | Syntax::MARKER_SHARED)) =>
             {
-                let head = self.read_marker_head()?;
+                let marker = self.parse_rule_marker()?;
                 let mut binding = self.sigil_binding()?;
-                binding.reactive_local = true;
-                binding.reactive_local_span = Some(head.span);
-                self.finish_stmt()?;
-                Ok(Stmt::Val(binding))
-            }
-            TokKind::Hash
-                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_SHARED) =>
-            {
-                let head = self.read_marker_head()?;
-                let mut binding = self.sigil_binding()?;
-                binding.reactive_shared = true;
-                binding.reactive_shared_span = Some(head.span);
-                binding.reactive_upgrade = true;
+                binding.markers.push(marker);
                 self.finish_stmt()?;
                 Ok(Stmt::Val(binding))
             }
@@ -2147,11 +2131,10 @@ impl<'a> Parser<'a> {
                     return self.at_reactive_stmt();
                 }
                 // D-CANVASSTATE1=D: statement switch-off attributes.
-                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_OFF) {
-                    return self.at_statement_switch_stmt(Syntax::MARKER_OFF);
-                }
-                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_DEBUG_ONLY) {
-                    return self.at_statement_switch_stmt(Syntax::MARKER_DEBUG_ONLY);
+                if matches!(&self.peek2().kind, TokKind::Ident(n)
+                    if n == Syntax::MARKER_OFF || n == Syntax::MARKER_DEBUG_ONLY)
+                {
+                    return self.at_statement_switch_stmt();
                 }
                 // D-UNSAFE2: `#Unsafe("reason") { … }` (or retired `#Audit("…") #Unsafe`).
                 self.at_unsafe_stmt()
@@ -2390,8 +2373,7 @@ fn rewrite_collect_root_exits(stmts: &mut [Stmt], target: &str, nested_loop_dept
             | Stmt::Impure { body, .. }
             | Stmt::Reactive { body, .. }
             | Stmt::Shield { body, .. }
-            | Stmt::Off { body, .. }
-            | Stmt::DebugOnly { body, .. }
+            | Stmt::Switched { body, .. }
             | Stmt::Region { body, .. }
             | Stmt::Policy { body, .. }
             | Stmt::TaskGroup { body, .. }

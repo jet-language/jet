@@ -41,7 +41,7 @@ use crate::Diagnostics::Span;
 use crate::Syntax;
 
 pub(super) fn tracked_float_origin(b: &crate::AST::Binding, ty: &Type, cx: &Cx) -> Option<String> {
-    if !b.track || !matches!(ty, Type::Float) {
+    if !b.track() || !matches!(ty, Type::Float) {
         return None;
     }
     let (line, col) = crate::Diagnostics::span_line_col(&cx.src, b.name_span.start);

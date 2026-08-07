@@ -2139,8 +2139,7 @@ fn contains_impure_gate(stmts: &[crate::AST::Stmt]) -> bool {
         | crate::AST::Stmt::Loop { body, .. }
         | crate::AST::Stmt::Reactive { body, .. }
         | crate::AST::Stmt::Shield { body, .. }
-        | crate::AST::Stmt::Off { body, .. }
-        | crate::AST::Stmt::DebugOnly { body, .. }
+        | crate::AST::Stmt::Switched { body, .. }
         | crate::AST::Stmt::Region { body, .. }
         | crate::AST::Stmt::Policy { body, .. }
         | crate::AST::Stmt::TaskGroup { body, .. }

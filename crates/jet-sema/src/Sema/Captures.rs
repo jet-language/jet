@@ -83,8 +83,7 @@ pub(crate) fn walk_stmts_for_const_refs(
             | Stmt::Impure { body: inner, .. }
             | Stmt::Reactive { body: inner, .. }
             | Stmt::Shield { body: inner, .. }
-            | Stmt::Off { body: inner, .. }
-            | Stmt::DebugOnly { body: inner, .. }
+            | Stmt::Switched { body: inner, .. }
             | Stmt::Region { body: inner, .. }
             | Stmt::Policy { body: inner, .. }
             | Stmt::TaskGroup { body: inner, .. }
@@ -492,12 +491,13 @@ pub(crate) fn stmt_refs_name(stmt: &Stmt, name: &str) -> bool {
                 || body.iter().any(|s| stmt_refs_name(s, name))
                 || step.as_ref().is_some_and(|step| stmt_refs_name(step, name))
         }
+        Stmt::Switched { marker, .. } if crate::AST::switched_off(marker) => false,
         Stmt::Loop { body, .. }
         | Stmt::Unsafe { body, .. }
         | Stmt::Impure { body, .. }
         | Stmt::Reactive { body, .. }
         | Stmt::Shield { body, .. }
-        | Stmt::DebugOnly { body, .. }
+        | Stmt::Switched { body, .. }
         | Stmt::Region { body, .. }
         | Stmt::Policy { body, .. }
         | Stmt::TaskGroup { body, .. }
@@ -506,7 +506,6 @@ pub(crate) fn stmt_refs_name(stmt: &Stmt, name: &str) -> bool {
         | Stmt::Grant { body, .. }
         | Stmt::Transact { body, .. }
         | Stmt::AssumeDet { body, .. } => body.iter().any(|s| stmt_refs_name(s, name)),
-        Stmt::Off { .. } => false,
         Stmt::Break(_)
         | Stmt::Continue(_)
         | Stmt::BreakLabel(..)
@@ -960,11 +959,12 @@ pub(crate) fn stmt_collect_captures(
                 stmt_collect_captures(step, bound, read, mut_cap);
             }
         }
+        Stmt::Switched { marker, .. } if crate::AST::switched_off(marker) => {}
         Stmt::Loop { body, .. }
         | Stmt::Unsafe { body, .. }
         | Stmt::Impure { body, .. }
         | Stmt::Shield { body, .. }
-        | Stmt::DebugOnly { body, .. }
+        | Stmt::Switched { body, .. }
         | Stmt::Region { body, .. }
         | Stmt::Policy { body, .. }
         | Stmt::TaskGroup { body, .. }
@@ -976,7 +976,6 @@ pub(crate) fn stmt_collect_captures(
             let mut body_bound = bound.clone();
             block_collect_captures(body, &mut body_bound, read, mut_cap);
         }
-        Stmt::Off { .. } => {}
         Stmt::Break(_)
         | Stmt::Continue(_)
         | Stmt::BreakLabel(..)

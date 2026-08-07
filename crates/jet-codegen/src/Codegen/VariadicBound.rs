@@ -217,12 +217,7 @@ fn unroll_variadic_body(stmts: &[Stmt], target: &str, arity: usize) -> Result<Ve
                 for i in 0..arity {
                     out.push(Stmt::Val(Binding {
                         mutable: false,
-                        track: false,
-                        track_span: None,
-                reactive_local: false,
-                reactive_local_span: None,
-                reactive_shared: false,
-                reactive_shared_span: None,
+                        markers: Vec::new(),
                 reactive_upgrade: false,
                         meta: None,
                         name: var.clone(),

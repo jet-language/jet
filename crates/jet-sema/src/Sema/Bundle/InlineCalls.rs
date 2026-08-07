@@ -104,8 +104,7 @@ pub(crate) fn rewrite_inline_calls_stmts(
             | Stmt::Impure { body: inner, .. }
             | Stmt::Reactive { body: inner, .. }
             | Stmt::Shield { body: inner, .. }
-            | Stmt::Off { body: inner, .. }
-            | Stmt::DebugOnly { body: inner, .. }
+            | Stmt::Switched { body: inner, .. }
             | Stmt::Region { body: inner, .. }
             | Stmt::Policy { body: inner, .. }
             | Stmt::TaskGroup { body: inner, .. }

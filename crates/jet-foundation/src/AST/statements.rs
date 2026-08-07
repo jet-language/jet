@@ -1,5 +1,12 @@
-use super::{BinOp, Binding, Expr, ForKind, LValue};
+use super::{BinOp, Binding, Expr, ForKind, LValue, Marker};
 use crate::Diagnostics::Span;
+
+/// D-CANVASSTATE1=D: which statement switch a `Stmt::Switched` carries. `#Off`
+/// bodies never reach runtime; `#DebugOnly` bodies do, in debug and dev builds
+/// only. Every stage asks the retained marker instead of keeping its own flag.
+pub fn switched_off(marker: &Marker) -> bool {
+    marker.name == crate::Syntax::MARKER_OFF
+}
 
 /// One `if`/`else if`/`else` chain.
 #[derive(Debug, Clone)]
@@ -189,16 +196,15 @@ pub enum Stmt {
         body: Vec<Stmt>,
         span: Span,
     },
-    /// D-CANVASSTATE1=D (ratified 2026-07-09): `#Off <stmt>` / `#Off { … }`.
-    /// The body is parsed and checked, but never emitted or executed.
-    Off {
-        body: Vec<Stmt>,
-        span: Span,
-    },
-    /// D-CANVASSTATE1=D (ratified 2026-07-09): `#DebugOnly <stmt>` /
-    /// `#DebugOnly { … }`. The body runs in debug/dev builds and is stripped
-    /// from release output.
-    DebugOnly {
+    /// D-CANVASSTATE1=D (ratified 2026-07-09): a statement switch attribute,
+    /// `#Off <stmt>` or `#DebugOnly <stmt>`, in either the bare or the block
+    /// form. D-VERDICT-1455-1: the written marker is retained, so which switch
+    /// this is stays a question about the marker rather than a parse-time
+    /// choice of node. `#Off` bodies are parsed and checked but never emitted;
+    /// `#DebugOnly` bodies run in debug and dev builds and are stripped from
+    /// release output.
+    Switched {
+        marker: Marker,
         body: Vec<Stmt>,
         span: Span,
     },
@@ -425,8 +431,7 @@ impl Stmt {
             | Stmt::Impure { span, .. }
             | Stmt::Reactive { span, .. }
             | Stmt::Shield { span, .. }
-            | Stmt::Off { span, .. }
-            | Stmt::DebugOnly { span, .. }
+            | Stmt::Switched { span, .. }
             | Stmt::Region { span, .. }
             | Stmt::Policy { span, .. }
             | Stmt::TaskGroup { span, .. }

@@ -13,12 +13,7 @@ impl<'a> Parser<'a> {
             let init = self.expr()?;
             return Ok(Binding {
                 mutable,
-                track: false,
-                track_span: None,
-                reactive_local: false,
-                reactive_local_span: None,
-                reactive_shared: false,
-                reactive_shared_span: None,
+                markers: Vec::new(),
                 reactive_upgrade: false,
                 meta: None,
                 name: String::new(),
@@ -89,12 +84,7 @@ impl<'a> Parser<'a> {
             if let Some((ty, ty_span, marker_span)) = typed_lit_uninit_head(&init) {
                 return Ok(Binding {
                     mutable: true,
-                    track: false,
-                    track_span: None,
-                reactive_local: false,
-                reactive_local_span: None,
-                reactive_shared: false,
-                reactive_shared_span: None,
+                    markers: Vec::new(),
                 reactive_upgrade: false,
                     meta: None,
                     name,
@@ -115,12 +105,7 @@ impl<'a> Parser<'a> {
         }
         Ok(Binding {
             mutable,
-            track: false,
-            track_span: None,
-                reactive_local: false,
-                reactive_local_span: None,
-                reactive_shared: false,
-                reactive_shared_span: None,
+            markers: Vec::new(),
                 reactive_upgrade: false,
             meta: None,
             name,
@@ -542,12 +527,7 @@ impl<'a> Parser<'a> {
         let init = self.expr()?;
         Ok(Binding {
             mutable: false,
-            track: false,
-            track_span: None,
-                reactive_local: false,
-                reactive_local_span: None,
-                reactive_shared: false,
-                reactive_shared_span: None,
+            markers: Vec::new(),
                 reactive_upgrade: false,
             meta: None,
             name,

@@ -1445,13 +1445,15 @@ fn collect_allocator_constructors(
                     collect_allocator_constructors(std::slice::from_ref(step), cx, &mut scope, found);
                 }
             }
+            // D-CANVASSTATE1=D: an `#Off` body is never emitted.
+            Stmt::Switched { marker, .. } if crate::AST::switched_off(marker) => {}
             Stmt::While { body, .. }
             | Stmt::Loop { body, .. }
             | Stmt::Unsafe { body, .. }
             | Stmt::Impure { body, .. }
             | Stmt::Reactive { body, .. }
             | Stmt::Shield { body, .. }
-            | Stmt::DebugOnly { body, .. }
+            | Stmt::Switched { body, .. }
             | Stmt::Region { body, .. }
             | Stmt::Policy { body, .. }
             | Stmt::TaskGroup { body, .. }
@@ -1482,8 +1484,7 @@ fn collect_allocator_constructors(
                     }
                 }
             }
-            Stmt::Off { .. }
-            | Stmt::Expr(_)
+            Stmt::Expr(_)
             | Stmt::Assign { .. }
             | Stmt::Return(..)
             | Stmt::Break(_)

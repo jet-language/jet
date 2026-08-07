@@ -718,8 +718,7 @@ fn rewrite_inline_loop_target(stmts: &mut [Stmt], old: &str, new: &str) {
             | Stmt::Impure { body, .. }
             | Stmt::Reactive { body, .. }
             | Stmt::Shield { body, .. }
-            | Stmt::Off { body, .. }
-            | Stmt::DebugOnly { body, .. }
+            | Stmt::Switched { body, .. }
             | Stmt::Region { body, .. }
             | Stmt::Policy { body, .. }
             | Stmt::TaskGroup { body, .. }
@@ -754,12 +753,7 @@ fn lower_collecting_loop(stmts: &mut Vec<Stmt>, item_ty: &Type, span: crate::Dia
         0,
         Stmt::Val(crate::AST::Binding {
             mutable: true,
-            track: false,
-            track_span: None,
-            reactive_local: false,
-            reactive_local_span: None,
-            reactive_shared: false,
-            reactive_shared_span: None,
+            markers: Vec::new(),
             reactive_upgrade: false,
             meta: None,
             name: target.clone(),
@@ -814,8 +808,7 @@ fn rewrite_collect_yields(stmts: &mut [Stmt], target: &str) {
             | Stmt::Impure { body, .. }
             | Stmt::Reactive { body, .. }
             | Stmt::Shield { body, .. }
-            | Stmt::Off { body, .. }
-            | Stmt::DebugOnly { body, .. }
+            | Stmt::Switched { body, .. }
             | Stmt::Region { body, .. }
             | Stmt::Policy { body, .. }
             | Stmt::TaskGroup { body, .. }

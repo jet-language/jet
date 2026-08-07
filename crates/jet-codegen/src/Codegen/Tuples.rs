@@ -367,8 +367,7 @@ fn collect_tuple_shapes_from_stmt(stmt: &Stmt, out: &mut CollectedTypeShapes) {
         Stmt::Region { body, .. }
         | Stmt::Policy { body, .. }
         | Stmt::Shield { body, .. }
-        | Stmt::Off { body, .. }
-        | Stmt::DebugOnly { body, .. }
+        | Stmt::Switched { body, .. }
         | Stmt::TaskGroup { body, .. }
         | Stmt::Layout { body, .. }
         | Stmt::Caps { body, .. }

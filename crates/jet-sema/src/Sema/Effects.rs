@@ -1423,12 +1423,14 @@ fn stmt_handle_escape(stmt: &crate::AST::Stmt, handle: &str) -> Option<Span> {
             .or_else(|| expr_handle_escape(cond, handle))
             .or_else(|| block(body))
             .or_else(|| step.as_ref().and_then(|step| stmt_handle_escape(step, handle))),
+        // D-CANVASSTATE1=D: an `#Off` body never runs, so nothing escapes it.
+        Stmt::Switched { marker, .. } if crate::AST::switched_off(marker) => None,
         Stmt::Loop { body, .. }
         | Stmt::Unsafe { body, .. }
         | Stmt::Impure { body, .. }
         | Stmt::Reactive { body, .. }
         | Stmt::Shield { body, .. }
-        | Stmt::DebugOnly { body, .. }
+        | Stmt::Switched { body, .. }
         | Stmt::Region { body, .. }
         | Stmt::Policy { body, .. }
         | Stmt::TaskGroup { body, .. }
@@ -1439,7 +1441,6 @@ fn stmt_handle_escape(stmt: &crate::AST::Stmt, handle: &str) -> Option<Span> {
         | Stmt::AssumeDet { body, .. }
         | Stmt::ScopeMember { body, .. }
         | Stmt::Live { body, .. } => block(body),
-        Stmt::Off { .. } => None,
         // D-CTMARKER1: comptime block erases; no handle can escape a build-time block.
         Stmt::ComptimeBlock { .. } => None,
         Stmt::ComptimeIf {

@@ -2228,7 +2228,7 @@ impl<'a> Checker<'a> {
                     self.check_block(body, true);
                     self.inferred_lambda_mut_captures = enclosing_mut_captures;
                 }
-                Stmt::Off { body, .. } => {
+                Stmt::Switched { marker, body, .. } if crate::AST::switched_off(marker) => {
                     let moved = self.moved.clone();
                     let uninit = self.uninit.clone();
                     let fx_direct = self.fx_direct.clone();
@@ -2272,7 +2272,7 @@ impl<'a> Checker<'a> {
                     self.fx_memory_calls = fx_memory_calls;
                     self.memory_control_multiplier = memory_control_multiplier;
                 }
-                Stmt::DebugOnly { body, .. } => {
+                Stmt::Switched { body, .. } => {
                     self.check_block(body, true);
                 }
                 // D-REGION1 (opt B): an explicit `region r { … }`. A fresh lexical

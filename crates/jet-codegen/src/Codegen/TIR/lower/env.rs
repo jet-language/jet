@@ -327,6 +327,8 @@ pub(super) fn collect_txn_mut_roots(body: &[Stmt], out: &mut Vec<String>) {
                     push(out, root);
                 }
             }
+            // D-CANVASSTATE1=D: an `#Off` body emits nothing.
+            Stmt::Switched { marker, .. } if crate::AST::switched_off(marker) => {}
             Stmt::While { body, .. }
             | Stmt::For { body, .. }
             | Stmt::Loop { body, .. }
@@ -334,7 +336,7 @@ pub(super) fn collect_txn_mut_roots(body: &[Stmt], out: &mut Vec<String>) {
             | Stmt::Unsafe { body, .. }
             | Stmt::Impure { body, .. }
             | Stmt::Reactive { body, .. }
-            | Stmt::DebugOnly { body, .. }
+            | Stmt::Switched { body, .. }
             | Stmt::Region { body, .. }
         | Stmt::Policy { body, .. }
             | Stmt::TaskGroup { body, .. }
@@ -344,7 +346,6 @@ pub(super) fn collect_txn_mut_roots(body: &[Stmt], out: &mut Vec<String>) {
             | Stmt::ContextBlock { body, .. }
             | Stmt::Live { body, .. }
             | Stmt::AssumeDet { body, .. } => collect_txn_mut_roots(body, out),
-            Stmt::Off { .. } => {}
             Stmt::Switch {
                 arms, else_body, ..
             } => {

@@ -1,4 +1,4 @@
-use super::{BindPattern, CtValue, Expr, StrPart, Type};
+use super::{BindPattern, CtValue, Expr, Marker, StrPart, Type};
 use crate::Diagnostics::Span;
 
 /// Assignment target: local name or indexed collection slot (M5).
@@ -159,17 +159,10 @@ pub enum ForKind {
 #[derive(Debug, Clone)]
 pub struct Binding {
     pub mutable: bool,
-    /// Binding-level `#Track` marker. Parser/formatter preserve it; sema assigns
-    /// meaning in the later tracking slice.
-    pub track: bool,
-    pub track_span: Option<Span>,
-    /// D-DATARACE1=C: `#Local` pin — reactive box must not cross a task/channel/
-    /// parallel boundary (E1102).
-    pub reactive_local: bool,
-    pub reactive_local_span: Option<Span>,
-    /// D-DATARACE1=C: `#Shared` pin — reactive box is explicitly synchronized.
-    pub reactive_shared: bool,
-    pub reactive_shared_span: Option<Span>,
+    /// D-VERDICT-1455-1: every marker written on this binding, retained as the
+    /// shared reader read it. The parser derives nothing from them; the
+    /// accessors below and sema both answer from these nodes.
+    pub markers: Vec<Marker>,
     /// D-DATARACE1=C: sema proved this reactive binding crosses a concurrency
     /// boundary (or `#Shared` pinned it). Codegen/report list the upgrade.
     pub reactive_upgrade: bool,
@@ -212,6 +205,31 @@ pub struct Binding {
     /// The value already arrives as a compiler-private GC root transferred
     /// from another opted function; no second allocation or trace site.
     pub gc_transferred: bool,
+}
+
+impl Binding {
+    /// D-VERDICT-1455-1: read a written marker back off the binding. Every
+    /// question about a binding-level marker is answered here, from the marker
+    /// node itself, so no stage has to keep a parallel flag.
+    pub fn marker(&self, name: &str) -> Option<&Marker> {
+        self.markers.iter().find(|marker| marker.name == name)
+    }
+
+    /// `#Track`: the parser preserves it, sema assigns meaning.
+    pub fn track(&self) -> bool {
+        self.marker(crate::Syntax::MARKER_TRACK).is_some()
+    }
+
+    /// D-DATARACE1=C: `#Local` pin — a reactive box must not cross a task,
+    /// channel, or parallel boundary (E1102).
+    pub fn reactive_local(&self) -> bool {
+        self.marker(crate::Syntax::MARKER_LOCAL).is_some()
+    }
+
+    /// D-DATARACE1=C: `#Shared` pin — a reactive box is explicitly synchronized.
+    pub fn reactive_shared(&self) -> bool {
+        self.marker(crate::Syntax::MARKER_SHARED).is_some()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

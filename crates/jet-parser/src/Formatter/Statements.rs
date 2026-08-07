@@ -496,9 +496,8 @@ impl<'a> Fmt<'a> {
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
             }
-            Stmt::Off { body, .. } => self.fmt_statement_switch_attr(Syntax::MARKER_OFF, body),
-            Stmt::DebugOnly { body, .. } => {
-                self.fmt_statement_switch_attr(Syntax::MARKER_DEBUG_ONLY, body)
+            Stmt::Switched { marker, body, .. } => {
+                self.fmt_statement_switch_attr(&marker.name, body)
             }
             // D-REACTCORE1: `#Reactive { … }` round-trips verbatim.
             Stmt::Reactive { body, .. } => {
@@ -1147,14 +1146,8 @@ impl<'a> Fmt<'a> {
             self.fmt_meta_attr(meta);
             self.write(" ");
         }
-        if b.track {
-            self.write(&format!("#{} ", Syntax::MARKER_TRACK));
-        }
-        if b.reactive_local {
-            self.write(&format!("#{} ", Syntax::MARKER_LOCAL));
-        }
-        if b.reactive_shared {
-            self.write(&format!("#{} ", Syntax::MARKER_SHARED));
+        for marker in &b.markers {
+            self.write(&format!("#{} ", marker.name));
         }
         // D-VERDICT-1308-1: explicit compile-time demand is marker-led.
         if b.is_comptime {

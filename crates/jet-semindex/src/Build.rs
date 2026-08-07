@@ -1818,8 +1818,7 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
         AST::Stmt::Impure { body, .. }
         | AST::Stmt::Reactive { body, .. }
         | AST::Stmt::Shield { body, .. }
-        | AST::Stmt::Off { body, .. }
-        | AST::Stmt::DebugOnly { body, .. }
+        | AST::Stmt::Switched { body, .. }
         | AST::Stmt::Region { body, .. }
         | AST::Stmt::Policy { body, .. }
         | AST::Stmt::TaskGroup { body, .. }

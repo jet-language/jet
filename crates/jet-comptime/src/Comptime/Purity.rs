@@ -568,8 +568,7 @@ fn walk_stmt_expr_nodes(s: &Stmt, include_suppressed: bool, f: &mut impl FnMut(&
         Stmt::Loop { body, .. }
         | Stmt::Reactive { body, .. }
         | Stmt::Shield { body, .. }
-        | Stmt::Off { body, .. }
-        | Stmt::DebugOnly { body, .. }
+        | Stmt::Switched { body, .. }
         | Stmt::Region { body, .. }
         | Stmt::Policy { body, .. }
         | Stmt::TaskGroup { body, .. }
