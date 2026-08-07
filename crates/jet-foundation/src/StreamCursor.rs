@@ -176,6 +176,26 @@ mod stream_cursor_tests {
     }
 
     #[test]
+    fn take_pattern_advances_on_a_hit_and_names_the_position_on_a_miss() {
+        let mut c = jet_cursor_over(&"abcdef".to_string());
+        assert_eq!(jet_cursor_tail(&c), "abcdef");
+        jet_cursor_take_pattern(&mut c, 3);
+        assert_eq!(jet_cursor_tail(&c), "def");
+        assert_eq!(
+            jet_cursor_pattern_miss(&c),
+            "pattern did not match at cursor position 3"
+        );
+
+        let mut r = jet_reader_over(&vec![1, 2, 3, 4]);
+        jet_reader_take_pattern(&mut r, 2);
+        assert_eq!(jet_reader_tail(&r), &[3, 4]);
+        assert_eq!(
+            jet_reader_pattern_miss(&r),
+            "pattern did not match at reader position 2"
+        );
+    }
+
+    #[test]
     fn cursor_skips_space_and_takes_until() {
         let mut c = jet_cursor_over(&"   ab|cd".to_string());
         jet_cursor_skip_ws(&mut c);

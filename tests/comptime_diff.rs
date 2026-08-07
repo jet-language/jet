@@ -526,8 +526,14 @@ fn check_comptime_src(i: usize, label: &str, src: &str) {
     );
 
     let dir = std::env::temp_dir();
-    let rs = dir.join(format!("jet_ctdiff_{}_{}.rs", std::process::id(), i));
-    let bin = dir.join(format!("jet_ctdiff_{}_{}", std::process::id(), i));
+    // Case numbers are per-test, so two tests running side by side both reach
+    // index 0 and race for the same file: one rustc deletes the object the
+    // other is linking, and the failure reads like an I2 miscompile. Number
+    // the artifacts per run instead.
+    static ARTIFACT: AtomicUsize = AtomicUsize::new(0);
+    let unique = ARTIFACT.fetch_add(1, Ordering::Relaxed);
+    let rs = dir.join(format!("jet_ctdiff_{}_{}_{}.rs", std::process::id(), i, unique));
+    let bin = dir.join(format!("jet_ctdiff_{}_{}_{}", std::process::id(), i, unique));
     fs::write(&rs, &compiled.rust).unwrap();
     let mut rustc = Command::new("rustc");
     rustc
