@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1615,
-    "rev": 28807,
+    "rev": 28813,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -92235,12 +92235,22 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "building",
       "priority": "P1",
       "plan": "Implements D-META-STAGE1 — ratified 2026-08-06. Read each decision verbatim (tower brief on this card's parent proposal, or tower decision show) before building; the ratified outcome text is the law, this plan is the route. Every requirement is a discrete exit criterion below: meet each with targeted proof (tests, snapshots, examples with golden output), and keep I9 tier parity inside this card — AOT, default jet run (JIT), and the interpreter must agree on every surface this card ships before it closes. Delete every superseded form the decisions retire in the same change; do not leave compatibility shims or parallel spellings. Reference: docs/proposals/metaprogramming-one-compile-time-program.md.",
       "blockedBy": [],
-      "assignee": "bd3-dollar",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-08-07",
+          "by": "bd3-dollar",
+          "text": "[handoff] Session ended mid-card; handing to bd3-dollar2 on the same branch bd3/dollar."
+        },
+        {
+          "at": "2026-08-07",
+          "by": "bd3-dollar",
+          "text": "[handoff] Branch bd3/dollar, worktree .claude/worktrees/dollar, commit 9b179efff off master 7b127acab, unmerged. The card is NOT done; no criterion is claimed. What is built and proved by hand: the mark rides the name, so $limit :: 1000 binds $limit and every mention writes the mark; Expr::ComptimeSplice is now Expr::ComptimeName, keeps the mark in the name, and the strip is gone, which retires the carry-out concept and E2713 (an unresolved compile-time name now gets the ordinary E0107). #Known no longer parses live: all three forms recover once and teach E0377, whose fix names the exact replacement form. The formatter emits $ { … }, $if, and the mark on the name. The item-start scan no longer searches backwards for a retired keyword, which was splitting a leading comment off its item when the comment contained the word comptime. Every .jet file is migrated, 131 occurrences across 79 files, with a per-file script that marks only declared compile-time names and never touches string text or comments; tests/comptime_diff.rs is migrated the same way through its Rust string literals. The example that demonstrated the retired splice concept is deleted with its golden and both fixtures. Proof so far: cargo build --workspace clean; all 14 comptime examples match their goldens byte for byte on a cleared cache; jet-parser lib 43 passed with only the pre-existing #1599 failure; jet-sema lib 68 passed with the same 3 pre-existing failures; jet fmt --check is clean on the migrated comptime examples except two files whose drift is the pre-existing one-lining behaviour, unrelated to the mark. Remaining work, in the order I would take it: (1) 292 #Known occurrences in 55 Rust test sources, 61 in 8 docs, 34 in 24 .stderr fixtures — the migration scripts live in the session scratchpad and the Rust one rewrites only string-literal contents, which matters because a first pass that treated Rust code as Jet broke a variable named encoded; (2) a real defect this slice exposes, and the reason comptime_diff is 12 passed and 14 failed rather than green: a folded value that carries a generic, such as Ok(6), lowers through TExprKind::CtLit and emits an unannotated Ok(6i64), which rustc rejects with E0282 — an I2 violation, and it needs the CtLit emission to carry the type or the compile-time name to reuse the const path; (3) T.$name and T.$fields, which the parser already accepts but sema answers with E0302; (4) the syntax-decisions.md entry, regenerated grammars, re-blessed snapshots, and I4 registration for E0377 (docs/spec/diagnostics.md row plus a UI fixture); (5) the diagnostics.md rows for E2712 and E2713 still need deleting."
+        },
         {
           "at": "2026-08-07",
           "by": "bd3-mark2",
@@ -92356,10 +92366,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:34:12.218Z",
-      "updated": "2026-08-07T11:51:42.659Z",
+      "updated": "2026-08-07T12:24:08.363Z",
       "updatedBy": "bd3-dollar",
-      "workOrder": 180,
-      "claimedAt": "2026-08-07T11:51:42.659Z"
+      "workOrder": 180
     },
     {
       "id": "c0pden89",
@@ -98176,11 +98185,11 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "building",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "bd3-jitfix",
       "log": [],
       "criteria": [],
       "refs": [],
@@ -98188,8 +98197,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T12:07:37.523Z",
-      "updated": "2026-08-07T12:07:37.523Z",
-      "updatedBy": "bd3-orch"
+      "updated": "2026-08-07T12:34:55.842Z",
+      "updatedBy": "bd3-jitfix",
+      "claimedAt": "2026-08-07T12:34:55.842Z"
     },
     {
       "id": "c0zebcjq",
@@ -98200,11 +98210,11 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "building",
       "priority": "P3",
       "plan": null,
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "bd3-jitfix",
       "log": [],
       "criteria": [],
       "refs": [],
@@ -98212,8 +98222,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T12:07:40.449Z",
-      "updated": "2026-08-07T12:07:40.450Z",
-      "updatedBy": "bd3-orch"
+      "updated": "2026-08-07T12:34:56.224Z",
+      "updatedBy": "bd3-jitfix",
+      "claimedAt": "2026-08-07T12:34:56.223Z"
     }
   ],
   "decisions": [
@@ -132766,6 +132777,48 @@
   ],
   "events": [
     {
+      "at": "2026-08-07T12:34:56.224Z",
+      "by": "bd3-jitfix",
+      "action": "card.update",
+      "ref": "c0zebcjq",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T12:34:55.842Z",
+      "by": "bd3-jitfix",
+      "action": "card.update",
+      "ref": "c0n02xfm",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T12:34:37.702Z",
+      "by": "bd3-jitfix",
+      "action": "card.claim",
+      "ref": "c0zebcjq",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T12:34:30.920Z",
+      "by": "bd3-jitfix",
+      "action": "card.claim",
+      "ref": "c0n02xfm",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T12:24:08.363Z",
+      "by": "bd3-dollar",
+      "action": "card.release",
+      "ref": "c0z2jsot",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-08-07T12:22:38.591Z",
+      "by": "bd3-dollar",
+      "action": "card.update",
+      "ref": "c0z2jsot",
+      "note": "phase,logEntry"
+    },
+    {
       "at": "2026-08-07T12:07:40.450Z",
       "by": "bd3-orch",
       "action": "card.add",
@@ -136222,48 +136275,6 @@
       "action": "card.update",
       "ref": "c0fzojeh",
       "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-07T00:56:59.905Z",
-      "by": "prep-security",
-      "action": "card.update",
-      "ref": "c0b26l71",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-08-07T00:56:49.892Z",
-      "by": "prep-security",
-      "action": "card.criteria-add",
-      "ref": "c0k0blpr",
-      "note": "#4 The report section policy-integrity lists all 2 owned candid"
-    },
-    {
-      "at": "2026-08-07T00:56:49.534Z",
-      "by": "prep-security",
-      "action": "card.criteria-add",
-      "ref": "c0f805q0",
-      "note": "#4 The report section package-supply-chain lists all 7 owned ca"
-    },
-    {
-      "at": "2026-08-07T00:56:49.175Z",
-      "by": "prep-security",
-      "action": "card.criteria-add",
-      "ref": "c0a5ajib",
-      "note": "#4 The report section command-code-injection lists all 20 owned"
-    },
-    {
-      "at": "2026-08-07T00:56:48.818Z",
-      "by": "prep-security",
-      "action": "card.criteria-add",
-      "ref": "c055tbgu",
-      "note": "#4 The report section devtools-control-plane lists all 10 owned"
-    },
-    {
-      "at": "2026-08-07T00:56:48.471Z",
-      "by": "prep-security",
-      "action": "card.criteria-add",
-      "ref": "c003si59",
-      "note": "#4 The report section filesystem-containment lists all 22 owned"
     }
   ],
   "nextNum": 368,

@@ -224,6 +224,18 @@ progress and looks hung. Every burndown command path must:
 
 Put these constraints in every worker brief that runs compiler/test commands.
 
+**Shared build cache (mandatory for worktree workers).** Every worktree
+worker exports `CARGO_TARGET_DIR=<main-clone>/target` so all streams share
+one warm cache instead of cold-building a private `target/` (5–10 min each).
+Cargo's own lock serializes concurrent builds safely; brief queueing beats
+cold rebuilds. Never point the target dir at `/tmp` (RAM tmpfs).
+
+**Worktrees persist across batches.** Keep a finished worker's worktree in
+place for the next batch instead of delete/recreate; remove worktrees only at
+end of burndown scope (or when a stream is permanently done). Branches still
+merge and delete promptly — only the working directory and its build cache
+stay warm.
+
 ## Concurrency
 
 Concurrency exists only under a subagent grant. Without one, there is exactly
@@ -264,6 +276,24 @@ After review and integration, run the union of required proof **once**:
 - Do not run targeted groups and then rerun the same groups through several
   agents. Do not restart a broad suite “to be safe.” If a run finds a concrete
   failure, fix the cause and rerun only the failing group.
+
+**Work first, prove once (mandatory).** Compile time dominates burndown
+wall-clock, so proof runs are batch-level, never card-level:
+
+- A worker implements **every card in its brief before its first proof run**,
+  then runs **one** combined command covering all of them (one cargo
+  invocation, many `--test` targets), fixes what is red, and reruns **only
+  the failing targets**. No per-card proof loops, no "quick check" runs
+  between cards, no rerunning a suite that is already green on the same code.
+- While implementing, a worker may run one red test **once** to confirm a
+  failure exists before fixing it — never repeatedly.
+- The orchestrator's integration proof is **one** run whose target union
+  covers every branch merged since the last proof, not one run per branch.
+- The reviewer reruns nothing that is green in evidence; spot-runs only on a
+  concrete false-green smell, and at most once.
+- Chain every proof as one shell command (`cargo test --test a --test b …`
+  or one `bash -c` list) so one cargo lock, one build, one report serves the
+  whole batch.
 
 Never trust worker greens alone. The batch reviewer checks evidence; the
 orchestrator checks final integration and grouped proof. Rebuild before `jet`
