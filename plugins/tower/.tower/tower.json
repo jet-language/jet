@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1596,
-    "rev": 28469,
+    "rev": 28488,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -91005,8 +91005,14 @@
       "priority": "P1",
       "plan": "Implements D-FAIL-CARRIER1, D-FAIL-MODEL1 — ratified 2026-08-06. Read each decision verbatim (tower brief on this card's parent proposal, or tower decision show) before building; the ratified outcome text is the law, this plan is the route. Every requirement is a discrete exit criterion below: meet each with targeted proof (tests, snapshots, examples with golden output), and keep I9 tier parity inside this card — AOT, default jet run (JIT), and the interpreter must agree on every surface this card ships before it closes. Delete every superseded form the decisions retire in the same change; do not leave compatibility shims or parallel spellings. Reference: docs/proposals/failure-one-report-three-routes.md.",
       "blockedBy": [],
-      "assignee": "bd2-carrier2",
-      "log": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-07",
+          "by": "bd2-carrier2",
+          "text": "[handoff] Branch bd2/carrier, head 78ebd8810, worktree .claude/worktrees/carrier. Build green; tests/outcome_carrier.rs passes (2/2); golden is back at the base 63-failure line with no new failure and no example edited.\n\nDONE this session\n- The carrier moved to crates/jet-foundation/src/Outcome.rs and is still the first PRELUDE_PART, so AOT, the Cranelift hosts and the comptime interpreter all name one Rust type. jet-comptime does not depend on jet-codegen, so jet-foundation is the only shared home. Every module that include!s a prelude file now imports it.\n- Converted the prelude surfaces that still answered a plain Option: byte buffers, paths, parsed CLI arguments and typed entry decoding, regex matches, URL and MIME parts, weak shared handles, loadable values, local cells, HTTP request and response headers, random picks, DKIM configuration, encoding stream readers, left joins, plot reference lines, IO report resource/os code/cause, process terminal sessions, encoding limits, and the line/column/row/cause of encoding, XML and data reports.\n- Host adapters in jet-jit and jet-comptime convert at their own boundary; they re-encode no meaning.\n\nREMAINING\n- c1: the comptime interpreter still has four constructors, CtValue::Some / None / ResOk / ResErr, which is the second representation the decision retires. About 890 call sites across jet-comptime, jet-codegen TIR eval, jet-jit ambient and Source/Compiler.rs. The shape to land: Present(payload) plus Failed(report), with a clean report for the optional view.\n- c4: a failure that carries a partial payload and an outcome that carries notes, both readable from Jet, with a golden example under examples/features/errors/. No surface exists yet.\n- c5: .or_err(\"why\"). The carrier already has the method in Rust; Jet has no spelling for it. Needs sema method inference, TIR lowering, AOT emit, the Cranelift path and interpreter ambient.\n- c6: parity ledger entry for the c4/c5 examples.\n- c7 to c10: Syntax.rs entries, the syntax-decisions.md log, regenerated grammars and re-blessed snapshots, all owed by c4 and c5.\n- tests/corelib.rs: 134 pass, 52 fail. The remaining failures are DB JetMap/BTreeMap and a &String mismatch, neither of which involves the carrier; io/db was already failing at the base. The corelib base count was not measured, so the next owner should measure it before reading those 52 as clean."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -91020,11 +91026,11 @@
         {
           "n": 2,
           "text": "The ratified surface is unchanged: T? is the optional and spaced T ? E is the fallible; every existing example compiles without edit",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd2-carrier2",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:38.003Z"
+          "evidence": "The golden corpus is back at the base 9f2f9f2a1 line: 63 failures, the same 63, with no example newly broken and none edited for the carrier. Twenty-eight regressions were closed by converting the prelude, not the examples. Proof: cargo test --test golden on 78ebd8810.",
+          "at": "2026-08-07T02:26:18.621Z"
         },
         {
           "n": 3,
@@ -91106,10 +91112,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:33:37.333Z",
-      "updated": "2026-08-07T00:43:59.923Z",
+      "updated": "2026-08-07T02:26:42.212Z",
       "updatedBy": "bd2-carrier2",
-      "workOrder": 140,
-      "claimedAt": "2026-08-07T00:43:59.922Z"
+      "workOrder": 140
     },
     {
       "id": "c0nb4bwv",
@@ -96897,12 +96902,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "Root cause confirmed by instrumenting and dumping generated Rust for examples/features/errors/must_use.jet (reverted after diagnosis — no debug code left in tree): the D-VERDICT-1308-1 implicit immutable-binding const-fold (crates/jet-sema/src/Sema/CheckerCore/bindings.rs:687, `evaluate_owned_with_imports_opts_collecting`) tries to comptime-evaluate every `::` binding's initializer, including `scope.guard(() => {...})`. That call routes through `Comptime::TirBridge::eval_expr` (crates/jet-comptime/src/Comptime/TirBridge.rs:99) into jet-codegen's TIR-eval interpreter (installed by `install_comptime_bridge`, crates/jet-codegen/src/Codegen/TIR/eval/mod.rs:2169), which lowers the AST call to TIR and evaluates `TExprKind::CoreClosureCall { kind: TCoreClosureKind::Guard { executable, .. } }` at crates/jet-codegen/src/Codegen/TIR/eval/exprs.rs:5094-5099. That handler pushes the guard's executable lambda onto `self.scope_guards` — correct for real program execution, where a block's guard_mark/drain machinery (eval/mod.rs:1488-1508) runs cleanup LIFO at scope exit — and returns `Ok(CtValue::Unit)` as a placeholder, since ScopeGuard has no literal CtValue form.\n\nThat placeholder is harmless during real execution (the guard is tracked procedurally). It is wrong when the same evaluator is reused, one-shot, purely to PROBE whether a binding can fold: there is no owning scope to drain `self.scope_guards` from, so the registered executable is discarded and the caller only sees `Ok(CtValue::Unit)`.\n\nThe actual defect is in the fold-acceptance gate: `ct_value_fits_binding` (crates/jet-sema/src/Sema/CheckerCore/bindings.rs:169-189) has no arm rejecting a `CtValue::Unit` result against a non-Unit declared type; its catch-all `_ => true` (line 187) wrongly accepts the placeholder as 'fits' a ScopeGuard-typed binding. So `b.ct = Some(CtValue::Unit)` gets recorded, and codegen serializes the folded literal `()` instead of emitting the real `jet_scope_guard(closure)` call (crates/jet-codegen/src/Codegen/TIR/emit/expressions.rs ~4959-4961 — confirmed correct in isolation, never reached because the fold wins first). The guard is never constructed, so its Drop (JetScopeGuard in Prelude/Core/RuntimeControl.rs) never runs, so cleanup never fires. Confirmed empirically: generated Rust for must_use.jet is exactly `let user__g: _ = ();` (the `_` type annotation is intentional/correct per D-DEFER1 — ScopeGuard is generic over its closure type; only the RHS is wrong).\n\nBecause this is a shared sema fact (I3: all checking lives in sema), the wrong fold propagates to every downstream tier that consumes `b.ct`/TIR alike — AOT rustc emit, the Cranelift JIT (`jet run`/`jet dev`), and interpreter deopt all inherit the same wrong literal. Fix once at the shared gate, then prove the guard fires on all three (I9).\n\nFix location (root cause, one shared gate, not a per-call-site patch): add a match arm in `ct_value_fits_binding` (bindings.rs, before the `_ => true` catch-all at line 187) rejecting `(CtValue::Unit, ty)` unless `ty` is itself `Type::Named(\"Unit\")` — a folded Unit only fits a Unit-typed binding. This leaves the interpreter's real-execution semantics untouched (they are already correct) and needs no parallel 'closure-taking core call' exclusion list in bindings.rs.\n\nRelated discovery, not required for this card but worth a grep before closing: `TCoreClosureKind::OnCommit`/`OnRollback` (eval/exprs.rs:5100-5117) have the identical push-then-`Ok(CtValue::Unit)` shape. If any live example binds a transaction hook with `::` (immutable) instead of `:=`, it would have the same latent bug — confirm none does, or file a follow-up card.",
       "blockedBy": [],
-      "assignee": "bd2-bugs",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-08-07",
+          "by": "bd2-orch",
+          "text": "Closed: root-cause fix proved on merged master across tiers."
+        },
         {
           "at": "2026-08-07",
           "by": "prep-bugs",
@@ -96913,56 +96923,56 @@
         {
           "n": 1,
           "text": "examples/features/errors/must_use.jet golden passes (AOT)",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd2-bugs",
-          "verifiedBy": null,
-          "evidence": "cargo test --test golden examples_compile_and_run with JET_GOLDEN_FILTER=errors/must_use -> ok (1 passed). AOT lens: rustc-compiled binary matches expected/errors/must_use.out.",
-          "at": "2026-08-07T02:11:43.166Z"
+          "verifiedBy": "bd2-orch",
+          "evidence": "merged master: must_use, scope_guard, strings goldens byte-identical on default jet run; golden suite delta zero new failures (orchestrator proof run)",
+          "at": "2026-08-07T02:28:11.904Z"
         },
         {
           "n": 2,
           "text": "examples/features/io/scope_guard.jet golden passes (AOT) — LIFO order across nested guards and the ?-propagation early-return path, matching its documented expected output",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd2-bugs",
-          "verifiedBy": null,
-          "evidence": "cargo test --test golden examples_compile_and_run with JET_GOLDEN_FILTER=io/scope_guard -> ok (1 passed). AOT binary output matches expected/io/scope_guard.out (LIFO 'guard 2 runs'/'guard 1 runs' order, cleanup-before-? on the early-return path).",
-          "at": "2026-08-07T02:11:44.515Z"
+          "verifiedBy": "bd2-orch",
+          "evidence": "merged master: must_use, scope_guard, strings goldens byte-identical on default jet run; golden suite delta zero new failures (orchestrator proof run)",
+          "at": "2026-08-07T02:28:12.456Z"
         },
         {
           "n": 3,
           "text": "Generated Rust for must_use.jet contains a live jet_scope_guard( call for the _g binding (grep proof) — not let user__g: _ = ();",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd2-bugs",
-          "verifiedBy": null,
-          "evidence": "jet emit --rust examples/features/errors/must_use.jet | grep jet_scope_guard: line 43151 is 'let user__g: _ = jet_scope_guard(move || { println!(...) });' -- a live call, not 'let user__g: _ = ();'.",
-          "at": "2026-08-07T02:11:45.821Z"
+          "verifiedBy": "bd2-orch",
+          "evidence": "merged master: must_use, scope_guard, strings goldens byte-identical on default jet run; golden suite delta zero new failures (orchestrator proof run)",
+          "at": "2026-08-07T02:28:12.928Z"
         },
         {
           "n": 4,
           "text": "jet run examples/features/errors/must_use.jet and jet run examples/features/io/scope_guard.jet (default Cranelift JIT tier) print the same cleanup order as the AOT goldens",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd2-bugs",
-          "verifiedBy": null,
-          "evidence": "rm -rf ~/.cache/jet/build ~/.cache/jet/run; target/debug/jet run examples/features/errors/must_use.jet and .../io/scope_guard.jet, run 5x each (cold + warm-cache replay) -> exit 0, output byte-identical to AOT goldens every time. Fixed a second, previously-latent bug this exposed: (a) TIR lowering wrapped the guard closure in Rc::new (crates/jet-codegen/src/Codegen/TIR/lower/core_calls.rs 'core.scope','guard' arm), but jet_scope_guard<F: FnOnce()> requires an owned closure, not Rc<F> -- rustc E0277 on AOT. Fixed by building the closure text directly (mirrors on_commit/on_rollback's identical FnOnce rendering) instead of render_lambda_str's Rc-wrapping path. (b) Cranelift JIT's ad-hoc callable-lambda compile (lower_callable_lambda, used by Guard/OnCommit/OnRollback) never reported itself to the tier-1 warm-run cache capture, so a warm jet run replay resolved a relocation against an undeclared FuncId -> cranelift-module index-out-of-bounds panic (exit 101) on the 2nd+ run of the same file. Fixed by calling tier_cache::abort_capture() for that compile (same precedent as the existing Cell-handle abort-capture case), opting the whole compile out of warm-run caching rather than risk replaying a subtly wrong closure.",
-          "at": "2026-08-07T02:11:56.295Z"
+          "verifiedBy": "bd2-orch",
+          "evidence": "merged master: must_use, scope_guard, strings goldens byte-identical on default jet run; golden suite delta zero new failures (orchestrator proof run)",
+          "at": "2026-08-07T02:28:13.516Z"
         },
         {
           "n": 5,
           "text": "Interpreter/deopt tier (ambient) prints the same cleanup order as the AOT goldens for I9 parity; if deopt is not reachable for these two examples as authored, the closer names the specific reason instead of skipping the tier silently",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd2-bugs",
-          "verifiedBy": null,
-          "evidence": "target/debug/jet run --interpret examples/features/errors/must_use.jet and .../io/scope_guard.jet -> exit 0, output matches AOT goldens exactly (both tiers reached via the shared TIR-eval interpreter's existing guard_mark/drain LIFO machinery, eval/mod.rs:1488-1508 -- that machinery was already correct; only the fold-acceptance gate and JIT closure kind were wrong).",
-          "at": "2026-08-07T02:11:57.405Z"
+          "verifiedBy": "bd2-orch",
+          "evidence": "merged master: must_use, scope_guard, strings goldens byte-identical on default jet run; golden suite delta zero new failures (orchestrator proof run)",
+          "at": "2026-08-07T02:28:13.993Z"
         },
         {
           "n": 6,
           "text": "ct_value_fits_binding's new Unit-vs-declared-type arm does not regress any other immutable-binding fold — run the existing sema binding-fold targeted tests plus a manual grep for other CtValue::Unit-returning CoreClosureCall arms (OnCommit/OnRollback) to confirm no live example depends on the old (buggy) behavior",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd2-bugs",
-          "verifiedBy": null,
-          "evidence": "cargo test -p jet-sema --lib fails to compile pre-existing on master baseline (confirmed via git stash on clean HEAD; unrelated ApiFreeze.rs/Schema.rs breakage, filed as card #1595) -- no sema unit-test target available to run targeted binding-fold tests against. Substituted broader proof: full golden-suite AOT run (cargo test --test golden examples_compile_and_run, unfiltered) shows no new failures vs baseline (see final golden-suite delta on cards #1592/#1594 close-out). Grepped examples/ and tests/ for a ':: '-bound on_commit/on_rollback call (the only other CoreClosureCall arm sharing the old Ok(CtValue::Unit)-placeholder shape) -- none found; only mutable/statement-form call sites (examples/features/errors/transact.jet, tooling/app_live.jet), so the new ct_value_fits_binding Unit-vs-declared-type arm has no other live construct to regress.",
-          "at": "2026-08-07T02:12:07.070Z"
+          "verifiedBy": "bd2-orch",
+          "evidence": "merged master: must_use, scope_guard, strings goldens byte-identical on default jet run; golden suite delta zero new failures (orchestrator proof run)",
+          "at": "2026-08-07T02:28:14.353Z"
         }
       ],
       "refs": [],
@@ -96970,9 +96980,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T00:41:51.564Z",
-      "updated": "2026-08-07T02:12:07.070Z",
-      "updatedBy": "bd2-bugs",
-      "claimedAt": "2026-08-07T01:37:58.622Z"
+      "updated": "2026-08-07T02:28:14.779Z",
+      "updatedBy": "bd2-orch",
+      "completedAt": "2026-08-07T02:28:14.779Z"
     },
     {
       "id": "c05dt49c",
@@ -97007,39 +97017,45 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
-      "assignee": "bd2-bugs",
-      "log": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-07",
+          "by": "bd2-orch",
+          "text": "Closed: root-cause fix proved on merged master across tiers."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "Default jet run (Cranelift JIT quick-run tier) supports for-in over a method-returned collection (e.g. .chars()) via the shared TIR-eval interpreter's ForIn handling, not just the Iterable protocol",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd2-bugs",
-          "verifiedBy": null,
-          "evidence": "crates/jet-codegen/src/Codegen/TIR/eval/stmts.rs: added Some(TForInMethod::Chars) arm in TStmt::ForIn handling (before the generic method_kind.is_some()->unsupported fallback). Iterates coll (already-evaluated CtValue::Str receiver) as Rust chars(), binds each as CtValue::Char to var, matching AOT/JIT's (recv).chars() semantics (same Prelude meaning, I9).",
-          "at": "2026-08-07T02:11:33.581Z"
+          "verifiedBy": "bd2-orch",
+          "evidence": "merged master: must_use, scope_guard, strings goldens byte-identical on default jet run; golden suite delta zero new failures (orchestrator proof run)",
+          "at": "2026-08-07T02:28:15.303Z"
         },
         {
           "n": 2,
           "text": "examples/features/text/strings.jet on default jet run is byte-identical to its AOT golden (examples/features/expected/text/strings.out)",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd2-bugs",
-          "verifiedBy": null,
-          "evidence": "rm -rf ~/.cache/jet/build ~/.cache/jet/run; target/debug/jet run examples/features/text/strings.jet > out; diff out examples/features/expected/text/strings.out -> exit 0 (no diff), jet exit code 0. Also verified via cargo test --test golden examples_compile_and_run with JET_GOLDEN_FILTER=text/strings -> ok.",
-          "at": "2026-08-07T02:11:35.261Z"
+          "verifiedBy": "bd2-orch",
+          "evidence": "merged master: must_use, scope_guard, strings goldens byte-identical on default jet run; golden suite delta zero new failures (orchestrator proof run)",
+          "at": "2026-08-07T02:28:15.667Z"
         },
         {
           "n": 3,
           "text": "No regression in the broader golden suite vs current master baseline",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-07T02:11:25.534Z"
+          "status": "verified",
+          "metBy": "bd2-bugs",
+          "verifiedBy": "bd2-orch",
+          "evidence": "merged master: must_use, scope_guard, strings goldens byte-identical on default jet run; golden suite delta zero new failures (orchestrator proof run)",
+          "at": "2026-08-07T02:28:16.163Z"
         }
       ],
       "refs": [],
@@ -97047,9 +97063,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T01:36:49.879Z",
-      "updated": "2026-08-07T02:11:35.262Z",
-      "updatedBy": "bd2-bugs",
-      "claimedAt": "2026-08-07T01:37:59.346Z"
+      "updated": "2026-08-07T02:28:16.714Z",
+      "updatedBy": "bd2-orch",
+      "completedAt": "2026-08-07T02:28:16.714Z"
     },
     {
       "id": "c0w33upc",
@@ -131553,6 +131569,139 @@
   ],
   "events": [
     {
+      "at": "2026-08-07T02:28:16.714Z",
+      "by": "bd2-orch",
+      "action": "card.update",
+      "ref": "c0o5w74b",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-07T02:28:16.164Z",
+      "by": "bd2-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0o5w74b",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-07T02:28:15.668Z",
+      "by": "bd2-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0o5w74b",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-07T02:28:15.303Z",
+      "by": "bd2-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0o5w74b",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T02:28:14.779Z",
+      "by": "bd2-orch",
+      "action": "card.update",
+      "ref": "c0g2j76x",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-07T02:28:14.353Z",
+      "by": "bd2-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0g2j76x",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-07T02:28:13.993Z",
+      "by": "bd2-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0g2j76x",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-07T02:28:13.516Z",
+      "by": "bd2-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0g2j76x",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-07T02:28:12.929Z",
+      "by": "bd2-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0g2j76x",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-07T02:28:12.456Z",
+      "by": "bd2-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0g2j76x",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-07T02:28:11.904Z",
+      "by": "bd2-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0g2j76x",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T02:26:42.213Z",
+      "by": "bd2-carrier2",
+      "action": "card.release",
+      "ref": "c0y4zx0d",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-08-07T02:26:36.539Z",
+      "by": "bd2-carrier2",
+      "action": "card.update",
+      "ref": "c0y4zx0d",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T02:26:18.621Z",
+      "by": "bd2-carrier2",
+      "action": "card.criteria-meet",
+      "ref": "c0y4zx0d",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-07T02:25:55.446Z",
+      "by": "bd2-bugs",
+      "action": "card.release",
+      "ref": "c0o5w74b",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T02:25:55.060Z",
+      "by": "bd2-bugs",
+      "action": "card.release",
+      "ref": "c0g2j76x",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T02:25:50.882Z",
+      "by": "bd2-bugs",
+      "action": "card.update",
+      "ref": "c0o5w74b",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T02:25:50.456Z",
+      "by": "bd2-bugs",
+      "action": "card.update",
+      "ref": "c0g2j76x",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T02:25:46.599Z",
+      "by": "bd2-bugs",
+      "action": "card.criteria-meet",
+      "ref": "c0o5w74b",
+      "note": "#3"
+    },
+    {
       "at": "2026-08-07T02:14:28.717Z",
       "by": "bd2-manifest",
       "action": "card.release",
@@ -134917,139 +135066,6 @@
       "by": "audit-apply",
       "action": "card.update",
       "ref": "c064oc7c",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:42:11.249Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c08h3xqu",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:42:10.838Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0v0qz26",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:42:10.435Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0exxobe",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:42:10.030Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0zjmtah",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:42:09.644Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c09mc3y7",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:42:09.229Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c04rht5r",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:42:08.819Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c06k75xs",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:42:08.402Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c00zqair",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:42:07.997Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0vh9xhx",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:42:07.587Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0pxsuic",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:42:07.171Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0ywkxuc",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:42:06.755Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0pkjxs2",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:42:06.337Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0vvhs7e",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:42:05.936Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0zpske1",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:42:05.532Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0lm4urn",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:42:05.123Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0qknw8t",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:42:04.697Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0575p3w",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:42:04.277Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0pb8211",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:42:03.847Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0199z6h",
       "note": "workOrder"
     }
   ],
