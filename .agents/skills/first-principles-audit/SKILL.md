@@ -62,10 +62,42 @@ does not produce those, the synthesis is not done.
   product tradeoff. Ratified decisions still need a named amendment in a
   ballot, but the ballot should propose the break whenever the break is
   better.
-- **Write everything with the `simple` skill.** Proposal, ballots, and chat
-  reports: short sentences, common words, one idea per sentence, no dense
-  jargon walls. The owner has rejected LLM-coded dense prose. Load `simple`
-  before writing any owner-facing text and follow it in every paragraph.
+- **Write everything with the `simple` skill — and simple never means stuffy.**
+  Short sentences, common words, one idea per sentence, no dense jargon walls.
+  The owner has rejected LLM-coded dense prose AND stodgy report-speak — both
+  read as "absolute shit" to him. Kill phrases like "it should be noted",
+  "serves to", "is responsible for", "in order to", "the mechanism by which".
+  Write like a sharp engineer talking: direct, concrete, alive. If a sentence
+  would sound pompous said out loud, rewrite it. Load `simple` before writing
+  any owner-facing text and follow it in every paragraph.
+- **Show, don't describe. The owner decides from visuals.** His words: "the
+  visuals ARE ALWAYS the most useful for me. I need to be able to visualize."
+  Prose exists only to prep and clarify what he is about to see; the payload
+  is what the code looks like and how the thing is structured, shown on the
+  page. Every claim gets a code block, a before/after pair, a tree, or a
+  table. A section that is all prose and no picture is a defect. Tables that
+  line up the divergent forms side by side (the "five coats of one law" kind)
+  are explicitly what he wants more of.
+- **Format for the Jet doc viewer: never hard-wrap prose.** The owner reads
+  proposals in a viewer that renders every newline, so hard-wrapped lines
+  produce broken, ragged paragraphs — a recurring complaint. One paragraph =
+  one long line; blank line between paragraphs; wrap nothing at a column
+  count. Line breaks belong only in code fences, tables, and lists. This
+  applies to every owner-facing markdown doc the audit produces.
+- **A syntax-area audit rethinks the syntax space, not just the inventory.**
+  Greenfield means the unclaimed lexical space is part of the sweep: prefix
+  and suffix conventions (`_name`, `__internal`, dunder/sunder shapes),
+  reserved namespaces for compiler internals, sigils, casing — what each
+  could mean, what peer languages did with them, and either a proposed use
+  or a stated reservation. Consolidating existing spellings alone is an
+  incomplete run; the owner has rejected one for exactly this.
+- **Every magic default owes the expert an audit trail and an explicit form.**
+  Whenever the proposal makes something automatic (imports, discovery,
+  wiring), it must answer in-line: how does an expert SEE what the magic
+  resolved (a real command, real output), how do they write it explicitly
+  when they need control (real syntax, e.g. a relative-path form), and how
+  do they refuse the magic project-wide. Magic with no ledger and no manual
+  spelling is a design hole, not a convenience.
 - **Never silently contradict ratified law.** Every ratified decision the
   proposal touches is either respected or named as an explicit amendment in a
   ballot. Frozen walls (no top type, no HKT, no macros, comptime never
@@ -123,44 +155,53 @@ space is where the unification usually hides.
 
 ## Phase 3 — the proposal (`docs/proposals/<area>-<slug>.md`)
 
-Owner doc style throughout: `simple`-skill prose, plain words, no repetition,
-no theming. Structure, in order:
+Owner doc style throughout: `simple`-skill prose that is direct and alive,
+plain words, no repetition, no theming, no hard-wrapped lines (one paragraph
+per line — the doc viewer renders every newline). The shape below is the
+owner's stated preference verbatim: exsum, then a brief look at the issues
+carried by a side-by-side table, then the proposal itself inline with worked
+examples climbing the rungs, closing on the full final vision shown
+visually. Prose preps; visuals decide. Structure, in order:
 
-1. **Executive summary first.** A legible exsum that ties the whole thing
-   together — the finding, the one idea, why now, the concrete payoffs, what
-   the ballots ask, what does not change. The owner reads the body and the
-   ballots with the full picture already in mind. This is mandatory; the
-   owner has asked for it explicitly.
-2. **Glossary** — define every term of art before first use.
-3. **The one idea** — one sentence, then one paragraph, with the beginner
-   story and the expert story.
-4. **Evidence** — the shadow-systems table with file:line proof.
-5. **The model** — axes, planes, laws, with the "ohhh" connections spelled
-   out explicitly as their own list.
-6. **The surface** — the heart of the proposal, not an afterthought. A full
-   redesign of the syntax, APIs, and structure the model implies: what gets
-   renamed, what gets deleted, what gets a new spelling, and why each change
-   makes code simpler to read and write. Present it as before/after pairs
-   from real programs. Breaking changes are welcome; mark each item ratified,
-   amended, or new.
-7. **Beginner magic, expert control** — mandatory: the ladder described in the
-   non-negotiables above, in real code, from zero ceremony to full authority
-   control. A proposal without this section is not finished.
-8. **What it looks like** — mandatory: complete example programs in real
-   syntax showing the whole model working together, spanning the beginner
-   default, the rich middle, and the expert opt-in extremes. Show today's
-   code next to the proposed code for the same job. Mark every
+1. **Executive summary first.** A legible, cleanly formatted exsum that ties
+   the whole thing together — the finding, the one idea, why now, the
+   concrete payoffs, what the ballots ask, what does not change. The owner
+   reads everything after it with the full picture in mind. Mandatory.
+2. **The problem, briefly.** A short prose setup and then the side-by-side
+   evidence table — every divergent form of the same underlying thing, its
+   home (file:line), and its defect. The table carries this section; keep
+   the prose around it tight. Fold any needed glossary into a few lines
+   here; define terms at first use.
+3. **The proposal, inline and example-led.** The heart of the doc. Work
+   through the redesign element by element, and for each one show it:
+   before/after pairs from real programs, each pair introduced by one or two
+   plain sentences saying what to look at. Climb the rungs inside each
+   element — beginner (types nothing), intermediate, expert (full control) —
+   as real code, with the rule that no upper rung changes what the lowest
+   rung does. For every magic default, show the expert's three exits
+   in-line: the command that reveals what it did, the explicit spelling
+   that replaces it, the project switch that refuses it. Mark every item
+   ratified, amended, or new. Axes, planes, and the law live here too,
+   stated where the examples make them obvious — the "ohhh" connections
+   spelled out right where the reader can see them on the page.
+4. **The final vision.** Mandatory closing spread, maximally visual:
+   complete example programs in real syntax spanning beginner default to
+   expert extreme, today's code next to the proposed code for the same job,
+   and the structure of the end state shown as a tree or layout diagram
+   (module tree, file layout, registry shape — whatever the area's
+   structure is). This is the section the owner decides from; if it were
+   the only section he read, the proposal should still land. Mark every
    not-yet-ratified line "proposed" — the review pass checks this.
-9. **What this unlocks** — domain by domain, extremes included.
-10. **What stays** — only things that earn their place: walls kept on
+5. **What this unlocks** — domain by domain, extremes included; brief.
+6. **What stays** — only things that earn their place: walls kept on
    purpose, zero-cost kept, spellings kept because they win on merit.
    Never "kept because shipped".
-11. **Decisions for the owner** — a compact direction-level table mapping to
+7. **Decisions for the owner** — a compact direction-level table mapping to
    the ballot slate; each ballot stands alone so any subset can be adopted.
-12. **Implementation shape** — phased: (A) internal re-founding with no
-    surface change and all tests green; (B) land ratified-but-unbuilt work on
-    the new substrate so it is built once; (C) balloted surface unifications,
-    each a coherent greenfield migration that deletes the replaced form.
+8. **Implementation shape** — phased: (A) internal re-founding with no
+   surface change and all tests green; (B) land ratified-but-unbuilt work on
+   the new substrate so it is built once; (C) balloted surface unifications,
+   each a coherent greenfield migration that deletes the replaced form.
 
 ## Phase 4 — Tower (ballots are part of the deliverable)
 
@@ -215,3 +256,16 @@ no theming. Structure, in order:
   units) before adding any new enum, handle, or wrapper — a task failure
   should ride the same rails as every other failure.
 - Dense prose. If a paragraph needs two reads, rewrite it with `simple`.
+- Stuffy report-speak. `simple` compliance does not excuse writing that
+  sounds like a committee. The owner called one run's prose "terrible &
+  stodgy & stuffy" — direct and alive, or rewrite.
+- Hard-wrapped prose lines. They render as broken ragged paragraphs in the
+  owner's doc viewer. One paragraph per line, always.
+- A prose-heavy section with no code block, table, or diagram. The owner
+  decides from visuals; describing a design without showing it fails him.
+- A syntax audit that only consolidates existing spellings and never
+  explores the open lexical space (underscore conventions, reserved
+  namespaces, sigils). The owner rejected a run as incomplete for this.
+- Magic with no expert exit shown in-line: no command to see what it
+  resolved, no explicit spelling to replace it, no switch to refuse it.
+  "Beginners get magic" without "experts get the ledger" is half a design.
