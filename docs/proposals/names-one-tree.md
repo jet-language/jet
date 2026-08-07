@@ -115,10 +115,10 @@ Inside the compiler (file:line evidence from this audit):
 |---|-----------|-------|
 | B1 | six binding stores, no symbol table | `Checker.scopes` (jet-sema/src/Sema/mod.rs:1250), `LowerEnv.locals` (jet-codegen/src/Codegen/TIR/lower/env.rs:24), `EvalCtx` (TIR/eval/mod.rs:708), `SemanticSymbolIndex` (jet-semindex/src/Symbols.rs:70), `Session.scope` (jet-repl/src/lib.rs:572), `Cx` (Codegen/Context.rs:82) |
 | B2 | import maps built twice from the same AST | sema Bundle.rs:1952–2148 vs Codegen/Imports.rs:139–251, including a second copy of the re-export walk |
-| B3 | call-name ladder twice, aligned by comment | Sema CheckerInfer/calls/direct_calls.rs:91 vs Codegen TIR/subset/expressions.rs:74 ("MUST match") |
+| B3 | call-name ladder re-implemented in codegen, plus internal copies aligned by comment | Sema CheckerInfer/calls/direct_calls.rs:91 vs Codegen TIR/subset/expressions.rs:74–235 (alignment comment at :219); third partial copy at method_calls.rs:1118 |
 | B4 | visibility checked twice with different rules | sema checks `pub` + `pub(package)`; Codegen/Imports.rs:83–426 filters on bare `is_pub` — `pub(package)` is invisible there |
 | B5 | six mangling sites plus ~30 inline `format!("user_…")` bypasses; JIT has its own scheme | Codegen/mod.rs:1302 canonical; jet-jit/src/jit/types_meta.rs:351 separate |
-| B6 | module scoping by string convention | members stored as `{alias}__{method}` and recovered by byte slicing (Sema/CheckerCoreLib/imports.rs:49); sibling calls fixed by AST string rewrite (Bundle/InlineCalls.rs:6) — a sibling used as a value silently misses |
+| B6 | module scoping by string convention | members stored as `{alias}__{method}` and recovered by byte slicing (Sema/CheckerCoreLib/imports.rs:49); sibling calls fixed by AST string rewrite (Bundle/InlineCalls.rs:6) — a sibling used as a value falls outside the rewrite and can only error |
 | B7 | Core surface as Rust string tables | predicates.rs:51 (~60 module paths), module_items.rs (1148 lines), fixed_sigs.rs (3236 lines); one tool string-parses sema's Rust source via `include_str!` (jet-devserver Canvas/query_actions.rs:583) |
 | B8 | three unrelated things called "prelude" | ambient ident list; `Units.jet` re-parsed at every check (Bundle.rs:2677); the Rust runtime text under `Prelude/**` |
 | B9 | "did you mean" search twice with different candidate sets | names_incdec.rs:66 vs direct_calls.rs:749 |
@@ -140,7 +140,9 @@ Three axes. Every name has all three; nothing else exists.
 2. **Fence** — who may cross the edge: private (default), `pub(package)`,
    `pub`. `_name` adds "not a promise" on top of any fence.
 3. **Grade** — when the name exists: runtime, compile time (`$name`,
-   D-META-STAGE1), or compiler fact (`$layout`, `$build`; D-FACT law).
+   D-META-STAGE1), or compiler fact (`$layout`, `$build`;
+   D-LAYOUT-FACTS1, D-CONF-READ1, and the fact-law capstone on card
+   #1620).
 
 The law, restated: *a declaration attaches; an alias only points.
 Declarations never collide. A declaration replaces an alias — never another
@@ -167,7 +169,9 @@ The "ohhh" connections:
   D-SPREAD1 member spread and the D-CORE-USELIST1 use list both fan one
   prefix across bracketed members. One meaning for `.[ ]`: "these members
   of that prefix." In expression position it builds values; after `use` it
-  builds aliases. The sigil is not overloaded; the law is shared.
+  builds aliases. The entry grammars stay as ratified — bare members in
+  expressions (E0961, D-SPREAD1), `as` and dotted paths in `use` lists
+  (D-CORE-USELIST1). Neither ruling changes; the law they share gets said.
 - **The prelude is not a mechanism; it is a module.** A ratified alias list
   (`pub use`) in Core source gives the same names, keeps growth
   ballot-gated, and deletes a closed compiler table. `#NoPrelude` means
@@ -223,7 +227,10 @@ Deleted spellings: `use "path"`, `use "path" as x`, and the file-reference
 declaration `module math`. A directory is a namespace; `grades/scoring.jet`
 is `grades.scoring`. `module name { }` stays as the way to group names
 inside a file — philosophy already calls inline and file modules one
-feature with two entry points.
+feature with two entry points. This re-frames U3's "single outermost
+construct" clause: a declared module nests under its file's namespace,
+and the common case — one declaration matching the filename — keeps its
+path unchanged. The FILES1 ballot names that amendment.
 
 ### 2. One visibility story — (amends D-VISDEFAULT2, D-SHAPE-INTERNAL1; ballot D-NAME-FENCE1)
 
@@ -239,22 +246,27 @@ pub fn _legacy() { }              // soft-public, warns outside
 module _draft { }                 // skipped from discovery
 ```
 
-After (proposed, three marks with one meaning each):
+After (proposed, four marks with one meaning each):
 
 ```jet
 pub fn api() { }                  // public (ratified)
 fn helper() { }                   // private (ratified)
 pub(package) fn shared() { }      // package fence (ratified)
 pub module text { … }             // public-by-default subtree (proposed,
-                                  // replaces #PubFile + priv)
+                                  // replaces #PubFile; priv opts out
+                                  // inside it, exactly as today)
 _name                             // one meaning anywhere: internal —
                                   // skipped from discovery, callable,
                                   // warns outside, never a promise
 ```
 
 `pub module` puts the "public by default" flip at the attach point — the
-module — instead of a file marker plus a second keyword. `priv`, `#PubFile`,
-and the separate soft-public rule fold in. `__name` stays Jet's.
+module — instead of a file marker. `priv` keeps its one existing meaning
+(opt out inside a public-by-default region) and simply moves with the
+flip. Note: `pub module` parses today with a weaker meaning — the module
+is visible but members still need `pub` — so this is a redefinition of
+that spelling, named in the FENCE1 ballot. `#PubFile` and the separate
+soft-public rule fold in. `__name` stays Jet's.
 
 ### 3. The prelude in the open — (amends the D-PRELUDE-LAW1 mechanism, not its list; ballot D-NAME-ALIAS1)
 
@@ -265,12 +277,19 @@ After (proposed) — Core ships a readable prelude module; the compiler opens
 it for every file:
 
 ```jet
-// core/prelude.jet (Core source, ratified list, ballot-gated growth)
-pub use core.io.[print, eprint, input]
-pub use core.run.[panic, require, assert, assert_eq]
+// core/prelude.jet (Core source; the ratified list, ballot-gated growth)
+pub fn print(value: Any) { … }         // ambient basics are declared here
+pub fn panic(message: String) { … }    // (their meaning stays in Prelude
+pub fn require(cond: Bool) { … }       //  per I9, as today)
 pub use core.time.[Clock, Instant, Date, Duration]
-pub use core.files.[Path, read_file, write_file, file_exists]
+pub use core.files.[Path, read as read_file, write as write_file]
+pub use core.comptime.[embed_file, embed_bytes, find, fetch]
 ```
+
+Exact member spellings follow the ratified Core tree (D-CORE-TREE1) and
+are settled by #1576; the lines above show the shape, not the final list.
+The comptime-gated four stay gated: the gate is a property of those
+declarations, and an alias never changes what it points at.
 
 Your declaration still wins — now by the alias law, with the ratified
 shadow warning. `#NoPrelude` still opts a file out. The D-CORE-PRELUDE1
@@ -294,7 +313,7 @@ module report {
 }
 ```
 
-### 5. Names round-trip — (amends D-METAREFLECT1 lightly; ballot D-NAME-REFLECT1)
+### 5. Names round-trip — (amends D-METAREFLECT1 and D-ANY-JAI1 lightly; ballot D-NAME-REFLECT1)
 
 Before: `reflect.of(x).type_name()` returns a bare name; two `Point` types
 in different modules reflect identically. Diagnostics mostly print bare
@@ -330,6 +349,9 @@ use core.[files as fs, http]      // aliases fs, http            (ratified)
 
 One sentence enters the spec: `.[ ]` always means "these members of that
 prefix"; expression position yields values, `use` position yields aliases.
+The entry grammars stay as ratified on each side — bare members in
+expressions (E0961), `as` and dotted paths after `use` — so neither
+D-SPREAD1 nor D-CORE-USELIST1 is amended.
 
 ## Beginner magic, expert control
 
@@ -396,10 +418,10 @@ The two failure modes, checked by name:
 - **Magic without an exit**: auto-visible files can be refused per file
   (`_name` keeps a file out of discovery; explicit `use project._name`
   still reaches it), seen (`jet project parts` names every contributed
-  member and its source file), and switched (a package that wants explicit
-  imports everywhere sets it once in `package.jet` — the FILES1 ballot
-  carries this switch). The prelude keeps its three exits: shadow it,
-  `#NoPrelude`, read it in Core source.
+  member and its source file), and switched (a project lint setting
+  requires explicit `use` lines without changing what code means — the
+  FILES1 ballot carries this lint). The prelude keeps its three exits:
+  shadow it, `#NoPrelude`, read it in Core source.
 
 ## What it looks like
 
@@ -441,11 +463,11 @@ fn run() {
 pub fn letter(score: Int) => String { … }
 pub fn curve(score: Int) => Int { … }
 
-// util.jet
-pub module util {                      // proposed: pub module = public
-    fn shout(s: String) => String = s.upper() + "!"   // default here
-    _pad(s: String) … // internal helper, one `_` story           (proposed)
-}
+// util.jet — the file is already module `util` (proposed)
+pub module util                        // header line: public-by-default
+                                       // file, replaces #PubFile (proposed)
+fn shout(s: String) => String = s.upper() + "!"       // public by default
+fn _pad(s: String) => String { … }     // internal, one `_` story (proposed)
 ```
 
 The rich middle — a library package with a curated door:
@@ -464,16 +486,17 @@ The expert extreme — computed subtree, facts, no prelude:
 
 ```jet
 #NoPrelude
-use core.io.[print]
+use core.prelude.[print]               // take back just one name (proposed)
 
 module cache<K>(capacity: Int) {       // ratified generic module
+    pub struct Entry { key: K }
     pub fn get(k: K) => K? { … }
 }
 module hot :: cache<String>($build.settings.slots)   // ratified splice
 
 fn run() {
-    print(hot.reflect().path)          // "project.hot"      (proposed)
-}
+    print(hot.Entry.reflect().path)    // "project.hot.Entry"  (proposed;
+}                                       // members via instance, ratified)
 ```
 
 ## What this unlocks
@@ -486,7 +509,7 @@ fn run() {
   read one ledger instead of five models; the devserver stops parsing
   sema's Rust source with `include_str!`.
 - **Metaprogramming**: derives emit paths that resolve anywhere, closing
-  the latent unqualified-emission bug family (E2710) and the inline-module
+  the unqualified-name traps in derive output and the inline-module
   Codable gap by construction — generated code names members by path, and
   paths mean the same thing everywhere.
 - **Critical builds**: `pub(package)` enforced in one place ends the
@@ -525,18 +548,20 @@ per option live in the Tower ballots.
 | D-NAME-TREE1 | Adopt the model: one tree, attach/alias law, one sema name ledger inside the compiler? | A adopt / B adopt the law but keep today's import surface / C reject |
 | D-NAME-FILES1 | Are project files visible without imports? | A yes, whole project tree / B yes, same directory only / C no, keep explicit imports |
 | D-NAME-ALIAS1 | Where does the prelude live? | A a readable Core module of `pub use` aliases / B today's compiler table / C mode-gated: bigger list for single-file programs, small list in packages |
-| D-NAME-FENCE1 | Which visibility set? | A `pub`, `pub(package)`, `pub module`, one `_` story (deletes `#PubFile`/`priv`/L0601 special) / B keep today's six spellings / C minimal: `pub` and `_` only, delete `pub(package)` and `#PubFile` |
+| D-NAME-FENCE1 | Which visibility set? | A `pub`, `pub(package)`, `pub module` (+ `priv` inside it), one `_` story (deletes `#PubFile` and the L0601 special) / B keep today's six spellings / C minimal: `pub` and `_` only, delete `pub(package)`, `#PubFile`, and `priv` |
 | D-NAME-WALK1 | Admit `use`/`pub use` inside module bodies, and write the one `.[ ]` sentence into the spec? | A both / B only inline `use` / C neither |
 | D-NAME-ROLEMOD1 | Finish the ratified retirement of role modules (`module env.dev`) into typed values? | A yes, edit U3/U8, delete `ENV_FILE`/`pkg.jet` readers / B keep role modules and amend D-ECO-DECL1 back / C defer |
-| D-NAME-REFLECT1 | Do reflection and diagnostics print canonical typeable paths? | A yes, add `.path`, keep `.name` as leaf / B no |
+| D-NAME-REFLECT1 | Do reflection and diagnostics print canonical typeable paths? | A yes, add `.path`, keep `.name` as leaf / B no, keep bare names / C paths in tools only |
 
 Ratified rulings each ballot amends are named inside the ballot text:
-FILES1 amends S16 (D-S16-USE, D-MOD1/2, D-MOD-DIR) and touches D-CALLDUAL1's
-scope wording; ALIAS1 amends the D-PRELUDE-LAW1 mechanism and D-PRELUDEX1
-wording; FENCE1 amends D-VISDEFAULT2 and D-SHAPE-INTERNAL1; WALK1 lifts
-D-GENMOD-BODY1's exclusion clause; ROLEMOD1 amends U3, U8, and
-D-JPK-MODBODY1 to match D-ECO-DECL1/D-ECO-FILEROOT1; REFLECT1 amends
-D-METAREFLECT1.
+FILES1 amends S16 (D-S16-USE, D-MOD1/2, D-MOD-DIR) and
+U3/D-SHAPE-MODULEINTERNAL1's outermost-construct and discovery-naming
+clauses, and touches D-CALLDUAL1's scope wording; ALIAS1 amends the
+D-PRELUDE-LAW1 mechanism and D-PRELUDEX1 wording; FENCE1 amends
+D-VISDEFAULT2 and D-SHAPE-INTERNAL1 and redefines the current `pub module`
+spelling; WALK1 lifts D-GENMOD-BODY1's exclusion clause; ROLEMOD1 amends
+U3, U8, and D-JPK-MODBODY1 to match D-ECO-DECL1/D-ECO-FILEROOT1; REFLECT1
+amends D-METAREFLECT1 and the D-ANY-JAI1 runtime reflection surface.
 
 ## Implementation shape
 
