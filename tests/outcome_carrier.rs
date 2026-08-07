@@ -14,6 +14,44 @@ fn compile(name: &str, src: &str) -> String {
     out.rust
 }
 
+/// Run a program on the interpreter tier — the tier the corpus gate proves
+/// agrees with AOT — so a claim about what a read *answers* is tested, not just
+/// what it emits.
+fn run_jet(name: &str, src: &str) -> String {
+    let dir = std::env::temp_dir().join("jet_outcome_carrier");
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join(format!("{name}.jet"));
+    fs::write(&file, src).unwrap();
+
+    // The front end and the evaluator both recurse through the program, so run
+    // them with the same room the other interpreter tests give them rather than
+    // the default test stack.
+    let (name, src) = (name.to_string(), src.to_string());
+    std::thread::Builder::new()
+        .stack_size(32 * 1024 * 1024)
+        .spawn(move || {
+            let path = file.to_str().unwrap();
+            let mut bundle = jet::Loader::load_entry(path).expect("fixture should load");
+            let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+            assert!(
+                !diags
+                    .iter()
+                    .any(|d| matches!(d.severity, jet::Diagnostics::Severity::Error)),
+                "{name} failed the front end:\n{}",
+                jet::render_diagnostics(path, &src, &diags)
+            );
+            let program = jet::Codegen::TIR::lower_jit_program(&bundle)
+                .unwrap_or_else(|| panic!("{name} must lower for the interpreter"));
+            let mut sink = jet::Comptime::DevSink::default();
+            jet::Codegen::TIR::run_named_func(&program, "run", Vec::new(), &mut sink)
+                .unwrap_or_else(|diag| panic!("{name} failed on the interpreter: {diag:?}"));
+            sink.stdout
+        })
+        .expect("spawn the interpreter thread")
+        .join()
+        .expect("the interpreter thread must finish")
+}
+
 fn user_body(rust: &str, function: &str) -> String {
     let head = format!("pub fn {function}(");
     let start = rust
@@ -103,8 +141,10 @@ fn run() {
     );
 }
 
-/// The carrier's middle states: a failure that kept part of its work, and an
-/// outcome that collected a note. Both read off the outcome without unwrapping.
+/// The carrier's middle states: a failure that kept part of its work, and a
+/// failure that had something to say. Both live on the outcome value, so two
+/// outcomes alive at once never share a fact and reading one twice answers the
+/// same thing both times.
 #[test]
 fn the_middle_states_read_off_the_same_carrier() {
     let rust = compile(
@@ -113,38 +153,82 @@ fn the_middle_states_read_off_the_same_carrier() {
 struct ImportErr {
     broken: Int
     partial: [String]
+    notes: [String]
 }
 
-fn import_rows(rows: [String]) => [String] ? ImportErr {
+fn import_rows(label: String, rows: [String]) => [String] ? ImportErr {
     good :: rows.filter((row) => row != "")
     broken :: rows.len() - good.len()
     if broken > 0 {
-        return Err(ImportErr.{ broken: broken, partial: good })
+        return Err(ImportErr.{ broken: broken, partial: good, notes: [~label] })
     }
     return Ok(good)
 }
 
 fn run() {
-    spotty :: import_rows(["ada", "", "alan"]).noting("one row was empty")
-    print((spotty.partial() ?? []).len())
-    print(spotty.notes().len())
+    people :: import_rows("people", ["ada", "", "alan"])
+    ports :: import_rows("ports", ["80", ""])
+    print(people.notes().join(""))
+    print(ports.notes().join(""))
+    print(people.notes().join(""))
+    print((people.partial() ?? []).len())
 }
 "#,
     );
     let run = user_body(&rust, "user_run");
     assert!(
-        run.contains("jet_partial(&(")
-            && run.contains("__jet_report.user_partial.clone()"),
+        run.contains("jet_partial(&(") && run.contains("__jet_report.user_partial.clone()"),
         "`.partial` must marshal onto the prelude's `jet_partial`:\n{run}"
     );
     assert!(
-        run.contains("jet_noting(") && run.contains("jet_notes(&("),
-        "notes must ride the prelude's journey, not a second one:\n{run}"
+        run.contains("jet_notes(&(") && run.contains("__jet_report.user_notes.clone()"),
+        "`.notes` must marshal onto the prelude's `jet_notes`:\n{run}"
     );
     // The middle states are the same carrier, so no third type appears.
     assert!(
         !run.contains("Partial<") && !run.contains("Noted<"),
         "the middle states need no third type:\n{run}"
+    );
+
+    // And both facts really are read off the value: two outcomes alive at once
+    // answer differently, and the second read of one answers what the first
+    // did. Nothing here can pass if a fact is kept beside the value.
+    let out = run_jet(
+        "middle_states_run",
+        r#"
+struct ImportErr {
+    broken: Int
+    partial: [String]
+    notes: [String]
+}
+
+fn import_rows(label: String, rows: [String]) => [String] ? ImportErr {
+    good :: rows.filter((row) => row != "")
+    broken :: rows.len() - good.len()
+    if broken > 0 {
+        return Err(ImportErr.{ broken: broken, partial: good, notes: [~label] })
+    }
+    return Ok(good)
+}
+
+fn run() {
+    people :: import_rows("people", ["ada", "", "alan"])
+    ports :: import_rows("ports", ["80", ""])
+    clean :: import_rows("clean", ["ada"])
+    print(people.notes().join(""))
+    print(ports.notes().join(""))
+    print(people.notes().join(""))
+    print((people.partial() ?? []).join(","))
+    print((ports.partial() ?? []).join(","))
+    print(clean.notes().len())
+    print((clean.partial() ?? ["kept nothing"]).join(","))
+}
+"#,
+    );
+    assert_eq!(
+        out,
+        "people\nports\npeople\nada,alan\n80\n0\nkept nothing\n",
+        "two outcomes must not share a fact, and a second read must answer the first"
     );
 }
 
@@ -196,9 +280,9 @@ fn run() {
 /// and no branch beyond the one the payload already needs.
 #[test]
 fn an_unread_verdict_costs_nothing() {
-    // The carrier's optional view, exactly as `Prelude/Outcome.rs` declares it.
-    struct JetAbsent;
-    type JetOutcome<T, E> = Result<T, E>;
+    // The carrier itself, not a copy of it: these are the very types the
+    // prelude embeds, so adding a field to either one fails this test.
+    use jet::Outcome::{JetAbsent, JetOutcome};
 
     assert_eq!(
         std::mem::size_of::<JetOutcome<i64, JetAbsent>>(),

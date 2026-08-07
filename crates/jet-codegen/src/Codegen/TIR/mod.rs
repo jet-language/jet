@@ -1960,12 +1960,16 @@ pub enum THostCall {
         method: String,
         args: Vec<TExpr>,
     },
-    /// D-FAIL-CARRIER1=A: read the payload a failure kept. `field` is the Jet
-    /// field the error type carries it on; emit spells the projection onto the
-    /// prelude's `jet_partial`, so no Rust text is written here.
-    CarrierPartial {
+    /// D-FAIL-CARRIER1=A: read a middle state off the outcome. `field` is the
+    /// Jet field the error type carries it on, and `notes` picks which prelude
+    /// reader decides what a success answers — `jet_notes` for the words a
+    /// failure had, `jet_partial` for the payload it kept. Every engine reads
+    /// this one node, so the rule is stated once and no Rust text is written
+    /// here.
+    CarrierFact {
         recv: Box<TExpr>,
         field: String,
+        notes: bool,
     },
     /// `Cell(Read|Edit)Guard.map/split`: sema-proved paths, shared by all tiers.
     CellGuardProject {

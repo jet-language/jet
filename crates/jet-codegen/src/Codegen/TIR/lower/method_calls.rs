@@ -613,33 +613,25 @@ pub(crate) fn lower_method_call(
         };
     }
     // D-FAIL-CARRIER1=A: the carrier's middle states. `.partial` reads the
-    // payload a failure kept, `.noting` attaches a note, `.notes` reads them
-    // back. The prelude's `jet_partial`/`jet_noting`/`jet_notes` hold the one
-    // meaning; these are plain marshalling calls onto them.
+    // payload a failure kept and `.notes` reads what it had to say. Both live
+    // on the outcome value; the prelude's `jet_partial`/`jet_notes` hold the
+    // one meaning, and one node carries both to every engine.
     if recv_type.as_deref() == Some("__Carrier__") {
+        let notes = method == Syntax::METHOD_OUTCOME_NOTES;
         let recv = lower_expr(receiver, cx, env);
-        let host = match method {
-            Syntax::METHOD_OUTCOME_PARTIAL => crate::Codegen::TIR::THostCall::CarrierPartial {
-                recv: Box::new(recv),
-                field: Syntax::FIELD_OUTCOME_PARTIAL.to_string(),
-            },
-            Syntax::METHOD_OUTCOME_NOTING => crate::Codegen::TIR::THostCall::Helper {
-                helper: format!("{}jet_noting", cx.root_prefix),
-                args: vec![
-                    crate::Codegen::TIR::THostArg::Expr(recv),
-                    crate::Codegen::TIR::THostArg::Expr(lower_expr(&args[0].expr, cx, env)),
-                ],
-            },
-            _ => crate::Codegen::TIR::THostCall::Helper {
-                helper: format!("{}jet_notes", cx.root_prefix),
-                args: vec![crate::Codegen::TIR::THostArg::Borrow(recv)],
-            },
-        };
         return TExpr {
             ty: resolved_ret
                 .cloned()
                 .unwrap_or_else(|| Type::List(Box::new(Type::String))),
-            kind: TExprKind::HostCall(Box::new(host)),
+            kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::CarrierFact {
+                recv: Box::new(recv),
+                field: if notes {
+                    Syntax::FIELD_OUTCOME_NOTES.to_string()
+                } else {
+                    Syntax::FIELD_OUTCOME_PARTIAL.to_string()
+                },
+                notes,
+            })),
         };
     }
     let guard_receiver = tir_recv_jet_ty(receiver, env).and_then(|ty| match ty {

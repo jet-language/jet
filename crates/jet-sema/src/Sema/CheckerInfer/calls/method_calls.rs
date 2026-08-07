@@ -39,12 +39,13 @@ struct RootCallTarget {
 }
 
 impl<'a> Checker<'a> {
-    /// D-FAIL-CARRIER1=A: the payload an error type keeps when it fails.
+    /// D-FAIL-CARRIER1=A: a fact an error type carries on its report.
     ///
-    /// An error type opts into partial results by carrying the surviving
-    /// payload on its report under the name `partial`. An error type that
-    /// declined gets the ordinary "no field" report, so nothing new is taught.
-    fn carrier_partial_field(&mut self, err: &Type, span: Span) -> Option<Type> {
+    /// An error type opts into a middle state by carrying it on its report:
+    /// the surviving payload under `partial`, the notes it collected under
+    /// `notes`. An error type that declined gets the ordinary "no field"
+    /// report, so nothing new is taught.
+    fn carrier_report_fact(&mut self, err: &Type, field: &str, why: &str, span: Span) -> Option<Type> {
         let name = match err {
             Type::Named(name) => name.as_str(),
             Type::Apply { name, .. } => name.as_str(),
@@ -52,15 +53,14 @@ impl<'a> Checker<'a> {
         };
         let owner = self.struct_owner_module(name, None)?;
         let fields = self.struct_fields_of(owner, name)?;
-        if let Some((_, _, ty, _)) = fields.iter().find(|(field, ..)| field == Syntax::FIELD_OUTCOME_PARTIAL) {
+        if let Some((_, _, ty, _)) = fields.iter().find(|(known, ..)| known == field) {
             return Some(ty.clone());
         }
         self.diags.push(Diagnostic::error(
             "E0302",
-            format!("`{}` has no field `partial`", name),
-            "an error type keeps part of its work by carrying it as a field named `partial`"
-                .to_string(),
-            format!("add a `partial` field to `{}`", name),
+            format!("`{}` has no field `{}`", name, field),
+            why.to_string(),
+            format!("add a `{}` field to `{}`", field, name),
             Some(span),
         ));
         None
@@ -2052,53 +2052,44 @@ impl<'a> Checker<'a> {
                 }
             }
             // D-FAIL-CARRIER1=A: the carrier's middle states, read from the
-            // fallible view. `.partial` answers the part of the payload a
-            // failure kept, and an error type opts in by carrying that payload
-            // on its report under the name `partial`. Proving the field is here
-            // is what makes the answer `T?` for every error type.
-            if method == Syntax::METHOD_OUTCOME_PARTIAL {
+            // fallible view. Both live on the outcome value: an error type opts
+            // in by carrying the surviving payload under `partial` and the
+            // notes it collected under `notes`. Proving the field is here is
+            // what makes the answer derivable from the receiver alone.
+            if matches!(
+                method,
+                Syntax::METHOD_OUTCOME_PARTIAL | Syntax::METHOD_OUTCOME_NOTES
+            ) {
                 if let Type::Result { ok, err } = &recv_ty {
                     if !args.is_empty() {
                         self.diags
-                            .push(wrong_core_arity(Syntax::METHOD_OUTCOME_PARTIAL, 0, args.len(), span));
+                            .push(wrong_core_arity(method, 0, args.len(), span));
                     }
-                    // A missing `partial` field reports E0302 from the shared
-                    // field lookup; a mismatched one reports the ordinary type
-                    // mismatch. Neither needs a code of its own.
-                    let kept = self.carrier_partial_field(err, span)?;
-                    self.check_type_assignable(ok, &kept, span);
+                    // A missing field reports E0302 from the shared lookup; a
+                    // mismatched one reports the ordinary type mismatch.
+                    // Neither needs a code of its own.
+                    let notes = method == Syntax::METHOD_OUTCOME_NOTES;
+                    let (field, why, wanted) = if notes {
+                        (
+                            Syntax::FIELD_OUTCOME_NOTES,
+                            "an outcome carries what it has to say as a field named `notes`",
+                            Type::List(Box::new(Type::String)),
+                        )
+                    } else {
+                        (
+                            Syntax::FIELD_OUTCOME_PARTIAL,
+                            "an error type keeps part of its work by carrying it as a field named `partial`",
+                            (**ok).clone(),
+                        )
+                    };
+                    let carried = self.carrier_report_fact(err, field, why, span)?;
+                    self.check_type_assignable(&wanted, &carried, span);
                     *recv_type_out = Some("__Carrier__".to_string());
-                    return Some(Type::Option(Box::new((**ok).clone())));
-                }
-            }
-            // D-FAIL-CARRIER1=A: notes are a fact about the carrier, so the
-            // fallible view answers them too. `.noting` hands the receiver back
-            // unchanged — a note says something about the journey, it does not
-            // change what was carried.
-            if matches!(method, Syntax::METHOD_OUTCOME_NOTES | Syntax::METHOD_OUTCOME_NOTING) {
-                if matches!(&recv_ty, Type::Result { .. } | Type::Option(_)) {
-                    let wanted = usize::from(method == Syntax::METHOD_OUTCOME_NOTING);
-                    if args.len() != wanted {
-                        self.diags
-                            .push(wrong_core_arity(method, wanted, args.len(), span));
-                        for a in args.iter_mut() {
-                            self.infer(&mut a.expr);
-                        }
-                        return Some(recv_ty);
-                    }
-                    if method == Syntax::METHOD_OUTCOME_NOTING {
-                        let saved = self.expected_type.clone();
-                        self.expected_type = Some(Type::String);
-                        let note_ty = self.infer(&mut args[0].expr);
-                        self.expected_type = saved;
-                        if let Some(t) = note_ty {
-                            self.check_type_assignable(&Type::String, &t, args[0].expr.span());
-                        }
-                        *recv_type_out = Some("__Carrier__".to_string());
-                        return Some(recv_ty);
-                    }
-                    *recv_type_out = Some("__Carrier__".to_string());
-                    return Some(Type::List(Box::new(Type::String)));
+                    return Some(if notes {
+                        wanted
+                    } else {
+                        Type::Option(Box::new(wanted))
+                    });
                 }
             }
             // D-ERRCTX1=D: `<fallible>.context("loading config {path}")` — a lazily-

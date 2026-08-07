@@ -6,35 +6,48 @@
 // a failure that still produced part of the result, and an outcome worth a
 // note. Both are the same carrier, so neither needs a third type.
 //
-// An error type keeps part of its work by carrying it under the name
-// `partial`. The payload it keeps is the payload the outcome carries, so the
-// two types are one.
+// Both facts live on the outcome value. An error type opts in by carrying the
+// surviving payload under `partial` and what it has to say under `notes`. Two
+// outcomes therefore never share a fact, and reading one twice answers the
+// same thing both times.
 struct ImportErr {
     broken: Int
     partial: [String]
+    notes: [String]
 }
 
-fn import_rows(rows: [String]) => [String] ? ImportErr {
+fn import_rows(label: String, rows: [String]) => [String] ? ImportErr {
     good :: rows.filter((row) => row != "")
     broken :: rows.len() - good.len()
-    if broken > 0 { return Err(ImportErr.{broken: broken, partial: good}) }
+    if broken > 0 {
+        return Err(ImportErr.{
+            broken: broken,
+            partial: good,
+            notes: ["{label}: {broken} rows were empty"]
+        })
+    }
     return Ok(good)
 }
 
 fn run() {
-    // Three good rows, two broken. The import fails, and the three good rows
-    // survive on the failure instead of dying with it.
-    spotty :: import_rows(["ada", "", "alan", "", "grace"]).noting("two rows were empty")
-    kept :: spotty.partial() ?? []
-    print(kept.len())
-    print(kept.join(", "))
+    // Two spotty imports, alive at the same time. Each one carries its own
+    // notes, because the notes are part of the outcome and not of the program.
+    people :: import_rows("people", ["ada", "", "alan", "", "grace"])
+    ports :: import_rows("ports", ["80", "", "443"])
 
-    // The note rode along with the outcome. Nothing was unwrapped to read it.
-    loop note, spotty.notes() { print(note) }
+    print((people.partial() ?? []).join(", "))
+    print((ports.partial() ?? []).join(", "))
+    print(people.notes().join(" / "))
+    print(ports.notes().join(" / "))
 
-    // A clean import kept nothing back, so the same read answers an absence
-    // and the fallback stands in. One carrier, one way to ask.
-    clean :: import_rows(["ada", "alan"])
+    // Reading the same outcome again answers the same thing. Nothing was
+    // consumed, because nothing was stored beside the value.
+    print(people.notes().join(" / "))
+    print((people.partial() ?? []).len())
+
+    // A clean import kept nothing back and had nothing to say, so the same two
+    // reads answer an absence and an empty list. One carrier, one way to ask.
+    clean :: import_rows("clean", ["ada", "alan"])
     print((clean.partial() ?? ["nothing was held back"]).join(", "))
     print(clean.notes().len())
 }

@@ -1104,23 +1104,30 @@ stdlib `.context("msg {var}")` (lazy) for human wording. No new grammar.
 **D-FAIL-CARRIER1 — One outcome carrier** *(ratified 2026-08-06, card
 #1527)*: `T?` and `T ? E` are two views of one carrier, not two types. The
 two type spellings are unchanged (D-RESULT-OPTION-CANON1 stands). An outcome
-has three facts: a payload, a verdict, and the reports it collected. Four
-methods reach those facts from either view, and no new grammar is added.
+has three facts: a payload, a verdict, and the reports it collected. Three
+methods reach those facts, and no new grammar is added.
 
 `.or_err("why")` lifts a clean absence into a failure: the payload rides
 through untouched and only the report changes. `.partial()` reads the payload
-a failure kept and answers `T?`; an error type opts in by carrying that
-payload under the field name `partial`, at the same type the outcome carries,
-and an error type that declined reports the ordinary E0302. `.noting("…")`
-attaches a note and hands the outcome straight back; `.notes()` reads those
-notes. A success kept nothing back, so `.partial()` on it answers a clean
-absence.
+a failure kept and answers `T?`. `.notes()` reads what a failure had to say
+and answers `[String]`.
+
+Both middle states live on the outcome value. An error type opts in by
+carrying them on its report — the surviving payload under the field name
+`partial`, at the same type the outcome carries, and the notes under `notes`.
+An error type that declined either one reports the ordinary E0302. Because
+nothing is stored beside the value, two outcomes alive at once never share a
+fact, reading one twice answers the same thing both times, and an outcome that
+crosses a thread takes its facts with it. A success has no report, so
+`.partial()` on one answers a clean absence and `.notes()` answers an empty
+list. Writing a note as a `?` hop, and the journey it travels on, belong to
+D-FAIL-CTX1.
 
 The verdict and the notes erase from the happy path: the clean report is
-zero-sized, so `T?` keeps the payload's own size, and an outcome nobody notes
-allocates nothing. Constants: `METHOD_OUTCOME_OR_ERR`,
-`METHOD_OUTCOME_PARTIAL`, `METHOD_OUTCOME_NOTING`, `METHOD_OUTCOME_NOTES`,
-`FIELD_OUTCOME_PARTIAL` in
+zero-sized, so `T?` keeps the payload's own size, and an error type that opts
+into neither middle state pays for neither. Constants:
+`METHOD_OUTCOME_OR_ERR`, `METHOD_OUTCOME_PARTIAL`, `METHOD_OUTCOME_NOTES`,
+`FIELD_OUTCOME_PARTIAL`, `FIELD_OUTCOME_NOTES` in
 `crates/jet-foundation/src/Syntax/package_files.rs`. The one carrier lives in
 `crates/jet-foundation/src/Outcome.rs`, embedded as the first prelude part,
 so every tier names one type. Examples:

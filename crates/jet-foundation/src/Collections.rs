@@ -424,12 +424,6 @@ pub fn builtin_method_return(
         // of the receiver's, which doesn't fit this table's one-fixed-placeholder-type
         // shape), so it is NOT listed here.
         Type::Option(inner) => option_method_return(inner, method, arg_count),
-        // D-FAIL-CARRIER1=A: the fallible view of the same carrier. `.noting`
-        // hands the receiver straight back, so it is answered here where both
-        // halves of the type are in hand.
-        Type::Result { ok, .. } if method == "noting" && arg_count == 1 => {
-            Some(Some(recv_ty.clone()))
-        }
         Type::Result { ok, .. } => result_method_return(ok, method, arg_count),
         Type::Int | Type::Float | Type::Bool | Type::Char | Type::IntN { .. } | Type::Float32 => {
             numeric_method_return(recv_ty, method, arg_count)
@@ -1190,11 +1184,6 @@ fn option_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Opti
             err: Box::new(Type::Named(crate::Syntax::TYPE_ERROR.to_string())),
         })),
         ("map", 1) => Some(Some(Type::Option(Box::new(Type::Int)))),
-        // D-FAIL-CARRIER1=A: notes are a fact about the carrier, so both views
-        // of it answer them. The optional view has no report to hang a partial
-        // payload on, so `.partial` belongs to the fallible view alone.
-        ("notes", 0) => Some(Some(Type::List(Box::new(Type::String)))),
-        ("noting", 1) => Some(Some(Type::Option(Box::new(inner.clone())))),
         _ => None,
     }
 }
@@ -2411,18 +2400,13 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
         Type::Option(inner) => match method {
             // D-FAIL-CARRIER1=A: the reason a clean absence becomes a failure,
             // and the note an outcome collects on its way.
-            "or_err" | "noting" => Some(vec![Type::String]),
+            "or_err" => Some(vec![Type::String]),
             "map" => Some(vec![Type::Fn {
                 params: vec![(**inner).clone()],
                 ret: None, // sema refines R from the closure's actual return
                 effect_bound: None, return_view_provenance: None,
                 param_contract: None,
             }]),
-            _ => Some(vec![]),
-        },
-        // D-FAIL-CARRIER1=A: the fallible view of the same carrier.
-        Type::Result { .. } => match method {
-            "noting" => Some(vec![Type::String]),
             _ => Some(vec![]),
         },
         Type::Apply { name, args } if name == "Sender" => match method {

@@ -89,19 +89,20 @@ pub const METHOD_DISTINCT_RAW: &str = "raw";
 
 /// D-FAIL-CARRIER1=A (ratified 2026-08-06): the one outcome carrier under `T?`
 /// and `T ? E`. The two ratified type spellings are unchanged; these are the
-/// four reads and writes that reach the carrier's facts from either view.
+/// three reads that reach the carrier's facts.
 ///
 /// `.or_err("why")` lifts a clean absence into a failure — the payload rides
 /// through untouched and only the report changes. `.partial()` reads the
-/// payload a failure kept, which an error type opts into by carrying it under
-/// the field name `partial`. `.noting("…")` attaches a note to an outcome and
-/// hands the outcome straight back; `.notes()` reads those notes.
+/// payload a failure kept and `.notes()` reads what it had to say. Both live on
+/// the outcome value: an error type opts in by carrying them on its report
+/// under the field names below. Writing a note as a `?` hop travels with the
+/// journey and belongs to D-FAIL-CTX1, not here.
 pub const METHOD_OUTCOME_OR_ERR: &str = "or_err";
 pub const METHOD_OUTCOME_PARTIAL: &str = "partial";
-pub const METHOD_OUTCOME_NOTING: &str = "noting";
 pub const METHOD_OUTCOME_NOTES: &str = "notes";
-/// The field an error type carries its surviving payload on.
+/// The fields an error type carries the carrier's middle states on.
 pub const FIELD_OUTCOME_PARTIAL: &str = "partial";
+pub const FIELD_OUTCOME_NOTES: &str = "notes";
 
 /// D-SHAPE-PLACE1=A (supersedes D-DYNARRAY1): retired `.view(a..b)` method
 /// name, retained only so parser recovery can emit E0214 and point at the bare

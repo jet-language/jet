@@ -661,6 +661,50 @@ fn ctvalue_type_name(v: &CtValue) -> String {
     }
 }
 
+/// D-FAIL-CARRIER1=A: read a middle state off an outcome, on either
+/// interpreter.
+///
+/// This is a marshalling adapter and nothing else. It converts the comptime
+/// outcome into the shape the prelude reads, hands over the projection onto the
+/// report, and lets `jet_partial`/`jet_notes` decide what a success and a
+/// failure each answer. Both interpreters call this one function, so neither
+/// can drift from the prelude or from each other.
+///
+/// `None` means the report is not a record with fields, which sema has already
+/// rejected — the caller turns it into the unsupported-construct diagnostic.
+pub fn carrier_fact(outcome: &CtValue, field: &str, notes: bool) -> Option<CtValue> {
+    use jet_foundation::Outcome::{jet_notes, jet_partial, JetAbsent, JetOutcome};
+
+    // The carrier's two sides, in the shape the prelude reads. Only the report
+    // is needed: the prelude never looks at a success's payload.
+    let carried: JetOutcome<(), &CtValue> = match outcome {
+        CtValue::Failed(CtReport::Told(report)) => Err(report.as_ref()),
+        _ => Ok(()),
+    };
+    let read = |report: &&CtValue| match report {
+        CtValue::Struct { fields, .. } => fields
+            .iter()
+            .find(|(name, _)| name == field)
+            .map(|(_, value)| value.clone()),
+        _ => None,
+    };
+    if notes {
+        // The prelude answers the empty list for a success and the report's own
+        // notes for a failure; the projection only says where they are kept.
+        let told = jet_notes(&carried, |report| match read(report) {
+            Some(CtValue::List(items)) => items,
+            _ => Vec::new(),
+        });
+        return Some(CtValue::List(told));
+    }
+    let kept: JetOutcome<Option<CtValue>, JetAbsent> = jet_partial(&carried, read);
+    match kept {
+        Ok(Some(value)) => Some(CtValue::Present(Box::new(value))),
+        Ok(None) => None,
+        Err(JetAbsent) => Some(CtValue::absent(Type::Int)),
+    }
+}
+
 pub fn apply_method(
     recv: &CtValue,
     method: &str,
@@ -762,46 +806,20 @@ pub fn apply_method(
                 _ => Err(unsupported("`.or_err` requires a string reason", span)),
             }
         }
-        // D-FAIL-CARRIER1=A: the carrier's middle states. A success kept
-        // nothing back, so `.partial` answers a clean absence; a failure hands
-        // over the payload its report carries under `partial`. The same two
-        // answers the prelude's `jet_partial` gives.
-        (CtValue::Present(_), "partial") => Ok(CtValue::absent(Type::Int)),
-        (CtValue::Failed(CtReport::Told(report)), "partial") => match report.as_ref() {
-            CtValue::Struct { fields, .. } => Ok(CtValue::Present(Box::new(
-                fields
-                    .iter()
-                    .find(|(name, _)| name == "partial")
-                    .map(|(_, value)| value.clone())
-                    .unwrap_or(CtValue::Unit),
-            ))),
-            _ => Err(unsupported(
-                "`.partial` needs an error type that keeps its payload",
-                span,
-            )),
-        },
-        // D-FAIL-CARRIER1=A: a note says something about the journey; the
-        // payload rides through untouched. `notes` reads them back and clears
-        // them for the next outcome, the same as the prelude's `jet_notes`.
-        (value, "noting") => {
-            if let Some(CtValue::Str(note)) = args.into_iter().next() {
-                // The prelude holds the journey, so the interpreter writes to
-                // the very same one every other tier writes to.
-                let _: jet_foundation::Outcome::JetOutcome<(), jet_foundation::Outcome::JetAbsent> =
-                    jet_foundation::Outcome::jet_noting(Ok(()), note);
-                Ok(value.clone())
-            } else {
-                Err(unsupported("`.noting` requires a string note", span))
-            }
-        }
-        (_, "notes") => Ok(CtValue::List(
-            jet_foundation::Outcome::jet_notes(
-                &Ok::<(), jet_foundation::Outcome::JetAbsent>(()),
+        // D-FAIL-CARRIER1=A: the carrier's middle states. Marshalling only —
+        // `carrier_fact` supplies the projection onto the report and calls the
+        // prelude reader, which is where what a success and a failure each
+        // answer is decided.
+        (value, crate::Syntax::FIELD_OUTCOME_PARTIAL | crate::Syntax::FIELD_OUTCOME_NOTES) => {
+            carrier_fact(value, method, method == crate::Syntax::FIELD_OUTCOME_NOTES).ok_or_else(
+                || {
+                    unsupported(
+                        "this middle state needs an error type that carries it",
+                        span,
+                    )
+                },
             )
-            .into_iter()
-            .map(CtValue::Str)
-            .collect(),
-        )),
+        }
         // D-HOLE1: `.zip` — pair two `Option`s, `None` if either is absent.
         // `(v, "zip")` rather than guarding to `CtValue::Present`/`Failed` because
         // both arms of the pairing need the same fallback.
