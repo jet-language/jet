@@ -140,6 +140,23 @@ pub(crate) fn emit_host_call(call: &THostCall, recv_ty: Option<&Type>, cx: &Cx) 
                 .join(", ");
             format!("{helper}({arg_str})")
         }
+        // D-FAIL-CARRIER1=A: marshalling only — the prelude's `jet_partial`
+        // decides what a success and a failure each answer.
+        THostCall::CarrierPartial { recv, field } => {
+            let report_ty = match &recv.ty {
+                Type::Result { err, .. } => Some((**err).clone()),
+                _ => None,
+            };
+            let field_rust = report_ty
+                .as_ref()
+                .map(|ty| emit_field_rust(cx, ty, field))
+                .unwrap_or_else(|| mangle(field));
+            format!(
+                "{}jet_partial(&({}), |__jet_report| __jet_report.{field_rust}.clone())",
+                cx.root_prefix,
+                emit_tir_expr(recv, cx)
+            )
+        }
         THostCall::Method { recv, method, args } => {
             let arg_str = args
                 .iter()

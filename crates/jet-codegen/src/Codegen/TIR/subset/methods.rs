@@ -144,6 +144,13 @@ pub(crate) fn method_call_in_subset(
             && expr_in_subset(receiver, cx, locals)
             && expr_in_subset(&args[0].expr, cx, locals);
     }
+    // D-FAIL-CARRIER1=A: the carrier's middle states. Sema marks the receiver
+    // via `recv_type_out` once it has proved the shape (see `infer_method_call`).
+    if recv_type.as_deref() == Some("__Carrier__") {
+        return args.len() == usize::from(method == "noting")
+            && expr_in_subset(receiver, cx, locals)
+            && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
+    }
     if method == Syntax::METHOD_DISTINCT_RAW {
         return args.is_empty() && expr_in_subset(receiver, cx, locals);
     }

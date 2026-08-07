@@ -1960,6 +1960,13 @@ pub enum THostCall {
         method: String,
         args: Vec<TExpr>,
     },
+    /// D-FAIL-CARRIER1=A: read the payload a failure kept. `field` is the Jet
+    /// field the error type carries it on; emit spells the projection onto the
+    /// prelude's `jet_partial`, so no Rust text is written here.
+    CarrierPartial {
+        recv: Box<TExpr>,
+        field: String,
+    },
     /// `Cell(Read|Edit)Guard.map/split`: sema-proved paths, shared by all tiers.
     CellGuardProject {
         recv: Box<TExpr>,

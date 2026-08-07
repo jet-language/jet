@@ -1,0 +1,44 @@
+// D-FAIL-CARRIER1=A — the middle states of the one outcome carrier.
+//
+// An outcome has three independent facts: a payload, a verdict, and the
+// reports it collected. Success and failure are the two corners people already
+// know. The middle states are the ones real programs need and could not say:
+// a failure that still produced part of the result, and an outcome worth a
+// note. Both are the same carrier, so neither needs a third type.
+
+// An error type keeps part of its work by carrying it under the name
+// `partial`. The payload it keeps is the payload the outcome carries, so the
+// two types are one.
+struct ImportErr {
+    broken: Int
+    partial: [String]
+}
+
+fn import_rows(rows: [String]) => [String] ? ImportErr {
+    good :: rows.filter((row) => row != "")
+    broken :: rows.len() - good.len()
+    if broken > 0 {
+        return Err(ImportErr.{ broken: broken, partial: good })
+    }
+    return Ok(good)
+}
+
+fn run() {
+    // Three good rows, two broken. The import fails, and the three good rows
+    // survive on the failure instead of dying with it.
+    spotty :: import_rows(["ada", "", "alan", "", "grace"]).noting("two rows were empty")
+    kept :: spotty.partial() ?? []
+    print(kept.len())
+    print(kept.join(", "))
+
+    // The note rode along with the outcome. Nothing was unwrapped to read it.
+    loop note, spotty.notes() {
+        print(note)
+    }
+
+    // A clean import kept nothing back, so the same read answers an absence
+    // and the fallback stands in. One carrier, one way to ask.
+    clean :: import_rows(["ada", "alan"])
+    print((clean.partial() ?? ["nothing was held back"]).join(", "))
+    print(clean.notes().len())
+}

@@ -76,6 +76,78 @@ fn run() {
     );
 }
 
+/// `.or_err("why")` moves an outcome from the optional view to the fallible
+/// one. The payload rides through untouched, so nothing converts.
+#[test]
+fn or_err_lifts_a_clean_absence_into_a_failure() {
+    let rust = compile(
+        "or_err",
+        r#"
+fn birth_year(book: [String: String], name: String) => String ? Error {
+    return book.get(name).or_err("nobody in the book is called that")
+}
+
+fn run() {
+    print(birth_year(["ada": "1815"], "ada") ?? "unknown")
+}
+"#,
+    );
+    let body = user_body(&rust, "user_birth_year");
+    assert!(
+        body.contains(".or_err(\"nobody in the book is called that\""),
+        "`.or_err` must reach the prelude's one meaning:\n{body}"
+    );
+    assert!(
+        !body.contains("ok_or") && !body.contains("Some(") && !body.contains("None"),
+        "the two views are one carrier, so nothing converts between them:\n{body}"
+    );
+}
+
+/// The carrier's middle states: a failure that kept part of its work, and an
+/// outcome that collected a note. Both read off the outcome without unwrapping.
+#[test]
+fn the_middle_states_read_off_the_same_carrier() {
+    let rust = compile(
+        "middle_states",
+        r#"
+struct ImportErr {
+    broken: Int
+    partial: [String]
+}
+
+fn import_rows(rows: [String]) => [String] ? ImportErr {
+    good :: rows.filter((row) => row != "")
+    broken :: rows.len() - good.len()
+    if broken > 0 {
+        return Err(ImportErr.{ broken: broken, partial: good })
+    }
+    return Ok(good)
+}
+
+fn run() {
+    spotty :: import_rows(["ada", "", "alan"]).noting("one row was empty")
+    print((spotty.partial() ?? []).len())
+    print(spotty.notes().len())
+}
+"#,
+    );
+    let run = user_body(&rust, "user_run");
+    assert!(
+        run.contains("jet_partial(&(")
+            && run.contains("__jet_report.user_partial.clone()"),
+        "`.partial` must marshal onto the prelude's `jet_partial`:\n{run}"
+    );
+    assert!(
+        run.contains("jet_noting(") && run.contains("jet_notes(&("),
+        "notes must ride the prelude's journey, not a second one:\n{run}"
+    );
+    // The middle states are the same carrier, so no third type appears.
+    assert!(
+        !run.contains("Partial<") && !run.contains("Noted<"),
+        "the middle states need no third type:\n{run}"
+    );
+}
+
 /// The verdict erases from the happy path: reading a `T?` costs no allocation
 /// and no branch beyond the one the payload already needs.
 #[test]

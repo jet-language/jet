@@ -1101,6 +1101,32 @@ prelude types implement it, unrelated enums never convert silently.
 **D-ERRCTX1 — Error context**: automatic `?`-propagation trace in dev builds;
 stdlib `.context("msg {var}")` (lazy) for human wording. No new grammar.
 
+**D-FAIL-CARRIER1 — One outcome carrier** *(ratified 2026-08-06, card
+#1527)*: `T?` and `T ? E` are two views of one carrier, not two types. The
+two type spellings are unchanged (D-RESULT-OPTION-CANON1 stands). An outcome
+has three facts: a payload, a verdict, and the reports it collected. Four
+methods reach those facts from either view, and no new grammar is added.
+
+`.or_err("why")` lifts a clean absence into a failure: the payload rides
+through untouched and only the report changes. `.partial()` reads the payload
+a failure kept and answers `T?`; an error type opts in by carrying that
+payload under the field name `partial`, at the same type the outcome carries,
+and an error type that declined reports the ordinary E0302. `.noting("…")`
+attaches a note and hands the outcome straight back; `.notes()` reads those
+notes. A success kept nothing back, so `.partial()` on it answers a clean
+absence.
+
+The verdict and the notes erase from the happy path: the clean report is
+zero-sized, so `T?` keeps the payload's own size, and an outcome nobody notes
+allocates nothing. Constants: `METHOD_OUTCOME_OR_ERR`,
+`METHOD_OUTCOME_PARTIAL`, `METHOD_OUTCOME_NOTING`, `METHOD_OUTCOME_NOTES`,
+`FIELD_OUTCOME_PARTIAL` in
+`crates/jet-foundation/src/Syntax/package_files.rs`. The one carrier lives in
+`crates/jet-foundation/src/Outcome.rs`, embedded as the first prelude part,
+so every tier names one type. Examples:
+`examples/features/errors/or_err.jet` and
+`examples/features/errors/partial_and_notes.jet`.
+
 **S36 — Bug stops**: `panic("msg")` (friendly report, exit 70);
 `require(cond[, "msg"])` for invariants/preconditions. Prelude builtins.
 

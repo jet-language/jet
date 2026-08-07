@@ -3910,6 +3910,27 @@ impl<'a> EvalCtx<'a> {
                     *edit_paths_disjoint,
                     scope,
                 ),
+                // D-FAIL-CARRIER1=A: a success kept nothing back; a failure
+                // hands over the payload its report carries. The same two
+                // answers the prelude's `jet_partial` gives.
+                crate::Codegen::TIR::THostCall::CarrierPartial { recv, field } => {
+                    match self.eval_expr(recv, scope)? {
+                        CtValue::Failed(CtReport::Told(report)) => match report.as_ref() {
+                            CtValue::Struct { fields, .. } => Ok(CtValue::Present(Box::new(
+                                fields
+                                    .iter()
+                                    .find(|(name, _)| name == field)
+                                    .map(|(_, value)| value.clone())
+                                    .unwrap_or(CtValue::Unit),
+                            ))),
+                            _ => Err(unsupported(
+                                "`.partial` needs an error type that keeps its payload",
+                                self.span(),
+                            )),
+                        },
+                        _ => Ok(CtValue::absent(Type::Int)),
+                    }
+                }
                 crate::Codegen::TIR::THostCall::Method { recv, method, args } => {
                     let mut r = self.eval_expr(recv, scope)?;
                     if matches!(
@@ -4216,6 +4237,29 @@ impl<'a> EvalCtx<'a> {
                             type_name: crate::Syntax::CLOCK_TYPE.to_string(),
                             fields: vec![("now".to_string(), CtValue::Int(0))],
                         });
+                    }
+                    // D-FAIL-CARRIER1=A: notes ride the journey the prelude
+                    // owns, so the interpreter writes to and reads from the
+                    // very same one every other tier uses.
+                    if leaf.ends_with("jet_noting") {
+                        if let Some(CtValue::Str(note)) = argv.get(1) {
+                            let _: jet_foundation::Outcome::JetOutcome<
+                                (),
+                                jet_foundation::Outcome::JetAbsent,
+                            > = jet_foundation::Outcome::jet_noting(Ok(()), note.clone());
+                        }
+                        return Ok(argv.first().cloned().unwrap_or(CtValue::Unit));
+                    }
+                    if leaf.ends_with("jet_notes") {
+                        return Ok(CtValue::List(
+                            jet_foundation::Outcome::jet_notes(&Ok::<
+                                (),
+                                jet_foundation::Outcome::JetAbsent,
+                            >(()))
+                            .into_iter()
+                            .map(CtValue::Str)
+                            .collect(),
+                        ));
                     }
                     // D-ERRCTX1: `.context(msg)` — prepend message on Err only.
                     if leaf == "jet_context" || leaf.ends_with("jet_context") {

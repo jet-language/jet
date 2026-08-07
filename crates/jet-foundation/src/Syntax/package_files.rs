@@ -87,6 +87,22 @@ pub const KW_DISTINCT: &str = "distinct";
 /// `value.raw()` yields the base value. Named-cast family (S42).
 pub const METHOD_DISTINCT_RAW: &str = "raw";
 
+/// D-FAIL-CARRIER1=A (ratified 2026-08-06): the one outcome carrier under `T?`
+/// and `T ? E`. The two ratified type spellings are unchanged; these are the
+/// four reads and writes that reach the carrier's facts from either view.
+///
+/// `.or_err("why")` lifts a clean absence into a failure — the payload rides
+/// through untouched and only the report changes. `.partial()` reads the
+/// payload a failure kept, which an error type opts into by carrying it under
+/// the field name `partial`. `.noting("…")` attaches a note to an outcome and
+/// hands the outcome straight back; `.notes()` reads those notes.
+pub const METHOD_OUTCOME_OR_ERR: &str = "or_err";
+pub const METHOD_OUTCOME_PARTIAL: &str = "partial";
+pub const METHOD_OUTCOME_NOTING: &str = "noting";
+pub const METHOD_OUTCOME_NOTES: &str = "notes";
+/// The field an error type carries its surviving payload on.
+pub const FIELD_OUTCOME_PARTIAL: &str = "partial";
+
 /// D-SHAPE-PLACE1=A (supersedes D-DYNARRAY1): retired `.view(a..b)` method
 /// name, retained only so parser recovery can emit E0214 and point at the bare
 /// range-place spelling. #567 removes the remaining collection plumbing.

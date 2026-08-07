@@ -762,6 +762,46 @@ pub fn apply_method(
                 _ => Err(unsupported("`.or_err` requires a string reason", span)),
             }
         }
+        // D-FAIL-CARRIER1=A: the carrier's middle states. A success kept
+        // nothing back, so `.partial` answers a clean absence; a failure hands
+        // over the payload its report carries under `partial`. The same two
+        // answers the prelude's `jet_partial` gives.
+        (CtValue::Present(_), "partial") => Ok(CtValue::absent(Type::Int)),
+        (CtValue::Failed(CtReport::Told(report)), "partial") => match report.as_ref() {
+            CtValue::Struct { fields, .. } => Ok(CtValue::Present(Box::new(
+                fields
+                    .iter()
+                    .find(|(name, _)| name == "partial")
+                    .map(|(_, value)| value.clone())
+                    .unwrap_or(CtValue::Unit),
+            ))),
+            _ => Err(unsupported(
+                "`.partial` needs an error type that keeps its payload",
+                span,
+            )),
+        },
+        // D-FAIL-CARRIER1=A: a note says something about the journey; the
+        // payload rides through untouched. `notes` reads them back and clears
+        // them for the next outcome, the same as the prelude's `jet_notes`.
+        (value, "noting") => {
+            if let Some(CtValue::Str(note)) = args.into_iter().next() {
+                // The prelude holds the journey, so the interpreter writes to
+                // the very same one every other tier writes to.
+                let _: jet_foundation::Outcome::JetOutcome<(), jet_foundation::Outcome::JetAbsent> =
+                    jet_foundation::Outcome::jet_noting(Ok(()), note);
+                Ok(value.clone())
+            } else {
+                Err(unsupported("`.noting` requires a string note", span))
+            }
+        }
+        (_, "notes") => Ok(CtValue::List(
+            jet_foundation::Outcome::jet_notes(
+                &Ok::<(), jet_foundation::Outcome::JetAbsent>(()),
+            )
+            .into_iter()
+            .map(CtValue::Str)
+            .collect(),
+        )),
         // D-HOLE1: `.zip` — pair two `Option`s, `None` if either is absent.
         // `(v, "zip")` rather than guarding to `CtValue::Present`/`Failed` because
         // both arms of the pairing need the same fallback.

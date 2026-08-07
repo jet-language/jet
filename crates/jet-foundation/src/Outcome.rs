@@ -105,6 +105,48 @@ pub fn jet_absent<T>() -> JetOutcome<T, JetAbsent> {
     Err(JetAbsent)
 }
 
+// D-FAIL-CARRIER1=A — the carrier's middle states.
+//
+// Success-with-notes and failure-with-partial-results are the same carrier
+// seen at a different corner of its grid, not a third type. Both facts cost
+// nothing when nobody reads them: a partial payload lives on the report an
+// error type already carries, and notes ride the journey rather than the
+// value, so a clean outcome stays the size of its payload.
+
+/// Read the part of the payload a failure kept.
+///
+/// An error type opts in by carrying the surviving payload on its report;
+/// `kept` is the projection onto it. A success held nothing back, so the
+/// carrier answers a clean absence and the caller reads it as `T?`.
+pub fn jet_partial<T, E, X: Clone>(
+    outcome: &JetOutcome<T, E>,
+    kept: impl FnOnce(&E) -> X,
+) -> JetOutcome<X, JetAbsent> {
+    match outcome {
+        Ok(_) => Err(JetAbsent),
+        Err(report) => Ok(kept(report)),
+    }
+}
+
+thread_local! {
+    /// The notes the outcome in flight has collected. Empty until something
+    /// writes one, which is why an unread verdict costs nothing.
+    static JET_NOTES: std::cell::RefCell<Vec<String>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Attach a note to an outcome. The payload rides through untouched: a note
+/// says something about the journey, it does not change what was carried.
+pub fn jet_noting<T, E>(outcome: JetOutcome<T, E>, note: String) -> JetOutcome<T, E> {
+    JET_NOTES.with(|notes| notes.borrow_mut().push(note));
+    outcome
+}
+
+/// Read the notes this outcome collected, and clear them for the next one.
+pub fn jet_notes<T, E>(_outcome: &JetOutcome<T, E>) -> Vec<String> {
+    JET_NOTES.with(|notes| notes.borrow_mut().drain(..).collect())
+}
+
 /// Marshal a Rust plumbing `Option` into the carrier at a Core boundary.
 ///
 /// Rust's own collections answer with `Option`, the same way they hold their
