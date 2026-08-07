@@ -1594,7 +1594,11 @@ impl<'a> Interp<'a> {
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<(), Diagnostic> {
         match target {
-            Expr::Ident(name, _) => {
+            // D-META-STAGE1=B: the mark is part of the identifier, so a marked
+            // name is written back exactly like a plain one. Without this a
+            // marked receiver never advances: `$ct.read_u8()` twice read the
+            // same byte while the runtime copy moved on.
+            Expr::Ident(name, _) | Expr::ComptimeName { name, .. } => {
                 scope.insert(name.clone(), new_value);
                 Ok(())
             }
