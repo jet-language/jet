@@ -11,6 +11,7 @@ pub mod Collections;
 pub mod CoreArchive;
 pub mod Diagnostics;
 mod ExactUnitConversion;
+pub mod Effects;
 pub mod ExitCodes;
 pub mod Facts;
 pub mod Generics;
