@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1596,
-    "rev": 28489,
+    "rev": 28500,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -1776,7 +1776,7 @@
       "priority": "P1",
       "plan": "## Outcome\n\nShip **CI change gate: complete test-target inventory and shards** as a complete slice. Every behavior in the title, body, and ratified decisions is required.\n\n## Work\n\n1. Apply these ratified decisions: D-CI1=A, D-CI2=A.\n2. Start with .github/workflows/ci.yml, scripts/agent/verify-full.sh, tests/grammar.rs, tests/release_gates.rs, Cargo.toml, clippy.toml, AGENTS.md, tests/fuzz_sema.rs, tools/perf/ci-perf-check.sh, tools/perf/baseline.json, plugins/tower/tower.mjs, docs/spec/syntax-decisions.md. Own only these paths and direct callers or tests found by the trace.\n3. Trace the public entry point through the production model to the observable result.\n4. Map each named behavior to implementation and proof before writing.\n5. Make the named release claim a deterministic automated gate with pinned inputs, declared platform evidence, and no false-green skip.\n6. Missing runners, flaky or skipped checks, stale artifacts, signing failure, nondeterminism, and partial publication block release and preserve audit evidence.\n7. Update affected docs, examples, diagnostics, goldens, and audit output.\n\n## Proof\n\nRun focused unit, integration, and example checks for this slice. Exercise the real production path and its main failure case. A stub, canned result, mock-only path, or skipped check does not count. Full-suite proof belongs to Epoch 10 closeout.\n\n## Scope\n\nDo not absorb sibling cards or create a second mechanism. Record any newly found owner choice as a Tower ballot before code.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "bd2-ci",
       "log": [
         {
           "at": "2026-08-01",
@@ -1830,7 +1830,7 @@
         }
       ],
       "created": "2026-07-05T11:30:26.908Z",
-      "updated": "2026-08-01T18:15:45.871Z",
+      "updated": "2026-08-07T02:29:18.426Z",
       "criteria": [
         {
           "n": 1,
@@ -1894,9 +1894,10 @@
         "docs/spec/syntax-decisions.md"
       ],
       "workOrder": 1440,
-      "updatedBy": "codex-plan-audit",
+      "updatedBy": "bd2-ci",
       "tags": [],
-      "parentId": null
+      "parentId": null,
+      "claimedAt": "2026-08-07T02:29:18.426Z"
     },
     {
       "id": "c0949cz5",
@@ -89972,7 +89973,23 @@
       "plan": "Implements D-CONF-PLANE1, D-CONF-NAME1 — ratified 2026-08-06. Read each decision verbatim (tower brief on this card's parent proposal, or tower decision show) before building; the ratified outcome text is the law, this plan is the route. Every requirement is a discrete exit criterion below: meet each with targeted proof (tests, snapshots, examples with golden output), and keep I9 tier parity inside this card — AOT, default jet run (JIT), and the interpreter must agree on every surface this card ships before it closes. Delete every superseded form the decisions retire in the same change; do not leave compatibility shims or parallel spellings. Reference: docs/proposals/build-config-one-plane.md.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-07",
+          "by": "bd2-rev3",
+          "text": "REVIEW non-blocking notes (do not need to hold the merge): (1) MANIFEST_SCALAR_FIELDS (crates/jet-pkg-model/src/Package/Blocks.rs:979) omits members, configs, defaults, environments and services, so a package.jet with a co-located fn build plus e.g. members: find(\"./packages\") still leaks unmasked manifest text into the build-entry parse — same shape as the bug 0a2a86863 fixed, left half closed. (2) crates/jetpack/src/Transition.rs:1672 render_legacy_package_root now hand-rolls a payload:/identity: reader; it is a one-way migration splice guarded by a following canonical parse, but a pkg.jet with no name now emits name: \"\" and fails downstream with MissingName instead of master's explicit migration error. (3) tests/ui/auto_derive_policy_invalid/stderr now tells the user to fix package.jet while the fixture file is literally pkg.jet. (4) docs/spec/architecture.md:184 and tests/workspace_crates.rs:217,273 still name PackageManifest as a live seam touch point (comments only)."
+        },
+        {
+          "at": "2026-08-07",
+          "by": "bd2-rev3",
+          "text": "REVIEW BLOCKER 2 (criterion 4) — tests/package_outputs.rs is false-green: it cannot distinguish outputs:-driven entry resolution from the pre-existing legacy_run_entry fallback. Proof: copy examples/features/packages/outputs_build/service.jet next to a package.jet holding only name:/version: (outputs: block deleted) and jet run prints the same 'outputs: demo drives the build', while jet build emits the same build/service.rs. Cause: for a single-segment entry (entry: run), PackageFacts::entry_path (crates/jet-pkg-model/src/Package/mod.rs:648-668) runs the identical algorithm as legacy_run_entry (mod.rs:633-641) — root-level files with a unique top-level fn of that name. The two asserts the test does make (no main.jet/run.jet; manifest contains outputs:) are satisfied by the fallback too. To prove the criterion the fixture must be unresolvable by legacy_run_entry: use the dotted entry: module.function form, or an entry function not named run, or two root files with fn run."
+        },
+        {
+          "at": "2026-08-07",
+          "by": "bd2-rev3",
+          "text": "REVIEW BLOCKER 1 (criterion 1) — missed consumer of the parser swap: crates/jetpack/src/Provider/remote.rs:569,573,577. classify_canonical_dep changed from source: &str to source: &Package::DepSource (remote.rs:322-330, commit fb77a8a3c) but its three #[cfg(test)] callers still pass string literals. cargo test -p jetpack --lib fails to compile with 3x E0308 (expected &DepSource, found &'static str), hiding all 561 jetpack unit tests. On master the same command builds and runs (556 passed, 5 pre-existing failures). cargo build --workspace cannot see this because cfg(test) code is not compiled — which is exactly the evidence criterion 1 rests on."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -89986,20 +90003,20 @@
         {
           "n": 2,
           "text": "Bare name: and version: are the only identity spelling; identity: .{ } is a normal unknown-field diagnostic",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd2-manifest",
-          "verifiedBy": null,
-          "evidence": "Package/mod.rs match arm has no 'identity'/'payload' case; both fall through to PackageParseError::UnknownField. Empirically verified: package.jet with 'identity: .{ name, version }' -> 'unknown Package field identity'. tests/ui/manifest_unknown_field snapshot proves payload: -> E1206 unknown-field.",
-          "at": "2026-08-07T02:13:32.152Z"
+          "verifiedBy": "bd2-rev3",
+          "evidence": "Confirmed: crates/jet-pkg-model/src/Package/mod.rs:1241-1338 has no identity/payload arm; both fall to PackageParseError::UnknownField. tests/ui/manifest_unknown_field passes under JET_UI_FILTER (ui_snapshots ok).",
+          "at": "2026-08-07T02:44:24.520Z"
         },
         {
           "n": 3,
           "text": "An unknown field such as payload: produces one manifest diagnostic (E1206 family) with what, why and fix text and a UI snapshot",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd2-manifest",
-          "verifiedBy": null,
-          "evidence": "e1206_unknown_field() in crates/jet-pkg-model/src/Manifest.rs: what/why/fix naming the retired spelling + ratified vocabulary. UI snapshot tests/ui/manifest_unknown_field/{pkg.jet,main.jet,stderr} — stderr reviewed before blessing.",
-          "at": "2026-08-07T02:13:32.517Z"
+          "verifiedBy": "bd2-rev3",
+          "evidence": "E1206 is registered in docs/spec/diagnostics.md:668. e1206_unknown_field (crates/jet-pkg-model/src/Manifest.rs:494-508) carries what/why/fix naming the retired spelling and the ratified field list. Snapshot tests/ui/manifest_unknown_field/{pkg.jet,main.jet,stderr} committed; ui_snapshots passes under JET_UI_FILTER=tests/ui/manifest_unknown_field.",
+          "at": "2026-08-07T02:44:33.232Z"
         },
         {
           "n": 4,
@@ -90013,47 +90030,47 @@
         {
           "n": 5,
           "text": "Every package.jet in examples/, tests/ and docs/ is migrated in the same change; no alias and no fallback parse path remains",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd2-manifest",
-          "verifiedBy": null,
-          "evidence": "Repo-wide sweep: 0 files under examples/tests/docs/corelib matching payload:/identity: in package.jet or pkg.jet (grep -rl confirmed empty). ~40 fixtures migrated to bare name:/version:, incl. tests/ui/*, tests/fixtures/jetpack-*, examples/features/**, corelib/*. No fallback parse path: legacy_package_facts and the pkg.jet-vs-package.jet dual-vocabulary branch both deleted.",
-          "at": "2026-08-07T02:13:41.998Z"
+          "verifiedBy": "bd2-rev3",
+          "evidence": "Re-swept in the worktree: of 52 pkg.jet/package.jet files under examples/tests/docs/corelib, only the deliberate tests/ui/manifest_unknown_field/pkg.jet still spells payload:. rg PackageManifest across the worktree leaves no Rust reference (only prose in docs/audits, docs/spec/architecture.md and two comments in tests/workspace_crates.rs). The legacy parser dir and the pkg.jet-vs-package.jet dual-vocabulary branch are gone. Caveat logged: crates/jetpack/src/Transition.rs:1672 keeps a hand-rolled one-way migration reader for payload:/identity:, guarded by a canonical re-parse.",
+          "at": "2026-08-07T02:44:33.609Z"
         },
         {
           "n": 6,
           "text": "Syntax.rs entry updated",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd2-manifest",
-          "verifiedBy": null,
-          "evidence": "crates/jet-foundation/src/Syntax/jetpack_config.rs: added MANIFEST_FIELD_NAME/MANIFEST_FIELD_VERSION and MANIFEST_BLOCK_DEPS/OUTPUTS/SETTINGS/MEMBERS (D-CONF-PLANE1/D-CONF-NAME1), retired MANIFEST_BLOCK_PAYLOAD. Package/mod.rs's field match now reads these constants instead of bare literals for the new/changed vocabulary.",
-          "at": "2026-08-07T02:13:51.063Z"
+          "verifiedBy": "bd2-rev3",
+          "evidence": "crates/jet-foundation/src/Syntax/jetpack_config.rs:584-600 carries MANIFEST_FIELD_NAME/VERSION and MANIFEST_BLOCK_DEPS/OUTPUTS/SETTINGS/MEMBERS with D-CONF-PLANE1/D-CONF-NAME1 attribution; MANIFEST_BLOCK_PAYLOAD is retired. Package/mod.rs reads those constants. cargo test --test syntax_reconciliation: 5 passed, 0 failed.",
+          "at": "2026-08-07T02:44:41.687Z"
         },
         {
           "n": 7,
           "text": "syntax-decisions.md log entry",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd2-manifest",
-          "verifiedBy": null,
-          "evidence": "docs/spec/syntax-decisions.md: new dated entry '2026-08-06 — D-CONF-PLANE1=A / D-CONF-NAME1=A' documenting the single-parser/bare-identity ruling, the block-noun vocabulary, dot-construction-optional grammar, dep-value forms, and the fn-build co-location carve-out.",
-          "at": "2026-08-07T02:13:51.642Z"
+          "verifiedBy": "bd2-rev3",
+          "evidence": "docs/spec/syntax-decisions.md gains a dated 2026-08-06 D-CONF-PLANE1=A / D-CONF-NAME1=A entry (39 added lines) covering the single parser, bare identity, block nouns and dep-value forms.",
+          "at": "2026-08-07T02:44:42.337Z"
         },
         {
           "n": 8,
           "text": "jet devtools grammars regenerated",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd2-manifest",
-          "verifiedBy": null,
-          "evidence": "No regen needed: verified by inspection that editors/tree-sitter/grammar.js has no keyword/lexical rule for manifest field names (payload/identity/name/version/deps/etc. are all ordinary identifiers under the ratified/existing generic record-literal grammar) — the tree-sitter grammar is unaffected by a vocabulary change to which field names a Rust-side manifest reader accepts. editors/zed/grammar-repo/ is a gitignored build artifact anyway (never committed).",
-          "at": "2026-08-07T02:14:02.859Z"
+          "verifiedBy": "bd2-rev3",
+          "evidence": "Confirmed by inspection: editors/tree-sitter/grammar.js has no lexical rule for manifest field names — they are ordinary identifiers in the generic record-literal grammar — so a Rust-side vocabulary change needs no regen. editors/zed/grammar-repo/ is a gitignored build artifact.",
+          "at": "2026-08-07T02:44:43.056Z"
         },
         {
           "n": 9,
           "text": "snapshots re-blessed",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd2-manifest",
-          "verifiedBy": null,
-          "evidence": "tests/ui/auto_derive_policy_invalid/stderr re-blessed (pkg.jet->package.jet fix text, reviewed). tests/ui/manifest_unknown_field/stderr new (reviewed before commit). Full tests/ui/* ui_snapshots suite run 3x, diffed against a master-HEAD baseline run in the main checkout: byte-identical 27-fixture mismatch set before/after (all pre-existing, unrelated drift) — zero snapshot regressions introduced.",
-          "at": "2026-08-07T02:14:03.410Z"
+          "verifiedBy": "bd2-rev3",
+          "evidence": "Independently reproduced: full ui_snapshots run in the worktree lists 27 mismatching fixtures; the same run on master HEAD lists 28. The worktree set is a strict subset of master's (master additionally mismatches tests/ui/source_owned_conversion_retired.jet, which passes on the branch). Zero snapshot regressions. The two touched snapshots read correctly: manifest_unknown_field/stderr (new E1206 what/why/fix) and auto_derive_policy_invalid/stderr (pkg.jet -> package.jet in the fix line).",
+          "at": "2026-08-07T02:44:59.722Z"
         }
       ],
       "refs": [
@@ -90063,8 +90080,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:33:05.673Z",
-      "updated": "2026-08-07T02:14:28.716Z",
-      "updatedBy": "bd2-manifest",
+      "updated": "2026-08-07T02:44:59.722Z",
+      "updatedBy": "bd2-rev3",
       "workOrder": 130
     },
     {
@@ -131570,6 +131587,83 @@
   ],
   "events": [
     {
+      "at": "2026-08-07T02:44:59.722Z",
+      "by": "bd2-rev3",
+      "action": "card.criteria-verify",
+      "ref": "c0ejda8e",
+      "note": "#9"
+    },
+    {
+      "at": "2026-08-07T02:44:43.056Z",
+      "by": "bd2-rev3",
+      "action": "card.criteria-verify",
+      "ref": "c0ejda8e",
+      "note": "#8"
+    },
+    {
+      "at": "2026-08-07T02:44:42.337Z",
+      "by": "bd2-rev3",
+      "action": "card.criteria-verify",
+      "ref": "c0ejda8e",
+      "note": "#7"
+    },
+    {
+      "at": "2026-08-07T02:44:41.687Z",
+      "by": "bd2-rev3",
+      "action": "card.criteria-verify",
+      "ref": "c0ejda8e",
+      "note": "#6"
+    },
+    {
+      "at": "2026-08-07T02:44:33.609Z",
+      "by": "bd2-rev3",
+      "action": "card.criteria-verify",
+      "ref": "c0ejda8e",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-07T02:44:33.232Z",
+      "by": "bd2-rev3",
+      "action": "card.criteria-verify",
+      "ref": "c0ejda8e",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-07T02:44:24.520Z",
+      "by": "bd2-rev3",
+      "action": "card.criteria-verify",
+      "ref": "c0ejda8e",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-07T02:44:16.654Z",
+      "by": "bd2-rev3",
+      "action": "card.update",
+      "ref": "c0ejda8e",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T02:44:08.732Z",
+      "by": "bd2-rev3",
+      "action": "card.update",
+      "ref": "c0ejda8e",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T02:44:00.713Z",
+      "by": "bd2-rev3",
+      "action": "card.update",
+      "ref": "c0ejda8e",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T02:29:18.426Z",
+      "by": "bd2-ci",
+      "action": "card.claim",
+      "ref": "c0wa2hf8",
+      "note": ""
+    },
+    {
       "at": "2026-08-07T02:28:48.316Z",
       "by": "bd2-carrier3",
       "action": "card.claim",
@@ -134991,83 +135085,6 @@
       "action": "decision.ratify",
       "ref": "D-ALIAS-OP1",
       "note": "B"
-    },
-    {
-      "at": "2026-08-06T21:42:27.329Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0pxsuic",
-      "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-08-06T21:42:27.329Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0pxsuic",
-      "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-08-06T21:42:27.329Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0pxsuic",
-      "note": "#2 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-08-06T21:42:27.329Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0pxsuic",
-      "note": "#1 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-08-06T21:42:14.558Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0kfh1yl",
-      "note": "logEntry,blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:42:14.141Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0v2fuet",
-      "note": "logEntry,blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:42:13.724Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0q2s3u5",
-      "note": "logEntry,blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:42:13.316Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0coebnr",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:42:12.889Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0pdzfiu",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:42:12.480Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0x9zm5o",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-08-06T21:42:12.073Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0hmpent",
-      "note": "workOrder"
     }
   ],
   "nextNum": 368,
