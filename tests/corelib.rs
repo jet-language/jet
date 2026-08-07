@@ -1,3 +1,5 @@
+#[allow(unused_imports)]
+use jet_foundation::Outcome::*;
 use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -5,6 +7,8 @@ use std::path::PathBuf;
 use std::process::Command;
 
 mod dns_resolver_policy {
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/DNSResolverPolicy.rs");
 
     pub fn resolv_conf(text: &str) -> Vec<String> {
@@ -28,6 +32,8 @@ mod email_native {
         }
         out
     }
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
     include!("../crates/jet-codegen/src/Prelude/CoreLib/Email.rs");
 }
 
@@ -178,10 +184,10 @@ fn core_email_smtp_config_limits_and_trust_follow_ratified_law() {
         recipient_policy: jet_email::RecipientPolicy::RequireAll,
         trust: jet_email::TLSTrust::SystemPlusCa { pem },
         limits: safe.clone(),
-        dkim: None,
+        dkim: Err(JetAbsent),
     };
     jet_email::validate_smtp_config(&config).unwrap();
-    config.dkim = Some(jet_email::DkimConfig {
+    config.dkim = Ok(jet_email::DkimConfig {
         domain: "example.com".to_string(), selector: "login-2026".to_string(),
         private_key: (), signed_headers: vec!["subject".to_string()],
     });
@@ -204,7 +210,7 @@ fn core_email_smtp_config_limits_and_trust_follow_ratified_law() {
             pem: b"-----BEGIN PRIVATE KEY-----\nAA==\n-----END PRIVATE KEY-----".to_vec(),
         },
         limits: safe,
-        dkim: None,
+        dkim: Err(JetAbsent),
     };
     assert!(matches!(jet_email::validate_smtp_config(&malformed),
         Err(jet_email::Error::Configuration { reason, .. }) if reason.contains("certificate")));
@@ -288,7 +294,7 @@ fn core_email_smtp_transaction_starttls_auth_rcpt_and_data_are_real() {
         recipient_policy: jet_email::RecipientPolicy::DeliverAccepted,
         trust: jet_email::TLSTrust::System,
         limits: jet_email::Limits::safe(),
-        dkim: None,
+        dkim: Err(JetAbsent),
     };
     let replies = concat!(
         "220 relay ready\r\n",
@@ -366,7 +372,7 @@ fn core_email_smtp_transaction_require_all_and_delivery_unknown_are_honest() {
         security: jet_email::SMTPSecurity::TLS, auth: jet_email::SMTPAuth::None,
         recipient_policy: policy, trust: jet_email::TLSTrust::System,
         limits: jet_email::Limits::safe(),
-        dkim: None,
+        dkim: Err(JetAbsent),
     };
 
     for (stop, timed_out) in [
@@ -1586,7 +1592,7 @@ mod jet_json_alloc_probe {
 }
 #[global_allocator]
 static JET_JSON_ALLOC: jet_json_alloc_probe::CountingAlloc = jet_json_alloc_probe::CountingAlloc;
-fn jet_enc_json_reader_next(reader: &mut jet_std::JSONReader) -> Result<Option<jet_std::DataEvent>, jet_std::EncodingError> {
+fn jet_enc_json_reader_next(reader: &mut jet_std::JSONReader) -> Result<JetOutcome<jet_std::DataEvent, JetAbsent>, jet_std::EncodingError> {
     let ceiling = jet_encoding_codec_heap_ceiling(&reader.limits);
     jet_json_alloc_probe::begin();
     let result = jet_enc_json_reader_next_inner(reader);
@@ -5628,7 +5634,7 @@ fn main() {
     match jet_net_tls_io_result::<()>(.Err(cause.clone()), jet_std::IOOperation::Read).unwrap_err() {
         jet_std::IOError::Protocol(context) => {
             assert_eq!(context.operation, jet_std::IOOperation::Read);
-            assert_eq!(context.cause, Some(cause));
+            assert_eq!(context.cause, Ok(cause));
         }
         other => panic!("expected Protocol(Read), got {other:?}"),
     }

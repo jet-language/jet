@@ -19,14 +19,21 @@ mod jet_std {
     #[derive(Clone, Debug, PartialEq)]
     pub struct IOContext {
         pub operation: IOOperation,
-        pub resource: Option<String>,
-        pub os_code: Option<i64>,
-        pub cause: Option<String>,
+        pub resource: JetOutcome<String, JetAbsent>,
+        pub os_code: JetOutcome<i64, JetAbsent>,
+        pub cause: JetOutcome<String, JetAbsent>,
     }
 
     impl IOContext {
+        // The constructor still takes Rust plumbing so every host call site reads
+        // the same; the carrier starts here, once.
         pub fn new(operation: IOOperation, resource: Option<String>, os_code: Option<i64>, cause: Option<String>) -> Self {
-            Self { operation, resource, os_code, cause }
+            Self {
+                operation,
+                resource: jet_outcome_of(resource),
+                os_code: jet_outcome_of(os_code),
+                cause: jet_outcome_of(cause),
+            }
         }
     }
 

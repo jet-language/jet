@@ -1,6 +1,8 @@
 //! Encoding stream hosts (#729) — `include!` canonical EncodingStream + HostileIo.
 //! File create/open plus JSON/JSONL/CSV/CBOR/XML reader/writer handles.
 
+#[allow(unused_imports)]
+pub use jet_foundation::Outcome::*;
 use super::Concurrency;
 use super::Encoding::{alloc_datatree, clone_heap_string, read_datatree, result_err_msg, result_ok_bits};
 
@@ -35,7 +37,7 @@ pub(crate) mod runtime {
             pub buffer_bytes: i64,
             pub max_depth: i64,
             pub max_item_bytes: i64,
-            pub max_total_bytes: Option<i64>,
+            pub max_total_bytes: JetOutcome<i64, JetAbsent>,
             pub max_expansion_depth: i64,
             pub max_expansion_bytes: i64,
         }
@@ -45,7 +47,7 @@ pub(crate) mod runtime {
                     buffer_bytes: 65536,
                     max_depth: 256,
                     max_item_bytes: 16777216,
-                    max_total_bytes: None,
+                    max_total_bytes: Err(JetAbsent),
                     max_expansion_depth: 32,
                     max_expansion_bytes: 8388608,
                 }
@@ -708,7 +710,7 @@ fn read_limits(handle: i64) -> runtime::jet_std::EncodingLimits {
             buffer_bytes: get(0),
             max_depth: get(1),
             max_item_bytes: get(2),
-            max_total_bytes: if total == 0 { None } else { Some(total) },
+            max_total_bytes: if total == 0 { Err(JetAbsent) } else { Ok(total) },
             max_expansion_depth: get(4),
             max_expansion_bytes: get(5),
         };

@@ -631,7 +631,7 @@ extern "C" fn jet_jit_regex_method(recv: i64, method: i64, arg0: i64, arg1: i64)
     with_regex(recv, |v| match (v, method.as_str()) {
         (RegexValue::Regex(rx), "is_match") => i64::from(rx.is_match(&clone_string(arg0))),
         (RegexValue::Regex(rx), "match") => match rx.match_value(&clone_string(arg0)) {
-            Err(JetAbsent) => 0,
+            Err(_) => 0,
             Ok(m) => push_regex(RegexValue::Match(m)).wrapping_add(1),
         },
         (RegexValue::Regex(rx), "find") => option_string_bits(rx.find(&clone_string(arg0)).ok()),

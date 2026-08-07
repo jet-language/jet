@@ -79,12 +79,12 @@
         pub buffer_bytes: i64,
         pub max_depth: i64,
         pub max_item_bytes: i64,
-        pub max_total_bytes: Option<i64>,
+        pub max_total_bytes: JetOutcome<i64, JetAbsent>,
         pub max_expansion_depth: i64,
         pub max_expansion_bytes: i64,
     }
     impl EncodingLimits {
-        pub fn safe() -> Self { Self { buffer_bytes: 65536, max_depth: 256, max_item_bytes: 16777216, max_total_bytes: None, max_expansion_depth: 32, max_expansion_bytes: 8388608 } }
+        pub fn safe() -> Self { Self { buffer_bytes: 65536, max_depth: 256, max_item_bytes: 16777216, max_total_bytes: Err(JetAbsent), max_expansion_depth: 32, max_expansion_bytes: 8388608 } }
     }
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub enum EncodingFormat { JSON, JSONL, CSV, XML, CBOR }
@@ -361,7 +361,7 @@
             std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<ProcessReader>>>>,
         pub stderr:
             std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<ProcessReader>>>>,
-        pub terminal: Option<TerminalSession>,
+        pub terminal: JetOutcome<TerminalSession, JetAbsent>,
         pub timeout_ms: Option<i64>,
         pub started: std::time::Instant,
     }
@@ -1334,8 +1334,8 @@
                 IOOperation::Resolve => "resolve", IOOperation::Codec => "codec",
             };
             let mut text = format!("{kind} during {operation}");
-            if let Some(resource) = &context.resource { text.push_str(&format!(" `{resource}`")); }
-            if let Some(cause) = &context.cause { text.push_str(&format!(": {cause}")); }
+            if let Ok(resource) = &context.resource { text.push_str(&format!(" `{resource}`")); }
+            if let Ok(cause) = &context.cause { text.push_str(&format!(": {cause}")); }
             text
         }
     }
