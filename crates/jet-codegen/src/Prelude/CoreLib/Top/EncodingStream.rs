@@ -233,11 +233,11 @@ fn jet_encoding_error(
         format: jet_std::EncodingFormat::JSON,
         kind,
         byte_offset: offset,
-        line: Some(line),
-        column: Some(column),
+        line: Ok(line),
+        column: Ok(column),
         path: String::new(),
         reason: reason.into(),
-        cause: None,
+        cause: Err(JetAbsent),
     }
 }
 
@@ -251,11 +251,11 @@ fn jet_encoding_io_error(
         format: jet_std::EncodingFormat::JSON,
         kind: jet_std::EncodingErrorKind::IO,
         byte_offset: offset,
-        line: Some(line),
-        column: Some(column),
+        line: Ok(line),
+        column: Ok(column),
         path: String::new(),
         reason: "file IO failed".to_string(),
-        cause: Some(jet_std::EncodingCause {
+        cause: Ok(jet_std::EncodingCause {
             kind: format!("{:?}", error.kind()),
             os_code: jet_outcome_of(error.raw_os_error().map(i64::from)),
             message: error.to_string(),
@@ -286,11 +286,11 @@ fn jet_encoding_validate_limits(
             format: jet_std::EncodingFormat::JSON,
             kind: jet_std::EncodingErrorKind::Limit,
             byte_offset: 0,
-            line: Some(1),
-            column: Some(1),
+            line: Ok(1),
+            column: Ok(1),
             path: String::new(),
             reason,
-            cause: None,
+            cause: Err(JetAbsent),
         }),
         None => Ok(()),
     }
@@ -1726,8 +1726,8 @@ impl jet_std::JSONLWriter {
         }
         if let Err(mut error) = jet_jsonl_tree_size(&value, 0, "$", &self.json.limits) {
             error.byte_offset = self.json.total;
-            error.line = Some(self.record_index + 1);
-            error.column = Some(1);
+            error.line = Ok(self.record_index + 1);
+            error.column = Ok(1);
             return self.fail(error);
         }
         // Value bytes now; record LF is deferred to next write or finish so
@@ -1820,17 +1820,17 @@ fn jet_csv_error(
         format: jet_std::EncodingFormat::CSV,
         kind,
         byte_offset: offset,
-        line: Some(line),
-        column: Some(column),
+        line: Ok(line),
+        column: Ok(column),
         path,
         reason: reason.into(),
-        cause: None,
+        cause: Err(JetAbsent),
     }
 }
 
 fn jet_csv_io_error(error: std::io::Error, offset: i64, line: i64, column: i64, path: String) -> jet_std::EncodingError {
     let mut out = jet_csv_error(jet_std::EncodingErrorKind::IO, offset, line, column, path, "file IO failed");
-    out.cause = Some(jet_std::EncodingCause {
+    out.cause = Ok(jet_std::EncodingCause {
         kind: format!("{:?}", error.kind()),
         os_code: jet_outcome_of(error.raw_os_error().map(i64::from)),
         message: error.to_string(),
@@ -2041,12 +2041,12 @@ enum JetCBORWriteFrame {
 }
 
 fn jet_cbor_stream_error(kind: jet_std::EncodingErrorKind, offset: i64, path: String, reason: impl Into<String>) -> jet_std::EncodingError {
-    jet_std::EncodingError { format: jet_std::EncodingFormat::CBOR, kind, byte_offset: offset, line: None, column: None, path, reason: reason.into(), cause: None }
+    jet_std::EncodingError { format: jet_std::EncodingFormat::CBOR, kind, byte_offset: offset, line: Err(JetAbsent), column: Err(JetAbsent), path, reason: reason.into(), cause: Err(JetAbsent) }
 }
 
 fn jet_cbor_stream_io(error: std::io::Error, offset: i64, path: String) -> jet_std::EncodingError {
     let mut out = jet_cbor_stream_error(jet_std::EncodingErrorKind::IO, offset, path, "file IO failed");
-    out.cause = Some(jet_std::EncodingCause { kind: format!("{:?}", error.kind()), os_code: jet_outcome_of(error.raw_os_error().map(i64::from)), message: error.to_string() });
+    out.cause = Ok(jet_std::EncodingCause { kind: format!("{:?}", error.kind()), os_code: jet_outcome_of(error.raw_os_error().map(i64::from)), message: error.to_string() });
     out
 }
 
@@ -2106,11 +2106,11 @@ fn jet_xml_stream_error(error: crate::jet_xml_pull::Error) -> jet_std::EncodingE
         format: jet_std::EncodingFormat::XML,
         kind,
         byte_offset: error.offset as i64,
-        line: error.line.map(|value| value as i64),
-        column: error.column.map(|value| value as i64),
+        line: jet_outcome_of(error.line.map(|value| value as i64)),
+        column: jet_outcome_of(error.column.map(|value| value as i64)),
         path: error.path,
         reason: error.reason,
-        cause: None,
+        cause: Err(JetAbsent),
     }
 }
 fn jet_xml_io_error(offset: i64, error: std::io::Error) -> jet_std::EncodingError {
@@ -2118,11 +2118,11 @@ fn jet_xml_io_error(offset: i64, error: std::io::Error) -> jet_std::EncodingErro
         format: jet_std::EncodingFormat::XML,
         kind: jet_std::EncodingErrorKind::IO,
         byte_offset: offset,
-        line: None,
-        column: None,
+        line: Err(JetAbsent),
+        column: Err(JetAbsent),
         path: String::new(),
         reason: "file IO failed".to_string(),
-        cause: Some(jet_std::EncodingCause {
+        cause: Ok(jet_std::EncodingCause {
             kind: format!("{:?}", error.kind()),
             os_code: jet_outcome_of(error.raw_os_error().map(i64::from)),
             message: error.to_string(),
@@ -2136,8 +2136,8 @@ fn jet_enc_xml_reader(
 ) -> Result<jet_std::XMLReader, jet_std::EncodingError> {
     jet_encoding_validate_limits(&limits).map_err(|mut error| {
         error.format = jet_std::EncodingFormat::XML;
-        error.line = None;
-        error.column = None;
+        error.line = Err(JetAbsent);
+        error.column = Err(JetAbsent);
         error
     })?;
     let mut options = jet_xml_options(&xml);
@@ -2165,11 +2165,11 @@ fn jet_enc_xml_reader(
             format: jet_std::EncodingFormat::XML,
             kind: jet_std::EncodingErrorKind::Limit,
             byte_offset: 0,
-            line: None,
-            column: None,
+            line: Err(JetAbsent),
+            column: Err(JetAbsent),
             path: "$".to_string(),
             reason: "XML event heap exceeded the bounded codec heap ceiling".to_string(),
-            cause: None,
+            cause: Err(JetAbsent),
         });
     }
     Ok(jet_std::XMLReader {
@@ -2210,11 +2210,11 @@ fn jet_xml_heap_error(offset: i64) -> jet_std::EncodingError {
         format: jet_std::EncodingFormat::XML,
         kind: jet_std::EncodingErrorKind::Limit,
         byte_offset: offset,
-        line: None,
-        column: None,
+        line: Err(JetAbsent),
+        column: Err(JetAbsent),
         path: "$".to_string(),
         reason: "XML event heap exceeded the bounded codec heap ceiling".to_string(),
-        cause: None,
+        cause: Err(JetAbsent),
     }
 }
 
@@ -2301,11 +2301,11 @@ fn jet_enc_xml_reader_scan(
                         format: jet_std::EncodingFormat::XML,
                         kind: jet_std::EncodingErrorKind::Limit,
                         byte_offset: reader.total,
-                        line: None,
-                        column: None,
+                        line: Err(JetAbsent),
+                        column: Err(JetAbsent),
                         path: String::new(),
                         reason: format!("max_total_bytes {maximum} exceeded"),
-                        cause: None,
+                        cause: Err(JetAbsent),
                     };
                     reader.terminal = Some(error.clone());
                     return Err(error);
@@ -2343,8 +2343,8 @@ fn jet_enc_xml_writer(
 ) -> Result<jet_std::XMLWriter, jet_std::EncodingError> {
     jet_encoding_validate_limits(&limits).map_err(|mut error| {
         error.format = jet_std::EncodingFormat::XML;
-        error.line = None;
-        error.column = None;
+        error.line = Err(JetAbsent);
+        error.column = Err(JetAbsent);
         error
     })?;
     let renderer = crate::jet_xml_pull::StreamWriter::new(
@@ -2385,12 +2385,12 @@ impl jet_std::XMLWriter {
     fn write_event(&mut self, event: jet_std::DataTree) -> Result<(), jet_std::EncodingError> {
         if let Some(error) = &self.terminal { return Err(error.clone()); }
         if self.finished {
-            return self.fail(jet_std::EncodingError { format: jet_std::EncodingFormat::XML, kind: jet_std::EncodingErrorKind::State, byte_offset: self.total, line: None, column: None, path: String::new(), reason: "write called after finish".to_string(), cause: None });
+            return self.fail(jet_std::EncodingError { format: jet_std::EncodingFormat::XML, kind: jet_std::EncodingErrorKind::State, byte_offset: self.total, line: Err(JetAbsent), column: Err(JetAbsent), path: String::new(), reason: "write called after finish".to_string(), cause: Err(JetAbsent) });
         }
         let value = match jet_xml_from_data_tree(&event) {
             Ok(value) => value,
             Err(reason) => {
-                let error = jet_std::EncodingError { format: jet_std::EncodingFormat::XML, kind: jet_std::EncodingErrorKind::Syntax, byte_offset: self.total, line: None, column: None, path: String::new(), reason, cause: None };
+                let error = jet_std::EncodingError { format: jet_std::EncodingFormat::XML, kind: jet_std::EncodingErrorKind::Syntax, byte_offset: self.total, line: Err(JetAbsent), column: Err(JetAbsent), path: String::new(), reason, cause: Err(JetAbsent) };
                 return self.fail(error);
             }
         };
@@ -2407,11 +2407,11 @@ impl jet_std::XMLWriter {
             }
         };
         if bytes.len() > self.limits.max_item_bytes as usize {
-            return self.fail(jet_std::EncodingError { format: jet_std::EncodingFormat::XML, kind: jet_std::EncodingErrorKind::Limit, byte_offset: self.total, line: None, column: None, path: String::new(), reason: format!("max_item_bytes {} exceeded", self.limits.max_item_bytes), cause: None });
+            return self.fail(jet_std::EncodingError { format: jet_std::EncodingFormat::XML, kind: jet_std::EncodingErrorKind::Limit, byte_offset: self.total, line: Err(JetAbsent), column: Err(JetAbsent), path: String::new(), reason: format!("max_item_bytes {} exceeded", self.limits.max_item_bytes), cause: Err(JetAbsent) });
         }
         let next_total = self.total.saturating_add(bytes.len() as i64);
         if self.limits.max_total_bytes.is_some_and(|maximum| next_total > maximum) {
-            return self.fail(jet_std::EncodingError { format: jet_std::EncodingFormat::XML, kind: jet_std::EncodingErrorKind::Limit, byte_offset: self.total, line: None, column: None, path: String::new(), reason: format!("max_total_bytes {} exceeded", self.limits.max_total_bytes.unwrap_or(0)), cause: None });
+            return self.fail(jet_std::EncodingError { format: jet_std::EncodingFormat::XML, kind: jet_std::EncodingErrorKind::Limit, byte_offset: self.total, line: Err(JetAbsent), column: Err(JetAbsent), path: String::new(), reason: format!("max_total_bytes {} exceeded", self.limits.max_total_bytes.unwrap_or(0)), cause: Err(JetAbsent) });
         }
         let capacity = self.limits.buffer_bytes as usize;
         if self.buffer.len().saturating_add(bytes.len()) > capacity { self.flush_buffer()?; }
@@ -2441,7 +2441,7 @@ impl jet_std::XMLWriter {
         if let Some(error) = &self.terminal { return Err(error.clone()); }
         if self.finished { return Ok(()); }
         if !self.renderer.is_finished() {
-            return self.fail(jet_std::EncodingError { format: jet_std::EncodingFormat::XML, kind: jet_std::EncodingErrorKind::State, byte_offset: self.total, line: None, column: None, path: String::new(), reason: "finish requires document_end".to_string(), cause: None });
+            return self.fail(jet_std::EncodingError { format: jet_std::EncodingFormat::XML, kind: jet_std::EncodingErrorKind::State, byte_offset: self.total, line: Err(JetAbsent), column: Err(JetAbsent), path: String::new(), reason: "finish requires document_end".to_string(), cause: Err(JetAbsent) });
         }
         self.flush_output()?;
         self.finished = true;
@@ -2454,7 +2454,7 @@ fn jet_enc_xml_writer_flush(writer: &mut jet_std::XMLWriter) -> Result<(), jet_s
 fn jet_enc_xml_writer_finish(writer: &mut jet_std::XMLWriter) -> Result<(), jet_std::EncodingError> { writer.finish_output() }
 
 fn jet_enc_cbor_reader(input: JetFileReader, limits: jet_std::EncodingLimits) -> Result<jet_std::CBORReader, jet_std::EncodingError> {
-    jet_encoding_validate_limits(&limits).map_err(|mut e| { e.format = jet_std::EncodingFormat::CBOR; e.line = None; e.column = None; e })?;
+    jet_encoding_validate_limits(&limits).map_err(|mut e| { e.format = jet_std::EncodingFormat::CBOR; e.line = Err(JetAbsent); e.column = Err(JetAbsent); e })?;
     let allocation = JetJSONAllocationBudget::new(jet_encoding_codec_heap_ceiling(&limits));
     // Scratch / wire-adjacent budget is codec-owned for the reader lifetime.
     if !allocation.charge(limits.buffer_bytes as usize) {
@@ -2715,8 +2715,8 @@ fn jet_cbor_push_preferred_float(out:&mut Vec<u8>,value:f64){if let Some(bits)=j
 fn jet_enc_cbor_writer(output: JetFileWriter, limits: jet_std::EncodingLimits) -> Result<jet_std::CBORWriter, jet_std::EncodingError> {
     jet_encoding_validate_limits(&limits).map_err(|mut e| {
         e.format = jet_std::EncodingFormat::CBOR;
-        e.line = None;
-        e.column = None;
+        e.line = Err(JetAbsent);
+        e.column = Err(JetAbsent);
         e
     })?;
     let allocation = JetJSONAllocationBudget::new(jet_encoding_codec_heap_ceiling(&limits));

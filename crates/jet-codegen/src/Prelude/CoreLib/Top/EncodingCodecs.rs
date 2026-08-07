@@ -192,9 +192,9 @@ fn jet_xml_reason(reason: crate::jet_xml_pull::Reason) -> jet_std::XMLReason {
 fn jet_xml_error(error: crate::jet_xml_pull::Error) -> jet_std::XMLError {
     jet_std::XMLError {
         kind: jet_xml_reason(error.kind),
-        byte_offset: error.line.map(|_| error.offset as i64),
-        line: error.line.map(|value| value as i64),
-        column: error.column.map(|value| value as i64),
+        byte_offset: jet_outcome_of(error.line.map(|_| error.offset as i64)),
+        line: jet_outcome_of(error.line.map(|value| value as i64)),
+        column: jet_outcome_of(error.column.map(|value| value as i64)),
         path: error.path,
         reason: error.reason,
     }
@@ -203,16 +203,16 @@ fn jet_xml_error(error: crate::jet_xml_pull::Error) -> jet_std::XMLError {
 fn jet_xml_source_error(error: crate::jet_xml_pull::Error) -> jet_std::XMLError {
     let offset = error.offset as i64;
     let mut converted = jet_xml_error(error);
-    converted.byte_offset = Some(offset);
+    converted.byte_offset = Ok(offset);
     converted
 }
 
 fn jet_xml_shape_error(reason: String) -> jet_std::XMLError {
     jet_std::XMLError {
         kind: jet_std::XMLReason::Shape,
-        byte_offset: None,
-        line: None,
-        column: None,
+        byte_offset: Err(JetAbsent),
+        line: Err(JetAbsent),
+        column: Err(JetAbsent),
         path: String::new(),
         reason,
     }
@@ -275,9 +275,9 @@ fn jet_std_xml_to_bytes(d: &jet_std::DataTree, options: jet_std::XMLRenderOption
 fn jet_std_xml_canonical(d: &jet_std::DataTree, options: &jet_std::XMLCanonical) -> Result<String, jet_std::XMLError> {
     let value = jet_xml_from_data_tree(d).map_err(|reason| jet_std::XMLError {
         kind: jet_std::XMLReason::Shape,
-        byte_offset: None,
-        line: None,
-        column: None,
+        byte_offset: Err(JetAbsent),
+        line: Err(JetAbsent),
+        column: Err(JetAbsent),
         path: String::new(),
         reason,
     })?;
@@ -302,9 +302,11 @@ fn jet_std_xml_root(document: &jet_std::DataTree) -> Result<jet_std::DataTree, j
 
 fn jet_std_xml_expanded_name(
     node: &jet_std::DataTree,
-) -> Result<(String, Option<String>, String, Option<String>), jet_std::XMLError> {
+) -> Result<(String, JetOutcome<String, JetAbsent>, String, JetOutcome<String, JetAbsent>), jet_std::XMLError> {
     let value = jet_xml_from_data_tree(node).map_err(jet_xml_shape_error)?;
-    crate::jet_xml_pull::expanded_name_parts(&value).map_err(jet_xml_error)
+    crate::jet_xml_pull::expanded_name_parts(&value)
+        .map(|(raw, prefix, local, uri)| (raw, jet_outcome_of(prefix), local, jet_outcome_of(uri)))
+        .map_err(jet_xml_error)
 }
 
 fn jet_std_xml_attribute(

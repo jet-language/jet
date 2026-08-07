@@ -80,22 +80,22 @@ pub(crate) mod runtime {
             pub format: EncodingFormat,
             pub kind: EncodingErrorKind,
             pub byte_offset: i64,
-            pub line: Option<i64>,
-            pub column: Option<i64>,
+            pub line: JetOutcome<i64, JetAbsent>,
+            pub column: JetOutcome<i64, JetAbsent>,
             pub path: String,
             pub reason: String,
-            pub cause: Option<EncodingCause>,
+            pub cause: JetOutcome<EncodingCause, JetAbsent>,
         }
         impl EncodingError {
-            pub fn cause(&self) -> Option<EncodingCause> {
+            pub fn cause(&self) -> JetOutcome<EncodingCause, JetAbsent> {
                 self.cause.clone()
             }
             fn display_text(&self) -> String {
                 let mut out = format!("{:?} {:?} at byte {}", self.format, self.kind, self.byte_offset);
-                if let Some(line) = self.line {
+                if let Ok(line) = self.line {
                     out.push_str(&format!(", line {line}"));
                 }
-                if let Some(column) = self.column {
+                if let Ok(column) = self.column {
                     out.push_str(&format!(", column {column}"));
                 }
                 if !self.path.is_empty() {
@@ -169,8 +169,8 @@ pub(crate) mod runtime {
         pub struct XMLError {
             pub kind: XMLReason,
             pub byte_offset: Option<i64>,
-            pub line: Option<i64>,
-            pub column: Option<i64>,
+            pub line: JetOutcome<i64, JetAbsent>,
+            pub column: JetOutcome<i64, JetAbsent>,
             pub path: String,
             pub reason: String,
         }

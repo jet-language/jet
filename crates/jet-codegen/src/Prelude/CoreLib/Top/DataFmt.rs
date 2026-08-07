@@ -218,11 +218,11 @@ fn jet_data_bridge_err(
     jet_std::DataError {
         kind,
         operation: "require_bridge".to_string(),
-        row: None,
-        column: None,
-        index: None,
+        row: Err(JetAbsent),
+        column: Err(JetAbsent),
+        index: Err(JetAbsent),
         reason: reason.into(),
-        cause: None,
+        cause: Err(JetAbsent),
     }
 }
 
