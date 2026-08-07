@@ -184,6 +184,16 @@ impl<'a> Checker<'a> {
             (CtValue::Some(_) | CtValue::None(_), _) => false,
             (CtValue::ResOk(_) | CtValue::ResErr(_), Type::Result { .. }) => true,
             (CtValue::ResOk(_) | CtValue::ResErr(_), _) => false,
+            // A folded Unit is a real value only when the binding is itself
+            // Unit-typed. `CtValue::Unit` also stands in as a placeholder for
+            // constructs the evaluator can't represent as a literal (e.g. a
+            // `scope.guard`/`on_commit`/`on_rollback` closure registration —
+            // eval/exprs.rs pushes the guard and returns `Ok(CtValue::Unit)`
+            // because real execution drains it procedurally at scope exit).
+            // Accepting that placeholder as a fold for a non-Unit binding
+            // would serialize a bare `()` in place of the real construct.
+            (CtValue::Unit, Type::Named(n)) if n == "Unit" => true,
+            (CtValue::Unit, _) => false,
             _ => true,
         }
     }

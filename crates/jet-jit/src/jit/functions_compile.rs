@@ -412,6 +412,18 @@ pub(crate) fn lower_callable_lambda(
     module
         .define_function(id, &mut ctx)
         .map_err(|error| error.to_string())?;
+    // #1592: this ad-hoc callable (scope.guard/on_commit/on_rollback closure) is
+    // declared reentrantly mid-compile of its enclosing function, so it consumes
+    // a `FuncId` slot the tier-1 warm-run cache's capture ordering doesn't
+    // account for (`tier_cache::note_defined` only runs from `lower_function`/
+    // spawn-body compile). A cold run compiles and runs it correctly (one live
+    // `JITModule`, consistent `FuncId`s); a warm-run replay re-declares only the
+    // captured functions, so relocations baked against the original (now-shifted)
+    // numbering resolve to the wrong function or go out of bounds. Same fix as
+    // the existing Cell-handle case just below `publish_capture` in
+    // `tier_cache.rs`: opt this whole compile out of warm-run caching rather
+    // than risk replaying a subtly wrong closure.
+    super::tier_cache::abort_capture();
     module.clear_context(&mut ctx);
     Ok(id)
 }
