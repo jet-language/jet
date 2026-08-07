@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1599,
-    "rev": 28561,
+    "rev": 28562,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -84020,7 +84020,7 @@
       "priority": "P1",
       "plan": "Implement D-VERDICT-1455-1 (D-MARK-REG1) structurally. One shared marker reader runs at every node start, accepts any name including keyword-lexed ones, and attaches Marker nodes to the owning AST node for every use site. Delete every hand-bumped marker token, both function-marker applicators, the marker_sequence_leads_to_function heuristic, the three shadow site tables, and all lexer marker-name knowledge. Sema receives markers; parse-time desugaring into flags ends. (This half of the card is unchanged from the original scope and is already in progress per its own criteria evidence.)\n\nAdded scope, ratified 2026-08-06 (D-META-ONE1=A, D-META-FORM1=A, D-META-NAME1=A): parse the declaration side too, since D-META-ONE1 explicitly \"fulfills D-VERDICT-1455-1\" by moving rule rows from Rust into Jet. A rule row is now written as an ordinary Jet declaration in Prelude source:\n\n  marker Inline(mode: InlineMode = .Hint, $sites: [.Function, .Method, .Constant])\n  marker Pre(condition: Any, message: String, $sites: [.Function, .Method], $repeatable: true)\n\nThe introducing keyword is \"marker\" (D-META-NAME1=A -- already the project's word everywhere else, no rename). Facts about the rule ($sites, $repeatable) are ordinary named parameters carrying the compile-time sigil \"$\", the same mark used by \"$limit\" and \"T.$layout\" -- there is no \"on\" keyword, no \"repeatable\" trailing word, no second parameter list, and no scope-block form (D-META-FORM1=A rejected all three of those spellings by name). This needs no new grammar beyond an ordinary named-parameter declaration list plus the existing \"$\" sigil applied to a parameter.\n\nNot in scope for this card: lowering the parsed \"marker\" declarations into whatever runtime structure sema/formatter/tree-sitter consume as \"registry rows\" -- that is #1457's and #1458's job; do not duplicate that work here. Also not in scope: implementing D-META-STAGE1's retirement of \"#Known\" (a separate ballot, tracked on its own new card) -- do not special-case \"#Known\" here beyond whatever the existing keyword-lexed-marker-name handling already covers generically.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "bd3-mark",
       "log": [
         {
           "at": "2026-08-06",
@@ -84105,9 +84105,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-05T22:45:07.350Z",
-      "updated": "2026-08-06T21:41:37.521Z",
-      "updatedBy": "audit-apply",
-      "workOrder": 370
+      "updated": "2026-08-07T08:27:15.847Z",
+      "updatedBy": "bd3-mark",
+      "workOrder": 370,
+      "claimedAt": "2026-08-07T08:27:15.846Z"
     },
     {
       "id": "c0ai0h4w",
@@ -131781,6 +131782,13 @@
   ],
   "events": [
     {
+      "at": "2026-08-07T08:27:15.847Z",
+      "by": "bd3-mark",
+      "action": "card.claim",
+      "ref": "c0556cxe",
+      "note": ""
+    },
+    {
       "at": "2026-08-07T08:26:30.462Z",
       "by": "bd3-orch",
       "action": "card.update",
@@ -135272,13 +135280,6 @@
       "action": "card.criteria-add",
       "ref": "c06k75xs",
       "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-08-06T21:47:13.548Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c06k75xs",
-      "note": "#2 syntax-decisions.md log entry"
     }
   ],
   "nextNum": 368,
