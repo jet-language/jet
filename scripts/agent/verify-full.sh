@@ -23,9 +23,9 @@ tmp="$(mktemp -d "$tmp_parent/jet-verify.XXXXXX")"
 cleanup() {
   # card 1640: artifact footprint stays visible every run — target/ has no
   # automatic pruning and once reached 619G unnoticed.
-  du -sh -- "${CARGO_TARGET_DIR:-$repo/target}" "$tmp" 2>/dev/null \
-    | sed 's/^/artifact footprint: /' >&2 || true
   target_kb="$(du -sk -- "${CARGO_TARGET_DIR:-$repo/target}" 2>/dev/null | cut -f1 || true)"
+  scratch_kb="$(du -sk -- "$tmp" 2>/dev/null | cut -f1 || true)"
+  echo "artifact footprint: target=$(( ${target_kb:-0} / 1048576 ))G scratch=$(( ${scratch_kb:-0} / 1024 ))M" >&2
   if [ "${target_kb:-0}" -gt 157286400 ]; then
     echo "warning: target/ exceeds 150G — run cargo clean (see AGENTS.md pruning note)" >&2
   fi

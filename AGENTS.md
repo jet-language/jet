@@ -76,6 +76,17 @@ on host tools unless testing host-shell independence. Group dependent checks whe
 Rebuild before compiler smoke tests: the `jet` wrapper runs `target/debug/jet`. Check `/tmp` before trusting ENOSPC.
 The verification skill owns snapshot, golden, formatter, grammar, and full-suite traps.
 
+`/tmp` is RAM-backed tmpfs on this machine. Never place cargo target dirs, alternate `CARGO_TARGET_DIR`s, or
+multi-GB logs there — tmpfs pages fill swap and end in kernel OOM kills. Use a gitignored disk path such as
+`<repo>/target-<name>`, and delete large session outputs when the task closes. `jet-env` rejects a `/tmp`
+target dir; `scripts/agent/tmp-guard.sh` auto-cleans stale junk and blocks commands under critical memory
+pressure — if it blocks you, free the space it names before continuing.
+
+`target/` is build cache with no automatic pruning; it once reached 619G unnoticed. Tests and scripts never
+write scratch, fixtures, or logs inside it — use temp-dir scratch cleaned on exit (the shared test `Scratch`).
+`verify-full.sh` prints the footprint each run and warns past 150G; on that warning, run `cargo clean` and
+rebuild.
+
 Only the owner starts the Tower board server (`node plugins/tower/tower.mjs
 serve --open`). Agents never run `tower serve` — not on another port, not in a
 worktree, not to "restart" a stale one; a second server holds divergent
