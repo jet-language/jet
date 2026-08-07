@@ -370,6 +370,7 @@ pub(super) fn eval_builtin(
         }
         TBuiltinOp::PriorityQueuePeek => apply_method(recv, "peek", args, span),
         TBuiltinOp::PriorityQueueToSortedList => apply_method(recv, "to_sorted_list", args, span),
+        TBuiltinOp::PriorityQueueRemove { .. } => apply_mutating(recv, "remove", args, span),
         TBuiltinOp::LruPut => apply_mutating(recv, "add", args, span),
         TBuiltinOp::LruAddNew => apply_mutating(recv, "add_new", args, span),
         TBuiltinOp::LruGet => apply_mutating(recv, "get", args, span),

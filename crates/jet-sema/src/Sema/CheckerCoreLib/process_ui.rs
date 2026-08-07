@@ -335,8 +335,11 @@ pub(crate) fn process_child_method_return(
             Type::Named("ProcessResult".to_string()),
             io.clone(),
         ))),
+        // #1481 core.process: a non-blocking poll — `wait()` blocks until the
+        // child exits; `exited()` reports the current state without waiting.
+        ("exited", 0) => Some(Some(result_ty(Type::Bool, io.clone()))),
         ("kill" | "terminate" | "interrupt", 0) => Some(Some(result_ty(unit_ty(), io))),
-        ("id" | "wait" | "kill" | "terminate" | "interrupt", _) => {
+        ("id" | "wait" | "exited" | "kill" | "terminate" | "interrupt", _) => {
             diags.push(wrong_core_arity(method, 0, n_args, span));
             Some(None)
         }

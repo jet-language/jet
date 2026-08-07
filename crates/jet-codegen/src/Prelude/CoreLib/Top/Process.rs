@@ -450,6 +450,20 @@ fn jet_process_child_wait(
         errors,
     })
 }
+// #1481 core.process: a non-blocking companion to `wait()` — reports whether
+// the child has already exited without draining its output pipes or
+// blocking. Peeks the same underlying handle `id`/`kill` already borrow.
+fn jet_process_child_exited(child: &jet_std::ProcessChild) -> Result<bool, jet_std::IOError> {
+    let mut slot = child.inner.borrow_mut();
+    let Some(inner) = slot.as_mut() else {
+        return Ok(true);
+    };
+    inner
+        .try_wait()
+        .map(|status| status.is_some())
+        .map_err(|error| jet_std::IOError::other(jet_std::IOOperation::Close, Some("process".to_string()), error))
+}
+
 fn jet_process_child_kill(child: &jet_std::ProcessChild) -> Result<(), jet_std::IOError> {
     jet_process_child_signal(child, jet_process_signal_kill())
 }

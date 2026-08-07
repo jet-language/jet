@@ -4123,6 +4123,12 @@ pub enum TBuiltinOp {
     PriorityQueueFrom,
     PriorityQueuePeek,
     PriorityQueueToSortedList,
+    /// D-LISTREMOVE1/F: `remove(x[, by])` on a `PriorityQueue`; same selector
+    /// shape as `RemoveList`, no positional ordering guarantee across pushes.
+    PriorityQueueRemove {
+        line: usize,
+        mode: ListRemoveMode,
+    },
     LruPut,
     LruAddNew,
     LruGet,

@@ -1126,6 +1126,24 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         a(1), recv, a(0), cx.file, line, recv, a(0), cx.file, line
                     ),
                 },
+                TBuiltinOp::PriorityQueueRemove { line, mode } => match mode {
+                    crate::Codegen::TIR::ListRemoveMode::Value => format!(
+                        "jet_priority_queue_remove_value(&mut ({}), {})",
+                        recv,
+                        a(0)
+                    ),
+                    crate::Codegen::TIR::ListRemoveMode::Slot => format!(
+                        "jet_priority_queue_remove_slot(&mut ({}), {}, {:?}, {})",
+                        recv,
+                        a(0),
+                        cx.file,
+                        line
+                    ),
+                    crate::Codegen::TIR::ListRemoveMode::Dynamic => format!(
+                        "match ({}) {{ JetRemoveBy::Val => jet_priority_queue_remove_value(&mut ({}), {}), JetRemoveBy::Slot => jet_priority_queue_remove_slot(&mut ({}), {}, {:?}, {}) }}",
+                        a(1), recv, a(0), recv, a(0), cx.file, line
+                    ),
+                },
                 TBuiltinOp::CountList => {
                     format!("jet_list_count(&({}), &({}))", recv, a(0))
                 }
@@ -3550,6 +3568,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::ProcessChildMethod { method } => match method.as_str() {
                     "id" => format!("{}jet_process_child_id(&({}))", root, recv),
                     "wait" => format!("{}jet_process_child_wait(&({}))", root, recv),
+                    // #1481 core.process: a non-blocking poll alongside the
+                    // blocking `wait()` — same handle, no new mechanism.
+                    "exited" => format!("{}jet_process_child_exited(&({}))", root, recv),
                     "kill" => format!("{}jet_process_child_kill(&({}))", root, recv),
                     "terminate" => {
                         format!("{}jet_process_child_terminate(&({}))", root, recv)

@@ -2920,6 +2920,17 @@ pub fn core_fixed_sig(
         // `v4()` reads /dev/urandom; `v7(clock)` extracts the timestamp from the
         // injected Clock so tests can produce a deterministic UUID.
         ("core.uuid", "v4") => Some((vec![], Some(Type::String))),
+        // #1481: `v5` is the deterministic namespace+name sibling (RFC 4122
+        // SHA-1); `parse` validates/normalizes a UUID string. Both fail on a
+        // malformed UUID rather than panic (fallible input, D-FAIL-*).
+        ("core.uuid", "v5") => Some((
+            vec![(read, Type::String), (read, Type::String)],
+            Some(result_ty(Type::String, Type::String)),
+        )),
+        ("core.uuid", "parse") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(Type::String, Type::String)),
+        )),
         ("core.uuid", "v7") => Some((
             vec![(read, Type::Named(crate::Syntax::CLOCK_TYPE.to_string()))],
             Some(Type::String),

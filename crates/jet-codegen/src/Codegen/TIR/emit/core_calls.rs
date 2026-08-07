@@ -2219,6 +2219,15 @@ pub(crate) fn emit_tir_core_call(
         // D-UUIDENC1=A: UUID v4 (CSPRNG) and v7 (injectable Clock).
         ("core.uuid", "v4") => format!("{}()", helper("jet_std_uuid_v4")),
         ("core.uuid", "v7") => format!("{}(&({}))", helper("jet_std_uuid_v7"), arg(0)),
+        // #1481: `v5` (namespace+name, deterministic) and `parse` (validate
+        // + normalize) — pure std, same UUID-as-String shape as v4/v7.
+        ("core.uuid", "v5") => format!(
+            "{}(&({}), &({}))",
+            helper("jet_std_uuid_v5"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.uuid", "parse") => format!("{}(&({}))", helper("jet_std_uuid_parse"), arg(0)),
         ("core.files", "open") => format!("{}(&({}))", helper("jet_std_files_open"), arg(0)),
         ("core.files", "create") => format!("{}(&({}))", helper("jet_std_files_create"), arg(0)),
         ("core.files", "append") => format!("{}(&({}))", helper("jet_std_files_append"), arg(0)),

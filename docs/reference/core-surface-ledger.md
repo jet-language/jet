@@ -7,7 +7,7 @@ This page is the durable review index. The JSON file beside it is the
 machine-readable source that card #1398 reads. Do not keep a second
 hand-written workflow inventory.
 
-Generated on: 2026-08-06
+Generated on: 2026-08-07
 
 ## What decides a row
 
@@ -51,18 +51,18 @@ Generated on: 2026-08-06
 | Languages compared | 11 |
 | Shared containers | 54 |
 | Core modules | 85 |
-| Module members | 1137 |
-| Collection method rows | 702 |
-| Jet-side rows | 1840 |
-| Total rows | 10432 |
+| Module members | 1139 |
+| Collection method rows | 703 |
+| Jet-side rows | 1843 |
+| Total rows | 10433 |
 
 ## Verdicts
 
 | Verdict | Rows |
 | --- | ---: |
-| Jet wins | 401 |
-| Equal | 850 |
-| Jet loses (two or more languages agree) | 318 |
+| Jet wins | 402 |
+| Equal | 852 |
+| Jet loses (two or more languages agree) | 316 |
 | Single witness (recorded, not scored) | 8274 |
 | Exported type, not an operation | 169 |
 | Not compared | 420 |
@@ -73,16 +73,16 @@ Generated on: 2026-08-06
 | Language | Surface read from | Recorded operations | Jet rows matched | Loss rows |
 | --- | --- | ---: | ---: | ---: |
 | Rust | standard-library source (rust-src component) | 1032 | 357 | 28 |
-| Go | official frozen API files (GOROOT/api/go1*.txt) | 1878 | 406 | 112 |
+| Go | official frozen API files (GOROOT/api/go1*.txt) | 1878 | 407 | 111 |
 | Swift | official documentation JSON (developer.apple.com) | 505 | 175 | 32 |
 | Kotlin | official API reference (kotlinlang.org) | 1141 | 231 | 60 |
-| C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1267 | 327 | 47 |
+| C# | official API documentation source (github.com/dotnet/dotnet-api-docs) | 1267 | 329 | 45 |
 | TypeScript | runtime introspection | 724 | 219 | 66 |
 | Ruby | runtime introspection | 1294 | 338 | 82 |
 | Elixir | runtime introspection | 1270 | 369 | 75 |
 | Julia | official documentation search index (docs.julialang.org) | 1132 | 282 | 79 |
 | R | official R manual package index (stat.ethz.ch R-devel) | 1768 | 51 | 0 |
-| Python | runtime introspection | 2232 | 419 | 158 |
+| Python | runtime introspection | 2232 | 420 | 157 |
 
 ## Loss clusters
 
@@ -98,34 +98,33 @@ while losses remain.
 | String | 34 | #1581 | ready | live |
 | core.crypto | 17 | #1473 | ready | live |
 | core.archive | 16 | #1470 | ready | live |
-| Set | 16 | #1478 | verify | live |
+| Set | 16 | #1478 | done | closed |
 | core.time | 14 | #1466 | done | closed |
 | core.tasks | 13 | #1468 | done | closed |
-| core.sync | 12 | #1481 | ready | live |
+| core.sync | 12 | #1590 | ready | live |
 | core.math | 10 | #1464 | done | closed |
 | core.os | 10 | #1465 | done | closed |
-| core.encoding.xml | 9 | #1481 | ready | live |
+| core.encoding.xml | 9 | #1590 | ready | live |
 | core.log | 9 | #1474 | done | closed |
 | core.net | 9 | #1469 | done | closed |
 | core.path | 9 | #288 | building | live |
-| core.process | 9 | #1481 | ready | live |
+| core.process | 9 | #1590 | ready | live |
 | ByteBuffer | 8 | #1467 | done | closed |
-| core.db | 8 | #1481 | ready | live |
-| core.reflect | 8 | #1481 | ready | live |
-| core.testing | 7 | #1481 | ready | live |
-| core.tls | 6 | #1481 | ready | live |
-| core.uuid | 5 | #1481 | ready | live |
-| core.http | 4 | #1481 | ready | live |
+| core.db | 8 | #1590 | ready | live |
+| core.reflect | 8 | #1590 | ready | live |
+| core.testing | 7 | #1590 | ready | live |
+| core.tls | 6 | #1590 | ready | live |
+| core.http | 4 | #1590 | ready | live |
 | core.regex | 4 | #1471 | done | closed |
-| core.encoding.csv | 3 | #1481 | ready | live |
-| core.args | 2 | #1481 | ready | live |
-| core.binary | 2 | #1481 | ready | live |
-| core.mem | 2 | #1481 | ready | live |
-| core.random | 2 | #1481 | ready | live |
+| core.uuid | 4 | #1590 | ready | live |
+| core.encoding.csv | 3 | #1590 | ready | live |
+| core.args | 2 | #1590 | ready | live |
+| core.binary | 2 | #1590 | ready | live |
+| core.mem | 2 | #1590 | ready | live |
+| core.random | 2 | #1590 | ready | live |
 | BitSet | 1 | #1493 | ready | live |
-| core.encoding.json | 1 | #1481 | ready | live |
+| core.encoding.json | 1 | #1590 | ready | live |
 | Deque | 1 | #1475 | done | closed |
-| PriorityQueue | 1 | #1481 | ready | live |
 
 ## Containers indexed per package
 

@@ -2526,6 +2526,10 @@ pub(crate) fn lower_method_call(
                 ok: Box::new(Type::Named("ProcessResult".to_string())),
                 err: Box::new(Type::Named("IOError".to_string())),
             },
+            (Some("ProcessChild"), "exited") => Type::Result {
+                ok: Box::new(Type::Bool),
+                err: Box::new(Type::Named("IOError".to_string())),
+            },
             (Some("ProcessChild"), _) => Type::Result {
                 ok: Box::new(unit_type()),
                 err: Box::new(Type::Named("IOError".to_string())),

@@ -1776,6 +1776,8 @@ fn priority_queue_method_return(elem: &Type, method: &str, nargs: usize) -> Opti
         ("is_empty", 0) => Some(Some(Type::Bool)),
         ("push" | "clear", _) => Some(None),
         ("pop" | "peek", 0) => Some(Some(Type::Option(Box::new(elem.clone())))),
+        // D-LISTREMOVE1/F (criterion c6 on #1481): same value/slot shape as List.remove.
+        ("remove", 1 | 2) => Some(Some(Type::Option(Box::new(elem.clone())))),
         ("to_sorted_list", 0) => Some(Some(Type::List(Box::new(elem.clone())))),
         _ => None,
     }
@@ -2405,6 +2407,10 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
         },
         Type::Apply { name, args } if name == Syntax::TYPE_PRIORITY_QUEUE => match method {
             "push" => Some(vec![args.first().cloned().unwrap_or(Type::Int)]),
+            "remove" => Some(vec![
+                args.first().cloned().unwrap_or(Type::Int),
+                Type::Named(Syntax::TYPE_REMOVE_BY.to_string()),
+            ]),
             _ => Some(vec![]),
         },
         Type::Apply { name, args } if name == Syntax::TYPE_LRU && args.len() >= 2 => match method {

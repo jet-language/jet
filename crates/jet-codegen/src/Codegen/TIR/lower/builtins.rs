@@ -304,6 +304,14 @@ pub(crate) fn resolve_builtin_op(
                 TBuiltinOp::RemoveMap
             } else if is_lru {
                 TBuiltinOp::RemoveMap
+            } else if is_priority_queue && list_remove_mode.is_some() {
+                // D-LISTREMOVE1/F: PriorityQueue reuses List's exact selector
+                // shape and panic-line convention (criterion c6 on #1481).
+                let line = crate::Diagnostics::span_line_col(&cx.src, method_span.start).0;
+                TBuiltinOp::PriorityQueueRemove {
+                    line,
+                    mode: list_remove_mode.unwrap(),
+                }
             } else if (is_list || rty.is_none()) && list_remove_mode.is_some() {
                 // The list form embeds the *method-span* line for its bounds panic,
                 // exactly as `emit_builtin_method` reads `span_line_col(method_span.start)`.

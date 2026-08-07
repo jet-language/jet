@@ -5,7 +5,7 @@ use crate::AST::Type;
 use crate::Diagnostics::{Diagnostic, Span};
 
 use super::Builtins::{as_int, cmp};
-use super::Diagnostics::unsupported;
+use super::Diagnostics::{index_oob, unsupported};
 use super::Value::CtValue;
 
 mod set_semantics {
@@ -301,7 +301,7 @@ pub fn apply_mutating(
         ("Bag", "add" | "remove" | "clear")
             | ("Set", "add" | "remove" | "clear")
             | ("SortedSet", "add" | "remove" | "clear")
-            | ("PriorityQueue", "push" | "pop" | "clear")
+            | ("PriorityQueue", "push" | "pop" | "clear" | "remove")
             | ("BitSet", "add" | "remove" | "clear")
             | ("Deque", "push_front" | "push_back" | "pop_front" | "pop_back" | "clear")
             | ("Cache", "add" | "add_new" | "get" | "remove" | "clear")
@@ -670,6 +670,29 @@ fn priority_queue_mutating(
         }
         "pop" if items.is_empty() => option_none(),
         "pop" => CtValue::Some(Box::new(items.remove(0))),
+        // D-LISTREMOVE1/F (criterion c6 on #1481): same value/slot selector
+        // as `List.remove`, over the same highest-first order `push` already
+        // maintains — matches the AOT/JIT `BinaryHeap::into_sorted_vec().rev()`
+        // order so `.Slot` means the same position on every tier (I9).
+        "remove" => {
+            let by_slot = matches!(
+                args.get(1),
+                Some(CtValue::Enum { variant, .. }) if variant == "Slot"
+            );
+            if by_slot {
+                let i = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
+                if i < 0 || i as usize >= items.len() {
+                    return Err(index_oob(items.len(), i, span));
+                }
+                CtValue::Some(Box::new(items.remove(i as usize)))
+            } else {
+                let value = args.first().cloned().unwrap_or(CtValue::Unit);
+                match items.iter().position(|item| *item == value) {
+                    Some(index) => CtValue::Some(Box::new(items.remove(index))),
+                    None => CtValue::None(items.first().map(|item| item.jet_type()).unwrap_or(Type::Int)),
+                }
+            }
+        }
         _ => {
             return Err(unsupported(
                 &format!("PriorityQueue.{} at compile time", method),

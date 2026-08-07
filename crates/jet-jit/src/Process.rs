@@ -834,6 +834,27 @@ extern "C" fn jet_jit_process_child_id(child: i64) -> i64 {
     })
 }
 
+// #1481 core.process: a non-blocking companion to `child_wait` — peeks the
+// same registry slot without draining pipes or blocking.
+extern "C" fn jet_jit_process_child_exited(child: i64) -> i64 {
+    if child <= 0 {
+        return result_err_msg("invalid ProcessChild");
+    }
+    let idx = (child as usize).saturating_sub(1);
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(slot) = rt.process_children.get_mut(idx) else {
+            return result_err_msg("invalid ProcessChild");
+        };
+        let Some(inner) = slot.inner.as_mut() else {
+            return result_ok_bits(1);
+        };
+        match inner.try_wait() {
+            Ok(status) => result_ok_bits(if status.is_some() { 1 } else { 0 }),
+            Err(e) => result_err_msg(&e.to_string()),
+        }
+    })
+}
+
 fn process_child_signal(child: i64, signal: i32) -> Option<String> {
     if child <= 0 {
         return Some("invalid ProcessChild".to_string());
@@ -1043,6 +1064,7 @@ pub(crate) struct ProcessHostFns {
     pub spec_run_checked: cranelift_module::FuncId,
     pub spec_spawn: cranelift_module::FuncId,
     pub child_id: cranelift_module::FuncId,
+    pub child_exited: cranelift_module::FuncId,
     pub child_terminal: cranelift_module::FuncId,
     pub child_kill: cranelift_module::FuncId,
     pub child_terminate: cranelift_module::FuncId,
@@ -1101,6 +1123,7 @@ pub(crate) fn register_process_symbols(builder: &mut cranelift_jit::JITBuilder) 
     );
     builder.symbol("jet_jit_process_spec_spawn", jet_jit_process_spec_spawn as *const u8);
     builder.symbol("jet_jit_process_child_id", jet_jit_process_child_id as *const u8);
+    builder.symbol("jet_jit_process_child_exited", jet_jit_process_child_exited as *const u8);
     builder.symbol(
         "jet_jit_process_child_terminal",
         jet_jit_process_child_terminal as *const u8,
@@ -1168,6 +1191,7 @@ pub(crate) fn declare_process_host_fns(
         spec_run_checked: import("jet_jit_process_spec_run_checked", &sig_unary)?,
         spec_spawn: import("jet_jit_process_spec_spawn", &sig_unary)?,
         child_id: import("jet_jit_process_child_id", &sig_unary)?,
+        child_exited: import("jet_jit_process_child_exited", &sig_unary)?,
         child_terminal: import("jet_jit_process_child_terminal", &sig_unary)?,
         child_kill: import("jet_jit_process_child_kill", &sig_unary)?,
         child_terminate: import("jet_jit_process_child_terminate", &sig_unary)?,

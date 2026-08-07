@@ -25,6 +25,14 @@ fn run() {
     print(pq.peek())
     print(pq.pop())
     print(pq.to_sorted_list())
+    // D-LISTREMOVE1/F (criterion c6 on #1481): PriorityQueue.remove mirrors
+    // List.remove's value/slot selector — by value by default, by position
+    // over the same highest-first order `to_sorted_list` publishes.
+    print(pq.remove(3))
+    print(pq.to_sorted_list())
+    print(pq.remove(0, .Slot))
+    print(pq.to_sorted_list())
+    print(pq.remove(99))
     cache := Cache.new(2)
     cache.add("a", 1).drop("cache is new, so no displaced value is needed")
     cache.add("b", 2).drop("cache is new, so no displaced value is needed")
