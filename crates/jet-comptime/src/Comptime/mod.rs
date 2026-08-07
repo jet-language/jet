@@ -567,6 +567,7 @@ pub fn evaluate_with_imports_opts(
         repl_mode: false,
         emitted_fragments: None,
         embed_inputs: None,
+        mutated: None,
     })
 }
 
@@ -582,6 +583,7 @@ pub fn evaluate_with_imports_opts_collecting(
     core_imports: &HashMap<String, String>,
     allow_impure: bool,
     initial_impure_depth: usize,
+    mutated: Option<&mut HashMap<String, CtValue>>,
 ) -> Result<(CtValue, Vec<crate::AST::ComptimeInput>), Diagnostic> {
     evaluate_with_imports_opts_collecting_structs(
         init,
@@ -593,6 +595,7 @@ pub fn evaluate_with_imports_opts_collecting(
         allow_impure,
         initial_impure_depth,
         empty_structs(),
+        mutated,
     )
 }
 
@@ -608,6 +611,7 @@ pub fn evaluate_with_imports_opts_collecting_structs<'a>(
     allow_impure: bool,
     initial_impure_depth: usize,
     structs: &HashMap<String, &'a StructDef>,
+    mutated: Option<&mut HashMap<String, CtValue>>,
 ) -> Result<(CtValue, Vec<crate::AST::ComptimeInput>), Diagnostic> {
     if initial_impure_depth == 0 {
         check_purity(init, funcs, extern_names)?;
@@ -632,6 +636,7 @@ pub fn evaluate_with_imports_opts_collecting_structs<'a>(
         repl_mode: false,
         emitted_fragments: None,
         embed_inputs: Some(&mut embed_inputs),
+        mutated,
     })?;
     Ok((val, embed_inputs))
 }
@@ -1203,6 +1208,7 @@ pub fn evaluate_owned_with_imports_opts_collecting(
     core_imports: &HashMap<String, String>,
     allow_impure: bool,
     initial_impure_depth: usize,
+    mutated: Option<&mut HashMap<String, CtValue>>,
 ) -> Result<(CtValue, Vec<crate::AST::ComptimeInput>), Diagnostic> {
     let reachable = Purity::reachable_owned_funcs(init, funcs);
     let refs: HashMap<String, &Func> =
@@ -1216,6 +1222,7 @@ pub fn evaluate_owned_with_imports_opts_collecting(
         core_imports,
         allow_impure,
         initial_impure_depth,
+        mutated,
     )
 }
 

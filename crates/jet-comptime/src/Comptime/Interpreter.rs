@@ -480,6 +480,7 @@ impl<'a> Interp<'a> {
         let sink = self.sink.as_deref_mut();
         let emitted_fragments = Some(&mut self.emitted_fragments);
         let embed_inputs = Some(&mut self.embed_inputs);
+        let mut mutated = HashMap::new();
         let mut req = super::TirBridge::ExprEvalRequest {
             expr: e,
             funcs,
@@ -499,8 +500,18 @@ impl<'a> Interp<'a> {
             repl_mode,
             emitted_fragments,
             embed_inputs,
+            mutated: Some(&mut mutated),
         };
-        super::TirBridge::eval_expr(&mut req)
+        let result = super::TirBridge::eval_expr(&mut req);
+        drop(req);
+        // Keep whatever the expression changed about bindings this scope owns.
+        // Anything else in `mutated` came from `globals` and is not ours.
+        for (name, value) in mutated {
+            if let Some(slot) = scope.get_mut(&name) {
+                *slot = value;
+            }
+        }
+        result
     }
 }
 

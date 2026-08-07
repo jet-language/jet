@@ -355,6 +355,7 @@ pub(crate) fn resolve_static_rule_products(
                 core_imports,
                 false,
                 0,
+                None,
             );
             let Ok((value, _)) = value else {
                 return RuleArgumentObservation {
@@ -451,6 +452,7 @@ pub(crate) fn resolve_static_rule_products(
                 core_imports,
                 false,
                 0,
+                None,
             ) {
                 Ok((value, _)) => field.default_ct = Some(value),
                 Err(_) if needs_baked_default => {

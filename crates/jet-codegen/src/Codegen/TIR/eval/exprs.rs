@@ -5191,6 +5191,16 @@ impl<'a> EvalCtx<'a> {
                 Ok(())
             }
             TExprKind::Borrow { place, .. } => self.write_back_place(place, value, scope),
+            // Fragment lowering (`lower_stmts_for_eval`) rewrites every binding
+            // that already existed when the fragment started into a `ConstRef`
+            // read from `globals`. A mutating receiver — `reader.read_u32_le()`,
+            // `cursor.skip_ws()` — must write there and into the statement scope
+            // the caller keeps, or the advance is dropped on the floor.
+            TExprKind::ConstRef(name) if self.globals.contains_key(name) => {
+                self.globals.insert(name.clone(), value.clone());
+                scope.insert(name.clone(), value);
+                Ok(())
+            }
             TExprKind::SharedGuardValue { guard, .. } => {
                 let guard = self.eval_expr(guard, scope)?;
                 let (index, _, editable, path) = shared_guard_parts(&guard)

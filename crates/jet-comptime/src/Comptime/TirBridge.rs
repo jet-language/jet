@@ -34,6 +34,11 @@ pub struct ExprEvalRequest<'a> {
     pub emitted_fragments: Option<&'a mut Vec<String>>,
     /// D-CTEFFECT1 Tier-1 inputs recorded by the canonical host surface.
     pub embed_inputs: Option<&'a mut Vec<ComptimeInput>>,
+    /// Bindings as the fragment left them. An expression can mutate a binding
+    /// it reads — `reader.read_u32_le()` advances the reader — and a statement
+    /// driver has to see the advance, or the next expression starts over.
+    /// `None` for pure const evaluation, which has no caller scope to update.
+    pub mutated: Option<&'a mut HashMap<String, CtValue>>,
 }
 
 pub struct BlockEvalRequest<'a> {

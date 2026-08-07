@@ -43,6 +43,53 @@ impl<'a> Checker<'a> {
             globals
         }
 
+        /// Record what a folded initializer changed about earlier bindings.
+        /// `r :: Reader.over(bytes)` followed by `magic :: r.read_u32_le()?`
+        /// advances `r`; without writing that back, every later fold reads a
+        /// reader still parked at position zero. Only names a comptime scope
+        /// already holds are updated.
+        pub(crate) fn apply_ct_mutations(
+            &mut self,
+            mutated: HashMap<String, crate::Comptime::CtValue>,
+        ) {
+            for (name, value) in mutated {
+                if let Some(slot) = self
+                    .ct_scopes
+                    .iter_mut()
+                    .rev()
+                    .find_map(|scope| scope.get_mut(&name))
+                {
+                    *slot = value;
+                }
+            }
+        }
+
+        /// Bindings the fold changed under it. A binding that advances a
+        /// receiver — `magic :: reader.read_u32_le()?` — only folds correctly
+        /// if the emitted runtime copy of that receiver advances too, and a
+        /// baked literal never does. The implicit fold path drops both the
+        /// answer and the receiver instead (D-VERDICT-1308-1: silent decline).
+        pub(crate) fn ct_mutated_names(
+            before: &HashMap<String, crate::Comptime::CtValue>,
+            after: &HashMap<String, crate::Comptime::CtValue>,
+        ) -> Vec<String> {
+            before
+                .iter()
+                .filter(|(name, value)| after.get(*name).is_some_and(|now| now != *value))
+                .map(|(name, _)| name.clone())
+                .collect()
+        }
+
+        /// Take names back out of the comptime world so later folds read them
+        /// as unknown rather than stale.
+        pub(crate) fn forget_ct_bindings(&mut self, names: &[String]) {
+            for scope in &mut self.ct_scopes {
+                for name in names {
+                    scope.remove(name);
+                }
+            }
+        }
+
         pub(crate) fn evaluate_constant(&self, expr: &crate::AST::Expr) -> Option<crate::Comptime::CtValue> {
             let mut globals = self.current_ct_globals();
             for scope in &self.scopes {

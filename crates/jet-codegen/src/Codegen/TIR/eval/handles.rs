@@ -853,26 +853,24 @@ pub(super) fn eval_handle(
         THandleOp::WebAppMethod { .. } => Err(unsupported("handle `WebAppMethod`", span)),
         THandleOp::PluginCall => Err(unsupported("handle `PluginCall`", span)),
         THandleOp::PluginCallInt => Err(unsupported("handle `PluginCallInt`", span)),
-        THandleOp::ReaderOver => Err(unsupported("handle `ReaderOver`", span)),
-        THandleOp::ReaderReadU8 => Err(unsupported("handle `ReaderReadU8`", span)),
-        THandleOp::ReaderReadU16Le => Err(unsupported("handle `ReaderReadU16Le`", span)),
-        THandleOp::ReaderReadU16Be => Err(unsupported("handle `ReaderReadU16Be`", span)),
-        THandleOp::ReaderReadU32Le => Err(unsupported("handle `ReaderReadU32Le`", span)),
-        THandleOp::ReaderReadU32Be => Err(unsupported("handle `ReaderReadU32Be`", span)),
-        THandleOp::ReaderReadU64Le => Err(unsupported("handle `ReaderReadU64Le`", span)),
-        THandleOp::ReaderReadU64Be => Err(unsupported("handle `ReaderReadU64Be`", span)),
-        THandleOp::ReaderTake => Err(unsupported("handle `ReaderTake`", span)),
-        THandleOp::ReaderRemaining => Err(unsupported("handle `ReaderRemaining`", span)),
-        THandleOp::ReaderAtEnd => Err(unsupported("handle `ReaderAtEnd`", span)),
-        THandleOp::CursorOver => Err(unsupported("handle `CursorOver`", span)),
-        THandleOp::CursorTakeUntil => Err(unsupported("handle `CursorTakeUntil`", span)),
-        THandleOp::CursorSkipWs => Err(unsupported("handle `CursorSkipWs`", span)),
-        THandleOp::CursorTakePattern { .. } => {
-            Err(unsupported("handle `CursorTakePattern`", span))
-        }
-        THandleOp::ReaderTakePattern { .. } => {
-            Err(unsupported("handle `ReaderTakePattern`", span))
-        }
+        // D-SHIFT1: `binary.Reader` / `text.Cursor` marshal to the shared
+        // `jet_foundation::StreamCursor` kernel AOT splices into its prelude.
+        THandleOp::ReaderOver
+        | THandleOp::ReaderReadU8
+        | THandleOp::ReaderReadU16Le
+        | THandleOp::ReaderReadU16Be
+        | THandleOp::ReaderReadU32Le
+        | THandleOp::ReaderReadU32Be
+        | THandleOp::ReaderReadU64Le
+        | THandleOp::ReaderReadU64Be
+        | THandleOp::ReaderTake
+        | THandleOp::ReaderRemaining
+        | THandleOp::ReaderAtEnd
+        | THandleOp::CursorOver
+        | THandleOp::CursorTakeUntil
+        | THandleOp::CursorSkipWs
+        | THandleOp::CursorTakePattern { .. }
+        | THandleOp::ReaderTakePattern { .. } => super::stream::eval(op, recv, args, span),
     }
 }
 
