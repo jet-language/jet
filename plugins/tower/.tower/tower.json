@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1613,
-    "rev": 28795,
+    "nextNum": 1615,
+    "rev": 28807,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -24,7 +24,7 @@
         "board-ideas"
       ]
     },
-    "completionCursor": "2026-08-07T11:26:33.504Z"
+    "completionCursor": "2026-08-07T12:03:08.301Z"
   },
   "epochs": [
     {
@@ -89417,12 +89417,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P1",
       "plan": "Root cause: neither ledger is lying on its own terms; the word `covered` is. tests/jet_gaps.txt says at the top that covered means `TIR lowered and Cranelift compiled end-to-end`, which is compile coverage. The tier-parity audit measures run coverage. Nothing cross-checks the two, so comptime/embed, comptime/embed_bytes, comptime/find and comptime/find_empty sit in jit_gaps.txt `covered:` and in tests/jit_corpus_gate.txt `frontend_rejected:` at the same time, while passing under `jet run --release`. Under I9 that is a real parity failure that is invisible to CI.\n\nWhat D-META-EFFECT1 and D-META-ONE1 change about the word: today `can this run at compile time` is membership in a closed Rust allow-list, which is what raises E0956. D-META-EFFECT1=A retires that allow-list and makes the effect set the answer, and it merges the two purity checkers. So `covered` must be keyed on tier and effect, not on a table, and E0956's compile-time wording must never surface from the run tier. That is why the four comptime rows are owed to the D-META-EFFECT1 card and not fixed here.\n\nBuild:\n1. In tests/jet_gaps.txt and in tests/dev.rs (jit_coverage_audit_inner, the JET_DUMP_JIT_GAPS writer, and parse_jit_gap_manifest), rename the `covered:` section to `compile_covered:` and update the header lines to say plainly that this file tracks compile coverage only. One word, and both ledgers stop claiming run coverage.\n2. Add one cross-check to the same test: a stem in `compile_covered:` may not appear in tests/jit_corpus_gate.txt under `frontend_rejected:`, nor under `deopt_interp:` carrying an error diagnostic, unless the stem is listed in a new `run_gaps:` section. The failure message quotes both ledger lines and the stem.\n3. Add the `run_gaps:` section to tests/jet_gaps.txt with the same shrink-only ratchet semantics the file already uses (D-LENS-RUN2), seeded with exactly the E0956 rows recorded in docs/audits/jit-run-tier-vs-aot-parity-audit-2026-07-28.md, each with its audit line as the reason. Growth fails CI.\n4. Comment the four comptime rows with the card that owes them: the D-META-EFFECT1 implementation card. Do not change the examples, the interpreter, or E0956 here.\n\nProof: one targeted check that a stem present in both ledgers fails the gate; `cargo test --test dev jit_coverage_audit` green; the four comptime rows visible in `run_gaps:` with the audit cited.\n\nDo not build: no new gate binary and no second manifest (I8), no per-example allow-list beyond the one shrink-only section, no silent removal of the four rows.",
       "blockedBy": [],
       "assignee": "bd3-ledger",
       "log": [
+        {
+          "at": "2026-08-07",
+          "by": "bd3-ledger",
+          "text": "[handoff] All five criteria met. Branch bd3/ledger, head d3c9fa1ce, worktree .claude/worktrees/ledger, cut fresh from master 7b127acab. Not merged; ready for review and integration. Two files changed: tests/dev.rs and tests/jit_gaps.txt.\n\nWHAT LANDED\nThe word covered was the bug. jit_gaps.txt measures compile coverage, the corpus gate measures run coverage, and nothing compared them, so four comptime stems sat in both covered: and the gate's frontend_rejected: at once. The section is now compile_covered: with a header that says what the file measures and names the gate as the other ledger. ledger_cross_check_holds fails when a compile_covered stem is one the gate records as failing at the run tier, quoting both ledger lines, unless run_gaps: names it. run_gaps: holds the fifteen E0956 rows from the 2026-07-28 parity audit with their reasons, shrink-only behind a ceiling of 15. The four comptime rows name card #1543 (D-META-EFFECT1) as the owner of their fix.\n\nThe cross-check reads manifest against manifest, so it compiles and runs nothing. It reuses the existing parse_corpus_gate_manifest; no second reader and no new gate binary (I8).\n\nTESTS\n- cargo test --test dev ledger_cross_check: 2 of 2 pass.\n- Negative control end to end: deleting the comptime/embed row from run_gaps: turned ledger_cross_check_holds red with the full quoted pair; restoring it turned it green.\n- cargo test --test dev example_corpus_strict_jit_aot_differential_gate: the manifest still parses and classifies; its only two failures are concurrency/shield_commit and io/terminal_parity, unrelated and pre-existing (the same two failed on master during card #1527).\n- cargo test --test dev --no-run: clean.\n\nPRE-EXISTING RED FOUND, NOT THIS CARD\n- jit_coverage_audit fails on master today: the measured compile-covered set has moved to 401 stems while the file records 399 (8 stems left, 10 arrived, among them collections/iter_adapters, effects/taint, io/args_audit leaving and errors/u8_divide_zero, net/dns_lookup, types/anonymous_unions arriving). This is not the rename: the compile_covered stem rows and the gaps rows are byte-identical to master, verified by diff, and this card touches no example and no compiler source. Someone owes the ratchet a re-bless after the recent feature merges; worth its own card.\n- jit_try_compile_manifest_matches overflows its stack. It calls collect_jit_coverage directly on the default test stack while its sibling jit_coverage_audit runs the same work inside a 16 MB thread. Structural and pre-existing; a one-line thread wrapper would fix it, but it is outside this card's scope.\n\nFull suite not run, per instruction."
+        },
         {
           "at": "2026-08-06",
           "by": "audit-rethinks-a",
@@ -89433,47 +89438,47 @@
         {
           "n": 1,
           "text": "tests/jet_gaps.txt names its section compile_covered: and its header says the file tracks compile coverage only; tests/dev.rs reads and writes the new name",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd3-ledger",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:31:40.912Z"
+          "evidence": "tests/jit_gaps.txt names its section compile_covered: and its header now says the file tracks compile coverage only, names the corpus gate as the run-coverage ledger, and states that compiled is not the same as runs. tests/dev.rs reads the new name in parse_jit_gap_manifest_full and writes it in the JET_DUMP_JIT_GAPS branch of jit_coverage_audit_inner, along with the same header. That writer also carries the run_gaps: rows across, because it regenerates the whole file and would otherwise have deleted the ratchet while looking like a clean dump. Every stem row is byte-identical to master: diff of master's covered rows against the new compile_covered rows is empty, and the same for the gaps rows. tools/ci/jit-aot-parity.sh only copies the file and needed no change.",
+          "at": "2026-08-07T12:06:05.862Z"
         },
         {
           "n": 2,
           "text": "A stem in compile_covered: that also sits in the corpus gate's frontend_rejected: class, or in deopt_interp: with an error diagnostic, fails the gate unless it is listed in run_gaps:",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd3-ledger",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:31:41.373Z"
+          "evidence": "tests/dev.rs::ledger_conflicts is the check and tests/dev.rs::ledger_cross_check_holds is the gate. A stem in compile_covered: fails when the corpus gate records it as failing at the run tier, which is either the frontend_rejected: class or the deopt_interp: class carrying a diagnostic, unless run_gaps: names it. A bare deopt_interp: row is a tier choice rather than a failure and does not trip it. The message quotes the jit_gaps.txt line and the jit_corpus_gate.txt line and names the stem. It reads manifest against manifest, so nothing is compiled or run and the check costs nothing; the corpus gate still measures the run tier itself. Reuses the existing parse_corpus_gate_manifest rather than adding a second reader or a new gate binary (I8). cargo test --test dev ledger_cross_check passes 2 of 2.",
+          "at": "2026-08-07T12:06:09.786Z"
         },
         {
           "n": 3,
           "text": "tests/jet_gaps.txt carries a shrink-only run_gaps: section seeded with the E0956 rows from docs/audits/jit-run-tier-vs-aot-parity-audit-2026-07-28.md, each with its reason, and growth fails CI",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd3-ledger",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:31:41.914Z"
+          "evidence": "tests/jit_gaps.txt carries a run_gaps: section holding all fifteen E0956 rows from docs/audits/jit-run-tier-vs-aot-parity-audit-2026-07-28.md, each quoting that audit's own reason: collections/dynamic-array-view, the four comptime stems, crypto/crypto_suite, io/args_audit, io/args_spec, io/db, io/dir_entry, the three lowlevel ExternCall stems, types/generic_constructor_inference and ui/events. The section comment states that each row works under jet build and dies under jet run, so each is a real I9 parity failure parked only so the cross-check can name its owner. Shrink-only is enforced in ledger_cross_check_holds by a RUN_GAPS_CEILING of 15: fix a row, delete it, lower the ceiling in the same diff, and adding a row without lowering it fails. The same test also requires every row to carry a reason after the colon. This mirrors the D-LENS-RUN2 ratchet the file already documents.",
+          "at": "2026-08-07T12:06:22.753Z"
         },
         {
           "n": 4,
           "text": "One targeted check proves the cross-check fires: a stem listed in both ledgers fails with both ledger lines quoted",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd3-ledger",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:31:42.463Z"
+          "evidence": "Proved two ways. First, tests/dev.rs::ledger_cross_check_fires_on_a_conflict is a unit negative control: a compile-covered stem the gate calls frontend_rejected and run_gaps does not name produces exactly one message, and the test asserts that message contains the stem, the jit_gaps.txt compile_covered line and the jit_corpus_gate.txt frontend_rejected line verbatim. It also asserts the three cases that must not fire: the stem parked in run_gaps, a healthy resident_jit stem, and a bare deopt_interp row; and the one that must, a deopt_interp row carrying a diagnostic. Second, an end-to-end injection against the real ledgers: deleting the comptime/embed row from run_gaps: made ledger_cross_check_holds fail with 'the tier ledgers disagree' and the full quoted pair, naming comptime/embed with the gate's real E0956 detail. The row was restored and the test is green again. Both checks pass: cargo test --test dev ledger_cross_check, 2 of 2.",
+          "at": "2026-08-07T12:06:26.256Z"
         },
         {
           "n": 5,
           "text": "The four comptime rows name the D-META-EFFECT1 implementation card as the owner of their fix, and no example, interpreter path or diagnostic is changed by this card",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd3-ledger",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:31:43.090Z"
+          "evidence": "The four comptime rows in run_gaps: each end with 'owed to #1543 (D-META-EFFECT1)', and the section comment above them explains why: whether something can run at compile time is a closed Rust allow-list today, which is what raises E0956, and card #1543 (One effect model at both stages, D-META-EFFECT1=A) retires it. The comment also says not to fix them by reclassifying the stem. The diff is two files, tests/dev.rs and tests/jit_gaps.txt: no example, no interpreter path, no diagnostic and no compiler source is touched, and no stem moved class. Verified by git diff --stat on commit d3c9fa1ce.",
+          "at": "2026-08-07T12:06:35.792Z"
         }
       ],
       "refs": [
@@ -89484,10 +89489,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T19:02:46.710Z",
-      "updated": "2026-08-07T11:51:57.495Z",
+      "updated": "2026-08-07T12:06:56.377Z",
       "updatedBy": "bd3-ledger",
       "workOrder": 100,
-      "claimedAt": "2026-08-07T11:51:57.495Z"
+      "claimedAt": "2026-08-07T12:06:56.377Z"
     },
     {
       "id": "c0ath783",
@@ -97609,11 +97614,11 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "building",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "bd3-tests",
       "log": [],
       "criteria": [
         {
@@ -97649,8 +97654,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T08:58:13.736Z",
-      "updated": "2026-08-07T08:58:18.164Z",
-      "updatedBy": "bd3-tests"
+      "updated": "2026-08-07T11:52:43.777Z",
+      "updatedBy": "bd3-tests",
+      "claimedAt": "2026-08-07T11:52:43.777Z"
     },
     {
       "id": "c00jybyb",
@@ -98159,6 +98165,54 @@
       "needsAcceptance": false,
       "created": "2026-08-07T11:17:51.078Z",
       "updated": "2026-08-07T11:17:51.730Z",
+      "updatedBy": "bd3-orch"
+    },
+    {
+      "id": "c0n02xfm",
+      "num": 1613,
+      "title": "jit_coverage_audit ratchet stale on master: 401 measured vs 399 recorded",
+      "body": "tests jit_coverage_audit is red on clean master: the measured compile-covered set is 401 stems, the recorded file says 399 (8 stems left, 10 arrived) after recent feature merges. Found while proving #1509 (its diff is byte-identical to master on the stem rows). Fix: re-bless the ratchet honestly after confirming the 10 arrivals and 8 departures are each explained by a merged feature, not a regression.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-07T12:07:37.523Z",
+      "updated": "2026-08-07T12:07:37.523Z",
+      "updatedBy": "bd3-orch"
+    },
+    {
+      "id": "c0zebcjq",
+      "num": 1614,
+      "title": "jit_try_compile_manifest_matches overflows its stack on the default test thread",
+      "body": "tests: jit_try_compile_manifest_matches calls collect_jit_coverage() on the default test stack and overflows; its sibling test runs the same work in a 16MB thread. Fix: run it in the same 16MB thread pattern. Found while proving #1509.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-07T12:07:40.449Z",
+      "updated": "2026-08-07T12:07:40.450Z",
       "updatedBy": "bd3-orch"
     }
   ],
@@ -132712,6 +132766,90 @@
   ],
   "events": [
     {
+      "at": "2026-08-07T12:07:40.450Z",
+      "by": "bd3-orch",
+      "action": "card.add",
+      "ref": "c0zebcjq",
+      "note": "jit_try_compile_manifest_matches overflows its stack on the default test thread"
+    },
+    {
+      "at": "2026-08-07T12:07:37.523Z",
+      "by": "bd3-orch",
+      "action": "card.add",
+      "ref": "c0n02xfm",
+      "note": "jit_coverage_audit ratchet stale on master: 401 measured vs 399 recorded"
+    },
+    {
+      "at": "2026-08-07T12:06:56.377Z",
+      "by": "bd3-ledger",
+      "action": "card.update",
+      "ref": "c05dihsu",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T12:06:55.976Z",
+      "by": "bd3-ledger",
+      "action": "card.update",
+      "ref": "c05dihsu",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T12:06:35.792Z",
+      "by": "bd3-ledger",
+      "action": "card.criteria-meet",
+      "ref": "c05dihsu",
+      "note": "#5"
+    },
+    {
+      "at": "2026-08-07T12:06:26.256Z",
+      "by": "bd3-ledger",
+      "action": "card.criteria-meet",
+      "ref": "c05dihsu",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-07T12:06:22.753Z",
+      "by": "bd3-ledger",
+      "action": "card.criteria-meet",
+      "ref": "c05dihsu",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-07T12:06:09.786Z",
+      "by": "bd3-ledger",
+      "action": "card.criteria-meet",
+      "ref": "c05dihsu",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-07T12:06:05.862Z",
+      "by": "bd3-ledger",
+      "action": "card.criteria-meet",
+      "ref": "c05dihsu",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T12:03:08.302Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-07T12:03:08.301Z"
+    },
+    {
+      "at": "2026-08-07T11:52:43.777Z",
+      "by": "bd3-tests",
+      "action": "card.update",
+      "ref": "c06qhbtc",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-07T11:52:38.571Z",
+      "by": "bd3-tests",
+      "action": "card.claim",
+      "ref": "c06qhbtc",
+      "note": ""
+    },
+    {
       "at": "2026-08-07T11:52:28.445Z",
       "by": "bd3-tests",
       "action": "card.update",
@@ -136126,90 +136264,6 @@
       "action": "card.criteria-add",
       "ref": "c003si59",
       "note": "#4 The report section filesystem-containment lists all 22 owned"
-    },
-    {
-      "at": "2026-08-07T00:56:44.080Z",
-      "by": "prep-security",
-      "action": "card.criteria-add",
-      "ref": "c0v0n8mh",
-      "note": "#4 The report section network-boundaries lists all 6 owned cand"
-    },
-    {
-      "at": "2026-08-07T00:56:43.738Z",
-      "by": "prep-security",
-      "action": "card.criteria-add",
-      "ref": "c0q3et2v",
-      "note": "#4 The report section resource-bounds lists all 35 owned candid"
-    },
-    {
-      "at": "2026-08-07T00:56:43.400Z",
-      "by": "prep-security",
-      "action": "card.criteria-add",
-      "ref": "c0kuhfjq",
-      "note": "#4 The report section identity-secrets-crypto lists all 12 owne"
-    },
-    {
-      "at": "2026-08-07T00:56:43.051Z",
-      "by": "prep-security",
-      "action": "card.criteria-add",
-      "ref": "c0fzojeh",
-      "note": "#4 The report section memory-abi-safety lists all 9 owned candi"
-    },
-    {
-      "at": "2026-08-07T00:56:42.697Z",
-      "by": "prep-security",
-      "action": "card.criteria-add",
-      "ref": "c0b26l71",
-      "note": "#4 The report section tower-control-plane lists all 11 owned ca"
-    },
-    {
-      "at": "2026-08-07T00:56:37.352Z",
-      "by": "prep-security",
-      "action": "card.update",
-      "ref": "c02lvwje",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-07T00:56:36.944Z",
-      "by": "prep-security",
-      "action": "card.update",
-      "ref": "c0k0blpr",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-07T00:56:36.533Z",
-      "by": "prep-security",
-      "action": "card.update",
-      "ref": "c0f805q0",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-07T00:56:36.130Z",
-      "by": "prep-security",
-      "action": "card.update",
-      "ref": "c0a5ajib",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-07T00:56:35.719Z",
-      "by": "prep-security",
-      "action": "card.update",
-      "ref": "c055tbgu",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-07T00:56:35.301Z",
-      "by": "prep-security",
-      "action": "card.update",
-      "ref": "c003si59",
-      "note": "plan"
-    },
-    {
-      "at": "2026-08-07T00:56:34.000Z",
-      "by": "prep-loops",
-      "action": "card.update",
-      "ref": "c0dmreif",
-      "note": "phase,logEntry"
     }
   ],
   "nextNum": 368,
