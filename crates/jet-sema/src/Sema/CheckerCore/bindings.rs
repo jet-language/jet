@@ -14,6 +14,27 @@ fn direct_fixed_constructor(expr: &Expr) -> bool {
     )
 }
 
+/// `mem.address_of(place)` has no compile-time answer: the TIR-eval bridge
+/// gives it a *stable synthetic* place identity (an FNV-1a hash, since the
+/// ambient/interpreter tier has no real ASLR — see
+/// `tir_place_address_key`/`stable_place_address` in
+/// `crates/jet-codegen/src/Codegen/TIR/eval/exprs.rs`) so `#Unsafe` pointer
+/// code still runs deterministically under that tier. Baking that synthetic
+/// number as an AOT `i64` literal is a different bug: the compiled program's
+/// real address space has nothing at that value, so `Ptr.from_addr` /
+/// `volatile_read` on it is a wild dereference (I2 is silent here — it's a
+/// safety bug, not a build failure). D-VERDICT-1308-1's implicit fold must
+/// never bake this call.
+fn direct_mem_address_of(expr: &Expr, core_imports: &std::collections::HashMap<String, String>) -> bool {
+    matches!(
+        expr,
+        Expr::MethodCall { receiver, method, .. }
+            if method == Syntax::MEM_ADDRESS_OF
+                && matches!(&**receiver, Expr::Ident(alias, _)
+                    if core_imports.get(alias).is_some_and(|m| m == Syntax::CORE_MEM_MODULE))
+    )
+}
+
 fn contains_taskgroup(ty: &Type) -> bool {
     match ty {
         Type::Named(name) => name == Syntax::TYPE_TASKGROUP,
@@ -702,7 +723,7 @@ impl<'a> Checker<'a> {
                     }
                     Err(d) => self.diags.push(d),
                 }
-            } else if !b.mutable {
+            } else if !b.mutable && !direct_mem_address_of(&b.init, self.core_imports) {
                 // D-VERDICT-1308-1: an ordinary immutable binding is an
                 // implicit folding opportunity. Failure is silent; only
                 // explicit `#Known` demands a compile-time answer.

@@ -189,7 +189,7 @@ struct Pair<T> {
     second: T
 }
 fn make_pair<T>(a: T, b: T) => Pair<T> {
-    return Pair<T>.{first: a, second: b}
+    return Pair<T>.{first: ^a, second: ^b}
 }
 struct Stack<T> {
     items: [T]
@@ -198,7 +198,7 @@ fn empty_stack<T>() => Stack<T> {
     return Stack<T>.{items: []}
 }
 fn push<T>(s: Stack<T>, item: T) => Stack<T> {
-    dup := s
+    dup := ^s
     dup.items.push(item)
     return dup
 }
@@ -232,7 +232,7 @@ fn foreign_struct_construction() {
     .unwrap();
     let main_src = "\
 use \"note\"
-fn make() => Note {
+fn make() => note.Note {
     return note.Note.{ title: \"hello\", pages: 3 }
 }
 fn run() {
