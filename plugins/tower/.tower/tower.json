@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1620,
-    "rev": 28918,
+    "nextNum": 1621,
+    "rev": 28930,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -92255,6 +92255,16 @@
       "log": [
         {
           "at": "2026-08-07",
+          "by": "bd3-dollar2",
+          "text": "[handoff-correction] The previous note in this log was mangled by shell expansion; this replaces it. c1+c6 still open. Head stays d22b848d1. I reverted my working tree rather than commit an unproven change, per instruction. Both halves plus the key check are done and measured, and the failure moved twice. The chain below rules out three hypotheses and leaves one concrete blocker.\n\nKEY CHECK, answered: the comptime scope keys the mark. A binding takes its name from expect_ident, which consumes the merged token, so ct_scopes holds the marked name; Expr::ComptimeName carries the marked name too (jet-parser Parser/Expressions/primary.rs, the is_comptime_name arm). No key mismatch anywhere. The userct_ mangling is codegen-only and never reaches the scope map.\n\nHALF 1 IS NOT NEEDED, and this corrects the recipe. jet-comptime has no expression evaluator of its own to add a read arm to. Comptime::Interpreter::eval at crates/jet-comptime/src/Comptime/Interpreter.rs:461 merges scope into globals, builds a TirBridge ExprEvalRequest, delegates to TirBridge::eval_expr, then copies the mutated map back into scope. The only Expr matches left in jet-comptime are Purity's no-op, the write_back I already fixed in d22b848d1, and two integer-width helpers. There is exactly one evaluator, the TIR one, so the whole fix lives there.\n\nHALF 2 AS PRESCRIBED, and why the fold survived without a read arm. In crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs the arm matching ComptimeName with a stamped value lowers to CtLit, and it sits BEFORE the is_eval_fragment arm, so it shadowed it. Inside a fold fragment a marked mention lowered to a baked value and never a place, which is exactly why write-back had nothing to reach. Reordering so the fragment arm wins makes the mention a Local place.\n\nWHAT THAT EXPOSED, measured in order:\n\n1. With the reorder alone: three E0107, \"nothing named $ct exists here\", whose fix line suggests the identical spelling. That is the same self-suggesting message dollar3 measured. Cause: the lexer merges the mark into one Ident token, so take_mark never fires for a marked binding in a function body, and the binding parses through the ORDINARY path with is_comptime false. See the construction near line 117 of jet-parser Parser/Statements/bindings.rs; the is_comptime true construction near line 543 is unreachable for this spelling. A marked binding was therefore getting implicit-fold semantics, and the implicit path calls forget_ct_bindings when a fold advances a receiver. That is what deleted the marked reader from the scope between line 5 and line 6 of the reproducer.\n\n2. Setting is_comptime from the name, with is_comptime set to Syntax::is_comptime_name of the binding name at that construction, cleared all three E0107. The mark is the demand. That single line reads correct against D-META-STAGE1=B on its own and is worth keeping when someone lands the whole fix.\n\n3. That left four E0956, \"method read_u8 can't run at compile time yet\", on both marked read lines. Binding the fragment local with the folded value's type instead of None did not move it.\n\nTHE ONE REMAINING BLOCKER: as a baked CtLit the receiver was a concrete value and the TIR evaluator's handle path accepted read_u8; as a Local place it does not. The gate is in crates/jet-codegen/src/Codegen/TIR/subset/handles.rs, the only place read_u8 is named outside jet-sema's signature table and jet-foundation's StreamCursor. Someone needs to make that handle path admit a marked Local receiver the same way it admits whatever the CtLit form presented. That is the whole remaining distance: the E0107 and the forget-the-binding behaviour are solved, and only the handle gate stands between this and the reproducer printing 7 then 9.\n\nNothing was committed from this attempt. d22b848d1 is unchanged and still builds clean."
+        },
+        {
+          "at": "2026-08-07",
+          "by": "bd3-dollar2",
+          "text": "[handoff] c1+c6 still open. Head stays d22b848d1; I reverted my working tree rather than commit an unproven change, per instruction. Both halves plus the key check are done and MEASURED, and the failure moved twice. The chain below is the useful result — it rules out three hypotheses and leaves one concrete blocker.\n\nKEY CHECK, answered\nThe comptime scope keys the mark. A binding takes its name from expect_ident, which consumes the merged token, so ct_scopes holds \"$ct\"; Expr::ComptimeName carries \"$ct\" too (crates/jet-parser/src/Parser/Expressions/primary.rs, the is_comptime_name arm). No key mismatch. userct_ mangling is codegen-only and never reaches the scope map.\n\nHALF 1 IS NOT NEEDED, and this is the correction to the recipe\njet-comptime has no expression evaluator of its own to add a read arm to. Comptime::Interpreter::eval (crates/jet-comptime/src/Comptime/Interpreter.rs:461) merges scope into globals, builds a TirBridge::ExprEvalRequest and delegates to TirBridge::eval_expr, then copies  back into scope. The only Expr matches left in jet-comptime are Purity's no-op, the write_back I already fixed, and two integer-width helpers. So there is exactly one evaluator, the TIR one, and the whole fix lives there.\n\nHALF 2 AS PRESCRIBED, and why the fold survived without a read arm\nIn crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs the arm  sits BEFORE the  arm, so it shadowed it: inside a fold fragment a marked mention lowered to a baked value, never a place, which is why write-back had nothing to reach. Reordering so the fragment arm wins makes the mention a Local place.\n\nWHAT THAT EXPOSED, measured in order\n1. With the reorder alone: 3x E0107,  with the fix line suggesting  — the same self-suggesting message dollar3 measured. Cause found: the lexer merges  into one Ident token, so  never fires for  in a function body and the binding parses through the ORDINARY path with is_comptime: false (crates/jet-parser/src/Parser/Statements/bindings.rs, the construction near line 117; the is_comptime: true construction near line 543 is unreachable for this spelling). A marked binding was therefore getting implicit-fold semantics, and the implicit path calls forget_ct_bindings when a fold advances a receiver — which is what deleted $ct from the scope between line 5 and line 6.\n2. Setting is_comptime from the name (is_comptime: crate::Syntax::is_comptime_name(&name)) at that construction cleared all three E0107. The mark is the demand; this line looks correct against D-META-STAGE1=B regardless of the rest, and is worth keeping when someone lands the whole fix.\n3. That left 4x E0956 , on both $ct.read_u8() lines. Binding the fragment local with the folded value's type (env.bind(name, TLocal::user(name), value.jet_type()) instead of None) did not move it.\n\nTHE ONE REMAINING BLOCKER\nAs a baked CtLit the receiver was a concrete value and the TIR evaluator's handle path accepted read_u8; as a Local place it does not. The gate is in crates/jet-codegen/src/Codegen/TIR/subset/handles.rs (the only place read_u8 is named outside jet-sema's signature table and jet-foundation's StreamCursor). Someone needs to make that handle path admit a marked Local receiver the same way it admits whatever the CtLit form presented. That is the whole remaining distance: E0107 and the forget-the-binding behaviour are solved, and only the handle gate stands between this and 7|9|7|9.\n\nNothing was committed from this attempt. d22b848d1 is unchanged and still builds clean."
+        },
+        {
+          "at": "2026-08-07",
           "by": "bd3-dollar3",
           "text": "[bd3-dollar3] Criteria 1 and 6 stay open. I tried the prescribed fix, measured it twice, and it is not sufficient — the branch is back at d22b848d1 with no net change from me, because a half-fix here is worse than none. Recording what I proved so the next worker does not spend the same two build cycles.\n\nWHAT I CONFIRMED\nThe reproducer prints 7|7|7|9 on d22b848d1, as logged.\n\nThe TIR side is not missing a marked-name concept. crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs has three ComptimeName arms; the first, guarded on value: Some(..), lowers every mention to TExprKind::CtLit. A CtLit is a value, not a place, so no write-back can reach it — that is why the marked reader never advances while the plain one does. The plain one advances because Expr::Ident lowers a seeded comptime binding to TExprKind::ConstRef, and ConstRef both reads (eval/exprs.rs:2157) and writes back (eval/exprs.rs:5476, added for card #1602). So the shape of the fix looked obvious: give ComptimeName the same treatment Ident gets.\n\nWHY THAT ALONE FAILS\nI tried it two ways: reordering so the eval-fragment arm wins, and mirroring the Ident const branch exactly (lower_comptime_scalar, else ConstRef(name)). Both build clean and both produce the identical result — three E0107 'a name must be declared before it's used' on the marked names, instead of 7|9|7|9.\n\nThe reason is in jet-comptime, not jet-codegen. A repository search for ComptimeName across crates/jet-comptime returns exactly two hits: Purity.rs:244, which ignores it, and Methods/dispatch.rs:1601, the write_back arm added in d22b848d1. There is no read arm anywhere in jet-comptime that resolves Expr::ComptimeName to a value. Today the fold only works because sema stamps value: Some(..) on each mention and the CtLit arm hands that stamp back. The moment a marked name resolves as a place instead of the stamp, nothing can read it, the fold of  :: .read_u8() fails,  never gets a value, and its later mentions report E0107.\n\nTHE FIX NEEDS BOTH HALVES IN ONE CHANGE\nFirst, jet-comptime needs a read arm for Expr::ComptimeName that resolves from the comptime scope by the marked name, mirroring its Expr::Ident arm — the mark is part of the identifier, so the scope key carries it. Second, once a marked name can be read as a binding, TIR lowering can resolve it as a place the way Ident does, and the write_back arm already in place closes the loop. Landing the second without the first is what I measured, twice.\n\nWorth checking while doing it: whether the comptime scope stores the binding under the marked key or the bare one, because ConstRef lookup goes through self.globals and a key mismatch would look exactly like this failure too."
         },
@@ -92393,8 +92403,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:34:12.218Z",
-      "updated": "2026-08-07T13:44:00.020Z",
-      "updatedBy": "bd3-dollar3",
+      "updated": "2026-08-07T13:51:21.363Z",
+      "updatedBy": "bd3-dollar2",
       "workOrder": 180,
       "claimedAt": "2026-08-07T13:44:00.019Z"
     },
@@ -97674,6 +97684,11 @@
         {
           "at": "2026-08-07",
           "by": "bd3-tests",
+          "text": "Reviewer found the mem.address_of fix was syntactic (bindings.rs pattern match on Expr::MethodCall) and bypassable — one extra paren survives as Expr::Paren (D-FMTPARENS1=A) and folds again; only bindings.rs's implicit path was guarded, not #Known, method_calls.rs::evaluate_constant, or scopes.rs::evaluate_constant. Fixed at the mint point instead: crates/jet-codegen/src/Codegen/TIR/eval/exprs.rs's CoreCall handling for core.mem.address_of now refuses (E0956) unless self.runtime_execution — stable_place_address/tir_place_address_key have exactly one call site in the whole codebase, so this one guard covers every entry point regardless of spelling. Deleted the redundant syntactic guard in bindings.rs. #Known mem.address_of now correctly errors (E0956) instead of silently baking a wild address under a 'this is checked' promise. Added 2 regression tests (plain form, parenthesized form, #Known form) — all pass. cargo test --test tir_unsafe_and_runtime: 22/26 (was 20/24 before the 2 new tests; the 4 failures are the pre-existing #1617 issues, unrelated)."
+        },
+        {
+          "at": "2026-08-07",
+          "by": "bd3-tests",
           "text": "tir_unsafe_and_runtime (criterion #2) is NOT closed: cargo test --test tir_unsafe_and_runtime is 20/24 (was 19/24) — unsafe_fn_block_and_ptr_ops and polymorphic_core_specials fixed as a side effect of the mem.address_of comptime-bake fix (a real memory-safety bug: sema's implicit fold baked the TIR-eval bridge's synthetic FNV-1a 'stable place identity' for mem.address_of as a real AOT i64 literal, so the compiled program dereferenced a wild address). 4 remain red: generic_struct_fns (Clone-bound codegen gap after fixing the real ~a/~b/~s ownership-sigil bug), foreign_struct_construction (check_struct_lit's import-qualified nominal name breaks 3 different bare-name-keyed consumers — reverted the fixture to its original, non-regressed E0113 state rather than ship the ICE my first attempt caused), optional_flow_narrowing_after_none_check (D-FLOWTYPE1 else-branch narrowing has no statement-if equivalent of the value-if swap that already exists), unsafe_tier_emit_is_byte_exact (strip_vetted_prelude_modules's brace counter still desyncs somewhere past string literals). All 4 root-caused and logged as card #1617 for a follow-up pass."
         }
       ],
@@ -97711,9 +97726,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T08:58:13.736Z",
-      "updated": "2026-08-07T13:30:45.160Z",
-      "updatedBy": "bd3-orch",
-      "claimedAt": "2026-08-07T13:29:03.490Z"
+      "updated": "2026-08-07T13:51:26.266Z",
+      "updatedBy": "bd3-tests",
+      "claimedAt": "2026-08-07T13:51:26.266Z"
     },
     {
       "id": "c00jybyb",
@@ -97732,6 +97747,11 @@
       ],
       "assignee": "bd3-tests",
       "log": [
+        {
+          "at": "2026-08-07",
+          "by": "bd3-tests",
+          "text": "Reviewer B2: investigated whether a ratified decision reinstated String.to_int. Confirmed: D-STR-DECLINE1 ratified 2026-08-07, outcome C — String.to_int/.to_float ship directly as Int.parse/Float.parse spellings; crates/jet-codegen/.../TIR/lower/builtins.rs already lowers it correctly. The E0311 'to_int is retired' guard in method_calls.rs was dead code left behind when that decision shipped — deleted it (branch a, not a regression). Renamed tests/ui/source_owned_conversion_retired.{jet,stderr} to source_owned_numeric_conversion_retired, dropped the no-longer-invalid to_int case, kept the still-genuinely-retired value.to_float() numeric-conversion case, re-blessed. cargo test --test diagnostic_snapshots: 3/4 pass (only view_mut_bounds_interpreter remains red, tracked on #1616, unrelated)."
+        },
         {
           "at": "2026-08-07",
           "by": "bd3-tests",
@@ -97759,8 +97779,8 @@
           "status": "met",
           "metBy": "bd3-tests",
           "verifiedBy": null,
-          "evidence": "source_owned_conversion_retired.stderr's second error updated: .to_int() is no longer retired (returns Int ? ParseError); print() on that fallible value correctly raises E0112 'print doesn't know how to show Int ? ParseError'. Matches current jet::compile_with_path output exactly (verified via diagnostic_snapshots.rs's own diff output before editing).",
-          "at": "2026-08-07T13:08:14.443Z"
+          "evidence": "D-STR-DECLINE1=C ratified 2026-08-07: String.to_int/.to_float ship directly as Int.parse/Float.parse. Deleted the dead E0311 retirement guard in method_calls.rs (contradicted the ratified decision). Renamed fixture to source_owned_numeric_conversion_retired.{jet,stderr}, kept only the still-valid numeric-conversion retired case.",
+          "at": "2026-08-07T13:51:54.758Z"
         },
         {
           "n": 3,
@@ -97777,9 +97797,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T09:03:02.874Z",
-      "updated": "2026-08-07T13:30:45.975Z",
-      "updatedBy": "bd3-orch",
-      "claimedAt": "2026-08-07T13:08:26.223Z"
+      "updated": "2026-08-07T13:51:54.759Z",
+      "updatedBy": "bd3-tests",
+      "claimedAt": "2026-08-07T13:51:46.718Z"
     },
     {
       "id": "c09qyavw",
@@ -98605,8 +98625,71 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T13:48:33.873Z",
-      "updated": "2026-08-07T13:49:25.918Z",
-      "updatedBy": "bd3-orch"
+      "updated": "2026-08-07T13:51:13.822Z",
+      "updatedBy": "owner"
+    },
+    {
+      "id": "c0q81flf",
+      "num": 1620,
+      "title": "Compiler-held facts: one law, one ledger — capstone proposal + ballot slate",
+      "body": "Proposal at docs/proposals/compiler-facts-one-law.md. Capstone over the four ratified rethinks: type v2 knowledge, authority rights, concurrency state/duty/reach, and memory v5 ownership. Finding: all four state one law in different words — a fact moves toward safety silently, and every move away is one written, recorded word. Seven D-FACT-* ballots ask the owner to ratify the law, one vocabulary, one gate ledger, one fact-read surface, orphan-fact homing, the ownership wall, and one flow-fact engine. Design only; no implementation starts here.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Proposal doc lands at docs/proposals/compiler-facts-one-law.md with exsum, evidence table, law, surface before/after pairs, ladder, and worked programs.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T13:50:19.158Z"
+        },
+        {
+          "n": 2,
+          "text": "Seven full-profile ballots D-FACT-LAW1, WORD1, GATE1, READ1, HOME1, OWN1, FLOW1 are ready on this card with worked code per option and all five review passes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T13:50:19.924Z"
+        },
+        {
+          "n": 3,
+          "text": "No ratified decision is contradicted. Every decision a ballot amends or extends is named inside that ballot's text.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T13:50:20.816Z"
+        },
+        {
+          "n": 4,
+          "text": "After ratification: outcomes recorded in docs/spec/syntax-decisions.md, and the substrate work is routed so cards #1517-#1579 build on one fact substrate, not four.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-07T13:50:21.942Z"
+        }
+      ],
+      "refs": [
+        "docs/proposals/compiler-facts-one-law.md"
+      ],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-07T13:50:00.598Z",
+      "updated": "2026-08-07T13:50:23.265Z",
+      "updatedBy": "fact-planes-audit"
     }
   ],
   "decisions": [
@@ -131626,8 +131709,10 @@
       },
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-08-07T13:49:25.918Z"
+      "status": "ratified",
+      "created": "2026-08-07T13:49:25.918Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-08-07"
     }
   ],
   "questions": [
@@ -133234,6 +133319,90 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-08-07T13:51:54.759Z",
+      "by": "bd3-tests",
+      "action": "card.criteria-meet",
+      "ref": "c00jybyb",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-07T13:51:46.719Z",
+      "by": "bd3-tests",
+      "action": "card.update",
+      "ref": "c00jybyb",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T13:51:26.266Z",
+      "by": "bd3-tests",
+      "action": "card.update",
+      "ref": "c06qhbtc",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T13:51:21.363Z",
+      "by": "bd3-dollar2",
+      "action": "card.update",
+      "ref": "c0z2jsot",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T13:51:13.822Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-ENVFLAG1",
+      "note": "A"
+    },
+    {
+      "at": "2026-08-07T13:50:51.951Z",
+      "by": "bd3-dollar2",
+      "action": "card.update",
+      "ref": "c0z2jsot",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-07T13:50:23.266Z",
+      "by": "fact-planes-audit",
+      "action": "card.update",
+      "ref": "c0q81flf",
+      "note": "refs"
+    },
+    {
+      "at": "2026-08-07T13:50:21.942Z",
+      "by": "fact-planes-audit",
+      "action": "card.criteria-add",
+      "ref": "c0q81flf",
+      "note": "#4 After ratification: outcomes recorded in docs/spec/syntax-de"
+    },
+    {
+      "at": "2026-08-07T13:50:20.816Z",
+      "by": "fact-planes-audit",
+      "action": "card.criteria-add",
+      "ref": "c0q81flf",
+      "note": "#3 No ratified decision is contradicted. Every decision a ballo"
+    },
+    {
+      "at": "2026-08-07T13:50:19.924Z",
+      "by": "fact-planes-audit",
+      "action": "card.criteria-add",
+      "ref": "c0q81flf",
+      "note": "#2 Seven full-profile ballots D-FACT-LAW1, WORD1, GATE1, READ1,"
+    },
+    {
+      "at": "2026-08-07T13:50:19.158Z",
+      "by": "fact-planes-audit",
+      "action": "card.criteria-add",
+      "ref": "c0q81flf",
+      "note": "#1 Proposal doc lands at docs/proposals/compiler-facts-one-law."
+    },
+    {
+      "at": "2026-08-07T13:50:00.598Z",
+      "by": "fact-planes-audit",
+      "action": "card.add",
+      "ref": "c0q81flf",
+      "note": "Compiler-held facts: one law, one ledger — capstone proposal + ballot slate"
+    },
     {
       "at": "2026-08-07T13:49:25.918Z",
       "by": "bd3-orch",
@@ -136649,90 +136818,6 @@
       "action": "card.add",
       "ref": "c0o5w74b",
       "note": "quick-run: for-in over method collections raises E0956"
-    },
-    {
-      "at": "2026-08-07T01:32:51.061Z",
-      "by": "bd2-apply",
-      "action": "card.release",
-      "ref": "c0z6ssoi",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-08-07T01:32:50.491Z",
-      "by": "bd2-apply",
-      "action": "card.release",
-      "ref": "c0cvssmh",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-08-07T01:32:49.929Z",
-      "by": "bd2-apply",
-      "action": "card.release",
-      "ref": "c0vgjxm5",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-08-07T01:32:49.337Z",
-      "by": "bd2-apply",
-      "action": "card.release",
-      "ref": "c0zsjsdx",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-08-07T01:32:38.195Z",
-      "by": "bd2-apply",
-      "action": "card.update",
-      "ref": "c0z6ssoi",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-07T01:32:37.765Z",
-      "by": "bd2-apply",
-      "action": "card.update",
-      "ref": "c0cvssmh",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-07T01:32:37.332Z",
-      "by": "bd2-apply",
-      "action": "card.update",
-      "ref": "c0vgjxm5",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-07T01:32:36.332Z",
-      "by": "bd2-apply",
-      "action": "card.update",
-      "ref": "c0zsjsdx",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-07T01:32:32.260Z",
-      "by": "bd2-apply",
-      "action": "card.criteria-meet",
-      "ref": "c0z6ssoi",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-07T01:32:31.798Z",
-      "by": "bd2-apply",
-      "action": "card.criteria-meet",
-      "ref": "c0z6ssoi",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-07T01:32:13.844Z",
-      "by": "bd2-apply",
-      "action": "card.criteria-meet",
-      "ref": "c0cvssmh",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-07T01:31:51.359Z",
-      "by": "bd2-apply",
-      "action": "card.criteria-meet",
-      "ref": "c0vgjxm5",
-      "note": "#1"
     }
   ],
   "nextNum": 368,
