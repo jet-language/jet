@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1599,
-    "rev": 28526,
+    "rev": 28532,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -89983,12 +89983,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "verify",
+      "phase": "done",
       "priority": "P1",
       "plan": "Implements D-CONF-PLANE1, D-CONF-NAME1 — ratified 2026-08-06. Read each decision verbatim (tower brief on this card's parent proposal, or tower decision show) before building; the ratified outcome text is the law, this plan is the route. Every requirement is a discrete exit criterion below: meet each with targeted proof (tests, snapshots, examples with golden output), and keep I9 tier parity inside this card — AOT, default jet run (JIT), and the interpreter must agree on every surface this card ships before it closes. Delete every superseded form the decisions retire in the same change; do not leave compatibility shims or parallel spellings. Reference: docs/proposals/build-config-one-plane.md.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-07",
+          "by": "bd2-orch",
+          "text": "Closed: single role-typed manifest parser merged to master; outputs proof 4/4 and hello smoke green after integration. Reviewer bd2-rev3 verified all nine criteria."
+        },
         {
           "at": "2026-08-07",
           "by": "bd2-manifest2",
@@ -90014,11 +90019,11 @@
         {
           "n": 1,
           "text": "The compile path reads package.jet through crates/jet-pkg-model/src/Package.rs; the PackageManifest parser directory is deleted, not deprecated",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd2-manifest",
-          "verifiedBy": null,
-          "evidence": "PackageManifest/ deleted (crates/jet-pkg-model/src/PackageManifest/ gone). jet-driver/Loader.rs, Manifest::parse/load, jetpack, Canvas all read via crate::Package::PackageFacts (crates/jet-pkg-model/src/Package/mod.rs). Commits fb77a8a3c, 607aa1ef0, 5ba9a71fd, 0a2a86863 on bd2/manifest. cargo build --workspace green.",
-          "at": "2026-08-07T02:13:24.366Z"
+          "verifiedBy": "bd2-rev3",
+          "evidence": "Rechecked after 15f6bec8d. crates/jet-pkg-model/src/PackageManifest/ is gone; zero PackageManifest references remain in Rust (only historical decision/proposal docs). Compile path (jet-driver Loader/Driver), jetpack, Canvas and Source/ all read jet_pkg_model::Package::PackageFacts. Blocker 1 closed: classify_canonical_dep's cfg(test) callers now build real DepSource values (Provider::Path for ../logging and ../tools, Version for 4.2) with assertions unchanged; cargo test -p jetpack --lib compiles and runs 554-556 passed / 5 failed, and the 5 failures are name-for-name identical to master's set (script_registry x2, Shell fish_prompt_pty, Store::Broker, Store::Tests) — Services::tests x2 flake on repeat runs on both. The Transition::legacy_plan fix is genuine, not a paper-over: before_facts now composes from the already-translated in-memory root_facts through the same pipeline PackageFacts::load runs (compose_configs -> validate_defaults -> validate_members_in), and legacy_plan keeps its own both-manifests guard, so no check is skipped. cargo build --workspace green; ui_snapshots mismatch set unchanged at 27; workspace_crates and build_entry failures still byte-identical to master.",
+          "at": "2026-08-07T03:38:38.590Z"
         },
         {
           "n": 2,
@@ -90041,11 +90046,11 @@
         {
           "n": 4,
           "text": "outputs:, defaults: and members: reach the build; a named example under examples/features/packages/ declares outputs: and the declared output drives jet build, golden-tested",
-          "status": "met",
+          "status": "verified",
           "metBy": "bd2-manifest",
-          "verifiedBy": null,
-          "evidence": "examples/features/packages/outputs_build/ has no main.jet/run.jet — only outputs: .{ demo: .Executable.{ entry: run } } names service.jet. tests/package_outputs.rs: 3 tests prove jet run (JIT) and jet build+execute (AOT, real rustc) both resolve via outputs: to the same file, same stdout — I9 parity. All 3 pass.",
-          "at": "2026-08-07T02:13:41.623Z"
+          "verifiedBy": "bd2-rev3",
+          "evidence": "Rechecked after 15f6bec8d. The fixture now uses the dotted entry: service.run, which entry_path resolves by following entry.jet's 'use service' import into service/module.jet — a non-root file the migration-era legacy_run_entry scan structurally cannot reach. Independently reproduced the discriminating pair outside the harness: a copy of examples/features/packages/outputs_build unchanged prints 'outputs: demo drives the build'; the same copy with only the outputs: line deleted fails with E0603 'can't find the file .../run.jet'. outputs: is therefore load-bearing. tests/package_outputs.rs 4/4 pass, including the new negative test entry_resolution_requires_the_outputs_block; the AOT leg still builds with real rustc and executes build/module, comparing stdout against examples/features/expected/packages/outputs_build.out. The negative test is coupled to the fixture — it copies service/module.jet from the example dir, so reverting to a root-level fn run breaks it rather than silently passing.",
+          "at": "2026-08-07T03:38:48.006Z"
         },
         {
           "n": 5,
@@ -90100,9 +90105,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:33:05.673Z",
-      "updated": "2026-08-07T03:25:45.880Z",
-      "updatedBy": "bd2-manifest2",
-      "workOrder": 130
+      "updated": "2026-08-07T03:41:24.572Z",
+      "updatedBy": "bd2-orch",
+      "workOrder": 130,
+      "completedAt": "2026-08-07T03:41:24.572Z"
     },
     {
       "id": "c0xenv6u",
@@ -91054,11 +91060,11 @@
         {
           "n": 1,
           "text": "One carrier type exists in crates/jet-codegen/src/Prelude/ carrying payload, verdict and reports; T? and T ? E lower onto it and no second representation remains in TIR, AOT, JIT or the interpreter",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd2-carrier3",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-06T21:33:37.678Z"
+          "evidence": "The interpreter reads the same carrier as every other tier. CtValue::Some, None, ResOk and ResErr are gone. CtValue::Present holds the payload of both views and CtValue::Failed holds the stop side, with CtReport::Clean as the comptime twin of the prelude's JetAbsent and CtReport::Told as the fallible view's error. About 900 call sites moved across jet-foundation, jet-comptime, jet-codegen TIR eval, jet-jit, jet-sema, jet-repl and Source. Proof on 84807d9b2: cargo build clean; cargo test --test outcome_carrier 2 of 2; cargo test --test golden fails the same 21 examples as the stashed HEAD baseline, with no new failure and no example edited; cargo test --test corelib 134 pass and 52 fail, the same counts measured on the branch before the change.",
+          "at": "2026-08-07T03:38:31.465Z"
         },
         {
           "n": 2,
@@ -91149,7 +91155,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-06T21:33:37.333Z",
-      "updated": "2026-08-07T02:28:48.316Z",
+      "updated": "2026-08-07T03:38:31.465Z",
       "updatedBy": "bd2-carrier3",
       "workOrder": 140,
       "claimedAt": "2026-08-07T02:28:48.315Z"
@@ -97118,7 +97124,7 @@
       "priority": "P3",
       "plan": null,
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "bd2-fix2",
       "log": [],
       "criteria": [],
       "refs": [],
@@ -97126,8 +97132,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T02:07:05.794Z",
-      "updated": "2026-08-07T02:07:05.795Z",
-      "updatedBy": "bd2-bugs"
+      "updated": "2026-08-07T03:38:23.716Z",
+      "updatedBy": "bd2-fix2",
+      "claimedAt": "2026-08-07T03:38:23.715Z"
     },
     {
       "id": "c0pd9rd4",
@@ -97207,7 +97214,7 @@
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "bd2-fix2",
       "log": [],
       "criteria": [],
       "refs": [],
@@ -97215,8 +97222,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T03:35:48.745Z",
-      "updated": "2026-08-07T03:35:48.745Z",
-      "updatedBy": "bd2-fix"
+      "updated": "2026-08-07T03:38:23.015Z",
+      "updatedBy": "bd2-fix2",
+      "claimedAt": "2026-08-07T03:38:23.015Z"
     }
   ],
   "decisions": [
@@ -131696,6 +131704,48 @@
   ],
   "events": [
     {
+      "at": "2026-08-07T03:41:24.572Z",
+      "by": "bd2-orch",
+      "action": "card.update",
+      "ref": "c0ejda8e",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-08-07T03:38:48.006Z",
+      "by": "bd2-rev3",
+      "action": "card.criteria-verify",
+      "ref": "c0ejda8e",
+      "note": "#4"
+    },
+    {
+      "at": "2026-08-07T03:38:38.590Z",
+      "by": "bd2-rev3",
+      "action": "card.criteria-verify",
+      "ref": "c0ejda8e",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T03:38:31.465Z",
+      "by": "bd2-carrier3",
+      "action": "card.criteria-meet",
+      "ref": "c0y4zx0d",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-07T03:38:23.716Z",
+      "by": "bd2-fix2",
+      "action": "card.claim",
+      "ref": "c0w33upc",
+      "note": ""
+    },
+    {
+      "at": "2026-08-07T03:38:23.015Z",
+      "by": "bd2-fix2",
+      "action": "card.claim",
+      "ref": "c07ylf1g",
+      "note": ""
+    },
+    {
       "at": "2026-08-07T03:37:53.370Z",
       "by": "bd2-orch",
       "action": "card.update",
@@ -135151,48 +135201,6 @@
       "by": "audit-apply",
       "action": "card.update",
       "ref": "c0re71tf",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:43:01.351Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0r5ljyr",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:43:00.945Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c08wqdlb",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:43:00.526Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0oq7ycd",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:43:00.101Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0a28z9s",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:42:59.676Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0pden89",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-06T21:42:59.260Z",
-      "by": "audit-apply",
-      "action": "card.update",
-      "ref": "c0kfna9f",
       "note": "blockedBy"
     }
   ],
