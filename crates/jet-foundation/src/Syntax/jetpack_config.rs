@@ -68,7 +68,9 @@ pub const JETPACK_REF_VAR: &str = "JETPACK_REF";
 /// D-ENV-LIFECYCLE1: prompt hook activation identity.
 pub const ENV_HOOK_ACTIVE_HASH_VAR: &str = "JETPACK_ENV_HASH";
 
-/// D-JPK3/17: the directive calls an `env.jet` author writes. `pkg.source`
+/// D-JPK17 (D-JPK3 predates the current numbering; current directive law
+/// lives under D-JPK17/D-JPK-REF1): the directive calls an `env.jet` author
+/// writes. `pkg.source`
 /// takes one arg (default built-in source) or two (named source + upstream/pin,
 /// D-JPK17). D-JPK-REF1=A packages reference named sources as `package@source`.
 pub const PACK_DIRECTIVE_SOURCE: &str = "pkg.source";
@@ -653,11 +655,13 @@ pub const TARGET_FIELD_NAME: &str = "name";
 /// defaults to the package name when omitted.
 pub const TARGET_FIELD_EXPORT: &str = "export";
 
-/// D-CAP1 (ratified 2026-06-21): the four-capability vocabulary —
-/// `view`/`edit`/`take`/`share`. `view` and `take` are ratified ownership keywords
-/// (S10); `edit` and `share` are reserved here. Parameter-position placement
-/// (D-CAP3) and the copy/share call form (D-CAP2) are still open, so these are
-/// reserved spellings only — not yet wired into the parser.
+/// D-CAP1-words (historical, ratified 2026-06-21, tombstoned): the original
+/// four-capability word vocabulary — `view`/`edit`/`take`/`share`. `view` and
+/// `take` rode the S10 ownership keywords, since superseded by D-CAP7's
+/// capability sigils (memory model v5: bare/`&`/`^`). `edit` and `share`
+/// never left reserved-spelling status under that word law and are not wired
+/// into the parser; check docs/spec/syntax-decisions.md's Capabilities
+/// section for current sigil-based capability law before reusing these.
 pub const CAPABILITY_EDIT: &str = "edit";
 pub const CAPABILITY_SHARE: &str = "share";
 

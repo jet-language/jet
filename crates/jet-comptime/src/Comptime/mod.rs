@@ -1086,7 +1086,7 @@ fn run_repl_step_inner(
     }
 }
 
-/// D-CTMARKER1 (ratified 2026-06-25, piece 2): run a `$ { … }` block at
+/// D-META-STAGE1=B (formerly D-CTMARKER1, ratified 2026-06-25, piece 2): run a `$ { … }` block at
 /// build time. Purity-checked (E0951/E0958) then tree-walked with fuel cap (E0952).
 /// Pure path only (Stage A); effect tiers wire in c157 (D-CTEFFECT1).
 pub fn run_block_with_imports(

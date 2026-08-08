@@ -94,7 +94,7 @@ pub(crate) fn walk_stmts_for_const_refs(
             | Stmt::AssumeDet { body: inner, .. } => {
                 walk_stmts_for_const_refs(inner, const_names, taken);
             }
-            // D-CTMARKER1: walk comptime block body for const refs.
+            // D-META-STAGE1=B (formerly D-CTMARKER1): walk comptime block body for const refs.
             Stmt::ComptimeBlock { body, .. } => walk_stmts_for_const_refs(body, const_names, taken),
             Stmt::ComptimeIf {
                 cond,
@@ -511,7 +511,7 @@ pub(crate) fn stmt_refs_name(stmt: &Stmt, name: &str) -> bool {
         | Stmt::BreakLabel(..)
         | Stmt::ContinueLabel(..)
         | Stmt::Return(None, _) => false,
-        // D-CTMARKER1: comptime block body may reference names.
+        // D-META-STAGE1=B (formerly D-CTMARKER1): comptime block body may reference names.
         Stmt::ComptimeBlock { body, .. } => body.iter().any(|s| stmt_refs_name(s, name)),
         Stmt::ComptimeIf {
             cond,
@@ -981,7 +981,7 @@ pub(crate) fn stmt_collect_captures(
         | Stmt::BreakLabel(..)
         | Stmt::ContinueLabel(..)
         | Stmt::Return(None, _) => {}
-        // D-CTMARKER1: comptime block erases; still walk body for captures (conservative).
+        // D-META-STAGE1=B (formerly D-CTMARKER1): comptime block erases; still walk body for captures (conservative).
         Stmt::ComptimeBlock { body, .. } => {
             let mut body_bound = bound.clone();
             block_collect_captures(body, &mut body_bound, read, mut_cap);

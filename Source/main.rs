@@ -1151,6 +1151,12 @@ fn main() {
     };
 
     if args.first().map(|s| s.as_str()) == Some("lsp") {
+        // #1659 c2 (round 2): `jet self lsp --help`/`-h` must print help, not
+        // start the language server on stdio.
+        if jet_argv.iter().any(|a| jet::CLI::is_help_flag(a)) {
+            print!("{}", command_help("lsp"));
+            exit(ExitCodes::OK);
+        }
         let sub = args.get(1).map(|s| s.as_str());
         let bench_flag = raw.iter().any(|a| a == "--bench");
         match (sub, bench_flag) {
@@ -1271,13 +1277,27 @@ fn main() {
         }
     }
 
-    // #1659 criterion 2: `jet <cmd> --help`/`-h` for every command that
-    // doesn't already own a bespoke flag vocabulary (and so a bespoke help
-    // screen) — retires the E2102 "unknown flag" that `--help` used to hit
-    // here. Checked before the pinned-toolchain re-exec so a help request
-    // never pays for one.
+    // #1659 criterion 2 (round 2): `jet <cmd> --help`/`-h` works for every
+    // command, including the ones that own a bespoke flag vocabulary — not
+    // just the generic ones. A handful of `owns_flags` commands already
+    // render *better*, sub-verb-specific bespoke help deep in their own
+    // dispatch and every one of their sub-verbs checks `is_help_flag` itself
+    // (`bind`'s per-language usage; `diff`/`merge`'s `wants_help`; `perf`
+    // which short-circuits earlier above) — those keep their own renderer
+    // instead of being downgraded to the generic table text here.
+    // `devtools` does NOT qualify: none of its sub-verbs (`grammars`,
+    // `reduce`, `bless`, …) check for `--help` themselves, so without this
+    // gate `jet self devtools grammars --help` silently executes (writes
+    // files) instead of printing help — the exact bug this criterion exists
+    // to close. Every other `owns_flags` command
+    // (`prove`/`budget`/`report`/`clean`/`update`/`image`/`trust`/`hangar`/
+    // `devtools`/…) previously either error-taught E2102 or, worse, executed
+    // for real — this is checked before the pinned-toolchain re-exec so a
+    // help request never pays for one.
+    const BESPOKE_DEEP_HELP: &[&str] = &["bind", "diff", "merge", "perf"];
     let owns_flags = jet::CLI::owns_flag_vocabulary(cmd);
-    if !owns_flags && jet_argv.iter().any(|a| jet::CLI::is_help_flag(a)) {
+    let wants_help = jet_argv.iter().any(|a| jet::CLI::is_help_flag(a));
+    if wants_help && !(owns_flags && BESPOKE_DEEP_HELP.contains(&cmd)) {
         print!("{}", command_help(cmd));
         exit(ExitCodes::OK);
     }

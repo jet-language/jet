@@ -541,7 +541,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             kind: TExprKind::CtLit(value.clone()),
         },
         Expr::ComptimeName { name, .. } if super::is_eval_fragment() => {
-            // `$name` resolves from the comptime scope at eval time (D-CTMARKER1=C).
+            // `$name` resolves from the comptime scope at eval time (D-META-STAGE1=B, formerly D-CTMARKER1=C).
             if !env.locals.contains_key(name) {
                 env.bind(name, TLocal::user(name), None);
             }

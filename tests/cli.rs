@@ -2307,7 +2307,7 @@ fn retired_bespoke_words_teach_real_spelling() {
 
 #[test]
 fn every_moved_bare_action_is_e2101_in_human_and_json_modes() {
-    for group in jet::CLI::COMMAND_GROUPS {
+    for group in jet::CLI::command_groups() {
         for action in group.actions {
             // `import` names both the canonical source translator and a
             // physical hangar action. Only actions without a canonical
@@ -2335,11 +2335,11 @@ fn every_moved_bare_action_is_e2101_in_human_and_json_modes() {
 #[test]
 fn invalid_nested_action_is_e2101_and_json_escaped() {
     let bad = "bad\\\"action";
-    // D-CLI-SURFACE3=B: `os` is not exhaustive (see `CommandGroup::exhaustive`)
+    // D-CLI-SURFACE3=B: `os` is not exhaustive (see `CommandSpec::exhaustive`)
     // — an unmodeled subword falls through to the real `jet os` dispatcher,
     // which teaches its own (non-E2101) "not a jetos verb" error, not this
     // registry's generic invalid-action path.
-    for group in jet::CLI::COMMAND_GROUPS.iter().filter(|g| g.exhaustive) {
+    for group in jet::CLI::command_groups().filter(|g| g.exhaustive) {
         let out = Command::new(jet()).args([group.name, bad]).output().unwrap();
         assert_eq!(out.status.code(), Some(2));
         let stderr = String::from_utf8_lossy(&out.stderr);
@@ -2382,7 +2382,7 @@ fn group_help_and_man_inventory_every_nested_description() {
     let man = Command::new(jet()).args(["self", "man"]).output().unwrap();
     assert_eq!(man.status.code(), Some(0));
     let man = String::from_utf8_lossy(&man.stdout);
-    for group in jet::CLI::COMMAND_GROUPS {
+    for group in jet::CLI::command_groups() {
         // D-CLI-SURFACE3=B: a non-exhaustive group (`os`) doesn't own its bare
         // `help` output — that stays the real `jet os` dispatcher's, which
         // this registry can't predict — so only the *static* man-page
@@ -2406,7 +2406,7 @@ fn group_help_and_man_inventory_every_nested_description() {
 
 #[test]
 fn palette_uses_canonical_nested_routes() {
-    for group in jet::CLI::COMMAND_GROUPS {
+    for group in jet::CLI::command_groups() {
         for action in group.actions {
             let route = format!("{} {}", group.name, action.name);
             let out = Command::new(jet()).args(["?", &route]).output().unwrap();
@@ -5603,6 +5603,34 @@ fn quiet_flag_declared_once_in_the_shared_table() {
     assert_eq!(count, 1, "--quiet must have exactly one spelling in jet::CLI::FLAGS");
 }
 
+/// #1659 criterion 1 (round 2): `--ar`/`--clang`/`--facts`/`--from`/
+/// `--no-sign`/`--pkg`/`--registry`/`--to` used to exist only in
+/// `NestedCommandSpec::usage` prose, invisible to the flag registry. Real
+/// `FlagSpec` rows make `is_known_flag` recognize them, `closest_flag`
+/// suggest them on a typo (E2102), and the man page and every shell's
+/// completions mention them.
+#[test]
+fn formerly_prose_only_flags_are_real_flag_rows() {
+    let flags = ["--ar", "--clang", "--facts", "--from", "--no-sign", "--pkg", "--registry", "--to"];
+    let man = jet::CLI::man_page("0.0.0");
+    let bash = jet::CLI::completions_bash();
+    let zsh = jet::CLI::completions_zsh();
+    let fish = jet::CLI::completions_fish();
+    let powershell = jet::CLI::completions_powershell();
+    for flag in flags {
+        assert!(jet::CLI::is_known_flag(flag), "`{flag}` must be a known flag");
+        assert!(man.contains(flag), "man page missing `{flag}`");
+        assert!(bash.contains(flag), "bash completions missing `{flag}`");
+        assert!(zsh.contains(flag), "zsh completions missing `{flag}`");
+        assert!(powershell.contains(flag), "powershell completions missing `{flag}`");
+        // fish completions drop the leading `--` (`complete -l <name>`, not `--<name>`).
+        assert!(fish.contains(flag.trim_start_matches("--")), "fish completions missing `{flag}`");
+    }
+    // E2102 "did you mean" now finds the real flag on a one-character typo.
+    assert_eq!(jet::CLI::closest_flag("--pk"), Some("--pkg"));
+    assert_eq!(jet::CLI::closest_flag("--regsitry"), Some("--registry"));
+}
+
 /// #1659 criterion 2: bare `jet --help` and `jet -h` print the full command
 /// table (same as `jet help`), not the short orientation greeting and not an
 /// E2101/E2102 teaching error.
@@ -5639,6 +5667,57 @@ fn per_command_help_flag_works_without_running_the_command() {
         assert!(!stdout.contains("Error ["), "`{cmd} {flag}` ran the command instead of printing help: {stdout}");
     }
     assert!(!dir.join("new").exists(), "`jet new --help` must not create a project");
+}
+
+/// #1659 criterion 2 (round 2): `--help`/`-h` also works for the
+/// `owns_flag_vocabulary` commands — `jet prove`/`jet budget`/`jet report`
+/// used to error-teach E2102 or E2101, and `jet clean`/`jet update`/
+/// `jet image`/`jet trust` used to silently EXECUTE the real command instead
+/// of printing help. All seven must print help and exit 0 without doing real
+/// work.
+#[test]
+fn owns_flag_vocabulary_help_flag_prints_help_not_execute() {
+    let dir = isolated_cwd("help_flag_owns_vocab");
+    for (cmd, flag) in [
+        ("prove", "--help"),
+        ("budget", "-h"),
+        ("report", "--help"),
+        ("clean", "--help"),
+        ("update", "-h"),
+        ("image", "--help"),
+        ("trust", "--help"),
+        ("hangar", "--help"),
+    ] {
+        assert!(jet::CLI::owns_flag_vocabulary(cmd), "test assumption: `{cmd}` should own a flag vocabulary");
+        let out = Command::new(jet())
+            .args([cmd, flag])
+            .current_dir(&dir)
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "`{cmd} {flag}` must print help and exit 0: {:?}", out);
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(stdout.contains(cmd), "`{cmd} {flag}` help text missing the command name: {stdout}");
+        assert!(out.stderr.is_empty(), "`{cmd} {flag}` must not print to stderr: {}", String::from_utf8_lossy(&out.stderr));
+    }
+    // `clean`/`update`/`image`/`trust` would otherwise mutate the package
+    // store, dependency pins, or trust grants — none of that happened.
+    assert!(!dir.join(".jet").exists(), "`--help` on an owns_flag_vocabulary command must not do real work");
+}
+
+/// #1659 criterion 2 (round 2): `jet self devtools --help` (bare, and with a
+/// sub-verb like `grammars`) prints help instead of erroring on the unknown
+/// `--help` "subcommand" or, worse, actually regenerating the grammar files.
+#[test]
+fn devtools_help_flag_prints_help_not_execute() {
+    let dir = isolated_cwd("help_flag_devtools");
+    for args in [vec!["self", "devtools", "--help"], vec!["self", "devtools", "grammars", "--help"]] {
+        let out = Command::new(jet()).args(&args).current_dir(&dir).env("NO_COLOR", "1").output().unwrap();
+        assert!(out.status.success(), "`jet {}`: {:?}", args.join(" "), out);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(!stderr.contains("unknown"), "`jet {}` hit the unknown-subcommand path: {stderr}", args.join(" "));
+    }
+    assert!(!dir.join("editors").exists(), "`devtools grammars --help` must not write any files");
 }
 
 /// #1659 criterion 2: an exhaustive group's bare `--help`/`-h` (`jet hangar
@@ -5711,4 +5790,132 @@ fn quiet_suppresses_sbom_write_confirmation() {
         String::from_utf8_lossy(&out.stdout)
     );
     assert!(dir.join("build/main.spdx").is_file(), "--quiet must not change what --sbom writes");
+}
+
+/// #1659 criterion 3 (round 2): `jet self devtools grammars --quiet` still
+/// writes every generated grammar section but suppresses the per-file `wrote
+/// <path>` lines and the `regenerated editor grammar sections` summary. Runs
+/// in an isolated cwd carrying stub grammar files (with just the real
+/// BEGIN/END markers) instead of the tracked `editors/` tree, so a test run
+/// never rewrites real repo files.
+#[test]
+fn quiet_suppresses_devtools_grammars_confirmation() {
+    let dir = isolated_cwd("quiet_devtools_grammars");
+    let stub = "before\n// BEGIN GENERATED JET SYNTAX HIGHLIGHTS\nstale\n// END GENERATED JET SYNTAX HIGHLIGHTS\nafter\n";
+    let files = [
+        "editors/vscode/syntaxes/jet.tmLanguage.json",
+        "editors/jet.tmGrammar",
+        "editors/tree-sitter/grammar.js",
+        "editors/zed/languages/jet/highlights.scm",
+    ];
+    for rel in files {
+        let path = dir.join(rel);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, stub).unwrap();
+    }
+
+    let out = Command::new(jet())
+        .args(["self", "devtools", "grammars", "--quiet"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{:?}", out);
+    assert!(
+        String::from_utf8_lossy(&out.stdout).trim().is_empty(),
+        "jet self devtools grammars --quiet must suppress its status lines, got: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    for rel in files {
+        let content = fs::read_to_string(dir.join(rel)).unwrap();
+        assert!(!content.contains("stale"), "--quiet must not change what devtools grammars writes ({rel}): {content}");
+    }
+}
+
+/// #1659 criterion 3 (round 2): `jet registry publish --quiet` suppresses its
+/// `status!`-gated progress narration (`publishing ...`, `[N/3] checking
+/// ...`) while every real error/warning (`build: failed`, `tests: failed`,
+/// the `could not snapshot` warning) and the exit code stay identical —
+/// `--quiet` never hides an error. Uses a locally pre-seeded fake signing key
+/// (valid 64-hex format, never a real Ed25519 key) via `JET_KEYS_DIR` so the
+/// pre-publish gate reaches its `status!` lines without building the real
+/// crypto helper or touching `~/.jet`; the project has no entry file, so the
+/// gate fails deterministically before any registry network/git action.
+#[test]
+fn quiet_suppresses_registry_publish_status_lines() {
+    fn publish_project(tag: &str) -> PathBuf {
+        let dir = isolated_cwd(tag);
+        let init = Command::new(jet()).arg("init").current_dir(&dir).env("NO_COLOR", "1").output().unwrap();
+        assert!(init.status.success(), "{:?}", init);
+        let keys = dir.join("keys");
+        fs::create_dir_all(&keys).unwrap();
+        fs::write(keys.join("jet.ed25519"), "test-fixture-seed-not-a-real-key").unwrap();
+        fs::write(keys.join("jet.ed25519.pub"), "ab".repeat(32)).unwrap();
+        dir
+    }
+
+    let loud_dir = publish_project("quiet_publish_loud");
+    let loud = Command::new(jet())
+        .args(["registry", "publish"])
+        .current_dir(&loud_dir)
+        .env("NO_COLOR", "1")
+        .env("JET_KEYS_DIR", loud_dir.join("keys"))
+        .output()
+        .unwrap();
+    assert_eq!(loud.status.code(), Some(1), "{:?}", loud);
+    let loud_stdout = String::from_utf8_lossy(&loud.stdout);
+    assert!(loud_stdout.contains("publishing"), "expected loud status narration, got: {loud_stdout}");
+    assert!(loud_stdout.contains("[1/3]"), "expected loud gate narration, got: {loud_stdout}");
+
+    let quiet_dir = publish_project("quiet_publish_quiet");
+    let quiet = Command::new(jet())
+        .args(["registry", "publish", "--quiet"])
+        .current_dir(&quiet_dir)
+        .env("NO_COLOR", "1")
+        .env("JET_KEYS_DIR", quiet_dir.join("keys"))
+        .output()
+        .unwrap();
+    assert_eq!(quiet.status.code(), Some(1), "--quiet must not change the exit code: {:?}", quiet);
+    assert!(
+        String::from_utf8_lossy(&quiet.stdout).trim().is_empty(),
+        "jet registry publish --quiet must suppress its status narration, got: {}",
+        String::from_utf8_lossy(&quiet.stdout)
+    );
+    let quiet_stderr = String::from_utf8_lossy(&quiet.stderr);
+    assert!(quiet_stderr.contains("build: failed"), "--quiet must not suppress the real gate error: {quiet_stderr}");
+}
+
+/// #1659 criterion 3 (round 2): `jet budget check --quiet` is accepted (it
+/// used to be a hard E2102 "unknown flag or argument") and suppresses the
+/// trailing `budgets: N passed · report ...` recap while the exit code stays
+/// identical. Uses a bare `jet init` project (no `#Budget` declared, so the
+/// real behavior is "0 budgets passed") rather than the `budget_project`
+/// helper above, which writes the stale `payload: {...}` manifest shape.
+#[test]
+fn quiet_accepted_and_suppresses_budget_check_recap() {
+    fn budget_dir(tag: &str) -> PathBuf {
+        let dir = isolated_cwd(tag);
+        let init = Command::new(jet()).arg("init").current_dir(&dir).env("NO_COLOR", "1").output().unwrap();
+        assert!(init.status.success(), "{:?}", init);
+        fs::write(dir.join("run.jet"), "fn run() {\n    print(\"hi\")\n}\n").unwrap();
+        dir
+    }
+
+    let loud_dir = budget_dir("quiet_budget_loud");
+    let loud = Command::new(jet()).args(["budget", "check"]).current_dir(&loud_dir).env("NO_COLOR", "1").output().unwrap();
+    assert!(loud.status.success(), "{:?}", loud);
+    assert!(
+        !String::from_utf8_lossy(&loud.stderr).trim().is_empty(),
+        "expected the loud recap line on stderr"
+    );
+
+    let quiet_dir = budget_dir("quiet_budget_quiet");
+    let quiet = Command::new(jet()).args(["budget", "check", "--quiet"]).current_dir(&quiet_dir).env("NO_COLOR", "1").output().unwrap();
+    assert!(quiet.status.success(), "`jet budget check --quiet` must be accepted, not E2102: {:?}", quiet);
+    assert_eq!(quiet.status.code(), loud.status.code(), "--quiet must not change the exit code");
+    assert!(
+        String::from_utf8_lossy(&quiet.stderr).trim().is_empty(),
+        "jet budget check --quiet must suppress its recap line, got: {}",
+        String::from_utf8_lossy(&quiet.stderr)
+    );
 }

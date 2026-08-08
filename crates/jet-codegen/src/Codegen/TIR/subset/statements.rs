@@ -278,7 +278,7 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
             else_body,
             span,
         } => switch_in_subset(subject, arms, else_body, *span, cx, locals),
-        // D-CTMARKER1 (ratified 2026-06-25, piece 2): `$ { … }` erases entirely.
+        // D-META-STAGE1=B (formerly D-CTMARKER1, ratified 2026-06-25, piece 2): `$ { … }` erases entirely.
         // Always "in subset" since it emits nothing in Rust (I3).
         Stmt::ComptimeBlock { .. } => true,
         // Scope classification mirrors lowering: an emitted Rust block gets a cloned

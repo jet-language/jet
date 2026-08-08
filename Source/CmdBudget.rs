@@ -29,6 +29,9 @@ struct Options {
     yes: bool,
     json: bool,
     verbose: bool,
+    // #1659 criterion 3 (round 2): one spelling, accepted like every other
+    // command — suppresses only the trailing pass/fail recap in emit_check.
+    quiet: bool,
     annotations: Annotations,
 }
 
@@ -168,7 +171,7 @@ pub(crate) fn run_build_gates(entry:&str, artifact_path:&Path, target:&str, prof
     let report_id=text_field(&built.value,"report_id").expect("verified report id").to_string();
     let path=format!(".jet/perf/reports/{report_id}.json");
     let created=match store.write_report(&built.bytes){Ok((_,created))=>created,Err(error)=>return build_gate_tool_failure(&format!("report write refused: {error}"))};
-    let options=Options{command:"check",baseline:None,bootstrap:false,accept_regression:false,reason:None,yes:false,json:false,verbose:false,annotations:Annotations::None};
+    let options=Options{command:"check",baseline:None,bootstrap:false,accept_regression:false,reason:None,yes:false,json:false,verbose:false,quiet:false,annotations:Annotations::None};
     emit_check(&options,&built,&report_id,&path,created);
     if built.fail>0{1}else{0}
 }
@@ -232,7 +235,7 @@ pub(crate) fn run_bench_refresh(entry:&str,evidence:&[crate::CmdDevTools::BenchE
     let built=match build_report(&root,&store,&bundle,&effect_facts,&active,&started,"native","bench",None,Some(evidence),None){Ok(report)=>report,Err(error)=>return build_gate_tool_failure(&error)};
     let report_id=text_field(&built.value,"report_id").expect("verified report id").to_string();let path=format!(".jet/perf/reports/{report_id}.json");
     let created=match store.write_report(&built.bytes){Ok((_,created))=>created,Err(error)=>return build_gate_tool_failure(&format!("report write refused: {error}"))};
-    let options=Options{command:"check",baseline:None,bootstrap:false,accept_regression:false,reason:None,yes:false,json:false,verbose:false,annotations:Annotations::None};emit_check(&options,&built,&report_id,&path,created);
+    let options=Options{command:"check",baseline:None,bootstrap:false,accept_regression:false,reason:None,yes:false,json:false,verbose:false,quiet:false,annotations:Annotations::None};emit_check(&options,&built,&report_id,&path,created);
     if built.fail>0{1}else{0}
 }
 
@@ -244,7 +247,7 @@ fn confirm_update() -> bool {
     matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes")
 }
 
-const USAGE: &str = "jet budget check [--json] [--verbose] [--annotations auto|none|github] | jet budget update --baseline <name> [--bootstrap|--accept-regression] [--reason <text>] [-y|--yes] [--json] [--verbose] [--annotations auto|none|github]";
+const USAGE: &str = "jet budget check [--json] [--verbose] [--quiet] [--annotations auto|none|github] | jet budget update --baseline <name> [--bootstrap|--accept-regression] [--reason <text>] [-y|--yes] [--json] [--verbose] [--quiet] [--annotations auto|none|github]";
 
 fn parse(raw: &[String]) -> Result<Options, String> {
     let command = match raw.get(1).map(String::as_str) {
@@ -252,7 +255,7 @@ fn parse(raw: &[String]) -> Result<Options, String> {
         Some(other) => return Err(format!("unknown `jet budget` subcommand `{other}`")),
         None => return Err("`jet budget` needs `check` or `update`".into()),
     };
-    let mut out = Options { command, baseline:None, bootstrap:false, accept_regression:false, reason:None, yes:false, json:false, verbose:false, annotations:Annotations::Auto };
+    let mut out = Options { command, baseline:None, bootstrap:false, accept_regression:false, reason:None, yes:false, json:false, verbose:false, quiet:false, annotations:Annotations::Auto };
     let mut seen = std::collections::BTreeSet::new();
     let mut index = 2;
     while index < raw.len() {
@@ -262,6 +265,7 @@ fn parse(raw: &[String]) -> Result<Options, String> {
         match flag {
             "--json" => out.json = true,
             "--verbose" => out.verbose = true,
+            "--quiet" => out.quiet = true,
             "-y" | "--yes" => out.yes = true,
             "--bootstrap" => out.bootstrap = true,
             "--accept-regression" => out.accept_regression = true,
@@ -525,7 +529,7 @@ pub(crate) fn run_dev_refresh(entry: &str, service_evidence: &[ServiceEvidence],
         Ok((_, created)) => created,
         Err(error) => return build_gate_tool_failure(&format!("report write refused: {error}")),
     };
-    let options = Options { command: "check", baseline: None, bootstrap: false, accept_regression: false, reason: None, yes: false, json: false, verbose: false, annotations: Annotations::None };
+    let options = Options { command: "check", baseline: None, bootstrap: false, accept_regression: false, reason: None, yes: false, json: false, verbose: false, quiet: false, annotations: Annotations::None };
     emit_check(&options, &built, &report_id, &path, created);
     if built.fail > 0 { 1 } else { 0 }
 }
@@ -707,7 +711,12 @@ fn frame(out:&mut Vec<u8>,value:&str){out.extend_from_slice(&(value.len()as u64)
 fn result_rank(row:&ResultRow)->u8{match(row.outcome,row.evidence,row.stale){(PolicyOutcome::Fail,Evidence::Regression|Evidence::Inconclusive,_)=>1,(PolicyOutcome::Fail,Evidence::Unavailable,false)=>2,(PolicyOutcome::Fail,_,true)=>3,(PolicyOutcome::Warn,_,_)=>4,_=>5}}
 fn output_counts(built:&BuiltReport)->(usize,usize,usize,usize,usize){let mut counts=(0,0,0,0,0);for row in &built.results{match result_rank(row){1=>counts.0+=1,2=>counts.1+=1,3=>counts.2+=1,4=>counts.3+=1,_=>counts.4+=1}}counts}
 fn diagnostic_parts(row:&ResultRow)->(&'static str,String,String){if row.evidence==Evidence::Unavailable{("E2906",format!("performance budget {} has no usable evidence",row.name),"correct the provider evidence or bootstrap only when absent or stale evidence is eligible".into())}else{("E2907",format!("performance budget {} {}",row.name,if row.evidence==Evidence::Inconclusive{"is inconclusive"}else{"regressed"}),"improve the measured behavior, inspect `jet budget check --verbose`, or record an explicit exception".into())}}
-fn emit_check(options:&Options,built:&BuiltReport,id:&str,path:&str,created:bool){if options.json{emit_json(options,built,path,None,false,if built.fail>0{1}else{0},None);return}for row in &built.results{if row.outcome==PolicyOutcome::Pass{if options.verbose{emit_verbose_row(row)}continue}let(code,message,fix)=diagnostic_parts(row);let severity=if row.outcome==PolicyOutcome::Warn{"Warning"}else{"Error"};eprintln!("{severity} [{code}]: {message}\n --> {}:{}:{}\n Why: {}\n Fix: {fix}",row.source,row.line,row.column,row.reason);emit_annotation(options,severity,code,row,&message,&fix);if options.verbose{emit_verbose_row(row)}}if options.verbose{eprintln!("{} report {} {}{}",if created{"+"}else{"~"},id,path,if created{""}else{" (verified reuse)"})}let(short,(failed,unavailable,stale,warn,passed))=(&id[..12],output_counts(built));if failed>0{eprintln!("budgets failed: {}{} · report {}",count(failed,"budget failed","budgets failed"),if warn>0{format!(" · {}",count(warn,"warning","warnings"))}else{String::new()},short)}else if unavailable>0{eprintln!("budgets unavailable: {}{} · report {}",count(unavailable,"result unavailable","results unavailable"),if warn>0{format!(" · {}",count(warn,"warning","warnings"))}else{String::new()},short)}else if stale>0{eprintln!("budgets stale: {}{} · report {}",count(stale,"baseline stale","baselines stale"),if warn>0{format!(" · {}",count(warn,"warning","warnings"))}else{String::new()},short)}else if warn>0{eprintln!("budgets: {}{} · report {}",if passed>0{format!("{} passed · ",count(passed,"budget","budgets"))}else{String::new()},count(warn,"warning","warnings"),short)}else{eprintln!("budgets: {} passed · report {}",count(passed,"budget","budgets"),short)}}
+fn emit_check(options:&Options,built:&BuiltReport,id:&str,path:&str,created:bool){if options.json{emit_json(options,built,path,None,false,if built.fail>0{1}else{0},None);return}for row in &built.results{if row.outcome==PolicyOutcome::Pass{if options.verbose{emit_verbose_row(row)}continue}let(code,message,fix)=diagnostic_parts(row);let severity=if row.outcome==PolicyOutcome::Warn{"Warning"}else{"Error"};eprintln!("{severity} [{code}]: {message}\n --> {}:{}:{}\n Why: {}\n Fix: {fix}",row.source,row.line,row.column,row.reason);emit_annotation(options,severity,code,row,&message,&fix);if options.verbose{emit_verbose_row(row)}}if options.verbose{eprintln!("{} report {} {}{}",if created{"+"}else{"~"},id,path,if created{""}else{" (verified reuse)"})}
+    // #1659 criterion 3 (round 2): `--quiet` mutes this trailing pass/fail
+    // recap line only — every per-row Error/Warning diagnostic above still
+    // prints, and the exit code is unchanged either way.
+    if options.quiet { return }
+    let(short,(failed,unavailable,stale,warn,passed))=(&id[..12],output_counts(built));if failed>0{eprintln!("budgets failed: {}{} · report {}",count(failed,"budget failed","budgets failed"),if warn>0{format!(" · {}",count(warn,"warning","warnings"))}else{String::new()},short)}else if unavailable>0{eprintln!("budgets unavailable: {}{} · report {}",count(unavailable,"result unavailable","results unavailable"),if warn>0{format!(" · {}",count(warn,"warning","warnings"))}else{String::new()},short)}else if stale>0{eprintln!("budgets stale: {}{} · report {}",count(stale,"baseline stale","baselines stale"),if warn>0{format!(" · {}",count(warn,"warning","warnings"))}else{String::new()},short)}else if warn>0{eprintln!("budgets: {}{} · report {}",if passed>0{format!("{} passed · ",count(passed,"budget","budgets"))}else{String::new()},count(warn,"warning","warnings"),short)}else{eprintln!("budgets: {} passed · report {}",count(passed,"budget","budgets"),short)}}
 fn emit_verbose_row(row:&ResultRow){let ids=if row.baseline_report_ids.is_empty(){"none".into()}else{row.baseline_report_ids.join(",")};let bound=|value:&Option<Rational>|value.as_ref().map(|value|format!("{}/{}",value.num,value.den)).unwrap_or_else(||"none".into());eprintln!("{} {}: point {}/{} · bounds [{}, {}] · baseline [{}] · {} · {}",if row.outcome==PolicyOutcome::Pass{"pass"}else if row.outcome==PolicyOutcome::Warn{"warn"}else{"fail"},row.id,row.sample.num,row.sample.den,bound(&row.lower95),bound(&row.upper95),ids,row.metric_label,row.reason)}
 fn emit_annotation(options:&Options,severity:&str,code:&str,row:&ResultRow,message:&str,fix:&str){let enabled=options.annotations==Annotations::Github||(options.annotations==Annotations::Auto&&std::env::var("GITHUB_ACTIONS").ok().as_deref()==Some("true"));if !enabled{return}let level=if severity=="Warning"{"warning"}else{"error"};let property=|v:&str|v.replace('%',"%25").replace('\r',"%0D").replace('\n',"%0A").replace(':',"%3A").replace(',',"%2C");let message=format!("{message}\nWhy: {}\nFix: {fix}",row.reason).replace('%',"%25").replace('\r',"%0D").replace('\n',"%0A");eprintln!("::{level} file={},line={},col={},title={}::{message}",property(&row.source),row.line,row.column,property(&format!("Jet {code}")))}
 fn emit_json(options:&Options,built:&BuiltReport,path:&str,plan:Option<(&str,Option<&str>,bool)>,applied:bool,exit:i32,diagnostic:Option<CanonicalJson>){let(failed,unavailable,stale,warn,_)=output_counts(built);let(status,failure_kind)=if failed>0{("fail",Some("budget"))}else if unavailable>0{("unavailable",Some("evidence"))}else if stale>0{("stale",Some("evidence"))}else if warn>0{("warn",None)}else{("pass",None)};let results=built.results.iter().map(result_json).collect();let plan=plan.map(|(baseline,old,created)|CanonicalJson::object([("baseline".into(),CanonicalJson::String(baseline.into())),("requires_confirmation".into(),CanonicalJson::Bool(false)),("rows".into(),CanonicalJson::Array(vec![plan_row(if created{"create"}else{"reuse"},"report",path,None,text_field(&built.value,"report_id").unwrap()),plan_row("advance","baseline",&format!(".jet/perf/baselines/names/{baseline}.json"),old,text_field(&built.value,"report_id").unwrap())]))]).unwrap()).unwrap_or(CanonicalJson::Null);let value=CanonicalJson::object([("applied".into(),CanonicalJson::Bool(applied)),("command".into(),CanonicalJson::String(options.command.into())),("diagnostics".into(),CanonicalJson::Array(diagnostic.into_iter().collect())),("exit_code".into(),CanonicalJson::Integer(exit.to_string())),("failure_kind".into(),failure_kind.map(|value|CanonicalJson::String(value.into())).unwrap_or(CanonicalJson::Null)),("plan".into(),plan),("report".into(),built.value.clone()),("report_path".into(),CanonicalJson::String(path.into())),("results".into(),CanonicalJson::Array(results)),("schema".into(),CanonicalJson::String("jet.budget-command".into())),("status".into(),CanonicalJson::String(status.into())),("version".into(),CanonicalJson::Integer("1".into()))]).unwrap();print!("{}",String::from_utf8(value.bytes()).unwrap())}

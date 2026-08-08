@@ -648,18 +648,22 @@ pub(crate) fn run_devtools(args: &[&String], mode: OutputMode) {
             write_generated_section(
                 "editors/vscode/syntaxes/jet.tmLanguage.json",
                 &jet::Syntax::render_vscode_generated_highlights(),
+                mode.quiet,
             );
             write_generated_section(
                 "editors/jet.tmGrammar",
                 &jet::Syntax::render_vscode_generated_highlights(),
+                mode.quiet,
             );
             write_generated_section(
                 "editors/tree-sitter/grammar.js",
                 &jet::Syntax::render_tree_sitter_generated_highlights(),
+                mode.quiet,
             );
             write_generated_section(
                 "editors/zed/languages/jet/highlights.scm",
                 &jet::Syntax::render_zed_generated_highlights(),
+                mode.quiet,
             );
             // #1659 criterion 3: the files were still written; `--quiet`
             // only mutes this confirmation line.
@@ -1349,7 +1353,7 @@ pub(crate) fn bless_command(target: &str) -> Command {
     cmd
 }
 
-fn write_generated_section(path: &str, fresh: &str) {
+fn write_generated_section(path: &str, fresh: &str, quiet: bool) {
     let text = fs::read_to_string(path).unwrap_or_else(|e| {
         eprintln!("error: couldn't read `{}`: {}", path, e);
         exit(ExitCodes::USER_ERROR);
@@ -1390,7 +1394,11 @@ fn write_generated_section(path: &str, fresh: &str) {
         eprintln!("error: couldn't write `{}`: {}", path, e);
         exit(ExitCodes::USER_ERROR);
     });
-    println!("wrote {}", path);
+    // #1659 criterion 3 (round 2): the file is still written; `--quiet` only
+    // mutes this per-file progress line (same rule as the summary line below).
+    if !quiet {
+        println!("wrote {}", path);
+    }
 }
 
 /// `jet self doctor` — environment self-diagnosis with actionable fixes (D-DX2,
@@ -1677,6 +1685,7 @@ pub(crate) fn run_bind(args: &[&String]) {
     let header = args[0].as_str();
     let mut pkg: Option<String> = None;
     let mut out: Option<String> = None;
+    let mut quiet = false;
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
@@ -1687,6 +1696,12 @@ pub(crate) fn run_bind(args: &[&String]) {
             "-o" | "--out" => {
                 out = args.get(i + 1).map(|s| s.to_string());
                 i += 2;
+            }
+            // #1659 c3: --quiet suppresses the `bound …` status line; the
+            // skipped-declaration notice stays (it is a warning, not status).
+            "--quiet" => {
+                quiet = true;
+                i += 1;
             }
             other => {
                 eprintln!("error: unknown `bind` flag `{}`", other);
@@ -1754,13 +1769,15 @@ pub(crate) fn run_bind(args: &[&String]) {
     // cflags are not yet threaded through `jet inspect bind`; pass "" for now.
     let _ = jet::CBind::write_bind_hash(std::path::Path::new(&out_path), &header_src, "");
 
-    println!(
-        "bound {} function{} from `{}` → {}",
-        result.bound.len(),
-        if result.bound.len() == 1 { "" } else { "s" },
-        header,
-        out_path
-    );
+    if !quiet {
+        println!(
+            "bound {} function{} from `{}` → {}",
+            result.bound.len(),
+            if result.bound.len() == 1 { "" } else { "s" },
+            header,
+            out_path
+        );
+    }
     if !result.skipped.is_empty() {
         println!(
             "skipped {} declaration{} outside the bindable subset (hand-write `#Extern` for these):",

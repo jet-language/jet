@@ -27,7 +27,7 @@ impl<'a> Parser<'a> {
             Self::is_capability_bundle_marker(name) || name == Syntax::MARKER_INVARIANT
         }
     
-        /// D-DIST3 / D-CAPBUNDLE1 / D-MARKERMOVE1 (ratified 2026-06-20 /
+        /// D-DIST3 / D-CAPBUNDLE1 / D-VERDICT-732-1 (formerly D-MARKERMOVE1) (ratified 2026-06-20 /
         /// 2026-07-01): true when a stack of one or more capability-bundle
         /// markers (`#Numeric`, `#Comparable`, `#Printable`, `#CodableAsBase`,
         /// any order, retired `#` spelling included so `distinct_def` can teach
@@ -90,7 +90,7 @@ impl<'a> Parser<'a> {
                 )
         }
     
-        /// D-DIST1/D-DIST3/D-CAPBUNDLE1/D-MARKERMOVE1: parse
+        /// D-DIST1/D-DIST3/D-CAPBUNDLE1/D-VERDICT-732-1 (formerly D-MARKERMOVE1): parse
         /// `[#Numeric] [#Comparable] [#Printable] [#CodableAsBase] Name :: distinct BaseType`
         /// — a stack of zero or more capability-bundle markers, any order.
         pub(super) fn distinct_def(
@@ -457,7 +457,7 @@ impl<'a> Parser<'a> {
                     Some(value.span()),
                 )),
             }).transpose()?;
-            let base = if let Some(value) = arguments.parameter(2) {
+            let mut base = if let Some(value) = arguments.parameter(2) {
                 let crate::AST::Expr::Ident(base, base_span) = value else {
                     return Err(crate::Policy::marker_argument_shape_error(Syntax::MARKER_UNIT_FAMILY, value.span()));
                 };
@@ -480,6 +480,7 @@ impl<'a> Parser<'a> {
             }
             self.expect(TokKind::LBrace, "to open the unit family member list")?;
             let mut members = Vec::new();
+            let mut has_conversion_metadata = false;
             while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
                 let (member, member_span) = self.expect_ident("as a unit family member")?;
                 let mut scale = crate::AST::UnitRatio::integer(1);
@@ -541,16 +542,7 @@ impl<'a> Parser<'a> {
                         Some(member_span),
                     ));
                 }
-                if base.is_none() && (saw_scale || saw_offset) {
-                    return Err(Diagnostic::error(
-                        "E0003",
-                        format!("unit `{member}` has conversion metadata but its family has no base"),
-                        "scale and offset are defined relative to one canonical family member"
-                            .to_string(),
-                        format!("write `#UnitFamily({family}, base: member_name)`"),
-                        Some(member_span),
-                    ));
-                }
+                has_conversion_metadata |= saw_scale || saw_offset;
                 members.push(crate::AST::UnitFamilyMember {
                     name: member,
                     name_span: member_span,
@@ -563,6 +555,18 @@ impl<'a> Parser<'a> {
                 }
             }
             self.expect(TokKind::RBrace, "to close the unit family member list")?;
+            // D-QUANTITY-DECL1=A: `base` documents a default of "first member".
+            // A bare family (no `dimension`, no member conversion metadata —
+            // currency, plain tags) stays fully nominal and never defaults: no
+            // unit fact registers, per D-DIMENSION-OPEN1's "without a base,
+            // members stay unrelated nominal types with no conversion." Once a
+            // family claims a dimension or writes `scale`/`offset` on any
+            // member, it has opted into conversion and the default applies.
+            if base.is_none() && (dimension.is_some() || has_conversion_metadata) {
+                if let Some(first) = members.first() {
+                    base = Some((first.name.clone(), first.name_span));
+                }
+            }
             if let Some((base_name, base_span)) = &base {
                 let Some(member) = members.iter().find(|member| member.name == *base_name) else {
                     return Err(Diagnostic::error(
@@ -877,7 +881,7 @@ impl<'a> Parser<'a> {
     
         // --- published-schema marker + migration blocks (D-MIGRATE1) -----------
     
-        /// D-MIGRATE1 / D-MARKERMOVE1 (ratified 2026-06-22 / 2026-07-01): true when
+        /// D-MIGRATE1 / D-VERDICT-732-1 (formerly D-MARKERMOVE1) (ratified 2026-06-22 / 2026-07-01): true when
         /// `#PublishedSchema struct` or `#PublishedSchema pub struct` is at the
         /// cursor. Also matches the retired `#PublishedSchema` spelling so
         /// `published_schema_struct_def` can teach E0062.
@@ -968,7 +972,7 @@ impl<'a> Parser<'a> {
             }
         }
     
-        /// D-MUSTUSE1 (c18iwxqx) / D-MARKERMOVE1: true when `#MustUse struct` /
+        /// D-MUSTUSE1 (c18iwxqx) / D-VERDICT-732-1 (formerly D-MARKERMOVE1): true when `#MustUse struct` /
         /// `#MustUse enum` is at the cursor. Also matches the retired `#MustUse`
         /// spelling so `must_use_type_def` can teach E0062.
         pub(super) fn at_must_use_type(&self) -> bool {
@@ -989,7 +993,7 @@ impl<'a> Parser<'a> {
             false
         }
     
-        /// D-MUSTUSE1/D-MARKERMOVE1: parse `#MustUse [pub] (struct|enum) Name { … }`.
+        /// D-MUSTUSE1/D-VERDICT-732-1 (formerly D-MARKERMOVE1): parse `#MustUse [pub] (struct|enum) Name { … }`.
         pub(super) fn must_use_type_def(&mut self, outer_is_pub: bool) -> Result<crate::AST::Item, Diagnostic> {
             let attr_start = self.peek().span;
             self.bump(); // consume `@`
@@ -1033,7 +1037,7 @@ impl<'a> Parser<'a> {
                 && matches!(&self.peek3().kind, TokKind::LBrace)
         }
     
-        /// D-MIGRATE1/D-MARKERMOVE1 (ratified 2026-06-22 / 2026-07-01): parse
+        /// D-MIGRATE1/D-VERDICT-732-1 (formerly D-MARKERMOVE1) (ratified 2026-06-22 / 2026-07-01): parse
         /// `#PublishedSchema [pub] struct Name { … }`. The retired `#PublishedSchema`
         /// spelling teaches E0062.
         pub(super) fn published_schema_struct_def(

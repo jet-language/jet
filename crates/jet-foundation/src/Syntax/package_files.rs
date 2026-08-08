@@ -134,14 +134,15 @@ pub const BINPAT_ENDIAN_BIG: &str = "be";
 /// D-BINPAT1: multi-byte little-endian read suffix — `{len:U16le}`.
 pub const BINPAT_ENDIAN_LITTLE: &str = "le";
 
-/// D-DIST3 / D-CAPBUNDLE1 / D-MARKERMOVE1 (ratified): `#Numeric` marker
-/// enables same-type arithmetic on a distinct type. Written `#Numeric` on
-/// the same line before the distinct-type name (contract-plane prefix,
-/// D-MARKER-FAMILY1). This is the single merged spelling for what used to
-/// be two markers doing the same job — the `#Numeric` distinct-type marker
-/// (D-DIST3) and the `@numeric` capability bundle (D-CAPBUNDLE1) — folded
-/// per D-MARKERMOVE1=B (I8: one way to mean it). `MARKER_BUNDLE_NUMERIC`
-/// no longer exists as a separate constant; use this one.
+/// D-DIST3 / D-CAPBUNDLE1 / D-VERDICT-732-1 (formerly D-MARKERMOVE1=B):
+/// `#Numeric` marker enables same-type arithmetic on a distinct type.
+/// Written `#Numeric` on the same line before the distinct-type name (the
+/// sole `#` rule prefix, D-VERDICT-732-1). This is the single merged
+/// spelling for what used to be two markers doing the same job — the
+/// `#Numeric` distinct-type marker (D-DIST3) and the formerly-`@numeric`
+/// capability bundle (D-CAPBUNDLE1) — folded per D-VERDICT-732-1 (I8: one
+/// way to mean it). `MARKER_BUNDLE_NUMERIC` no longer exists as a separate
+/// constant; use this one.
 pub const MARKER_NUMERIC: &str = "Numeric";
 
 /// D-QUAL3 (ratified 2026-06-24): `#UnitFamily(Currency) { usd, eur, gbp }` —
@@ -314,20 +315,21 @@ pub const LAYOUT_COLUMNAR: &str = "columnar"; // D-SOA1 / D-SOA2A
 
 // ── Serde derive markers + attributes (D-SERDE2–8, D-ENC1; bracket form D-ATTR2) ──
 // Derive markers (PascalCase per D-CASING1, written `#[…]` before a struct/enum,
-// D-MARKERMOVE1=B): `#[Codable]` derives BOTH directions (sugar for `#[Encode,
-// Decode]`); `#[Encode]` is write-only; `#[Decode]` is read-only. Owner (D-SERDE4 = B,
-// modified): the
+// D-VERDICT-732-1, formerly D-MARKERMOVE1=B): `#[Codable]` derives BOTH
+// directions (sugar for `#[Encode, Decode]`); `#[Encode]` is write-only;
+// `#[Decode]` is read-only. Owner (D-SERDE4 = B, modified): the
 // collapsed umbrella is `Codable`, with `Encode`/`Decode` as the one-way markers.
 pub const MARKER_CODABLE: &str = "Codable"; // D-SERDE4
 pub const MARKER_ENCODE: &str = "Encode"; // D-SERDE4
 pub const MARKER_DECODE: &str = "Decode"; // D-SERDE4
-                                        // D-MARKERMOVE3 (B, ratified 2026-07-02): the other built-in derive markers
-                                        // that join Codable/Encode/Decode on the contract plane (`@`).
+                                        // D-VERDICT-732-1 (formerly D-MARKERMOVE3, B, ratified 2026-07-02): the
+                                        // other built-in derive markers that join Codable/Encode/Decode — all on
+                                        // `#`, the sole rule prefix.
                                         // D-AUTODERIVE-SYNTAX1=D restores Debug as a signed type-site auto-derive
                                         // control beside Printable and Equatable. User derives (`derive T.Wire {
-                                        // … }`, applied as `#[Wire]`) stay `#` — the built-in/user line is the
-                                        // `@`/`#` plane line.
-pub const MARKER_COMPARABLE: &str = "Comparable"; // D-MARKERMOVE3
+                                        // … }`, applied as `#[Wire]`) also stay `#` — built-in and user derives
+                                        // share the same prefix; only the derive name tells them apart.
+pub const MARKER_COMPARABLE: &str = "Comparable"; // D-VERDICT-732-1 (formerly D-MARKERMOVE3)
                                                 // Per-field attributes (D-SERDE5 = A), written `#[…]` before a field.
 pub const MARKER_RENAME: &str = "Rename"; // D-SERDE5  #[Rename("wire_key")]
 pub const MARKER_SKIP: &str = "Skip"; // D-SERDE5  #[Skip]

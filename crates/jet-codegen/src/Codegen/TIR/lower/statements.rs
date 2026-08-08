@@ -1634,7 +1634,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             else_body,
             span,
         } => lower_switch(subject, arms, else_body, *span, cx, env),
-        // D-CTMARKER1 (ratified 2026-06-25, piece 2): `$ { … }` runs at
+        // D-META-STAGE1=B (formerly D-CTMARKER1, ratified 2026-06-25, piece 2): `$ { … }` runs at
         // build time and erases entirely — no runtime Rust is emitted (I3).
         Stmt::ComptimeBlock { .. } => TStmt::Inline(vec![]),
         // D-CANVASSTATE1=D: `#Off` type-checks in sema but emits no runtime TIR.

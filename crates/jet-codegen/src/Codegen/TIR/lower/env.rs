@@ -356,7 +356,7 @@ pub(super) fn collect_txn_mut_roots(body: &[Stmt], out: &mut Vec<String>) {
                     collect_txn_mut_roots(eb, out);
                 }
             }
-            // D-CTMARKER1: build-time block erases; no runtime mutations.
+            // D-META-STAGE1=B (formerly D-CTMARKER1): build-time block erases; no runtime mutations.
             Stmt::ComptimeBlock { .. } => {}
             Stmt::ComptimeIf {
                 then_body,

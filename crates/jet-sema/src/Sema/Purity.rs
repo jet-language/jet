@@ -268,7 +268,7 @@ pub(crate) fn check_pure_stmt(
             None
         }
         Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => None,
-        // D-CTMARKER1: comptime block is build-time only; pure by construction.
+        // D-META-STAGE1=B (formerly D-CTMARKER1): comptime block is build-time only; pure by construction.
         Stmt::ComptimeBlock { .. } => None,
         // D-WHEN1: check both arms of a $if for purity (conservative).
         Stmt::ComptimeIf {
@@ -686,7 +686,7 @@ fn check_pure_stmt_with_path(
             None
         }
         Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => None,
-        // D-CTMARKER1: comptime block is build-time only; pure by construction.
+        // D-META-STAGE1=B (formerly D-CTMARKER1): comptime block is build-time only; pure by construction.
         Stmt::ComptimeBlock { .. } => None,
         Stmt::ComptimeIf {
             cond,
@@ -1228,7 +1228,7 @@ fn walk_stmt_for_calls(
             }
         }
         Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => {}
-        // D-CTMARKER1: comptime block is build-time only; no runtime calls to check.
+        // D-META-STAGE1=B (formerly D-CTMARKER1): comptime block is build-time only; no runtime calls to check.
         Stmt::ComptimeBlock { .. } => {}
         Stmt::ComptimeIf {
             cond,

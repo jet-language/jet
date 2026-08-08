@@ -1833,7 +1833,7 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
         AST::Stmt::BreakLabel(name, span) | AST::Stmt::ContinueLabel(name, span) => {
             collect_loop_label_ref(name, *span, mp, ctx);
         }
-        // D-CTMARKER1: collect symbols from comptime block body.
+        // D-META-STAGE1=B (formerly D-CTMARKER1): collect symbols from comptime block body.
         AST::Stmt::ComptimeBlock { body, .. } => structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(body, mp, module, ctx)),
         AST::Stmt::ComptimeIf {
             cond,

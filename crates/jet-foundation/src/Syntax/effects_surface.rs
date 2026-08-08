@@ -264,7 +264,7 @@ pub const INTERP_SELECTOR_FIXED: &str = "Fixed";
 pub const INTERP_SELECTOR_UNIT: &str = "Unit";
 pub const INTERP_UNIT_STYLE_NAME: &str = "name";
 pub const INTERP_UNIT_STYLE_BARE: &str = "bare";
-/// D-DEBUG-REDACT / D-MARKERMOVE1 (contract plane, `#Redact`): hide a field
+/// D-DEBUG-REDACT / D-VERDICT-732-1 (formerly D-MARKERMOVE1, `#Redact`): hide a field
 /// from auto-derived Debug output.
 pub const MARKER_REDACT: &str = "Redact";
 

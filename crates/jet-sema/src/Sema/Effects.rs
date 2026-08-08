@@ -1441,7 +1441,7 @@ fn stmt_handle_escape(stmt: &crate::AST::Stmt, handle: &str) -> Option<Span> {
         | Stmt::AssumeDet { body, .. }
         | Stmt::ScopeMember { body, .. }
         | Stmt::Live { body, .. } => block(body),
-        // D-CTMARKER1: comptime block erases; no handle can escape a build-time block.
+        // D-META-STAGE1=B (formerly D-CTMARKER1): comptime block erases; no handle can escape a build-time block.
         Stmt::ComptimeBlock { .. } => None,
         Stmt::ComptimeIf {
             cond,

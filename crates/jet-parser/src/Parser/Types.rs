@@ -56,7 +56,7 @@ impl<'a> Parser<'a> {
             self.peek().kind,
             TokKind::KwFn | TokKind::Ident(_) | TokKind::LParen | TokKind::LBracket
         )
-        // D-EFF2/D-MARKERMOVE2: `fn(…) =[]=>` — a pure-bounded function type
+        // D-EFF2/D-VERDICT-732-1 (formerly D-MARKERMOVE2): `fn(…) =[]=>` — a pure-bounded function type
         // (G1: the one carve-out where a contract marker prefixes a TYPE, not a
         // declaration). Retired `fn(…) --[]->` remains recognized here so the
         // callback-bound parser can teach E0062. `fn(…) --[E]->` — the retired general
@@ -971,7 +971,7 @@ impl<'a> Parser<'a> {
     /// at `#`. `#Pure` yields the empty set (`Some([])`); `#(E1, E2, …)` yields the
     /// listed names (validated against the effect vocabulary in sema, not here).
     /// The caller has confirmed via lookahead that a `fn` follows.
-    /// D-EFF2/D-MARKERMOVE2 (G1): parse a callback effect bound. `fn(…) =[]=>`
+    /// D-EFF2/D-VERDICT-732-1 (formerly D-MARKERMOVE2, G1): parse a callback effect bound. `fn(…) =[]=>`
     /// is the one carve-out where a contract marker prefixes a function TYPE
     /// instead of a declaration — the retired `fn(…) --[]->` spelling still
     /// parses here so it can teach E0062. The general effect-list form,

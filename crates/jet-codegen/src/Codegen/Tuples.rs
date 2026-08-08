@@ -407,7 +407,7 @@ fn collect_tuple_shapes_from_stmt(stmt: &Stmt, out: &mut CollectedTypeShapes) {
                 collect_tuple_shapes_from_stmt(s, out);
             }
         }
-        // D-CTMARKER1: comptime block erases; no tuple shapes in emitted Rust.
+        // D-META-STAGE1=B (formerly D-CTMARKER1): comptime block erases; no tuple shapes in emitted Rust.
         Stmt::ComptimeBlock { .. } => {}
         // D-WHEN1: collect tuple shapes from both arms (conservative).
         Stmt::ComptimeIf {

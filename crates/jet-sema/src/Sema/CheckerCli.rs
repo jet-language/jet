@@ -1,7 +1,8 @@
 //! D-CLIFLAG1 (c7cliflag): typed entry-signature CLI parsing.
 //!
 //! `#[CLI]` is a sibling derive of `#[Codable]` on the same marker/derive
-//! infrastructure (D-MARKERMOVE1/D-CLIFLAG1). A `#[CLI]`-derived struct's
+//! infrastructure (D-VERDICT-732-1, formerly D-MARKERMOVE1; D-CLIFLAG1).
+//! A `#[CLI]`-derived struct's
 //! fields each map to one `core.args` registration; see docs/spec/spec.md
 //! ("Typed entry-signature CLI parsing (D-CLIFLAG1)") for the pinned
 //! field-mapping rule this validates. Sema does the shape-checking here so

@@ -1647,7 +1647,7 @@ impl<'a> Checker<'a> {
                         }
                     }
                 }
-                // D-CTMARKER1 (ratified 2026-06-25, piece 2): build-time execution block.
+                // D-META-STAGE1=B (formerly D-CTMARKER1, ratified 2026-06-25, piece 2): build-time execution block.
                 Stmt::ComptimeBlock { .. } => self.check_comptime_block(stmt),
                 // D-WHEN1/D-WHEN2 (ratified 2026-06-19): compile-time conditional.
                 Stmt::ComptimeIf { .. } => self.check_comptime_if(stmt),

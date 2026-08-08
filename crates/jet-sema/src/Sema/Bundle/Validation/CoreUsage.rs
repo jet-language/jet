@@ -301,7 +301,7 @@ pub(crate) fn collect_core_stmts(
             }
             Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => {
             }
-            // D-CTMARKER1: collect Core usage from comptime block body.
+            // D-META-STAGE1=B (formerly D-CTMARKER1): collect Core usage from comptime block body.
             Stmt::ComptimeBlock { body, .. } => collect_core_stmts(body, imports, used, spans, ffi_cb),
             // D-WHEN1: collect Core usage from both arms (we don't know which is
             // selected until sema runs; over-collecting is harmless here).

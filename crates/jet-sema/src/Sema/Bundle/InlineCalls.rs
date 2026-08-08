@@ -115,7 +115,7 @@ pub(crate) fn rewrite_inline_calls_stmts(
             | Stmt::AssumeDet { body: inner, .. } => {
                 rewrite_inline_calls_stmts(inner, siblings, modname);
             }
-            // D-CTMARKER1: rewrite inline calls in comptime block body.
+            // D-META-STAGE1=B (formerly D-CTMARKER1): rewrite inline calls in comptime block body.
             Stmt::ComptimeBlock { body, .. } => rewrite_inline_calls_stmts(body, siblings, modname),
             // D-WHEN1: rewrite calls in both arms so sibling resolution works
             // regardless of which arm is selected at comptime.

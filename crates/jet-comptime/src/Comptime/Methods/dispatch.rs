@@ -705,7 +705,8 @@ fn class_matches(class: &[char], needle: char) -> bool {
     matched
 }
 
-/// D-CTMARKER1=C: substitute `$name` splices in a string using values from the
+/// D-META-STAGE1=B (formerly D-CTMARKER1=C's splice spelling): substitute
+/// `$name` mentions in a string with their compile-time value from the
 /// comptime scope. Unknown names are left as-is (`$unknown`). Used by `emit(…)`.
 pub fn apply_dollar_splices(s: &str, scope: &HashMap<String, CtValue>) -> String {
     let mut result = String::new();

@@ -110,7 +110,11 @@ pub struct FlagSpec {
     pub help: &'static str,
 }
 
-/// One subcommand of `jet`.
+/// One subcommand of `jet` — a bare leaf (`build`, `run`, …) or a namespaced
+/// group (`hangar`, `registry`, …) that owns nested actions. #1659 criterion 1
+/// (round 2): this is the ONE declaration dispatch, help, man, and completions
+/// all render from — a group is a row here with non-empty `actions`, not a
+/// second parallel table.
 pub struct CommandSpec {
     pub name: &'static str,
     /// One-line summary (man + completion description).
@@ -118,23 +122,26 @@ pub struct CommandSpec {
     /// Whether this is one of the three "commands that matter" shown when argv
     /// is flags-only with no subcommand (bare `jet` starts the REPL instead).
     pub headline: bool,
+    /// Nested actions when this is a namespaced group (`hangar`, `registry`,
+    /// …); empty for a bare leaf command.
+    pub actions: &'static [NestedCommandSpec],
+    /// Only meaningful when `actions` is non-empty: true when every subword of
+    /// this group is modeled by `actions` — the bare group form and `<group>
+    /// help` print the CLI-owned summary, and an unmodeled subword is E2101.
+    /// False for `os`/`gc` (D-CLI-SURFACE3=B): `os` exposes a wider native verb
+    /// surface (`check`/`build`/`switch`/…) that stays opaque to this
+    /// registry, so only the migrated verbs (`push`/`bridge`/`services`/
+    /// `config`) are modeled and everything else — including bare `jet os` and
+    /// `jet os help` — falls through to the real `jet os` dispatcher unchanged.
+    pub exhaustive: bool,
 }
 
-/// D-SHAPE6=A / D-CLI-SURFACE1=B / D-CLI-SURFACE2=A / D-CLI-SURFACE3=B:
-/// authoritative noun-then-verb command registry.
-pub struct CommandGroup {
-    pub name: &'static str,
-    pub summary: &'static str,
-    pub actions: &'static [NestedCommandSpec],
-    /// True when every subword of this group is modeled by `actions` — the
-    /// bare group form and `<group> help` print the CLI-owned summary, and an
-    /// unmodeled subword is E2101. False for `os` (D-CLI-SURFACE3=B): jetos
-    /// owns a wider native verb surface (`check`/`build`/`switch`/…) that
-    /// stays opaque to this registry, so only the migrated verbs
-    /// (`push`/`bridge`/`services`/`config`) are modeled and everything else
-    /// — including bare `jet os` and `jet os help` — falls through to the
-    /// real `jet os` dispatcher unchanged.
-    pub exhaustive: bool,
+impl CommandSpec {
+    /// True when this row is a namespaced group with nested actions, rather
+    /// than a bare leaf command.
+    pub const fn is_group(&self) -> bool {
+        !self.actions.is_empty()
+    }
 }
 
 /// One canonical nested spelling and the real legacy dispatcher seam it reaches.
@@ -261,7 +268,7 @@ const SELF_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec { name: "lsp", usage: "lsp", summary: "Start the language server", handler: HandlerKey::Lsp },
 ];
 // D-CLI-SURFACE3=B: `push`/`bridge`/`services`/`config` move under `jet os`.
-// This group is *not* exhaustive (see `CommandGroup::exhaustive`) — jetos's
+// This group is *not* exhaustive (see `CommandSpec::exhaustive`) — jetos's
 // own native verbs (`check`/`build`/`switch`/…, D-JPK-OSVERB1) stay entirely
 // owned by the `jet os` dispatcher and are not modeled here.
 const OS_ACTIONS: &[NestedCommandSpec] = &[
@@ -284,24 +291,20 @@ const PERF_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec { name: "export", usage: "export", summary: "Export a loss-declared projection of a .jettrace", handler: HandlerKey::Perf },
 ];
 
-pub const COMMAND_GROUPS: &[CommandGroup] = &[
-    CommandGroup { name: "registry", summary: "Publish and manage packages", actions: REGISTRY_ACTIONS, exhaustive: true },
-    CommandGroup { name: "inspect", summary: "Explore code, builds, packages, and bindings", actions: INSPECT_ACTIONS, exhaustive: true },
-    CommandGroup { name: "hangar", summary: "Inspect and maintain the package store", actions: HANGAR_ACTIONS, exhaustive: true },
-    CommandGroup { name: "gc", summary: "Inspect automatic memory management", actions: GC_ACTIONS, exhaustive: false },
-    CommandGroup { name: "project", summary: "Inspect project files and modules", actions: PROJECT_ACTIONS, exhaustive: true },
-    CommandGroup { name: "self", summary: "Manage the Jet installation and editor tools", actions: SELF_ACTIONS, exhaustive: true },
-    CommandGroup { name: "os", summary: "Manage Jetos machines and services", actions: OS_ACTIONS, exhaustive: false },
-    CommandGroup { name: "perf", summary: "Collect and inspect performance traces", actions: PERF_ACTIONS, exhaustive: true },
-];
+/// #1659 criterion 1 (round 2): groups are no longer a second parallel array —
+/// they are the `COMMANDS` rows whose `actions` is non-empty. Every renderer
+/// (dispatch, help, man, completions) reads this same one table.
+pub fn command_groups() -> impl Iterator<Item = &'static CommandSpec> {
+    COMMANDS.iter().filter(|c| c.is_group())
+}
 
-pub fn command_group(name: &str) -> Option<&'static CommandGroup> {
-    COMMAND_GROUPS.iter().find(|group| group.name == name)
+pub fn command_group(name: &str) -> Option<&'static CommandSpec> {
+    command_groups().find(|group| group.name == name)
 }
 
 /// #1659 criterion 1: the one renderer for a group's nested-action usage
 /// block, shared by `jet help`, `jet <group> --help`, and `jet perf --help`
-/// (CmdPerf.rs) so every caller reads the same `COMMAND_GROUPS` table instead
+/// (CmdPerf.rs) so every caller reads the same `COMMANDS` table instead
 /// of re-deriving its own text.
 pub fn command_group_usage(name: &str) -> String {
     let Some(group) = command_group(name) else { return String::new() };
@@ -320,12 +323,12 @@ pub fn command_group_usage(name: &str) -> String {
     output
 }
 
-pub fn nested_command(group: &str, action: &str) -> Option<(&'static CommandGroup, &'static NestedCommandSpec)> {
+pub fn nested_command(group: &str, action: &str) -> Option<(&'static CommandSpec, &'static NestedCommandSpec)> {
     let group = command_group(group)?;
     group.actions.iter().find(|spec| spec.name == action).map(|action| (group, action))
 }
 
-pub fn moved_command(name: &str) -> Option<(&'static CommandGroup, &'static NestedCommandSpec)> {
+pub fn moved_command(name: &str) -> Option<(&'static CommandSpec, &'static NestedCommandSpec)> {
     // A spelling can own a canonical top-level meaning and also name a
     // grouped action (`import` translates source at the top level and imports
     // store archives under `hangar`). D-JPK-IMPORTCMD1 / D-MIGRATE-SRC1 make
@@ -336,7 +339,7 @@ pub fn moved_command(name: &str) -> Option<(&'static CommandGroup, &'static Nest
     if name == "import" || matches!(name, "run" | "test" | "bench" | "report") {
         return None;
     }
-    COMMAND_GROUPS.iter().find_map(|group| {
+    command_groups().find_map(|group| {
         group.actions.iter().find(|action| action.name == name).map(|action| (group, action))
     })
 }
@@ -348,120 +351,164 @@ pub fn moved_command_group(name: &str) -> Option<&'static str> {
 /// Every built-in subcommand. Order here is the order shown in the man page and
 /// completions; the greeting picks the `headline` ones.
 pub const COMMANDS: &[CommandSpec] = &[
-    CommandSpec { name: "registry", summary: "Publish and manage packages", headline: false },
-    CommandSpec { name: "inspect", summary: "Explore code, builds, packages, and bindings", headline: false },
-    CommandSpec { name: "hangar", summary: "Inspect and maintain the package store", headline: false },
-    CommandSpec { name: "project", summary: "Inspect project files and modules", headline: false },
-    CommandSpec { name: "self", summary: "Manage the Jet installation and editor tools", headline: false },
+    CommandSpec { name: "registry", summary: "Publish and manage packages", headline: false, actions: REGISTRY_ACTIONS, exhaustive: true },
+    CommandSpec { name: "inspect", summary: "Explore code, builds, packages, and bindings", headline: false, actions: INSPECT_ACTIONS, exhaustive: true },
+    CommandSpec { name: "hangar", summary: "Inspect and maintain the package store", headline: false, actions: HANGAR_ACTIONS, exhaustive: true },
+    CommandSpec { name: "project", summary: "Inspect project files and modules", headline: false, actions: PROJECT_ACTIONS, exhaustive: true },
+    CommandSpec { name: "self", summary: "Manage the Jet installation and editor tools", headline: false, actions: SELF_ACTIONS, exhaustive: true },
     CommandSpec {
         name: "diff",
         summary: "Compare two Jet programs by meaning",
         headline: false,
+        actions: &[],
+        exhaustive: false,
     },
     CommandSpec {
         name: "merge",
         summary: "Merge Jet programs without losing code structure",
         headline: false,
+        actions: &[],
+        exhaustive: false,
     },
     CommandSpec {
         name: "run",
         summary: "Run a program or project",
         headline: true,
+        actions: &[],
+        exhaustive: false,
     },
     CommandSpec {
         name: "tasks",
         summary: "List project tasks",
         headline: false,
+        actions: &[],
+        exhaustive: false,
     },
     CommandSpec {
         name: "check",
         summary: "Check code without creating a binary",
         headline: true,
+        actions: &[],
+        exhaustive: false,
     },
     CommandSpec {
         name: "test",
         summary: "Run tests",
         headline: true,
+        actions: &[],
+        exhaustive: false,
     },
     CommandSpec {
         name: "prove",
         summary: "Create a proof report for code and tests",
         headline: false,
+        actions: &[],
+        exhaustive: false,
     },
     CommandSpec {
         name: "build",
         summary: "Create a native executable",
         headline: false,
+        actions: &[],
+        exhaustive: false,
     },
     CommandSpec {
         name: "dev",
         summary: "Rerun a program whenever files change",
         headline: false,
+        actions: &[],
+        exhaustive: false,
     },
     CommandSpec {
         name: "serve",
         summary: "Use `jet dev --swap` instead",
         headline: false,
+        actions: &[],
+        exhaustive: false,
     },
     CommandSpec {
         name: "debug",
         summary: "Debug a program from Jet source",
         headline: false,
+        actions: &[],
+        exhaustive: false,
     },
     CommandSpec {
         name: "repl",
         summary: "Try Jet code interactively",
         headline: false,
+        actions: &[],
+        exhaustive: false,
     },
     CommandSpec {
         name: "notebook",
         summary: "Open a Jet notebook (.jetnb) or Jupyter adapter",
         headline: false,
+        actions: &[],
+        exhaustive: false,
     },
     CommandSpec {
         name: "import",
         summary: "Convert supported source code into editable Jet",
         headline: false,
+        actions: &[],
+        exhaustive: false,
     },
     CommandSpec {
         name: "new",
         summary: "Create a Jet project",
         headline: false,
+        actions: &[],
+        exhaustive: false,
     },
     CommandSpec {
         name: "fmt",
         summary: "Format Jet source files",
         headline: false,
+        actions: &[],
+        exhaustive: false,
     },
     CommandSpec {
         name: "fix",
         summary: "Apply safe automatic fixes",
         headline: false,
+        actions: &[],
+        exhaustive: false,
     },
     CommandSpec {
         name: "lint",
         summary: "Run optional code-quality checks",
         headline: false,
+        actions: &[],
+        exhaustive: false,
     },
     CommandSpec {
         name: "explain",
         summary: "Explain a diagnostic code",
         headline: false,
+        actions: &[],
+        exhaustive: false,
     },
     CommandSpec {
         name: "env",
         summary: "Open the project development shell",
         headline: false,
+        actions: &[],
+        exhaustive: false,
     },
     CommandSpec {
         name: "cache",
         summary: "Manage host-owned binary-cache bindings",
         headline: false,
+        actions: &[],
+        exhaustive: false,
     },
     CommandSpec {
         name: "remote",
         summary: "Manage host-owned remote builders",
         headline: false,
+        actions: &[],
+        exhaustive: false,
     },
     // #1659 criterion 1: `push`/`bridge`/`services` are `jet os` nested
     // actions (see OS_ACTIONS below) — declared once there, not here too.
@@ -469,72 +516,100 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "trust",
         summary: "Review or change trusted capabilities",
         headline: false,
+        actions: &[],
+        exhaustive: false,
     },
     CommandSpec {
         name: "image",
         summary: "Build a declared container image",
         headline: false,
+        actions: &[],
+        exhaustive: false,
     },
     CommandSpec {
         name: "os",
         summary: "Manage Jetos machines and images",
         headline: false,
+        actions: OS_ACTIONS,
+        exhaustive: false,
     },
     CommandSpec {
         name: "add",
         summary: "Add and download a dependency",
         headline: false,
+        actions: &[],
+        exhaustive: false,
     },
     CommandSpec {
         name: "remove",
         summary: "Remove a dependency",
         headline: false,
+        actions: &[],
+        exhaustive: false,
     },
     CommandSpec {
         name: "fetch",
         summary: "Download locked dependencies",
         headline: false,
+        actions: &[],
+        exhaustive: false,
     },
     CommandSpec {
         name: "update",
         summary: "Update dependency or toolchain pins",
         headline: false,
+        actions: &[],
+        exhaustive: false,
     },
     CommandSpec {
         name: "init",
         summary: "Create package settings in this directory",
         headline: false,
+        actions: &[],
+        exhaustive: false,
     },
     CommandSpec {
         name: "split",
         summary: "Extract closed Package facts into Configs or members",
         headline: false,
+        actions: &[],
+        exhaustive: false,
     },
     CommandSpec {
         name: "fold",
         summary: "Reverse a recorded Package source transition",
         headline: false,
+        actions: &[],
+        exhaustive: false,
     },
     CommandSpec {
         name: "lock",
         summary: "Use `jet fetch --lock <script.jet>` instead",
         headline: false,
+        actions: &[],
+        exhaustive: false,
     },
     CommandSpec {
         name: "store",
         summary: "Use `jet hangar`, `jet clean`, or `jet fetch` instead",
         headline: false,
+        actions: &[],
+        exhaustive: false,
     },
     // #1659 criterion 1: `config` is a `jet os` nested action (OS_ACTIONS).
     CommandSpec {
         name: "gc",
         summary: "Show values moved into automatic memory management",
         headline: false,
+        actions: GC_ACTIONS,
+        exhaustive: false,
     },
     CommandSpec {
         name: "clean",
         summary: "Remove unused package-store data",
         headline: false,
+        actions: &[],
+        exhaustive: false,
     },
     // #1659 criterion 1: `publish`/`yank`/`keygen`/`key`/`vendor` are `jet
     // registry` nested actions (REGISTRY_ACTIONS); `audit`/`sbom` are `jet
@@ -543,46 +618,64 @@ pub const COMMANDS: &[CommandSpec] = &[
         name: "emit",
         summary: "Print generated build output",
         headline: false,
+        actions: &[],
+        exhaustive: false,
     },
     CommandSpec {
         name: "eval",
         summary: "Evaluate pure Jet and print JSON",
         headline: false,
+        actions: &[],
+        exhaustive: false,
     },
     CommandSpec {
         name: "budget",
         summary: "Check performance limits or update baselines",
         headline: false,
+        actions: &[],
+        exhaustive: false,
     },
     CommandSpec {
         name: "perf",
         summary: "Collect and inspect performance traces",
         headline: false,
+        actions: PERF_ACTIONS,
+        exhaustive: true,
     },
     CommandSpec {
         name: "report",
         summary: "Write a private local report bundle",
         headline: false,
+        actions: &[],
+        exhaustive: false,
     },
     CommandSpec {
         name: "bench",
         summary: "Measure program performance",
         headline: false,
+        actions: &[],
+        exhaustive: false,
     },
     CommandSpec {
         name: "fuzz",
         summary: "Find failing inputs for property tests",
         headline: false,
+        actions: &[],
+        exhaustive: false,
     },
     CommandSpec {
         name: "version",
         summary: "Show the Jet version",
         headline: false,
+        actions: &[],
+        exhaustive: false,
     },
     CommandSpec {
         name: "help",
         summary: "Show command help",
         headline: false,
+        actions: &[],
+        exhaustive: false,
     },
 ];
 
@@ -635,6 +728,17 @@ pub const FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "-p", help: "with run/dev/debug/bench/check/build/tasks: pick a workspace member by name" },
     FlagSpec { long: "--annotated", help: "with new: include commented example deps" },
     FlagSpec { long: "--force", help: "with publish: bypass pre-publish gate (with warning)" },
+    // #1659 criterion 1 (round 2): these 8 flags previously lived only in
+    // usage-string prose (`NestedCommandSpec::usage`), invisible to
+    // `is_known_flag`/`closest_flag` (E2102 "did you mean"), the man page,
+    // and shell completions. Real rows here fix all three renderers at once.
+    FlagSpec { long: "--no-sign", help: "with publish: skip the optional author signature (registry metadata is still signed)" },
+    FlagSpec { long: "--registry", help: "with keygen/key: registry name to generate or manage a signing key for" },
+    FlagSpec { long: "--pkg", help: "with bind: library name for the generated binding module" },
+    FlagSpec { long: "--clang", help: "with bind cpp: path to the clang binary used to parse the header" },
+    FlagSpec { long: "--ar", help: "with bind cpp: path to the ar archiver used to build the static library" },
+    FlagSpec { long: "--from", help: "with hangar repair: signed archive to repair the entry from" },
+    FlagSpec { long: "--to", help: "with hangar copy/export/sign: destination Hangar root, archive, or signature path" },
     FlagSpec { long: "--message", help: "with yank: human-readable reason for yanking the version" },
     FlagSpec { long: "--before", help: "with schema squash: re-baseline migrations before this version" },
     FlagSpec { long: "--spdx", help: "with sbom: emit SPDX tag-value format (default)" },
@@ -701,6 +805,9 @@ pub const FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--seed", help: "with fuzz: base PRNG seed --seed=<n> (default: fixed, reproducible)" },
     FlagSpec { long: "--corpus", help: "with fuzz: corpus directory --corpus=<dir> (default: .jet/fuzz/<test>)" },
     FlagSpec { long: "--lens", help: "with prove: project the human report by an exact evidence facet" },
+    // #1659 criterion 1 (round 2): see the block above --message for the
+    // other 7 formerly usage-string-only flags.
+    FlagSpec { long: "--facts", help: "with expand: project a specific evidence lens --facts=<lens>" },
     FlagSpec { long: "--annotations", help: "with budget: CI annotations auto, none, or github" },
     FlagSpec { long: "--baseline", help: "with budget update: selected baseline name" },
     FlagSpec { long: "--bootstrap", help: "with budget update: create absent or stale baseline history" },
@@ -715,9 +822,9 @@ pub fn is_builtin(name: &str) -> bool {
     COMMANDS.iter().any(|c| c.name == name)
         // Group normalization rewrites canonical `jet <group> <action>` into
         // its internal handler word after rejecting the retired bare form.
-        || COMMAND_GROUPS
+        || COMMANDS
             .iter()
-            .flat_map(|group| group.actions)
+            .flat_map(|c| c.actions)
             .any(|action| action.handler.dispatch_word() == name)
         // E0043 teaching path: `jet install` is intentionally not advertised in
         // help/completions, but dispatch must reach its bespoke "use fetch"
@@ -839,7 +946,7 @@ pub fn completions_bash() -> String {
         .collect::<Vec<_>>()
         .join(" ");
     let flags = FLAGS.iter().map(|f| f.long).collect::<Vec<_>>().join(" ");
-    let nested = COMMAND_GROUPS.iter().map(|g| format!("        {}) COMPREPLY=( $(compgen -W \"{}\" -- \"$cur\") ); return 0 ;;", g.name, g.actions.iter().map(|a| a.name).collect::<Vec<_>>().join(" "))).collect::<Vec<_>>().join("\n");
+    let nested = command_groups().map(|g| format!("        {}) COMPREPLY=( $(compgen -W \"{}\" -- \"$cur\") ); return 0 ;;", g.name, g.actions.iter().map(|a| a.name).collect::<Vec<_>>().join(" "))).collect::<Vec<_>>().join("\n");
     format!(
         "# bash completion for {bin} (generated by `{bin} self completions bash`)\n\
 _{bin}() {{\n\
@@ -876,7 +983,7 @@ pub fn completions_zsh() -> String {
         if !is_canonical_top_level(c.name) { continue; }
         cmd_lines.push_str(&format!("        '{}:{}'\n", c.name, escape_zsh(c.summary)));
     }
-    let nested = COMMAND_GROUPS.iter().map(|g| format!("            {}) _values 'action' {} ;;", g.name, g.actions.iter().map(|a| format!("'{}:{}'", a.name, escape_zsh(a.summary))).collect::<Vec<_>>().join(" "))).collect::<Vec<_>>().join("\n");
+    let nested = command_groups().map(|g| format!("            {}) _values 'action' {} ;;", g.name, g.actions.iter().map(|a| format!("'{}:{}'", a.name, escape_zsh(a.summary))).collect::<Vec<_>>().join(" "))).collect::<Vec<_>>().join("\n");
     let mut flag_lines = String::new();
     for f in FLAGS {
         flag_lines.push_str(&format!("        '{}[{}]'\n", f.long, escape_zsh(f.help)));
@@ -923,7 +1030,7 @@ pub fn completions_fish() -> String {
             desc = escape_fish(c.summary),
         ));
     }
-    for group in COMMAND_GROUPS {
+    for group in command_groups() {
         for action in group.actions {
             out.push_str(&format!("complete -c {bin} -n '__fish_seen_subcommand_from {group}' -a {action} -d '{desc}'\n", bin=BINARY_NAME, group=group.name, action=action.name, desc=escape_fish(action.summary)));
         }
@@ -942,7 +1049,7 @@ pub fn completions_fish() -> String {
 /// PowerShell completion script, derived from the same nested registry.
 pub fn completions_powershell() -> String {
     let top = COMMANDS.iter().filter(|c| is_canonical_top_level(c.name)).map(|c| format!("'{}'", c.name)).collect::<Vec<_>>().join(",");
-    let groups = COMMAND_GROUPS.iter().map(|g| format!("'{}' = @({})", g.name, g.actions.iter().map(|a| format!("'{}'", a.name)).collect::<Vec<_>>().join(","))).collect::<Vec<_>>().join("; ");
+    let groups = command_groups().map(|g| format!("'{}' = @({})", g.name, g.actions.iter().map(|a| format!("'{}'", a.name)).collect::<Vec<_>>().join(","))).collect::<Vec<_>>().join("; ");
     let flags = FLAGS.iter().map(|f| format!("'{}'", f.long)).collect::<Vec<_>>().join(",");
     format!("# PowerShell completion for {bin} (generated by `{bin} self completions powershell`)\n$JetCommands = @({top})\n$JetFlags = @({flags})\n$JetGroups = @{{ {groups} }}\nRegister-ArgumentCompleter -Native -CommandName {bin} -ScriptBlock {{ param($wordToComplete,$commandAst,$cursorPosition) $words = @($commandAst.CommandElements | ForEach-Object {{ $_.Extent.Text }}); $choices = if ($wordToComplete.StartsWith('-')) {{ $JetFlags }} elseif ($words.Count -ge 2 -and $JetGroups.ContainsKey($words[1])) {{ $JetGroups[$words[1]] }} else {{ $JetCommands }}; $choices | Where-Object {{ $_ -like \"$wordToComplete*\" }} | ForEach-Object {{ [System.Management.Automation.CompletionResult]::new($_,$_,\"ParameterValue\",$_) }} }}\n", bin=BINARY_NAME, top=top, flags=flags, groups=groups)
 }
@@ -1232,7 +1339,7 @@ mod tests {
                     c.name
                 );
             }
-            for group in COMMAND_GROUPS {
+            for group in command_groups() {
                 assert!(shell_out.contains(group.name), "completion missing group {}", group.name);
                 for action in group.actions {
                     assert!(shell_out.contains(action.name), "completion missing {} {}", group.name, action.name);
@@ -1243,7 +1350,7 @@ mod tests {
 
     #[test]
     fn moved_commands_are_not_canonical_top_level() {
-        for group in COMMAND_GROUPS {
+        for group in command_groups() {
             for action in group.actions {
                 if matches!(action.name, "import" | "run" | "test" | "bench" | "report") {
                     assert!(is_canonical_top_level(action.name));
@@ -1256,7 +1363,7 @@ mod tests {
                 // An action name can appear in more than one group (`export` under
                 // hangar and perf). Bare teaching routes to the first registered owner.
                 assert!(
-                    COMMAND_GROUPS.iter().any(|candidate| {
+                    command_groups().any(|candidate| {
                         candidate.name == owner.unwrap()
                             && candidate.actions.iter().any(|entry| entry.name == action.name)
                     }),
@@ -1270,7 +1377,7 @@ mod tests {
 
     #[test]
     fn typo_suggestions_never_advertise_moved_bare_actions() {
-        for group in COMMAND_GROUPS {
+        for group in command_groups() {
             for action in group.actions {
                 if !matches!(action.name, "import" | "run" | "test" | "bench" | "report") {
                     assert_ne!(closest_command(action.name), Some(action.name));
@@ -1281,7 +1388,7 @@ mod tests {
 
     #[test]
     fn every_nested_action_has_canonical_usage() {
-        for group in COMMAND_GROUPS {
+        for group in command_groups() {
             for action in group.actions {
                 assert!(!action.usage.trim().is_empty(), "missing usage for {} {}", group.name, action.name);
                 for usage in action.usage.lines() {
@@ -1333,7 +1440,7 @@ mod tests {
             ("perf", "view", Perf, "perf", true), ("perf", "compare", Perf, "perf", true),
             ("perf", "export", Perf, "perf", true),
         ];
-        assert_eq!(COMMAND_GROUPS.iter().map(|g| g.actions.len()).sum::<usize>(), expected.len());
+        assert_eq!(command_groups().map(|g| g.actions.len()).sum::<usize>(), expected.len());
         for (group_name, action_name, handler, dispatch_word, keeps_group) in expected {
             let (_, action) = nested_command(group_name, action_name).unwrap_or_else(|| panic!("missing {group_name} {action_name}"));
             assert_eq!(action.handler, handler, "wrong handler for {group_name} {action_name}");
@@ -1351,7 +1458,7 @@ mod tests {
             };
             assert_eq!(normalized, expected_argv, "wrong normalized argv for {group_name} {action_name}");
         }
-        for group in COMMAND_GROUPS {
+        for group in command_groups() {
             for action in group.actions {
                 assert!(!action.summary.trim().is_empty(), "missing summary for {} {}", group.name, action.name);
                 assert!(is_builtin(action.handler.dispatch_word()), "{} {} routes to missing handler {}", group.name, action.name, action.handler.dispatch_word());
@@ -1374,22 +1481,23 @@ mod tests {
         }
     }
 
-    /// #1659 criterion 1: a command is declared exactly once. A
-    /// non-keeps_group nested action's dispatch word must never also appear
-    /// as a flat `COMMANDS` entry — that is the same command declared twice
-    /// in two parallel tables. (`keeps_group` actions like `hangar verify`
-    /// legitimately share their group's own flat entry — `hangar` is one
-    /// command with eleven actions, not eleven commands.)
+    /// #1659 criterion 1: a command is declared exactly once in the one
+    /// `COMMANDS` table. A non-keeps_group nested action's dispatch word must
+    /// never also appear as its own separate top-level `COMMANDS` row — that
+    /// would be the same command declared twice within the one table.
+    /// (`keeps_group` actions like `hangar verify` legitimately share their
+    /// owning group's own row — `hangar` is one row with eleven actions, not
+    /// eleven rows.)
     #[test]
     fn no_command_declared_in_both_tables() {
-        for group in COMMAND_GROUPS {
+        for group in command_groups() {
             for action in group.actions {
                 if action.handler.keeps_group() {
                     continue;
                 }
                 assert!(
                     !COMMANDS.iter().any(|c| c.name == action.handler.dispatch_word()),
-                    "`{}` is declared in both COMMANDS and `{}` group actions",
+                    "`{}` is declared both as a `{}` nested action and again as a top-level COMMANDS row",
                     action.handler.dispatch_word(),
                     group.name,
                 );
@@ -1407,7 +1515,7 @@ mod tests {
 
     #[test]
     fn command_group_usage_lists_every_action() {
-        for group in COMMAND_GROUPS {
+        for group in command_groups() {
             let text = command_group_usage(group.name);
             for action in group.actions {
                 assert!(text.contains(action.name), "{} usage missing action {}", group.name, action.name);

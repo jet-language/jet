@@ -494,7 +494,7 @@ impl<'a> Parser<'a> {
             matches!(self.peek().kind, TokKind::Hash) && matches!(self.peek2().kind, TokKind::LBracket)
         }
     
-        /// D-ATTR1/D-MARKER-CANON1: a PascalCase applied rule immediately before `struct`/`enum`.
+        /// D-ATTR1 (predates the current numbering) / D-MARKER-CANON1: a PascalCase applied rule immediately before `struct`/`enum`.
         pub(in crate::Parser) fn at_single_type_marker(&self) -> bool {
             if !matches!(self.peek().kind, TokKind::Hash) {
                 return false;
@@ -557,7 +557,7 @@ impl<'a> Parser<'a> {
                 Some(n) => n,
                 None => return false,
             };
-            // D-MARKER-FAMILY1/G2: a type declaration may carry several stacked
+            // D-VERDICT-732-1/G2 (formerly D-MARKER-FAMILY1): a type declaration may carry several stacked
             // rule prefixes (`#[Codable, RenameAll(camel)] struct …`, or
             // `#MustUse #[Codable] struct …`) — keep skipping rule-shaped
             // prefixes (bracket groups or lone `#Name`/`#Name(args)?`) until none

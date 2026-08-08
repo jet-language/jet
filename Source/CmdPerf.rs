@@ -84,12 +84,32 @@ pub(crate) fn run(raw: &[String]) -> Outcome {
         print!("{}", jet::CLI::command_group_usage("perf"));
         return Outcome::Exit(ExitCodes::OK);
     }
-    match action.unwrap() {
-        "run" | "test" | "bench" => Outcome::Exit(run_session(action.unwrap(), &raw[2..])),
-        "attach" => Outcome::Exit(attach(&raw[2..])),
-        "view" => Outcome::Exit(view(&raw[2..])),
-        "compare" => Outcome::Exit(compare(&raw[2..])),
-        "export" => Outcome::Exit(export(&raw[2..])),
+    let action = action.unwrap();
+    let mut rest: Vec<String> = raw[2..].to_vec();
+    // #1659 c2/c3: every perf sub-verb answers `--help`/`-h` with its row from
+    // the one table, and accepts `--quiet`. Perf's only non-error status line
+    // is the `trace:` path note in a session run; product output (view,
+    // compare, export payloads) is never suppressed.
+    if rest.iter().any(|arg| jet::CLI::is_help_flag(arg)) {
+        let spec = jet::CLI::command_group("perf")
+            .and_then(|group| group.actions.iter().find(|nested| nested.name == action));
+        match spec {
+            Some(spec) => {
+                println!("jet perf {} — {}", spec.name, spec.summary);
+                println!("usage: {}", spec.usage);
+            }
+            None => print!("{}", jet::CLI::command_group_usage("perf")),
+        }
+        return Outcome::Exit(ExitCodes::OK);
+    }
+    let quiet = rest.iter().any(|arg| arg == "--quiet");
+    rest.retain(|arg| arg != "--quiet");
+    match action {
+        "run" | "test" | "bench" => Outcome::Exit(run_session(action, &rest, quiet)),
+        "attach" => Outcome::Exit(attach(&rest)),
+        "view" => Outcome::Exit(view(&rest)),
+        "compare" => Outcome::Exit(compare(&rest)),
+        "export" => Outcome::Exit(export(&rest)),
         other => {
             eprintln!("Error [E2101]: `{other}` isn't a jet perf command.");
             eprintln!(" Why: jet perf accepts only commands in its named area.");
@@ -100,7 +120,7 @@ pub(crate) fn run(raw: &[String]) -> Outcome {
 }
 
 /// Spawn exact base intent with observe, capture while live, write `.jettrace`.
-fn run_session(action: &str, args: &[String]) -> i32 {
+fn run_session(action: &str, args: &[String], quiet: bool) -> i32 {
     let parsed = match parse_session_args(args) {
         Ok(parsed) => parsed,
         Err(message) => {
@@ -194,7 +214,11 @@ fn run_session(action: &str, args: &[String]) -> i32 {
         capture,
         &parsed.capture_allowlist,
     ) {
-        Ok(path) => eprintln!("trace: {}", path.display()),
+        Ok(path) => {
+            if !quiet {
+                eprintln!("trace: {}", path.display());
+            }
+        }
         Err(message) => {
             eprintln!("Error [E2102]: {message}");
             return ExitCodes::USAGE;

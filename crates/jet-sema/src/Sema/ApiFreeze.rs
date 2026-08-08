@@ -481,62 +481,86 @@ pub fn collect_api_unit_dimensions(
     for item in items {
         match item {
             Item::UnitFamily(family) => {
-                if let Some(dimension) = resolved.get(&family.family).cloned() {
-                    let owner = family.resolved_owner.as_deref().unwrap_or(package);
-                    let base = family
-                        .base
-                        .as_ref()
-                        .map(|base| crate::AST::UnitFamilyDef::type_name(&base.0));
-                    let affine = family.base.is_some()
-                        && family
-                            .members
-                            .iter()
-                            .any(|member| member.offset != crate::AST::UnitRatio::zero());
-                    for member in &family.members {
-                        let names = if affine {
-                            vec![
-                                (
-                                    format!(
-                                        "{}Point",
-                                        crate::AST::UnitFamilyDef::type_name(&member.name)
-                                    ),
-                                    member.offset.to_string(),
+                let dimension = resolved.get(&family.family).cloned();
+                // D-QUANTITY-DECL1=A: "API snapshots record dimension, base,
+                // scale, offset, and package provenance" — a scaled/affine
+                // family (explicit `base`) is API/SemVer identity on its own,
+                // whether or not it also claims a `dimension`. A dimension
+                // claim alone (no base — D-DIMENSION-OPEN1's plain-tag case
+                // reaching here through a derived-dimension member) still
+                // carries the erasure identity.
+                if dimension.is_none() && family.base.is_none() {
+                    continue;
+                }
+                // The caller's `package` is the canonical provenance already
+                // resolved by the publish flow (doc comment on
+                // `extract_public_api_for_package`) and must win for a family
+                // declared in the checked bundle itself. `resolved_owner` only
+                // overrides it for the one genuine cross-boundary identity Sema
+                // stamps unconditionally: the standard Prelude catalog's
+                // reserved "core.units" owner (`Bundle/Units.rs`,
+                // `resolve_standard_unit_dimensions`), which every package
+                // shares by construction and must never be locally renamed.
+                let owner = match family.resolved_owner.as_deref() {
+                    Some("core.units") => "core.units",
+                    _ => package,
+                };
+                let base = family
+                    .base
+                    .as_ref()
+                    .map(|base| crate::AST::UnitFamilyDef::type_name(&base.0));
+                let affine = family.base.is_some()
+                    && family
+                        .members
+                        .iter()
+                        .any(|member| member.offset != crate::AST::UnitRatio::zero());
+                for member in &family.members {
+                    let names = if affine {
+                        vec![
+                            (
+                                format!(
+                                    "{}Point",
+                                    crate::AST::UnitFamilyDef::type_name(&member.name)
                                 ),
-                                (
-                                    format!(
-                                        "{}Delta",
-                                        crate::AST::UnitFamilyDef::type_name(&member.name)
-                                    ),
-                                    "0".to_string(),
-                                ),
-                            ]
-                        } else {
-                            vec![(
-                                crate::AST::UnitFamilyDef::type_name(&member.name),
                                 member.offset.to_string(),
-                            )]
+                            ),
+                            (
+                                format!(
+                                    "{}Delta",
+                                    crate::AST::UnitFamilyDef::type_name(&member.name)
+                                ),
+                                "0".to_string(),
+                            ),
+                        ]
+                    } else {
+                        vec![(
+                            crate::AST::UnitFamilyDef::type_name(&member.name),
+                            member.offset.to_string(),
+                        )]
+                    };
+                    for (name, offset) in names {
+                        let identity = match (&base, &dimension) {
+                            (None, Some(dimension)) => format!(
+                                "{{family={}; base=Float; dimension={}}}",
+                                family.family,
+                                dimension.identity()
+                            ),
+                            (Some(base), Some(dimension)) => format!(
+                                "{{package={owner}; family={}; base={base}; dimension={}; scale={}; provenance={}; offset={offset}}}",
+                                family.family,
+                                dimension.identity(),
+                                member.scale,
+                                unit_scale_provenance_identity(&member.scale_provenance)
+                            ),
+                            (Some(base), None) => format!(
+                                "{{package={owner}; family={}; base={base}; scale={}; provenance={}; offset={offset}}}",
+                                family.family,
+                                member.scale,
+                                unit_scale_provenance_identity(&member.scale_provenance)
+                            ),
+                            (None, None) => unreachable!("guarded above"),
                         };
-                        for (name, offset) in names {
-                            let identity = base.as_ref().map_or_else(
-                                || {
-                                    format!(
-                                        "{{family={}; base=Float; dimension={}}}",
-                                        family.family,
-                                        dimension.identity()
-                                    )
-                                },
-                                |base| {
-                                    format!(
-                                        "{{package={owner}; family={}; base={base}; dimension={}; scale={}; provenance={}; offset={offset}}}",
-                                        family.family,
-                                        dimension.identity(),
-                                        member.scale,
-                                        unit_scale_provenance_identity(&member.scale_provenance)
-                                    )
-                                },
-                            );
-                            out.insert(name, identity);
-                        }
+                        out.insert(name, identity);
                     }
                 }
             }

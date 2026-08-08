@@ -191,37 +191,246 @@ fn every_syntax_const_has_adjacent_decision_comment() {
     );
 }
 
-/// #1670: guard the two retired-marker-law spellings against silent return.
-/// D-MARKER-FAMILY1 (the old `@`/`#` two-plane split) and D-CTMARKER1 (`$` as
-/// splice-only) are tombstoned by D-VERDICT-732-1 and D-META-STAGE1=B. A
-/// comment restating either retired characterization as current law would
-/// mislead a reader into reintroducing `@Pure`-style markers or splice-only
-/// `$`. This does not forbid citing the IDs for historical provenance (most
-/// of the codebase does, correctly) — it only bans the retired *meaning*.
+/// #1670 / D-ONCE-LAW1=A: a real tombstone guard, not two hand-picked
+/// sentences. Every truth has one home (docs/spec/syntax-decisions.md's
+/// "Superseded & deferred IDs (tombstones)" section); a comment citing a
+/// tombstoned ID is only honest if it says so. This parses the tombstone ID
+/// list from that section (so a newly-tombstoned ID is covered automatically,
+/// no hand-maintained copy) and scans every `.rs` comment under `crates/`
+/// and `Source/` for a literal citation. A hit must carry a provenance word
+/// (retires/retired/superseded/formerly/historical/tombstoned/predates)
+/// in the same comment block, or it reads as current law and fails the test.
+///
+/// Scope note: only `D-`-prefixed tombstone IDs are scanned. Bare `S`/`N`/`U`
+/// tombstone numbers (S6, S10, U1, U10, …) collide with unrelated numbering
+/// used elsewhere in the corpus — e.g. `D-MEM1 S6` names a memory-model spec
+/// section, not the retired semicolon decision S6 — so a literal-substring
+/// scan over them produces false positives a lazy guard cannot tell apart
+/// from a real citation. `D-` IDs are namespaced and collision-free, and they
+/// are the entire evidence base for this card (~25 D-CTMARKER1 + ~20
+/// D-MARKERMOVE* citations). Widening to bare S/N/U tombstones needs
+/// contextual disambiguation, which is future work, not a silent allowlist.
+///
+/// The scan covers all of `crates/` and `Source/` with no exclusions — a
+/// carved-out path is a hole the guard cannot see (review bd10-rev proved the
+/// point by planting a violation in an excluded path).
 #[test]
-fn retired_marker_law_does_not_return() {
-    let sources = [
-        "crates/jet-foundation/src/Syntax/package_files.rs",
-        "crates/jet-lexer/src/Lexer/Tokens.rs",
-        "crates/jet-foundation/src/AST/statements.rs",
-        "crates/jet-foundation/src/AST/expressions.rs",
-        "crates/jet-foundation/src/Syntax/core_surface.rs",
+fn tombstoned_decision_ids_carry_provenance() {
+    let docs =
+        fs::read_to_string("docs/spec/syntax-decisions.md").expect("docs/spec/syntax-decisions.md");
+    let tombstones = extract_tombstone_d_ids(&docs);
+    assert!(
+        tombstones.contains("D-CTMARKER1")
+            && tombstones.contains("D-MARKERMOVE1")
+            && tombstones.contains("D-MARKERMOVE2")
+            && tombstones.contains("D-MARKERMOVE3")
+            && tombstones.contains("D-MARKER-FAMILY1"),
+        "tombstone extraction regressed: expected D-CTMARKER1/D-MARKER-FAMILY1/D-MARKERMOVE1..3, got {tombstones:?}"
+    );
+
+    const EXCLUDED_DIRS: &[&str] = &[];
+    const EXCLUDED_FILES: &[&str] = &[];
+    const PROVENANCE_WORDS: &[&str] = &[
+        "retires",
+        "retired",
+        "superseded",
+        "formerly",
+        "historical",
+        "tombstoned",
+        "predates",
     ];
-    for path in sources {
-        let raw = fs::read_to_string(path).unwrap_or_else(|err| panic!("{path}: {err}"));
-        // Join wrapped doc-comment lines so a phrase split across `///` lines
-        // still matches as one continuous string.
-        let text = raw.replace('\n', " ");
-        assert!(
-            !text.contains("`@` precedes a declaration and states a checkable contract"),
-            "{path} restates the retired D-MARKER-FAMILY1 two-plane law as current; \
-             D-VERDICT-732-1 made `#` the sole marker prefix"
-        );
-        assert!(
-            !text.to_lowercase().contains("splice-only") || text.contains("retires D-CTMARKER1"),
-            "{path} calls `$` splice-only without noting D-META-STAGE1=B superseded that spelling"
-        );
+
+    let mut files = Vec::new();
+    for root in ["crates", "Source"] {
+        collect_rs_files(root, EXCLUDED_DIRS, &mut files);
     }
+
+    let mut violations = Vec::new();
+    for path in &files {
+        if EXCLUDED_FILES.contains(&path.as_str()) {
+            continue;
+        }
+        let raw = fs::read_to_string(path).unwrap_or_else(|err| panic!("{path}: {err}"));
+        for (block_start, block) in comment_blocks(&raw) {
+            let joined = block.join(" ");
+            for id in &tombstones {
+                if !contains_id(&joined, id) {
+                    continue;
+                }
+                let has_provenance = PROVENANCE_WORDS
+                    .iter()
+                    .any(|w| joined.to_lowercase().contains(w));
+                if !has_provenance {
+                    violations.push(format!(
+                        "{path}:{block_start}: cites tombstoned {id} with no provenance word ({})",
+                        PROVENANCE_WORDS.join("/")
+                    ));
+                }
+            }
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "comments cite a tombstoned decision ID as if it were live law (#1670, D-ONCE-LAW1):\n{}",
+        violations.join("\n")
+    );
+}
+
+/// Recursively collect `.rs` file paths under `dir`, skipping any path equal
+/// to (or nested under) an entry in `exclude_dirs`.
+fn collect_rs_files(dir: &str, exclude_dirs: &[&str], out: &mut Vec<String>) {
+    if exclude_dirs
+        .iter()
+        .any(|ex| dir == *ex || dir.starts_with(&format!("{ex}/")))
+    {
+        return;
+    }
+    let entries = match fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    let mut children: Vec<_> = entries.filter_map(|e| e.ok()).map(|e| e.path()).collect();
+    children.sort();
+    for path in children {
+        let path_str = path.display().to_string();
+        if exclude_dirs
+            .iter()
+            .any(|ex| path_str == *ex || path_str.starts_with(&format!("{ex}/")))
+        {
+            continue;
+        }
+        if path.is_dir() {
+            collect_rs_files(&path_str, exclude_dirs, out);
+        } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+            out.push(path_str);
+        }
+    }
+}
+
+/// Group contiguous `//`, `///`, `//!` comment lines into blocks (a blank
+/// line or a non-comment line closes a block). Returns each block's
+/// 1-indexed starting line number alongside its lines, so a phrase wrapped
+/// across several comment lines is still checked as one continuous string.
+fn comment_blocks(raw: &str) -> Vec<(usize, Vec<&str>)> {
+    let mut blocks = Vec::new();
+    let mut current: Vec<&str> = Vec::new();
+    let mut current_start = 0usize;
+    for (i, line) in raw.lines().enumerate() {
+        let t = line.trim_start();
+        if t.starts_with("//") {
+            if current.is_empty() {
+                current_start = i + 1;
+            }
+            current.push(line);
+        } else if !current.is_empty() {
+            blocks.push((current_start, std::mem::take(&mut current)));
+        }
+    }
+    if !current.is_empty() {
+        blocks.push((current_start, current));
+    }
+    blocks
+}
+
+/// Whole-word literal match of `id` inside `text`: the char immediately
+/// before and after the match (if any) must not be alphanumeric or `-`, so
+/// `S6` cannot false-match inside `S6-R` and `D-CTMARKER1` cannot false-match
+/// inside a longer `D-CTMARKER1X`-shaped token.
+fn contains_id(text: &str, id: &str) -> bool {
+    let bytes = text.as_bytes();
+    let idb = id.as_bytes();
+    if idb.is_empty() || bytes.len() < idb.len() {
+        return false;
+    }
+    for start in 0..=(bytes.len() - idb.len()) {
+        if &bytes[start..start + idb.len()] != idb {
+            continue;
+        }
+        let before_ok = start == 0 || {
+            let c = bytes[start - 1];
+            !(c.is_ascii_alphanumeric() || c == b'-')
+        };
+        let after = start + idb.len();
+        let after_ok = after >= bytes.len() || {
+            let c = bytes[after];
+            !(c.is_ascii_alphanumeric() || c == b'-')
+        };
+        if before_ok && after_ok {
+            return true;
+        }
+    }
+    false
+}
+
+/// Parse `D-`-prefixed tombstone IDs out of the "Superseded & deferred IDs
+/// (tombstones)" section of docs/spec/syntax-decisions.md. Each record is a
+/// `**id-list [— title]**: description.` paragraph; the id-list is a
+/// comma/` / `-separated list, and a compact `D-PREFIXn/m/o` spelling expands
+/// to `D-PREFIXn`, `D-PREFIXm`, `D-PREFIXo`. Bare S/N/U tombstone numbers are
+/// intentionally not extracted here — see the scope note on the test above.
+fn extract_tombstone_d_ids(docs: &str) -> BTreeSet<String> {
+    let section = section_between(
+        docs,
+        "### Superseded & deferred IDs (tombstones)",
+        "## Enforcement",
+    );
+    let joined = section.replace('\n', " ");
+    let mut ids = BTreeSet::new();
+    let mut rest = joined.as_str();
+    while let Some(start) = rest.find("**") {
+        let after_start = &rest[start + 2..];
+        let Some(end) = after_start.find("**") else {
+            break;
+        };
+        let bold = &after_start[..end];
+        let id_part = match bold.find(" — ") {
+            Some(i) => &bold[..i],
+            None => bold,
+        };
+        for comma_piece in id_part.split(',') {
+            for piece in comma_piece.split(" / ") {
+                let piece = piece.trim();
+                if !piece.starts_with("D-") {
+                    continue;
+                }
+                for expanded in expand_slash_compound(piece) {
+                    ids.insert(expanded);
+                }
+            }
+        }
+        rest = &after_start[end + 2..];
+    }
+    ids
+}
+
+/// Expand a compact `D-PREFIXn/m/o` (or `D-PREFIXn/m-suffix`) tombstone
+/// spelling into its full IDs. A token with no `/` is returned unchanged.
+fn expand_slash_compound(tok: &str) -> Vec<String> {
+    if !tok.contains('/') {
+        return vec![tok.to_string()];
+    }
+    let segs: Vec<&str> = tok.split('/').collect();
+    let first = segs[0];
+    // Prefix: the non-digit head of the first segment, e.g. "D-CAP" out of "D-CAP1".
+    let prefix_end = first
+        .find(|c: char| c.is_ascii_digit())
+        .unwrap_or(first.len());
+    let prefix = &first[..prefix_end];
+    // Suffix: any trailing non-digit text after the last segment's leading
+    // digit run, e.g. "-words" out of "2-words" in `D-CAP1/2-words`. This
+    // suffix belongs to every expanded ID, including the first.
+    let last = segs[segs.len() - 1];
+    let last_digit_end = last
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(last.len());
+    let suffix = &last[last_digit_end..];
+    let mut out = Vec::new();
+    for seg in &segs {
+        let digits: String = seg.chars().skip_while(|c| !c.is_ascii_digit()).take_while(|c| c.is_ascii_digit()).collect();
+        out.push(format!("{prefix}{digits}{suffix}"));
+    }
+    out
 }
 
 fn line_has_decision_id(line: &str) -> bool {

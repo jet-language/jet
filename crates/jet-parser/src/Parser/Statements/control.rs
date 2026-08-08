@@ -1522,7 +1522,7 @@ impl<'a> Parser<'a> {
                     let stmt = self.comptime_if_stmt()?;
                     return Ok(stmt);
                 }
-                // D-CTMARKER1 (ratified 2026-06-25, piece 2): `$ { … }` block.
+                // D-META-STAGE1=B (formerly D-CTMARKER1, ratified 2026-06-25, piece 2): `$ { … }` block.
                 if matches!(self.peek2().kind, TokKind::LBrace) {
                     let stmt = self.comptime_block_stmt()?;
                     return Ok(stmt);
@@ -2124,7 +2124,7 @@ impl<'a> Parser<'a> {
                     Expr::Call(_)
                     | Expr::Field(_, _, _)
                     | Expr::MethodCall { .. }
-                    // D-CTMARKER1=C: `$name;` as a standalone statement — valid in comptime contexts.
+                    // D-META-STAGE1=B (formerly D-CTMARKER1=C): `$name;` as a standalone statement — valid in comptime contexts.
                     | Expr::ComptimeName { .. }
                     // S7: `expr?;` propagates a fallible result as a statement (E2-M7).
                     | Expr::Try(_, _, _)

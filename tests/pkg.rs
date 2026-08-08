@@ -3011,7 +3011,16 @@ fn physical_unit_trait_methods_use_canonical_dimensions() {
 
     let dir = tmp_dir("physical_unit_trait_api");
     let path = dir.join("current.jet");
-    let source = "#UnitFamily(Length) { meter }\npub trait Measure { fn scale(value: Meter) => Meter; }\n";
+    // No local `#UnitFamily(Length)` here: D-DIMENSION-OPEN1=D says a
+    // same-named local declaration shadows the standard Prelude catalog
+    // (`Bundle/Units.rs`'s "Local names shadow Prelude members; physical
+    // dimension behavior remains explicit opt-in"), so it would stay
+    // nominal and could never carry `core.units::Length`. Referencing
+    // `Meter` bare lets the ambient standard-unit prelude supply the real,
+    // canonical Length family instead (card #1765/#1769 root cause: the
+    // prior fixture redeclared the family and shadowed the very identity
+    // it meant to assert on).
+    let source = "pub trait Measure { fn scale(value: Meter) => Meter; }\n";
     fs::write(&path, source).unwrap();
 
     let api = extract_public_api(source, path.to_str().unwrap());
@@ -3021,7 +3030,7 @@ fn physical_unit_trait_methods_use_canonical_dimensions() {
         .expect("public trait method");
     assert_eq!(
         method.signature,
-        "fn Measure.scale(value: Meter{family=Length; base=Float; dimension=core.units%3A%3ALength:1}) => Meter{family=Length; base=Float; dimension=core.units%3A%3ALength:1}"
+        "fn Measure.scale(value: Meter{package=core.units; family=Length; base=Meter; dimension=core.units%3A%3ALength:1; scale=1; provenance=Rational; offset=0}) => Meter{package=core.units; family=Length; base=Meter; dimension=core.units%3A%3ALength:1; scale=1; provenance=Rational; offset=0}"
     );
 
     let mut bundle = jet::Loader::load_entry_with_overlay(path.to_str().unwrap(), None, true)

@@ -86,7 +86,8 @@ pub enum TokKind {
     Colon,
     /// D-BIND4: `::` immutable binding sigil.
     ColonColon,
-    /// D-BIND1 (ratified 2026-06-18): `:=` mutable binding sigil (was `var`).
+    /// D-BIND1 (ratified 2026-06-18; predates the current D-BIND4/D-BIND-BARE1
+    /// numbering): `:=` mutable binding sigil (was `var`).
     ColonEq,
     Comma,
     Arrow,

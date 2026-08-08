@@ -627,8 +627,8 @@ pub enum Expr {
         addr: Box<Expr>,
         span: Span,
     },
-    /// D-CTMARKER1=C: `$name` — comptime splice expression. In a comptime
-    /// D-META-STAGE1=B: a compile-time name, `$limit`. The mark is part of the
+    /// D-META-STAGE1=B (formerly D-CTMARKER1's splice-expression spelling):
+    /// a compile-time name, `$limit`. The mark is part of the
     /// name and is written at every mention, so this is an ordinary identifier
     /// read that happens to name a value the compiler already computed. `name`
     /// holds the written text, mark included, and never denotes the same
