@@ -3156,6 +3156,32 @@ impl<'a> EvalCtx<'a> {
                         *source_span,
                     ));
                 }
+                // #1788: `core.random` (besides `.rng`, a pure function of its
+                // explicit seed argument) reads/writes ambient PRNG state — the
+                // real runtime `Rand` when this evaluator is truly running the
+                // program (`runtime_execution`) or a live REPL session
+                // (`repl_mode`, which *is* the one execution), but a throwaway
+                // interpreter-only stream otherwise. That "otherwise" is a
+                // sema-time D-VERDICT-1308-1 implicit `::` fold or an explicit
+                // `$`/#Known demand (same call path as the `mem.address_of`
+                // guard above): baking its draw as a literal would freeze a
+                // value that never resyncs with whatever `random.seed()` the
+                // compiled program's Prelude RNG sees at real runtime. Decline
+                // plainly so the fold backs off to ordinary runtime codegen
+                // (D-VERDICT-1308-1: failure is silent); an explicit demand
+                // surfaces this as a normal "not available at compile time"
+                // error. Do not route through the Tier-2 `#Impure` gate below —
+                // random stays outside that gate (D-META-EFFECT1).
+                if !self.runtime_execution
+                    && !self.repl_mode
+                    && module == "core.random"
+                    && method != "rng"
+                {
+                    return Err(unsupported(
+                        &format!("`{module}.{method}()` at compile time"),
+                        *source_span,
+                    ));
+                }
                 let is_tier2 =
                     crate::Comptime::is_tier2_core_call(module, method, self.repl_mode);
                 if !is_tier2 {
