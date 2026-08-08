@@ -2306,6 +2306,36 @@ fn retired_bespoke_words_teach_real_spelling() {
 }
 
 #[test]
+fn moved_command_registry_agrees_with_dispatch_exceptions() {
+    let mut declared = Vec::new();
+    for group in jet::CLI::command_groups() {
+        for action in group.actions {
+            let dispatch_exempts = jet::CLI::moved_command(action.name).is_none();
+            assert_eq!(
+                action.also_canonical_top_level,
+                dispatch_exempts,
+                "registry and moved_command disagree for {} {}",
+                group.name,
+                action.name
+            );
+            if action.also_canonical_top_level {
+                declared.push(action.name);
+            }
+        }
+    }
+    assert_eq!(declared, vec!["import", "report", "run", "test", "bench"]);
+}
+
+#[test]
+fn bare_dev_uses_file_scoped_run() {
+    let out = Command::new(jet()).args(["dev", "--no-color"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("`jet dev` needs a file to watch"), "{stderr}");
+    assert!(stderr.contains("jet dev <file.jet>"), "{stderr}");
+}
+
+#[test]
 fn every_moved_bare_action_is_e2101_in_human_and_json_modes() {
     for group in jet::CLI::command_groups() {
         for action in group.actions {

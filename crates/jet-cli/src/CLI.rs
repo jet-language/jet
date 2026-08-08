@@ -158,6 +158,8 @@ pub struct NestedCommandSpec {
     pub usage: &'static str,
     pub summary: &'static str,
     pub handler: HandlerKey,
+    /// True when this spelling is also canonical as a top-level command.
+    pub also_canonical_top_level: bool,
 }
 
 /// Closed set of real dispatcher seams reachable from nested commands.
@@ -206,94 +208,94 @@ impl HandlerKey {
 }
 
 const REGISTRY_ACTIONS: &[NestedCommandSpec] = &[
-    NestedCommandSpec { name: "publish", usage: "publish [--force] [--no-sign]", summary: "Publish the current package", handler: HandlerKey::Publish },
-    NestedCommandSpec { name: "yank", usage: "yank <version> [--message <reason>]", summary: "Stop new installs of a published version", handler: HandlerKey::Yank },
-    NestedCommandSpec { name: "keygen", usage: "keygen [--registry <name>] [--force]", summary: "Create a package-signing key", handler: HandlerKey::Keygen },
-    NestedCommandSpec { name: "key", usage: "key backup [<dest>] [--registry <name>]", summary: "Manage the package-signing key", handler: HandlerKey::Key },
-    NestedCommandSpec { name: "vendor", usage: "vendor [--vendor-dir <path>]", summary: "Copy dependencies into vendor/", handler: HandlerKey::Vendor },
+    NestedCommandSpec { name: "publish", usage: "publish [--force] [--no-sign]", summary: "Publish the current package", handler: HandlerKey::Publish, also_canonical_top_level: false },
+    NestedCommandSpec { name: "yank", usage: "yank <version> [--message <reason>]", summary: "Stop new installs of a published version", handler: HandlerKey::Yank, also_canonical_top_level: false },
+    NestedCommandSpec { name: "keygen", usage: "keygen [--registry <name>] [--force]", summary: "Create a package-signing key", handler: HandlerKey::Keygen, also_canonical_top_level: false },
+    NestedCommandSpec { name: "key", usage: "key backup [<dest>] [--registry <name>]", summary: "Manage the package-signing key", handler: HandlerKey::Key, also_canonical_top_level: false },
+    NestedCommandSpec { name: "vendor", usage: "vendor [--vendor-dir <path>]", summary: "Copy dependencies into vendor/", handler: HandlerKey::Vendor, also_canonical_top_level: false },
 ];
 const INSPECT_ACTIONS: &[NestedCommandSpec] = &[
-    NestedCommandSpec { name: "live", usage: "live <pid>", summary: "Watch a running Jet process", handler: HandlerKey::Live },
-    NestedCommandSpec { name: "graph", usage: "graph <file.jet>", summary: "Show the build graph", handler: HandlerKey::Graph },
-    NestedCommandSpec { name: "query", usage: "query build <file.jet>", summary: "Search code and build information", handler: HandlerKey::Query },
-    NestedCommandSpec { name: "explain-build", usage: "explain-build <target|action|file> <file.jet>", summary: "Explain why a target, action, or file is rebuilt", handler: HandlerKey::ExplainBuild },
-    NestedCommandSpec { name: "compiler", usage: "compiler <lex|parse|check|source-map> <file>", summary: "Read compiler facts as versioned JSON", handler: HandlerKey::Compiler },
-    NestedCommandSpec { name: "impact", usage: "impact <file.jet> <symbol>", summary: "Show code affected by a symbol", handler: HandlerKey::Impact },
-    NestedCommandSpec { name: "dossier", usage: "dossier <file.jet> [symbol]", summary: "Show everything known about a file or symbol", handler: HandlerKey::Dossier },
-    NestedCommandSpec { name: "semindex", usage: "semindex <file.jet>", summary: "Search the code index", handler: HandlerKey::Semindex },
-    NestedCommandSpec { name: "expand", usage: "expand [--facts <lens>] [--json] <file.jet>", summary: "Show expanded meaning of Jet code (use --json for canonical facts)", handler: HandlerKey::Expand },
-    NestedCommandSpec { name: "unsafe", usage: "unsafe <file.jet>", summary: "Review unsafe code and its safeguards", handler: HandlerKey::Unsafe },
-    NestedCommandSpec { name: "schema", usage: "schema status\nschema squash --before <version>", summary: "Inspect saved data schema versions", handler: HandlerKey::Schema },
-    NestedCommandSpec { name: "codemod", usage: "codemod <plan.json> --dry-run\ncodemod apply <plan.json> [--yes]\ncodemod undo <log.json>", summary: "Preview or apply code changes", handler: HandlerKey::Codemod },
-    NestedCommandSpec { name: "audit", usage: "audit [--advisory-db <path>]", summary: "Check dependencies for known vulnerabilities", handler: HandlerKey::Audit },
-    NestedCommandSpec { name: "sbom", usage: "sbom [--cyclonedx]", summary: "Create a software bill of materials", handler: HandlerKey::Sbom },
-    NestedCommandSpec { name: "bind", usage: "bind <header.h> --pkg <lib>\nbind cpp <header.hpp> --target <triple> --clang <path> --ar <path>", summary: "Generate Jet bindings from a foreign header", handler: HandlerKey::Bind },
-    NestedCommandSpec { name: "logs", usage: "logs <pkg>", summary: "Show recent package build logs", handler: HandlerKey::Logs },
-    NestedCommandSpec { name: "search", usage: "search <query>", summary: "Search the local package catalog", handler: HandlerKey::Search },
-    NestedCommandSpec { name: "info", usage: "info <source>.<package>", summary: "Show package details", handler: HandlerKey::Info },
-    NestedCommandSpec { name: "outdated", usage: "outdated", summary: "List dependencies with available updates", handler: HandlerKey::Outdated },
+    NestedCommandSpec { name: "live", usage: "live <pid>", summary: "Watch a running Jet process", handler: HandlerKey::Live, also_canonical_top_level: false },
+    NestedCommandSpec { name: "graph", usage: "graph <file.jet>", summary: "Show the build graph", handler: HandlerKey::Graph, also_canonical_top_level: false },
+    NestedCommandSpec { name: "query", usage: "query build <file.jet>", summary: "Search code and build information", handler: HandlerKey::Query, also_canonical_top_level: false },
+    NestedCommandSpec { name: "explain-build", usage: "explain-build <target|action|file> <file.jet>", summary: "Explain why a target, action, or file is rebuilt", handler: HandlerKey::ExplainBuild, also_canonical_top_level: false },
+    NestedCommandSpec { name: "compiler", usage: "compiler <lex|parse|check|source-map> <file>", summary: "Read compiler facts as versioned JSON", handler: HandlerKey::Compiler, also_canonical_top_level: false },
+    NestedCommandSpec { name: "impact", usage: "impact <file.jet> <symbol>", summary: "Show code affected by a symbol", handler: HandlerKey::Impact, also_canonical_top_level: false },
+    NestedCommandSpec { name: "dossier", usage: "dossier <file.jet> [symbol]", summary: "Show everything known about a file or symbol", handler: HandlerKey::Dossier, also_canonical_top_level: false },
+    NestedCommandSpec { name: "semindex", usage: "semindex <file.jet>", summary: "Search the code index", handler: HandlerKey::Semindex, also_canonical_top_level: false },
+    NestedCommandSpec { name: "expand", usage: "expand [--facts <lens>] [--json] <file.jet>", summary: "Show expanded meaning of Jet code (use --json for canonical facts)", handler: HandlerKey::Expand, also_canonical_top_level: false },
+    NestedCommandSpec { name: "unsafe", usage: "unsafe <file.jet>", summary: "Review unsafe code and its safeguards", handler: HandlerKey::Unsafe, also_canonical_top_level: false },
+    NestedCommandSpec { name: "schema", usage: "schema status\nschema squash --before <version>", summary: "Inspect saved data schema versions", handler: HandlerKey::Schema, also_canonical_top_level: false },
+    NestedCommandSpec { name: "codemod", usage: "codemod <plan.json> --dry-run\ncodemod apply <plan.json> [--yes]\ncodemod undo <log.json>", summary: "Preview or apply code changes", handler: HandlerKey::Codemod, also_canonical_top_level: false },
+    NestedCommandSpec { name: "audit", usage: "audit [--advisory-db <path>]", summary: "Check dependencies for known vulnerabilities", handler: HandlerKey::Audit, also_canonical_top_level: false },
+    NestedCommandSpec { name: "sbom", usage: "sbom [--cyclonedx]", summary: "Create a software bill of materials", handler: HandlerKey::Sbom, also_canonical_top_level: false },
+    NestedCommandSpec { name: "bind", usage: "bind <header.h> --pkg <lib>\nbind cpp <header.hpp> --target <triple> --clang <path> --ar <path>", summary: "Generate Jet bindings from a foreign header", handler: HandlerKey::Bind, also_canonical_top_level: false },
+    NestedCommandSpec { name: "logs", usage: "logs <pkg>", summary: "Show recent package build logs", handler: HandlerKey::Logs, also_canonical_top_level: false },
+    NestedCommandSpec { name: "search", usage: "search <query>", summary: "Search the local package catalog", handler: HandlerKey::Search, also_canonical_top_level: false },
+    NestedCommandSpec { name: "info", usage: "info <source>.<package>", summary: "Show package details", handler: HandlerKey::Info, also_canonical_top_level: false },
+    NestedCommandSpec { name: "outdated", usage: "outdated", summary: "List dependencies with available updates", handler: HandlerKey::Outdated, also_canonical_top_level: false },
     // #1659 criterion 5: reserved words and sigils, including the five
     // teaching-reserved words (copy/mut/take/const/unsafe) that reject valid
     // identifiers with a redirect to their current spelling.
-    NestedCommandSpec { name: "reserved", usage: "reserved [--json]", summary: "List reserved words and sigils", handler: HandlerKey::Reserved },
+    NestedCommandSpec { name: "reserved", usage: "reserved [--json]", summary: "List reserved words and sigils", handler: HandlerKey::Reserved, also_canonical_top_level: false },
     // D-ONCE-LAW1=A (#1728): the one registration table, read out. Every
     // registered truth shows its home, its renderers, and the guard that
     // proves there is no second copy.
-    NestedCommandSpec { name: "facts", usage: "facts [--json]", summary: "List every registered truth and its guard", handler: HandlerKey::Facts },
+    NestedCommandSpec { name: "facts", usage: "facts [--json]", summary: "List every registered truth and its guard", handler: HandlerKey::Facts, also_canonical_top_level: false },
 ];
 // D-CLI-STORE2=A / D-JPK-STORECLI1=D: the physical store lives under
 // `hangar`. Archive verbs share Jetpack's signed, versioned archive format,
 // quarantine-first import, and atomic closure publication path.
 const HANGAR_ACTIONS: &[NestedCommandSpec] = &[
-    NestedCommandSpec { name: "verify", usage: "verify", summary: "Check package-store integrity", handler: HandlerKey::Hangar },
-    NestedCommandSpec { name: "repair", usage: "repair <entry> --from <archive.hangar>", summary: "Repair a damaged Hangar object from a signed archive", handler: HandlerKey::Hangar },
-    NestedCommandSpec { name: "copy", usage: "copy <entry> --to <hangar-root>", summary: "Copy a verified closure between local Hangars", handler: HandlerKey::Hangar },
-    NestedCommandSpec { name: "import", usage: "import <archive.hangar>", summary: "Verify and import a signed Hangar archive", handler: HandlerKey::Hangar },
-    NestedCommandSpec { name: "export", usage: "export <entry> --to <archive.hangar>", summary: "Export a signed Hangar closure", handler: HandlerKey::Hangar },
-    NestedCommandSpec { name: "dump", usage: "dump <entry>", summary: "Stream a signed Hangar archive", handler: HandlerKey::Hangar },
-    NestedCommandSpec { name: "restore", usage: "restore", summary: "Restore a signed Hangar archive from stdin", handler: HandlerKey::Hangar },
-    NestedCommandSpec { name: "sign", usage: "sign <entry-or-archive> [--to <path>]", summary: "Sign a Hangar object or archive", handler: HandlerKey::Hangar },
-    NestedCommandSpec { name: "rollback", usage: "rollback", summary: "Restore an earlier package-store generation", handler: HandlerKey::Hangar },
-    NestedCommandSpec { name: "generations", usage: "generations", summary: "List package-store generations", handler: HandlerKey::Hangar },
-    NestedCommandSpec { name: "du", usage: "du", summary: "Show disk use for each stored object", handler: HandlerKey::Hangar },
+    NestedCommandSpec { name: "verify", usage: "verify", summary: "Check package-store integrity", handler: HandlerKey::Hangar, also_canonical_top_level: false },
+    NestedCommandSpec { name: "repair", usage: "repair <entry> --from <archive.hangar>", summary: "Repair a damaged Hangar object from a signed archive", handler: HandlerKey::Hangar, also_canonical_top_level: false },
+    NestedCommandSpec { name: "copy", usage: "copy <entry> --to <hangar-root>", summary: "Copy a verified closure between local Hangars", handler: HandlerKey::Hangar, also_canonical_top_level: false },
+    NestedCommandSpec { name: "import", usage: "import <archive.hangar>", summary: "Verify and import a signed Hangar archive", handler: HandlerKey::Hangar, also_canonical_top_level: true },
+    NestedCommandSpec { name: "export", usage: "export <entry> --to <archive.hangar>", summary: "Export a signed Hangar closure", handler: HandlerKey::Hangar, also_canonical_top_level: false },
+    NestedCommandSpec { name: "dump", usage: "dump <entry>", summary: "Stream a signed Hangar archive", handler: HandlerKey::Hangar, also_canonical_top_level: false },
+    NestedCommandSpec { name: "restore", usage: "restore", summary: "Restore a signed Hangar archive from stdin", handler: HandlerKey::Hangar, also_canonical_top_level: false },
+    NestedCommandSpec { name: "sign", usage: "sign <entry-or-archive> [--to <path>]", summary: "Sign a Hangar object or archive", handler: HandlerKey::Hangar, also_canonical_top_level: false },
+    NestedCommandSpec { name: "rollback", usage: "rollback", summary: "Restore an earlier package-store generation", handler: HandlerKey::Hangar, also_canonical_top_level: false },
+    NestedCommandSpec { name: "generations", usage: "generations", summary: "List package-store generations", handler: HandlerKey::Hangar, also_canonical_top_level: false },
+    NestedCommandSpec { name: "du", usage: "du", summary: "Show disk use for each stored object", handler: HandlerKey::Hangar, also_canonical_top_level: false },
 ];
 const GC_ACTIONS: &[NestedCommandSpec] = &[
-    NestedCommandSpec { name: "report", usage: "report", summary: "Show values moved into automatic memory management", handler: HandlerKey::GcReport },
+    NestedCommandSpec { name: "report", usage: "report", summary: "Show values moved into automatic memory management", handler: HandlerKey::GcReport, also_canonical_top_level: true },
 ];
 const PROJECT_ACTIONS: &[NestedCommandSpec] = &[
-    NestedCommandSpec { name: "parts", usage: "parts", summary: "List loaded and skipped project modules", handler: HandlerKey::ProjectParts },
+    NestedCommandSpec { name: "parts", usage: "parts", summary: "List loaded and skipped project modules", handler: HandlerKey::ProjectParts, also_canonical_top_level: false },
 ];
 const SELF_ACTIONS: &[NestedCommandSpec] = &[
-    NestedCommandSpec { name: "toolchain", usage: "toolchain", summary: "Show the Jet version selected for this project", handler: HandlerKey::Toolchain },
-    NestedCommandSpec { name: "upgrade", usage: "upgrade", summary: "Show how to install a newer Jet release", handler: HandlerKey::Upgrade },
-    NestedCommandSpec { name: "doctor", usage: "doctor", summary: "Find and fix toolchain problems", handler: HandlerKey::Doctor },
-    NestedCommandSpec { name: "completions", usage: "completions", summary: "Print shell completions", handler: HandlerKey::Completions },
-    NestedCommandSpec { name: "man", usage: "man", summary: "Print the Jet manual", handler: HandlerKey::Man },
-    NestedCommandSpec { name: "devtools", usage: "devtools", summary: "Run Jet maintenance tools", handler: HandlerKey::Devtools },
-    NestedCommandSpec { name: "lsp", usage: "lsp", summary: "Start the language server", handler: HandlerKey::Lsp },
+    NestedCommandSpec { name: "toolchain", usage: "toolchain", summary: "Show the Jet version selected for this project", handler: HandlerKey::Toolchain, also_canonical_top_level: false },
+    NestedCommandSpec { name: "upgrade", usage: "upgrade", summary: "Show how to install a newer Jet release", handler: HandlerKey::Upgrade, also_canonical_top_level: false },
+    NestedCommandSpec { name: "doctor", usage: "doctor", summary: "Find and fix toolchain problems", handler: HandlerKey::Doctor, also_canonical_top_level: false },
+    NestedCommandSpec { name: "completions", usage: "completions", summary: "Print shell completions", handler: HandlerKey::Completions, also_canonical_top_level: false },
+    NestedCommandSpec { name: "man", usage: "man", summary: "Print the Jet manual", handler: HandlerKey::Man, also_canonical_top_level: false },
+    NestedCommandSpec { name: "devtools", usage: "devtools", summary: "Run Jet maintenance tools", handler: HandlerKey::Devtools, also_canonical_top_level: false },
+    NestedCommandSpec { name: "lsp", usage: "lsp", summary: "Start the language server", handler: HandlerKey::Lsp, also_canonical_top_level: false },
 ];
 // D-CLI-SURFACE3=B: `push`/`bridge`/`services`/`config` move under `jet os`.
 // This group is *not* exhaustive (see `CommandSpec::exhaustive`) — jetos's
 // own native verbs (`check`/`build`/`switch`/…, D-JPK-OSVERB1) stay entirely
 // owned by the `jet os` dispatcher and are not modeled here.
 const OS_ACTIONS: &[NestedCommandSpec] = &[
-    NestedCommandSpec { name: "push", usage: "push", summary: "Deploy one or more Jetos machines", handler: HandlerKey::Push },
-    NestedCommandSpec { name: "bridge", usage: "bridge", summary: "Convert an existing system configuration to Jet", handler: HandlerKey::Bridge },
-    NestedCommandSpec { name: "services", usage: "services", summary: "Manage development services", handler: HandlerKey::Services },
-    NestedCommandSpec { name: "config", usage: "config", summary: "Manage Jet settings and trust", handler: HandlerKey::Config },
+    NestedCommandSpec { name: "push", usage: "push", summary: "Deploy one or more Jetos machines", handler: HandlerKey::Push, also_canonical_top_level: false },
+    NestedCommandSpec { name: "bridge", usage: "bridge", summary: "Convert an existing system configuration to Jet", handler: HandlerKey::Bridge, also_canonical_top_level: false },
+    NestedCommandSpec { name: "services", usage: "services", summary: "Manage development services", handler: HandlerKey::Services, also_canonical_top_level: false },
+    NestedCommandSpec { name: "config", usage: "config", summary: "Manage Jet settings and trust", handler: HandlerKey::Config, also_canonical_top_level: false },
 ];
 
 // D-PERFSESSION1=D: `jet perf` owns collection/view/compare/export. `run`/
 // `test`/`bench` stay canonical top-level intents and also live here so the
-// group help lists the full family; moved_command excludes those three.
+// group help lists the full family; their rows declare that overlap.
 const PERF_ACTIONS: &[NestedCommandSpec] = &[
-    NestedCommandSpec { name: "run", usage: "run", summary: "Run a program and write a .jettrace", handler: HandlerKey::Perf },
-    NestedCommandSpec { name: "test", usage: "test", summary: "Run tests and write a .jettrace", handler: HandlerKey::Perf },
-    NestedCommandSpec { name: "bench", usage: "bench", summary: "Measure performance and write a .jettrace", handler: HandlerKey::Perf },
-    NestedCommandSpec { name: "attach", usage: "attach", summary: "Attach to a running process and write a .jettrace", handler: HandlerKey::Perf },
-    NestedCommandSpec { name: "view", usage: "view", summary: "Show a .jettrace summary", handler: HandlerKey::Perf },
-    NestedCommandSpec { name: "compare", usage: "compare", summary: "Compare two .jettrace artifacts", handler: HandlerKey::Perf },
-    NestedCommandSpec { name: "export", usage: "export", summary: "Export a loss-declared projection of a .jettrace", handler: HandlerKey::Perf },
+    NestedCommandSpec { name: "run", usage: "run", summary: "Run a program and write a .jettrace", handler: HandlerKey::Perf, also_canonical_top_level: true },
+    NestedCommandSpec { name: "test", usage: "test", summary: "Run tests and write a .jettrace", handler: HandlerKey::Perf, also_canonical_top_level: true },
+    NestedCommandSpec { name: "bench", usage: "bench", summary: "Measure performance and write a .jettrace", handler: HandlerKey::Perf, also_canonical_top_level: true },
+    NestedCommandSpec { name: "attach", usage: "attach", summary: "Attach to a running process and write a .jettrace", handler: HandlerKey::Perf, also_canonical_top_level: false },
+    NestedCommandSpec { name: "view", usage: "view", summary: "Show a .jettrace summary", handler: HandlerKey::Perf, also_canonical_top_level: false },
+    NestedCommandSpec { name: "compare", usage: "compare", summary: "Compare two .jettrace artifacts", handler: HandlerKey::Perf, also_canonical_top_level: false },
+    NestedCommandSpec { name: "export", usage: "export", summary: "Export a loss-declared projection of a .jettrace", handler: HandlerKey::Perf, also_canonical_top_level: false },
 ];
 
 /// #1659 criterion 1 (round 2): groups are no longer a second parallel array —
@@ -334,19 +336,9 @@ pub fn nested_command(group: &str, action: &str) -> Option<(&'static CommandSpec
 }
 
 pub fn moved_command(name: &str) -> Option<(&'static CommandSpec, &'static NestedCommandSpec)> {
-    // A spelling can own a canonical top-level meaning and also name a
-    // grouped action (`import` translates source at the top level and imports
-    // store archives under `hangar`). D-JPK-IMPORTCMD1 / D-MIGRATE-SRC1 make
-    // that one overlap explicit; D-PERFSESSION1=D likewise keeps run/test/bench
-    // as daily top-level intents while listing them under `jet perf`.
-    // Internal handler rows in COMMANDS do not make any other grouped action
-    // canonical at the top level.
-    if name == "import" || matches!(name, "run" | "test" | "bench" | "report") {
-        return None;
-    }
     command_groups().find_map(|group| {
         group.actions.iter().find(|action| action.name == name).map(|action| (group, action))
-    })
+    }).filter(|(_, action)| !action.also_canonical_top_level)
 }
 
 pub fn moved_command_group(name: &str) -> Option<&'static str> {
@@ -1392,10 +1384,10 @@ mod tests {
     }
 
     #[test]
-    fn moved_commands_are_not_canonical_top_level() {
+    fn moved_command_registry_agrees_with_dispatch() {
         for group in command_groups() {
             for action in group.actions {
-                if matches!(action.name, "import" | "run" | "test" | "bench" | "report") {
+                if action.also_canonical_top_level {
                     assert!(is_canonical_top_level(action.name));
                     assert!(moved_command(action.name).is_none());
                     continue;
@@ -1422,7 +1414,7 @@ mod tests {
     fn typo_suggestions_never_advertise_moved_bare_actions() {
         for group in command_groups() {
             for action in group.actions {
-                if !matches!(action.name, "import" | "run" | "test" | "bench" | "report") {
+                if !action.also_canonical_top_level {
                     assert_ne!(closest_command(action.name), Some(action.name));
                 }
             }
