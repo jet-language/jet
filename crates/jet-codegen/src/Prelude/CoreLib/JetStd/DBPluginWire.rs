@@ -523,7 +523,7 @@
     }
 
     // ── core.db wire codec ──────────────────────────────────────────────────────
-    // The FFI bridge crate (built only when a program uses `jet.db`, Source/FFI.rs)
+    // The FFI bridge crate (built only when a program uses `core.db`, Source/FFI.rs)
     // and this always-compiled prelude are two independently built Rust crates —
     // they can't share types, so bind params and result rows cross that boundary as
     // plain `String`s in a small tagged-length wire format (mirrored byte-for-byte

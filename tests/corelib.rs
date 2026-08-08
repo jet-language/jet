@@ -9583,7 +9583,7 @@ fn core_module_items_covers_known_core_modules() {
     }
     for line in fn_body.lines() {
         let trimmed = line.trim();
-        // A match arm head: `"core.files" => &[` or `"core.log" | "jet.log" => &[`
+        // A match arm head: `"core.files" => &[` or `"core.log" => &[`
         if trimmed.starts_with('"') && trimmed.contains("=>") {
             let arm_head = trimmed.split("=>").next().unwrap_or("");
             let mut rest = arm_head;
@@ -9603,20 +9603,12 @@ fn core_module_items_covers_known_core_modules() {
         }
     }
 
-    // D-CORENS-CANON1: most ring packages still normalize to legacy `jet.*`
-    // internal dispatch keys. Some modules are already canonical end-to-end.
-    let ring_names = ["log", "crypto", "http", "regex", "reactive", "db", "plugin"];
-    let known_raw = jet::Loader::KNOWN_CORE_MODULES;
-    let known: std::collections::BTreeSet<String> = known_raw
+    // D-CORENS1 / D-CORENS-CANON1: every Core module keeps its canonical
+    // `core.*` key through the checker tables. No internal `jet.*` rewrite is
+    // allowed to hide a missing or extra module arm.
+    let known: std::collections::BTreeSet<String> = jet::Loader::KNOWN_CORE_MODULES
         .iter()
-        .map(|s| {
-            if let Some(ring) = s.strip_prefix("core.") {
-                if ring_names.contains(&ring) {
-                    return format!("jet.{ring}");
-                }
-            }
-            s.to_string()
-        })
+        .map(|s| s.to_string())
         .collect();
 
     let missing_from_items: Vec<&String> =
@@ -9635,6 +9627,60 @@ fn core_module_items_covers_known_core_modules() {
          Either add to KNOWN_CORE_MODULES in Source/Loader.rs or remove the arm.",
         extra_in_items
     );
+}
+
+#[test]
+fn compiler_sources_reject_retired_jet_ring_keys() {
+    // D-CORENS-CANON1: keep the registry guard broader than one table. A new
+    // quoted `jet.<ring>` dispatch key in any compiler source must fail this
+    // test instead of silently restoring a second internal namespace.
+    let roots = [
+        "Source",
+        "crates/jet-foundation/src",
+        "crates/jet-driver/src",
+        "crates/jet-sema/src",
+        "crates/jet-codegen/src",
+        "crates/jet-comptime/src",
+        "crates/jet-jit/src",
+        "crates/jet-repl/src",
+    ];
+    let retired = [
+        "\"jet.log\"",
+        "\"jet.crypto\"",
+        "\"jet.http\"",
+        "\"jet.regex\"",
+        "\"jet.reactive\"",
+        "\"jet.db\"",
+        "\"jet.plugin\"",
+        "\"jet.time\"",
+    ];
+    let mut pending = roots.iter().map(PathBuf::from).collect::<Vec<_>>();
+    while let Some(path) = pending.pop() {
+        let metadata = fs::metadata(&path).unwrap_or_else(|error| {
+            panic!("failed to inspect compiler source {}: {error}", path.display())
+        });
+        if metadata.is_dir() {
+            for entry in fs::read_dir(&path).unwrap_or_else(|error| {
+                panic!("failed to read compiler source {}: {error}", path.display())
+            }) {
+                pending.push(entry.unwrap().path());
+            }
+            continue;
+        }
+        if path.extension().and_then(|extension| extension.to_str()) != Some("rs") {
+            continue;
+        }
+        let source = fs::read_to_string(&path).unwrap_or_else(|error| {
+            panic!("failed to read compiler source {}: {error}", path.display())
+        });
+        for &key in &retired {
+            assert!(
+                !source.contains(key),
+                "retired internal module key {key} found in {}",
+                path.display()
+            );
+        }
+    }
 }
 
 #[test]

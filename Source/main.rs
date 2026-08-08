@@ -15,6 +15,7 @@ use std::process::{exit, Command};
 
 use jet::Diagnostics::ColorChoice;
 use jet::ExitCodes;
+use jet_foundation::BuildEffect;
 
 mod CmdCodemod;
 mod CmdBudget;
@@ -367,6 +368,11 @@ pub(crate) fn usage() -> String {
     // #1659 criterion 1: rendered from jet::CLI's one COMMAND_GROUPS table.
     let inspect_commands = jet::CLI::command_group_usage("inspect");
     let registry_commands = jet::CLI::command_group_usage("registry");
+    let effect_roots = BuildEffect::ALL
+        .iter()
+        .map(|effect| effect.flag())
+        .collect::<Vec<_>>()
+        .join("/");
     format!(
         "\
 Welcome to {lang}! (v{ver})
@@ -401,8 +407,8 @@ usage:
   {bin} debug <file.{ext}>          step through a program at the Jet source level (D-DBG3)
   {bin} repl                         start an interactive session (E2-M18)
   {bin} repl  --project <dir>        same, with access to a project's imports
-  {bin} repl  --allow-<root>         pre-authorize one Core effect root (fs/env/exec/net/io)
-  {bin} repl  --deny-<root>          deny one Core effect root; overrides allow and prompts
+  {bin} repl  --allow-<root>         pre-authorize one Core effect root ({effect_roots})
+  {bin} repl  --deny-<root>          deny one Core effect root; overrides allow and prompts ({effect_roots})
   {bin} eval  <file.{ext}> --pure   evaluate a pure program to stable JSON (S60)
   {bin} fmt                         rewrite all .jet files in the project to canonical style
   {bin} fmt   <file|dir>...         rewrite specific files or directories (recurse)
@@ -995,10 +1001,14 @@ fn main() {
     let small = jet_argv.iter().any(|a| a == "--small");
     let freestanding_flag = jet_argv.iter().any(|a| a == "--freestanding");
     let allow_impure = jet_argv.iter().any(|a| a == "--allow-impure");
-    let build_grants: Vec<String> = ["exec", "fs", "net", "env", "io", "db", "time", "rand", "log", "gpu"]
+    let build_grants: Vec<String> = BuildEffect::ALL
         .into_iter()
-        .filter(|effect| jet_argv.iter().any(|arg| arg == &format!("--allow-{effect}")))
-        .map(str::to_string)
+        .filter(|effect| {
+            jet_argv
+                .iter()
+                .any(|arg| arg == &format!("--allow-{}", effect.flag()))
+        })
+        .map(|effect| effect.flag().to_string())
         .collect();
     let locked = jet_argv.iter().any(|a| a == "--locked");
     let annotated = jet_argv.iter().any(|a| a == "--annotated");
@@ -1821,14 +1831,21 @@ fn main() {
                 .iter()
                 .find_map(|a| a.strip_prefix("--project=").map(str::to_string))
                 .or_else(|| flag_value(&raw, "--project").map(str::to_string));
-            let roots = ["exec", "fs", "net", "env", "io", "db", "time", "rand", "log", "gpu"];
-            let allow: Vec<String> = roots.into_iter()
-                .filter(|root| raw.iter().any(|arg| arg == &format!("--allow-{root}")))
-                .map(str::to_string)
+            let allow: Vec<String> = BuildEffect::ALL
+                .into_iter()
+                .filter(|effect| {
+                    raw.iter()
+                        .any(|arg| arg == &format!("--allow-{}", effect.flag()))
+                })
+                .map(|effect| effect.flag().to_string())
                 .collect();
-            let deny: Vec<String> = roots.into_iter()
-                .filter(|root| raw.iter().any(|arg| arg == &format!("--deny-{root}")))
-                .map(str::to_string)
+            let deny: Vec<String> = BuildEffect::ALL
+                .into_iter()
+                .filter(|effect| {
+                    raw.iter()
+                        .any(|arg| arg == &format!("--deny-{}", effect.flag()))
+                })
+                .map(|effect| effect.flag().to_string())
                 .collect();
             run_repl(project.as_deref(), &allow, &deny, mode.color);
             return;

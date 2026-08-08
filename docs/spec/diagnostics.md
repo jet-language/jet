@@ -13,6 +13,18 @@ Every diagnostic has four parts:
 - **why** — the rule behind the error, so the user learns the model.
 - **fix** — a concrete next step, copy-pasteable when possible.
 
+## Diagnostic code grammar
+
+Jet uses one code grammar with two valid shapes:
+
+- numeric: `E` or `L` followed by four digits, such as `E0102` or `L0201`;
+- word-shaped: `E-<WORD>-<WORD>` with two or more uppercase words separated by
+  `-`, such as `E-WEB-ABI-TYPE`.
+
+Each word starts with an uppercase letter and continues with uppercase letters
+or digits. Both shapes are stable diagnostic codes. `jet explain` and I4
+coverage checks accept both.
+
 ## Adding a diagnostic
 
 1. Prove the rejection belongs in the Jet front end, not rustc or codegen, and

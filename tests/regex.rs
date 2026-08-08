@@ -73,7 +73,7 @@ fn have_toolchain() -> bool {
 #[test]
 fn match_groups_find_replace_split() {
     if !have_toolchain() {
-        eprintln!("note: cargo/rustc not found; skipping jet.regex integration test");
+        eprintln!("note: cargo/rustc not found; skipping core.regex integration test");
         return;
     }
     let src = r##"
@@ -137,7 +137,7 @@ fn run() {
 #[test]
 fn bad_pattern_is_a_recoverable_error_not_a_crash() {
     if !have_toolchain() {
-        eprintln!("note: cargo/rustc not found; skipping jet.regex error test");
+        eprintln!("note: cargo/rustc not found; skipping core.regex error test");
         return;
     }
     // Runtime-built text stays fallible at the explicit compilation boundary.

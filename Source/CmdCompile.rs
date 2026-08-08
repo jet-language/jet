@@ -301,6 +301,56 @@ pub(crate) fn run_compile_cmd(
         exit(ExitCodes::USAGE);
     }
 
+    // D-ONCE-TIER1=A: `jet run --interpret` selects tier 0 without entering the
+    // watch engine. Keep artifact/build controls explicit instead of ignoring them.
+    let force_interpreter = cmd == "run" && cli_requests_interpreter();
+    if force_interpreter {
+        let incompatible = cross_target.is_some()
+            || output_name.is_some()
+            || remote_builder.is_some()
+            || emit_rust
+            || emit_generated
+            || small
+            || freestanding
+            || allow_impure
+            || !build_grants.is_empty()
+            || capabilities_json
+            || sbom
+            || named_profile.is_some();
+        if incompatible {
+            let diagnostic = jet::Diagnostics::Diagnostic::error(
+                "E2102",
+                "`--interpret` cannot be combined with build or artifact flags".to_string(),
+                "`--interpret` selects the tier-0 interpreter for a one-shot native run".to_string(),
+                "run `jet run --interpret <file.jet>` without build or artifact flags".to_string(),
+                None,
+            );
+            report_problems(mode, file, &src, &[diagnostic]);
+            exit(ExitCodes::USAGE);
+        }
+
+        let args = program_args
+            .iter()
+            .map(|arg| arg.as_str())
+            .collect::<Vec<_>>();
+        let outcome = jet::Interpreter::run_interpreter_once_with_args(file, &args);
+        match outcome {
+            jet::Interpreter::RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            } => {
+                print!("{stdout}");
+                eprint!("{stderr}");
+                exit(exit_code);
+            }
+            jet::Interpreter::RunOutcome::Problems(diags) => {
+                report_problems(mode, file, &src, &diags);
+                exit(ExitCodes::USER_ERROR);
+            }
+        }
+    }
+
     // D-LENS-RUN1: default native `jet run` is strict Cranelift. Explicit
     // profiles and artifact-oriented flags keep the AOT escape hatch.
     if cmd == "run"
@@ -689,6 +739,13 @@ pub(crate) fn run_compile_cmd(
             exit(ExitCodes::USAGE);
         }
     }
+}
+
+fn cli_requests_interpreter() -> bool {
+    std::env::args()
+        .skip(1)
+        .take_while(|arg| arg != "--")
+        .any(|arg| arg == "--interpret")
 }
 
 /// c-devserver (owner-directed 2026-07-01): `jet dev <file>` when `file`

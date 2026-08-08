@@ -506,7 +506,7 @@ impl<'a> Checker<'a> {
                                     target.core_imports.get(alias).and_then(|module| {
                                         if matches!(
                                             module.as_str(),
-                                            "core.crypto" | "jet.crypto"
+                                            "core.crypto"
                                         ) && matches!(
                                             leaf,
                                             "Secret" | "SigningKey" | "X25519SecretKey"

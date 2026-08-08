@@ -1833,7 +1833,7 @@ fn docs_lookup_builtin_list_filter_matches_ratified_mock() {
     let session = Session::new();
     let doc = Docs::lookup(&session, "List.filter").expect("List.filter has builtin docs");
     assert!(
-        doc.starts_with("List.filter(f: fn(T) => Bool) -> List<T>"),
+        doc.starts_with("List.filter(f: fn(T) => Bool) => List<T>"),
         "got: {doc:?}"
     );
     assert!(doc.contains("Keeps items where f(item) is true."), "got: {doc:?}");

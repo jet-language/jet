@@ -22,7 +22,9 @@ fn expr_is_absent_none(expr: &Expr) -> bool {
             variant,
             args,
             ..
-        } if type_name.is_empty() && variant == Syntax::LIT_NULL && args.is_empty() => true,
+        } if type_name.is_empty()
+            && matches!(contextual_literal(variant), Some(ContextualLiteral::Null))
+            && args.is_empty() => true,
         Expr::Paren(inner, _) | Expr::Copy(inner, _) => expr_is_absent_none(inner),
         _ => false,
     }
@@ -33,12 +35,25 @@ pub(crate) fn atomic_absent_optional_subject(cond: &Expr) -> Option<(String, Spa
     match cond {
         Expr::PatternTest {
             subject,
-            pattern: Pattern::Absent(_),
+            pattern,
             span,
-        } => match subject.as_ref() {
-            Expr::Ident(name, name_span) => Some((name.clone(), *name_span, *span)),
-            _ => None,
-        },
+        } => {
+            let is_absent = match pattern {
+                Pattern::Absent(_) => true,
+                Pattern::Variant {
+                    variant, bindings, ..
+                } => matches!(contextual_literal(variant), Some(ContextualLiteral::Null))
+                    && bindings.is_empty(),
+                _ => false,
+            };
+            if !is_absent {
+                return None;
+            }
+            match subject.as_ref() {
+                Expr::Ident(name, name_span) => Some((name.clone(), *name_span, *span)),
+                _ => None,
+            }
+        }
         _ => None,
     }
 }
@@ -54,6 +69,24 @@ fn guard_subject_path(expr: &Expr) -> Option<String> {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ContextualLiteral {
+    Value,
+    Null,
+    Ok,
+    Err,
+}
+
+pub(crate) fn contextual_literal(name: &str) -> Option<ContextualLiteral> {
+    match name {
+        name if name == Syntax::LIT_VALUE => Some(ContextualLiteral::Value),
+        name if name == Syntax::LIT_NULL => Some(ContextualLiteral::Null),
+        name if name == Syntax::LIT_OK => Some(ContextualLiteral::Ok),
+        name if name == Syntax::LIT_ERR => Some(ContextualLiteral::Err),
+        _ => None,
+    }
+}
+
 pub(crate) fn normalize_contextual_pattern(pattern: &mut Pattern, subject_ty: &Type) {
     if let Pattern::Or(alts, _) = pattern {
         for alt in alts {
@@ -64,6 +97,7 @@ pub(crate) fn normalize_contextual_pattern(pattern: &mut Pattern, subject_ty: &T
     let Pattern::Variant {
         variant,
         bindings,
+        leading_dot,
         span,
     } = pattern
     else {
@@ -81,11 +115,18 @@ pub(crate) fn normalize_contextual_pattern(pattern: &mut Pattern, subject_ty: &T
                 )
             })
     };
-    let replacement = match (subject_ty, variant.as_str(), bindings.len()) {
-        (Type::Option(_), name, 0) if name == Syntax::LIT_NULL => {
+    let replacement = match (
+        subject_ty,
+        contextual_literal(variant),
+        *leading_dot,
+        bindings.len(),
+    ) {
+        (_, Some(ContextualLiteral::Null), false, 0)
+        | (Type::Option(_), Some(ContextualLiteral::Null), true, 0) => {
             Some(Pattern::Absent(*span))
         }
-        (Type::Option(_), name, 1) if name == Syntax::LIT_VALUE => {
+        (_, Some(ContextualLiteral::Value), false, 1)
+        | (Type::Option(_), Some(ContextualLiteral::Value), true, 1) => {
             let (binding, binding_span) = binding().unwrap();
             Some(Pattern::Present {
                 binding,
@@ -93,7 +134,7 @@ pub(crate) fn normalize_contextual_pattern(pattern: &mut Pattern, subject_ty: &T
                 span: *span,
             })
         }
-        (Type::Result { .. }, name, 1) if name == Syntax::LIT_OK => {
+        (Type::Result { .. }, Some(ContextualLiteral::Ok), _, 1) => {
             let (binding, binding_span) = binding().unwrap();
             Some(Pattern::Ok {
                 binding,
@@ -101,7 +142,7 @@ pub(crate) fn normalize_contextual_pattern(pattern: &mut Pattern, subject_ty: &T
                 span: *span,
             })
         }
-        (Type::Result { .. }, name, 1) if name == Syntax::LIT_ERR => {
+        (Type::Result { .. }, Some(ContextualLiteral::Err), _, 1) => {
             let (binding, binding_span) = binding().unwrap();
             Some(Pattern::Err {
                 binding,

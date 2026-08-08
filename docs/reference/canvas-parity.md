@@ -46,7 +46,7 @@ contract; it does not mean every form has a bespoke graph gesture. Status values
 - [Stmt::If] status=graph branch node.
 - [Stmt::While] status=graph loop rail.
 - [Stmt::For] status=graph loop rail.
-- [Stmt::Switch] status=graph switch rail.
+- [Stmt::Switch] status=graph switch rail with pattern-arm add/edit/remove source transactions.
 - [Stmt::Break] status=graph control node.
 - [Stmt::BreakValue] status=graph control node with value in source detail.
 - [Stmt::Continue] status=graph control node.
@@ -57,8 +57,8 @@ contract; it does not mean every form has a bespoke graph gesture. Status values
 - [Stmt::CountedLoop] status=graph loop rail.
 - [Stmt::Val metadata] status=`#Meta` projects to binding-node `meta` JSON (D-CANVASMETA1), details-panel UI pending #377.
 - [Func metadata] status=`#Meta` projects to function `meta` JSON (D-CANVASMETA1), details-panel UI pending #377.
-- [Stmt::Off] status=readonly switched-off statement (D-CANVASSTATE1), node badge UI pending, source edits.
-- [Stmt::DebugOnly] status=readonly debug-build statement (D-CANVASSTATE1), node badge UI pending, source edits.
+- [Stmt::Off] status=graph `#Off` state badge with a source-backed toggle (D-CANVASSTATE1).
+- [Stmt::DebugOnly] status=graph `#DebugOnly` state badge with a source-backed toggle (D-CANVASSTATE1).
 - [Stmt::Unsafe] status=readonly expert gate, source edits.
 - [Stmt::Impure] status=readonly expert gate, source edits.
 - [Stmt::Reactive] status=readonly effect registration, source edits.
@@ -79,7 +79,16 @@ contract; it does not mean every form has a bespoke graph gesture. Status values
 - [Stmt::Transact] status=readonly transaction block, source edits.
 - [Stmt::Yield] status=readonly stream yield, source edits.
 - [Stmt::ScopeMember] status=readonly marker-scope member, source edits.
-- [Stmt::Switched] status=readonly statement-switch block (#Off badge planned on card #387), source edits.
+- [Stmt::Switched] status=graph statement-state node with `#Off`/`#DebugOnly` badge, toggle, and nested source edits.
+
+## Palette staging
+
+- Core entries with `needs_canvas_defaults` or `method_only` status are graph
+  `stageable`: the palette shows them normally, places a dashed local node, and
+  leaves source bytes unchanged until a compatible input wire materializes the
+  checked source transaction.
+- `needs_unsafe_region`, `type_member`, `type_only`, and `value_only` remain
+  excluded with their stable reason codes.
 
 ## Expressions
 

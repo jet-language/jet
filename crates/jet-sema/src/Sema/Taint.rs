@@ -14,12 +14,12 @@ pub type FieldTypes = HashMap<(String, String), String>;
 pub type ReturnTypes = HashMap<String, String>;
 
 /// D-TAG-SURFACE1=A: credential log/print/serialize sinks. A `#Credential`
-/// value reaching `core.io.print`, `core.io.eprint`, `jet.log.*`, or
+/// value reaching `core.io.print`, `core.io.eprint`, `core.log.*`, or
 /// `core.encoding.*.to_string*` is E0722.
 fn is_credential_sink(module: &str, method: &str) -> bool {
     match module {
         "core.io" => matches!(method, "print" | "eprint"),
-        "jet.log" | "core.log" => true, // all log methods are credential sinks
+        "core.log" => true, // all log methods are credential sinks
         "core.encoding.json" | "core.encoding.csv" | "core.encoding.toml"
         | "core.encoding.yaml" | "core.encoding.cbor" | "core.encoding.xml" => {
             matches!(method, "to_string" | "to_string_pretty" | "to_bytes" | "to_bytes_canonical")
@@ -39,7 +39,7 @@ struct TaintCtx<'a> {
     field_tags: &'a FieldTags,
     field_types: &'a FieldTypes,
     /// Core import aliases in scope for the module owning this body
-    /// (alias → resolved module path, e.g. `db` → `jet.db`). Used to classify a
+    /// (alias → resolved module path, e.g. `db` → `core.db`). Used to classify a
     /// `MethodCall` on a Core alias as a sink.
     core_imports: &'a HashMap<String, String>,
     /// The taint plane of the one flow-fact store.

@@ -1644,9 +1644,10 @@ ordinary Core values. There is no `event` declaration syntax in this slice.
 
 - `event.new<T>() => Event<T>` creates a typed many-subscriber occurrence stream.
 - `event.async_result<T, E>(policy, failures) => AsyncEvent<T, E> ? String`
-  creates one scheduler-backed bounded queue. `emit_async` returns
-  `Task<DispatchReport<E>>`; queue, running, blocked, failure, cancellation,
-  deadline, close, and overflow outcomes are explicit.
+  creates one scheduler-backed bounded queue; see [Bounded buffering law](#bounded-buffering-law)
+  for its pressure behavior. `emit_async` returns `Task<DispatchReport<E>>`;
+  queue, running, blocked, failure, cancellation, deadline, close, and overflow
+  outcomes are explicit.
 - `event.hook<T, R>(fallback) => Hook<T, R>` creates an ordered intervention
   point. `.run(payload, fallback)` returns the last active handler result, or
   the call-site fallback when no handler is active.
@@ -2194,12 +2195,39 @@ are gone. Channel payloads
 must be sendable (**E1102**).
 
 `tasks.channel<T>(capacity: N)` creates the same pair with a bounded buffer.
-When the buffer already holds `N` values, `send` waits until a receiver removes
-one. A bounded work queue therefore limits queued memory and applies
-backpressure to producers. To limit active work, seed the channel with `N`
+Its full-buffer behavior is defined by the [Bounded buffering law](#bounded-buffering-law).
+To limit active work, seed the channel with `N`
 tokens; each worker receives one before work and sends it back afterward. Token
 ownership then admits at most `N` active workers. Both patterns are demonstrated
 in `examples/features/concurrency/bounded_workers.jet`.
+
+### Bounded buffering law
+
+Jet bounded buffers preserve accepted values and apply backpressure by default.
+Only `AsyncEvent` may discard a payload, and only when its immutable
+`AsyncPolicy` explicitly selects `DropNewest` or `DropOldest`; `Block` preserves
+it by waiting. This split follows ratified roles: `tasks.channel` is typed work
+transfer, where capacity bounds queued memory and active work, while `AsyncEvent`
+is an asynchronous many-subscriber occurrence stream whose pressure choice is
+explicit and observable in its dispatch report. No primitive gains a new
+overflow knob here. See [D-EVENT2=A](syntax-decisions.md) and
+[D-TASKRUNTIME1=A](syntax-decisions.md).
+
+| Primitive | Full behavior | Buffering law |
+|---|---|---|
+| `tasks.channel<T>(capacity: N)` | `send` waits for receiver space; deadline or cancellation can wake the wait | Preserve work-queue values and FIFO; capacity bounds queued memory and producer pressure |
+| `AsyncEvent<T, E>` | `Block` waits; `DropNewest` drops the new attempt; `DropOldest` drops the oldest queued attempt | Only explicit loss path; report exposes acceptance and terminal state |
+| `core.services` worker mailbox | Full delivery waits under deadline or returns `Full` | At-most-once, per-sender FIFO; no silent drop |
+| `core.files` buffered handles | Reader/writer calls block or flush; no Jet queue or drop policy | Bounded-memory stream; caller pace controls progress |
+| `core.io` stream handles and `core.http` `Body` | Blocking reads/writes use OS or socket backpressure; body limits reject over-limit input | Transport streaming preserves accepted bytes; no overflow drop |
+| `core.encoding` readers/writers and `core.data.DataStream` | Blocking `next`/`write`/`flush`; `EncodingLimits`/`DataLimits` bound retained work; no hidden queue or drop | Bounded pull/push stream, not lossy delivery |
+| `core.log` sinks | No public bounded queue, capacity, or overflow policy; sink writes and `flush` are explicit | No buffering-loss rule today; sampling/disable are explicit emission controls |
+
+`Deque`, `PriorityQueue`, `Cache`, and `ByteBuffer` capacity fields are storage
+capacity, not concurrent producer/consumer buffering. Host-internal queues for
+browser events, HTTP admission, observation, and tooling are implementation
+limits, not Jet primitives. Any future buffered log sink or other lossy surface
+needs an owner decision before adding a policy knob.
 
 D-DEADLINE1 (ratified 2026-06-28): an ambient deadline can be set with
 `#Context(deadline: <Int epoch_ms>) { … }`. Inside that scope, wait/IO points

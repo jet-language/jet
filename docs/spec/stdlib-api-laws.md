@@ -118,3 +118,8 @@ Tower card tracking the fix; this list is the authoritative inventory.
 | L1 | `core.files.read` / `core.files.write` use short names | 1 | c44-follow-1 |
 
 *When a gap is resolved, remove the row and close the follow-up card.*
+
+Resolved disposition, #1691: `core.crypto.expert` now uses distinct
+`x25519_raw` / `hkdf_sha256_raw` names, and
+`examples/features/crypto/crypto_migration.jet` covers the audited raw path
+while the safe `core.crypto` APIs retain typed defaults.

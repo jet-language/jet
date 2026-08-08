@@ -1994,6 +1994,7 @@ impl<'a> Checker<'a> {
         Some(Pattern::Variant {
             variant: variant.clone(),
             bindings: Vec::new(),
+            leading_dot: false,
             span: *rhs_span,
         })
     }
@@ -2062,6 +2063,7 @@ impl<'a> Checker<'a> {
                 Some(Pattern::Variant {
                     variant: variant.clone(),
                     bindings: vec![],
+                    leading_dot: false,
                     span: *span,
                 })
             }
@@ -2097,6 +2099,7 @@ impl<'a> Checker<'a> {
                                 name: binding.clone(),
                                 span: *binding_span,
                             }],
+                            leading_dot: false,
                             span: call.name_span,
                         });
                     }
@@ -2121,6 +2124,7 @@ impl<'a> Checker<'a> {
                         name: binding.clone(),
                         span: *binding_span,
                     }],
+                    leading_dot: false,
                     span: call.name_span,
                 })
             }

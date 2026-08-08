@@ -24,9 +24,8 @@ use crate::Codegen::TIR::TLocal;
 use crate::Codegen::TIR::unit_type;
 use std::collections::HashSet;
 
-/// c109 Phase 11: lower a lambda/closure literal (`Expr::Lambda`) to a `TLambda`,
-/// reproducing `emit_lambda` (Source/Codegen/Expression.rs) byte-for-byte. Every
-/// capture/escape/Fn-vs-FnMut decision is the TOTAL `Lambda.meta` fact — no capture
+/// c109 Phase 11: lower a lambda/closure literal (`Expr::Lambda`) to a `TLambda`.
+/// Every capture/escape/Fn-vs-FnMut decision is the TOTAL `Lambda.meta` fact — no capture
 /// analysis here. The body is lowered on a CLONED env extended with: the cloned
 /// captures (rebound to `_jet_cap_<n>`, place = that name, type `None` — matching the
 /// AST slot) and the params (place = mangled name, type from the annotation). The
@@ -408,8 +407,7 @@ pub(crate) fn lower_spawn_lambda_for_jit_expecting(
     }
 }
 
-/// c109 Phase 13: render a `tasks.spawn` lambda, reproducing `emit_spawn_lambda`
-/// (Source/Codegen/Expression.rs) byte-for-byte. It is `emit_lambda` minus the
+/// c109 Phase 13: render a `tasks.spawn` lambda. It is `emit_lambda` minus the
 /// Fn-vs-FnMut and escape logic: ALWAYS `move`, NEVER `Box::new`. The clone-capture
 /// prelude is identical. Returns the full rendered closure string (wrapped in
 /// `{ <prep> <closure> }` when there are cloned captures).
@@ -582,8 +580,8 @@ pub(crate) fn render_lambda_str_expecting_value(
 // Emission: TIR -> Rust. PURE formatting. No type inference, no decisions.
 // ---------------------------------------------------------------------------
 
-/// c109 Phase 25: render the router handler (arg 1) exactly as `emit_router_handler`
-/// (Source/Codegen/Expression.rs) does, at lowering. A bare top-level fn name (not a
+/// c109 Phase 25: render the router handler (arg 1) at lowering. A bare top-level fn
+/// name (not a local)
 /// local) becomes the canonical shared `JetHTTPHandler`; a lambda does the same.
 pub(crate) fn render_router_handler(
     args: &[crate::AST::CallArg],

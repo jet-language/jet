@@ -1531,7 +1531,7 @@ pub fn apply_method(
             _ => Err(unsupported("equal with a non-text argument", span)),
         },
         // D-STR-DECLINE1=C: `matches`/`match` — the same RegexLite engine
-        // `jet.regex.compile`/`is_match`/`find` already run (`regex_is_match`/
+        // `core.regex.compile`/`is_match`/`find` already run (`regex_is_match`/
         // `regex_find` in Methods/core_calls.rs), composed for a String receiver.
         (CtValue::Str(s), "matches") => match args.into_iter().next() {
             Some(CtValue::Str(pattern)) => Ok(match super::RegexLite::RegexLite::parse(&pattern) {

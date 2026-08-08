@@ -41,13 +41,11 @@ impl RuntimeLayer {
 }
 
 /// Classify a compiler-known core module path to its minimum runtime layer.
-/// Accepts user-facing `core.*` and legacy internal `jet.*` ring keys.
 pub fn core_module_layer(module: &str) -> Option<RuntimeLayer> {
-    let key = Syntax::normalize_core_module(module).unwrap_or_else(|| module.to_string());
-    Some(layer_of_normalized(&key))
+    Some(layer_of(module))
 }
 
-fn layer_of_normalized(module: &str) -> RuntimeLayer {
+fn layer_of(module: &str) -> RuntimeLayer {
     match module {
         // ── core: no heap, no OS ─────────────────────────────────────────
         "core"
@@ -62,7 +60,7 @@ fn layer_of_normalized(module: &str) -> RuntimeLayer {
         | "core.web.storage.session"
         | "core.encoding.hex"
         | "core.encoding.base64"
-        | "jet.crypto" => RuntimeLayer::Core,
+        | "core.crypto" => RuntimeLayer::Core,
 
         // ── alloc: heap / growable data, no direct OS I/O ──────────────────
         "core.mem"
@@ -86,22 +84,21 @@ fn layer_of_normalized(module: &str) -> RuntimeLayer {
         | "core.time.expiring"
         | "core.vault"
         | "core.vault.expert"
-        | "jet.reactive"
+        | "core.reactive"
         | "core.sketch.hll"
         | "core.sketch.tdigest"
         | "core.sketch.cms"
         | "core.sketch.reservoir"
-        | "jet.log"
-        | "jet.regex" => RuntimeLayer::Alloc,
+        | "core.log"
+        | "core.regex" => RuntimeLayer::Alloc,
 
         // ── hosted: OS I/O, networking, processes ──────────────────────────
         "core.io" | "core.env" | "core.process" | "core.files" | "core.path" | "core.watcher"
         | "core.net" | "core.tls" | "core.term" | "core.time" | "core.time.date" | "core.time.datetime"
-        | "core.tasks" | "jet.http" | "core.http.client" | "core.http.server" | "core.archive"
-        | "core.raylib" | "core.compress.gzip" | "core.compress.zstd" | "jet.db"
-        // D-DEP-WASM1=A (c81): the plugin loader embeds wasmtime — same OS-facing
-        // posture as jet.db's embedded rusqlite.
-        | "jet.plugin" => RuntimeLayer::Std,
+        | "core.tasks" | "core.http" | "core.http.client" | "core.http.server" | "core.archive"
+        | "core.raylib" | "core.compress.gzip" | "core.compress.zstd" | "core.db"
+        // D-DEP-WASM1=A (c81): the plugin loader embeds wasmtime.
+        | "core.plugin" => RuntimeLayer::Std,
 
         // Unknown modules default to std so new OS-facing modules stay conservative.
         other if Syntax::is_known_core_module(other) => RuntimeLayer::Std,
@@ -176,7 +173,7 @@ mod tests {
     }
 
     #[test]
-    fn ring_imports_normalize_to_layer() {
+    fn core_imports_use_layer() {
         assert_eq!(core_module_layer("core.log"), Some(RuntimeLayer::Alloc));
         assert_eq!(core_module_layer("core.http"), Some(RuntimeLayer::Std));
         assert_eq!(core_module_layer("core.math"), Some(RuntimeLayer::Core));

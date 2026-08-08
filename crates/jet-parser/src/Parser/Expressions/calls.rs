@@ -111,6 +111,7 @@ impl<'a> Parser<'a> {
                     type_name: String::new(),
                     variant,
                     args: Vec::new(),
+                    leading_dot: true,
                     span: Span::new(start, variant_span.end),
                 }
             } else {

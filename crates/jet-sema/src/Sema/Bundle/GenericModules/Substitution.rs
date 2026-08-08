@@ -14,6 +14,7 @@ fn ct_value_expr(value: &crate::AST::CtValue, span: crate::Diagnostics::Span) ->
             type_name: type_name.clone(),
             variant: variant.clone(),
             args: Vec::new(),
+            leading_dot: false,
             span,
         },
         _ => unreachable!("generic-module value domain was checked before substitution"),

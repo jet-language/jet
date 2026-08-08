@@ -41,8 +41,7 @@ pub(crate) fn ast_operand_is_integer(e: &Expr, env: &LowerEnv) -> Option<bool> {
     }
 }
 
-/// c109 Phase 15: the PLAIN Rust field name for a CORE-struct field read, mirroring
-/// `core_struct_field_rust_name` (Source/Codegen/Expression.rs) — but keyed on the
+/// c109 Phase 15: the PLAIN Rust field name for a CORE-struct field read, keyed on the
 /// RESOLVED receiver type (the TIR's total `recv.ty`) instead of `expr_jet_ty(env)`.
 /// Returns `Some(plain_name)` for a known core-struct field (so it is emitted
 /// unprefixed, B2), `None` otherwise (the caller falls back to `mangle(member)`).

@@ -1,4 +1,4 @@
-//! `jet.regex` evaluator, kept separate from the Core call registry.
+//! `core.regex` evaluator, kept separate from the Core call registry.
 
 use crate::AST::CtValue;
 use crate::Diagnostics::{Diagnostic, Span};

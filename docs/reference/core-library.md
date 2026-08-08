@@ -322,7 +322,8 @@ Whole-file helpers:
 **`IOError`** — `NotFound(path)`, `PermissionDenied(path)`, or `Other(message)`.
 
 Streaming handles (E2-M7/D-IO2) — for bounded-memory reads/writes instead of
-loading the whole file:
+loading the whole file. Their pressure classification is in the [Bounded
+buffering law](../spec/spec.md#bounded-buffering-law):
 
 ```jet
 use core.files as files
@@ -522,7 +523,8 @@ or configure them.
 `core.http.client` is the request side; `core.http.server` is the serving side.
 The client accepts `String` or typed `Url` values, uses HTTPS by default through
 the hidden rustls bridge, and keeps the compiler itself dependency-free. The
-server is std-only HTTP/1.1 unless the named TLS option is supplied.
+server is std-only HTTP/1.1 unless the named TLS option is supplied. Body
+streaming follows the [Bounded buffering law](../spec/spec.md#bounded-buffering-law).
 
 ```jet
 use core.http.client as client
@@ -679,6 +681,13 @@ Acceptance matrix and agent cookbook:
 nonce handling and algorithm selection; raw algorithm choice lives under
 `core.crypto.expert` and requires an audited `#Unsafe` region. RustCrypto crates
 are linked only through the hidden bridge crate, not the compiler.
+
+The expert surface keeps raw interoperability controls separate from the typed
+defaults: `expert.x25519_raw(secret_bytes, public_bytes)` and
+`expert.hkdf_sha256_raw(ikm, salt, info, len)` accept byte material, while the
+safe `x25519` and `hkdf_sha256` APIs require nominal `X25519*`/`Secret` values
+and enforce their defaults. Raw callers own byte validation, protocol choice,
+and the `#Unsafe` audit; raw X25519 always rejects a non-contributory peer.
 
 ```jet
 use core.crypto as crypto
@@ -940,6 +949,8 @@ fn run() {
 ---
 
 ### `core.io` — terminal and arguments
+
+Terminal stream buffering follows the [Bounded buffering law](../spec/spec.md#bounded-buffering-law).
 
 ```jet
 use core.io as io
@@ -2031,6 +2042,7 @@ newlines; malformed quote closure is an error rather than a partial row.
 
 **Ratified Epoch 3 breadth (D-ENCSTREAM1 and follow-ups).** The same `DataTree`
 tree backs one whole-value and streaming adapter contract per format:
+stream pressure follows the [Bounded buffering law](../spec/spec.md#bounded-buffering-law).
 The exact signatures, defaults/ranges/accounting, tagged XML schemas, error
 paths/projections, canonical byte rules, strict decoder matrices, lifecycle,
 test vectors, and edition migrations are normative in
@@ -2126,6 +2138,7 @@ sort, join, pivot, and collect enforce named ceilings. Invalid analytics
 instead of silent zeros or clamps. Numeric reducers use population variance
 (divide by `n`), Neumaier summation, and collapse signed zero to `+0.0` on
 output. Pivot cells use distinct `DataPivotCell` row/column keys.
+The stream pressure classification is in the [Bounded buffering law](../spec/spec.md#bounded-buffering-law).
 
 `data.csv<T>(text)` decodes CSV into `[T]` using the same `#Codable` model as
 `core.encoding.csv.decode<T>`. `data.json<T>(text)` decodes a JSON array of objects
@@ -2245,7 +2258,8 @@ fn run() {
 
 `core.log` records events as typed fields plus optional span context. Plain
 `info`/`warn`/`error`/`debug` is still the beginner path; `*_fields` carries
-typed `LogField` values for services and audit logs.
+typed `LogField` values for services and audit logs. Sink buffering follows the
+[Bounded buffering law](../spec/spec.md#bounded-buffering-law).
 
 ```jet
 use core.log as log
@@ -2480,9 +2494,8 @@ fn run() {
 ```
 
 `tasks.channel<T>()` returns the send/receive pair directly (D-TUPLE-DESTRUCT1) —
-destructure it with `(tx, rx) := tasks.channel<T>()`. `tasks.channel<T>(capacity:
-N)` creates a bounded channel; `send` parks when the queue already holds `N`
-values and resumes when a receiver drains space. A second sender is `~tx`
+destructure it with `(tx, rx) := tasks.channel<T>()`. The bounded form follows
+the [Bounded buffering law](../spec/spec.md#bounded-buffering-law). A second sender is `~tx`
 (D-SHAPE-COPY1's copy sigil makes a cheap handle duplicate;
 there's no combined channel value).
 
@@ -2501,7 +2514,7 @@ there's no combined channel value).
 | `task.trace()` | `String` | Read control-plane state as `paused=...,cancel=...` |
 | `task.exception()` | `String` | `"cancelled"` after cancel; otherwise `""` |
 | `tasks.channel<T>()` | `(Sender<T>, Receiver<T>)` | Create an unbounded linked send/receive pair |
-| `tasks.channel<T>(capacity: N)` | `(Sender<T>, Receiver<T>)` | Create a bounded pair with real backpressure |
+| `tasks.channel<T>(capacity: N)` | `(Sender<T>, Receiver<T>)` | Create a bounded pair; see the [buffering law](../spec/spec.md#bounded-buffering-law) |
 | `tasks.after(ms: N)` | `Receiver<Unit>` | One-shot timer channel |
 | `tasks.after(ms: N, value: fallback)` | `Receiver<T>` | One-shot typed timer channel for timeout values |
 | `tasks.interval(ms: N)` | `Receiver<Int>` | Interval timer channel sending `1`, `2`, ... |
@@ -2845,7 +2858,7 @@ fn run() {
 | Call | Returns | Does |
 |------|---------|------|
 | `event.new<T>()` | `Event<T>` | create a typed many-subscriber event |
-| `event.async_result<T, E>(policy, failures)` | `AsyncEvent<T, E> ? String` | create one scheduler-backed bounded event queue |
+| `event.async_result<T, E>(policy, failures)` | `AsyncEvent<T, E> ? String` | create one scheduler-backed event queue; see the [buffering law](../spec/spec.md#bounded-buffering-law) |
 | `event.hook<T, R>(fallback)` | `Hook<T, R>` | create an ordered hook; last active handler result wins |
 | `event.decision_hook<T, E>(policy)` | `DecisionHook<T, E>` | create an ordered transform/continue/cancel/fail fold |
 | `event.scope()` | `EventScope` | create an owner for subscriptions |
@@ -2871,10 +2884,11 @@ During synchronous dispatch, removals before a listener's turn take effect,
 additions wait for a later or nested dispatch, reentrant emissions run
 depth-first, and `once` deactivates before calling its handler.
 
-`AsyncPolicy` requires a positive capacity and chooses `Block`, `DropNewest`,
-or `DropOldest`; `FailurePolicy` is `StopFirst`, `Collect`, `Log`, or `Ignore`.
-Cancellation, inherited deadlines, close, and owner teardown share one terminal
-transition. With `JET_OBSERVE=1`, the debugger and Canvas `?pid=` live view read
+`AsyncPolicy` requires a positive capacity. The complete pressure behavior is in
+the [Bounded buffering law](../spec/spec.md#bounded-buffering-law).
+`FailurePolicy` is `StopFirst`, `Collect`, `Log`, or `Ignore`. Cancellation,
+inherited deadlines, close, and owner teardown share one terminal transition.
+With `JET_OBSERVE=1`, the debugger and Canvas `?pid=` live view read
 the same bounded payload-free executed lifecycle sequence; without a live PID,
 Canvas reports no runtime Event facts.
 
@@ -3505,8 +3519,8 @@ Backend facts for Core modules (ownership/effects/failure/platform) live in
 
 D-SERVICE1=D / D-SERVICE-DELIVERY1=D / D-SERVICE-STATE1=D /
 D-SERVICE-WORKFLOW1=D / D-SERVICE-IDENTITY1=D / D-SERVICE-UPGRADE1=D: typed
-service trees over the existing task/channel model. Workers own bounded
-mailboxes; delivery defaults to at-most-once with `Full` under capacity;
+service trees over the existing task/channel model. Workers own mailboxes; the
+delivery pressure rule is in the [Bounded buffering law](../spec/spec.md#bounded-buffering-law).
 `send_durable` requires DurableAtLeastOnce plus an idempotency key; restart
 policy defaults to OneForOne (also OneForAll / RestForOne); state adapters are
 Empty / Snapshot / EventLog; workflows, directory identity, and generation

@@ -679,6 +679,7 @@ impl<'a> Checker<'a> {
                                         type_name: crate::Syntax::TYPE_ORDERING.to_string(),
                                         variant: variant.to_string(),
                                         args: Vec::new(),
+                                        leading_dot: false,
                                         span,
                                     }),
                                     span,

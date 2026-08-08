@@ -548,6 +548,10 @@ pub enum Expr {
         type_name: String,
         variant: String,
         args: Vec<EnumLitArg>,
+        /// D-ENUMDOT2: whether source used the contextual leading-dot form.
+        /// Canonical `Val`/`None` literals use the same generic node with this
+        /// unset, then sema normalizes both spellings to the dedicated nodes.
+        leading_dot: bool,
         span: Span,
     },
     /// D-TAG-SURFACE1=A: `#Tag value` attaches a declared value fact. It rides

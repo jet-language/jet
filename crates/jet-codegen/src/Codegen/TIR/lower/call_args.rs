@@ -111,8 +111,7 @@ pub(crate) fn lambda_body_ty_expecting(
     }
 }
 
-/// c109 Phase 6/13: lower method-call arguments, mirroring `emit_call_args`
-/// (Source/Codegen/Expression.rs). The clone/Arc wrappers, the borrow/mut-borrow
+/// c109 Phase 6/13: lower method-call arguments. The clone/Arc, borrow, and mut-borrow
 /// wrappers, and the Fn-typed Box-coercion are all decided here from total facts
 /// (`CallArg.flags` + the resolved param convention/type), never re-derived in emit.
 pub(crate) fn lower_method_args(
@@ -130,8 +129,7 @@ pub(crate) fn lower_method_args(
         .collect()
 }
 
-/// c109 Phase 13: lower ONE call argument, reproducing `emit_call_args`
-/// (Source/Codegen/Expression.rs) byte-for-byte — the single source of truth for
+/// c109 Phase 13: lower ONE call argument — the single source of truth for
 /// the clone/Arc, Fn-coercion, and borrow/mut-borrow wrapper order. `conv` is the
 /// resolved param `(convention, type)` for this position (`None` when the callee has
 /// no known signature, e.g. a `CallValue`). The emit order is exactly the AST path's:
@@ -287,8 +285,7 @@ pub(crate) fn lower_module_args(
         .collect()
 }
 
-/// c109 Phase 14: lower one FFI extern-call argument, reproducing
-/// `emit_extern_call_args` (Source/Codegen/Expression.rs). The value is wrapped in
+/// c109 Phase 14: lower one FFI extern-call argument. The value is wrapped in
 /// `(…).clone()` when the arg carries `implicit_clone`, OR when its param is a
 /// non-scalar `Read`-convention type and `implicit_clone` is NOT already set (the AST
 /// `if a.flags.implicit_clone { … } else if … } if let Some((_, ty)) = sig … if
@@ -336,8 +333,8 @@ pub(crate) fn ast_arg_is_named_fn_value(e: &Expr, cx: &Cx, env: &LowerEnv) -> bo
     false
 }
 
-/// c109 Phase 9: reproduce codegen's `expr_jet_ty(receiver, env)`
-/// (Source/Codegen/Expression.rs) for a built-in method receiver, using the TIR
+/// c109 Phase 9: reproduce codegen's `expr_jet_ty(receiver, env)` for a built-in
+/// method receiver, using the TIR
 /// lowering env's slot types. This MUST match `expr_jet_ty` bit-for-bit (incl. its
 /// `None` results) because the Map-vs-List-vs-String emit branch in
 /// `emit_builtin_method` is keyed on it: a divergence here flips a branch and breaks

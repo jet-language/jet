@@ -137,8 +137,8 @@ pub(super) fn lower_string_view_init(init: &Expr, cx: &Cx, env: &mut LowerEnv) -
 }
 
 /// c109 Phase 9: resolve the built-in method op from the method name, arg count, and
-/// the receiver's resolved type — reproducing `emit_builtin_method`'s name+`rty`
-/// dispatch (Source/Codegen/Expression.rs) exactly. The Map-vs-List branch
+/// the receiver's resolved type — reproducing the name+`rty` dispatch exactly.
+/// The Map-vs-List branch
 /// (`insert`/`remove`/`get`) and the String-vs-list branch (`len`) come from
 /// `tir_recv_jet_ty` (matching the AST's `rty`). Unknown receivers retain the
 /// AST's legacy list fallback, while known non-list receivers stay available to
@@ -845,8 +845,7 @@ pub(crate) fn builtin_result_ty(method: &str, nargs: usize, recv_ty: Option<&Typ
 }
 
 /// c109 Phase 11: resolve a closure-taking collection method into a total
-/// `TClosureOp`, reproducing `emit_builtin_method`'s closure arms
-/// (Source/Codegen/Expression.rs) exactly. The receiver-type branch
+/// `TClosureOp`, reproducing the closure arms exactly. The receiver-type branch
 /// (`rty = expr_jet_ty(receiver)`) picks Map (`EachMap`) vs trait-object list
 /// (`EachRef`) vs plain list; the Fn-vs-FnMut branch reads the lambda arg's
 /// `needs_fn_mut` meta. All decisions made HERE, never in emit (I3). The gate
@@ -978,8 +977,8 @@ pub(crate) fn resolve_closure_op(
     op
 }
 
-/// c109 Phase 11: TIR-local reproduction of codegen's `list_carries_trait`
-/// (Source/Codegen/Expression.rs) — a list element type that is a trait object or a
+/// c109 Phase 11: TIR-local reproduction of codegen's `list_carries_trait` — a list
+/// element type that is a trait object or a
 /// named trait. Used by the `each`-on-trait-object-list emit branch (`jet_list_each_ref`).
 /// In the covered collection subset a trait-object element type is excluded, so this
 /// is always false for a covered receiver; reproduced for exactness regardless.

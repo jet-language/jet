@@ -1501,7 +1501,7 @@ pub fn core_module_path(imp: &ImportDecl) -> Option<String> {
 
 pub use crate::Syntax::{
     core_modules_list, is_known_core_module, is_legacy_std_import, is_ring_module,
-    is_ring_module_staged, normalize_core_module, KNOWN_CORE_MODULES,
+    is_ring_module_staged, KNOWN_CORE_MODULES,
 };
 
 /// D-JPK-RINGSHIP1=C: where a ring module's implementation comes from.

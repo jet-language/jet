@@ -376,6 +376,7 @@ fn lower_if_cond_atom(
             pattern @ Pattern::Variant {
                 variant,
                 bindings,
+                leading_dot: _,
                 span: pat_span,
             },
         ..

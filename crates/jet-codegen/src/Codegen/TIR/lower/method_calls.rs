@@ -779,7 +779,7 @@ pub(crate) fn lower_method_call(
             // inferred typed literals. At a regex one-shot's first parameter, the
             // expected type is unambiguously Regex; lower the same checked literal
             // node that normal sema produces.
-            if module == "jet.regex"
+            if module == "core.regex"
                 && index == 0
                 && matches!(
                     method,
@@ -803,7 +803,7 @@ pub(crate) fn lower_method_call(
                     return TExpr {
                         ty: Type::Named(Syntax::TYPE_REGEX.to_string()),
                         kind: TExprKind::CoreCall {
-                            module: "jet.regex".to_string(),
+                            module: "core.regex".to_string(),
                             method: "literal".to_string(),
                             args: vec![lower_expr(pattern, cx, env)],
                             source_span: *span,
@@ -1106,7 +1106,7 @@ pub(crate) fn lower_method_call(
         }
     }
     if let Some(helper) = crypto_static {
-        let module = "jet.crypto";
+        let module = "core.crypto";
         let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
         let widen_to_vec = core_widen_to_vec(module, helper, &targs);
         let ty = resolved_ret.cloned().unwrap_or_else(|| crypto_helper_return_ty(helper));
@@ -1138,10 +1138,10 @@ pub(crate) fn lower_method_call(
         if let Some(helper) = helper {
             let recv = lower_expr(receiver, cx, env);
             let args = vec![recv];
-            let widen_to_vec = core_widen_to_vec("jet.crypto", helper, &args);
+            let widen_to_vec = core_widen_to_vec("core.crypto", helper, &args);
             let ty = resolved_ret.cloned().unwrap_or_else(|| crypto_helper_return_ty(helper));
             return TExpr { ty, kind: TExprKind::CoreCall {
-                module: "jet.crypto".to_string(), method: helper.to_string(), args, source_span: method_span, widen_to_vec,
+                module: "core.crypto".to_string(), method: helper.to_string(), args, source_span: method_span, widen_to_vec,
             }};
         }
     }
@@ -1883,8 +1883,8 @@ pub(crate) fn lower_method_call(
     }
 
     // c109 Phase 10: a core/stdlib module call `alias.method(args)`.
-    // Mirror `emit_core_call` (Source/Codegen/Expression.rs): resolve the module here
-    // (total), lower args PLAINLY (no clone/borrow wrappers — `emit_core_call`'s
+    // Mirror TIR core-call emission: resolve the module here (total), lower args
+    // PLAINLY (no clone/borrow wrappers —
     // `arg(i)` is a raw `emit_expr`), and carry the return type from the authoritative
     // `core_fixed_sig` table. Tried BEFORE the builtin shape (a core method named
     // `get`/`split`/… must not be claimed by the receiver-keyed builtin op).

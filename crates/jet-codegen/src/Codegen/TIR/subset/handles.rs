@@ -9,8 +9,8 @@ use crate::Syntax;
 use std::collections::HashSet;
 
 /// c109 Phase 13: resolve a handle method `(handle, method, nargs)` into a total
-/// `THandleOp`, reproducing the handle arms of `emit_builtin_method`
-/// (Source/Codegen/Expression.rs). Returns `None` for anything not covered (so the
+/// `THandleOp`, reproducing built-in method lowering. Returns `None` for anything not
+/// covered (so the caller
 /// caller falls through to other shapes). Excluded (with reason): `lines` on
 /// FileReader/StdinHandle (dead — E2502, loop-source-only); all HTTPRouter `get`/
 /// `post`/`put`/`delete` (closure handler → `emit_router_handler`); HTTPRequest/
@@ -158,7 +158,7 @@ pub(crate) fn http_client_static_op(
 }
 
 /// c109 Phase 25: is `router.get(path, handler)` (and `.post`/`.put`/`.delete`) inside
-/// the subset? Reproduces `emit_router_handler` (Source/Codegen/Expression.rs): the
+/// the subset? Reproduces router-handler lowering: the
 /// handler (arg 1) must be either a BARE TOP-LEVEL FN name (an `Ident` not in locals —
 /// the `env.get(name).is_none()` branch → the `move |__req| user_<fn>(&__req)` wrapper)
 /// or an in-subset literal LAMBDA (the `Box::new(<lambda>)` branch). The path (arg 0) is
@@ -734,7 +734,7 @@ pub(crate) fn core_closure_call_return_ty(module: &str, method: &str, body_ty: T
             args: vec![body_ty],
         })),
         ("core.scope", "guard") => Type::Named("ScopeGuard".to_string()),
-        ("jet.reactive", "effect") => Type::Named(crate::Syntax::TYPE_EFFECT.to_string()),
+        ("core.reactive", "effect") => Type::Named(crate::Syntax::TYPE_EFFECT.to_string()),
         _ => unit_type(),
     }
 }
@@ -749,9 +749,9 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
     // this keeps the node's `ty` honest — `dispatch` → HTTPResponse composes with the
     // `.status()`/`.body()` accessors that read it).
     match (module, method) {
-        ("jet.http", "router") => return Type::Named("HTTPRouter".to_string()),
-        ("jet.http", "parse") => return Type::Named("HTTPRequest".to_string()),
-        ("jet.http", "dispatch") => return Type::Named("HTTPResponse".to_string()),
+        ("core.http", "router") => return Type::Named("HTTPRouter".to_string()),
+        ("core.http", "parse") => return Type::Named("HTTPRequest".to_string()),
+        ("core.http", "dispatch") => return Type::Named("HTTPResponse".to_string()),
         // c109 Phase 29: qualified `io.input(prompt)`. NOT in `core_fixed_sig` — its return
         // type is fixed (`Result<String, IOError>`) but lives in sema's bespoke
         // `infer_core_call` arm (CheckerCoreLib.rs `("core.io", "input")`), NOT the table.

@@ -1633,8 +1633,8 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     for method in [
         "ed25519_verify_strict",
         "ed25519_sign",
-        "hkdf_sha256",
-        "x25519",
+        "hkdf_sha256_raw",
+        "x25519_raw",
         "xchacha20poly1305_seal",
         "xchacha20poly1305_open",
         "aes256gcm_seal",

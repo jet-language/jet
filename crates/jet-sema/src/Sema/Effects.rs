@@ -42,7 +42,6 @@
 //! D-WASM1) that only ever care about a whole root regardless of leaf.
 
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::Syntax;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 /// A primitive effect. Closed, compiler-known set; each Core operation
@@ -494,12 +493,8 @@ pub fn show_set(set: &EffectSet) -> String {
 
 /// The effect carried by a Core call `module.method`, or `None` if pure.
 /// Grounded in the real Core API surface (CheckerCoreLib). The `module` is the
-/// fully-resolved name (`core.files`, `core.http`, …); legacy internal ring
-/// keys are normalized through the foundation resolver before matching.
+/// fully-resolved name (`core.files`, `core.http`, …).
 pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
-    let normalized_module =
-        Syntax::normalize_core_module(module).unwrap_or_else(|| module.to_string());
-    let module = normalized_module.as_str();
     // D-DET1: the deterministic capability constructors carry NO ambient effect —
     // `Clock.new(seed)` / `random.rng(seed)` build a reproducible `Clock`/`Rng`
     // from a caller-supplied seed (a pure value). Reading time/randomness THROUGH
@@ -553,7 +548,7 @@ pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
         "core.compute" if method != "device_cpu" => Effect::GPU,
         "core.files" => Effect::FS,
         // D-BROWSER-AUTO1=A: browser automation is a versioned network protocol.
-        "core.net" | "core.tls" | "jet.http" | "core.http.client" | "core.http.server" | "core.http.middleware" => Effect::Net,
+        "core.net" | "core.tls" | "core.http" | "core.http.client" | "core.http.server" | "core.http.middleware" => Effect::Net,
         // D-RAYLIB1=A: windowing/drawing/input/audio bridge.
         "core.raylib" => Effect::GPU,
         "core.time" => Effect::Time,
@@ -561,12 +556,12 @@ pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
         "core.env" => Effect::Env,
         "core.process" => Effect::Exec,
         "core.io" => Effect::IO,
-        "jet.db" | "jet.sql" => Effect::DB,
+        "core.db" | "jet.sql" => Effect::DB,
         // D-DEP-WASM1=A (c81): loading a sandboxed plugin executes foreign
         // code, even though the sandbox makes it memory-safe — same bucket as
         // `core.process` (an effects-budget `deny: [Exec]` also denies plugins).
-        "core.plugin" | "jet.plugin" => Effect::Exec,
-        "jet.log" => Effect::Log,
+        "core.plugin" => Effect::Exec,
+        "core.log" => Effect::Log,
         "core.ui" | "core.web" | "core.web.storage.local" | "core.web.storage.session" => {
             Effect::Browser
         }

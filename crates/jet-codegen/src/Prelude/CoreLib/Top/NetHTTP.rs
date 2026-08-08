@@ -1,4 +1,4 @@
-// ── E2-M10: networking (core.net + jet.http) ─────────────────────────────────
+// ── E2-M10: networking (core.net + core.http) ─────────────────────────────────
 // All networking uses std::net only — zero external crates in the prelude (I6).
 // TLS (D-NET1) is delivered as the `jet.tls` FFI package and is not included here.
 

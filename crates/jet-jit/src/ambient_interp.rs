@@ -1,4 +1,4 @@
-//! Whole-program interpreter hosts for `jet.db` / `jet.crypto` (#1254).
+//! Whole-program interpreter hosts for `core.db` / `core.crypto` (#1254).
 //!
 //! Same bridge runtimes as Cranelift hosts; CtValue at the boundary. Installed
 //! only around `run_whole_interp` so comptime/REPL stay pure / native-denied.
@@ -550,11 +550,11 @@ pub fn ambient_core_call(
             };
             Some(Ok(service_runtime_value(store.clone(), retention_ms)))
         }
-        ("jet.db" | "core.db", "policy") => {
+        ("core.db", "policy") => {
             let (Some(CtValue::Str(table)), Some(CtValue::Str(expression))) =
                 (args.first(), args.get(1))
             else {
-                return Some(Err(unsupported("jet.db.policy arguments", span)));
+                return Some(Err(unsupported("core.db.policy arguments", span)));
             };
             Some(Ok(match wire::jet_db_policy_validate(table, expression) {
                 Ok(()) => CtValue::Present(Box::new(db_policy_value(
@@ -564,7 +564,7 @@ pub fn ambient_core_call(
                 Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
             }))
         }
-        ("jet.db" | "core.db", "transaction" | "migrate") => {
+        ("core.db", "transaction" | "migrate") => {
             let Some(scope_value) = args.first() else {
                 return Some(Err(unsupported("database scope", span)));
             };
@@ -632,15 +632,15 @@ pub fn ambient_core_call(
                 }
             }))
         }
-        ("jet.db" | "core.db", "open_memory") => Some(Ok(db_conn_value(DB::runtime_open_memory()))),
-        ("jet.db" | "core.db", "open") => {
+        ("core.db", "open_memory") => Some(Ok(db_conn_value(DB::runtime_open_memory()))),
+        ("core.db", "open") => {
             let path = match args.first() {
                 Some(CtValue::Str(s)) => s.clone(),
-                _ => return Some(Err(unsupported("jet.db.open path", span))),
+                _ => return Some(Err(unsupported("core.db.open path", span))),
             };
             Some(Ok(db_conn_value(DB::runtime_open(&path))))
         }
-        ("jet.crypto", "sha512_bytes") => {
+        ("core.crypto", "sha512_bytes") => {
             let data = match as_bytes(args.first()?, span) {
                 Ok(b) => b,
                 Err(e) => return Some(Err(e)),
@@ -649,7 +649,7 @@ pub fn ambient_core_call(
                 &data,
             ))))
         }
-        ("jet.crypto", "blake3_bytes") => {
+        ("core.crypto", "blake3_bytes") => {
             let data = match as_bytes(args.first()?, span) {
                 Ok(b) => b,
                 Err(e) => return Some(Err(e)),
@@ -658,7 +658,7 @@ pub fn ambient_core_call(
                 &data,
             ))))
         }
-        ("jet.crypto", "constant_time_equal_bytes") => {
+        ("core.crypto", "constant_time_equal_bytes") => {
             let a = match as_bytes(args.first()?, span) {
                 Ok(b) => b,
                 Err(e) => return Some(Err(e)),
@@ -671,7 +671,7 @@ pub fn ambient_core_call(
                 Crypto::runtime::jet_crypto_constant_time_equal_bytes_impl(&a, &b),
             )))
         }
-        ("jet.crypto", "constant_time_equal") => {
+        ("core.crypto", "constant_time_equal") => {
             let a = match to_secret(args.first()?, span) {
                 Ok(s) => s,
                 Err(e) => return Some(Err(e)),
@@ -684,7 +684,7 @@ pub fn ambient_core_call(
                 Crypto::runtime::jet_crypto_constant_time_secret_impl(&a, &b),
             )))
         }
-        ("jet.crypto", "hkdf_sha256") => {
+        ("core.crypto", "hkdf_sha256") => {
             let ikm = match to_secret(args.first()?, span) {
                 Ok(s) => s,
                 Err(e) => return Some(Err(e)),
@@ -710,7 +710,7 @@ pub fn ambient_core_call(
                 },
             ))
         }
-        ("jet.crypto", "x25519_public") => {
+        ("core.crypto", "x25519_public") => {
             let secret = match as_bytes(args.first()?, span) {
                 Ok(b) => b,
                 Err(e) => return Some(Err(e)),
@@ -722,7 +722,7 @@ pub fn ambient_core_call(
                 },
             ))
         }
-        ("jet.crypto", "x25519_shared") => {
+        ("core.crypto", "x25519_shared") => {
             let secret = match as_bytes(args.first()?, span) {
                 Ok(b) => b,
                 Err(e) => return Some(Err(e)),
@@ -738,7 +738,7 @@ pub fn ambient_core_call(
                 },
             ))
         }
-        ("jet.crypto", "password_hash") => {
+        ("core.crypto", "password_hash") => {
             let password = match to_secret(args.first()?, span) {
                 Ok(s) => s,
                 Err(e) => return Some(Err(e)),
@@ -752,7 +752,7 @@ pub fn ambient_core_call(
                 },
             ))
         }
-        ("jet.crypto", "password_verify") => {
+        ("core.crypto", "password_verify") => {
             let password = match to_secret(args.first()?, span) {
                 Ok(s) => s,
                 Err(e) => return Some(Err(e)),
@@ -781,7 +781,7 @@ pub fn ambient_core_call(
                 },
             ))
         }
-        ("jet.crypto", "__secret_from_text") => {
+        ("core.crypto", "__secret_from_text") => {
             let text = match args.first() {
                 Some(CtValue::Str(s)) => s.clone(),
                 _ => return Some(Err(unsupported("Secret.from_text", span))),
@@ -791,7 +791,7 @@ pub fn ambient_core_call(
                 Crypto::runtime::jet_crypto_expert_secret_bytes_impl(&secret),
             )))
         }
-        ("jet.crypto", "__secret_from_bytes") => {
+        ("core.crypto", "__secret_from_bytes") => {
             let bytes = match as_bytes(args.first()?, span) {
                 Ok(b) => b,
                 Err(e) => return Some(Err(e)),
@@ -801,7 +801,7 @@ pub fn ambient_core_call(
                 Crypto::runtime::jet_crypto_expert_secret_bytes_impl(&secret),
             )))
         }
-        ("jet.crypto", "__x25519_generate") => Some(Ok(
+        ("core.crypto", "__x25519_generate") => Some(Ok(
             match Crypto::runtime::jet_crypto_x25519_generate_impl() {
                 Ok(key) => CtValue::Present(Box::new(x25519_secret_value(
                     Crypto::runtime::jet_crypto_expert_x25519_secret_bytes_impl(&key),
@@ -809,7 +809,7 @@ pub fn ambient_core_call(
                 Err(e) => CtValue::failed(Box::new(crypto_err(e.to_string()))),
             },
         )),
-        ("jet.crypto", "__x25519_public") => {
+        ("core.crypto", "__x25519_public") => {
             let bytes = match struct_bytes(args.first()?, "X25519SecretKey", span) {
                 Ok(b) => b,
                 Err(e) => return Some(Err(e)),
@@ -819,7 +819,7 @@ pub fn ambient_core_call(
                 Err(e) => Some(Err(unsupported(&e, span))),
             }
         }
-        ("jet.crypto", "__password_text") => {
+        ("core.crypto", "__password_text") => {
             let text = match args.first() {
                 Some(CtValue::Struct { type_name, fields }) if type_name == "PasswordHash" => {
                     fields.iter().find_map(|(n, v)| match (n.as_str(), v) {
@@ -834,7 +834,7 @@ pub fn ambient_core_call(
                 None => Some(Err(unsupported("PasswordHash.text", span))),
             }
         }
-        ("jet.crypto", "file_seal") => {
+        ("core.crypto", "file_seal") => {
             let recipients = match args.first() {
                 Some(CtValue::List(items)) => {
                     let mut out = Vec::new();
@@ -876,7 +876,7 @@ pub fn ambient_core_call(
                 },
             ))
         }
-        ("jet.crypto", "file_open") => {
+        ("core.crypto", "file_open") => {
             let key_bytes = match struct_bytes(args.first()?, "X25519SecretKey", span) {
                 Ok(b) => b,
                 Err(e) => return Some(Err(e)),

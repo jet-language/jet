@@ -1090,7 +1090,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 return TExpr {
                     ty: Type::Named(Syntax::TYPE_REGEX.to_string()),
                     kind: TExprKind::CoreCall {
-                        module: "jet.regex".to_string(),
+                        module: "core.regex".to_string(),
                         method: "literal".to_string(),
                         args: vec![lower_expr(&call.args[0].expr, cx, env)],
                         source_span: call.name_span,
@@ -2883,7 +2883,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     return TExpr {
                         ty: head,
                         kind: TExprKind::CoreCall {
-                            module: "jet.regex".to_string(),
+                            module: "core.regex".to_string(),
                             method: "literal".to_string(),
                             args: vec![lower_expr(pattern, cx, env)],
                             source_span: *span,

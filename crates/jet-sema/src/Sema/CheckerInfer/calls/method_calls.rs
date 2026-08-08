@@ -632,7 +632,7 @@ impl<'a> Checker<'a> {
                             return Some(Type::Named("KeyUnlock".to_string()));
                         }
                         if crate::Sema::CheckerCoreLib::core_module_type_item(&ns, leaf) {
-                            let type_name = if matches!(ns.as_str(), "jet.http" | "core.http.client" | "core.http.server") {
+                            let type_name = if matches!(ns.as_str(), "core.http" | "core.http.client" | "core.http.server") {
                                 match leaf.as_str() {
                                     "Method" | "Status" | "Version" | "HeaderName" | "HeaderValue"
                                     | "Headers" | "Request" | "Response" | "Body" | "Handler" | "Error" | "Proxy" => {
@@ -830,7 +830,7 @@ impl<'a> Checker<'a> {
                                     } else {
                                         ret
                                     }
-                                } else if matches!(ns.as_str(), "jet.crypto" | "core.crypto") {
+                                } else if ns.as_str() == "core.crypto" {
                                     ret.map(crate::Sema::Diagnostics::core_crypto_nominal)
                                 } else {
                                     ret
@@ -3772,6 +3772,7 @@ impl<'a> Checker<'a> {
                             variant,
                             args: enum_args,
                             span: value_span,
+                            ..
                         } = &args[0].expr
                         {
                             let valid = (type_name.is_empty()

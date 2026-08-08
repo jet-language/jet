@@ -8,8 +8,8 @@ use std::collections::HashSet;
 /// covered set is exactly the **type-monomorphic** core calls — those whose full
 /// signature (param conventions + return type) is fixed by `Sema::core_fixed_sig`.
 /// That table is the authoritative total source: its return type gives the node's
-/// total `ty` (for `?`-unwrap and binding inference), and `emit_core_call`
-/// (Source/Codegen/Expression.rs) has a matching emit arm for every one of these.
+/// total `ty` (for `?`-unwrap and binding inference), and `emit_tir_core_call` has a
+/// matching emit arm for every one of these.
 ///
 /// Gating on `core_fixed_sig(...).is_some()` cleanly EXCLUDES the deferred calls:
 ///   - **closure-taking** (`tasks.spawn`, `http.serve`, `scope.guard`) — not in the
@@ -54,7 +54,7 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     // type is arg-type dependent, resolved by sema's bespoke `infer_core_call` and
     // written onto the node's `resolved_ret` field (read at lowering, so it's total —
     // I3). The EMITTED form is a fixed per-`(module, method)` string (reproduced in
-    // `emit_tir_core_call`), args emitted plainly, byte-for-byte `emit_core_call`.
+    // `emit_tir_core_call`), args emitted plainly, preserving canonical encoding.
     // (`io.input` is NOT here — it IS in `core_fixed_sig`, covered by Phase 10.)
     // D-TUPLE-DESTRUCT1: `tasks.channel<T>()` is now a polymorphic core special
     // (registered in `is_polymorphic_core_special` above) — its `(Sender<T>,
@@ -77,7 +77,7 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     // `http.serve` stays out (closure-taking, covered by `CoreClosureCall`); `http.router`
     // is arg-free so it can't collide. The producer's `HTTPRouter` value type is covered
     // (`is_covered_handle_ty`) and its binding is forced to `let mut` (D-ROUTE1=A).
-    if module == "jet.http" && matches!(method, "router" | "parse" | "dispatch") {
+    if module == "core.http" && matches!(method, "router" | "parse" | "dispatch") {
         return true;
     }
     // D-TEXTWIDTH1=B: `text.display_width` — NOT in `core_fixed_sig` (its return
@@ -93,7 +93,7 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     // qualified MethodCall on a `core.io` alias (the ambient bare `input()`, Phase 25, is
     // a separate `Expr::Call` node → `AmbientInput`). Emits the same fixed-string CoreCall
     // `{root}jet_std_io_input(None|Some(&(prompt)))` (reproduced in `emit_tir_core_call`),
-    // byte-for-byte the AST `emit_core_call` arm. Composes with the Phase-8 `?? return`.
+    // byte-for-byte the TIR core-call encoding. Composes with the Phase-8 `?? return`.
     if module == "core.io" && method == "input" {
         return true;
     }
@@ -221,7 +221,7 @@ pub(super) fn core_call_args_in_subset(
     // D-REGEX-LIT1=D: regex one-shot calls support the ordinary documentation-only
     // labels (`pattern:`, `text:`). Sema has already checked each label against its
     // positional parameter; lowering erases labels.
-    if module == "jet.regex" {
+    if module == "core.regex" {
         return args
             .iter()
             .all(|arg| expr_in_subset(&arg.expr, cx, locals));
@@ -341,7 +341,7 @@ pub(super) fn core_call_args_in_subset(
 
 /// c109 Phase 13: is a closure-taking core call (`tasks.spawn`/`http.serve`/
 /// `scope.guard`) inside the subset? These are NOT in `core_fixed_sig` — each has a
-/// bespoke emit shape (`emit_core_call`, Source/Codegen/Expression.rs). We cover only
+/// bespoke emit shape. We cover only
 /// the cleanest, byte-reproducible case for each, where the closure arg is a LITERAL
 /// in-subset lambda:
 ///   - `tasks.spawn(<lambda>)` — 1 arg, a literal lambda (the `emit_spawn_lambda`
@@ -365,7 +365,7 @@ pub(crate) fn core_closure_call_in_subset(
         ("core.tasks", "spawn") => args.len() == 1 && no_labels && lambda_arg(0),
         // D-VERDICT-1323-1: (count, body); the body is a spawn lambda like `spawn`.
         ("core.tasks", "spawn_group") => args.len() == 2 && no_labels && lambda_arg(1),
-        ("jet.http", "serve") => {
+        ("core.http", "serve") => {
             args.len() == 2
                 && no_labels
                 && expr_in_subset(&args[0].expr, cx, locals)
@@ -417,7 +417,7 @@ pub(crate) fn core_closure_call_in_subset(
         }
         // D-REACT1=B / D-SIGNAL1: `reactive.derived/computed/effect(<lambda>)` —
         // 1 arg, a literal zero-param in-subset lambda (rendered by `render_lambda_str`).
-        ("jet.reactive", "derived" | "computed" | "effect") => {
+        ("core.reactive", "derived" | "computed" | "effect") => {
             args.len() == 1 && no_labels && lambda_arg(0)
         }
         // D-RENDERTGT2=A (c133 M2): `ui.reactive_render(<lambda>)`.

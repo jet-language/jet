@@ -43,7 +43,7 @@ fn is_fallible_void_return(
                     if n == Syntax::TYPE_ERROR
                         || (n == "CryptoError"
                             && !registry.contains(n)
-                            && core_imports.values().any(|module| module == "jet.crypto" || module == "core.crypto")))
+                            && core_imports.values().any(|module| module == "core.crypto")))
     )
 }
 

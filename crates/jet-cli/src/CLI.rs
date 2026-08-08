@@ -20,6 +20,8 @@
 
 pub use crate::Syntax::edit_distance;
 use crate::Syntax::BINARY_NAME;
+use jet_foundation::BuildEffect;
+use std::sync::LazyLock;
 
 /// One reserved word or sigil, for `jet inspect reserved` (#1659 criterion 5).
 pub struct ReservedEntry {
@@ -103,6 +105,7 @@ pub fn reserved_report_json() -> String {
 }
 
 /// One global flag that applies across commands.
+#[derive(Clone)]
 pub struct FlagSpec {
     /// Long form, e.g. `--json` (always present).
     pub long: &'static str,
@@ -693,9 +696,38 @@ pub fn is_canonical_top_level(name: &str) -> bool {
     moved_command_group(name).is_none() && !RETIRED_BARE.contains(&name)
 }
 
+fn leaked_cli_text(text: String) -> &'static str {
+    // ponytail: leak fixed registry strings once; use owned fields only if this registry becomes reloadable.
+    Box::leak(text.into_boxed_str())
+}
+
+fn generated_effect_flags() -> Vec<FlagSpec> {
+    BuildEffect::ALL
+        .into_iter()
+        .flat_map(|effect| {
+            [
+                FlagSpec {
+                    long: leaked_cli_text(format!("--allow-{}", effect.flag())),
+                    help: leaked_cli_text(format!(
+                        "with build: allow {} access for this run",
+                        effect.name()
+                    )),
+                },
+                FlagSpec {
+                    long: leaked_cli_text(format!("--deny-{}", effect.flag())),
+                    help: leaked_cli_text(format!(
+                        "with repl: deny {} access; overrides allow and prompts",
+                        effect.name()
+                    )),
+                },
+            ]
+        })
+        .collect()
+}
+
 /// Every global flag the driver understands. Used to flag-check and to suggest
 /// on a typo (E2102), and to complete after `--`.
-pub const FLAGS: &[FlagSpec] = &[
+const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--attach", help: "with inspect live: process id to observe" },
     FlagSpec { long: "--once", help: "with inspect live: print one snapshot and exit" },
     FlagSpec { long: "--observe", help: "with run: expose bounded live runtime facts for attachment" },
@@ -764,17 +796,6 @@ pub const FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--freestanding", help: "with build/run: target a system without an operating system" },
     // D-CTEFFECT1: comptime effect tier gate.
     FlagSpec { long: "--allow-impure", help: "with build/run: allow explicitly gated compile-time effects" },
-    // D-BUILDFLAGS1=A: per-effect grants for one programmable-build run.
-    FlagSpec { long: "--allow-exec", help: "with build: allow declared process execution for this run" },
-    FlagSpec { long: "--allow-fs", help: "with build: allow declared file access for this run" },
-    FlagSpec { long: "--allow-net", help: "with build: allow declared network access for this run" },
-    FlagSpec { long: "--allow-env", help: "with build: allow declared environment access for this run" },
-    FlagSpec { long: "--allow-io", help: "with build: allow declared input and output for this run" },
-    FlagSpec { long: "--allow-db", help: "with build: allow declared database access for this run" },
-    FlagSpec { long: "--allow-time", help: "with build: allow declared clock access for this run" },
-    FlagSpec { long: "--allow-rand", help: "with build: allow declared randomness for this run" },
-    FlagSpec { long: "--allow-log", help: "with build: allow declared logging for this run" },
-    FlagSpec { long: "--allow-gpu", help: "with build: allow declared GPU access for this run" },
     FlagSpec { long: "--target", help: "with build: compile for a target platform" },
     FlagSpec {
         long: "--explain-partition",
@@ -816,6 +837,12 @@ pub const FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--yes", help: "with budget update: apply a valid non-interactive plan" },
     FlagSpec { long: "-y", help: "short form of --yes" },
 ];
+
+pub static FLAGS: LazyLock<Vec<FlagSpec>> = LazyLock::new(|| {
+    let mut flags = BASE_FLAGS.to_vec();
+    flags.extend(generated_effect_flags());
+    flags
+});
 
 /// Is `name` a built-in command?
 pub fn is_builtin(name: &str) -> bool {
@@ -985,7 +1012,7 @@ pub fn completions_zsh() -> String {
     }
     let nested = command_groups().map(|g| format!("            {}) _values 'action' {} ;;", g.name, g.actions.iter().map(|a| format!("'{}:{}'", a.name, escape_zsh(a.summary))).collect::<Vec<_>>().join(" "))).collect::<Vec<_>>().join("\n");
     let mut flag_lines = String::new();
-    for f in FLAGS {
+    for f in FLAGS.iter() {
         flag_lines.push_str(&format!("        '{}[{}]'\n", f.long, escape_zsh(f.help)));
     }
     format!(
@@ -1035,7 +1062,7 @@ pub fn completions_fish() -> String {
             out.push_str(&format!("complete -c {bin} -n '__fish_seen_subcommand_from {group}' -a {action} -d '{desc}'\n", bin=BINARY_NAME, group=group.name, action=action.name, desc=escape_fish(action.summary)));
         }
     }
-    for f in FLAGS {
+    for f in FLAGS.iter() {
         out.push_str(&format!(
             "complete -c {bin} -l {long} -d '{desc}'\n",
             bin = BINARY_NAME,
@@ -1257,7 +1284,7 @@ and their dependencies. Output is plain when piped and colored on a terminal.\n"
         }
     }
     out.push_str(".SH FLAGS\n");
-    for f in FLAGS {
+    for f in FLAGS.iter() {
         out.push_str(&format!(".TP\n.B {}\n{}\n", f.long, roff_escape(f.help)));
     }
     out.push_str(".SH FILES\n");
@@ -1476,8 +1503,34 @@ mod tests {
         for c in COMMANDS.iter().filter(|c| is_canonical_top_level(c.name)) {
             assert!(m.contains(c.name), "man missing command {}", c.name);
         }
-        for f in FLAGS {
+        for f in FLAGS.iter() {
             assert!(m.contains(f.long), "man missing flag {}", f.long);
+        }
+    }
+
+    #[test]
+    fn effect_flags_render_in_registry_completions_and_man() {
+        let man = man_page("0.0.0");
+        let completions = [
+            completions_bash(),
+            completions_zsh(),
+            completions_fish(),
+            completions_powershell(),
+        ];
+        for effect in BuildEffect::ALL.iter().copied() {
+            let deny = format!("--deny-{}", effect.flag());
+            assert!(
+                FLAGS.iter().any(|flag| flag.long == deny.as_str()),
+                "registry missing {deny}"
+            );
+            assert!(man.contains(deny.as_str()), "man missing {deny}");
+            for completion in &completions {
+                assert!(
+                    completion.contains(deny.as_str())
+                        || completion.contains(deny.trim_start_matches("--")),
+                    "completion missing {deny}"
+                );
+            }
         }
     }
 

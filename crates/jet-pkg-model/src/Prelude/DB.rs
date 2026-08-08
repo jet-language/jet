@@ -1,7 +1,7 @@
-// jet.db runtime (D-DBDRIVER1) — SQLite via rusqlite (bundled).
+// core.db runtime (D-DBDRIVER1) — SQLite via rusqlite (bundled).
 //
 // This file is emitted verbatim into the hidden FFI bridge crate (see
-// Source/FFI.rs) when a Jet program uses `jet.db`. The compiler crate
+// Source/FFI.rs) when a Jet program uses `core.db`. The compiler crate
 // (`Source/`) never depends on `rusqlite`; it only ships this text.
 // Owner-approved I6 bootstrap exception: bundled SQLite is compiled by
 // rusqlite's build.rs from the C source it vendors.

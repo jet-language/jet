@@ -1307,8 +1307,8 @@ fn string_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
             err: Box::new(Type::Named("ParseError".to_string())),
         })),
         // D-STR-DECLINE1=C: `matches`/`match` route through the one core.regex
-        // engine (`jet.regex.compile` + `is_match`/`find`) — same `? String`
-        // bad-pattern error shape `jet.regex.compile` already returns.
+        // engine (`core.regex.compile` + `is_match`/`find`) — same `? String`
+        // bad-pattern error shape `core.regex.compile` already returns.
         ("matches", 1) => Some(Some(Type::Result {
             ok: Box::new(Type::Bool),
             err: Box::new(Type::String),

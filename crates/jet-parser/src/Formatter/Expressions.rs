@@ -1198,10 +1198,17 @@ impl<'a> Fmt<'a> {
                 type_name,
                 variant,
                 args,
+                leading_dot,
                 ..
             } => {
-                self.write(type_name);
-                self.write(".");
+                if type_name.is_empty() {
+                    if *leading_dot {
+                        self.write(".");
+                    }
+                } else {
+                    self.write(type_name);
+                    self.write(".");
+                }
                 self.write(variant);
                 if !args.is_empty() {
                     // D-UITREE1/D-DOTCTOR1: named-payload variants use the struct

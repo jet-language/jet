@@ -641,7 +641,7 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
             "core.binary",
         ],
     );
-    let _needs_regex = core_usage_matches(used_core, &["core.regex", "jet.regex"]);
+    let _needs_regex = core_usage_matches(used_core, &["core.regex"]);
     // needs_xml / needs_base still drive encoding Top reachability below.
 
     for part in CORELIB_KERNEL_PARTS {
@@ -694,7 +694,6 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
             "core.crypto.random",
             "core.vault",
             "core.vault.expert",
-            "jet.crypto",
             "core.uuid",
         ],
     );
@@ -729,7 +728,6 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
             "core.sketch.tdigest",
             "core.sketch.cms",
             "core.sketch.reservoir",
-            "jet.db",
             "core.db",
         ],
     );
@@ -749,7 +747,6 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
             "core.http",
             "core.http.client",
             "core.http.server",
-            "jet.http",
             "core.ws",
             "core.email",
             "core.browser",
@@ -766,7 +763,6 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
             "core.http",
             "core.http.client",
             "core.http.server",
-            "jet.http",
             "core.web",
             "core.web.devserver",
         ],
@@ -786,7 +782,7 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
     let needs_reflect = core_usage_matches(used_core, &["core.reflect", "core.lang"]);
     let needs_auth_tokens = core_usage_matches(used_core, &["core.auth"]) || needs_crypto;
     let needs_auth_session = core_usage_matches(used_core, &["core.auth", "app"]);
-    let needs_sync = core_usage_matches(used_core, &["core.sync", "app", "jet.db"]);
+    let needs_sync = core_usage_matches(used_core, &["core.sync", "app", "core.db"]);
     let needs_services = core_usage_matches(used_core, &["core.services"]);
 
     // Kernel closure: JetStd brace-chain files name these Top symbols
@@ -958,7 +954,7 @@ fn push_web_app_preludes(out: &mut String, used_core: &std::collections::HashSet
             "core.web.devserver",
         ],
     );
-    let needs_live = core_usage_matches(used_core, &["app", "core.web", "jet.db"]);
+    let needs_live = core_usage_matches(used_core, &["app", "core.web", "core.db"]);
     if needs_webapp {
         out.push_str(DEVSERVER_PRELUDE);
         out.push_str(WEBAPP_PRELUDE);
@@ -1637,7 +1633,7 @@ pub(crate) fn emit_synthetic_close_builtin_impls(cx: &Cx, items: &[Item], out: &
             ));
         }
     }
-    if uses("jet.db") {
+    if uses("core.db") {
         // D-DBPOLICY-BIND1: `Driver` is a policy-bearing scope, never the raw
         // connection. Generic calls use the same policy-enforcing helpers as
         // concrete `DBScope` calls.

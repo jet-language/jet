@@ -8764,7 +8764,7 @@ impl LowerCtx<'_, '_> {
                         .store(MemFlags::trusted(), value, pointer, 0);
                     return Ok(self.b.ins().iconst(types::I8, 0));
                 }
-                if module == "jet.crypto" {
+                if module == "core.crypto" {
                     let (host_id, arg_values): (FuncId, Vec<Value>) =
                         match (method.as_str(), args.as_slice()) {
                             ("__signing_generate", []) => {
@@ -8974,7 +8974,7 @@ impl LowerCtx<'_, '_> {
                                     self.lower_expr(dest)?,
                                 ],
                             ),
-                            ("x25519", [secret, public]) => (
+                            ("x25519_raw", [secret, public]) => (
                                 self.host.crypto.expert_x25519,
                                 vec![
                                     self.lower_expr(secret)?,
@@ -8982,22 +8982,15 @@ impl LowerCtx<'_, '_> {
                                     self.b.ins().iconst(types::I64, 1),
                                 ],
                             ),
-                            ("x25519", [secret, public, reject]) => {
-                                let secret_val = self.lower_expr(secret)?;
-                                let public_val = self.lower_expr(public)?;
-                                let reject_val = self.lower_expr(reject)?;
-                                let reject_i64 = if self.meta.clif_ty(&reject.ty)
-                                    == Some(types::I8)
-                                {
-                                    self.b.ins().uextend(types::I64, reject_val)
-                                } else {
-                                    reject_val
-                                };
-                                (
-                                    self.host.crypto.expert_x25519,
-                                    vec![secret_val, public_val, reject_i64],
-                                )
-                            }
+                            ("hkdf_sha256_raw", [ikm, salt, info, length]) => (
+                                self.host.crypto.expert_hkdf_sha256,
+                                vec![
+                                    self.lower_expr(ikm)?,
+                                    self.lower_expr(salt)?,
+                                    self.lower_expr(info)?,
+                                    self.lower_expr(length)?,
+                                ],
+                            ),
                             ("secret_bytes", [secret]) => (
                                 self.host.crypto.expert_secret_bytes,
                                 vec![self.lower_expr(secret)?],
@@ -9612,7 +9605,7 @@ impl LowerCtx<'_, '_> {
                     let call = self.b.ins().call(host_ref, &arg_vals);
                     return Ok(self.b.inst_results(call)[0]);
                 }
-                if matches!(module.as_str(), "jet.http" | "core.http" | "core.http.client") {
+                if matches!(module.as_str(), "core.http" | "core.http.client") {
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
                         "get" if args.len() == 1 => (
                             self.host.net_http.http_client_get,
@@ -9675,7 +9668,7 @@ impl LowerCtx<'_, '_> {
                     let call = self.b.ins().call(host_ref, &arg_vals);
                     return Ok(self.b.inst_results(call)[0]);
                 }
-                if module == "jet.log" {
+                if module == "core.log" {
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
                         "set_level" if args.len() == 1 => {
                             (self.host.core.log_set_level, vec![self.lower_expr(&args[0])?])
@@ -11638,7 +11631,7 @@ impl LowerCtx<'_, '_> {
                     let call = self.b.ins().call(host_ref, &arg_vals);
                     return Ok(self.b.inst_results(call)[0]);
                 }
-                if module == "jet.regex" || module == "core.regex" {
+                if module == "core.regex" {
                     let widen_bool = |this: &mut Self, e: &TExpr| -> Result<Value, String> {
                         let v = this.lower_expr(e)?;
                         if this.b.func.dfg.value_type(v) == types::I8 {
@@ -11714,7 +11707,7 @@ impl LowerCtx<'_, '_> {
                     let call = self.b.ins().call(host_ref, &arg_vals);
                     return Ok(self.b.inst_results(call)[0]);
                 }
-                if module == "jet.db" {
+                if module == "core.db" {
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
                         "open_memory" if args.is_empty() => {
                             (self.host.db.open_memory, Vec::new())
@@ -11873,7 +11866,7 @@ impl LowerCtx<'_, '_> {
                     let call = self.b.ins().call(host_ref, &arg_vals);
                     return Ok(self.b.inst_results(call)[0]);
                 }
-                if module == "jet.reactive" {
+                if module == "core.reactive" {
                     match method.as_str() {
                         "signal" if args.len() == 1 => {
                             let init = self.lower_expr(&args[0])?;

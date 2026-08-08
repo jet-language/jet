@@ -769,7 +769,7 @@ impl Cx {
     pub(crate) fn core_qualified_rust_type_name(&self, name: &str) -> Option<&'static str> {
         let (alias, leaf) = name.split_once('.')?;
         match (self.core_imports.get(alias).map(String::as_str), leaf) {
-            (Some("core.crypto" | "jet.crypto"), leaf) => core_crypto_type_name(leaf),
+            (Some("core.crypto"), leaf) => core_crypto_type_name(leaf),
             (Some("core.auth"), "Claims") => Some("Claims"),
             (Some("core.auth"), "AuthError") => Some("AuthError"),
             (Some("core.auth"), "Session") => Some("Session"),
@@ -2576,7 +2576,7 @@ fn register_core_close_types(cx: &mut Cx) {
                 .map(str::to_string),
         );
     }
-    if imports("jet.db") {
+    if imports("core.db") {
         cx.close_types.extend(["DBConnection", "DBScope"].into_iter().map(str::to_string));
     }
 }

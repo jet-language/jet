@@ -3148,13 +3148,13 @@ impl<'a> EvalCtx<'a> {
                         _ => unreachable!("Decode protocol returns Result"),
                     });
                 }
-                if module == "jet.crypto"
+                if module == "core.crypto"
                     && method == "__signing_generate"
                     && argv.is_empty()
                 {
                     return Ok(CtValue::Present(Box::new(CtValue::Int(1))));
                 }
-                if module == "jet.crypto"
+                if module == "core.crypto"
                     && method == "__signing_public"
                     && argv.len() == 1
                 {

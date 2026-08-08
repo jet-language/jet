@@ -1400,7 +1400,7 @@ pub(crate) fn static_method_call_in_subset(
 
 /// Method names a core/stdlib/builtin/special lowering intercepts *before* the
 /// user-method dispatch (`emit_method_call` → `emit_builtin_method` and the
-/// `.raw()`/`.snapshot()`/`mem.*.new` special cases, Source/Codegen/Expression.rs).
+/// `.raw()`/`.snapshot()`/`mem.*.new` special cases).
 /// A user method sharing one of these names is emitted by that bespoke lowering on
 /// the AST path, not by `method_sigs`, so the TIR must NOT claim it — exclude.
 /// The list is intentionally a superset (every name those paths mention, guarded

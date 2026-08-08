@@ -53,9 +53,9 @@ fn lookup_deprecation(item: &str) -> Option<&'static Deprecation> {
 
 #[allow(dead_code)]
 pub(crate) fn check_core_deprecation(module: &str, name: &str) -> Option<Deprecation> {
-    let short = crate::Syntax::normalize_core_module(module)
-        .and_then(|m| m.strip_prefix("core.encoding.").map(|rest| rest.to_string()))
-        .unwrap_or_else(|| module.to_string());
+    let short = module
+        .strip_prefix("core.encoding.")
+        .unwrap_or(module);
     let item = format!("{short}.{name}");
     lookup_deprecation(&item).copied()
 }

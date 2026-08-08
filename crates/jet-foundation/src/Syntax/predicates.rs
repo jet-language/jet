@@ -120,9 +120,7 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     "core.fmt",
     // D-UUIDENC1=A: UUID v4 (CSPRNG) and v7 (injectable Clock).
     "core.uuid",
-    // D-CORENS1: ring packages now spelled `core.*` (canonical user-facing name).
-    // Most ring packages still dispatch through legacy `jet.*` keys; archive is
-    // canonical end-to-end as `core.archive`.
+    // D-CORENS1: ring packages use their canonical `core.*` names end to end.
     "core.log",
     "core.crypto",
     // D-RANDSPLIT1=A: CSPRNG submodule — `core.crypto.random.bytes(n)`.
@@ -221,49 +219,25 @@ pub fn is_known_core_module(name: &str) -> bool {
     if KNOWN_CORE_MODULES.contains(&name) {
         return true;
     }
-    // D-CORENS1: internal dispatch key `jet.<ring>` (from normalize_core_module)
-    // is valid for ring modules that have not been canonicalized end to end.
-    if let Some(ring) = name.strip_prefix("jet.") {
-        if ring == "raylib" {
-            return false;
-        }
-        return is_ring_module(ring);
-    }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_known_core_module, KNOWN_CORE_MODULES};
+
+    #[test]
+    fn core_module_keys_reject_internal_jet_prefix() {
+        assert!(KNOWN_CORE_MODULES.iter().all(|name| !name.starts_with("jet.")));
+        for ring in ["log", "crypto", "http", "regex", "reactive", "archive", "raylib", "db", "plugin"] {
+            assert!(is_known_core_module(&format!("core.{ring}")));
+            assert!(!is_known_core_module(&format!("jet.{ring}")));
+        }
+    }
 }
 
 pub fn core_modules_list() -> String {
     KNOWN_CORE_MODULES.join(", ")
-}
-
-/// Normalize a module import name to a canonical core-module path, or `None`
-/// if the import is not a core/ring module.
-///
-/// D-CORENS-CANON1: `core.<ring>` is the only user-facing spelling. Ring modules
-/// still normalize to the internal `jet.<ring>` key used by sema dispatch.
-pub fn normalize_core_module(name: &str) -> Option<String> {
-    if name == CORE_SHORT {
-        return Some(CORE_SHORT.to_string());
-    }
-    if name == CORE_CANONICAL {
-        return Some(CORE_SHORT.to_string());
-    }
-    // D-LIVEQUERY1=A: `app` is a first-class Core surface for live queries.
-    if name == "app" {
-        return Some("app".to_string());
-    }
-    // Some ring modules still use internal `jet.<ring>` keys until their
-    // package cleanup lands. Canonicalized modules stay `core.*` end to end.
-    if let Some(ring) = name.strip_prefix("core.") {
-        if matches!(ring, "archive" | "raylib") {
-            return Some(name.to_string());
-        }
-        if is_ring_module(ring) {
-            return Some(format!("jet.{ring}"));
-        }
-        return Some(format!("core.{ring}"));
-    }
-    None
 }
 
 /// E2-M9: ring module names that resolve as compiler-known modules.
@@ -271,7 +245,7 @@ pub fn is_ring_module(name: &str) -> bool {
     matches!(
         name,
         "log" | "crypto" | "http" | "regex" | "reactive" | "archive" | "raylib" | "db"
-            // D-DEP-WASM1=A (c81): `core.plugin` / internal `jet.plugin` — the
+            // D-DEP-WASM1=A (c81): `core.plugin` — the
             // wasmtime-backed plugin loader (`Plugin.load`/`.call`).
             | "plugin"
     )
@@ -421,10 +395,7 @@ pub fn edit_distance(a: &str, b: &str) -> usize {
     }
     prev[b.len()]
 }
-use super::{
-    CORE_CANONICAL, CORE_EMAIL_MODULE, CORE_SHORT, STDLIB_DSL_BLOCK_MARKERS, TYPE_BIT_SET,
-    TYPE_BYTE_BUFFER,
-};
+use super::{CORE_EMAIL_MODULE, STDLIB_DSL_BLOCK_MARKERS, TYPE_BIT_SET, TYPE_BYTE_BUFFER};
 
 /// D-SHAPE-INTERNAL1 / D-SHAPE-DUNDER2: the one prefix classification used by
 /// the lexer, sema, publishing, and tools. Bare `_` remains the pattern/binding

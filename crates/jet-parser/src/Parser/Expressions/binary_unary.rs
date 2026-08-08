@@ -612,6 +612,7 @@ impl<'a> Parser<'a> {
                         type_name: String::new(),
                         variant,
                         args,
+                        leading_dot: true,
                         span: Span::new(dot_start, end),
                     })
                 }
@@ -671,6 +672,7 @@ impl<'a> Parser<'a> {
                         type_name: String::new(),
                         variant,
                         args,
+                        leading_dot: true,
                         span: Span::new(dot_start, end),
                     })
                 }

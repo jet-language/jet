@@ -678,17 +678,17 @@ fn base32_encode(bytes: &[u8]) -> String {
 /// Core modules the REPL interpreter cannot run (native FFI / threads / HTTP stack).
 fn repl_native_only_module(module: &str) -> Option<&'static str> {
     match module {
-        "core.http" | "core.http.client" | "core.http.server" | "jet.http" => {
+        "core.http" | "core.http.client" | "core.http.server" => {
             Some("the HTTP client/server (`core.http`)")
         }
-        "core.db" | "jet.db" => Some("`core.db` (SQLite)"),
+        "core.db" => Some("`core.db` (SQLite)"),
         "core.net" => Some("network sockets (`core.net`)"),
-        "core.reactive" | "jet.reactive" => Some("`core.reactive`"),
-        "core.crypto" | "core.crypto.random" | "jet.crypto" => Some("`core.crypto`"),
+        "core.reactive" => Some("`core.reactive`"),
+        "core.crypto" | "core.crypto.random" => Some("`core.crypto`"),
         "core.auth" => Some("`core.auth` token verification"),
         "core.tasks" | "core.channels" => Some("tasks/channels (`core.tasks`)"),
         "core.mem" | "core.mem.alloc" => Some("`core.mem` (low-level memory tier)"),
-        "jet.log" => Some("`core.log`"),
+        "core.log" => Some("`core.log`"),
         _ => None,
     }
 }
@@ -1007,7 +1007,7 @@ fn text_width_policy_flags(policy: &CtValue) -> (bool, bool) {
 }
 
 /// Evaluate a whitelisted pure Core call at comptime / in the REPL.
-/// `module` is the full path (e.g. `"core.math"`, `"jet.regex"`).
+/// `module` is the full path (e.g. `"core.math"`, `"core.regex"`).
 pub fn apply_core_call(
     module: &str,
     method: &str,
@@ -2031,8 +2031,8 @@ pub fn apply_core_call(
                 fields: vec![("now".to_string(), CtValue::Int(seed))],
             })
         }
-        // --- jet.regex / core.regex (D-REGEXENGINE1) ---
-        ("jet.regex", "literal") => {
+        // --- core.regex / core.regex (D-REGEXENGINE1) ---
+        ("core.regex", "literal") => {
             let pattern = as_string(one(0)?, span)?;
             jet_foundation::RegexSyntax::validate(pattern).map_err(|error| {
                 Diagnostic::error(
@@ -2051,15 +2051,15 @@ pub fn apply_core_call(
                 fields: vec![("pattern".to_string(), CtValue::Str(pattern.to_string()))],
             })
         }
-        ("jet.regex", "is_match") => regex_is_match(args, span),
-        ("jet.regex", "find") => regex_find(args, span),
-        ("jet.regex", "find_all") => regex_find_all(args, span),
-        ("jet.regex", "matches") => regex_matches(args, span),
-        ("jet.regex", "split") => regex_split(args, span),
-        ("jet.regex", "split_limit") => regex_split_limit(args, span),
-        ("jet.regex", "replace") => regex_replace(args, span, false),
-        ("jet.regex", "replace_all") => regex_replace(args, span, true),
-        ("jet.regex", "match") => regex_match(args, span),
+        ("core.regex", "is_match") => regex_is_match(args, span),
+        ("core.regex", "find") => regex_find(args, span),
+        ("core.regex", "find_all") => regex_find_all(args, span),
+        ("core.regex", "matches") => regex_matches(args, span),
+        ("core.regex", "split") => regex_split(args, span),
+        ("core.regex", "split_limit") => regex_split_limit(args, span),
+        ("core.regex", "replace") => regex_replace(args, span, false),
+        ("core.regex", "replace_all") => regex_replace(args, span, true),
+        ("core.regex", "match") => regex_match(args, span),
         // --- core.random (ambient; seed for deterministic REPL transcripts) ---
         ("core.random", "seed") => {
             let seed = match one(0)? {

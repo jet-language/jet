@@ -262,6 +262,7 @@ Current transactions:
 | `add_pattern_arm` | `graph_id`, `node_start`, `node_end`, `pattern` | Appends a checked Jet pattern arm to a branch/dispatch node. `pattern` may be written with or without leading `==`; new arm bodies use a sema-safe default `return …` for value functions or `print("canvas arm")` for `Void` functions. |
 | `edit_pattern_arm` | `graph_id`, `pattern_start`, `pattern_end`, `pattern` | Replaces one arm pattern source, then formats, checks, and reprojects. Bad patterns return normal Jet diagnostics and leave source unchanged. |
 | `remove_pattern_arm` | `graph_id`, `pattern_start`, `pattern_end` | Deletes one pattern arm and its body. Removing the last remaining arm is refused in plain language before source would become invalid. |
+| `toggle_switch_state` | `graph_id`, `node_start`, `node_end` | Removes an existing `#Off`/`#DebugOnly` marker or adds `#Off` to a checked statement, then formats, checks, and reprojects. State-contained nodes are refused without changing source. |
 | `append_multi_input` | `node_start`, `node_end`, optional `element` | Appends an element to a list literal source node. Clients normally supply a type-derived default element and open inline edit after reproject. |
 | `remove_multi_input_element` | `node_start`, `node_end`, `element_start`, `element_end` | Removes one list/fan-out element, including the adjacent comma, then formats, checks, and reprojects. |
 | `create_trait_impl` | `type_name`, `trait_name` | Appends an ordinary `impl Type.Trait { ... }` block with source-checked member stubs. |
@@ -358,9 +359,14 @@ The `core_catalog` query is browse-only. Core entries in the actions palette are
 source-backed insert candidates when `available:true`: they carry module path,
 signature, `pure`, `insert_callee`, `insert_op:"insert_call"`, source document,
 ordinary source-edit authority, and `writes:"source_transaction_only"`. Rows with
-`available:false` stay visible and disabled; `unavailable_reason_code` is the
-machine-readable reason and `denied_reason` is the hover text. They still execute
-only after the existing `insert_call`/preview source transaction validates.
+`available:false` stay visible. Entries with `stageable:true` and
+`stage_reason_code` `needs_canvas_defaults` or `method_only` remain active and
+place a dashed local node; the first compatible wire runs the existing checked
+`insert_call` source transaction. Other unavailable rows stay disabled;
+`unavailable_reason_code` is the machine-readable reason and `denied_reason` is
+the hover text. A `method_only` row carries its typed `receiver_type`; Canvas
+does not invent a `Value` receiver when that type is unknown. No palette action
+bypasses the existing source transaction validation.
 
 Terms:
 
@@ -368,13 +374,14 @@ Terms:
 |---|---|
 | Palette entry | Read-only function/type/docs metadata projected from ordinary Jet code. |
 | Canvas action | Behavior-producing Jet action with explicit authority and audited output. |
+| `receiver_type` | Typed method receiver required by a staged `method_only` entry. |
 | Command action | Existing Jet/Jetpack command surfaced with authority, command argv, write class, and approval state. |
 | External adapter | Opt-in native/tool bridge for heavyweight integrations. |
 
 Query actions:
 
 ```json
-{"protocol":"jet.canvas.query","schema_version":1,"ok":true,"op":"actions","revision":"sha256-...","results":[],"impact":null,"diff":null,"actions_schema_version":1,"project_functions":[{"name":"square","signature":"fn square(n: Int) => Int","callee":"square","module_path":"main.jet","pure":true,"ret":"Int","pins":[{"name":"n","direction":"input","type":"Int"}],"default_args":["1"],"available":true,"insert_op":"insert_call"}],"actions":[{"action_id":"canvas.action:main.jet:square","kind":"canvas.action","title":"square","callee":"square","engine":"checked-tir+jit","authority":["canvas.source_edit:package"],"package_id":"app","version":"0.1.0","touched_files":["main.jet"],"writes":"source_transaction_only"},{"action_id":"canvas.core_catalog:core.math:abs","kind":"canvas.core_catalog","title":"abs · core.math","module_path":"core.math","callee":"math.abs","insert_callee":"math.abs","insert_op":"insert_call","engine":"checked-tir+jit","execution":"source_transaction","available":true,"authority":["canvas.source_edit:package"],"writes":"source_transaction_only","signature":"abs(x)","pure":true,"source":"docs/reference/core-library.md"},{"action_id":"canvas.core_catalog:core.args:help","kind":"canvas.core_catalog","title":"help · core.args","module_path":"core.args","available":false,"unavailable_reason_code":"method_only","denied_reason":"Use this as a method on an ArgsSpec value.","writes":"source_transaction_only"},{"action_id":"canvas.command:run","kind":"canvas.command","title":"Run program","op":"command_authority","engine":"jet-cli","execution":"external_command","available":true,"command":["jet","run","main.jet"],"authority":["canvas.command:run","canvas.source_edit:package"],"package_id":"app","version":"0.1.0","touched_files":["main.jet"],"writes":"none","requires_confirmation":false}]}
+{"protocol":"jet.canvas.query","schema_version":1,"ok":true,"op":"actions","revision":"sha256-...","results":[],"impact":null,"diff":null,"actions_schema_version":1,"project_functions":[{"name":"square","signature":"fn square(n: Int) => Int","callee":"square","module_path":"main.jet","pure":true,"ret":"Int","pins":[{"name":"n","direction":"input","type":"Int"}],"default_args":["1"],"available":true,"insert_op":"insert_call"}],"actions":[{"action_id":"canvas.action:main.jet:square","kind":"canvas.action","title":"square","callee":"square","engine":"checked-tir+jit","authority":["canvas.source_edit:package"],"package_id":"app","version":"0.1.0","touched_files":["main.jet"],"writes":"source_transaction_only"},{"action_id":"canvas.core_catalog:core.math:abs","kind":"canvas.core_catalog","title":"abs · core.math","module_path":"core.math","callee":"math.abs","insert_callee":"math.abs","insert_op":"insert_call","engine":"checked-tir+jit","execution":"source_transaction","available":true,"stageable":false,"stage_reason_code":"","stage_reason":"","authority":["canvas.source_edit:package"],"writes":"source_transaction_only","signature":"abs(x)","pure":true,"source":"docs/reference/core-library.md"},{"action_id":"canvas.core_catalog:core.args:help","kind":"canvas.core_catalog","title":"help · core.args","module_path":"core.args","available":false,"stageable":true,"stage_reason_code":"method_only","stage_reason":"Use this as a method on an ArgsSpec value.","unavailable_reason_code":"method_only","denied_reason":"Use this as a method on an ArgsSpec value.","writes":"source_transaction_only"},{"action_id":"canvas.command:run","kind":"canvas.command","title":"Run program","op":"command_authority","engine":"jet-cli","execution":"external_command","available":true,"command":["jet","run","main.jet"],"authority":["canvas.command:run","canvas.source_edit:package"],"package_id":"app","version":"0.1.0","touched_files":["main.jet"],"writes":"none","requires_confirmation":false}]}
 ```
 
 Preview an action:

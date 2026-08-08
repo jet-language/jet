@@ -530,7 +530,7 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             args,
             ..
         } => {
-            if module == "jet.crypto" {
+            if module == "core.crypto" {
                 return match (method.as_str(), args.as_slice()) {
                     ("__signing_generate" | "__x25519_generate", []) => true,
                     (
@@ -568,7 +568,10 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             if module == "core.crypto.expert" {
                 return match (method.as_str(), args.as_slice()) {
                     ("secret_bytes", [value]) => resident_safe_expr(value, callees),
-                    ("open_v1" | "x25519", args) if (2..=3).contains(&args.len()) => {
+                    ("open_v1" | "x25519_raw", args) if args.len() == 2 => {
+                        args.iter().all(|arg| resident_safe_expr(arg, callees))
+                    }
+                    ("hkdf_sha256_raw", args) if args.len() == 4 => {
                         args.iter().all(|arg| resident_safe_expr(arg, callees))
                     }
                     ("aes256gcm_seal" | "aes256gcm_open" | "migrate_v1", args)

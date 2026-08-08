@@ -84,8 +84,8 @@ pub(crate) fn emit_static_owner(owner: &TStaticOwner, cx: &Cx) -> String {
     }
 }
 
-/// c109 Phase 6: format call/method arguments, reproducing `emit_call_args`
-/// (Source/Codegen/Expression.rs) byte-for-byte. The clone wrapper (`.clone()` or
+/// c109 Phase 6: format call/method arguments from total TIR flags. The clone wrapper
+/// (`.clone()` or
 /// `Arc::clone(&…)`) is applied to the raw value first, then the borrow wrapper
 /// (`&(…)` for a `Read` non-scalar, `&mut (…)` for a `Mutate`). All four decisions
 /// are total TIR flags — emit makes no convention decision.

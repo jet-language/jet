@@ -11,7 +11,7 @@ pub(crate) fn is_freestanding_forbidden(module: &str) -> bool {
     matches!(
         module,
         "core.files" | "core.watcher" | "core.io" | "core.net" | "core.tls" | "core.tasks"
-            | "core.process" | "core.time" | "jet.http" | "jet.log"
+            | "core.process" | "core.time" | "core.http" | "core.log"
             // D-TERM1: terminal I/O requires an OS terminal device.
             | "core.term"
             // U13 (D-JPK-SECRETCRYPTO1): reading the encrypted repo store is
@@ -31,7 +31,7 @@ pub(crate) fn freestanding_hint(module: &str) -> &'static str {
         "core.files" => {
             "Embed the data at compile time with `@embed(\"file\")`, or build without `--freestanding`."
         }
-        "core.net" | "core.tls" | "jet.http" => {
+        "core.net" | "core.tls" | "core.http" => {
             "Freestanding targets have no network stack. Build without `--freestanding`, or use a bare-metal driver."
         }
         "core.tasks" => {
@@ -43,7 +43,7 @@ pub(crate) fn freestanding_hint(module: &str) -> &'static str {
         "core.process" | "core.time" => {
             "System calls are not available in a freestanding build. Build without `--freestanding`."
         }
-        "jet.log" => {
+        "core.log" => {
             "The log module writes to stderr (an OS resource). Use a bare-metal write routine or build without `--freestanding`."
         }
         "core.term" => {
@@ -81,7 +81,7 @@ pub(crate) fn unknown_core_item(module: &str, name: &str, span: Span) -> Diagnos
             Some(span),
         );
     }
-    if module == "jet.crypto" && name == "constant_time_eq" {
+    if module == "core.crypto" && name == "constant_time_eq" {
         return Diagnostic::error(
             "E1004",
             "`crypto.constant_time_eq` was retired".to_string(),

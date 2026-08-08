@@ -9,7 +9,7 @@
 //
 // Wire format for the decrypted store payload: a flat, hand-rolled
 // tagged-length encoding of `[(String, String)]` name/value pairs — no JSON
-// crate, no escaping edge cases (mirrors `jet.db`'s own tagged-length wire
+// crate, no escaping edge cases (mirrors `core.db`'s own tagged-length wire
 // convention for the same "two independently-built crates can't share Rust
 // types" reason).
 

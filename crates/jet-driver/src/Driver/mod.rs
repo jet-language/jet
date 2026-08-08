@@ -2926,7 +2926,7 @@ fn build_execution_diagnostic(error: crate::Comptime::Build::BuildExecutionError
             "E3504",
             format!("build action `{action}` asks for ungranted `{capability:?}` authority"),
             "declaring a capability in `fn build` does not grant it; root policy must approve each ambient effect".to_string(),
-            format!("pass `--allow-{}` for this run, or grant it in package/workspace policy", format!("{capability:?}").to_ascii_lowercase()),
+            format!("pass `--allow-{}` for this run, or grant it in package/workspace policy", capability.flag()),
             None,
         ),
         BuildExecutionError::ActionFailed { action, exit_code, stderr } => Diagnostic::error(
@@ -3813,4 +3813,22 @@ pub fn compile_benches(
         crate::Codegen::emit_bundle_benches(&bundle, ffi.as_ref()),
         ffi,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_execution_diagnostic;
+    use crate::Comptime::Build::BuildExecutionError;
+
+    #[test]
+    fn e3504_fix_text_snapshot_uses_canonical_effect_flag() {
+        let diagnostic = build_execution_diagnostic(BuildExecutionError::MissingGrant {
+            action: "compile".to_string(),
+            capability: jet_foundation::BuildEffect::GPU,
+        });
+        assert_eq!(
+            diagnostic.fix,
+            "pass `--allow-gpu` for this run, or grant it in package/workspace policy"
+        );
+    }
 }

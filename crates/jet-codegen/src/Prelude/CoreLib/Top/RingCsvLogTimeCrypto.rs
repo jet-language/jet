@@ -132,7 +132,7 @@ fn jet_ring_csv_render(rows: &Vec<Vec<String>>) -> String {
         .join("\n")
 }
 
-// ── jet.log ───────────────────────────────────────────────────────────────────
+// ── core.log ───────────────────────────────────────────────────────────────────
 // E2-M12 D-OBS3: structured JSON logs (OTel-aligned field names).
 // Each log record is a JSON object on stderr:
 //   {"level":"info","body":"...","ts":<unix-ms>}
@@ -509,60 +509,7 @@ fn jet_ring_log_error_fields(msg: &String, fields: &Vec<jet_std::LogField>) {
     }
 }
 
-// ── jet.time ──────────────────────────────────────────────────────────────────
-// Format a Unix millisecond timestamp using a strftime-like pattern.
-// Supported tokens: %Y year, %m month, %d day, %H hour, %M minute, %S second.
-fn jet_ring_time_format(millis: i64, fmt: &String) -> String {
-    let secs = (millis / 1000) as i64;
-    let (y, mo, d, h, mi, s) = unix_to_ymdhms(secs);
-    let mut out = fmt.clone();
-    out = out.replace("%Y", &format!("{:04}", y));
-    out = out.replace("%m", &format!("{:02}", mo));
-    out = out.replace("%d", &format!("{:02}", d));
-    out = out.replace("%H", &format!("{:02}", h));
-    out = out.replace("%M", &format!("{:02}", mi));
-    out = out.replace("%S", &format!("{:02}", s));
-    out
-}
-
-fn unix_to_ymdhms(secs: i64) -> (i32, u32, u32, u32, u32, u32) {
-    // Days since epoch, treating every year as having the right leap-year logic.
-    let mut days = secs / 86400;
-    let time_of_day = (secs % 86400).unsigned_abs();
-    let h = (time_of_day / 3600) as u32;
-    let mi = ((time_of_day % 3600) / 60) as u32;
-    let s = (time_of_day % 60) as u32;
-    // Walk from 1970.
-    let mut year: i32 = 1970;
-    loop {
-        let dy = if is_leap(year) { 366 } else { 365 };
-        if days < dy {
-            break;
-        }
-        days -= dy;
-        year += 1;
-    }
-    let month_days: [i64; 12] = if is_leap(year) {
-        [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-    } else {
-        [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-    };
-    let mut month: u32 = 1;
-    for &md in &month_days {
-        if days < md {
-            break;
-        }
-        days -= md;
-        month += 1;
-    }
-    (year, month, (days + 1) as u32, h, mi, s)
-}
-
-fn is_leap(y: i32) -> bool {
-    (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0)
-}
-
-// ── jet.crypto ────────────────────────────────────────────────────────────────
+// ── core.crypto ────────────────────────────────────────────────────────────────
 // SHA-256 of a UTF-8 string, returned as a lowercase hex string.
 fn jet_ring_crypto_sha256(s: &String) -> String {
     let hash = jet_sha256_raw(s.as_bytes());
