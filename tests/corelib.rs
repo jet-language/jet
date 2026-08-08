@@ -7679,6 +7679,51 @@ fn run() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// #1788/#1781: an immutable `::` binding of a `core.random` call must read
+/// the runtime-seeded PRNG exactly like a mutable `:=` binding does. Before
+/// the fix, sema's D-VERDICT-1308-1 implicit fold treated `random.float()` as
+/// a foldable pure call and baked its value at compile time from a disjoint
+/// ambient interpreter PRNG, so two identical `seed(11); x :: random.float()`
+/// pairs never matched and never landed on the seeded stream either.
+#[test]
+fn immutable_binding_of_random_call_reads_the_seeded_stream() {
+    let have_rustc = common::have_rustc();
+    if !have_rustc {
+        eprintln!("note: skipping immutable-random-binding test (need rustc)");
+        return;
+    }
+    let dir =
+        std::env::temp_dir().join(format!("jet_corelib_random_immutable_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "random_immutable",
+        r#"
+use core.random as random
+
+fn run() {
+    random.seed(11)
+    a :: random.float()
+    random.seed(11)
+    b :: random.float()
+    print(a == b)
+    random.seed(11)
+    c := random.float()
+    print(a == c)
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(
+        stdout, "true\ntrue\n",
+        "reseeded `::` bindings must match each other and the `:=` binding's seeded draw"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn random_distribution_surface_is_deterministic() {
     let have_rustc = common::have_rustc();
