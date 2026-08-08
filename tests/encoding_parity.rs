@@ -1134,19 +1134,23 @@ fn assert_aot_dev_stream_parity_inner(label: &str, source: &str) {
 #[test]
 fn json_stream_reader_writer_matches_aot_and_default_dev() {
     let body = r#"
+use core.encoding.json as json
+
 fn run() {
     path := "@DIR@/json_stream_out.json"
-    output :: files.create(path) ?? panic("create")
-    writer :: fmt.writer(^output, encoding.EncodingLimits.safe(), false) ?? panic("writer")
+    out :: files.create(path) ?? panic("create")
+    writer :: json.writer(^out, canonical: true) ?? panic("writer")
     writer.write(encoding.DataEvent.ObjectStart) ?? panic("write")
-    writer.write(encoding.DataEvent.Key("ok")) ?? panic("key")
-    writer.write(encoding.DataEvent.Bool(true)) ?? panic("bool")
+    writer.write(encoding.DataEvent.Key("b")) ?? panic("key b")
+    writer.write(encoding.DataEvent.Int(2)) ?? panic("value b")
+    writer.write(encoding.DataEvent.Key("a")) ?? panic("key a")
+    writer.write(encoding.DataEvent.Int(1)) ?? panic("value a")
     writer.write(encoding.DataEvent.ObjectEnd) ?? panic("end")
     writer.finish() ?? panic("finish")
     input :: files.open(path) ?? panic("open")
     reader :: fmt.reader(^input, encoding.EncodingLimits.safe()) ?? panic("reader")
     count := 0
-    loop count < 5 {
+    loop count < 7 {
         maybe :: reader.next() ?? panic("next")
         if maybe == None { print("eof"); break }
         print("event")
