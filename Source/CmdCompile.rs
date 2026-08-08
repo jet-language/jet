@@ -640,7 +640,7 @@ pub(crate) fn run_compile_cmd(
             }
             // D-SUPPLY1: `--sbom` writes an SPDX SBOM next to the binary.
             if sbom {
-                write_sbom_for_build(file, &bin_path(file));
+                write_sbom_for_build(file, &bin_path(file), mode);
             }
             // D-TOOL5 (E2-M11): print capability summary after a successful build.
             if capabilities_json {
@@ -1014,7 +1014,7 @@ pub(crate) fn run_tasks(file: &str, mode: OutputMode) {
 /// program with no project is emitted with just the root component. When a
 /// Package root and lockfile exist, the SBOM lists every locked dependency with
 /// its tree-hash checksum.
-fn write_sbom_for_build(file: &str, bin: &Path) {
+fn write_sbom_for_build(file: &str, bin: &Path, mode: OutputMode) {
     let file_path = Path::new(file);
     let search_from = file_path.parent().unwrap_or(Path::new("."));
 
@@ -1051,7 +1051,13 @@ fn write_sbom_for_build(file: &str, bin: &Path) {
     let sbom = jet::Publish::emit_spdx(&lock, &name, &version);
     let out = bin.with_extension("spdx");
     match fs::write(&out, sbom) {
-        Ok(()) => println!("sbom: {}", out.display()),
+        // #1659 criterion 3: the SBOM was still written; `--quiet` only mutes
+        // this confirmation line, never the warning below.
+        Ok(()) => {
+            if !mode.quiet {
+                println!("sbom: {}", out.display());
+            }
+        }
         Err(e) => eprintln!("warning: couldn't write SBOM to {}: {}", out.display(), e),
     }
 }
@@ -1316,7 +1322,7 @@ fn edition_2027_encoding_audit(before: &str, after: &str) -> Vec<String> {
     notes
 }
 
-pub(crate) fn run_new(name: &str, annotated: bool) {
+pub(crate) fn run_new(name: &str, annotated: bool, mode: OutputMode) {
     if name.is_empty() || name.contains('/') || name.contains('\\') {
         eprintln!("error: project name must be a simple folder name");
         eprintln!(" fix: try: {} new my_app", jet::Syntax::BINARY_NAME);
@@ -1351,11 +1357,15 @@ pub(crate) fn run_new(name: &str, annotated: bool) {
         eprintln!("error: couldn't write .gitignore: {}", e);
         exit(ExitCodes::USER_ERROR);
     });
-    println!("created {}/", name);
-    println!("  {}", jet::Syntax::PACKAGE_FILE);
-    println!("  {}", jet::Syntax::DEFAULT_ENTRY_FILE);
-    println!("  .gitignore");
-    println!("next: cd {} && {} run", name, jet::Syntax::BINARY_NAME);
+    // #1659 criterion 3: `--quiet` suppresses this confirmation; the project
+    // itself was still created — only the non-error status narration mutes.
+    if !mode.quiet {
+        println!("created {}/", name);
+        println!("  {}", jet::Syntax::PACKAGE_FILE);
+        println!("  {}", jet::Syntax::DEFAULT_ENTRY_FILE);
+        println!("  .gitignore");
+        println!("next: cd {} && {} run", name, jet::Syntax::BINARY_NAME);
+    }
 }
 
 /// `jet test` flags beyond the file/dir target (D-TESTKIT1=A gaps #2-#4).

@@ -113,6 +113,11 @@ fn render_signing_diagnostic(diagnostic: &jet::Diagnostics::Diagnostic) {
 /// clone/pull the sparse index, append the version line, commit, push. Version
 /// immutability (D-VERSION1) is enforced here (E1234).
 pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
+    // #1659 criterion 3: `--quiet` suppresses this function's non-error
+    // progress narration only — every gate, error, and mutation below still
+    // runs and still exits non-zero on failure; `status!` never wraps
+    // `eprintln!`.
+    macro_rules! status { ($($arg:tt)*) => { if !mode.quiet { println!($($arg)*); } }; }
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let root = crate::require_manifest_root(
         &cwd,
@@ -202,10 +207,10 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
         exit(ExitCodes::USER_ERROR);
     }
 
-    println!("publishing `{}` v{} ...", name, version);
+    status!("publishing `{}` v{} ...", name, version);
 
     // Pre-publish gate step 1: build.
-    println!("[1/3] checking build ...");
+    status!("[1/3] checking build ...");
     let entry_path = find_project_entry(&root);
     let entry_str = entry_path.to_string_lossy().to_string();
     let build_ok = if entry_path.is_file() {
@@ -232,7 +237,7 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
             }
             false
         } else {
-            println!("  build: ok");
+            status!("  build: ok");
             true
         }
     } else {
@@ -245,19 +250,19 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
 
     // Pre-publish gate step 2: run the project's real test command before any
     // immutable registry index mutation.
-    println!("[2/3] checking tests ...");
+    status!("[2/3] checking tests ...");
     let tests_ok = run_publish_tests(&root, &entry_path);
 
     // Pre-publish gate step 3: SemVer API diff.
-    println!("[3/3] checking public API ...");
+    status!("[3/3] checking public API ...");
     // For the diff we need the previous version's public API. In v1, without a live
     // registry we cannot fetch the old version; we report that the check is advisory
     // (would fire on an actual publish to the registry which has the old version).
     // We still extract the current API so the output shows what would be published.
     let current_api = jet::Publish::extract_public_api_for_package("", &entry_str, name);
-    println!("  public API surface: {} items", current_api.len());
+    status!("  public API surface: {} items", current_api.len());
     for item in &current_api {
-        println!("    {} {}", item.kind, item.name);
+        status!("    {} {}", item.kind, item.name);
     }
 
     // D-SUPPLY1 Step 3: local SemVer gate (E1218). If a frozen public-API
@@ -326,13 +331,13 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
                 exit(ExitCodes::USER_ERROR);
             }
         } else {
-            println!(
+            status!(
                 "  semver: ok — public API compatible with the {} snapshot",
                 prev.published_version
             );
         }
     } else {
-        println!(
+        status!(
             "  note: no previous API snapshot — SemVer diff (E1218) starts on the next publish.\n  \
              The registry re-checks against the live previous version (E2601) on receipt."
         );
@@ -341,7 +346,7 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
     // D-MIGRATE1: snapshot `#PublishedSchema` structs at release time.
     let snap_count = jet::Publish::write_schema_snapshots_for_entry(&root, &entry_str, version);
     if snap_count > 0 {
-        println!(
+        status!(
             "  schema: {} #PublishedSchema snapshot(s) updated in .jet/cache/schema/",
             snap_count
         );
@@ -351,7 +356,7 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
     // pub-metadata semver diffing (feeds the next publish's E1218 check above),
     // no `api:` opt-in gate anymore.
     match jet::Publish::ApiFreeze::write_api_snapshot_for_entry(&root, &entry_str, name, version) {
-        Some(n) => println!(
+        Some(n) => status!(
             "  api: {} public fn signature(s) snapshotted in .jet/cache/api/{}.api",
             n, name
         ),
@@ -367,12 +372,12 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
         }
     }
 
-    println!("\nok: `{}` v{} passes the pre-publish gate.", name, version);
+    status!("\nok: `{}` v{} passes the pre-publish gate.", name, version);
 
     // c56 (D-JPK-CACHE1=A / D-VERSION1=A): push the index entry to the git
     // registry. The registry is a git repo — publishing is: clone/pull the
     // sparse index, append the version line, commit, push.
-    println!("publishing to registry index `{}` ...", registry.url);
+    status!("publishing to registry index `{}` ...", registry.url);
 
     let source_repo = match jet::Publish::ensure_index_clone(&registry) {
         Ok(r) => r,
@@ -447,14 +452,14 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
     // still applies unconditionally). The public key is TOFU-pinned into the
     // index on the FIRST published version of a package and never rewritten.
     let (public_key, signature) = if no_sign {
-        println!("  signing: skipped (--no-sign); tier-B checksum still applies.");
+        status!("  signing: skipped (--no-sign); tier-B checksum still applies.");
         (String::new(), String::new())
     } else {
         let reg = &registry.name;
         if let Some((seed_path, _pub_path, pub_hex)) = generated_key {
-            println!("  signing: generated a new key for registry `{}`.", reg);
-            println!("    public key: {}", pub_hex);
-            println!(
+            status!("  signing: generated a new key for registry `{}`.", reg);
+            status!("    public key: {}", pub_hex);
+            status!(
                 "    `jet registry key backup` writes this to {} — losing it means losing your ability to publish signed updates.",
                 seed_path.display()
             );
@@ -488,7 +493,7 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
         } else {
             jet::Publish::Sign::read_public_key(reg).unwrap_or_default()
         };
-        println!("  signing: signed content hash with the `{}` key.", reg);
+        status!("  signing: signed content hash with the `{}` key.", reg);
         (pub_field, sig)
     };
 
@@ -540,7 +545,7 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
         exit(ExitCodes::USER_ERROR);
     }
 
-    println!("ok: published `{}` v{} to {}", name, version, registry.url);
+    status!("ok: published `{}` v{} to {}", name, version, registry.url);
 }
 
 /// Source hash + plan fingerprint for the index entry. Reuses the lock's

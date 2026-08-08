@@ -363,26 +363,10 @@ impl BuildProfile {
     }
 }
 
-fn command_group_usage(name: &str) -> String {
-    let group = jet::CLI::command_group(name).expect("command group must exist");
-    let mut output = String::new();
-    for action in group.actions {
-        for usage in action.usage.lines() {
-            output.push_str(&format!(
-                "  {} {} {:<48} {}\n",
-                jet::Syntax::BINARY_NAME,
-                group.name,
-                usage,
-                action.summary
-            ));
-        }
-    }
-    output
-}
-
 pub(crate) fn usage() -> String {
-    let inspect_commands = command_group_usage("inspect");
-    let registry_commands = command_group_usage("registry");
+    // #1659 criterion 1: rendered from jet::CLI's one COMMAND_GROUPS table.
+    let inspect_commands = jet::CLI::command_group_usage("inspect");
+    let registry_commands = jet::CLI::command_group_usage("registry");
     format!(
         "\
 Welcome to {lang}! (v{ver})
@@ -495,6 +479,54 @@ flags:
         inspect_commands = inspect_commands,
         registry_commands = registry_commands,
     )
+}
+
+/// #1659 criterion 2: `jet <cmd> --help`/`-h`. Rendered from the same
+/// `jet::CLI` tables and `usage()` text as `jet help` and the man page — not
+/// a hand-duplicated per-command help string.
+fn command_help(cmd: &str) -> String {
+    let bin = jet::Syntax::BINARY_NAME;
+    // A bare group name (`registry`/`inspect`/`hangar`/`project`/`self`/`gc`)
+    // reaches here only for a non-exhaustive group (`os`) — the exhaustive
+    // ones are already handled by `normalize_frequency_ring_argv`.
+    if let Some(group) = jet::CLI::command_group(cmd) {
+        return format!(
+            "{bin} {cmd} — {}\n\n{}",
+            group.summary,
+            jet::CLI::command_group_usage(cmd)
+        );
+    }
+    // A normalized nested-action dispatch word (`publish`, `graph`, …).
+    if let Some((group, action)) = jet::CLI::moved_command(cmd) {
+        let mut lines = String::new();
+        for usage_line in action.usage.lines() {
+            lines.push_str(&format!("  {bin} {} {}\n", group.name, usage_line));
+        }
+        return format!(
+            "{bin} {} {cmd} — {}\n\n{lines}",
+            group.name, action.summary
+        );
+    }
+    // A canonical flat top-level command: pull its summary and the matching
+    // usage lines straight out of `usage()` so the two never drift.
+    let summary = jet::CLI::COMMANDS.iter().find(|c| c.name == cmd).map(|c| c.summary);
+    let full = usage();
+    let matched: Vec<&str> = full
+        .lines()
+        .filter(|line| {
+            let mut words = line.trim_start().split_whitespace();
+            words.next() == Some(bin) && words.next() == Some(cmd)
+        })
+        .collect();
+    let header = match summary {
+        Some(s) => format!("{bin} {cmd} — {s}\n\n"),
+        None => format!("{bin} {cmd}\n\n"),
+    };
+    if matched.is_empty() {
+        format!("{header}Run `{bin} help` to see every command.\n")
+    } else {
+        format!("{header}{}\n", matched.join("\n"))
+    }
 }
 
 /// True when `arg` names a Jet source file or project directory (c6vz465 sugar:
@@ -658,9 +690,15 @@ fn normalize_frequency_ring_argv(raw: &mut Vec<String>) {
     // group's (partial) action list.
     let exhaustive = jet::CLI::command_group(&group).map(|spec| spec.exhaustive).unwrap_or(false);
     if let Some(spec) = jet::CLI::command_group(&group) {
-        if exhaustive && (raw.len() == 1 || raw.get(1).map(String::as_str) == Some("help")) {
+        // #1659 criterion 2: `--help`/`-h` are real help requests here, not
+        // an unmodeled subword — retiring the E2101 that used to fire for
+        // e.g. `jet hangar --help`.
+        let asks_help = raw.len() == 1
+            || matches!(raw.get(1).map(String::as_str), Some("help"))
+            || raw.get(1).is_some_and(|a| jet::CLI::is_help_flag(a));
+        if exhaustive && asks_help {
             println!("jet {group} — {}", spec.summary);
-            print!("{}", command_group_usage(&group));
+            print!("{}", jet::CLI::command_group_usage(&group));
             exit(ExitCodes::OK);
         }
     }
@@ -1138,6 +1176,12 @@ fn main() {
     let cmd = match args.first() {
         Some(c) => c.as_str(),
         None => {
+            // #1659 criterion 2: `jet --help`/`jet -h` are real requests for
+            // the full command table, not the short orientation greeting.
+            if jet_argv.iter().any(|a| jet::CLI::is_help_flag(a)) {
+                print!("{}", usage());
+                exit(ExitCodes::OK);
+            }
             // No-args: a friendly greeting that orients, NOT a usage error.
             print!("{}", greeting());
             exit(ExitCodes::OK);
@@ -1227,6 +1271,17 @@ fn main() {
         }
     }
 
+    // #1659 criterion 2: `jet <cmd> --help`/`-h` for every command that
+    // doesn't already own a bespoke flag vocabulary (and so a bespoke help
+    // screen) — retires the E2102 "unknown flag" that `--help` used to hit
+    // here. Checked before the pinned-toolchain re-exec so a help request
+    // never pays for one.
+    let owns_flags = jet::CLI::owns_flag_vocabulary(cmd);
+    if !owns_flags && jet_argv.iter().any(|a| jet::CLI::is_help_flag(a)) {
+        print!("{}", command_help(cmd));
+        exit(ExitCodes::OK);
+    }
+
     // D-JPK-TOOLCHAIN1=A (#179): a version-pinned project hands off to its
     // pinned `jet` toolchain before any manifest-driven verb runs. A running
     // `jet` in the pinned channel runs natively; a genuine version mismatch
@@ -1238,7 +1293,6 @@ fn main() {
     // Validate flags against the registry; an unknown/half-typed flag is E2102.
     // Skipped for commands that own a bespoke flag vocabulary or forward flags
     // downstream (so their flags aren't measured against the global set).
-    let owns_flags = jet::CLI::owns_flag_vocabulary(cmd);
     if !owns_flags {
         check_flags(jet_argv, cmd);
     }
@@ -1340,7 +1394,7 @@ fn main() {
             // global `args` filter would otherwise strip (same reason `bind`
             // reads from `raw` below).
             let devtool_args: Vec<&String> = raw.iter().skip(1).collect();
-            run_devtools(&devtool_args);
+            run_devtools(&devtool_args, mode);
             return;
         }
         "man" => {
@@ -2124,7 +2178,7 @@ fn main() {
                 .find_map(|a| a.strip_prefix("--edition=").map(str::to_string));
             run_fix(target, dry_run, edition.as_deref());
         }
-        "new" => run_new(target, annotated),
+        "new" => run_new(target, annotated, mode),
         "test" => {
             let update_snapshots = jet_argv
                 .iter()

@@ -5602,3 +5602,113 @@ fn quiet_flag_declared_once_in_the_shared_table() {
     let count = jet::CLI::FLAGS.iter().filter(|f| f.long == "--quiet").count();
     assert_eq!(count, 1, "--quiet must have exactly one spelling in jet::CLI::FLAGS");
 }
+
+/// #1659 criterion 2: bare `jet --help` and `jet -h` print the full command
+/// table (same as `jet help`), not the short orientation greeting and not an
+/// E2101/E2102 teaching error.
+#[test]
+fn top_level_help_flag_prints_full_usage() {
+    for flag in ["--help", "-h"] {
+        let out = Command::new(jet()).arg(flag).env("NO_COLOR", "1").output().unwrap();
+        assert!(out.status.success(), "{flag}: {:?}", out);
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(stdout.contains("usage:"), "{flag} did not print full usage: {stdout}");
+        assert!(stdout.contains("build"), "{flag} usage missing a real command: {stdout}");
+        assert!(stdout.contains("inspect commands:"), "{flag} usage missing the inspect group: {stdout}");
+    }
+}
+
+/// #1659 criterion 2: `jet <cmd> --help`/`-h` works for a command that used
+/// to hit the generic E2102 "unknown flag" — it neither runs the command nor
+/// errors, and names the command in its own help text.
+#[test]
+fn per_command_help_flag_works_without_running_the_command() {
+    let dir = isolated_cwd("help_flag_build");
+    for (cmd, flag) in [("build", "--help"), ("check", "-h"), ("new", "--help")] {
+        let out = Command::new(jet())
+            .args([cmd, flag])
+            .current_dir(&dir)
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "`{cmd} {flag}`: {:?}", out);
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(stdout.contains(cmd), "`{cmd} {flag}` help text missing the command name: {stdout}");
+        // A real `jet build`/`jet check` with no file argument would fail
+        // (E2xxx missing target); `--help` must short-circuit before that.
+        assert!(!stdout.contains("Error ["), "`{cmd} {flag}` ran the command instead of printing help: {stdout}");
+    }
+    assert!(!dir.join("new").exists(), "`jet new --help` must not create a project");
+}
+
+/// #1659 criterion 2: an exhaustive group's bare `--help`/`-h` (`jet hangar
+/// --help`, `jet registry -h`) prints the group's action table instead of
+/// the E2101 "isn't a jet hangar command" that `--help` used to trigger.
+#[test]
+fn exhaustive_group_help_flag_lists_actions_instead_of_e2101() {
+    for (group, flag) in [("hangar", "--help"), ("registry", "-h"), ("inspect", "--help")] {
+        let out = Command::new(jet()).args([group, flag]).env("NO_COLOR", "1").output().unwrap();
+        assert!(out.status.success(), "`{group} {flag}`: {:?}", out);
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(!stderr.contains("E2101"), "`{group} {flag}` still hit E2101: {stderr}");
+        let expected_action = jet::CLI::command_group(group).unwrap().actions[0].name;
+        assert!(stdout.contains(expected_action), "`{group} {flag}` missing action `{expected_action}`: {stdout}");
+    }
+}
+
+/// #1659 criterion 2: `jet perf` (bare) and `jet perf --help`/`-h` print the
+/// group's action table instead of the E2101/E2102 they used to raise.
+#[test]
+fn perf_bare_and_help_flag_list_actions_instead_of_e2101_e2102() {
+    for args in [vec!["perf"], vec!["perf", "--help"], vec!["perf", "-h"], vec!["perf", "help"]] {
+        let out = Command::new(jet()).args(&args).env("NO_COLOR", "1").output().unwrap();
+        assert!(out.status.success(), "`jet {}`: {:?}", args.join(" "), out);
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(!stderr.contains("E2101") && !stderr.contains("E2102"), "`jet {}`: {stderr}", args.join(" "));
+        assert!(stdout.contains("view") && stdout.contains("compare"), "`jet {}` missing perf actions: {stdout}", args.join(" "));
+    }
+}
+
+/// #1659 criterion 3: `jet new --quiet` still creates the project but
+/// suppresses its confirmation lines.
+#[test]
+fn quiet_suppresses_new_confirmation() {
+    let dir = isolated_cwd("quiet_new");
+    let out = Command::new(jet())
+        .args(["new", "quiet_project", "--quiet"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{:?}", out);
+    assert!(
+        String::from_utf8_lossy(&out.stdout).trim().is_empty(),
+        "jet new --quiet must suppress its confirmation, got: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    assert!(dir.join("quiet_project").join(jet::Syntax::PACKAGE_FILE).is_file(), "--quiet must not change what new creates");
+}
+
+/// #1659 criterion 3: `jet build --sbom --quiet` still writes the SBOM file
+/// but suppresses the `sbom: <path>` confirmation line.
+#[test]
+fn quiet_suppresses_sbom_write_confirmation() {
+    let dir = isolated_cwd("quiet_sbom");
+    let file = dir.join("main.jet");
+    fs::write(&file, "fn run() {\n    print(\"hi\")\n}\n").unwrap();
+    let out = Command::new(jet())
+        .args(["build", "main.jet", "--sbom", "--quiet"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{:?}", out);
+    assert!(
+        !String::from_utf8_lossy(&out.stdout).contains("sbom:"),
+        "jet build --sbom --quiet must suppress the sbom confirmation, got: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    assert!(dir.join("build/main.spdx").is_file(), "--quiet must not change what --sbom writes");
+}

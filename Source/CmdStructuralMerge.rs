@@ -440,7 +440,7 @@ fn positional(args: &[String], command: &str) -> Vec<String> {
 }
 fn flag_value<'a>(args: &'a [String], name: &str) -> Option<&'a str> { args.windows(2).find(|pair| pair[0] == name).map(|pair| pair[1].as_str()) }
 fn report_mode(args: &[String]) -> &str { flag_value(args, "--report").unwrap_or("text") }
-fn wants_help(args: &[String]) -> bool { args.iter().any(|arg| matches!(arg.as_str(), "--help" | "-h")) || args.get(1).is_some_and(|arg| arg == "help") }
+fn wants_help(args: &[String]) -> bool { args.iter().any(|arg| jet::CLI::is_help_flag(arg)) || args.get(1).is_some_and(|arg| arg == "help") }
 fn diff_help() -> &'static str { "usage: jet diff --structural <before.jet> <after.jet> [--report text|json|editor]\n\nCompares checked Jet definitions by semantic identity.\n" }
 fn merge_help() -> &'static str { "usage:\n  jet merge --structural <base.jet> <ours.jet> <theirs.jet> [--out <file.jet>] [--report text|json|editor]\n  jet merge install-driver [--repo <path>]\n\nPerforms a checked three-way structural merge or installs the opt-in Git driver.\n" }
 fn same_module(path: &Path, module: &str) -> bool { absolute_normalized(path) == absolute_normalized(Path::new(module)) }

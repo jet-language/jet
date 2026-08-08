@@ -26,8 +26,6 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-const USAGE: &str = "usage: jet perf <run|test|bench|attach|view|compare|export> …";
-
 pub(crate) enum Outcome {
     Exit(i32),
 }
@@ -73,13 +71,21 @@ impl CaptureBundle {
 }
 
 pub(crate) fn run(raw: &[String]) -> Outcome {
-    let Some(action) = raw.get(1).map(String::as_str) else {
-        eprintln!("Error [E2102]: `jet perf` needs a subcommand");
-        eprintln!(" Fix: {USAGE}");
-        return Outcome::Exit(ExitCodes::USAGE);
-    };
-    match action {
-        "run" | "test" | "bench" => Outcome::Exit(run_session(action, &raw[2..])),
+    let action = raw.get(1).map(String::as_str);
+    // #1659 criterion 2: `jet perf` / `jet perf help` / `jet perf --help` /
+    // `-h` all show the group's action table, rendered from the one
+    // `jet::CLI::COMMAND_GROUPS` entry — retires the E2101/E2102 that used
+    // to fire here for a bare or `--help` invocation.
+    if matches!(action, None | Some("help")) || action.is_some_and(jet::CLI::is_help_flag) {
+        if let Some(group) = jet::CLI::command_group("perf") {
+            println!("jet perf — {}", group.summary);
+        }
+        println!();
+        print!("{}", jet::CLI::command_group_usage("perf"));
+        return Outcome::Exit(ExitCodes::OK);
+    }
+    match action.unwrap() {
+        "run" | "test" | "bench" => Outcome::Exit(run_session(action.unwrap(), &raw[2..])),
         "attach" => Outcome::Exit(attach(&raw[2..])),
         "view" => Outcome::Exit(view(&raw[2..])),
         "compare" => Outcome::Exit(compare(&raw[2..])),

@@ -299,6 +299,27 @@ pub fn command_group(name: &str) -> Option<&'static CommandGroup> {
     COMMAND_GROUPS.iter().find(|group| group.name == name)
 }
 
+/// #1659 criterion 1: the one renderer for a group's nested-action usage
+/// block, shared by `jet help`, `jet <group> --help`, and `jet perf --help`
+/// (CmdPerf.rs) so every caller reads the same `COMMAND_GROUPS` table instead
+/// of re-deriving its own text.
+pub fn command_group_usage(name: &str) -> String {
+    let Some(group) = command_group(name) else { return String::new() };
+    let mut output = String::new();
+    for action in group.actions {
+        for usage in action.usage.lines() {
+            output.push_str(&format!(
+                "  {} {} {:<48} {}\n",
+                BINARY_NAME,
+                group.name,
+                usage,
+                action.summary
+            ));
+        }
+    }
+    output
+}
+
 pub fn nested_command(group: &str, action: &str) -> Option<(&'static CommandGroup, &'static NestedCommandSpec)> {
     let group = command_group(group)?;
     group.actions.iter().find(|spec| spec.name == action).map(|action| (group, action))
@@ -442,24 +463,11 @@ pub const COMMANDS: &[CommandSpec] = &[
         summary: "Manage host-owned remote builders",
         headline: false,
     },
-    CommandSpec {
-        name: "push",
-        summary: "Deploy one or more Jetos machines",
-        headline: false,
-    },
+    // #1659 criterion 1: `push`/`bridge`/`services` are `jet os` nested
+    // actions (see OS_ACTIONS below) — declared once there, not here too.
     CommandSpec {
         name: "trust",
         summary: "Review or change trusted capabilities",
-        headline: false,
-    },
-    CommandSpec {
-        name: "bridge",
-        summary: "Convert an existing system configuration to Jet",
-        headline: false,
-    },
-    CommandSpec {
-        name: "services",
-        summary: "Manage development services",
         headline: false,
     },
     CommandSpec {
@@ -517,11 +525,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         summary: "Use `jet hangar`, `jet clean`, or `jet fetch` instead",
         headline: false,
     },
-    CommandSpec {
-        name: "config",
-        summary: "Manage Jet settings and trust",
-        headline: false,
-    },
+    // #1659 criterion 1: `config` is a `jet os` nested action (OS_ACTIONS).
     CommandSpec {
         name: "gc",
         summary: "Show values moved into automatic memory management",
@@ -532,41 +536,9 @@ pub const COMMANDS: &[CommandSpec] = &[
         summary: "Remove unused package-store data",
         headline: false,
     },
-    CommandSpec {
-        name: "publish",
-        summary: "Publish the current package",
-        headline: false,
-    },
-    CommandSpec {
-        name: "yank",
-        summary: "Stop new installs of a published version",
-        headline: false,
-    },
-    CommandSpec {
-        name: "keygen",
-        summary: "Create a package-signing key",
-        headline: false,
-    },
-    CommandSpec {
-        name: "key",
-        summary: "Manage or back up the package-signing key",
-        headline: false,
-    },
-    CommandSpec {
-        name: "vendor",
-        summary: "Copy dependencies into vendor/",
-        headline: false,
-    },
-    CommandSpec {
-        name: "audit",
-        summary: "Check dependencies for known vulnerabilities",
-        headline: false,
-    },
-    CommandSpec {
-        name: "sbom",
-        summary: "Create a software bill of materials",
-        headline: false,
-    },
+    // #1659 criterion 1: `publish`/`yank`/`keygen`/`key`/`vendor` are `jet
+    // registry` nested actions (REGISTRY_ACTIONS); `audit`/`sbom` are `jet
+    // inspect` nested actions (INSPECT_ACTIONS) — declared once there.
     CommandSpec {
         name: "emit",
         summary: "Print generated build output",
@@ -814,6 +786,13 @@ pub fn owns_flag_vocabulary(name: &str) -> bool {
 pub fn is_known_flag(flag: &str) -> bool {
     let head = flag.split('=').next().unwrap_or(flag);
     FLAGS.iter().any(|f| f.long == head)
+}
+
+/// #1659 criterion 2: the one spelling-check for "the user asked for help",
+/// shared by every command instead of each hand-copying
+/// `arg == "--help" || arg == "-h"`.
+pub fn is_help_flag(arg: &str) -> bool {
+    arg == "--help" || arg == "-h"
 }
 
 /// Levenshtein edit distance — the same shape used by sema's S14 suggestions.
@@ -1393,5 +1372,47 @@ mod tests {
         for f in FLAGS {
             assert!(m.contains(f.long), "man missing flag {}", f.long);
         }
+    }
+
+    /// #1659 criterion 1: a command is declared exactly once. A
+    /// non-keeps_group nested action's dispatch word must never also appear
+    /// as a flat `COMMANDS` entry — that is the same command declared twice
+    /// in two parallel tables. (`keeps_group` actions like `hangar verify`
+    /// legitimately share their group's own flat entry — `hangar` is one
+    /// command with eleven actions, not eleven commands.)
+    #[test]
+    fn no_command_declared_in_both_tables() {
+        for group in COMMAND_GROUPS {
+            for action in group.actions {
+                if action.handler.keeps_group() {
+                    continue;
+                }
+                assert!(
+                    !COMMANDS.iter().any(|c| c.name == action.handler.dispatch_word()),
+                    "`{}` is declared in both COMMANDS and `{}` group actions",
+                    action.handler.dispatch_word(),
+                    group.name,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn is_help_flag_recognizes_both_spellings() {
+        assert!(is_help_flag("--help"));
+        assert!(is_help_flag("-h"));
+        assert!(!is_help_flag("--json"));
+        assert!(!is_help_flag("help"));
+    }
+
+    #[test]
+    fn command_group_usage_lists_every_action() {
+        for group in COMMAND_GROUPS {
+            let text = command_group_usage(group.name);
+            for action in group.actions {
+                assert!(text.contains(action.name), "{} usage missing action {}", group.name, action.name);
+            }
+        }
+        assert_eq!(command_group_usage("no-such-group"), "");
     }
 }
