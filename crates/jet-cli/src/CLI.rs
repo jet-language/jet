@@ -105,6 +105,8 @@ pub fn reserved_report_json() -> String {
 }
 
 /// One global flag that applies across commands.
+pub const DRY_RUN_FLAG: &str = "--dry-run";
+
 #[derive(Clone)]
 pub struct FlagSpec {
     /// Long form, e.g. `--json` (always present).
@@ -222,7 +224,7 @@ const INSPECT_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec { name: "expand", usage: "expand [--facts <lens>] [--json] <file.jet>", summary: "Show expanded meaning of Jet code (use --json for canonical facts)", handler: HandlerKey::Expand },
     NestedCommandSpec { name: "unsafe", usage: "unsafe <file.jet>", summary: "Review unsafe code and its safeguards", handler: HandlerKey::Unsafe },
     NestedCommandSpec { name: "schema", usage: "schema status\nschema squash --before <version>", summary: "Inspect saved data schema versions", handler: HandlerKey::Schema },
-    NestedCommandSpec { name: "codemod", usage: "codemod dry-run <plan.json>\ncodemod apply <plan.json> [--yes]\ncodemod undo <log.json>", summary: "Preview or apply code changes", handler: HandlerKey::Codemod },
+    NestedCommandSpec { name: "codemod", usage: "codemod <plan.json> --dry-run\ncodemod apply <plan.json> [--yes]\ncodemod undo <log.json>", summary: "Preview or apply code changes", handler: HandlerKey::Codemod },
     NestedCommandSpec { name: "audit", usage: "audit [--advisory-db <path>]", summary: "Check dependencies for known vulnerabilities", handler: HandlerKey::Audit },
     NestedCommandSpec { name: "sbom", usage: "sbom [--cyclonedx]", summary: "Create a software bill of materials", handler: HandlerKey::Sbom },
     NestedCommandSpec { name: "bind", usage: "bind <header.h> --pkg <lib>\nbind cpp <header.hpp> --target <triple> --clang <path> --ar <path>", summary: "Generate Jet bindings from a foreign header", handler: HandlerKey::Bind },
@@ -781,7 +783,7 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--verbose", help: "with build: print the bridge steps" },
     FlagSpec { long: "--online", help: "with doctor: allow network checks" },
     FlagSpec { long: "--fix", help: "with doctor: apply auto-fixable problems" },
-    FlagSpec { long: "--dry-run", help: "with fix: show changes without writing" },
+    FlagSpec { long: DRY_RUN_FLAG, help: "with rewrite commands: preview changes without writing" },
     FlagSpec { long: "--edition", help: "with fix: apply edition migration rewrites --edition=<year>" },
     FlagSpec { long: "--try-anyway", help: "with dev: interpret past unsupported features (no guarantees)" },
     FlagSpec { long: "--interpret", help: "with dev: force the tier-0 TIR interpreter" },
@@ -1354,6 +1356,20 @@ mod tests {
         assert!(is_known_flag("--color=always"));
         assert!(is_known_flag("--json"));
         assert!(!is_known_flag("--nonsense"));
+    }
+
+    #[test]
+    fn dry_run_is_one_shared_flag_row() {
+        assert_eq!(FLAGS.iter().filter(|flag| flag.long == DRY_RUN_FLAG).count(), 1);
+        assert!(is_known_flag(DRY_RUN_FLAG));
+        assert!(man_page("0.0.0").contains(DRY_RUN_FLAG));
+        assert!(completions_bash().contains(DRY_RUN_FLAG));
+        assert!(completions_zsh().contains(DRY_RUN_FLAG));
+        assert!(completions_fish().contains("dry-run"));
+        assert!(completions_powershell().contains(DRY_RUN_FLAG));
+        let inspect_usage = command_group_usage("inspect");
+        assert!(inspect_usage.contains("codemod <plan.json> --dry-run"));
+        assert!(!inspect_usage.contains("codemod dry-run"));
     }
 
     #[test]

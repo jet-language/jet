@@ -987,8 +987,9 @@ spelling (D-IGNORERET2, amended by D-MARK-DISCARD1=A: the `#Suppress(MustUse)
 ## M6 phase 1 — `jet fmt` (done)
 
 **`jet fmt <file.jet>`** rewrites the file in place to canonical Jet style
-(S44). **`jet fmt --check <file>`** prints a unified diff and exits **1**
-when the file would change (CI mode). Formatting is lex → parse → print;
+(S44). **`jet fmt --dry-run <file>`** prints a unified diff and writes nothing.
+**`jet fmt --check <file>`** reports changed files and exits **1** when the
+file would change (CI mode). Formatting is lex → parse → print;
 sema and rustc are not run.
 
 Style (zero configuration): 4-space indent, `{` on the same line as its
@@ -3533,8 +3534,9 @@ The LSP exposes scattered-method breadcrumbs as inlay hints at the owning type
 declaration. These are editor-only overlays: they do not edit source and carry
 source links to the real impl method spans.
 
-`jet inspect codemod dry-run|apply|undo` uses one replay engine for both schema
-versions. A missing version or `version: 1` is the original semantic rename:
+`jet inspect codemod <plan.json> --dry-run`, `jet inspect codemod apply <plan.json>`, and
+`jet inspect codemod undo <log.json>` use one replay engine for both schema versions.
+A missing version or `version: 1` is the original semantic rename:
 
 ```json
 {"name":"RenameReport","entry":"main.jet","operation":"rename","from":"report","to":"summarize"}

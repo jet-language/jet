@@ -5604,6 +5604,18 @@ fn quiet_flag_declared_once_in_the_shared_table() {
     assert_eq!(count, 1, "--quiet must have exactly one spelling in jet::CLI::FLAGS");
 }
 
+#[test]
+fn dry_run_flag_declared_once_for_rewriters() {
+    let count = jet::CLI::FLAGS
+        .iter()
+        .filter(|flag| flag.long == jet::CLI::DRY_RUN_FLAG)
+        .count();
+    assert_eq!(count, 1, "--dry-run must have exactly one FlagSpec row");
+    let usage = jet::CLI::command_group_usage("inspect");
+    assert!(usage.contains("codemod <plan.json> --dry-run"), "{usage}");
+    assert!(!usage.contains("codemod dry-run"), "{usage}");
+}
+
 /// #1659 criterion 1 (round 2): `--ar`/`--clang`/`--facts`/`--from`/
 /// `--no-sign`/`--pkg`/`--registry`/`--to` used to exist only in
 /// `NestedCommandSpec::usage` prose, invisible to the flag registry. Real

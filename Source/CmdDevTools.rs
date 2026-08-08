@@ -1272,7 +1272,7 @@ pub(crate) fn run_devtools_bless(args: &[&String]) {
     let mut dry_run = false;
     let mut requested: Vec<String> = Vec::new();
     for a in args {
-        if a.as_str() == "--dry-run" {
+        if a.as_str() == jet::CLI::DRY_RUN_FLAG {
             dry_run = true;
         } else {
             requested.push(a.to_string());
