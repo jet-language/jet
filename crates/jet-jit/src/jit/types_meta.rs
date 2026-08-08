@@ -12,6 +12,10 @@ use std::sync::LazyLock;
 static HOOK_INT_PAYLOAD: LazyLock<Vec<Type>> = LazyLock::new(|| vec![Type::Int]);
 static HOOK_STR_PAYLOAD: LazyLock<Vec<Type>> = LazyLock::new(|| vec![Type::String]);
 static EMPTY_PAYLOAD: LazyLock<Vec<Type>> = LazyLock::new(Vec::new);
+// D-SERVICE-AUTHORITY1=A: `ServiceReceipt.Retained(id, until)` — the one
+// two-field variant; every other variant carries a single String id.
+static SERVICE_RECEIPT_RETAINED_PAYLOAD: LazyLock<Vec<Type>> =
+    LazyLock::new(|| vec![Type::String, Type::Int]);
 
 /// `TypeName → per-field #[Redact]` flags in declaration order (parallel to
 /// `JitProgram.struct_fields`). Populated from the ProgramBundle before compile
@@ -421,6 +425,15 @@ impl<'a> JitMeta<'a> {
         if matches!(enum_name, "DataTree" | "JSON" | "TOML" | "YAML" | "CSV") {
             return Some(datatree_payload(variant));
         }
+        if enum_name == "ServiceReceipt" {
+            return Some(match variant {
+                "Retained" => SERVICE_RECEIPT_RETAINED_PAYLOAD.as_slice(),
+                "Accepted" | "Duplicate" | "DeadLettered" | "Rejected" | "Unavailable" => {
+                    HOOK_STR_PAYLOAD.as_slice()
+                }
+                _ => EMPTY_PAYLOAD.as_slice(),
+            });
+        }
         if enum_name == "Key" {
             return Some(key_payload(variant));
         }
@@ -700,6 +713,20 @@ impl<'a> JitMeta<'a> {
                 _ => None,
             };
         }
+        // D-SERVICE-AUTHORITY1=A: order mirrors codegen's
+        // `register_core_import_surfaces` (Codegen/Context.rs) — the AOT/
+        // interpreter discriminant order this table must agree with (I9).
+        if enum_name == "ServiceReceipt" {
+            return match variant {
+                "Accepted" => Some(0),
+                "Duplicate" => Some(1),
+                "Retained" => Some(2),
+                "DeadLettered" => Some(3),
+                "Rejected" => Some(4),
+                "Unavailable" => Some(5),
+                _ => None,
+            };
+        }
         // DataTree (+ format aliases): Null/Bool/Int/Float/Text/Array/Object.
         if matches!(enum_name, "DataTree" | "JSON" | "TOML" | "YAML" | "CSV") {
             return match variant {
@@ -762,6 +789,7 @@ impl<'a> JitMeta<'a> {
                 | "FailurePolicy"
                 | "EventResult"
                 | "DispatchState"
+                | "ServiceReceipt"
         ) || self.enum_variants.contains_key(name)
     }
 

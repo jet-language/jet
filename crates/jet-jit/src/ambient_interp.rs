@@ -336,11 +336,13 @@ fn service_error_value(error: service_prelude::JetServiceError) -> CtValue {
 
 fn service_duration_ms(value: &CtValue) -> Option<i64> {
     match value {
+        // The `Duration` carrier's one field is `ns` (see eval/handles.rs
+        // `duration_new`); this host wants milliseconds, so convert.
         CtValue::Struct { type_name, fields } if type_name == "Duration" => fields
             .iter()
-            .find_map(|(name, value)| (name == "ms").then_some(value))
+            .find_map(|(name, value)| (name == "ns").then_some(value))
             .and_then(|value| match value {
-                CtValue::Int(ms) => Some(*ms),
+                CtValue::Int(ns) => Some(ns / 1_000_000),
                 _ => None,
             }),
         _ => None,
