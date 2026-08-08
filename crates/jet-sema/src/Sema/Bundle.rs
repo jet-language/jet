@@ -101,6 +101,8 @@ fn dedupe_unknown_names(diagnostics: &mut Vec<Diagnostic>) {
 fn check_fact_tags_and_states(
     bundle: &ProgramBundle,
     states: &[ModuleState],
+    returns: &HashMap<String, super::Taint::TagSet>,
+    return_types: &super::Taint::ReturnTypes,
     diags: &mut Vec<Diagnostic>,
 ) -> jet_foundation::Facts::FactRegistry {
     let mut facts = jet_foundation::Facts::FactRegistry::default();
@@ -108,8 +110,6 @@ fn check_fact_tags_and_states(
     super::Taint::register_builtin_tag_facts(&mut facts);
 
     let mut scrubbers = HashMap::new();
-    let mut returns = HashMap::new();
-    let mut return_types = HashMap::new();
     let mut field_tags = HashMap::new();
     let mut field_types = HashMap::new();
     let mut known_sources = std::collections::BTreeSet::new();
@@ -121,11 +121,6 @@ fn check_fact_tags_and_states(
         );
     }
     for module in &bundle.modules {
-        super::Taint::collect_return_tag_facts(
-            &module.items,
-            &mut returns,
-            &mut return_types,
-        );
         super::Taint::collect_field_facts(
             &module.items,
             &mut field_tags,
@@ -156,8 +151,8 @@ fn check_fact_tags_and_states(
                 item,
                 &scrubbers,
                 &facts,
-                &returns,
-                &return_types,
+                returns,
+                return_types,
                 &field_tags,
                 &field_types,
                 &states[index].core_imports,
@@ -2091,7 +2086,7 @@ fn check_bundle_opts_for_output_inner(
     }
 
     // D-EFF1: collect effect summaries across every module, then run the
-    // whole-program fixpoint and enforce each `#(…)` bound once.
+    // shared reachability projection and enforce each `#(…)` bound once.
     let mut declared_effect_facts = jet_foundation::Facts::FactRegistry::default();
     register_effect_facts(bundle, &mut declared_effect_facts);
     diags.extend(validate_declared_effects(bundle, &declared_effect_facts));
@@ -2169,7 +2164,7 @@ fn check_bundle_opts_for_output_inner(
         );
     }
     // D-EFF2 (`#(via f)`): seed each via-fn's summary with its callback's bound
-    // before the fixpoint, so its published effect set is a tight pass-through.
+    // before projection, so its published effect set is a tight pass-through.
     for (module_index, module) in bundle.modules.iter().enumerate() {
         let phase_diagnostic_start = diags.len();
         apply_effect_via(&module.items, &mut effect_summaries, &mut diags);
@@ -2181,7 +2176,33 @@ fn check_bundle_opts_for_output_inner(
     }
     // File modules need qualified facts: bare top-level names overwrite one
     // another, while D-EFFECT-OMIT1 requires one cross-package solver answer.
-    let (public_summaries, public_solved) = qualified_effect_facts(&module_effect_summaries);
+    let mut taint_returns = HashMap::new();
+    let mut return_types = HashMap::new();
+    for module in &bundle.modules {
+        super::Taint::collect_return_tag_facts(
+            &module.items,
+            &mut taint_returns,
+            &mut return_types,
+        );
+    }
+    let (public_summaries, public_reachability) =
+        qualified_effect_facts(&module_effect_summaries, &taint_returns);
+    let public_solved: HashMap<String, EffectSet> = public_summaries
+        .keys()
+        .filter_map(|key| {
+            public_reachability
+                .row("effects")
+                .and_then(|row| row.get(key))
+                .map(|effects| (key.clone(), effects.clone()))
+        })
+        .collect();
+    if let Some(row) = public_reachability.row("taint") {
+        for (key, tags) in row {
+            if !tags.is_empty() {
+                taint_returns.insert(key.clone(), tags.clone());
+            }
+        }
+    }
     // The Output carries the same solved effect row used by diagnostics and
     // semantic-index consumers. Tooling never re-walks the callable body.
     for module in &mut bundle.modules {
@@ -2261,13 +2282,14 @@ fn check_bundle_opts_for_output_inner(
             &module.alias,
             &validation_summaries,
             &public_solved,
+            &public_reachability,
             &mut diags,
         );
         check_replayable_effects(&module.items, &local_solved, &mut diags);
         check_secret_grants(
             &module.items,
             &module.alias,
-            &validation_summaries,
+            &public_reachability.nodes_with("secret", Effect::Secret.name()),
             &mut diags,
         );
         mark_failed_pending_functions(
@@ -2287,7 +2309,7 @@ fn check_bundle_opts_for_output_inner(
 
     // D-WASM1=A (c123 M1): JS/WASM partition inference and boundary checks.
     // D-MEM-FACTS1: module `#Policy(no_alloc)` declarations are checked only
-    // after the same qualified, dependency-complete graph reaches its fixpoint.
+    // after the same qualified, dependency-complete graph is projected.
     // #657 feeds the other scope levels and the two remaining fact values into
     // this declaration surface; reachability itself stays single-mechanism.
     let (memory_summaries, memory_declarations) =
@@ -2328,7 +2350,13 @@ fn check_bundle_opts_for_output_inner(
     // D-FACTMODEL1=A: one erased fact model for tags, effects, and states.
     // Keep the pass in its own frame; this bundle checker already carries the
     // compiler's largest solved graphs.
-    let fact_registry = check_fact_tags_and_states(bundle, &states, &mut diags);
+    let fact_registry = check_fact_tags_and_states(
+        bundle,
+        &states,
+        &taint_returns,
+        &return_types,
+        &mut diags,
+    );
 
     let (mut used_core, usage_spans, ffi_callback_fns) = collect_used_core(bundle, &states);
     // D-CLIFLAG1: a `#[CLI]`-derived struct's generated `__jet_cli_spec_*`/
@@ -2395,6 +2423,7 @@ fn check_bundle_opts_for_output_inner(
         super::Effects::SemIndexEffectFacts {
             summaries: public_summaries,
             solved: public_solved,
+            reachability: public_reachability,
             memory_declarations,
             memory_projections,
             reference_anchors,

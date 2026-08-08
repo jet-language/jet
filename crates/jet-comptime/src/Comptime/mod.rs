@@ -5,7 +5,8 @@
 //! One law (S26): comptime computes *values* only — it never creates,
 //! parameterizes, or selects a type, and never affects dispatch.
 //!
-//! Diagnostics: E0951 impurity (with call path) · E0952 fuel exhausted ·
+//! Diagnostics: E3401 impurity (with call path — shared code with the
+//! run-time `=[]=>` check, D-META-EFFECT1 c3) · E0952 fuel exhausted ·
 //! E0953 comptime panic (user message verbatim, overflow, divide-by-zero) ·
 //! E0955 embed_file errors · E0956 construct not yet supported at comptime.
 //!
@@ -88,7 +89,10 @@ pub fn data_status_rows() -> Vec<(String, String, String, String, String, String
     Methods::data_status_rows()
 }
 pub use Methods::apply_dollar_splices;
-pub use Purity::{check_build_time_io, walk_calls, walk_identifiers};
+pub use Purity::{
+    check_build_time_io, walk_calls, walk_identifiers, walk_purity_expr, walk_purity_stmts,
+    walk_purity_stmts_from, PurityStage,
+};
 pub use Reflect::{
     build_enum_layout_info, build_program_info, build_struct_layout_info, build_struct_type_info,
     build_struct_type_info_with_states, ProgramSemanticFacts,
@@ -541,7 +545,7 @@ pub fn evaluate_with_imports_opts(
     // the expression is not nested inside a `#Impure` block at sema time).
     // When initial_impure_depth > 0, the gate is active — skip check_purity
     // so that Tier-2 calls fire E3411 ("gate present, flag absent") instead
-    // of E0951 ("impure call at comptime"), giving a better fix message.
+    // of the bare E3401 impurity gate, giving a better fix message.
     if initial_impure_depth == 0 {
         check_purity(init, funcs, extern_names)?;
     }
@@ -1087,7 +1091,7 @@ fn run_repl_step_inner(
 }
 
 /// D-META-STAGE1=B (formerly D-CTMARKER1, ratified 2026-06-25, piece 2): run a `$ { … }` block at
-/// build time. Purity-checked (E0951/E0958) then tree-walked with fuel cap (E0952).
+/// build time. Purity-checked (E3401) then tree-walked with fuel cap (E0952).
 /// Pure path only (Stage A); effect tiers wire in c157 (D-CTEFFECT1).
 pub fn run_block_with_imports(
     stmts: &[crate::AST::Stmt],

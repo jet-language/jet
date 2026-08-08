@@ -1,5 +1,6 @@
 use super::*;
 use crate::AST::Param;
+use std::collections::BTreeSet;
 
 mod CoreUsage;
 pub(crate) use CoreUsage::{
@@ -9,7 +10,11 @@ pub(crate) use CoreUsage::{
 
 pub(super) fn qualified_effect_facts(
     modules: &[(String, HashMap<String, EffectSummary>)],
-) -> (HashMap<String, EffectSummary>, HashMap<String, EffectSet>) {
+    taint_seeds: &HashMap<String, BTreeSet<String>>,
+) -> (
+    HashMap<String, EffectSummary>,
+    jet_foundation::Facts::ReachabilityResult,
+) {
     let mut locations = HashMap::<String, Vec<String>>::new();
     let aliases = modules.iter().map(|(alias, _)| alias.as_str()).collect::<HashSet<_>>();
     for (alias, summaries) in modules {
@@ -48,17 +53,15 @@ pub(super) fn qualified_effect_facts(
             qualified.insert(format!("{alias}::{key}"), summary);
         }
     }
-    let mut solved = solve(&qualified);
+    let mut reachability = solve_reachability(&qualified, taint_seeds);
     for (short, values) in locations.iter().filter(|(_, values)| values.len() == 1) {
         let qualified_key = &values[0];
         if let Some(summary) = qualified.get(qualified_key).cloned() {
             qualified.insert(short.clone(), summary);
         }
-        if let Some(effects) = solved.get(qualified_key).cloned() {
-            solved.insert(short.clone(), effects);
-        }
+        reachability.copy_node(short, qualified_key);
     }
-    (qualified, solved)
+    (qualified, reachability)
 }
 
 #[cfg(test)]
@@ -97,7 +100,7 @@ mod effect_qualification_tests {
             ),
         ];
 
-        let (summaries, _) = qualified_effect_facts(&modules);
+        let (summaries, _) = qualified_effect_facts(&modules, &HashMap::new());
         let root = &summaries["main::root"];
         assert_eq!(
             root.regions[0].edges,
@@ -1674,7 +1677,7 @@ pub(crate) fn check_func_body_bundle(
         }
     }
     // Direct ambient/foreign operations keep their precise body diagnostic.
-    // User callees are checked after the whole-program effect fixpoint so an
+    // User callees are checked after the shared reachability projection so an
     // inferred-pure callee need not repeat `=[]=>`.
     if f.is_pure {
         ck.diags.extend(check_pure_fn(f, &st.funcs));
