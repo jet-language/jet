@@ -320,10 +320,9 @@ impl<'a> Checker<'a> {
                 // D-TAG1: an earlier group arm already covers every leaf in
                 // its subtree, so `.Fire ->` makes a later `.Fire.Burn ->`
                 // unreachable (ancestor-or-equal test on the dotted path).
-                let already = covered.contains(&variant)
-                    || covered
-                        .iter()
-                        .any(|c| variant.starts_with(&format!("{c}.")));
+                let already = covered
+                    .iter()
+                    .any(|c| jet_foundation::Facts::fact_covers(c, &variant));
                 if already {
                     let what = format!(
                         "arm `{}` is unreachable — that case is already handled",

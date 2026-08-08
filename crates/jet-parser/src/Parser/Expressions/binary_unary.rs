@@ -1,6 +1,6 @@
 use super::super::{
     BinOp, Diagnostic, EnumLitArg, Expr, OrFallback, Parser, Span, StrTokPart, Syntax, TokKind,
-    UnOp, pat_span,
+    UnOp, leading_dot_variant, pat_span,
 };
 
 fn write_window_at_maximal_place(expr: Expr, start: usize) -> Expr {
@@ -28,16 +28,6 @@ fn write_window_at_maximal_place(expr: Expr, start: usize) -> Expr {
             let span = Span::new(start, place.span().end);
             Expr::Place(Box::new(place), crate::AST::PlaceAccess::Write, span)
         }
-    }
-}
-
-fn leading_dot_variant(kind: &TokKind) -> Option<String> {
-    match kind {
-        TokKind::Ident(name) if name.chars().next().is_some_and(char::is_uppercase) => {
-            Some(name.clone())
-        }
-        TokKind::KwNull => Some(Syntax::LIT_NULL.to_string()),
-        _ => None,
     }
 }
 

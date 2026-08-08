@@ -558,6 +558,18 @@ fn pat_span(pat: &Pattern) -> Span {
     pat.span()
 }
 
+/// D-DOTSCOPE1/leading-dot patterns share one head classifier: an uppercase
+/// ident or `null` (spelled `Syntax::LIT_NULL`) may follow a leading `.`.
+fn leading_dot_variant(kind: &TokKind) -> Option<String> {
+    match kind {
+        TokKind::Ident(name) if name.chars().next().is_some_and(char::is_uppercase) => {
+            Some(name.clone())
+        }
+        TokKind::KwNull => Some(Syntax::LIT_NULL.to_string()),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod s61_tests {
     use super::*;

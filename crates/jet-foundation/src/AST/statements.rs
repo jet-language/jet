@@ -313,9 +313,10 @@ pub enum Stmt {
         else_body: Option<Vec<Stmt>>,
         span: Span,
     },
-    /// D-CTMARKER1 (ratified 2026-06-25, piece 2): `$ { … }` — a
-    /// build-time execution block. Runs at compile time via the tree-walking
-    /// comptime interpreter; erases entirely (no runtime Rust emitted, I3).
+    /// D-META-STAGE1=B (ratified 2026-08-06, card #1537, retires D-CTMARKER1's
+    /// splice-only spelling): `$ { … }` — a build-time execution block. Runs
+    /// at compile time via the tree-walking comptime interpreter; erases
+    /// entirely (no runtime Rust emitted, I3).
     /// Pure-only in Stage A (D-CTCORE1 whitelist + E0951/E0958/E0953/E0956);
     /// effect tiers (D-CTEFFECT1) wire in c157. Bindings inside do not leak to
     /// the enclosing scope. `$name` splice (piece 1) deferred to c155.

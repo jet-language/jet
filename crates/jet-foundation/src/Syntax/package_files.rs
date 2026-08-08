@@ -75,6 +75,11 @@ pub const SIGIL_SPREAD: &str = "...";
 /// Same token, two contexts: `[T#N]` is the type-level size form; `name#ver`
 /// is the package version-pin form. No dedicated two-character token in either
 /// case — the parser resolves by position.
+///
+/// `#` has a third job outside a type: the applied-rule prefix at a
+/// declaration/statement/expression target (D-VERDICT-732-1,
+/// `RULE_PREFIX`/`MARKER_PREFIX`). D-ONCE-HASH1=B keeps all three jobs on
+/// one token, disambiguated only by parser position.
 pub const TYPE_FIXED_SIZE_SEP: &str = "#";
 
 /// D-DIST1 (ratified 2026-06-19): `UserId :: distinct Int` — declares a
@@ -592,34 +597,22 @@ pub const BUILD_OPTIMIZE_FULL: &str = "full"; // D-BUILDPROFILE1
 /// having it here prevents silent divergence.
 pub const IMPURE_BUILTINS: &[&str] = &[BUILTIN_PRINT, "eprint", "print", BUILTIN_INPUT, "read_all_input"];
 
-// ── Marker family + syntax wave (ratified 2026-07-01, D-MARKERMOVE2/3 2026-07-02) ──
+// ── Marker plane (current law: D-VERDICT-732-1, ratified 2026-07-23, card #732) ──
 //
-// D-MARKER-FAMILY1 (B): two-plane sigil law. `@` precedes a declaration and
-// states a checkable contract about it; `#` instructs the compiler (modes,
-// regions, effects, compile-time values) and may appear in type/expression
-// position where `@` never does; `$` stays splice-only (D-CTMARKER1).
+// `#` is the sole prefix for attributes, instructions, and properties: every
+// typed rule, built-in or user derive, wire marker, and compile-time
+// instruction lives on `#`. `@` is reserved for locations, addresses, and
+// sources — it is never a marker sigil. `$` is the one compile-time mark
+// (D-META-STAGE1=B; retires D-CTMARKER1's splice-only spelling).
+// A leading `@Rule` is E0063 with the canonical `#Rule` fix.
 //
-// D-CONTRACTCASE1 (A): PascalCase everywhere on the `@` plane — one casing
-// rule for the whole language, extending D-CASING1's `#`-plane rule to `@`.
-//
-// D-MARKERMOVE1 (B): the fixed move list — `Pure`, `MustUse`, `Codable`,
-// `Encode`, `Decode`, `Experimental`, `Tested`, `Hardened`, `PublishedSchema`,
-// `Redact`, `Numeric` move from `#` to `@` (e.g. `#Pure` → `#Pure`), exact
-// PascalCase spelling kept. `#Numeric` (D-DIST3) and the `@numeric` capability
-// bundle (D-CAPBUNDLE1) are the same job (I8) and merge into one `#Numeric` —
-// see `MARKER_NUMERIC` above; there is no separate bundle constant. Serde field +
-// container markers (`#Rename`, `#Skip`, `#Default`, `#Flatten`,
-// `#RenameAll`, `#DenyUnknownFields`, `#Tag`, `#Untagged`) are wire-format
-// machinery, not promises, and stay on `#`.
-//
-// D-SHAPE8 supersedes D-MARKERMOVE2: `#Pure` is retired teaching syntax.
-// Empty effect bounds use the return-arrow row `=[]=>`.
-//
-// D-MARKERMOVE3 (B, ratified 2026-07-02): all built-in derive markers move,
-// user derives stay `#`. `#Debug`, `#Summarize`, `#Comparable` join
-// `#Codable`/`#Encode`/`#Decode` as contract-plane capability promises;
-// `derive T.Wire { … }` bodies applied as `#[Wire]` remain `#` generation
-// machinery — the built-in/user line IS the plane line.
+// D-VERDICT-732-1 supersedes the earlier two-plane sigil law: D-SHAPE2's
+// original `@`/`#` split and D-MARKER-FAMILY1/D-MARKERMOVE1/2/3 (which had
+// moved `Pure`, `MustUse`, `Codable`, `Debug`, and others onto `@`) are
+// historical spelling-reconciliation notes only — every one of those markers
+// is back on `#` today. Do not reintroduce `@Pure`-style markers from reading
+// old comments or docs; check docs/spec/syntax-decisions.md for the live law
+// before trusting any comment that predates 2026-07-23.
 use super::{
     BUILTIN_INPUT, BUILTIN_PRINT, CTX_BLOCK, KW_ALIAS, KW_AS, KW_BENCH,
     KW_BREAK, KW_DEFER, KW_DERIVE, KW_EFFECT_DECL, KW_ELSE, KW_ENUM,

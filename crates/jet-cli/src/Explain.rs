@@ -513,6 +513,6 @@ mod marker_registry_tests {
 
         let pure = super::lookup("Pure").expect("Pure retirement explanation");
         assert!(pure.retired);
-        assert_eq!(pure.fix.as_deref(), Some("replace it with `pure fn`"));
+        assert_eq!(pure.fix.as_deref(), Some("replace it with `=[]=>`"));
     }
 }

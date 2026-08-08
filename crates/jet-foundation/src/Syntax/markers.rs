@@ -1,6 +1,12 @@
 /// D-VERDICT-732-1: the sole prefix for applying a typed rule. A rule may target a
 /// declaration, expression, or brace scope when that rule declares the target
 /// legal. `@` is reserved for locations, addresses, and sources.
+///
+/// `#` has two other jobs, told apart by parser position only (no lookahead
+/// heuristics): inside a bracketed type, `[T#N]`, it is the fixed-size-list
+/// separator (S76/D-FIXARR1, `TYPE_FIXED_SIZE_SEP` in `package_files.rs`);
+/// after a package name it is the version-pin separator (`pkg#1.2.0`, same
+/// constant). D-ONCE-HASH1=B keeps all three jobs on one token.
 pub const RULE_PREFIX: &str = "#"; // D-VERDICT-732-1
 
 /// D-PREPOST1 / D-CONTRACTCASE1: precondition contract on a function

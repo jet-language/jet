@@ -293,9 +293,9 @@ pub enum Type {
     Union(Vec<Type>),
     /// D-COMPUTE-TYPE1 family: a physical quantity — a numeric `base` type
     /// tagged with an open `Dimension`. Card #1662: replaces the retired
-    /// `Type::Apply{name: "\0Quantity", ..}` string-serialized encoding with a
-    /// real variant. Runtime values still carry no dimension metadata; the
-    /// dimension is compile-time only.
+    /// unwriteable-marker `Type::Apply` string encoding with a real variant.
+    /// Runtime values still carry no dimension metadata; the dimension is
+    /// compile-time only.
     Quantity {
         base: Box<Type>,
         dimension: Dimension,

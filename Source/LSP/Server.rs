@@ -2081,11 +2081,7 @@ fn is_keyword_token(tok: &Token, text: &str) -> bool {
     }
     matches!(
         tok.kind,
-        TokKind::KwWhile
-            | TokKind::KwFor
-            | TokKind::KwSwitch
-            | TokKind::KwMutate
-            | TokKind::KwMove
+        TokKind::KwSwitch | TokKind::KwMutate | TokKind::KwMove
     )
 }
 

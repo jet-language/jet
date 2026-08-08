@@ -20,8 +20,6 @@ pub enum TokKind {
     KwPriv,
     KwIf,
     KwElse,
-    KwWhile,
-    KwFor,
     KwSwitch,
     KwBreak,
     KwTrue,
@@ -165,7 +163,8 @@ pub enum TokKind {
     ShrEq,
     /// S76 (2026-06-16): `#` separates the element type and size in `[T#N]`.
     Hash,
-    /// D-CTMARKER1=C: `$` — comptime splice marker in `emit()` templates.
+    /// D-META-STAGE1=B (retires D-CTMARKER1's splice-only spelling): `$` —
+    /// the one compile-time mark.
     Dollar,
     /// S5: `//` through end of line (M6 fmt preserves these).
     LineComment(String),
@@ -212,8 +211,6 @@ pub fn describe(kind: &TokKind) -> String {
         TokKind::KwPriv => format!("the keyword `{}`", Syntax::KW_PRIV),
         TokKind::KwIf => format!("the keyword `{}`", Syntax::KW_IF),
         TokKind::KwElse => format!("the keyword `{}`", Syntax::KW_ELSE),
-        TokKind::KwWhile => format!("the keyword `{}`", Syntax::FOREIGN_WHILE),
-        TokKind::KwFor => format!("the keyword `{}`", Syntax::FOREIGN_FOR),
         TokKind::KwSwitch => format!("the keyword `{}`", Syntax::KW_SWITCH),
         TokKind::KwBreak => format!("the keyword `{}`", Syntax::KW_BREAK),
         TokKind::KwTrue => "`true`".to_string(),

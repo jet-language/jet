@@ -1384,6 +1384,16 @@ bearing rules require a visible brace scope, reason, and audit treatment, and
 before `@` and its source after it. A leading `@Rule` produces E0063
 with the canonical `#Rule` fix.
 
+**`#` disambiguation** *(D-ONCE-HASH1=B, ratified 2026-08-07)*: `#` lexes to
+one `TokKind::Hash` and carries three jobs, told apart by parser position
+alone, never lookahead heuristics. At a declaration, statement, or expression
+target it is the rule prefix (D-VERDICT-732-1): `#Rule`, `#[A, B]`. Inside a
+bracketed type, `[T#N]`, it is the fixed-size-list separator (S76/D-FIXARR1).
+After a package name, `pkg#1.2.0`, it is the version-pin separator (same
+constant as the fixed-size form). Interpolation selectors do not use `#`; they
+respell to colon (`{x:Fixed(2)}`) so they never collide with any of the three
+jobs above.
+
 **D-SHAPE2=A — One applied-rule marker** *(ratified 2026-07-14, card #534;
 sigil assignment superseded by D-VERDICT-732-1)*: every typed rule uses the
 single `#Rule` mechanism. Non-rule `#` constructs remain unchanged: effect sets
@@ -5373,6 +5383,11 @@ Control flow).
 **S43 — `test` blocks**: superseded by `#Test("name")` (see Testing).
 **S53 — concurrency**: deferred past v1.0 (see Capabilities & memory).
 **S81 — `?continue`**: superseded by `expr ?? next` (D-LOOP-CONTROLWORD1=B).
+**D-MARKER-FAMILY1 / D-MARKERMOVE1/2/3 — two-plane `@`/`#` sigil law**:
+superseded by D-VERDICT-732-1; every marker is back on `#`, `@` is reserved
+for locations/sources.
+**D-CTMARKER1 — `$name` splice marker**: retired outright by D-META-STAGE1=B;
+`$` is the one compile-time mark, not a splice-only sigil.
 **U1 / U10 filenames, D-JPK3/8/13, D-BIND1/2, D-ATTR1/3, D-CAP1/2-words,
 D-JSONOUT1, D-LITSUFFIX-SCOPE, D-UNIT1-spelling, the bare-brace constructor
 spelling superseded by D-DOTCTOR2**: all

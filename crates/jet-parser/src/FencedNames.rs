@@ -189,8 +189,6 @@ fn expand_segment(
                     | TokKind::KwIf
                     | TokKind::KwElse
                     | TokKind::KwLoop
-                    | TokKind::KwWhile
-                    | TokKind::KwFor
                     | TokKind::KwSwitch
                     | TokKind::KwStruct
                     | TokKind::KwEnum

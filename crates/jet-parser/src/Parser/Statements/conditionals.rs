@@ -1,15 +1,5 @@
 use super::super::*;
 
-fn leading_dot_variant(kind: &TokKind) -> Option<String> {
-    match kind {
-        TokKind::Ident(name) if name.chars().next().is_some_and(char::is_uppercase) => {
-            Some(name.clone())
-        }
-        TokKind::KwNull => Some(Syntax::LIT_NULL.to_string()),
-        _ => None,
-    }
-}
-
 impl<'a> Parser<'a> {
     /// D-DOTSCOPE1: parse a scope-member statement `.name { … }` /
     /// `.name(args) { … }`. Purely structural — whether `name` is a valid member

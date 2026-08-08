@@ -401,11 +401,7 @@ impl<'a> Parser<'a> {
             let start = self.peek().span.start;
             self.bump(); // consume `derive`
             let (type_param, type_param_span) = self.expect_ident("after `derive`")?;
-            let old_derive_for = match &self.peek().kind {
-                TokKind::KwFor => true,
-                TokKind::Ident(n) if n == "for" => true,
-                _ => false,
-            };
+            let old_derive_for = matches!(&self.peek().kind, TokKind::Ident(n) if n == "for");
             if old_derive_for {
                 // Old spelling `derive Trait for T`: the first ident was the trait name.
                 return Err(Diagnostic::error(

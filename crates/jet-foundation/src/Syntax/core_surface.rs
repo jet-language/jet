@@ -103,6 +103,7 @@ pub const SIGIL_FENCE_CLOSE: &str = "]$";
 /// `#Track name :: expr` / `#Track name := expr`.
 pub const MARKER_TRACK: &str = "Track";
 
+/// S57 (ratified, as amended by D-META-STAGE1=B): compile-time demand.
 /// D-META-STAGE1=B (ratified 2026-08-06, amends D-VERDICT-1308-1/2 and retires
 /// D-CTMARKER1): `$` is the one compile-time mark. It belongs to the name, so
 /// it is written at every mention — `$limit :: 1000` then `print("{$limit}")`.

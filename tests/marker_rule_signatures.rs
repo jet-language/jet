@@ -431,11 +431,11 @@ fn static_string_products_resolve_before_consumers() {
 $label :: "shared"
 $invariant :: "value >= 0 && value < 4"
 $page :: "index.html"
-#HTML(page)
-#Invariant(invariant)
+#HTML($page)
+#Invariant($invariant)
 Tiny :: distinct Int
-#Test(label) {}
-#Bench(label) {}
+#Test($label) {}
+#Bench($label) {}
 fn run() {}
 "#;
     let (bundle, diagnostics) = checked(source, jet::Sema::CompileMode::Check);
@@ -494,10 +494,10 @@ fn static_type_and_field_strings_use_the_same_signature_gate() {
 $tag_name :: "kind"
 $field_name :: "identifier"
 $variant_name :: "ready"
-#[Codable, Discriminant(tag_name)]
-enum Event { #Rename(variant_name) Ready }
+#[Codable, Discriminant($tag_name)]
+enum Event { #Rename($variant_name) Ready }
 #Codable
-struct Row { #Rename(field_name) id: Int }
+struct Row { #Rename($field_name) id: Int }
 fn run() {}
 "#,
     );
@@ -548,7 +548,7 @@ fn resolved_invariant_text_keeps_domain_validation() {
     let diagnostics = codes(
         r#"
 $invariant :: "value != 3"
-#Invariant(invariant)
+#Invariant($invariant)
 Tiny :: distinct Int
 fn run() {}
 "#,

@@ -191,6 +191,39 @@ fn every_syntax_const_has_adjacent_decision_comment() {
     );
 }
 
+/// #1670: guard the two retired-marker-law spellings against silent return.
+/// D-MARKER-FAMILY1 (the old `@`/`#` two-plane split) and D-CTMARKER1 (`$` as
+/// splice-only) are tombstoned by D-VERDICT-732-1 and D-META-STAGE1=B. A
+/// comment restating either retired characterization as current law would
+/// mislead a reader into reintroducing `@Pure`-style markers or splice-only
+/// `$`. This does not forbid citing the IDs for historical provenance (most
+/// of the codebase does, correctly) — it only bans the retired *meaning*.
+#[test]
+fn retired_marker_law_does_not_return() {
+    let sources = [
+        "crates/jet-foundation/src/Syntax/package_files.rs",
+        "crates/jet-lexer/src/Lexer/Tokens.rs",
+        "crates/jet-foundation/src/AST/statements.rs",
+        "crates/jet-foundation/src/AST/expressions.rs",
+        "crates/jet-foundation/src/Syntax/core_surface.rs",
+    ];
+    for path in sources {
+        let raw = fs::read_to_string(path).unwrap_or_else(|err| panic!("{path}: {err}"));
+        // Join wrapped doc-comment lines so a phrase split across `///` lines
+        // still matches as one continuous string.
+        let text = raw.replace('\n', " ");
+        assert!(
+            !text.contains("`@` precedes a declaration and states a checkable contract"),
+            "{path} restates the retired D-MARKER-FAMILY1 two-plane law as current; \
+             D-VERDICT-732-1 made `#` the sole marker prefix"
+        );
+        assert!(
+            !text.to_lowercase().contains("splice-only") || text.contains("retires D-CTMARKER1"),
+            "{path} calls `$` splice-only without noting D-META-STAGE1=B superseded that spelling"
+        );
+    }
+}
+
 fn line_has_decision_id(line: &str) -> bool {
     // Matches S123 / N12 / U12 tokens, or D-XXXX / D-XXXX=A / D-XXXX1=A decision IDs.
     let bytes = line.as_bytes();
