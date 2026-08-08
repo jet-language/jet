@@ -482,3 +482,5 @@ mod predicates;
 pub use predicates::*;
 mod retirements;
 pub use retirements::*;
+mod sinks;
+pub use sinks::*;
