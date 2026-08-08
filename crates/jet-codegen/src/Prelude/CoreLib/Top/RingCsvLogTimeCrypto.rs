@@ -509,6 +509,41 @@ fn jet_ring_log_error_fields(msg: &String, fields: &Vec<jet_std::LogField>) {
     }
 }
 
+fn unix_to_ymdhms(secs: i64) -> (i32, u32, u32, u32, u32, u32) {
+    let mut days = secs / 86400;
+    let time_of_day = (secs % 86400).unsigned_abs();
+    let h = (time_of_day / 3600) as u32;
+    let mi = ((time_of_day % 3600) / 60) as u32;
+    let s = (time_of_day % 60) as u32;
+    let mut year: i32 = 1970;
+    loop {
+        let dy = if is_leap(year) { 366 } else { 365 };
+        if days < dy {
+            break;
+        }
+        days -= dy;
+        year += 1;
+    }
+    let month_days: [i64; 12] = if is_leap(year) {
+        [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    } else {
+        [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    };
+    let mut month: u32 = 1;
+    for &md in &month_days {
+        if days < md {
+            break;
+        }
+        days -= md;
+        month += 1;
+    }
+    (year, month, (days + 1) as u32, h, mi, s)
+}
+
+fn is_leap(y: i32) -> bool {
+    (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0)
+}
+
 // ── core.crypto ────────────────────────────────────────────────────────────────
 // SHA-256 of a UTF-8 string, returned as a lowercase hex string.
 fn jet_ring_crypto_sha256(s: &String) -> String {
