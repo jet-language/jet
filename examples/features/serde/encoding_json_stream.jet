@@ -24,14 +24,8 @@ fn run() {
     write_catalog(path)
     input :: files.open(path) ?? panic("open")
     reader :: json.reader(^input) ?? panic("reader")
-    count := 0
-    loop count < 5 {
-        maybe :: reader.next() ?? panic("next")
-        if maybe == .None {
-            print("eof")
-            break
-        }
+    loop event, reader {
         print("event")
-        count++
     }
+    print("eof")
 }
