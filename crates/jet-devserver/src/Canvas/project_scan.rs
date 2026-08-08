@@ -68,9 +68,8 @@ pub(super) struct ProjectContext {
     pub(super) entry_path: PathBuf,
     pub(super) project_root: PathBuf,
     pub(super) manifest_root: Option<PathBuf>,
-    /// Canonical E5 Package root. This is separate from `manifest_root` so
-    /// legacy `pkg.jet` compiler support cannot become a second authority for
-    /// a project that already has `package.jet`.
+    /// Package root used by Canvas package projections. It comes from the
+    /// loader's one root walk; workspace roots still take precedence.
     pub(super) ecosystem_root: Option<PathBuf>,
     pub(super) workspace_root: Option<PathBuf>,
     pub(super) files: Vec<ProjectFileRec>,
@@ -122,7 +121,7 @@ pub(super) fn project_context_for_entry(path: &Path) -> ProjectContext {
         .as_deref()
         .filter(|root| root.join(jet_driver::Syntax::PACKAGE_FILE).is_file())
         .map(Path::to_path_buf)
-        .or_else(|| find_package_root(entry_dir));
+        .or_else(|| manifest_root.clone());
     let project_root = workspace_root
         .as_deref()
         .or(manifest_root.as_deref())
@@ -147,23 +146,6 @@ pub(super) fn project_context_for_entry(path: &Path) -> ProjectContext {
         files,
         parts,
         project_revision,
-    }
-}
-
-/// Card #1665: walks upward for the canonical E5 Package root — deliberately
-/// narrower than `jet_driver::Loader::find_manifest_root` (used for
-/// `manifest_root` above), which also accepts the migration-era `pkg.jet`.
-/// Keeping this canonical-only (see `ProjectContext::ecosystem_root`'s doc)
-/// stops legacy `pkg.jet` compiler support from becoming a second authority
-/// for a project that already has `package.jet`. One filename, sourced from
-/// the shared `Syntax::PACKAGE_FILE` constant, not a hand-typed literal.
-fn find_package_root(start: &Path) -> Option<PathBuf> {
-    let mut dir = start.to_path_buf();
-    loop {
-        if dir.join(jet_driver::Syntax::PACKAGE_FILE).is_file() {
-            return Some(dir);
-        }
-        dir = dir.parent()?.to_path_buf();
     }
 }
 

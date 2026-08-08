@@ -3529,7 +3529,16 @@ fn workspace_root_for_path(server: &Server, path: &str) -> Option<String> {
         .filter(|root| path_ref.starts_with(root.as_str()))
         .max_by_key(|root| root.len())
         .cloned()
-        .or_else(|| project_root_marker(&path))
+        .or_else(|| {
+            let dir = path_ref.parent()?;
+            crate::Loader::find_manifest_root(dir)
+                .or_else(|| {
+                    dir.ancestors()
+                        .find(|candidate| candidate.join(".git").exists())
+                        .map(std::path::Path::to_path_buf)
+                })
+                .map(|root| normalize_path_buf(&root))
+        })
 }
 
 fn workspace_relative_diagnostic_path(server: &Server, path: &str) -> String {
@@ -3550,21 +3559,6 @@ fn workspace_relative_diagnostic_path(server: &Server, path: &str) -> String {
         .unwrap_or(std::path::Path::new(&normalized))
         .to_string_lossy()
         .replace('\\', "/")
-}
-
-fn project_root_marker(path: &str) -> Option<String> {
-    let mut dir = std::path::Path::new(path).parent()?;
-    loop {
-        if dir.join("package.jet").exists()
-            || dir.join("pkg.jet").exists()
-            || dir.join("Jet.toml").exists()
-            || dir.join("jet.toml").exists()
-            || dir.join(".git").exists()
-        {
-            return Some(normalize_path_buf(dir));
-        }
-        dir = dir.parent()?;
-    }
 }
 
 fn code_lenses_for(uri: &str, src: &str) -> Vec<String> {

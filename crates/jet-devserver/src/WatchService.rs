@@ -231,8 +231,8 @@ impl WatchGraph {
             .and_then(|n| n.to_str())
             .unwrap_or("")
             .to_ascii_lowercase();
-        if name == "package.jet"
-            || name == "pkg.jet"
+        if name == jet_driver::Syntax::PACKAGE_FILE
+            || name == jet_driver::Syntax::PAYLOAD_FILE
             || name.ends_with(".manifest")
             || name == "web.manifest.json"
         {
@@ -273,30 +273,35 @@ impl WatchGraph {
         let entry = canonicalize_loose(entry);
         graph.set_entry(entry.clone());
 
-        let project = entry.parent().unwrap_or_else(|| Path::new("."));
+        let entry_dir = entry.parent().unwrap_or_else(|| Path::new("."));
+        let project = jet_driver::Loader::find_manifest_root(entry_dir)
+            .unwrap_or_else(|| entry_dir.to_path_buf());
         let extras = [
             (
-                jet_driver::Manifest::manifest_path_in(project),
+                jet_driver::Loader::manifest_path(&project),
                 RootKind::Manifest,
             ),
-            (project.join(".jet/lock"), RootKind::Lock),
+            (Some(project.join(".jet/lock")), RootKind::Lock),
             (
-                project.join(format!(
+                Some(project.join(format!(
                     "{}.html",
                     entry.file_stem().and_then(|s| s.to_str()).unwrap_or("app")
-                )),
+                ))),
                 RootKind::HTML,
             ),
             (
-                project.join(format!(
+                Some(project.join(format!(
                     "{}.css",
                     entry.file_stem().and_then(|s| s.to_str()).unwrap_or("app")
-                )),
+                ))),
                 RootKind::Style,
             ),
-            (project.join("target.fact"), RootKind::TargetFact),
+            (Some(project.join("target.fact")), RootKind::TargetFact),
         ];
         for (path, kind) in extras {
+            let Some(path) = path else {
+                continue;
+            };
             if path.exists() || kind == RootKind::Manifest || kind == RootKind::Lock {
                 graph.upsert(path.clone(), kind);
                 graph.link(entry.clone(), path);

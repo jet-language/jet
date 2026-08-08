@@ -493,10 +493,7 @@ fn project_relative_diagnostic_path(file: &str) -> String {
     }
     let mut directory = path.parent();
     while let Some(root) = directory {
-        if ["pkg.jet", "Jet.toml", "jet.toml", ".git"]
-            .iter()
-            .any(|marker| root.join(marker).exists())
-        {
+        if root.join(".git").exists() {
             if let Ok(relative) = path.strip_prefix(root) {
                 return relative.to_string_lossy().replace('\\', "/");
             }

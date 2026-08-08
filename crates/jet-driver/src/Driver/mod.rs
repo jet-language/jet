@@ -2206,18 +2206,17 @@ fn build_package_name(file: &str) -> String {
             .map(|directory| directory.join(entry))
             .unwrap_or_else(|_| entry.to_path_buf())
     };
-    let mut directory = absolute.parent();
-    while let Some(dir) = directory {
-        let path = crate::Manifest::manifest_path_in(dir);
+    if let Some(root) = crate::Loader::find_manifest_root(
+        absolute.parent().unwrap_or(std::path::Path::new(".")),
+    ) {
+        let path = crate::Loader::manifest_path(&root).expect("manifest root has a Package file");
         if let Ok(source) = std::fs::read_to_string(&path) {
             if let Ok(manifest) = crate::Package::PackageFacts::parse(&source, "package.jet") {
                 if !manifest.name.is_empty() {
                     return manifest.name;
                 }
             }
-            break;
         }
-        directory = dir.parent();
     }
     absolute
         .file_stem()
