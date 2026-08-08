@@ -39,51 +39,36 @@ extern "C" fn jet_jit_tar_names_json(archive: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(json))
 }
 
-pub(crate) struct ArchiveHostFns {
-    pub zip_compress: cranelift_module::FuncId,
-    pub zip_decompress: cranelift_module::FuncId,
-    pub tar_add: cranelift_module::FuncId,
-    pub tar_get: cranelift_module::FuncId,
-    pub tar_names_json: cranelift_module::FuncId,
+host_fns! {
+    struct ArchiveHostFns;
+    register: register_archive_symbols;
+    declare: declare_archive_host_fns(module) {
+        use cranelift_codegen::ir::{types, AbiParam, Signature};
+        use cranelift_module::{Linkage, Module};
+        let cc = module.target_config().default_call_conv;
+        let mut sig_unary = Signature::new(cc);
+        sig_unary.params.push(AbiParam::new(types::I64));
+        sig_unary.returns.push(AbiParam::new(types::I64));
+        let mut sig_bin = Signature::new(cc);
+        sig_bin.params.push(AbiParam::new(types::I64));
+        sig_bin.params.push(AbiParam::new(types::I64));
+        sig_bin.returns.push(AbiParam::new(types::I64));
+        let mut sig_tern = Signature::new(cc);
+        sig_tern.params.push(AbiParam::new(types::I64));
+        sig_tern.params.push(AbiParam::new(types::I64));
+        sig_tern.params.push(AbiParam::new(types::I64));
+        sig_tern.returns.push(AbiParam::new(types::I64));
+
+
+    }
+    zip_compress: "jet_jit_zip_compress" => jet_jit_zip_compress: sig_bin;
+    zip_decompress: "jet_jit_zip_decompress" => jet_jit_zip_decompress: sig_unary;
+    tar_add: "jet_jit_tar_add" => jet_jit_tar_add: sig_tern;
+    tar_get: "jet_jit_tar_get" => jet_jit_tar_get: sig_bin;
+    tar_names_json: "jet_jit_tar_names_json" => jet_jit_tar_names_json: sig_unary;
 }
 
-pub(crate) fn register_archive_symbols(builder: &mut cranelift_jit::JITBuilder) {
-    builder.symbol("jet_jit_zip_compress", jet_jit_zip_compress as *const u8);
-    builder.symbol("jet_jit_zip_decompress", jet_jit_zip_decompress as *const u8);
-    builder.symbol("jet_jit_tar_add", jet_jit_tar_add as *const u8);
-    builder.symbol("jet_jit_tar_get", jet_jit_tar_get as *const u8);
-    builder.symbol("jet_jit_tar_names_json", jet_jit_tar_names_json as *const u8);
-}
 
-pub(crate) fn declare_archive_host_fns(
-    module: &mut cranelift_jit::JITModule,
-) -> Result<ArchiveHostFns, String> {
-    use cranelift_codegen::ir::{types, AbiParam, Signature};
-    use cranelift_module::{Linkage, Module};
 
-    let cc = module.target_config().default_call_conv;
-    let mut sig_unary = Signature::new(cc);
-    sig_unary.params.push(AbiParam::new(types::I64));
-    sig_unary.returns.push(AbiParam::new(types::I64));
-    let mut sig_bin = Signature::new(cc);
-    sig_bin.params.push(AbiParam::new(types::I64));
-    sig_bin.params.push(AbiParam::new(types::I64));
-    sig_bin.returns.push(AbiParam::new(types::I64));
-    let mut sig_tern = Signature::new(cc);
-    sig_tern.params.push(AbiParam::new(types::I64));
-    sig_tern.params.push(AbiParam::new(types::I64));
-    sig_tern.params.push(AbiParam::new(types::I64));
-    sig_tern.returns.push(AbiParam::new(types::I64));
-    let mut import = |name: &str, sig: &Signature| -> Result<cranelift_module::FuncId, String> {
-        module
-            .declare_function(name, Linkage::Import, sig)
-            .map_err(|e| e.to_string())
-    };
-    Ok(ArchiveHostFns {
-        zip_compress: import("jet_jit_zip_compress", &sig_bin)?,
-        zip_decompress: import("jet_jit_zip_decompress", &sig_unary)?,
-        tar_add: import("jet_jit_tar_add", &sig_tern)?,
-        tar_get: import("jet_jit_tar_get", &sig_bin)?,
-        tar_names_json: import("jet_jit_tar_names_json", &sig_unary)?,
-    })
-}
+
+

@@ -724,218 +724,106 @@ extern "C" fn jet_jit_dispatch_report_handlers(report: i64) -> i64 {
     })
 }
 
-pub(crate) struct ReactiveHostFns {
-    pub(crate) signal: FuncId,
-    pub(crate) get: FuncId,
-    pub(crate) set: FuncId,
-    pub(crate) derived: FuncId,
-    pub(crate) derived_get: FuncId,
-    pub(crate) effect: FuncId,
-    pub(crate) effect_rooted: FuncId,
-    pub(crate) loadable_idle: FuncId,
-    pub(crate) loadable_loading: FuncId,
-    pub(crate) loadable_loaded: FuncId,
-    pub(crate) loadable_failed: FuncId,
-    pub(crate) loadable_is: FuncId,
-    pub(crate) loadable_payload: FuncId,
-    pub(crate) loadable_or_else: FuncId,
-    pub(crate) event_scope: FuncId,
-    pub(crate) event_new: FuncId,
-    pub(crate) event_on: FuncId,
-    pub(crate) event_once: FuncId,
-    pub(crate) event_emit: FuncId,
-    pub(crate) event_trace_summary: FuncId,
-    pub(crate) event_scope_active: FuncId,
-    pub(crate) event_scope_cancel: FuncId,
-    pub(crate) subscription_unsubscribe: FuncId,
-    pub(crate) hook_new: FuncId,
-    pub(crate) hook_on_priority: FuncId,
-    pub(crate) hook_run: FuncId,
-    pub(crate) decision_hook_new: FuncId,
-    pub(crate) decision_hook_on: FuncId,
-    pub(crate) decision_hook_run: FuncId,
-    pub(crate) hook_decision_continue: FuncId,
-    pub(crate) hook_decision_transform: FuncId,
-    pub(crate) hook_decision_cancel: FuncId,
-    pub(crate) hook_decision_fail: FuncId,
-    pub(crate) async_event_new: FuncId,
-    pub(crate) async_event_on: FuncId,
-    pub(crate) async_event_emit: FuncId,
-    pub(crate) async_event_join: FuncId,
-    pub(crate) async_event_close: FuncId,
-    pub(crate) dispatch_report_state: FuncId,
-    pub(crate) dispatch_report_handlers: FuncId,
+host_fns! {
+    struct ReactiveHostFns;
+    register: register_reactive_symbols;
+    declare: declare_reactive_host_fns(module) {
+        let cc = module.target_config().default_call_conv;
+
+        let mut nullary = Signature::new(cc);
+        nullary.returns.push(AbiParam::new(types::I64));
+        let mut unary = Signature::new(cc);
+        unary.params.push(AbiParam::new(types::I64));
+        unary.returns.push(AbiParam::new(types::I64));
+        let mut unary_void = Signature::new(cc);
+        unary_void.params.push(AbiParam::new(types::I64));
+        let mut binary = Signature::new(cc);
+        binary.params.push(AbiParam::new(types::I64));
+        binary.params.push(AbiParam::new(types::I64));
+        binary.returns.push(AbiParam::new(types::I64));
+        let mut binary_void = Signature::new(cc);
+        binary_void.params.push(AbiParam::new(types::I64));
+        binary_void.params.push(AbiParam::new(types::I64));
+        let mut binary_i8 = Signature::new(cc);
+        binary_i8.params.push(AbiParam::new(types::I64));
+        binary_i8.params.push(AbiParam::new(types::I64));
+        binary_i8.returns.push(AbiParam::new(types::I8));
+        let mut cb6 = Signature::new(cc);
+        for _ in 0..6 {
+            cb6.params.push(AbiParam::new(types::I64));
+        }
+        cb6.returns.push(AbiParam::new(types::I64));
+        let mut cb6_void = Signature::new(cc);
+        for _ in 0..6 {
+            cb6_void.params.push(AbiParam::new(types::I64));
+        }
+        let mut event_on = Signature::new(cc);
+        for _ in 0..8 {
+            event_on.params.push(AbiParam::new(types::I64));
+        }
+        event_on.returns.push(AbiParam::new(types::I64));
+        let mut hook_pri = Signature::new(cc);
+        for _ in 0..9 {
+            hook_pri.params.push(AbiParam::new(types::I64));
+        }
+        let mut decision_on = Signature::new(cc);
+        for _ in 0..9 {
+            decision_on.params.push(AbiParam::new(types::I64));
+        }
+        decision_on.params.push(AbiParam::new(types::I8));
+        let mut ternary = Signature::new(cc);
+        ternary.params.push(AbiParam::new(types::I64));
+        ternary.params.push(AbiParam::new(types::I64));
+        ternary.params.push(AbiParam::new(types::I64));
+        ternary.returns.push(AbiParam::new(types::I64));
+
+    }
+    signal: "jet_jit_reactive_signal" => jet_jit_reactive_signal: unary;
+    get: "jet_jit_reactive_get" => jet_jit_reactive_get: unary;
+    set: "jet_jit_reactive_set" => jet_jit_reactive_set: binary_void;
+    derived: "jet_jit_reactive_derived" => jet_jit_reactive_derived: cb6;
+    derived_get: "jet_jit_reactive_derived_get" => jet_jit_reactive_derived_get: unary;
+    effect: "jet_jit_reactive_effect" => jet_jit_reactive_effect: cb6;
+    effect_rooted: "jet_jit_reactive_effect_rooted" => jet_jit_reactive_effect_rooted: cb6_void;
+    loadable_idle: "jet_jit_loadable_idle" => jet_jit_loadable_idle: nullary;
+    loadable_loading: "jet_jit_loadable_loading" => jet_jit_loadable_loading: nullary;
+    loadable_loaded: "jet_jit_loadable_loaded" => jet_jit_loadable_loaded: unary;
+    loadable_failed: "jet_jit_loadable_failed" => jet_jit_loadable_failed: unary;
+    loadable_is: "jet_jit_loadable_is" => jet_jit_loadable_is: binary_i8;
+    loadable_payload: "jet_jit_loadable_payload" => jet_jit_loadable_payload: unary;
+    loadable_or_else: "jet_jit_loadable_or_else" => jet_jit_loadable_or_else: binary;
+    event_scope: "jet_jit_event_scope" => jet_jit_event_scope: nullary;
+    event_new: "jet_jit_event_new" => jet_jit_event_new: nullary;
+    event_on: "jet_jit_event_on" => jet_jit_event_on: event_on;
+    event_once: "jet_jit_event_once" => jet_jit_event_once: event_on;
+    event_emit: "jet_jit_event_emit" => jet_jit_event_emit: binary;
+    event_trace_summary: "jet_jit_event_trace_summary" => jet_jit_event_trace_summary: unary;
+    event_scope_active: "jet_jit_event_scope_active" => jet_jit_event_scope_active: unary;
+    event_scope_cancel: "jet_jit_event_scope_cancel" => jet_jit_event_scope_cancel: unary_void;
+    subscription_unsubscribe: "jet_jit_subscription_unsubscribe" => jet_jit_subscription_unsubscribe: unary_void;
+    hook_new: "jet_jit_hook_new" => jet_jit_hook_new: unary;
+    hook_on_priority: "jet_jit_hook_on_priority" => jet_jit_hook_on_priority: hook_pri;
+    hook_run: "jet_jit_hook_run" => jet_jit_hook_run: ternary;
+    decision_hook_new: "jet_jit_decision_hook_new" => jet_jit_decision_hook_new: unary;
+    decision_hook_on: "jet_jit_decision_hook_on" => jet_jit_decision_hook_on: decision_on;
+    decision_hook_run: "jet_jit_decision_hook_run" => jet_jit_decision_hook_run: binary;
+    hook_decision_continue: "jet_jit_hook_decision_continue" => jet_jit_hook_decision_continue: nullary;
+    hook_decision_transform: "jet_jit_hook_decision_transform" => jet_jit_hook_decision_transform: unary;
+    hook_decision_cancel: "jet_jit_hook_decision_cancel" => jet_jit_hook_decision_cancel: nullary;
+    hook_decision_fail: "jet_jit_hook_decision_fail" => jet_jit_hook_decision_fail: unary;
+    async_event_new: "jet_jit_async_event_new" => jet_jit_async_event_new: ternary;
+    async_event_on: "jet_jit_async_event_on" => jet_jit_async_event_on: event_on;
+    async_event_emit: "jet_jit_async_event_emit" => jet_jit_async_event_emit: binary;
+    async_event_join: "jet_jit_async_event_join" => jet_jit_async_event_join: unary;
+    async_event_close: "jet_jit_async_event_close" => jet_jit_async_event_close: unary_void;
+    dispatch_report_state: "jet_jit_dispatch_report_state" => jet_jit_dispatch_report_state: unary;
+    dispatch_report_handlers: "jet_jit_dispatch_report_handlers" => jet_jit_dispatch_report_handlers: unary;
 }
 
-pub(crate) fn register_reactive_symbols(builder: &mut JITBuilder) {
-    builder.symbol("jet_jit_reactive_signal", jet_jit_reactive_signal as *const u8);
-    builder.symbol("jet_jit_reactive_get", jet_jit_reactive_get as *const u8);
-    builder.symbol("jet_jit_reactive_set", jet_jit_reactive_set as *const u8);
-    builder.symbol("jet_jit_reactive_derived", jet_jit_reactive_derived as *const u8);
-    builder.symbol(
-        "jet_jit_reactive_derived_get",
-        jet_jit_reactive_derived_get as *const u8,
-    );
-    builder.symbol("jet_jit_reactive_effect", jet_jit_reactive_effect as *const u8);
-    builder.symbol(
-        "jet_jit_reactive_effect_rooted",
-        jet_jit_reactive_effect_rooted as *const u8,
-    );
-    builder.symbol("jet_jit_loadable_idle", jet_jit_loadable_idle as *const u8);
-    builder.symbol("jet_jit_loadable_loading", jet_jit_loadable_loading as *const u8);
-    builder.symbol("jet_jit_loadable_loaded", jet_jit_loadable_loaded as *const u8);
-    builder.symbol("jet_jit_loadable_failed", jet_jit_loadable_failed as *const u8);
-    builder.symbol("jet_jit_loadable_is", jet_jit_loadable_is as *const u8);
-    builder.symbol("jet_jit_loadable_payload", jet_jit_loadable_payload as *const u8);
-    builder.symbol("jet_jit_loadable_or_else", jet_jit_loadable_or_else as *const u8);
-    builder.symbol("jet_jit_event_scope", jet_jit_event_scope as *const u8);
-    builder.symbol("jet_jit_event_new", jet_jit_event_new as *const u8);
-    builder.symbol("jet_jit_event_on", jet_jit_event_on as *const u8);
-    builder.symbol("jet_jit_event_once", jet_jit_event_once as *const u8);
-    builder.symbol("jet_jit_event_emit", jet_jit_event_emit as *const u8);
-    builder.symbol(
-        "jet_jit_event_trace_summary",
-        jet_jit_event_trace_summary as *const u8,
-    );
-    builder.symbol("jet_jit_event_scope_active", jet_jit_event_scope_active as *const u8);
-    builder.symbol("jet_jit_event_scope_cancel", jet_jit_event_scope_cancel as *const u8);
-    builder.symbol(
-        "jet_jit_subscription_unsubscribe",
-        jet_jit_subscription_unsubscribe as *const u8,
-    );
-    builder.symbol("jet_jit_hook_new", jet_jit_hook_new as *const u8);
-    builder.symbol("jet_jit_hook_on_priority", jet_jit_hook_on_priority as *const u8);
-    builder.symbol("jet_jit_hook_run", jet_jit_hook_run as *const u8);
-    builder.symbol("jet_jit_decision_hook_new", jet_jit_decision_hook_new as *const u8);
-    builder.symbol("jet_jit_decision_hook_on", jet_jit_decision_hook_on as *const u8);
-    builder.symbol("jet_jit_decision_hook_run", jet_jit_decision_hook_run as *const u8);
-    builder.symbol(
-        "jet_jit_hook_decision_continue",
-        jet_jit_hook_decision_continue as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_hook_decision_transform",
-        jet_jit_hook_decision_transform as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_hook_decision_cancel",
-        jet_jit_hook_decision_cancel as *const u8,
-    );
-    builder.symbol("jet_jit_hook_decision_fail", jet_jit_hook_decision_fail as *const u8);
-    builder.symbol("jet_jit_async_event_new", jet_jit_async_event_new as *const u8);
-    builder.symbol("jet_jit_async_event_on", jet_jit_async_event_on as *const u8);
-    builder.symbol("jet_jit_async_event_emit", jet_jit_async_event_emit as *const u8);
-    builder.symbol("jet_jit_async_event_join", jet_jit_async_event_join as *const u8);
-    builder.symbol("jet_jit_async_event_close", jet_jit_async_event_close as *const u8);
-    builder.symbol(
-        "jet_jit_dispatch_report_state",
-        jet_jit_dispatch_report_state as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_dispatch_report_handlers",
-        jet_jit_dispatch_report_handlers as *const u8,
-    );
-}
 
-pub(crate) fn declare_reactive_host_fns(
-    module: &mut JITModule,
-) -> Result<ReactiveHostFns, String> {
-    let cc = module.target_config().default_call_conv;
-    let mut import = |name: &str, sig: &Signature| {
-        module
-            .declare_function(name, Linkage::Import, sig)
-            .map_err(|e| e.to_string())
-    };
-    let mut nullary = Signature::new(cc);
-    nullary.returns.push(AbiParam::new(types::I64));
-    let mut unary = Signature::new(cc);
-    unary.params.push(AbiParam::new(types::I64));
-    unary.returns.push(AbiParam::new(types::I64));
-    let mut unary_void = Signature::new(cc);
-    unary_void.params.push(AbiParam::new(types::I64));
-    let mut binary = Signature::new(cc);
-    binary.params.push(AbiParam::new(types::I64));
-    binary.params.push(AbiParam::new(types::I64));
-    binary.returns.push(AbiParam::new(types::I64));
-    let mut binary_void = Signature::new(cc);
-    binary_void.params.push(AbiParam::new(types::I64));
-    binary_void.params.push(AbiParam::new(types::I64));
-    let mut binary_i8 = Signature::new(cc);
-    binary_i8.params.push(AbiParam::new(types::I64));
-    binary_i8.params.push(AbiParam::new(types::I64));
-    binary_i8.returns.push(AbiParam::new(types::I8));
-    let mut cb6 = Signature::new(cc);
-    for _ in 0..6 {
-        cb6.params.push(AbiParam::new(types::I64));
-    }
-    cb6.returns.push(AbiParam::new(types::I64));
-    let mut cb6_void = Signature::new(cc);
-    for _ in 0..6 {
-        cb6_void.params.push(AbiParam::new(types::I64));
-    }
-    let mut event_on = Signature::new(cc);
-    for _ in 0..8 {
-        event_on.params.push(AbiParam::new(types::I64));
-    }
-    event_on.returns.push(AbiParam::new(types::I64));
-    let mut hook_pri = Signature::new(cc);
-    for _ in 0..9 {
-        hook_pri.params.push(AbiParam::new(types::I64));
-    }
-    let mut decision_on = Signature::new(cc);
-    for _ in 0..9 {
-        decision_on.params.push(AbiParam::new(types::I64));
-    }
-    decision_on.params.push(AbiParam::new(types::I8));
-    let mut ternary = Signature::new(cc);
-    ternary.params.push(AbiParam::new(types::I64));
-    ternary.params.push(AbiParam::new(types::I64));
-    ternary.params.push(AbiParam::new(types::I64));
-    ternary.returns.push(AbiParam::new(types::I64));
 
-    Ok(ReactiveHostFns {
-        signal: import("jet_jit_reactive_signal", &unary)?,
-        get: import("jet_jit_reactive_get", &unary)?,
-        set: import("jet_jit_reactive_set", &binary_void)?,
-        derived: import("jet_jit_reactive_derived", &cb6)?,
-        derived_get: import("jet_jit_reactive_derived_get", &unary)?,
-        effect: import("jet_jit_reactive_effect", &cb6)?,
-        effect_rooted: import("jet_jit_reactive_effect_rooted", &cb6_void)?,
-        loadable_idle: import("jet_jit_loadable_idle", &nullary)?,
-        loadable_loading: import("jet_jit_loadable_loading", &nullary)?,
-        loadable_loaded: import("jet_jit_loadable_loaded", &unary)?,
-        loadable_failed: import("jet_jit_loadable_failed", &unary)?,
-        loadable_is: import("jet_jit_loadable_is", &binary_i8)?,
-        loadable_payload: import("jet_jit_loadable_payload", &unary)?,
-        loadable_or_else: import("jet_jit_loadable_or_else", &binary)?,
-        event_scope: import("jet_jit_event_scope", &nullary)?,
-        event_new: import("jet_jit_event_new", &nullary)?,
-        event_on: import("jet_jit_event_on", &event_on)?,
-        event_once: import("jet_jit_event_once", &event_on)?,
-        event_emit: import("jet_jit_event_emit", &binary)?,
-        event_trace_summary: import("jet_jit_event_trace_summary", &unary)?,
-        event_scope_active: import("jet_jit_event_scope_active", &unary)?,
-        event_scope_cancel: import("jet_jit_event_scope_cancel", &unary_void)?,
-        subscription_unsubscribe: import("jet_jit_subscription_unsubscribe", &unary_void)?,
-        hook_new: import("jet_jit_hook_new", &unary)?,
-        hook_on_priority: import("jet_jit_hook_on_priority", &hook_pri)?,
-        hook_run: import("jet_jit_hook_run", &ternary)?,
-        decision_hook_new: import("jet_jit_decision_hook_new", &unary)?,
-        decision_hook_on: import("jet_jit_decision_hook_on", &decision_on)?,
-        decision_hook_run: import("jet_jit_decision_hook_run", &binary)?,
-        hook_decision_continue: import("jet_jit_hook_decision_continue", &nullary)?,
-        hook_decision_transform: import("jet_jit_hook_decision_transform", &unary)?,
-        hook_decision_cancel: import("jet_jit_hook_decision_cancel", &nullary)?,
-        hook_decision_fail: import("jet_jit_hook_decision_fail", &unary)?,
-        async_event_new: import("jet_jit_async_event_new", &ternary)?,
-        async_event_on: import("jet_jit_async_event_on", &event_on)?,
-        async_event_emit: import("jet_jit_async_event_emit", &binary)?,
-        async_event_join: import("jet_jit_async_event_join", &unary)?,
-        async_event_close: import("jet_jit_async_event_close", &unary_void)?,
-        dispatch_report_state: import("jet_jit_dispatch_report_state", &unary)?,
-        dispatch_report_handlers: import("jet_jit_dispatch_report_handlers", &unary)?,
-    })
-}
+
+
 
 #[allow(dead_code)]
 fn _arc_keepalive() {

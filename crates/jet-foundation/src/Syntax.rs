@@ -7,8 +7,16 @@
 //!
 //! Agents: do NOT add an entry here without a decision ID approved by the
 //! owner in docs/spec/syntax-decisions.md.
+// D-META-REG1=A / D-META-NAME1=A / D-META-FORM1=A: KW_MARKER is the one
+// declaring word, and `Registry::rows` is the one registration table behind it —
+// a marker rule, a knowledge plane, a right, and a build fact are rows of the
+// same table, separated only by what they attach to. Facts about a rule ride the
+// declaration's own named-parameter list under the compile-time mark
+// (`$sites: [Site]`, `$repeatable: true`); no clause form and no second keyword
+// enter the grammar. Every row states its safe direction and its gate words
+// (D-FACT-LAW1=B); a prover may publish a read-only row (D-FACT-OWN1=A).
 // Marker-plane reconciliation anchors: MARKER_PUB_FILE, MARKER_NO_PRELUDE, MARKER_TARGET,
-// MARKER_LAYOUT, MARKER_CODABLE, Policy::APPLIED_RULES, KW_CAPS, KW_GRANT,
+// MARKER_LAYOUT, MARKER_CODABLE, Policy::APPLIED_RULES, Registry::rows, KW_CAPS, KW_GRANT,
 // KW_COMPTIME, KW_DERIVE, MARKER_TRACK, MARKER_LOCAL, MARKER_SHARED. Constants live in the private modules
 // below; keep this root file mentioning them so I7 audits can check one
 // canonical surface entrypoint.
@@ -475,3 +483,5 @@ mod highlights;
 pub use highlights::*;
 mod predicates;
 pub use predicates::*;
+mod retirements;
+pub use retirements::*;

@@ -1022,161 +1022,59 @@ extern "C" fn jet_jit_process_child_wait(child: i64) -> i64 {
     }
 }
 
-pub(crate) struct ProcessHostFns {
-    pub cmd: cranelift_module::FuncId,
-    pub run: cranelift_module::FuncId,
-    pub pipeline: cranelift_module::FuncId,
-    pub spec_stdout: cranelift_module::FuncId,
-    pub spec_stderr: cranelift_module::FuncId,
-    pub spec_stdin: cranelift_module::FuncId,
-    pub spec_timeout: cranelift_module::FuncId,
-    pub spec_output_limit: cranelift_module::FuncId,
-    pub spec_cwd: cranelift_module::FuncId,
-    pub spec_env: cranelift_module::FuncId,
-    pub spec_env_remove: cranelift_module::FuncId,
-    pub spec_env_clear: cranelift_module::FuncId,
-    pub spec_detached: cranelift_module::FuncId,
-    pub spec_terminal: cranelift_module::FuncId,
-    pub spec_terminal_with_policy: cranelift_module::FuncId,
-    pub spec_capabilities: cranelift_module::FuncId,
-    pub spec_run: cranelift_module::FuncId,
-    pub spec_run_checked: cranelift_module::FuncId,
-    pub spec_spawn: cranelift_module::FuncId,
-    pub child_id: cranelift_module::FuncId,
-    pub child_exited: cranelift_module::FuncId,
-    pub child_terminal: cranelift_module::FuncId,
-    pub child_kill: cranelift_module::FuncId,
-    pub child_terminate: cranelift_module::FuncId,
-    pub child_interrupt: cranelift_module::FuncId,
-    pub child_wait: cranelift_module::FuncId,
-    pub terminal_resize: cranelift_module::FuncId,
-    pub stream_lines: cranelift_module::FuncId,
+host_fns! {
+    struct ProcessHostFns;
+    register: register_process_symbols;
+    declare: declare_process_host_fns(module) {
+        use cranelift_codegen::ir::{types, AbiParam, Signature};
+        use cranelift_module::{Linkage, Module};
+        let cc = module.target_config().default_call_conv;
+        let mut sig_unary = Signature::new(cc);
+        sig_unary.params.push(AbiParam::new(types::I64));
+        sig_unary.returns.push(AbiParam::new(types::I64));
+        let mut sig_binary = Signature::new(cc);
+        sig_binary.params.push(AbiParam::new(types::I64));
+        sig_binary.params.push(AbiParam::new(types::I64));
+        sig_binary.returns.push(AbiParam::new(types::I64));
+        let mut sig_ternary = Signature::new(cc);
+        sig_ternary.params.push(AbiParam::new(types::I64));
+        sig_ternary.params.push(AbiParam::new(types::I64));
+        sig_ternary.params.push(AbiParam::new(types::I64));
+        sig_ternary.returns.push(AbiParam::new(types::I64));
+
+
+    }
+    cmd: "jet_jit_process_cmd" => jet_jit_process_cmd: sig_unary;
+    run: "jet_jit_process_run" => jet_jit_process_run: sig_unary;
+    pipeline: "jet_jit_process_pipeline" => jet_jit_process_pipeline: sig_unary;
+    spec_stdout: "jet_jit_process_spec_stdout" => jet_jit_process_spec_stdout: sig_binary;
+    spec_stderr: "jet_jit_process_spec_stderr" => jet_jit_process_spec_stderr: sig_binary;
+    spec_stdin: "jet_jit_process_spec_stdin" => jet_jit_process_spec_stdin: sig_binary;
+    spec_timeout: "jet_jit_process_spec_timeout" => jet_jit_process_spec_timeout: sig_binary;
+    spec_output_limit: "jet_jit_process_spec_output_limit" => jet_jit_process_spec_output_limit: sig_binary;
+    spec_cwd: "jet_jit_process_spec_cwd" => jet_jit_process_spec_cwd: sig_binary;
+    spec_env: "jet_jit_process_spec_env" => jet_jit_process_spec_env: sig_ternary;
+    spec_env_remove: "jet_jit_process_spec_env_remove" => jet_jit_process_spec_env_remove: sig_binary;
+    spec_env_clear: "jet_jit_process_spec_env_clear" => jet_jit_process_spec_env_clear: sig_unary;
+    spec_detached: "jet_jit_process_spec_detached" => jet_jit_process_spec_detached: sig_unary;
+    spec_terminal: "jet_jit_process_spec_terminal" => jet_jit_process_spec_terminal: sig_unary;
+    spec_terminal_with_policy: "jet_jit_process_spec_terminal_with_policy" => jet_jit_process_spec_terminal_with_policy: sig_binary;
+    spec_capabilities: "jet_jit_process_spec_capabilities" => jet_jit_process_spec_capabilities: sig_unary;
+    spec_run: "jet_jit_process_spec_run" => jet_jit_process_spec_run: sig_unary;
+    spec_run_checked: "jet_jit_process_spec_run_checked" => jet_jit_process_spec_run_checked: sig_unary;
+    spec_spawn: "jet_jit_process_spec_spawn" => jet_jit_process_spec_spawn: sig_unary;
+    child_id: "jet_jit_process_child_id" => jet_jit_process_child_id: sig_unary;
+    child_exited: "jet_jit_process_child_exited" => jet_jit_process_child_exited: sig_unary;
+    child_terminal: "jet_jit_process_child_terminal" => jet_jit_process_child_terminal: sig_unary;
+    child_kill: "jet_jit_process_child_kill" => jet_jit_process_child_kill: sig_unary;
+    child_terminate: "jet_jit_process_child_terminate" => jet_jit_process_child_terminate: sig_unary;
+    child_interrupt: "jet_jit_process_child_interrupt" => jet_jit_process_child_interrupt: sig_unary;
+    child_wait: "jet_jit_process_child_wait" => jet_jit_process_child_wait: sig_unary;
+    terminal_resize: "jet_jit_terminal_session_resize" => jet_jit_terminal_session_resize: sig_binary;
+    stream_lines: "jet_jit_process_stream_lines" => jet_jit_process_stream_lines: sig_binary;
 }
 
-pub(crate) fn register_process_symbols(builder: &mut cranelift_jit::JITBuilder) {
-    builder.symbol("jet_jit_process_cmd", jet_jit_process_cmd as *const u8);
-    builder.symbol("jet_jit_process_run", jet_jit_process_run as *const u8);
-    builder.symbol("jet_jit_process_pipeline", jet_jit_process_pipeline as *const u8);
-    builder.symbol("jet_jit_process_spec_stdout", jet_jit_process_spec_stdout as *const u8);
-    builder.symbol("jet_jit_process_spec_stderr", jet_jit_process_spec_stderr as *const u8);
-    builder.symbol("jet_jit_process_spec_stdin", jet_jit_process_spec_stdin as *const u8);
-    builder.symbol("jet_jit_process_spec_timeout", jet_jit_process_spec_timeout as *const u8);
-    builder.symbol(
-        "jet_jit_process_spec_output_limit",
-        jet_jit_process_spec_output_limit as *const u8,
-    );
-    builder.symbol("jet_jit_process_spec_cwd", jet_jit_process_spec_cwd as *const u8);
-    builder.symbol("jet_jit_process_spec_env", jet_jit_process_spec_env as *const u8);
-    builder.symbol(
-        "jet_jit_process_spec_env_remove",
-        jet_jit_process_spec_env_remove as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_process_spec_env_clear",
-        jet_jit_process_spec_env_clear as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_process_spec_detached",
-        jet_jit_process_spec_detached as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_process_spec_terminal",
-        jet_jit_process_spec_terminal as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_process_spec_terminal_with_policy",
-        jet_jit_process_spec_terminal_with_policy as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_process_spec_capabilities",
-        jet_jit_process_spec_capabilities as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_terminal_session_resize",
-        jet_jit_terminal_session_resize as *const u8,
-    );
-    builder.symbol("jet_jit_process_spec_run", jet_jit_process_spec_run as *const u8);
-    builder.symbol(
-        "jet_jit_process_spec_run_checked",
-        jet_jit_process_spec_run_checked as *const u8,
-    );
-    builder.symbol("jet_jit_process_spec_spawn", jet_jit_process_spec_spawn as *const u8);
-    builder.symbol("jet_jit_process_child_id", jet_jit_process_child_id as *const u8);
-    builder.symbol("jet_jit_process_child_exited", jet_jit_process_child_exited as *const u8);
-    builder.symbol(
-        "jet_jit_process_child_terminal",
-        jet_jit_process_child_terminal as *const u8,
-    );
-    builder.symbol("jet_jit_process_child_kill", jet_jit_process_child_kill as *const u8);
-    builder.symbol(
-        "jet_jit_process_child_terminate",
-        jet_jit_process_child_terminate as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_process_child_interrupt",
-        jet_jit_process_child_interrupt as *const u8,
-    );
-    builder.symbol("jet_jit_process_child_wait", jet_jit_process_child_wait as *const u8);
-    builder.symbol("jet_jit_process_stream_lines", jet_jit_process_stream_lines as *const u8);
-}
 
-pub(crate) fn declare_process_host_fns(
-    module: &mut cranelift_jit::JITModule,
-) -> Result<ProcessHostFns, String> {
-    use cranelift_codegen::ir::{types, AbiParam, Signature};
-    use cranelift_module::{Linkage, Module};
 
-    let cc = module.target_config().default_call_conv;
-    let mut sig_unary = Signature::new(cc);
-    sig_unary.params.push(AbiParam::new(types::I64));
-    sig_unary.returns.push(AbiParam::new(types::I64));
-    let mut sig_binary = Signature::new(cc);
-    sig_binary.params.push(AbiParam::new(types::I64));
-    sig_binary.params.push(AbiParam::new(types::I64));
-    sig_binary.returns.push(AbiParam::new(types::I64));
-    let mut sig_ternary = Signature::new(cc);
-    sig_ternary.params.push(AbiParam::new(types::I64));
-    sig_ternary.params.push(AbiParam::new(types::I64));
-    sig_ternary.params.push(AbiParam::new(types::I64));
-    sig_ternary.returns.push(AbiParam::new(types::I64));
 
-    let mut import = |name: &str, sig: &Signature| -> Result<cranelift_module::FuncId, String> {
-        module
-            .declare_function(name, Linkage::Import, sig)
-            .map_err(|e| e.to_string())
-    };
 
-    Ok(ProcessHostFns {
-        cmd: import("jet_jit_process_cmd", &sig_unary)?,
-        run: import("jet_jit_process_run", &sig_unary)?,
-        pipeline: import("jet_jit_process_pipeline", &sig_unary)?,
-        spec_stdout: import("jet_jit_process_spec_stdout", &sig_binary)?,
-        spec_stderr: import("jet_jit_process_spec_stderr", &sig_binary)?,
-        spec_stdin: import("jet_jit_process_spec_stdin", &sig_binary)?,
-        spec_timeout: import("jet_jit_process_spec_timeout", &sig_binary)?,
-        spec_output_limit: import("jet_jit_process_spec_output_limit", &sig_binary)?,
-        spec_cwd: import("jet_jit_process_spec_cwd", &sig_binary)?,
-        spec_env: import("jet_jit_process_spec_env", &sig_ternary)?,
-        spec_env_remove: import("jet_jit_process_spec_env_remove", &sig_binary)?,
-        spec_env_clear: import("jet_jit_process_spec_env_clear", &sig_unary)?,
-        spec_detached: import("jet_jit_process_spec_detached", &sig_unary)?,
-        spec_terminal: import("jet_jit_process_spec_terminal", &sig_unary)?,
-        spec_terminal_with_policy: import(
-            "jet_jit_process_spec_terminal_with_policy",
-            &sig_binary,
-        )?,
-        spec_capabilities: import("jet_jit_process_spec_capabilities", &sig_unary)?,
-        spec_run: import("jet_jit_process_spec_run", &sig_unary)?,
-        spec_run_checked: import("jet_jit_process_spec_run_checked", &sig_unary)?,
-        spec_spawn: import("jet_jit_process_spec_spawn", &sig_unary)?,
-        child_id: import("jet_jit_process_child_id", &sig_unary)?,
-        child_exited: import("jet_jit_process_child_exited", &sig_unary)?,
-        child_terminal: import("jet_jit_process_child_terminal", &sig_unary)?,
-        child_kill: import("jet_jit_process_child_kill", &sig_unary)?,
-        child_terminate: import("jet_jit_process_child_terminate", &sig_unary)?,
-        child_interrupt: import("jet_jit_process_child_interrupt", &sig_unary)?,
-        child_wait: import("jet_jit_process_child_wait", &sig_unary)?,
-        terminal_resize: import("jet_jit_terminal_session_resize", &sig_binary)?,
-        stream_lines: import("jet_jit_process_stream_lines", &sig_binary)?,
-    })
-}

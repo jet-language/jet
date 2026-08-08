@@ -5,12 +5,12 @@ use crate::Sema::{Checker, LocalInfo};
 use std::collections::{HashMap, HashSet};
 impl<'a> Checker<'a> {
         pub(crate) fn push_scope(&mut self) {
-            self.scopes.push(HashMap::new());
+            self.flow.enter_scope();
             self.concrete_unit_values.push(HashMap::new());
             self.lambda_mut_borrow_stack.push(HashSet::new());
             self.ct_scopes.push(HashMap::new());
         }
-    
+
         pub(crate) fn pop_scope(&mut self) {
             self.lint_unjoined_tasks_in_current_scope();
             self.check_single_use_consumed_in_current_scope();
@@ -18,13 +18,35 @@ impl<'a> Checker<'a> {
         }
 
         pub(crate) fn drop_scope_no_obligation_checks(&mut self) {
-            // #649: every view kind leaves the one fact graph at lexical scope end.
-            let depth = self.scopes.len();
-            self.view_facts.leave_scope(depth);
-            self.scopes.pop();
+            // D-FACT-FLOW1: every scope-lived plane — bindings, flow narrowing
+            // and open windows — leaves the one store together.
+            self.flow.leave_scope();
             self.concrete_unit_values.pop();
             self.lambda_mut_borrow_stack.pop();
             self.ct_scopes.pop();
+        }
+
+        /// Number of open scopes. A fact recorded now leaves at this depth.
+        pub(crate) fn scope_depth(&self) -> usize {
+            self.flow.depth
+        }
+
+        /// Record a binding in the scope that is open now, with none of
+        /// `declare`'s redefinition checks. Parameters and loop variables use
+        /// this: their own caller already decided the name is free.
+        pub(crate) fn declare_in_scope(&mut self, name: &str, info: LocalInfo) {
+            let depth = self.flow.depth;
+            self.flow.bindings.set_at(name, depth, info);
+        }
+
+        /// Every name a binding is known by here, at any depth. Callers use it
+        /// to match spellings, so the order carries no meaning.
+        pub(crate) fn visible_names(&self) -> Vec<String> {
+            self.flow
+                .bindings
+                .all()
+                .map(|(name, _)| name.to_string())
+                .collect()
         }
     
         pub(crate) fn lambda_mut_borrow_active(&self, name: &str) -> bool {
@@ -92,11 +114,9 @@ impl<'a> Checker<'a> {
 
         pub(crate) fn evaluate_constant(&self, expr: &crate::AST::Expr) -> Option<crate::Comptime::CtValue> {
             let mut globals = self.current_ct_globals();
-            for scope in &self.scopes {
-                for (name, info) in scope {
-                    if let Some(value) = &info.constant_value {
-                        globals.insert(name.clone(), value.clone());
-                    }
+            for (name, info) in self.flow.bindings.all() {
+                if let Some(value) = &info.constant_value {
+                    globals.insert(name.to_string(), value.clone());
                 }
             }
             crate::Comptime::evaluate_owned_with_imports_opts(
@@ -112,11 +132,23 @@ impl<'a> Checker<'a> {
             .ok()
         }
     
+        /// What the checker knows about a name here: the innermost declaration,
+        /// or the flow-narrowed refinement of it when a proven test recorded one
+        /// at the same depth or deeper (D-FLOWTYPE1).
         pub(crate) fn lookup(&self, name: &str) -> Option<&LocalInfo> {
             if name == "_" {
                 return None;
             }
-            self.scopes.iter().rev().find_map(|s| s.get(name))
+            let declared = self.flow.bindings.depth_of(name);
+            let narrowed = self.flow.narrow.depth_of(name);
+            match (declared, narrowed) {
+                (Some(declared), Some(narrowed)) if narrowed >= declared => {
+                    self.flow.narrow.get(name)
+                }
+                (Some(_), _) => self.flow.bindings.get(name),
+                (None, Some(_)) => self.flow.narrow.get(name),
+                (None, None) => None,
+            }
         }
     
         /// A binding is borrowed (a `view`) when it is a `Read` parameter of a
@@ -141,10 +173,11 @@ impl<'a> Checker<'a> {
                 self.diags.push(already_defined(name, name_span));
             }
             self.clear_moved_binding(name);
-            self.scopes
-                .last_mut()
-                .unwrap()
-                .insert(name.to_string(), info);
+            let depth = self.flow.depth;
+            // A fresh declaration replaces any refinement recorded for the same
+            // name in this scope: the new binding is what the name now means.
+            self.flow.narrow.remove_at(name, depth);
+            self.flow.bindings.set_at(name, depth, info);
         }
     
         pub(crate) fn declare_loop_var(&mut self, name: String, name_span: Span, ty: &Type) {
@@ -157,8 +190,10 @@ impl<'a> Checker<'a> {
             {
                 self.diags.push(already_defined(&name, name_span));
             } else {
-                self.scopes.last_mut().unwrap().insert(
-                    name,
+                let depth = self.flow.depth;
+                self.flow.bindings.set_at(
+                    &name,
+                    depth,
                     LocalInfo {
                         def_span: name_span,
                         ty: ty.clone(),

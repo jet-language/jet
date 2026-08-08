@@ -119,63 +119,76 @@ pub(super) fn taint_check_item(
 ) {
     match item {
         Item::Func(f) => {
-            diags.extend(check_func_taint(
+            let new = check_func_taint(
                 f, None, scrubbers, facts, returns, return_types, field_tags, field_types,
-                core_imports,
-            ))
+                core_imports, diags.as_slice(),
+            );
+            diags.extend(new);
         }
         Item::Impl(i) => {
             for m in &i.methods {
-                diags.extend(check_func_taint(
+                let new = check_func_taint(
                     m, Some(&i.type_name), scrubbers, facts, returns, return_types, field_tags,
-                    field_types, core_imports,
-                ));
+                    field_types, core_imports, diags.as_slice(),
+                );
+                diags.extend(new);
             }
         }
         Item::Struct(s) => {
             for m in &s.methods {
-                diags.extend(check_func_taint(
+                let new = check_func_taint(
                     m, Some(&s.name), scrubbers, facts, returns, return_types, field_tags,
-                    field_types, core_imports,
-                ));
+                    field_types, core_imports, diags.as_slice(),
+                );
+                diags.extend(new);
             }
             for block in &s.trait_impls {
                 for m in &block.methods {
-                    diags.extend(check_func_taint(
+                    let new = check_func_taint(
                         m, Some(&s.name), scrubbers, facts, returns, return_types, field_tags,
-                        field_types, core_imports,
-                    ));
+                        field_types, core_imports, diags.as_slice(),
+                    );
+                    diags.extend(new);
                 }
             }
         }
         Item::Enum(e) => {
             for m in &e.methods {
-                diags.extend(check_func_taint(
+                let new = check_func_taint(
                     m, Some(&e.name), scrubbers, facts, returns, return_types, field_tags,
-                    field_types, core_imports,
-                ));
+                    field_types, core_imports, diags.as_slice(),
+                );
+                diags.extend(new);
             }
         }
-        Item::Test(t) => diags.extend(crate::Sema::Taint::check_body_tags(
-            &t.body,
-            scrubbers,
-            facts,
-            returns,
-            return_types,
-            field_tags,
-            field_types,
-            core_imports,
-        )),
-        Item::ErrorConv(ec) => diags.extend(crate::Sema::Taint::check_body_tags(
-            &ec.body,
-            scrubbers,
-            facts,
-            returns,
-            return_types,
-            field_tags,
-            field_types,
-            core_imports,
-        )),
+        Item::Test(t) => {
+            let new = crate::Sema::Taint::check_body_tags(
+                &t.body,
+                scrubbers,
+                facts,
+                returns,
+                return_types,
+                field_tags,
+                field_types,
+                core_imports,
+                diags.as_slice(),
+            );
+            diags.extend(new);
+        }
+        Item::ErrorConv(ec) => {
+            let new = crate::Sema::Taint::check_body_tags(
+                &ec.body,
+                scrubbers,
+                facts,
+                returns,
+                return_types,
+                field_tags,
+                field_types,
+                core_imports,
+                diags.as_slice(),
+            );
+            diags.extend(new);
+        }
         _ => {}
     }
 }
@@ -2157,9 +2170,11 @@ pub(crate) fn check_func_body_bundle(
         current_function_span: f.span,
         reference_anchors,
         diags: Vec::new(),
-        scopes: vec![HashMap::new()],
+        flow: crate::Sema::FlowFacts::FlowFacts {
+            depth: 1,
+            ..Default::default()
+        },
         concrete_unit_values: vec![HashMap::new()],
-        moved: HashMap::new(),
         suppress_partial_move_root_read: false,
         loop_depth: 0,
         source_nesting: 0,
@@ -2210,12 +2225,10 @@ pub(crate) fn check_func_body_bundle(
         iter_borrowed: HashSet::new(),
         noelse_chains_checked: HashSet::new(),
         lending_view_loop_vars: HashSet::new(),
-        view_facts: Default::default(),
         return_view_provenance: None,
         views_used_in_stmt: Default::default(),
         scoped_loan_read_reported: false,
         call_access_frames: Vec::new(),
-        uninit: HashMap::new(),
         borrow_ctx: false,
         allow_fixed_constructor: false,
         allow_string_view_read: false,

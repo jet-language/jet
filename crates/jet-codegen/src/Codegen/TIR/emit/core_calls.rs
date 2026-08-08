@@ -11,6 +11,7 @@ use crate::Codegen::TIR::enc_row_target_rust_traced;
 use crate::Codegen::TIR::enc_target_rust;
 use crate::Codegen::TIR::enc_target_rust_traced;
 use crate::Codegen::TIR::struct_field_type;
+use crate::Codegen::TIR::emit::emit_symbol_call;
 use crate::Codegen::TIR::TExpr;
 
 fn emit_data_schema_columns(elem_ty: &Type, expand_struct: bool, cx: &Cx) -> String {
@@ -106,6 +107,609 @@ pub(crate) fn emit_http_response_from_bridge(call: String, ffi: &str) -> String 
     )
 }
 
+/// #1635: plain core calls that carry nothing but a Prelude symbol name and a
+/// borrow mask -- (module, method, symbol, prefixed_with_root, arg_borrow_mask).
+/// `prefixed_with_root` means `{cx.root_prefix}{symbol}`; otherwise `symbol` is
+/// emitted verbatim. Looked up by `emit_plain_core_call` before the bespoke match.
+const PLAIN_CORE_CALLS: &[(&str, &str, &str, bool, &[bool])] = &[
+    ("core.mem", "volatile_read", "std::ptr::read_volatile", false, &[false]),
+    ("core.mem", "volatile_write", "std::ptr::write_volatile", false, &[false, false]),
+    ("core.tasks", "interval", "jet_std::interval", true, &[false]),
+    ("core.tasks", "yield_now", "jet_std::jet_task_yield", true, &[]),
+    ("core.tasks", "current_task", "jet_std::jet_task_current_trace", true, &[]),
+    ("jet.reactive", "signal", "jet_std::JetSignal::new", true, &[false]), // D-REACT1=B: `reactive.signal(initial)` producer → a `JetSignal<T>`.
+    ("core.event", "scope", "jet_std::JetEventScope::new", true, &[]), // D-EVENT1=D: first-party typed Event/Hook constructors.
+    ("core.event", "policy_sync", "jet_std::JetEventPolicy::sync", true, &[]),
+    ("core.science.measurement", "from", "jet_std::JetMeasurement::new", true, &[false, false]), // D-HONESTNUM1=A: `M.from(value, uncertainty)` → a `JetMeasurement<f64>`.
+    ("core.math", "fraction", "jet_fraction_new", true, &[false, false]), // D-CORE-NUMERIC1=A: `core.math.decimal(s)` → exact parse.
+    ("core.math", "decimal", "jet_decimal_from_str", true, &[true]),
+    ("core.files", "read", "jet_std_fs_read", true, &[true]), // D-FILES-WRITE1 (merge, was `core.fs`): whole-file convenience helpers now // live in `core.files` alongside the streaming handle constructors below. // D-FILES-APPEND1=A: whole-file one-shot is `append_all`, not `append` — // that name stays reserved for the streaming handle's `.append(text)`.
+    ("core.files", "read_bytes", "jet_std_fs_read_bytes", true, &[true]),
+    ("core.files", "write", "jet_std_fs_write", true, &[true, true]),
+    ("core.files", "append_all", "jet_std_fs_append", true, &[true, true]),
+    ("core.files", "exists", "jet_std_fs_exists", true, &[true]),
+    ("core.files", "remove", "jet_std_fs_remove", true, &[true]),
+    ("core.files", "remove_dir", "jet_std_fs_remove_dir", true, &[true]),
+    ("core.files", "remove_all", "jet_std_fs_remove_all", true, &[true]),
+    ("core.files", "list_dir", "jet_std_fs_list_dir", true, &[true]),
+    ("core.files", "create_dir", "jet_std_fs_create_dir", true, &[true]),
+    ("core.files", "create_dir_all", "jet_std_fs_create_dir_all", true, &[true]),
+    ("core.files", "is_dir", "jet_std_fs_is_dir", true, &[true]),
+    ("core.files", "copy", "jet_std_fs_copy", true, &[true, true]),
+    ("core.files", "copy_dir", "jet_std_fs_copy_dir", true, &[true, true]),
+    ("core.files", "rename", "jet_std_fs_rename", true, &[true, true]),
+    ("core.files", "symlink", "jet_std_fs_symlink", true, &[true, true]),
+    ("core.files", "read_link", "jet_std_fs_read_link", true, &[true]),
+    ("core.files", "hard_link", "jet_std_fs_hard_link", true, &[true, true]),
+    ("core.files", "stat", "jet_std_fs_stat", true, &[true]),
+    ("core.files", "canonicalize", "jet_std_fs_canonicalize", true, &[true]),
+    ("core.files", "absolute", "jet_std_fs_absolute", true, &[true]),
+    ("core.files", "walk", "jet_std_fs_walk", true, &[true]),
+    ("core.files", "glob", "jet_std_fs_glob", true, &[true]),
+    ("core.files", "read_at", "jet_std_fs_read_at", true, &[true, false, false]),
+    ("core.files", "write_at", "jet_std_fs_write_at", true, &[true, false, true]),
+    ("core.files", "fsync", "jet_std_fs_fsync", true, &[true]),
+    ("core.files", "write_atomic", "jet_std_fs_write_atomic", true, &[true, true]),
+    ("core.files", "temp_dir", "jet_std_fs_temp_dir", true, &[true]),
+    ("core.files", "temp_file", "jet_std_fs_temp_file", true, &[true]),
+    ("core.files", "lock", "jet_std_fs_lock", true, &[true]),
+    ("core.watcher", "files", "jet_watcher_files", true, &[true]),
+    ("core.watcher", "process_pid", "jet_watcher_process_pid", true, &[false]),
+    ("core.watcher", "port", "jet_watcher_port", true, &[true, false]),
+    ("core.watcher", "set", "jet_watcher_set", true, &[]),
+    ("core.io", "args", "jet_std_io_args", true, &[]),
+    ("core.args", "spec", "jet_args_spec", true, &[]), // D-ARGS1: `args.spec()` → empty builder.
+    ("core.io", "confirm", "jet_std_io_confirm", true, &[true]),
+    ("core.io", "choose", "jet_std_io_choose", true, &[true, true]),
+    ("core.io", "input_secret", "jet_std_io_input_secret", true, &[true]),
+    ("core.io", "read_all_input", "jet_std_io_read_all_input", true, &[]),
+    ("core.io", "readline", "jet_std_io_readline", true, &[]),
+    ("core.io", "read_until", "jet_std_io_read_until", true, &[true]),
+    ("core.io", "take", "jet_std_io_take", true, &[false]),
+    ("core.io", "buffered", "jet_std_io_buffered", true, &[]),
+    ("core.io", "sprint", "jet_std_io_sprint", true, &[true]),
+    ("core.io", "repr", "jet_std_io_repr", true, &[true]),
+    ("core.io", "binread", "jet_std_io_binread", true, &[true]),
+    ("core.io", "binwrite", "jet_std_io_binwrite", true, &[true, true]),
+    ("core.io", "stdin", "jet_std_io_stdin", true, &[]), // D-STDIN1=A: io.stdin() → JetStdinReader handle.
+    ("core.io", "stdout", "jet_std_io_stdout", true, &[]),
+    ("core.io", "stderr", "jet_std_io_stderr", true, &[]),
+    ("core.io", "terminal_width", "jet_std_io_terminal_width", true, &[]),
+    ("core.io", "terminal_height", "jet_std_io_terminal_height", true, &[]),
+    ("core.io", "style", "jet_std_io_style", true, &[true, true]),
+    ("core.io", "style_force", "jet_std_io_style_force", true, &[true, true]),
+    ("core.env", "get", "jet_std_env_get", true, &[true]),
+    ("core.env", "set", "jet_std_env_set", true, &[true, true]),
+    ("core.env", "unset", "jet_std_env_unset", true, &[true]),
+    ("core.env", "vars", "jet_std_env_vars", true, &[]),
+    ("core.env", "current_dir", "jet_std_env_current_dir", true, &[]),
+    ("core.env", "home_dir", "jet_std_env_home_dir", true, &[]),
+    ("core.os", "name", "jet_std_os_name", true, &[]),
+    ("core.os", "family", "jet_std_os_family", true, &[]),
+    ("core.os", "arch", "jet_std_os_arch", true, &[]),
+    ("core.os", "cpu_count", "jet_std_os_cpu_count", true, &[]),
+    ("core.os", "temp_dir", "jet_std_os_temp_dir", true, &[]),
+    ("core.os", "executable", "jet_std_os_executable", true, &[]),
+    ("core.os", "pid", "jet_std_os_pid", true, &[]),
+    ("core.os", "getpid", "jet_std_os_pid", true, &[]),
+    ("core.os", "hostname", "jet_std_os_hostname", true, &[]),
+    ("core.os", "username", "jet_std_os_username", true, &[]),
+    ("core.os", "release", "jet_std_os_release", true, &[]),
+    ("core.os", "version", "jet_std_os_version", true, &[]),
+    ("core.os", "expand", "jet_std_os_expand", true, &[true]),
+    ("core.os", "getppid", "jet_std_os_getppid", true, &[]),
+    ("core.os", "getuid", "jet_std_os_getuid", true, &[]),
+    ("core.os", "geteuid", "jet_std_os_geteuid", true, &[]),
+    ("core.os", "getgid", "jet_std_os_getgid", true, &[]),
+    ("core.os", "getegid", "jet_std_os_getegid", true, &[]),
+    ("core.os", "getgroups", "jet_std_os_getgroups", true, &[]),
+    ("core.os", "getpgrp", "jet_std_os_getpgrp", true, &[]),
+    ("core.os", "uptime", "jet_std_os_uptime", true, &[]),
+    ("core.os", "loadavg", "jet_std_os_loadavg", true, &[]),
+    ("core.os", "times", "jet_std_os_times", true, &[]),
+    ("core.os", "sync", "jet_std_os_sync", true, &[]),
+    ("core.os", "getpgid", "jet_std_os_getpgid", true, &[false]),
+    ("core.os", "getsid", "jet_std_os_getsid", true, &[false]),
+    ("core.os", "exitcode", "jet_std_os_exitcode", true, &[false]),
+    ("core.os", "success", "jet_std_os_success", true, &[false]),
+    ("core.os", "umask", "jet_std_os_umask", true, &[false]),
+    ("core.os", "getpriority", "jet_std_os_getpriority", true, &[false]),
+    ("core.os", "setpriority", "jet_std_os_setpriority", true, &[false, false]),
+    ("core.os", "utime", "jet_std_os_utime", true, &[true, false, false]),
+    ("core.os", "stop", "jet_std_os_stop", true, &[false]),
+    ("core.os", "set_current_dir", "jet_std_os_set_current_dir", true, &[true]),
+    ("core.os", "on_interrupt", "jet_std_os_on_interrupt", true, &[false]),
+    ("core.os", "atexit", "jet_std_os_atexit", true, &[false]),
+    ("core.os", "fork", "jet_std_os_fork", true, &[]),
+    ("core.os", "setuid", "jet_std_os_setuid", true, &[false]),
+    ("core.os", "setgid", "jet_std_os_setgid", true, &[false]),
+    ("core.os", "setpgid", "jet_std_os_setpgid", true, &[false, false]),
+    ("core.os", "setpgrp", "jet_std_os_setpgrp", true, &[]),
+    ("core.os", "setsid", "jet_std_os_setsid", true, &[]),
+    ("core.os", "initgroups", "jet_std_os_initgroups", true, &[true, false]),
+    ("core.os", "kill", "jet_std_os_kill", true, &[false, false]),
+    ("core.os", "wait", "jet_std_os_wait", true, &[]),
+    ("core.os", "waitpid", "jet_std_os_waitpid", true, &[false, false]),
+    ("core.os", "pipe", "jet_std_os_pipe", true, &[]),
+    ("core.os", "close_fd", "jet_std_os_close_fd", true, &[false]),
+    ("core.os", "mkfifo", "jet_std_os_mkfifo", true, &[true, false]),
+    ("core.process", "exit", "jet_std_process_exit", true, &[false]),
+    ("core.process", "run", "jet_std_process_run", true, &[true]),
+    ("core.process", "cmd", "jet_std_process_cmd", true, &[true]),
+    ("core.process", "pipeline", "jet_std_process_pipeline", true, &[true]),
+    ("core.testing", "snap", "jet_testing_snap", true, &[true, true]),
+    ("core.testing", "golden", "jet_testing_golden", true, &[true, true]),
+    ("core.testing", "fixture", "jet_testing_fixture", true, &[true]),
+    ("core.testing", "temp_dir", "jet_testing_temp_dir", true, &[true]),
+    ("core.testing", "corpus", "jet_testing_corpus", true, &[true]),
+    ("core.testing", "fake_clock", "jet_std_clock_new", true, &[false]),
+    ("core.testing", "fake_rng", "jet_std_rng_new", true, &[false]),
+    ("core.math", "round", "jet_std_math_round", true, &[false]),
+    ("core.math", "isqrt", "jet_std_math_isqrt", true, &[false]),
+    ("core.math", "factorial", "jet_std_math_factorial", true, &[false]),
+    ("core.math", "erf", "jet_std_math_erf", true, &[false]),
+    ("core.math", "erfc", "jet_std_math_erfc", true, &[false]),
+    ("core.math", "gamma", "jet_std_math_gamma", true, &[false]),
+    ("core.math", "lgamma", "jet_std_math_lgamma", true, &[false]),
+    ("core.math", "logb", "jet_std_math_logb", true, &[false]),
+    ("core.math", "significand", "jet_std_math_significand", true, &[false]),
+    ("core.math", "ulp", "jet_std_math_ulp", true, &[false]),
+    ("core.math", "cmp", "jet_std_math_cmp", true, &[false, false]),
+    ("core.math", "next_after", "jet_std_math_next_after", true, &[false, false]),
+    ("core.math", "ldexp", "jet_std_math_ldexp", true, &[false, false]),
+    ("core.math", "scaleb", "jet_std_math_ldexp", true, &[false, false]),
+    ("core.math", "ilogb", "jet_std_math_ilogb", true, &[false]),
+    ("core.math", "leading_ones", "jet_std_math_leading_ones", true, &[false]),
+    ("core.math", "trailing_ones", "jet_std_math_trailing_ones", true, &[false]),
+    ("core.math", "digits", "jet_std_math_digits", true, &[false]),
+    ("core.math", "binomial", "jet_std_math_binomial", true, &[false, false]),
+    ("core.math", "checked_pow", "jet_std_math_checked_pow", true, &[false, false]),
+    ("core.math", "int_pow", "jet_std_math_int_pow", true, &[false, false]),
+    ("core.math", "gcd", "jet_std_math_gcd", true, &[false, false]),
+    ("core.math", "lcm", "jet_std_math_lcm", true, &[false, false]),
+    ("core.random", "int", "jet_std_random_int", true, &[false, false]),
+    ("core.random", "float", "jet_std_random_float", true, &[]),
+    ("core.random", "float_range", "jet_std_random_float_range", true, &[false, false]),
+    ("core.random", "bool", "jet_std_random_bool", true, &[false]),
+    ("core.random", "normal", "jet_std_random_normal", true, &[false, false]),
+    ("core.random", "exponential", "jet_std_random_exponential", true, &[false]),
+    ("core.random", "seed", "jet_std_random_seed", true, &[false]),
+    ("core.random", "bytes", "jet_std_random_bytes", true, &[false]), // D-RANDSPLIT1=A: PRNG bytes — fast, NOT crypto-safe.
+    ("core.crypto.random", "bytes", "jet_std_crypto_random_bytes", true, &[false]), // D-CRYPTO-RNG1=A: shared fail-closed OS CSPRNG provider.
+    ("core.random", "rng", "jet_std_rng_new", true, &[false]), // D-DET1: deterministic injected RNG capability constructor.
+    ("core.random", "split", "jet_std_random_split", true, &[false]),
+    ("core.time", "now", "jet_std_time_now", true, &[]),
+    ("core.time", "sleep", "jet_std_time_sleep", true, &[false]),
+    ("core.time", "start", "jet_std_time_start", true, &[]),
+    ("core.time", "instant", "jet_time_instant_now", true, &[]),
+    ("core.time", "now_utc", "jet_time_now_utc", true, &[]),
+    ("core.time", "from_unix_ms", "JetDateTime::from_unix_ms", false, &[false]),
+    ("core.time", "today", "jet_time_today", true, &[]),
+    ("core.time", "parse_rfc3339", "jet_time_parse_rfc3339", true, &[true]),
+    ("core.time", "datetime", "jet_time_datetime", true, &[false, false, false, false, false, false]),
+    ("core.time", "time", "JetLocalTime::new", false, &[false, false, false]),
+    ("core.time", "local_time", "JetLocalTime::new", false, &[false, false, false]),
+    ("core.time", "days_in_month", "jet_time_days_in_month", true, &[false, false]),
+    ("core.time", "is_leap_year", "jet_time_is_leap_year", true, &[false]),
+    ("core.time", "period", "jet_time_period", true, &[false, false, false]),
+    ("core.time", "period_days", "jet_time_period_days", true, &[false]),
+    ("core.time", "period_months", "jet_time_period_months", true, &[false]),
+    ("core.time", "period_years", "jet_time_period_years", true, &[false]),
+    ("core.time", "zone", "jet_time_zone_named", true, &[true]),
+    ("core.time", "utc", "jet_time_zone_utc", true, &[]),
+    ("core.time", "zoned", "jet_time_zoned", true, &[true, true]),
+    ("core.time", "zoned_local", "jet_time_zoned_local", true, &[true, true, true]),
+    ("core.time", "clock", "jet_std_clock_new", true, &[false]), // D-DET1: deterministic injected Clock capability constructor.
+    ("core.encoding.json", "parse", "jet_std_json_parse", true, &[true]), // D-ENC1 + D-JSONVERB1 + D-SERDE6: unified `core.encoding.*`. The dynamic forms // (`JSON` tree / `[[String]]` / `Map`) keep their existing helpers; the typed // forms route through the Encode/Decode model, distinguished by the lowered arg // type (encode) or the resolved return type (decode). `is_json_value` etc. read // those total facts — codegen never re-infers (I3).
+    ("core.encoding.json", "events", "jet_std_json_events", true, &[true]),
+    ("core.encoding.jsonl", "parse", "jet_std_jsonl_parse", true, &[true]),
+    ("core.encoding.jsonl", "to_string", "jet_std_jsonl_render", true, &[true]),
+    ("core.encoding.csv", "parse", "jet_ring_csv_parse", true, &[true]),
+    ("core.data", "count", "jet_data_count", true, &[true]),
+    ("core.compute", "zeros", "jet_compute_zeros", true, &[true]), // D-COMPUTE1=D (#443): Tensor CPU oracle — one Prelude symbol per call.
+    ("core.compute", "ones", "jet_compute_ones", true, &[true]),
+    ("core.compute", "full", "jet_compute_full", true, &[true, false]),
+    ("core.compute", "from_list", "jet_compute_from_list", true, &[true]),
+    ("core.compute", "matrix", "jet_compute_matrix", true, &[false, false, false]),
+    ("core.compute", "vec", "jet_compute_vec", true, &[false, false]),
+    ("core.compute", "add", "jet_compute_add", true, &[true, true]),
+    ("core.compute", "mul", "jet_compute_mul", true, &[true, true]),
+    ("core.compute", "matmul", "jet_compute_matmul", true, &[true, true]),
+    ("core.compute", "reshape", "jet_compute_reshape", true, &[true, true]),
+    ("core.compute", "get", "jet_compute_get", true, &[true, true]),
+    ("core.compute", "shape", "jet_compute_tensor_shape", true, &[true]),
+    ("core.compute", "rank", "jet_compute_tensor_rank", true, &[true]),
+    ("core.compute", "numel", "jet_compute_tensor_numel", true, &[true]),
+    ("core.compute", "to_list", "jet_compute_tensor_to_list", true, &[true]),
+    ("core.compute", "device", "jet_compute_tensor_device", true, &[true]),
+    ("core.compute", "placement", "jet_compute_tensor_placement", true, &[true]),
+    ("core.compute", "device_cpu", "jet_compute_device_cpu", true, &[]),
+    ("core.compute", "device_auto", "jet_compute_device_auto", true, &[]),
+    ("core.compute", "on_device", "jet_compute_on_device", true, &[true, false]),
+    ("core.compute", "broadcast_to", "jet_compute_broadcast_to", true, &[true, true]),
+    ("core.compute", "transpose", "jet_compute_transpose", true, &[true]),
+    ("core.compute", "sum_axis", "jet_compute_sum_axis", true, &[true, false]),
+    ("core.compute", "eye", "jet_compute_eye", true, &[false]),
+    ("core.compute", "det", "jet_compute_det", true, &[true]),
+    ("core.compute", "inv", "jet_compute_inv", true, &[true]),
+    ("core.compute", "fft", "jet_compute_fft", true, &[true]),
+    ("core.compute", "solve", "jet_compute_solve", true, &[true, true]),
+    ("core.compute", "stream_new", "jet_compute_stream_new", true, &[]),
+    ("core.compute", "stream_sync", "jet_compute_stream_sync", true, &[true]),
+    ("core.compute", "stream_show", "jet_compute_stream_show", true, &[true]),
+    ("core.compute", "transfer", "jet_compute_transfer", true, &[true, false]),
+    ("core.compute", "transfer_show", "jet_compute_transfer_show", true, &[true]),
+    ("core.compute", "kernel_bounds_ok", "jet_compute_kernel_bounds_ok", true, &[true, true]),
+    ("core.compute", "value_and_grad_mul", "jet_compute_value_and_grad_mul", true, &[true, true]),
+    ("core.compute", "grad_value", "jet_compute_grad_value", true, &[true]),
+    ("core.compute", "grad_a", "jet_compute_grad_a", true, &[true]),
+    ("core.compute", "grad_b", "jet_compute_grad_b", true, &[true]),
+    ("core.compute", "grad_show", "jet_compute_grad_show", true, &[true]),
+    ("core.compute", "mse_loss", "jet_compute_mse_loss", true, &[true, true]),
+    ("core.compute", "sgd_step", "jet_compute_sgd_step", true, &[true, true, false]),
+    ("core.compute", "serialize", "jet_compute_serialize", true, &[true]),
+    ("core.compute", "deserialize", "jet_compute_deserialize", true, &[true]),
+    ("core.compute", "to_sparse", "jet_compute_to_sparse", true, &[true]),
+    ("core.compute", "sparse_nnz", "jet_compute_sparse_nnz", true, &[true]),
+    ("core.compute", "sparse_mv", "jet_compute_sparse_mv", true, &[true, true]),
+    ("core.compute", "sparse_show", "jet_compute_sparse_show", true, &[true]),
+    ("core.compute", "matmul_f32_tile", "jet_compute_matmul_f32_tile", true, &[true, true]),
+    ("core.compute", "profile_f32_strict", "jet_compute_profile_f32_strict", true, &[]),
+    ("core.compute", "profile_show", "jet_compute_profile_show", true, &[]),
+    ("core.services", "restart_one_for_one", "jet_services_restart_one_for_one", true, &[]),
+    ("core.services", "restart_one_for_all", "jet_services_restart_one_for_all", true, &[]),
+    ("core.services", "restart_rest_for_one", "jet_services_restart_rest_for_one", true, &[]),
+    ("core.services", "delivery_at_most_once", "jet_services_delivery_at_most_once", true, &[]),
+    ("core.services", "delivery_durable", "jet_services_delivery_durable", true, &[]),
+    ("core.services", "mailbox_depth", "jet_services_mailbox_depth", true, &[true, true]),
+    ("core.services", "restarts", "jet_services_restarts", true, &[true, true]),
+    ("core.services", "dead_letter_count", "jet_services_dead_letter_count", true, &[true]),
+    ("core.services", "restore_snapshot", "jet_services_restore_snapshot", true, &[true]),
+    ("core.services", "event_count", "jet_services_event_count", true, &[true]),
+    ("core.services", "replay_events", "jet_services_replay_events", true, &[true]),
+    ("core.services", "workflow_history", "jet_services_workflow_history", true, &[true, false]),
+    ("core.services", "directory_resolve", "jet_services_directory_resolve", true, &[true, true]),
+    ("core.services", "directory_generation", "jet_services_directory_generation", true, &[true]),
+    ("core.services", "upgrade_receipt", "jet_services_upgrade_receipt", true, &[true]),
+    ("core.services", "observe", "jet_services_observe", true, &[true]),
+    ("core.services", "endpoint_show", "jet_services_endpoint_show", true, &[true]),
+    ("core.services", "tree_show", "jet_services_tree_show", true, &[true]),
+    ("core.data", "table", "jet_data_table", true, &[true]),
+    ("core.data", "rows", "jet_data_rows", true, &[true]),
+    ("core.data", "series", "jet_data_series", true, &[true]),
+    ("core.data", "values", "jet_data_series_values", true, &[true]),
+    ("core.data", "missing_count", "jet_data_missing_count", true, &[true]),
+    ("core.data", "lazy", "jet_data_lazy", true, &[true]),
+    ("core.data", "plan", "jet_data_plan", true, &[true]),
+    ("core.data", "filter", "jet_data_filter", true, &[true, false]),
+    ("core.data", "lazy_filter", "jet_data_lazy_filter", true, &[true, false]),
+    ("core.data", "lazy_sort_by", "jet_data_lazy_sort_by", true, &[true, false]),
+    ("core.data", "status", "jet_data_status", true, &[]),
+    ("core.data", "require_bridge", "jet_data_require_bridge", true, &[true]),
+    ("core.data", "csv_reader", "jet_data_csv_reader", true, &[false, false]),
+    ("core.data", "json_reader", "jet_data_json_reader", true, &[false, false]),
+    ("core.fmt", "number", "jet_fmt_number", true, &[false]),
+    ("core.fmt", "decimal", "jet_fmt_decimal", true, &[false, false]),
+    ("core.fmt", "percent", "jet_fmt_percent", true, &[false, false]),
+    ("core.fmt", "bytes", "jet_fmt_bytes", true, &[false]),
+    ("core.fmt", "duration", "jet_fmt_duration", true, &[false]),
+    ("core.fmt", "ordinal", "jet_fmt_ordinal", true, &[false]),
+    ("core.fmt", "plural", "jet_fmt_plural", true, &[false, true, true]),
+    ("core.fmt", "pad_left", "jet_fmt_pad_left", true, &[true, false, true]),
+    ("core.fmt", "pad_right", "jet_fmt_pad_right", true, &[true, false, true]),
+    ("core.fmt", "pad_center", "jet_fmt_pad_center", true, &[true, false, true]),
+    ("core.encoding.toml", "parse", "jet_std_toml_parse", true, &[true]),
+    ("core.encoding.yaml", "parse", "jet_std_yaml_parse", true, &[true]),
+    ("core.encoding.xml", "parse", "jet_std_xml_parse", true, &[true]),
+    ("core.encoding.xml", "parse_with", "jet_std_xml_parse_with", true, &[true, true]),
+    ("core.encoding.xml", "to_string", "jet_std_xml_render", true, &[true]),
+    ("core.encoding.xml", "canonical", "jet_std_xml_canonical", true, &[true, true]),
+    ("core.encoding.xml", "root", "jet_std_xml_root", true, &[true]),
+    ("core.encoding.xml", "attribute", "jet_std_xml_attribute", true, &[true, true]),
+    ("core.encoding.xml", "content", "jet_std_xml_content", true, &[true]),
+    ("core.encoding.cbor", "to_bytes", "jet_enc_cbor_to_bytes", true, &[true]),
+    ("core.encoding.cbor", "to_bytes_canonical", "jet_enc_cbor_to_bytes_canonical", true, &[true]),
+    ("core.encoding.hex", "encode", "jet_std_hex_encode", true, &[true]), // D-UUIDENC1=A: hex and base64 encode/decode.
+    ("core.encoding.hex", "decode", "jet_std_hex_decode", true, &[true]),
+    ("core.encoding.base64", "encode", "jet_std_b64_encode", true, &[true]),
+    ("core.encoding.base64", "decode", "jet_std_b64_decode", true, &[true]),
+    ("core.encoding.base64", "encode_url", "jet_std_b64url_encode", true, &[true]),
+    ("core.encoding.base64", "decode_url", "jet_std_b64url_decode", true, &[true]),
+    ("core.encoding.base32", "encode", "jet_std_base32_encode", true, &[true]),
+    ("core.encoding.base32", "decode", "jet_std_base32_decode", true, &[true]),
+    ("core.uuid", "v4", "jet_std_uuid_v4", true, &[]), // D-UUIDENC1=A: UUID v4 (CSPRNG) and v7 (injectable Clock).
+    ("core.uuid", "v7", "jet_std_uuid_v7", true, &[true]),
+    ("core.uuid", "v5", "jet_std_uuid_v5", true, &[true, true]), // #1481: `v5` (namespace+name, deterministic) and `parse` (validate // + normalize) — pure std, same UUID-as-String shape as v4/v7.
+    ("core.uuid", "parse", "jet_std_uuid_parse", true, &[true]),
+    ("core.files", "open", "jet_std_files_open", true, &[true]),
+    ("core.files", "create", "jet_std_files_create", true, &[true]),
+    ("core.files", "append", "jet_std_files_append", true, &[true]),
+    ("core.path", "join", "jet_std_path_join", true, &[true, true]), // E2-M7: std.path helpers (D-IO1).
+    ("core.path", "parent", "jet_std_path_parent", true, &[true]),
+    ("core.path", "extension", "jet_std_path_extension", true, &[true]),
+    ("core.path", "normalize", "jet_std_path_normalize", true, &[true]),
+    ("core.url", "parse", "jet_url_parse", true, &[true]),
+    ("core.url", "from_parts", "jet_url_from_parts", true, &[true, true, true, true, true]),
+    ("core.url", "file", "jet_url_file", true, &[true]),
+    ("core.url", "data", "jet_url_data", true, &[true, true]),
+    ("core.url", "query", "jet_url_query", true, &[true]),
+    ("core.url", "percent_encode", "jet_url_percent_encode_component", true, &[true]),
+    ("core.url", "percent_decode", "jet_url_percent_decode_component", true, &[true]),
+    ("core.mime", "parse", "jet_mime_parse", true, &[true]),
+    ("core.mime", "from_extension", "jet_mime_from_extension", true, &[true]),
+    ("core.mime", "extension", "jet_mime_extension", true, &[true]),
+    ("core.email", "address", "jet_email::address", true, &[true]),
+    ("core.email", "attachment", "jet_email::attachment", true, &[true, true, true]),
+    ("core.email", "message", "jet_email::message", true, &[true, true, true, true, true, true, true]),
+    ("core.email", "envelope", "jet_email::envelope", true, &[true, true]),
+    ("core.email", "serialize", "jet_email::serialize", true, &[true]),
+    ("core.text.unicode", "scalar_count", "jet_text_unicode_scalar_count", true, &[true]), // D-TEXTUNICODE1: std-only Unicode scalar helpers.
+    ("core.text.unicode", "byte_count", "jet_text_unicode_byte_count", true, &[true]),
+    ("core.text.unicode", "is_ascii", "jet_text_unicode_is_ascii", true, &[true]),
+    ("core.text.unicode", "lower", "jet_text_unicode_lower", true, &[true]),
+    ("core.text.unicode", "upper", "jet_text_unicode_upper", true, &[true]),
+    ("core.text.unicode", "scalars", "jet_text_unicode_scalars", true, &[true]),
+    ("core.text", "nfc", "jet_text_nfc", true, &[true]),
+    ("core.text", "nfd", "jet_text_nfd", true, &[true]),
+    ("core.text", "nfkc", "jet_text_nfkc", true, &[true]),
+    ("core.text", "nfkd", "jet_text_nfkd", true, &[true]),
+    ("core.text", "casefold", "jet_text_casefold", true, &[true]),
+    ("core.text", "caseless_eq", "jet_text_caseless_eq", true, &[true, true]),
+    ("core.text", "lower", "jet_text_lower", true, &[true]),
+    ("core.text", "upper", "jet_text_upper", true, &[true]),
+    ("core.text", "graphemes", "jet_text_graphemes", true, &[true]),
+    ("core.text", "words", "jet_text_words", true, &[true]),
+    ("core.text", "sentences", "jet_text_sentences", true, &[true]),
+    ("core.text", "display_width", "jet_text_display_width_default", true, &[true]),
+    ("core.text", "scalar_count", "jet_text_unicode_scalar_count", true, &[true]),
+    ("core.text", "byte_count", "jet_text_unicode_byte_count", true, &[true]),
+    ("core.text", "is_alphabetic", "jet_text_is_alphabetic", true, &[true]),
+    ("core.text", "is_numeric", "jet_text_is_numeric", true, &[true]),
+    ("core.text", "is_whitespace", "jet_text_is_whitespace", true, &[true]),
+    ("core.text", "is_ascii", "jet_text_unicode_is_ascii", true, &[true]),
+    ("core.text", "scalars", "jet_text_unicode_scalars", true, &[true]),
+    ("core.text", "splitn", "jet_text_splitn", true, &[true, true, false]),
+    ("core.text", "rsplitn", "jet_text_rsplitn", true, &[true, true, false]),
+    ("core.text", "trim", "jet_text_trim", true, &[true]),
+    ("core.text", "trim_start", "jet_text_trim_start", true, &[true]),
+    ("core.text", "trim_end", "jet_text_trim_end", true, &[true]),
+    ("core.text", "pad_start", "jet_text_pad_start", true, &[true, false, true]),
+    ("core.text", "pad_end", "jet_text_pad_end", true, &[true, false, true]),
+    ("core.text", "center", "jet_text_center", true, &[true, false, true]),
+    ("core.text", "starts_any", "jet_text_starts_any", true, &[true, true]),
+    ("core.text", "ends_any", "jet_text_ends_any", true, &[true, true]),
+    ("core.text", "char_indices", "jet_text_char_indices", true, &[true]),
+    ("jet.log", "info", "jet_ring_log_info", true, &[true]), // E2-M9: first-party ring packages.
+    ("jet.log", "warn", "jet_ring_log_warn", true, &[true]),
+    ("jet.log", "error", "jet_ring_log_error", true, &[true]),
+    ("jet.log", "debug", "jet_ring_log_debug", true, &[true]),
+    ("jet.log", "critical", "jet_ring_log_critical", true, &[true]),
+    ("jet.log", "fatal", "jet_ring_log_fatal", true, &[true]),
+    ("jet.log", "disable", "jet_ring_log_disable", true, &[]),
+    ("jet.log", "flush", "jet_ring_log_flush", true, &[]),
+    ("jet.log", "enabled", "jet_ring_log_enabled", true, &[true]),
+    ("jet.log", "field", "jet_ring_log_field", true, &[true, true]),
+    ("jet.log", "int", "jet_ring_log_int", true, &[true, false]),
+    ("jet.log", "float", "jet_ring_log_float", true, &[true, false]),
+    ("jet.log", "bool", "jet_ring_log_bool", true, &[true, false]),
+    ("jet.log", "redact", "jet_ring_log_redact", true, &[true]),
+    ("jet.log", "info_fields", "jet_ring_log_info_fields", true, &[true, true]),
+    ("jet.log", "warn_fields", "jet_ring_log_warn_fields", true, &[true, true]),
+    ("jet.log", "error_fields", "jet_ring_log_error_fields", true, &[true, true]),
+    ("jet.log", "debug_fields", "jet_ring_log_debug_fields", true, &[true, true]),
+    ("jet.log", "span", "jet_ring_log_span", true, &[true]),
+    ("jet.log", "enter", "jet_ring_log_enter", true, &[true]),
+    ("jet.log", "close", "jet_ring_log_close", true, &[true]),
+    ("jet.log", "set_sink", "jet_ring_log_set_sink", true, &[true, true]),
+    ("jet.log", "sample_every", "jet_ring_log_sample_every", true, &[false]),
+    ("jet.log", "counter", "jet_ring_log_counter", true, &[true, false]),
+    ("jet.log", "otlp_file", "jet_ring_log_otlp_file", true, &[true]),
+    ("jet.log", "set_level", "jet_ring_log_set_level", true, &[true]),
+    ("jet.log", "set_trace_id", "jet_ring_log_set_trace_id", true, &[true]), // E2-M12 D-OBS3: trace context for structured log records.
+    ("jet.log", "setup", "jet_ring_log_setup", true, &[true]), // D-LOGFMT1=A: explicit log format override.
+    ("jet.time", "now", "jet_std_time_now", true, &[]),
+    ("jet.time", "format", "jet_ring_time_format", true, &[false, true]),
+    ("jet.crypto", "sha256_bytes", "jet_ring_crypto_sha256_bytes", true, &[true]),
+    ("core.auth", "session_validate", "jet_auth_session_validate", true, &[true, false]),
+    ("core.auth", "session_show", "jet_auth_session_show", true, &[true]),
+    ("core.auth", "session_user", "jet_auth_session_user", true, &[true]),
+    ("core.auth", "session_cookie", "jet_auth_session_cookie", true, &[true]),
+    ("core.auth", "session_id", "jet_auth_session_id", true, &[true]),
+    ("core.sync", "text_merge", "jet_sync_text_merge", true, &[true, true]),
+    ("core.sync", "text_show", "jet_sync_text_show", true, &[true]),
+    ("core.sync", "text_metadata", "jet_sync_text_metadata", true, &[true]),
+    ("core.sync", "counter_merge", "jet_sync_counter_merge", true, &[true, true]),
+    ("core.sync", "counter_value", "jet_sync_counter_value", true, &[true]),
+    ("core.sync", "map_new", "jet_sync_map_new", true, &[]),
+    ("core.sync", "map_get", "jet_sync_map_get", true, &[true, true]),
+    ("core.sync", "map_merge", "jet_sync_map_merge", true, &[true, true]),
+    ("core.sync", "map_show", "jet_sync_map_show", true, &[true]),
+    ("core.sync", "list_new", "jet_sync_list_new", true, &[]),
+    ("core.sync", "list_merge", "jet_sync_list_merge", true, &[true, true]),
+    ("core.sync", "list_show", "jet_sync_list_show", true, &[true]),
+    ("core.sync", "policy_allows", "jet_db_policy_allows", true, &[true, true, true]),
+    ("core.sync", "policy_show", "jet_db_policy_show", true, &[true]),
+    ("core.net", "ip_addr", "jet_net_ip_addr", true, &[true]), // D-NETSOCKET1=A: core.net — typed addresses, TCP/UDP/Unix/DNS, TLS handle.
+    ("core.net", "ip_to_string", "jet_net_ip_to_string", true, &[true]),
+    ("core.net", "ip_is_ipv4", "jet_net_ip_is_ipv4", true, &[true]),
+    ("core.net", "socket_addr", "jet_net_socket_addr", true, &[true, false]),
+    ("core.net", "socket_addr_parse", "jet_net_socket_addr_parse", true, &[true]),
+    ("core.net", "socket_host", "jet_net_socket_host", true, &[true]),
+    ("core.net", "socket_port", "jet_net_socket_port", true, &[true]),
+    ("core.net", "socket_to_string", "jet_net_socket_to_string", true, &[true]),
+    ("core.net", "tcp_listen", "jet_net_tcp_listen", true, &[true]),
+    ("core.net", "tcp_listen_addr", "jet_net_tcp_listen_addr", true, &[true]),
+    ("core.net", "tcp_accept", "jet_net_tcp_accept", true, &[true]),
+    ("core.net", "tcp_connect", "jet_net_tcp_connect", true, &[true]),
+    ("core.net", "tcp_connect_addr", "jet_net_tcp_connect_addr", true, &[true]),
+    ("core.net", "tcp_connect_timeout", "jet_net_tcp_connect_timeout", true, &[true, false]),
+    ("core.net", "tcp_connect_happy", "jet_net_tcp_connect_happy", true, &[true, false, false]),
+    ("core.net", "ready_readable", "jet_net_ready_readable", true, &[true]),
+    ("core.net", "ready_writable", "jet_net_ready_writable", true, &[true]),
+    ("core.net", "error_operation", "jet_net_error_operation", true, &[true]),
+    ("core.net", "error_address", "jet_net_error_address", true, &[true]),
+    ("core.net", "error_name", "jet_net_error_name", true, &[true]),
+    ("core.net", "error_message", "jet_net_error_message", true, &[true]),
+    ("core.net", "error_os_code", "jet_net_error_os_code", true, &[true]),
+    ("core.net", "tcp_local_addr", "jet_net_tcp_local_addr", true, &[true]),
+    ("core.net", "tcp_peer_addr", "jet_net_tcp_peer_addr", true, &[true]),
+    ("core.net", "tcp_local_socket_addr", "jet_net_tcp_local_socket_addr", true, &[true]),
+    ("core.net", "tcp_peer_socket_addr", "jet_net_tcp_peer_socket_addr", true, &[true]),
+    ("core.net", "listener_local_socket_addr", "jet_net_listener_local_socket_addr", true, &[true]),
+    ("core.net", "nodelay", "jet_net_nodelay", true, &[true]),
+    ("core.net", "set_nodelay", "jet_net_set_nodelay", true, &[true, false]),
+    ("core.net", "ttl", "jet_net_ttl", true, &[true]),
+    ("core.net", "set_ttl", "jet_net_set_ttl", true, &[true, false]),
+    ("core.net", "socket_type", "jet_net_socket_type", true, &[true]),
+    ("core.net", "tcp_reply", "jet_net_tcp_reply", true, &[false, true, true]),
+    ("core.net", "udp_bind", "jet_net_udp_bind", true, &[true]),
+    ("core.net", "udp_bind_addr", "jet_net_udp_bind_addr", true, &[true]),
+    ("core.net", "udp_local_addr", "jet_net_udp_local_addr", true, &[true]),
+    ("core.net", "udp_set_timeout", "jet_net_udp_set_timeout", true, &[true, false]),
+    ("core.net", "udp_send_to", "jet_net_udp_send_to", true, &[true, true, true]),
+    ("core.net", "udp_recv_from", "jet_net_udp_recv_from", true, &[true, false]),
+    ("core.net", "udp_send_bytes_to", "jet_net_udp_send_bytes_to", true, &[true, true, true]),
+    ("core.net", "udp_receive", "jet_net_udp_receive", true, &[true, false]),
+    ("core.net", "udp_packet_data", "jet_net_udp_packet_data", true, &[true]),
+    ("core.net", "udp_packet_addr", "jet_net_udp_packet_addr", true, &[true]),
+    ("core.net", "udp_packet_bytes", "jet_net_udp_packet_bytes", true, &[true]),
+    ("core.net", "udp_packet_original_len", "jet_net_udp_packet_original_len", true, &[true]),
+    ("core.net", "udp_packet_truncated", "jet_net_udp_packet_truncated", true, &[true]),
+    ("core.net", "unix_listen", "jet_net_unix_listen", true, &[true]),
+    ("core.net", "unix_accept", "jet_net_unix_accept", true, &[true]),
+    ("core.net", "getservbyname", "jet_net_getservbyname", true, &[true]),
+    ("core.net", "getservbyport", "jet_net_getservbyport", true, &[false]),
+    ("core.net", "dns_srv_target", "jet_net_dns_srv_target", true, &[true]),
+    ("core.net", "dns_srv_port", "jet_net_dns_srv_port", true, &[true]),
+    ("core.net", "dns_srv_priority", "jet_net_dns_srv_priority", true, &[true]),
+    ("core.net", "dns_srv_weight", "jet_net_dns_srv_weight", true, &[true]),
+    ("jet.http", "router", "jet_http_router_new", true, &[]), // c109 Phase 25: HTTPRouter producer + parse/dispatch (D-ROUTE1=A), byte-for-byte // `emit_core_call` (Source/Codegen/Expression.rs ~L1411). `router()` is arg-free; // `parse(raw)` borrows the raw string; `dispatch(router, req)` borrows the router // and passes the request by value.
+    ("jet.http", "parse", "jet_http_parse_request", true, &[true]),
+    ("jet.http", "dispatch", "jet_http_router_dispatch", true, &[true, false]),
+    ("jet.regex", "flags", "jet_std::jet_regex_flags", true, &[false, false, false]), // D-REGEXENGINE1=A: core.regex — std-only runtime in jet_std, no bridge dep.
+    ("jet.regex", "escape", "jet_std::jet_regex_escape", true, &[true]),
+    ("jet.regex", "compile", "jet_std::jet_regex_compile", true, &[true]),
+    ("jet.regex", "compile_with", "jet_std::jet_regex_compile_with", true, &[true, true]),
+    ("jet.regex", "literal", "jet_std::jet_regex_literal", true, &[true]),
+    ("jet.regex", "is_match", "jet_std::jet_regex_is_match", true, &[true, true]),
+    ("jet.regex", "match", "jet_std::jet_regex_match", true, &[true, true]),
+    ("jet.regex", "find", "jet_std::jet_regex_find", true, &[true, true]),
+    ("jet.regex", "find_all", "jet_std::jet_regex_find_all", true, &[true, true]),
+    ("jet.regex", "matches", "jet_std::jet_regex_matches", true, &[true, true]),
+    ("jet.regex", "split", "jet_std::jet_regex_split", true, &[true, true]),
+    ("jet.regex", "split_limit", "jet_std::jet_regex_split_limit", true, &[true, true, false]),
+    ("jet.regex", "replace", "jet_std::jet_regex_replace", true, &[true, true, true]),
+    ("jet.regex", "replace_all", "jet_std::jet_regex_replace_all", true, &[true, true, true]),
+    ("core.raylib", "window_open", "jet_raylib_window_open", true, &[false, false, true]), // D-RAYLIB1=A / D-FLAGSHIP-RAYLIB1=A: typed graphics bridge.
+    ("core.raylib", "window_should_close", "jet_raylib_window_should_close", true, &[true]),
+    ("core.raylib", "window_ready", "jet_raylib_window_ready", true, &[true]),
+    ("core.raylib", "begin_drawing", "jet_raylib_begin_drawing", true, &[true]),
+    ("core.raylib", "clear_background", "jet_raylib_clear_background", true, &[true]),
+    ("core.raylib", "draw_text", "jet_raylib_draw_text", true, &[true, false, false, false, true]),
+    ("core.raylib", "draw_rectangle", "jet_raylib_draw_rectangle", true, &[false, false, false, false, true]),
+    ("core.raylib", "end_drawing", "jet_raylib_end_drawing", true, &[]),
+    ("core.raylib", "close_window", "jet_raylib_close_window", true, &[true]),
+    ("core.raylib", "key_down", "jet_raylib_key_down", true, &[true]),
+    ("core.raylib", "set_target_fps", "jet_raylib_set_target_fps", true, &[false]),
+    ("core.raylib", "load_sound", "jet_raylib_load_sound", true, &[true]),
+    ("core.raylib", "play_sound", "jet_raylib_play_sound", true, &[true]),
+    ("core.raylib", "color", "jet_raylib_color", true, &[false, false, false, false]),
+    ("jet.db", "params", "jet_std::jet_db_params_from_sql", true, &[true]),
+    ("jet.db", "row_value", "jet_std::jet_db_row_value", true, &[true, true]),
+    ("jet.db", "row_int", "jet_std::jet_db_row_int", true, &[true, true]),
+    ("jet.db", "row_float", "jet_std::jet_db_row_float", true, &[true, true]),
+    ("jet.db", "row_text", "jet_std::jet_db_row_text", true, &[true, true]),
+    ("jet.db", "row_bool", "jet_std::jet_db_row_bool", true, &[true, true]),
+    ("jet.db", "transaction", "jet_db_scope_transaction", false, &[true, true, true]),
+    ("jet.db", "migrate", "jet_db_scope_migrate", false, &[true, true, true]),
+    ("core.random", "pick", "jet_std_random_pick", true, &[true]),
+    ("core.random", "weighted_pick", "jet_std_random_weighted_pick", true, &[true, true]),
+    ("core.random", "sample", "jet_std_random_sample", true, &[true, false]),
+    ("core.term", "read_key", "jet_term_read_key", true, &[]), // D-TERM1 (ratified 2026-06-22): terminal direct-input.
+    ("core.perf", "fidelity", "jet_perf_fidelity", false, &[]), // D-FIDELITY-API1=A: runtime-global fidelity signal.
+    ("core.perf", "default_fidelity", "jet_perf_default_fidelity", false, &[]),
+    ("core.perf", "override_fidelity", "jet_perf_override_fidelity", false, &[false]),
+    ("core.perf", "reset_fidelity", "jet_perf_reset_fidelity", false, &[]),
+    ("core.ui", "null_backend", "jet_ui_null", true, &[]), // D-RENDERTGT2=A (c133 M1): UI backend seam constructors.
+    ("core.ui", "tui_backend", "jet_ui_tui", true, &[]),
+    ("core.ui", "gtk_backend", "jet_ui_gtk", true, &[]), // D-UIDEVSHELL1=A (c134 Phase 8): native Linux GTK4 backend constructor.
+    ("core.ui", "point", "jet_ui_point", true, &[false, false]),
+    ("core.ui", "size", "jet_ui_size", true, &[false, false]),
+    ("core.ui", "rect", "jet_ui_rect", true, &[false, false, false, false]),
+    ("core.ui", "constraint", "jet_ui_constraint", true, &[false, false, false, false]),
+    ("core.ui", "node", "jet_ui_node", true, &[true, false, false]),
+    ("core.ui", "text", "jet_ui_text", true, &[true]),
+    ("core.ui", "button", "jet_ui_button", true, &[true]),
+    ("core.ui", "key_event", "jet_ui_key_event", true, &[true]),
+    ("core.ui", "resize_event", "jet_ui_resize_event", true, &[false, false]),
+    ("core.ui", "node_role", "jet_ui_node_role", true, &[true, false, false, false]), // D-A11YGATE1=B (c134 Phase 6): accessible-role node + role constants.
+    ("core.ui", "node_color", "jet_ui_node_color", true, &[true, false, false, true]), // D-STYLESHAPE1=A wiring: a node carrying an explicit fill color.
+    ("core.ui", "aria_role_button", "jet_ui_aria_role_button", true, &[]),
+    ("core.ui", "aria_role_text_input", "jet_ui_aria_role_text_input", true, &[]),
+    ("core.ui", "aria_role_label", "jet_ui_aria_role_label", true, &[]),
+    ("core.ui", "aria_role_container", "jet_ui_aria_role_container", true, &[]),
+    ("core.web", "app", "jet_web_app", true, &[]), // D-WEBAPP1=D: application builder + page helper.
+    ("app", "live_get", "jet_app_live_get", true, &[true]),
+    ("core.web", "live_get", "jet_app_live_get", true, &[true]),
+    ("app", "live_show", "jet_app_live_show", true, &[true]),
+    ("core.web", "live_show", "jet_app_live_show", true, &[true]),
+    ("app", "live_stats", "jet_app_live_stats", true, &[]),
+    ("core.web", "live_stats", "jet_app_live_stats", true, &[]),
+    ("app", "auth_routes", "jet_app_auth_routes", true, &[true]),
+    ("core.web", "auth_routes", "jet_app_auth_routes", true, &[true]),
+    ("app", "auth_show", "jet_app_auth_show", true, &[true]),
+    ("core.web", "auth_show", "jet_app_auth_show", true, &[true]),
+    ("core.web.devserver", "for_app", "jet_devserver_for_app", true, &[true]), // c-devserver (owner-directed 2026-07-01): `devserver.for_app(file)` // constructor — the builder methods dispatch through // `THandleOp::DevServerMethod` above, not here.
+    ("core.web.devserver", "app", "jet_devserver_app", true, &[]),
+    ("core.sketch.hll", "new", "JetHyperLogLog::new", false, &[]), // D-APPROX1=A: sketch constructors.
+    ("core.sketch.tdigest", "new", "JetTDigest::new", false, &[]),
+    ("core.sketch.cms", "new", "JetCountMinSketch::new", false, &[]),
+    ("core.sketch.reservoir", "new", "JetReservoirSampler::new", false, &[false]),
+    ("core.browser", "profile", "jet_browser_profile", false, &[true]), // D-BROWSER-AUTO1=A: native versioned BiDi entry points.
+    ("core.browser", "timeout", "jet_browser_timeout", false, &[false]),
+    ("core.browser", "locked", "jet_browser_locked", false, &[true]),
+    ("core.browser", "connect", "jet_browser_connect", false, &[true]),
+    ("core.browser", "connect_profile", "jet_browser_connect_profile", false, &[true, true, false]),
+    ("core.http.server", "mux", "jet_http_mux_new", false, &[]),
+    ("core.http.server", "response", "jet_http_srv_response", false, &[false, true]),
+    ("core.http.server", "tls", "jet_http_srv_tls", false, &[true, true]),
+    ("core.http.server", "sse", "jet_http_srv_sse", false, &[true]),
+    ("core.http.server", "json", "jet_http_srv_json", false, &[false, true]), // D-HTTP-JSON1=A: one JSON response with its content type set.
+    ("core.http.server", "cors", "jet_http_srv_install_cors", false, &[true, true]),
+    ("core.http.server", "access_log", "jet_http_srv_access_log", false, &[true, false]),
+    ("core.http.server", "request_id", "jet_http_srv_install_request_id", false, &[true]),
+    ("core.ws", "connect", "jet_ws_connect", false, &[true]), // D-WS1=B: cleartext WebSocket client/server.
+    ("core.ws", "upgrade", "jet_ws_upgrade", false, &[true]),
+    ("core.time.date", "new", "JetDate::new", false, &[false, false, false]), // D-TIMEDEPTH1=A: civil-time constructors.
+    ("core.time.date", "today", "JetDate::today_utc", false, &[]),
+    ("core.time.datetime", "from_timestamp", "JetDateTime::from_timestamp", false, &[false]),
+    ("core.time.datetime", "now", "JetDateTime::now", false, &[]),
+];
+
+/// #1635: dispatch a plain call straight off `PLAIN_CORE_CALLS` before the
+/// bespoke match below has to run. `arg`/`helper` are the same closures
+/// `emit_tir_core_call` already built (widen-to-vec included).
+fn emit_plain_core_call(
+    module: &str,
+    method: &str,
+    arg: &dyn Fn(usize) -> String,
+    helper: &dyn Fn(&str) -> String,
+) -> Option<String> {
+    let &(_, _, symbol, prefixed, mask) = PLAIN_CORE_CALLS
+        .iter()
+        .find(|&&(m, me, ..)| m == module && me == method)?;
+    let rendered: Vec<String> = mask
+        .iter()
+        .enumerate()
+        .map(|(idx, borrow)| {
+            let a = arg(idx);
+            if *borrow { format!("&({a})") } else { a }
+        })
+        .collect();
+    let sym = if prefixed { helper(symbol) } else { symbol.to_string() };
+    Some(emit_symbol_call(&sym, &rendered.join(", ")))
+}
+
 pub(crate) fn emit_tir_core_call(
     module: &str,
     method: &str,
@@ -147,6 +751,9 @@ pub(crate) fn emit_tir_core_call(
     let normalized_module =
         crate::Syntax::normalize_core_module(module).unwrap_or_else(|| module.to_string());
     let module = normalized_module.as_str();
+    if let Some(rendered) = emit_plain_core_call(module, method, &arg, &helper) {
+        return rendered;
+    }
     fn vault_key_type(ty: &Type) -> Option<&str> {
         match ty {
             Type::Named(name) if matches!(name.as_str(), "SigningKey" | "X25519SecretKey") => Some(name),
@@ -162,6 +769,16 @@ pub(crate) fn emit_tir_core_call(
         Some("X25519SecretKey") => format!("{}::JetX25519SecretKey", cx.ffi_crate.as_deref().unwrap_or("jet_ffi")),
         _ => "_".to_string(),
     };
+    // #1635: every arm below stays bespoke because it needs at least one thing
+    // `PLAIN_CORE_CALLS` can't express -- a match guard or duplicate
+    // (module, method) key (order-sensitive dispatch), a dynamic Rust type
+    // parameter (`cx.rust_type(...)`), tuple/struct construction with
+    // generated field names, conditional branching on `args`/`ret_ty` (arg
+    // count, arg type, f32 vs f64 paths, ...), `Option`-wrapped or defaulted
+    // args, a method-call or operator spelling instead of a bare symbol call
+    // (`(x).foo()`, `x % 2`), or other call-site logic (HTTP/bridge/vault
+    // error mapping, `method` used inside the template, multi-statement
+    // setup). Each is exactly one of those; see the arm itself for which.
     match (module, method) {
         ("jet.unit", "magnitude") => format!("({}).to_string()", arg(0)),
         // c109 Phase 18 (S58, E2-M13): low-level pointer ops, byte-for-byte
@@ -170,17 +787,7 @@ pub(crate) fn emit_tir_core_call(
         // valid because the call only reaches codegen inside an `#Unsafe` region/fn (sema
         // E3101), already lowered to a Rust `unsafe` context.
         ("core.mem", "address_of") => format!("(&({}) as *const _ as usize as i64)", arg(0)),
-        ("core.mem", "volatile_read") => format!("std::ptr::read_volatile({})", arg(0)),
-        ("core.mem", "volatile_write") => {
-            format!("std::ptr::write_volatile({}, {})", arg(0), arg(1))
-        }
-        // D-TUPLE-DESTRUCT1: the `tasks.channel<T>()` producer — returns the
-        // `(Sender<T>, Receiver<T>)` pair as the same `JetTup_<hash>` named-tuple
-        // struct every other `Type::Tuple` value uses (`enumerate`/`zip`/`partition`'s
-        // convention — `Tuples::collect_tuple_shapes` already walks this call's
-        // `resolved_ret` and declares the struct). `T` and the struct shape both come
-        // from the call node's own resolved `ret_ty`, not a binding annotation
-        // (there's no combined "Channel" value left to annotate).
+        
         ("core.tasks", "channel") => {
             let fields = match ret_ty {
                 Type::Tuple(fields) => crate::Codegen::Tuples::tuple_fields_plain(fields),
@@ -228,20 +835,9 @@ pub(crate) fn emit_tir_core_call(
                 )
             }
         }
-        ("core.tasks", "interval") => format!("{}jet_std::interval({})", cx.root_prefix, arg(0)),
-        ("core.tasks", "yield_now") => format!("{}jet_std::jet_task_yield()", cx.root_prefix),
-        ("core.tasks", "current_task") => {
-            format!("{}jet_std::jet_task_current_trace()", cx.root_prefix)
-        }
-        // D-REACT1=B: `reactive.signal(initial)` producer → a `JetSignal<T>`.
-        ("jet.reactive", "signal") => {
-            format!("{}jet_std::JetSignal::new({})", cx.root_prefix, arg(0))
-        }
-        // D-EVENT1=D: first-party typed Event/Hook constructors.
-        ("core.event", "scope") => format!("{}jet_std::JetEventScope::new()", cx.root_prefix),
-        ("core.event", "policy_sync") => {
-            format!("{}jet_std::JetEventPolicy::sync()", cx.root_prefix)
-        }
+        
+        
+        
         ("core.event", "new") => {
             let elem = match ret_ty {
                 Type::Apply { args, .. } => args.first().cloned().unwrap_or(Type::Int),
@@ -309,24 +905,7 @@ pub(crate) fn emit_tir_core_call(
             )
         }
         // D-HONESTNUM1=A: `M.from(value, uncertainty)` → a `JetMeasurement<f64>`.
-        ("core.science.measurement", "from") => {
-            format!(
-                "{}jet_std::JetMeasurement::new({}, {})",
-                cx.root_prefix,
-                arg(0),
-                arg(1)
-            )
-        }
-        // D-CORE-NUMERIC1=A: `core.math.decimal(s)` → exact parse.
-        ("core.math", "fraction") => format!(
-            "{}jet_fraction_new({}, {})",
-            cx.root_prefix, arg(0), arg(1)
-        ),
-        ("core.math", "decimal") => {
-            format!("{}jet_decimal_from_str(&({}))", cx.root_prefix, arg(0))
-        }
-        // D-PENDING1=B: Loadable<T,E> constructors.
-        // idle/loading/loaded/failed need concrete type params for E: Clone bound satisfaction.
+        
         ("core.reactive.loadable", "idle") => format!("JetLoadable::<(), ()>::Idle"),
         ("core.reactive.loadable", "loading") => format!("JetLoadable::<(), ()>::Loading"),
         ("core.reactive.loadable", "loaded") => {
@@ -339,119 +918,31 @@ pub(crate) fn emit_tir_core_call(
         // live in `core.files` alongside the streaming handle constructors below.
         // D-FILES-APPEND1=A: whole-file one-shot is `append_all`, not `append` —
         // that name stays reserved for the streaming handle's `.append(text)`.
-        ("core.files", "read") => format!("{}(&({}))", helper("jet_std_fs_read"), arg(0)),
-        ("core.files", "read_bytes") => {
-            format!("{}(&({}))", helper("jet_std_fs_read_bytes"), arg(0))
-        }
-        ("core.files", "write") => format!(
-            "{}(&({}), &({}))",
-            helper("jet_std_fs_write"),
-            arg(0),
-            arg(1)
-        ),
-        ("core.files", "append_all") => format!(
-            "{}(&({}), &({}))",
-            helper("jet_std_fs_append"),
-            arg(0),
-            arg(1)
-        ),
-        ("core.files", "exists") => format!("{}(&({}))", helper("jet_std_fs_exists"), arg(0)),
-        ("core.files", "remove") => format!("{}(&({}))", helper("jet_std_fs_remove"), arg(0)),
-        ("core.files", "remove_dir") => {
-            format!("{}(&({}))", helper("jet_std_fs_remove_dir"), arg(0))
-        }
-        ("core.files", "remove_all") => {
-            format!("{}(&({}))", helper("jet_std_fs_remove_all"), arg(0))
-        }
-        ("core.files", "list_dir") => format!("{}(&({}))", helper("jet_std_fs_list_dir"), arg(0)),
-        ("core.files", "create_dir") => {
-            format!("{}(&({}))", helper("jet_std_fs_create_dir"), arg(0))
-        }
-        ("core.files", "create_dir_all") => {
-            format!("{}(&({}))", helper("jet_std_fs_create_dir_all"), arg(0))
-        }
-        ("core.files", "is_dir") => format!("{}(&({}))", helper("jet_std_fs_is_dir"), arg(0)),
-        ("core.files", "copy") => format!(
-            "{}(&({}), &({}))",
-            helper("jet_std_fs_copy"),
-            arg(0),
-            arg(1)
-        ),
-        ("core.files", "copy_dir") => format!(
-            "{}(&({}), &({}))",
-            helper("jet_std_fs_copy_dir"),
-            arg(0),
-            arg(1)
-        ),
-        ("core.files", "rename") => format!(
-            "{}(&({}), &({}))",
-            helper("jet_std_fs_rename"),
-            arg(0),
-            arg(1)
-        ),
-        ("core.files", "symlink") => format!(
-            "{}(&({}), &({}))",
-            helper("jet_std_fs_symlink"),
-            arg(0),
-            arg(1)
-        ),
-        ("core.files", "read_link") => {
-            format!("{}(&({}))", helper("jet_std_fs_read_link"), arg(0))
-        }
-        ("core.files", "hard_link") => format!(
-            "{}(&({}), &({}))",
-            helper("jet_std_fs_hard_link"),
-            arg(0),
-            arg(1)
-        ),
-        ("core.files", "stat") => format!("{}(&({}))", helper("jet_std_fs_stat"), arg(0)),
-        ("core.files", "canonicalize") => {
-            format!("{}(&({}))", helper("jet_std_fs_canonicalize"), arg(0))
-        }
-        ("core.files", "absolute") => {
-            format!("{}(&({}))", helper("jet_std_fs_absolute"), arg(0))
-        }
-        ("core.files", "walk") => format!("{}(&({}))", helper("jet_std_fs_walk"), arg(0)),
-        ("core.files", "glob") => format!("{}(&({}))", helper("jet_std_fs_glob"), arg(0)),
-        ("core.files", "read_at") => format!(
-            "{}(&({}), {}, {})",
-            helper("jet_std_fs_read_at"),
-            arg(0),
-            arg(1),
-            arg(2)
-        ),
-        ("core.files", "write_at") => format!(
-            "{}(&({}), {}, &({}))",
-            helper("jet_std_fs_write_at"),
-            arg(0),
-            arg(1),
-            arg(2)
-        ),
-        ("core.files", "fsync") => format!("{}(&({}))", helper("jet_std_fs_fsync"), arg(0)),
-        ("core.files", "write_atomic") => format!(
-            "{}(&({}), &({}))",
-            helper("jet_std_fs_write_atomic"),
-            arg(0),
-            arg(1)
-        ),
-        ("core.files", "temp_dir") => {
-            format!("{}(&({}))", helper("jet_std_fs_temp_dir"), arg(0))
-        }
-        ("core.files", "temp_file") => {
-            format!("{}(&({}))", helper("jet_std_fs_temp_file"), arg(0))
-        }
-        ("core.files", "lock") => format!("{}(&({}))", helper("jet_std_fs_lock"), arg(0)),
-        ("core.watcher", "files") => format!("{}(&({}))", helper("jet_watcher_files"), arg(0)),
-        ("core.watcher", "process_pid") => {
-            format!("{}({})", helper("jet_watcher_process_pid"), arg(0))
-        }
-        ("core.watcher", "port") => {
-            format!("{}(&({}), {})", helper("jet_watcher_port"), arg(0), arg(1))
-        }
-        ("core.watcher", "set") => format!("{}()", helper("jet_watcher_set")),
-        ("core.io", "args") => format!("{}()", helper("jet_std_io_args")),
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
         // D-ARGS1: `args.spec()` → empty builder.
-        ("core.args", "spec") => format!("{}()", helper("jet_args_spec")),
+        
         // D-ANY-JAI1 (c7jaiany §6): `reflect.of(x)` — built entirely at this call
         // site (no generic runtime trait needed, I3: sema already gated
         // legality via `is_displayable` in `CheckerCoreLib::infer_core_call`,
@@ -507,56 +998,21 @@ pub(crate) fn emit_tir_core_call(
                 format!("{}(Some(&({})))", helper("jet_std_io_input"), arg(0))
             }
         }
-        ("core.io", "confirm") => {
-            format!("{}(&({}))", helper("jet_std_io_confirm"), arg(0))
-        }
-        ("core.io", "choose") => format!(
-            "{}(&({}), &({}))",
-            helper("jet_std_io_choose"),
-            arg(0),
-            arg(1)
-        ),
-        ("core.io", "input_secret") => {
-            format!("{}(&({}))", helper("jet_std_io_input_secret"), arg(0))
-        }
-        ("core.io", "read_all_input") => format!("{}()", helper("jet_std_io_read_all_input")),
-        ("core.io", "readline") => format!("{}()", helper("jet_std_io_readline")),
-        ("core.io", "read_until") => {
-            format!("{}(&({}))", helper("jet_std_io_read_until"), arg(0))
-        }
-        ("core.io", "take") => format!("{}({})", helper("jet_std_io_take"), arg(0)),
-        ("core.io", "buffered") => format!("{}()", helper("jet_std_io_buffered")),
-        ("core.io", "sprint") => format!("{}(&({}))", helper("jet_std_io_sprint"), arg(0)),
-        ("core.io", "repr") => format!("{}(&({}))", helper("jet_std_io_repr"), arg(0)),
-        ("core.io", "binread") => format!("{}(&({}))", helper("jet_std_io_binread"), arg(0)),
-        ("core.io", "binwrite") => format!(
-            "{}(&({}), &({}))",
-            helper("jet_std_io_binwrite"),
-            arg(0),
-            arg(1)
-        ),
+        
+        
+        
+        
+        
+        
+        
+        
+        
         // D-STDIN1=A: io.stdin() → JetStdinReader handle.
-        ("core.io", "stdin") => format!("{}()", helper("jet_std_io_stdin")),
-        ("core.io", "stdout") => format!("{}()", helper("jet_std_io_stdout")),
-        ("core.io", "stderr") => format!("{}()", helper("jet_std_io_stderr")),
-        ("core.io", "terminal_width") => format!("{}()", helper("jet_std_io_terminal_width")),
-        ("core.io", "terminal_height") => format!("{}()", helper("jet_std_io_terminal_height")),
-        ("core.io", "style") => {
-            format!(
-                "{}(&({}), &({}))",
-                helper("jet_std_io_style"),
-                arg(0),
-                arg(1)
-            )
-        }
-        ("core.io", "style_force") => {
-            format!(
-                "{}(&({}), &({}))",
-                helper("jet_std_io_style_force"),
-                arg(0),
-                arg(1)
-            )
-        }
+        
+        
+        
+        
+        
         ("core.io", "progress") => {
             if matches!(args.first().map(|a| &a.ty), Some(Type::String)) {
                 format!("{}(&({}))", helper("jet_std_io_progress"), arg(0))
@@ -578,122 +1034,66 @@ pub(crate) fn emit_tir_core_call(
                 format!("{}({}, {}, {})", helper(helper_name), arg(0), description, format)
             }
         }
-        ("core.env", "get") => format!("{}(&({}))", helper("jet_std_env_get"), arg(0)),
-        ("core.env", "set") => format!(
-            "{}(&({}), &({}))",
-            helper("jet_std_env_set"),
-            arg(0),
-            arg(1)
-        ),
-        ("core.env", "unset") => format!("{}(&({}))", helper("jet_std_env_unset"), arg(0)),
-        ("core.env", "vars") => format!("{}()", helper("jet_std_env_vars")),
-        ("core.env", "current_dir") => format!("{}()", helper("jet_std_env_current_dir")),
-        ("core.env", "home_dir") => format!("{}()", helper("jet_std_env_home_dir")),
-        ("core.os", "name") => format!("{}()", helper("jet_std_os_name")),
-        ("core.os", "family") => format!("{}()", helper("jet_std_os_family")),
-        ("core.os", "arch") => format!("{}()", helper("jet_std_os_arch")),
-        ("core.os", "cpu_count") => format!("{}()", helper("jet_std_os_cpu_count")),
-        ("core.os", "temp_dir") => format!("{}()", helper("jet_std_os_temp_dir")),
-        ("core.os", "executable") => format!("{}()", helper("jet_std_os_executable")),
-        ("core.os", "pid" | "getpid") => format!("{}()", helper("jet_std_os_pid")),
-        ("core.os", "hostname") => format!("{}()", helper("jet_std_os_hostname")),
-        ("core.os", "username") => format!("{}()", helper("jet_std_os_username")),
-        ("core.os", "release") => format!("{}()", helper("jet_std_os_release")),
-        ("core.os", "version") => format!("{}()", helper("jet_std_os_version")),
-        ("core.os", "expand") => format!("{}(&({}))", helper("jet_std_os_expand"), arg(0)),
-        ("core.os", "getppid") => format!("{}()", helper("jet_std_os_getppid")),
-        ("core.os", "getuid") => format!("{}()", helper("jet_std_os_getuid")),
-        ("core.os", "geteuid") => format!("{}()", helper("jet_std_os_geteuid")),
-        ("core.os", "getgid") => format!("{}()", helper("jet_std_os_getgid")),
-        ("core.os", "getegid") => format!("{}()", helper("jet_std_os_getegid")),
-        ("core.os", "getgroups") => format!("{}()", helper("jet_std_os_getgroups")),
-        ("core.os", "getpgrp") => format!("{}()", helper("jet_std_os_getpgrp")),
-        ("core.os", "uptime") => format!("{}()", helper("jet_std_os_uptime")),
-        ("core.os", "loadavg") => format!("{}()", helper("jet_std_os_loadavg")),
-        ("core.os", "times") => format!("{}()", helper("jet_std_os_times")),
-        ("core.os", "sync") => format!("{}()", helper("jet_std_os_sync")),
-        ("core.os", "getpgid") => format!("{}({})", helper("jet_std_os_getpgid"), arg(0)),
-        ("core.os", "getsid") => format!("{}({})", helper("jet_std_os_getsid"), arg(0)),
-        ("core.os", "exitcode") => format!("{}({})", helper("jet_std_os_exitcode"), arg(0)),
-        ("core.os", "success") => format!("{}({})", helper("jet_std_os_success"), arg(0)),
-        ("core.os", "umask") => format!("{}({})", helper("jet_std_os_umask"), arg(0)),
-        ("core.os", "getpriority") => format!("{}({})", helper("jet_std_os_getpriority"), arg(0)),
-        ("core.os", "setpriority") => format!(
-            "{}({}, {})",
-            helper("jet_std_os_setpriority"),
-            arg(0),
-            arg(1)
-        ),
-        ("core.os", "utime") => format!(
-            "{}(&({}), {}, {})",
-            helper("jet_std_os_utime"),
-            arg(0),
-            arg(1),
-            arg(2)
-        ),
-        ("core.os", "stop") => format!("{}({})", helper("jet_std_os_stop"), arg(0)),
-        ("core.os", "set_current_dir") => {
-            format!("{}(&({}))", helper("jet_std_os_set_current_dir"), arg(0))
-        }
-        ("core.os", "on_interrupt") => {
-            format!("{}({})", helper("jet_std_os_on_interrupt"), arg(0))
-        }
-        ("core.os", "atexit") => format!("{}({})", helper("jet_std_os_atexit"), arg(0)),
-        ("core.os", "fork") => format!("{}()", helper("jet_std_os_fork")),
-        ("core.os", "setuid") => format!("{}({})", helper("jet_std_os_setuid"), arg(0)),
-        ("core.os", "setgid") => format!("{}({})", helper("jet_std_os_setgid"), arg(0)),
-        ("core.os", "setpgid") => format!(
-            "{}({}, {})",
-            helper("jet_std_os_setpgid"),
-            arg(0),
-            arg(1)
-        ),
-        ("core.os", "setpgrp") => format!("{}()", helper("jet_std_os_setpgrp")),
-        ("core.os", "setsid") => format!("{}()", helper("jet_std_os_setsid")),
-        ("core.os", "initgroups") => format!(
-            "{}(&({}), {})",
-            helper("jet_std_os_initgroups"),
-            arg(0),
-            arg(1)
-        ),
-        ("core.os", "kill") => format!(
-            "{}({}, {})",
-            helper("jet_std_os_kill"),
-            arg(0),
-            arg(1)
-        ),
-        ("core.os", "wait") => format!("{}()", helper("jet_std_os_wait")),
-        ("core.os", "waitpid") => format!(
-            "{}({}, {})",
-            helper("jet_std_os_waitpid"),
-            arg(0),
-            arg(1)
-        ),
-        ("core.os", "pipe") => format!("{}()", helper("jet_std_os_pipe")),
-        ("core.os", "close_fd") => format!("{}({})", helper("jet_std_os_close_fd"), arg(0)),
-        ("core.os", "mkfifo") => format!(
-            "{}(&({}), {})",
-            helper("jet_std_os_mkfifo"),
-            arg(0),
-            arg(1)
-        ),
-        ("core.process", "exit") => format!("{}({})", helper("jet_std_process_exit"), arg(0)),
-        ("core.process", "run") => format!("{}(&({}))", helper("jet_std_process_run"), arg(0)),
-        ("core.process", "cmd") => format!("{}(&({}))", helper("jet_std_process_cmd"), arg(0)),
-        ("core.process", "pipeline") => {
-            format!("{}(&({}))", helper("jet_std_process_pipeline"), arg(0))
-        }
-        ("core.testing", "snap") => {
-            format!("{}(&({}), &({}))", helper("jet_testing_snap"), arg(0), arg(1))
-        }
-        ("core.testing", "golden") => {
-            format!("{}(&({}), &({}))", helper("jet_testing_golden"), arg(0), arg(1))
-        }
-        ("core.testing", "fixture") => format!("{}(&({}))", helper("jet_testing_fixture"), arg(0)),
-        ("core.testing", "temp_dir") => format!("{}(&({}))", helper("jet_testing_temp_dir"), arg(0)),
-        ("core.testing", "corpus") => format!("{}(&({}))", helper("jet_testing_corpus"), arg(0)),
-        ("core.testing", "fake_clock") => format!("{}({})", helper("jet_std_clock_new"), arg(0)),
-        ("core.testing", "fake_rng") => format!("{}({})", helper("jet_std_rng_new"), arg(0)),
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
         // D-FLOATW1: width-generic math — choose the f32 helper when the arg is F32.
         ("core.math", "sqrt") => {
             let f32_path = matches!(args.first().map(|a| &a.ty), Some(Type::Float32));
@@ -727,7 +1127,7 @@ pub(crate) fn emit_tir_core_call(
                 format!("{}({})", helper("jet_std_math_ceil"), arg(0))
             }
         }
-        ("core.math", "round") => format!("{}({})", helper("jet_std_math_round"), arg(0)),
+        
         (
             "core.math",
             "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "sinh" | "cosh" | "tanh"
@@ -741,8 +1141,8 @@ pub(crate) fn emit_tir_core_call(
         ("core.math", "fma") => {
             format!("({}).mul_add({}, {})", arg(0), arg(1), arg(2))
         }
-        ("core.math", "isqrt") => format!("{}({})", helper("jet_std_math_isqrt"), arg(0)),
-        ("core.math", "factorial") => format!("{}({})", helper("jet_std_math_factorial"), arg(0)),
+        
+        
         ("core.math", "checked_abs") => format!("({}).checked_abs()", arg(0)),
         ("core.math", "checked_neg") => format!("({}).checked_neg()", arg(0)),
         ("core.math", "checked_div") => format!("({}).checked_div({})", arg(0), arg(1)),
@@ -766,33 +1166,15 @@ pub(crate) fn emit_tir_core_call(
         ("core.math", "inv") => format!("(1.0 / ({}))", arg(0)),
         ("core.math", "zero") => "0.0_f64".to_string(),
         ("core.math", "radix") => "2i64".to_string(),
-        ("core.math", "erf") => format!("{}({})", helper("jet_std_math_erf"), arg(0)),
-        ("core.math", "erfc") => format!("{}({})", helper("jet_std_math_erfc"), arg(0)),
-        ("core.math", "gamma") => format!("{}({})", helper("jet_std_math_gamma"), arg(0)),
-        ("core.math", "lgamma") => format!("{}({})", helper("jet_std_math_lgamma"), arg(0)),
-        ("core.math", "logb") => format!("{}({})", helper("jet_std_math_logb"), arg(0)),
-        ("core.math", "significand") => {
-            format!("{}({})", helper("jet_std_math_significand"), arg(0))
-        }
-        ("core.math", "ulp") => format!("{}({})", helper("jet_std_math_ulp"), arg(0)),
-        ("core.math", "cmp") => format!("{}({}, {})", helper("jet_std_math_cmp"), arg(0), arg(1)),
-        ("core.math", "next_after") => {
-            format!("{}({}, {})", helper("jet_std_math_next_after"), arg(0), arg(1))
-        }
-        ("core.math", "ldexp" | "scaleb") => {
-            format!("{}({}, {})", helper("jet_std_math_ldexp"), arg(0), arg(1))
-        }
-        ("core.math", "ilogb") => format!("{}({})", helper("jet_std_math_ilogb"), arg(0)),
-        ("core.math", "leading_ones") => {
-            format!("{}({})", helper("jet_std_math_leading_ones"), arg(0))
-        }
-        ("core.math", "trailing_ones") => {
-            format!("{}({})", helper("jet_std_math_trailing_ones"), arg(0))
-        }
-        ("core.math", "digits") => format!("{}({})", helper("jet_std_math_digits"), arg(0)),
-        ("core.math", "binomial") => {
-            format!("{}({}, {})", helper("jet_std_math_binomial"), arg(0), arg(1))
-        }
+        
+        
+        
+        
+        
+        
+        
+        
+        
         ("core.math", "sin_cos") => {
             let fields = match ret_ty {
                 Type::Tuple(fields) => crate::Codegen::Tuples::tuple_fields_plain(fields),
@@ -893,45 +1275,26 @@ pub(crate) fn emit_tir_core_call(
         ("core.math", "checked_add") => format!("({}).checked_add({})", arg(0), arg(1)),
         ("core.math", "checked_sub") => format!("({}).checked_sub({})", arg(0), arg(1)),
         ("core.math", "checked_mul") => format!("({}).checked_mul({})", arg(0), arg(1)),
-        ("core.math", "checked_pow") => {
-            format!("{}({}, {})", helper("jet_std_math_checked_pow"), arg(0), arg(1))
-        }
         ("core.math", "saturating_add") => format!("({}).saturating_add({})", arg(0), arg(1)),
         ("core.math", "saturating_sub") => format!("({}).saturating_sub({})", arg(0), arg(1)),
         ("core.math", "saturating_mul") => format!("({}).saturating_mul({})", arg(0), arg(1)),
         ("core.math", "wrapping_add") => format!("({}).wrapping_add({})", arg(0), arg(1)),
         ("core.math", "wrapping_sub") => format!("({}).wrapping_sub({})", arg(0), arg(1)),
         ("core.math", "wrapping_mul") => format!("({}).wrapping_mul({})", arg(0), arg(1)),
-        ("core.math", "int_pow") => format!("{}({}, {})", helper("jet_std_math_int_pow"), arg(0), arg(1)),
-        ("core.math", "gcd") => format!("{}({}, {})", helper("jet_std_math_gcd"), arg(0), arg(1)),
-        ("core.math", "lcm") => format!("{}({}, {})", helper("jet_std_math_lcm"), arg(0), arg(1)),
-        ("core.random", "int") => {
-            format!("{}({}, {})", helper("jet_std_random_int"), arg(0), arg(1))
-        }
-        ("core.random", "float") => format!("{}()", helper("jet_std_random_float")),
-        ("core.random", "float_range") => {
-            format!("{}({}, {})", helper("jet_std_random_float_range"), arg(0), arg(1))
-        }
-        ("core.random", "bool") => format!("{}({})", helper("jet_std_random_bool"), arg(0)),
-        ("core.random", "normal") => {
-            format!("{}({}, {})", helper("jet_std_random_normal"), arg(0), arg(1))
-        }
-        ("core.random", "exponential") => {
-            format!("{}({})", helper("jet_std_random_exponential"), arg(0))
-        }
-        ("core.random", "seed") => format!("{}({})", helper("jet_std_random_seed"), arg(0)),
+        
+        
+        
+        
+        
+        
         // D-RANDSPLIT1=A: PRNG bytes — fast, NOT crypto-safe.
-        ("core.random", "bytes") => format!("{}({})", helper("jet_std_random_bytes"), arg(0)),
+        
         // D-CRYPTO-RNG1=A: shared fail-closed OS CSPRNG provider.
-        ("core.crypto.random", "bytes") => {
-            format!("{}({})", helper("jet_std_crypto_random_bytes"), arg(0))
-        }
-        // D-DET1: deterministic injected RNG capability constructor.
-        ("core.random", "rng") => format!("{}({})", helper("jet_std_rng_new"), arg(0)),
-        ("core.random", "split") => format!("{}({})", helper("jet_std_random_split"), arg(0)),
-        ("core.time", "now") => format!("{}()", helper("jet_std_time_now")),
-        ("core.time", "sleep") => format!("{}({})", helper("jet_std_time_sleep"), arg(0)),
-        ("core.time", "start") => format!("{}()", helper("jet_std_time_start")),
+        
+        
+        
+        
+        
         ("core.time", "milliseconds") => format!(
             "{}({}, jet_std::DurationUnit::Milliseconds)",
             helper("jet_duration_from_int"),
@@ -962,63 +1325,21 @@ pub(crate) fn emit_tir_core_call(
             helper("jet_duration_from_int"),
             arg(0)
         ),
-        ("core.time", "instant") => format!("{}()", helper("jet_time_instant_now")),
-        ("core.time", "now_utc") => format!("{}()", helper("jet_time_now_utc")),
-        ("core.time", "from_unix_ms") => format!("JetDateTime::from_unix_ms({})", arg(0)),
-        ("core.time", "today") => format!("{}()", helper("jet_time_today")),
-        ("core.time", "parse_rfc3339") => {
-            format!("{}(&({}))", helper("jet_time_parse_rfc3339"), arg(0))
-        }
-        ("core.time", "datetime") => format!(
-            "{}({}, {}, {}, {}, {}, {})",
-            helper("jet_time_datetime"),
-            arg(0),
-            arg(1),
-            arg(2),
-            arg(3),
-            arg(4),
-            arg(5)
-        ),
-        ("core.time", "time") | ("core.time", "local_time") => {
-            format!("JetLocalTime::new({}, {}, {})", arg(0), arg(1), arg(2))
-        }
-        ("core.time", "days_in_month") => {
-            format!("{}({}, {})", helper("jet_time_days_in_month"), arg(0), arg(1))
-        }
-        ("core.time", "is_leap_year") => {
-            format!("{}({})", helper("jet_time_is_leap_year"), arg(0))
-        }
+        
+        
+        
+        
+        
         ("core.time", "parse_time") => {
             format!("JetLocalTime::parse(&({})).map_err(|e| e)", arg(0))
         }
-        ("core.time", "period") => format!(
-            "{}({}, {}, {})",
-            helper("jet_time_period"),
-            arg(0),
-            arg(1),
-            arg(2)
-        ),
-        ("core.time", "period_days") => format!("{}({})", helper("jet_time_period_days"), arg(0)),
-        ("core.time", "period_months") => {
-            format!("{}({})", helper("jet_time_period_months"), arg(0))
-        }
-        ("core.time", "period_years") => {
-            format!("{}({})", helper("jet_time_period_years"), arg(0))
-        }
-        ("core.time", "zone") => format!("{}(&({}))", helper("jet_time_zone_named"), arg(0)),
-        ("core.time", "utc") => format!("{}()", helper("jet_time_zone_utc")),
-        ("core.time", "zoned") => {
-            format!("{}(&({}), &({}))", helper("jet_time_zoned"), arg(0), arg(1))
-        }
-        ("core.time", "zoned_local") => format!(
-            "{}(&({}), &({}), &({}))",
-            helper("jet_time_zoned_local"),
-            arg(0),
-            arg(1),
-            arg(2)
-        ),
+        
+        
+        
+        
+        
         // D-DET1: deterministic injected Clock capability constructor.
-        ("core.time", "clock") => format!("{}({})", helper("jet_std_clock_new"), arg(0)),
+        
         ("core.game", "run") => {
             let replay = if args.len() >= 2
                 && matches!(args[1].ty, Type::Named(ref n) if n == "GameReplay")
@@ -1052,9 +1373,6 @@ pub(crate) fn emit_tir_core_call(
         // forms route through the Encode/Decode model, distinguished by the lowered arg
         // type (encode) or the resolved return type (decode). `is_json_value` etc. read
         // those total facts — codegen never re-infers (I3).
-        ("core.encoding.json", "parse") => {
-            format!("{}(&({}))", helper("jet_std_json_parse"), arg(0))
-        }
         ("core.encoding.json", "reader") => {
             let limits = if args.len() > 1 { arg(1) } else { format!("{}jet_std::EncodingLimits::safe()", cx.root_prefix) };
             format!("{}({}, {})", helper("jet_enc_json_reader"), arg(0), limits)
@@ -1133,18 +1451,6 @@ pub(crate) fn emit_tir_core_call(
                 format!("{}(&({}))", helper("jet_std_json_render_canonical"), arg(0))
             }
         }
-        ("core.encoding.json", "events") => {
-            format!("{}(&({}))", helper("jet_std_json_events"), arg(0))
-        }
-        ("core.encoding.jsonl", "parse") => {
-            format!("{}(&({}))", helper("jet_std_jsonl_parse"), arg(0))
-        }
-        ("core.encoding.jsonl", "to_string") => {
-            format!("{}(&({}))", helper("jet_std_jsonl_render"), arg(0))
-        }
-        ("core.encoding.csv", "parse") => {
-            format!("{}(&({}))", helper("jet_ring_csv_parse"), arg(0))
-        }
         ("core.encoding.csv", "decode") => {
             format!(
                 "{}::<{}>(&({}))",
@@ -1185,41 +1491,11 @@ pub(crate) fn emit_tir_core_call(
                 arg(0)
             )
         }
-        ("core.data", "count") => format!("{}(&({}))", helper("jet_data_count"), arg(0)),
+        
         // D-COMPUTE1=D (#443): Tensor CPU oracle — one Prelude symbol per call.
-        ("core.compute", "zeros") => format!("{}(&({}))", helper("jet_compute_zeros"), arg(0)),
-        ("core.compute", "ones") => format!("{}(&({}))", helper("jet_compute_ones"), arg(0)),
-        ("core.compute", "full") => {
-            format!("{}(&({}), {})", helper("jet_compute_full"), arg(0), arg(1))
-        }
-        ("core.compute", "from_list") => {
-            format!("{}(&({}))", helper("jet_compute_from_list"), arg(0))
-        }
-        ("core.compute", "matrix") => format!(
-            "{}({}, {}, {})",
-            helper("jet_compute_matrix"),
-            arg(0),
-            arg(1),
-            arg(2)
-        ),
-        ("core.compute", "vec") => {
-            format!("{}({}, {})", helper("jet_compute_vec"), arg(0), arg(1))
-        }
-        ("core.compute", "add") => {
-            format!("{}(&({}), &({}))", helper("jet_compute_add"), arg(0), arg(1))
-        }
-        ("core.compute", "mul") => {
-            format!("{}(&({}), &({}))", helper("jet_compute_mul"), arg(0), arg(1))
-        }
-        ("core.compute", "matmul") => {
-            format!("{}(&({}), &({}))", helper("jet_compute_matmul"), arg(0), arg(1))
-        }
-        ("core.compute", "reshape") => {
-            format!("{}(&({}), &({}))", helper("jet_compute_reshape"), arg(0), arg(1))
-        }
-        ("core.compute", "get") => {
-            format!("{}(&({}), &({}))", helper("jet_compute_get"), arg(0), arg(1))
-        }
+        
+        
+        
         ("core.compute", "set") => format!(
             "{}(&mut ({}), &({}), {})",
             helper("jet_compute_set"),
@@ -1227,47 +1503,11 @@ pub(crate) fn emit_tir_core_call(
             arg(1),
             arg(2)
         ),
-        ("core.compute", "shape") => {
-            format!("{}(&({}))", helper("jet_compute_tensor_shape"), arg(0))
-        }
-        ("core.compute", "rank") => {
-            format!("{}(&({}))", helper("jet_compute_tensor_rank"), arg(0))
-        }
-        ("core.compute", "numel") => {
-            format!("{}(&({}))", helper("jet_compute_tensor_numel"), arg(0))
-        }
-        ("core.compute", "to_list") => {
-            format!("{}(&({}))", helper("jet_compute_tensor_to_list"), arg(0))
-        }
-        ("core.compute", "device") => {
-            format!("{}(&({}))", helper("jet_compute_tensor_device"), arg(0))
-        }
-        ("core.compute", "placement") => {
-            format!("{}(&({}))", helper("jet_compute_tensor_placement"), arg(0))
-        }
-        ("core.compute", "device_cpu") => format!("{}()", helper("jet_compute_device_cpu")),
-        ("core.compute", "device_auto") => format!("{}()", helper("jet_compute_device_auto")),
-        ("core.compute", "on_device") => format!(
-            "{}(&({}), {})",
-            helper("jet_compute_on_device"),
-            arg(0),
-            arg(1)
-        ),
-        ("core.compute", "broadcast_to") => format!(
-            "{}(&({}), &({}))",
-            helper("jet_compute_broadcast_to"),
-            arg(0),
-            arg(1)
-        ),
-        ("core.compute", "transpose") => {
-            format!("{}(&({}))", helper("jet_compute_transpose"), arg(0))
-        }
-        ("core.compute", "sum_axis") => format!(
-            "{}(&({}), {})",
-            helper("jet_compute_sum_axis"),
-            arg(0),
-            arg(1)
-        ),
+        
+        
+        
+        
+        
         ("core.compute", "negate" | "abs" | "exp" | "log" | "sqrt") => {
             format!("{}(\"{}\", &({}))", helper("jet_compute_unary"), method, arg(0))
         }
@@ -1278,38 +1518,14 @@ pub(crate) fn emit_tir_core_call(
             arg(0),
             arg(1)
         ),
-        ("core.compute", "eye") => format!("{}({})", helper("jet_compute_eye"), arg(0)),
-        ("core.compute", "det") => format!("{}(&({}))", helper("jet_compute_det"), arg(0)),
-        ("core.compute", "inv") => format!("{}(&({}))", helper("jet_compute_inv"), arg(0)),
-        ("core.compute", "fft") => format!("{}(&({}))", helper("jet_compute_fft"), arg(0)),
-        ("core.compute", "solve") => format!(
-            "{}(&({}), &({}))",
-            helper("jet_compute_solve"),
-            arg(0),
-            arg(1)
-        ),
-        ("core.compute", "stream_new") => format!("{}()", helper("jet_compute_stream_new")),
-        ("core.compute", "stream_sync") => {
-            format!("{}(&({}))", helper("jet_compute_stream_sync"), arg(0))
-        }
-        ("core.compute", "stream_show") => {
-            format!("{}(&({}))", helper("jet_compute_stream_show"), arg(0))
-        }
-        ("core.compute", "transfer") => format!(
-            "{}(&({}), {})",
-            helper("jet_compute_transfer"),
-            arg(0),
-            arg(1)
-        ),
-        ("core.compute", "transfer_show") => {
-            format!("{}(&({}))", helper("jet_compute_transfer_show"), arg(0))
-        }
-        ("core.compute", "kernel_bounds_ok") => format!(
-            "{}(&({}), &({}))",
-            helper("jet_compute_kernel_bounds_ok"),
-            arg(0),
-            arg(1)
-        ),
+        
+        
+        
+        
+        
+        
+        
+        
         ("core.compute", "jvp_add" | "jvp_mul" | "jvp_matmul") => format!(
             "{}(&({}), &({}), &({}), &({}))",
             helper(&format!("jet_compute_{method}")),
@@ -1325,64 +1541,14 @@ pub(crate) fn emit_tir_core_call(
             arg(1),
             arg(2)
         ),
-        ("core.compute", "value_and_grad_mul") => format!(
-            "{}(&({}), &({}))",
-            helper("jet_compute_value_and_grad_mul"),
-            arg(0),
-            arg(1)
-        ),
-        ("core.compute", "grad_value") => {
-            format!("{}(&({}))", helper("jet_compute_grad_value"), arg(0))
-        }
-        ("core.compute", "grad_a") => format!("{}(&({}))", helper("jet_compute_grad_a"), arg(0)),
-        ("core.compute", "grad_b") => format!("{}(&({}))", helper("jet_compute_grad_b"), arg(0)),
-        ("core.compute", "grad_show") => {
-            format!("{}(&({}))", helper("jet_compute_grad_show"), arg(0))
-        }
-        ("core.compute", "mse_loss") => format!(
-            "{}(&({}), &({}))",
-            helper("jet_compute_mse_loss"),
-            arg(0),
-            arg(1)
-        ),
-        ("core.compute", "sgd_step") => format!(
-            "{}(&({}), &({}), {})",
-            helper("jet_compute_sgd_step"),
-            arg(0),
-            arg(1),
-            arg(2)
-        ),
-        ("core.compute", "serialize") => {
-            format!("{}(&({}))", helper("jet_compute_serialize"), arg(0))
-        }
-        ("core.compute", "deserialize") => {
-            format!("{}(&({}))", helper("jet_compute_deserialize"), arg(0))
-        }
-        ("core.compute", "to_sparse") => {
-            format!("{}(&({}))", helper("jet_compute_to_sparse"), arg(0))
-        }
-        ("core.compute", "sparse_nnz") => {
-            format!("{}(&({}))", helper("jet_compute_sparse_nnz"), arg(0))
-        }
-        ("core.compute", "sparse_mv") => format!(
-            "{}(&({}), &({}))",
-            helper("jet_compute_sparse_mv"),
-            arg(0),
-            arg(1)
-        ),
-        ("core.compute", "sparse_show") => {
-            format!("{}(&({}))", helper("jet_compute_sparse_show"), arg(0))
-        }
-        ("core.compute", "matmul_f32_tile") => format!(
-            "{}(&({}), &({}))",
-            helper("jet_compute_matmul_f32_tile"),
-            arg(0),
-            arg(1)
-        ),
-        ("core.compute", "profile_f32_strict") => {
-            format!("{}()", helper("jet_compute_profile_f32_strict"))
-        }
-        ("core.compute", "profile_show") => format!("{}()", helper("jet_compute_profile_show")),
+        
+        
+        
+        
+        
+        
+        
+        
         ("core.services", "runtime") => format!(
             "{}(({}).clone(), ({}).as_millis())",
             helper("jet_services_runtime"),
@@ -1395,21 +1561,6 @@ pub(crate) fn emit_tir_core_call(
             arg(0)
         ),
         ("core.services", "tree") => format!("{}(({}).clone())", helper("jet_services_tree"), arg(0)),
-        ("core.services", "restart_one_for_one") => {
-            format!("{}()", helper("jet_services_restart_one_for_one"))
-        }
-        ("core.services", "restart_one_for_all") => {
-            format!("{}()", helper("jet_services_restart_one_for_all"))
-        }
-        ("core.services", "restart_rest_for_one") => {
-            format!("{}()", helper("jet_services_restart_rest_for_one"))
-        }
-        ("core.services", "delivery_at_most_once") => {
-            format!("{}()", helper("jet_services_delivery_at_most_once"))
-        }
-        ("core.services", "delivery_durable") => {
-            format!("{}()", helper("jet_services_delivery_durable"))
-        }
         ("core.services", "set_restart") => format!(
             "{}(&mut ({}), {})",
             helper("jet_services_set_restart"),
@@ -1463,27 +1614,14 @@ pub(crate) fn emit_tir_core_call(
             arg(0),
             arg(1)
         ),
-        ("core.services", "mailbox_depth") => format!(
-            "{}(&({}), &({}))",
-            helper("jet_services_mailbox_depth"),
-            arg(0),
-            arg(1)
-        ),
+        
         ("core.services", "fail_worker") => format!(
             "{}(&mut ({}), &({}))",
             helper("jet_services_fail_worker"),
             arg(0),
             arg(1)
         ),
-        ("core.services", "restarts") => format!(
-            "{}(&({}), &({}))",
-            helper("jet_services_restarts"),
-            arg(0),
-            arg(1)
-        ),
-        ("core.services", "dead_letter_count") => {
-            format!("{}(&({}))", helper("jet_services_dead_letter_count"), arg(0))
-        }
+        
         ("core.services", "drain_dead_letters") => format!(
             "{}(&mut ({}))",
             helper("jet_services_drain_dead_letters"),
@@ -1516,21 +1654,12 @@ pub(crate) fn emit_tir_core_call(
             arg(0),
             arg(1)
         ),
-        ("core.services", "restore_snapshot") => {
-            format!("{}(&({}))", helper("jet_services_restore_snapshot"), arg(0))
-        }
         ("core.services", "append_event") => format!(
             "{}(&mut ({}), ({}).clone())",
             helper("jet_services_append_event"),
             arg(0),
             arg(1)
         ),
-        ("core.services", "event_count") => {
-            format!("{}(&({}))", helper("jet_services_event_count"), arg(0))
-        }
-        ("core.services", "replay_events") => {
-            format!("{}(&({}))", helper("jet_services_replay_events"), arg(0))
-        }
         ("core.services", "workflow_start") => format!(
             "{}(&mut ({}), ({}).clone(), {})",
             helper("jet_services_workflow_start"),
@@ -1545,12 +1674,7 @@ pub(crate) fn emit_tir_core_call(
             arg(1),
             arg(2)
         ),
-        ("core.services", "workflow_history") => format!(
-            "{}(&({}), {})",
-            helper("jet_services_workflow_history"),
-            arg(0),
-            arg(1)
-        ),
+        
         ("core.services", "directory_register") => format!(
             "{}(&mut ({}), ({}).clone(), ({}).clone())",
             helper("jet_services_directory_register"),
@@ -1558,17 +1682,8 @@ pub(crate) fn emit_tir_core_call(
             arg(1),
             arg(2)
         ),
-        ("core.services", "directory_resolve") => format!(
-            "{}(&({}), &({}))",
-            helper("jet_services_directory_resolve"),
-            arg(0),
-            arg(1)
-        ),
-        ("core.services", "directory_generation") => format!(
-            "{}(&({}))",
-            helper("jet_services_directory_generation"),
-            arg(0)
-        ),
+        
+        
         ("core.services", "drain_worker") => format!(
             "{}(&mut ({}), &({}))",
             helper("jet_services_drain_worker"),
@@ -1580,11 +1695,7 @@ pub(crate) fn emit_tir_core_call(
             helper("jet_services_handoff_generation"),
             arg(0)
         ),
-        ("core.services", "upgrade_receipt") => format!(
-            "{}(&({}))",
-            helper("jet_services_upgrade_receipt"),
-            arg(0)
-        ),
+        
         ("core.services", "rollback_generation") => format!(
             "{}(&mut ({}))",
             helper("jet_services_rollback_generation"),
@@ -1593,19 +1704,10 @@ pub(crate) fn emit_tir_core_call(
         ("core.services", "chaos_fail") => {
             format!("{}(&mut ({}))", helper("jet_services_chaos_fail"), arg(0))
         }
-        ("core.services", "observe") => {
-            format!("{}(&({}))", helper("jet_services_observe"), arg(0))
-        }
-        ("core.services", "endpoint_show") => {
-            format!("{}(&({}))", helper("jet_services_endpoint_show"), arg(0))
-        }
-        ("core.services", "tree_show") => {
-            format!("{}(&({}))", helper("jet_services_tree_show"), arg(0))
-        }
-        ("core.data", "table") => format!("{}(&({}))", helper("jet_data_table"), arg(0)),
-        ("core.data", "rows") => format!("{}(&({}))", helper("jet_data_rows"), arg(0)),
-        ("core.data", "series") => format!("{}(&({}))", helper("jet_data_series"), arg(0)),
-        ("core.data", "values") => format!("{}(&({}))", helper("jet_data_series_values"), arg(0)),
+        
+        
+        
+        
         ("core.data", "schema") => {
             let arg_ty = args.first().map(|a| &a.ty);
             let elem = arg_ty
@@ -1620,10 +1722,7 @@ pub(crate) fn emit_tir_core_call(
                 emit_data_schema_columns(&elem, expand, cx)
             )
         }
-        ("core.data", "missing_count") => {
-            format!("{}(&({}))", helper("jet_data_missing_count"), arg(0))
-        }
-        ("core.data", "lazy") => format!("{}(&({}))", helper("jet_data_lazy"), arg(0)),
+        
         ("core.data", "collect") => {
             if matches!(ret_ty, Type::Result { .. }) {
                 format!(
@@ -1636,10 +1735,7 @@ pub(crate) fn emit_tir_core_call(
                 format!("{}(&({}))", helper("jet_data_collect"), arg(0))
             }
         }
-        ("core.data", "plan") => format!("{}(&({}))", helper("jet_data_plan"), arg(0)),
-        ("core.data", "filter") => {
-            format!("{}(&({}), {})", helper("jet_data_filter"), arg(0), arg(1))
-        }
+        
         ("core.data", "sort_by") => {
             if matches!(ret_ty, Type::Result { .. }) {
                 format!(
@@ -1652,12 +1748,6 @@ pub(crate) fn emit_tir_core_call(
             } else {
                 format!("{}(&({}), {})", helper("jet_data_sort_by"), arg(0), arg(1))
             }
-        }
-        ("core.data", "lazy_filter") => {
-            format!("{}(&({}), {})", helper("jet_data_lazy_filter"), arg(0), arg(1))
-        }
-        ("core.data", "lazy_sort_by") => {
-            format!("{}(&({}), {})", helper("jet_data_lazy_sort_by"), arg(0), arg(1))
         }
         ("core.data", "group_count") => {
             if matches!(ret_ty, Type::Result { .. }) {
@@ -1883,10 +1973,7 @@ pub(crate) fn emit_tir_core_call(
                 format!("{}(&({}))", helper("jet_data_describe"), arg(0))
             }
         }
-        ("core.data", "status") => format!("{}()", helper("jet_data_status")),
-        ("core.data", "require_bridge") => {
-            format!("{}(&({}))", helper("jet_data_require_bridge"), arg(0))
-        }
+        
         ("core.data", "bar_text") => {
             if matches!(ret_ty, Type::Result { .. }) {
                 format!("{}(&({}))", helper("jet_data_bar_text_checked"), arg(0))
@@ -1925,63 +2012,14 @@ pub(crate) fn emit_tir_core_call(
                 format!("{}(&({}), &({}))", helper("jet_data_line_svg"), arg(0), arg(1))
             }
         }
-        ("core.data", "csv_reader") => {
-            format!(
-                "{}({}, {})",
-                helper("jet_data_csv_reader"),
-                arg(0),
-                arg(1)
-            )
-        }
-        ("core.data", "json_reader") => {
-            format!(
-                "{}({}, {})",
-                helper("jet_data_json_reader"),
-                arg(0),
-                arg(1)
-            )
-        }
-        ("core.fmt", "number") => format!("{}({})", helper("jet_fmt_number"), arg(0)),
-        ("core.fmt", "decimal") => {
-            format!("{}({}, {})", helper("jet_fmt_decimal"), arg(0), arg(1))
-        }
-        ("core.fmt", "percent") => {
-            format!("{}({}, {})", helper("jet_fmt_percent"), arg(0), arg(1))
-        }
-        ("core.fmt", "bytes") => format!("{}({})", helper("jet_fmt_bytes"), arg(0)),
-        ("core.fmt", "duration") => format!("{}({})", helper("jet_fmt_duration"), arg(0)),
-        ("core.fmt", "ordinal") => format!("{}({})", helper("jet_fmt_ordinal"), arg(0)),
-        ("core.fmt", "plural") => format!(
-            "{}({}, &({}), &({}))",
-            helper("jet_fmt_plural"),
-            arg(0),
-            arg(1),
-            arg(2)
-        ),
-        ("core.fmt", "pad_left") => format!(
-            "{}(&({}), {}, &({}))",
-            helper("jet_fmt_pad_left"),
-            arg(0),
-            arg(1),
-            arg(2)
-        ),
-        ("core.fmt", "pad_right") => format!(
-            "{}(&({}), {}, &({}))",
-            helper("jet_fmt_pad_right"),
-            arg(0),
-            arg(1),
-            arg(2)
-        ),
-        ("core.fmt", "pad_center") => format!(
-            "{}(&({}), {}, &({}))",
-            helper("jet_fmt_pad_center"),
-            arg(0),
-            arg(1),
-            arg(2)
-        ),
-        ("core.encoding.toml", "parse") => {
-            format!("{}(&({}))", helper("jet_std_toml_parse"), arg(0))
-        }
+        
+        
+        
+        
+        
+        
+        
+        
         ("core.encoding.toml", "decode") => {
             format!(
                 "{}::<{}>(&({}))",
@@ -2004,9 +2042,6 @@ pub(crate) fn emit_tir_core_call(
             } else {
                 format!("{}(&({}))", helper("jet_enc_toml_to_string"), arg(0))
             }
-        }
-        ("core.encoding.yaml", "parse") => {
-            format!("{}(&({}))", helper("jet_std_yaml_parse"), arg(0))
         }
         ("core.encoding.yaml", "decode") => {
             format!(
@@ -2031,12 +2066,6 @@ pub(crate) fn emit_tir_core_call(
                 format!("{}(&({}))", helper("jet_enc_yaml_to_string"), arg(0))
             }
         }
-        ("core.encoding.xml", "parse") => {
-            format!("{}(&({}))", helper("jet_std_xml_parse"), arg(0))
-        }
-        ("core.encoding.xml", "parse_with") => {
-            format!("{}(&({}), &({}))", helper("jet_std_xml_parse_with"), arg(0), arg(1))
-        }
         ("core.encoding.xml", "parse_bytes") => {
             let options = if args.len() > 1 {
                 arg(1)
@@ -2045,9 +2074,6 @@ pub(crate) fn emit_tir_core_call(
             };
             format!("{}(&({}), {})", helper("jet_std_xml_parse_bytes"), arg(0), options)
         }
-        ("core.encoding.xml", "to_string") => {
-            format!("{}(&({}))", helper("jet_std_xml_render"), arg(0))
-        }
         ("core.encoding.xml", "to_bytes") => {
             let options = if args.len() > 1 {
                 arg(1)
@@ -2055,12 +2081,6 @@ pub(crate) fn emit_tir_core_call(
                 format!("{}jet_std::XMLRenderOptions::safe()", cx.root_prefix)
             };
             format!("{}(&({}), {})", helper("jet_std_xml_to_bytes"), arg(0), options)
-        }
-        ("core.encoding.xml", "canonical") => {
-            format!("{}(&({}), &({}))", helper("jet_std_xml_canonical"), arg(0), arg(1))
-        }
-        ("core.encoding.xml", "root") => {
-            format!("{}(&({}))", helper("jet_std_xml_root"), arg(0))
         }
         ("core.encoding.xml", "expanded_name") => {
             let fields = match ret_ty {
@@ -2082,12 +2102,6 @@ pub(crate) fn emit_tir_core_call(
                 local = mangle("local"),
                 uri = mangle("namespace_uri"),
             )
-        }
-        ("core.encoding.xml", "attribute") => {
-            format!("{}(&({}), &({}))", helper("jet_std_xml_attribute"), arg(0), arg(1))
-        }
-        ("core.encoding.xml", "content") => {
-            format!("{}(&({}))", helper("jet_std_xml_content"), arg(0))
         }
         ("core.encoding.xml", "decode") => {
             let options = if args.len() > 1 {
@@ -2128,12 +2142,6 @@ pub(crate) fn emit_tir_core_call(
         ("core.encoding.cbor", "parse") => {
             let options = if args.len() > 1 { arg(1) } else { format!("{}jet_std::CBOROptions::safe()", cx.root_prefix) };
             format!("{}(&({}), {})", helper("jet_enc_cbor_parse"), arg(0), options)
-        }
-        ("core.encoding.cbor", "to_bytes") => {
-            format!("{}(&({}))", helper("jet_enc_cbor_to_bytes"), arg(0))
-        }
-        ("core.encoding.cbor", "to_bytes_canonical") => {
-            format!("{}(&({}))", helper("jet_enc_cbor_to_bytes_canonical"), arg(0))
         }
         ("core.encoding.cbor", "reader") => {
             let limits = if args.len() > 1 { arg(1) } else { format!("{}jet_std::EncodingLimits::safe()", cx.root_prefix) };
@@ -2192,106 +2200,29 @@ pub(crate) fn emit_tir_core_call(
             format!("{}::<{}>(&({}), {})", helper("jet_enc_cbor_decode"), target, arg(0), options)
         }
         // D-UUIDENC1=A: hex and base64 encode/decode.
-        ("core.encoding.hex", "encode") => {
-            format!("{}(&({}))", helper("jet_std_hex_encode"), arg(0))
-        }
-        ("core.encoding.hex", "decode") => {
-            format!("{}(&({}))", helper("jet_std_hex_decode"), arg(0))
-        }
-        ("core.encoding.base64", "encode") => {
-            format!("{}(&({}))", helper("jet_std_b64_encode"), arg(0))
-        }
-        ("core.encoding.base64", "decode") => {
-            format!("{}(&({}))", helper("jet_std_b64_decode"), arg(0))
-        }
-        ("core.encoding.base64", "encode_url") => {
-            format!("{}(&({}))", helper("jet_std_b64url_encode"), arg(0))
-        }
-        ("core.encoding.base64", "decode_url") => {
-            format!("{}(&({}))", helper("jet_std_b64url_decode"), arg(0))
-        }
-        ("core.encoding.base32", "encode") => {
-            format!("{}(&({}))", helper("jet_std_base32_encode"), arg(0))
-        }
-        ("core.encoding.base32", "decode") => {
-            format!("{}(&({}))", helper("jet_std_base32_decode"), arg(0))
-        }
-        // D-UUIDENC1=A: UUID v4 (CSPRNG) and v7 (injectable Clock).
-        ("core.uuid", "v4") => format!("{}()", helper("jet_std_uuid_v4")),
-        ("core.uuid", "v7") => format!("{}(&({}))", helper("jet_std_uuid_v7"), arg(0)),
+        
+        
         // #1481: `v5` (namespace+name, deterministic) and `parse` (validate
         // + normalize) — pure std, same UUID-as-String shape as v4/v7.
-        ("core.uuid", "v5") => format!(
-            "{}(&({}), &({}))",
-            helper("jet_std_uuid_v5"),
-            arg(0),
-            arg(1)
-        ),
-        ("core.uuid", "parse") => format!("{}(&({}))", helper("jet_std_uuid_parse"), arg(0)),
-        ("core.files", "open") => format!("{}(&({}))", helper("jet_std_files_open"), arg(0)),
-        ("core.files", "create") => format!("{}(&({}))", helper("jet_std_files_create"), arg(0)),
-        ("core.files", "append") => format!("{}(&({}))", helper("jet_std_files_append"), arg(0)),
+        
+        
+        
+        
+        
         // E2-M7: std.path helpers (D-IO1).
-        ("core.path", "join") => format!(
-            "{}(&({}), &({}))",
-            helper("jet_std_path_join"),
-            arg(0),
-            arg(1)
-        ),
-        ("core.path", "parent") => format!("{}(&({}))", helper("jet_std_path_parent"), arg(0)),
-        ("core.path", "extension") => {
-            format!("{}(&({}))", helper("jet_std_path_extension"), arg(0))
-        }
-        ("core.path", "normalize") => {
-            format!("{}(&({}))", helper("jet_std_path_normalize"), arg(0))
-        }
-        ("core.url", "parse") => format!("{}(&({}))", helper("jet_url_parse"), arg(0)),
-        ("core.url", "from_parts") => format!(
-            "{}(&({}), &({}), &({}), &({}), &({}))",
-            helper("jet_url_from_parts"),
-            arg(0),
-            arg(1),
-            arg(2),
-            arg(3),
-            arg(4)
-        ),
-        ("core.url", "file") => format!("{}(&({}))", helper("jet_url_file"), arg(0)),
-        ("core.url", "data") => {
-            format!("{}(&({}), &({}))", helper("jet_url_data"), arg(0), arg(1))
-        }
-        ("core.url", "query") => format!("{}(&({}))", helper("jet_url_query"), arg(0)),
-        ("core.url", "percent_encode") => {
-            format!(
-                "{}(&({}))",
-                helper("jet_url_percent_encode_component"),
-                arg(0)
-            )
-        }
-        ("core.url", "percent_decode") => {
-            format!(
-                "{}(&({}))",
-                helper("jet_url_percent_decode_component"),
-                arg(0)
-            )
-        }
-        ("core.mime", "parse") => format!("{}(&({}))", helper("jet_mime_parse"), arg(0)),
-        ("core.mime", "from_extension") => {
-            format!("{}(&({}))", helper("jet_mime_from_extension"), arg(0))
-        }
-        ("core.mime", "extension") => format!("{}(&({}))", helper("jet_mime_extension"), arg(0)),
-        ("core.email", "address") => format!("{}jet_email::address(&({}))", cx.root_prefix, arg(0)),
-        ("core.email", "attachment") => format!(
-            "{}jet_email::attachment(&({}), &({}), &({}))",
-            cx.root_prefix, arg(0), arg(1), arg(2)
-        ),
-        ("core.email", "message") => format!(
-            "{}jet_email::message(&({}), &({}), &({}), &({}), &({}), &({}), &({}))",
-            cx.root_prefix, arg(0), arg(1), arg(2), arg(3), arg(4), arg(5), arg(6)
-        ),
-        ("core.email", "envelope") => format!(
-            "{}jet_email::envelope(&({}), &({}))", cx.root_prefix, arg(0), arg(1)
-        ),
-        ("core.email", "serialize") => format!("{}jet_email::serialize(&({}))", cx.root_prefix, arg(0)),
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
         ("core.email", "smtp") => format!(
             "{}jet_email::smtp({}, {}, {})",
             cx.root_prefix, format!("&({})", arg(0)), regex_fn("jet_crypto_secret_copy_for_smtp_impl"), email_runtime(),
@@ -2300,37 +2231,16 @@ pub(crate) fn emit_tir_core_call(
             "{}jet_email::smtp_from_env({})", cx.root_prefix, email_runtime(),
         ),
         // D-TEXTUNICODE1: std-only Unicode scalar helpers.
-        ("core.text.unicode", "scalar_count") => {
-            format!("{}(&({}))", helper("jet_text_unicode_scalar_count"), arg(0))
-        }
-        ("core.text.unicode", "byte_count") => {
-            format!("{}(&({}))", helper("jet_text_unicode_byte_count"), arg(0))
-        }
-        ("core.text.unicode", "is_ascii") => {
-            format!("{}(&({}))", helper("jet_text_unicode_is_ascii"), arg(0))
-        }
-        ("core.text.unicode", "lower") => {
-            format!("{}(&({}))", helper("jet_text_unicode_lower"), arg(0))
-        }
-        ("core.text.unicode", "upper") => {
-            format!("{}(&({}))", helper("jet_text_unicode_upper"), arg(0))
-        }
-        ("core.text.unicode", "scalars") => {
-            format!("{}(&({}))", helper("jet_text_unicode_scalars"), arg(0))
-        }
-        ("core.text", "nfc") => format!("{}(&({}))", helper("jet_text_nfc"), arg(0)),
-        ("core.text", "nfd") => format!("{}(&({}))", helper("jet_text_nfd"), arg(0)),
-        ("core.text", "nfkc") => format!("{}(&({}))", helper("jet_text_nfkc"), arg(0)),
-        ("core.text", "nfkd") => format!("{}(&({}))", helper("jet_text_nfkd"), arg(0)),
-        ("core.text", "casefold") => format!("{}(&({}))", helper("jet_text_casefold"), arg(0)),
-        ("core.text", "caseless_eq") => {
-            format!("{}(&({}), &({}))", helper("jet_text_caseless_eq"), arg(0), arg(1))
-        }
-        ("core.text", "lower") => format!("{}(&({}))", helper("jet_text_lower"), arg(0)),
-        ("core.text", "upper") => format!("{}(&({}))", helper("jet_text_upper"), arg(0)),
-        ("core.text", "graphemes") => format!("{}(&({}))", helper("jet_text_graphemes"), arg(0)),
-        ("core.text", "words") => format!("{}(&({}))", helper("jet_text_words"), arg(0)),
-        ("core.text", "sentences") => format!("{}(&({}))", helper("jet_text_sentences"), arg(0)),
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
         // D-TEXTWIDTH1=B: 1-arg = portable default (`Int`); 2-arg (`policy:`)
         // routes through the `TextWidth`-taking helper (`Int ? TextError`).
         ("core.text", "display_width") if args.len() >= 2 => format!(
@@ -2339,103 +2249,40 @@ pub(crate) fn emit_tir_core_call(
             arg(0),
             arg(1)
         ),
-        ("core.text", "display_width") => format!("{}(&({}))", helper("jet_text_display_width_default"), arg(0)),
-        ("core.text", "scalar_count") => format!("{}(&({}))", helper("jet_text_unicode_scalar_count"), arg(0)),
-        ("core.text", "byte_count") => format!("{}(&({}))", helper("jet_text_unicode_byte_count"), arg(0)),
-        ("core.text", "is_alphabetic") => format!("{}(&({}))", helper("jet_text_is_alphabetic"), arg(0)),
-        ("core.text", "is_numeric") => format!("{}(&({}))", helper("jet_text_is_numeric"), arg(0)),
-        ("core.text", "is_whitespace") => format!("{}(&({}))", helper("jet_text_is_whitespace"), arg(0)),
-        ("core.text", "is_ascii") => format!("{}(&({}))", helper("jet_text_unicode_is_ascii"), arg(0)),
-        ("core.text", "scalars") => format!("{}(&({}))", helper("jet_text_unicode_scalars"), arg(0)),
-        ("core.text", "splitn") => {
-            format!("{}(&({}), &({}), {})", helper("jet_text_splitn"), arg(0), arg(1), arg(2))
-        }
-        ("core.text", "rsplitn") => {
-            format!("{}(&({}), &({}), {})", helper("jet_text_rsplitn"), arg(0), arg(1), arg(2))
-        }
-        ("core.text", "trim") => format!("{}(&({}))", helper("jet_text_trim"), arg(0)),
-        ("core.text", "trim_start") => format!("{}(&({}))", helper("jet_text_trim_start"), arg(0)),
-        ("core.text", "trim_end") => format!("{}(&({}))", helper("jet_text_trim_end"), arg(0)),
-        ("core.text", "pad_start") => {
-            format!("{}(&({}), {}, &({}))", helper("jet_text_pad_start"), arg(0), arg(1), arg(2))
-        }
-        ("core.text", "pad_end") => {
-            format!("{}(&({}), {}, &({}))", helper("jet_text_pad_end"), arg(0), arg(1), arg(2))
-        }
-        ("core.text", "center") => {
-            format!("{}(&({}), {}, &({}))", helper("jet_text_center"), arg(0), arg(1), arg(2))
-        }
-        ("core.text", "starts_any") => {
-            format!("{}(&({}), &({}))", helper("jet_text_starts_any"), arg(0), arg(1))
-        }
-        ("core.text", "ends_any") => {
-            format!("{}(&({}), &({}))", helper("jet_text_ends_any"), arg(0), arg(1))
-        }
-        ("core.text", "char_indices") => format!("{}(&({}))", helper("jet_text_char_indices"), arg(0)),
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
         // E2-M9: first-party ring packages.
-        ("jet.log", "info") => format!("{}(&({}))", helper("jet_ring_log_info"), arg(0)),
-        ("jet.log", "warn") => format!("{}(&({}))", helper("jet_ring_log_warn"), arg(0)),
-        ("jet.log", "error") => format!("{}(&({}))", helper("jet_ring_log_error"), arg(0)),
-        ("jet.log", "debug") => format!("{}(&({}))", helper("jet_ring_log_debug"), arg(0)),
-        ("jet.log", "critical") => format!("{}(&({}))", helper("jet_ring_log_critical"), arg(0)),
-        ("jet.log", "fatal") => format!("{}(&({}))", helper("jet_ring_log_fatal"), arg(0)),
-        ("jet.log", "disable") => format!("{}()", helper("jet_ring_log_disable")),
-        ("jet.log", "flush") => format!("{}()", helper("jet_ring_log_flush")),
-        ("jet.log", "enabled") => format!("{}(&({}))", helper("jet_ring_log_enabled"), arg(0)),
-        ("jet.log", "field") => {
-            format!("{}(&({}), &({}))", helper("jet_ring_log_field"), arg(0), arg(1))
-        }
-        ("jet.log", "int") => {
-            format!("{}(&({}), {})", helper("jet_ring_log_int"), arg(0), arg(1))
-        }
-        ("jet.log", "float") => {
-            format!("{}(&({}), {})", helper("jet_ring_log_float"), arg(0), arg(1))
-        }
-        ("jet.log", "bool") => {
-            format!("{}(&({}), {})", helper("jet_ring_log_bool"), arg(0), arg(1))
-        }
-        ("jet.log", "redact") => format!("{}(&({}))", helper("jet_ring_log_redact"), arg(0)),
-        ("jet.log", "info_fields") => {
-            format!("{}(&({}), &({}))", helper("jet_ring_log_info_fields"), arg(0), arg(1))
-        }
-        ("jet.log", "warn_fields") => {
-            format!("{}(&({}), &({}))", helper("jet_ring_log_warn_fields"), arg(0), arg(1))
-        }
-        ("jet.log", "error_fields") => {
-            format!("{}(&({}), &({}))", helper("jet_ring_log_error_fields"), arg(0), arg(1))
-        }
-        ("jet.log", "debug_fields") => {
-            format!("{}(&({}), &({}))", helper("jet_ring_log_debug_fields"), arg(0), arg(1))
-        }
-        ("jet.log", "span") => format!("{}(&({}))", helper("jet_ring_log_span"), arg(0)),
-        ("jet.log", "enter") => format!("{}(&({}))", helper("jet_ring_log_enter"), arg(0)),
-        ("jet.log", "close") => format!("{}(&({}))", helper("jet_ring_log_close"), arg(0)),
-        ("jet.log", "set_sink") => {
-            format!("{}(&({}), &({}))", helper("jet_ring_log_set_sink"), arg(0), arg(1))
-        }
-        ("jet.log", "sample_every") => format!("{}({})", helper("jet_ring_log_sample_every"), arg(0)),
-        ("jet.log", "counter") => {
-            format!("{}(&({}), {})", helper("jet_ring_log_counter"), arg(0), arg(1))
-        }
-        ("jet.log", "otlp_file") => format!("{}(&({}))", helper("jet_ring_log_otlp_file"), arg(0)),
-        ("jet.log", "set_level") => format!("{}(&({}))", helper("jet_ring_log_set_level"), arg(0)),
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
         // E2-M12 D-OBS3: trace context for structured log records.
-        ("jet.log", "set_trace_id") => {
-            format!("{}(&({}))", helper("jet_ring_log_set_trace_id"), arg(0))
-        }
-        // D-LOGFMT1=A: explicit log format override.
-        ("jet.log", "setup") => format!("{}(&({}))", helper("jet_ring_log_setup"), arg(0)),
-        ("jet.time", "now") => format!("{}()", helper("jet_std_time_now")),
-        ("jet.time", "format") => format!(
-            "{}({}, &({}))",
-            helper("jet_ring_time_format"),
-            arg(0),
-            arg(1)
-        ),
+        
+        
+        
         ("jet.crypto", "sha256") => format!("{}(&({}))", regex_fn("jet_crypto_sha256_typed_impl"), arg(0)),
-        ("jet.crypto", "sha256_bytes") => {
-            format!("{}(&({}))", helper("jet_ring_crypto_sha256_bytes"), arg(0))
-        }
         ("jet.crypto", "sha512_bytes") => {
             format!("{}(&({}))", regex_fn("jet_crypto_sha512_impl"), arg(0))
         }
@@ -2630,24 +2477,7 @@ pub(crate) fn emit_tir_core_call(
             arg(2),
             arg(3)
         ),
-        ("core.auth", "session_validate") => format!(
-            "{}(&({}), {})",
-            helper("jet_auth_session_validate"),
-            arg(0),
-            arg(1)
-        ),
-        ("core.auth", "session_show") => {
-            format!("{}(&({}))", helper("jet_auth_session_show"), arg(0))
-        }
-        ("core.auth", "session_user") => {
-            format!("{}(&({}))", helper("jet_auth_session_user"), arg(0))
-        }
-        ("core.auth", "session_cookie") => {
-            format!("{}(&({}))", helper("jet_auth_session_cookie"), arg(0))
-        }
-        ("core.auth", "session_id") => {
-            format!("{}(&({}))", helper("jet_auth_session_id"), arg(0))
-        }
+        
         ("core.auth", "magic_link_issue") => format!(
             "{}(({}).clone(), {}, {})",
             helper("jet_auth_magic_link_issue"),
@@ -2688,17 +2518,7 @@ pub(crate) fn emit_tir_core_call(
             arg(1),
             arg(2)
         ),
-        ("core.sync", "text_merge") => format!(
-            "{}(&({}), &({}))",
-            helper("jet_sync_text_merge"),
-            arg(0),
-            arg(1)
-        ),
-        ("core.sync", "text_show") => {
-            format!("{}(&({}))", helper("jet_sync_text_show"), arg(0))
-        }
-        // These take the document by value but sema declares a read, so the
-        // caller keeps its own copy: a program may edit one base twice.
+        
         ("core.sync", "text_edit") => format!(
             "{}(({}).clone(), ({}).clone(), {}, {}, ({}).clone())",
             helper("jet_sync_text_edit"),
@@ -2708,9 +2528,6 @@ pub(crate) fn emit_tir_core_call(
             arg(3),
             arg(4)
         ),
-        ("core.sync", "text_metadata") => {
-            format!("{}(&({}))", helper("jet_sync_text_metadata"), arg(0))
-        }
         ("core.sync", "counter_new") => format!(
             "{}(({}).clone(), {})",
             helper("jet_sync_counter_new"),
@@ -2724,16 +2541,8 @@ pub(crate) fn emit_tir_core_call(
             arg(1),
             arg(2)
         ),
-        ("core.sync", "counter_merge") => format!(
-            "{}(&({}), &({}))",
-            helper("jet_sync_counter_merge"),
-            arg(0),
-            arg(1)
-        ),
-        ("core.sync", "counter_value") => {
-            format!("{}(&({}))", helper("jet_sync_counter_value"), arg(0))
-        }
-        ("core.sync", "map_new") => format!("{}()", helper("jet_sync_map_new")),
+        
+        
         ("core.sync", "map_set") => format!(
             "{}(({}), ({}).clone(), ({}).clone())",
             helper("jet_sync_map_set"),
@@ -2741,22 +2550,9 @@ pub(crate) fn emit_tir_core_call(
             arg(1),
             arg(2)
         ),
-        ("core.sync", "map_get") => format!(
-            "{}(&({}), &({}))",
-            helper("jet_sync_map_get"),
-            arg(0),
-            arg(1)
-        ),
-        ("core.sync", "map_merge") => format!(
-            "{}(&({}), &({}))",
-            helper("jet_sync_map_merge"),
-            arg(0),
-            arg(1)
-        ),
-        ("core.sync", "map_show") => {
-            format!("{}(&({}))", helper("jet_sync_map_show"), arg(0))
-        }
-        ("core.sync", "list_new") => format!("{}()", helper("jet_sync_list_new")),
+        
+        
+        
         ("core.sync", "list_push") => format!(
             "{}(({}), ({}).clone(), ({}).clone())",
             helper("jet_sync_list_push"),
@@ -2764,35 +2560,14 @@ pub(crate) fn emit_tir_core_call(
             arg(1),
             arg(2)
         ),
-        ("core.sync", "list_merge") => format!(
-            "{}(&({}), &({}))",
-            helper("jet_sync_list_merge"),
-            arg(0),
-            arg(1)
-        ),
-        ("core.sync", "list_show") => {
-            format!("{}(&({}))", helper("jet_sync_list_show"), arg(0))
-        }
+        
         ("core.sync", "policy_new") => format!(
             "{}(({}).clone(), ({}).clone())",
             helper("jet_db_policy_new"),
             arg(0),
             arg(1)
         ),
-        ("core.sync", "policy_allows") => format!(
-            "{}(&({}), &({}), &({}))",
-            helper("jet_db_policy_allows"),
-            arg(0),
-            arg(1),
-            arg(2)
-        ),
-        ("core.sync", "policy_show") => {
-            format!("{}(&({}))", helper("jet_db_policy_show"), arg(0))
-        }
-        // U13 (D-JPK-SECRETCRYPTO1): `core.vault.get` — reads `.jet/secrets.age`
-        // (project-relative) and decrypts with the local identity, via the
-        // age-style crypto FFI bridge. Already the exact `Option<String>` shape
-        // (`None` on any failure — missing file, missing entry, bad identity).
+        
         ("core.vault", "get") => {
             format!("{}(&({}))", regex_fn("jet_vault_get_impl"), arg(0))
         }
@@ -2835,49 +2610,15 @@ pub(crate) fn emit_tir_core_call(
         ("jet.crypto", "__vault_unlock_passphrase") =>
             format!("{}(&({}))", regex_fn("jet_vault_unlock_passphrase_impl"), arg(0)),
         // D-NETSOCKET1=A: core.net — typed addresses, TCP/UDP/Unix/DNS, TLS handle.
-        ("core.net", "ip_addr") => format!("{}(&({}))", helper("jet_net_ip_addr"), arg(0)),
-        ("core.net", "ip_to_string") => {
-            format!("{}(&({}))", helper("jet_net_ip_to_string"), arg(0))
-        }
-        ("core.net", "ip_is_ipv4") => format!("{}(&({}))", helper("jet_net_ip_is_ipv4"), arg(0)),
-        ("core.net", "socket_addr") => {
-            format!(
-                "{}(&({}), {})",
-                helper("jet_net_socket_addr"),
-                arg(0),
-                arg(1)
-            )
-        }
-        ("core.net", "socket_addr_parse") => {
-            format!("{}(&({}))", helper("jet_net_socket_addr_parse"), arg(0))
-        }
-        ("core.net", "socket_host") => format!("{}(&({}))", helper("jet_net_socket_host"), arg(0)),
-        ("core.net", "socket_port") => format!("{}(&({}))", helper("jet_net_socket_port"), arg(0)),
-        ("core.net", "socket_to_string") => {
-            format!("{}(&({}))", helper("jet_net_socket_to_string"), arg(0))
-        }
-        ("core.net", "tcp_listen") => format!("{}(&({}))", helper("jet_net_tcp_listen"), arg(0)),
-        ("core.net", "tcp_listen_addr") => {
-            format!("{}(&({}))", helper("jet_net_tcp_listen_addr"), arg(0))
-        }
-        ("core.net", "tcp_accept") => format!("{}(&({}))", helper("jet_net_tcp_accept"), arg(0)),
-        ("core.net", "tcp_connect") => format!("{}(&({}))", helper("jet_net_tcp_connect"), arg(0)),
-        ("core.net", "tcp_connect_addr") => {
-            format!("{}(&({}))", helper("jet_net_tcp_connect_addr"), arg(0))
-        }
-        ("core.net", "tcp_connect_timeout") => format!(
-            "{}(&({}), {})",
-            helper("jet_net_tcp_connect_timeout"),
-            arg(0),
-            arg(1)
-        ),
-        ("core.net", "tcp_connect_happy") => format!(
-            "{}(&({}), {}, {})",
-            helper("jet_net_tcp_connect_happy"),
-            arg(0),
-            arg(1),
-            arg(2)
-        ),
+        
+        
+        
+        
+        
+        
+        
+        
+        
         ("core.net", "tcp_read") => format!("{}(&mut ({}))", helper("jet_net_tcp_read"), arg(0)),
         ("core.net", "tcp_write") => format!(
             "{}(&mut ({}), &({}))",
@@ -2909,34 +2650,12 @@ pub(crate) fn emit_tir_core_call(
         ("core.net", "tcp_ready") => format!(
             "{}(&mut ({}), {}, {})", helper("jet_net_tcp_ready"), arg(0), arg(1), arg(2)
         ),
-        ("core.net", "ready_readable") => {
-            format!("{}(&({}))", helper("jet_net_ready_readable"), arg(0))
-        }
-        ("core.net", "ready_writable") => {
-            format!("{}(&({}))", helper("jet_net_ready_writable"), arg(0))
-        }
-        ("core.net", "error_operation") => format!("{}(&({}))", helper("jet_net_error_operation"), arg(0)),
-        ("core.net", "error_address") => format!("{}(&({}))", helper("jet_net_error_address"), arg(0)),
-        ("core.net", "error_name") => format!("{}(&({}))", helper("jet_net_error_name"), arg(0)),
-        ("core.net", "error_message") => format!("{}(&({}))", helper("jet_net_error_message"), arg(0)),
-        ("core.net", "error_os_code") => format!("{}(&({}))", helper("jet_net_error_os_code"), arg(0)),
-        ("core.net", "tcp_local_addr") => {
-            format!("{}(&({}))", helper("jet_net_tcp_local_addr"), arg(0))
-        }
-        ("core.net", "tcp_peer_addr") => {
-            format!("{}(&({}))", helper("jet_net_tcp_peer_addr"), arg(0))
-        }
-        ("core.net", "tcp_local_socket_addr") => {
-            format!("{}(&({}))", helper("jet_net_tcp_local_socket_addr"), arg(0))
-        }
-        ("core.net", "tcp_peer_socket_addr") => {
-            format!("{}(&({}))", helper("jet_net_tcp_peer_socket_addr"), arg(0))
-        }
-        ("core.net", "listener_local_socket_addr") => format!(
-            "{}(&({}))",
-            helper("jet_net_listener_local_socket_addr"),
-            arg(0)
-        ),
+        
+        
+        
+        
+        
+        
         ("core.net", "set_timeout") => format!(
             "{}(&mut ({}), {})",
             helper("jet_net_set_timeout"),
@@ -2955,87 +2674,26 @@ pub(crate) fn emit_tir_core_call(
             arg(0),
             arg(1)
         ),
-        ("core.net", "nodelay") => {
-            format!("{}(&({}))", helper("jet_net_nodelay"), arg(0))
-        }
-        ("core.net", "set_nodelay") => format!(
-            "{}(&({}), {})",
-            helper("jet_net_set_nodelay"),
-            arg(0),
-            arg(1)
-        ),
-        ("core.net", "ttl") => format!("{}(&({}))", helper("jet_net_ttl"), arg(0)),
-        ("core.net", "set_ttl") => format!(
-            "{}(&({}), {})",
-            helper("jet_net_set_ttl"),
-            arg(0),
-            arg(1)
-        ),
-        ("core.net", "socket_type") => {
-            format!("{}(&({}))", helper("jet_net_socket_type"), arg(0))
-        }
+        
+        
+        
         ("core.net", "sendfile") => format!(
             "{}(&mut ({}), &({}))",
             helper("jet_net_sendfile"),
             arg(0),
             arg(1)
         ),
-        ("core.net", "tcp_reply") => format!(
-            "{}({}, &({}), &({}))",
-            helper("jet_net_tcp_reply"),
-            arg(0),
-            arg(1),
-            arg(2)
-        ),
-        ("core.net", "udp_bind") => format!("{}(&({}))", helper("jet_net_udp_bind"), arg(0)),
-        ("core.net", "udp_bind_addr") => {
-            format!("{}(&({}))", helper("jet_net_udp_bind_addr"), arg(0))
-        }
-        ("core.net", "udp_local_addr") => {
-            format!("{}(&({}))", helper("jet_net_udp_local_addr"), arg(0))
-        }
-        ("core.net", "udp_set_timeout") => format!(
-            "{}(&({}), {})",
-            helper("jet_net_udp_set_timeout"),
-            arg(0),
-            arg(1)
-        ),
-        ("core.net", "udp_send_to") => format!(
-            "{}(&({}), &({}), &({}))",
-            helper("jet_net_udp_send_to"),
-            arg(0),
-            arg(1),
-            arg(2)
-        ),
-        ("core.net", "udp_recv_from") => format!(
-            "{}(&({}), {})",
-            helper("jet_net_udp_recv_from"),
-            arg(0),
-            arg(1)
-        ),
-        ("core.net", "udp_send_bytes_to") => format!(
-            "{}(&({}), &({}), &({}))", helper("jet_net_udp_send_bytes_to"), arg(0), arg(1), arg(2)
-        ),
-        ("core.net", "udp_receive") => format!(
-            "{}(&({}), {})", helper("jet_net_udp_receive"), arg(0), arg(1)
-        ),
-        ("core.net", "udp_packet_data") => {
-            format!("{}(&({}))", helper("jet_net_udp_packet_data"), arg(0))
-        }
-        ("core.net", "udp_packet_addr") => {
-            format!("{}(&({}))", helper("jet_net_udp_packet_addr"), arg(0))
-        }
-        ("core.net", "udp_packet_bytes") => {
-            format!("{}(&({}))", helper("jet_net_udp_packet_bytes"), arg(0))
-        }
-        ("core.net", "udp_packet_original_len") => format!(
-            "{}(&({}))", helper("jet_net_udp_packet_original_len"), arg(0)
-        ),
-        ("core.net", "udp_packet_truncated") => format!(
-            "{}(&({}))", helper("jet_net_udp_packet_truncated"), arg(0)
-        ),
-        ("core.net", "unix_listen") => format!("{}(&({}))", helper("jet_net_unix_listen"), arg(0)),
-        ("core.net", "unix_accept") => format!("{}(&({}))", helper("jet_net_unix_accept"), arg(0)),
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
         ("core.net", "unix_connect") => {
             if args.len() == 2 {
                 format!(
@@ -3098,12 +2756,6 @@ pub(crate) fn emit_tir_core_call(
         ("core.net", "dns_ptr") => {
             format!("{}({}(&({}), {}), &({}))", helper("jet_net_dns_result"), helper("jet_net_dns_ptr"), arg(0), arg(1), arg(0))
         }
-        ("core.net", "getservbyname") => {
-            format!("{}(&({}))", helper("jet_net_getservbyname"), arg(0))
-        }
-        ("core.net", "getservbyport") => {
-            format!("{}({})", helper("jet_net_getservbyport"), arg(0))
-        }
         ("core.net", "dns_srv") => {
             format!("{}({}(&({}), {}), &({}))", helper("jet_net_dns_result"), helper("jet_net_dns_srv"), arg(0), arg(1), arg(0))
         }
@@ -3114,18 +2766,6 @@ pub(crate) fn emit_tir_core_call(
             arg(1),
             arg(2), arg(1)
         ),
-        ("core.net", "dns_srv_target") => {
-            format!("{}(&({}))", helper("jet_net_dns_srv_target"), arg(0))
-        }
-        ("core.net", "dns_srv_port") => {
-            format!("{}(&({}))", helper("jet_net_dns_srv_port"), arg(0))
-        }
-        ("core.net", "dns_srv_priority") => {
-            format!("{}(&({}))", helper("jet_net_dns_srv_priority"), arg(0))
-        }
-        ("core.net", "dns_srv_weight") => {
-            format!("{}(&({}))", helper("jet_net_dns_srv_weight"), arg(0))
-        }
         ("core.net", "tls_connect") => format!(
             "{}({}, &({}), {}, {}, {}, {}, {}, {}, {}, {}, {}, {})",
             helper("jet_net_tls_client_scheduler"),
@@ -3233,124 +2873,12 @@ pub(crate) fn emit_tir_core_call(
         // `emit_core_call` (Source/Codegen/Expression.rs ~L1411). `router()` is arg-free;
         // `parse(raw)` borrows the raw string; `dispatch(router, req)` borrows the router
         // and passes the request by value.
-        ("jet.http", "router") => format!("{}()", helper("jet_http_router_new")),
-        ("jet.http", "parse") => format!("{}(&({}))", helper("jet_http_parse_request"), arg(0)),
-        ("jet.http", "dispatch") => format!(
-            "{}(&({}), {})",
-            helper("jet_http_router_dispatch"),
-            arg(0),
-            arg(1)
-        ),
+        
+        
+        
         // D-REGEXENGINE1=A: core.regex — std-only runtime in jet_std, no bridge dep.
-        ("jet.regex", "flags") => {
-            format!(
-                "{}jet_std::jet_regex_flags({}, {}, {})",
-                cx.root_prefix,
-                arg(0),
-                arg(1),
-                arg(2)
-            )
-        }
-        ("jet.regex", "escape") => {
-            format!(
-                "{}jet_std::jet_regex_escape(&({}))",
-                cx.root_prefix,
-                arg(0)
-            )
-        }
-        ("jet.regex", "compile") => {
-            format!(
-                "{}jet_std::jet_regex_compile(&({}))",
-                cx.root_prefix,
-                arg(0)
-            )
-        }
-        ("jet.regex", "compile_with") => {
-            format!(
-                "{}jet_std::jet_regex_compile_with(&({}), &({}))",
-                cx.root_prefix,
-                arg(0),
-                arg(1)
-            )
-        }
-        ("jet.regex", "literal") => {
-            format!(
-                "{}jet_std::jet_regex_literal(&({}))",
-                cx.root_prefix,
-                arg(0)
-            )
-        }
-        ("jet.regex", "is_match") => {
-            format!(
-                "{}jet_std::jet_regex_is_match(&({}), &({}))",
-                cx.root_prefix,
-                arg(0),
-                arg(1)
-            )
-        }
-        ("jet.regex", "match") => {
-            format!(
-                "{}jet_std::jet_regex_match(&({}), &({}))",
-                cx.root_prefix,
-                arg(0),
-                arg(1)
-            )
-        }
-        ("jet.regex", "find") => {
-            format!(
-                "{}jet_std::jet_regex_find(&({}), &({}))",
-                cx.root_prefix,
-                arg(0),
-                arg(1)
-            )
-        }
-        ("jet.regex", "find_all") => {
-            format!(
-                "{}jet_std::jet_regex_find_all(&({}), &({}))",
-                cx.root_prefix,
-                arg(0),
-                arg(1)
-            )
-        }
-        ("jet.regex", "matches") => {
-            format!(
-                "{}jet_std::jet_regex_matches(&({}), &({}))",
-                cx.root_prefix,
-                arg(0),
-                arg(1)
-            )
-        }
-        ("jet.regex", "split") => {
-            format!(
-                "{}jet_std::jet_regex_split(&({}), &({}))",
-                cx.root_prefix,
-                arg(0),
-                arg(1)
-            )
-        }
-        ("jet.regex", "split_limit") => {
-            format!(
-                "{}jet_std::jet_regex_split_limit(&({}), &({}), {})",
-                cx.root_prefix,
-                arg(0),
-                arg(1),
-                arg(2)
-            )
-        }
-        ("jet.regex", "replace") => format!(
-            "{}jet_std::jet_regex_replace(&({}), &({}), &({}))",
-            cx.root_prefix,
-            arg(0),
-            arg(1),
-            arg(2)
-        ),
-        ("jet.regex", "replace_all") => format!(
-            "{}jet_std::jet_regex_replace_all(&({}), &({}), &({}))",
-            cx.root_prefix,
-            arg(0),
-            arg(1),
-            arg(2)
-        ),
+        
+        
         // D-CORE-COMPRESS1=A / D-DEP-ARCHIVE1=A: core.archive owns only
         // zip/tar containers. Stream codecs lower through core.compress.
         // Archive operations use the canonical dependency-free ABI bridge.
@@ -3389,90 +2917,6 @@ pub(crate) fn emit_tir_core_call(
             format!("{}(&({}))", regex_fn("jet_archive_tar_names_json"), arg(0))
         }
         // D-RAYLIB1=A / D-FLAGSHIP-RAYLIB1=A: typed graphics bridge.
-        ("core.raylib", "window_open") => {
-            format!(
-                "{}jet_raylib_window_open({}, {}, &({}))",
-                cx.root_prefix,
-                arg(0),
-                arg(1),
-                arg(2)
-            )
-        }
-        ("core.raylib", "window_should_close") => {
-            format!(
-                "{}jet_raylib_window_should_close(&({}))",
-                cx.root_prefix,
-                arg(0)
-            )
-        }
-        ("core.raylib", "window_ready") => {
-            format!("{}jet_raylib_window_ready(&({}))", cx.root_prefix, arg(0))
-        }
-        ("core.raylib", "begin_drawing") => {
-            format!("{}jet_raylib_begin_drawing(&({}))", cx.root_prefix, arg(0))
-        }
-        ("core.raylib", "clear_background") => {
-            format!(
-                "{}jet_raylib_clear_background(&({}))",
-                cx.root_prefix,
-                arg(0)
-            )
-        }
-        ("core.raylib", "draw_text") => {
-            format!(
-                "{}jet_raylib_draw_text(&({}), {}, {}, {}, &({}))",
-                cx.root_prefix,
-                arg(0),
-                arg(1),
-                arg(2),
-                arg(3),
-                arg(4)
-            )
-        }
-        ("core.raylib", "draw_rectangle") => {
-            format!(
-                "{}jet_raylib_draw_rectangle({}, {}, {}, {}, &({}))",
-                cx.root_prefix,
-                arg(0),
-                arg(1),
-                arg(2),
-                arg(3),
-                arg(4)
-            )
-        }
-        ("core.raylib", "end_drawing") => {
-            format!("{}jet_raylib_end_drawing()", cx.root_prefix)
-        }
-        ("core.raylib", "close_window") => {
-            format!("{}jet_raylib_close_window(&({}))", cx.root_prefix, arg(0))
-        }
-        ("core.raylib", "key_down") => {
-            format!("{}jet_raylib_key_down(&({}))", cx.root_prefix, arg(0))
-        }
-        ("core.raylib", "set_target_fps") => {
-            format!("{}jet_raylib_set_target_fps({})", cx.root_prefix, arg(0))
-        }
-        ("core.raylib", "load_sound") => {
-            format!("{}jet_raylib_load_sound(&({}))", cx.root_prefix, arg(0))
-        }
-        ("core.raylib", "play_sound") => {
-            format!("{}jet_raylib_play_sound(&({}))", cx.root_prefix, arg(0))
-        }
-        ("core.raylib", "color") => {
-            format!(
-                "{}jet_raylib_color({}, {}, {}, {})",
-                cx.root_prefix,
-                arg(0),
-                arg(1),
-                arg(2),
-                arg(3)
-            )
-        }
-        // D-CORE-COMPRESS1=A / D-CODECS1: canonical gzip/zstd stream codecs
-        // via the FFI bridge crate. `compress` is
-        // infallible; `decompress` returns a Rust `Result<Vec<u8>, String>` which is
-        // already the runtime shape of the Jet `Result<[U8], String>` value — no
-        // extra wrapping needed (same pattern as `jet.crypto`'s seal/open).
         ("core.compress.gzip", "compress") => {
             format!("{}(&({}))", regex_fn("jet_compress_gzip_compress"), arg(0))
         }
@@ -3520,47 +2964,6 @@ pub(crate) fn emit_tir_core_call(
             arg(0),
             arg(1)
         ),
-        ("jet.db", "params") => {
-            format!("{}jet_std::jet_db_params_from_sql(&({}))", cx.root_prefix, arg(0))
-        }
-        ("jet.db", "row_value") => {
-            format!("{}jet_std::jet_db_row_value(&({}), &({}))", cx.root_prefix, arg(0), arg(1))
-        }
-        ("jet.db", "row_int") => {
-            format!("{}jet_std::jet_db_row_int(&({}), &({}))", cx.root_prefix, arg(0), arg(1))
-        }
-        ("jet.db", "row_float") => {
-            format!("{}jet_std::jet_db_row_float(&({}), &({}))", cx.root_prefix, arg(0), arg(1))
-        }
-        ("jet.db", "row_text") => {
-            format!("{}jet_std::jet_db_row_text(&({}), &({}))", cx.root_prefix, arg(0), arg(1))
-        }
-        ("jet.db", "row_bool") => {
-            format!("{}jet_std::jet_db_row_bool(&({}), &({}))", cx.root_prefix, arg(0), arg(1))
-        }
-        ("jet.db", "transaction") => {
-            format!(
-                "jet_db_scope_transaction(&({}), &({}), &({}))",
-                arg(0),
-                arg(1),
-                arg(2),
-            )
-        }
-        ("jet.db", "migrate") => {
-            format!(
-                "jet_db_scope_migrate(&({}), &({}), &({}))",
-                arg(0),
-                arg(1),
-                arg(2),
-            )
-        }
-        // D-DEP-WASM1=A / D-PLUGIN1=B (c81): core.plugin — sandboxed WASM
-        // Component Model loader via the FFI bridge crate (wasmtime,
-        // runtime-side only, I6). `load` is the only module-level entry
-        // point; it wraps the bridge's wire-encoded handle in the Jet-visible
-        // `Plugin` handle (`JetPlugin`), so `.call`/`.call_int` dispatch by
-        // receiver TYPE as instance methods (`THandleOp::PluginCall{,Int}`
-        // in the `HandleMethod` arm below), not a second module-call surface.
         ("jet.plugin", "load") => {
             format!(
                 "{root}JetPlugin {{ handle: {root}jet_std::jet_plugin_load_handle(&{}(&({}))) }}",
@@ -3578,32 +2981,23 @@ pub(crate) fn emit_tir_core_call(
         ("core.math", "min") => format!("({}).min({})", arg(0), arg(1)),
         ("core.math", "max") => format!("({}).max({})", arg(0), arg(1)),
         ("core.math", "clamp") => format!("({}).clamp({}, {})", arg(0), arg(1), arg(2)),
-        ("core.random", "pick") => format!("{}(&({}))", helper("jet_std_random_pick"), arg(0)),
-        ("core.random", "weighted_pick") => {
-            format!("{}(&({}), &({}))", helper("jet_std_random_weighted_pick"), arg(0), arg(1))
-        }
-        ("core.random", "sample") => {
-            format!("{}(&({}), {})", helper("jet_std_random_sample"), arg(0), arg(1))
-        }
+        
         ("core.random", "shuffle") => {
             format!("{}(&mut ({}))", helper("jet_std_random_shuffle"), arg(0))
         }
         ("core.io", "eprint") => format!("eprintln!(\"{{}}\", ({}).jet_show())", arg(0)),
         ("core.io", "print" | "println") => format!("println!(\"{{}}\", ({}).jet_show())", arg(0)),
         // D-TERM1 (ratified 2026-06-22): terminal direct-input.
-        ("core.term", "read_key") => format!("{}()", helper("jet_term_read_key")),
+        
         // D-FIDELITY-API1=A: runtime-global fidelity signal.
-        ("core.perf", "fidelity") => format!("jet_perf_fidelity()"),
-        ("core.perf", "default_fidelity") => format!("jet_perf_default_fidelity()"),
-        ("core.perf", "override_fidelity") => {
-            format!("jet_perf_override_fidelity({})", arg(0))
-        }
-        ("core.perf", "reset_fidelity") => format!("jet_perf_reset_fidelity()"),
+        
+        
+        
         // D-RENDERTGT2=A (c133 M1): UI backend seam constructors.
-        ("core.ui", "null_backend") => format!("{}jet_ui_null()", cx.root_prefix),
-        ("core.ui", "tui_backend") => format!("{}jet_ui_tui()", cx.root_prefix),
+        
+        
         // D-UIDEVSHELL1=A (c134 Phase 8): native Linux GTK4 backend constructor.
-        ("core.ui", "gtk_backend") => format!("{}jet_ui_gtk()", cx.root_prefix),
+        
         // D-UI-MOUNT1=A: free-fn spelling of the backend mount pipeline.
         ("core.ui", "mount") => {
             let backend = arg(0);
@@ -3619,84 +3013,24 @@ pub(crate) fn emit_tir_core_call(
                 format!("({}).mount_node_default(({}).clone())", backend, tree)
             }
         }
-        ("core.ui", "point") => format!("{}jet_ui_point({}, {})", cx.root_prefix, arg(0), arg(1)),
-        ("core.ui", "size") => format!("{}jet_ui_size({}, {})", cx.root_prefix, arg(0), arg(1)),
-        ("core.ui", "rect") => format!(
-            "{}jet_ui_rect({}, {}, {}, {})",
-            cx.root_prefix,
-            arg(0),
-            arg(1),
-            arg(2),
-            arg(3)
-        ),
-        ("core.ui", "constraint") => format!(
-            "{}jet_ui_constraint({}, {}, {}, {})",
-            cx.root_prefix,
-            arg(0),
-            arg(1),
-            arg(2),
-            arg(3)
-        ),
-        ("core.ui", "node") => format!(
-            "{}jet_ui_node(&({}), {}, {})",
-            cx.root_prefix,
-            arg(0),
-            arg(1),
-            arg(2)
-        ),
-        ("core.ui", "text") => {
-            format!("{}jet_ui_text(&({}))", cx.root_prefix, arg(0))
-        }
-        ("core.ui", "button") => {
-            format!("{}jet_ui_button(&({}))", cx.root_prefix, arg(0))
-        }
+        
+        
+        
+        
+        
         ("core.ui", "box") => {
             format!("{}jet_ui_box(({}).clone())", cx.root_prefix, arg(0))
         }
-        ("core.ui", "key_event") => format!("{}jet_ui_key_event(&({}))", cx.root_prefix, arg(0)),
-        ("core.ui", "resize_event") => format!(
-            "{}jet_ui_resize_event({}, {})",
-            cx.root_prefix,
-            arg(0),
-            arg(1)
-        ),
+        
+        
         // D-A11YGATE1=B (c134 Phase 6): accessible-role node + role constants.
-        ("core.ui", "node_role") => format!(
-            "{}jet_ui_node_role(&({}), {}, {}, {})",
-            cx.root_prefix,
-            arg(0),
-            arg(1),
-            arg(2),
-            arg(3)
-        ),
+        
         // D-STYLESHAPE1=A wiring: a node carrying an explicit fill color.
-        ("core.ui", "node_color") => format!(
-            "{}jet_ui_node_color(&({}), {}, {}, &({}))",
-            cx.root_prefix,
-            arg(0),
-            arg(1),
-            arg(2),
-            arg(3)
-        ),
-        ("core.ui", "aria_role_button") => {
-            format!("{}jet_ui_aria_role_button()", cx.root_prefix)
-        }
-        ("core.ui", "aria_role_text_input") => {
-            format!("{}jet_ui_aria_role_text_input()", cx.root_prefix)
-        }
-        ("core.ui", "aria_role_label") => {
-            format!("{}jet_ui_aria_role_label()", cx.root_prefix)
-        }
-        ("core.ui", "aria_role_container") => {
-            format!("{}jet_ui_aria_role_container()", cx.root_prefix)
-        }
-        // D-FLAGSHIP-WEBAPI1=A: browser-only helpers. Native TIR emission stays
-        // inert so web TIR validation can lower checked JS bodies without making
-        // rustc the browser API checker.
+        
         ("core.web", "on") => "{ let _ = || (); () }".to_string(),
         ("core.web", "value") => "String::new()".to_string(),
         // D-WEBAPP1=D: application builder + page helper.
-        ("core.web", "app") => format!("{}jet_web_app()", cx.root_prefix),
+        
         ("core.web", "page") => {
             format!(
                 "{}jet_web_page(({}).clone(), ({}).clone())",
@@ -3733,15 +3067,6 @@ pub(crate) fn emit_tir_core_call(
             arg(0),
             arg(1)
         ),
-        ("app" | "core.web", "live_get") => {
-            format!("{}jet_app_live_get(&({}))", cx.root_prefix, arg(0))
-        }
-        ("app" | "core.web", "live_show") => {
-            format!("{}jet_app_live_show(&({}))", cx.root_prefix, arg(0))
-        }
-        ("app" | "core.web", "live_stats") => {
-            format!("{}jet_app_live_stats()", cx.root_prefix)
-        }
         ("app" | "core.web", "auth") => format!(
             "{}jet_app_auth(({}).clone())",
             cx.root_prefix,
@@ -3753,12 +3078,6 @@ pub(crate) fn emit_tir_core_call(
             arg(0),
             arg(1)
         ),
-        ("app" | "core.web", "auth_routes") => {
-            format!("{}jet_app_auth_routes(&({}))", cx.root_prefix, arg(0))
-        }
-        ("app" | "core.web", "auth_show") => {
-            format!("{}jet_app_auth_show(&({}))", cx.root_prefix, arg(0))
-        }
         ("app" | "core.web", "sync_over") => format!(
             "{}jet_app_sync_over(({}).clone(), ({}).clone())",
             cx.root_prefix,
@@ -3780,17 +3099,10 @@ pub(crate) fn emit_tir_core_call(
         // c-devserver (owner-directed 2026-07-01): `devserver.for_app(file)`
         // constructor — the builder methods dispatch through
         // `THandleOp::DevServerMethod` above, not here.
-        ("core.web.devserver", "for_app") => {
-            format!("{}jet_devserver_for_app(&({}))", cx.root_prefix, arg(0))
-        }
-        ("core.web.devserver", "app") => {
-            format!("{}jet_devserver_app()", cx.root_prefix)
-        }
-        // D-APPROX1=A: sketch constructors.
-        ("core.sketch.hll", "new") => format!("JetHyperLogLog::new()"),
-        ("core.sketch.tdigest", "new") => format!("JetTDigest::new()"),
-        ("core.sketch.cms", "new") => format!("JetCountMinSketch::new()"),
-        ("core.sketch.reservoir", "new") => format!("JetReservoirSampler::new({})", arg(0)),
+        
+        
+        
+        
         // D-NETDEP1=A / D-HTTPLIB1=A: HTTP client constructors.
         // Bridge returns primitives; CoreLib assembles the one shared response.
         ("core.http.client", "get") => {
@@ -3826,20 +3138,9 @@ pub(crate) fn emit_tir_core_call(
             format!("jet_http_client_request_new(&({}), &({}))", arg(0), u)
         }
         // D-BROWSER-AUTO1=A: native versioned BiDi entry points.
-        ("core.browser", "profile") => {
-            format!("jet_browser_profile(&({}))", arg(0))
-        }
-        ("core.browser", "timeout") => format!("jet_browser_timeout({})", arg(0)),
-        ("core.browser", "locked") => format!("jet_browser_locked(&({}))", arg(0)),
-        ("core.browser", "connect") => {
-            format!("jet_browser_connect(&({}))", arg(0))
-        }
-        ("core.browser", "connect_profile") => format!(
-            "jet_browser_connect_profile(&({}), &({}), {})",
-            arg(0),
-            arg(1),
-            arg(2)
-        ),
+        
+        
+        
         // D-NETDEP1=A / D-HTTPLIB1=A: HTTP server constructors (CoreLib, no prefix needed).
         ("core.http.server", "bind") if args.len() == 3 => {
             let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
@@ -3851,7 +3152,7 @@ pub(crate) fn emit_tir_core_call(
             )
         }
         ("core.http.server", "bind") => format!("jet_http_server_bind(&({}), {}).map_err(|_| JetHTTPError::IO {{ operation: \"bind\".to_string() }})", arg(0), arg(1)),
-        ("core.http.server", "mux") => format!("jet_http_mux_new()"),
+        
         ("core.http.server", "serve") if args.len() == 3 => {
             let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
             format!(
@@ -3872,11 +3173,8 @@ pub(crate) fn emit_tir_core_call(
                 arg(1)
             )
         }
-        ("core.http.server", "response") => {
-            format!("jet_http_srv_response({}, &({}))", arg(0), arg(1))
-        }
-        ("core.http.server", "tls") => format!("jet_http_srv_tls(&({}), &({}))", arg(0), arg(1)),
-        ("core.http.server", "sse") => format!("jet_http_srv_sse(&({}))", arg(0)),
+        
+        
         ("core.http.server", "static_file") => {
             format!("jet_http_srv_static_file(&({}), &({})).map_err(|_| JetHTTPError::IO {{ operation: \"read static file\".to_string() }})", arg(0), arg(1))
         }
@@ -3887,11 +3185,6 @@ pub(crate) fn emit_tir_core_call(
             arg(2)
         ),
         // D-HTTP-JSON1=A: one JSON response with its content type set.
-        ("core.http.server", "json") => {
-            format!("jet_http_srv_json({}, &({}))", arg(0), arg(1))
-        }
-        // D-HTTP-STATIC-FILES1=A: mount a directory. The trailing options keep
-        // the safe defaults when the program leaves them off.
         ("core.http.server", "static_files") => {
             let option = |index: usize| {
                 args.get(index)
@@ -3931,26 +3224,13 @@ pub(crate) fn emit_tir_core_call(
                 value(4),
             )
         }
-        ("core.http.server", "cors") => {
-            format!("jet_http_srv_install_cors(&({}), &({}))", arg(0), arg(1))
-        }
-        ("core.http.server", "access_log") => {
-            format!("jet_http_srv_access_log(&({}), {})", arg(0), arg(1))
-        }
-        ("core.http.server", "request_id") => {
-            format!("jet_http_srv_install_request_id(&({}))", arg(0))
-        }
-        // D-WS1=B: cleartext WebSocket client/server.
-        ("core.ws", "connect") => format!("jet_ws_connect(&({}))", arg(0)),
-        ("core.ws", "upgrade") => format!("jet_ws_upgrade(&({}))", arg(0)),
+        
+        
         // D-TIMEDEPTH1=A: civil-time constructors.
-        ("core.time.date", "new") => format!("JetDate::new({}, {}, {})", arg(0), arg(1), arg(2)),
-        ("core.time.date", "today") => format!("JetDate::today_utc()"),
+        
+        
         ("core.time.date", "parse") => format!("JetDate::parse(&({})).map_err(|e| e)", arg(0)),
-        ("core.time.datetime", "from_timestamp") => {
-            format!("JetDateTime::from_timestamp({})", arg(0))
-        }
-        ("core.time.datetime", "now") => format!("JetDateTime::now()"),
+        
         _ => "/* unknown std call */".to_string(),
     }
 }

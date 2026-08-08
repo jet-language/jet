@@ -181,7 +181,55 @@ impl RuleSite {
         Self::Bench,
         Self::Operation,
     ];
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Package => "Package",
+            Self::File => "File",
+            Self::Module => "Module",
+            Self::Function => "Function",
+            Self::Method => "Method",
+            Self::Block => "Block",
+            Self::Statement => "Statement",
+            Self::Expression => "Expression",
+            Self::Type => "Type",
+            Self::Impl => "Impl",
+            Self::Declaration => "Declaration",
+            Self::Constant => "Constant",
+            Self::Field => "Field",
+            Self::Variant => "Variant",
+            Self::Parameter => "Parameter",
+            Self::Test => "Test",
+            Self::Bench => "Bench",
+            Self::Operation => "Operation",
+        }
+    }
 }
+
+/// D-META-FORM1=A: `$sites` on a `marker` declaration takes `[Site]`, so the
+/// eighteen attachment points are published as an ordinary `core.lang` enum
+/// beside the other marker-argument menus (D-RULEARG-TYPES1=A). `RuleSite::ALL`
+/// stays the one source; `site_variants_match_the_enum` proves this list is it.
+pub const SITE_VARIANTS: &[&str] = &[
+    "Package",
+    "File",
+    "Module",
+    "Function",
+    "Method",
+    "Block",
+    "Statement",
+    "Expression",
+    "Type",
+    "Impl",
+    "Declaration",
+    "Constant",
+    "Field",
+    "Variant",
+    "Parameter",
+    "Test",
+    "Bench",
+    "Operation",
+];
 
 /// D-MARK-FORM1=A: one placement law. A marker, or one bracket group, is
 /// written immediately before its target; the registry says which targets it
@@ -274,6 +322,7 @@ fn canonical_rule_arg_variants(name: &str) -> Option<&'static [&'static str]> {
             crate::Syntax::RENAME_ALL_SCREAMING,
         ],
         "ObligationMode" => &["None", "GateOnly", "Obligations", "PerSite", "Track", "Skip"],
+        "Site" => SITE_VARIANTS,
         "PolicySetting" => &[
             "no_alloc",
             "zero_rc",
@@ -293,7 +342,10 @@ fn canonical_rule_arg_variants(name: &str) -> Option<&'static [&'static str]> {
 /// Generated from the active/retired applied-rule signatures. `Track` is the
 /// compatibility reflection enum retained by D-RULEARG-TYPES1.
 pub static RULE_ARG_DECLARATIONS: LazyLock<Vec<RuleArgDeclaration>> = LazyLock::new(|| {
-    let mut names = std::collections::BTreeSet::from(["Track"]);
+    // `Site` is published for `$sites` on a `marker` declaration (D-META-FORM1=A)
+    // and `Track` for reflection; neither appears in a marker signature, so both
+    // are seeded rather than found.
+    let mut names = std::collections::BTreeSet::from(["Site", "Track"]);
     for row in APPLIED_RULES {
         names.extend(row.signature.params.iter().map(|parameter| parameter.source_type));
         names.extend(row.signature.variadic_source_type);
@@ -1025,7 +1077,12 @@ mod tests {
         let rows = super::applied_rule_registry();
         for row in rows {
             assert_eq!(rows.iter().filter(|candidate| candidate.name == row.name).count(), 1, "{}", row.name);
-            assert!(!row.sites.is_empty(), "{}", row.name);
+            // D-META-STAGE1=B: an active row must keep at least one legal site.
+            // A retired row may keep none, because a stage that is no longer a
+            // rule about a target has nowhere left to be written.
+            if matches!(row.status, super::RuleStatus::Active) {
+                assert!(!row.sites.is_empty(), "{}", row.name);
+            }
             assert_eq!(row.signature.variadic.is_some(), row.signature.variadic_source_type.is_some(), "{}", row.name);
             assert!(row.signature.required() <= row.signature.params.len(), "{}", row.name);
             for param in row.signature.params {
@@ -1033,6 +1090,20 @@ mod tests {
                 assert!(!param.source_type.is_empty(), "{}", row.name);
             }
         }
+    }
+
+    #[test]
+    fn site_variants_match_the_enum() {
+        use super::RuleSite;
+
+        assert_eq!(super::SITE_VARIANTS.len(), 18);
+        let published: Vec<&str> = RuleSite::ALL.iter().map(|site| site.name()).collect();
+        assert_eq!(published, super::SITE_VARIANTS);
+
+        let declaration =
+            super::rule_arg_declaration("Site").expect("`Site` is published in `core.lang`");
+        assert_eq!(declaration.variants, super::SITE_VARIANTS);
+        assert_eq!(declaration.variant_segment, super::VariantSegment::Last);
     }
 
     #[test]
@@ -1090,8 +1161,8 @@ mod tests {
     fn every_typed_marker_argument_has_one_core_lang_declaration() {
         // One declaration per typed marker-argument menu, plus the `Track`
         // reflection enum retained by D-RULEARG-TYPES1.
-        assert_eq!(super::RULE_ARG_DECLARATIONS.len(), 15);
-        let mut expected = std::collections::BTreeSet::from(["Track"]);
+        assert_eq!(super::RULE_ARG_DECLARATIONS.len(), 16);
+        let mut expected = std::collections::BTreeSet::from(["Site", "Track"]);
         for row in super::APPLIED_RULES {
             expected.extend(row.signature.params.iter().map(|parameter| parameter.source_type));
             expected.extend(row.signature.variadic_source_type);

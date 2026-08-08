@@ -8,51 +8,98 @@
 
 use std::collections::HashSet;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
+/// Card #1639 (D-ONCE): the one home for "does this test file bypass the
+/// `have_rustc()` guard" — walks every file under `tests/` instead of a
+/// hardcoded suite list, so a new test file is covered automatically.
+/// `tests/common/mod.rs` and `tests/tir_support/mod.rs` are the two
+/// legitimate homes that define the probe itself; `tests/truthfulness.rs`
+/// is exempt because this function's own source quotes the needles.
+const RUSTC_PROBE_ALLOWED_HOMES: &[&str] = &[
+    "tests/common/mod.rs",
+    "tests/tir_support/mod.rs",
+    "tests/truthfulness.rs",
+];
+
+fn collect_rs_files(dir: &Path, files: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(metadata) = fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if metadata.file_type().is_symlink() {
+            continue;
+        }
+        if metadata.is_dir() {
+            collect_rs_files(&path, files);
+        } else if path.extension().is_some_and(|extension| extension == "rs") {
+            files.push(path);
+        }
+    }
+}
+
+/// Files (relative to `root`) under `tests/` that contain `needle`, ignoring
+/// whitespace (rustfmt can wrap `.arg(...)` onto its own line) and skipping
+/// `RUSTC_PROBE_ALLOWED_HOMES`.
+fn stray_probe_sites(root: &Path, needle: &str) -> Vec<String> {
+    let mut files = Vec::new();
+    collect_rs_files(&root.join("tests"), &mut files);
+    files.sort();
+    let mut findings = Vec::new();
+    for file in files {
+        let relative = file
+            .strip_prefix(root)
+            .expect("scanned file stays beneath repository root")
+            .to_string_lossy()
+            .replace('\\', "/");
+        if RUSTC_PROBE_ALLOWED_HOMES.contains(&relative.as_str()) {
+            continue;
+        }
+        let source = fs::read_to_string(&file).expect("test source is readable");
+        let collapsed: String = source.chars().filter(|c| !c.is_whitespace()).collect();
+        let collapsed_needle: String = needle.chars().filter(|c| !c.is_whitespace()).collect();
+        if collapsed.contains(&collapsed_needle) {
+            findings.push(relative);
+        }
+    }
+    findings
+}
+
 #[test]
 fn rustc_availability_probes_use_common_helper() {
     let root = root();
-    let suites = [
-        "tests/golden.rs",
-        "tests/release_gates.rs",
-        "tests/dev.rs",
-        "tests/archive.rs",
-        "tests/regex.rs",
-        "tests/ice_regressions.rs",
-        "tests/comptime_diff.rs",
-        "tests/jet_test.rs",
-    ];
     let forbidden = [
         "Command::new(\"rustc\").arg(\"--version\")",
         "Command::new(\"rustc\").arg(\"-V\")",
     ];
     let mut violations = Vec::new();
-    for suite in suites {
-        let source = fs::read_to_string(root.join(suite)).unwrap();
-        for needle in forbidden {
-            if source.contains(needle) {
-                violations.push(format!("{suite}: direct `{needle}` availability probe"));
-            }
+    for needle in forbidden {
+        for finding in stray_probe_sites(&root, needle) {
+            violations.push(format!("{finding}: direct `{needle}` availability probe"));
         }
-        if matches!(suite, "tests/archive.rs" | "tests/regex.rs") {
-            let helper = source
-                .split("fn have_toolchain() -> bool {")
-                .nth(1)
-                .and_then(|tail| tail.split_once('}').map(|(body, _)| body))
-                .expect("have_toolchain helper");
-            let rustc_pos = helper.find("have_rustc()").expect("rustc gate");
-            let cargo_pos = helper.find("Command::new(\"cargo\")").expect("cargo probe");
-            if rustc_pos > cargo_pos {
-                violations.push(format!(
-                    "{suite}: have_rustc must run before the cargo probe so JET_REQUIRE_RUSTC=1 cannot short-circuit"
-                ));
-            }
+    }
+    for suite in ["tests/archive.rs", "tests/regex.rs"] {
+        let source = fs::read_to_string(root.join(suite)).unwrap();
+        let helper = source
+            .split("fn have_toolchain() -> bool {")
+            .nth(1)
+            .and_then(|tail| tail.split_once('}').map(|(body, _)| body))
+            .expect("have_toolchain helper");
+        let rustc_pos = helper.find("have_rustc()").expect("rustc gate");
+        let cargo_pos = helper.find("Command::new(\"cargo\")").expect("cargo probe");
+        if rustc_pos > cargo_pos {
+            violations.push(format!(
+                "{suite}: have_rustc must run before the cargo probe so JET_REQUIRE_RUSTC=1 cannot short-circuit"
+            ));
         }
     }
     assert!(
@@ -60,6 +107,22 @@ fn rustc_availability_probes_use_common_helper() {
         "rustc availability must use tests/common::have_rustc so JET_REQUIRE_RUSTC cannot be bypassed:\n{}",
         violations.join("\n")
     );
+}
+
+#[test]
+fn rustc_probe_scanner_detects_a_seeded_stray_probe() {
+    let scratch =
+        std::env::temp_dir().join(format!("jet_rustc_probe_guard_test_{}", std::process::id()));
+    let seed_dir = scratch.join("tests");
+    fs::create_dir_all(&seed_dir).unwrap();
+    fs::write(
+        seed_dir.join("seeded_probe.rs"),
+        "fn f() { Command::new(\"rustc\")\n.arg(\"--version\"); }\n",
+    )
+    .unwrap();
+    let findings = stray_probe_sites(&scratch, "Command::new(\"rustc\").arg(\"--version\")");
+    fs::remove_dir_all(&scratch).unwrap();
+    assert_eq!(findings, vec!["tests/seeded_probe.rs".to_string()]);
 }
 
 // ---------------------------------------------------------------------------

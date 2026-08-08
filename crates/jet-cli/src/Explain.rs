@@ -118,7 +118,13 @@ pub fn lookup(code: &str) -> Option<Explanation> {
             })
         })
         .or_else(|| {
-            let row = jet_foundation::Policy::applied_rule(code.trim())?;
+            // D-META-REG1=A: one lookup over the one registration table. A
+            // marker, a knowledge plane, a right, and a build fact are rows of
+            // the same table, so `jet explain` has one path, not one per kind.
+            let registered = jet_foundation::Registry::row(code.trim())?;
+            let Some(row) = registered.rule else {
+                return Some(explain_fact_row(registered));
+            };
             let (retired, replacement) = match row.status {
                 jet_foundation::Policy::RuleStatus::Active => (false, None),
                 jet_foundation::Policy::RuleStatus::Retired { replacement } => {
@@ -153,6 +159,53 @@ pub fn lookup(code: &str) -> Option<Explanation> {
                 retired,
             })
         })
+}
+
+/// D-FACT-LAW1=B: a row that is not a rule on written code answers with the one
+/// law it obeys — which way its facts tighten for free, and the written words
+/// that loosen them. D-FACT-OWN1=A: a row a prover publishes is read-only, so it
+/// states no direction and names no gate.
+fn explain_fact_row(row: &jet_foundation::Registry::RegistryRow) -> Explanation {
+    use jet_foundation::Registry::{RowTarget, SafeDirection};
+
+    let attaches_to = match row.target {
+        RowTarget::Code(_) => "written code",
+        RowTarget::Value => "a value",
+        RowTarget::Scope => "a scope",
+        RowTarget::Build => "the build",
+    };
+    Explanation {
+        code: row.name.to_string(),
+        stage: "registration table".to_string(),
+        meaning: format!(
+            "`{}` — a registered {} on {} ({})",
+            row.name,
+            row.kind().name(),
+            attaches_to,
+            row.decision
+        ),
+        what: Some(match row.published_by {
+            Some(prover) => format!(
+                "the {prover} prover publishes this row; it is read-only and carries no plane algebra."
+            ),
+            None => format!("attaches to {attaches_to}."),
+        }),
+        why: Some(match row.safe_direction {
+            SafeDirection::None => {
+                "this row holds no fact that moves, so it states no safe direction".to_string()
+            }
+            direction => format!(
+                "facts tighten silently in the `{}` direction; loosening one is always written",
+                direction.name()
+            ),
+        }),
+        fix: Some(if row.gates.is_empty() {
+            "nothing loosens this row; read it and act on what it says".to_string()
+        } else {
+            format!("to loosen it, write one of: {}", row.gates.join(", "))
+        }),
+        retired: false,
+    }
 }
 
 fn marker_argument_declarations(row: &jet_foundation::Policy::AppliedRule) -> String {

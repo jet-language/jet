@@ -1,6 +1,8 @@
 use jet::JitBackend::JitBackend;
 use std::process::Command;
 
+mod common;
+
 fn project_dir(name: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!(
         "jet_auto_derive_{name}_{}",
@@ -19,7 +21,7 @@ fn checked_project(
     std::fs::write(
         dir.join("pkg.jet"),
         format!(
-            "payload: {{ name: \"{name}\", version: \"1.0.0\" }}\n{manifest_policy}\n"
+            "name: \"{name}\"\nversion: \"1.0.0\"\n{manifest_policy}\n"
         ),
     )
     .unwrap();
@@ -46,7 +48,7 @@ fn project_diagnostics(name: &str, manifest_policy: &str, source: &str) -> Vec<S
     std::fs::write(
         dir.join("pkg.jet"),
         format!(
-            "payload: {{ name: \"{name}\", version: \"1.0.0\" }}\n{manifest_policy}\n"
+            "name: \"{name}\"\nversion: \"1.0.0\"\n{manifest_policy}\n"
         ),
     )
     .unwrap();
@@ -80,7 +82,7 @@ fn collect_struct_defaults(items: &[jet::AST::Item], out: &mut Vec<(String, bool
 }
 
 fn aot_output(bundle: &jet::AST::ProgramBundle, name: &str) -> Option<(i32, String)> {
-    if Command::new("rustc").arg("--version").output().is_err() {
+    if !common::have_rustc() {
         return None;
     }
     let dir = project_dir(name);
@@ -297,7 +299,7 @@ fn package_default_reaches_nested_and_dependency_modules() {
     std::fs::create_dir_all(&nested_dir).unwrap();
     std::fs::write(
         nested_dir.join("pkg.jet"),
-        "payload: { name: \"nested\", version: \"1\" }\npolicy: .{ auto_derive: false }\n",
+        "name: \"nested\"\nversion: \"1\"\npolicy: .{ auto_derive: false }\n",
     )
     .unwrap();
     std::fs::write(
@@ -326,7 +328,7 @@ fn package_default_reaches_nested_and_dependency_modules() {
     std::fs::create_dir_all(dep.join(".jet")).unwrap();
     std::fs::write(
         app.join("pkg.jet"),
-        "payload: { name: \"app\", version: \"1\" }\ndeps: { dep: ../dep }\npolicy: .{ auto_derive: true }\n",
+        "name: \"app\"\nversion: \"1\"\ndeps: { dep: ../dep }\npolicy: .{ auto_derive: true }\n",
     )
     .unwrap();
     std::fs::write(
@@ -336,7 +338,7 @@ fn package_default_reaches_nested_and_dependency_modules() {
     .unwrap();
     std::fs::write(
         dep.join("pkg.jet"),
-        "payload: { name: \"dep\", version: \"1\" }\npolicy: .{ auto_derive: false }\n",
+        "name: \"dep\"\nversion: \"1\"\npolicy: .{ auto_derive: false }\n",
     )
     .unwrap();
     std::fs::write(
@@ -387,7 +389,8 @@ fn same_named_dependency_type_keeps_its_own_auto_derive_policy() {
     std::fs::create_dir_all(open_dep.join(".jet")).unwrap();
     std::fs::write(
         app.join("pkg.jet"),
-        "payload: { name: \"app\", version: \"1\" }\n\
+        "name: \"app\"\n\
+         version: \"1\"\n\
          deps: {\n\
              dep: ../dep,\n\
              open_dep: ../open_dep,\n\
@@ -416,7 +419,7 @@ fn run() {
     .unwrap();
     std::fs::write(
         dep.join("pkg.jet"),
-        "payload: { name: \"dep\", version: \"1\" }\npolicy: .{ auto_derive: false }\n",
+        "name: \"dep\"\nversion: \"1\"\npolicy: .{ auto_derive: false }\n",
     )
     .unwrap();
     std::fs::write(
@@ -426,7 +429,7 @@ fn run() {
     .unwrap();
     std::fs::write(
         open_dep.join("pkg.jet"),
-        "payload: { name: \"open_dep\", version: \"1\" }\n",
+        "name: \"open_dep\"\nversion: \"1\"\n",
     )
     .unwrap();
     std::fs::write(

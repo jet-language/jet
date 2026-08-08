@@ -63,7 +63,7 @@ fn build_and_run(name: &str, src: &str, allow_authored_unsafe: bool) -> Option<S
         );
     }
 
-    if Command::new("rustc").arg("--version").output().is_err() {
+    if !common::have_rustc() {
         eprintln!("note: rustc not found; compiled front end only");
         return None;
     }

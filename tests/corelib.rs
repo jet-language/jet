@@ -6,6 +6,8 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::process::Command;
 
+mod common;
+
 mod dns_resolver_policy {
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
@@ -1059,7 +1061,7 @@ fn rfc8785_corpus_manifest_hashes_and_provenance_are_pinned() {
 
 #[test]
 fn json_canonical_stream_matches_every_finite_rfc8785_appendix_b_vector() {
-    if !Command::new("rustc").arg("--version").output().is_ok() {
+    if !common::have_rustc() {
         eprintln!("note: skipping RFC 8785 Appendix B stream corpus (need rustc)");
         return;
     }
@@ -1465,7 +1467,7 @@ fn run() {{
 
 #[test]
 fn json_stream_number_token_stays_under_counting_allocator_ceiling() {
-    if !Command::new("rustc").arg("--version").output().is_ok() {
+    if !common::have_rustc() {
         eprintln!("note: skipping JSON counting-allocator test (need rustc)");
         return;
     }
@@ -2757,7 +2759,7 @@ fn run() {{
 
 #[test]
 fn cbor_whole_codable_bytes_and_original_wire_canonical_validation() {
-    if !Command::new("rustc").arg("--version").output().is_ok() {
+    if !common::have_rustc() {
         eprintln!("note: skipping cbor whole-value test (need rustc)");
         return;
     }
@@ -2853,7 +2855,7 @@ fn run() {
 
 #[test]
 fn cbor_whole_live_allocation_and_preferred_float_validation() {
-    if !Command::new("rustc").arg("--version").output().is_ok() {
+    if !common::have_rustc() {
         eprintln!("note: skipping cbor whole-value limits test (need rustc)");
         return;
     }
@@ -2895,7 +2897,7 @@ fn run() {
 
 #[test]
 fn cbor_whole_indefinite_values_obey_normal_canonical_and_limit_laws() {
-    if !Command::new("rustc").arg("--version").output().is_ok() {
+    if !common::have_rustc() {
         eprintln!("note: skipping CBOR indefinite-value test (need rustc)");
         return;
     }
@@ -2973,7 +2975,7 @@ fn run() {
 
 #[test]
 fn cbor_whole_hostile_byte_corpus_matches_aot_and_default_dev() {
-    if !Command::new("rustc").arg("--version").output().is_ok() {
+    if !common::have_rustc() {
         eprintln!("note: skipping CBOR hostile whole-value corpus (need rustc)");
         return;
     }
@@ -3095,7 +3097,7 @@ fn run() {
 
 #[test]
 fn cbor_whole_requested_allocation_stays_under_counting_allocator_ceiling() {
-    if !Command::new("rustc").arg("--version").output().is_ok() {
+    if !common::have_rustc() {
         eprintln!("note: skipping cbor counting-allocator test (need rustc)");
         return;
     }
@@ -7222,7 +7224,7 @@ fn run() {
 
 #[test]
 fn core_data_typed_csv_group_stats_status_and_plot() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping core.data runtime test (need rustc)");
         return;
@@ -7322,7 +7324,7 @@ fn run() {
 
 #[test]
 fn core_data_stream_limits_and_typed_errors() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping core.data stream test (need rustc)");
         return;
@@ -7388,7 +7390,7 @@ fn run() {{
 
 #[test]
 fn core_data_schema_ingest_and_select() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping core.data schema test (need rustc)");
         return;
@@ -7437,7 +7439,7 @@ fn run() {
 
 #[test]
 fn core_data_json_ingest_and_select() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping core.data json test (need rustc)");
         return;
@@ -7486,7 +7488,7 @@ fn run() {
 
 #[test]
 fn core_data_schema_empty_table_and_series_law() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping core.data empty schema test (need rustc)");
         return;
@@ -7560,7 +7562,7 @@ fn run() {
 
 #[test]
 fn io_input_reads_a_line_from_stdin() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping io.input test (need rustc)");
         return;
@@ -7592,7 +7594,7 @@ fn run() {
 
 #[test]
 fn io_prompt_helpers_validate_choices_and_refuse_non_tty_secrets() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping core.io prompt test (need rustc)");
         return;
@@ -7647,7 +7649,7 @@ fn io_prompt_helpers_validate_choices_and_refuse_non_tty_secrets() {
 
 #[test]
 fn random_and_time_output_pins_with_seed_and_epoch() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping random/time pin test (need rustc)");
         return;
@@ -7679,7 +7681,7 @@ fn run() {
 
 #[test]
 fn random_distribution_surface_is_deterministic() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping random distribution test (need rustc)");
         return;
@@ -7731,7 +7733,7 @@ fn run() {
 
 #[test]
 fn encoding_breadth_codecs_share_data_tree() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping encoding breadth test (need rustc)");
         return;
@@ -7799,7 +7801,7 @@ fn run() {
 
 #[test]
 fn xml_dual_limits_validate_in_ratified_order_and_fuse_stronger_bounds() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping XML dual-limits test (need rustc)");
         return;
@@ -7967,7 +7969,7 @@ fn run() {{
 
 #[test]
 fn xml_whole_byte_verbs_match_comptime_aot_and_dev() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping XML whole-byte parity test (need rustc)");
         return;
@@ -8042,7 +8044,7 @@ fn run() {
 
 #[test]
 fn xml_10_fifth_edition_char_errors_match_comptime_aot_and_dev() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping XML character parity test (need rustc)");
         return;
@@ -8099,7 +8101,7 @@ fn run() {
 
 #[test]
 fn xml_attribute_whitespace_normalization_matches_comptime_aot_and_dev() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping XML attribute normalization parity test (need rustc)");
         return;
@@ -8162,7 +8164,7 @@ fn run() {
 
 #[test]
 fn base_decoders_preserve_2026_union_with_comptime_aot_and_dev_parity() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping base decoder parity test (need rustc)");
         return;
@@ -8297,7 +8299,7 @@ fn run() {
 
 #[test]
 fn xml_stream_reader_is_incremental_exact_and_terminal() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping XML stream test (need rustc)");
         return;
@@ -8485,7 +8487,7 @@ fn run() {{
 
 #[test]
 fn xml_stream_writer_and_canonical_surface_run_end_to_end() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping XML writer test (need rustc)");
         return;
@@ -8549,7 +8551,7 @@ fn run() {{
 
 #[test]
 fn xml_reader_writer_hostile_state_and_exclusive_c14n() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping XML hostile/c14n surface test (need rustc)");
         return;
@@ -8621,7 +8623,7 @@ fn run() {{
 
 #[test]
 fn text_unicode_audit_surface_runs() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping text unicode test (need rustc)");
         return;
@@ -8664,7 +8666,7 @@ fn run() {
 
 #[test]
 fn db_checked_sql_params_feed_parameterized_execute() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping db checked sql test (need rustc)");
         return;
@@ -8720,7 +8722,7 @@ fn run() {
 
 #[test]
 fn core_db_implements_driver_trait() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping db Driver trait test (need rustc)");
         return;
@@ -8783,7 +8785,7 @@ fn run() {
 
 #[test]
 fn core_fmt_human_formatting_surface_runs() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping core.fmt runtime test (need rustc)");
         return;
@@ -8823,7 +8825,7 @@ fn run() {
 
 #[test]
 fn core_log_structured_file_sink_runs() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping core.log file sink test (need rustc)");
         return;
@@ -8862,7 +8864,7 @@ fn run() {
 
 #[test]
 fn core_testing_helpers_run_against_files() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping core.testing helper test (need rustc)");
         return;
@@ -8923,7 +8925,7 @@ fn run() {
 
 #[test]
 fn deadline_context_exceed_reports_e3003() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping deadline runtime test (need rustc)");
         return;
@@ -8962,7 +8964,7 @@ fn run() {
 #[cfg(unix)]
 #[test]
 fn process_wait_observes_inherited_deadline() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping process deadline runtime test (need rustc)");
         return;
@@ -9003,7 +9005,7 @@ fn run() {{
 #[test]
 fn importing_all_core_modules_without_calls_stays_hello_world_sized() {
     let jet = jet_bin();
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc || !jet.exists() {
         eprintln!("note: skipping core use size test (need jet + rustc)");
         return;
@@ -9068,7 +9070,7 @@ fn run() {
 // (c) multiple coercions = one line each.
 #[test]
 fn json_decode_lenient_surfaces_coercions() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping json_decode_lenient_surfaces_coercions (need rustc)");
         return;
@@ -9186,7 +9188,7 @@ fn run() {
 // (bad escapes, raw control chars) with a clear line/message.
 #[test]
 fn json_parser_is_rfc8259_complete() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping json_parser_is_rfc8259_complete (need rustc)");
         return;
@@ -9269,7 +9271,7 @@ fn run() {
 #[test]
 #[ignore]
 fn channel_stress_1000_messages() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping channel stress test (need rustc)");
         return;
@@ -9308,7 +9310,7 @@ fn run() {
 
 #[test]
 fn scheduler_spawn_1000_tasks() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping scheduler spawn test (need rustc)");
         return;
@@ -9347,7 +9349,7 @@ fn run() {
 
 #[test]
 fn scheduler_spawn_10000_tasks() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping 10k scheduler spawn test (need rustc)");
         return;
@@ -9387,7 +9389,7 @@ fn run() {
 #[test]
 #[ignore = "local 100k parked-task stress; run with --ignored"]
 fn scheduler_spawn_100000_tasks_bench() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping 100k scheduler bench (need rustc)");
         return;
@@ -9426,7 +9428,7 @@ fn run() {
 
 #[test]
 fn race_cancels_losing_task() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping race cancel test (need rustc)");
         return;
@@ -9644,7 +9646,7 @@ fn run() {
 /// a phantom-param type serializes regardless of its phantom argument (D-SERDE10).
 #[test]
 fn generic_codable_round_trips() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping generic serde round-trip (need rustc)");
         return;
@@ -9693,7 +9695,7 @@ fn run() {
 // nested `#[Codable]` structs, and the rich tree round-trips through `to_string`.
 #[test]
 fn toml_full_nested_decode_and_round_trip() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping toml_full_nested_decode_and_round_trip (need rustc)");
         return;
@@ -9759,7 +9761,7 @@ fn run() {
 // trip can only succeed through the HAND methods, never a derive.
 #[test]
 fn hand_written_encode_decode_round_trips() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping hand_written_encode_decode_round_trips (need rustc)");
         return;
@@ -9812,7 +9814,7 @@ fn run() {
 /// generated, and hand-written Decode implementations through one spelling.
 #[test]
 fn datatree_decode_dispatches_all_decode_impl_kinds() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc { return; }
     let dir = std::env::temp_dir().join(format!("jet_datatree_decode_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
@@ -9853,7 +9855,7 @@ fn run() {
 
 #[test]
 fn generated_enum_codecs_reenter_jet_pipeline() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc { return; }
     let dir = std::env::temp_dir().join(format!("jet_enum_serde_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
@@ -10510,7 +10512,7 @@ fn run() {
 // comments, document markers, and anchors/aliases.
 #[test]
 fn yaml_full_nested_decode_and_features() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping yaml_full_nested_decode_and_features (need rustc)");
         return;
@@ -10584,7 +10586,7 @@ fn run() {
 // below.
 #[test]
 fn decode_traced_json_plain_and_published_fresh() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping decode_traced_json_plain_and_published_fresh (need rustc)");
         return;
@@ -10641,7 +10643,7 @@ fn run() {
 // decode machinery across json/csv/toml/yaml).
 #[test]
 fn decode_traced_toml_and_csv() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping decode_traced_toml_and_csv (need rustc)");
         return;
@@ -10691,7 +10693,7 @@ fn run() {
 // `decode`, and garbage still erroring.
 #[test]
 fn decode_traced_migration_chain() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping decode_traced_migration_chain (need rustc)");
         return;
@@ -10772,7 +10774,7 @@ fn run() {
 // the batch-level status reports it once).
 #[test]
 fn decode_traced_migration_toml_and_csv() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping decode_traced_migration_toml_and_csv (need rustc)");
         return;
@@ -10878,7 +10880,7 @@ fn run() {
 #[test]
 fn typed_codec_decode_matches_between_full_build_and_quick_run() {
     let jet = jet_bin();
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc || !jet.exists() {
         eprintln!("note: skipping typed codec decode tier parity (need jet + rustc)");
         return;
@@ -11060,7 +11062,7 @@ fn run() => () ? {
 
 #[test]
 fn perf_override_is_range_checked_and_resettable() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping perf runtime test (need rustc)");
         return;
@@ -11100,7 +11102,7 @@ fn option_zip_and_lift2_combinators() {
     // D-HOLE1: `.zip`/`Option.lift2` — both present -> a present result; either
     // absent -> `None`. No general "hole" type; these are plain library combinators
     // on `T?`.
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping option combinator test (need rustc)");
         return;
@@ -11142,7 +11144,7 @@ fn run() {
 
 #[test]
 fn event_scope_subscribe_once_priority_and_hook_run() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping event runtime test (need rustc)");
         return;
@@ -11188,7 +11190,7 @@ fn run() {
 
 #[test]
 fn async_event_scheduler_dispatch_and_invalid_capacity() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc { return; }
     let dir = std::env::temp_dir().join(format!("jet_corelib_async_event_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
@@ -11246,7 +11248,7 @@ fn run() {
 
 #[test]
 fn async_event_overflow_and_failure_policies() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc { return; }
     let dir = std::env::temp_dir().join(format!("jet_corelib_async_event_policies_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
@@ -11380,7 +11382,7 @@ fn run() {
 
 #[test]
 fn async_event_scope_cancel_and_inherited_deadline_are_single_terminal() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc { return; }
     let dir = std::env::temp_dir().join(format!("jet_corelib_async_event_lifecycle_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
@@ -11512,7 +11514,7 @@ fn async_event_terminal_transition_rejects_terminal_expected_phase() {
 
 #[test]
 fn async_event_cancel_and_close_winners_remain_immutable_after_task_drain() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc { return; }
     let dir = std::env::temp_dir().join(format!("jet_corelib_async_event_absorbing_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
@@ -11587,7 +11589,7 @@ fn run() {
 
 #[test]
 fn event_sync_dispatch_handles_mutation_reentrancy_and_owner_drop() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         return;
     }
@@ -11673,7 +11675,7 @@ fn run() {
 
 #[test]
 fn solve_solver_records_bool_constraints_in_order() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping solver runtime test (need rustc)");
         return;

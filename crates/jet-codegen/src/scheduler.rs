@@ -11,10 +11,13 @@ thread_local! {
     static JIT_CTX_DEADLINE_MS: std::cell::Cell<Option<i64>> = const { std::cell::Cell::new(None) };
 }
 
-mod io;
-pub use io::jet_scheduler_io_wait;
-
 fn wall_now_ms() -> i64 {
+    // Mirrors prelude `jet_std_time_now` (MathRandomTime.rs) check order — one mechanism.
+    if let Ok(s) = std::env::var("JET_PROVE_REPLAY_TIME_MS") {
+        if let Ok(n) = s.parse::<i64>() {
+            return n;
+        }
+    }
     if let Ok(s) = std::env::var("LEX_TEST_EPOCH") {
         if let Ok(n) = s.parse::<i64>() {
             return n;
@@ -681,7 +684,11 @@ impl<T: Send> JetSchedulerChannel<T> {
     }
 
     pub fn bounded(capacity: usize) -> Self {
-        Self::with_capacity(Some(capacity))
+        // D-VERDICT-1637-1: capacity is a real memory/backpressure bound
+        // (MathTaskMem.rs), never a rendezvous handshake — clamp matches
+        // Prelude/Scheduler.rs so `tasks.channel<T>(0)` behaves identically
+        // under JIT and AOT (no ratified zero-capacity semantics exist).
+        Self::with_capacity(Some(capacity.max(1)))
     }
 
     fn with_capacity(capacity: Option<usize>) -> Self {
@@ -814,42 +821,26 @@ impl<T: Send> JetSchedulerSender<T> {
                 ctrl.wait_while_paused();
             }
             let slot = ParkSlot::new();
-            let (wake, rendezvous) = {
+            let wake = {
                 let mut st = self.inner.state.lock().unwrap();
                 if st.closed || st.receiver_count == 0 {
                     return false;
                 }
-                let full = st.capacity.is_some_and(|cap| {
-                    if cap == 0 {
-                        st.recv_waiters.is_empty()
-                    } else {
-                        st.queue.len() >= cap
-                    }
-                });
+                let full = st.capacity.is_some_and(|cap| st.queue.len() >= cap);
                 if full {
                     st.send_waiters.push(slot.clone());
-                    (None, false)
+                    None
                 } else {
-                    let rendezvous = st.capacity == Some(0);
                     st.queue
                         .push_back(value.take().expect("channel send value missing"));
-                    if rendezvous {
-                        st.send_waiters.push(slot.clone());
-                    }
-                    (st.recv_waiters.pop(), rendezvous)
+                    st.recv_waiters.pop()
                 }
             };
             if let Some(slot) = wake {
                 jet_scheduler_wake(&slot);
             }
             if value.is_none() {
-                if !rendezvous {
-                    return true;
-                }
-                jet_scheduler_yield("channel send", &slot, None);
-                let mut st = self.inner.state.lock().unwrap();
-                st.send_waiters.retain(|w| !Arc::ptr_eq(w, &slot));
-                return st.queue.is_empty();
+                return true;
             }
             jet_scheduler_yield("channel send", &slot, None);
             let mut st = self.inner.state.lock().unwrap();
@@ -1019,46 +1010,15 @@ pub(crate) fn jet_scheduler_select<T: Send>(
 static METRIC_PARKED: AtomicUsize = AtomicUsize::new(0);
 static METRIC_POLLER_WAKE: AtomicUsize = AtomicUsize::new(0);
 static METRIC_PARK_BLOCKS: AtomicUsize = AtomicUsize::new(0);
+// D-VERDICT-1637-1: no live JIT-host caller ever registers real IO through
+// this scheduler (net_http_rt.rs runs its own local poll loop instead — see
+// #1637 divergence list). METRIC_IO_ACTIVE/ALLOCATED/RETIRED stay wired into
+// jet_scheduler_drain() below (mirrors Prelude/Scheduler.rs, one mechanism)
+// but always read (0, 0, 0) here; the backend-name and windows IOCP metric
+// reporting that only the deleted io.rs fork consumed were removed with it.
 static METRIC_IO_ACTIVE: AtomicUsize = AtomicUsize::new(0);
 static METRIC_IO_ALLOCATED: AtomicUsize = AtomicUsize::new(0);
 static METRIC_IO_RETIRED: AtomicUsize = AtomicUsize::new(0);
-#[cfg(target_os = "windows")]
-static METRIC_IO_STALE: AtomicUsize = AtomicUsize::new(0);
-#[cfg(target_os = "windows")]
-static METRIC_IO_FAILURES: AtomicUsize = AtomicUsize::new(0);
-#[cfg(target_os = "windows")]
-static METRIC_IO_PORT_CLOSED: AtomicUsize = AtomicUsize::new(0);
-static IO_BACKEND: OnceLock<&'static str> = OnceLock::new();
-
-#[allow(unreachable_code)]
-pub fn jet_scheduler_io_backend() -> &'static str {
-    *IO_BACKEND.get_or_init(|| {
-        #[cfg(all(target_os = "linux", feature = "jet_native_io"))]
-        {
-            return "epoll";
-        }
-        #[cfg(all(
-            any(
-                target_os = "macos",
-                target_os = "ios",
-                target_os = "tvos",
-                target_os = "watchos",
-                target_os = "freebsd",
-                target_os = "netbsd",
-                target_os = "openbsd"
-            ),
-            feature = "jet_native_io"
-        ))]
-        {
-            return "kqueue";
-        }
-        #[cfg(all(target_os = "windows", feature = "jet_native_io"))]
-        {
-            return "iocp";
-        }
-        "portable-poll"
-    })
-}
 
 pub fn jet_scheduler_metric_parked() -> usize {
     METRIC_PARKED.load(Ordering::Relaxed)
@@ -1072,14 +1032,6 @@ pub fn jet_scheduler_metric_poller_wake() -> usize {
 /// fast-path). A busy-wait scheduler would leave this at zero under contention.
 pub fn jet_scheduler_metric_park_blocks() -> usize {
     METRIC_PARK_BLOCKS.load(Ordering::Relaxed)
-}
-
-pub fn jet_scheduler_metric_io_operations() -> (usize, usize, usize) {
-    (
-        METRIC_IO_ACTIVE.load(Ordering::Relaxed),
-        METRIC_IO_ALLOCATED.load(Ordering::Relaxed),
-        METRIC_IO_RETIRED.load(Ordering::Relaxed),
-    )
 }
 
 // ── M1: work-stealing pool ───────────────────────────────────────────────────
@@ -1572,7 +1524,10 @@ mod interrupt_boundary_tests {
     }
 
     #[test]
-    fn zero_capacity_channel_is_a_rendezvous() {
+    fn zero_capacity_channel_clamps_to_a_buffer_of_one() {
+        // D-VERDICT-1637-1: `bounded(0)` is a real memory/backpressure bound,
+        // never a rendezvous handshake (no ratified zero-capacity semantics
+        // exist) — it clamps to 1, matching Prelude/Scheduler.rs.
         let channel = JetSchedulerChannel::bounded(0);
         let sender = channel.sender();
         let (done_tx, done_rx) = std::sync::mpsc::sync_channel(1);
@@ -1580,13 +1535,11 @@ mod interrupt_boundary_tests {
             assert!(sender.send(7));
             done_tx.send(()).unwrap();
         });
-        assert!(done_rx
-            .recv_timeout(std::time::Duration::from_millis(25))
-            .is_err());
-        assert_eq!(channel.receive(), Some(7));
+        // A capacity-1 buffer accepts the first send without a receiver.
         done_rx
             .recv_timeout(std::time::Duration::from_secs(1))
             .unwrap();
+        assert_eq!(channel.receive(), Some(7));
         worker.join().unwrap();
     }
 
@@ -1637,35 +1590,33 @@ mod interrupt_boundary_tests {
     }
 
     #[test]
-    fn scheduler_module_stays_split_by_runtime_ownership() {
+    fn scheduler_module_stays_under_the_size_boundary_with_no_io_fork() {
+        // #1637: the `scheduler/io.rs` fork of Prelude/Scheduler.rs is deleted
+        // (D-VERDICT-1637-1) — no live JIT-host caller ever registered real IO
+        // through it (net_http_rt.rs runs its own local poll loop instead).
+        // One scheduler substrate remains: this file.
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         const MAX_MODULE_LINES: usize = 2500;
-        let read = |relative: &str| {
-            let path = root.join(relative);
-            std::fs::read_to_string(&path)
-                .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()))
-        };
-        let root_source = read("src/scheduler.rs");
-        let io_source = read("src/scheduler/io.rs");
-        for (relative, source) in [
-            ("src/scheduler.rs", root_source.as_str()),
-            ("src/scheduler/io.rs", io_source.as_str()),
-        ] {
-            assert!(
-                source.lines().count() < MAX_MODULE_LINES,
-                "{relative} must stay below the card #510 module boundary"
-            );
-        }
+        let root_source = std::fs::read_to_string(root.join("src/scheduler.rs"))
+            .unwrap_or_else(|error| panic!("failed to read src/scheduler.rs: {error}"));
+        assert!(
+            root_source.lines().count() < MAX_MODULE_LINES,
+            "src/scheduler.rs must stay below the card #510 module boundary"
+        );
+        assert!(
+            !root.join("src/scheduler/io.rs").exists(),
+            "the scheduler/io.rs fork must stay deleted"
+        );
         let production_root = root_source
             .split("#[cfg(test)]\nmod interrupt_boundary_tests")
             .next()
             .expect("scheduler test boundary");
         assert!(
-            production_root.contains("\nmod io;\n"),
-            "scheduler root must declare normal `mod io;` ownership"
+            !production_root.contains("mod io;"),
+            "scheduler root must not re-declare the deleted io fork"
         );
         assert!(
-            !production_root.contains("include!(") && !io_source.contains("include!("),
+            !production_root.contains("include!("),
             "scheduler split must use normal Rust modules, never include! shells"
         );
     }
@@ -2114,7 +2065,12 @@ mod interrupt_boundary_tests {
         jet_scheduler_task_panic_leave();
         match result {
             JetSchedulerWait::Deadline(rendered) => {
-                assert_eq!(rendered, "deadline exceeded");
+                assert_eq!(
+                    rendered,
+                    "Error [E3003]: deadline exceeded while waiting in task yield\n\
+Why: this wait point observed the task context deadline from `#Context(deadline: …)`\n\
+Fix: raise the deadline budget or shorten the work before this wait point"
+                );
             }
             _ => panic!("yield deadline must cross native boundary as typed status"),
         }
@@ -2202,7 +2158,12 @@ mod interrupt_boundary_tests {
             .downcast_ref::<JetDeadlineUnwind>()
             .map(|deadline| deadline.rendered.as_str())
             .unwrap_or("");
-        assert_eq!(text, "deadline exceeded");
+        assert_eq!(
+            text,
+            "Error [E3003]: deadline exceeded while waiting in shield exit\n\
+Why: this wait point observed the task context deadline from `#Context(deadline: …)`\n\
+Fix: raise the deadline budget or shorten the work before this wait point"
+        );
         assert!(!jet_scheduler_shielded());
         TEST_DEADLINE_EXCEEDED.with(|d| d.set(false));
 

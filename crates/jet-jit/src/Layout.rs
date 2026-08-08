@@ -222,96 +222,63 @@ extern "C" fn jet_jit_layout_strength(constraint: i64, kind: i64) -> i64 {
     })
 }
 
-pub(crate) struct LayoutHostFns {
-    pub(crate) new: FuncId,
-    pub(crate) from_const: FuncId,
-    pub(crate) ge: FuncId,
-    pub(crate) le: FuncId,
-    pub(crate) eq: FuncId,
-    pub(crate) add: FuncId,
-    pub(crate) sub: FuncId,
-    pub(crate) h: FuncId,
-    pub(crate) v: FuncId,
-    pub(crate) value: FuncId,
-    pub(crate) suggest: FuncId,
-    pub(crate) is_feasible: FuncId,
-    pub(crate) add_constraint: FuncId,
-    pub(crate) strength: FuncId,
+host_fns! {
+    struct LayoutHostFns;
+    register: register_layout_symbols;
+    declare: declare_layout_host_fns(module) {
+        let cc = module.target_config().default_call_conv;
+        let mut unary = Signature::new(cc);
+        unary.params.push(AbiParam::new(types::I64));
+        unary.returns.push(AbiParam::new(types::I64));
+        let mut binary = Signature::new(cc);
+        binary.params.push(AbiParam::new(types::I64));
+        binary.params.push(AbiParam::new(types::I64));
+        binary.returns.push(AbiParam::new(types::I64));
+        let mut from_const = Signature::new(cc);
+        from_const.params.push(AbiParam::new(types::F64));
+        from_const.returns.push(AbiParam::new(types::I64));
+        let mut ternary = Signature::new(cc);
+        ternary.params.push(AbiParam::new(types::I64));
+        ternary.params.push(AbiParam::new(types::I64));
+        ternary.params.push(AbiParam::new(types::I64));
+        ternary.returns.push(AbiParam::new(types::I64));
+        let mut value = Signature::new(cc);
+        value.params.push(AbiParam::new(types::I64));
+        value.params.push(AbiParam::new(types::I64));
+        value.returns.push(AbiParam::new(types::F64));
+        let mut suggest = Signature::new(cc);
+        suggest.params.push(AbiParam::new(types::I64));
+        suggest.params.push(AbiParam::new(types::I64));
+        suggest.params.push(AbiParam::new(types::F64));
+        let mut is_feasible = Signature::new(cc);
+        is_feasible.params.push(AbiParam::new(types::I64));
+        is_feasible.returns.push(AbiParam::new(types::I8));
+        let mut add_c = Signature::new(cc);
+        add_c.params.push(AbiParam::new(types::I64));
+        add_c.params.push(AbiParam::new(types::I64));
+
+
+    }
+    new: "jet_jit_layout_new" => jet_jit_layout_new: unary;
+    from_const: "jet_jit_layout_from_const" => jet_jit_layout_from_const: from_const;
+    ge: "jet_jit_layout_ge" => jet_jit_layout_ge: binary;
+    le: "jet_jit_layout_le" => jet_jit_layout_le: binary;
+    eq: "jet_jit_layout_eq" => jet_jit_layout_eq: binary;
+    add: "jet_jit_layout_add" => jet_jit_layout_add: binary;
+    sub: "jet_jit_layout_sub" => jet_jit_layout_sub: binary;
+    h: "jet_jit_layout_h" => jet_jit_layout_h: ternary;
+    v: "jet_jit_layout_v" => jet_jit_layout_v: ternary;
+    value: "jet_jit_layout_value" => jet_jit_layout_value: value;
+    suggest: "jet_jit_layout_suggest" => jet_jit_layout_suggest: suggest;
+    is_feasible: "jet_jit_layout_is_feasible" => jet_jit_layout_is_feasible: is_feasible;
+    add_constraint: "jet_jit_layout_add_constraint" => jet_jit_layout_add_constraint: add_c;
+    strength: "jet_jit_layout_strength" => jet_jit_layout_strength: binary;
 }
 
-pub(crate) fn register_layout_symbols(builder: &mut JITBuilder) {
-    builder.symbol("jet_jit_layout_new", jet_jit_layout_new as *const u8);
-    builder.symbol("jet_jit_layout_from_const", jet_jit_layout_from_const as *const u8);
-    builder.symbol("jet_jit_layout_ge", jet_jit_layout_ge as *const u8);
-    builder.symbol("jet_jit_layout_le", jet_jit_layout_le as *const u8);
-    builder.symbol("jet_jit_layout_eq", jet_jit_layout_eq as *const u8);
-    builder.symbol("jet_jit_layout_add", jet_jit_layout_add as *const u8);
-    builder.symbol("jet_jit_layout_sub", jet_jit_layout_sub as *const u8);
-    builder.symbol("jet_jit_layout_h", jet_jit_layout_h as *const u8);
-    builder.symbol("jet_jit_layout_v", jet_jit_layout_v as *const u8);
-    builder.symbol("jet_jit_layout_value", jet_jit_layout_value as *const u8);
-    builder.symbol("jet_jit_layout_suggest", jet_jit_layout_suggest as *const u8);
-    builder.symbol("jet_jit_layout_is_feasible", jet_jit_layout_is_feasible as *const u8);
-    builder.symbol(
-        "jet_jit_layout_add_constraint",
-        jet_jit_layout_add_constraint as *const u8,
-    );
-    builder.symbol("jet_jit_layout_strength", jet_jit_layout_strength as *const u8);
-}
 
-pub(crate) fn declare_layout_host_fns(module: &mut JITModule) -> Result<LayoutHostFns, String> {
-    let cc = module.target_config().default_call_conv;
-    let mut unary = Signature::new(cc);
-    unary.params.push(AbiParam::new(types::I64));
-    unary.returns.push(AbiParam::new(types::I64));
-    let mut binary = Signature::new(cc);
-    binary.params.push(AbiParam::new(types::I64));
-    binary.params.push(AbiParam::new(types::I64));
-    binary.returns.push(AbiParam::new(types::I64));
-    let mut from_const = Signature::new(cc);
-    from_const.params.push(AbiParam::new(types::F64));
-    from_const.returns.push(AbiParam::new(types::I64));
-    let mut ternary = Signature::new(cc);
-    ternary.params.push(AbiParam::new(types::I64));
-    ternary.params.push(AbiParam::new(types::I64));
-    ternary.params.push(AbiParam::new(types::I64));
-    ternary.returns.push(AbiParam::new(types::I64));
-    let mut value = Signature::new(cc);
-    value.params.push(AbiParam::new(types::I64));
-    value.params.push(AbiParam::new(types::I64));
-    value.returns.push(AbiParam::new(types::F64));
-    let mut suggest = Signature::new(cc);
-    suggest.params.push(AbiParam::new(types::I64));
-    suggest.params.push(AbiParam::new(types::I64));
-    suggest.params.push(AbiParam::new(types::F64));
-    let mut is_feasible = Signature::new(cc);
-    is_feasible.params.push(AbiParam::new(types::I64));
-    is_feasible.returns.push(AbiParam::new(types::I8));
-    let mut add_c = Signature::new(cc);
-    add_c.params.push(AbiParam::new(types::I64));
-    add_c.params.push(AbiParam::new(types::I64));
-    let mut import = |name: &str, sig: &Signature| {
-        module
-            .declare_function(name, Linkage::Import, sig)
-            .map_err(|e| e.to_string())
-    };
-    Ok(LayoutHostFns {
-        new: import("jet_jit_layout_new", &unary)?,
-        from_const: import("jet_jit_layout_from_const", &from_const)?,
-        ge: import("jet_jit_layout_ge", &binary)?,
-        le: import("jet_jit_layout_le", &binary)?,
-        eq: import("jet_jit_layout_eq", &binary)?,
-        add: import("jet_jit_layout_add", &binary)?,
-        sub: import("jet_jit_layout_sub", &binary)?,
-        h: import("jet_jit_layout_h", &ternary)?,
-        v: import("jet_jit_layout_v", &ternary)?,
-        value: import("jet_jit_layout_value", &value)?,
-        suggest: import("jet_jit_layout_suggest", &suggest)?,
-        is_feasible: import("jet_jit_layout_is_feasible", &is_feasible)?,
-        add_constraint: import("jet_jit_layout_add_constraint", &add_c)?,
-        strength: import("jet_jit_layout_strength", &binary)?,
-    })
-}
+
+
+
 
 // silence unused import warning until lower_ctx wires Result packing
 #[allow(dead_code)]

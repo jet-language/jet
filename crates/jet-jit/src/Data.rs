@@ -1391,147 +1391,53 @@ fn err_at(kind: &'static str, op: &str, index: Option<i64>, reason: impl Into<St
     e
 }
 
-pub(crate) struct DataHostFns {
-    pub status: FuncId,
-    pub require_bridge: FuncId,
-    pub stat: FuncId,
-    pub quantile: FuncId,
-    pub describe: FuncId,
-    pub bar_text: FuncId,
-    pub bar_svg: FuncId,
-    pub line_text: FuncId,
-    pub line_svg: FuncId,
-    pub group_reduce: FuncId,
-    pub group_reduce_limited: FuncId,
-    pub error_show: FuncId,
-    pub inner_join: FuncId,
-    pub left_join: FuncId,
-    pub pivot_sum: FuncId,
-    pub rolling_mean: FuncId,
-    pub missing_count: FuncId,
-    pub lazy_push_op: FuncId,
-    pub lazy_clone_ops: FuncId,
-    pub lazy_count: FuncId,
-    pub collect: FuncId,
-    pub csv_reader: FuncId,
-    pub stream_next: FuncId,
-    pub stream_rest: FuncId,
-    pub stream_max_groups: FuncId,
+host_fns! {
+    struct DataHostFns;
+    register: register_symbols;
+    declare: declare(module) {
+        let cc = module.target_config().default_call_conv;
+        let mut sig_void = Signature::new(cc);
+        sig_void.returns.push(AbiParam::new(types::I64));
+        let mut sig_unary = Signature::new(cc);
+        sig_unary.params.push(AbiParam::new(types::I64));
+        sig_unary.returns.push(AbiParam::new(types::I64));
+        let mut sig_binary = sig_unary.clone();
+        sig_binary.params.push(AbiParam::new(types::I64));
+        let mut sig_ternary = sig_binary.clone();
+        sig_ternary.params.push(AbiParam::new(types::I64));
+        let mut sig_quaternary = sig_ternary.clone();
+        sig_quaternary.params.push(AbiParam::new(types::I64));
+
+
+    }
+    status: "jet_jit_data_status" => jet_jit_data_status: sig_void;
+    require_bridge: "jet_jit_data_require_bridge" => jet_jit_data_require_bridge: sig_unary;
+    stat: "jet_jit_data_stat" => jet_jit_data_stat: sig_binary;
+    quantile: "jet_jit_data_quantile" => jet_jit_data_quantile: sig_binary;
+    describe: "jet_jit_data_describe" => jet_jit_data_describe: sig_unary;
+    bar_text: "jet_jit_data_bar_text" => jet_jit_data_bar_text: sig_unary;
+    bar_svg: "jet_jit_data_bar_svg" => jet_jit_data_bar_svg: sig_unary;
+    line_text: "jet_jit_data_line_text" => jet_jit_data_line_text: sig_binary;
+    line_svg: "jet_jit_data_line_svg" => jet_jit_data_line_svg: sig_binary;
+    group_reduce: "jet_jit_data_group_reduce" => jet_jit_data_group_reduce: sig_ternary;
+    group_reduce_limited: "jet_jit_data_group_reduce_limited" => jet_jit_data_group_reduce_limited: sig_ternary;
+    error_show: "jet_jit_data_error_show" => jet_jit_data_error_show: sig_unary;
+    inner_join: "jet_jit_data_inner_join" => jet_jit_data_inner_join: sig_quaternary;
+    left_join: "jet_jit_data_left_join" => jet_jit_data_left_join: sig_quaternary;
+    pivot_sum: "jet_jit_data_pivot_sum" => jet_jit_data_pivot_sum: sig_ternary;
+    rolling_mean: "jet_jit_data_rolling_mean" => jet_jit_data_rolling_mean: sig_binary;
+    missing_count: "jet_jit_data_missing_count" => jet_jit_data_missing_count: sig_unary;
+    lazy_push_op: "jet_jit_data_lazy_push_op" => jet_jit_data_lazy_push_op: sig_ternary;
+    lazy_clone_ops: "jet_jit_data_lazy_clone_ops" => jet_jit_data_lazy_clone_ops: sig_binary;
+    lazy_count: "jet_jit_data_lazy_count" => jet_jit_data_lazy_count: sig_unary;
+    collect: "jet_jit_data_collect" => jet_jit_data_collect: sig_unary;
+    csv_reader: "jet_jit_data_csv_reader" => jet_jit_data_csv_reader: sig_ternary;
+    stream_next: "jet_jit_data_stream_next" => jet_jit_data_stream_next: sig_unary;
+    stream_rest: "jet_jit_data_stream_rest" => jet_jit_data_stream_rest: sig_unary;
+    stream_max_groups: "jet_jit_data_stream_max_groups" => jet_jit_data_stream_max_groups: sig_unary;
 }
 
-pub(crate) fn register_symbols(builder: &mut JITBuilder) {
-    builder.symbol("jet_jit_data_status", jet_jit_data_status as *const u8);
-    builder.symbol(
-        "jet_jit_data_require_bridge",
-        jet_jit_data_require_bridge as *const u8,
-    );
-    builder.symbol("jet_jit_data_stat", jet_jit_data_stat as *const u8);
-    builder.symbol("jet_jit_data_quantile", jet_jit_data_quantile as *const u8);
-    builder.symbol("jet_jit_data_describe", jet_jit_data_describe as *const u8);
-    builder.symbol("jet_jit_data_bar_text", jet_jit_data_bar_text as *const u8);
-    builder.symbol("jet_jit_data_bar_svg", jet_jit_data_bar_svg as *const u8);
-    builder.symbol("jet_jit_data_line_text", jet_jit_data_line_text as *const u8);
-    builder.symbol("jet_jit_data_line_svg", jet_jit_data_line_svg as *const u8);
-    builder.symbol(
-        "jet_jit_data_group_reduce",
-        jet_jit_data_group_reduce as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_data_group_reduce_limited",
-        jet_jit_data_group_reduce_limited as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_data_error_show",
-        jet_jit_data_error_show as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_data_inner_join",
-        jet_jit_data_inner_join as *const u8,
-    );
-    builder.symbol("jet_jit_data_left_join", jet_jit_data_left_join as *const u8);
-    builder.symbol("jet_jit_data_pivot_sum", jet_jit_data_pivot_sum as *const u8);
-    builder.symbol(
-        "jet_jit_data_rolling_mean",
-        jet_jit_data_rolling_mean as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_data_missing_count",
-        jet_jit_data_missing_count as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_data_lazy_push_op",
-        jet_jit_data_lazy_push_op as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_data_lazy_clone_ops",
-        jet_jit_data_lazy_clone_ops as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_data_lazy_count",
-        jet_jit_data_lazy_count as *const u8,
-    );
-    builder.symbol("jet_jit_data_collect", jet_jit_data_collect as *const u8);
-    builder.symbol(
-        "jet_jit_data_csv_reader",
-        jet_jit_data_csv_reader as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_data_stream_next",
-        jet_jit_data_stream_next as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_data_stream_rest",
-        jet_jit_data_stream_rest as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_data_stream_max_groups",
-        jet_jit_data_stream_max_groups as *const u8,
-    );
-}
 
-pub(crate) fn declare(module: &mut JITModule) -> Result<DataHostFns, String> {
-    let cc = module.target_config().default_call_conv;
-    let mut sig_void = Signature::new(cc);
-    sig_void.returns.push(AbiParam::new(types::I64));
-    let mut sig_unary = Signature::new(cc);
-    sig_unary.params.push(AbiParam::new(types::I64));
-    sig_unary.returns.push(AbiParam::new(types::I64));
-    let mut sig_binary = sig_unary.clone();
-    sig_binary.params.push(AbiParam::new(types::I64));
-    let mut sig_ternary = sig_binary.clone();
-    sig_ternary.params.push(AbiParam::new(types::I64));
-    let mut sig_quaternary = sig_ternary.clone();
-    sig_quaternary.params.push(AbiParam::new(types::I64));
-    let mut import = |name: &str, sig: &Signature| -> Result<FuncId, String> {
-        module
-            .declare_function(name, Linkage::Import, sig)
-            .map_err(|e| e.to_string())
-    };
-    Ok(DataHostFns {
-        status: import("jet_jit_data_status", &sig_void)?,
-        require_bridge: import("jet_jit_data_require_bridge", &sig_unary)?,
-        stat: import("jet_jit_data_stat", &sig_binary)?,
-        quantile: import("jet_jit_data_quantile", &sig_binary)?,
-        describe: import("jet_jit_data_describe", &sig_unary)?,
-        bar_text: import("jet_jit_data_bar_text", &sig_unary)?,
-        bar_svg: import("jet_jit_data_bar_svg", &sig_unary)?,
-        line_text: import("jet_jit_data_line_text", &sig_binary)?,
-        line_svg: import("jet_jit_data_line_svg", &sig_binary)?,
-        group_reduce: import("jet_jit_data_group_reduce", &sig_ternary)?,
-        group_reduce_limited: import("jet_jit_data_group_reduce_limited", &sig_ternary)?,
-        error_show: import("jet_jit_data_error_show", &sig_unary)?,
-        inner_join: import("jet_jit_data_inner_join", &sig_quaternary)?,
-        left_join: import("jet_jit_data_left_join", &sig_quaternary)?,
-        pivot_sum: import("jet_jit_data_pivot_sum", &sig_ternary)?,
-        rolling_mean: import("jet_jit_data_rolling_mean", &sig_binary)?,
-        missing_count: import("jet_jit_data_missing_count", &sig_unary)?,
-        lazy_push_op: import("jet_jit_data_lazy_push_op", &sig_ternary)?,
-        lazy_clone_ops: import("jet_jit_data_lazy_clone_ops", &sig_binary)?,
-        lazy_count: import("jet_jit_data_lazy_count", &sig_unary)?,
-        collect: import("jet_jit_data_collect", &sig_unary)?,
-        csv_reader: import("jet_jit_data_csv_reader", &sig_ternary)?,
-        stream_next: import("jet_jit_data_stream_next", &sig_unary)?,
-        stream_rest: import("jet_jit_data_stream_rest", &sig_unary)?,
-        stream_max_groups: import("jet_jit_data_stream_max_groups", &sig_unary)?,
-    })
-}
+
+
+

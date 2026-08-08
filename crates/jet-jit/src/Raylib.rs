@@ -135,115 +135,43 @@ extern "C" fn jet_jit_raylib_play_sound(sound: i64) -> i8 {
     })
 }
 
-pub(crate) struct RaylibHostFns {
-    pub(crate) window_open: cranelift_module::FuncId,
-    pub(crate) color: cranelift_module::FuncId,
-    pub(crate) set_target_fps: cranelift_module::FuncId,
-    pub(crate) key_down: cranelift_module::FuncId,
-    pub(crate) begin_drawing: cranelift_module::FuncId,
-    pub(crate) clear_background: cranelift_module::FuncId,
-    pub(crate) draw_rectangle: cranelift_module::FuncId,
-    pub(crate) draw_text: cranelift_module::FuncId,
-    pub(crate) end_drawing: cranelift_module::FuncId,
-    pub(crate) close_window: cranelift_module::FuncId,
-    pub(crate) window_should_close: cranelift_module::FuncId,
-    pub(crate) window_ready: cranelift_module::FuncId,
-    pub(crate) load_sound: cranelift_module::FuncId,
-    pub(crate) play_sound: cranelift_module::FuncId,
+host_fns! {
+    struct RaylibHostFns;
+    register: register_raylib_symbols;
+    declare: declare_raylib_host_fns(module) {
+        use cranelift_codegen::ir::{types, AbiParam, Signature};
+        use cranelift_module::{Linkage, Module};
+        let cc = module.target_config().default_call_conv;
+
+        let mut sig = |n_params: usize, ret: Option<cranelift_codegen::ir::Type>| {
+            let mut s = Signature::new(cc);
+            for _ in 0..n_params {
+                s.params.push(AbiParam::new(types::I64));
+            }
+            if let Some(r) = ret {
+                s.returns.push(AbiParam::new(r));
+            }
+            s
+        };
+
+    }
+    window_open: "jet_jit_raylib_window_open" => jet_jit_raylib_window_open: sig(3, Some(types::I64));
+    color: "jet_jit_raylib_color" => jet_jit_raylib_color: sig(4, Some(types::I64));
+    set_target_fps: "jet_jit_raylib_set_target_fps" => jet_jit_raylib_set_target_fps: sig(1, None);
+    key_down: "jet_jit_raylib_key_down" => jet_jit_raylib_key_down: sig(1, Some(types::I8));
+    begin_drawing: "jet_jit_raylib_begin_drawing" => jet_jit_raylib_begin_drawing: sig(1, None);
+    clear_background: "jet_jit_raylib_clear_background" => jet_jit_raylib_clear_background: sig(1, None);
+    draw_rectangle: "jet_jit_raylib_draw_rectangle" => jet_jit_raylib_draw_rectangle: sig(5, None);
+    draw_text: "jet_jit_raylib_draw_text" => jet_jit_raylib_draw_text: sig(5, None);
+    end_drawing: "jet_jit_raylib_end_drawing" => jet_jit_raylib_end_drawing: sig(0, None);
+    close_window: "jet_jit_raylib_close_window" => jet_jit_raylib_close_window: sig(1, None);
+    window_should_close: "jet_jit_raylib_window_should_close" => jet_jit_raylib_window_should_close: sig(1, Some(types::I8));
+    window_ready: "jet_jit_raylib_window_ready" => jet_jit_raylib_window_ready: sig(1, Some(types::I8));
+    load_sound: "jet_jit_raylib_load_sound" => jet_jit_raylib_load_sound: sig(1, Some(types::I64));
+    play_sound: "jet_jit_raylib_play_sound" => jet_jit_raylib_play_sound: sig(1, Some(types::I8));
 }
 
-pub(crate) fn register_raylib_symbols(builder: &mut cranelift_jit::JITBuilder) {
-    builder.symbol(
-        "jet_jit_raylib_window_open",
-        jet_jit_raylib_window_open as *const u8,
-    );
-    builder.symbol("jet_jit_raylib_color", jet_jit_raylib_color as *const u8);
-    builder.symbol(
-        "jet_jit_raylib_set_target_fps",
-        jet_jit_raylib_set_target_fps as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_raylib_key_down",
-        jet_jit_raylib_key_down as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_raylib_begin_drawing",
-        jet_jit_raylib_begin_drawing as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_raylib_clear_background",
-        jet_jit_raylib_clear_background as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_raylib_draw_rectangle",
-        jet_jit_raylib_draw_rectangle as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_raylib_draw_text",
-        jet_jit_raylib_draw_text as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_raylib_end_drawing",
-        jet_jit_raylib_end_drawing as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_raylib_close_window",
-        jet_jit_raylib_close_window as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_raylib_window_should_close",
-        jet_jit_raylib_window_should_close as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_raylib_window_ready",
-        jet_jit_raylib_window_ready as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_raylib_load_sound",
-        jet_jit_raylib_load_sound as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_raylib_play_sound",
-        jet_jit_raylib_play_sound as *const u8,
-    );
-}
 
-pub(crate) fn declare_raylib_host_fns(
-    module: &mut cranelift_jit::JITModule,
-) -> Result<RaylibHostFns, String> {
-    use cranelift_codegen::ir::{types, AbiParam, Signature};
-    use cranelift_module::{Linkage, Module};
 
-    let cc = module.target_config().default_call_conv;
-    let mut import = |name: &str, sig: &Signature| -> Result<cranelift_module::FuncId, String> {
-        module
-            .declare_function(name, Linkage::Import, sig)
-            .map_err(|e| e.to_string())
-    };
-    let mut sig = |n_params: usize, ret: Option<cranelift_codegen::ir::Type>| {
-        let mut s = Signature::new(cc);
-        for _ in 0..n_params {
-            s.params.push(AbiParam::new(types::I64));
-        }
-        if let Some(r) = ret {
-            s.returns.push(AbiParam::new(r));
-        }
-        s
-    };
-    Ok(RaylibHostFns {
-        window_open: import("jet_jit_raylib_window_open", &sig(3, Some(types::I64)))?,
-        color: import("jet_jit_raylib_color", &sig(4, Some(types::I64)))?,
-        set_target_fps: import("jet_jit_raylib_set_target_fps", &sig(1, None))?,
-        key_down: import("jet_jit_raylib_key_down", &sig(1, Some(types::I8)))?,
-        begin_drawing: import("jet_jit_raylib_begin_drawing", &sig(1, None))?,
-        clear_background: import("jet_jit_raylib_clear_background", &sig(1, None))?,
-        draw_rectangle: import("jet_jit_raylib_draw_rectangle", &sig(5, None))?,
-        draw_text: import("jet_jit_raylib_draw_text", &sig(5, None))?,
-        end_drawing: import("jet_jit_raylib_end_drawing", &sig(0, None))?,
-        close_window: import("jet_jit_raylib_close_window", &sig(1, None))?,
-        window_should_close: import("jet_jit_raylib_window_should_close", &sig(1, Some(types::I8)))?,
-        window_ready: import("jet_jit_raylib_window_ready", &sig(1, Some(types::I8)))?,
-        load_sound: import("jet_jit_raylib_load_sound", &sig(1, Some(types::I64)))?,
-        play_sound: import("jet_jit_raylib_play_sound", &sig(1, Some(types::I8)))?,
-    })
-}
+
+

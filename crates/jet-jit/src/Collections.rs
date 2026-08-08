@@ -2725,656 +2725,276 @@ extern "C" fn jet_jit_print_enum(packed: i64, name_ptr: i64, name_len: i64) {
     });
 }
 
-pub(crate) struct CollectionsHostFns {
-    pub io_args: cranelift_module::FuncId,
-    pub list_new: cranelift_module::FuncId,
-    pub list_uninit: cranelift_module::FuncId,
-    pub list_push: cranelift_module::FuncId,
-    pub list_push_f64: cranelift_module::FuncId,
-    pub list_push_range: cranelift_module::FuncId,
-    pub list_get: cranelift_module::FuncId,
-    pub list_get_f64: cranelift_module::FuncId,
-    pub list_get_range_start: cranelift_module::FuncId,
-    pub list_get_range_end: cranelift_module::FuncId,
-    pub list_get_range_exclusive: cranelift_module::FuncId,
-    pub list_get_opt: cranelift_module::FuncId,
-    pub list_set: cranelift_module::FuncId,
-    pub list_set_f64: cranelift_module::FuncId,
-    pub list_len: cranelift_module::FuncId,
-    pub list_contains_str: cranelift_module::FuncId,
-    pub list_eq: cranelift_module::FuncId,
-    pub list_indexes: cranelift_module::FuncId,
-    pub list_sort: cranelift_module::FuncId,
-    pub list_sort_str: cranelift_module::FuncId,
-    pub list_clone: cranelift_module::FuncId,
-    pub list_slice: cranelift_module::FuncId,
-    pub list_range_end: cranelift_module::FuncId,
-    pub split_write: cranelift_module::FuncId,
-    pub get_disjoint_write: cranelift_module::FuncId,
-    pub range_contains: cranelift_module::FuncId,
-    pub range_show: cranelift_module::FuncId,
-    pub range_equal: cranelift_module::FuncId,
-    pub list_join_str: cranelift_module::FuncId,
-    pub loop_stride_check: cranelift_module::FuncId,
-    pub map_new: cranelift_module::FuncId,
-    pub map_clone: cranelift_module::FuncId,
-    pub map_merge: cranelift_module::FuncId,
-    pub map_insert: cranelift_module::FuncId,
-    pub map_increment: cranelift_module::FuncId,
-    pub map_get: cranelift_module::FuncId,
-    pub map_validate: cranelift_module::FuncId,
-    pub map_get_opt: cranelift_module::FuncId,
-    pub map_len: cranelift_module::FuncId,
-    pub map_key_at: cranelift_module::FuncId,
-    pub map_value_at: cranelift_module::FuncId,
-    pub map_keys: cranelift_module::FuncId,
-    pub map_values: cranelift_module::FuncId,
-    pub iter_take: cranelift_module::FuncId,
-    pub iter_skip: cranelift_module::FuncId,
-    pub iter_step_by: cranelift_module::FuncId,
-    pub iter_dedup: cranelift_module::FuncId,
-    pub iter_chunks: cranelift_module::FuncId,
-    pub iter_windows: cranelift_module::FuncId,
-    pub list_sum_i64: cranelift_module::FuncId,
-    pub list_product_i64: cranelift_module::FuncId,
-    pub list_min_i64: cranelift_module::FuncId,
-    pub list_max_i64: cranelift_module::FuncId,
-    pub list_flatten: cranelift_module::FuncId,
-    pub list_intersperse: cranelift_module::FuncId,
-    pub list_zip: cranelift_module::FuncId,
-    pub list_unzip: cranelift_module::FuncId,
-    pub list_sort_by_i64_keys: cranelift_module::FuncId,
-    pub list_sort_by_str_keys: cranelift_module::FuncId,
-    pub print_list: cranelift_module::FuncId,
-    pub print_opt: cranelift_module::FuncId,
-    pub print_enum: cranelift_module::FuncId,
-    pub list_show: cranelift_module::FuncId,
-    pub list_remove: cranelift_module::FuncId,
-    pub list_pop: cranelift_module::FuncId,
-    pub list_insert: cranelift_module::FuncId,
-    pub set_from_list: cranelift_module::FuncId,
-    pub set_new: cranelift_module::FuncId,
-    pub set_insert: cranelift_module::FuncId,
-    pub set_remove: cranelift_module::FuncId,
-    pub set_has: cranelift_module::FuncId,
-    pub set_len: cranelift_module::FuncId,
-    pub set_to_list: cranelift_module::FuncId,
-    pub set_copy: cranelift_module::FuncId,
-    pub set_equal: cranelift_module::FuncId,
-    pub set_capacity: cranelift_module::FuncId,
-    pub set_first: cranelift_module::FuncId,
-    pub set_replace: cranelift_module::FuncId,
-    pub set_take: cranelift_module::FuncId,
-    pub set_union: cranelift_module::FuncId,
-    pub set_intersection: cranelift_module::FuncId,
-    pub set_difference: cranelift_module::FuncId,
-    pub set_symmetric_difference: cranelift_module::FuncId,
-    pub set_is_subset: cranelift_module::FuncId,
-    pub set_is_superset: cranelift_module::FuncId,
-    pub set_is_disjoint: cranelift_module::FuncId,
-    pub deque_new: cranelift_module::FuncId,
-    pub deque_push_front: cranelift_module::FuncId,
-    pub deque_push_back: cranelift_module::FuncId,
-    pub deque_pop_front: cranelift_module::FuncId,
-    pub deque_pop_back: cranelift_module::FuncId,
-    pub deque_peek_front: cranelift_module::FuncId,
-    pub deque_peek_back: cranelift_module::FuncId,
-    pub deque_len: cranelift_module::FuncId,
-    pub deque_capacity: cranelift_module::FuncId,
-    pub deque_contains: cranelift_module::FuncId,
-    pub deque_get: cranelift_module::FuncId,
-    pub deque_delete: cranelift_module::FuncId,
-    pub deque_to_list: cranelift_module::FuncId,
-    pub deque_join: cranelift_module::FuncId,
-    pub deque_reverse: cranelift_module::FuncId,
-    pub deque_split: cranelift_module::FuncId,
-    pub deque_from: cranelift_module::FuncId,
-    pub bag_new: cranelift_module::FuncId,
-    pub bag_add: cranelift_module::FuncId,
-    pub bag_remove: cranelift_module::FuncId,
-    pub bag_has: cranelift_module::FuncId,
-    pub bag_count: cranelift_module::FuncId,
-    pub bag_len: cranelift_module::FuncId,
-    pub sorted_set_new: cranelift_module::FuncId,
-    pub sorted_set_len: cranelift_module::FuncId,
-    pub sorted_set_has: cranelift_module::FuncId,
-    pub sorted_set_from: cranelift_module::FuncId,
-    pub sorted_set_insert: cranelift_module::FuncId,
-    pub sorted_set_remove: cranelift_module::FuncId,
-    pub sorted_set_to_list: cranelift_module::FuncId,
-    pub sorted_set_first: cranelift_module::FuncId,
-    pub sorted_set_last: cranelift_module::FuncId,
-    pub sorted_set_union: cranelift_module::FuncId,
-    pub sorted_set_intersection: cranelift_module::FuncId,
-    pub sorted_set_difference: cranelift_module::FuncId,
-    pub sorted_set_symmetric_difference: cranelift_module::FuncId,
-    pub sorted_set_is_subset: cranelift_module::FuncId,
-    pub sorted_set_is_superset: cranelift_module::FuncId,
-    pub sorted_set_is_disjoint: cranelift_module::FuncId,
-    pub priority_queue_new: cranelift_module::FuncId,
-    pub priority_queue_len: cranelift_module::FuncId,
-    pub priority_queue_from: cranelift_module::FuncId,
-    pub priority_queue_push: cranelift_module::FuncId,
-    pub priority_queue_peek: cranelift_module::FuncId,
-    pub priority_queue_pop: cranelift_module::FuncId,
-    pub priority_queue_to_sorted_list: cranelift_module::FuncId,
-    pub lru_new: cranelift_module::FuncId,
-    pub lru_put: cranelift_module::FuncId,
-    pub lru_get: cranelift_module::FuncId,
-    pub lru_has: cranelift_module::FuncId,
-    pub lru_keys: cranelift_module::FuncId,
-    pub bit_set_new: cranelift_module::FuncId,
-    pub bit_set_add: cranelift_module::FuncId,
-    pub bit_set_remove: cranelift_module::FuncId,
-    pub bit_set_to_list: cranelift_module::FuncId,
-    pub bit_set_len: cranelift_module::FuncId,
-    pub bit_set_count: cranelift_module::FuncId,
-    pub byte_buffer_new: cranelift_module::FuncId,
-    pub byte_buffer_with_capacity: cranelift_module::FuncId,
-    pub byte_buffer_from: cranelift_module::FuncId,
-    pub byte_buffer_write: cranelift_module::FuncId,
-    pub byte_buffer_to_bytes: cranelift_module::FuncId,
-    pub byte_buffer_method: cranelift_module::FuncId,
+host_fns! {
+    struct CollectionsHostFns;
+    register: register_collections_symbols;
+    declare: declare_collections_host_fns(module) {
+        use cranelift_codegen::ir::{types, AbiParam, Signature};
+        use cranelift_module::{Linkage, Module};
+        let cc = module.target_config().default_call_conv;
+        let mut sig_new = Signature::new(cc);
+        sig_new.returns.push(AbiParam::new(types::I64));
+        let mut sig_sorted_set_new = sig_new.clone();
+        sig_sorted_set_new.params.push(AbiParam::new(types::I64));
+        let mut sig_uninit = Signature::new(cc);
+        sig_uninit.params.push(AbiParam::new(types::I64));
+        sig_uninit.returns.push(AbiParam::new(types::I64));
+        let mut sig_push = Signature::new(cc);
+        sig_push.params.push(AbiParam::new(types::I64));
+        sig_push.params.push(AbiParam::new(types::I64));
+        let mut sig_push_f64 = Signature::new(cc);
+        sig_push_f64.params.push(AbiParam::new(types::I64));
+        sig_push_f64.params.push(AbiParam::new(types::F64));
+        let mut sig_push_range = Signature::new(cc);
+        sig_push_range.params.push(AbiParam::new(types::I64));
+        sig_push_range.params.push(AbiParam::new(types::I64));
+        sig_push_range.params.push(AbiParam::new(types::I64));
+        sig_push_range.params.push(AbiParam::new(types::I8));
+        let mut sig_len = Signature::new(cc);
+        sig_len.params.push(AbiParam::new(types::I64));
+        sig_len.returns.push(AbiParam::new(types::I64));
+        let mut sig_get = sig_len.clone();
+        sig_get.params.push(AbiParam::new(types::I64));
+        sig_get.params.push(AbiParam::new(types::I32));
+        let mut sig_get_f64 = sig_get.clone();
+        sig_get_f64.returns.clear();
+        sig_get_f64.returns.push(AbiParam::new(types::F64));
+        let sig_get_range_scalar = sig_get.clone();
+        let mut sig_get_range_exclusive = sig_get.clone();
+        sig_get_range_exclusive.returns.clear();
+        sig_get_range_exclusive
+            .returns
+            .push(AbiParam::new(types::I8));
+        let mut sig_get_opt = sig_len.clone();
+        sig_get_opt.params.push(AbiParam::new(types::I64));
+        let mut sig_set_from = sig_len.clone();
+        sig_set_from.params.push(AbiParam::new(types::I64));
+        let mut sig_list_eq = Signature::new(cc);
+        sig_list_eq.params.push(AbiParam::new(types::I64));
+        sig_list_eq.params.push(AbiParam::new(types::I64));
+        sig_list_eq.returns.push(AbiParam::new(types::I8));
+        // list_set(list, idx, val, line)
+        let mut sig_set = Signature::new(cc);
+        sig_set.params.push(AbiParam::new(types::I64));
+        sig_set.params.push(AbiParam::new(types::I64));
+        sig_set.params.push(AbiParam::new(types::I64));
+        sig_set.params.push(AbiParam::new(types::I32));
+        // list_set_f64(list, idx, val, line)
+        let mut sig_set_f64 = Signature::new(cc);
+        sig_set_f64.params.push(AbiParam::new(types::I64));
+        sig_set_f64.params.push(AbiParam::new(types::I64));
+        sig_set_f64.params.push(AbiParam::new(types::F64));
+        sig_set_f64.params.push(AbiParam::new(types::I32));
+        let mut sig_sort = sig_len.clone();
+        sig_sort.returns.clear();
+        // list_slice(list, start, end, line) -> id
+        let mut sig_slice = Signature::new(cc);
+        sig_slice.params.push(AbiParam::new(types::I64));
+        sig_slice.params.push(AbiParam::new(types::I64));
+        sig_slice.params.push(AbiParam::new(types::I64));
+        sig_slice.params.push(AbiParam::new(types::I32));
+        sig_slice.returns.push(AbiParam::new(types::I64));
+        let mut sig_range_end = Signature::new(cc);
+        sig_range_end.params.push(AbiParam::new(types::I64));
+        sig_range_end.params.push(AbiParam::new(types::I64));
+        sig_range_end.params.push(AbiParam::new(types::I64));
+        sig_range_end.params.push(AbiParam::new(types::I64));
+        sig_range_end.params.push(AbiParam::new(types::I32));
+        sig_range_end.returns.push(AbiParam::new(types::I64));
+        let mut sig_range_contains = Signature::new(cc);
+        for _ in 0..4 {
+            sig_range_contains.params.push(AbiParam::new(types::I64));
+        }
+        sig_range_contains.returns.push(AbiParam::new(types::I8));
+        let mut sig_disjoint = sig_list_eq.clone();
+        sig_disjoint.returns.clear();
+        sig_disjoint.returns.push(AbiParam::new(types::I64));
+        let mut sig_range_show = Signature::new(cc);
+        for _ in 0..3 {
+            sig_range_show.params.push(AbiParam::new(types::I64));
+        }
+        sig_range_show.returns.push(AbiParam::new(types::I64));
+        let mut sig_range_equal = Signature::new(cc);
+        for _ in 0..6 {
+            sig_range_equal.params.push(AbiParam::new(types::I64));
+        }
+        sig_range_equal.returns.push(AbiParam::new(types::I8));
+        let mut sig_join = sig_len.clone();
+        sig_join.params.push(AbiParam::new(types::I64));
+        let mut sig_map_insert = Signature::new(cc);
+        sig_map_insert.params.push(AbiParam::new(types::I64));
+        sig_map_insert.params.push(AbiParam::new(types::I64));
+        sig_map_insert.params.push(AbiParam::new(types::I64));
+        let mut sig_three_ret = sig_map_insert.clone();
+        sig_three_ret.returns.push(AbiParam::new(types::I64));
+        let mut sig_four_ret = sig_three_ret.clone();
+        sig_four_ret.params.push(AbiParam::new(types::I64));
+        let sig_map_get = sig_get.clone();
+        let sig_map_get_opt = sig_get_opt.clone();
+        let sig_map_at = sig_get_opt.clone();
+        let mut sig_print_list = sig_get_opt.clone();
+        sig_print_list.returns.clear();
+        let mut sig_print_enum = Signature::new(cc);
+        sig_print_enum.params.push(AbiParam::new(types::I64));
+        sig_print_enum.params.push(AbiParam::new(types::I64));
+        sig_print_enum.params.push(AbiParam::new(types::I64));
+        let mut sig_sort_by_keys = sig_get_opt.clone();
+        sig_sort_by_keys.returns.clear();
+
+
+    }
+    io_args: "jet_jit_io_args" => jet_jit_io_args: sig_new;
+    list_new: "jet_jit_list_new" => jet_jit_list_new: sig_new;
+    list_uninit: "jet_jit_list_uninit" => jet_jit_list_uninit: sig_uninit;
+    list_push: "jet_jit_list_push" => jet_jit_list_push: sig_push;
+    list_push_f64: "jet_jit_list_push_f64" => jet_jit_list_push_f64: sig_push_f64;
+    list_push_range: "jet_jit_list_push_range" => jet_jit_list_push_range: sig_push_range;
+    list_get: "jet_jit_list_get" => jet_jit_list_get: sig_get;
+    list_get_f64: "jet_jit_list_get_f64" => jet_jit_list_get_f64: sig_get_f64;
+    list_get_range_start: "jet_jit_list_get_range_start" => jet_jit_list_get_range_start: sig_get_range_scalar;
+    list_get_range_end: "jet_jit_list_get_range_end" => jet_jit_list_get_range_end: sig_get_range_scalar;
+    list_get_range_exclusive: "jet_jit_list_get_range_exclusive" => jet_jit_list_get_range_exclusive: sig_get_range_exclusive;
+    list_get_opt: "jet_jit_list_get_opt" => jet_jit_list_get_opt: sig_get_opt;
+    list_set: "jet_jit_list_set" => jet_jit_list_set: sig_set;
+    list_set_f64: "jet_jit_list_set_f64" => jet_jit_list_set_f64: sig_set_f64;
+    list_len: "jet_jit_list_len" => jet_jit_list_len: sig_len;
+    list_contains_str: "jet_jit_list_contains_str" => jet_jit_list_contains_str: sig_list_eq;
+    list_eq: "jet_jit_list_eq" => jet_jit_list_eq: sig_list_eq;
+    list_indexes: "jet_jit_list_indexes" => jet_jit_list_indexes: sig_len;
+    list_sort: "jet_jit_list_sort" => jet_jit_list_sort: sig_sort;
+    list_sort_str: "jet_jit_list_sort_str" => jet_jit_list_sort_str: sig_sort;
+    list_clone: "jet_jit_list_clone" => jet_jit_list_clone: sig_len;
+    list_slice: "jet_jit_list_slice" => jet_jit_list_slice: sig_slice;
+    list_range_end: "jet_jit_list_range_end" => jet_jit_list_range_end: sig_range_end;
+    split_write: "jet_jit_split_write" => jet_jit_split_write: sig_disjoint;
+    get_disjoint_write: "jet_jit_get_disjoint_write" => jet_jit_get_disjoint_write: sig_disjoint;
+    range_contains: "jet_jit_range_contains" => jet_jit_range_contains: sig_range_contains;
+    range_show: "jet_jit_range_show" => jet_jit_range_show: sig_range_show;
+    range_equal: "jet_jit_range_equal" => jet_jit_range_equal: sig_range_equal;
+    list_join_str: "jet_jit_list_join_str" => jet_jit_list_join_str: sig_join;
+    loop_stride_check: "jet_jit_loop_stride_check" => jet_jit_loop_stride_check: sig_len;
+    map_new: "jet_jit_map_new" => jet_jit_map_new: sig_new;
+    map_clone: "jet_jit_map_clone" => jet_jit_map_clone: sig_len;
+    map_merge: "jet_jit_map_merge" => jet_jit_map_merge: sig_get_opt;
+    map_insert: "jet_jit_map_insert" => jet_jit_map_insert: sig_map_insert;
+    map_increment: "jet_jit_map_increment" => jet_jit_map_increment: sig_push;
+    map_get: "jet_jit_map_get" => jet_jit_map_get: sig_map_get;
+    map_validate: "jet_jit_map_validate" => jet_jit_map_validate: sig_len;
+    map_get_opt: "jet_jit_map_get_opt" => jet_jit_map_get_opt: sig_map_get_opt;
+    map_len: "jet_jit_map_len" => jet_jit_map_len: sig_len;
+    map_key_at: "jet_jit_map_key_at" => jet_jit_map_key_at: sig_map_at;
+    map_value_at: "jet_jit_map_value_at" => jet_jit_map_value_at: sig_map_at;
+    map_keys: "jet_jit_map_keys" => jet_jit_map_keys: sig_len;
+    map_values: "jet_jit_map_values" => jet_jit_map_values: sig_len;
+    iter_take: "jet_jit_iter_take" => jet_jit_iter_take: sig_get_opt;
+    iter_skip: "jet_jit_iter_skip" => jet_jit_iter_skip: sig_get_opt;
+    iter_step_by: "jet_jit_iter_step_by" => jet_jit_iter_step_by: sig_get_opt;
+    iter_dedup: "jet_jit_iter_dedup" => jet_jit_iter_dedup: sig_get_opt;
+    iter_chunks: "jet_jit_iter_chunks" => jet_jit_iter_chunks: sig_get_opt;
+    iter_windows: "jet_jit_iter_windows" => jet_jit_iter_windows: sig_get_opt;
+    list_sum_i64: "jet_jit_list_sum_i64" => jet_jit_list_sum_i64: sig_len;
+    list_product_i64: "jet_jit_list_product_i64" => jet_jit_list_product_i64: sig_len;
+    list_min_i64: "jet_jit_list_min_i64" => jet_jit_list_min_i64: sig_len;
+    list_max_i64: "jet_jit_list_max_i64" => jet_jit_list_max_i64: sig_len;
+    list_flatten: "jet_jit_list_flatten" => jet_jit_list_flatten: sig_len;
+    list_intersperse: "jet_jit_list_intersperse" => jet_jit_list_intersperse: sig_get_opt;
+    list_zip: "jet_jit_list_zip" => jet_jit_list_zip: sig_get_opt;
+    list_unzip: "jet_jit_list_unzip" => jet_jit_list_unzip: sig_len;
+    list_sort_by_i64_keys: "jet_jit_list_sort_by_i64_keys" => jet_jit_list_sort_by_i64_keys: sig_sort_by_keys;
+    list_sort_by_str_keys: "jet_jit_list_sort_by_str_keys" => jet_jit_list_sort_by_str_keys: sig_sort_by_keys;
+    print_list: "jet_jit_print_list" => jet_jit_print_list: sig_print_list;
+    print_opt: "jet_jit_print_opt" => jet_jit_print_opt: sig_print_list;
+    print_enum: "jet_jit_print_enum" => jet_jit_print_enum: sig_print_enum;
+    list_show: "jet_jit_list_show" => jet_jit_list_show: sig_get_opt;
+    list_remove: "jet_jit_list_remove" => jet_jit_list_remove: sig_get_opt;
+    list_pop: "jet_jit_list_pop" => jet_jit_list_pop: sig_len;
+    list_insert: "jet_jit_list_insert" => jet_jit_list_insert: sig_map_insert;
+    set_from_list: "jet_jit_set_from_list" => jet_jit_set_from_list: sig_set_from;
+    set_new: "jet_jit_set_new" => jet_jit_set_new: sig_sorted_set_new;
+    set_insert: "jet_jit_set_insert" => jet_jit_set_insert: sig_list_eq;
+    set_remove: "jet_jit_set_remove" => jet_jit_set_remove: sig_push;
+    set_has: "jet_jit_set_has" => jet_jit_set_has: sig_list_eq;
+    set_len: "jet_jit_set_len" => jet_jit_set_len: sig_len;
+    set_to_list: "jet_jit_set_to_list" => jet_jit_set_to_list: sig_len;
+    set_copy: "jet_jit_set_copy" => jet_jit_set_copy: sig_len;
+    set_equal: "jet_jit_set_equal" => jet_jit_set_equal: sig_list_eq;
+    set_capacity: "jet_jit_set_capacity" => jet_jit_set_capacity: sig_len;
+    set_first: "jet_jit_set_first" => jet_jit_set_first: sig_len;
+    set_replace: "jet_jit_set_replace" => jet_jit_set_replace: sig_get_opt;
+    set_take: "jet_jit_set_take" => jet_jit_set_take: sig_get_opt;
+    set_union: "jet_jit_set_union" => jet_jit_set_union: sig_get_opt;
+    set_intersection: "jet_jit_set_intersection" => jet_jit_set_intersection: sig_get_opt;
+    set_difference: "jet_jit_set_difference" => jet_jit_set_difference: sig_get_opt;
+    set_symmetric_difference: "jet_jit_set_symmetric_difference" => jet_jit_set_symmetric_difference: sig_get_opt;
+    set_is_subset: "jet_jit_set_is_subset" => jet_jit_set_is_subset: sig_list_eq;
+    set_is_superset: "jet_jit_set_is_superset" => jet_jit_set_is_superset: sig_list_eq;
+    set_is_disjoint: "jet_jit_set_is_disjoint" => jet_jit_set_is_disjoint: sig_list_eq;
+    deque_new: "jet_jit_deque_new" => jet_jit_deque_new: sig_new;
+    deque_push_front: "jet_jit_deque_push_front" => jet_jit_deque_push_front: sig_push;
+    deque_push_back: "jet_jit_deque_push_back" => jet_jit_deque_push_back: sig_push;
+    deque_pop_front: "jet_jit_deque_pop_front" => jet_jit_deque_pop_front: sig_len;
+    deque_pop_back: "jet_jit_deque_pop_back" => jet_jit_deque_pop_back: sig_len;
+    deque_peek_front: "jet_jit_deque_peek_front" => jet_jit_deque_peek_front: sig_len;
+    deque_peek_back: "jet_jit_deque_peek_back" => jet_jit_deque_peek_back: sig_len;
+    deque_len: "jet_jit_deque_len" => jet_jit_deque_len: sig_len;
+    deque_capacity: "jet_jit_deque_capacity" => jet_jit_deque_capacity: sig_len;
+    deque_contains: "jet_jit_deque_contains" => jet_jit_deque_contains: sig_list_eq;
+    deque_get: "jet_jit_deque_get" => jet_jit_deque_get: sig_get_opt;
+    deque_delete: "jet_jit_deque_delete" => jet_jit_deque_delete: sig_push;
+    deque_to_list: "jet_jit_deque_to_list" => jet_jit_deque_to_list: sig_len;
+    deque_join: "jet_jit_deque_join" => jet_jit_deque_join: sig_join;
+    deque_reverse: "jet_jit_deque_reverse" => jet_jit_deque_reverse: sig_len;
+    deque_split: "jet_jit_deque_split" => jet_jit_deque_split: sig_get_opt;
+    deque_from: "jet_jit_deque_from" => jet_jit_deque_from: sig_len;
+    bag_new: "jet_jit_bag_new" => jet_jit_bag_new: sig_new;
+    bag_add: "jet_jit_bag_add" => jet_jit_bag_add: sig_list_eq;
+    bag_remove: "jet_jit_bag_remove" => jet_jit_bag_remove: sig_push;
+    bag_has: "jet_jit_bag_has" => jet_jit_bag_has: sig_list_eq;
+    bag_count: "jet_jit_bag_count" => jet_jit_bag_count: sig_get_opt;
+    bag_len: "jet_jit_bag_len" => jet_jit_bag_len: sig_len;
+    sorted_set_new: "jet_jit_sorted_set_new" => jet_jit_sorted_set_new: sig_sorted_set_new;
+    sorted_set_len: "jet_jit_sorted_set_len" => jet_jit_sorted_set_len: sig_len;
+    sorted_set_has: "jet_jit_sorted_set_has" => jet_jit_sorted_set_has: sig_list_eq;
+    sorted_set_from: "jet_jit_sorted_set_from" => jet_jit_sorted_set_from: sig_set_from;
+    sorted_set_insert: "jet_jit_sorted_set_insert" => jet_jit_sorted_set_insert: sig_list_eq;
+    sorted_set_remove: "jet_jit_sorted_set_remove" => jet_jit_sorted_set_remove: sig_push;
+    sorted_set_to_list: "jet_jit_sorted_set_to_list" => jet_jit_sorted_set_to_list: sig_len;
+    sorted_set_first: "jet_jit_sorted_set_first" => jet_jit_sorted_set_first: sig_len;
+    sorted_set_last: "jet_jit_sorted_set_last" => jet_jit_sorted_set_last: sig_len;
+    sorted_set_union: "jet_jit_sorted_set_union" => jet_jit_sorted_set_union: sig_get_opt;
+    sorted_set_intersection: "jet_jit_sorted_set_intersection" => jet_jit_sorted_set_intersection: sig_get_opt;
+    sorted_set_difference: "jet_jit_sorted_set_difference" => jet_jit_sorted_set_difference: sig_get_opt;
+    sorted_set_symmetric_difference: "jet_jit_sorted_set_symmetric_difference" => jet_jit_sorted_set_symmetric_difference: sig_get_opt;
+    sorted_set_is_subset: "jet_jit_sorted_set_is_subset" => jet_jit_sorted_set_is_subset: sig_list_eq;
+    sorted_set_is_superset: "jet_jit_sorted_set_is_superset" => jet_jit_sorted_set_is_superset: sig_list_eq;
+    sorted_set_is_disjoint: "jet_jit_sorted_set_is_disjoint" => jet_jit_sorted_set_is_disjoint: sig_list_eq;
+    priority_queue_new: "jet_jit_priority_queue_new" => jet_jit_priority_queue_new: sig_new;
+    priority_queue_len: "jet_jit_priority_queue_len" => jet_jit_priority_queue_len: sig_len;
+    priority_queue_from: "jet_jit_priority_queue_from" => jet_jit_priority_queue_from: sig_len;
+    priority_queue_push: "jet_jit_priority_queue_push" => jet_jit_priority_queue_push: sig_push;
+    priority_queue_peek: "jet_jit_priority_queue_peek" => jet_jit_priority_queue_peek: sig_len;
+    priority_queue_pop: "jet_jit_priority_queue_pop" => jet_jit_priority_queue_pop: sig_len;
+    priority_queue_to_sorted_list: "jet_jit_priority_queue_to_sorted_list" => jet_jit_priority_queue_to_sorted_list: sig_len;
+    lru_new: "jet_jit_lru_new" => jet_jit_lru_new: sig_len;
+    lru_put: "jet_jit_lru_put" => jet_jit_lru_put: sig_three_ret;
+    lru_get: "jet_jit_lru_get" => jet_jit_lru_get: sig_get_opt;
+    lru_has: "jet_jit_lru_has" => jet_jit_lru_has: sig_list_eq;
+    lru_keys: "jet_jit_lru_keys" => jet_jit_lru_keys: sig_len;
+    bit_set_new: "jet_jit_bit_set_new" => jet_jit_bit_set_new: sig_new;
+    bit_set_add: "jet_jit_bit_set_add" => jet_jit_bit_set_add: sig_list_eq;
+    bit_set_remove: "jet_jit_bit_set_remove" => jet_jit_bit_set_remove: sig_push;
+    bit_set_to_list: "jet_jit_bit_set_to_list" => jet_jit_bit_set_to_list: sig_len;
+    bit_set_len: "jet_jit_bit_set_len" => jet_jit_bit_set_len: sig_len;
+    bit_set_count: "jet_jit_bit_set_count" => jet_jit_bit_set_count: sig_len;
+    byte_buffer_new: "jet_jit_byte_buffer_new" => jet_jit_byte_buffer_new: sig_new;
+    byte_buffer_with_capacity: "jet_jit_byte_buffer_with_capacity" => jet_jit_byte_buffer_with_capacity: sig_len;
+    byte_buffer_from: "jet_jit_byte_buffer_from" => jet_jit_byte_buffer_from: sig_len;
+    byte_buffer_write: "jet_jit_byte_buffer_write" => jet_jit_byte_buffer_write: sig_map_insert;
+    byte_buffer_to_bytes: "jet_jit_byte_buffer_to_bytes" => jet_jit_byte_buffer_to_bytes: sig_len;
+    byte_buffer_method: "jet_jit_byte_buffer_method" => jet_jit_byte_buffer_method: sig_four_ret;
 }
 
-pub(crate) fn register_collections_symbols(builder: &mut cranelift_jit::JITBuilder) {
-    builder.symbol("jet_jit_io_args", jet_jit_io_args as *const u8);
-    builder.symbol("jet_jit_list_new", jet_jit_list_new as *const u8);
-    builder.symbol("jet_jit_list_uninit", jet_jit_list_uninit as *const u8);
-    builder.symbol("jet_jit_list_push", jet_jit_list_push as *const u8);
-    builder.symbol("jet_jit_list_push_f64", jet_jit_list_push_f64 as *const u8);
-    builder.symbol(
-        "jet_jit_list_push_range",
-        jet_jit_list_push_range as *const u8,
-    );
-    builder.symbol("jet_jit_list_get", jet_jit_list_get as *const u8);
-    builder.symbol("jet_jit_list_get_f64", jet_jit_list_get_f64 as *const u8);
-    builder.symbol(
-        "jet_jit_list_get_range_start",
-        jet_jit_list_get_range_start as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_list_get_range_end",
-        jet_jit_list_get_range_end as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_list_get_range_exclusive",
-        jet_jit_list_get_range_exclusive as *const u8,
-    );
-    builder.symbol("jet_jit_list_get_opt", jet_jit_list_get_opt as *const u8);
-    builder.symbol("jet_jit_list_set", jet_jit_list_set as *const u8);
-    builder.symbol("jet_jit_list_set_f64", jet_jit_list_set_f64 as *const u8);
-    builder.symbol("jet_jit_list_len", jet_jit_list_len as *const u8);
-    builder.symbol("jet_jit_list_contains_str", jet_jit_list_contains_str as *const u8);
-    builder.symbol("jet_jit_list_eq", jet_jit_list_eq as *const u8);
-    builder.symbol("jet_jit_list_indexes", jet_jit_list_indexes as *const u8);
-    builder.symbol("jet_jit_list_sort", jet_jit_list_sort as *const u8);
-    builder.symbol("jet_jit_list_sort_str", jet_jit_list_sort_str as *const u8);
-    builder.symbol("jet_jit_list_clone", jet_jit_list_clone as *const u8);
-    builder.symbol("jet_jit_list_slice", jet_jit_list_slice as *const u8);
-    builder.symbol("jet_jit_list_range_end", jet_jit_list_range_end as *const u8);
-    builder.symbol("jet_jit_split_write", jet_jit_split_write as *const u8);
-    builder.symbol(
-        "jet_jit_get_disjoint_write",
-        jet_jit_get_disjoint_write as *const u8,
-    );
-    builder.symbol("jet_jit_range_contains", jet_jit_range_contains as *const u8);
-    builder.symbol("jet_jit_range_show", jet_jit_range_show as *const u8);
-    builder.symbol("jet_jit_range_equal", jet_jit_range_equal as *const u8);
-    builder.symbol("jet_jit_list_join_str", jet_jit_list_join_str as *const u8);
-    builder.symbol("jet_jit_loop_stride_check", jet_jit_loop_stride_check as *const u8);
-    builder.symbol("jet_jit_map_new", jet_jit_map_new as *const u8);
-    builder.symbol("jet_jit_map_clone", jet_jit_map_clone as *const u8);
-    builder.symbol("jet_jit_map_merge", jet_jit_map_merge as *const u8);
-    builder.symbol("jet_jit_map_insert", jet_jit_map_insert as *const u8);
-    builder.symbol("jet_jit_map_increment", jet_jit_map_increment as *const u8);
-    builder.symbol("jet_jit_map_get", jet_jit_map_get as *const u8);
-    builder.symbol("jet_jit_map_validate", jet_jit_map_validate as *const u8);
-    builder.symbol("jet_jit_map_get_opt", jet_jit_map_get_opt as *const u8);
-    builder.symbol("jet_jit_map_len", jet_jit_map_len as *const u8);
-    builder.symbol("jet_jit_map_key_at", jet_jit_map_key_at as *const u8);
-    builder.symbol("jet_jit_map_value_at", jet_jit_map_value_at as *const u8);
-    builder.symbol("jet_jit_map_keys", jet_jit_map_keys as *const u8);
-    builder.symbol("jet_jit_map_values", jet_jit_map_values as *const u8);
-    builder.symbol("jet_jit_iter_take", jet_jit_iter_take as *const u8);
-    builder.symbol("jet_jit_iter_skip", jet_jit_iter_skip as *const u8);
-    builder.symbol("jet_jit_iter_step_by", jet_jit_iter_step_by as *const u8);
-    builder.symbol("jet_jit_iter_dedup", jet_jit_iter_dedup as *const u8);
-    builder.symbol("jet_jit_iter_chunks", jet_jit_iter_chunks as *const u8);
-    builder.symbol("jet_jit_iter_windows", jet_jit_iter_windows as *const u8);
-    builder.symbol("jet_jit_list_sum_i64", jet_jit_list_sum_i64 as *const u8);
-    builder.symbol("jet_jit_list_product_i64", jet_jit_list_product_i64 as *const u8);
-    builder.symbol("jet_jit_list_min_i64", jet_jit_list_min_i64 as *const u8);
-    builder.symbol("jet_jit_list_max_i64", jet_jit_list_max_i64 as *const u8);
-    builder.symbol("jet_jit_list_flatten", jet_jit_list_flatten as *const u8);
-    builder.symbol("jet_jit_list_intersperse", jet_jit_list_intersperse as *const u8);
-    builder.symbol("jet_jit_list_zip", jet_jit_list_zip as *const u8);
-    builder.symbol("jet_jit_list_unzip", jet_jit_list_unzip as *const u8);
-    builder.symbol(
-        "jet_jit_list_sort_by_i64_keys",
-        jet_jit_list_sort_by_i64_keys as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_list_sort_by_str_keys",
-        jet_jit_list_sort_by_str_keys as *const u8,
-    );
-    builder.symbol("jet_jit_print_list", jet_jit_print_list as *const u8);
-    builder.symbol("jet_jit_print_opt", jet_jit_print_opt as *const u8);
-    builder.symbol("jet_jit_print_enum", jet_jit_print_enum as *const u8);
-    builder.symbol("jet_jit_list_show", jet_jit_list_show as *const u8);
-    builder.symbol("jet_jit_list_remove", jet_jit_list_remove as *const u8);
-    builder.symbol("jet_jit_list_pop", jet_jit_list_pop as *const u8);
-    builder.symbol("jet_jit_list_insert", jet_jit_list_insert as *const u8);
-    builder.symbol("jet_jit_set_from_list", jet_jit_set_from_list as *const u8);
-    builder.symbol("jet_jit_set_new", jet_jit_set_new as *const u8);
-    builder.symbol("jet_jit_set_insert", jet_jit_set_insert as *const u8);
-    builder.symbol("jet_jit_set_remove", jet_jit_set_remove as *const u8);
-    builder.symbol("jet_jit_set_has", jet_jit_set_has as *const u8);
-    builder.symbol("jet_jit_set_len", jet_jit_set_len as *const u8);
-    builder.symbol("jet_jit_set_to_list", jet_jit_set_to_list as *const u8);
-    builder.symbol("jet_jit_set_copy", jet_jit_set_copy as *const u8);
-    builder.symbol("jet_jit_set_equal", jet_jit_set_equal as *const u8);
-    builder.symbol("jet_jit_set_capacity", jet_jit_set_capacity as *const u8);
-    builder.symbol("jet_jit_set_first", jet_jit_set_first as *const u8);
-    builder.symbol("jet_jit_set_replace", jet_jit_set_replace as *const u8);
-    builder.symbol("jet_jit_set_take", jet_jit_set_take as *const u8);
-    builder.symbol("jet_jit_set_union", jet_jit_set_union as *const u8);
-    builder.symbol(
-        "jet_jit_set_intersection",
-        jet_jit_set_intersection as *const u8,
-    );
-    builder.symbol("jet_jit_set_difference", jet_jit_set_difference as *const u8);
-    builder.symbol(
-        "jet_jit_set_symmetric_difference",
-        jet_jit_set_symmetric_difference as *const u8,
-    );
-    builder.symbol("jet_jit_set_is_subset", jet_jit_set_is_subset as *const u8);
-    builder.symbol("jet_jit_set_is_superset", jet_jit_set_is_superset as *const u8);
-    builder.symbol("jet_jit_set_is_disjoint", jet_jit_set_is_disjoint as *const u8);
-    builder.symbol("jet_jit_deque_new", jet_jit_deque_new as *const u8);
-    builder.symbol("jet_jit_deque_push_front", jet_jit_deque_push_front as *const u8);
-    builder.symbol("jet_jit_deque_push_back", jet_jit_deque_push_back as *const u8);
-    builder.symbol("jet_jit_deque_pop_front", jet_jit_deque_pop_front as *const u8);
-    builder.symbol("jet_jit_deque_pop_back", jet_jit_deque_pop_back as *const u8);
-    builder.symbol("jet_jit_deque_peek_front", jet_jit_deque_peek_front as *const u8);
-    builder.symbol("jet_jit_deque_peek_back", jet_jit_deque_peek_back as *const u8);
-    builder.symbol("jet_jit_deque_len", jet_jit_deque_len as *const u8);
-    builder.symbol("jet_jit_deque_capacity", jet_jit_deque_capacity as *const u8);
-    builder.symbol("jet_jit_deque_contains", jet_jit_deque_contains as *const u8);
-    builder.symbol("jet_jit_deque_get", jet_jit_deque_get as *const u8);
-    builder.symbol("jet_jit_deque_delete", jet_jit_deque_delete as *const u8);
-    builder.symbol("jet_jit_deque_to_list", jet_jit_deque_to_list as *const u8);
-    builder.symbol("jet_jit_deque_join", jet_jit_deque_join as *const u8);
-    builder.symbol("jet_jit_deque_reverse", jet_jit_deque_reverse as *const u8);
-    builder.symbol("jet_jit_deque_split", jet_jit_deque_split as *const u8);
-    builder.symbol("jet_jit_deque_from", jet_jit_deque_from as *const u8);
-    builder.symbol("jet_jit_bag_new", jet_jit_bag_new as *const u8);
-    builder.symbol("jet_jit_bag_add", jet_jit_bag_add as *const u8);
-    builder.symbol("jet_jit_bag_remove", jet_jit_bag_remove as *const u8);
-    builder.symbol("jet_jit_bag_has", jet_jit_bag_has as *const u8);
-    builder.symbol("jet_jit_bag_count", jet_jit_bag_count as *const u8);
-    builder.symbol("jet_jit_bag_len", jet_jit_bag_len as *const u8);
-    builder.symbol("jet_jit_sorted_set_new", jet_jit_sorted_set_new as *const u8);
-    builder.symbol("jet_jit_sorted_set_len", jet_jit_sorted_set_len as *const u8);
-    builder.symbol("jet_jit_sorted_set_has", jet_jit_sorted_set_has as *const u8);
-    builder.symbol("jet_jit_sorted_set_from", jet_jit_sorted_set_from as *const u8);
-    builder.symbol("jet_jit_sorted_set_insert", jet_jit_sorted_set_insert as *const u8);
-    builder.symbol("jet_jit_sorted_set_remove", jet_jit_sorted_set_remove as *const u8);
-    builder.symbol("jet_jit_sorted_set_to_list", jet_jit_sorted_set_to_list as *const u8);
-    builder.symbol("jet_jit_sorted_set_first", jet_jit_sorted_set_first as *const u8);
-    builder.symbol("jet_jit_sorted_set_last", jet_jit_sorted_set_last as *const u8);
-    builder.symbol(
-        "jet_jit_sorted_set_union",
-        jet_jit_sorted_set_union as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_sorted_set_intersection",
-        jet_jit_sorted_set_intersection as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_sorted_set_difference",
-        jet_jit_sorted_set_difference as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_sorted_set_symmetric_difference",
-        jet_jit_sorted_set_symmetric_difference as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_sorted_set_is_subset",
-        jet_jit_sorted_set_is_subset as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_sorted_set_is_superset",
-        jet_jit_sorted_set_is_superset as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_sorted_set_is_disjoint",
-        jet_jit_sorted_set_is_disjoint as *const u8,
-    );
-    builder.symbol("jet_jit_priority_queue_new", jet_jit_priority_queue_new as *const u8);
-    builder.symbol("jet_jit_priority_queue_len", jet_jit_priority_queue_len as *const u8);
-    builder.symbol("jet_jit_priority_queue_from", jet_jit_priority_queue_from as *const u8);
-    builder.symbol("jet_jit_priority_queue_push", jet_jit_priority_queue_push as *const u8);
-    builder.symbol("jet_jit_priority_queue_peek", jet_jit_priority_queue_peek as *const u8);
-    builder.symbol("jet_jit_priority_queue_pop", jet_jit_priority_queue_pop as *const u8);
-    builder.symbol(
-        "jet_jit_priority_queue_to_sorted_list",
-        jet_jit_priority_queue_to_sorted_list as *const u8,
-    );
-    builder.symbol("jet_jit_lru_new", jet_jit_lru_new as *const u8);
-    builder.symbol("jet_jit_lru_put", jet_jit_lru_put as *const u8);
-    builder.symbol("jet_jit_lru_get", jet_jit_lru_get as *const u8);
-    builder.symbol("jet_jit_lru_has", jet_jit_lru_has as *const u8);
-    builder.symbol("jet_jit_lru_keys", jet_jit_lru_keys as *const u8);
-    builder.symbol("jet_jit_bit_set_new", jet_jit_bit_set_new as *const u8);
-    builder.symbol("jet_jit_bit_set_add", jet_jit_bit_set_add as *const u8);
-    builder.symbol("jet_jit_bit_set_remove", jet_jit_bit_set_remove as *const u8);
-    builder.symbol("jet_jit_bit_set_to_list", jet_jit_bit_set_to_list as *const u8);
-    builder.symbol("jet_jit_bit_set_len", jet_jit_bit_set_len as *const u8);
-    builder.symbol("jet_jit_bit_set_count", jet_jit_bit_set_count as *const u8);
-    builder.symbol("jet_jit_byte_buffer_new", jet_jit_byte_buffer_new as *const u8);
-    builder.symbol(
-        "jet_jit_byte_buffer_with_capacity",
-        jet_jit_byte_buffer_with_capacity as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_byte_buffer_from",
-        jet_jit_byte_buffer_from as *const u8,
-    );
-    builder.symbol("jet_jit_byte_buffer_write", jet_jit_byte_buffer_write as *const u8);
-    builder.symbol(
-        "jet_jit_byte_buffer_to_bytes",
-        jet_jit_byte_buffer_to_bytes as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_byte_buffer_method",
-        jet_jit_byte_buffer_method as *const u8,
-    );
-}
 
-pub(crate) fn declare_collections_host_fns(
-    module: &mut cranelift_jit::JITModule,
-) -> Result<CollectionsHostFns, String> {
-    use cranelift_codegen::ir::{types, AbiParam, Signature};
-    use cranelift_module::{Linkage, Module};
 
-    let cc = module.target_config().default_call_conv;
-    let mut sig_new = Signature::new(cc);
-    sig_new.returns.push(AbiParam::new(types::I64));
-    let mut sig_sorted_set_new = sig_new.clone();
-    sig_sorted_set_new.params.push(AbiParam::new(types::I64));
-    let mut sig_uninit = Signature::new(cc);
-    sig_uninit.params.push(AbiParam::new(types::I64));
-    sig_uninit.returns.push(AbiParam::new(types::I64));
-    let mut sig_push = Signature::new(cc);
-    sig_push.params.push(AbiParam::new(types::I64));
-    sig_push.params.push(AbiParam::new(types::I64));
-    let mut sig_push_f64 = Signature::new(cc);
-    sig_push_f64.params.push(AbiParam::new(types::I64));
-    sig_push_f64.params.push(AbiParam::new(types::F64));
-    let mut sig_push_range = Signature::new(cc);
-    sig_push_range.params.push(AbiParam::new(types::I64));
-    sig_push_range.params.push(AbiParam::new(types::I64));
-    sig_push_range.params.push(AbiParam::new(types::I64));
-    sig_push_range.params.push(AbiParam::new(types::I8));
-    let mut sig_len = Signature::new(cc);
-    sig_len.params.push(AbiParam::new(types::I64));
-    sig_len.returns.push(AbiParam::new(types::I64));
-    let mut sig_get = sig_len.clone();
-    sig_get.params.push(AbiParam::new(types::I64));
-    sig_get.params.push(AbiParam::new(types::I32));
-    let mut sig_get_f64 = sig_get.clone();
-    sig_get_f64.returns.clear();
-    sig_get_f64.returns.push(AbiParam::new(types::F64));
-    let sig_get_range_scalar = sig_get.clone();
-    let mut sig_get_range_exclusive = sig_get.clone();
-    sig_get_range_exclusive.returns.clear();
-    sig_get_range_exclusive
-        .returns
-        .push(AbiParam::new(types::I8));
-    let mut sig_get_opt = sig_len.clone();
-    sig_get_opt.params.push(AbiParam::new(types::I64));
-    let mut sig_set_from = sig_len.clone();
-    sig_set_from.params.push(AbiParam::new(types::I64));
-    let mut sig_list_eq = Signature::new(cc);
-    sig_list_eq.params.push(AbiParam::new(types::I64));
-    sig_list_eq.params.push(AbiParam::new(types::I64));
-    sig_list_eq.returns.push(AbiParam::new(types::I8));
-    // list_set(list, idx, val, line)
-    let mut sig_set = Signature::new(cc);
-    sig_set.params.push(AbiParam::new(types::I64));
-    sig_set.params.push(AbiParam::new(types::I64));
-    sig_set.params.push(AbiParam::new(types::I64));
-    sig_set.params.push(AbiParam::new(types::I32));
-    // list_set_f64(list, idx, val, line)
-    let mut sig_set_f64 = Signature::new(cc);
-    sig_set_f64.params.push(AbiParam::new(types::I64));
-    sig_set_f64.params.push(AbiParam::new(types::I64));
-    sig_set_f64.params.push(AbiParam::new(types::F64));
-    sig_set_f64.params.push(AbiParam::new(types::I32));
-    let mut sig_sort = sig_len.clone();
-    sig_sort.returns.clear();
-    // list_slice(list, start, end, line) -> id
-    let mut sig_slice = Signature::new(cc);
-    sig_slice.params.push(AbiParam::new(types::I64));
-    sig_slice.params.push(AbiParam::new(types::I64));
-    sig_slice.params.push(AbiParam::new(types::I64));
-    sig_slice.params.push(AbiParam::new(types::I32));
-    sig_slice.returns.push(AbiParam::new(types::I64));
-    let mut sig_range_end = Signature::new(cc);
-    sig_range_end.params.push(AbiParam::new(types::I64));
-    sig_range_end.params.push(AbiParam::new(types::I64));
-    sig_range_end.params.push(AbiParam::new(types::I64));
-    sig_range_end.params.push(AbiParam::new(types::I64));
-    sig_range_end.params.push(AbiParam::new(types::I32));
-    sig_range_end.returns.push(AbiParam::new(types::I64));
-    let mut sig_range_contains = Signature::new(cc);
-    for _ in 0..4 {
-        sig_range_contains.params.push(AbiParam::new(types::I64));
-    }
-    sig_range_contains.returns.push(AbiParam::new(types::I8));
-    let mut sig_disjoint = sig_list_eq.clone();
-    sig_disjoint.returns.clear();
-    sig_disjoint.returns.push(AbiParam::new(types::I64));
-    let mut sig_range_show = Signature::new(cc);
-    for _ in 0..3 {
-        sig_range_show.params.push(AbiParam::new(types::I64));
-    }
-    sig_range_show.returns.push(AbiParam::new(types::I64));
-    let mut sig_range_equal = Signature::new(cc);
-    for _ in 0..6 {
-        sig_range_equal.params.push(AbiParam::new(types::I64));
-    }
-    sig_range_equal.returns.push(AbiParam::new(types::I8));
-    let mut sig_join = sig_len.clone();
-    sig_join.params.push(AbiParam::new(types::I64));
-    let mut sig_map_insert = Signature::new(cc);
-    sig_map_insert.params.push(AbiParam::new(types::I64));
-    sig_map_insert.params.push(AbiParam::new(types::I64));
-    sig_map_insert.params.push(AbiParam::new(types::I64));
-    let mut sig_three_ret = sig_map_insert.clone();
-    sig_three_ret.returns.push(AbiParam::new(types::I64));
-    let mut sig_four_ret = sig_three_ret.clone();
-    sig_four_ret.params.push(AbiParam::new(types::I64));
-    let sig_map_get = sig_get.clone();
-    let sig_map_get_opt = sig_get_opt.clone();
-    let sig_map_at = sig_get_opt.clone();
-    let mut sig_print_list = sig_get_opt.clone();
-    sig_print_list.returns.clear();
-    let mut sig_print_enum = Signature::new(cc);
-    sig_print_enum.params.push(AbiParam::new(types::I64));
-    sig_print_enum.params.push(AbiParam::new(types::I64));
-    sig_print_enum.params.push(AbiParam::new(types::I64));
-    let mut sig_sort_by_keys = sig_get_opt.clone();
-    sig_sort_by_keys.returns.clear();
 
-    let mut import = |name: &str, sig: &Signature| -> Result<cranelift_module::FuncId, String> {
-        module
-            .declare_function(name, Linkage::Import, sig)
-            .map_err(|e| e.to_string())
-    };
 
-    Ok(CollectionsHostFns {
-        io_args: import("jet_jit_io_args", &sig_new)?,
-        list_new: import("jet_jit_list_new", &sig_new)?,
-        list_uninit: import("jet_jit_list_uninit", &sig_uninit)?,
-        list_push: import("jet_jit_list_push", &sig_push)?,
-        list_push_f64: import("jet_jit_list_push_f64", &sig_push_f64)?,
-        list_push_range: import("jet_jit_list_push_range", &sig_push_range)?,
-        list_get: import("jet_jit_list_get", &sig_get)?,
-        list_get_f64: import("jet_jit_list_get_f64", &sig_get_f64)?,
-        list_get_range_start: import(
-            "jet_jit_list_get_range_start",
-            &sig_get_range_scalar,
-        )?,
-        list_get_range_end: import("jet_jit_list_get_range_end", &sig_get_range_scalar)?,
-        list_get_range_exclusive: import(
-            "jet_jit_list_get_range_exclusive",
-            &sig_get_range_exclusive,
-        )?,
-        list_get_opt: import("jet_jit_list_get_opt", &sig_get_opt)?,
-        list_set: import("jet_jit_list_set", &sig_set)?,
-        list_set_f64: import("jet_jit_list_set_f64", &sig_set_f64)?,
-        list_len: import("jet_jit_list_len", &sig_len)?,
-        list_contains_str: import("jet_jit_list_contains_str", &sig_list_eq)?,
-        list_eq: import("jet_jit_list_eq", &sig_list_eq)?,
-        list_indexes: import("jet_jit_list_indexes", &sig_len)?,
-        list_sort: import("jet_jit_list_sort", &sig_sort)?,
-        list_sort_str: import("jet_jit_list_sort_str", &sig_sort)?,
-        list_clone: import("jet_jit_list_clone", &sig_len)?,
-        list_slice: import("jet_jit_list_slice", &sig_slice)?,
-        list_range_end: import("jet_jit_list_range_end", &sig_range_end)?,
-        split_write: import("jet_jit_split_write", &sig_disjoint)?,
-        get_disjoint_write: import("jet_jit_get_disjoint_write", &sig_disjoint)?,
-        range_contains: import("jet_jit_range_contains", &sig_range_contains)?,
-        range_show: import("jet_jit_range_show", &sig_range_show)?,
-        range_equal: import("jet_jit_range_equal", &sig_range_equal)?,
-        list_join_str: import("jet_jit_list_join_str", &sig_join)?,
-        loop_stride_check: import("jet_jit_loop_stride_check", &sig_len)?,
-        map_new: import("jet_jit_map_new", &sig_new)?,
-        map_clone: import("jet_jit_map_clone", &sig_len)?,
-        map_merge: import("jet_jit_map_merge", &sig_get_opt)?,
-        map_insert: import("jet_jit_map_insert", &sig_map_insert)?,
-        map_increment: import("jet_jit_map_increment", &sig_push)?,
-        map_get: import("jet_jit_map_get", &sig_map_get)?,
-        map_validate: import("jet_jit_map_validate", &sig_len)?,
-        map_get_opt: import("jet_jit_map_get_opt", &sig_map_get_opt)?,
-        map_len: import("jet_jit_map_len", &sig_len)?,
-        map_key_at: import("jet_jit_map_key_at", &sig_map_at)?,
-        map_value_at: import("jet_jit_map_value_at", &sig_map_at)?,
-        map_keys: import("jet_jit_map_keys", &sig_len)?,
-        map_values: import("jet_jit_map_values", &sig_len)?,
-        iter_take: import("jet_jit_iter_take", &sig_get_opt)?,
-        iter_skip: import("jet_jit_iter_skip", &sig_get_opt)?,
-        iter_step_by: import("jet_jit_iter_step_by", &sig_get_opt)?,
-        iter_dedup: import("jet_jit_iter_dedup", &sig_get_opt)?,
-        iter_chunks: import("jet_jit_iter_chunks", &sig_get_opt)?,
-        iter_windows: import("jet_jit_iter_windows", &sig_get_opt)?,
-        list_sum_i64: import("jet_jit_list_sum_i64", &sig_len)?,
-        list_product_i64: import("jet_jit_list_product_i64", &sig_len)?,
-        list_min_i64: import("jet_jit_list_min_i64", &sig_len)?,
-        list_max_i64: import("jet_jit_list_max_i64", &sig_len)?,
-        list_flatten: import("jet_jit_list_flatten", &sig_len)?,
-        list_intersperse: import("jet_jit_list_intersperse", &sig_get_opt)?,
-        list_zip: import("jet_jit_list_zip", &sig_get_opt)?,
-        list_unzip: import("jet_jit_list_unzip", &sig_len)?,
-        list_sort_by_i64_keys: import("jet_jit_list_sort_by_i64_keys", &sig_sort_by_keys)?,
-        list_sort_by_str_keys: import("jet_jit_list_sort_by_str_keys", &sig_sort_by_keys)?,
-        print_list: import("jet_jit_print_list", &sig_print_list)?,
-        print_opt: import("jet_jit_print_opt", &sig_print_list)?,
-        print_enum: import("jet_jit_print_enum", &sig_print_enum)?,
-        list_show: import("jet_jit_list_show", &sig_get_opt)?,
-        list_remove: import("jet_jit_list_remove", &sig_get_opt)?,
-        list_pop: import("jet_jit_list_pop", &sig_len)?,
-        list_insert: import("jet_jit_list_insert", &sig_map_insert)?,
-        set_from_list: import("jet_jit_set_from_list", &sig_set_from)?,
-        set_new: import("jet_jit_set_new", &sig_sorted_set_new)?,
-        set_insert: import("jet_jit_set_insert", &sig_list_eq)?,
-        set_remove: import("jet_jit_set_remove", &sig_push)?,
-        set_has: import("jet_jit_set_has", &sig_list_eq)?,
-        set_len: import("jet_jit_set_len", &sig_len)?,
-        set_to_list: import("jet_jit_set_to_list", &sig_len)?,
-        set_copy: import("jet_jit_set_copy", &sig_len)?,
-        set_equal: import("jet_jit_set_equal", &sig_list_eq)?,
-        set_capacity: import("jet_jit_set_capacity", &sig_len)?,
-        set_first: import("jet_jit_set_first", &sig_len)?,
-        set_replace: import("jet_jit_set_replace", &sig_get_opt)?,
-        set_take: import("jet_jit_set_take", &sig_get_opt)?,
-        set_union: import("jet_jit_set_union", &sig_get_opt)?,
-        set_intersection: import("jet_jit_set_intersection", &sig_get_opt)?,
-        set_difference: import("jet_jit_set_difference", &sig_get_opt)?,
-        set_symmetric_difference: import("jet_jit_set_symmetric_difference", &sig_get_opt)?,
-        set_is_subset: import("jet_jit_set_is_subset", &sig_list_eq)?,
-        set_is_superset: import("jet_jit_set_is_superset", &sig_list_eq)?,
-        set_is_disjoint: import("jet_jit_set_is_disjoint", &sig_list_eq)?,
-        deque_new: import("jet_jit_deque_new", &sig_new)?,
-        deque_push_front: import("jet_jit_deque_push_front", &sig_push)?,
-        deque_push_back: import("jet_jit_deque_push_back", &sig_push)?,
-        deque_pop_front: import("jet_jit_deque_pop_front", &sig_len)?,
-        deque_pop_back: import("jet_jit_deque_pop_back", &sig_len)?,
-        deque_peek_front: import("jet_jit_deque_peek_front", &sig_len)?,
-        deque_peek_back: import("jet_jit_deque_peek_back", &sig_len)?,
-        deque_len: import("jet_jit_deque_len", &sig_len)?,
-        deque_capacity: import("jet_jit_deque_capacity", &sig_len)?,
-        deque_contains: import("jet_jit_deque_contains", &sig_list_eq)?,
-        deque_get: import("jet_jit_deque_get", &sig_get_opt)?,
-        deque_delete: import("jet_jit_deque_delete", &sig_push)?,
-        deque_to_list: import("jet_jit_deque_to_list", &sig_len)?,
-        deque_join: import("jet_jit_deque_join", &sig_join)?,
-        deque_reverse: import("jet_jit_deque_reverse", &sig_len)?,
-        deque_split: import("jet_jit_deque_split", &sig_get_opt)?,
-        deque_from: import("jet_jit_deque_from", &sig_len)?,
-        bag_new: import("jet_jit_bag_new", &sig_new)?,
-        bag_add: import("jet_jit_bag_add", &sig_list_eq)?,
-        bag_remove: import("jet_jit_bag_remove", &sig_push)?,
-        bag_has: import("jet_jit_bag_has", &sig_list_eq)?,
-        bag_count: import("jet_jit_bag_count", &sig_get_opt)?,
-        bag_len: import("jet_jit_bag_len", &sig_len)?,
-        sorted_set_new: import("jet_jit_sorted_set_new", &sig_sorted_set_new)?,
-        sorted_set_len: import("jet_jit_sorted_set_len", &sig_len)?,
-        sorted_set_has: import("jet_jit_sorted_set_has", &sig_list_eq)?,
-        sorted_set_from: import("jet_jit_sorted_set_from", &sig_set_from)?,
-        sorted_set_insert: import("jet_jit_sorted_set_insert", &sig_list_eq)?,
-        sorted_set_remove: import("jet_jit_sorted_set_remove", &sig_push)?,
-        sorted_set_to_list: import("jet_jit_sorted_set_to_list", &sig_len)?,
-        sorted_set_first: import("jet_jit_sorted_set_first", &sig_len)?,
-        sorted_set_last: import("jet_jit_sorted_set_last", &sig_len)?,
-        sorted_set_union: import("jet_jit_sorted_set_union", &sig_get_opt)?,
-        sorted_set_intersection: import("jet_jit_sorted_set_intersection", &sig_get_opt)?,
-        sorted_set_difference: import("jet_jit_sorted_set_difference", &sig_get_opt)?,
-        sorted_set_symmetric_difference: import(
-            "jet_jit_sorted_set_symmetric_difference",
-            &sig_get_opt,
-        )?,
-        sorted_set_is_subset: import("jet_jit_sorted_set_is_subset", &sig_list_eq)?,
-        sorted_set_is_superset: import("jet_jit_sorted_set_is_superset", &sig_list_eq)?,
-        sorted_set_is_disjoint: import("jet_jit_sorted_set_is_disjoint", &sig_list_eq)?,
-        priority_queue_new: import("jet_jit_priority_queue_new", &sig_new)?,
-        priority_queue_len: import("jet_jit_priority_queue_len", &sig_len)?,
-        priority_queue_from: import("jet_jit_priority_queue_from", &sig_len)?,
-        priority_queue_push: import("jet_jit_priority_queue_push", &sig_push)?,
-        priority_queue_peek: import("jet_jit_priority_queue_peek", &sig_len)?,
-        priority_queue_pop: import("jet_jit_priority_queue_pop", &sig_len)?,
-        priority_queue_to_sorted_list: import(
-            "jet_jit_priority_queue_to_sorted_list",
-            &sig_len,
-        )?,
-        lru_new: import("jet_jit_lru_new", &sig_len)?,
-        lru_put: import("jet_jit_lru_put", &sig_three_ret)?,
-        lru_get: import("jet_jit_lru_get", &sig_get_opt)?,
-        lru_has: import("jet_jit_lru_has", &sig_list_eq)?,
-        lru_keys: import("jet_jit_lru_keys", &sig_len)?,
-        bit_set_new: import("jet_jit_bit_set_new", &sig_new)?,
-        bit_set_add: import("jet_jit_bit_set_add", &sig_list_eq)?,
-        bit_set_remove: import("jet_jit_bit_set_remove", &sig_push)?,
-        bit_set_to_list: import("jet_jit_bit_set_to_list", &sig_len)?,
-        bit_set_len: import("jet_jit_bit_set_len", &sig_len)?,
-        bit_set_count: import("jet_jit_bit_set_count", &sig_len)?,
-        byte_buffer_new: import("jet_jit_byte_buffer_new", &sig_new)?,
-        byte_buffer_with_capacity: import("jet_jit_byte_buffer_with_capacity", &sig_len)?,
-        byte_buffer_from: import("jet_jit_byte_buffer_from", &sig_len)?,
-        byte_buffer_write: import("jet_jit_byte_buffer_write", &sig_map_insert)?,
-        byte_buffer_to_bytes: import("jet_jit_byte_buffer_to_bytes", &sig_len)?,
-        byte_buffer_method: import("jet_jit_byte_buffer_method", &sig_four_ret)?,
-    })
-}

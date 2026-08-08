@@ -480,8 +480,8 @@ impl<'a> Checker<'a> {
                 span,
             } => {
                 let span = *span;
-                let before = self.moved.clone();
-                let mut after = before.clone();
+                // D-FACT-FLOW1: one snapshot, one store per arm, one join.
+                let before = self.flow.clone();
                 // D-FLOWTYPE1=A: same Optional presence desugar as statement `if`.
                 self.rewrite_optional_flow_ne_none(cond);
                 // Value-if always has an else arm; invert atomic `== None` so the
@@ -518,20 +518,19 @@ impl<'a> Checker<'a> {
                 let then_ty = self.infer(then_value);
                 self.pop_scope();
                 for (name, at) in restore_moved {
-                    self.moved.insert(name, at);
+                    self.flow.moved.set(&name, at);
                 }
-                for (k, v) in self.moved.drain() {
-                    after.entry(k).or_insert(v);
-                }
-                self.moved = before.clone();
+                let then_path = self.flow.clone();
+                self.flow = before.clone();
                 self.push_scope();
                 self.check_block(else_body, false);
                 let else_ty = self.infer(else_value);
                 self.pop_scope();
-                for (k, v) in self.moved.drain() {
-                    after.entry(k).or_insert(v);
-                }
-                self.moved = after;
+                let else_path = self.flow.clone();
+                self.flow = crate::Sema::FlowFacts::FlowFacts::merge_paths(
+                    &before,
+                    &[then_path, else_path],
+                );
                 match (then_ty, else_ty) {
                     (Some(a), Some(b)) => {
                         // D-TOOL2: `todo` is diverging; if one branch is a
@@ -935,7 +934,7 @@ impl<'a> Checker<'a> {
                     return None;
                 }
                 // D-UNINIT-SENTINEL2: reading a `Type.{ uninit }` binding before it is written.
-                if self.uninit.contains_key(name) {
+                if self.flow.uninit.contains(name) {
                     self.diags.push(Diagnostic::error(
                         "E0420",
                         format!("`{}` may be read before it is given a value", name),
@@ -949,7 +948,7 @@ impl<'a> Checker<'a> {
                         ),
                         Some(*span),
                     ));
-                    self.uninit.remove(name); // report once, then resolve its type below
+                    self.flow.uninit.remove(name); // report once, then resolve its type below
                 }
                 // D-ALLOC2: E0632 — reading an arena `view` whose backing arena
                 // was already reset. (`alloc` and `reset` go
@@ -1690,6 +1689,7 @@ impl<'a> Checker<'a> {
                     args.iter()
                         .filter_map(|arg| match &arg.expr {
                             Expr::Ident(name, _) => self
+                                .flow
                                 .uninit
                                 .get(name)
                                 .cloned()
@@ -1706,7 +1706,7 @@ impl<'a> Checker<'a> {
                     // `Fixed.over(&bytes)` is the one raw-storage adapter: it
                     // borrows the wrapper without claiming initialization.
                     for (name, _) in &fixed_uninit {
-                        self.uninit.remove(name);
+                        self.flow.uninit.remove(name);
                     }
                 }
                 let inferred = self.infer_method_call(
@@ -1719,7 +1719,9 @@ impl<'a> Checker<'a> {
                     recv_type,
                     resolved_ret,
                 );
-                self.uninit.extend(fixed_uninit);
+                for (name, state) in fixed_uninit {
+                    self.flow.uninit.set(&name, state);
+                }
                 inferred
             }
             Expr::StructLit {

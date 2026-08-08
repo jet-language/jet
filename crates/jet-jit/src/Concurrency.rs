@@ -891,244 +891,102 @@ extern "C" fn jet_jit_sleep(millis: i64) -> i64 {
     })
 }
 
-pub(crate) struct ConcurrencyHostFns {
-    pub channel_new: cranelift_module::FuncId,
-    pub channel_bounded: cranelift_module::FuncId,
-    pub generator_channel_new: cranelift_module::FuncId,
-    pub channel_close: cranelift_module::FuncId,
-    pub channel_sender: cranelift_module::FuncId,
-    pub sender_clone: cranelift_module::FuncId,
-    pub sender_send: cranelift_module::FuncId,
-    pub sender_close: cranelift_module::FuncId,
-    pub generator_receive_status: cranelift_module::FuncId,
-    pub channel_receive: cranelift_module::FuncId,
-    pub channel_receive_status: cranelift_module::FuncId,
-    pub panic_channel_closed: cranelift_module::FuncId,
-    pub spawn0: cranelift_module::FuncId,
-    pub spawn1: cranelift_module::FuncId,
-    pub spawn2: cranelift_module::FuncId,
-    pub spawn3: cranelift_module::FuncId,
-    pub spawn4: cranelift_module::FuncId,
-    pub task_group_new: cranelift_module::FuncId,
-    pub task_group_register: cranelift_module::FuncId,
-    pub task_group_close: cranelift_module::FuncId,
-    pub task_join: cranelift_module::FuncId,
-    pub task_cancel: cranelift_module::FuncId,
-    pub task_detach: cranelift_module::FuncId,
-    pub task_pause: cranelift_module::FuncId,
-    pub task_resume: cranelift_module::FuncId,
-    pub task_trace: cranelift_module::FuncId,
-    pub task_exception: cranelift_module::FuncId,
-    pub task_yield: cranelift_module::FuncId,
-    pub task_current_trace: cranelift_module::FuncId,
-    pub task_all: cranelift_module::FuncId,
-    pub task_wait_all: cranelift_module::FuncId,
-    pub task_trace_all: cranelift_module::FuncId,
-    pub task_detach_all: cranelift_module::FuncId,
-    pub task_cancel_all: cranelift_module::FuncId,
-    pub task_pause_all: cranelift_module::FuncId,
-    pub task_resume_all: cranelift_module::FuncId,
-    pub task_race: cranelift_module::FuncId,
-    pub task_any: cranelift_module::FuncId,
-    pub select_wait: cranelift_module::FuncId,
-    pub after_value: cranelift_module::FuncId,
-    pub interval: cranelift_module::FuncId,
-    pub shield_enter: cranelift_module::FuncId,
-    pub shield_leave: cranelift_module::FuncId,
-    pub pending_exit_status: cranelift_module::FuncId,
-    pub wait_value: cranelift_module::FuncId,
-    pub sleep: cranelift_module::FuncId,
-    pub time_now: cranelift_module::FuncId,
-    pub deadline_push: cranelift_module::FuncId,
-    pub deadline_pop: cranelift_module::FuncId,
+host_fns! {
+    struct ConcurrencyHostFns;
+    register: register_concurrency_symbols;
+    declare: declare_concurrency_host_fns(module) {
+        use cranelift_codegen::ir::{types, AbiParam, Signature};
+        use cranelift_module::{Linkage, Module};
+        let cc = module.target_config().default_call_conv;
+        let mut sig_channel_new = Signature::new(cc);
+        sig_channel_new.returns.push(AbiParam::new(types::I64));
+        let mut sig_i64 = Signature::new(cc);
+        sig_i64.params.push(AbiParam::new(types::I64));
+        sig_i64.returns.push(AbiParam::new(types::I64));
+        let mut sig_i64_i64 = sig_i64.clone();
+        sig_i64_i64.params.push(AbiParam::new(types::I64));
+        let mut sig_recv = sig_i64.clone();
+        sig_recv.params.push(AbiParam::new(types::I32));
+        let mut sig_panic_line = Signature::new(cc);
+        sig_panic_line.params.push(AbiParam::new(types::I32));
+        sig_panic_line.returns.push(AbiParam::new(types::I64));
+        let mut sig_send = Signature::new(cc);
+        sig_send.params.push(AbiParam::new(types::I64));
+        sig_send.returns.push(AbiParam::new(types::I64));
+        sig_send.params.push(AbiParam::new(types::I64));
+        let mut sig_spawn0 = Signature::new(cc);
+        sig_spawn0.params.push(AbiParam::new(types::I64));
+        sig_spawn0.returns.push(AbiParam::new(types::I64));
+        let mut sig_void_i64 = Signature::new(cc);
+        sig_void_i64.params.push(AbiParam::new(types::I64));
+        let mut sig_void_i64_i64 = sig_void_i64.clone();
+        sig_void_i64_i64.params.push(AbiParam::new(types::I64));
+        let sig_void = Signature::new(cc);
+        let mut sig_noarg_i64 = Signature::new(cc);
+        sig_noarg_i64.returns.push(AbiParam::new(types::I64));
+
+        let mut sig_spawn1 = sig_spawn0.clone();
+        sig_spawn1.params.push(AbiParam::new(types::I64));
+        let mut sig_spawn2 = sig_spawn1.clone();
+        sig_spawn2.params.push(AbiParam::new(types::I64));
+        let mut sig_spawn3 = sig_spawn2.clone();
+        sig_spawn3.params.push(AbiParam::new(types::I64));
+        let mut sig_spawn4 = sig_spawn3.clone();
+        sig_spawn4.params.push(AbiParam::new(types::I64));
+
+    }
+    channel_new: "jet_jit_channel_new" => jet_jit_channel_new: sig_channel_new;
+    channel_bounded: "jet_jit_channel_bounded" => jet_jit_channel_bounded: sig_i64;
+    generator_channel_new: "jet_jit_generator_channel_new" => jet_jit_generator_channel_new: sig_channel_new;
+    channel_close: "jet_jit_channel_close" => jet_jit_channel_close: sig_void_i64;
+    channel_sender: "jet_jit_channel_sender" => jet_jit_channel_sender: sig_i64;
+    sender_clone: "jet_jit_sender_clone" => jet_jit_sender_clone: sig_i64;
+    sender_send: "jet_jit_sender_send" => jet_jit_sender_send: sig_send;
+    sender_close: "jet_jit_sender_close" => jet_jit_sender_close: sig_void_i64_i64;
+    generator_receive_status: "jet_jit_generator_channel_receive_status" => jet_jit_generator_channel_receive_status: sig_i64;
+    channel_receive: "jet_jit_channel_receive" => jet_jit_channel_receive: sig_recv;
+    channel_receive_status: "jet_jit_channel_receive_status" => jet_jit_channel_receive_status: sig_i64;
+    panic_channel_closed: "jet_jit_panic_channel_closed" => jet_jit_panic_channel_closed: sig_panic_line;
+    spawn0: "jet_jit_spawn0" => jet_jit_spawn0: sig_spawn0;
+    spawn1: "jet_jit_spawn1" => jet_jit_spawn1: sig_spawn1;
+    spawn2: "jet_jit_spawn2" => jet_jit_spawn2: sig_spawn2;
+    spawn3: "jet_jit_spawn3" => jet_jit_spawn3: sig_spawn3;
+    spawn4: "jet_jit_spawn4" => jet_jit_spawn4: sig_spawn4;
+    task_group_new: "jet_jit_task_group_new" => jet_jit_task_group_new: sig_noarg_i64;
+    task_group_register: "jet_jit_task_group_register" => jet_jit_task_group_register: sig_void_i64_i64;
+    task_group_close: "jet_jit_task_group_close" => jet_jit_task_group_close: sig_i64;
+    task_join: "jet_jit_task_join" => jet_jit_task_join: sig_i64;
+    task_cancel: "jet_jit_task_cancel" => jet_jit_task_cancel: sig_void_i64;
+    task_detach: "jet_jit_task_detach" => jet_jit_task_detach: sig_void_i64;
+    task_pause: "jet_jit_task_pause" => jet_jit_task_pause: sig_void_i64;
+    task_resume: "jet_jit_task_resume" => jet_jit_task_resume: sig_void_i64;
+    task_trace: "jet_jit_task_trace" => jet_jit_task_trace: sig_i64;
+    task_exception: "jet_jit_task_exception" => jet_jit_task_exception: sig_i64;
+    task_yield: "jet_jit_task_yield" => jet_jit_task_yield: sig_void;
+    task_current_trace: "jet_jit_task_current_trace" => jet_jit_task_current_trace: sig_noarg_i64;
+    task_all: "jet_jit_task_all" => jet_jit_task_all: sig_i64;
+    task_wait_all: "jet_jit_task_wait_all" => jet_jit_task_wait_all: sig_i64;
+    task_trace_all: "jet_jit_task_trace_all" => jet_jit_task_trace_all: sig_i64;
+    task_detach_all: "jet_jit_task_detach_all" => jet_jit_task_detach_all: sig_void_i64;
+    task_cancel_all: "jet_jit_task_cancel_all" => jet_jit_task_cancel_all: sig_void_i64;
+    task_pause_all: "jet_jit_task_pause_all" => jet_jit_task_pause_all: sig_void_i64;
+    task_resume_all: "jet_jit_task_resume_all" => jet_jit_task_resume_all: sig_void_i64;
+    task_race: "jet_jit_task_race" => jet_jit_task_race: sig_i64;
+    task_any: "jet_jit_task_any" => jet_jit_task_any: sig_i64;
+    select_wait: "jet_jit_select_wait" => jet_jit_select_wait: sig_i64_i64;
+    after_value: "jet_jit_after_value" => jet_jit_after_value: sig_i64_i64;
+    interval: "jet_jit_interval" => jet_jit_interval: sig_i64;
+    shield_enter: "jet_jit_shield_enter" => jet_jit_shield_enter: sig_void;
+    shield_leave: "jet_jit_shield_leave" => jet_jit_shield_leave: sig_noarg_i64;
+    pending_exit_status: "jet_jit_pending_exit_status" => jet_jit_pending_exit_status: sig_noarg_i64;
+    wait_value: "jet_jit_wait_value" => jet_jit_wait_value: sig_noarg_i64;
+    sleep: "jet_jit_sleep" => jet_jit_sleep: sig_i64;
+    time_now: "jet_jit_time_now" => jet_jit_time_now: sig_noarg_i64;
+    deadline_push: "jet_jit_deadline_push" => jet_jit_deadline_push: sig_void_i64;
+    deadline_pop: "jet_jit_deadline_pop" => jet_jit_deadline_pop: sig_void;
 }
 
-pub(crate) fn register_concurrency_symbols(builder: &mut cranelift_jit::JITBuilder) {
-    builder.symbol("jet_jit_channel_new", jet_jit_channel_new as *const u8);
-    builder.symbol(
-        "jet_jit_channel_bounded",
-        jet_jit_channel_bounded as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_generator_channel_new",
-        jet_jit_generator_channel_new as *const u8,
-    );
-    builder.symbol("jet_jit_channel_close", jet_jit_channel_close as *const u8);
-    builder.symbol(
-        "jet_jit_channel_sender",
-        jet_jit_channel_sender as *const u8,
-    );
-    builder.symbol("jet_jit_sender_clone", jet_jit_sender_clone as *const u8);
-    builder.symbol("jet_jit_sender_send", jet_jit_sender_send as *const u8);
-    builder.symbol("jet_jit_sender_close", jet_jit_sender_close as *const u8);
-    builder.symbol(
-        "jet_jit_generator_channel_receive_status",
-        jet_jit_generator_channel_receive_status as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_channel_receive",
-        jet_jit_channel_receive as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_channel_receive_status",
-        jet_jit_channel_receive_status as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_panic_channel_closed",
-        jet_jit_panic_channel_closed as *const u8,
-    );
-    builder.symbol("jet_jit_spawn0", jet_jit_spawn0 as *const u8);
-    builder.symbol("jet_jit_spawn1", jet_jit_spawn1 as *const u8);
-    builder.symbol("jet_jit_spawn2", jet_jit_spawn2 as *const u8);
-    builder.symbol("jet_jit_spawn3", jet_jit_spawn3 as *const u8);
-    builder.symbol("jet_jit_spawn4", jet_jit_spawn4 as *const u8);
-    builder.symbol(
-        "jet_jit_task_group_new",
-        jet_jit_task_group_new as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_task_group_register",
-        jet_jit_task_group_register as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_task_group_close",
-        jet_jit_task_group_close as *const u8,
-    );
-    builder.symbol("jet_jit_task_join", jet_jit_task_join as *const u8);
-    builder.symbol("jet_jit_task_cancel", jet_jit_task_cancel as *const u8);
-    builder.symbol("jet_jit_task_detach", jet_jit_task_detach as *const u8);
-    builder.symbol("jet_jit_task_pause", jet_jit_task_pause as *const u8);
-    builder.symbol("jet_jit_task_resume", jet_jit_task_resume as *const u8);
-    builder.symbol("jet_jit_task_trace", jet_jit_task_trace as *const u8);
-    builder.symbol("jet_jit_task_exception", jet_jit_task_exception as *const u8);
-    builder.symbol("jet_jit_task_yield", jet_jit_task_yield as *const u8);
-    builder.symbol("jet_jit_task_current_trace", jet_jit_task_current_trace as *const u8);
-    builder.symbol("jet_jit_task_all", jet_jit_task_all as *const u8);
-    builder.symbol("jet_jit_task_wait_all", jet_jit_task_wait_all as *const u8);
-    builder.symbol("jet_jit_task_trace_all", jet_jit_task_trace_all as *const u8);
-    builder.symbol("jet_jit_task_detach_all", jet_jit_task_detach_all as *const u8);
-    builder.symbol("jet_jit_task_cancel_all", jet_jit_task_cancel_all as *const u8);
-    builder.symbol("jet_jit_task_pause_all", jet_jit_task_pause_all as *const u8);
-    builder.symbol("jet_jit_task_resume_all", jet_jit_task_resume_all as *const u8);
-    builder.symbol("jet_jit_task_race", jet_jit_task_race as *const u8);
-    builder.symbol("jet_jit_task_any", jet_jit_task_any as *const u8);
-    builder.symbol("jet_jit_select_wait", jet_jit_select_wait as *const u8);
-    builder.symbol("jet_jit_after_value", jet_jit_after_value as *const u8);
-    builder.symbol("jet_jit_interval", jet_jit_interval as *const u8);
-    builder.symbol("jet_jit_shield_enter", jet_jit_shield_enter as *const u8);
-    builder.symbol("jet_jit_shield_leave", jet_jit_shield_leave as *const u8);
-    builder.symbol(
-        "jet_jit_pending_exit_status",
-        jet_jit_pending_exit_status as *const u8,
-    );
-    builder.symbol("jet_jit_wait_value", jet_jit_wait_value as *const u8);
-    builder.symbol("jet_jit_sleep", jet_jit_sleep as *const u8);
-    builder.symbol("jet_jit_time_now", jet_jit_time_now as *const u8);
-    builder.symbol("jet_jit_deadline_push", jet_jit_deadline_push as *const u8);
-    builder.symbol("jet_jit_deadline_pop", jet_jit_deadline_pop as *const u8);
-}
 
-pub(crate) fn declare_concurrency_host_fns(
-    module: &mut cranelift_jit::JITModule,
-) -> Result<ConcurrencyHostFns, String> {
-    use cranelift_codegen::ir::{types, AbiParam, Signature};
-    use cranelift_module::{Linkage, Module};
 
-    let cc = module.target_config().default_call_conv;
-    let mut sig_channel_new = Signature::new(cc);
-    sig_channel_new.returns.push(AbiParam::new(types::I64));
-    let mut sig_i64 = Signature::new(cc);
-    sig_i64.params.push(AbiParam::new(types::I64));
-    sig_i64.returns.push(AbiParam::new(types::I64));
-    let mut sig_i64_i64 = sig_i64.clone();
-    sig_i64_i64.params.push(AbiParam::new(types::I64));
-    let mut sig_recv = sig_i64.clone();
-    sig_recv.params.push(AbiParam::new(types::I32));
-    let mut sig_panic_line = Signature::new(cc);
-    sig_panic_line.params.push(AbiParam::new(types::I32));
-    sig_panic_line.returns.push(AbiParam::new(types::I64));
 
-    let mut sig_send = Signature::new(cc);
-    sig_send.params.push(AbiParam::new(types::I64));
-    sig_send.returns.push(AbiParam::new(types::I64));
-    sig_send.params.push(AbiParam::new(types::I64));
 
-    let mut sig_spawn0 = Signature::new(cc);
-    sig_spawn0.params.push(AbiParam::new(types::I64));
-    sig_spawn0.returns.push(AbiParam::new(types::I64));
-
-    let mut sig_void_i64 = Signature::new(cc);
-    sig_void_i64.params.push(AbiParam::new(types::I64));
-    let mut sig_void_i64_i64 = sig_void_i64.clone();
-    sig_void_i64_i64.params.push(AbiParam::new(types::I64));
-    let sig_void = Signature::new(cc);
-    let mut sig_noarg_i64 = Signature::new(cc);
-    sig_noarg_i64.returns.push(AbiParam::new(types::I64));
-
-    let mut import = |name: &str, sig: &Signature| -> Result<cranelift_module::FuncId, String> {
-        module
-            .declare_function(name, Linkage::Import, sig)
-            .map_err(|e| e.to_string())
-    };
-
-    let mut sig_spawn1 = sig_spawn0.clone();
-    sig_spawn1.params.push(AbiParam::new(types::I64));
-    let mut sig_spawn2 = sig_spawn1.clone();
-    sig_spawn2.params.push(AbiParam::new(types::I64));
-    let mut sig_spawn3 = sig_spawn2.clone();
-    sig_spawn3.params.push(AbiParam::new(types::I64));
-    let mut sig_spawn4 = sig_spawn3.clone();
-    sig_spawn4.params.push(AbiParam::new(types::I64));
-
-    Ok(ConcurrencyHostFns {
-        channel_new: import("jet_jit_channel_new", &sig_channel_new)?,
-        channel_bounded: import("jet_jit_channel_bounded", &sig_i64)?,
-        generator_channel_new: import("jet_jit_generator_channel_new", &sig_channel_new)?,
-        channel_close: import("jet_jit_channel_close", &sig_void_i64)?,
-        channel_sender: import("jet_jit_channel_sender", &sig_i64)?,
-        sender_clone: import("jet_jit_sender_clone", &sig_i64)?,
-        sender_send: import("jet_jit_sender_send", &sig_send)?,
-        sender_close: import("jet_jit_sender_close", &sig_void_i64_i64)?,
-        generator_receive_status: import("jet_jit_generator_channel_receive_status", &sig_i64)?,
-        channel_receive: import("jet_jit_channel_receive", &sig_recv)?,
-        channel_receive_status: import("jet_jit_channel_receive_status", &sig_i64)?,
-        panic_channel_closed: import("jet_jit_panic_channel_closed", &sig_panic_line)?,
-        spawn0: import("jet_jit_spawn0", &sig_spawn0)?,
-        spawn1: import("jet_jit_spawn1", &sig_spawn1)?,
-        spawn2: import("jet_jit_spawn2", &sig_spawn2)?,
-        spawn3: import("jet_jit_spawn3", &sig_spawn3)?,
-        spawn4: import("jet_jit_spawn4", &sig_spawn4)?,
-        task_group_new: import("jet_jit_task_group_new", &sig_noarg_i64)?,
-        task_group_register: import("jet_jit_task_group_register", &sig_void_i64_i64)?,
-        task_group_close: import("jet_jit_task_group_close", &sig_i64)?,
-        task_join: import("jet_jit_task_join", &sig_i64)?,
-        task_cancel: import("jet_jit_task_cancel", &sig_void_i64)?,
-        task_detach: import("jet_jit_task_detach", &sig_void_i64)?,
-        task_pause: import("jet_jit_task_pause", &sig_void_i64)?,
-        task_resume: import("jet_jit_task_resume", &sig_void_i64)?,
-        task_trace: import("jet_jit_task_trace", &sig_i64)?,
-        task_exception: import("jet_jit_task_exception", &sig_i64)?,
-        task_yield: import("jet_jit_task_yield", &sig_void)?,
-        task_current_trace: import("jet_jit_task_current_trace", &sig_noarg_i64)?,
-        task_all: import("jet_jit_task_all", &sig_i64)?,
-        task_wait_all: import("jet_jit_task_wait_all", &sig_i64)?,
-        task_trace_all: import("jet_jit_task_trace_all", &sig_i64)?,
-        task_detach_all: import("jet_jit_task_detach_all", &sig_void_i64)?,
-        task_cancel_all: import("jet_jit_task_cancel_all", &sig_void_i64)?,
-        task_pause_all: import("jet_jit_task_pause_all", &sig_void_i64)?,
-        task_resume_all: import("jet_jit_task_resume_all", &sig_void_i64)?,
-        task_race: import("jet_jit_task_race", &sig_i64)?,
-        task_any: import("jet_jit_task_any", &sig_i64)?,
-        select_wait: import("jet_jit_select_wait", &sig_i64_i64)?,
-        after_value: import("jet_jit_after_value", &sig_i64_i64)?,
-        interval: import("jet_jit_interval", &sig_i64)?,
-        shield_enter: import("jet_jit_shield_enter", &sig_void)?,
-        shield_leave: import("jet_jit_shield_leave", &sig_noarg_i64)?,
-        pending_exit_status: import("jet_jit_pending_exit_status", &sig_noarg_i64)?,
-        wait_value: import("jet_jit_wait_value", &sig_noarg_i64)?,
-        sleep: import("jet_jit_sleep", &sig_i64)?,
-        time_now: import("jet_jit_time_now", &sig_noarg_i64)?,
-        deadline_push: import("jet_jit_deadline_push", &sig_void_i64)?,
-        deadline_pop: import("jet_jit_deadline_pop", &sig_void)?,
-    })
-}

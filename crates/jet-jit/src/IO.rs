@@ -1283,285 +1283,100 @@ extern "C" fn jet_jit_term_leave() {
     terminal_mode::leave();
 }
 
-pub(crate) struct IOHostFns {
-    pub stdout: FuncId,
-    pub stderr: FuncId,
-    pub stdin: FuncId,
-    pub stdout_write: FuncId,
-    pub stdout_write_line: FuncId,
-    pub stdout_write_bytes: FuncId,
-    pub stdout_flush: FuncId,
-    pub stdout_is_tty: FuncId,
-    pub stderr_write: FuncId,
-    pub stderr_write_line: FuncId,
-    pub stderr_write_bytes: FuncId,
-    pub stderr_flush: FuncId,
-    pub stderr_is_tty: FuncId,
-    pub terminal_width: FuncId,
-    pub terminal_height: FuncId,
-    pub style: FuncId,
-    pub style_force: FuncId,
-    pub progress: FuncId,
-    pub progress_iter: FuncId,
-    pub progress_list: FuncId,
-    pub progress_mark_exact: FuncId,
-    pub progress_pull: FuncId,
-    pub progress_finish: FuncId,
-    pub progress_exhaust: FuncId,
-    pub progress_transfer: FuncId,
-    pub progress_transfer_filter: FuncId,
-    pub progress_transfer_dedup: FuncId,
-    pub progress_transfer_chunks: FuncId,
-    pub progress_transfer_windows: FuncId,
-    pub progress_transfer_flatten: FuncId,
-    pub progress_transfer_intersperse: FuncId,
-    pub progress_transfer_take_while: FuncId,
-    pub progress_source_pull: FuncId,
-    pub progress_transfer_plan: FuncId,
-    pub progress_collect: FuncId,
-    pub confirm: FuncId,
-    pub choose: FuncId,
-    pub input_secret: FuncId,
-    pub sprint: FuncId,
-    pub repr: FuncId,
-    pub take: FuncId,
-    pub read_until: FuncId,
-    pub readline: FuncId,
-    pub stdin_lines: FuncId,
-    pub file_lines: FuncId,
-    pub file_writer_write_line: FuncId,
-    pub file_writer_flush: FuncId,
-    pub file_writer_close: FuncId,
-    pub file_reader_close: FuncId,
-    pub term_enter: FuncId,
-    pub term_leave: FuncId,
+host_fns! {
+    struct IOHostFns;
+    register: register_io_symbols;
+    declare: declare_io_host_fns(module) {
+        let cc = module.target_config().default_call_conv;
+        let mut nullary = Signature::new(cc);
+        nullary.returns.push(AbiParam::new(types::I64));
+        let mut nullary_void = Signature::new(cc);
+        let mut unary = Signature::new(cc);
+        unary.params.push(AbiParam::new(types::I64));
+        unary.returns.push(AbiParam::new(types::I64));
+        let mut unary_void = Signature::new(cc);
+        unary_void.params.push(AbiParam::new(types::I64));
+        let mut unary_i8 = Signature::new(cc);
+        unary_i8.params.push(AbiParam::new(types::I64));
+        unary_i8.returns.push(AbiParam::new(types::I8));
+        let mut binary = Signature::new(cc);
+        binary.params.push(AbiParam::new(types::I64));
+        binary.params.push(AbiParam::new(types::I64));
+        binary.returns.push(AbiParam::new(types::I64));
+        let mut binary_void = Signature::new(cc);
+        binary_void.params.push(AbiParam::new(types::I64));
+        binary_void.params.push(AbiParam::new(types::I64));
+        let mut ternary = Signature::new(cc);
+        ternary.params.push(AbiParam::new(types::I64));
+        ternary.params.push(AbiParam::new(types::I64));
+        ternary.params.push(AbiParam::new(types::I64));
+        ternary.returns.push(AbiParam::new(types::I64));
+        let mut ternary_void = Signature::new(cc);
+        ternary_void.params.push(AbiParam::new(types::I64));
+        ternary_void.params.push(AbiParam::new(types::I64));
+        ternary_void.params.push(AbiParam::new(types::I64));
+        let mut quaternary_void = Signature::new(cc);
+        quaternary_void.params.push(AbiParam::new(types::I64));
+        quaternary_void.params.push(AbiParam::new(types::I64));
+        quaternary_void.params.push(AbiParam::new(types::I64));
+        quaternary_void.params.push(AbiParam::new(types::I64));
+
+
+    }
+    stdout: "jet_jit_io_stdout" => jet_jit_io_stdout: nullary;
+    stderr: "jet_jit_io_stderr" => jet_jit_io_stderr: nullary;
+    stdin: "jet_jit_io_stdin" => jet_jit_io_stdin: nullary;
+    stdout_write: "jet_jit_stdout_write" => jet_jit_stdout_write: binary;
+    stdout_write_line: "jet_jit_stdout_write_line" => jet_jit_stdout_write_line: binary;
+    stdout_write_bytes: "jet_jit_stdout_write_bytes" => jet_jit_stdout_write_bytes: binary;
+    stdout_flush: "jet_jit_stdout_flush" => jet_jit_stdout_flush: unary;
+    stdout_is_tty: "jet_jit_stdout_is_tty" => jet_jit_stdout_is_tty: unary_i8;
+    stderr_write: "jet_jit_stderr_write" => jet_jit_stderr_write: binary;
+    stderr_write_line: "jet_jit_stderr_write_line" => jet_jit_stderr_write_line: binary;
+    stderr_write_bytes: "jet_jit_stderr_write_bytes" => jet_jit_stderr_write_bytes: binary;
+    stderr_flush: "jet_jit_stderr_flush" => jet_jit_stderr_flush: unary;
+    stderr_is_tty: "jet_jit_stderr_is_tty" => jet_jit_stderr_is_tty: unary_i8;
+    terminal_width: "jet_jit_terminal_width" => jet_jit_terminal_width: nullary;
+    terminal_height: "jet_jit_terminal_height" => jet_jit_terminal_height: nullary;
+    style: "jet_jit_io_style" => jet_jit_io_style: binary;
+    style_force: "jet_jit_io_style_force" => jet_jit_io_style_force: binary;
+    progress: "jet_jit_io_progress" => jet_jit_io_progress: unary;
+    progress_iter: "jet_jit_io_progress_iter" => jet_jit_io_progress_iter: ternary;
+    progress_list: "jet_jit_io_progress_list" => jet_jit_io_progress_list: ternary;
+    progress_mark_exact: "jet_jit_io_mark_exact_iter" => jet_jit_io_mark_exact_iter: unary;
+    progress_pull: "jet_jit_io_progress_pull" => jet_jit_io_progress_pull: binary_void;
+    progress_finish: "jet_jit_io_progress_finish" => jet_jit_io_progress_finish: unary_void;
+    progress_exhaust: "jet_jit_io_progress_exhaust" => jet_jit_io_progress_exhaust: unary_void;
+    progress_transfer: "jet_jit_io_progress_transfer" => jet_jit_io_progress_transfer: binary_void;
+    progress_transfer_filter: "jet_jit_io_progress_transfer_filter" => jet_jit_io_progress_transfer_filter: binary_void;
+    progress_transfer_dedup: "jet_jit_io_progress_transfer_dedup" => jet_jit_io_progress_transfer_dedup: ternary_void;
+    progress_transfer_chunks: "jet_jit_io_progress_transfer_chunks" => jet_jit_io_progress_transfer_chunks: ternary_void;
+    progress_transfer_windows: "jet_jit_io_progress_transfer_windows" => jet_jit_io_progress_transfer_windows: ternary_void;
+    progress_transfer_flatten: "jet_jit_io_progress_transfer_flatten" => jet_jit_io_progress_transfer_flatten: binary_void;
+    progress_transfer_intersperse: "jet_jit_io_progress_transfer_intersperse" => jet_jit_io_progress_transfer_intersperse: binary_void;
+    progress_transfer_take_while: "jet_jit_io_progress_transfer_take_while" => jet_jit_io_progress_transfer_take_while: ternary_void;
+    progress_source_pull: "jet_jit_io_progress_source_pull" => jet_jit_io_progress_source_pull: binary;
+    progress_transfer_plan: "jet_jit_io_progress_transfer_plan" => jet_jit_io_progress_transfer_plan: quaternary_void;
+    progress_collect: "jet_jit_io_progress_collect" => jet_jit_io_progress_collect: unary;
+    confirm: "jet_jit_io_confirm" => jet_jit_io_confirm: unary_i8;
+    choose: "jet_jit_io_choose" => jet_jit_io_choose: binary;
+    input_secret: "jet_jit_io_input_secret" => jet_jit_io_input_secret: unary;
+    sprint: "jet_jit_io_sprint" => io_line_stream::jet_jit_io_sprint: unary;
+    repr: "jet_jit_io_repr" => io_line_stream::jet_jit_io_repr: unary;
+    take: "jet_jit_io_take" => io_line_stream::jet_jit_io_take: unary;
+    read_until: "jet_jit_io_read_until" => io_line_stream::jet_jit_io_read_until: unary;
+    readline: "jet_jit_io_readline" => io_line_stream::jet_jit_io_readline: nullary;
+    stdin_lines: "jet_jit_stdin_lines" => jet_jit_stdin_lines: unary;
+    file_lines: "jet_jit_file_lines" => jet_jit_file_lines: unary;
+    file_writer_write_line: "jet_jit_file_writer_write_line" => jet_jit_file_writer_write_line: binary;
+    file_writer_flush: "jet_jit_file_writer_flush" => jet_jit_file_writer_flush: unary;
+    file_writer_close: "jet_jit_file_writer_close" => super::enc_stream::jet_jit_file_writer_close: unary_void;
+    file_reader_close: "jet_jit_file_reader_close" => super::enc_stream::jet_jit_file_reader_close: unary_void;
+    term_enter: "jet_jit_term_enter" => jet_jit_term_enter: nullary_void;
+    term_leave: "jet_jit_term_leave" => jet_jit_term_leave: nullary_void;
 }
 
-pub(crate) fn register_io_symbols(builder: &mut JITBuilder) {
-    builder.symbol("jet_jit_io_stdout", jet_jit_io_stdout as *const u8);
-    builder.symbol("jet_jit_io_stderr", jet_jit_io_stderr as *const u8);
-    builder.symbol("jet_jit_io_stdin", jet_jit_io_stdin as *const u8);
-    builder.symbol("jet_jit_stdout_write", jet_jit_stdout_write as *const u8);
-    builder.symbol("jet_jit_stdout_write_line", jet_jit_stdout_write_line as *const u8);
-    builder.symbol("jet_jit_stdout_write_bytes", jet_jit_stdout_write_bytes as *const u8);
-    builder.symbol("jet_jit_stdout_flush", jet_jit_stdout_flush as *const u8);
-    builder.symbol("jet_jit_stdout_is_tty", jet_jit_stdout_is_tty as *const u8);
-    builder.symbol("jet_jit_stderr_write", jet_jit_stderr_write as *const u8);
-    builder.symbol("jet_jit_stderr_write_line", jet_jit_stderr_write_line as *const u8);
-    builder.symbol("jet_jit_stderr_write_bytes", jet_jit_stderr_write_bytes as *const u8);
-    builder.symbol("jet_jit_stderr_flush", jet_jit_stderr_flush as *const u8);
-    builder.symbol("jet_jit_stderr_is_tty", jet_jit_stderr_is_tty as *const u8);
-    builder.symbol("jet_jit_terminal_width", jet_jit_terminal_width as *const u8);
-    builder.symbol("jet_jit_terminal_height", jet_jit_terminal_height as *const u8);
-    builder.symbol("jet_jit_io_style", jet_jit_io_style as *const u8);
-    builder.symbol("jet_jit_io_style_force", jet_jit_io_style_force as *const u8);
-    builder.symbol("jet_jit_io_progress", jet_jit_io_progress as *const u8);
-    builder.symbol(
-        "jet_jit_io_progress_iter",
-        jet_jit_io_progress_iter as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_io_progress_list",
-        jet_jit_io_progress_list as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_io_mark_exact_iter",
-        jet_jit_io_mark_exact_iter as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_io_progress_pull",
-        jet_jit_io_progress_pull as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_io_progress_finish",
-        jet_jit_io_progress_finish as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_io_progress_exhaust",
-        jet_jit_io_progress_exhaust as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_io_progress_transfer",
-        jet_jit_io_progress_transfer as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_io_progress_transfer_filter",
-        jet_jit_io_progress_transfer_filter as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_io_progress_transfer_dedup",
-        jet_jit_io_progress_transfer_dedup as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_io_progress_transfer_chunks",
-        jet_jit_io_progress_transfer_chunks as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_io_progress_transfer_windows",
-        jet_jit_io_progress_transfer_windows as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_io_progress_transfer_flatten",
-        jet_jit_io_progress_transfer_flatten as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_io_progress_transfer_intersperse",
-        jet_jit_io_progress_transfer_intersperse as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_io_progress_transfer_take_while",
-        jet_jit_io_progress_transfer_take_while as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_io_progress_source_pull",
-        jet_jit_io_progress_source_pull as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_io_progress_transfer_plan",
-        jet_jit_io_progress_transfer_plan as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_io_progress_collect",
-        jet_jit_io_progress_collect as *const u8,
-    );
-    builder.symbol("jet_jit_io_confirm", jet_jit_io_confirm as *const u8);
-    builder.symbol("jet_jit_io_choose", jet_jit_io_choose as *const u8);
-    builder.symbol(
-        "jet_jit_io_input_secret",
-        jet_jit_io_input_secret as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_io_sprint",
-        io_line_stream::jet_jit_io_sprint as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_io_repr",
-        io_line_stream::jet_jit_io_repr as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_io_take",
-        io_line_stream::jet_jit_io_take as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_io_read_until",
-        io_line_stream::jet_jit_io_read_until as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_io_readline",
-        io_line_stream::jet_jit_io_readline as *const u8,
-    );
-    builder.symbol("jet_jit_stdin_lines", jet_jit_stdin_lines as *const u8);
-    builder.symbol("jet_jit_file_lines", jet_jit_file_lines as *const u8);
-    builder.symbol(
-        "jet_jit_file_writer_write_line",
-        jet_jit_file_writer_write_line as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_file_writer_flush",
-        jet_jit_file_writer_flush as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_file_writer_close",
-        super::enc_stream::jet_jit_file_writer_close as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_file_reader_close",
-        super::enc_stream::jet_jit_file_reader_close as *const u8,
-    );
-    builder.symbol("jet_jit_term_enter", jet_jit_term_enter as *const u8);
-    builder.symbol("jet_jit_term_leave", jet_jit_term_leave as *const u8);
-}
 
-pub(crate) fn declare_io_host_fns(module: &mut JITModule) -> Result<IOHostFns, String> {
-    let cc = module.target_config().default_call_conv;
-    let mut nullary = Signature::new(cc);
-    nullary.returns.push(AbiParam::new(types::I64));
-    let mut nullary_void = Signature::new(cc);
-    let mut unary = Signature::new(cc);
-    unary.params.push(AbiParam::new(types::I64));
-    unary.returns.push(AbiParam::new(types::I64));
-    let mut unary_void = Signature::new(cc);
-    unary_void.params.push(AbiParam::new(types::I64));
-    let mut unary_i8 = Signature::new(cc);
-    unary_i8.params.push(AbiParam::new(types::I64));
-    unary_i8.returns.push(AbiParam::new(types::I8));
-    let mut binary = Signature::new(cc);
-    binary.params.push(AbiParam::new(types::I64));
-    binary.params.push(AbiParam::new(types::I64));
-    binary.returns.push(AbiParam::new(types::I64));
-    let mut binary_void = Signature::new(cc);
-    binary_void.params.push(AbiParam::new(types::I64));
-    binary_void.params.push(AbiParam::new(types::I64));
-    let mut ternary = Signature::new(cc);
-    ternary.params.push(AbiParam::new(types::I64));
-    ternary.params.push(AbiParam::new(types::I64));
-    ternary.params.push(AbiParam::new(types::I64));
-    ternary.returns.push(AbiParam::new(types::I64));
-    let mut ternary_void = Signature::new(cc);
-    ternary_void.params.push(AbiParam::new(types::I64));
-    ternary_void.params.push(AbiParam::new(types::I64));
-    ternary_void.params.push(AbiParam::new(types::I64));
-    let mut quaternary_void = Signature::new(cc);
-    quaternary_void.params.push(AbiParam::new(types::I64));
-    quaternary_void.params.push(AbiParam::new(types::I64));
-    quaternary_void.params.push(AbiParam::new(types::I64));
-    quaternary_void.params.push(AbiParam::new(types::I64));
-    let mut import = |name: &str, sig: &Signature| {
-        module
-            .declare_function(name, Linkage::Import, sig)
-            .map_err(|e| e.to_string())
-    };
-    Ok(IOHostFns {
-        stdout: import("jet_jit_io_stdout", &nullary)?,
-        stderr: import("jet_jit_io_stderr", &nullary)?,
-        stdin: import("jet_jit_io_stdin", &nullary)?,
-        stdout_write: import("jet_jit_stdout_write", &binary)?,
-        stdout_write_line: import("jet_jit_stdout_write_line", &binary)?,
-        stdout_write_bytes: import("jet_jit_stdout_write_bytes", &binary)?,
-        stdout_flush: import("jet_jit_stdout_flush", &unary)?,
-        stdout_is_tty: import("jet_jit_stdout_is_tty", &unary_i8)?,
-        stderr_write: import("jet_jit_stderr_write", &binary)?,
-        stderr_write_line: import("jet_jit_stderr_write_line", &binary)?,
-        stderr_write_bytes: import("jet_jit_stderr_write_bytes", &binary)?,
-        stderr_flush: import("jet_jit_stderr_flush", &unary)?,
-        stderr_is_tty: import("jet_jit_stderr_is_tty", &unary_i8)?,
-        terminal_width: import("jet_jit_terminal_width", &nullary)?,
-        terminal_height: import("jet_jit_terminal_height", &nullary)?,
-        style: import("jet_jit_io_style", &binary)?,
-        style_force: import("jet_jit_io_style_force", &binary)?,
-        progress: import("jet_jit_io_progress", &unary)?,
-        progress_iter: import("jet_jit_io_progress_iter", &ternary)?,
-        progress_list: import("jet_jit_io_progress_list", &ternary)?,
-        progress_mark_exact: import("jet_jit_io_mark_exact_iter", &unary)?,
-        progress_pull: import("jet_jit_io_progress_pull", &binary_void)?,
-        progress_finish: import("jet_jit_io_progress_finish", &unary_void)?,
-        progress_exhaust: import("jet_jit_io_progress_exhaust", &unary_void)?,
-        progress_transfer: import("jet_jit_io_progress_transfer", &binary_void)?,
-        progress_transfer_filter: import("jet_jit_io_progress_transfer_filter", &binary_void)?,
-        progress_transfer_dedup: import("jet_jit_io_progress_transfer_dedup", &ternary_void)?,
-        progress_transfer_chunks: import("jet_jit_io_progress_transfer_chunks", &ternary_void)?,
-        progress_transfer_windows: import("jet_jit_io_progress_transfer_windows", &ternary_void)?,
-        progress_transfer_flatten: import("jet_jit_io_progress_transfer_flatten", &binary_void)?,
-        progress_transfer_intersperse: import("jet_jit_io_progress_transfer_intersperse", &binary_void)?,
-        progress_transfer_take_while: import("jet_jit_io_progress_transfer_take_while", &ternary_void)?,
-        progress_source_pull: import("jet_jit_io_progress_source_pull", &binary)?,
-        progress_transfer_plan: import("jet_jit_io_progress_transfer_plan", &quaternary_void)?,
-        progress_collect: import("jet_jit_io_progress_collect", &unary)?,
-        confirm: import("jet_jit_io_confirm", &unary_i8)?,
-        choose: import("jet_jit_io_choose", &binary)?,
-        input_secret: import("jet_jit_io_input_secret", &unary)?,
-        sprint: import("jet_jit_io_sprint", &unary)?,
-        repr: import("jet_jit_io_repr", &unary)?,
-        take: import("jet_jit_io_take", &unary)?,
-        read_until: import("jet_jit_io_read_until", &unary)?,
-        readline: import("jet_jit_io_readline", &nullary)?,
-        stdin_lines: import("jet_jit_stdin_lines", &unary)?,
-        file_lines: import("jet_jit_file_lines", &unary)?,
-        file_writer_write_line: import("jet_jit_file_writer_write_line", &binary)?,
-        file_writer_flush: import("jet_jit_file_writer_flush", &unary)?,
-        file_writer_close: import("jet_jit_file_writer_close", &unary_void)?,
-        file_reader_close: import("jet_jit_file_reader_close", &unary_void)?,
-        term_enter: import("jet_jit_term_enter", &nullary_void)?,
-        term_leave: import("jet_jit_term_leave", &nullary_void)?,
-    })
-}
+
+
+

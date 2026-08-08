@@ -93,9 +93,14 @@ impl<'a> Checker<'a> {
         if let Some(dropped) = dropped_arm {
             let diagnostic_start = self.diags.len();
             let previous = self.in_dropped_comptime_arm;
+            // D-FACT-FLOW1: the dropped arm is walked for name resolution only.
+            // It is not a path through this code, so nothing it does to the
+            // flow facts survives it.
+            let facts = self.flow.clone();
             self.in_dropped_comptime_arm = true;
             self.check_block(dropped, true);
             self.in_dropped_comptime_arm = previous;
+            self.flow = facts;
             let diagnostics: Vec<Diagnostic> =
                 self.diags.drain(diagnostic_start..).collect();
             self.diags.extend(

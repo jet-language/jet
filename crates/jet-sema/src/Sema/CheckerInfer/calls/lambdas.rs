@@ -369,8 +369,8 @@ use std::collections::HashSet;
             );
             let saved_return_view_provenance = self.return_view_provenance.take();
             for (p, pty) in lam.params.iter().zip(param_types.iter()) {
-                self.scopes.last_mut().unwrap().insert(
-                    p.name.clone(),
+                self.declare_in_scope(
+                    &p.name,
                     LocalInfo {
                         def_span: p.name_span,
                         ty: pty.clone(),

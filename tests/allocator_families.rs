@@ -111,7 +111,7 @@ fn run_jet(label: &str, src: &str) -> (i32, String, String) {
 
 #[test]
 fn arena_bump_and_slab_have_distinct_aligned_drop_and_retention_laws() {
-    if Command::new("rustc").arg("--version").output().is_err() {
+    if !common::have_rustc() {
         return;
     }
     let ran = compile_rust_harness(
@@ -190,7 +190,7 @@ fn main() {
 
 #[test]
 fn fixed_uses_one_borrowed_buffer_for_payload_alignment_and_reverse_drop_metadata() {
-    if Command::new("rustc").arg("--version").output().is_err() {
+    if !common::have_rustc() {
         return;
     }
     let ran = compile_rust_harness(
@@ -269,7 +269,7 @@ fn run() {
         over_user.contains("JetFixed::over_uninit_fixed(&mut user_bytes)"),
         "{over_user}"
     );
-    if Command::new("rustc").arg("--version").output().is_ok() {
+    if common::have_rustc() {
         let (code, stdout, stderr) = run_jet("fixed_over", over_src);
         assert_eq!(code, 0, "{stderr}");
         assert_eq!(stdout, "9\n");
@@ -372,7 +372,7 @@ fn run() {
 
 #[test]
 fn pool_ids_reuse_slots_without_reviving_stale_generations() {
-    if Command::new("rustc").arg("--version").output().is_err() {
+    if !common::have_rustc() {
         return;
     }
     let src = r#"
@@ -400,7 +400,7 @@ fn run() {
 
 #[test]
 fn stale_pool_id_panics_instead_of_reading_reused_slot() {
-    if Command::new("rustc").arg("--version").output().is_err() {
+    if !common::have_rustc() {
         return;
     }
     let src = r#"
@@ -425,7 +425,7 @@ fn default_dev_runs_allocator_constructors_natively() {
     use jet::Interpreter::RunOutcome;
     use jet::JitBackend::JitBackend;
 
-    if Command::new("rustc").arg("--version").output().is_err() {
+    if !common::have_rustc() {
         return;
     }
     let src = r#"

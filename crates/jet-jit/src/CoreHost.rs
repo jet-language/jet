@@ -2209,498 +2209,214 @@ extern "C" fn jet_jit_process_exit(code: i64) {
     });
 }
 
-pub(crate) struct CoreHostFns {
-    pub os_name: cranelift_module::FuncId,
-    pub os_family: cranelift_module::FuncId,
-    pub os_arch: cranelift_module::FuncId,
-    pub os_cpu_count: cranelift_module::FuncId,
-    pub os_temp_dir: cranelift_module::FuncId,
-    pub os_executable: cranelift_module::FuncId,
-    pub os_pid: cranelift_module::FuncId,
-    pub os_hostname: cranelift_module::FuncId,
-    pub os_username: cranelift_module::FuncId,
-    pub os_release: cranelift_module::FuncId,
-    pub os_version: cranelift_module::FuncId,
-    pub os_getppid: cranelift_module::FuncId,
-    pub os_getuid: cranelift_module::FuncId,
-    pub os_geteuid: cranelift_module::FuncId,
-    pub os_getgid: cranelift_module::FuncId,
-    pub os_getegid: cranelift_module::FuncId,
-    pub os_getpgrp: cranelift_module::FuncId,
-    pub os_getgroups: cranelift_module::FuncId,
-    pub os_uptime: cranelift_module::FuncId,
-    pub os_loadavg: cranelift_module::FuncId,
-    pub os_times: cranelift_module::FuncId,
-    pub os_success: cranelift_module::FuncId,
-    pub os_exitcode: cranelift_module::FuncId,
-    pub os_expand: cranelift_module::FuncId,
-    pub os_getpgid: cranelift_module::FuncId,
-    pub os_getsid: cranelift_module::FuncId,
-    pub os_setpgid: cranelift_module::FuncId,
-    pub os_setpgrp: cranelift_module::FuncId,
-    pub os_umask: cranelift_module::FuncId,
-    pub os_sync: cranelift_module::FuncId,
-    pub os_getpriority: cranelift_module::FuncId,
-    pub os_setpriority: cranelift_module::FuncId,
-    pub os_kill: cranelift_module::FuncId,
-    pub os_pipe: cranelift_module::FuncId,
-    pub os_close_fd: cranelift_module::FuncId,
-    pub os_mkfifo: cranelift_module::FuncId,
-    pub os_fork: cranelift_module::FuncId,
-    pub os_setuid: cranelift_module::FuncId,
-    pub os_setgid: cranelift_module::FuncId,
-    pub os_setsid: cranelift_module::FuncId,
-    pub os_initgroups: cranelift_module::FuncId,
-    pub os_wait: cranelift_module::FuncId,
-    pub os_waitpid: cranelift_module::FuncId,
-    pub os_utime: cranelift_module::FuncId,
-    pub os_atexit: cranelift_module::FuncId,
-    pub os_stop: cranelift_module::FuncId,
-    pub log_set_level: cranelift_module::FuncId,
-    pub log_setup: cranelift_module::FuncId,
-    pub log_debug: cranelift_module::FuncId,
-    pub log_info: cranelift_module::FuncId,
-    pub log_warn: cranelift_module::FuncId,
-    pub log_error: cranelift_module::FuncId,
-    pub log_critical: cranelift_module::FuncId,
-    pub log_fatal: cranelift_module::FuncId,
-    pub log_disable: cranelift_module::FuncId,
-    pub log_flush: cranelift_module::FuncId,
-    pub log_enabled: cranelift_module::FuncId,
-    pub log_set_trace_id: cranelift_module::FuncId,
-    pub log_field: cranelift_module::FuncId,
-    pub log_int_field: cranelift_module::FuncId,
-    pub log_bool_field: cranelift_module::FuncId,
-    pub log_counter: cranelift_module::FuncId,
-    pub log_span: cranelift_module::FuncId,
-    pub log_enter: cranelift_module::FuncId,
-    pub log_close: cranelift_module::FuncId,
-    pub log_info_fields: cranelift_module::FuncId,
-    pub fs_exists: cranelift_module::FuncId,
-    pub fs_read: cranelift_module::FuncId,
-    pub fs_read_bytes: cranelift_module::FuncId,
-    pub fs_write: cranelift_module::FuncId,
-    pub fs_create_dir: cranelift_module::FuncId,
-    pub fs_list_dir: cranelift_module::FuncId,
-    pub fs_remove_all: cranelift_module::FuncId,
-    pub fs_remove: cranelift_module::FuncId,
-    pub fs_stat: cranelift_module::FuncId,
-    pub fs_read_at: cranelift_module::FuncId,
-    pub fs_write_at: cranelift_module::FuncId,
-    pub fs_fsync: cranelift_module::FuncId,
-    pub fs_write_atomic: cranelift_module::FuncId,
-    pub fs_walk: cranelift_module::FuncId,
-    pub fs_glob: cranelift_module::FuncId,
-    pub fs_symlink: cranelift_module::FuncId,
-    pub fs_read_link: cranelift_module::FuncId,
-    pub fs_hard_link: cranelift_module::FuncId,
-    pub fs_canonicalize: cranelift_module::FuncId,
-    pub fs_absolute: cranelift_module::FuncId,
-    pub fs_copy_dir: cranelift_module::FuncId,
-    pub fs_temp_dir: cranelift_module::FuncId,
-    pub fs_temp_file: cranelift_module::FuncId,
-    pub fs_lock: cranelift_module::FuncId,
-    pub path_join: cranelift_module::FuncId,
-    pub path_parent_str: cranelift_module::FuncId,
-    pub path_extension_str: cranelift_module::FuncId,
-    pub path_normalize_str: cranelift_module::FuncId,
-    pub path_from: cranelift_module::FuncId,
-    pub path_write_atomic: cranelift_module::FuncId,
-    pub path_join_handle: cranelift_module::FuncId,
-    pub path_parent: cranelift_module::FuncId,
-    pub path_extension: cranelift_module::FuncId,
-    pub path_stem: cranelift_module::FuncId,
-    pub path_to_string: cranelift_module::FuncId,
-    pub path_walk: cranelift_module::FuncId,
-    pub math_sin: cranelift_module::FuncId,
-    pub math_cos: cranelift_module::FuncId,
-    pub math_exp: cranelift_module::FuncId,
-    pub math_atan2: cranelift_module::FuncId,
-    pub math_hypot: cranelift_module::FuncId,
-    pub math_lerp: cranelift_module::FuncId,
-    pub math_degrees: cranelift_module::FuncId,
-    pub math_radians: cranelift_module::FuncId,
-    pub math_is_finite: cranelift_module::FuncId,
-    pub math_sign: cranelift_module::FuncId,
-    pub math_checked_add: cranelift_module::FuncId,
-    pub math_saturating_add: cranelift_module::FuncId,
-    pub math_wrapping_add: cranelift_module::FuncId,
-    pub math_int_pow: cranelift_module::FuncId,
-    pub math_gcd: cranelift_module::FuncId,
-    pub math_lcm: cranelift_module::FuncId,
-    pub math_sqrt: cranelift_module::FuncId,
-    pub math_sqrt_f32: cranelift_module::FuncId,
-    pub math_pow: cranelift_module::FuncId,
-    pub math_pow_f32: cranelift_module::FuncId,
-    pub math_floor: cranelift_module::FuncId,
-    pub math_floor_f32: cranelift_module::FuncId,
-    pub math_ceil: cranelift_module::FuncId,
-    pub math_ceil_f32: cranelift_module::FuncId,
-    pub env_get: cranelift_module::FuncId,
-    pub env_set: cranelift_module::FuncId,
-    pub env_unset: cranelift_module::FuncId,
-    pub env_vars: cranelift_module::FuncId,
-    pub io_input: cranelift_module::FuncId,
-    pub process_exit: cranelift_module::FuncId,
+host_fns! {
+    struct CoreHostFns;
+    register: register_core_host_symbols;
+    declare: declare_core_host_fns(module) {
+        use cranelift_codegen::ir::{types, AbiParam, Signature};
+        use cranelift_module::{Linkage, Module};
+        let cc = module.target_config().default_call_conv;
+        let mut sig_str = Signature::new(cc);
+        sig_str.returns.push(AbiParam::new(types::I64));
+        let mut sig_i64 = Signature::new(cc);
+        sig_i64.returns.push(AbiParam::new(types::I64));
+        let mut sig_f64 = Signature::new(cc);
+        sig_f64.returns.push(AbiParam::new(types::F64));
+        let mut sig_void = Signature::new(cc);
+        let mut sig_void_str = Signature::new(cc);
+        sig_void_str.params.push(AbiParam::new(types::I64));
+        let mut sig_str_str_str = Signature::new(cc);
+        sig_str_str_str.params.push(AbiParam::new(types::I64));
+        sig_str_str_str.params.push(AbiParam::new(types::I64));
+        sig_str_str_str.returns.push(AbiParam::new(types::I64));
+        let mut sig_str_i64_str = Signature::new(cc);
+        sig_str_i64_str.params.push(AbiParam::new(types::I64));
+        sig_str_i64_str.params.push(AbiParam::new(types::I64));
+        sig_str_i64_str.returns.push(AbiParam::new(types::I64));
+        let mut sig_str_i8_str = Signature::new(cc);
+        sig_str_i8_str.params.push(AbiParam::new(types::I64));
+        sig_str_i8_str.params.push(AbiParam::new(types::I8));
+        sig_str_i8_str.returns.push(AbiParam::new(types::I64));
+        let mut sig_void_i64 = Signature::new(cc);
+        sig_void_i64.params.push(AbiParam::new(types::I64));
+        let mut sig_void_i64_i64 = Signature::new(cc);
+        sig_void_i64_i64.params.push(AbiParam::new(types::I64));
+        sig_void_i64_i64.params.push(AbiParam::new(types::I64));
+        let mut sig_unary_i64 = Signature::new(cc);
+        sig_unary_i64.params.push(AbiParam::new(types::I64));
+        sig_unary_i64.returns.push(AbiParam::new(types::I64));
+        let mut sig_i64_i8 = Signature::new(cc);
+        sig_i64_i8.params.push(AbiParam::new(types::I64));
+        sig_i64_i8.returns.push(AbiParam::new(types::I8));
+        let mut sig_f64_f64 = Signature::new(cc);
+        sig_f64_f64.params.push(AbiParam::new(types::F64));
+        sig_f64_f64.returns.push(AbiParam::new(types::F64));
+        let mut sig_f64_f64_f64 = Signature::new(cc);
+        sig_f64_f64_f64.params.push(AbiParam::new(types::F64));
+        sig_f64_f64_f64.params.push(AbiParam::new(types::F64));
+        sig_f64_f64_f64.returns.push(AbiParam::new(types::F64));
+        let mut sig_lerp = Signature::new(cc);
+        sig_lerp.params.push(AbiParam::new(types::F64));
+        sig_lerp.params.push(AbiParam::new(types::F64));
+        sig_lerp.params.push(AbiParam::new(types::F64));
+        sig_lerp.returns.push(AbiParam::new(types::F64));
+        let mut sig_f64_i8 = Signature::new(cc);
+        sig_f64_i8.params.push(AbiParam::new(types::F64));
+        sig_f64_i8.returns.push(AbiParam::new(types::I8));
+        let mut sig_f64_i64 = Signature::new(cc);
+        sig_f64_i64.params.push(AbiParam::new(types::F64));
+        sig_f64_i64.returns.push(AbiParam::new(types::I64));
+        let mut sig_i64_i64_i64 = Signature::new(cc);
+        sig_i64_i64_i64.params.push(AbiParam::new(types::I64));
+        sig_i64_i64_i64.params.push(AbiParam::new(types::I64));
+        sig_i64_i64_i64.returns.push(AbiParam::new(types::I64));
+        let mut sig_i64_i64_i64_i64 = Signature::new(cc);
+        sig_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
+        sig_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
+        sig_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
+        sig_i64_i64_i64_i64.returns.push(AbiParam::new(types::I64));
+        let mut sig_i8_i64_i64 = Signature::new(cc);
+        sig_i8_i64_i64.params.push(AbiParam::new(types::I8));
+        sig_i8_i64_i64.params.push(AbiParam::new(types::I64));
+        sig_i8_i64_i64.returns.push(AbiParam::new(types::I64));
+
+
+    }
+    os_name: "jet_jit_os_name" => jet_jit_os_name: sig_str;
+    os_family: "jet_jit_os_family" => jet_jit_os_family: sig_str;
+    os_arch: "jet_jit_os_arch" => jet_jit_os_arch: sig_str;
+    os_cpu_count: "jet_jit_os_cpu_count" => jet_jit_os_cpu_count: sig_i64;
+    os_temp_dir: "jet_jit_os_temp_dir" => jet_jit_os_temp_dir: sig_str;
+    os_executable: "jet_jit_os_executable" => jet_jit_os_executable: sig_str;
+    os_pid: "jet_jit_os_pid" => jet_jit_os_pid: sig_i64;
+    os_hostname: "jet_jit_os_hostname" => jet_jit_os_hostname: sig_str;
+    os_username: "jet_jit_os_username" => jet_jit_os_username: sig_str;
+    os_release: "jet_jit_os_release" => jet_jit_os_release: sig_str;
+    os_version: "jet_jit_os_version" => jet_jit_os_version: sig_str;
+    os_getppid: "jet_jit_os_getppid" => jet_jit_os_getppid: sig_i64;
+    os_getuid: "jet_jit_os_getuid" => jet_jit_os_getuid: sig_i64;
+    os_geteuid: "jet_jit_os_geteuid" => jet_jit_os_geteuid: sig_i64;
+    os_getgid: "jet_jit_os_getgid" => jet_jit_os_getgid: sig_i64;
+    os_getegid: "jet_jit_os_getegid" => jet_jit_os_getegid: sig_i64;
+    os_getpgrp: "jet_jit_os_getpgrp" => jet_jit_os_getpgrp: sig_i64;
+    os_getgroups: "jet_jit_os_getgroups" => jet_jit_os_getgroups: sig_i64;
+    os_uptime: "jet_jit_os_uptime" => jet_jit_os_uptime: sig_f64;
+    os_loadavg: "jet_jit_os_loadavg" => jet_jit_os_loadavg: sig_i64;
+    os_times: "jet_jit_os_times" => jet_jit_os_times: sig_i64;
+    os_success: "jet_jit_os_success" => jet_jit_os_success: sig_i64_i8;
+    os_exitcode: "jet_jit_os_exitcode" => jet_jit_os_exitcode: sig_unary_i64;
+    os_expand: "jet_jit_os_expand" => jet_jit_os_expand: sig_unary_i64;
+    os_getpgid: "jet_jit_os_getpgid" => jet_jit_os_getpgid: sig_unary_i64;
+    os_getsid: "jet_jit_os_getsid" => jet_jit_os_getsid: sig_unary_i64;
+    os_setpgid: "jet_jit_os_setpgid" => jet_jit_os_setpgid: sig_i64_i64_i64;
+    os_setpgrp: "jet_jit_os_setpgrp" => jet_jit_os_setpgrp: sig_i64;
+    os_umask: "jet_jit_os_umask" => jet_jit_os_umask: sig_unary_i64;
+    os_sync: "jet_jit_os_sync" => jet_jit_os_sync: sig_void;
+    os_getpriority: "jet_jit_os_getpriority" => jet_jit_os_getpriority: sig_unary_i64;
+    os_setpriority: "jet_jit_os_setpriority" => jet_jit_os_setpriority: sig_i64_i64_i64;
+    os_kill: "jet_jit_os_kill" => jet_jit_os_kill: sig_i64_i64_i64;
+    os_pipe: "jet_jit_os_pipe" => jet_jit_os_pipe: sig_i64;
+    os_close_fd: "jet_jit_os_close_fd" => jet_jit_os_close_fd: sig_void_i64;
+    os_mkfifo: "jet_jit_os_mkfifo" => jet_jit_os_mkfifo: sig_i64_i64_i64;
+    os_fork: "jet_jit_os_fork" => jet_jit_os_fork: sig_i64;
+    os_setuid: "jet_jit_os_setuid" => jet_jit_os_setuid: sig_unary_i64;
+    os_setgid: "jet_jit_os_setgid" => jet_jit_os_setgid: sig_unary_i64;
+    os_setsid: "jet_jit_os_setsid" => jet_jit_os_setsid: sig_i64;
+    os_initgroups: "jet_jit_os_initgroups" => jet_jit_os_initgroups: sig_i64_i64_i64;
+    os_wait: "jet_jit_os_wait" => jet_jit_os_wait: sig_i64;
+    os_waitpid: "jet_jit_os_waitpid" => jet_jit_os_waitpid: sig_i64_i64_i64;
+    os_utime: "jet_jit_os_utime" => jet_jit_os_utime: sig_i64_i64_i64_i64;
+    os_atexit: "jet_jit_os_atexit" => jet_jit_os_atexit: sig_unary_i64;
+    os_stop: "jet_jit_os_stop" => jet_jit_os_stop: sig_void_i64;
+    log_set_level: "jet_jit_log_set_level" => jet_jit_log_set_level: sig_void_str;
+    log_setup: "jet_jit_log_setup" => jet_jit_log_setup: sig_void_str;
+    log_debug: "jet_jit_log_debug" => jet_jit_log_debug: sig_void_str;
+    log_info: "jet_jit_log_info" => jet_jit_log_info: sig_void_str;
+    log_warn: "jet_jit_log_warn" => jet_jit_log_warn: sig_void_str;
+    log_error: "jet_jit_log_error" => jet_jit_log_error: sig_void_str;
+    log_critical: "jet_jit_log_critical" => jet_jit_log_critical: sig_void_str;
+    log_fatal: "jet_jit_log_fatal" => jet_jit_log_fatal: sig_void_str;
+    log_disable: "jet_jit_log_disable" => jet_jit_log_disable: sig_void;
+    log_flush: "jet_jit_log_flush" => jet_jit_log_flush: sig_void;
+    log_enabled: "jet_jit_log_enabled" => jet_jit_log_enabled: sig_i64_i8;
+    log_set_trace_id: "jet_jit_log_set_trace_id" => jet_jit_log_set_trace_id: sig_void_str;
+    log_field: "jet_jit_log_field" => jet_jit_log_field: sig_str_str_str;
+    log_int_field: "jet_jit_log_int_field" => jet_jit_log_int_field: sig_str_i64_str;
+    log_bool_field: "jet_jit_log_bool_field" => jet_jit_log_bool_field: sig_str_i8_str;
+    log_counter: "jet_jit_log_counter" => jet_jit_log_counter: sig_str_i64_str;
+    log_span: "jet_jit_log_span" => jet_jit_log_span: sig_unary_i64;
+    log_enter: "jet_jit_log_enter" => jet_jit_log_enter: sig_void_i64;
+    log_close: "jet_jit_log_close" => jet_jit_log_close: sig_void_i64;
+    log_info_fields: "jet_jit_log_info_fields" => jet_jit_log_info_fields: sig_void_i64_i64;
+    fs_exists: "jet_jit_fs_exists" => jet_jit_fs_exists: sig_i64_i8;
+    fs_read: "jet_jit_fs_read" => jet_jit_fs_read: sig_unary_i64;
+    fs_read_bytes: "jet_jit_fs_read_bytes" => jet_jit_fs_read_bytes: sig_unary_i64;
+    fs_write: "jet_jit_fs_write" => jet_jit_fs_write: sig_i64_i64_i64;
+    fs_create_dir: "jet_jit_fs_create_dir" => jet_jit_fs_create_dir: sig_unary_i64;
+    fs_list_dir: "jet_jit_fs_list_dir" => jet_jit_fs_list_dir: sig_unary_i64;
+    fs_remove_all: "jet_jit_fs_remove_all" => jet_jit_fs_remove_all: sig_unary_i64;
+    fs_remove: "jet_jit_fs_remove" => jet_jit_fs_remove: sig_unary_i64;
+    fs_stat: "jet_jit_fs_stat" => jet_jit_fs_stat: sig_unary_i64;
+    fs_read_at: "jet_jit_fs_read_at" => jet_jit_fs_read_at: sig_i64_i64_i64_i64;
+    fs_write_at: "jet_jit_fs_write_at" => jet_jit_fs_write_at: sig_i64_i64_i64_i64;
+    fs_fsync: "jet_jit_fs_fsync" => jet_jit_fs_fsync: sig_unary_i64;
+    fs_write_atomic: "jet_jit_fs_write_atomic" => jet_jit_fs_write_atomic: sig_i64_i64_i64;
+    fs_walk: "jet_jit_fs_walk" => jet_jit_fs_walk: sig_unary_i64;
+    fs_glob: "jet_jit_fs_glob" => jet_jit_fs_glob: sig_unary_i64;
+    fs_symlink: "jet_jit_fs_symlink" => jet_jit_fs_symlink: sig_i64_i64_i64;
+    fs_read_link: "jet_jit_fs_read_link" => jet_jit_fs_read_link: sig_unary_i64;
+    fs_hard_link: "jet_jit_fs_hard_link" => jet_jit_fs_hard_link: sig_i64_i64_i64;
+    fs_canonicalize: "jet_jit_fs_canonicalize" => jet_jit_fs_canonicalize: sig_unary_i64;
+    fs_absolute: "jet_jit_fs_absolute" => jet_jit_fs_absolute: sig_unary_i64;
+    fs_copy_dir: "jet_jit_fs_copy_dir" => jet_jit_fs_copy_dir: sig_i64_i64_i64;
+    fs_temp_dir: "jet_jit_fs_temp_dir" => jet_jit_fs_temp_dir: sig_unary_i64;
+    fs_temp_file: "jet_jit_fs_temp_file" => jet_jit_fs_temp_file: sig_unary_i64;
+    fs_lock: "jet_jit_fs_lock" => jet_jit_fs_lock: sig_unary_i64;
+    path_join: "jet_jit_path_join" => jet_jit_path_join: sig_i64_i64_i64;
+    path_parent_str: "jet_jit_path_parent_str" => jet_jit_path_parent_str: sig_unary_i64;
+    path_extension_str: "jet_jit_path_extension_str" => jet_jit_path_extension_str: sig_unary_i64;
+    path_normalize_str: "jet_jit_path_normalize_str" => jet_jit_path_normalize_str: sig_unary_i64;
+    path_from: "jet_jit_path_from" => jet_jit_path_from: sig_unary_i64;
+    path_write_atomic: "jet_jit_path_write_atomic" => jet_jit_path_write_atomic: sig_i64_i64_i64;
+    path_join_handle: "jet_jit_path_join_handle" => jet_jit_path_join_handle: sig_i64_i64_i64;
+    path_parent: "jet_jit_path_parent" => jet_jit_path_parent: sig_unary_i64;
+    path_extension: "jet_jit_path_extension" => jet_jit_path_extension: sig_unary_i64;
+    path_stem: "jet_jit_path_stem" => jet_jit_path_stem: sig_unary_i64;
+    path_to_string: "jet_jit_path_to_string" => jet_jit_path_to_string: sig_unary_i64;
+    path_walk: "jet_jit_path_walk" => jet_jit_path_walk: sig_unary_i64;
+    math_sin: "jet_jit_math_sin" => jet_jit_math_sin: sig_f64_f64;
+    math_cos: "jet_jit_math_cos" => jet_jit_math_cos: sig_f64_f64;
+    math_exp: "jet_jit_math_exp" => jet_jit_math_exp: sig_f64_f64;
+    math_atan2: "jet_jit_math_atan2" => jet_jit_math_atan2: sig_f64_f64_f64;
+    math_hypot: "jet_jit_math_hypot" => jet_jit_math_hypot: sig_f64_f64_f64;
+    math_lerp: "jet_jit_math_lerp" => jet_jit_math_lerp: sig_lerp;
+    math_degrees: "jet_jit_math_degrees" => jet_jit_math_degrees: sig_f64_f64;
+    math_radians: "jet_jit_math_radians" => jet_jit_math_radians: sig_f64_f64;
+    math_is_finite: "jet_jit_math_is_finite" => jet_jit_math_is_finite: sig_f64_i8;
+    math_sign: "jet_jit_math_sign" => jet_jit_math_sign: sig_f64_i64;
+    math_checked_add: "jet_jit_math_checked_add" => jet_jit_math_checked_add: sig_i64_i64_i64;
+    math_saturating_add: "jet_jit_math_saturating_add" => jet_jit_math_saturating_add: sig_i64_i64_i64;
+    math_wrapping_add: "jet_jit_math_wrapping_add" => jet_jit_math_wrapping_add: sig_i64_i64_i64;
+    math_int_pow: "jet_jit_math_int_pow" => jet_jit_math_int_pow: sig_i64_i64_i64;
+    math_gcd: "jet_jit_math_gcd" => jet_jit_math_gcd: sig_i64_i64_i64;
+    math_lcm: "jet_jit_math_lcm" => jet_jit_math_lcm: sig_i64_i64_i64;
+    math_sqrt: "jet_jit_math_sqrt" => jet_jit_math_sqrt: sig_f64_f64;
+    math_sqrt_f32: "jet_jit_math_sqrt_f32" => jet_jit_math_sqrt_f32: sig_f64_f64;
+    math_pow: "jet_jit_math_pow" => jet_jit_math_pow: sig_f64_f64_f64;
+    math_pow_f32: "jet_jit_math_pow_f32" => jet_jit_math_pow_f32: sig_f64_f64_f64;
+    math_floor: "jet_jit_math_floor" => jet_jit_math_floor: sig_f64_f64;
+    math_floor_f32: "jet_jit_math_floor_f32" => jet_jit_math_floor_f32: sig_f64_f64;
+    math_ceil: "jet_jit_math_ceil" => jet_jit_math_ceil: sig_f64_f64;
+    math_ceil_f32: "jet_jit_math_ceil_f32" => jet_jit_math_ceil_f32: sig_f64_f64;
+    env_get: "jet_jit_env_get" => jet_jit_env_get: sig_unary_i64;
+    env_set: "jet_jit_env_set" => jet_jit_env_set: sig_i64_i64_i64;
+    env_unset: "jet_jit_env_unset" => jet_jit_env_unset: sig_unary_i64;
+    env_vars: "jet_jit_env_vars" => jet_jit_env_vars: sig_i64;
+    io_input: "jet_jit_io_input" => jet_jit_io_input: sig_i8_i64_i64;
+    process_exit: "jet_jit_process_exit" => jet_jit_process_exit: sig_void_i64;
 }
 
-pub(crate) fn register_core_host_symbols(builder: &mut cranelift_jit::JITBuilder) {
-    builder.symbol("jet_jit_os_name", jet_jit_os_name as *const u8);
-    builder.symbol("jet_jit_os_family", jet_jit_os_family as *const u8);
-    builder.symbol("jet_jit_os_arch", jet_jit_os_arch as *const u8);
-    builder.symbol("jet_jit_os_cpu_count", jet_jit_os_cpu_count as *const u8);
-    builder.symbol("jet_jit_os_temp_dir", jet_jit_os_temp_dir as *const u8);
-    builder.symbol("jet_jit_os_executable", jet_jit_os_executable as *const u8);
-    builder.symbol("jet_jit_os_pid", jet_jit_os_pid as *const u8);
-    builder.symbol("jet_jit_os_hostname", jet_jit_os_hostname as *const u8);
-    builder.symbol("jet_jit_os_username", jet_jit_os_username as *const u8);
-    builder.symbol("jet_jit_os_release", jet_jit_os_release as *const u8);
-    builder.symbol("jet_jit_os_version", jet_jit_os_version as *const u8);
-    builder.symbol("jet_jit_os_getppid", jet_jit_os_getppid as *const u8);
-    builder.symbol("jet_jit_os_getuid", jet_jit_os_getuid as *const u8);
-    builder.symbol("jet_jit_os_geteuid", jet_jit_os_geteuid as *const u8);
-    builder.symbol("jet_jit_os_getgid", jet_jit_os_getgid as *const u8);
-    builder.symbol("jet_jit_os_getegid", jet_jit_os_getegid as *const u8);
-    builder.symbol("jet_jit_os_getpgrp", jet_jit_os_getpgrp as *const u8);
-    builder.symbol("jet_jit_os_getgroups", jet_jit_os_getgroups as *const u8);
-    builder.symbol("jet_jit_os_uptime", jet_jit_os_uptime as *const u8);
-    builder.symbol("jet_jit_os_loadavg", jet_jit_os_loadavg as *const u8);
-    builder.symbol("jet_jit_os_times", jet_jit_os_times as *const u8);
-    builder.symbol("jet_jit_os_success", jet_jit_os_success as *const u8);
-    builder.symbol("jet_jit_os_exitcode", jet_jit_os_exitcode as *const u8);
-    builder.symbol("jet_jit_os_expand", jet_jit_os_expand as *const u8);
-    builder.symbol("jet_jit_os_getpgid", jet_jit_os_getpgid as *const u8);
-    builder.symbol("jet_jit_os_getsid", jet_jit_os_getsid as *const u8);
-    builder.symbol("jet_jit_os_setpgid", jet_jit_os_setpgid as *const u8);
-    builder.symbol("jet_jit_os_setpgrp", jet_jit_os_setpgrp as *const u8);
-    builder.symbol("jet_jit_os_umask", jet_jit_os_umask as *const u8);
-    builder.symbol("jet_jit_os_sync", jet_jit_os_sync as *const u8);
-    builder.symbol("jet_jit_os_getpriority", jet_jit_os_getpriority as *const u8);
-    builder.symbol("jet_jit_os_setpriority", jet_jit_os_setpriority as *const u8);
-    builder.symbol("jet_jit_os_kill", jet_jit_os_kill as *const u8);
-    builder.symbol("jet_jit_os_pipe", jet_jit_os_pipe as *const u8);
-    builder.symbol("jet_jit_os_close_fd", jet_jit_os_close_fd as *const u8);
-    builder.symbol("jet_jit_os_mkfifo", jet_jit_os_mkfifo as *const u8);
-    builder.symbol("jet_jit_os_fork", jet_jit_os_fork as *const u8);
-    builder.symbol("jet_jit_os_setuid", jet_jit_os_setuid as *const u8);
-    builder.symbol("jet_jit_os_setgid", jet_jit_os_setgid as *const u8);
-    builder.symbol("jet_jit_os_setsid", jet_jit_os_setsid as *const u8);
-    builder.symbol("jet_jit_os_initgroups", jet_jit_os_initgroups as *const u8);
-    builder.symbol("jet_jit_os_wait", jet_jit_os_wait as *const u8);
-    builder.symbol("jet_jit_os_waitpid", jet_jit_os_waitpid as *const u8);
-    builder.symbol("jet_jit_os_utime", jet_jit_os_utime as *const u8);
-    builder.symbol("jet_jit_os_atexit", jet_jit_os_atexit as *const u8);
-    builder.symbol("jet_jit_os_stop", jet_jit_os_stop as *const u8);
-    builder.symbol("jet_jit_log_set_level", jet_jit_log_set_level as *const u8);
-    builder.symbol("jet_jit_log_setup", jet_jit_log_setup as *const u8);
-    builder.symbol("jet_jit_log_debug", jet_jit_log_debug as *const u8);
-    builder.symbol("jet_jit_log_info", jet_jit_log_info as *const u8);
-    builder.symbol("jet_jit_log_warn", jet_jit_log_warn as *const u8);
-    builder.symbol("jet_jit_log_error", jet_jit_log_error as *const u8);
-    builder.symbol("jet_jit_log_critical", jet_jit_log_critical as *const u8);
-    builder.symbol("jet_jit_log_fatal", jet_jit_log_fatal as *const u8);
-    builder.symbol("jet_jit_log_disable", jet_jit_log_disable as *const u8);
-    builder.symbol("jet_jit_log_flush", jet_jit_log_flush as *const u8);
-    builder.symbol("jet_jit_log_enabled", jet_jit_log_enabled as *const u8);
-    builder.symbol(
-        "jet_jit_log_set_trace_id",
-        jet_jit_log_set_trace_id as *const u8,
-    );
-    builder.symbol("jet_jit_log_field", jet_jit_log_field as *const u8);
-    builder.symbol("jet_jit_log_int_field", jet_jit_log_int_field as *const u8);
-    builder.symbol("jet_jit_log_bool_field", jet_jit_log_bool_field as *const u8);
-    builder.symbol("jet_jit_log_counter", jet_jit_log_counter as *const u8);
-    builder.symbol("jet_jit_log_span", jet_jit_log_span as *const u8);
-    builder.symbol("jet_jit_log_enter", jet_jit_log_enter as *const u8);
-    builder.symbol("jet_jit_log_close", jet_jit_log_close as *const u8);
-    builder.symbol(
-        "jet_jit_log_info_fields",
-        jet_jit_log_info_fields as *const u8,
-    );
-    builder.symbol("jet_jit_fs_exists", jet_jit_fs_exists as *const u8);
-    builder.symbol("jet_jit_fs_read", jet_jit_fs_read as *const u8);
-    builder.symbol("jet_jit_fs_read_bytes", jet_jit_fs_read_bytes as *const u8);
-    builder.symbol("jet_jit_fs_write", jet_jit_fs_write as *const u8);
-    builder.symbol("jet_jit_fs_create_dir", jet_jit_fs_create_dir as *const u8);
-    builder.symbol("jet_jit_fs_list_dir", jet_jit_fs_list_dir as *const u8);
-    builder.symbol("jet_jit_fs_remove_all", jet_jit_fs_remove_all as *const u8);
-    builder.symbol("jet_jit_fs_remove", jet_jit_fs_remove as *const u8);
-    builder.symbol("jet_jit_fs_stat", jet_jit_fs_stat as *const u8);
-    builder.symbol("jet_jit_fs_read_at", jet_jit_fs_read_at as *const u8);
-    builder.symbol("jet_jit_fs_write_at", jet_jit_fs_write_at as *const u8);
-    builder.symbol("jet_jit_fs_fsync", jet_jit_fs_fsync as *const u8);
-    builder.symbol("jet_jit_fs_write_atomic", jet_jit_fs_write_atomic as *const u8);
-    builder.symbol("jet_jit_fs_walk", jet_jit_fs_walk as *const u8);
-    builder.symbol("jet_jit_fs_glob", jet_jit_fs_glob as *const u8);
-    builder.symbol("jet_jit_fs_symlink", jet_jit_fs_symlink as *const u8);
-    builder.symbol("jet_jit_fs_read_link", jet_jit_fs_read_link as *const u8);
-    builder.symbol("jet_jit_fs_hard_link", jet_jit_fs_hard_link as *const u8);
-    builder.symbol("jet_jit_fs_canonicalize", jet_jit_fs_canonicalize as *const u8);
-    builder.symbol("jet_jit_fs_absolute", jet_jit_fs_absolute as *const u8);
-    builder.symbol("jet_jit_fs_copy_dir", jet_jit_fs_copy_dir as *const u8);
-    builder.symbol("jet_jit_fs_temp_dir", jet_jit_fs_temp_dir as *const u8);
-    builder.symbol("jet_jit_fs_temp_file", jet_jit_fs_temp_file as *const u8);
-    builder.symbol("jet_jit_fs_lock", jet_jit_fs_lock as *const u8);
-    builder.symbol("jet_jit_path_join", jet_jit_path_join as *const u8);
-    builder.symbol("jet_jit_path_parent_str", jet_jit_path_parent_str as *const u8);
-    builder.symbol("jet_jit_path_extension_str", jet_jit_path_extension_str as *const u8);
-    builder.symbol("jet_jit_path_normalize_str", jet_jit_path_normalize_str as *const u8);
-    builder.symbol("jet_jit_path_from", jet_jit_path_from as *const u8);
-    builder.symbol("jet_jit_path_write_atomic", jet_jit_path_write_atomic as *const u8);
-    builder.symbol("jet_jit_path_join_handle", jet_jit_path_join_handle as *const u8);
-    builder.symbol("jet_jit_path_parent", jet_jit_path_parent as *const u8);
-    builder.symbol("jet_jit_path_extension", jet_jit_path_extension as *const u8);
-    builder.symbol("jet_jit_path_stem", jet_jit_path_stem as *const u8);
-    builder.symbol("jet_jit_path_to_string", jet_jit_path_to_string as *const u8);
-    builder.symbol("jet_jit_path_walk", jet_jit_path_walk as *const u8);
-    builder.symbol("jet_jit_math_sin", jet_jit_math_sin as *const u8);
-    builder.symbol("jet_jit_math_cos", jet_jit_math_cos as *const u8);
-    builder.symbol("jet_jit_math_exp", jet_jit_math_exp as *const u8);
-    builder.symbol("jet_jit_math_atan2", jet_jit_math_atan2 as *const u8);
-    builder.symbol("jet_jit_math_hypot", jet_jit_math_hypot as *const u8);
-    builder.symbol("jet_jit_math_lerp", jet_jit_math_lerp as *const u8);
-    builder.symbol("jet_jit_math_degrees", jet_jit_math_degrees as *const u8);
-    builder.symbol("jet_jit_math_radians", jet_jit_math_radians as *const u8);
-    builder.symbol("jet_jit_math_is_finite", jet_jit_math_is_finite as *const u8);
-    builder.symbol("jet_jit_math_sign", jet_jit_math_sign as *const u8);
-    builder.symbol("jet_jit_math_checked_add", jet_jit_math_checked_add as *const u8);
-    builder.symbol(
-        "jet_jit_math_saturating_add",
-        jet_jit_math_saturating_add as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_math_wrapping_add",
-        jet_jit_math_wrapping_add as *const u8,
-    );
-    builder.symbol("jet_jit_math_int_pow", jet_jit_math_int_pow as *const u8);
-    builder.symbol("jet_jit_math_gcd", jet_jit_math_gcd as *const u8);
-    builder.symbol("jet_jit_math_lcm", jet_jit_math_lcm as *const u8);
-    builder.symbol("jet_jit_math_sqrt", jet_jit_math_sqrt as *const u8);
-    builder.symbol("jet_jit_math_sqrt_f32", jet_jit_math_sqrt_f32 as *const u8);
-    builder.symbol("jet_jit_math_pow", jet_jit_math_pow as *const u8);
-    builder.symbol("jet_jit_math_pow_f32", jet_jit_math_pow_f32 as *const u8);
-    builder.symbol("jet_jit_math_floor", jet_jit_math_floor as *const u8);
-    builder.symbol("jet_jit_math_floor_f32", jet_jit_math_floor_f32 as *const u8);
-    builder.symbol("jet_jit_math_ceil", jet_jit_math_ceil as *const u8);
-    builder.symbol("jet_jit_math_ceil_f32", jet_jit_math_ceil_f32 as *const u8);
-    builder.symbol("jet_jit_env_get", jet_jit_env_get as *const u8);
-    builder.symbol("jet_jit_env_set", jet_jit_env_set as *const u8);
-    builder.symbol("jet_jit_env_unset", jet_jit_env_unset as *const u8);
-    builder.symbol("jet_jit_env_vars", jet_jit_env_vars as *const u8);
-    builder.symbol("jet_jit_io_input", jet_jit_io_input as *const u8);
-    builder.symbol("jet_jit_process_exit", jet_jit_process_exit as *const u8);
-}
 
-pub(crate) fn declare_core_host_fns(
-    module: &mut cranelift_jit::JITModule,
-) -> Result<CoreHostFns, String> {
-    use cranelift_codegen::ir::{types, AbiParam, Signature};
-    use cranelift_module::{Linkage, Module};
 
-    let cc = module.target_config().default_call_conv;
-    let mut sig_str = Signature::new(cc);
-    sig_str.returns.push(AbiParam::new(types::I64));
-    let mut sig_i64 = Signature::new(cc);
-    sig_i64.returns.push(AbiParam::new(types::I64));
-    let mut sig_f64 = Signature::new(cc);
-    sig_f64.returns.push(AbiParam::new(types::F64));
-    let mut sig_void = Signature::new(cc);
-    let mut sig_void_str = Signature::new(cc);
-    sig_void_str.params.push(AbiParam::new(types::I64));
-    let mut sig_str_str_str = Signature::new(cc);
-    sig_str_str_str.params.push(AbiParam::new(types::I64));
-    sig_str_str_str.params.push(AbiParam::new(types::I64));
-    sig_str_str_str.returns.push(AbiParam::new(types::I64));
-    let mut sig_str_i64_str = Signature::new(cc);
-    sig_str_i64_str.params.push(AbiParam::new(types::I64));
-    sig_str_i64_str.params.push(AbiParam::new(types::I64));
-    sig_str_i64_str.returns.push(AbiParam::new(types::I64));
-    let mut sig_str_i8_str = Signature::new(cc);
-    sig_str_i8_str.params.push(AbiParam::new(types::I64));
-    sig_str_i8_str.params.push(AbiParam::new(types::I8));
-    sig_str_i8_str.returns.push(AbiParam::new(types::I64));
-    let mut sig_void_i64 = Signature::new(cc);
-    sig_void_i64.params.push(AbiParam::new(types::I64));
-    let mut sig_void_i64_i64 = Signature::new(cc);
-    sig_void_i64_i64.params.push(AbiParam::new(types::I64));
-    sig_void_i64_i64.params.push(AbiParam::new(types::I64));
-    let mut sig_unary_i64 = Signature::new(cc);
-    sig_unary_i64.params.push(AbiParam::new(types::I64));
-    sig_unary_i64.returns.push(AbiParam::new(types::I64));
-    let mut sig_i64_i8 = Signature::new(cc);
-    sig_i64_i8.params.push(AbiParam::new(types::I64));
-    sig_i64_i8.returns.push(AbiParam::new(types::I8));
-    let mut sig_f64_f64 = Signature::new(cc);
-    sig_f64_f64.params.push(AbiParam::new(types::F64));
-    sig_f64_f64.returns.push(AbiParam::new(types::F64));
-    let mut sig_f64_f64_f64 = Signature::new(cc);
-    sig_f64_f64_f64.params.push(AbiParam::new(types::F64));
-    sig_f64_f64_f64.params.push(AbiParam::new(types::F64));
-    sig_f64_f64_f64.returns.push(AbiParam::new(types::F64));
-    let mut sig_lerp = Signature::new(cc);
-    sig_lerp.params.push(AbiParam::new(types::F64));
-    sig_lerp.params.push(AbiParam::new(types::F64));
-    sig_lerp.params.push(AbiParam::new(types::F64));
-    sig_lerp.returns.push(AbiParam::new(types::F64));
-    let mut sig_f64_i8 = Signature::new(cc);
-    sig_f64_i8.params.push(AbiParam::new(types::F64));
-    sig_f64_i8.returns.push(AbiParam::new(types::I8));
-    let mut sig_f64_i64 = Signature::new(cc);
-    sig_f64_i64.params.push(AbiParam::new(types::F64));
-    sig_f64_i64.returns.push(AbiParam::new(types::I64));
-    let mut sig_i64_i64_i64 = Signature::new(cc);
-    sig_i64_i64_i64.params.push(AbiParam::new(types::I64));
-    sig_i64_i64_i64.params.push(AbiParam::new(types::I64));
-    sig_i64_i64_i64.returns.push(AbiParam::new(types::I64));
-    let mut sig_i64_i64_i64_i64 = Signature::new(cc);
-    sig_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
-    sig_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
-    sig_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
-    sig_i64_i64_i64_i64.returns.push(AbiParam::new(types::I64));
 
-    let mut sig_i8_i64_i64 = Signature::new(cc);
-    sig_i8_i64_i64.params.push(AbiParam::new(types::I8));
-    sig_i8_i64_i64.params.push(AbiParam::new(types::I64));
-    sig_i8_i64_i64.returns.push(AbiParam::new(types::I64));
 
-    let mut import = |name: &str, sig: &Signature| -> Result<cranelift_module::FuncId, String> {
-        module
-            .declare_function(name, Linkage::Import, sig)
-            .map_err(|e| e.to_string())
-    };
-
-    Ok(CoreHostFns {
-        os_name: import("jet_jit_os_name", &sig_str)?,
-        os_family: import("jet_jit_os_family", &sig_str)?,
-        os_arch: import("jet_jit_os_arch", &sig_str)?,
-        os_cpu_count: import("jet_jit_os_cpu_count", &sig_i64)?,
-        os_temp_dir: import("jet_jit_os_temp_dir", &sig_str)?,
-        os_executable: import("jet_jit_os_executable", &sig_str)?,
-        os_pid: import("jet_jit_os_pid", &sig_i64)?,
-        os_hostname: import("jet_jit_os_hostname", &sig_str)?,
-        os_username: import("jet_jit_os_username", &sig_str)?,
-        os_release: import("jet_jit_os_release", &sig_str)?,
-        os_version: import("jet_jit_os_version", &sig_str)?,
-        os_getppid: import("jet_jit_os_getppid", &sig_i64)?,
-        os_getuid: import("jet_jit_os_getuid", &sig_i64)?,
-        os_geteuid: import("jet_jit_os_geteuid", &sig_i64)?,
-        os_getgid: import("jet_jit_os_getgid", &sig_i64)?,
-        os_getegid: import("jet_jit_os_getegid", &sig_i64)?,
-        os_getpgrp: import("jet_jit_os_getpgrp", &sig_i64)?,
-        os_getgroups: import("jet_jit_os_getgroups", &sig_i64)?,
-        os_uptime: import("jet_jit_os_uptime", &sig_f64)?,
-        os_loadavg: import("jet_jit_os_loadavg", &sig_i64)?,
-        os_times: import("jet_jit_os_times", &sig_i64)?,
-        os_success: import("jet_jit_os_success", &sig_i64_i8)?,
-        os_exitcode: import("jet_jit_os_exitcode", &sig_unary_i64)?,
-        os_expand: import("jet_jit_os_expand", &sig_unary_i64)?,
-        os_getpgid: import("jet_jit_os_getpgid", &sig_unary_i64)?,
-        os_getsid: import("jet_jit_os_getsid", &sig_unary_i64)?,
-        os_setpgid: import("jet_jit_os_setpgid", &sig_i64_i64_i64)?,
-        os_setpgrp: import("jet_jit_os_setpgrp", &sig_i64)?,
-        os_umask: import("jet_jit_os_umask", &sig_unary_i64)?,
-        os_sync: import("jet_jit_os_sync", &sig_void)?,
-        os_getpriority: import("jet_jit_os_getpriority", &sig_unary_i64)?,
-        os_setpriority: import("jet_jit_os_setpriority", &sig_i64_i64_i64)?,
-        os_kill: import("jet_jit_os_kill", &sig_i64_i64_i64)?,
-        os_pipe: import("jet_jit_os_pipe", &sig_i64)?,
-        os_close_fd: import("jet_jit_os_close_fd", &sig_void_i64)?,
-        os_mkfifo: import("jet_jit_os_mkfifo", &sig_i64_i64_i64)?,
-        os_fork: import("jet_jit_os_fork", &sig_i64)?,
-        os_setuid: import("jet_jit_os_setuid", &sig_unary_i64)?,
-        os_setgid: import("jet_jit_os_setgid", &sig_unary_i64)?,
-        os_setsid: import("jet_jit_os_setsid", &sig_i64)?,
-        os_initgroups: import("jet_jit_os_initgroups", &sig_i64_i64_i64)?,
-        os_wait: import("jet_jit_os_wait", &sig_i64)?,
-        os_waitpid: import("jet_jit_os_waitpid", &sig_i64_i64_i64)?,
-        os_utime: import("jet_jit_os_utime", &sig_i64_i64_i64_i64)?,
-        os_atexit: import("jet_jit_os_atexit", &sig_unary_i64)?,
-        os_stop: import("jet_jit_os_stop", &sig_void_i64)?,
-        log_set_level: import("jet_jit_log_set_level", &sig_void_str)?,
-        log_setup: import("jet_jit_log_setup", &sig_void_str)?,
-        log_debug: import("jet_jit_log_debug", &sig_void_str)?,
-        log_info: import("jet_jit_log_info", &sig_void_str)?,
-        log_warn: import("jet_jit_log_warn", &sig_void_str)?,
-        log_error: import("jet_jit_log_error", &sig_void_str)?,
-        log_critical: import("jet_jit_log_critical", &sig_void_str)?,
-        log_fatal: import("jet_jit_log_fatal", &sig_void_str)?,
-        log_disable: import("jet_jit_log_disable", &sig_void)?,
-        log_flush: import("jet_jit_log_flush", &sig_void)?,
-        log_enabled: import("jet_jit_log_enabled", &sig_i64_i8)?,
-        log_set_trace_id: import("jet_jit_log_set_trace_id", &sig_void_str)?,
-        log_field: import("jet_jit_log_field", &sig_str_str_str)?,
-        log_int_field: import("jet_jit_log_int_field", &sig_str_i64_str)?,
-        log_bool_field: import("jet_jit_log_bool_field", &sig_str_i8_str)?,
-        log_counter: import("jet_jit_log_counter", &sig_str_i64_str)?,
-        log_span: import("jet_jit_log_span", &sig_unary_i64)?,
-        log_enter: import("jet_jit_log_enter", &sig_void_i64)?,
-        log_close: import("jet_jit_log_close", &sig_void_i64)?,
-        log_info_fields: import("jet_jit_log_info_fields", &sig_void_i64_i64)?,
-        fs_exists: import("jet_jit_fs_exists", &sig_i64_i8)?,
-        fs_read: import("jet_jit_fs_read", &sig_unary_i64)?,
-        fs_read_bytes: import("jet_jit_fs_read_bytes", &sig_unary_i64)?,
-        fs_write: import("jet_jit_fs_write", &sig_i64_i64_i64)?,
-        fs_create_dir: import("jet_jit_fs_create_dir", &sig_unary_i64)?,
-        fs_list_dir: import("jet_jit_fs_list_dir", &sig_unary_i64)?,
-        fs_remove_all: import("jet_jit_fs_remove_all", &sig_unary_i64)?,
-        fs_remove: import("jet_jit_fs_remove", &sig_unary_i64)?,
-        fs_stat: import("jet_jit_fs_stat", &sig_unary_i64)?,
-        fs_read_at: import("jet_jit_fs_read_at", &sig_i64_i64_i64_i64)?,
-        fs_write_at: import("jet_jit_fs_write_at", &sig_i64_i64_i64_i64)?,
-        fs_fsync: import("jet_jit_fs_fsync", &sig_unary_i64)?,
-        fs_write_atomic: import("jet_jit_fs_write_atomic", &sig_i64_i64_i64)?,
-        fs_walk: import("jet_jit_fs_walk", &sig_unary_i64)?,
-        fs_glob: import("jet_jit_fs_glob", &sig_unary_i64)?,
-        fs_symlink: import("jet_jit_fs_symlink", &sig_i64_i64_i64)?,
-        fs_read_link: import("jet_jit_fs_read_link", &sig_unary_i64)?,
-        fs_hard_link: import("jet_jit_fs_hard_link", &sig_i64_i64_i64)?,
-        fs_canonicalize: import("jet_jit_fs_canonicalize", &sig_unary_i64)?,
-        fs_absolute: import("jet_jit_fs_absolute", &sig_unary_i64)?,
-        fs_copy_dir: import("jet_jit_fs_copy_dir", &sig_i64_i64_i64)?,
-        fs_temp_dir: import("jet_jit_fs_temp_dir", &sig_unary_i64)?,
-        fs_temp_file: import("jet_jit_fs_temp_file", &sig_unary_i64)?,
-        fs_lock: import("jet_jit_fs_lock", &sig_unary_i64)?,
-        path_join: import("jet_jit_path_join", &sig_i64_i64_i64)?,
-        path_parent_str: import("jet_jit_path_parent_str", &sig_unary_i64)?,
-        path_extension_str: import("jet_jit_path_extension_str", &sig_unary_i64)?,
-        path_normalize_str: import("jet_jit_path_normalize_str", &sig_unary_i64)?,
-        path_from: import("jet_jit_path_from", &sig_unary_i64)?,
-        path_write_atomic: import("jet_jit_path_write_atomic", &sig_i64_i64_i64)?,
-        path_join_handle: import("jet_jit_path_join_handle", &sig_i64_i64_i64)?,
-        path_parent: import("jet_jit_path_parent", &sig_unary_i64)?,
-        path_extension: import("jet_jit_path_extension", &sig_unary_i64)?,
-        path_stem: import("jet_jit_path_stem", &sig_unary_i64)?,
-        path_to_string: import("jet_jit_path_to_string", &sig_unary_i64)?,
-        path_walk: import("jet_jit_path_walk", &sig_unary_i64)?,
-        math_sin: import("jet_jit_math_sin", &sig_f64_f64)?,
-        math_cos: import("jet_jit_math_cos", &sig_f64_f64)?,
-        math_exp: import("jet_jit_math_exp", &sig_f64_f64)?,
-        math_atan2: import("jet_jit_math_atan2", &sig_f64_f64_f64)?,
-        math_hypot: import("jet_jit_math_hypot", &sig_f64_f64_f64)?,
-        math_lerp: import("jet_jit_math_lerp", &sig_lerp)?,
-        math_degrees: import("jet_jit_math_degrees", &sig_f64_f64)?,
-        math_radians: import("jet_jit_math_radians", &sig_f64_f64)?,
-        math_is_finite: import("jet_jit_math_is_finite", &sig_f64_i8)?,
-        math_sign: import("jet_jit_math_sign", &sig_f64_i64)?,
-        math_checked_add: import("jet_jit_math_checked_add", &sig_i64_i64_i64)?,
-        math_saturating_add: import("jet_jit_math_saturating_add", &sig_i64_i64_i64)?,
-        math_wrapping_add: import("jet_jit_math_wrapping_add", &sig_i64_i64_i64)?,
-        math_int_pow: import("jet_jit_math_int_pow", &sig_i64_i64_i64)?,
-        math_gcd: import("jet_jit_math_gcd", &sig_i64_i64_i64)?,
-        math_lcm: import("jet_jit_math_lcm", &sig_i64_i64_i64)?,
-        math_sqrt: import("jet_jit_math_sqrt", &sig_f64_f64)?,
-        math_sqrt_f32: import("jet_jit_math_sqrt_f32", &sig_f64_f64)?,
-        math_pow: import("jet_jit_math_pow", &sig_f64_f64_f64)?,
-        math_pow_f32: import("jet_jit_math_pow_f32", &sig_f64_f64_f64)?,
-        math_floor: import("jet_jit_math_floor", &sig_f64_f64)?,
-        math_floor_f32: import("jet_jit_math_floor_f32", &sig_f64_f64)?,
-        math_ceil: import("jet_jit_math_ceil", &sig_f64_f64)?,
-        math_ceil_f32: import("jet_jit_math_ceil_f32", &sig_f64_f64)?,
-        env_get: import("jet_jit_env_get", &sig_unary_i64)?,
-        env_set: import("jet_jit_env_set", &sig_i64_i64_i64)?,
-        env_unset: import("jet_jit_env_unset", &sig_unary_i64)?,
-        env_vars: import("jet_jit_env_vars", &sig_i64)?,
-        io_input: import("jet_jit_io_input", &sig_i8_i64_i64)?,
-        process_exit: import("jet_jit_process_exit", &sig_void_i64)?,
-    })
-}

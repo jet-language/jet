@@ -614,6 +614,45 @@ mod marker_decl_tests {
         assert_eq!(decl.params[1].name, "$sites");
     }
 
+    /// D-META-FORM1=A: `$repeatable` is a named parameter like every other
+    /// fact about a rule, never a trailing word. A new fact about rules is a
+    /// new named parameter, so the list stays open-ended and the grammar does
+    /// not grow. `$sites` takes `[Site]`, the eighteen-member menu published in
+    /// `core.lang` (`Policy::SITE_VARIANTS`).
+    #[test]
+    fn a_fact_about_the_rule_is_one_more_named_parameter() {
+        let source = "marker Pre(condition: String, message: String, $sites: [.Function, .Method], $repeatable: true)\nfn run() {}\n";
+        let (tokens, lex_diags) = Lexer::lex(source);
+        assert!(lex_diags.is_empty(), "{lex_diags:?}");
+        let program = Parser::parse(&tokens).expect("ratified marker declaration must parse");
+        let decl = program
+            .items
+            .iter()
+            .find_map(|item| match item {
+                AST::Item::MarkerDecl(decl) => Some(decl),
+                _ => None,
+            })
+            .expect("a MarkerDecl item");
+        let names: Vec<&str> = decl.params.iter().map(|param| param.name.as_str()).collect();
+        assert_eq!(names, ["condition", "message", "$sites", "$repeatable"]);
+
+        // A fact about the rule carries a value, not a type; an argument the
+        // use site supplies carries a type.
+        for param in &decl.params {
+            if param.name.starts_with('$') {
+                assert!(param.ty.is_none(), "{}", param.name);
+                assert!(param.value.is_some(), "{}", param.name);
+            } else {
+                assert!(param.ty.is_some(), "{}", param.name);
+            }
+        }
+
+        // The site names `$sites` may hold are exactly the published menu.
+        for site in jet_foundation::Policy::RuleSite::ALL {
+            assert!(jet_foundation::Policy::SITE_VARIANTS.contains(&site.name()));
+        }
+    }
+
     /// D-META-FORM1=A rejected a trailing `on` clause, a second parameter
     /// list, and a scope block by name, in favor of `$`-marked named
     /// parameters in the declaration's own list.

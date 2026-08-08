@@ -674,193 +674,84 @@ extern "C" fn jet_jit_regex_escape(text: i64) -> i64 {
 }
 
 
-pub(crate) struct TextHostFns {
-    pub lower: FuncId,
-    pub upper: FuncId,
-    pub graphemes: FuncId,
-    pub words: FuncId,
-    pub sentences: FuncId,
-    pub nfc: FuncId,
-    pub nfkc: FuncId,
-    pub nfd: FuncId,
-    pub nfkd: FuncId,
-    pub caseless_eq: FuncId,
-    pub display_width: FuncId,
-    pub display_width_policy: FuncId,
-    pub is_alphabetic: FuncId,
-    pub is_numeric: FuncId,
-    pub is_whitespace: FuncId,
-    pub is_ascii: FuncId,
-    pub trim_start: FuncId,
-    pub trim_end: FuncId,
-    pub pad_start: FuncId,
-    pub pad_end: FuncId,
-    pub index_of: FuncId,
-    pub count: FuncId,
-    pub title: FuncId,
-    pub split_once: FuncId,
-    pub string_method: FuncId,
-    pub center: FuncId,
-    pub starts_any: FuncId,
-    pub char_indices: FuncId,
-    pub regex_flags: FuncId,
-    pub regex_escape: FuncId,
-    pub regex_literal: FuncId,
-    pub regex_is_match: FuncId,
-    pub regex_find: FuncId,
-    pub regex_find_all: FuncId,
-    pub regex_matches: FuncId,
-    pub regex_match: FuncId,
-    pub regex_replace: FuncId,
-    pub regex_replace_all: FuncId,
-    pub regex_split: FuncId,
-    pub regex_split_limit: FuncId,
-    pub regex_compile: FuncId,
-    pub regex_compile_with: FuncId,
-    pub regex_method: FuncId,
-}
+host_fns! {
+    struct TextHostFns;
+    register: register_text_symbols;
+    declare: declare_text_host_fns(module) {
+        let cc = module.target_config().default_call_conv;
+        let mut unary = Signature::new(cc);
+        unary.params.push(AbiParam::new(types::I64));
+        unary.returns.push(AbiParam::new(types::I64));
+        let mut unary_i8 = Signature::new(cc);
+        unary_i8.params.push(AbiParam::new(types::I64));
+        unary_i8.returns.push(AbiParam::new(types::I8));
+        let mut binary = Signature::new(cc);
+        binary.params.push(AbiParam::new(types::I64));
+        binary.params.push(AbiParam::new(types::I64));
+        binary.returns.push(AbiParam::new(types::I64));
+        let mut binary_i8 = Signature::new(cc);
+        binary_i8.params.push(AbiParam::new(types::I64));
+        binary_i8.params.push(AbiParam::new(types::I64));
+        binary_i8.returns.push(AbiParam::new(types::I8));
+        let mut ternary = Signature::new(cc);
+        for _ in 0..3 {
+            ternary.params.push(AbiParam::new(types::I64));
+        }
+        ternary.returns.push(AbiParam::new(types::I64));
 
-pub(crate) fn register_text_symbols(builder: &mut JITBuilder) {
-    builder.symbol("jet_jit_text_lower", jet_jit_text_lower as *const u8);
-    builder.symbol("jet_jit_text_upper", jet_jit_text_upper as *const u8);
-    builder.symbol("jet_jit_text_graphemes", jet_jit_text_graphemes as *const u8);
-    builder.symbol("jet_jit_text_words", jet_jit_text_words as *const u8);
-    builder.symbol("jet_jit_text_sentences", jet_jit_text_sentences as *const u8);
-    builder.symbol("jet_jit_text_nfc", jet_jit_text_nfc as *const u8);
-    builder.symbol("jet_jit_text_nfkc", jet_jit_text_nfkc as *const u8);
-    builder.symbol("jet_jit_text_nfd", jet_jit_text_nfd as *const u8);
-    builder.symbol("jet_jit_text_nfkd", jet_jit_text_nfkd as *const u8);
-    builder.symbol("jet_jit_text_caseless_eq", jet_jit_text_caseless_eq as *const u8);
-    builder.symbol(
-        "jet_jit_text_display_width",
-        jet_jit_text_display_width as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_text_display_width_policy",
-        jet_jit_text_display_width_policy as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_text_is_alphabetic",
-        jet_jit_text_is_alphabetic as *const u8,
-    );
-    builder.symbol("jet_jit_text_is_numeric", jet_jit_text_is_numeric as *const u8);
-    builder.symbol(
-        "jet_jit_text_is_whitespace",
-        jet_jit_text_is_whitespace as *const u8,
-    );
-    builder.symbol("jet_jit_text_is_ascii", jet_jit_text_is_ascii as *const u8);
-    builder.symbol(
-        "jet_jit_text_trim_start",
-        jet_jit_text_trim_start as *const u8,
-    );
-    builder.symbol("jet_jit_text_trim_end", jet_jit_text_trim_end as *const u8);
-    builder.symbol("jet_jit_text_pad_start", jet_jit_text_pad_start as *const u8);
-    builder.symbol("jet_jit_text_pad_end", jet_jit_text_pad_end as *const u8);
-    builder.symbol("jet_jit_text_index_of", jet_jit_text_index_of as *const u8);
-    builder.symbol("jet_jit_text_count", jet_jit_text_count as *const u8);
-    builder.symbol("jet_jit_text_title", jet_jit_text_title as *const u8);
-    builder.symbol("jet_jit_string_method", jet_jit_string_method as *const u8);
-    builder.symbol(
-        "jet_jit_text_split_once",
-        jet_jit_text_split_once as *const u8,
-    );
-    builder.symbol("jet_jit_text_center", jet_jit_text_center as *const u8);
-    builder.symbol("jet_jit_text_starts_any", jet_jit_text_starts_any as *const u8);
-    builder.symbol(
-        "jet_jit_text_char_indices",
-        jet_jit_text_char_indices as *const u8,
-    );
-    builder.symbol("jet_jit_regex_flags", jet_jit_regex_flags as *const u8);
-    builder.symbol("jet_jit_regex_escape", jet_jit_regex_escape as *const u8);
-    builder.symbol("jet_jit_regex_literal", jet_jit_regex_literal as *const u8);
-    builder.symbol("jet_jit_regex_is_match", jet_jit_regex_is_match as *const u8);
-    builder.symbol("jet_jit_regex_find", jet_jit_regex_find as *const u8);
-    builder.symbol("jet_jit_regex_find_all", jet_jit_regex_find_all as *const u8);
-    builder.symbol("jet_jit_regex_matches", jet_jit_regex_matches as *const u8);
-    builder.symbol("jet_jit_regex_match", jet_jit_regex_match as *const u8);
-    builder.symbol("jet_jit_regex_replace", jet_jit_regex_replace as *const u8);
-    builder.symbol("jet_jit_regex_replace_all", jet_jit_regex_replace_all as *const u8);
-    builder.symbol("jet_jit_regex_split", jet_jit_regex_split as *const u8);
-    builder.symbol("jet_jit_regex_split_limit", jet_jit_regex_split_limit as *const u8);
-    builder.symbol("jet_jit_regex_compile", jet_jit_regex_compile as *const u8);
-    builder.symbol("jet_jit_regex_compile_with", jet_jit_regex_compile_with as *const u8);
-    builder.symbol("jet_jit_regex_method", jet_jit_regex_method as *const u8);
-}
 
-pub(crate) fn declare_text_host_fns(module: &mut JITModule) -> Result<TextHostFns, String> {
-    let cc = module.target_config().default_call_conv;
-    let mut unary = Signature::new(cc);
-    unary.params.push(AbiParam::new(types::I64));
-    unary.returns.push(AbiParam::new(types::I64));
-    let mut unary_i8 = Signature::new(cc);
-    unary_i8.params.push(AbiParam::new(types::I64));
-    unary_i8.returns.push(AbiParam::new(types::I8));
-    let mut binary = Signature::new(cc);
-    binary.params.push(AbiParam::new(types::I64));
-    binary.params.push(AbiParam::new(types::I64));
-    binary.returns.push(AbiParam::new(types::I64));
-    let mut binary_i8 = Signature::new(cc);
-    binary_i8.params.push(AbiParam::new(types::I64));
-    binary_i8.params.push(AbiParam::new(types::I64));
-    binary_i8.returns.push(AbiParam::new(types::I8));
-    let mut ternary = Signature::new(cc);
-    for _ in 0..3 {
-        ternary.params.push(AbiParam::new(types::I64));
     }
-    ternary.returns.push(AbiParam::new(types::I64));
-    let mut import = |name: &str, sig: &Signature| {
-        module
-            .declare_function(name, Linkage::Import, sig)
-            .map_err(|e| e.to_string())
-    };
-    Ok(TextHostFns {
-        lower: import("jet_jit_text_lower", &unary)?,
-        upper: import("jet_jit_text_upper", &unary)?,
-        graphemes: import("jet_jit_text_graphemes", &unary)?,
-        words: import("jet_jit_text_words", &unary)?,
-        sentences: import("jet_jit_text_sentences", &unary)?,
-        nfc: import("jet_jit_text_nfc", &unary)?,
-        nfkc: import("jet_jit_text_nfkc", &unary)?,
-        nfd: import("jet_jit_text_nfd", &unary)?,
-        nfkd: import("jet_jit_text_nfkd", &unary)?,
-        caseless_eq: import("jet_jit_text_caseless_eq", &binary_i8)?,
-        display_width: import("jet_jit_text_display_width", &unary)?,
-        display_width_policy: import("jet_jit_text_display_width_policy", &binary)?,
-        is_alphabetic: import("jet_jit_text_is_alphabetic", &unary_i8)?,
-        is_numeric: import("jet_jit_text_is_numeric", &unary_i8)?,
-        is_whitespace: import("jet_jit_text_is_whitespace", &unary_i8)?,
-        is_ascii: import("jet_jit_text_is_ascii", &unary_i8)?,
-        trim_start: import("jet_jit_text_trim_start", &unary)?,
-        trim_end: import("jet_jit_text_trim_end", &unary)?,
-        pad_start: import("jet_jit_text_pad_start", &ternary)?,
-        pad_end: import("jet_jit_text_pad_end", &ternary)?,
-        index_of: import("jet_jit_text_index_of", &binary)?,
-        count: import("jet_jit_text_count", &binary)?,
-        title: import("jet_jit_text_title", &unary)?,
-        split_once: import("jet_jit_text_split_once", &binary)?,
-        string_method: import("jet_jit_string_method", &ternary)?,
-        center: import("jet_jit_text_center", &ternary)?,
-        starts_any: import("jet_jit_text_starts_any", &binary_i8)?,
-        char_indices: import("jet_jit_text_char_indices", &unary)?,
-        regex_flags: import("jet_jit_regex_flags", &ternary)?,
-        regex_escape: import("jet_jit_regex_escape", &unary)?,
-        regex_literal: import("jet_jit_regex_literal", &unary)?,
-        regex_is_match: import("jet_jit_regex_is_match", &binary_i8)?,
-        regex_find: import("jet_jit_regex_find", &binary)?,
-        regex_find_all: import("jet_jit_regex_find_all", &binary)?,
-        regex_matches: import("jet_jit_regex_matches", &binary)?,
-        regex_match: import("jet_jit_regex_match", &binary)?,
-        regex_replace: import("jet_jit_regex_replace", &ternary)?,
-        regex_replace_all: import("jet_jit_regex_replace_all", &ternary)?,
-        regex_split: import("jet_jit_regex_split", &binary)?,
-        regex_split_limit: import("jet_jit_regex_split_limit", &ternary)?,
-        regex_compile: import("jet_jit_regex_compile", &unary)?,
-        regex_compile_with: import("jet_jit_regex_compile_with", &binary)?,
-        regex_method: {
+    lower: "jet_jit_text_lower" => jet_jit_text_lower: unary;
+    upper: "jet_jit_text_upper" => jet_jit_text_upper: unary;
+    graphemes: "jet_jit_text_graphemes" => jet_jit_text_graphemes: unary;
+    words: "jet_jit_text_words" => jet_jit_text_words: unary;
+    sentences: "jet_jit_text_sentences" => jet_jit_text_sentences: unary;
+    nfc: "jet_jit_text_nfc" => jet_jit_text_nfc: unary;
+    nfkc: "jet_jit_text_nfkc" => jet_jit_text_nfkc: unary;
+    nfd: "jet_jit_text_nfd" => jet_jit_text_nfd: unary;
+    nfkd: "jet_jit_text_nfkd" => jet_jit_text_nfkd: unary;
+    caseless_eq: "jet_jit_text_caseless_eq" => jet_jit_text_caseless_eq: binary_i8;
+    display_width: "jet_jit_text_display_width" => jet_jit_text_display_width: unary;
+    display_width_policy: "jet_jit_text_display_width_policy" => jet_jit_text_display_width_policy: binary;
+    is_alphabetic: "jet_jit_text_is_alphabetic" => jet_jit_text_is_alphabetic: unary_i8;
+    is_numeric: "jet_jit_text_is_numeric" => jet_jit_text_is_numeric: unary_i8;
+    is_whitespace: "jet_jit_text_is_whitespace" => jet_jit_text_is_whitespace: unary_i8;
+    is_ascii: "jet_jit_text_is_ascii" => jet_jit_text_is_ascii: unary_i8;
+    trim_start: "jet_jit_text_trim_start" => jet_jit_text_trim_start: unary;
+    trim_end: "jet_jit_text_trim_end" => jet_jit_text_trim_end: unary;
+    pad_start: "jet_jit_text_pad_start" => jet_jit_text_pad_start: ternary;
+    pad_end: "jet_jit_text_pad_end" => jet_jit_text_pad_end: ternary;
+    index_of: "jet_jit_text_index_of" => jet_jit_text_index_of: binary;
+    count: "jet_jit_text_count" => jet_jit_text_count: binary;
+    title: "jet_jit_text_title" => jet_jit_text_title: unary;
+    split_once: "jet_jit_text_split_once" => jet_jit_text_split_once: binary;
+    string_method: "jet_jit_string_method" => jet_jit_string_method: ternary;
+    center: "jet_jit_text_center" => jet_jit_text_center: ternary;
+    starts_any: "jet_jit_text_starts_any" => jet_jit_text_starts_any: binary_i8;
+    char_indices: "jet_jit_text_char_indices" => jet_jit_text_char_indices: unary;
+    regex_flags: "jet_jit_regex_flags" => jet_jit_regex_flags: ternary;
+    regex_escape: "jet_jit_regex_escape" => jet_jit_regex_escape: unary;
+    regex_literal: "jet_jit_regex_literal" => jet_jit_regex_literal: unary;
+    regex_is_match: "jet_jit_regex_is_match" => jet_jit_regex_is_match: binary_i8;
+    regex_find: "jet_jit_regex_find" => jet_jit_regex_find: binary;
+    regex_find_all: "jet_jit_regex_find_all" => jet_jit_regex_find_all: binary;
+    regex_matches: "jet_jit_regex_matches" => jet_jit_regex_matches: binary;
+    regex_match: "jet_jit_regex_match" => jet_jit_regex_match: binary;
+    regex_replace: "jet_jit_regex_replace" => jet_jit_regex_replace: ternary;
+    regex_replace_all: "jet_jit_regex_replace_all" => jet_jit_regex_replace_all: ternary;
+    regex_split: "jet_jit_regex_split" => jet_jit_regex_split: binary;
+    regex_split_limit: "jet_jit_regex_split_limit" => jet_jit_regex_split_limit: ternary;
+    regex_compile: "jet_jit_regex_compile" => jet_jit_regex_compile: unary;
+    regex_compile_with: "jet_jit_regex_compile_with" => jet_jit_regex_compile_with: binary;
+    regex_method: "jet_jit_regex_method" => jet_jit_regex_method: {
             let mut q = Signature::new(cc);
             for _ in 0..4 { q.params.push(AbiParam::new(types::I64)); }
             q.returns.push(AbiParam::new(types::I64));
-            import("jet_jit_regex_method", &q)?
-        },
-    })
+            q
+        };
 }
+
+
+
+
+

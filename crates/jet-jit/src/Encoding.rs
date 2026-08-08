@@ -2119,203 +2119,105 @@ extern "C" fn jet_jit_bytes_datatree(bytes: i64) -> i64 {
     alloc_dt_record(DT_BYTES, bytes)
 }
 
-pub(crate) struct EncodingHostFns {
-    pub hex_encode: cranelift_module::FuncId,
-    pub hex_decode: cranelift_module::FuncId,
-    pub b64_encode: cranelift_module::FuncId,
-    pub b64_encode_url: cranelift_module::FuncId,
-    pub b64_decode: cranelift_module::FuncId,
-    pub b64_decode_url: cranelift_module::FuncId,
-    pub base32_encode: cranelift_module::FuncId,
-    pub base32_decode: cranelift_module::FuncId,
-    pub csv_parse: cranelift_module::FuncId,
-    pub csv_to_string: cranelift_module::FuncId,
-    pub csv_tree_to_string: cranelift_module::FuncId,
-    pub uuid_v4: cranelift_module::FuncId,
-    pub uuid_v7: cranelift_module::FuncId,
-    pub uuid_v5: cranelift_module::FuncId,
-    pub uuid_parse: cranelift_module::FuncId,
-    pub json_parse: cranelift_module::FuncId,
-    pub json_decode: cranelift_module::FuncId,
-    pub json_to_string: cranelift_module::FuncId,
-    pub json_to_string_pretty: cranelift_module::FuncId,
-    pub json_canonical: cranelift_module::FuncId,
-    pub json_canonical_checked: cranelift_module::FuncId,
-    pub json_events: cranelift_module::FuncId,
-    pub jsonl_parse: cranelift_module::FuncId,
-    pub jsonl_to_string: cranelift_module::FuncId,
-    pub xml_parse: cranelift_module::FuncId,
-    pub xml_to_string: cranelift_module::FuncId,
-    pub xml_root: cranelift_module::FuncId,
-    pub xml_expanded_name: cranelift_module::FuncId,
-    pub xml_attribute: cranelift_module::FuncId,
-    pub xml_content: cranelift_module::FuncId,
-    pub xml_to_bytes: cranelift_module::FuncId,
-    pub xml_project: cranelift_module::FuncId,
-    pub xml_project_bytes: cranelift_module::FuncId,
-    pub cbor_to_bytes: cranelift_module::FuncId,
-    pub cbor_to_bytes_canonical: cranelift_module::FuncId,
-    pub cbor_parse: cranelift_module::FuncId,
-    pub cbor_parse_options: cranelift_module::FuncId,
-    pub cbor_decode_tree: cranelift_module::FuncId,
-    pub cbor_decode_tree_options: cranelift_module::FuncId,
-    pub bytes_datatree: cranelift_module::FuncId,
-    pub csv_decode_trees: cranelift_module::FuncId,
-    pub datatree_field: cranelift_module::FuncId,
-    pub datatree_at: cranelift_module::FuncId,
-    pub datatree_int: cranelift_module::FuncId,
-    pub datatree_decode_int: cranelift_module::FuncId,
-    pub decode_int_range: cranelift_module::FuncId,
-    pub decode_f32_range: cranelift_module::FuncId,
-    pub decode_fixed_len: cranelift_module::FuncId,
-    pub datatree_decode_list_error: cranelift_module::FuncId,
-    pub decode_error_under: cranelift_module::FuncId,
-    pub decode_error_under_segment: cranelift_module::FuncId,
-    pub decode_error_accumulate: cranelift_module::FuncId,
-    pub datatree_decode_union_error: cranelift_module::FuncId,
-    pub datatree_text: cranelift_module::FuncId,
-    pub datatree_bool: cranelift_module::FuncId,
-    pub datatree_float: cranelift_module::FuncId,
-    pub datatree_pack: cranelift_module::FuncId,
-    pub object_from_map: cranelift_module::FuncId,
-    pub object_entries_to_map: cranelift_module::FuncId,
-    pub datatree_migrate: cranelift_module::FuncId,
-    pub toml_parse: cranelift_module::FuncId,
-    pub toml_to_string: cranelift_module::FuncId,
-    pub yaml_parse: cranelift_module::FuncId,
-    pub yaml_to_string: cranelift_module::FuncId,
-    pub decode_error_show: cranelift_module::FuncId,
-    pub encoding_error_show: cranelift_module::FuncId,
+host_fns! {
+    struct EncodingHostFns;
+    register: register_encoding_symbols;
+    declare: declare_encoding_host_fns(module) {
+        use cranelift_codegen::ir::{types, AbiParam, Signature};
+        use cranelift_module::{Linkage, Module};
+        let cc = module.target_config().default_call_conv;
+        let mut sig_unary = Signature::new(cc);
+        sig_unary.params.push(AbiParam::new(types::I64));
+        sig_unary.returns.push(AbiParam::new(types::I64));
+        let mut sig_nullary = Signature::new(cc);
+        sig_nullary.returns.push(AbiParam::new(types::I64));
+        let mut sig_binary = Signature::new(cc);
+        sig_binary.params.push(AbiParam::new(types::I64));
+        sig_binary.params.push(AbiParam::new(types::I64));
+        sig_binary.returns.push(AbiParam::new(types::I64));
+        let mut sig_ternary = Signature::new(cc);
+        for _ in 0..3 {
+            sig_ternary.params.push(AbiParam::new(types::I64));
+        }
+        sig_ternary.returns.push(AbiParam::new(types::I64));
+        let mut sig_quaternary = Signature::new(cc);
+        for _ in 0..4 {
+            sig_quaternary.params.push(AbiParam::new(types::I64));
+        }
+        sig_quaternary.returns.push(AbiParam::new(types::I64));
+
+
+    }
+    hex_encode: "jet_jit_hex_encode" => jet_jit_hex_encode: sig_unary;
+    hex_decode: "jet_jit_hex_decode" => jet_jit_hex_decode: sig_unary;
+    b64_encode: "jet_jit_b64_encode" => jet_jit_b64_encode: sig_unary;
+    b64_encode_url: "jet_jit_b64_encode_url" => jet_jit_b64_encode_url: sig_unary;
+    b64_decode: "jet_jit_b64_decode" => jet_jit_b64_decode: sig_unary;
+    b64_decode_url: "jet_jit_b64_decode_url" => jet_jit_b64_decode_url: sig_unary;
+    base32_encode: "jet_jit_base32_encode" => jet_jit_base32_encode: sig_unary;
+    base32_decode: "jet_jit_base32_decode" => jet_jit_base32_decode: sig_unary;
+    csv_parse: "jet_jit_csv_parse" => jet_jit_csv_parse: sig_unary;
+    csv_to_string: "jet_jit_csv_to_string" => jet_jit_csv_to_string: sig_unary;
+    csv_tree_to_string: "jet_jit_csv_tree_to_string" => jet_jit_csv_tree_to_string: sig_unary;
+    uuid_v4: "jet_jit_uuid_v4" => jet_jit_uuid_v4: sig_nullary;
+    uuid_v7: "jet_jit_uuid_v7" => jet_jit_uuid_v7: sig_unary;
+    uuid_v5: "jet_jit_uuid_v5" => jet_jit_uuid_v5: sig_binary;
+    uuid_parse: "jet_jit_uuid_parse" => jet_jit_uuid_parse: sig_unary;
+    json_parse: "jet_jit_json_parse" => jet_jit_json_parse: sig_unary;
+    json_decode: "jet_jit_json_decode" => jet_jit_json_decode: sig_unary;
+    json_to_string: "jet_jit_json_to_string" => jet_jit_json_to_string: sig_unary;
+    json_to_string_pretty: "jet_jit_json_to_string_pretty" => jet_jit_json_to_string_pretty: sig_unary;
+    json_canonical: "jet_jit_json_canonical" => jet_jit_json_canonical: sig_unary;
+    json_canonical_checked: "jet_jit_json_canonical_checked" => jet_jit_json_canonical_checked: sig_binary;
+    json_events: "jet_jit_json_events" => jet_jit_json_events: sig_unary;
+    jsonl_parse: "jet_jit_jsonl_parse" => jet_jit_jsonl_parse: sig_unary;
+    jsonl_to_string: "jet_jit_jsonl_to_string" => jet_jit_jsonl_to_string: sig_unary;
+    xml_parse: "jet_jit_xml_parse" => jet_jit_xml_parse: sig_unary;
+    xml_to_string: "jet_jit_xml_to_string" => jet_jit_xml_to_string: sig_unary;
+    xml_root: "jet_jit_xml_root" => jet_jit_xml_root: sig_unary;
+    xml_expanded_name: "jet_jit_xml_expanded_name" => jet_jit_xml_expanded_name: sig_unary;
+    xml_attribute: "jet_jit_xml_attribute" => jet_jit_xml_attribute: sig_binary;
+    xml_content: "jet_jit_xml_content" => jet_jit_xml_content: sig_unary;
+    xml_to_bytes: "jet_jit_xml_to_bytes" => jet_jit_xml_to_bytes: sig_unary;
+    xml_project: "jet_jit_xml_project" => jet_jit_xml_project: sig_unary;
+    xml_project_bytes: "jet_jit_xml_project_bytes" => jet_jit_xml_project_bytes: sig_unary;
+    cbor_to_bytes: "jet_jit_cbor_to_bytes" => jet_jit_cbor_to_bytes: sig_unary;
+    cbor_to_bytes_canonical: "jet_jit_cbor_to_bytes_canonical" => jet_jit_cbor_to_bytes_canonical: sig_unary;
+    cbor_parse: "jet_jit_cbor_parse" => jet_jit_cbor_parse: sig_unary;
+    cbor_parse_options: "jet_jit_cbor_parse_options" => jet_jit_cbor_parse_options: sig_binary;
+    cbor_decode_tree: "jet_jit_cbor_decode_tree" => jet_jit_cbor_decode_tree: sig_unary;
+    cbor_decode_tree_options: "jet_jit_cbor_decode_tree_options" => jet_jit_cbor_decode_tree_options: sig_binary;
+    bytes_datatree: "jet_jit_bytes_datatree" => jet_jit_bytes_datatree: sig_unary;
+    csv_decode_trees: "jet_jit_csv_decode_trees" => jet_jit_csv_decode_trees: sig_unary;
+    datatree_field: "jet_jit_datatree_field" => jet_jit_datatree_field: sig_binary;
+    datatree_at: "jet_jit_datatree_at" => jet_jit_datatree_at: sig_binary;
+    datatree_int: "jet_jit_datatree_int" => jet_jit_datatree_int: sig_unary;
+    datatree_decode_int: "jet_jit_datatree_decode_int" => jet_jit_datatree_decode_int: sig_unary;
+    decode_int_range: "jet_jit_decode_int_range" => jet_jit_decode_int_range: sig_quaternary;
+    decode_f32_range: "jet_jit_decode_f32_range" => jet_jit_decode_f32_range: sig_unary;
+    decode_fixed_len: "jet_jit_decode_fixed_len" => jet_jit_decode_fixed_len: sig_binary;
+    datatree_decode_list_error: "jet_jit_datatree_decode_list_error" => jet_jit_datatree_decode_list_error: sig_unary;
+    decode_error_under: "jet_jit_decode_error_under" => jet_jit_decode_error_under: sig_binary;
+    decode_error_under_segment: "jet_jit_decode_error_under_segment" => jet_jit_decode_error_under_segment: sig_binary;
+    decode_error_accumulate: "jet_jit_decode_error_accumulate" => jet_jit_decode_error_accumulate: sig_ternary;
+    datatree_decode_union_error: "jet_jit_datatree_decode_union_error" => jet_jit_datatree_decode_union_error: sig_nullary;
+    datatree_text: "jet_jit_datatree_text" => jet_jit_datatree_text: sig_unary;
+    datatree_bool: "jet_jit_datatree_bool" => jet_jit_datatree_bool: sig_unary;
+    datatree_float: "jet_jit_datatree_float" => jet_jit_datatree_float: sig_unary;
+    datatree_pack: "jet_jit_datatree_pack" => jet_jit_datatree_pack: sig_binary;
+    object_from_map: "jet_jit_object_from_map" => jet_jit_object_from_map: sig_unary;
+    object_entries_to_map: "jet_jit_object_entries_to_map" => jet_jit_object_entries_to_map: sig_unary;
+    datatree_migrate: "jet_jit_datatree_migrate" => jet_jit_datatree_migrate: sig_binary;
+    toml_parse: "jet_jit_toml_parse" => jet_jit_toml_parse: sig_unary;
+    toml_to_string: "jet_jit_toml_to_string" => jet_jit_toml_to_string: sig_unary;
+    yaml_parse: "jet_jit_yaml_parse" => jet_jit_yaml_parse: sig_unary;
+    yaml_to_string: "jet_jit_yaml_to_string" => jet_jit_yaml_to_string: sig_unary;
+    decode_error_show: "jet_jit_decode_error_show" => jet_jit_decode_error_show: sig_unary;
+    encoding_error_show: "jet_jit_encoding_error_show" => jet_jit_encoding_error_show: sig_unary;
 }
 
-pub(crate) fn register_encoding_symbols(builder: &mut cranelift_jit::JITBuilder) {
-    builder.symbol("jet_jit_hex_encode", jet_jit_hex_encode as *const u8);
-    builder.symbol("jet_jit_hex_decode", jet_jit_hex_decode as *const u8);
-    builder.symbol("jet_jit_b64_encode", jet_jit_b64_encode as *const u8);
-    builder.symbol("jet_jit_b64_encode_url", jet_jit_b64_encode_url as *const u8);
-    builder.symbol("jet_jit_b64_decode", jet_jit_b64_decode as *const u8);
-    builder.symbol("jet_jit_b64_decode_url", jet_jit_b64_decode_url as *const u8);
-    builder.symbol("jet_jit_base32_encode", jet_jit_base32_encode as *const u8);
-    builder.symbol("jet_jit_base32_decode", jet_jit_base32_decode as *const u8);
-    builder.symbol("jet_jit_csv_parse", jet_jit_csv_parse as *const u8);
-    builder.symbol("jet_jit_csv_to_string", jet_jit_csv_to_string as *const u8);
-    builder.symbol(
-        "jet_jit_csv_tree_to_string",
-        jet_jit_csv_tree_to_string as *const u8,
-    );
-    builder.symbol("jet_jit_uuid_v4", jet_jit_uuid_v4 as *const u8);
-    builder.symbol("jet_jit_uuid_v7", jet_jit_uuid_v7 as *const u8);
-    builder.symbol("jet_jit_uuid_v5", jet_jit_uuid_v5 as *const u8);
-    builder.symbol("jet_jit_uuid_parse", jet_jit_uuid_parse as *const u8);
-    builder.symbol("jet_jit_json_parse", jet_jit_json_parse as *const u8);
-    builder.symbol("jet_jit_json_decode", jet_jit_json_decode as *const u8);
-    builder.symbol("jet_jit_json_to_string", jet_jit_json_to_string as *const u8);
-    builder.symbol(
-        "jet_jit_json_to_string_pretty",
-        jet_jit_json_to_string_pretty as *const u8,
-    );
-    builder.symbol("jet_jit_json_canonical", jet_jit_json_canonical as *const u8);
-    builder.symbol(
-        "jet_jit_json_canonical_checked",
-        jet_jit_json_canonical_checked as *const u8,
-    );
-    builder.symbol("jet_jit_json_events", jet_jit_json_events as *const u8);
-    builder.symbol("jet_jit_jsonl_parse", jet_jit_jsonl_parse as *const u8);
-    builder.symbol("jet_jit_jsonl_to_string", jet_jit_jsonl_to_string as *const u8);
-    builder.symbol("jet_jit_xml_parse", jet_jit_xml_parse as *const u8);
-    builder.symbol("jet_jit_xml_to_string", jet_jit_xml_to_string as *const u8);
-    builder.symbol("jet_jit_xml_root", jet_jit_xml_root as *const u8);
-    builder.symbol("jet_jit_xml_expanded_name", jet_jit_xml_expanded_name as *const u8);
-    builder.symbol("jet_jit_xml_attribute", jet_jit_xml_attribute as *const u8);
-    builder.symbol("jet_jit_xml_content", jet_jit_xml_content as *const u8);
-    builder.symbol("jet_jit_xml_to_bytes", jet_jit_xml_to_bytes as *const u8);
-    builder.symbol("jet_jit_xml_project", jet_jit_xml_project as *const u8);
-    builder.symbol("jet_jit_xml_project_bytes", jet_jit_xml_project_bytes as *const u8);
-    builder.symbol("jet_jit_cbor_to_bytes", jet_jit_cbor_to_bytes as *const u8);
-    builder.symbol(
-        "jet_jit_cbor_to_bytes_canonical",
-        jet_jit_cbor_to_bytes_canonical as *const u8,
-    );
-    builder.symbol("jet_jit_cbor_parse", jet_jit_cbor_parse as *const u8);
-    builder.symbol(
-        "jet_jit_cbor_parse_options",
-        jet_jit_cbor_parse_options as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_cbor_decode_tree",
-        jet_jit_cbor_decode_tree as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_cbor_decode_tree_options",
-        jet_jit_cbor_decode_tree_options as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_bytes_datatree",
-        jet_jit_bytes_datatree as *const u8,
-    );
-    builder.symbol("jet_jit_csv_decode_trees", jet_jit_csv_decode_trees as *const u8);
-    builder.symbol("jet_jit_datatree_field", jet_jit_datatree_field as *const u8);
-    builder.symbol("jet_jit_datatree_at", jet_jit_datatree_at as *const u8);
-    builder.symbol("jet_jit_datatree_int", jet_jit_datatree_int as *const u8);
-    builder.symbol(
-        "jet_jit_datatree_decode_int",
-        jet_jit_datatree_decode_int as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_decode_int_range",
-        jet_jit_decode_int_range as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_decode_f32_range",
-        jet_jit_decode_f32_range as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_decode_fixed_len",
-        jet_jit_decode_fixed_len as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_datatree_decode_list_error",
-        jet_jit_datatree_decode_list_error as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_decode_error_under",
-        jet_jit_decode_error_under as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_decode_error_under_segment",
-        jet_jit_decode_error_under_segment as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_decode_error_accumulate",
-        jet_jit_decode_error_accumulate as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_datatree_decode_union_error",
-        jet_jit_datatree_decode_union_error as *const u8,
-    );
-    builder.symbol("jet_jit_datatree_text", jet_jit_datatree_text as *const u8);
-    builder.symbol("jet_jit_datatree_bool", jet_jit_datatree_bool as *const u8);
-    builder.symbol("jet_jit_datatree_float", jet_jit_datatree_float as *const u8);
-    builder.symbol("jet_jit_datatree_pack", jet_jit_datatree_pack as *const u8);
-    builder.symbol("jet_jit_object_from_map", jet_jit_object_from_map as *const u8);
-    builder.symbol(
-        "jet_jit_object_entries_to_map",
-        jet_jit_object_entries_to_map as *const u8,
-    );
-    builder.symbol("jet_jit_datatree_migrate", jet_jit_datatree_migrate as *const u8);
-    builder.symbol("jet_jit_toml_parse", jet_jit_toml_parse as *const u8);
-    builder.symbol("jet_jit_toml_to_string", jet_jit_toml_to_string as *const u8);
-    builder.symbol("jet_jit_yaml_parse", jet_jit_yaml_parse as *const u8);
-    builder.symbol("jet_jit_yaml_to_string", jet_jit_yaml_to_string as *const u8);
-    builder.symbol(
-        "jet_jit_decode_error_show",
-        jet_jit_decode_error_show as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_encoding_error_show",
-        jet_jit_encoding_error_show as *const u8,
-    );
-}
+
+
 
 extern "C" fn jet_jit_datatree_pack(disc: i64, payload: i64) -> i64 {
     alloc_dt_record(disc, payload)
@@ -2592,112 +2494,4 @@ extern "C" fn jet_jit_datatree_migrate(type_name: i64, tree: i64) -> i64 {
     }
 }
 
-pub(crate) fn declare_encoding_host_fns(
-    module: &mut cranelift_jit::JITModule,
-) -> Result<EncodingHostFns, String> {
-    use cranelift_codegen::ir::{types, AbiParam, Signature};
-    use cranelift_module::{Linkage, Module};
 
-    let cc = module.target_config().default_call_conv;
-    let mut sig_unary = Signature::new(cc);
-    sig_unary.params.push(AbiParam::new(types::I64));
-    sig_unary.returns.push(AbiParam::new(types::I64));
-    let mut sig_nullary = Signature::new(cc);
-    sig_nullary.returns.push(AbiParam::new(types::I64));
-    let mut sig_binary = Signature::new(cc);
-    sig_binary.params.push(AbiParam::new(types::I64));
-    sig_binary.params.push(AbiParam::new(types::I64));
-    sig_binary.returns.push(AbiParam::new(types::I64));
-    let mut sig_ternary = Signature::new(cc);
-    for _ in 0..3 {
-        sig_ternary.params.push(AbiParam::new(types::I64));
-    }
-    sig_ternary.returns.push(AbiParam::new(types::I64));
-    let mut sig_quaternary = Signature::new(cc);
-    for _ in 0..4 {
-        sig_quaternary.params.push(AbiParam::new(types::I64));
-    }
-    sig_quaternary.returns.push(AbiParam::new(types::I64));
-    let mut import = |name: &str, sig: &Signature| -> Result<cranelift_module::FuncId, String> {
-        module
-            .declare_function(name, Linkage::Import, sig)
-            .map_err(|e| e.to_string())
-    };
-    Ok(EncodingHostFns {
-        hex_encode: import("jet_jit_hex_encode", &sig_unary)?,
-        hex_decode: import("jet_jit_hex_decode", &sig_unary)?,
-        b64_encode: import("jet_jit_b64_encode", &sig_unary)?,
-        b64_encode_url: import("jet_jit_b64_encode_url", &sig_unary)?,
-        b64_decode: import("jet_jit_b64_decode", &sig_unary)?,
-        b64_decode_url: import("jet_jit_b64_decode_url", &sig_unary)?,
-        base32_encode: import("jet_jit_base32_encode", &sig_unary)?,
-        base32_decode: import("jet_jit_base32_decode", &sig_unary)?,
-        csv_parse: import("jet_jit_csv_parse", &sig_unary)?,
-        csv_to_string: import("jet_jit_csv_to_string", &sig_unary)?,
-        csv_tree_to_string: import("jet_jit_csv_tree_to_string", &sig_unary)?,
-        uuid_v4: import("jet_jit_uuid_v4", &sig_nullary)?,
-        uuid_v7: import("jet_jit_uuid_v7", &sig_unary)?,
-        uuid_v5: import("jet_jit_uuid_v5", &sig_binary)?,
-        uuid_parse: import("jet_jit_uuid_parse", &sig_unary)?,
-        json_parse: import("jet_jit_json_parse", &sig_unary)?,
-        json_decode: import("jet_jit_json_decode", &sig_unary)?,
-        json_to_string: import("jet_jit_json_to_string", &sig_unary)?,
-        json_to_string_pretty: import("jet_jit_json_to_string_pretty", &sig_unary)?,
-        json_canonical: import("jet_jit_json_canonical", &sig_unary)?,
-        json_canonical_checked: import("jet_jit_json_canonical_checked", &sig_binary)?,
-        json_events: import("jet_jit_json_events", &sig_unary)?,
-        jsonl_parse: import("jet_jit_jsonl_parse", &sig_unary)?,
-        jsonl_to_string: import("jet_jit_jsonl_to_string", &sig_unary)?,
-        xml_parse: import("jet_jit_xml_parse", &sig_unary)?,
-        xml_to_string: import("jet_jit_xml_to_string", &sig_unary)?,
-        xml_root: import("jet_jit_xml_root", &sig_unary)?,
-        xml_expanded_name: import("jet_jit_xml_expanded_name", &sig_unary)?,
-        xml_attribute: import("jet_jit_xml_attribute", &sig_binary)?,
-        xml_content: import("jet_jit_xml_content", &sig_unary)?,
-        xml_to_bytes: import("jet_jit_xml_to_bytes", &sig_unary)?,
-        xml_project: import("jet_jit_xml_project", &sig_unary)?,
-        xml_project_bytes: import("jet_jit_xml_project_bytes", &sig_unary)?,
-        cbor_to_bytes: import("jet_jit_cbor_to_bytes", &sig_unary)?,
-        cbor_to_bytes_canonical: import("jet_jit_cbor_to_bytes_canonical", &sig_unary)?,
-        cbor_parse: import("jet_jit_cbor_parse", &sig_unary)?,
-        cbor_parse_options: import("jet_jit_cbor_parse_options", &sig_binary)?,
-        cbor_decode_tree: import("jet_jit_cbor_decode_tree", &sig_unary)?,
-        cbor_decode_tree_options: import("jet_jit_cbor_decode_tree_options", &sig_binary)?,
-        bytes_datatree: import("jet_jit_bytes_datatree", &sig_unary)?,
-        csv_decode_trees: import("jet_jit_csv_decode_trees", &sig_unary)?,
-        datatree_field: import("jet_jit_datatree_field", &sig_binary)?,
-        datatree_at: import("jet_jit_datatree_at", &sig_binary)?,
-        datatree_int: import("jet_jit_datatree_int", &sig_unary)?,
-        datatree_decode_int: import("jet_jit_datatree_decode_int", &sig_unary)?,
-        decode_int_range: import("jet_jit_decode_int_range", &sig_quaternary)?,
-        decode_f32_range: import("jet_jit_decode_f32_range", &sig_unary)?,
-        decode_fixed_len: import("jet_jit_decode_fixed_len", &sig_binary)?,
-        datatree_decode_list_error: import(
-            "jet_jit_datatree_decode_list_error",
-            &sig_unary,
-        )?,
-        decode_error_under: import("jet_jit_decode_error_under", &sig_binary)?,
-        decode_error_under_segment: import(
-            "jet_jit_decode_error_under_segment",
-            &sig_binary,
-        )?,
-        decode_error_accumulate: import("jet_jit_decode_error_accumulate", &sig_ternary)?,
-        datatree_decode_union_error: import(
-            "jet_jit_datatree_decode_union_error",
-            &sig_nullary,
-        )?,
-        datatree_text: import("jet_jit_datatree_text", &sig_unary)?,
-        datatree_bool: import("jet_jit_datatree_bool", &sig_unary)?,
-        datatree_float: import("jet_jit_datatree_float", &sig_unary)?,
-        datatree_pack: import("jet_jit_datatree_pack", &sig_binary)?,
-        object_from_map: import("jet_jit_object_from_map", &sig_unary)?,
-        object_entries_to_map: import("jet_jit_object_entries_to_map", &sig_unary)?,
-        datatree_migrate: import("jet_jit_datatree_migrate", &sig_binary)?,
-        toml_parse: import("jet_jit_toml_parse", &sig_unary)?,
-        toml_to_string: import("jet_jit_toml_to_string", &sig_unary)?,
-        yaml_parse: import("jet_jit_yaml_parse", &sig_unary)?,
-        yaml_to_string: import("jet_jit_yaml_to_string", &sig_unary)?,
-        decode_error_show: import("jet_jit_decode_error_show", &sig_unary)?,
-        encoding_error_show: import("jet_jit_encoding_error_show", &sig_unary)?,
-    })
-}

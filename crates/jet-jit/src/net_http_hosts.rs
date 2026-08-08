@@ -1681,525 +1681,148 @@ extern "C" fn jet_jit_http_resp_cookies(resp: i64) -> i64 {
     }
 }
 
-pub(crate) struct NetHttpHostFns {
-    pub socket_addr: FuncId,
-    pub socket_to_string: FuncId,
-    pub socket_host: FuncId,
-    pub socket_port_typed: FuncId,
-    pub tcp_listen_str: FuncId,
-    pub tcp_listen_addr: FuncId,
-    pub tcp_connect: FuncId,
-    pub listener_local_socket_addr: FuncId,
-    pub set_timeout: FuncId,
-    pub nodelay: FuncId,
-    pub set_nodelay: FuncId,
-    pub ttl: FuncId,
-    pub set_ttl: FuncId,
-    pub socket_type: FuncId,
-    pub sendfile: FuncId,
-    pub dns_ptr: FuncId,
-    pub getservbyname: FuncId,
-    pub getservbyport: FuncId,
-    pub tcp_reply: FuncId,
-    pub udp_bind: FuncId,
-    pub udp_local_addr: FuncId,
-    pub udp_set_timeout: FuncId,
-    pub udp_send_bytes_to: FuncId,
-    pub udp_receive: FuncId,
-    pub udp_packet_bytes: FuncId,
-    pub udp_packet_original_len: FuncId,
-    pub udp_packet_truncated: FuncId,
-    pub unix_listen: FuncId,
-    pub unix_accept: FuncId,
-    pub unix_connect: FuncId,
-    pub unix_read: FuncId,
-    pub unix_write: FuncId,
-    pub unix_write_all_bytes: FuncId,
-    pub unix_close: FuncId,
-    pub tcp_accept: FuncId,
-    pub tcp_local_addr: FuncId,
-    pub tcp_read_text: FuncId,
-    pub tcp_write_all_bytes: FuncId,
-    pub tcp_close: FuncId,
-    pub http_mux_new: FuncId,
-    pub http_mux_add: FuncId,
-    pub http_response: FuncId,
-    pub http_req_body: FuncId,
-    pub http_req_method: FuncId,
-    pub http_req_path: FuncId,
-    pub http_req_param: FuncId,
-    pub http_req_header: FuncId,
-    pub http_body_text: FuncId,
-    pub http_body_json_text: FuncId,
-    pub http_json_response: FuncId,
-    pub http_static_files: FuncId,
-    pub http_cors_policy: FuncId,
-    pub http_cors: FuncId,
-    pub http_project_json_decode_error: FuncId,
-    pub http_resp_status: FuncId,
-    pub http_resp_body: FuncId,
-    pub http_client_resp_body: FuncId,
-    pub http_server_bind: FuncId,
-    pub http_server_local_addr: FuncId,
-    pub http_server_serve: FuncId,
-    pub http_server_shutdown: FuncId,
-    pub http_shutdown_report_field: FuncId,
-    pub http_serve_once_listener: FuncId,
-    pub http_client_get: FuncId,
-    pub http_client_post: FuncId,
-    pub http_handler_bind: FuncId,
-    pub http_handler_bind1: FuncId,
-    pub http_handler_handle: FuncId,
-    pub http_mux_middleware: FuncId,
-    pub http_request_id: FuncId,
-    pub http_req_trailers: FuncId,
-    pub http_resp_trailers: FuncId,
-    pub http_req_body_len: FuncId,
-    pub http_req_under_limit: FuncId,
-    pub http_sse: FuncId,
-    pub http_static_file_range: FuncId,
-    pub http_client_request_new: FuncId,
-    pub http_client_request_body: FuncId,
-    pub http_client_request_form: FuncId,
-    pub http_client_request_cookie: FuncId,
-    pub http_client_request_header: FuncId,
-    pub http_client_request_redirects: FuncId,
-    pub http_client_request_connect_timeout: FuncId,
-    pub http_client_request_read_timeout: FuncId,
-    pub http_client_request_send: FuncId,
-    pub http_resp_header: FuncId,
-    pub http_resp_cookies: FuncId,
-    pub ws_upgrade: FuncId,
-    pub ws_connect: FuncId,
-    pub ws_send_text: FuncId,
-    pub ws_recv: FuncId,
-    pub ws_close: FuncId,
-    pub ws_message_is_text: FuncId,
-    pub ws_message_text: FuncId,
+host_fns! {
+    struct NetHttpHostFns;
+    register: register_net_http_symbols;
+    declare: declare_net_http_host_fns(module) {
+        let cc = module.target_config().default_call_conv;
+        let mut sig0 = Signature::new(cc);
+        sig0.returns.push(AbiParam::new(types::I64));
+        let mut sig1 = Signature::new(cc);
+        sig1.params.push(AbiParam::new(types::I64));
+        sig1.returns.push(AbiParam::new(types::I64));
+        let mut sig2 = Signature::new(cc);
+        sig2.params.push(AbiParam::new(types::I64));
+        sig2.params.push(AbiParam::new(types::I64));
+        sig2.returns.push(AbiParam::new(types::I64));
+        let mut sig3 = Signature::new(cc);
+        for _ in 0..3 {
+            sig3.params.push(AbiParam::new(types::I64));
+        }
+        sig3.returns.push(AbiParam::new(types::I64));
+        let mut sig4 = Signature::new(cc);
+        for _ in 0..4 {
+            sig4.params.push(AbiParam::new(types::I64));
+        }
+        sig4.returns.push(AbiParam::new(types::I64));
+
+        let mut sig5 = Signature::new(cc);
+        for _ in 0..5 {
+            sig5.params.push(AbiParam::new(types::I64));
+        }
+        sig5.returns.push(AbiParam::new(types::I64));
+        let mut sig6 = Signature::new(cc);
+        for _ in 0..6 {
+            sig6.params.push(AbiParam::new(types::I64));
+        }
+        sig6.returns.push(AbiParam::new(types::I64));
+        let mut sig7 = Signature::new(cc);
+        for _ in 0..7 {
+            sig7.params.push(AbiParam::new(types::I64));
+        }
+        sig7.returns.push(AbiParam::new(types::I64));
+
+    }
+    socket_addr: "jet_jit_net_socket_addr" => jet_jit_net_socket_addr: sig2;
+    socket_to_string: "jet_jit_net_socket_to_string" => jet_jit_net_socket_to_string: sig1;
+    socket_host: "jet_jit_net_socket_host" => jet_jit_net_socket_host: sig1;
+    socket_port_typed: "jet_jit_net_socket_port_typed" => jet_jit_net_socket_port_typed: sig1;
+    tcp_listen_str: "jet_jit_net_tcp_listen_str" => jet_jit_net_tcp_listen_str: sig1;
+    tcp_listen_addr: "jet_jit_net_tcp_listen_addr" => jet_jit_net_tcp_listen_addr: sig1;
+    tcp_connect: "jet_jit_net_tcp_connect" => jet_jit_net_tcp_connect: sig1;
+    listener_local_socket_addr: "jet_jit_net_listener_local_socket_addr2" => jet_jit_net_listener_local_socket_addr: sig1;
+    set_timeout: "jet_jit_net_set_timeout" => jet_jit_net_set_timeout: sig2;
+    nodelay: "jet_jit_net_nodelay" => jet_jit_net_nodelay: sig1;
+    set_nodelay: "jet_jit_net_set_nodelay" => jet_jit_net_set_nodelay: sig2;
+    ttl: "jet_jit_net_ttl" => jet_jit_net_ttl: sig1;
+    set_ttl: "jet_jit_net_set_ttl" => jet_jit_net_set_ttl: sig2;
+    socket_type: "jet_jit_net_socket_type" => jet_jit_net_socket_type: sig1;
+    sendfile: "jet_jit_net_sendfile" => jet_jit_net_sendfile: sig2;
+    dns_ptr: "jet_jit_net_dns_ptr" => jet_jit_net_dns_ptr: sig2;
+    getservbyname: "jet_jit_net_getservbyname" => jet_jit_net_getservbyname: sig1;
+    getservbyport: "jet_jit_net_getservbyport" => jet_jit_net_getservbyport: sig1;
+    tcp_reply: "jet_jit_net_tcp_reply" => jet_jit_net_tcp_reply: sig3;
+    udp_bind: "jet_jit_net_udp_bind" => jet_jit_net_udp_bind: sig1;
+    udp_local_addr: "jet_jit_net_udp_local_addr" => jet_jit_net_udp_local_addr: sig1;
+    udp_set_timeout: "jet_jit_net_udp_set_timeout" => jet_jit_net_udp_set_timeout: sig2;
+    udp_send_bytes_to: "jet_jit_net_udp_send_bytes_to" => jet_jit_net_udp_send_bytes_to: sig3;
+    udp_receive: "jet_jit_net_udp_receive" => jet_jit_net_udp_receive: sig2;
+    udp_packet_bytes: "jet_jit_net_udp_packet_bytes" => jet_jit_net_udp_packet_bytes: sig1;
+    udp_packet_original_len: "jet_jit_net_udp_packet_original_len" => jet_jit_net_udp_packet_original_len: sig1;
+    udp_packet_truncated: "jet_jit_net_udp_packet_truncated" => jet_jit_net_udp_packet_truncated: sig1;
+    unix_listen: "jet_jit_net_unix_listen" => jet_jit_net_unix_listen: sig1;
+    unix_accept: "jet_jit_net_unix_accept" => jet_jit_net_unix_accept: sig1;
+    unix_connect: "jet_jit_net_unix_connect" => jet_jit_net_unix_connect: sig1;
+    unix_read: "jet_jit_net_unix_read" => jet_jit_net_unix_read: sig1;
+    unix_write: "jet_jit_net_unix_write" => jet_jit_net_unix_write: sig2;
+    unix_write_all_bytes: "jet_jit_net_unix_write_all_bytes" => jet_jit_net_unix_write_all_bytes: sig2;
+    unix_close: "jet_jit_net_unix_close" => jet_jit_net_unix_close: sig1;
+    tcp_accept: "jet_jit_tcp_listener_accept" => jet_jit_tcp_listener_accept: sig1;
+    tcp_local_addr: "jet_jit_tcp_listener_local_addr" => jet_jit_tcp_listener_local_addr: sig1;
+    tcp_read_text: "jet_jit_tcp_stream_read_text" => jet_jit_tcp_stream_read_text: sig2;
+    tcp_write_all_bytes: "jet_jit_tcp_stream_write_all_bytes" => jet_jit_tcp_stream_write_all_bytes: sig2;
+    tcp_close: "jet_jit_tcp_stream_close" => jet_jit_tcp_stream_close: sig1;
+    http_mux_new: "jet_jit_http_mux_new" => jet_jit_http_mux_new: sig0;
+    http_mux_add: "jet_jit_http_mux_add" => jet_jit_http_mux_add: sig4;
+    http_response: "jet_jit_http_response" => jet_jit_http_response: sig2;
+    http_req_body: "jet_jit_http_req_body" => jet_jit_http_req_body: sig1;
+    http_req_method: "jet_jit_http_req_method" => jet_jit_http_req_method: sig1;
+    http_req_path: "jet_jit_http_req_path" => jet_jit_http_req_path: sig1;
+    http_req_param: "jet_jit_http_req_param" => jet_jit_http_req_param: sig2;
+    http_req_header: "jet_jit_http_req_header" => jet_jit_http_req_header: sig2;
+    http_body_text: "jet_jit_http_body_text" => jet_jit_http_body_text: sig2;
+    http_body_json_text: "jet_jit_http_body_json_text" => jet_jit_http_body_json_text: sig3;
+    http_json_response: "jet_jit_http_json_response" => jet_jit_http_json_response: sig2;
+    http_static_files: "jet_jit_http_static_files" => jet_jit_http_static_files: sig6;
+    http_cors_policy: "jet_jit_http_cors_policy" => jet_jit_http_cors_policy: sig7;
+    http_cors: "jet_jit_http_cors" => jet_jit_http_cors: sig2;
+    http_project_json_decode_error: "jet_jit_http_project_json_decode_error" => jet_jit_http_project_json_decode_error: sig1;
+    http_resp_status: "jet_jit_http_resp_status" => jet_jit_http_resp_status: sig1;
+    http_resp_body: "jet_jit_http_resp_body" => jet_jit_http_resp_body: sig1;
+    http_client_resp_body: "jet_jit_http_client_resp_body" => jet_jit_http_client_resp_body: sig1;
+    http_server_bind: "jet_jit_http_server_bind" => jet_jit_http_server_bind: sig2;
+    http_server_local_addr: "jet_jit_http_server_local_addr" => jet_jit_http_server_local_addr: sig1;
+    http_server_serve: "jet_jit_http_server_serve" => jet_jit_http_server_serve: sig1;
+    http_server_shutdown: "jet_jit_http_server_shutdown" => jet_jit_http_server_shutdown: sig2;
+    http_shutdown_report_field: "jet_jit_http_shutdown_report_field" => jet_jit_http_shutdown_report_field: sig2;
+    http_serve_once_listener: "jet_jit_http_serve_once_listener" => jet_jit_http_serve_once_listener: sig2;
+    http_client_get: "jet_jit_http_client_get" => jet_jit_http_client_get: sig1;
+    http_client_post: "jet_jit_http_client_post" => jet_jit_http_client_post: sig2;
+    http_handler_bind: "jet_jit_http_handler_bind" => jet_jit_http_handler_bind: sig2;
+    http_handler_bind1: "jet_jit_http_handler_bind1" => jet_jit_http_handler_bind1: sig2;
+    http_handler_handle: "jet_jit_http_handler_handle" => jet_jit_http_handler_handle: sig2;
+    http_mux_middleware: "jet_jit_http_mux_middleware" => jet_jit_http_mux_middleware: sig2;
+    http_request_id: "jet_jit_http_request_id" => jet_jit_http_request_id: sig1;
+    http_req_trailers: "jet_jit_http_req_trailers" => jet_jit_http_req_trailers: sig1;
+    http_resp_trailers: "jet_jit_http_resp_trailers" => jet_jit_http_resp_trailers: sig2;
+    http_req_body_len: "jet_jit_http_req_body_len" => jet_jit_http_req_body_len: sig1;
+    http_req_under_limit: "jet_jit_http_req_under_limit" => jet_jit_http_req_under_limit: sig2;
+    http_sse: "jet_jit_http_sse" => jet_jit_http_sse: sig1;
+    http_static_file_range: "jet_jit_http_static_file_range" => jet_jit_http_static_file_range: sig3;
+    http_client_request_new: "jet_jit_http_client_request_new" => jet_jit_http_client_request_new: sig2;
+    http_client_request_body: "jet_jit_http_client_request_body" => jet_jit_http_client_request_body: sig2;
+    http_client_request_form: "jet_jit_http_client_request_form" => jet_jit_http_client_request_form: sig3;
+    http_client_request_cookie: "jet_jit_http_client_request_cookie" => jet_jit_http_client_request_cookie: sig3;
+    http_client_request_header: "jet_jit_http_client_request_header" => jet_jit_http_client_request_header: sig3;
+    http_client_request_redirects: "jet_jit_http_client_request_redirects" => jet_jit_http_client_request_redirects: sig2;
+    http_client_request_connect_timeout: "jet_jit_http_client_request_connect_timeout" => jet_jit_http_client_request_connect_timeout: sig2;
+    http_client_request_read_timeout: "jet_jit_http_client_request_read_timeout" => jet_jit_http_client_request_read_timeout: sig2;
+    http_client_request_send: "jet_jit_http_client_request_send" => jet_jit_http_client_request_send: sig1;
+    http_resp_header: "jet_jit_http_resp_header" => jet_jit_http_resp_header: sig2;
+    http_resp_cookies: "jet_jit_http_resp_cookies" => jet_jit_http_resp_cookies: sig1;
+    ws_upgrade: "jet_jit_ws_upgrade" => jet_jit_ws_upgrade: sig1;
+    ws_connect: "jet_jit_ws_connect" => jet_jit_ws_connect: sig1;
+    ws_send_text: "jet_jit_ws_send_text" => jet_jit_ws_send_text: sig2;
+    ws_recv: "jet_jit_ws_recv" => jet_jit_ws_recv: sig1;
+    ws_close: "jet_jit_ws_close" => jet_jit_ws_close: sig3;
+    ws_message_is_text: "jet_jit_ws_message_is_text" => jet_jit_ws_message_is_text: sig1;
+    ws_message_text: "jet_jit_ws_message_text" => jet_jit_ws_message_text: sig1;
 }
 
-pub(crate) fn register_net_http_symbols(builder: &mut JITBuilder) {
-    builder.symbol("jet_jit_net_socket_addr", jet_jit_net_socket_addr as *const u8);
-    builder.symbol(
-        "jet_jit_net_socket_to_string",
-        jet_jit_net_socket_to_string as *const u8,
-    );
-    builder.symbol("jet_jit_net_socket_host", jet_jit_net_socket_host as *const u8);
-    builder.symbol(
-        "jet_jit_net_socket_port_typed",
-        jet_jit_net_socket_port_typed as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_net_tcp_listen_str",
-        jet_jit_net_tcp_listen_str as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_net_tcp_listen_addr",
-        jet_jit_net_tcp_listen_addr as *const u8,
-    );
-    builder.symbol("jet_jit_net_tcp_connect", jet_jit_net_tcp_connect as *const u8);
-    builder.symbol(
-        "jet_jit_net_listener_local_socket_addr2",
-        jet_jit_net_listener_local_socket_addr as *const u8,
-    );
-    builder.symbol("jet_jit_net_set_timeout", jet_jit_net_set_timeout as *const u8);
-    builder.symbol("jet_jit_net_nodelay", jet_jit_net_nodelay as *const u8);
-    builder.symbol("jet_jit_net_set_nodelay", jet_jit_net_set_nodelay as *const u8);
-    builder.symbol("jet_jit_net_ttl", jet_jit_net_ttl as *const u8);
-    builder.symbol("jet_jit_net_set_ttl", jet_jit_net_set_ttl as *const u8);
-    builder.symbol("jet_jit_net_socket_type", jet_jit_net_socket_type as *const u8);
-    builder.symbol("jet_jit_net_sendfile", jet_jit_net_sendfile as *const u8);
-    builder.symbol("jet_jit_net_dns_ptr", jet_jit_net_dns_ptr as *const u8);
-    builder.symbol(
-        "jet_jit_net_getservbyname",
-        jet_jit_net_getservbyname as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_net_getservbyport",
-        jet_jit_net_getservbyport as *const u8,
-    );
-    builder.symbol("jet_jit_net_tcp_reply", jet_jit_net_tcp_reply as *const u8);
-    builder.symbol("jet_jit_net_udp_bind", jet_jit_net_udp_bind as *const u8);
-    builder.symbol(
-        "jet_jit_net_udp_local_addr",
-        jet_jit_net_udp_local_addr as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_net_udp_set_timeout",
-        jet_jit_net_udp_set_timeout as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_net_udp_send_bytes_to",
-        jet_jit_net_udp_send_bytes_to as *const u8,
-    );
-    builder.symbol("jet_jit_net_udp_receive", jet_jit_net_udp_receive as *const u8);
-    builder.symbol(
-        "jet_jit_net_udp_packet_bytes",
-        jet_jit_net_udp_packet_bytes as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_net_udp_packet_original_len",
-        jet_jit_net_udp_packet_original_len as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_net_udp_packet_truncated",
-        jet_jit_net_udp_packet_truncated as *const u8,
-    );
-    builder.symbol("jet_jit_net_unix_listen", jet_jit_net_unix_listen as *const u8);
-    builder.symbol("jet_jit_net_unix_accept", jet_jit_net_unix_accept as *const u8);
-    builder.symbol(
-        "jet_jit_net_unix_connect",
-        jet_jit_net_unix_connect as *const u8,
-    );
-    builder.symbol("jet_jit_net_unix_read", jet_jit_net_unix_read as *const u8);
-    builder.symbol("jet_jit_net_unix_write", jet_jit_net_unix_write as *const u8);
-    builder.symbol(
-        "jet_jit_net_unix_write_all_bytes",
-        jet_jit_net_unix_write_all_bytes as *const u8,
-    );
-    builder.symbol("jet_jit_net_unix_close", jet_jit_net_unix_close as *const u8);
-    builder.symbol(
-        "jet_jit_tcp_listener_accept",
-        jet_jit_tcp_listener_accept as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_tcp_listener_local_addr",
-        jet_jit_tcp_listener_local_addr as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_tcp_stream_read_text",
-        jet_jit_tcp_stream_read_text as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_tcp_stream_write_all_bytes",
-        jet_jit_tcp_stream_write_all_bytes as *const u8,
-    );
-    builder.symbol("jet_jit_tcp_stream_close", jet_jit_tcp_stream_close as *const u8);
-    builder.symbol("jet_jit_http_mux_new", jet_jit_http_mux_new as *const u8);
-    builder.symbol("jet_jit_http_mux_add", jet_jit_http_mux_add as *const u8);
-    builder.symbol("jet_jit_http_response", jet_jit_http_response as *const u8);
-    builder.symbol("jet_jit_http_req_body", jet_jit_http_req_body as *const u8);
-    builder.symbol("jet_jit_http_req_method", jet_jit_http_req_method as *const u8);
-    builder.symbol("jet_jit_http_req_path", jet_jit_http_req_path as *const u8);
-    builder.symbol("jet_jit_http_req_param", jet_jit_http_req_param as *const u8);
-    builder.symbol("jet_jit_http_req_header", jet_jit_http_req_header as *const u8);
-    builder.symbol("jet_jit_http_body_text", jet_jit_http_body_text as *const u8);
-    builder.symbol(
-        "jet_jit_http_body_json_text",
-        jet_jit_http_body_json_text as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_http_json_response",
-        jet_jit_http_json_response as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_http_static_files",
-        jet_jit_http_static_files as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_http_cors_policy",
-        jet_jit_http_cors_policy as *const u8,
-    );
-    builder.symbol("jet_jit_http_cors", jet_jit_http_cors as *const u8);
-    builder.symbol(
-        "jet_jit_http_project_json_decode_error",
-        jet_jit_http_project_json_decode_error as *const u8,
-    );
-    builder.symbol("jet_jit_http_resp_status", jet_jit_http_resp_status as *const u8);
-    builder.symbol("jet_jit_http_resp_body", jet_jit_http_resp_body as *const u8);
-    builder.symbol(
-        "jet_jit_http_client_resp_body",
-        jet_jit_http_client_resp_body as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_http_server_bind",
-        jet_jit_http_server_bind as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_http_server_local_addr",
-        jet_jit_http_server_local_addr as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_http_server_serve",
-        jet_jit_http_server_serve as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_http_server_shutdown",
-        jet_jit_http_server_shutdown as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_http_shutdown_report_field",
-        jet_jit_http_shutdown_report_field as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_http_serve_once_listener",
-        jet_jit_http_serve_once_listener as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_http_client_get",
-        jet_jit_http_client_get as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_http_client_post",
-        jet_jit_http_client_post as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_http_handler_bind",
-        jet_jit_http_handler_bind as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_http_handler_bind1",
-        jet_jit_http_handler_bind1 as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_http_handler_handle",
-        jet_jit_http_handler_handle as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_http_mux_middleware",
-        jet_jit_http_mux_middleware as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_http_request_id",
-        jet_jit_http_request_id as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_http_req_trailers",
-        jet_jit_http_req_trailers as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_http_resp_trailers",
-        jet_jit_http_resp_trailers as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_http_req_body_len",
-        jet_jit_http_req_body_len as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_http_req_under_limit",
-        jet_jit_http_req_under_limit as *const u8,
-    );
-    builder.symbol("jet_jit_http_sse", jet_jit_http_sse as *const u8);
-    builder.symbol(
-        "jet_jit_http_static_file_range",
-        jet_jit_http_static_file_range as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_http_client_request_new",
-        jet_jit_http_client_request_new as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_http_client_request_body",
-        jet_jit_http_client_request_body as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_http_client_request_form",
-        jet_jit_http_client_request_form as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_http_client_request_cookie",
-        jet_jit_http_client_request_cookie as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_http_client_request_header",
-        jet_jit_http_client_request_header as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_http_client_request_redirects",
-        jet_jit_http_client_request_redirects as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_http_client_request_connect_timeout",
-        jet_jit_http_client_request_connect_timeout as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_http_client_request_read_timeout",
-        jet_jit_http_client_request_read_timeout as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_http_client_request_send",
-        jet_jit_http_client_request_send as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_http_resp_header",
-        jet_jit_http_resp_header as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_http_resp_cookies",
-        jet_jit_http_resp_cookies as *const u8,
-    );
-    builder.symbol("jet_jit_ws_upgrade", jet_jit_ws_upgrade as *const u8);
-    builder.symbol("jet_jit_ws_connect", jet_jit_ws_connect as *const u8);
-    builder.symbol("jet_jit_ws_send_text", jet_jit_ws_send_text as *const u8);
-    builder.symbol("jet_jit_ws_recv", jet_jit_ws_recv as *const u8);
-    builder.symbol("jet_jit_ws_close", jet_jit_ws_close as *const u8);
-    builder.symbol(
-        "jet_jit_ws_message_is_text",
-        jet_jit_ws_message_is_text as *const u8,
-    );
-    builder.symbol("jet_jit_ws_message_text", jet_jit_ws_message_text as *const u8);
-}
 
-pub(crate) fn declare_net_http_host_fns(
-    module: &mut JITModule,
-) -> Result<NetHttpHostFns, String> {
-    let cc = module.target_config().default_call_conv;
-    let mut sig0 = Signature::new(cc);
-    sig0.returns.push(AbiParam::new(types::I64));
-    let mut sig1 = Signature::new(cc);
-    sig1.params.push(AbiParam::new(types::I64));
-    sig1.returns.push(AbiParam::new(types::I64));
-    let mut sig2 = Signature::new(cc);
-    sig2.params.push(AbiParam::new(types::I64));
-    sig2.params.push(AbiParam::new(types::I64));
-    sig2.returns.push(AbiParam::new(types::I64));
-    let mut sig3 = Signature::new(cc);
-    for _ in 0..3 {
-        sig3.params.push(AbiParam::new(types::I64));
-    }
-    sig3.returns.push(AbiParam::new(types::I64));
-    let mut sig4 = Signature::new(cc);
-    for _ in 0..4 {
-        sig4.params.push(AbiParam::new(types::I64));
-    }
-    sig4.returns.push(AbiParam::new(types::I64));
-    let import = |module: &mut JITModule, name: &str, sig: &Signature| {
-        module
-            .declare_function(name, Linkage::Import, sig)
-            .map_err(|e| e.to_string())
-    };
-    let mut sig5 = Signature::new(cc);
-    for _ in 0..5 {
-        sig5.params.push(AbiParam::new(types::I64));
-    }
-    sig5.returns.push(AbiParam::new(types::I64));
-    let mut sig6 = Signature::new(cc);
-    for _ in 0..6 {
-        sig6.params.push(AbiParam::new(types::I64));
-    }
-    sig6.returns.push(AbiParam::new(types::I64));
-    let mut sig7 = Signature::new(cc);
-    for _ in 0..7 {
-        sig7.params.push(AbiParam::new(types::I64));
-    }
-    sig7.returns.push(AbiParam::new(types::I64));
-    Ok(NetHttpHostFns {
-        socket_addr: import(module, "jet_jit_net_socket_addr", &sig2)?,
-        socket_to_string: import(module, "jet_jit_net_socket_to_string", &sig1)?,
-        socket_host: import(module, "jet_jit_net_socket_host", &sig1)?,
-        socket_port_typed: import(module, "jet_jit_net_socket_port_typed", &sig1)?,
-        tcp_listen_str: import(module, "jet_jit_net_tcp_listen_str", &sig1)?,
-        tcp_listen_addr: import(module, "jet_jit_net_tcp_listen_addr", &sig1)?,
-        tcp_connect: import(module, "jet_jit_net_tcp_connect", &sig1)?,
-        listener_local_socket_addr: import(
-            module,
-            "jet_jit_net_listener_local_socket_addr2",
-            &sig1,
-        )?,
-        set_timeout: import(module, "jet_jit_net_set_timeout", &sig2)?,
-        nodelay: import(module, "jet_jit_net_nodelay", &sig1)?,
-        set_nodelay: import(module, "jet_jit_net_set_nodelay", &sig2)?,
-        ttl: import(module, "jet_jit_net_ttl", &sig1)?,
-        set_ttl: import(module, "jet_jit_net_set_ttl", &sig2)?,
-        socket_type: import(module, "jet_jit_net_socket_type", &sig1)?,
-        sendfile: import(module, "jet_jit_net_sendfile", &sig2)?,
-        dns_ptr: import(module, "jet_jit_net_dns_ptr", &sig2)?,
-        getservbyname: import(module, "jet_jit_net_getservbyname", &sig1)?,
-        getservbyport: import(module, "jet_jit_net_getservbyport", &sig1)?,
-        tcp_reply: import(module, "jet_jit_net_tcp_reply", &sig3)?,
-        udp_bind: import(module, "jet_jit_net_udp_bind", &sig1)?,
-        udp_local_addr: import(module, "jet_jit_net_udp_local_addr", &sig1)?,
-        udp_set_timeout: import(module, "jet_jit_net_udp_set_timeout", &sig2)?,
-        udp_send_bytes_to: import(module, "jet_jit_net_udp_send_bytes_to", &sig3)?,
-        udp_receive: import(module, "jet_jit_net_udp_receive", &sig2)?,
-        udp_packet_bytes: import(module, "jet_jit_net_udp_packet_bytes", &sig1)?,
-        udp_packet_original_len: import(module, "jet_jit_net_udp_packet_original_len", &sig1)?,
-        udp_packet_truncated: import(module, "jet_jit_net_udp_packet_truncated", &sig1)?,
-        unix_listen: import(module, "jet_jit_net_unix_listen", &sig1)?,
-        unix_accept: import(module, "jet_jit_net_unix_accept", &sig1)?,
-        unix_connect: import(module, "jet_jit_net_unix_connect", &sig1)?,
-        unix_read: import(module, "jet_jit_net_unix_read", &sig1)?,
-        unix_write: import(module, "jet_jit_net_unix_write", &sig2)?,
-        unix_write_all_bytes: import(module, "jet_jit_net_unix_write_all_bytes", &sig2)?,
-        unix_close: import(module, "jet_jit_net_unix_close", &sig1)?,
-        tcp_accept: import(module, "jet_jit_tcp_listener_accept", &sig1)?,
-        tcp_local_addr: import(module, "jet_jit_tcp_listener_local_addr", &sig1)?,
-        tcp_read_text: import(module, "jet_jit_tcp_stream_read_text", &sig2)?,
-        tcp_write_all_bytes: import(module, "jet_jit_tcp_stream_write_all_bytes", &sig2)?,
-        tcp_close: import(module, "jet_jit_tcp_stream_close", &sig1)?,
-        http_mux_new: import(module, "jet_jit_http_mux_new", &sig0)?,
-        http_mux_add: import(module, "jet_jit_http_mux_add", &sig4)?,
-        http_response: import(module, "jet_jit_http_response", &sig2)?,
-        http_req_body: import(module, "jet_jit_http_req_body", &sig1)?,
-        http_req_method: import(module, "jet_jit_http_req_method", &sig1)?,
-        http_req_path: import(module, "jet_jit_http_req_path", &sig1)?,
-        http_req_param: import(module, "jet_jit_http_req_param", &sig2)?,
-        http_req_header: import(module, "jet_jit_http_req_header", &sig2)?,
-        http_body_text: import(module, "jet_jit_http_body_text", &sig2)?,
-        http_body_json_text: import(module, "jet_jit_http_body_json_text", &sig3)?,
-        http_json_response: import(module, "jet_jit_http_json_response", &sig2)?,
-        http_static_files: import(module, "jet_jit_http_static_files", &sig6)?,
-        http_cors_policy: import(module, "jet_jit_http_cors_policy", &sig7)?,
-        http_cors: import(module, "jet_jit_http_cors", &sig2)?,
-        http_project_json_decode_error: import(
-            module,
-            "jet_jit_http_project_json_decode_error",
-            &sig1,
-        )?,
-        http_resp_status: import(module, "jet_jit_http_resp_status", &sig1)?,
-        http_resp_body: import(module, "jet_jit_http_resp_body", &sig1)?,
-        http_client_resp_body: import(module, "jet_jit_http_client_resp_body", &sig1)?,
-        http_server_bind: import(module, "jet_jit_http_server_bind", &sig2)?,
-        http_server_local_addr: import(module, "jet_jit_http_server_local_addr", &sig1)?,
-        http_server_serve: import(module, "jet_jit_http_server_serve", &sig1)?,
-        http_server_shutdown: import(module, "jet_jit_http_server_shutdown", &sig2)?,
-        http_shutdown_report_field: import(module, "jet_jit_http_shutdown_report_field", &sig2)?,
-        http_serve_once_listener: import(module, "jet_jit_http_serve_once_listener", &sig2)?,
-        http_client_get: import(module, "jet_jit_http_client_get", &sig1)?,
-        http_client_post: import(module, "jet_jit_http_client_post", &sig2)?,
-        http_handler_bind: import(module, "jet_jit_http_handler_bind", &sig2)?,
-        http_handler_bind1: import(module, "jet_jit_http_handler_bind1", &sig2)?,
-        http_handler_handle: import(module, "jet_jit_http_handler_handle", &sig2)?,
-        http_mux_middleware: import(module, "jet_jit_http_mux_middleware", &sig2)?,
-        http_request_id: import(module, "jet_jit_http_request_id", &sig1)?,
-        http_req_trailers: import(module, "jet_jit_http_req_trailers", &sig1)?,
-        http_resp_trailers: import(module, "jet_jit_http_resp_trailers", &sig2)?,
-        http_req_body_len: import(module, "jet_jit_http_req_body_len", &sig1)?,
-        http_req_under_limit: import(module, "jet_jit_http_req_under_limit", &sig2)?,
-        http_sse: import(module, "jet_jit_http_sse", &sig1)?,
-        http_static_file_range: import(module, "jet_jit_http_static_file_range", &sig3)?,
-        http_client_request_new: import(module, "jet_jit_http_client_request_new", &sig2)?,
-        http_client_request_body: import(module, "jet_jit_http_client_request_body", &sig2)?,
-        http_client_request_form: import(module, "jet_jit_http_client_request_form", &sig3)?,
-        http_client_request_cookie: import(module, "jet_jit_http_client_request_cookie", &sig3)?,
-        http_client_request_header: import(module, "jet_jit_http_client_request_header", &sig3)?,
-        http_client_request_redirects: import(
-            module,
-            "jet_jit_http_client_request_redirects",
-            &sig2,
-        )?,
-        http_client_request_connect_timeout: import(
-            module,
-            "jet_jit_http_client_request_connect_timeout",
-            &sig2,
-        )?,
-        http_client_request_read_timeout: import(
-            module,
-            "jet_jit_http_client_request_read_timeout",
-            &sig2,
-        )?,
-        http_client_request_send: import(module, "jet_jit_http_client_request_send", &sig1)?,
-        http_resp_header: import(module, "jet_jit_http_resp_header", &sig2)?,
-        http_resp_cookies: import(module, "jet_jit_http_resp_cookies", &sig1)?,
-        ws_upgrade: import(module, "jet_jit_ws_upgrade", &sig1)?,
-        ws_connect: import(module, "jet_jit_ws_connect", &sig1)?,
-        ws_send_text: import(module, "jet_jit_ws_send_text", &sig2)?,
-        ws_recv: import(module, "jet_jit_ws_recv", &sig1)?,
-        ws_close: import(module, "jet_jit_ws_close", &sig3)?,
-        ws_message_is_text: import(module, "jet_jit_ws_message_is_text", &sig1)?,
-        ws_message_text: import(module, "jet_jit_ws_message_text", &sig1)?,
-    })
-}
+
+
+
 
 // ── I9 shared Prelude adapters (C hosts + ambient call these; no forked logic) ─
 

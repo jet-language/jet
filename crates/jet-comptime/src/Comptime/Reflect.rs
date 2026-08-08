@@ -190,7 +190,10 @@ fn marker_arg_value(expression: &crate::AST::Expr, source_type: &str) -> CtValue
 }
 
 fn marker_info(marker: &Marker) -> CtValue {
-    let row = jet_foundation::Policy::applied_rule(&marker.name);
+    // D-META-REG1=A: reflection reads the one registration table, not a
+    // marker-only table beside it. A marker is the row whose target is written
+    // code, so its signature rides on the row.
+    let row = jet_foundation::Registry::row(&marker.name).and_then(|row| row.rule);
     let bindings = row.and_then(|row| row.signature.marker_argument_bindings(marker));
     let args = marker
         .args

@@ -1330,239 +1330,99 @@ extern "C" fn jet_jit_vault_expert_commit_import_signing(write: i64, plan: i64) 
     }
 }
 
-pub(crate) struct CryptoHostFns {
-    pub x25519_generate: FuncId,
-    pub x25519_public: FuncId,
-    pub signing_generate: FuncId,
-    pub signing_public: FuncId,
-    pub sign: FuncId,
-    pub verify: FuncId,
-    pub sha256: FuncId,
-    pub sha512_bytes: FuncId,
-    pub blake3_bytes: FuncId,
-    pub digest256_hex: FuncId,
-    pub digest256_bytes: FuncId,
-    pub signature_bytes: FuncId,
-    pub sealed_bytes: FuncId,
-    pub x25519_public_bytes: FuncId,
-    pub x25519_public_text: FuncId,
-    pub x25519_public_from_text: FuncId,
-    pub secret_from_text: FuncId,
-    pub random_bytes: FuncId,
-    pub seal: FuncId,
-    pub open: FuncId,
-    pub password_hash: FuncId,
-    pub password_verify: FuncId,
-    pub password_text: FuncId,
-    pub file_open: FuncId,
-    pub secret_from_bytes: FuncId,
-    pub hkdf_sha256: FuncId,
-    pub x25519_public_from_bytes: FuncId,
-    pub x25519_shared: FuncId,
-    pub constant_time_equal: FuncId,
-    pub constant_time_equal_bytes: FuncId,
-    pub file_seal: FuncId,
-    pub expert_aes256gcm_seal: FuncId,
-    pub expert_aes256gcm_open: FuncId,
-    pub expert_open_v1: FuncId,
-    pub expert_migrate_v1: FuncId,
-    pub expert_x25519: FuncId,
-    pub expert_secret_bytes: FuncId,
-    pub verify_jwt: FuncId,
-    pub verify_paseto: FuncId,
-    pub vault_get: FuncId,
-    pub vault_key_ref_show: FuncId,
-    pub vault_current: FuncId,
-    pub vault_prepare_generate: FuncId,
-    pub vault_prepare_rotate: FuncId,
-    pub vault_prepare_store: FuncId,
-    pub vault_prepare_retire: FuncId,
-    pub vault_prepare_revoke: FuncId,
-    pub vault_authorize_write: FuncId,
-    pub vault_commit_generate: FuncId,
-    pub vault_commit_store: FuncId,
-    pub vault_commit_rotate: FuncId,
-    pub vault_commit_retire: FuncId,
-    pub vault_commit_revoke: FuncId,
-    pub vault_load: FuncId,
-    pub vault_status: FuncId,
-    pub vault_versions: FuncId,
-    pub vault_export_to_recipients: FuncId,
-    pub vault_export_to_passphrase: FuncId,
-    pub vault_wrapped_from_bytes: FuncId,
-    pub vault_wrapped_bytes: FuncId,
-    pub vault_unlock_recipient: FuncId,
-    pub vault_unlock_passphrase: FuncId,
-    pub vault_prepare_import_wrapped: FuncId,
-    pub vault_authorize_wrapped_import: FuncId,
-    pub vault_commit_import_wrapped: FuncId,
-    pub vault_expert_prepare_import_signing: FuncId,
-    pub vault_expert_commit_import_signing: FuncId,
-}
+host_fns! {
+    struct CryptoHostFns;
+    register: register_crypto_symbols;
+    declare: declare_crypto_host_fns(module) {
+        let cc = module.target_config().default_call_conv;
+        let mut nullary = Signature::new(cc);
+        nullary.returns.push(AbiParam::new(types::I64));
+        let mut unary = nullary.clone();
+        unary.params.push(AbiParam::new(types::I64));
+        let mut binary = unary.clone();
+        binary.params.push(AbiParam::new(types::I64));
+        let mut ternary = binary.clone();
+        ternary.params.push(AbiParam::new(types::I64));
+        let mut quaternary = ternary.clone();
+        quaternary.params.push(AbiParam::new(types::I64));
+        let mut quinary = quaternary.clone();
+        quinary.params.push(AbiParam::new(types::I64));
+        let mut septenary = quinary.clone();
+        septenary.params.push(AbiParam::new(types::I64));
+        septenary.params.push(AbiParam::new(types::I64));
 
-pub(crate) fn register_crypto_symbols(builder: &mut JITBuilder) {
-    for (name, pointer) in [
-        ("jet_jit_crypto_x25519_generate", jet_jit_crypto_x25519_generate as *const u8),
-        ("jet_jit_crypto_x25519_public", jet_jit_crypto_x25519_public as *const u8),
-        ("jet_jit_crypto_signing_generate", jet_jit_crypto_signing_generate as *const u8),
-        ("jet_jit_crypto_signing_public", jet_jit_crypto_signing_public as *const u8),
-        ("jet_jit_crypto_sign", jet_jit_crypto_sign as *const u8),
-        ("jet_jit_crypto_verify", jet_jit_crypto_verify as *const u8),
-        ("jet_jit_crypto_sha256", jet_jit_crypto_sha256 as *const u8),
-        ("jet_jit_crypto_sha512_bytes", jet_jit_crypto_sha512_bytes as *const u8),
-        ("jet_jit_crypto_blake3_bytes", jet_jit_crypto_blake3_bytes as *const u8),
-        ("jet_jit_crypto_digest256_hex", jet_jit_crypto_digest256_hex as *const u8),
-        ("jet_jit_crypto_digest256_bytes", jet_jit_crypto_digest256_bytes as *const u8),
-        ("jet_jit_crypto_signature_bytes", jet_jit_crypto_signature_bytes as *const u8),
-        ("jet_jit_crypto_sealed_bytes", jet_jit_crypto_sealed_bytes as *const u8),
-        ("jet_jit_crypto_x25519_public_bytes", jet_jit_crypto_x25519_public_bytes as *const u8),
-        ("jet_jit_crypto_x25519_public_text", jet_jit_crypto_x25519_public_text as *const u8),
-        ("jet_jit_crypto_x25519_public_from_text", jet_jit_crypto_x25519_public_from_text as *const u8),
-        ("jet_jit_crypto_secret_from_text", jet_jit_crypto_secret_from_text as *const u8),
-        ("jet_jit_crypto_random_bytes", jet_jit_crypto_random_bytes as *const u8),
-        ("jet_jit_crypto_seal", jet_jit_crypto_seal as *const u8),
-        ("jet_jit_crypto_open", jet_jit_crypto_open as *const u8),
-        ("jet_jit_crypto_password_hash", jet_jit_crypto_password_hash as *const u8),
-        ("jet_jit_crypto_password_verify", jet_jit_crypto_password_verify as *const u8),
-        ("jet_jit_crypto_password_text", jet_jit_crypto_password_text as *const u8),
-        ("jet_jit_crypto_file_open", jet_jit_crypto_file_open as *const u8),
-        ("jet_jit_crypto_secret_from_bytes", jet_jit_crypto_secret_from_bytes as *const u8),
-        ("jet_jit_crypto_hkdf_sha256", jet_jit_crypto_hkdf_sha256 as *const u8),
-        ("jet_jit_crypto_x25519_public_from_bytes", jet_jit_crypto_x25519_public_bytes_raw as *const u8),
-        ("jet_jit_crypto_x25519_shared", jet_jit_crypto_x25519_shared as *const u8),
-        ("jet_jit_crypto_constant_time_equal", jet_jit_crypto_constant_time_equal as *const u8),
-        ("jet_jit_crypto_constant_time_equal_bytes", jet_jit_crypto_constant_time_equal_bytes as *const u8),
-        ("jet_jit_crypto_file_seal", jet_jit_crypto_file_seal as *const u8),
-        ("jet_jit_crypto_expert_aes256gcm_seal", jet_jit_crypto_expert_aes256gcm_seal as *const u8),
-        ("jet_jit_crypto_expert_aes256gcm_open", jet_jit_crypto_expert_aes256gcm_open as *const u8),
-        ("jet_jit_crypto_expert_open_v1", jet_jit_crypto_expert_open_v1 as *const u8),
-        ("jet_jit_crypto_expert_migrate_v1", jet_jit_crypto_expert_migrate_v1 as *const u8),
-        ("jet_jit_crypto_expert_x25519", jet_jit_crypto_expert_x25519 as *const u8),
-        ("jet_jit_crypto_expert_secret_bytes", jet_jit_crypto_expert_secret_bytes as *const u8),
-        ("jet_jit_auth_verify_jwt", jet_jit_auth_verify_jwt as *const u8),
-        ("jet_jit_auth_verify_paseto", jet_jit_auth_verify_paseto as *const u8),
-        ("jet_jit_vault_get", jet_jit_vault_get as *const u8),
-        ("jet_jit_vault_key_ref_show", jet_jit_vault_key_ref_show as *const u8),
-        ("jet_jit_vault_current", jet_jit_vault_current as *const u8),
-        ("jet_jit_vault_prepare_generate", jet_jit_vault_prepare_generate as *const u8),
-        ("jet_jit_vault_prepare_rotate", jet_jit_vault_prepare_rotate as *const u8),
-        ("jet_jit_vault_prepare_store", jet_jit_vault_prepare_store as *const u8),
-        ("jet_jit_vault_prepare_retire", jet_jit_vault_prepare_retire as *const u8),
-        ("jet_jit_vault_prepare_revoke", jet_jit_vault_prepare_revoke as *const u8),
-        ("jet_jit_vault_authorize_write", jet_jit_vault_authorize_write as *const u8),
-        ("jet_jit_vault_commit_generate", jet_jit_vault_commit_generate as *const u8),
-        ("jet_jit_vault_commit_store", jet_jit_vault_commit_store as *const u8),
-        ("jet_jit_vault_commit_rotate", jet_jit_vault_commit_rotate as *const u8),
-        ("jet_jit_vault_commit_retire", jet_jit_vault_commit_retire as *const u8),
-        ("jet_jit_vault_commit_revoke", jet_jit_vault_commit_revoke as *const u8),
-        ("jet_jit_vault_load", jet_jit_vault_load as *const u8),
-        ("jet_jit_vault_status", jet_jit_vault_status as *const u8),
-        ("jet_jit_vault_versions", jet_jit_vault_versions as *const u8),
-        ("jet_jit_vault_export_to_recipients", jet_jit_vault_export_to_recipients as *const u8),
-        ("jet_jit_vault_export_to_passphrase", jet_jit_vault_export_to_passphrase as *const u8),
-        ("jet_jit_vault_wrapped_from_bytes", jet_jit_vault_wrapped_from_bytes as *const u8),
-        ("jet_jit_vault_wrapped_bytes", jet_jit_vault_wrapped_bytes as *const u8),
-        ("jet_jit_vault_unlock_recipient", jet_jit_vault_unlock_recipient as *const u8),
-        ("jet_jit_vault_unlock_passphrase", jet_jit_vault_unlock_passphrase as *const u8),
-        ("jet_jit_vault_prepare_import_wrapped", jet_jit_vault_prepare_import_wrapped as *const u8),
-        ("jet_jit_vault_authorize_wrapped_import", jet_jit_vault_authorize_wrapped_import as *const u8),
-        ("jet_jit_vault_commit_import_wrapped", jet_jit_vault_commit_import_wrapped as *const u8),
-        ("jet_jit_vault_expert_prepare_import_signing", jet_jit_vault_expert_prepare_import_signing as *const u8),
-        ("jet_jit_vault_expert_commit_import_signing", jet_jit_vault_expert_commit_import_signing as *const u8),
-    ] {
-        builder.symbol(name, pointer);
+
     }
+    x25519_generate: "jet_jit_crypto_x25519_generate" => jet_jit_crypto_x25519_generate: nullary;
+    x25519_public: "jet_jit_crypto_x25519_public" => jet_jit_crypto_x25519_public: unary;
+    signing_generate: "jet_jit_crypto_signing_generate" => jet_jit_crypto_signing_generate: nullary;
+    signing_public: "jet_jit_crypto_signing_public" => jet_jit_crypto_signing_public: unary;
+    sign: "jet_jit_crypto_sign" => jet_jit_crypto_sign: binary;
+    verify: "jet_jit_crypto_verify" => jet_jit_crypto_verify: ternary;
+    sha256: "jet_jit_crypto_sha256" => jet_jit_crypto_sha256: unary;
+    sha512_bytes: "jet_jit_crypto_sha512_bytes" => jet_jit_crypto_sha512_bytes: unary;
+    blake3_bytes: "jet_jit_crypto_blake3_bytes" => jet_jit_crypto_blake3_bytes: unary;
+    digest256_hex: "jet_jit_crypto_digest256_hex" => jet_jit_crypto_digest256_hex: unary;
+    digest256_bytes: "jet_jit_crypto_digest256_bytes" => jet_jit_crypto_digest256_bytes: unary;
+    signature_bytes: "jet_jit_crypto_signature_bytes" => jet_jit_crypto_signature_bytes: unary;
+    sealed_bytes: "jet_jit_crypto_sealed_bytes" => jet_jit_crypto_sealed_bytes: unary;
+    x25519_public_bytes: "jet_jit_crypto_x25519_public_bytes" => jet_jit_crypto_x25519_public_bytes: unary;
+    x25519_public_text: "jet_jit_crypto_x25519_public_text" => jet_jit_crypto_x25519_public_text: unary;
+    x25519_public_from_text: "jet_jit_crypto_x25519_public_from_text" => jet_jit_crypto_x25519_public_from_text: unary;
+    secret_from_text: "jet_jit_crypto_secret_from_text" => jet_jit_crypto_secret_from_text: unary;
+    random_bytes: "jet_jit_crypto_random_bytes" => jet_jit_crypto_random_bytes: unary;
+    seal: "jet_jit_crypto_seal" => jet_jit_crypto_seal: ternary;
+    open: "jet_jit_crypto_open" => jet_jit_crypto_open: ternary;
+    password_hash: "jet_jit_crypto_password_hash" => jet_jit_crypto_password_hash: unary;
+    password_verify: "jet_jit_crypto_password_verify" => jet_jit_crypto_password_verify: binary;
+    password_text: "jet_jit_crypto_password_text" => jet_jit_crypto_password_text: unary;
+    file_open: "jet_jit_crypto_file_open" => jet_jit_crypto_file_open: ternary;
+    secret_from_bytes: "jet_jit_crypto_secret_from_bytes" => jet_jit_crypto_secret_from_bytes: unary;
+    hkdf_sha256: "jet_jit_crypto_hkdf_sha256" => jet_jit_crypto_hkdf_sha256: quaternary;
+    x25519_public_from_bytes: "jet_jit_crypto_x25519_public_from_bytes" => jet_jit_crypto_x25519_public_bytes_raw: unary;
+    x25519_shared: "jet_jit_crypto_x25519_shared" => jet_jit_crypto_x25519_shared: binary;
+    constant_time_equal: "jet_jit_crypto_constant_time_equal" => jet_jit_crypto_constant_time_equal: binary;
+    constant_time_equal_bytes: "jet_jit_crypto_constant_time_equal_bytes" => jet_jit_crypto_constant_time_equal_bytes: binary;
+    file_seal: "jet_jit_crypto_file_seal" => jet_jit_crypto_file_seal: ternary;
+    expert_aes256gcm_seal: "jet_jit_crypto_expert_aes256gcm_seal" => jet_jit_crypto_expert_aes256gcm_seal: quaternary;
+    expert_aes256gcm_open: "jet_jit_crypto_expert_aes256gcm_open" => jet_jit_crypto_expert_aes256gcm_open: quaternary;
+    expert_open_v1: "jet_jit_crypto_expert_open_v1" => jet_jit_crypto_expert_open_v1: binary;
+    expert_migrate_v1: "jet_jit_crypto_expert_migrate_v1" => jet_jit_crypto_expert_migrate_v1: quaternary;
+    expert_x25519: "jet_jit_crypto_expert_x25519" => jet_jit_crypto_expert_x25519: ternary;
+    expert_secret_bytes: "jet_jit_crypto_expert_secret_bytes" => jet_jit_crypto_expert_secret_bytes: unary;
+    verify_jwt: "jet_jit_auth_verify_jwt" => jet_jit_auth_verify_jwt: quinary;
+    verify_paseto: "jet_jit_auth_verify_paseto" => jet_jit_auth_verify_paseto: septenary;
+    vault_get: "jet_jit_vault_get" => jet_jit_vault_get: unary;
+    vault_key_ref_show: "jet_jit_vault_key_ref_show" => jet_jit_vault_key_ref_show: unary;
+    vault_current: "jet_jit_vault_current" => jet_jit_vault_current: binary;
+    vault_prepare_generate: "jet_jit_vault_prepare_generate" => jet_jit_vault_prepare_generate: binary;
+    vault_prepare_rotate: "jet_jit_vault_prepare_rotate" => jet_jit_vault_prepare_rotate: binary;
+    vault_prepare_store: "jet_jit_vault_prepare_store" => jet_jit_vault_prepare_store: ternary;
+    vault_prepare_retire: "jet_jit_vault_prepare_retire" => jet_jit_vault_prepare_retire: ternary;
+    vault_prepare_revoke: "jet_jit_vault_prepare_revoke" => jet_jit_vault_prepare_revoke: ternary;
+    vault_authorize_write: "jet_jit_vault_authorize_write" => jet_jit_vault_authorize_write: ternary;
+    vault_commit_generate: "jet_jit_vault_commit_generate" => jet_jit_vault_commit_generate: ternary;
+    vault_commit_store: "jet_jit_vault_commit_store" => jet_jit_vault_commit_store: ternary;
+    vault_commit_rotate: "jet_jit_vault_commit_rotate" => jet_jit_vault_commit_rotate: ternary;
+    vault_commit_retire: "jet_jit_vault_commit_retire" => jet_jit_vault_commit_retire: ternary;
+    vault_commit_revoke: "jet_jit_vault_commit_revoke" => jet_jit_vault_commit_revoke: ternary;
+    vault_load: "jet_jit_vault_load" => jet_jit_vault_load: binary;
+    vault_status: "jet_jit_vault_status" => jet_jit_vault_status: binary;
+    vault_versions: "jet_jit_vault_versions" => jet_jit_vault_versions: binary;
+    vault_export_to_recipients: "jet_jit_vault_export_to_recipients" => jet_jit_vault_export_to_recipients: ternary;
+    vault_export_to_passphrase: "jet_jit_vault_export_to_passphrase" => jet_jit_vault_export_to_passphrase: ternary;
+    vault_wrapped_from_bytes: "jet_jit_vault_wrapped_from_bytes" => jet_jit_vault_wrapped_from_bytes: unary;
+    vault_wrapped_bytes: "jet_jit_vault_wrapped_bytes" => jet_jit_vault_wrapped_bytes: unary;
+    vault_unlock_recipient: "jet_jit_vault_unlock_recipient" => jet_jit_vault_unlock_recipient: unary;
+    vault_unlock_passphrase: "jet_jit_vault_unlock_passphrase" => jet_jit_vault_unlock_passphrase: unary;
+    vault_prepare_import_wrapped: "jet_jit_vault_prepare_import_wrapped" => jet_jit_vault_prepare_import_wrapped: quaternary;
+    vault_authorize_wrapped_import: "jet_jit_vault_authorize_wrapped_import" => jet_jit_vault_authorize_wrapped_import: ternary;
+    vault_commit_import_wrapped: "jet_jit_vault_commit_import_wrapped" => jet_jit_vault_commit_import_wrapped: ternary;
+    vault_expert_prepare_import_signing: "jet_jit_vault_expert_prepare_import_signing" => jet_jit_vault_expert_prepare_import_signing: binary;
+    vault_expert_commit_import_signing: "jet_jit_vault_expert_commit_import_signing" => jet_jit_vault_expert_commit_import_signing: binary;
 }
 
-pub(crate) fn declare_crypto_host_fns(module: &mut JITModule) -> Result<CryptoHostFns, String> {
-    let cc = module.target_config().default_call_conv;
-    let mut nullary = Signature::new(cc);
-    nullary.returns.push(AbiParam::new(types::I64));
-    let mut unary = nullary.clone();
-    unary.params.push(AbiParam::new(types::I64));
-    let mut binary = unary.clone();
-    binary.params.push(AbiParam::new(types::I64));
-    let mut ternary = binary.clone();
-    ternary.params.push(AbiParam::new(types::I64));
-    let mut quaternary = ternary.clone();
-    quaternary.params.push(AbiParam::new(types::I64));
-    let mut quinary = quaternary.clone();
-    quinary.params.push(AbiParam::new(types::I64));
-    let mut septenary = quinary.clone();
-    septenary.params.push(AbiParam::new(types::I64));
-    septenary.params.push(AbiParam::new(types::I64));
-    let mut import = |name: &str, signature: &Signature| {
-        module
-            .declare_function(name, Linkage::Import, signature)
-            .map_err(|error| error.to_string())
-    };
-    Ok(CryptoHostFns {
-        x25519_generate: import("jet_jit_crypto_x25519_generate", &nullary)?,
-        x25519_public: import("jet_jit_crypto_x25519_public", &unary)?,
-        signing_generate: import("jet_jit_crypto_signing_generate", &nullary)?,
-        signing_public: import("jet_jit_crypto_signing_public", &unary)?,
-        sign: import("jet_jit_crypto_sign", &binary)?,
-        verify: import("jet_jit_crypto_verify", &ternary)?,
-        sha256: import("jet_jit_crypto_sha256", &unary)?,
-        sha512_bytes: import("jet_jit_crypto_sha512_bytes", &unary)?,
-        blake3_bytes: import("jet_jit_crypto_blake3_bytes", &unary)?,
-        digest256_hex: import("jet_jit_crypto_digest256_hex", &unary)?,
-        digest256_bytes: import("jet_jit_crypto_digest256_bytes", &unary)?,
-        signature_bytes: import("jet_jit_crypto_signature_bytes", &unary)?,
-        sealed_bytes: import("jet_jit_crypto_sealed_bytes", &unary)?,
-        x25519_public_bytes: import("jet_jit_crypto_x25519_public_bytes", &unary)?,
-        x25519_public_text: import("jet_jit_crypto_x25519_public_text", &unary)?,
-        x25519_public_from_text: import("jet_jit_crypto_x25519_public_from_text", &unary)?,
-        secret_from_text: import("jet_jit_crypto_secret_from_text", &unary)?,
-        random_bytes: import("jet_jit_crypto_random_bytes", &unary)?,
-        seal: import("jet_jit_crypto_seal", &ternary)?,
-        open: import("jet_jit_crypto_open", &ternary)?,
-        password_hash: import("jet_jit_crypto_password_hash", &unary)?,
-        password_verify: import("jet_jit_crypto_password_verify", &binary)?,
-        password_text: import("jet_jit_crypto_password_text", &unary)?,
-        file_open: import("jet_jit_crypto_file_open", &ternary)?,
-        secret_from_bytes: import("jet_jit_crypto_secret_from_bytes", &unary)?,
-        hkdf_sha256: import("jet_jit_crypto_hkdf_sha256", &quaternary)?,
-        x25519_public_from_bytes: import("jet_jit_crypto_x25519_public_from_bytes", &unary)?,
-        x25519_shared: import("jet_jit_crypto_x25519_shared", &binary)?,
-        constant_time_equal: import("jet_jit_crypto_constant_time_equal", &binary)?,
-        constant_time_equal_bytes: import("jet_jit_crypto_constant_time_equal_bytes", &binary)?,
-        file_seal: import("jet_jit_crypto_file_seal", &ternary)?,
-        expert_aes256gcm_seal: import("jet_jit_crypto_expert_aes256gcm_seal", &quaternary)?,
-        expert_aes256gcm_open: import("jet_jit_crypto_expert_aes256gcm_open", &quaternary)?,
-        expert_open_v1: import("jet_jit_crypto_expert_open_v1", &binary)?,
-        expert_migrate_v1: import("jet_jit_crypto_expert_migrate_v1", &quaternary)?,
-        expert_x25519: import("jet_jit_crypto_expert_x25519", &ternary)?,
-        expert_secret_bytes: import("jet_jit_crypto_expert_secret_bytes", &unary)?,
-        verify_jwt: import("jet_jit_auth_verify_jwt", &quinary)?,
-        verify_paseto: import("jet_jit_auth_verify_paseto", &septenary)?,
-        vault_get: import("jet_jit_vault_get", &unary)?,
-        vault_key_ref_show: import("jet_jit_vault_key_ref_show", &unary)?,
-        vault_current: import("jet_jit_vault_current", &binary)?,
-        vault_prepare_generate: import("jet_jit_vault_prepare_generate", &binary)?,
-        vault_prepare_rotate: import("jet_jit_vault_prepare_rotate", &binary)?,
-        vault_prepare_store: import("jet_jit_vault_prepare_store", &ternary)?,
-        vault_prepare_retire: import("jet_jit_vault_prepare_retire", &ternary)?,
-        vault_prepare_revoke: import("jet_jit_vault_prepare_revoke", &ternary)?,
-        vault_authorize_write: import("jet_jit_vault_authorize_write", &ternary)?,
-        vault_commit_generate: import("jet_jit_vault_commit_generate", &ternary)?,
-        vault_commit_store: import("jet_jit_vault_commit_store", &ternary)?,
-        vault_commit_rotate: import("jet_jit_vault_commit_rotate", &ternary)?,
-        vault_commit_retire: import("jet_jit_vault_commit_retire", &ternary)?,
-        vault_commit_revoke: import("jet_jit_vault_commit_revoke", &ternary)?,
-        vault_load: import("jet_jit_vault_load", &binary)?,
-        vault_status: import("jet_jit_vault_status", &binary)?,
-        vault_versions: import("jet_jit_vault_versions", &binary)?,
-        vault_export_to_recipients: import("jet_jit_vault_export_to_recipients", &ternary)?,
-        vault_export_to_passphrase: import("jet_jit_vault_export_to_passphrase", &ternary)?,
-        vault_wrapped_from_bytes: import("jet_jit_vault_wrapped_from_bytes", &unary)?,
-        vault_wrapped_bytes: import("jet_jit_vault_wrapped_bytes", &unary)?,
-        vault_unlock_recipient: import("jet_jit_vault_unlock_recipient", &unary)?,
-        vault_unlock_passphrase: import("jet_jit_vault_unlock_passphrase", &unary)?,
-        vault_prepare_import_wrapped: import("jet_jit_vault_prepare_import_wrapped", &quaternary)?,
-        vault_authorize_wrapped_import: import("jet_jit_vault_authorize_wrapped_import", &ternary)?,
-        vault_commit_import_wrapped: import("jet_jit_vault_commit_import_wrapped", &ternary)?,
-        vault_expert_prepare_import_signing: import("jet_jit_vault_expert_prepare_import_signing", &binary)?,
-        vault_expert_commit_import_signing: import("jet_jit_vault_expert_commit_import_signing", &binary)?,
-    })
-}
+
+
+
+

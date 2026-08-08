@@ -131,6 +131,14 @@ fn shared_lock_receipt_id(recv: &TExpr, cx: &Cx) -> String {
     format!("expr-{hash:016x}")
 }
 
+/// `{symbol}({arg_str})` — the one shape every plain Prelude call collapses
+/// to, whether the args came from `THostCall::Helper` here or the #1635 data
+/// table `PLAIN_CORE_CALLS` a `core.*` call is looked up in
+/// (`Codegen/TIR/emit/core_calls.rs::emit_plain_core_call`).
+pub(crate) fn emit_symbol_call(symbol: &str, arg_str: &str) -> String {
+    format!("{symbol}({arg_str})")
+}
+
 pub(crate) fn emit_host_call(call: &THostCall, recv_ty: Option<&Type>, cx: &Cx) -> String {
     match call {
         THostCall::Helper { helper, args } => {
@@ -155,7 +163,7 @@ pub(crate) fn emit_host_call(call: &THostCall, recv_ty: Option<&Type>, cx: &Cx) 
                 })
                 .collect::<Vec<_>>()
                 .join(", ");
-            format!("{helper}({arg_str})")
+            emit_symbol_call(helper, &arg_str)
         }
         // D-FAIL-CARRIER1=A: marshalling only — the projection onto the report
         // is spelled here, and the prelude's reader decides what a success and

@@ -2709,8 +2709,8 @@ fn rebuild_dev_web(
         }
     };
     let Some(web) = &out.web else {
-        let message = "internal compiler error: missing web codegen output".to_string();
-        eprintln!("error: {message}");
+        let message = jet::Diagnostics::render_ice_report("missing web codegen output", "");
+        eprintln!("{message}");
         host.mark_error("ICE".to_string(), message, is_rebuild);
         return false;
     };
@@ -2886,9 +2886,9 @@ pub(crate) fn write_web_artifacts(
         .map_err(|e| format!("error: couldn't run rustc for wasm: {}", e))?;
 
     if !rustc.status.success() {
-        return Err(format!(
-            "error: rustc rejected generated wasm module (internal compiler error)\n{}",
-            String::from_utf8_lossy(&rustc.stderr)
+        return Err(jet::Diagnostics::render_ice_report(
+            "rustc rejected generated wasm module",
+            &String::from_utf8_lossy(&rustc.stderr),
         ));
     }
 
@@ -3149,7 +3149,10 @@ pub(crate) fn build(
     // D-WEBKIND1=A (c123 M2): `web` is a Jet backend target — emit WASM + JS.
     if cross_target == Some(jet::Syntax::BUILD_TARGET_WEB) {
         let web = web.unwrap_or_else(|| {
-            eprintln!("error: internal compiler error: missing web codegen output");
+            eprintln!(
+                "{}",
+                jet::Diagnostics::render_ice_report("missing web codegen output", "")
+            );
             exit(ExitCodes::ICE);
         });
         let emit_maps = !matches!(profile, BuildProfile::Release);
@@ -3188,15 +3191,18 @@ pub(crate) fn build(
     // sandboxed wasm32 Component Model module instead of a native binary.
     if cross_target == Some(jet::Syntax::TARGET_PLUGIN) {
         let plugin = plugin.unwrap_or_else(|| {
-            eprintln!("error: internal compiler error: missing plugin codegen output");
+            eprintln!(
+                "{}",
+                jet::Diagnostics::render_ice_report("missing plugin codegen output", "")
+            );
             exit(ExitCodes::ICE);
         });
         let paths = match write_plugin_artifacts(file, plugin, verbose, Path::new("build")) {
             Ok(p) => p,
             Err(PluginBuildError::GeneratedCodeRejected(msg)) => {
                 eprintln!(
-                    "error: rustc rejected generated code (internal compiler error)\n{}",
-                    msg
+                    "{}",
+                    jet::Diagnostics::render_ice_report("rustc rejected generated code", &msg)
                 );
                 exit(ExitCodes::ICE);
             }
@@ -3363,15 +3369,15 @@ pub(crate) fn build(
             );
             exit(ExitCodes::USER_ERROR);
         }
-        eprintln!("internal compiler error: the generated Rust did not compile.");
-        eprintln!(
-            "This is a bug in {}, NOT in your program. Please report it,",
-            jet::Syntax::BINARY_NAME
+        let detail = format!(
+            "  generated: {}\n--- rustc said ---\n{}",
+            rs_path.display(),
+            stderr
         );
-        eprintln!("attaching your source file and the generated file below.");
-        eprintln!("  generated: {}", rs_path.display());
-        eprintln!("--- rustc said ---");
-        eprintln!("{}", stderr);
+        eprintln!(
+            "{}",
+            jet::Diagnostics::render_ice_report("the generated Rust did not compile.", &detail)
+        );
         exit(ExitCodes::ICE);
     }
 

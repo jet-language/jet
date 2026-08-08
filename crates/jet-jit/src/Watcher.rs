@@ -565,113 +565,52 @@ pub(crate) fn clear_watcher_state() {
     SCOPE_FRAMES.with(|s| s.borrow_mut().clear());
 }
 
-pub(crate) fn register_watcher_symbols(builder: &mut JITBuilder) {
-    // `jet_jit_event_scope` / `_cancel` registered by Reactive (unified with UI).
-    builder.symbol(
-        "jet_jit_event_scope_frame_push",
-        jet_jit_event_scope_frame_push as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_event_scope_frame_pop",
-        jet_jit_event_scope_frame_pop as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_subscription_is_active",
-        jet_jit_subscription_is_active as *const u8,
-    );
-    builder.symbol("jet_jit_watcher_files", jet_jit_watcher_files as *const u8);
-    builder.symbol(
-        "jet_jit_watcher_process_pid",
-        jet_jit_watcher_process_pid as *const u8,
-    );
-    builder.symbol("jet_jit_watcher_port", jet_jit_watcher_port as *const u8);
-    builder.symbol("jet_jit_watcher_set", jet_jit_watcher_set as *const u8);
-    builder.symbol("jet_jit_watch_poll", jet_jit_watch_poll as *const u8);
-    builder.symbol("jet_jit_watch_cancel", jet_jit_watch_cancel as *const u8);
-    builder.symbol("jet_jit_watch_is_active", jet_jit_watch_is_active as *const u8);
-    builder.symbol("jet_jit_watch_summary", jet_jit_watch_summary as *const u8);
-    builder.symbol("jet_jit_watch_on", jet_jit_watch_on as *const u8);
-    builder.symbol("jet_jit_watch_once", jet_jit_watch_once as *const u8);
-    builder.symbol("jet_jit_watchset_add", jet_jit_watchset_add as *const u8);
-    builder.symbol("jet_jit_watchset_poll", jet_jit_watchset_poll as *const u8);
-    builder.symbol(
-        "jet_jit_watchset_summary",
-        jet_jit_watchset_summary as *const u8,
-    );
-}
-
-#[derive(Clone, Copy)]
-pub(crate) struct WatcherHostFns {
-    pub event_scope: FuncId,
-    pub event_scope_cancel: FuncId,
-    pub event_scope_frame_push: FuncId,
-    pub event_scope_frame_pop: FuncId,
-    pub subscription_is_active: FuncId,
-    pub watcher_files: FuncId,
-    pub watcher_process_pid: FuncId,
-    pub watcher_port: FuncId,
-    pub watcher_set: FuncId,
-    pub watch_poll: FuncId,
-    pub watch_cancel: FuncId,
-    pub watch_is_active: FuncId,
-    pub watch_summary: FuncId,
-    pub watch_on: FuncId,
-    pub watch_once: FuncId,
-    pub watchset_add: FuncId,
-    pub watchset_poll: FuncId,
-    pub watchset_summary: FuncId,
-}
-
-pub(crate) fn declare_watcher_host_fns(module: &mut JITModule) -> Result<WatcherHostFns, String> {
-    let cc = module.target_config().default_call_conv;
-    let mut import = |name: &str, params: &[cranelift_codegen::ir::Type], ret: Option<cranelift_codegen::ir::Type>| {
-        let mut sig = Signature::new(cc);
-        for p in params {
-            sig.params.push(AbiParam::new(*p));
+host_fns! {
+    struct WatcherHostFns;
+    register: register_watcher_symbols;
+    declare: declare_watcher_host_fns(module) {
+        let cc = module.target_config().default_call_conv;
+        let mut nullary_i64 = Signature::new(cc);
+        nullary_i64.returns.push(AbiParam::new(types::I64));
+        let nullary_void = Signature::new(cc);
+        let mut unary_void = Signature::new(cc);
+        unary_void.params.push(AbiParam::new(types::I64));
+        let mut unary_i64 = Signature::new(cc);
+        unary_i64.params.push(AbiParam::new(types::I64));
+        unary_i64.returns.push(AbiParam::new(types::I64));
+        let mut unary_i8 = Signature::new(cc);
+        unary_i8.params.push(AbiParam::new(types::I64));
+        unary_i8.returns.push(AbiParam::new(types::I8));
+        let mut binary_i64 = Signature::new(cc);
+        binary_i64.params.push(AbiParam::new(types::I64));
+        binary_i64.params.push(AbiParam::new(types::I64));
+        binary_i64.returns.push(AbiParam::new(types::I64));
+        let mut binary_void = Signature::new(cc);
+        binary_void.params.push(AbiParam::new(types::I64));
+        binary_void.params.push(AbiParam::new(types::I64));
+        let mut octonary_i64 = Signature::new(cc);
+        for _ in 0..8 {
+            octonary_i64.params.push(AbiParam::new(types::I64));
         }
-        if let Some(r) = ret {
-            sig.returns.push(AbiParam::new(r));
-        }
-        module
-            .declare_function(name, Linkage::Import, &sig)
-            .map_err(|e| e.to_string())
-    };
-    Ok(WatcherHostFns {
-        event_scope: import("jet_jit_event_scope", &[], Some(types::I64))?,
-        event_scope_cancel: import("jet_jit_event_scope_cancel", &[types::I64], None)?,
-        event_scope_frame_push: import("jet_jit_event_scope_frame_push", &[], None)?,
-        event_scope_frame_pop: import("jet_jit_event_scope_frame_pop", &[], None)?,
-        subscription_is_active: import("jet_jit_subscription_is_active", &[types::I64], Some(types::I8))?,
-        watcher_files: import("jet_jit_watcher_files", &[types::I64], Some(types::I64))?,
-        watcher_process_pid: import("jet_jit_watcher_process_pid", &[types::I64], Some(types::I64))?,
-        watcher_port: import(
-            "jet_jit_watcher_port",
-            &[types::I64, types::I64],
-            Some(types::I64),
-        )?,
-        watcher_set: import("jet_jit_watcher_set", &[], Some(types::I64))?,
-        watch_poll: import("jet_jit_watch_poll", &[types::I64], Some(types::I64))?,
-        watch_cancel: import("jet_jit_watch_cancel", &[types::I64], None)?,
-        watch_is_active: import("jet_jit_watch_is_active", &[types::I64], Some(types::I8))?,
-        watch_summary: import("jet_jit_watch_summary", &[types::I64], Some(types::I64))?,
-        watch_on: import(
-            "jet_jit_watch_on",
-            &[
-                types::I64, types::I64, types::I64, types::I64, types::I64, types::I64, types::I64,
-                types::I64,
-            ],
-            Some(types::I64),
-        )?,
-        watch_once: import(
-            "jet_jit_watch_once",
-            &[
-                types::I64, types::I64, types::I64, types::I64, types::I64, types::I64, types::I64,
-                types::I64,
-            ],
-            Some(types::I64),
-        )?,
-        watchset_add: import("jet_jit_watchset_add", &[types::I64, types::I64], None)?,
-        watchset_poll: import("jet_jit_watchset_poll", &[types::I64], Some(types::I64))?,
-        watchset_summary: import("jet_jit_watchset_summary", &[types::I64], Some(types::I64))?,
-    })
+        octonary_i64.returns.push(AbiParam::new(types::I64));
+    }
+    event_scope_frame_push: "jet_jit_event_scope_frame_push" => jet_jit_event_scope_frame_push: nullary_void;
+    event_scope_frame_pop: "jet_jit_event_scope_frame_pop" => jet_jit_event_scope_frame_pop: nullary_void;
+    subscription_is_active: "jet_jit_subscription_is_active" => jet_jit_subscription_is_active: unary_i8;
+    watcher_files: "jet_jit_watcher_files" => jet_jit_watcher_files: unary_i64;
+    watcher_process_pid: "jet_jit_watcher_process_pid" => jet_jit_watcher_process_pid: unary_i64;
+    watcher_port: "jet_jit_watcher_port" => jet_jit_watcher_port: binary_i64;
+    watcher_set: "jet_jit_watcher_set" => jet_jit_watcher_set: nullary_i64;
+    watch_poll: "jet_jit_watch_poll" => jet_jit_watch_poll: unary_i64;
+    watch_cancel: "jet_jit_watch_cancel" => jet_jit_watch_cancel: unary_void;
+    watch_is_active: "jet_jit_watch_is_active" => jet_jit_watch_is_active: unary_i8;
+    watch_summary: "jet_jit_watch_summary" => jet_jit_watch_summary: unary_i64;
+    watch_on: "jet_jit_watch_on" => jet_jit_watch_on: octonary_i64;
+    watch_once: "jet_jit_watch_once" => jet_jit_watch_once: octonary_i64;
+    watchset_add: "jet_jit_watchset_add" => jet_jit_watchset_add: binary_void;
+    watchset_poll: "jet_jit_watchset_poll" => jet_jit_watchset_poll: unary_i64;
+    watchset_summary: "jet_jit_watchset_summary" => jet_jit_watchset_summary: unary_i64;
+    // registered once by Reactive::register_reactive_symbols (unified event-scope symbol with UI).
+    @shared event_scope: "jet_jit_event_scope": nullary_i64;
+    @shared event_scope_cancel: "jet_jit_event_scope_cancel": unary_void;
 }

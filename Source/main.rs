@@ -892,6 +892,11 @@ fn is_executable(p: &Path) -> bool {
 }
 
 fn main() {
+    // I2: install first, before any other work, so every uncaught panic
+    // (including one triggered before argv parsing) renders the branded
+    // ICE report instead of raw Rust panic text.
+    jet::Diagnostics::install_ice_panic_hook();
+
     // Process-wide: any derive/comptime path may hit TirBridge before Loader.
     jet::boot_tir_eval();
 

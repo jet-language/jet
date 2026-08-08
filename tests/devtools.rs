@@ -7,6 +7,8 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
+mod common;
+
 fn jet() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
 }
@@ -252,7 +254,7 @@ fn devtools_new_example_scaffolds_a_passing_golden_pair() {
             )
         });
 
-    if Command::new("rustc").arg("--version").output().is_ok() {
+    if common::have_rustc() {
         let rs = dir_join_unique("devtools_new_example");
         fs::write(&rs, &compiled.rust).unwrap();
         let bin = rs.with_extension("");

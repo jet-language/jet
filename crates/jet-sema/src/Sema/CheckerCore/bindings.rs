@@ -344,20 +344,20 @@ impl<'a> Checker<'a> {
                     constant_value: None,
                 },
             );
-            self.uninit.insert(b.name.clone(), state);
+            self.flow.uninit.set(&b.name, state);
         }
     
         /// A write-convention argument is not a definite-initialization proof:
         /// Jet has no callee contract that guarantees one scalar, or every fixed
         /// slot, was written. Keep the state and reject the unproved handoff.
         pub(crate) fn clear_uninit_mut_args(&mut self, args: &[CallArg]) {
-            if self.uninit.is_empty() {
+            if self.flow.uninit.is_empty() {
                 return;
             }
             for arg in args {
                 if arg.convention == AccessConvention::Write {
                     if let Expr::Ident(n, span) = &arg.expr {
-                        if self.uninit.contains_key(n) {
+                        if self.flow.uninit.contains(n) {
                             self.diags.push(Diagnostic::error(
                                 "E0420",
                                 format!("`{n}` may be read before it is given a value"),

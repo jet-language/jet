@@ -178,7 +178,7 @@ fn perf_capture_rejects_unknown_allowlist_field() {
 
 #[test]
 fn perf_attach_drives_real_devserver_browser_lifecycle() {
-    if Command::new("rustc").arg("--version").output().is_err() {
+    if !common::have_rustc() {
         eprintln!("note: skipping real browser relay lifecycle (need rustc)");
         return;
     }

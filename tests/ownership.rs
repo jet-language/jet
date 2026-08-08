@@ -1603,7 +1603,7 @@ fn run() {
 
 #[test]
 fn rustc_oracle_rejects_the_hostile_borrow_shapes() {
-    if Command::new("rustc").arg("--version").output().is_err() {
+    if !common::have_rustc() {
         return;
     }
     let root = common::unique_tmp("jet_call_place_rustc_oracle");
@@ -1986,7 +1986,7 @@ fn main() {
 
 #[test]
 fn rustc_oracle_accepts_move_copy_and_disjoint_field_captures() {
-    if Command::new("rustc").arg("--version").output().is_err() {
+    if !common::have_rustc() {
         return;
     }
     let root = common::unique_tmp("jet_call_place_rustc_positive_oracle");

@@ -3,6 +3,8 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
+mod common;
+
 fn build_and_run(dir: &PathBuf, name: &str, src: &str) -> (i32, String, String) {
     let path = dir.join(format!("{name}.jet"));
     fs::write(&path, src).unwrap();
@@ -50,7 +52,7 @@ fn build_and_run(dir: &PathBuf, name: &str, src: &str) -> (i32, String, String) 
 
 #[test]
 fn data_stream_limits_and_typed_errors() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping dataflow stream test (need rustc)");
         return;
@@ -133,7 +135,7 @@ fn run() {{
 
 #[test]
 fn rolling_mean_nonfinite_matches_aot_and_default_dev() {
-    if !Command::new("rustc").arg("--version").output().is_ok() {
+    if !common::have_rustc() {
         eprintln!("note: skipping rolling_mean parity test (need rustc)");
         return;
     }

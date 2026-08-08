@@ -720,112 +720,50 @@ pub(crate) fn clear_math_values() {
     MATH_VALUES.with(|slot| slot.borrow_mut().clear());
 }
 
-pub(crate) struct MathHostFns {
-    pub call: FuncId,
-    pub result_is_float: FuncId,
-    pub result_float: FuncId,
-    pub result_handle: FuncId,
-    pub html_escape: FuncId,
-    pub str_concat: FuncId,
-    pub typed_sql_raw: FuncId,
-    pub typed_sql_interp: FuncId,
-    pub typed_sql_template: FuncId,
-    pub typed_sql_params: FuncId,
-    pub typed_sh_raw: FuncId,
-    pub typed_sh_interp: FuncId,
-    pub typed_html_raw: FuncId,
-    pub typed_html_text: FuncId,
-    pub typed_html_interp: FuncId,
+host_fns! {
+    struct MathHostFns;
+    register: register_math_host_symbols;
+    declare: declare_math_host_fns(module) {
+        let cc = module.target_config().default_call_conv;
+
+        let mut sig_call = Signature::new(cc);
+        sig_call.params.push(AbiParam::new(types::I64));
+        sig_call.params.push(AbiParam::new(types::I64));
+        sig_call.params.push(AbiParam::new(types::I64));
+        sig_call.returns.push(AbiParam::new(types::I64));
+        let mut sig_i64_i8 = Signature::new(cc);
+        sig_i64_i8.params.push(AbiParam::new(types::I64));
+        sig_i64_i8.returns.push(AbiParam::new(types::I8));
+        let mut sig_i64_f64 = Signature::new(cc);
+        sig_i64_f64.params.push(AbiParam::new(types::I64));
+        sig_i64_f64.returns.push(AbiParam::new(types::F64));
+        let mut sig_unary = Signature::new(cc);
+        sig_unary.params.push(AbiParam::new(types::I64));
+        sig_unary.returns.push(AbiParam::new(types::I64));
+        let mut sig_binary = Signature::new(cc);
+        sig_binary.params.push(AbiParam::new(types::I64));
+        sig_binary.params.push(AbiParam::new(types::I64));
+        sig_binary.returns.push(AbiParam::new(types::I64));
+
+    }
+    call: "jet_jit_math_call" => jet_jit_math_call: sig_call;
+    result_is_float: "jet_jit_math_result_is_float" => jet_jit_math_result_is_float: sig_i64_i8;
+    result_float: "jet_jit_math_result_float" => jet_jit_math_result_float: sig_i64_f64;
+    result_handle: "jet_jit_math_result_handle" => jet_jit_math_result_handle: sig_unary;
+    html_escape: "jet_jit_html_escape" => jet_jit_html_escape: sig_unary;
+    str_concat: "jet_jit_str_concat" => jet_jit_str_concat: sig_binary;
+    typed_sql_raw: "jet_jit_typed_sql_raw" => jet_jit_typed_sql_raw: sig_unary;
+    typed_sql_interp: "jet_jit_typed_sql_interpolate" => jet_jit_typed_sql_interpolate: sig_binary;
+    typed_sql_template: "jet_jit_typed_sql_template" => jet_jit_typed_sql_template: sig_unary;
+    typed_sql_params: "jet_jit_typed_sql_params" => jet_jit_typed_sql_params: sig_unary;
+    typed_sh_raw: "jet_jit_typed_sh_raw" => jet_jit_typed_sh_raw: sig_unary;
+    typed_sh_interp: "jet_jit_typed_sh_interpolate" => jet_jit_typed_sh_interpolate: sig_binary;
+    typed_html_raw: "jet_jit_typed_html_raw" => jet_jit_typed_html_raw: sig_unary;
+    typed_html_text: "jet_jit_typed_html_text" => jet_jit_typed_html_text: sig_unary;
+    typed_html_interp: "jet_jit_typed_html_interpolate" => jet_jit_typed_html_interpolate: sig_binary;
 }
 
-pub(crate) fn register_math_host_symbols(builder: &mut JITBuilder) {
-    builder.symbol("jet_jit_math_call", jet_jit_math_call as *const u8);
-    builder.symbol(
-        "jet_jit_math_result_is_float",
-        jet_jit_math_result_is_float as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_math_result_float",
-        jet_jit_math_result_float as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_math_result_handle",
-        jet_jit_math_result_handle as *const u8,
-    );
-    builder.symbol("jet_jit_html_escape", jet_jit_html_escape as *const u8);
-    builder.symbol("jet_jit_str_concat", jet_jit_str_concat as *const u8);
-    builder.symbol("jet_jit_typed_sql_raw", jet_jit_typed_sql_raw as *const u8);
-    builder.symbol(
-        "jet_jit_typed_sql_interpolate",
-        jet_jit_typed_sql_interpolate as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_typed_sql_template",
-        jet_jit_typed_sql_template as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_typed_sql_params",
-        jet_jit_typed_sql_params as *const u8,
-    );
-    builder.symbol("jet_jit_typed_sh_raw", jet_jit_typed_sh_raw as *const u8);
-    builder.symbol(
-        "jet_jit_typed_sh_interpolate",
-        jet_jit_typed_sh_interpolate as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_typed_html_raw",
-        jet_jit_typed_html_raw as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_typed_html_text",
-        jet_jit_typed_html_text as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_typed_html_interpolate",
-        jet_jit_typed_html_interpolate as *const u8,
-    );
-}
 
-pub(crate) fn declare_math_host_fns(module: &mut JITModule) -> Result<MathHostFns, String> {
-    let cc = module.target_config().default_call_conv;
-    let mut import = |name: &str, sig: &Signature| -> Result<FuncId, String> {
-        module
-            .declare_function(name, Linkage::Import, sig)
-            .map_err(|e| e.to_string())
-    };
-    let mut sig_call = Signature::new(cc);
-    sig_call.params.push(AbiParam::new(types::I64));
-    sig_call.params.push(AbiParam::new(types::I64));
-    sig_call.params.push(AbiParam::new(types::I64));
-    sig_call.returns.push(AbiParam::new(types::I64));
-    let mut sig_i64_i8 = Signature::new(cc);
-    sig_i64_i8.params.push(AbiParam::new(types::I64));
-    sig_i64_i8.returns.push(AbiParam::new(types::I8));
-    let mut sig_i64_f64 = Signature::new(cc);
-    sig_i64_f64.params.push(AbiParam::new(types::I64));
-    sig_i64_f64.returns.push(AbiParam::new(types::F64));
-    let mut sig_unary = Signature::new(cc);
-    sig_unary.params.push(AbiParam::new(types::I64));
-    sig_unary.returns.push(AbiParam::new(types::I64));
-    let mut sig_binary = Signature::new(cc);
-    sig_binary.params.push(AbiParam::new(types::I64));
-    sig_binary.params.push(AbiParam::new(types::I64));
-    sig_binary.returns.push(AbiParam::new(types::I64));
-    Ok(MathHostFns {
-        call: import("jet_jit_math_call", &sig_call)?,
-        result_is_float: import("jet_jit_math_result_is_float", &sig_i64_i8)?,
-        result_float: import("jet_jit_math_result_float", &sig_i64_f64)?,
-        result_handle: import("jet_jit_math_result_handle", &sig_unary)?,
-        html_escape: import("jet_jit_html_escape", &sig_unary)?,
-        str_concat: import("jet_jit_str_concat", &sig_binary)?,
-        typed_sql_raw: import("jet_jit_typed_sql_raw", &sig_unary)?,
-        typed_sql_interp: import("jet_jit_typed_sql_interpolate", &sig_binary)?,
-        typed_sql_template: import("jet_jit_typed_sql_template", &sig_unary)?,
-        typed_sql_params: import("jet_jit_typed_sql_params", &sig_unary)?,
-        typed_sh_raw: import("jet_jit_typed_sh_raw", &sig_unary)?,
-        typed_sh_interp: import("jet_jit_typed_sh_interpolate", &sig_binary)?,
-        typed_html_raw: import("jet_jit_typed_html_raw", &sig_unary)?,
-        typed_html_text: import("jet_jit_typed_html_text", &sig_unary)?,
-        typed_html_interp: import("jet_jit_typed_html_interpolate", &sig_binary)?,
-    })
-}
+
+
+

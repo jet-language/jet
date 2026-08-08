@@ -394,9 +394,9 @@ impl<'a> Checker<'a> {
             // than an `Expr::Ident`. Add only matching outer bindings here so
             // top-level/builtin calls stay non-captures while stored function
             // values receive the same worker-sharing check as every other read.
-            for name in self.scopes.iter().flat_map(|scope| scope.keys()) {
-                if !params.contains(name) && lambda_body_refs_name(&lam.body, name) {
-                    read.insert(name.clone());
+            for name in self.visible_names() {
+                if !params.contains(&name) && lambda_body_refs_name(&lam.body, &name) {
+                    read.insert(name);
                 }
             }
             for name in read {

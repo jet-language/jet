@@ -336,22 +336,15 @@ extern "C" fn jet_jit_extern_call(wrapper: i64, args: i64) -> i64 {
     }
 }
 
-pub(crate) struct FfiHostFns {
-    pub call: FuncId,
-}
-
-pub(crate) fn register_ffi_host_symbols(builder: &mut JITBuilder) {
-    builder.symbol("jet_jit_extern_call", jet_jit_extern_call as *const u8);
-}
-
-pub(crate) fn declare_ffi_host_fns(module: &mut JITModule) -> Result<FfiHostFns, String> {
-    let cc = module.target_config().default_call_conv;
-    let mut sig = Signature::new(cc);
-    sig.params.push(AbiParam::new(types::I64));
-    sig.params.push(AbiParam::new(types::I64));
-    sig.returns.push(AbiParam::new(types::I64));
-    let call = module
-        .declare_function("jet_jit_extern_call", Linkage::Import, &sig)
-        .map_err(|e| e.to_string())?;
-    Ok(FfiHostFns { call })
+host_fns! {
+    struct FfiHostFns;
+    register: register_ffi_host_symbols;
+    declare: declare_ffi_host_fns(module) {
+        let cc = module.target_config().default_call_conv;
+        let mut sig = Signature::new(cc);
+        sig.params.push(AbiParam::new(types::I64));
+        sig.params.push(AbiParam::new(types::I64));
+        sig.returns.push(AbiParam::new(types::I64));
+    }
+    call: "jet_jit_extern_call" => jet_jit_extern_call: sig;
 }

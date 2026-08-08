@@ -27,9 +27,29 @@
 //! rather than guessing (P1 — beginners never see a spurious error).
 
 use crate::Diagnostics::{Diagnostic, Span};
+use crate::Sema::FlowFacts::{Facts, Plane};
 use crate::Syntax::edit_distance;
 use crate::AST::{Call, Expr, Func, Item, LValue, Stmt};
 use std::collections::{HashMap, HashSet};
+
+/// D-STATE1: the state a value is in. One plane of the checker's flow facts —
+/// this file supplies the join rule and nothing else about merging.
+pub(crate) enum Typestate {}
+
+impl Plane for Typestate {
+    type Fact = String;
+
+    /// A state holds after paths meet only when every path agrees. Paths that
+    /// disagree leave the value untracked, and say so (L0152).
+    fn join(left: Option<&String>, right: Option<&String>) -> Option<String> {
+        match (left, right) {
+            (Some(left), Some(right)) if left == right => Some(left.clone()),
+            _ => None,
+        }
+    }
+
+    const REPORTS_DIVERGENCE: bool = true;
+}
 
 /// Program-wide typestate metadata, collected once before any body is walked.
 #[derive(Default)]
@@ -246,18 +266,66 @@ impl StateTable {
 /// Per-function typestate analyzer. Tracks each tracked local's current state.
 struct StateCtx<'a> {
     tbl: &'a StateTable,
-    /// local name → current state tag.
-    states: HashMap<String, String>,
+    /// The typestate plane of the one flow-fact store.
+    states: Facts<Typestate>,
     diags: Vec<Diagnostic>,
+    /// Diagnostics CheckerCore already produced before this pass runs — read
+    /// only to check whether a switch was already proven exhaustive
+    /// (`FlowFacts::switch_proven_exhaustive`); never written here.
+    existing_diags: &'a [Diagnostic],
 }
 
 impl<'a> StateCtx<'a> {
-    fn new(tbl: &'a StateTable) -> Self {
+    fn new(tbl: &'a StateTable, existing_diags: &'a [Diagnostic]) -> Self {
         StateCtx {
             tbl,
-            states: HashMap::new(),
+            states: Facts::new(),
             diags: Vec::new(),
+            existing_diags,
         }
+    }
+
+    /// Join every path that meets here, and report each value the paths left in
+    /// different states instead of keeping whichever path was walked last.
+    fn merge_states(&mut self, before: &Facts<Typestate>, paths: &[Facts<Typestate>], span: Span) {
+        let mut diverged = Vec::new();
+        self.states = Facts::merge_paths(before, paths, &mut diverged);
+        self.report_divergence(diverged, span);
+    }
+
+    fn report_divergence(
+        &mut self,
+        mut diverged: Vec<crate::Sema::FlowFacts::Divergence<String>>,
+        span: Span,
+    ) {
+        diverged.sort_by(|a, b| {
+            a.name
+                .cmp(&b.name)
+                .then(a.left.cmp(&b.left))
+                .then(a.right.cmp(&b.right))
+        });
+        diverged.dedup_by(|a, b| a.name == b.name);
+        for split in diverged {
+            self.diags
+                .push(l0152(&split.name, &split.left, &split.right, span));
+        }
+    }
+
+    /// Walk one path from the facts that reach it and report where it ends.
+    fn walk_path(&mut self, before: &Facts<Typestate>, body: &[Stmt]) -> Facts<Typestate> {
+        self.states = before.clone();
+        self.check_block(body);
+        self.states.clone()
+    }
+
+    /// The shared loop rule, stated once in `Facts::after_loop`.
+    fn check_loop_body(&mut self, body: &[Stmt], span: Span) {
+        let before = self.states.clone();
+        self.check_block(body);
+        let after_body = self.states.clone();
+        let mut diverged = Vec::new();
+        self.states = Facts::after_loop(&before, &after_body, &mut diverged);
+        self.report_divergence(diverged, span);
     }
 
     /// Resolve a static-method receiver (`Payment.Client.client()`) to a type name.
@@ -321,15 +389,15 @@ impl<'a> StateCtx<'a> {
                 // gives `r` the call's to-state. Otherwise seed from an entry ctor.
                 if !b.name.is_empty() {
                     if let Some(to) = self.result_state_of(&b.init) {
-                        self.states.insert(b.name.clone(), to);
+                        self.states.set(&b.name, to);
                     } else if let Some(to) = self.entry_state_of(&b.init) {
-                        self.states.insert(b.name.clone(), to);
+                        self.states.set(&b.name, to);
                     } else {
                         // The binding takes on the state of the local it aliases, if
                         // any (`s := r`), else becomes untracked.
                         if let Expr::Ident(src, _) = &b.init {
                             if let Some(st) = self.states.get(src).cloned() {
-                                self.states.insert(b.name.clone(), st);
+                                self.states.set(&b.name, st);
                             } else {
                                 self.states.remove(&b.name);
                             }
@@ -349,7 +417,7 @@ impl<'a> StateCtx<'a> {
                             .result_state_of(value)
                             .or_else(|| self.entry_state_of(value))
                         {
-                            self.states.insert(name.clone(), to);
+                            self.states.set(name, to);
                         } else {
                             self.states.remove(name);
                         }
@@ -358,11 +426,11 @@ impl<'a> StateCtx<'a> {
             }
             Stmt::Return(Some(e), _) => self.check_expr(e),
             Stmt::Return(None, _) => {}
-            Stmt::While { cond, body, .. } => {
+            Stmt::While { cond, body, span, .. } => {
                 self.check_expr(cond);
-                self.check_block(body);
+                self.check_loop_body(body, *span);
             }
-            Stmt::For { kind, body, .. } => {
+            Stmt::For { kind, body, span, .. } => {
                 if let crate::AST::ForKind::Range { start, end, step, exclusive: _ } = kind {
                     self.check_expr(start);
                     self.check_expr(end);
@@ -373,43 +441,67 @@ impl<'a> StateCtx<'a> {
                     self.check_expr(collection);
                     if let Some(step) = step { self.check_expr(step); }
                 }
-                self.check_block(body);
+                self.check_loop_body(body, *span);
             }
             Stmt::Switch {
                 subject,
                 arms,
                 else_body,
-                ..
+                span,
             }
             | Stmt::ComptimeSwitch {
                 subject,
                 arms,
                 else_body,
-                ..
+                span,
             } => {
                 self.check_expr(subject);
+                let before = self.states.clone();
+                let mut paths = Vec::new();
                 for a in arms {
+                    self.states = before.clone();
                     self.check_expr(&a.cond);
                     self.check_block(&a.body);
+                    paths.push(self.states.clone());
                 }
-                if let Some(b) = else_body {
-                    self.check_block(b);
+                match else_body {
+                    Some(b) => paths.push(self.walk_path(&before, b)),
+                    // No `else`: skipping every arm is itself a path, unless
+                    // CheckerCore already proved this pattern table exhaustive.
+                    None if !crate::Sema::FlowFacts::switch_proven_exhaustive(
+                        arms,
+                        self.existing_diags,
+                        *span,
+                    ) =>
+                    {
+                        paths.push(before.clone());
+                    }
+                    None => {}
                 }
+                self.merge_states(&before, &paths, *span);
             }
             Stmt::CountedLoop {
                 init,
                 cond,
                 step,
                 body,
+                span,
                 ..
             } => {
                 self.check_expr(&init.init);
                 self.check_expr(cond);
+                let before = self.states.clone();
                 self.check_block(body);
-                if let Some(step) = step { self.check_stmt(step); }
+                if let Some(step) = step {
+                    self.check_stmt(step);
+                }
+                let after_body = self.states.clone();
+                let mut diverged = Vec::new();
+                self.states = Facts::after_loop(&before, &after_body, &mut diverged);
+                self.report_divergence(diverged, *span);
             }
-            Stmt::Loop { body, .. }
-            | Stmt::Unsafe { body, .. }
+            Stmt::Loop { body, span, .. } => self.check_loop_body(body, *span),
+            Stmt::Unsafe { body, .. }
             | Stmt::Impure { body, .. }
             | Stmt::Reactive { body, .. }
             | Stmt::Shield { body, .. }
@@ -430,13 +522,17 @@ impl<'a> StateCtx<'a> {
                 cond,
                 then_body,
                 else_body,
+                span,
                 ..
             } => {
                 self.check_expr(cond);
-                self.check_block(then_body);
-                if let Some(b) = else_body {
-                    self.check_block(b);
-                }
+                let before = self.states.clone();
+                let then_path = self.walk_path(&before, then_body);
+                let other_path = match else_body {
+                    Some(b) => self.walk_path(&before, b),
+                    None => before.clone(),
+                };
+                self.merge_states(&before, &[then_path, other_path], *span);
             }
             Stmt::ContextBlock { fields, body, .. } => {
                 for (_, e, _) in fields {
@@ -515,7 +611,7 @@ impl<'a> StateCtx<'a> {
                     if let Some(req) = from {
                         self.check_state(local, cur.as_deref(), req, ty, method, *method_span);
                     }
-                    self.states.insert(local.clone(), to.clone());
+                    self.states.set(local, to.clone());
                 }
             }
             Expr::Call(Call { name, args, .. }) => {
@@ -540,7 +636,7 @@ impl<'a> StateCtx<'a> {
                     if let Some(req) = from {
                         self.check_state(&local, cur.as_deref(), req, name, name, span);
                     }
-                    self.states.insert(local, to.clone());
+                    self.states.set(&local, to.clone());
                 }
             }
             Expr::Tainted(inner, _, _)
@@ -617,13 +713,18 @@ impl<'a> StateCtx<'a> {
                 then_value,
                 else_body,
                 else_value,
-                ..
+                span,
             } => {
                 self.check_expr(cond);
+                let before = self.states.clone();
                 self.check_block(then_body);
                 self.check_expr(then_value);
+                let then_path = self.states.clone();
+                self.states = before.clone();
                 self.check_block(else_body);
                 self.check_expr(else_value);
+                let else_path = self.states.clone();
+                self.merge_states(&before, &[then_path, else_path], *span);
             }
             Expr::PatternTest { subject, .. } => self.check_expr(subject),
             Expr::PtrFromAddr { addr, .. } => self.check_expr(addr),
@@ -709,35 +810,11 @@ impl<'a> StateCtx<'a> {
     }
 }
 
-/// Join two branch state-maps back into one: a local keeps its state only when both
-/// branches agree (and it had one before, or both produced the same). Disagreement →
-/// untracked (no spurious guard error after a state-divergent `if`).
-#[allow(dead_code)]
-fn join_after(
-    before: HashMap<String, String>,
-    then_s: HashMap<String, String>,
-    else_s: HashMap<String, String>,
-) -> HashMap<String, String> {
-    let mut out = HashMap::new();
-    for (k, v) in &then_s {
-        if else_s.get(k) == Some(v) {
-            out.insert(k.clone(), v.clone());
-        }
-    }
-    // Keep pre-branch states for locals untouched by either branch.
-    for (k, v) in before {
-        if then_s.get(&k) == Some(&v) && else_s.get(&k) == Some(&v) {
-            out.insert(k, v);
-        }
-    }
-    out
-}
-
 /// Run the typestate pass over one function body. The receiver's incoming state is
 /// seeded from a `#State(S)`/`#Transition(S, _)` marker on `self` so a method body
 /// that itself transitions starts from the declared state.
-pub fn check_func_state(f: &Func, tbl: &StateTable) -> Vec<Diagnostic> {
-    let mut ctx = StateCtx::new(tbl);
+pub fn check_func_state(f: &Func, tbl: &StateTable, existing_diags: &[Diagnostic]) -> Vec<Diagnostic> {
+    let mut ctx = StateCtx::new(tbl, existing_diags);
     // Seed `self`'s incoming state from this function's own typestate marker so a
     // chain of self-transitions inside one body checks correctly.
     if f.self_param().is_some() {
@@ -747,7 +824,7 @@ pub fn check_func_state(f: &Func, tbl: &StateTable) -> Vec<Diagnostic> {
             .map(|(s, _)| s.clone())
             .or_else(|| f.state_transition.as_ref().and_then(|t| t.from.clone()));
         if let Some(s) = incoming {
-            ctx.states.insert(crate::Syntax::KW_SELF.to_string(), s);
+            ctx.states.set(crate::Syntax::KW_SELF, s);
         }
     }
     ctx.check_block(&f.body);
@@ -758,32 +835,42 @@ pub fn check_func_state(f: &Func, tbl: &StateTable) -> Vec<Diagnostic> {
 pub fn check_items_state(items: &[Item], tbl: &StateTable, diags: &mut Vec<Diagnostic>) {
     for item in items {
         match item {
-            Item::Func(f) => diags.extend(check_func_state(f, tbl)),
+            Item::Func(f) => {
+                let new = check_func_state(f, tbl, diags.as_slice());
+                diags.extend(new);
+            }
             Item::Impl(i) => {
                 for m in &i.methods {
-                    diags.extend(check_func_state(m, tbl));
+                    let new = check_func_state(m, tbl, diags.as_slice());
+                    diags.extend(new);
                 }
             }
             Item::Struct(s) => {
                 for m in &s.methods {
-                    diags.extend(check_func_state(m, tbl));
+                    let new = check_func_state(m, tbl, diags.as_slice());
+                    diags.extend(new);
                 }
                 for block in &s.trait_impls {
                     for m in &block.methods {
-                        diags.extend(check_func_state(m, tbl));
+                        let new = check_func_state(m, tbl, diags.as_slice());
+                        diags.extend(new);
                     }
                 }
             }
             Item::Enum(e) => {
                 for m in &e.methods {
-                    diags.extend(check_func_state(m, tbl));
+                    let new = check_func_state(m, tbl, diags.as_slice());
+                    diags.extend(new);
                 }
             }
-            Item::Test(t) => diags.extend({
-                let mut ctx = StateCtx::new(tbl);
-                ctx.check_block(&t.body);
-                ctx.diags
-            }),
+            Item::Test(t) => {
+                let new = {
+                    let mut ctx = StateCtx::new(tbl, diags.as_slice());
+                    ctx.check_block(&t.body);
+                    ctx.diags
+                };
+                diags.extend(new);
+            }
             _ => {}
         }
     }
@@ -826,6 +913,24 @@ pub fn l0151(state: &str, type_name: &str, span: Span) -> Diagnostic {
         ),
         format!(
             "add `#Transition({state}, NextState) fn …` on `{type_name}`, or remove `{state}` from the declaration"
+        ),
+        Some(span),
+    )
+}
+
+/// L0152 (D-STATE1, D-FACT-FLOW1): two paths meet and leave one value in
+/// different states, so from here the compiler can no longer say which state it
+/// is in. A warning, not an error: the code may never need the state again.
+pub fn l0152(value: &str, one: &str, other: &str, span: Span) -> Diagnostic {
+    Diagnostic::lint(
+        "L0152",
+        format!("`{value}` ends in state `{one}` on one path and `{other}` on another"),
+        format!(
+            "typestate (D-STATE1): after two paths meet, a state holds only when both paths agree — \
+             here they do not, so `{value}` is untracked from this point and later state checks on it stay silent"
+        ),
+        format!(
+            "bring both paths to the same state before they meet, or do the work that needs `{one}` or `{other}` inside the path that reaches it"
         ),
         Some(span),
     )

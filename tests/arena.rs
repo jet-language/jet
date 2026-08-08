@@ -55,7 +55,7 @@ fn build_and_run(name: &str, src: &str) -> Option<String> {
         "`unsafe` leaked outside the vetted prelude helpers"
     );
 
-    if Command::new("rustc").arg("--version").output().is_err() {
+    if !common::have_rustc() {
         eprintln!("note: rustc not found; compiled front end only");
         return None;
     }

@@ -26,6 +26,7 @@ pub mod Persist;
 pub mod Policy;
 pub mod RingLayer;
 pub mod RegexSyntax;
+pub mod Registry;
 pub mod SHA256;
 pub mod MatchScan;
 pub mod StreamCursor;

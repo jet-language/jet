@@ -414,7 +414,7 @@ impl<'a> Checker<'a> {
             };
             body.push(Stmt::Expr(cancel_call(&name, spawn.span)));
             body.push(Stmt::Expr(join_call(&name, spawn.span)));
-            self.moved.insert(name, spawn.span);
+            self.flow.moved.set(&name, spawn.span);
         }
     }
 

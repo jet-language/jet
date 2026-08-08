@@ -543,7 +543,7 @@ impl<'a> Checker<'a> {
                     // a compound `name += …` reads it first, so it's a
                     // read-before-write.
                     if let LValue::Local { name, name_span } = &*target {
-                        if self.uninit.contains_key(name) {
+                        if self.flow.uninit.contains(name) {
                             if is_compound {
                                 self.diags.push(Diagnostic::error(
                                     "E0420",
@@ -556,7 +556,7 @@ impl<'a> Checker<'a> {
                                     Some(*name_span),
                                 ));
                             }
-                            self.uninit.remove(name);
+                            self.flow.uninit.remove(name);
                         }
                     }
                     match target {
@@ -655,6 +655,7 @@ impl<'a> Checker<'a> {
                             let fixed_uninit = if !is_compound {
                                 match base.as_ref() {
                                     Expr::Ident(name, _) => self
+                                        .flow
                                         .uninit
                                         .remove(name)
                                         .map(|state| (name.clone(), state)),
@@ -989,7 +990,7 @@ impl<'a> Checker<'a> {
                                         false
                                     };
                                 if !completely_initialized {
-                                    self.uninit.insert(name, state);
+                                    self.flow.uninit.set(&name, state);
                                 }
                             }
                         }
@@ -1668,11 +1669,13 @@ impl<'a> Checker<'a> {
                     }
                     self.push_loop_value_frame(label.as_ref());
                     self.loop_depth += 1;
-                    // D-UNINIT1: a loop body may run 0 times, so writes inside it don't
-                    // count as initializing after the loop.
-                    let saved_u = self.uninit.clone();
+                    // D-FACT-FLOW1: one loop rule for every plane — a body may run zero
+                    // times, so the facts after the loop join the zero-turn path with the
+                    // path one walk of the body left behind.
+                    let before_loop = self.flow.clone();
                     self.check_block(body, true);
-                    self.uninit = saved_u;
+                    let after_body = self.flow.clone();
+                    self.flow = crate::Sema::FlowFacts::FlowFacts::after_loop(&before_loop, &after_body);
                     self.loop_depth -= 1;
                     self.pop_loop_value_frame();
                     if label.is_some() {
@@ -1698,9 +1701,10 @@ impl<'a> Checker<'a> {
                     if let Some((n, label_span)) = label {
                         self.declare_loop_label(n, *label_span);
                     }
-                    // D-UNINIT1: a loop body may run 0 times; writes inside it don't
-                    // count as initializing after the loop.
-                    let saved_u = self.uninit.clone();
+                    // D-FACT-FLOW1: one loop rule for every plane — a body may run
+                    // zero times, so the facts after the loop join the zero-turn
+                    // path with the path one walk of the body left behind.
+                    let before_loop = self.flow.clone();
                     self.push_loop_value_frame(label.as_ref());
                     match kind {
                         ForKind::Range { start, end, step, exclusive } => {
@@ -1763,8 +1767,8 @@ impl<'a> Checker<'a> {
                             if self.lookup(&v).is_some() || self.consts.contains_key(&v) {
                                 self.diags.push(already_defined(&v, vs));
                             }
-                            self.scopes.last_mut().unwrap().insert(
-                                v,
+                            self.declare_in_scope(
+                                &v,
                                 LocalInfo {
                                     def_span: vs,
                                     ty: Type::Int,
@@ -2063,7 +2067,8 @@ impl<'a> Checker<'a> {
                         }
                     }
                     self.pop_loop_value_frame();
-                    self.uninit = saved_u;
+                    let after_body = self.flow.clone();
+                    self.flow = crate::Sema::FlowFacts::FlowFacts::after_loop(&before_loop, &after_body);
                     if label.is_some() {
                         self.loop_labels.pop();
                     }
@@ -2127,12 +2132,13 @@ impl<'a> Checker<'a> {
                     self.require_bool(cond, "a counted loop condition");
                     self.push_loop_value_frame(label.as_ref());
                     self.loop_depth += 1;
-                    let saved_u = self.uninit.clone();
+                    let before_loop = self.flow.clone();
                     self.check_block(body, true);
                     if let Some(step) = step {
                         self.check_stmt(step.as_mut());
                     }
-                    self.uninit = saved_u;
+                    let after_body = self.flow.clone();
+                    self.flow = crate::Sema::FlowFacts::FlowFacts::after_loop(&before_loop, &after_body);
                     self.loop_depth -= 1;
                     self.pop_loop_value_frame();
                     self.pop_scope();
@@ -2151,9 +2157,10 @@ impl<'a> Checker<'a> {
                     }
                     self.push_loop_value_frame(label.as_ref());
                     self.loop_depth += 1;
-                    let saved_u = self.uninit.clone();
+                    let before_loop = self.flow.clone();
                     self.check_block(inner, true);
-                    self.uninit = saved_u;
+                    let after_body = self.flow.clone();
+                    self.flow = crate::Sema::FlowFacts::FlowFacts::after_loop(&before_loop, &after_body);
                     self.loop_depth -= 1;
                     self.pop_loop_value_frame();
                     if label.is_some() {
@@ -2229,8 +2236,7 @@ impl<'a> Checker<'a> {
                     self.inferred_lambda_mut_captures = enclosing_mut_captures;
                 }
                 Stmt::Switched { marker, body, .. } if crate::AST::switched_off(marker) => {
-                    let moved = self.moved.clone();
-                    let uninit = self.uninit.clone();
+                    let flow = self.flow.clone();
                     let fx_direct = self.fx_direct.clone();
                     let fx_direct_spans = self.fx_direct_spans.clone();
                     let fx_edges = self.fx_edges.clone();
@@ -2254,8 +2260,7 @@ impl<'a> Checker<'a> {
                     }
                     self.drop_scope_no_obligation_checks();
                     self.suppress_must_use = prev_suppress;
-                    self.moved = moved;
-                    self.uninit = uninit;
+                    self.flow = flow;
                     self.fx_direct = fx_direct;
                     self.fx_direct_spans = fx_direct_spans;
                     self.fx_edges = fx_edges;

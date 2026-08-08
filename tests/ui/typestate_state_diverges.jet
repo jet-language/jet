@@ -1,0 +1,40 @@
+// @all_diags
+// D-FACT-FLOW1 (card #1621): one arm confirms the order, the other cancels it,
+// so after the arms meet nobody can say which state `order` is in. The one join
+// rule reports that instead of keeping whichever arm was walked last.
+state Order { Draft, Confirmed, Cancelled }
+
+struct Order {
+    id: Int
+}
+
+impl Order {
+    #Transition(_, Draft) fn start(id: Int) => Order {
+        return Order.{id: id}
+    }
+
+    #Transition(Draft, Confirmed) fn confirm(self: ^Order) => Order {
+        return self
+    }
+
+    #Transition(Draft, Cancelled) fn cancel(self: ^Order) => Order {
+        return self
+    }
+
+    #Transition(Confirmed, Draft) fn reopen(self: ^Order) => Order {
+        return self
+    }
+
+    #Transition(Cancelled, Draft) fn restore(self: ^Order) => Order {
+        return self
+    }
+}
+
+fn run(paid: Bool) {
+    order := Order.start(1)
+    if {
+        paid -> order = order.confirm()
+        else -> order = order.cancel()
+    }
+    print(order.id)
+}

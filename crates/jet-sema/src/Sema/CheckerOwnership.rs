@@ -10,6 +10,24 @@ use crate::AST::{
 };
 use std::collections::{HashMap, HashSet};
 
+/// D-FACT-OWN1: the borrow checker is a prover, not a plane. The view plane
+/// stores the windows; deciding when a window dies stays here, with the prover
+/// that opened it.
+pub(crate) fn invalidate_view_owner(
+    views: &mut ViewStore,
+    owner: &ViewOwnerId,
+    verb: &str,
+    span: Span,
+) {
+    for facts in views.all_mut() {
+        for fact in facts {
+            if &fact.place.owner == owner && fact.invalidated.is_none() {
+                fact.invalidated = Some((verb.to_string(), span));
+            }
+        }
+    }
+}
+
 #[derive(Clone)]
 struct EvaluatedAccess {
     place: ViewPlace,
@@ -242,7 +260,7 @@ impl<'a> Checker<'a> {
     /// E0632: when `arena` is reset, every live view into it dies.
     pub(crate) fn kill_views_of_arena(&mut self, arena: &str, verb: &str, span: Span) {
         let owner = self.owner_id(arena);
-        self.view_facts.invalidate_owner(&owner, verb, span);
+        invalidate_view_owner(&mut self.flow.views, &owner, verb, span);
     }
 
     /// E0632: reading a view whose arena was already reset.
@@ -427,11 +445,16 @@ impl<'a> Checker<'a> {
         transfer_from: Option<&str>,
         enum_variants: Option<&HashSet<String>>,
     ) {
-        let conflicts = self.view_facts.bindings.iter().any(|(existing_name, fact)| {
+        let conflicts = self
+            .flow
+            .views
+            .all()
+            .flat_map(|(existing_name, facts)| facts.iter().map(move |fact| (existing_name, fact)))
+            .any(|(existing_name, fact)| {
             if !self.view_is_live_now(existing_name) || fact.invalidated.is_some() {
                 return false;
             }
-            if transfer_from == Some(existing_name.as_str()) {
+            if transfer_from == Some(existing_name) {
                 return false;
             }
             // Several candidates for one logical output slot are alternatives,
@@ -488,10 +511,11 @@ impl<'a> Checker<'a> {
             place,
             kind,
             access,
-            scope_len: self.scopes.len(),
+            scope_len: self.scope_depth(),
+            seq: 0,
             invalidated: None,
         };
-        self.view_facts.push(name.to_string(), fact);
+        crate::Sema::push_view_fact(&mut self.flow.views, name, fact);
     }
 
     fn view_paths_are_enum_alternatives(
@@ -510,14 +534,14 @@ impl<'a> Checker<'a> {
 
     pub(crate) fn view_fact(&self, name: &str) -> Option<&ViewFact> {
         let binding = self.lookup(name)?;
-        self.view_facts.current_for_binding(name, binding.def_span)
+        crate::Sema::current_view_fact_for_binding(&self.flow.views, name, binding.def_span)
     }
 
     fn view_facts(&self, name: &str) -> Vec<&ViewFact> {
         let Some(binding) = self.lookup(name) else {
             return Vec::new();
         };
-        self.view_facts.all_for_binding(name, binding.def_span)
+        crate::Sema::view_facts_for_binding(&self.flow.views, name, binding.def_span)
     }
 
     fn view_fact_at_path(&self, name: &str, output_path: &[String]) -> Option<&ViewFact> {
@@ -581,7 +605,7 @@ impl<'a> Checker<'a> {
             // A Fixed handle still owns cleanup work even after its last source
             // read. Its exclusive backing borrow ends only on consuming close
             // (or lexical scope exit), not ordinary last-use shortening.
-            return !self.moved.contains_key(name);
+            return !self.flow.moved.contains(name);
         }
         self.views_used_in_stmt.contains(name) || self.is_name_live_after(name)
     }
@@ -591,11 +615,8 @@ impl<'a> Checker<'a> {
     }
 
     fn view_kind_for_place(&self, place: &ViewPlace) -> ViewKind {
-        if let Some((_, fact)) = self
-            .view_facts
-            .bindings
-            .iter()
-            .rev()
+        if let Some((_, fact)) = crate::Sema::view_facts_newest_first(&self.flow.views)
+            .into_iter()
             .find(|(_, fact)| {
                 fact.place.owner.def_span == place.owner.def_span
                     && fact.place.projections == place.projections
@@ -606,11 +627,8 @@ impl<'a> Checker<'a> {
         // D-PIN2=A / D-PIN3=A: a place reached through a live pin is still
         // pinned. Only `Pin` inherits this way — every other window kind keeps
         // its own owner-shaped classification below.
-        if self
-            .view_facts
-            .bindings
-            .iter()
-            .rev()
+        if crate::Sema::view_facts_newest_first(&self.flow.views)
+            .into_iter()
             .any(|(_, fact)| fact.kind == ViewKind::Pin && place.extends(&fact.place))
         {
             return ViewKind::Pin;
@@ -2293,18 +2311,15 @@ impl<'a> Checker<'a> {
                 return;
             }
         }
-        let Some((view, place_name, kind)) = self
-            .view_facts
-            .bindings
-            .iter()
-            .rev()
+        let Some((view, place_name, kind)) = crate::Sema::view_facts_newest_first(&self.flow.views)
+            .into_iter()
             .find(|(name, fact)| {
                 self.view_is_live_now(name)
                     && fact.access == ViewAccess::Write
                     && fact.place.overlaps(&place)
                     && fact.invalidated.is_none()
             })
-            .map(|(name, fact)| (name.clone(), Self::place_name(&fact.place), fact.kind))
+            .map(|(name, fact)| (name.to_string(), Self::place_name(&fact.place), fact.kind))
         else {
             return;
         };
@@ -2332,11 +2347,8 @@ impl<'a> Checker<'a> {
         if self.report_scoped_loan_conflict(changed, action, span) {
             return;
         }
-        let Some((view, access, place, kind)) = self
-            .view_facts
-            .bindings
-            .iter()
-            .rev()
+        let Some((view, access, place, kind)) = crate::Sema::view_facts_newest_first(&self.flow.views)
+            .into_iter()
             .find(|(name, fact)| {
                 self.view_is_live_now(name)
                     && fact.place.overlaps(changed)
@@ -2344,7 +2356,7 @@ impl<'a> Checker<'a> {
             })
             .map(|(name, fact)| {
                 (
-                    name.clone(),
+                    name.to_string(),
                     fact.access,
                     Self::place_name(&fact.place),
                     fact.kind,
@@ -3319,7 +3331,7 @@ impl<'a> Checker<'a> {
         span: Span,
     ) {
         if let Some(root) = root {
-            self.moved.insert(root.to_string(), span);
+            self.flow.moved.set(root, span);
         }
     }
 
@@ -3334,7 +3346,7 @@ impl<'a> Checker<'a> {
         {
             return false;
         }
-        self.moved.insert(name.clone(), *span);
+        self.flow.moved.set(name, *span);
         true
     }
 
@@ -3739,14 +3751,8 @@ impl<'a> Checker<'a> {
         what: &str,
         span: Span,
     ) {
-        let owner = self
-            .view_facts
-            .bindings
-            .iter()
-            .rev()
-            .find_map(|(binding, fact)| {
-                (binding == name).then(|| fact.place.owner.name.clone())
-            })
+        let owner = crate::Sema::current_view_fact(&self.flow.views, name)
+            .map(|fact| fact.place.owner.name.clone())
             .unwrap_or_else(|| "its owner".to_string());
         self.diags.push(Diagnostic::error(
             "E2307",
@@ -3981,7 +3987,8 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn clear_moved_binding(&mut self, name: &str) {
-        self.moved
+        self.flow
+            .moved
             .retain(|place, _| !Self::contains_place(name, place));
     }
 
@@ -3990,7 +3997,8 @@ impl<'a> Checker<'a> {
             return;
         };
         let place = Self::place_name(&place);
-        self.moved
+        self.flow
+            .moved
             .retain(|moved, _| !Self::contains_place(&place, moved));
     }
 
@@ -4000,16 +4008,18 @@ impl<'a> Checker<'a> {
         };
         let place_name = Self::place_name(&place);
         let moved = if matches!(expr, Expr::Ident(..)) && self.suppress_partial_move_root_read {
-            self.moved
+            self.flow
+                .moved
                 .get(&place_name)
                 .copied()
                 .map(|at| (place_name.clone(), at))
         } else {
-            self.moved
+            self.flow
+                .moved
                 .iter()
                 .filter(|(moved, _)| Self::move_keys_overlap(&place_name, moved))
                 .min_by_key(|(moved, _)| moved.len())
-                .map(|(moved, at)| (moved.clone(), *at))
+                .map(|(moved, at)| (moved.to_string(), *at))
         };
         let Some((moved_place, _moved_at)) = moved else {
             return false;
@@ -4047,7 +4057,7 @@ impl<'a> Checker<'a> {
             fix,
             Some(span),
         ));
-        self.moved.remove(&moved_place);
+        self.flow.moved.remove(&moved_place);
         true
     }
 
@@ -4072,7 +4082,7 @@ impl<'a> Checker<'a> {
                 return;
             }
         }
-        self.moved.insert(Self::place_name(&place), span);
+        self.flow.moved.set(&Self::place_name(&place), span);
     }
 
     pub(crate) fn mark_moved(&mut self, name: String, span: Span) {
@@ -4140,17 +4150,16 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn lint_unjoined_tasks_in_current_scope(&mut self) {
-        let Some(scope) = self.scopes.last() else {
-            return;
-        };
-        let pending: Vec<(String, Span)> = scope
-            .iter()
+        let pending: Vec<(String, Span)> = self
+            .flow
+            .bindings
+            .iter_at(self.scope_depth())
             .filter_map(|(name, info)| {
                 let span = info.task_lint_span?;
-                if self.moved.contains_key(name) {
+                if self.flow.moved.contains(name) {
                     None
                 } else {
-                    Some((name.clone(), span))
+                    Some((name.to_string(), span))
                 }
             })
             .collect();
@@ -4172,17 +4181,16 @@ impl<'a> Checker<'a> {
     /// case (consumed on one path, dropped on the other) is E0141, raised in
     /// `check_if`.
     pub(crate) fn check_single_use_consumed_in_current_scope(&mut self) {
-        let Some(scope) = self.scopes.last() else {
-            return;
-        };
-        let pending: Vec<(String, Span)> = scope
-            .iter()
+        let pending: Vec<(String, Span)> = self
+            .flow
+            .bindings
+            .iter_at(self.scope_depth())
             .filter_map(|(name, info)| {
                 let span = info.single_use_span?;
-                if self.moved.contains_key(name) {
+                if self.flow.moved.contains(name) {
                     None
                 } else {
-                    Some((name.clone(), span))
+                    Some((name.to_string(), span))
                 }
             })
             .collect();

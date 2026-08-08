@@ -579,105 +579,56 @@ pub(crate) fn runtime_query(handle: u64, sql: &str, params_wire: &str) -> String
     runtime::jet_db_query(handle, sql, params_wire)
 }
 
-pub(crate) struct DBHostFns {
-    pub open_memory: FuncId,
-    pub open: FuncId,
-    pub policy: FuncId,
-    pub with_policy: FuncId,
-    pub close: FuncId,
-    pub begin: FuncId,
-    pub commit: FuncId,
-    pub rollback: FuncId,
-    pub execute: FuncId,
-    pub query: FuncId,
-    pub query_one: FuncId,
-    pub migrate: FuncId,
-    pub transaction: FuncId,
-    pub params: FuncId,
-    pub row_int: FuncId,
-    pub row_text: FuncId,
-    pub dbvalue_pack: FuncId,
-    pub dbvalue_int: FuncId,
-    pub dbvalue_float: FuncId,
-    pub dbvalue_text: FuncId,
-    pub dbvalue_bool: FuncId,
-    pub dbvalue_is_null: FuncId,
-}
+host_fns! {
+    struct DBHostFns;
+    register: register_db_symbols;
+    declare: declare_db_host_fns(module) {
+        let cc = module.target_config().default_call_conv;
+        let mut nullary = Signature::new(cc);
+        nullary.returns.push(AbiParam::new(types::I64));
+        let mut unary = Signature::new(cc);
+        unary.params.push(AbiParam::new(types::I64));
+        unary.returns.push(AbiParam::new(types::I64));
+        let mut unary_i8 = Signature::new(cc);
+        unary_i8.params.push(AbiParam::new(types::I64));
+        unary_i8.returns.push(AbiParam::new(types::I8));
+        let mut ternary = Signature::new(cc);
+        for _ in 0..3 {
+            ternary.params.push(AbiParam::new(types::I64));
+        }
+        ternary.returns.push(AbiParam::new(types::I64));
+        let mut binary = Signature::new(cc);
+        binary.params.push(AbiParam::new(types::I64));
+        binary.params.push(AbiParam::new(types::I64));
+        binary.returns.push(AbiParam::new(types::I64));
 
-pub(crate) fn register_db_symbols(builder: &mut JITBuilder) {
-    builder.symbol("jet_jit_db_open_memory", jet_jit_db_open_memory as *const u8);
-    builder.symbol("jet_jit_db_open", jet_jit_db_open as *const u8);
-    builder.symbol("jet_jit_db_policy", jet_jit_db_policy as *const u8);
-    builder.symbol("jet_jit_db_with_policy", jet_jit_db_with_policy as *const u8);
-    builder.symbol("jet_jit_db_close", jet_jit_db_close as *const u8);
-    builder.symbol("jet_jit_db_begin", jet_jit_db_begin as *const u8);
-    builder.symbol("jet_jit_db_commit", jet_jit_db_commit as *const u8);
-    builder.symbol("jet_jit_db_rollback", jet_jit_db_rollback as *const u8);
-    builder.symbol("jet_jit_db_execute", jet_jit_db_execute as *const u8);
-    builder.symbol("jet_jit_db_query", jet_jit_db_query as *const u8);
-    builder.symbol("jet_jit_db_query_one", jet_jit_db_query_one as *const u8);
-    builder.symbol("jet_jit_db_migrate", jet_jit_db_migrate as *const u8);
-    builder.symbol("jet_jit_db_transaction", jet_jit_db_transaction as *const u8);
-    builder.symbol("jet_jit_db_params", jet_jit_db_params as *const u8);
-    builder.symbol("jet_jit_db_row_int", jet_jit_db_row_int as *const u8);
-    builder.symbol("jet_jit_db_row_text", jet_jit_db_row_text as *const u8);
-    builder.symbol("jet_jit_dbvalue_pack", jet_jit_dbvalue_pack as *const u8);
-    builder.symbol("jet_jit_dbvalue_int", jet_jit_dbvalue_int as *const u8);
-    builder.symbol("jet_jit_dbvalue_float", jet_jit_dbvalue_float as *const u8);
-    builder.symbol("jet_jit_dbvalue_text", jet_jit_dbvalue_text as *const u8);
-    builder.symbol("jet_jit_dbvalue_bool", jet_jit_dbvalue_bool as *const u8);
-    builder.symbol(
-        "jet_jit_dbvalue_is_null",
-        jet_jit_dbvalue_is_null as *const u8,
-    );
-}
 
-pub(crate) fn declare_db_host_fns(module: &mut JITModule) -> Result<DBHostFns, String> {
-    let cc = module.target_config().default_call_conv;
-    let mut nullary = Signature::new(cc);
-    nullary.returns.push(AbiParam::new(types::I64));
-    let mut unary = Signature::new(cc);
-    unary.params.push(AbiParam::new(types::I64));
-    unary.returns.push(AbiParam::new(types::I64));
-    let mut unary_i8 = Signature::new(cc);
-    unary_i8.params.push(AbiParam::new(types::I64));
-    unary_i8.returns.push(AbiParam::new(types::I8));
-    let mut ternary = Signature::new(cc);
-    for _ in 0..3 {
-        ternary.params.push(AbiParam::new(types::I64));
     }
-    ternary.returns.push(AbiParam::new(types::I64));
-    let mut binary = Signature::new(cc);
-    binary.params.push(AbiParam::new(types::I64));
-    binary.params.push(AbiParam::new(types::I64));
-    binary.returns.push(AbiParam::new(types::I64));
-    let mut import = |name: &str, sig: &Signature| {
-        module
-            .declare_function(name, Linkage::Import, sig)
-            .map_err(|e| e.to_string())
-    };
-    Ok(DBHostFns {
-        open_memory: import("jet_jit_db_open_memory", &nullary)?,
-        open: import("jet_jit_db_open", &unary)?,
-        policy: import("jet_jit_db_policy", &binary)?,
-        with_policy: import("jet_jit_db_with_policy", &ternary)?,
-        close: import("jet_jit_db_close", &unary_i8)?,
-        begin: import("jet_jit_db_begin", &unary_i8)?,
-        commit: import("jet_jit_db_commit", &unary_i8)?,
-        rollback: import("jet_jit_db_rollback", &unary_i8)?,
-        execute: import("jet_jit_db_execute", &ternary)?,
-        query: import("jet_jit_db_query", &ternary)?,
-        query_one: import("jet_jit_db_query_one", &ternary)?,
-        migrate: import("jet_jit_db_migrate", &ternary)?,
-        transaction: import("jet_jit_db_transaction", &ternary)?,
-        params: import("jet_jit_db_params", &unary)?,
-        row_int: import("jet_jit_db_row_int", &binary)?,
-        row_text: import("jet_jit_db_row_text", &binary)?,
-        dbvalue_pack: import("jet_jit_dbvalue_pack", &binary)?,
-        dbvalue_int: import("jet_jit_dbvalue_int", &unary)?,
-        dbvalue_float: import("jet_jit_dbvalue_float", &unary)?,
-        dbvalue_text: import("jet_jit_dbvalue_text", &unary)?,
-        dbvalue_bool: import("jet_jit_dbvalue_bool", &unary)?,
-        dbvalue_is_null: import("jet_jit_dbvalue_is_null", &unary_i8)?,
-    })
+    open_memory: "jet_jit_db_open_memory" => jet_jit_db_open_memory: nullary;
+    open: "jet_jit_db_open" => jet_jit_db_open: unary;
+    policy: "jet_jit_db_policy" => jet_jit_db_policy: binary;
+    with_policy: "jet_jit_db_with_policy" => jet_jit_db_with_policy: ternary;
+    close: "jet_jit_db_close" => jet_jit_db_close: unary_i8;
+    begin: "jet_jit_db_begin" => jet_jit_db_begin: unary_i8;
+    commit: "jet_jit_db_commit" => jet_jit_db_commit: unary_i8;
+    rollback: "jet_jit_db_rollback" => jet_jit_db_rollback: unary_i8;
+    execute: "jet_jit_db_execute" => jet_jit_db_execute: ternary;
+    query: "jet_jit_db_query" => jet_jit_db_query: ternary;
+    query_one: "jet_jit_db_query_one" => jet_jit_db_query_one: ternary;
+    migrate: "jet_jit_db_migrate" => jet_jit_db_migrate: ternary;
+    transaction: "jet_jit_db_transaction" => jet_jit_db_transaction: ternary;
+    params: "jet_jit_db_params" => jet_jit_db_params: unary;
+    row_int: "jet_jit_db_row_int" => jet_jit_db_row_int: binary;
+    row_text: "jet_jit_db_row_text" => jet_jit_db_row_text: binary;
+    dbvalue_pack: "jet_jit_dbvalue_pack" => jet_jit_dbvalue_pack: binary;
+    dbvalue_int: "jet_jit_dbvalue_int" => jet_jit_dbvalue_int: unary;
+    dbvalue_float: "jet_jit_dbvalue_float" => jet_jit_dbvalue_float: unary;
+    dbvalue_text: "jet_jit_dbvalue_text" => jet_jit_dbvalue_text: unary;
+    dbvalue_bool: "jet_jit_dbvalue_bool" => jet_jit_dbvalue_bool: unary;
+    dbvalue_is_null: "jet_jit_dbvalue_is_null" => jet_jit_dbvalue_is_null: unary_i8;
 }
+
+
+
+
+

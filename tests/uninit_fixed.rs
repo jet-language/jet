@@ -242,3 +242,35 @@ fn write_argument_does_not_claim_an_uninit_buffer_was_filled() {
         "{diagnostics:#?}"
     );
 }
+
+/// D-FACT-FLOW1 (card #1621): the branch merge intersects what each path
+/// initialised. Both arms fill every slot, so the value is written after the
+/// branch and reading it is fine.
+#[test]
+fn every_path_initialising_a_slot_makes_it_written() {
+    let out = jet::compile(
+        "use core.mem\nfn decide(flag: Bool) {\n    bytes := [U8#2].{ uninit }\n    if {\n        flag -> {\n            bytes[0] = 1\n            bytes[1] = 2\n        }\n        else -> {\n            bytes[0] = 3\n            bytes[1] = 4\n        }\n    }\n    print(bytes[0])\n}\nfn run() { decide(true) }\n",
+    );
+    assert!(
+        out.is_ok(),
+        "both paths write every slot: {:#?}",
+        out.err()
+    );
+}
+
+/// The other half of the same rule: a slot written on one path only is not
+/// written after the branch. Before the one join rule the walker kept whatever
+/// arm it saw last and let this read through.
+#[test]
+fn a_slot_written_on_one_path_only_stays_unwritten() {
+    let diagnostics = jet::compile(
+        "use core.mem\nfn decide(flag: Bool) {\n    bytes := [U8#2].{ uninit }\n    if {\n        flag -> {\n            bytes[0] = 1\n            bytes[1] = 2\n        }\n        else -> {\n            bytes[0] = 3\n        }\n    }\n    print(bytes[1])\n}\nfn run() { decide(true) }\n",
+    )
+    .expect_err("one path leaves a slot unwritten");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0420"),
+        "{diagnostics:#?}"
+    );
+}

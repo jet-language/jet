@@ -214,3 +214,107 @@ fn run() {
         lint_codes(src)
     );
 }
+
+/// D-FACT-FLOW1 (card #1621): a branch that confirms an order on one path and
+/// cancels it on the other leaves the state unproved. The one join rule reports
+/// the divergence (L0152) instead of keeping whatever arm was walked last.
+const DIVERGENT: &str = r#"
+state Order { Draft, Confirmed, Cancelled, Closed }
+
+struct Order { id: Int }
+
+impl Order {
+    #Transition(_, Draft) fn start(id: Int) => Order { return Order.{ id: id } }
+    #Transition(Draft, Confirmed) fn confirm(self: ^Order) => Order { return self }
+    #Transition(Draft, Cancelled) fn cancel(self: ^Order) => Order { return self }
+    #Transition(Confirmed, Closed) fn close(self: ^Order) => Order { return self }
+    #Transition(Cancelled, Closed) fn archive(self: ^Order) => Order { return self }
+    #State(Confirmed) fn ship(self) => Int { return self.id }
+}
+"#;
+
+#[test]
+fn divergent_branch_states_are_reported() {
+    let src = format!(
+        "{DIVERGENT}\nfn decide(paid: Bool) {{\n  order := Order.start(1)\n  if {{\n    paid -> order = order.confirm()\n    else -> order = order.cancel()\n  }}\n  print(order.id)\n}}\nfn run() {{ decide(true) }}\n"
+    );
+    assert!(
+        lint_codes(&src).iter().any(|c| c == "L0152"),
+        "a state-divergent branch must be reported: {:?}",
+        lint_codes(&src)
+    );
+}
+
+#[test]
+fn divergent_branch_does_not_keep_the_last_walked_arm() {
+    let src = format!(
+        "{DIVERGENT}\nfn decide(paid: Bool) {{\n  order := Order.start(1)\n  if {{\n    paid -> order = order.confirm()\n    else -> order = order.cancel()\n  }}\n  print(order.ship())\n}}\nfn run() {{ decide(true) }}\n"
+    );
+    // Keeping the last arm would call `ship` on a `Cancelled` order and report
+    // E0150. After the join the state is unproved, so the guard stays silent —
+    // and the divergence itself is what gets reported.
+    assert!(
+        !codes(&src).iter().any(|c| c == "E0150"),
+        "the last-walked arm must not decide the state: {:?}",
+        codes(&src)
+    );
+    assert!(
+        lint_codes(&src).iter().any(|c| c == "L0152"),
+        "the divergence is reported instead: {:?}",
+        lint_codes(&src)
+    );
+}
+
+#[test]
+fn agreeing_branches_keep_the_state() {
+    let src = format!(
+        "{DIVERGENT}\nfn decide(paid: Bool) {{\n  order := Order.start(1)\n  if {{\n    paid -> order = order.confirm()\n    else -> order = order.confirm()\n  }}\n  print(order.ship())\n}}\nfn run() {{ decide(true) }}\n"
+    );
+    assert!(
+        codes(&src).is_empty(),
+        "both paths reach `Confirmed`, so `ship` is in state: {:?}",
+        codes(&src)
+    );
+    assert!(
+        !lint_codes(&src).iter().any(|c| c == "L0152"),
+        "agreeing paths are not a divergence: {:?}",
+        lint_codes(&src)
+    );
+}
+
+/// D-FACT-FLOW1 (card #1621): an else-less pattern table CheckerCore already
+/// proved exhaustive has no fall-through path, so agreeing arms must not be
+/// reported as diverging against the pre-table state.
+#[test]
+fn agreeing_switch_arms_over_an_exhaustive_enum_keep_the_state() {
+    let src = format!(
+        "{DIVERGENT}\nenum Mode {{ Fast Slow }}\nfn decide(m: Mode) {{\n  order := Order.start(1)\n  if m == {{\n    .Fast -> order = order.confirm()\n    .Slow -> order = order.confirm()\n  }}\n  print(order.ship())\n}}\nfn run() {{ decide(Mode.Fast) }}\n"
+    );
+    assert!(
+        codes(&src).is_empty(),
+        "both arms of an exhaustive dispatch reach `Confirmed`, so `ship` is in state: {:?}",
+        codes(&src)
+    );
+    assert!(
+        !lint_codes(&src).iter().any(|c| c == "L0152"),
+        "an exhaustive pattern table has no fall-through path to diverge from: {:?}",
+        lint_codes(&src)
+    );
+}
+
+/// D-FACT-FLOW1 (card #1621): a counted loop's body may run zero times, so
+/// the loop merge is the join of the pre-loop state with the post-body state,
+/// not the post-body state alone — a mismatch here is a real divergence.
+#[test]
+fn counted_loop_zero_iterations_reports_the_pre_loop_divergence() {
+    let src = format!(
+        "{DIVERGENT}\nfn decide(n: Int) {{\n  order := Order.start(1)\n  loop i := 0, i < n {{\n    order = order.confirm()\n  }}\n  print(order.ship())\n}}\nfn run() {{ decide(1) }}\n"
+    );
+    eprintln!("DEBUG codes={:?} lints={:?}", codes(&src), lint_codes(&src));
+    assert!(
+        lint_codes(&src).iter().any(|c| c == "L0152"),
+        "the loop may run zero times, so `Draft` (skipped) and `Confirmed` \
+         (ran) must be reported as diverging: {:?}",
+        lint_codes(&src)
+    );
+}

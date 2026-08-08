@@ -4,6 +4,8 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
+mod common;
+
 fn build_and_run(dir: &PathBuf, name: &str, src: &str) -> (i32, String, String) {
     let path = dir.join(name);
     fs::write(&path, src).unwrap();
@@ -42,7 +44,7 @@ fn build_and_run(dir: &PathBuf, name: &str, src: &str) -> (i32, String, String) 
 
 #[test]
 fn null_backend_measure_layout_paint_roundtrip() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping ui backend test (need rustc)");
         return;
@@ -63,7 +65,7 @@ fn null_backend_measure_layout_paint_roundtrip() {
 
 #[test]
 fn tui_backend_reactive_render_loop() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping ui backend test (need rustc)");
         return;
@@ -85,7 +87,7 @@ fn tui_backend_reactive_render_loop() {
 /// D-UI-MOUNT1=A: mount twice yields the same paint transcript as one mount.
 #[test]
 fn mount_twice_is_idempotent() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping ui mount idempotence test (need rustc)");
         return;
@@ -123,7 +125,7 @@ text({x:0,y:1,w:8,h:1}, Save)
 /// TUI backends. Painting the tree also derives one shared focus order.
 #[test]
 fn typed_component_tree_has_backend_parity() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping typed UI tree test (need rustc)");
         return;

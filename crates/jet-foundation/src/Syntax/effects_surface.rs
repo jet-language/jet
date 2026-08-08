@@ -412,6 +412,23 @@ pub const REF_SOURCE_PERL: &str = "perl";
 /// D-FFI-PHP1 / D-JPK7: direct Packagist ecosystem root.
 pub const REF_SOURCE_PHP: &str = "php";
 
+/// The one home for "which source tokens are built-in providers" — every
+/// recognized `REF_SOURCE_*` above, in the order a ref may not put them
+/// (D-JPK-REF1=A: `target@provider`, never `provider@target`).
+/// `jet-pkg-model`'s `RefSpec::Source::is_builtin` and
+/// `Syntax/retirements.rs`'s `package-ref-order` ratchet both read this list
+/// instead of hand-copying it, so they can never drift apart.
+pub const REF_SOURCE_PROVIDERS: &[&str] = &[
+    REF_SOURCE_NIXPKGS,
+    REF_SOURCE_GITHUB,
+    REF_SOURCE_PATH,
+    REF_SOURCE_CRAN,
+    REF_SOURCE_LUAROCKS,
+    REF_SOURCE_RUBY,
+    REF_SOURCE_PERL,
+    REF_SOURCE_PHP,
+];
+
 /// D-JPK2/9: the Phase 1 verb set.
 pub const JETPACK_VERBS: &[&str] = &[
     // Card #479: reuses D-DX2's existing `doctor` spelling for Jetpack health.

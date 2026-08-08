@@ -2,6 +2,7 @@
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Sema::Effects::core_effect;
+use crate::Sema::FlowFacts::{Facts, Plane};
 use crate::AST::{
     EnumLitArg, Expr, ForKind, Item, LValue, Lambda, LambdaBody, OrFallback, Stmt, StrPart, Type,
 };
@@ -41,10 +42,52 @@ struct TaintCtx<'a> {
     /// (alias → resolved module path, e.g. `db` → `jet.db`). Used to classify a
     /// `MethodCall` on a Core alias as a sink.
     core_imports: &'a HashMap<String, String>,
-    locals: HashMap<String, TagSet>,
-    local_types: HashMap<String, String>,
+    /// The taint plane of the one flow-fact store.
+    locals: Facts<Taint>,
+    /// The type each local carries, so a field read can find its tags.
+    local_types: Facts<LocalType>,
     diags: Vec<Diagnostic>,
+    /// Diagnostics CheckerCore already produced before this pass runs — read
+    /// only to check whether a switch was already proven exhaustive
+    /// (`FlowFacts::switch_proven_exhaustive`); never written here.
+    existing_diags: &'a [Diagnostic],
 }
+
+/// D-TAG-SURFACE1: the fact tags a value carries. Suspicion is a hazard, so it
+/// spreads across a merge: a value tainted on any path is tainted after it.
+pub(crate) enum Taint {}
+
+impl Plane for Taint {
+    type Fact = TagSet;
+
+    fn join(left: Option<&TagSet>, right: Option<&TagSet>) -> Option<TagSet> {
+        match (left, right) {
+            (Some(left), Some(right)) => Some(left.union(right).cloned().collect()),
+            (Some(one), None) | (None, Some(one)) => Some(one.clone()),
+            (None, None) => None,
+        }
+    }
+}
+
+/// The declared type of a local, tracked beside its tags so a field read can
+/// look up the owner's field tags.
+pub(crate) enum LocalType {}
+
+impl Plane for LocalType {
+    type Fact = String;
+
+    fn join(left: Option<&String>, right: Option<&String>) -> Option<String> {
+        match (left, right) {
+            (Some(left), Some(right)) if left == right => Some(left.clone()),
+            (Some(one), None) | (None, Some(one)) => Some(one.clone()),
+            _ => None,
+        }
+    }
+}
+
+/// Both taint planes as one path leaves them.
+#[derive(Clone)]
+struct TaintFacts(Facts<Taint>, Facts<LocalType>);
 
 impl<'a> TaintCtx<'a> {
     fn new(
@@ -55,6 +98,7 @@ impl<'a> TaintCtx<'a> {
         field_tags: &'a FieldTags,
         field_types: &'a FieldTypes,
         core_imports: &'a HashMap<String, String>,
+        existing_diags: &'a [Diagnostic],
     ) -> Self {
         TaintCtx {
             scrubbers,
@@ -64,9 +108,10 @@ impl<'a> TaintCtx<'a> {
             field_tags,
             field_types,
             core_imports,
-            locals: HashMap::new(),
-            local_types: HashMap::new(),
+            locals: Facts::new(),
+            local_types: Facts::new(),
             diags: Vec::new(),
+            existing_diags,
         }
     }
 
@@ -464,10 +509,16 @@ impl<'a> TaintCtx<'a> {
                 ..
             } => {
                 self.check_expr(cond);
+                let before = self.snapshot();
                 self.check_block(then_body);
                 self.check_expr(then_value);
+                let then_path = self.snapshot();
+                self.locals = before.0.clone();
+                self.local_types = before.1.clone();
                 self.check_block(else_body);
                 self.check_expr(else_value);
+                let else_path = self.snapshot();
+                self.merge_tags(&before, &[then_path, else_path]);
             }
             Expr::PtrFromAddr { addr, .. } => self.check_expr(addr),
             Expr::Lambda(l) => self.check_lambda(l),
@@ -517,17 +568,17 @@ impl<'a> TaintCtx<'a> {
                 }
                 if let Some(pat) = &b.pattern {
                     for name in pattern_names(pat) {
-                        self.set_tags(name, tags.clone());
+                        self.set_tags(&name, tags.clone());
                     }
                 } else if !b.name.is_empty() {
-                    self.set_tags(b.name.clone(), tags);
+                    self.set_tags(&b.name, tags);
                     if let Some(type_name) = b
                         .ty
                         .as_ref()
                         .and_then(Self::type_name)
                         .or_else(|| self.type_of(&b.init))
                     {
-                        self.local_types.insert(b.name.clone(), type_name);
+                        self.local_types.set(&b.name, type_name);
                     }
                 }
             }
@@ -540,7 +591,7 @@ impl<'a> TaintCtx<'a> {
                     if op.is_some() {
                         tags.extend(self.locals.get(name).cloned().unwrap_or_default());
                     }
-                    self.set_tags(name.clone(), tags);
+                    self.set_tags(name, tags);
                 } else {
                     // Field/index assign targets are also walked for nested sinks.
                     if let LValue::Index { base, index, .. } = target {
@@ -556,7 +607,7 @@ impl<'a> TaintCtx<'a> {
             Stmt::Return(None, _) => {}
             Stmt::While { cond, body, .. } => {
                 self.check_expr(cond);
-                self.check_block(body);
+                self.check_loop_body(body);
             }
             Stmt::For {
                 kind,
@@ -580,32 +631,49 @@ impl<'a> TaintCtx<'a> {
                         self.tags_of(collection)
                     }
                 };
-                self.set_tags(var.clone(), collection_tags.clone());
+                self.set_tags(var, collection_tags.clone());
                 if let Some((v2, _)) = var2 {
-                    self.set_tags(v2.clone(), collection_tags);
+                    self.set_tags(v2, collection_tags);
                 }
-                self.check_block(body);
+                self.check_loop_body(body);
             }
             Stmt::Switch {
                 subject,
                 arms,
                 else_body,
-                ..
+                span,
             }
             | Stmt::ComptimeSwitch {
                 subject,
                 arms,
                 else_body,
-                ..
+                span,
             } => {
                 self.check_expr(subject);
+                let before = self.snapshot();
+                let mut paths = Vec::new();
                 for a in arms {
+                    self.locals = before.0.clone();
+                    self.local_types = before.1.clone();
                     self.check_expr(&a.cond);
                     self.check_block(&a.body);
+                    paths.push(self.snapshot());
                 }
-                if let Some(b) = else_body {
-                    self.check_block(b);
+                match else_body {
+                    Some(b) => paths.push(self.walk_path(&before, b)),
+                    // No `else`: skipping every arm is itself a path, unless
+                    // CheckerCore already proved this pattern table exhaustive.
+                    None if !crate::Sema::FlowFacts::switch_proven_exhaustive(
+                        arms,
+                        self.existing_diags,
+                        *span,
+                    ) =>
+                    {
+                        paths.push(before.clone());
+                    }
+                    None => {}
                 }
+                self.merge_tags(&before, &paths);
             }
             Stmt::CountedLoop {
                 init,
@@ -616,11 +684,17 @@ impl<'a> TaintCtx<'a> {
             } => {
                 self.check_expr(&init.init);
                 self.check_expr(cond);
+                let before = self.snapshot();
                 self.check_block(body);
-                if let Some(step) = step { self.check_stmt(step); }
+                if let Some(step) = step {
+                    self.check_stmt(step);
+                }
+                let after_body = self.snapshot();
+                self.locals = Facts::after_loop(&before.0, &after_body.0, &mut Vec::new());
+                self.local_types = Facts::after_loop(&before.1, &after_body.1, &mut Vec::new());
             }
-            Stmt::Loop { body, .. }
-            | Stmt::Unsafe { body, .. }
+            Stmt::Loop { body, .. } => self.check_loop_body(body),
+            Stmt::Unsafe { body, .. }
             | Stmt::Impure { body, .. }
             | Stmt::Reactive { body, .. }
             | Stmt::Shield { body, .. }
@@ -644,10 +718,13 @@ impl<'a> TaintCtx<'a> {
                 ..
             } => {
                 self.check_expr(cond);
-                self.check_block(then_body);
-                if let Some(b) = else_body {
-                    self.check_block(b);
-                }
+                let before = self.snapshot();
+                let then_path = self.walk_path(&before, then_body);
+                let other_path = match else_body {
+                    Some(b) => self.walk_path(&before, b),
+                    None => before.clone(),
+                };
+                self.merge_tags(&before, &[then_path, other_path]);
             }
             Stmt::ContextBlock { fields, body, .. } => {
                 for (_, e, _) in fields {
@@ -660,12 +737,40 @@ impl<'a> TaintCtx<'a> {
         }
     }
 
-    fn set_tags(&mut self, name: String, tags: TagSet) {
+    fn set_tags(&mut self, name: &str, tags: TagSet) {
         if tags.is_empty() {
-            self.locals.remove(&name);
+            self.locals.remove(name);
         } else {
-            self.locals.insert(name, tags);
+            self.locals.set(name, tags);
         }
+    }
+
+    /// Join every path that meets here. Suspicion spreads: a value tainted on
+    /// any path stays tainted after the paths meet.
+    fn merge_tags(&mut self, before: &TaintFacts, paths: &[TaintFacts]) {
+        self.locals = Facts::merge_paths(&before.0, &paths.iter().map(|p| p.0.clone()).collect::<Vec<_>>(), &mut Vec::new());
+        self.local_types = Facts::merge_paths(&before.1, &paths.iter().map(|p| p.1.clone()).collect::<Vec<_>>(), &mut Vec::new());
+    }
+
+    fn snapshot(&self) -> TaintFacts {
+        TaintFacts(self.locals.clone(), self.local_types.clone())
+    }
+
+    /// Walk one path from the facts that reach it and report where it ends.
+    fn walk_path(&mut self, before: &TaintFacts, body: &[Stmt]) -> TaintFacts {
+        self.locals = before.0.clone();
+        self.local_types = before.1.clone();
+        self.check_block(body);
+        self.snapshot()
+    }
+
+    /// The shared loop rule, stated once in `Facts::after_loop`.
+    fn check_loop_body(&mut self, body: &[Stmt]) {
+        let before = self.snapshot();
+        self.check_block(body);
+        let after_body = self.snapshot();
+        self.locals = Facts::after_loop(&before.0, &after_body.0, &mut Vec::new());
+        self.local_types = Facts::after_loop(&before.1, &after_body.1, &mut Vec::new());
     }
 }
 
@@ -703,6 +808,7 @@ pub fn check_func_taint(
     field_tags: &FieldTags,
     field_types: &FieldTypes,
     core_imports: &HashMap<String, String>,
+    existing_diags: &[Diagnostic],
 ) -> Vec<Diagnostic> {
     let mut ctx = TaintCtx::new(
         scrubbers,
@@ -712,15 +818,16 @@ pub fn check_func_taint(
         field_tags,
         field_types,
         core_imports,
+        existing_diags,
     );
     for parameter in &function.params {
-        ctx.set_tags(parameter.name.clone(), type_tags(&parameter.ty));
+        ctx.set_tags(&parameter.name, type_tags(&parameter.ty));
         let type_name = match (&parameter.ty, owner) {
             (Type::Named(name), Some(owner)) if name == "Self" => Some(owner.to_string()),
             (ty, _) => TaintCtx::type_name(ty),
         };
         if let Some(type_name) = type_name {
-            ctx.local_types.insert(parameter.name.clone(), type_name);
+            ctx.local_types.set(&parameter.name, type_name);
         }
     }
     ctx.check_block(&function.body);
@@ -736,6 +843,7 @@ pub fn check_body_tags(
     field_tags: &FieldTags,
     field_types: &FieldTypes,
     core_imports: &HashMap<String, String>,
+    existing_diags: &[Diagnostic],
 ) -> Vec<Diagnostic> {
     let mut ctx = TaintCtx::new(
         scrubbers,
@@ -745,6 +853,7 @@ pub fn check_body_tags(
         field_tags,
         field_types,
         core_imports,
+        existing_diags,
     );
     ctx.check_block(body);
     ctx.diags

@@ -405,3 +405,27 @@ fn run() {
         codes(src)
     );
 }
+
+/// D-FACT-FLOW1 (card #1621): a counted loop's body may run zero times, so
+/// taint present before the loop must still reach a sink after it even when
+/// the body always scrubs — the loop merge joins the pre-loop facts with the
+/// post-body facts instead of keeping the post-body facts alone.
+#[test]
+fn counted_loop_zero_iterations_keeps_pre_loop_taint() {
+    let src = r#"
+use core.process as process
+#Scrub(Input) fn clean(raw: #Input String) => String { return raw.split(" ").to_list()[0] }
+fn run(n: Int) {
+    value := #Input "world; rm -rf /"
+    loop i := 0, i < n {
+        value = clean(value)
+    }
+    process.run(["echo", value]) ?? return
+}
+"#;
+    assert!(
+        codes(src).iter().any(|c| c == "E0721"),
+        "the loop may run zero times, so the pre-loop taint must still reach the sink: {:?}",
+        codes(src)
+    );
+}

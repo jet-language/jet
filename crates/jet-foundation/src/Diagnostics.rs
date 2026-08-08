@@ -878,6 +878,67 @@ pub fn render_all(file: &str, src: &str, diags: &[Diagnostic]) -> String {
     let rendered: Vec<String> = diags.iter().map(|d| d.render(file, src)).collect();
     rendered.join("\n")
 }
+
+/// I2: the one home for the branded ICE report. Every internal-compiler-error
+/// site — the uncaught-panic hook (`install_ice_panic_hook`) and every
+/// `Source/CmdCompile.rs` site that used to hand-type its own banner —
+/// renders through here, so there is exactly one phrasing.
+///
+/// `what` is the one-line description that follows the fixed
+/// "internal compiler error: " prefix. `detail` is optional extra context
+/// (a generated-file path, rustc's stderr, a panic location) appended below
+/// the fixed body; pass `""` to omit it.
+pub fn render_ice_report(what: &str, detail: &str) -> String {
+    let mut report = format!(
+        "internal compiler error: {what}\n\
+         This is a bug in {bin}, NOT in your program. Please report it,\n\
+         attaching your source file and the generated file below.",
+        bin = crate::Syntax::BINARY_NAME,
+    );
+    if !detail.is_empty() {
+        report.push('\n');
+        report.push_str(detail);
+    }
+    report
+}
+
+/// I2: installs the one process-wide panic hook so an uncaught panic
+/// anywhere in the jet binary prints the branded `render_ice_report` output
+/// instead of Rust's raw panic text (no `RUST_BACKTRACE` hint, no
+/// `thread 'main' panicked at`), then exits 101 (`ExitCodes::ICE`) via
+/// Rust's default unhandled-panic behavior — this never touches the exit
+/// code, only the message. Call this first thing in `main()`, before any
+/// other work.
+///
+/// `JET_ICE_SELF_TEST=1` deliberately panics right after the hook installs,
+/// so `tests/ice_report_single_home.rs` can prove the hook's real output on
+/// the actual `jet` binary.
+pub fn install_ice_panic_hook() {
+    std::panic::set_hook(Box::new(|info| {
+        let what = info
+            .payload()
+            .downcast_ref::<&str>()
+            .map(|s| s.to_string())
+            .or_else(|| info.payload().downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "unknown panic".to_string());
+        // The `ice!` macro (this module) already prefixes its message with
+        // "internal compiler error: "; strip it so it isn't doubled.
+        let what = what
+            .strip_prefix("internal compiler error: ")
+            .map(str::to_string)
+            .unwrap_or(what);
+        let detail = info
+            .location()
+            .map(|loc| format!("  at {}:{}:{}", loc.file(), loc.line(), loc.column()))
+            .unwrap_or_default();
+        eprintln!("{}", render_ice_report(&what, &detail));
+    }));
+
+    if std::env::var_os("JET_ICE_SELF_TEST").is_some() {
+        panic!("ICE self-test triggered by JET_ICE_SELF_TEST");
+    }
+}
+
 #[cfg(test)]
 mod unicode_display_width_tests {
     use super::*;

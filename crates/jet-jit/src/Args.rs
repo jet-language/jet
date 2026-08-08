@@ -303,155 +303,67 @@ mod runtime {
 pub(crate) type ArgsSpec = runtime::Spec;
 pub(crate) type ParsedArgs = runtime::Parsed;
 
-pub(crate) struct ArgsHostFns {
-    pub spec: FuncId,
-    pub flag: FuncId,
-    pub flag_short: FuncId,
-    pub option: FuncId,
-    pub option_default: FuncId,
-    pub option_int: FuncId,
-    pub option_choice: FuncId,
-    pub repeat: FuncId,
-    pub positional: FuncId,
-    pub subcommand: FuncId,
-    pub version: FuncId,
-    pub help: FuncId,
-    pub completion: FuncId,
-    pub parse: FuncId,
-    pub parse_or_exit: FuncId,
-    pub parsed_flag: FuncId,
-    pub parsed_option: FuncId,
-    pub parsed_option_int: FuncId,
-    pub parsed_option_float: FuncId,
-    pub parsed_options: FuncId,
-    pub parsed_positional: FuncId,
-    pub parsed_subcommand: FuncId,
+host_fns! {
+    struct ArgsHostFns;
+    register: register_args_symbols;
+    declare: declare_args_host_fns(module) {
+        let cc = module.target_config().default_call_conv;
+        let mut nullary = Signature::new(cc);
+        nullary.returns.push(AbiParam::new(types::I64));
+        let mut unary = Signature::new(cc);
+        unary.params.push(AbiParam::new(types::I64));
+        unary.returns.push(AbiParam::new(types::I64));
+        let mut binary = Signature::new(cc);
+        binary.params.push(AbiParam::new(types::I64));
+        binary.params.push(AbiParam::new(types::I64));
+        binary.returns.push(AbiParam::new(types::I64));
+        let mut binary_i8 = Signature::new(cc);
+        binary_i8.params.push(AbiParam::new(types::I64));
+        binary_i8.params.push(AbiParam::new(types::I64));
+        binary_i8.returns.push(AbiParam::new(types::I8));
+        let mut ternary = Signature::new(cc);
+        for _ in 0..3 {
+            ternary.params.push(AbiParam::new(types::I64));
+        }
+        ternary.returns.push(AbiParam::new(types::I64));
+        let mut quaternary = Signature::new(cc);
+        for _ in 0..4 {
+            quaternary.params.push(AbiParam::new(types::I64));
+        }
+        quaternary.returns.push(AbiParam::new(types::I64));
+        let mut quinary = Signature::new(cc);
+        for _ in 0..5 {
+            quinary.params.push(AbiParam::new(types::I64));
+        }
+        quinary.returns.push(AbiParam::new(types::I64));
+
+
+    }
+    spec: "jet_jit_args_spec" => runtime::jet_jit_args_spec: nullary;
+    flag: "jet_jit_args_flag" => runtime::jet_jit_args_flag: ternary;
+    flag_short: "jet_jit_args_flag_short" => runtime::jet_jit_args_flag_short: quaternary;
+    option: "jet_jit_args_option" => runtime::jet_jit_args_option: quaternary;
+    option_default: "jet_jit_args_option_default" => runtime::jet_jit_args_option_default: quinary;
+    option_int: "jet_jit_args_option_int" => runtime::jet_jit_args_option_int: quaternary;
+    option_choice: "jet_jit_args_option_choice" => runtime::jet_jit_args_option_choice: quinary;
+    repeat: "jet_jit_args_repeat" => runtime::jet_jit_args_repeat: quaternary;
+    positional: "jet_jit_args_positional" => runtime::jet_jit_args_positional: ternary;
+    subcommand: "jet_jit_args_subcommand" => runtime::jet_jit_args_subcommand: quaternary;
+    version: "jet_jit_args_version" => runtime::jet_jit_args_version: binary;
+    help: "jet_jit_args_help" => runtime::jet_jit_args_help: unary;
+    completion: "jet_jit_args_completion" => runtime::jet_jit_args_completion: binary;
+    parse: "jet_jit_args_parse" => runtime::jet_jit_args_parse: binary;
+    parse_or_exit: "jet_jit_args_parse_or_exit" => runtime::jet_jit_args_parse_or_exit: binary;
+    parsed_flag: "jet_jit_parsed_flag" => runtime::jet_jit_parsed_flag: binary_i8;
+    parsed_option: "jet_jit_parsed_option" => runtime::jet_jit_parsed_option: binary;
+    parsed_option_int: "jet_jit_parsed_option_int" => runtime::jet_jit_parsed_option_int: binary;
+    parsed_option_float: "jet_jit_parsed_option_float_opt" => runtime::jet_jit_parsed_option_float_opt: binary;
+    parsed_options: "jet_jit_parsed_options" => runtime::jet_jit_parsed_options: binary;
+    parsed_positional: "jet_jit_parsed_positional" => runtime::jet_jit_parsed_positional: binary;
+    parsed_subcommand: "jet_jit_parsed_subcommand" => runtime::jet_jit_parsed_subcommand: unary;
 }
 
-pub(crate) fn register_args_symbols(builder: &mut JITBuilder) {
-    builder.symbol("jet_jit_args_spec", runtime::jet_jit_args_spec as *const u8);
-    builder.symbol("jet_jit_args_flag", runtime::jet_jit_args_flag as *const u8);
-    builder.symbol(
-        "jet_jit_args_flag_short",
-        runtime::jet_jit_args_flag_short as *const u8,
-    );
-    builder.symbol("jet_jit_args_option", runtime::jet_jit_args_option as *const u8);
-    builder.symbol(
-        "jet_jit_args_option_default",
-        runtime::jet_jit_args_option_default as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_args_option_int",
-        runtime::jet_jit_args_option_int as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_args_option_choice",
-        runtime::jet_jit_args_option_choice as *const u8,
-    );
-    builder.symbol("jet_jit_args_repeat", runtime::jet_jit_args_repeat as *const u8);
-    builder.symbol(
-        "jet_jit_args_positional",
-        runtime::jet_jit_args_positional as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_args_subcommand",
-        runtime::jet_jit_args_subcommand as *const u8,
-    );
-    builder.symbol("jet_jit_args_version", runtime::jet_jit_args_version as *const u8);
-    builder.symbol("jet_jit_args_help", runtime::jet_jit_args_help as *const u8);
-    builder.symbol(
-        "jet_jit_args_completion",
-        runtime::jet_jit_args_completion as *const u8,
-    );
-    builder.symbol("jet_jit_args_parse", runtime::jet_jit_args_parse as *const u8);
-    builder.symbol(
-        "jet_jit_args_parse_or_exit",
-        runtime::jet_jit_args_parse_or_exit as *const u8,
-    );
-    builder.symbol("jet_jit_parsed_flag", runtime::jet_jit_parsed_flag as *const u8);
-    builder.symbol(
-        "jet_jit_parsed_option",
-        runtime::jet_jit_parsed_option as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_parsed_option_int",
-        runtime::jet_jit_parsed_option_int as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_parsed_option_float_opt",
-        runtime::jet_jit_parsed_option_float_opt as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_parsed_options",
-        runtime::jet_jit_parsed_options as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_parsed_positional",
-        runtime::jet_jit_parsed_positional as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_parsed_subcommand",
-        runtime::jet_jit_parsed_subcommand as *const u8,
-    );
-}
 
-pub(crate) fn declare_args_host_fns(module: &mut JITModule) -> Result<ArgsHostFns, String> {
-    let cc = module.target_config().default_call_conv;
-    let mut nullary = Signature::new(cc);
-    nullary.returns.push(AbiParam::new(types::I64));
-    let mut unary = Signature::new(cc);
-    unary.params.push(AbiParam::new(types::I64));
-    unary.returns.push(AbiParam::new(types::I64));
-    let mut binary = Signature::new(cc);
-    binary.params.push(AbiParam::new(types::I64));
-    binary.params.push(AbiParam::new(types::I64));
-    binary.returns.push(AbiParam::new(types::I64));
-    let mut binary_i8 = Signature::new(cc);
-    binary_i8.params.push(AbiParam::new(types::I64));
-    binary_i8.params.push(AbiParam::new(types::I64));
-    binary_i8.returns.push(AbiParam::new(types::I8));
-    let mut ternary = Signature::new(cc);
-    for _ in 0..3 {
-        ternary.params.push(AbiParam::new(types::I64));
-    }
-    ternary.returns.push(AbiParam::new(types::I64));
-    let mut quaternary = Signature::new(cc);
-    for _ in 0..4 {
-        quaternary.params.push(AbiParam::new(types::I64));
-    }
-    quaternary.returns.push(AbiParam::new(types::I64));
-    let mut quinary = Signature::new(cc);
-    for _ in 0..5 {
-        quinary.params.push(AbiParam::new(types::I64));
-    }
-    quinary.returns.push(AbiParam::new(types::I64));
-    let mut import = |name: &str, sig: &Signature| {
-        module
-            .declare_function(name, Linkage::Import, sig)
-            .map_err(|e| e.to_string())
-    };
-    Ok(ArgsHostFns {
-        spec: import("jet_jit_args_spec", &nullary)?,
-        flag: import("jet_jit_args_flag", &ternary)?,
-        flag_short: import("jet_jit_args_flag_short", &quaternary)?,
-        option: import("jet_jit_args_option", &quaternary)?,
-        option_default: import("jet_jit_args_option_default", &quinary)?,
-        option_int: import("jet_jit_args_option_int", &quaternary)?,
-        option_choice: import("jet_jit_args_option_choice", &quinary)?,
-        repeat: import("jet_jit_args_repeat", &quaternary)?,
-        positional: import("jet_jit_args_positional", &ternary)?,
-        subcommand: import("jet_jit_args_subcommand", &quaternary)?,
-        version: import("jet_jit_args_version", &binary)?,
-        help: import("jet_jit_args_help", &unary)?,
-        completion: import("jet_jit_args_completion", &binary)?,
-        parse: import("jet_jit_args_parse", &binary)?,
-        parse_or_exit: import("jet_jit_args_parse_or_exit", &binary)?,
-        parsed_flag: import("jet_jit_parsed_flag", &binary_i8)?,
-        parsed_option: import("jet_jit_parsed_option", &binary)?,
-        parsed_option_int: import("jet_jit_parsed_option_int", &binary)?,
-        parsed_option_float: import("jet_jit_parsed_option_float_opt", &binary)?,
-        parsed_options: import("jet_jit_parsed_options", &binary)?,
-        parsed_positional: import("jet_jit_parsed_positional", &binary)?,
-        parsed_subcommand: import("jet_jit_parsed_subcommand", &unary)?,
-    })
-}
+
+
+

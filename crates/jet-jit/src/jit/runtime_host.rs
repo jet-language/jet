@@ -2653,3 +2653,48 @@ fn declare_host_fns(
         ffi,
     })
 }
+
+#[cfg(test)]
+mod host_fns_tests {
+    use super::new_jit_module;
+    use crate::host_fns_audit;
+
+    /// #1633 criterion #3: every `host_fns!`-declared symbol (across every
+    /// `host_fns!`-migrated module, `@shared` entries included) must have a
+    /// matching `builder.symbol` registration.
+    ///
+    /// `JITModule::new` does NOT prove this: cranelift-jit 0.112.3's
+    /// `declare_function` for `Linkage::Import` does
+    /// `lookup_symbol(name).unwrap_or(null)` and installs a null PLT entry on
+    /// a miss, returning `Ok` regardless. A prior version of this test only
+    /// asserted `new_jit_module()` is `Ok`, which stayed green even with a
+    /// missing registration (e.g. deleting `Reactive`'s
+    /// `event_scope: "jet_jit_event_scope" => jet_jit_event_scope`
+    /// registration while `Watcher`'s `@shared event_scope_cancel` import
+    /// kept expecting it) — the JIT would then call a null pointer at run
+    /// time. `host_fns!` now records every symbol it declares and registers
+    /// into two process-wide sets (`host_fns_audit`); this test compares
+    /// them directly instead of trusting `new_jit_module`'s `Ok`.
+    #[test]
+    fn all_host_symbols_declared_match_all_registered() {
+        let (_module, _host) = new_jit_module()
+            .expect("every declared JIT host FuncId must resolve to a registered symbol");
+        let (registered, declared) = host_fns_audit::take_snapshot();
+        assert!(
+            !declared.is_empty(),
+            "host_fns! declared no symbols — audit hooks did not fire"
+        );
+        let declared_not_registered: Vec<_> = declared.difference(&registered).collect();
+        assert!(
+            declared_not_registered.is_empty(),
+            "declared JIT host symbols with no matching registration (would resolve to a \
+             null PLT entry at run time, not a build error): {declared_not_registered:?}"
+        );
+        let registered_not_declared: Vec<_> = registered.difference(&declared).collect();
+        assert!(
+            registered_not_declared.is_empty(),
+            "registered JIT host symbols that no `host_fns!` table declares/imports \
+             (dead registration, not the single listing #1633 requires): {registered_not_declared:?}"
+        );
+    }
+}
