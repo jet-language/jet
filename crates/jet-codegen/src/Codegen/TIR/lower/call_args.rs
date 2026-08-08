@@ -347,16 +347,39 @@ pub(crate) fn ast_arg_is_named_fn_value(e: &Expr, cx: &Cx, env: &LowerEnv) -> bo
 /// receiver lands on the AST's default branch (the list/else arm).
 pub(crate) fn tir_recv_jet_ty(e: &Expr, env: &LowerEnv) -> Option<Type> {
     fn dispatch_ty(ty: Type) -> Type {
-        // D-PROCESS-SESSION2=D: this internal tag exists only so sema can
-        // distinguish the terminal capability report from an arbitrary
-        // Set<String>. TIR dispatch must see the report's real collection
-        // type; the tag has no runtime representation.
+        // D-TAINT1/D-TAG-SURFACE1: most `Type::Tagged` markers (the terminal
+        // capability report's own D-PROCESS-SESSION2 tag, `#Input`/other user
+        // taint facts, …) are compile-time-only dataflow facts with no runtime
+        // representation — the same erasure `Expr::Tainted` gets in
+        // `expr_in_subset` (TIR/subset/expressions.rs). Builtin-method
+        // dispatch here must see the real underlying type (String/List/Map/…)
+        // or a tagged receiver's `.split()`/`.get()`/etc. misses the curated
+        // `TBuiltinOp` fast path and falls back to a generic call the JIT
+        // declines to native-compile.
+        //
+        // The 4 compiler-owned exceptions mirror sema's OWN rule at
+        // `infer_method_call` (Sema/CheckerInfer/calls/method_calls.rs,
+        // "Most fact tags are type-transparent"): SharedGuard read/edit,
+        // the terminal fact-set, and the crypto nominal tag carry method
+        // POLICY, not just a dataflow fact — `SharedGuard.wait()` dispatches
+        // through the tagged type's own handle-method table, not a generic
+        // `TypeName::method` lookup. Stripping those here misroutes the call
+        // and regresses an already-JIT-covered stem (memory/shared_guard_queue).
         match ty {
             Type::Tagged { marker, inner }
-                if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::TerminalFactSet)) =>
+                if matches!(
+                    marker,
+                    crate::AST::TagMarker::Internal(
+                        crate::AST::InternalTag::SharedGuardRead
+                            | crate::AST::InternalTag::SharedGuardEdit
+                            | crate::AST::InternalTag::TerminalFactSet
+                            | crate::AST::InternalTag::CoreCryptoNominal
+                    )
+                ) =>
             {
-                dispatch_ty(*inner)
+                Type::Tagged { marker, inner }
             }
+            Type::Tagged { inner, .. } => dispatch_ty(*inner),
             other => other,
         }
     }
