@@ -17,9 +17,9 @@
 //! forged or foreign artifact fails the pin before anything about its
 //! claimed effects is trusted (`check_before_map`).
 //!
-//! Deliberately out of scope here (card #1421 criteria 4-6, later slices):
-//! the `outputs: .{ … loadable: true }` manifest spelling (D-LIB-NAME1),
-//! the `Mod.load`/`Mod.load_all` Jet-level call surface, and native export
+//! The package manifest owns the `Library.{ loadable: true }` field used to
+//! request this artifact. Deliberately out of scope here (card #1421 criteria
+//! 5-6, later slices): the `Mod.load` Jet-level call surface and native export
 //! (D-LIB-EXPORT1). This module is the artifact-format and check machinery
 //! those slices wire up — nothing here assumes their user-facing spelling.
 
