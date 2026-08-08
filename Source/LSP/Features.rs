@@ -42,10 +42,10 @@ pub(crate) fn compute_hover(
     offset: usize,
 ) -> Option<String> {
     if compiler_fact_at(tokens, offset) {
-        return Some(
-            "Compiler fact $layout: focused layout metadata with typed optional physical facts."
-                .to_string(),
-        );
+        return Some(format!(
+            "Compiler fact {}: focused layout metadata with typed optional physical facts.",
+            Syntax::COMPILER_FACT_LAYOUT
+        ));
     }
     if let Some(symbol) = db.symbols.at(path, offset) {
         return Some(semantic_hover(symbol, path));
@@ -83,22 +83,20 @@ fn find_ident_at<'a>(tokens: &'a [Token], offset: usize) -> Option<&'a str> {
 }
 
 fn compiler_fact_at(tokens: &[Token], offset: usize) -> bool {
-    tokens.windows(2).any(|pair| {
-        matches!(pair[0].kind, TokKind::Dollar)
-            && matches!(&pair[1].kind, TokKind::Ident(name) if name == "layout")
-            && pair[1].span.start <= offset
-            && offset <= pair[1].span.end
+    tokens.iter().any(|token| {
+        matches!(&token.kind, TokKind::Ident(name) if name == Syntax::COMPILER_FACT_LAYOUT)
+            && token.span.start <= offset
+            && offset <= token.span.end
     })
 }
 
 fn compiler_fact_receiver(tokens: &[Token], src: &str, offset: usize) -> Option<String> {
-    let pair = tokens.windows(2).find(|pair| {
-        matches!(pair[0].kind, TokKind::Dollar)
-            && matches!(&pair[1].kind, TokKind::Ident(name) if name == "layout")
-            && pair[1].span.start <= offset
-            && offset <= pair[1].span.end
+    let fact = tokens.iter().find(|token| {
+        matches!(&token.kind, TokKind::Ident(name) if name == Syntax::COMPILER_FACT_LAYOUT)
+            && token.span.start <= offset
+            && offset <= token.span.end
     })?;
-    let before = &src[..pair[0].span.start];
+    let before = &src[..fact.span.start];
     let dot = before.len().checked_sub(1)?;
     if before.as_bytes().get(dot) != Some(&b'.') {
         return None;
@@ -314,7 +312,10 @@ pub(crate) fn compute_rename(
         ));
     }
     if compiler_fact_at(tokens, offset) {
-        return Err("compiler-owned $layout is fixed; rename the reflected type or field instead".to_string());
+        return Err(format!(
+            "compiler-owned {} is fixed; rename the reflected type or field instead",
+            Syntax::COMPILER_FACT_LAYOUT
+        ));
     }
     let name = match find_ident_at(tokens, offset) {
         Some(n) => n,
