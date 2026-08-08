@@ -198,23 +198,35 @@ pub(super) fn substitute_expr(
             type_name,
             type_args,
             fields,
+            span,
             ..
         } => {
-            // A type param may instantiate to a builtin (T=Int), not only a
-            // named type — rewrite the literal head to the substituted type's
-            // canonical name either way (card #1787).
-            if let Some(resolved) = types.get(type_name) {
-                *type_name = match resolved {
-                    Type::Named(name) => name.clone(),
-                    other => other.name(),
-                };
-            }
-            for ty in type_args {
+            for ty in type_args.iter_mut() {
                 *ty = crate::Generics::substitute_type(ty, types);
             }
             fields
                 .iter_mut()
                 .for_each(|(_, _, value)| substitute_expr(value, types, values));
+            match types.get(type_name) {
+                Some(Type::Named(resolved)) => *type_name = resolved.clone(),
+                // A type param may instantiate to a builtin (T=Int). The
+                // hand-written Int.{ … } parses as a TypedLit, so the
+                // substituted node must become one too — a StructLit with a
+                // builtin head is unnameable to sema (card #1797).
+                Some(resolved) => {
+                    let body = if fields.len() == 1 {
+                        crate::AST::TypedLitBody::Value(Box::new(fields.remove(0).2))
+                    } else {
+                        crate::AST::TypedLitBody::Fields(std::mem::take(fields))
+                    };
+                    *expr = Expr::TypedLit {
+                        head: Some(resolved.clone()),
+                        body,
+                        span: *span,
+                    };
+                }
+                None => {}
+            }
         }
         Expr::TypedLit { head, body, .. } => {
             if let Some(h) = head {
