@@ -2433,7 +2433,10 @@ fn top_level_entries(value: &str) -> Vec<String> {
     let mut depth = 0i32;
     let mut quoted = false;
     let mut escaped = false;
-    for ch in value.chars() {
+    let chars = value.chars().collect::<Vec<_>>();
+    let mut index = 0;
+    while index < chars.len() {
+        let ch = chars[index];
         if quoted {
             current.push(ch);
             if escaped {
@@ -2443,6 +2446,7 @@ fn top_level_entries(value: &str) -> Vec<String> {
             } else if ch == '"' {
                 quoted = false;
             }
+            index += 1;
             continue;
         }
         match ch {
@@ -2463,13 +2467,63 @@ fn top_level_entries(value: &str) -> Vec<String> {
                     entries.push(std::mem::take(&mut current));
                 }
             }
+            ch if depth == 0
+                && ch.is_whitespace()
+                && implicit_field_start(&chars, index, &current) =>
+            {
+                if !current.trim().is_empty() {
+                    entries.push(std::mem::take(&mut current));
+                }
+                index += 1;
+                while index < chars.len() && chars[index].is_whitespace() {
+                    index += 1;
+                }
+                continue;
+            }
             _ => current.push(ch),
         }
+        index += 1;
     }
     if !current.trim().is_empty() {
         entries.push(current);
     }
     entries
+}
+
+/// Jet record fields may be adjacent without a comma. Recognize the same
+/// boundary in the typed package/config reader after a complete value.
+fn implicit_field_start(chars: &[char], index: usize, current: &str) -> bool {
+    if split_field(current).is_none() {
+        return false;
+    }
+    let Some(last) = current.trim_end().chars().next_back() else {
+        return false;
+    };
+    if !(last.is_ascii_alphanumeric() || matches!(last, '}' | ']' | ')' | '"')) {
+        return false;
+    }
+
+    let mut next = index;
+    while chars.get(next).is_some_and(|ch| ch.is_whitespace()) {
+        next += 1;
+    }
+    if !chars
+        .get(next)
+        .is_some_and(|ch| ch.is_ascii_alphabetic() || *ch == '_')
+    {
+        return false;
+    }
+    next += 1;
+    while chars
+        .get(next)
+        .is_some_and(|ch| ch.is_ascii_alphanumeric() || *ch == '_')
+    {
+        next += 1;
+    }
+    while chars.get(next).is_some_and(|ch| ch.is_whitespace()) {
+        next += 1;
+    }
+    matches!(chars.get(next), Some(&':'))
 }
 
 fn is_identifier(value: &str) -> bool {
