@@ -1869,9 +1869,9 @@ pub enum TFuncKind {
     },
 }
 
-/// c109 Phase 22: the method-call-collection iteration form on a `loop x; <coll>`,
-/// resolved at lowering from `emit_for_in`'s `Expr::MethodCall` branches
-/// (Source/Codegen/Statement.rs). Each carries the receiver's emitted Rust string;
+/// c109 Phase 22: a special source iteration form on a `loop x, <coll>`,
+/// resolved at lowering from the collection's type or method-call shape.
+/// Each carries the receiver's emitted Rust string;
 /// `file`/the panic line are program/source facts. The plain `.iter().cloned()` form
 /// (incl. a non-special method-call collection like `.split(…)`, which `emit_for_in`
 /// routes to its `else` default) is represented by `ForIn.method_kind == None`.
@@ -1893,6 +1893,8 @@ pub enum TForInMethod {
     /// `jet_process_stream_next_line(&recv)` via a `let Some(x) = … else { break }`,
     /// so (unlike `LinesFile`/`LinesStdin`) no extra wrapper block is needed.
     LinesProcessStream,
+    /// D-ENCSTREAM-SURFACE1=A: bounded synchronous codec-reader pull source.
+    EncodingReader { reader_type: String },
     /// D-ITER-HOOK: `loop x; mytype` when `mytype` implements `Iterable`.
     Iterable {
         coll_type: String,
@@ -2518,8 +2520,8 @@ pub enum TStmt {
         label: Option<String>,
         var: String,
         var2: Option<String>,
-        /// The expression iterated over: the method receiver for a `method_kind`
-        /// form, otherwise the whole collection.
+        /// The expression iterated over: the method receiver for a method-call
+        /// form, otherwise the whole collection (including codec readers).
         source: TExpr,
         /// The whole collection expression, whose type carries the element type.
         collection: TExpr,

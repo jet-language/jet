@@ -34,6 +34,16 @@ fn division_fix_hint(want: &Type, got: &Type, value: &Expr) -> String {
     }
     type_fix_hint(want, got)
 }
+
+fn encoding_reader_item_type(name: &str) -> Option<Type> {
+    match name {
+        "JSONReader" | "CBORReader" => Some(Type::Named("DataEvent".to_string())),
+        "JSONLReader" | "XMLReader" => Some(Type::Named("DataTree".to_string())),
+        "CSVReader" => Some(Type::List(Box::new(Type::String))),
+        _ => None,
+    }
+}
+
 use std::collections::HashSet;
 use super::helpers::layout_constraint_fingerprint;
 impl<'a> Checker<'a> {
@@ -1972,6 +1982,22 @@ impl<'a> Checker<'a> {
                                             err: Box::new(Type::Named("HTTPError".to_string())),
                                         },
                                     );
+                                }
+                                Some(Type::Named(n)) if encoding_reader_item_type(n).is_some() => {
+                                    if var2.is_some() {
+                                        self.diags.push(Diagnostic::error(
+                                            "E0109",
+                                            format!(
+                                                "`for x in` on `{}` needs one loop name, not two",
+                                                n
+                                            ),
+                                            "a codec reader yields one item per step".to_string(),
+                                            format!("write `for item in {n}`").to_string(),
+                                            Some(collection.span()),
+                                        ));
+                                    } else if let Some(item_ty) = encoding_reader_item_type(n) {
+                                        self.declare_loop_var(var.clone(), *var_span, &item_ty);
+                                    }
                                 }
                                 Some(Type::Named(n))
                                     if self.trait_reg.iterable_items.contains_key(n) =>

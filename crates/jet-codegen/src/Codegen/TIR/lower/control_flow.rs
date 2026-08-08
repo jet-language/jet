@@ -40,6 +40,26 @@ use crate::Codegen::{variant_binding_types, variant_binding_types_for_enum};
 use crate::Diagnostics::Span;
 use crate::Syntax;
 
+pub(crate) fn encoding_reader_item_type(name: &str) -> Option<Type> {
+    match name {
+        "JSONReader" | "CBORReader" => Some(Type::Named("DataEvent".to_string())),
+        "JSONLReader" | "XMLReader" => Some(Type::Named("DataTree".to_string())),
+        "CSVReader" => Some(Type::List(Box::new(Type::String))),
+        _ => None,
+    }
+}
+
+fn encoding_reader_method(ty: &Type) -> Option<TForInMethod> {
+    match ty {
+        Type::Named(name) if encoding_reader_item_type(name).is_some() => {
+            Some(TForInMethod::EncodingReader {
+                reader_type: name.clone(),
+            })
+        }
+        _ => None,
+    }
+}
+
 pub(super) fn tracked_float_origin(b: &crate::AST::Binding, ty: &Type, cx: &Cx) -> Option<String> {
     if !b.track() || !matches!(ty, Type::Float) {
         return None;
@@ -136,16 +156,22 @@ pub(crate) fn lower_forin_collection(
                 // A `.lines()` on neither (unreachable in valid Jet — sema E2502
                 // restricts `.lines()` to a FileReader/StdinHandle loop position) would
                 // fall to the AST `else` default; reproduce that for totality.
-                (lower_expr(collection, cx, env), None)
+                let coll = lower_expr(collection, cx, env);
+                let method = encoding_reader_method(&coll.ty);
+                (coll, method)
             }
             _ => {
                 // The `.iter().cloned()` default: the WHOLE method call is the
                 // collection value (e.g. a `.split(…)` builtin returning a `[String]`).
-                (lower_expr(collection, cx, env), None)
+                let coll = lower_expr(collection, cx, env);
+                let method = encoding_reader_method(&coll.ty);
+                (coll, method)
             }
         }
     } else {
-        (lower_expr(collection, cx, env), None)
+        let coll = lower_expr(collection, cx, env);
+        let method = encoding_reader_method(&coll.ty);
+        (coll, method)
     }
 }
 
