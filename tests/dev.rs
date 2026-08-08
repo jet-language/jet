@@ -2585,7 +2585,7 @@ fn dev_packed_enum_print_is_safe_across_run_processes() {
 /// site — no guarantees, but it tried.
 ///
 /// c139 JIT-parity fix (2026-07-03): the dev interpreter's own comptime-leak
-/// errors (E0956/E0951) are now rewrapped as E2201 for a consistent voice
+/// errors (E0956/E3401) are now rewrapped as E2201 for a consistent voice
 /// (`Source/Interpreter.rs::dev_boundary_from_comptime`), so the diagnostic
 /// CODE alone no longer distinguishes "blocked by the pre-scan" from "tried
 /// and failed later" — both surface as E2201. Compare the failure SITE

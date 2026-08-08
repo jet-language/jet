@@ -325,7 +325,10 @@ pub fn scheduled_tasks(bundle: &ProgramBundle) -> Vec<(String, crate::AST::Every
 
 /// c139 JIT-parity fix (2026-07-03): the dev interpreter IS the comptime
 /// tree-walker (see module doc), so a construct it can't run leaks the
-/// comptime evaluator's own E0956 ("unsupported")/E0951 ("impurity") /
+/// comptime evaluator's own E0956 ("unsupported")/E3401 ("impurity",
+/// D-META-EFFECT1 c3 — the retired E0951 redirects here; a genuine run-time
+/// E3401 is a sema-time diagnostic that fails the build before this ever
+/// runs, so any E3401 seen here is always the shared evaluator's own gate) /
 /// E3410/E3412 (Tier-2 / live-net comptime) codes — correct for a real
 /// `$ { }` block, but wrong voice here: the "compute this at runtime"
 /// / "only fetch at comptime" fix advice is nonsense when the user is already
@@ -338,7 +341,7 @@ fn dev_boundary_from_comptime(d: Diagnostic) -> Diagnostic {
             .strip_suffix(" can't run at compile time yet")
             .unwrap_or(&d.what)
             .replace(" at compile time", ""),
-        "E0951" => {
+        "E3401" => {
             "code that touches the outside world (network, filesystem, or environment)".to_string()
         }
         // Live sockets / Tier-2 ambient I/O: same rewriter as E0956 — keep the

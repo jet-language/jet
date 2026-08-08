@@ -828,7 +828,7 @@ impl<'a> Interp<'a> {
         // Whole-program dev mode (E2-M4): the two IO builtins write to the
         // buffered sink, producing bytes identical to the compiled program
         // (`jet_show()` + `\n`). In pure comptime mode the sink is `None` and
-        // these are unreachable (the purity check rejects them first, E0951).
+        // these are unreachable (the purity check rejects them first, E3401).
         if name == "print" || name == "eprint" {
             if self.sink.is_some() {
                 let text = match args.first() {
