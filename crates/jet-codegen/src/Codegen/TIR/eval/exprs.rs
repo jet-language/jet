@@ -2751,6 +2751,31 @@ impl<'a> EvalCtx<'a> {
                 // single-handle counterpart applied in order.
                 {
                     use crate::Codegen::TIR::THandleOp as Op;
+                    match op {
+                        Op::ChannelReceive => {
+                            let index = handle_index(&r, "Receiver")
+                                .ok_or_else(|| unsupported("channel receiver", self.span()))?;
+                            return self.receive_eval_channel(index);
+                        }
+                        Op::SenderSend => {
+                            let index = handle_index(&r, "Sender")
+                                .ok_or_else(|| unsupported("channel sender", self.span()))?;
+                            let value = argv
+                                .first()
+                                .cloned()
+                                .ok_or_else(|| unsupported("channel send value", self.span()))?;
+                            self.send_eval_channel(index, value)?;
+                            return Ok(CtValue::Unit);
+                        }
+                        Op::ChannelClose => {
+                            let index = handle_index(&r, "Sender")
+                                .or_else(|| handle_index(&r, "Receiver"))
+                                .ok_or_else(|| unsupported("channel", self.span()))?;
+                            self.close_eval_channel(index)?;
+                            return Ok(CtValue::Unit);
+                        }
+                        _ => {}
+                    }
                     let each = |this: &mut Self, value: &CtValue| -> Result<(), Diagnostic> {
                         match op {
                             Op::TaskCancel | Op::TaskCancelAll => this.cancel_task_value(value),
@@ -2799,12 +2824,6 @@ impl<'a> EvalCtx<'a> {
                             } else {
                                 String::new()
                             }));
-                        }
-                        Op::ChannelClose => {
-                            // Explicit close is a control-plane signal; evaluator
-                            // channel hosts treat drop as close, so Unit is enough
-                            // for I9 observation of a successful call.
-                            return Ok(CtValue::Unit);
                         }
                         Op::TaskTraceAll => {
                             let CtValue::List(tasks) = &r else {
@@ -2927,6 +2946,18 @@ impl<'a> EvalCtx<'a> {
                     }
                     let key = tir_place_address_key(&args[0]);
                     return Ok(CtValue::Int(stable_place_address(&key)));
+                }
+                if module == "core.tasks" && method == "channel" {
+                    if !self.runtime_execution {
+                        return Err(unsupported("`tasks.channel` at compile time", *source_span));
+                    }
+                    let capacity = args
+                        .first()
+                        .map(|arg| self.eval_expr(arg, scope))
+                        .transpose()?
+                        .map(|value| as_int(&value, self.span()))
+                        .transpose()?;
+                    return Ok(self.new_eval_channel(capacity));
                 }
                 if module == "core.tasks" && method == "yield_now" && args.is_empty() {
                     std::thread::yield_now();
@@ -5487,11 +5518,37 @@ impl<'a> EvalCtx<'a> {
                 };
                 self.task_select(&tasks, crate::task_group::JetTaskSelectMode::Any)
             }
-            TExprKind::SelectStart => Err(unsupported("expr `SelectStart`", self.span())),
-            TExprKind::SelectRecv { .. } => Err(unsupported("expr `SelectRecv`", self.span())),
-            TExprKind::SelectAfter { .. } => Err(unsupported("expr `SelectAfter`", self.span())),
-            TExprKind::SelectRead { .. } => Err(unsupported("expr `SelectRead`", self.span())),
-            TExprKind::SelectWait { .. } => Err(unsupported("expr `SelectWait`", self.span())),
+            TExprKind::SelectStart => Ok(self.new_eval_select()),
+            TExprKind::SelectRecv { builder, channel } => {
+                let builder = self.eval_expr(builder, scope)?;
+                let channel = self.eval_expr(channel, scope)?;
+                let receiver = handle_index(&channel, "Receiver")
+                    .ok_or_else(|| unsupported("select receiver", self.span()))?;
+                self.eval_select_recv(builder, receiver)
+            }
+            TExprKind::SelectAfter {
+                builder,
+                millis,
+                value,
+            } => {
+                let builder = self.eval_expr(builder, scope)?;
+                let millis = as_int(&self.eval_expr(millis, scope)?, self.span())?;
+                let value = value
+                    .as_ref()
+                    .map(|value| self.eval_expr(value, scope))
+                    .transpose()?
+                    .unwrap_or(CtValue::Unit);
+                self.eval_select_after(builder, millis, value)
+            }
+            TExprKind::SelectRead { builder, stream } => {
+                let builder = self.eval_expr(builder, scope)?;
+                let _ = self.eval_expr(stream, scope)?;
+                Ok(builder)
+            }
+            TExprKind::SelectWait { builder } => {
+                let builder = self.eval_expr(builder, scope)?;
+                self.eval_select_wait(builder)
+            }
             TExprKind::FnValue { kind } => match kind {
                 TFnValueKind::NamedFn {
                     name: Some(name), ..

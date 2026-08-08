@@ -91,23 +91,21 @@ fn jet_deadline_exceeded(wait_kind: &str) -> ! {
 // the same scheduler entry points through generated code instead.
 // ---------------------------------------------------------------------------
 
-/// Select over int channels plus typed timer arms `(ms, value)`.
-/// A timer win returns `value` (D-TASKRUNTIME1 / `g.select().after(ms, v)`),
-/// where the untyped `jet_scheduler_select_int_channels` has no value to give.
-pub fn jet_scheduler_select_int_channels_timed(
-    channels: &[JetSchedulerChannel<i64>],
-    timers: Vec<(u64, i64)>,
-) -> i64 {
-    let inners: Vec<_> = channels.iter().map(|c| c.select_inner()).collect();
-    let after_ms: Vec<u64> = timers.iter().map(|(ms, _)| *ms).collect();
-    match jet_scheduler_select(inners, after_ms) {
-        JetSelectOutcome::Recv { value, .. } => value,
-        JetSelectOutcome::After { arm } => timers
-            .get(arm)
-            .map(|(_, v)| *v)
-            .unwrap_or_else(|| jet_scheduler_fatal("select timer arm has no receive value")),
-        JetSelectOutcome::Closed => jet_scheduler_fatal("select closed"),
-    }
+/// JIT marshalling for the one generic Prelude select door. Cranelift values
+/// happen to use `i64` slots, including opaque String handles; that ABI choice
+/// does not narrow the `Receiver<T>` language contract.
+pub fn jet_scheduler_select_int_channels_timed<T: Send>(
+    channels: &[JetSchedulerChannel<T>],
+    timers: Vec<(u64, T)>,
+) -> T {
+    let recvs: Vec<_> = channels.iter().map(|c| c.select_inner()).collect();
+    jet_scheduler_select_values(
+        recvs,
+        timers
+            .into_iter()
+            .map(|(ms, value)| (ms, Some(value)))
+            .collect(),
+    )
 }
 
 #[cfg(test)]
@@ -285,6 +283,15 @@ mod scheduler_host_tests {
         assert_eq!(
             jet_scheduler_select_int_channels_timed(&[channel], vec![(0, 99)]),
             99
+        );
+    }
+
+    #[test]
+    fn timed_select_preserves_a_non_int_payload() {
+        let channel = JetSchedulerChannel::<String>::new();
+        assert_eq!(
+            jet_scheduler_select_int_channels_timed(&[channel], vec![(0, "generic".into())]),
+            "generic"
         );
     }
 

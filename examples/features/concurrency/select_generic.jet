@@ -1,0 +1,11 @@
+// D-SELECT-GENERIC1=A: select carries a non-Int payload through one generic door.
+use core.tasks as tasks
+
+fn run() {
+    taskgroup g {
+        (sender, receiver) :: tasks.channel<String>()
+        sender.send("generic")
+        value :: g.select().recv(receiver).wait()
+        print(value)
+    }
+}
