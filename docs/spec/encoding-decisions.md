@@ -33,8 +33,7 @@ doc :: xml.parse(input)?
 item :: xml.decode<Item>(input)?
 
 reader :: json.reader(^file)?
-loop {
-    ev :: reader.next()? ?? break
+loop ev, reader {
     handle(ev)
 }
 writer :: json.writer(^out, canonical: true)?
@@ -59,7 +58,7 @@ A applicability: JSONReader.next => DataEvent? ? EncodingError and JSONWriter.wr
 
 XMLReader/XMLWriter use D-ENCXML1's exact event/node algebra, item type, lexical-preservation law, namespace-expanded names, parse/render options, and field-by-field XMLError projection below. Safe parse options never open external identifiers, expand only an explicit in-memory map, and charge shared expansion budgets. Chunk boundaries cannot change events or errors. Collecting events reconstructs the structurally equal whole value tree; lexical evidence belongs only to D-ENCXML1 fields.
 
-Compatibility/evolution: all stream names are new; json.events remains unchanged as specified above. Stream types are non-Codable state handles and cannot be copied. EncodingFormat is exhaustive in v1, so adding a format variant is source-breaking for exhaustive matches and requires an edition-migration decision plus generated rewrite; adding format-specific handles alone does not change the enum. DataEvent changes only if DataTree changes through an owner decision. Beginner pass: whole-value calls remain smallest; JSONL/CSV use an explicit four-line fallible pull loop. Expert pass: ownership, exact event types, byte offsets, namespace/entity law, limits, flush/finish, deterministic output, and backpressure are explicit. Hybrid pass: whole and stream paths use one parser, one DataTree, one error law, and one event algebra.
+Compatibility/evolution: all stream names are new; json.events remains unchanged as specified above. Stream types are non-Codable state handles and cannot be copied. EncodingFormat is exhaustive in v1, so adding a format variant is source-breaking for exhaustive matches and requires an edition-migration decision plus generated rewrite; adding format-specific handles alone does not change the enum. DataEvent changes only if DataTree changes through an owner decision. Beginner pass: whole-value calls remain smallest; every stream reader uses the ordinary bounded reader loop. Expert pass: ownership, exact event types, byte offsets, namespace/entity law, limits, flush/finish, deterministic output, and backpressure are explicit. Hybrid pass: whole and stream paths use one parser, one DataTree, one error law, and one event algebra.
 
 ### Selected option: Codec-native pull handles
 
@@ -73,9 +72,7 @@ use core.files as files
 fn run() => () ? {
     input := files.open("catalog.json")?
     reader := json.reader(^input, limits: encoding.EncodingLimits.safe())?
-    loop {
-        next :: reader.next()?
-        if next == None { break }
+    loop next, reader {
         if next == Val(.Key(name)) and name == "item" { print("item") }
     }
 }
