@@ -1,6 +1,7 @@
 # Type system v2 — carriers and knowledge
 
-Status: proposal, 2026-08-06. Owner decisions: eight ballots on card #1497.
+Status: settled law, 2026-08-06. All eleven D-TYPE2 decisions are ratified with
+outcome A. Implementation cards: #1546–#1556.
 Scope: types, numbers, units, refinements, measures, fact planes, reflection — the whole compile-time
 knowledge surface. Sources: six research passes over spec, sema, prelude, Tower, and the 2026-07/08 audits.
 
@@ -36,7 +37,7 @@ building them twice.
   audit trail for experts.
 - Time becomes one system instead of three: `500ms` means the same thing in user code,
   `.timeout(...)`, and `#Every(...)`.
-- Matrix shapes (card #1437), uncertainty propagation (deferred D-UNCERTAIN1), and full
+- Matrix shapes (card #1437), uncertainty propagation (D-TYPE2-UNCERT1), and full
   reflection stop being new features — they are new planes on the same substrate.
 
 **Precise by default.** The model's own conclusion, taken all the way: the default numeric world
@@ -45,22 +46,23 @@ science, analytics, and modeling are correct out of the box. Approximation becom
 *restriction*: `Float`, `F32`, `U8` are expert opt-ins that read as restrictions, chosen for
 memory, speed, or hardware — never suffered by default. `0.1 + 0.2 == 0.3` is true in Jet.
 
-**What the ballots ask.** Eleven direction-level choices on card #1497: adopt the foundation
-(FOUND1); adopt the number grid and retire `BigInt` (NUM1); one refinement spelling (REFINE1);
-time joins the unit plane (TIME1); one substrate for compile-time numbers (MEASURE1); ratify the
-conservation law (EXACT1); opt-in uncertainty propagation (UNCERT1); extend marker law zero to
-every plane (PLANE1); make exact the default numeric world (DEFAULT1); inline refinements in
-type position (SPELL1); imaginary literals via the unit-literal path (IMAG1). Each ballot stands
-alone — any subset can be adopted, though FOUND1 is the foundation the others build on.
+**What is now law.** The owner ratified all eleven D-TYPE2 decisions on 2026-08-06 with outcome
+A: the carrier-plus-knowledge foundation (FOUND1); the number grid and `BigInt` retirement
+(NUM1); one refinement spelling (REFINE1); Time quantities (TIME1); one measure substrate
+(MEASURE1); the conservation law (EXACT1); opt-in uncertainty propagation (UNCERT1); the plane
+registry law (PLANE1); exact numeric defaults (DEFAULT1); inline refinements (SPELL1); and
+imaginary literals on the unit-literal path (IMAG1). This document records settled law. Cards
+#1546–#1556 implement it.
 
 **See it, not just read it.** The "What it looks like" section near the end is three complete
 Jet programs — beginner analytics, a measured simulation, and expert systems code — showing the
 whole model in working syntax.
 
-**What does not change.** All ratified surface spellings stay unless a ballot says otherwise.
+**What does not change.** All ratified surface spellings stay except where this settled slate
+changes them.
 The walls stay: no top type, no HKT, no macros, no dependent types, comptime never creates
 types. Zero-cost stays. The sections below give the evidence, the model, and worked examples
-for each ballot.
+for the settled law.
 
 ## Glossary
 
@@ -162,9 +164,9 @@ the fixed-list index proof — five mechanisms today, one in v2. Surface unchang
 **2. The operator slate was one decision made nine times.** Every rule ratified on 2026-08-05 is
 the tower answering "which world does the exact answer live in, and what does the approximation
 policy say":
-- `7 / 2` — the exact answer leaves ℤ and lives in ℚ; the beginner default approximates ℚ to `Float`,
-  so `3.5`. `Fraction` users keep exactness by asking for it.
-- `2 ^ -3` — a written negative exponent leaves ℤ; same landing, `Float` (D-EXPSEM1, D-EXPNEG1).
+- `7 / 2` — the exact answer leaves ℤ and lives in ℚ; the exact default prints `3.5`.
+  Naming `Fraction` remains available when that carrier is needed.
+- `2 ^ -3` — a written negative exponent leaves ℤ and lands in exact ℚ (D-EXPSEM1, D-EXPNEG1).
 - `factorial(25)`, `2 ^ 200` — never leave ℤ, so they are exact, because `Int` *is* ℤ (D-INTBIG1).
 - `sqrt(2.0)` — leaves ℚ for ℝ. `sqrt(-1.0)` leaves ℝ; it is a domain fault unless you asked for `Complex`.
 - `<=>` — `Ordering` is the knowledge "how two values compare", reified as a value (D-CMP3WAY1).
@@ -199,7 +201,7 @@ approximation an expert restriction you opt into, exactly like `U8`.**
   expert escape is one word at the declaration site. Hot loops that want raw floats say `Float`
   and get exactly today's machine arithmetic.
 
-This amends three ratified rules, and the ballot names all three explicitly: D-INTDIV1's
+This settled law amends three ratified rules: D-INTDIV1's
 `/`-lands-in-`Float` (the landing world becomes exact ℚ), the D-EXPSEM1/D-EXPNEG1 rule that a
 written negative exponent lands in `Float` (same amendment, same reason), and D-NUMTYPE1's
 "Fraction is opt-in by naming it" clause (an exact ratio can now arrive from plain division).
@@ -223,7 +225,7 @@ This is the philosophy's "footguns are opt-in" made precise for types: the compi
 knowledge for you (magic) and refuses to drop it behind your back (safety). It also exposes today's
 one true inconsistency: float-precision loss and unit-rounding loss are the same event with two
 unrelated vocabularies (`approx(v)` vs `from_*_rounded(...)`). V2 keeps destination-owned
-conversion names and ratifies the law; whether the two spellings merge is a ballot below.
+conversion names. The two spellings stay because each names its operation well.
 
 ## The planes
 
@@ -281,8 +283,9 @@ Exact / approximate(precision) / measured(σ). Today this knowledge exists in th
 cannot see each other: the widening exactness check, unit scale provenance
 (`Rational | SymbolicPi | Conventional | Measured`), and `core.science.measurement`. As one plane:
 an exact `Int` times a measured constant is measured; the compiler can *tell you* your simulation's
-uncertainty instead of you deriving it by hand. This revives deferred D-UNCERTAIN1 as a plane
-instance, not a feature — opt-in, invisible until a measured value enters.
+uncertainty instead of you deriving it by hand. D-TYPE2-UNCERT1 records this as a plane instance,
+not a separate feature. It is opt-in and invisible until a measured value enters. Propagation uses
+first-order linear approximation with uncorrelated inputs. Correlated errors are out of scope.
 
 ### Obligation plane — algebra: subsumption on function types
 `effect_bound`, `param_contract`, `return_view_provenance`, plus ownership conventions. V2 states
@@ -307,7 +310,7 @@ contracted types that are unequal to each other — `types.rs:305-391`.)
 
 ## What does not change
 
-- All ratified surface spellings stay unless a ballot below says otherwise. `U8`, `distinct`,
+- All ratified surface spellings stay except where this settled slate changes them. `U8`, `distinct`,
   `#UnitFamily`, `tag`, `state`, `effect`, `T?`, `T ? E`, unions, `Type.{ }` — untouched.
 - The walls stay: no top type (D-ANY-JAI1), no HKT (D-LIB2), no macros, no dependent types —
   measures are declared, never computed. Comptime never creates types (S26). Facts classify and
@@ -317,9 +320,19 @@ contracted types that are unequal to each other — `types.rs:305-391`.)
 - The marker registry, law zero, and the mid-flight #1455–#1461 rebuild are the pattern v2
   extends, not competes with.
 
+## Retired forms
+
+The settled slate removes three duplicate forms.
+
+- `BigInt` retires into arbitrary-precision `Int`. Diagnostics E0130–E0133 retire with the name.
+- `#Invariant("...")` retires. Use `distinct Int(lo..hi)` for a named range, or
+  `Int(lo..hi)` inline.
+- The two hidden duration suffix tables retire. `Duration` and `Instant` use the canonical `Time`
+  quantity family, and every `500ms` literal resolves through the unit plane.
+
 ## The surface: spellings from first principles
 
-Three spelling principles fall out of the model, and each yields concrete surface proposals:
+Three spelling principles fall out of the model, and each yields settled surface rules:
 
 **1. The default spelling is the mathematical name; restrictions read as restrictions.**
 `Int` means ℤ. The exact ℚ world needs no name in daily code — it is just what numbers do.
@@ -333,7 +346,7 @@ requires minting a named type first. The general form lets the type position car
 directly:
 
 ```jet
-fn set_brightness(level: Int(0..100)) { ... }     // proposed: inline refinement
+fn set_brightness(level: Int(0..100)) { ... }     // settled inline refinement
 volume: Int(0..11) = dial.read()?                  // fallible where unproven
 UserId :: distinct Int                             // naming is still there when identity matters
 ```
@@ -342,25 +355,26 @@ UserId :: distinct Int                             // naming is still there when
 model. The same inline position accepts unit and exactness knowledge later without new grammar.
 
 **3. Literals reuse one literal machinery.** The lexer already turns `500ms` and `12.5usd` into
-unit literals. Two more number worlds fit the identical path, with no new grammar:
+unit literals. Imaginary literals use the same suffix path, with no new grammar. Measured values
+use the canonical `measurement(...)` call:
 
 ```jet
-z :: 3 + 4i                       // proposed: imaginary literal — `i` rides the unit-suffix path
-g :: 9.80665 ± 0.00001            // proposed: measured literal (plain form: measurement(...))
+z :: 3 + 4i                       // settled: `i` rides the unit-suffix path
+g :: measurement(9.80665, uncertainty: 0.00001) // canonical measured value
 ```
 
 `4i` is a unit literal whose family is ℂ's imaginary axis — the "same underlying thing" made
-literal. `±` makes a measured value cost one keystroke more than a guess, which is the whole
-adoption battle for honest numbers.
+literal. The `±` literal is not ratified; `measurement(value, uncertainty: ...)` is the canonical
+form.
 
-Worth future ballots, listed but not minted now: compound unit suffixes (`9.8m/s^2` instead of
-declaring a derived family member), and exponent-aware unit printing. Both are surface sugar
-over machinery this proposal already builds.
+Future surface work, outside this slate, includes compound unit suffixes (`9.8m/s^2` instead of
+declaring a derived family member) and exponent-aware unit printing. Both are surface sugar over
+machinery this proposal already builds.
 
 ## What it looks like
 
-Three complete programs. Everything not marked *proposed* is ratified syntax; the semantic
-differences from today are the ballots of this slate in action.
+Three complete programs. They use the settled D-TYPE2 law. The matrix literal remains proposed
+under card #1437; the measured example uses the canonical call.
 
 ### P1 — a beginner's first analytics script (nothing opted in, everything exact)
 
@@ -389,7 +403,7 @@ fn main() {
 ```jet
 fn main() {
     h :: 100meter                             // a Length quantity
-    g :: 9.80665 ± 0.00001                    // proposed ± literal: a measured value
+    g :: measurement(9.80665, uncertainty: 0.00001) // canonical measured value
 
     t :: sqrt(2 * h.raw() / g)                // sqrt leaves ℚ — result is approximate,
     print("fall time: {t}")                   // and carries the propagated uncertainty:
@@ -428,7 +442,7 @@ fn checksum(bytes: [U8]) => U8 {
 #Kernel fn blend(a: F32x4, b: F32x4) => F32x4 =
     a * 0.5 + b * 0.5                         // approximate and fast — on purpose, and it shows
 
-fn set_brightness(level: Int(0..100)) { ... }  // proposed inline refinement
+fn set_brightness(level: Int(0..100)) { ... }  // settled inline refinement
 fn on_dial(raw: Int) {
     level :: Int(0..100).from_int(raw) ?? return   // unproven → fallible, same as U8 today
     set_brightness(level)
@@ -443,23 +457,24 @@ The through-line: the beginner program contains zero annotations and zero surpri
 program contains only visible, chosen restrictions; and every line in between is the
 conservation law doing its job.
 
-## Decisions for the owner
+## Settled law
 
-Direction-level; each gets a full ballot on the card. Worked examples live in the sections above.
+The owner ratified all eleven decisions on 2026-08-06 with outcome A. The final law is below.
+Implementation cards carry the build work. No D-TYPE2 choice remains open in this proposal.
 
-| ID | Question | Recommendation |
-|---|---|---|
-| D-TYPE2-FOUND1 | Adopt the carrier+knowledge foundation, the plane registry law, and the one identity law for `Type` equality | adopt |
-| D-TYPE2-NUM1 | Adopt the two-axis number tower; sized widths become interval+layout facts (surface unchanged); retire `BigInt` into `Int` | adopt |
-| D-TYPE2-REFINE1 | One refinement spelling: keep `distinct Int(lo..hi)`, retire `#Invariant("...")` | retire the string form |
-| D-TYPE2-TIME1 | `Duration`/`Instant` become the `Time` quantity pair on the unit plane; delete both hardcoded suffix tables | adopt |
-| D-TYPE2-MEASURE1 | One measure substrate for lengths, shapes, lanes, and dimension exponents | adopt |
-| D-TYPE2-EXACT1 | Ratify the conservation law; keep `approx` and `from_*_rounded` as its two spelled demotions, or merge them into one word | ratify law, keep both spellings |
-| D-TYPE2-UNCERT1 | Uncertainty as an exactness-plane grade (revives D-UNCERTAIN1), opt-in | adopt as opt-in |
-| D-TYPE2-PLANE1 | All planes nameable + reflectable + prelude-source by law (extends the D-VERDICT-1455-1 registration law); `TypeInfo` gains `dimensions` and typed marker args at every level | adopt |
-| D-TYPE2-DEFAULT1 | The default numeric world is exact: decimal literals are `Decimal`, `/` lands in exact ℚ (amends D-INTDIV1's landing type), approximation is opt-in | adopt |
-| D-TYPE2-SPELL1 | Inline refinements in type position: `Int(0..100)` wherever a type is written; sized widths become teachable aliases | adopt |
-| D-TYPE2-IMAG1 | Imaginary literals `4i` ride the existing unit-literal path | adopt |
+| ID | Settled law | Amends | Implementation |
+|---|---|---|---|
+| D-TYPE2-FOUND1 | Every compile-time fact joins one substrate with one registry. Type carries a knowledge vector. Identity is carrier plus identity-bearing facts. Obligations compare by subsumption. All knowledge erases before typed IR. | none | #1546 |
+| D-TYPE2-NUM1 | Every number type is one cell of the two-axis grid. A sized width is `Int` plus a proven range and a one-byte layout. `BigInt` retires into `Int`. | D-INTBIG1; E0130–E0133 retire | #1550 |
+| D-TYPE2-REFINE1 | `distinct Int(1..6)` is the one named range spelling. `#Invariant("...")` retires. The interval fact drives range checking and fixed-list index proofs. | D-RANGETYPE1; D-REFINE1; D-VERDICT-1455-1 | #1548 |
+| D-TYPE2-TIME1 | `Duration` is the delta quantity of the canonical `Time` family. `Instant` is the matching point quantity. `500ms` resolves through one unit plane, and both hidden suffix tables are deleted. | D-TIMERES1; D-QUANTITY-POINT1 | #1552 |
+| D-TYPE2-MEASURE1 | Lengths, shapes, lanes, and exponents use one measure substrate. Each use declares its combination rule. Measures are declared literals or module value parameters. | D-COMPUTE-TYPE1 | #1553 |
+| D-TYPE2-EXACT1 | Knowledge grows silently, is lost only at a spelled step, and erases at runtime. `approx` and rounded conversions remain the two existing spelled demotions. | none | #1554 |
+| D-TYPE2-UNCERT1 | Measurement is the measured grade of numeric knowledge. Arithmetic and math functions propagate uncertainty by first-order rules with uncorrelated inputs. Correlated errors are out of scope. | D-UNCERTAIN1 | #1555 |
+| D-TYPE2-PLANE1 | Every fact plane uses one registry. Its facts are nameable and reflectable, and its declarations ship as readable Prelude source. `TypeInfo` reports dimensions and typed marker arguments. | D-VERDICT-1455-1 | #1547 |
+| D-TYPE2-DEFAULT1 | Decimal literals are exact `Decimal` values. Exact division lands in ℚ. Functions that leave the rationals answer approximate. Approximation is opt-in. | D-INTDIV1; D-EXPSEM1; D-EXPNEG1; D-NUMTYPE1 | #1551 |
+| D-TYPE2-SPELL1 | `Int(0..100)` is legal in every type position. Literal bounds are checked at compile time. Unproven values convert fallibly. `distinct` remains for nominal identity. | D-RANGE-VALUE1 | #1549 |
+| D-TYPE2-IMAG1 | A numeric literal with suffix `i` is an imaginary number. The suffix uses the existing unit-literal path. Bare `i` remains an ordinary identifier. | none | #1556 |
 
 ## Implementation shape
 
@@ -471,9 +486,9 @@ Effort is expendable; the sequence is what matters.
 - **Phase B — land the owed ratifications on the new substrate.** Bigint `Int` (#1436), `Complex`,
   `Fraction`, `<=>`/`Ordering` (#1435), ns `Duration` (#1466) — built once, as grid and plane
   instances, full I9 parity.
-- **Phase C — the balloted surface unifications.** Refinement spelling, Duration→Time, `BigInt`
-  retirement, uncertainty opt-in, reflection completion. Each is a coherent in-repo migration with
-  the replaced form deleted, per greenfield law.
+- **Phase C — implement the settled surface law.** Refinement spelling, Duration→Time, `BigInt`
+  retirement, uncertainty opt-in, and reflection completion. Each is a coherent in-repo migration
+  with the replaced form deleted, per greenfield law.
 
-Phase A is pure consolidation and can start on ratification of D-TYPE2-FOUND1 alone; B and C
-follow their own ballots and the existing cards they absorb.
+Phase A is pure consolidation. Phases B and C follow implementation cards #1546–#1556 and their
+ratified blockers. This proposal records the law; those cards build it.
