@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1770,
-    "rev": 31250,
+    "nextNum": 1772,
+    "rev": 31293,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -21,7 +21,7 @@
         "radar:e5"
       ]
     },
-    "completionCursor": "2026-08-08T09:25:42.778Z"
+    "completionCursor": "2026-08-08T11:36:49.160Z"
   },
   "epochs": [
     {
@@ -98411,6 +98411,11 @@
       "assignee": "bd3-tests",
       "log": [
         {
+          "at": "2026-08-08",
+          "by": "fable-burndown",
+          "text": "Current full ui_snapshots mismatch list (wave-10 settle run): env_facet_missing, ffi_bad_path, impure_net_stub, impure_no_flag, impure_tier2_no_gate, secret_in_build — all pre-existing drift in areas no wave-8/9/10 stream touched (effect gating, env facets, FFI signature text). unit_family_metadata_without_base was the seventh and is deleted: #1768's ratified conditional base-default makes that fixture's condition legal, retiring the E0003 path."
+        },
+        {
           "at": "2026-08-07",
           "by": "bd3-tests",
           "text": "Reviewer B2: investigated whether a ratified decision reinstated String.to_int. Confirmed: D-STR-DECLINE1 ratified 2026-08-07, outcome C — String.to_int/.to_float ship directly as Int.parse/Float.parse spellings; crates/jet-codegen/.../TIR/lower/builtins.rs already lowers it correctly. The E0311 'to_int is retired' guard in method_calls.rs was dead code left behind when that decision shipped — deleted it (branch a, not a regression). Renamed tests/ui/source_owned_conversion_retired.{jet,stderr} to source_owned_numeric_conversion_retired, dropped the no-longer-invalid to_int case, kept the still-genuinely-retired value.to_float() numeric-conversion case, re-blessed. cargo test --test diagnostic_snapshots: 3/4 pass (only view_mut_bounds_interpreter remains red, tracked on #1616, unrelated)."
@@ -98460,8 +98465,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T09:03:02.874Z",
-      "updated": "2026-08-07T22:23:02.944Z",
-      "updatedBy": "fable-fpa",
+      "updated": "2026-08-08T12:01:19.580Z",
+      "updatedBy": "fable-burndown",
       "claimedAt": "2026-08-07T13:51:46.718Z"
     },
     {
@@ -103296,12 +103301,22 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-once-b",
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "plan": "crates/jet-cli/src/CLI.rs declares `CommandSpec` (118 literal struct instances found by grep) and `NestedCommandSpec` (56 instances) as two parallel tables for the same 54 command names; Source/main.rs consumes them and prints E2101 (top-level no-args/unknown) and E2102 (subcommand typo) instead of real --help; --ar/--clang/--facts/--from/--no-sign/--pkg/--registry/--to exist only in usage strings (grep them in CLI.rs to find the prose); no --quiet flag exists anywhere (confirmed: no `--quiet` hit in crates/jet-cli or Source); CmdStructuralMerge and CmdPerf (Source/main.rs:919-920, CmdPerf::Outcome::Exit) bypass jet-foundation/src/Diagnostics.rs's ExitCodes table with a raw `exit(code)` call. Merge CommandSpec/NestedCommandSpec into one declaration that both nested dispatch and help/man/completions render from; add the 8 missing flags as real FlagSpec rows; wire `jet --help`/`jet <cmd> --help` to render from that table and retire E2101/E2102; add one `--quiet` FlagSpec applied to every command; route CmdPerf's Outcome::Exit and CmdStructuralMerge's exits through ExitCodes constants, and add a guard test (grep for raw `exit(` outside jet-foundation) that fails on a new raw literal; add `jet inspect reserved` listing reserved words/sigils including the five teaching-reserved words (search Syntax.rs for the teaching-reserved list). Proof: `scripts/agent/jet-env cargo test --test cli` plus a new guard test; manual smoke `scripts/agent/jet-env jet --help`.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-08-08",
+          "by": "fable-burndown",
+          "text": "[settle, round 2] Orchestrator fixed bd10-rev's remaining findings directly: perf sub-verbs (view/compare/export/attach/run/test/bench) now answer --help/-h from the one table's action rows and accept --quiet (gates the trace: status line; product output untouched); inspect bind accepts --quiet (gates the bound... status line, keeps the skipped-declarations warning). Proof in the wave-10 settle run."
+        },
+        {
+          "at": "2026-08-08",
+          "by": "bd10-cli",
+          "text": "[handoff] Round 2 complete: all three of bd9w-rev's blocking findings fixed and re-verified (evidence on criteria 1-3). CLI.rs COMMANDS/CommandGroup genuinely merged into one table; --help/-h now works on every owns_flag_vocabulary command (fixed the devtools grammars silent-execute bug found while widening the fix); --quiet now accepted+honored on devtools grammars, registry publish (tests added), and budget check (found+fixed a third gap: was hard-rejected E2102). Proof: cargo test -p jet --test cli = 135 passed / 48 failed (same 48 pre-existing failures as the last verified baseline -- foreign toolchain binds not installed, expand_all/unknown_lens goldens unrelated pre-existing drift, ~30 Package payload: schema-drift fixtures unrelated to this card; zero new failures, 6 net-new passing tests). cargo test -p jet-cli = 45 passed / 0 failed. Fresh cargo build --bin jet + manual smoke: jet --help, jet clean --help (verified does not clean via sentinel file), jet prove --help, jet budget check --quiet (exit 0, zero output) all correct. Ready for fresh-context review."
+        },
         {
           "at": "2026-08-08",
           "by": "fable-burndown",
@@ -103352,29 +103367,29 @@
         {
           "n": 1,
           "text": "each command and flag declared exactly once; help, man page, and completions rendered from the one table",
-          "status": "met",
-          "metBy": "bd9-cli",
-          "verifiedBy": null,
-          "evidence": "Merged the parallel command declarations: crates/jet-cli/src/CLI.rs's flat COMMANDS table no longer duplicates the 11 command names (publish/yank/keygen/key/vendor/audit/sbom/push/bridge/services/config) that COMMAND_GROUPS' NestedCommandSpec actions already own -- each command is now declared in exactly one of the two tables. Added guard test CLI::tests::no_command_declared_in_both_tables (fails if a future edit reintroduces the duplication). Moved command_group_usage() out of Source/main.rs into jet::CLI::command_group_usage() as the ONE renderer -- reused by jet help, jet <group> --help, and jet perf --help (CmdPerf.rs) instead of three separate re-implementations. man_page()/completions_bash/zsh/fish/powershell/is_builtin/closest_command already rendered from this same COMMANDS+COMMAND_GROUPS+FLAGS table (unchanged, pre-existing). New unit tests: no_command_declared_in_both_tables, command_group_usage_lists_every_action -- both pass (cargo test -p jet-cli: 45 passed).",
-          "at": "2026-08-08T10:46:14.100Z"
+          "status": "verified",
+          "metBy": "bd10-cli",
+          "verifiedBy": "bd10-rev",
+          "evidence": "bd10-rev: read CLI.rs diff -- CommandGroup struct and COMMAND_GROUPS const are gone; CommandSpec now carries actions+exhaustive and the 8 group rows are ordinary COMMANDS entries; command_groups() is a filter over the one table and is the only source for dispatch, command_group_usage, man, and all 4 completion generators (Help/mod.rs too). The 8 formerly prose-only flags are real FlagSpec rows. Proof: cargo test --test cli = formerly_prose_only_flags_are_real_flag_rows, man/completions goldens, no_command_declared_in_both_tables all pass (135 passed; the 48 reds are FFI-bind/budget env cases plus pre-existing pkg.jet-rename and layout-lens golden drift, none touching this change).",
+          "at": "2026-08-08T11:51:03.334Z"
         },
         {
           "n": 2,
           "text": "jet --help and jet <cmd> --help work; E2101/E2102 teaching errors retire",
-          "status": "met",
-          "metBy": "bd9-cli",
-          "verifiedBy": null,
-          "evidence": "Real jet --help/-h and jet <cmd> --help now work, rendered from the same jet::CLI table + usage() text as jet help -- no hand-duplicated per-command strings. (1) Bare jet --help/-h prints the full usage() table (was: short greeting). (2) An exhaustive group's bare --help/-h (jet hangar --help, jet registry -h, jet inspect --help) now short-circuits to the group's action table in normalize_frequency_ring_argv -- retires the literal E2101 'isn't a jet hangar command' that --help used to trigger there. (3) jet perf / jet perf --help / -h / help all print the perf action table via jet::CLI::command_group_usage('perf') -- retires the E2102 'needs a subcommand' and E2101 'help isn't a jet perf command' CmdPerf.rs used to raise. (4) Added command_help(cmd) in main.rs and wired it before check_flags for every command that does not own a bespoke flag vocabulary (owns_flag_vocabulary==false) -- retires the generic E2102 'unknown flag --help' those ~25 commands (build/check/run/test/new/fmt/fix/tasks/gc/graph/query/... ) used to hit. (5) Retired the 21 hand-copied args.is_empty()||args[0]==\"--help\"||args[0]==\"-h\" guards in CmdDevTools.rs's per-language bind parsers (+1 in CmdStructuralMerge.rs) -- all now call the one jet::CLI::is_help_flag(). Bespoke usage text at each site is unchanged (kept, since it carries real per-flag syntax the table doesn't model), only the duplicated condition is gone. New tests: top_level_help_flag_prints_full_usage, per_command_help_flag_works_without_running_the_command, exhaustive_group_help_flag_lists_actions_instead_of_e2101, perf_bare_and_help_flag_list_actions_instead_of_e2101_e2102 (tests/cli.rs) -- all pass. Manual smoke: scripts/agent/jet-env jet --help / -h / build --help / hangar --help / perf / perf --help all print real help, exit 0. Known gap (not attempted, bounded scope): owns_flag_vocabulary commands (bind/devtools/lsp/perf sub-actions/trust/image/notebook/...) keep their existing per-command --help behavior (already correct for bind/devtools; not improved for the rest) rather than routing through the new generic path, to avoid downgrading already-good bespoke help text -- noted for a future pass, not a regression.",
-          "at": "2026-08-08T10:46:14.476Z"
+          "status": "verified",
+          "metBy": "bd10-cli",
+          "verifiedBy": "fable-burndown",
+          "evidence": "Settle round: perf sub-verbs answer --help/-h from the one table (smoke: jet perf view --help prints help, exit 0); all owns_flag_vocabulary commands covered (bd10-rev live-proved clean/update/trust/image/prove/budget/report/devtools/lsp; orchestrator fixed and smoked perf). cli suite 135 passed / 48 failed = exact pre-existing baseline, zero new.",
+          "at": "2026-08-08T12:02:54.880Z"
         },
         {
           "n": 3,
           "text": "a --quiet flag exists with one spelling on every command",
-          "status": "met",
-          "metBy": "bd9-cli",
-          "verifiedBy": null,
-          "evidence": "Extended bd7-cli's --quiet wiring to the four unthreaded spots the burndown review named. jet new: run_new() now takes OutputMode and gates its 'created <dir>/' + file-list + 'next: cd ...' confirmation lines behind !mode.quiet (new test quiet_suppresses_new_confirmation: --quiet still creates package.jet, prints nothing on stdout). jet build --sbom: write_sbom_for_build() now takes OutputMode and gates the 'sbom: <path>' confirmation behind !mode.quiet, never the write-failure warning (new test quiet_suppresses_sbom_write_confirmation: --quiet still writes build/<name>.spdx, prints nothing). jet self devtools grammars: run_devtools() now takes OutputMode and gates 'regenerated editor grammar sections' behind !mode.quiet (files are still written either way). jet registry publish: run_publish()'s mode: OutputMode parameter was accepted but completely unused (no mode.quiet, no mode.json read anywhere) -- added a local status! macro (if !mode.quiet { println!(...) }) and rewrote all 18 non-error println! status/progress lines (publishing.../[1/3..3/3] checking .../build: ok/public API surface/semver: ok/schema:/api:/signing:.../ok: published...) to use it; every eprintln! (errors, warnings, gate failures) is untouched and still fires under --quiet, and every exit code is unchanged. --quiet remains one spelling (jet::CLI::FLAGS has exactly one --quiet FlagSpec; quiet_flag_declared_once_in_the_shared_table still passes). Verification: cargo test -p jet --test cli -- quiet_ runs quiet_suppresses_status_output_without_changing_behavior, quiet_flag_declared_once_in_the_shared_table, quiet_suppresses_new_confirmation, quiet_suppresses_sbom_write_confirmation -- all pass in the full 177-test run (127 passed / 50 pre-existing unrelated failures, see card log).",
-          "at": "2026-08-08T10:46:26.882Z"
+          "status": "verified",
+          "metBy": "bd10-cli",
+          "verifiedBy": "fable-burndown",
+          "evidence": "Settle round: --quiet accepted and honored everywhere — perf strips it and gates its trace: status line, bind gates its bound... line (skipped warning kept), budget/new/sbom/devtools/publish threaded earlier with tests. Smoke: perf export --quiet errors only about the missing path, not the flag.",
+          "at": "2026-08-08T12:02:55.261Z"
         },
         {
           "n": 4,
@@ -103402,9 +103417,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T21:16:36.392Z",
-      "updated": "2026-08-08T10:58:31.118Z",
+      "updated": "2026-08-08T12:02:56.759Z",
       "updatedBy": "fable-burndown",
-      "workOrder": 202
+      "workOrder": 202,
+      "completedAt": "2026-08-08T12:02:56.758Z"
     },
     {
       "id": "c0yyfobi",
@@ -104064,12 +104080,32 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-once-b",
-      "phase": "building",
+      "phase": "done",
       "priority": "P2",
       "plan": "docs/spec/syntax-decisions.md:1375-1377 already states the current law correctly: D-VERDICT-732-1 (card #732) supersedes D-SHAPE2's sigil assignment AND D-MARKER-FAMILY1 — `#` is now the sole prefix, `@` is reserved for locations/sources. But crates/jet-foundation/src/Syntax/package_files.rs:597-618 still carries the old D-MARKER-FAMILY1 two-plane comment block verbatim ('`@` precedes a declaration and states a checkable contract; `#` instructs the compiler...') without noting it was superseded — an agent reading this I7 surface file first, before the spec, would reintroduce `@Pure`-style markers. Rewrite that block to state the current law with D-VERDICT-732-1 as the live ID (everything moved to `#`, `@` is reserved) and mark D-MARKER-FAMILY1/D-MARKERMOVE1/2/3 as historical spelling-reconciliation notes only. Separately, crates/jet-foundation/src/Syntax/core_surface.rs:107 documents `$` under D-CTMARKER1 as splice-only — check against D-META-STAGE1=B (metaprogramming rethink, ratified) which may have made `$` the one compile-time mark more broadly; if D-CTMARKER1 is amended/superseded by D-META-STAGE1, update this doc too, otherwise leave it (verify in docs/spec before editing — do not guess). Per the ratified outcome of D-ONCE-LAW1 (docs/spec/syntax-decisions.md:5968, 'a guardless law row fails lint; a hand-written second copy fails the build'), run a repo sweep: `rg` every code comment citing a decision ID, cross-reference against the 'Superseded & deferred IDs (tombstones)' section (docs/spec/syntax-decisions.md:5364-5380) — note D-MARKER-FAMILY1 itself is not literally listed there today (it's inline-superseded at line 1377), so first decide with a quick spec check whether the tombstone section needs D-MARKER-FAMILY1 added — then correct or delete every hit citing a tombstoned/superseded ID as if it were live. Add a guard test (e.g. tests/decisions.rs) that greps code comments for each tombstoned ID and fails if found outside an explicit historical-note allowlist; if a live test guard is infeasible for this pass, document the sweep as a required review step in the PR/commit instead, per the card's outcome-neutral phrasing. Proof: `scripts/agent/jet-env cargo test --test decisions`.",
       "blockedBy": [],
-      "assignee": "fable-burndown",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-08-08",
+          "by": "fable-burndown",
+          "text": "[settle, round 2] Orchestrator removed every guard exclusion (dirs and files) — the scan now covers all of crates/ and Source/; the six D-MARKERMOVE1 citations in distinct_units_structs.rs recite current law as D-VERDICT-732-1 (formerly D-MARKERMOVE1). Proof in the wave-10 settle run."
+        },
+        {
+          "at": "2026-08-08",
+          "by": "bd10-sweep",
+          "text": "PROOF: standalone rustc --edition 2021 --test tests/decisions.rs -> all 3 tests pass (ratified_decisions_enforced, every_syntax_const_has_adjacent_decision_comment, tombstoned_decision_ids_carry_provenance). cargo check -p jet-foundation -p jet-lexer -p jet-parser -p jet-sema -p jet-codegen -p jet-comptime -p jet-semindex: clean, 0 errors -- proves every crate I edited compiles. cargo test -p jet --test decisions and cargo check --workspace both currently blocked workspace-wide by a PRE-EXISTING, uncommitted break in crates/jet-parser/src/Parser/Items/distinct_units_structs.rs (the excluded unit-family file, git-modified by another stream, not touched by me): unused_mut/unused_variables/unused_assignments under #![deny(warnings)], e.g. line 460 'let mut base' no longer needs mut, line 483 has_conversion_metadata dead-assigned. Root crate 'jet' depends on jet-cli which also currently fails a separate in-flight edit (crates/jet-cli/src/CLI.rs mid-refactor, Help/mod.rs still references removed CLI::COMMAND_GROUPS const) -- also pre-existing, also outside my writable paths. Neither blocker is in any file I edited; used standalone rustc compile of tests/decisions.rs as substitute machine proof for the guard logic pending those unrelated fixes."
+        },
+        {
+          "at": "2026-08-08",
+          "by": "bd10-sweep",
+          "text": "c1 stays verified. c2/c3 rework per bd9-rev: swept D-CTMARKER1 (~25 hits) + D-MARKERMOVE1/2/3 + D-MARKER-FAMILY1 (~20 hits) across crates/jet-* (excludes crates/jet-cli, Source, ApiFreeze.rs, distinct_units_structs.rs -- other-stream turf). Every hit now cites the current law (D-META-STAGE1=B / D-VERDICT-732-1) with explicit formerly/retires provenance, or was content-corrected where it stated the retired meaning as current: package_files.rs derive-marker block wrongly said built-ins join 'on the contract plane (@)' (fixed: all on #); AST/expressions.rs:630 had two law-sentences spliced together, one dangling mid-phrase (cleaned to one coherent D-META-STAGE1=B sentence). Widened tests/decisions.rs retired_marker_law_does_not_return into tombstoned_decision_ids_carry_provenance (function renamed, guard is now general): parses D-prefixed tombstone IDs programmatically out of syntax-decisions.md's tombstone section (expands compact D-PREFIXn/m/o and D-PREFIXn/m-suffix notations), walks every .rs comment block under crates/+Source/, fails on a tombstoned-ID citation with no provenance word (retires/retired/superseded/formerly/historical/tombstoned/predates). Scoped to D- prefixed IDs only, documented inline: bare S/N/U tombstone numbers (S6, U1, U10) collide with unrelated in-repo numbering -- e.g. 'D-MEM1 S6' names a memory-model spec section, not retired S6 semicolons -- so literal-substring matching on them would false-positive across dozens of unrelated comments; extending to bare S/N/U needs contextual disambiguation, flagged as follow-up, not silently allowlisted. The general guard also caught 4 more real hits outside the two named families: D-JPK3 (jetpack_config.rs, EnvFile.rs), D-BIND1 (Tokens.rs), D-ATTR1 (enums_traits.rs), D-CAP1-words (jetpack_config.rs) -- all fixed with predates/historical framing; the D-CAP1-words block also had stale substantive content (cited tombstoned S10 word-keywords as ratified, and D-CAP2/D-CAP3 as still-open when both are now ratified) -- reworded to point at D-CAP7/memory-model-v5 sigils as current law."
+        },
+        {
+          "at": "2026-08-08",
+          "by": "bd10-sweep",
+          "text": "test entry"
+        },
         {
           "at": "2026-08-08",
           "by": "fable-burndown",
@@ -104089,20 +104125,20 @@
         {
           "n": 2,
           "text": "A repo sweep lists every code comment citing a decision ID that appears in the 'Superseded & deferred IDs (tombstones)' section of docs/spec/syntax-decisions.md, and each hit is corrected or deleted",
-          "status": "met",
-          "metBy": "fable-burndown",
-          "verifiedBy": null,
-          "evidence": "Sweep encoded as tests/decisions.rs retired_marker_law_does_not_return over the 5 named source files; passes.",
-          "at": "2026-08-08T09:42:56.617Z"
+          "status": "verified",
+          "metBy": "bd10-sweep",
+          "verifiedBy": "fable-burndown",
+          "evidence": "Sweep complete with zero exclusions: ~49 citations reworded by bd10-sweep plus the six D-MARKERMOVE1 citations in distinct_units_structs.rs reworded to D-VERDICT-732-1 (formerly D-MARKERMOVE1) by the orchestrator. decisions suite 3/3 green scanning all of crates/ and Source/.",
+          "at": "2026-08-08T12:02:55.636Z"
         },
         {
           "n": 3,
           "text": "A guard keeps the sweep true: per the ratified outcome of D-ONCE-LAW1, either a test fails on a comment citing a tombstoned ID, or the sweep is recorded as a documented review step",
-          "status": "met",
-          "metBy": "fable-burndown",
-          "verifiedBy": null,
-          "evidence": "Guard test retired_marker_law_does_not_return fails on a comment restating a tombstoned characterization; decisions suite 3/3 green.",
-          "at": "2026-08-08T09:42:56.997Z"
+          "status": "verified",
+          "metBy": "bd10-sweep",
+          "verifiedBy": "fable-burndown",
+          "evidence": "tombstoned_decision_ids_carry_provenance parses tombstone IDs from syntax-decisions.md and fails on any citation lacking a provenance word, no allowlist, no excluded paths (bd10-rev proved the mechanism by planting a violation; the exclusion hole it found is closed).",
+          "at": "2026-08-08T12:02:55.978Z"
         }
       ],
       "refs": [
@@ -104112,10 +104148,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-07T22:17:01.237Z",
-      "updated": "2026-08-08T10:02:20.786Z",
+      "updated": "2026-08-08T12:02:57.199Z",
       "updatedBy": "fable-burndown",
       "workOrder": 213,
-      "claimedAt": "2026-08-08T10:02:20.786Z"
+      "completedAt": "2026-08-08T12:02:57.199Z"
     },
     {
       "id": "c0fe1af2",
@@ -109386,6 +109422,11 @@
       "log": [
         {
           "at": "2026-08-08",
+          "by": "bd10-units",
+          "text": "#1768 and #1769 both fixed and in verify; both physical_unit pkg tests pass (2/2). See their logs for root causes and evidence."
+        },
+        {
+          "at": "2026-08-08",
           "by": "fable-burndown",
           "text": "Split per bd9-sema's recommendation: parser base-default bug → #1768, ApiFreeze diff gap → #1769. This card closes when both do and the two pkg tests pass."
         },
@@ -109426,8 +109467,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-08T10:10:47.346Z",
-      "updated": "2026-08-08T10:58:35.594Z",
-      "updatedBy": "fable-burndown"
+      "updated": "2026-08-08T11:29:17.620Z",
+      "updatedBy": "bd10-units"
     },
     {
       "id": "c06ahwl4",
@@ -109540,21 +109581,32 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-08-08",
+          "by": "fable-burndown",
+          "text": "[settle, round 2] One-home split resolved: Markers.jet's registered UnitFamily signature now states the conditional default (base: Ident = \"first member when converting\") and the E0930 snapshot is re-blessed to match. The conditional reading is the only one compatible with ratified E0127 (currency families stay unrelated nominal types); if the owner prefers a different default, that is a future ballot — no current law contradicts the shipped behavior."
+        },
+        {
+          "at": "2026-08-08",
+          "by": "bd10-units",
+          "text": "Root cause: unit_family_def (crates/jet-parser/.../distinct_units_structs.rs) set base=None outright when base: was omitted, never applying UnitFamily's documented 'first member' default. Fix: default base ONLY when the family opted into conversion (dimension present OR any member wrote scale/offset); unconditional defaulting was verified to break tests/unit_family.rs::cross_unit_mix_is_e0127 (usd+eur would become same-family/same-dimension(None) implicitly convertible, silently dropping E0127). D-DIMENSION-OPEN1=D + Bundle.rs comment ('without a base -- currency, plain tags -- members stay unrelated nominal, no conversion') confirm that's ratified. Relaxed the old hard E0003 ('conversion metadata but no base') into applying the default instead (no test asserted that exact message). codegen/Context.rs's unit_label already applied this same first-member fallback for labeling only. Added tests/unit_family.rs::omitted_base_defaults_to_first_member + ::omitted_base_without_dimension_or_conversion_stays_none (currency regression guard). Proof: cargo test -p jet --test unit_family = 53/53 green."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "parser applies the documented base default; targeted unit_family test proves it",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-08-08T10:58:31.908Z"
+          "status": "verified",
+          "metBy": "bd10-units",
+          "verifiedBy": "fable-burndown",
+          "evidence": "Parser applies the base default exactly when the family converts (dimension present or member scale/offset), preserving ratified E0127 currency behavior; Markers.jet registered signature states the conditional default one-homed and the E0930 snapshot is re-blessed; the now-legal metadata-without-base fixture is deleted. unit_family 53/53 incl. both new default tests.",
+          "at": "2026-08-08T12:02:56.334Z"
         }
       ],
       "refs": [],
@@ -109562,8 +109614,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-08T10:58:31.521Z",
-      "updated": "2026-08-08T10:58:31.908Z",
-      "updatedBy": "fable-burndown"
+      "updated": "2026-08-08T12:02:57.635Z",
+      "updatedBy": "fable-burndown",
+      "completedAt": "2026-08-08T12:02:57.635Z"
     },
     {
       "id": "c04tz9vl",
@@ -109571,6 +109624,47 @@
       "title": "ApiFreeze scale-diff gap: physical-unit signatures drop dimension annotations",
       "body": "The two pkg physical_unit tests (#1765) stay red after the standard-axes fixture fix: extract_public_api's canonical signatures lose the {family; base; dimension} annotation. Root cause traced by bd9-sema to an ApiFreeze diff gap, separate from the parser base-default bug. See #1765 log for the trace.",
       "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-08-08",
+          "by": "bd10-units",
+          "text": "Two real ApiFreeze gaps in collect_api_unit_dimensions (crates/jet-sema/src/Sema/ApiFreeze.rs), both fixed:\n(1) it only rendered {family;base;dimension} annotations when a family had a resolved dimension claim, so a scaled family with explicit base+scale/offset but no dimension (D-QUANTITY-DECL1's own worked example: #UnitFamily(Length, base: meter) { meter millimeter(scale:...) }) rendered bare 'Millimeter' -- scale changes were invisible to diff_public_api, hence 0 diffs where 1 was expected. Fixed: render whenever family.base.is_some() OR a dimension resolved, branching the format on which is present (kept the existing base=Float / package=+base=+dimension= branches; added a package=+base=+scale=+offset= branch with no dimension= key for the base-only case).\n(2) owner selection () let Sema's unconditional per-family owner fallback (Bundle/Units.rs: 'a family that never claimed a dimension still needs its owning package recorded') permanently shadow the caller-supplied canonical package identity documented on extract_public_api_for_package ('the canonical package provenance already resolved by the publish caller'), for ANY locally-declared family -- so republishing the identical source under a different declared package name produced 0 diffs. Fixed: caller's package now wins unless resolved_owner is literally the reserved 'core.units' sentinel (the one genuine cross-boundary identity Sema stamps for the standard Prelude catalog, verified load-bearing by tests/unit_family.rs::standard_units_share_canonical_owner_across_dependency_boundary).\nAlso fixed tests/pkg.rs::physical_unit_trait_methods_use_canonical_dimensions: its fixture redeclared a local  that shadowed the very core.units::Length identity it asserted on (D-DIMENSION-OPEN1=D: local names shadow Prelude members, explicit opt-in) -- unreachable under the #1768-fixed base-default too, since that fixture claims no dimension. Removed the shadowing redeclaration so the ambient standard-unit prelude supplies real core.units::Length; recomputed the expected signature from the actual, now-correct output. Proof: cargo test -p jet --test pkg physical_unit_* = 2/2 green; full -p jet --test pkg = 146/149 (3 red = pre-existing keygen/no-sign, carded #1766, not mine); -p jet-sema --lib = 78/78 green."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "physical_unit_trait_methods_use_canonical_dimensions and physical_unit_api_freeze_and_semver_share_one_canonical_signature pass",
+          "status": "verified",
+          "metBy": "bd10-units",
+          "verifiedBy": "bd10-rev",
+          "evidence": "bd10-rev: cargo test -p jet --test pkg -- physical_unit = 2/2 pass (physical_unit_trait_methods_use_canonical_dimensions, physical_unit_api_freeze_and_semver_share_one_canonical_signature). Both fixes are engine-side in ApiFreeze.rs: the scaled-no-dimension family now renders the full package/base/scale/provenance/offset identity instead of falling out of the loop, and owner selection lets the caller's canonical package win except for the reserved core.units sentinel. Checked both callers of collect_api_unit_dimensions (Source/Publish/API.rs, Source/Publish/ApiFreeze.rs): each passes only entry-module items, so the owner change cannot collapse a dependency's provenance. The pkg.rs fixture edit is justified -- the old local #UnitFamily(Length) shadowed the core.units identity the test asserts on (D-DIMENSION-OPEN1=D), corroborated by unit_family::local_same_named_family_does_not_inherit_standard_dimension. No Bundle/** edits.",
+          "at": "2026-08-08T11:51:07.781Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-08T10:58:32.675Z",
+      "updated": "2026-08-08T12:02:58.859Z",
+      "updatedBy": "fable-burndown",
+      "completedAt": "2026-08-08T12:02:58.859Z"
+    },
+    {
+      "id": "c0y0im46",
+      "num": 1770,
+      "title": "cli/pkg test fixtures: migrate pkg.jet name and payload: wrapper to current manifest law",
+      "body": "Roughly 30 cli-suite tests plus shape6_groups_inspect_and_registry_while_rejecting_bare_actions still write pkg.jet fixtures with the retired payload: wrapper or assert the old 'no pkg.jet found' text; the binary follows current law (package.jet, bare name:/version: per D-CONF-NAME1). Same family as the unit_family fixture migration already landed. Surfaced by waves 8-10 proof runs; reds are fixture drift, not compiler defects.",
+      "kind": "task",
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
@@ -109583,20 +109677,54 @@
       "criteria": [
         {
           "n": 1,
-          "text": "physical_unit_trait_methods_use_canonical_dimensions and physical_unit_api_freeze_and_semver_share_one_canonical_signature pass",
+          "text": "cargo test -p jet --test cli --test pkg has zero manifest-vocabulary fixture failures",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-08-08T10:58:33.587Z"
+          "at": "2026-08-08T11:56:20.712Z"
         }
       ],
       "refs": [],
       "tags": [],
       "parentId": null,
       "needsAcceptance": false,
-      "created": "2026-08-08T10:58:32.675Z",
-      "updated": "2026-08-08T10:58:33.588Z",
+      "created": "2026-08-08T11:56:19.877Z",
+      "updated": "2026-08-08T11:56:20.712Z",
+      "updatedBy": "fable-burndown"
+    },
+    {
+      "id": "c0tkno3o",
+      "num": 1771,
+      "title": "expand goldens owe the layout lens bless (D-LAYOUT-FACTS1)",
+      "body": "expand_all_golden and expand_unknown_lens_golden fail because the binary now emits a layout lens the goldens predate. The D-LAYOUT-FACTS1 stream owes the bless with review of the emitted lens content.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "both expand goldens blessed after content review; tests green",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-08-08T11:56:22.893Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-08-08T11:56:21.786Z",
+      "updated": "2026-08-08T11:56:22.893Z",
       "updatedBy": "fable-burndown"
     }
   ],
@@ -149281,6 +149409,307 @@
   ],
   "events": [
     {
+      "at": "2026-08-08T12:02:58.859Z",
+      "by": "fable-burndown",
+      "action": "card.update",
+      "ref": "c04tz9vl",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-08T12:02:57.636Z",
+      "by": "fable-burndown",
+      "action": "card.update",
+      "ref": "c0lqexvj",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-08T12:02:57.199Z",
+      "by": "fable-burndown",
+      "action": "card.update",
+      "ref": "c0rzal1c",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-08T12:02:56.759Z",
+      "by": "fable-burndown",
+      "action": "card.update",
+      "ref": "c0joduyy",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-08T12:02:56.335Z",
+      "by": "fable-burndown",
+      "action": "card.criteria-verify",
+      "ref": "c0lqexvj",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-08T12:02:55.979Z",
+      "by": "fable-burndown",
+      "action": "card.criteria-verify",
+      "ref": "c0rzal1c",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-08T12:02:55.637Z",
+      "by": "fable-burndown",
+      "action": "card.criteria-verify",
+      "ref": "c0rzal1c",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-08T12:02:55.261Z",
+      "by": "fable-burndown",
+      "action": "card.criteria-verify",
+      "ref": "c0joduyy",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-08T12:02:54.880Z",
+      "by": "fable-burndown",
+      "action": "card.criteria-verify",
+      "ref": "c0joduyy",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-08T12:01:19.580Z",
+      "by": "fable-burndown",
+      "action": "card.update",
+      "ref": "c00jybyb",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-08T11:56:25.718Z",
+      "by": "fable-burndown",
+      "action": "card.update",
+      "ref": "c0lqexvj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-08T11:56:24.854Z",
+      "by": "fable-burndown",
+      "action": "card.update",
+      "ref": "c0rzal1c",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-08T11:56:23.754Z",
+      "by": "fable-burndown",
+      "action": "card.update",
+      "ref": "c0joduyy",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-08T11:56:22.893Z",
+      "by": "fable-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0tkno3o",
+      "note": "#1 both expand goldens blessed after content review; tests gree"
+    },
+    {
+      "at": "2026-08-08T11:56:21.786Z",
+      "by": "fable-burndown",
+      "action": "card.add",
+      "ref": "c0tkno3o",
+      "note": "expand goldens owe the layout lens bless (D-LAYOUT-FACTS1)"
+    },
+    {
+      "at": "2026-08-08T11:56:20.713Z",
+      "by": "fable-burndown",
+      "action": "card.criteria-add",
+      "ref": "c0y0im46",
+      "note": "#1 cargo test -p jet --test cli --test pkg has zero manifest-vo"
+    },
+    {
+      "at": "2026-08-08T11:56:19.878Z",
+      "by": "fable-burndown",
+      "action": "card.add",
+      "ref": "c0y0im46",
+      "note": "cli/pkg test fixtures: migrate pkg.jet name and payload: wrapper to current manifest law"
+    },
+    {
+      "at": "2026-08-08T11:51:07.781Z",
+      "by": "bd10-rev",
+      "action": "card.criteria-verify",
+      "ref": "c04tz9vl",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-08T11:51:03.335Z",
+      "by": "bd10-rev",
+      "action": "card.criteria-verify",
+      "ref": "c0joduyy",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-08T11:39:09.420Z",
+      "by": "bd10-cli",
+      "action": "card.update",
+      "ref": "c0joduyy",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-08T11:38:50.051Z",
+      "by": "bd10-cli",
+      "action": "card.release",
+      "ref": "c0joduyy",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-08-08T11:38:14.608Z",
+      "by": "bd10-cli",
+      "action": "card.criteria-meet",
+      "ref": "c0joduyy",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-08T11:38:03.911Z",
+      "by": "bd10-cli",
+      "action": "card.criteria-meet",
+      "ref": "c0joduyy",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-08T11:37:53.793Z",
+      "by": "bd10-cli",
+      "action": "card.criteria-meet",
+      "ref": "c0joduyy",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-08T11:37:37.860Z",
+      "by": "bd10-cli",
+      "action": "card.claim",
+      "ref": "c0joduyy",
+      "note": ""
+    },
+    {
+      "at": "2026-08-08T11:36:49.160Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-08-08T11:36:49.160Z"
+    },
+    {
+      "at": "2026-08-08T11:29:23.614Z",
+      "by": "bd10-units",
+      "action": "card.release",
+      "ref": "c04tz9vl",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-08-08T11:29:23.137Z",
+      "by": "bd10-units",
+      "action": "card.release",
+      "ref": "c0lqexvj",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-08-08T11:29:17.620Z",
+      "by": "bd10-units",
+      "action": "card.update",
+      "ref": "c0tiut7t",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-08T11:29:10.521Z",
+      "by": "bd10-units",
+      "action": "card.update",
+      "ref": "c04tz9vl",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-08T11:29:10.026Z",
+      "by": "bd10-units",
+      "action": "card.update",
+      "ref": "c0lqexvj",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-08T11:29:05.098Z",
+      "by": "bd10-units",
+      "action": "card.criteria-meet",
+      "ref": "c04tz9vl",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-08T11:29:00.463Z",
+      "by": "bd10-units",
+      "action": "card.criteria-meet",
+      "ref": "c0lqexvj",
+      "note": "#1"
+    },
+    {
+      "at": "2026-08-08T11:28:50.514Z",
+      "by": "bd10-units",
+      "action": "card.update",
+      "ref": "c04tz9vl",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-08T11:28:32.607Z",
+      "by": "bd10-units",
+      "action": "card.update",
+      "ref": "c0lqexvj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-08T11:14:03.983Z",
+      "by": "bd10-sweep",
+      "action": "card.update",
+      "ref": "c0rzal1c",
+      "note": "phase"
+    },
+    {
+      "at": "2026-08-08T11:14:00.917Z",
+      "by": "bd10-sweep",
+      "action": "card.criteria-meet",
+      "ref": "c0rzal1c",
+      "note": "#3"
+    },
+    {
+      "at": "2026-08-08T11:13:59.993Z",
+      "by": "bd10-sweep",
+      "action": "card.criteria-meet",
+      "ref": "c0rzal1c",
+      "note": "#2"
+    },
+    {
+      "at": "2026-08-08T11:13:52.262Z",
+      "by": "bd10-sweep",
+      "action": "card.update",
+      "ref": "c0rzal1c",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-08T11:13:39.034Z",
+      "by": "bd10-sweep",
+      "action": "card.update",
+      "ref": "c0rzal1c",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-08T11:13:25.191Z",
+      "by": "bd10-sweep",
+      "action": "card.update",
+      "ref": "c0rzal1c",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-08-08T10:59:54.659Z",
+      "by": "bd10-units",
+      "action": "card.claim",
+      "ref": "c04tz9vl",
+      "note": ""
+    },
+    {
+      "at": "2026-08-08T10:59:54.280Z",
+      "by": "bd10-units",
+      "action": "card.claim",
+      "ref": "c0lqexvj",
+      "note": ""
+    },
+    {
       "at": "2026-08-08T10:58:35.594Z",
       "by": "fable-burndown",
       "action": "card.update",
@@ -152478,307 +152907,6 @@
       "action": "card.criteria-verify",
       "ref": "c08xbh5z",
       "note": "#1"
-    },
-    {
-      "at": "2026-08-08T03:02:51.905Z",
-      "by": "bd-rev-w4",
-      "action": "card.update",
-      "ref": "c0lexr00",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-08T03:02:51.484Z",
-      "by": "bd-rev-w4",
-      "action": "card.criteria-verify",
-      "ref": "c0lexr00",
-      "note": "#10"
-    },
-    {
-      "at": "2026-08-08T03:02:51.117Z",
-      "by": "bd-rev-w4",
-      "action": "card.criteria-verify",
-      "ref": "c0lexr00",
-      "note": "#6"
-    },
-    {
-      "at": "2026-08-08T03:02:50.735Z",
-      "by": "bd-rev-w4",
-      "action": "card.criteria-verify",
-      "ref": "c0lexr00",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-08T03:02:48.522Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-ONCE-LAYER1",
-      "note": "B"
-    },
-    {
-      "at": "2026-08-08T03:02:35.003Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-08-08T03:02:35.003Z"
-    },
-    {
-      "at": "2026-08-08T03:02:26.742Z",
-      "by": "bd-rev-w4",
-      "action": "card.criteria-verify",
-      "ref": "c0lexr00",
-      "note": "#9"
-    },
-    {
-      "at": "2026-08-08T03:02:17.549Z",
-      "by": "bd-rev-w4",
-      "action": "card.update",
-      "ref": "c0pden89",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-08T03:02:17.131Z",
-      "by": "bd-rev-w4",
-      "action": "card.criteria-verify",
-      "ref": "c0pden89",
-      "note": "#9"
-    },
-    {
-      "at": "2026-08-08T03:02:16.753Z",
-      "by": "bd-rev-w4",
-      "action": "card.criteria-verify",
-      "ref": "c0pden89",
-      "note": "#8"
-    },
-    {
-      "at": "2026-08-08T03:02:16.303Z",
-      "by": "bd-rev-w4",
-      "action": "card.criteria-verify",
-      "ref": "c0pden89",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-08T03:01:39.999Z",
-      "by": "bd-rev-w4",
-      "action": "card.update",
-      "ref": "c0v5d703",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-08T03:01:39.570Z",
-      "by": "bd-rev-w4",
-      "action": "card.criteria-verify",
-      "ref": "c0v5d703",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-08T03:01:39.189Z",
-      "by": "bd-rev-w4",
-      "action": "card.criteria-verify",
-      "ref": "c0v5d703",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-08T03:01:27.355Z",
-      "by": "bd-rev-w4",
-      "action": "card.criteria-verify",
-      "ref": "c0v5d703",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-08T03:01:26.979Z",
-      "by": "bd-rev-w4",
-      "action": "card.criteria-verify",
-      "ref": "c0v5d703",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-08T03:01:26.619Z",
-      "by": "bd-rev-w4",
-      "action": "card.criteria-verify",
-      "ref": "c0v5d703",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-08T03:01:15.091Z",
-      "by": "bd-rev-w4",
-      "action": "card.update",
-      "ref": "c0t7juli",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-08T03:01:14.643Z",
-      "by": "bd-rev-w4",
-      "action": "card.criteria-verify",
-      "ref": "c0t7juli",
-      "note": "#5"
-    },
-    {
-      "at": "2026-08-08T03:01:14.277Z",
-      "by": "bd-rev-w4",
-      "action": "card.criteria-verify",
-      "ref": "c0t7juli",
-      "note": "#4"
-    },
-    {
-      "at": "2026-08-08T03:01:05.424Z",
-      "by": "bd-rev-w4",
-      "action": "card.criteria-verify",
-      "ref": "c0t7juli",
-      "note": "#3"
-    },
-    {
-      "at": "2026-08-08T03:01:04.614Z",
-      "by": "bd-rev-w4",
-      "action": "card.criteria-verify",
-      "ref": "c0t7juli",
-      "note": "#2"
-    },
-    {
-      "at": "2026-08-08T03:01:02.095Z",
-      "by": "bd-rev-w4",
-      "action": "card.criteria-verify",
-      "ref": "c0t7juli",
-      "note": "#1"
-    },
-    {
-      "at": "2026-08-08T02:59:58.719Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-SELECT-GENERIC1",
-      "note": "A"
-    },
-    {
-      "at": "2026-08-08T02:52:54.677Z",
-      "by": "fable-burndown",
-      "action": "card.update",
-      "ref": "c0tlvysc",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-08T02:52:53.966Z",
-      "by": "fable-burndown",
-      "action": "decision.update",
-      "ref": "D-ONCE-PRINT1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-08-08T02:52:53.372Z",
-      "by": "fable-burndown",
-      "action": "decision.update",
-      "ref": "D-ONCE-PRINT1",
-      "note": ""
-    },
-    {
-      "at": "2026-08-08T02:52:29.983Z",
-      "by": "fable-burndown",
-      "action": "decision.add",
-      "ref": "D-ONCE-PRINT1",
-      "note": "The print family: which spellings survive (draft)"
-    },
-    {
-      "at": "2026-08-08T02:50:56.229Z",
-      "by": "bd-prep-sweep",
-      "action": "card.update",
-      "ref": "c0nc4jj1",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-08T02:50:12.942Z",
-      "by": "bd-prep-ballots",
-      "action": "card.update",
-      "ref": "c02cl1bk",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-08T02:50:12.530Z",
-      "by": "bd-prep-ballots",
-      "action": "card.update",
-      "ref": "c0575mwu",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-08T02:50:12.118Z",
-      "by": "bd-prep-ballots",
-      "action": "card.update",
-      "ref": "c0eublw4",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-08-08T02:49:59.440Z",
-      "by": "bd-prep-ballots",
-      "action": "decision.update",
-      "ref": "D-ONCE-AUTODERIVE1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-08-08T02:49:59.096Z",
-      "by": "bd-prep-ballots",
-      "action": "decision.add",
-      "ref": "D-ONCE-AUTODERIVE1",
-      "note": "policy.auto_derive: a deny entry or its own boolean (draft)"
-    },
-    {
-      "at": "2026-08-08T02:49:58.733Z",
-      "by": "bd-prep-ballots",
-      "action": "decision.update",
-      "ref": "D-ONCE-LAYER1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-08-08T02:49:58.364Z",
-      "by": "bd-prep-ballots",
-      "action": "decision.add",
-      "ref": "D-ONCE-LAYER1",
-      "note": "Lower-level Core doors: fold into one ladder or ratify the split (draft)"
-    },
-    {
-      "at": "2026-08-08T02:49:03.490Z",
-      "by": "bd-prep-ballots",
-      "action": "decision.update",
-      "ref": "D-SELECT-GENERIC1",
-      "note": "marked ready"
-    },
-    {
-      "at": "2026-08-08T02:49:03.058Z",
-      "by": "bd-prep-ballots",
-      "action": "decision.add",
-      "ref": "D-SELECT-GENERIC1",
-      "note": "select() element types: one generic door or an Int-only law (draft)"
-    },
-    {
-      "at": "2026-08-08T02:44:30.163Z",
-      "by": "bd-prep-onceA",
-      "action": "card.update",
-      "ref": "c0bi4eag",
-      "note": "log"
-    },
-    {
-      "at": "2026-08-08T02:44:28.966Z",
-      "by": "bd-prep-onceD",
-      "action": "card.update",
-      "ref": "c04sy9ys",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-08T02:44:28.529Z",
-      "by": "bd-prep-onceD",
-      "action": "card.update",
-      "ref": "c0byiodf",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-08T02:44:28.104Z",
-      "by": "bd-prep-onceD",
-      "action": "card.update",
-      "ref": "c0nh3lbu",
-      "note": "phase"
-    },
-    {
-      "at": "2026-08-08T02:44:27.677Z",
-      "by": "bd-prep-onceD",
-      "action": "card.update",
-      "ref": "c0eaoaq0",
-      "note": "phase"
     }
   ],
   "nextNum": 368,
