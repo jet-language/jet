@@ -150,6 +150,7 @@ compile_covered:
   errors/errors
   errors/fallible_run
   errors/must_use
+  errors/or_err
   errors/panic
   errors/qq_control
   errors/rollback_trait
@@ -230,6 +231,7 @@ compile_covered:
   memory/owner_backed_views
   memory/ownership
   memory/parameter_modes
+  memory/pin
   memory/rawptr
   memory/ref_field
   memory/resource_close
@@ -237,6 +239,7 @@ compile_covered:
   memory/shared_config
   memory/shared_guard_queue
   memory/shared_transact
+  memory/shared_weak_cycle
   memory/string_view
   memory/uninit
   memory/uninit_buffer
@@ -294,6 +297,7 @@ compile_covered:
   serde/decode_traced
   serde/encoding
   serde/encoding_base
+  serde/encoding_breadth
   serde/encoding_cbor_stream
   serde/encoding_csv_stream
   serde/encoding_json_stream
@@ -429,14 +433,10 @@ gaps:
   crypto/auth_sessions: run: jit core call unsupported: core.auth.register_user
   effects/determinism: coin_and_card: jit result ?? operand is not Result
   effects/taint: shell_arg: jit #1477 list/map builtin pending host
-  errors/or_err: birth_year: jit method on Option(String)
   errors/partial_and_notes: run: jit host call unsupported
   io/args_audit: run: jit result ?? operand is not Result
   io/db_policy: run: jit let type unsupported: Result { ok: List(Map { key: String, key_span: None, value: Named("DBValue") }), err: Named("DBError") }
   math/random_audit: run: jit result ?? operand is not Result
-  memory/pin: wire_self: jit address_of needs a local place
-  memory/shared_weak_cycle: run: jit clone unsupported type: Apply { name: "Shared.Weak", args: [Named("Node")] }
-  serde/encoding_breadth: run: jit core call unsupported: core.encoding.json.canonical
   serde/serde_generic: run: jit missing encode `Wrap::encode`
   tooling/app_live: run: jit core call unsupported: app.live
   tooling/branch_dispatch_bench: enum_dispatch: jit if-expression pattern match unsupported
