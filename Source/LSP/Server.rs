@@ -2825,7 +2825,7 @@ mod project_part_tests {
             "remove the raw nonce".into(),
             Span::new(2, 7),
             crate::Diagnostics::CryptoMisuseReason::RawNonce,
-            "seal".to_string(),
+            "seal",
         );
         let json = diagnostic_json(&diagnostic, "src/main.jet", "xxnonce");
         assert!(json.contains("\"reason\":\"raw_nonce\""), "{json}");
