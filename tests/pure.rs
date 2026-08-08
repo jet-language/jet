@@ -74,6 +74,73 @@ fn run() {
     );
 }
 
+/// Card #1543 merge-review finding 1: an `#Impure` body inside a `=[]=>` fn
+/// still fires E3401. `#Impure` records/gates the ambient call at run time,
+/// it doesn't erase it — a declared-empty effect set can't silently admit
+/// one just because it's fenced.
+#[test]
+fn pure_fn_impure_gate_still_fires_e3401() {
+    let src = r#"
+fn bad() =[]=> Int {
+    #Impure("side effect") {
+        print("ambient")
+    }
+    return 42;
+}
+fn run() {
+    print("{bad()}");
+}
+"#;
+    let res = jet::compile(src);
+    assert!(
+        res.is_err(),
+        "#Impure-gated ambient call in a `=[]=>` fn should still fail"
+    );
+    let diags = res.unwrap_err();
+    assert!(
+        diags.iter().any(|d| d.code == "E3401"),
+        "expected E3401, got: {:?}",
+        diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
+    );
+}
+
+/// Card #1543 merge-review finding 2: a `$ { ... }` comptime block inside a
+/// `=[]=>` fn must NOT ALSO trip a run-time-voiced E3401 on top of the real
+/// build-time one — it emits no runtime code at all (I3), so the run-time
+/// `=[]=>` walk must not descend into it a second time. `print` here is
+/// genuinely invalid at compile time (comptime can't touch stdout), so the
+/// block's own build-time evaluation correctly reports E3401 once; the bug
+/// was the run-time walk piling a second, run-time-voiced E3401 on top.
+#[test]
+fn pure_fn_comptime_block_is_excluded_from_runtime_check() {
+    let src = r#"
+fn good() =[]=> Int {
+    $ {
+        print("build-time only")
+    }
+    return 42;
+}
+fn run() {
+    print("{good()}");
+}
+"#;
+    let res = jet::compile(src);
+    assert!(res.is_err(), "print() inside `$ {{ }}` is still build-time invalid");
+    let diags = res.unwrap_err();
+    let e3401s: Vec<_> = diags.iter().filter(|d| d.code == "E3401").collect();
+    assert_eq!(
+        e3401s.len(),
+        1,
+        "expected exactly one E3401 (the build-time one), got: {:?}",
+        e3401s
+    );
+    assert!(
+        e3401s[0].what.contains("not allowed in comptime code"),
+        "the surviving E3401 should be the build-time one, got: {:?}",
+        e3401s[0]
+    );
+}
+
 /// A `pure fn` calling another `pure fn` is fine.
 #[test]
 fn pure_fn_calling_pure_fn_is_ok() {
