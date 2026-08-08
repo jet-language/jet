@@ -181,13 +181,9 @@ thread_local! {
 }
 
 // ---------------------------------------------------------------------------
-// D-CTCORE1 (ratified 2026-06-22): curated pure Core whitelist for comptime.
-//
-// Only deterministic, pure functions may run at comptime. I/O (`fs.read`,
-// `env.get`, etc.) is rejected here with a teaching diagnostic; the user
-// can get build-time I/O via the explicit `embed_file`/`embed_bytes` tier.
-//
-// The whitelist grows with tests; start with core.math and core.string.
+// D-META-EFFECT1: this is the implementation dispatch for Core calls that the
+// shared effect facts admit at comptime. Eligibility is decided by
+// `Effects::core_effect`; this table only supplies evaluator implementations.
 // ---------------------------------------------------------------------------
 
 pub(in super::super) fn as_float(v: &CtValue, span: Span) -> Result<f64, Diagnostic> {
@@ -1006,7 +1002,7 @@ fn text_width_policy_flags(policy: &CtValue) -> (bool, bool) {
     (ambiguous_wide, controls_reject)
 }
 
-/// Evaluate a whitelisted pure Core call at comptime / in the REPL.
+/// Evaluate an effect-approved, implemented Core call at comptime / in the REPL.
 /// `module` is the full path (e.g. `"core.math"`, `"core.regex"`).
 pub fn apply_core_call(
     module: &str,
@@ -1133,7 +1129,7 @@ pub fn apply_core_call(
             PERF_FIDELITY.with(|c| c.set(PERF_DEFAULT_FIDELITY_BITS));
             Ok(CtValue::Unit)
         }
-        // --- core.math whitelist ---
+        // --- core.math implementation surface ---
         ("core.math", "sqrt") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.sqrt())),
         ("core.math", "floor") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.floor())),
         ("core.math", "ceil") => Ok(CtValue::Float(as_ct_float(one(0)?, span)?.ceil())),
@@ -1602,7 +1598,7 @@ pub fn apply_core_call(
                 (a / x).saturating_mul(b).abs()
             }))
         }
-        // --- core.text module whitelist (card #392: `"core.string"` was a
+        // --- core.text module implementation surface (card #392: `"core.string"` was a
         // dead key here — no import ever resolves to it, `core.text` is the
         // only ratified spelling (KNOWN_CORE_MODULES), so every arm below was
         // unreachable and every `use core.text as t; t.trim(s)`-style call
@@ -2713,7 +2709,7 @@ pub fn apply_core_call(
             ),
             Some(span),
         )),
-        // --- unknown / not yet whitelisted ---
+        // --- unknown / not yet implemented ---
         _ => {
             if repl_mode {
                 if let Some(_) = repl_native_only_module(module) {
@@ -3117,8 +3113,8 @@ pub fn apply_impure_core_call(
         }
         // Ambient impure depth must not block pure-tier CorePureParity surfaces
         // that TirBridge already evaluates (date/math/measurement/testing/…).
-        // Pure style/net helpers share the AST allowlist so impure_depth>0
-        // (TirBridge / jet run deopt) still hits CorePureParity.
+        // Pure style/net helpers share the implementation dispatch so
+        // impure_depth>0 (TirBridge / jet run deopt) still hits CorePureParity.
         ("core.io", method)
             if jet_foundation::Effects::core_effect("core.io", method).is_none() =>
         {

@@ -358,7 +358,8 @@ impl<'a> Interp<'a> {
                 ));
             }
         }
-        // D-CTCORE1 (ratified 2026-06-22): module alias calls like `math.sqrt(x)`.
+        // D-META-EFFECT1: module alias calls like `math.sqrt(x)` use the shared
+        // Core effect fact before evaluator dispatch.
         // Check *before* evaluating the receiver so unknown aliases don't fail.
         if let Expr::Ident(alias, _) = receiver {
             if let Some(module) = self.core_imports.get(alias.as_str()).cloned() {

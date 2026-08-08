@@ -1364,8 +1364,8 @@ operations that can violate memory safety. Ordinary Jet never reaches these.
 
 ## Comptime effect tiers (D-CTEFFECT1)
 
-Tier-0 (pure) calls are whitelisted Core builtins — always safe, no gate needed.
-Tier-1 (`embed_file`/`embed_bytes`/`find`) hashes inputs into `.jet/lock`.
+Tier-0 (pure) calls have an empty shared effect set — always safe, no gate
+needed. Tier-1 (`embed_file`/`embed_bytes`/`find`) hashes inputs into `.jet/lock`.
 Tier-2 (ambient) requires both a `#Impure("reason") { … }` gate **and** `--allow-impure`.
 
 | code | what | why | fix |

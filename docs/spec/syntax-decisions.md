@@ -2095,11 +2095,14 @@ and `T.$fields` are one closed spelling, each projecting the matching
 `TypeInfo` member. The mark after `.` is not a general user-member escape:
 any other marked member reports E0302 and names the three facts.
 
-**D-CTCORE1 / D-CTIO1 / D-PURE2 — Comptime I/O**: only a curated whitelist of
-pure Core functions evaluates at comptime; the sole I/O escapes are
-`embed_file(path) => String` and `embed_bytes(path) => [U8]` (string-literal
-path, no escaping the project root). **D-STRPARSE1**: comptime evaluation may
-pass through `Result`/`Option` for pure parse paths.
+**D-CTCORE1 / D-CTIO1 / D-PURE2 — Comptime I/O**, amended by
+**D-META-EFFECT1**: comptime and runtime read the same Core effect fact. An
+empty effect set is Tier 0 and may evaluate without a gate. Recorded,
+hash-checked inputs such as `embed_file(path) => String`,
+`embed_bytes(path) => [U8]`, `find(glob)`, and pinned `fetch` are Tier 1; they
+enter `.jet/lock`. Ambient effects are Tier 2 and keep the explicit
+`#Impure("reason")` plus `--allow-impure` gate for this ruling. **D-STRPARSE1**:
+comptime evaluation may pass through `Result`/`Option` for pure parse paths.
 
 **D-CTEFFECT1 — Comptime effect tiers**: Tier 0 pure always-on; Tier 1
 hashed-reproducible recorded into `.jet/lock` (`@embed`, `find`,
@@ -5814,6 +5817,15 @@ an owner call. Card #1526.
 D-META-FORM1=A** *(card #1538, proposal
 `docs/proposals/metaprogramming-one-compile-time-program.md`)*. Four registries
 were proposed in one week for one job. This ruling makes them one.
+
+**2026-08-06 — D-META-EFFECT1=A** *(card #1543, same proposal)*. One effect
+model applies at both stages. Tier 0 is an empty effect set; Tier 1 is recorded
+and hashed in `.jet/lock`; Tier 2 requires `#Impure("reason")` and
+`--allow-impure` in this change. The curated pure-Core eligibility list retires:
+the shared foundation effect fact decides eligibility, and the shared
+`PurityStage` walk gives both stages one E3401 family (`E0951` redirects to
+E3401). `D-ONCE-GATE1` remains a later policy question; it does not retire
+`--allow-impure` here.
 
 **D-META-REG1 = A — one table, four uses.** A marker rule, a knowledge plane, a
 right, and a build fact are rows of the same table, separated only by what they

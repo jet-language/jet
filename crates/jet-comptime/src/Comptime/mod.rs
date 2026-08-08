@@ -506,7 +506,7 @@ pub fn evaluate(
     )
 }
 
-/// Like `evaluate` but with module alias map for D-CTCORE1 whitelisted Core calls.
+/// Like `evaluate` but with module aliases for effect-approved Core calls.
 pub fn evaluate_with_imports(
     init: &crate::AST::Expr,
     funcs: &HashMap<String, &Func>,
@@ -933,10 +933,11 @@ pub fn run_repl_main_with_fuel(
 /// trailing `;` to detect a bare expression and passes `suppress = false`; a
 /// statement ending in `;` passes `suppress = true`.
 ///
-/// D-CTCORE1: `core_imports` maps alias → Core module path (e.g. `"math"` →
-/// `"core.math"`) from the session's accumulated `use` declarations, so
-/// whitelisted pure Core calls (e.g. `math.sqrt(16.0)`) execute inline instead
-/// of raising E0956. Pass `&HashMap::new()` when no imports are active.
+/// D-META-EFFECT1: `core_imports` maps alias → Core module path (e.g. `"math"`
+/// → `"core.math"`) from the session's accumulated `use` declarations, so
+/// effect-approved implemented Core calls (e.g. `math.sqrt(16.0)`) execute
+/// inline instead of raising E0956. Pass `&HashMap::new()` when no imports
+/// are active.
 pub fn run_repl_step(
     stmts: &[crate::AST::Stmt],
     funcs: &HashMap<String, &Func>,
@@ -1148,7 +1149,7 @@ pub fn evaluate_owned(
     )
 }
 
-/// Like `evaluate_owned` but with module alias map for D-CTCORE1 whitelisted Core calls.
+/// Like `evaluate_owned` but with module aliases for effect-approved Core calls.
 pub fn evaluate_owned_with_imports(
     init: &crate::AST::Expr,
     funcs: &HashMap<String, Func>,

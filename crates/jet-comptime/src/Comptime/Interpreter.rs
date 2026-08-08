@@ -126,8 +126,8 @@ pub(super) struct Interp<'a> {
     /// `Some` in whole-program dev mode (E2-M4): `print`/`eprint` write here
     /// instead of being rejected. `None` in pure comptime mode (M9.5).
     pub(super) sink: Option<&'a mut DevSink>,
-    /// D-CTCORE1: module alias → Core module path (e.g. `"math"` → `"core.math"`).
-    /// Enables the comptime interpreter to evaluate whitelisted pure Core calls.
+    /// D-META-EFFECT1: module alias → Core module path (e.g. `"math"` → `"core.math"`).
+    /// Enables the comptime interpreter to evaluate effect-approved Core calls.
     /// Empty for contexts that have no `use` declarations (e.g. module-level consts).
     pub(super) core_imports: &'a HashMap<String, String>,
     /// D-DBG3: `Some` under `jet debug` — the source-level debugger driver,

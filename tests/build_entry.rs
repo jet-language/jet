@@ -1494,7 +1494,7 @@ fn build_context_find_and_embed_are_locked_tier_one_inputs() {
     write(
         &entry,
         r#"
-fn build(b: BuildContext) => BuildPlan ? {
+fn build(b: BuildContext) =[FS]=> BuildPlan ? {
     files :: b.find("assets/*.txt")
     message :: b.embed(files[0])
     b.generate("asset", "fn generated_asset() => String {{ return \"hello\" }}")?
