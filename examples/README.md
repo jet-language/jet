@@ -23,6 +23,49 @@ the only path.
 New examples should land the same way: beginner default in the named flagship,
 long path only as an expert variant when the manual form is still worth teaching.
 
+## Genre marker (one rule)
+
+Every example under `features/` is a teaching example first — it explains a
+mechanism, not just a fact that a card closed. An example whose header is
+nothing but a bare `#NNNN: <what shipped>` note, with no ratified decision ID
+and no explanation of the mechanism, is a closure ledger entry wearing a
+teaching example's clothes. Mark it: prefix the card number with the word
+`ledger` (`// ledger #1477: remaining List surface after #1410/#1479.`). A
+reader then knows at a glance this file exists to prove a ledger item closed,
+not to teach — citing a card number *alongside* a decision ID or real
+explanation (the norm across this corpus) needs no marker; only the bare,
+unexplained case does.
+
+## Auxiliary golden stream suffixes (one rule per meaning)
+
+`features/expected/<stem>.out` always holds the plain `jet run` stdout. Every
+other suffix under `features/expected/` names a distinct proof, never an ad
+hoc pick:
+
+- `<stem>.err.out` — the example is expected to fail (panic, exit 70, or an
+  uncaught `Err`, exit 1). Its presence tells `tests/golden.rs` to require a
+  non-zero exit.
+- `<stem>.stderr.out` — the example is expected to **succeed** (exit 0) but
+  still writes incidental stderr (warnings, progress). Optional; add it only
+  when a passing example's stderr must stay pinned.
+- `<stem>.web.out` — stdout captured running the example under the web/wasm
+  target instead of native. Read by `tests/web_build.rs` and
+  `tests/web_examples_doc.rs`.
+- `<stem>.harness.out` — output from the DOM click/interaction test harness
+  for a web example, not plain stdout. Read by `tests/web_build.rs` and
+  `tests/web_examples_doc.rs`.
+- `<stem>.seed.out` / `<stem>.greet.out` — an example with more than one
+  named `#Job` task (D-JPK-TASKRUN1) uses the task name as the suffix,
+  keyed per task rather than per stream. Read by `tests/golden.rs` and
+  `tests/dev.rs` for `devloop/task_runner`.
+- `<stem>.test.out` — the pinned report from running `jet test` on the
+  example itself, not the example's own stdout. Read by `tests/jet_test.rs`.
+- `<stem>.fuzz.out` — the pinned report from running `jet fuzz` on the
+  example. Read by `tests/jet_test.rs`.
+
+Never add a suffix ad hoc: reuse one of the meanings above, or extend this
+list in the same commit that adds a new one.
+
 Suggested learning order:
 
 | Topic | What lives there |

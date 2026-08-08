@@ -6,10 +6,10 @@ Error [E0120]: `resource` was not moved here, so it cannot fill an owned field
  Why: this function has read access only and does not own the value
  Fix: copy it explicitly with `~resource`
 
-Error [E0140]: `db` must be used exactly once, but it is never used
+Error [E0140]: `db` still owes `consume`
   --> tests/ui/single_use_dropped.jet:15:5
     |
  15 |     db :: acquire("db")
     |     ^^
  Why: this value's type is `#SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)
- Fix: give it away exactly once: move it to a `^` parameter, or `return` it
+ Fix: consume it exactly once: move it to a `^` parameter, or `return` it — or write `#Unsafe("reason") { consume(db) }` to discard it deliberately

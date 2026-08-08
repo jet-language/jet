@@ -478,18 +478,33 @@ impl<'a> Parser<'a> {
                 loop {
                     let marked =
                         matches!(&self.peek().kind, TokKind::Ident(n) if Syntax::is_comptime_name(n));
-                    let (name, name_span) = self.expect_ident(if marked {
-                        "a marker fact name"
-                    } else {
-                        "a marker parameter name"
-                    })?;
+                    // D-VERDICT-1455-1: a marker parameter is named by any
+                    // written word, including one the lexer reads as a keyword
+                    // (`#Scrub(tag: …)`, `#Layout(tag: …)`).
+                    let (name, name_span) = match crate::Lexer::keyword_spelling(&self.peek().kind)
+                    {
+                        Some(word) => (word.to_string(), self.bump().span),
+                        None => self.expect_ident(if marked {
+                            "a marker fact name"
+                        } else {
+                            "a marker parameter name"
+                        })?,
+                    };
                     self.expect(
                         TokKind::Colon,
                         "between the parameter name and its type or value",
                     )?;
+                    let mut variadic = false;
                     let (ty, value) = if marked {
                         (None, Some(Box::new(self.expr_no_struct_lit()?)))
                     } else {
+                        // D-VARIADIC1: `name: ...T` is the one rest-parameter
+                        // spelling, so a marker that takes a list of arguments
+                        // (`#Caps(Net, FS)`) writes it the same way a function does.
+                        if matches!(self.peek().kind, TokKind::DotDotDot) {
+                            self.bump();
+                            variadic = true;
+                        }
                         let (ty, _ty_span) = self.type_()?;
                         let default = if matches!(self.peek().kind, TokKind::Eq) {
                             self.bump();
@@ -504,6 +519,7 @@ impl<'a> Parser<'a> {
                         name_span,
                         ty,
                         value,
+                        variadic,
                     });
                     if matches!(self.peek().kind, TokKind::RParen) {
                         break;

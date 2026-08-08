@@ -305,7 +305,7 @@ pub struct CompanionSite {
 fn canonical_rule_arg_variants(name: &str) -> Option<&'static [&'static str]> {
     Some(match name {
         "ABI" => &["system", "cdecl", "stdcall", "fastcall", "win64", "sysv64"],
-        "Capability" => crate::Facts::EFFECT_ROOTS,
+        "Capability" => crate::Facts::EFFECT_ROOTS.as_slice(),
         "FfiLanguage" => &["c", "cpp", "asm"],
         "InlineMode" => &["Hint", "Always", "Never"],
         "KernelMode" => &["parallel"],
@@ -346,7 +346,7 @@ pub static RULE_ARG_DECLARATIONS: LazyLock<Vec<RuleArgDeclaration>> = LazyLock::
     // and `Track` for reflection; neither appears in a marker signature, so both
     // are seeded rather than found.
     let mut names = std::collections::BTreeSet::from(["Site", "Track"]);
-    for row in APPLIED_RULES {
+    for row in APPLIED_RULES.iter() {
         names.extend(row.signature.params.iter().map(|parameter| parameter.source_type));
         names.extend(row.signature.variadic_source_type);
     }
@@ -590,6 +590,43 @@ pub fn active_rule_names() -> Vec<String> {
         .collect()
 }
 
+/// D-MARK-VOCAB1 + D-META-ONE1=A: the whole marker vocabulary, in one value.
+///
+/// The registry rows read from `Prelude/Markers.jet` are the closed half. A
+/// `derive T.Name { … }` provider the build can see is the open half. Every
+/// legality test and every "did you mean" list reads this one value, so the
+/// compiler keeps no second registry of marker names.
+#[derive(Debug, Clone, Default)]
+pub struct MarkerVocabulary {
+    declared: std::collections::BTreeSet<String>,
+}
+
+impl MarkerVocabulary {
+    /// The registry, plus the derive providers visible to this build.
+    pub fn with_derives(names: impl IntoIterator<Item = String>) -> Self {
+        Self { declared: names.into_iter().collect() }
+    }
+
+    /// True when a writer may spell this name as a marker.
+    pub fn knows(&self, name: &str) -> bool {
+        crate::Syntax::is_applied_rule(name) || self.declared.contains(name)
+    }
+
+    /// Every spellable name, for a nearest-spelling suggestion.
+    pub fn names(&self) -> Vec<String> {
+        active_rule_names().into_iter().chain(self.declared.iter().cloned()).collect()
+    }
+
+    /// The one unknown-marker diagnostic. No caller writes its own.
+    pub fn unknown(
+        &self,
+        name: &str,
+        span: crate::Diagnostics::Span,
+    ) -> crate::Diagnostics::Diagnostic {
+        marker_unknown_error(name, &self.names(), span)
+    }
+}
+
 /// D-VERDICT-1455-1: one E0927 family for an unregistered or retired marker
 /// name, at every site. Parser and sema both call this; neither writes its own
 /// unknown-marker text, so a typo reads the same wherever it sits.
@@ -761,272 +798,20 @@ fn parse_invariant_clause(clause: &str) -> Option<(i64, i64)> {
     None
 }
 
-const NO_POLICY_SCOPES: &[PolicyScope] = &[];
-/// D-META-STAGE1=B: a retired rule that keeps no legal site.
-const NO_SITES: &[RuleSite] = &[];
-const FILE_SITE: &[RuleSite] = &[RuleSite::File];
-const MODULE_SITE: &[RuleSite] = &[RuleSite::Module];
-const FUNCTION_SITE: &[RuleSite] = &[RuleSite::Function];
-const CALLABLE_SITE: &[RuleSite] = &[RuleSite::Function, RuleSite::Method];
-const BLOCK_SITE: &[RuleSite] = &[RuleSite::Block];
-const STATEMENT_SITE: &[RuleSite] = &[RuleSite::Statement, RuleSite::Block];
-const TYPE_SITE: &[RuleSite] = &[RuleSite::Type];
-const DECLARATION_SITE: &[RuleSite] = &[RuleSite::Declaration];
-const FIELD_SITE: &[RuleSite] = &[RuleSite::Field];
-const FIELD_OR_VARIANT_SITE: &[RuleSite] = &[RuleSite::Field, RuleSite::Variant];
-const CONST_SITE: &[RuleSite] = &[RuleSite::Constant];
-const EXPR_SITE: &[RuleSite] = &[RuleSite::Expression];
-const PARAMETER_SITE: &[RuleSite] = &[RuleSite::Parameter];
+#[path = "Policy/MarkerSource.rs"]
+mod MarkerSource;
 
-macro_rules! rule {
-    ($name:expr, $sig:expr, $sites:expr) => {
-        AppliedRule {
-            name: $name,
-            signature: $sig,
-            policy_scopes: NO_POLICY_SCOPES,
-            sites: $sites,
-            repeatable: false,
-            owns_menu: false,
-            companion_site: None,
-            status: RuleStatus::Active,
-            inherits: false,
-            resolution: RuleResolution::SiteBound,
-        }
-    };
-    (repeatable $name:expr, $sig:expr, $sites:expr) => {
-        AppliedRule {
-            name: $name,
-            signature: $sig,
-            policy_scopes: NO_POLICY_SCOPES,
-            sites: $sites,
-            repeatable: true,
-            owns_menu: false,
-            companion_site: None,
-            status: RuleStatus::Active,
-            inherits: false,
-            resolution: RuleResolution::SiteBound,
-        }
-    };
-    (owns_menu $name:expr, $sig:expr, $sites:expr) => {
-        AppliedRule {
-            name: $name,
-            signature: $sig,
-            policy_scopes: NO_POLICY_SCOPES,
-            sites: $sites,
-            repeatable: false,
-            owns_menu: true,
-            companion_site: None,
-            status: RuleStatus::Active,
-            inherits: false,
-            resolution: RuleResolution::SiteBound,
-        }
-    };
-    (companion $name:expr, $sig:expr, $sites:expr, $companion:expr) => {
-        AppliedRule {
-            name: $name,
-            signature: $sig,
-            policy_scopes: NO_POLICY_SCOPES,
-            sites: $sites,
-            repeatable: false,
-            owns_menu: false,
-            companion_site: Some($companion),
-            status: RuleStatus::Active,
-            inherits: false,
-            resolution: RuleResolution::SiteBound,
-        }
-    };
-    (retired $name:expr, $sig:expr, $sites:expr, $replacement:expr) => {
-        AppliedRule {
-            name: $name,
-            signature: $sig,
-            policy_scopes: NO_POLICY_SCOPES,
-            sites: $sites,
-            repeatable: false,
-            owns_menu: false,
-            companion_site: None,
-            status: RuleStatus::Retired { replacement: $replacement },
-            inherits: false,
-            resolution: RuleResolution::SiteBound,
-        }
-    };
-}
+pub use MarkerSource::MARKER_SOURCE;
 
-macro_rules! param {
-    ($name:literal, $ty:ident) => {
-        RuleParam { name: $name, ty: RuleArgType::$ty, source_type: RuleArgType::$ty.name(), default: None }
-    };
-    ($name:literal, $ty:ident, $default:literal) => {
-        RuleParam { name: $name, ty: RuleArgType::$ty, source_type: RuleArgType::$ty.name(), default: Some($default) }
-    };
-    ($name:literal, $ty:ident => $source_type:literal) => {
-        RuleParam { name: $name, ty: RuleArgType::$ty, source_type: $source_type, default: None }
-    };
-    ($name:literal, $ty:ident => $source_type:literal, $default:literal) => {
-        RuleParam { name: $name, ty: RuleArgType::$ty, source_type: $source_type, default: Some($default) }
-    };
-}
-
-macro_rules! sig {
-    () => {
-        RuleSignature { params: &[], variadic: None, variadic_source_type: None }
-    };
-    ($($param:expr),+ $(,)?) => {
-        RuleSignature { params: &[$($param),+], variadic: None, variadic_source_type: None }
-    };
-    (variadic $ty:ident) => {
-        RuleSignature { params: &[], variadic: Some(RuleArgType::$ty), variadic_source_type: Some(RuleArgType::$ty.name()) }
-    };
-    (variadic $ty:ident => $source_type:literal) => {
-        RuleSignature { params: &[], variadic: Some(RuleArgType::$ty), variadic_source_type: Some($source_type) }
-    };
-}
-
-/// D-MARKSIG1=A: the sole compiler registry for active and retired markers.
-/// Parser, sema, formatter, LSP, highlighting, explain, and retirement
-/// diagnostics read these rows.
-pub const APPLIED_RULES: &[AppliedRule] = &[
-    AppliedRule {
-        name: "Policy",
-        signature: sig!(variadic Any => "PolicySetting"),
-        policy_scopes: ALL_SCOPES,
-        sites: &[RuleSite::Package, RuleSite::Module, RuleSite::Function, RuleSite::Method, RuleSite::Block],
-        repeatable: false,
-        owns_menu: false,
-        companion_site: None,
-        status: RuleStatus::Active,
-        inherits: true,
-        resolution: RuleResolution::Tighten,
-    },
-    rule!("Unsafe", sig!(param!("reason", String), param!("obligations", Ident => "ObligationMode", ".None")), &[RuleSite::Function, RuleSite::Method, RuleSite::Block, RuleSite::Operation]),
-    rule!("Grant", sig!(variadic Ident => "Capability"), &[RuleSite::Block, RuleSite::Operation]),
-    rule!("Scrub", sig!(param!("tag", Ident)), CALLABLE_SITE),
-    rule!(retired "Pure", sig!(), CALLABLE_SITE, "=[]=>"),
-    // D-MARK-REPEAT1=A: several contracts on one callable each explain their own violation.
-    rule!(repeatable "Pre", sig!(param!("condition", Any), param!("message", String)), CALLABLE_SITE),
-    rule!(repeatable "Post", sig!(param!("condition", Any), param!("message", String)), CALLABLE_SITE),
-    rule!("Kernel", sig!(param!("mode", Ident => "KernelMode")), FUNCTION_SITE),
-    rule!("Inline", sig!(param!("mode", Ident => "InlineMode", ".Hint")), &[RuleSite::Function, RuleSite::Method, RuleSite::Constant]),
-    // D-TASK-META1=A: the bare form stays the beginner task marker; the
-    // optional named fields are typed metadata on the same marker.
-    rule!("Job", sig!(
-        param!("packages", Any, "[]"),
-        param!("cwd", Any, "none"),
-        param!("inputs", Any, "[]"),
-        param!("outputs", Any, "[]"),
-        param!("skip", Any, "none"),
-        param!("cache", Any, ".Uncached"),
-        param!("authority", Any, "none"),
-        param!("limits", Any, "{}")
-    ), FUNCTION_SITE),
-    rule!("Every", sig!(param!("schedule", DurationOrString)), FUNCTION_SITE),
-    rule!("Replayable", sig!(), CALLABLE_SITE),
-    rule!("WasmExport", sig!(), FUNCTION_SITE),
-    rule!("State", sig!(param!("state", Ident => "State")), CALLABLE_SITE),
-    rule!("Transition", sig!(param!("from", Ident => "State"), param!("to", Ident => "State")), CALLABLE_SITE),
-    // E3220 teaches the FFI language menu itself.
-    rule!(owns_menu "FFI", sig!(param!("language", Ident => "FfiLanguage")), FUNCTION_SITE),
-    rule!("ABI", sig!(param!("name", Ident => "ABI")), FUNCTION_SITE),
-    rule!("MustUse", sig!(), &[RuleSite::Function, RuleSite::Method, RuleSite::Type]),
-    rule!("Codable", sig!(), TYPE_SITE),
-    rule!("Encode", sig!(), TYPE_SITE),
-    rule!("Decode", sig!(), TYPE_SITE),
-    rule!("PublishedSchema", sig!(), TYPE_SITE),
-    rule!("Comparable", sig!(), TYPE_SITE),
-    rule!("Equatable", sig!(), TYPE_SITE),
-    rule!("Debug", sig!(), TYPE_SITE),
-    rule!("Numeric", sig!(), TYPE_SITE),
-    rule!("Printable", sig!(), TYPE_SITE),
-    rule!("CodableAsBase", sig!(), TYPE_SITE),
-    rule!("CLI", sig!(), TYPE_SITE),
-    rule!("Patchable", sig!(), TYPE_SITE),
-    rule!("UnitFamily", sig!(
-        param!("family", Ident),
-        param!("dimension", Any, "nominal"),
-        param!("base", Ident, "first member")
-    ), TYPE_SITE),
-    rule!("SingleUse", sig!(), TYPE_SITE),
-    rule!("Invariant", sig!(param!("condition", String)), TYPE_SITE),
-    rule!("Layout", sig!(param!("kind", Ident => "Layout"), param!("tag", Ident => "IntType", "I32")), TYPE_SITE),
-    // E2409 teaches the naming-case menu itself.
-    rule!(owns_menu "RenameAll", sig!(param!("case", Ident => "NamingCase")), TYPE_SITE),
-    rule!("DenyUnknownFields", sig!(), TYPE_SITE),
-    rule!("Discriminant", sig!(param!("field", String)), TYPE_SITE),
-    rule!("Untagged", sig!(), TYPE_SITE),
-    rule!("Redact", sig!(), FIELD_SITE),
-    rule!("Rename", sig!(param!("name", String)), FIELD_OR_VARIANT_SITE),
-    rule!("Skip", sig!(), FIELD_SITE),
-    rule!("Default", sig!(param!("value", Any, "T.default")), FIELD_SITE),
-    rule!("Flatten", sig!(), FIELD_SITE),
-    // D-TASKS-LIST1=A: a field rule that also describes a `#Job`.
-    rule!(companion "Doc", sig!(param!("text", String)), FIELD_SITE,
-        CompanionSite { rule: "Job", site: RuleSite::Function }),
-    rule!("Flag", sig!(), FIELD_SITE),
-    rule!("Short", sig!(param!("name", String)), FIELD_SITE),
-    rule!("Env", sig!(param!("name", String)), FIELD_SITE),
-    rule!("Persist", sig!(), DECLARATION_SITE),
-    rule!("Track", sig!(), DECLARATION_SITE),
-    // B5 revert (card #1456): #1537's own checkpoint dropped this row to retire
-    // `$`, but #1537 hasn't landed its migration of the 327 in-repo uses
-    // yet. Restored so `$` stays a recognized, working spelling until
-    // #1537 lands the full retirement + migration in one change.
-    // D-META-STAGE1=B: a stage is not a rule about a target, so the compile-time
-    // mark leaves the marker plane. The Prefix form and its four legal sites go
-    // with it; the replacement is the mark on the name.
-    rule!(retired "Known", sig!(), NO_SITES, "$name :: …"),
-    rule!("Local", sig!(), DECLARATION_SITE),
-    rule!("Shared", sig!(), DECLARATION_SITE),
-    rule!("Meta", sig!(param!("category", String, "\"\""), param!("tunable", Bool, "false"), param!("maturity", Ident => "Maturity", ".Tested")), &[RuleSite::Function, RuleSite::Method, RuleSite::Declaration, RuleSite::Constant]),
-    rule!("Todo", sig!(), EXPR_SITE),
-    rule!("Shield", sig!(), BLOCK_SITE),
-    rule!("Impure", sig!(param!("reason", String, "none")), BLOCK_SITE),
-    rule!("Caps", sig!(variadic Ident => "Capability"), BLOCK_SITE),
-    rule!("Transact", sig!(param!("name", Ident)), BLOCK_SITE),
-    rule!("Region", sig!(param!("name", Ident)), BLOCK_SITE),
-    rule!("Live", sig!(), BLOCK_SITE),
-    rule!("Nondeterministic", sig!(param!("reason", String)), BLOCK_SITE),
-    rule!("Context", sig!(param!("allocator", Any, "default"), param!("logger", Any, "default"), param!("deadline", Int, "default")), BLOCK_SITE),
-    rule!("Reactive", sig!(), &[RuleSite::Function, RuleSite::Method, RuleSite::Block]),
-    rule!("Off", sig!(), STATEMENT_SITE),
-    rule!("DebugOnly", sig!(), STATEMENT_SITE),
-    rule!("Test", sig!(param!("name", String, "function name")), &[RuleSite::Test]),
-    rule!("Bench", sig!(param!("name", String)), &[RuleSite::Bench]),
-    rule!("Target", sig!(param!("target", Ident => "Target")), &[RuleSite::File, RuleSite::Module, RuleSite::Function]),
-    rule!("Root", sig!(), PARAMETER_SITE),
-    rule!("HTML", sig!(param!("path", String)), FILE_SITE),
-    rule!("PubFile", sig!(), FILE_SITE),
-    rule!("NoPrelude", sig!(), FILE_SITE),
-    rule!("SQL", sig!(), BLOCK_SITE),
-    rule!("Extern", sig!(param!("library", String)), MODULE_SITE),
-    rule!("Bindgen", sig!(param!("library", String)), MODULE_SITE),
-    // D-MARK-REPEAT1=A: one target may silence several lints.
-    rule!(repeatable "allow", sig!(param!("lint", Ident)), &[RuleSite::Declaration, RuleSite::Field, RuleSite::Statement]),
-    rule!("Static", sig!(), CONST_SITE),
-    rule!("wire", sig!(), FIELD_SITE),
-    rule!(retired "InlineAlways", sig!(), FUNCTION_SITE, "#Inline(Always)"),
-    rule!(retired "static", sig!(), CONST_SITE, "#Static"),
-    rule!(retired "inline", sig!(), CONST_SITE, "#Inline"),
-    rule!(retired "Add", sig!(), EXPR_SITE, ".Add"),
-    rule!(retired "Mul", sig!(), EXPR_SITE, ".Mul"),
-    rule!(retired "Min", sig!(), EXPR_SITE, ".Min"),
-    rule!(retired "Max", sig!(), EXPR_SITE, ".Max"),
-    rule!(retired "Audit", sig!(param!("reason", String)), &[RuleSite::Function, RuleSite::Method, RuleSite::Block], "#Unsafe(reason)"),
-    rule!(retired "Wasm", sig!(), FUNCTION_SITE, "#Target(Wasm)"),
-    rule!(retired "JS", sig!(), FUNCTION_SITE, "#Target(JS)"),
-    rule!(retired "Suppress", sig!(param!("reason", String)), BLOCK_SITE, ".drop(\"reason\")"),
-    rule!(retired "Uninit", sig!(), FIELD_SITE, "give the field a real initial value — stored uninitialized-sentinel fields were retired outright (D-UNINIT-SENTINEL1)"),
-    rule!(retired "Cli", sig!(), TYPE_SITE, "#CLI"),
-    rule!(retired "Abi", sig!(param!("name", Ident => "ABI")), FUNCTION_SITE, "#ABI"),
-    rule!(retired "Html", sig!(param!("path", String)), FILE_SITE, "#HTML"),
-    rule!(retired "Sql", sig!(), BLOCK_SITE, "#SQL"),
-    rule!(retired "Ref", sig!(), FIELD_SITE, "use an owned value"),
-    rule!(retired "Tainted", sig!(param!("kind", Ident => "TaintKind", ".Input")), &[RuleSite::Expression, RuleSite::Operation], "#Input"),
-    rule!(retired "Sanitizer", sig!(), CALLABLE_SITE, "#Scrub(Tag)"),
-    rule!(retired "Task", sig!(), FUNCTION_SITE, "#Job"),
-    rule!(retired "Tag", sig!(param!("field", String)), TYPE_SITE, "#Discriminant"),
-];
+/// D-MARKSIG1=A + D-META-ONE1=A: the sole compiler registry for active and
+/// retired markers. Parser, sema, formatter, LSP, highlighting, explain, and
+/// retirement diagnostics read these rows; the rows themselves are written as
+/// ordinary Jet `marker` declarations in `Prelude/Markers.jet`, so this file
+/// holds no copy of the vocabulary.
+pub static APPLIED_RULES: LazyLock<Vec<AppliedRule>> = LazyLock::new(MarkerSource::read);
 
 pub fn applied_rule_registry() -> &'static [AppliedRule] {
-    APPLIED_RULES
+    &APPLIED_RULES
 }
 
 pub fn applied_rule(name: &str) -> Option<&'static AppliedRule> {
@@ -1163,7 +948,7 @@ mod tests {
         // reflection enum retained by D-RULEARG-TYPES1.
         assert_eq!(super::RULE_ARG_DECLARATIONS.len(), 16);
         let mut expected = std::collections::BTreeSet::from(["Site", "Track"]);
-        for row in super::APPLIED_RULES {
+        for row in super::APPLIED_RULES.iter() {
             expected.extend(row.signature.params.iter().map(|parameter| parameter.source_type));
             expected.extend(row.signature.variadic_source_type);
         }
@@ -1181,7 +966,7 @@ mod tests {
                 declaration.name
             );
         }
-        for row in super::APPLIED_RULES {
+        for row in super::APPLIED_RULES.iter() {
             for param in row.signature.params {
                 if matches!(
                     param.source_type,
@@ -1225,7 +1010,7 @@ mod tests {
             variants("NamingCase"),
             &["camel", "snake", "pascal", "kebab", "screaming"]
         );
-        assert_eq!(variants("Capability"), crate::Facts::EFFECT_ROOTS);
+        assert_eq!(variants("Capability"), crate::Facts::EFFECT_ROOTS.as_slice());
     }
 
     /// D-MARK-FORM1=A / D-MARK-REPEAT1=A / D-VERDICT-1455-1: the facts the

@@ -21,6 +21,109 @@ mod math_lib_pure {
     include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs");
 }
 
+// #1657 / I9: the one `core.data` statistics, bar-plot and bridge-status
+// kernel. This is the exact source AOT embeds and the Cranelift JIT host
+// includes, so comptime and the interpreter run the same compensated
+// arithmetic and report the same `DataError`. Only the `jet_std` value types
+// are declared here; every rule lives in the included file.
+#[allow(dead_code)]
+mod data_kernel {
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
+
+    pub(crate) mod jet_std {
+        #[allow(unused_imports)]
+        pub use jet_foundation::Outcome::*;
+
+        #[allow(dead_code)]
+        #[derive(Clone, Debug, PartialEq, Eq)]
+        pub(crate) enum DataErrorKind {
+            Decode,
+            Limit,
+            IO,
+            Empty,
+            InvalidArgument,
+            NonFinite,
+            Overflow,
+            State,
+            Bridge,
+        }
+
+        /// `DataError.cause` only ever carries an absence here: the kernel's
+        /// encoding-backed errors live in `DataFlow.rs`, not in this file.
+        #[derive(Clone, Debug, PartialEq, Eq)]
+        pub(crate) struct EncodingError;
+
+        #[derive(Clone, Debug)]
+        pub(crate) struct DataError {
+            pub(crate) kind: DataErrorKind,
+            pub(crate) operation: String,
+            pub(crate) row: JetOutcome<i64, JetAbsent>,
+            pub(crate) column: JetOutcome<i64, JetAbsent>,
+            pub(crate) index: JetOutcome<i64, JetAbsent>,
+            pub(crate) reason: String,
+            pub(crate) cause: JetOutcome<EncodingError, JetAbsent>,
+        }
+
+        #[derive(Clone, Debug)]
+        pub(crate) struct DataGroup {
+            pub(crate) key: String,
+            pub(crate) count: i64,
+            pub(crate) sum: f64,
+            pub(crate) mean: f64,
+        }
+
+        #[derive(Clone, Debug)]
+        pub(crate) struct DataSummary {
+            pub(crate) count: i64,
+            pub(crate) sum: f64,
+            pub(crate) mean: f64,
+            pub(crate) min: f64,
+            pub(crate) max: f64,
+            pub(crate) median: f64,
+            pub(crate) variance: f64,
+            pub(crate) stddev: f64,
+        }
+
+        /// D-DATA-PLOT1=A: shared options for the deterministic line renderers.
+        #[derive(Clone, Debug)]
+        pub(crate) struct DataLineOptions {
+            pub(crate) title: String,
+            pub(crate) x_label: String,
+            pub(crate) y_label: String,
+            pub(crate) markers: bool,
+            pub(crate) reference: JetOutcome<f64, JetAbsent>,
+            pub(crate) style: String,
+            pub(crate) color: String,
+            pub(crate) legend: String,
+        }
+
+        #[derive(Clone, Debug)]
+        pub(crate) struct DataStatus {
+            pub(crate) step: String,
+            pub(crate) path: String,
+            pub(crate) copy: String,
+            pub(crate) ownership: String,
+            pub(crate) trust: String,
+            pub(crate) fallback: String,
+            pub(crate) replacement: String,
+        }
+    }
+
+    include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs");
+}
+
+// #1657: `core.data` line renderers share AOT's `DataPlot.rs` the same way.
+mod data_plot_rt {
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
+    pub(crate) use super::data_kernel::jet_std;
+
+    #[allow(unused_imports)]
+    pub use jet_foundation::Outcome::*;
+    include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs");
+}
+
 pub(in super::super) fn apply_core_pure_method(
     recv: &CtValue,
     method: &str,
@@ -271,78 +374,58 @@ fn as_float_list(v: &CtValue, span: Span) -> Result<Vec<f64>, Diagnostic> {
     }
 }
 
-/// `[DataGroup]` argument — `bar_text`/`bar_svg` only read `.key`/`.count`
-/// (never `.sum`/`.mean`), matching AOT's `jet_data_bar_text`/`_svg`.
-fn as_data_groups(v: &CtValue, span: Span) -> Result<Vec<(String, i64)>, Diagnostic> {
-    match v {
-        CtValue::List(xs) => xs
-            .iter()
-            .map(|x| match x {
-                CtValue::Struct { type_name, fields } if type_name == "DataGroup" => {
-                    let key = fields
-                        .iter()
-                        .find(|(n, _)| n == "key")
-                        .map(|(_, v)| v.clone());
-                    let count = fields
-                        .iter()
-                        .find(|(n, _)| n == "count")
-                        .map(|(_, v)| v.clone());
-                    match (key, count) {
-                        (Some(CtValue::Str(k)), Some(CtValue::Int(c))) => Ok((k, c)),
-                        _ => Err(unsupported(
-                            "core.data: a `DataGroup` needs `key: String` and `count: Int`",
-                            span,
-                        )),
-                    }
-                }
-                _ => Err(unsupported("core.data: argument must be `[DataGroup]`", span)),
+/// `[DataGroup]` argument for the bar and line renderers. Every field the
+/// kernel validates is read here, so comptime rejects exactly what AOT rejects.
+fn as_data_groups(
+    v: &CtValue,
+    span: Span,
+) -> Result<Vec<data_kernel::jet_std::DataGroup>, Diagnostic> {
+    let CtValue::List(items) = v else {
+        return Err(unsupported("core.data: argument must be `[DataGroup]`", span));
+    };
+    items
+        .iter()
+        .map(|item| {
+            let CtValue::Struct { type_name, fields } = item else {
+                return Err(unsupported("core.data: argument must be `[DataGroup]`", span));
+            };
+            if type_name != "DataGroup" {
+                return Err(unsupported("core.data: argument must be `[DataGroup]`", span));
+            }
+            let field = |name: &str| {
+                fields
+                    .iter()
+                    .find(|(field, _)| field == name)
+                    .map(|(_, value)| value)
+            };
+            let (Some(CtValue::Str(key)), Some(CtValue::Int(count))) =
+                (field("key"), field("count"))
+            else {
+                return Err(unsupported(
+                    "core.data: a `DataGroup` needs `key: String` and `count: Int`",
+                    span,
+                ));
+            };
+            let (Some(sum), Some(mean)) = (field("sum"), field("mean")) else {
+                return Err(unsupported(
+                    "core.data: a `DataGroup` needs `sum: Float` and `mean: Float`",
+                    span,
+                ));
+            };
+            Ok(data_kernel::jet_std::DataGroup {
+                key: key.clone(),
+                count: *count,
+                sum: as_float(sum, span)?,
+                mean: as_float(mean, span)?,
             })
-            .collect(),
-        _ => Err(unsupported("core.data: argument must be `[DataGroup]`", span)),
-    }
-}
-
-fn as_data_line_groups(v: &CtValue, span: Span) -> Result<Vec<(String, f64)>, Diagnostic> {
-    match v {
-        CtValue::List(xs) => xs
-            .iter()
-            .map(|x| match x {
-                CtValue::Struct { type_name, fields } if type_name == "DataGroup" => {
-                    let key = fields
-                        .iter()
-                        .find(|(n, _)| n == "key")
-                        .map(|(_, v)| v.clone());
-                    let mean = fields
-                        .iter()
-                        .find(|(n, _)| n == "mean")
-                        .map(|(_, v)| v.clone());
-                    match key {
-                        Some(CtValue::Str(key)) => {
-                            let Some(mean) = mean else {
-                                return Err(unsupported(
-                                    "core.data: a `DataGroup` needs `mean: Float`",
-                                    span,
-                                ));
-                            };
-                            Ok((key, as_float(&mean, span)?))
-                        }
-                        _ => Err(unsupported(
-                            "core.data: a `DataGroup` needs `key: String`",
-                            span,
-                        )),
-                    }
-                }
-                _ => Err(unsupported("core.data: argument must be `[DataGroup]`", span)),
-            })
-            .collect(),
-        _ => Err(unsupported("core.data: argument must be `[DataGroup]`", span)),
-    }
+        })
+        .collect()
 }
 
 fn as_data_line_options(
     v: &CtValue,
     span: Span,
-) -> Result<super::super::DataLite::LineOptions, Diagnostic> {
+) -> Result<data_kernel::jet_std::DataLineOptions, Diagnostic> {
     let CtValue::Struct { type_name, fields } = v else {
         return Err(unsupported(
             "core.data line renderers need `DataLineOptions`",
@@ -371,11 +454,11 @@ fn as_data_line_options(
         _ => return Err(unsupported("DataLineOptions `markers` must be Bool", span)),
     };
     let reference = match field("reference")? {
-        CtValue::Present(value) => Some(as_float(&value, span)?),
-        CtValue::Failed(CtReport::Clean(_)) => None,
+        CtValue::Present(value) => Ok(as_float(&value, span)?),
+        CtValue::Failed(CtReport::Clean(_)) => Err(jet_foundation::Outcome::JetAbsent),
         _ => return Err(unsupported("DataLineOptions `reference` must be Float?", span)),
     };
-    Ok(super::super::DataLite::LineOptions {
+    Ok(data_kernel::jet_std::DataLineOptions {
         title: string("title")?,
         x_label: string("x_label")?,
         y_label: string("y_label")?,
@@ -387,7 +470,20 @@ fn as_data_line_options(
     })
 }
 
-fn data_line_error(error: super::super::DataLite::LineError) -> CtValue {
+/// #1657 / I9: the checked `core.data` surface is the edition-2027 default and
+/// older editions type the same calls as plain values. Sema picks the return
+/// type from this same question (`fixed_sigs.rs`), so comptime asks it too.
+fn data_checked_surface() -> bool {
+    jet_foundation::PackageEdition::package_edition_at_least("2027")
+}
+
+/// One `DataError` value for every `core.data` failure, built from the kernel's
+/// own error — comptime never writes its own reason text.
+fn data_error_value(error: &data_kernel::jet_std::DataError) -> CtValue {
+    let index = |slot: &jet_foundation::Outcome::JetOutcome<i64, jet_foundation::Outcome::JetAbsent>| match slot {
+        Ok(value) => CtValue::Present(Box::new(CtValue::Int(*value))),
+        Err(_) => CtValue::absent(Type::Int),
+    };
     CtValue::Struct {
         type_name: "DataError".to_string(),
         fields: vec![
@@ -395,24 +491,15 @@ fn data_line_error(error: super::super::DataLite::LineError) -> CtValue {
                 "kind".to_string(),
                 CtValue::Enum {
                     type_name: "DataErrorKind".to_string(),
-                    variant: error.kind.to_string(),
+                    variant: format!("{:?}", error.kind),
                     args: Vec::new(),
                 },
             ),
-            (
-                "operation".to_string(),
-                CtValue::Str(error.operation.to_string()),
-            ),
-            ("row".to_string(), CtValue::absent(Type::Int)),
-            ("column".to_string(), CtValue::absent(Type::Int)),
-            (
-                "index".to_string(),
-                error
-                    .index
-                    .map(|index| CtValue::Present(Box::new(CtValue::Int(index))))
-                    .unwrap_or(CtValue::absent(Type::Int)),
-            ),
-            ("reason".to_string(), CtValue::Str(error.reason.to_string())),
+            ("operation".to_string(), CtValue::Str(error.operation.clone())),
+            ("row".to_string(), index(&error.row)),
+            ("column".to_string(), index(&error.column)),
+            ("index".to_string(), index(&error.index)),
+            ("reason".to_string(), CtValue::Str(error.reason.clone())),
             (
                 "cause".to_string(),
                 CtValue::absent(Type::Named("EncodingError".to_string())),
@@ -421,13 +508,50 @@ fn data_line_error(error: super::super::DataLite::LineError) -> CtValue {
     }
 }
 
+/// Marshal one kernel result onto the surface the current edition types.
+fn data_result_value<T>(
+    checked: Result<T, data_kernel::jet_std::DataError>,
+    unchecked: impl FnOnce() -> T,
+    to_value: impl Fn(T) -> CtValue,
+) -> CtValue {
+    if !data_checked_surface() {
+        return to_value(unchecked());
+    }
+    match checked {
+        Ok(value) => CtValue::Present(Box::new(to_value(value))),
+        Err(error) => CtValue::failed(Box::new(data_error_value(&error))),
+    }
+}
+
+fn data_float_value(value: f64) -> CtValue {
+    CtValue::Float(CtFloat::f64(value))
+}
+
+/// D-DATA-STATUS1 / #708: the `data.status()` rows for `jet inspect dossier`,
+/// read from the one kernel rather than a second table.
+pub fn data_status_rows() -> Vec<(String, String, String, String, String, String, String)> {
+    data_kernel::jet_data_status()
+        .into_iter()
+        .map(|row| {
+            (
+                row.step,
+                row.path,
+                row.copy,
+                row.ownership,
+                row.trust,
+                row.fallback,
+                row.replacement,
+            )
+        })
+        .collect()
+}
+
 pub fn apply_data_line_call(
     method: &str,
     args: Vec<CtValue>,
     span: Span,
-    checked: bool,
 ) -> Result<CtValue, Diagnostic> {
-    let groups = as_data_line_groups(
+    let groups = as_data_groups(
         args.first()
             .ok_or_else(|| unsupported("core.data line renderers need groups", span))?,
         span,
@@ -437,31 +561,37 @@ pub fn apply_data_line_call(
             .ok_or_else(|| unsupported("core.data line renderers need options", span))?,
         span,
     )?;
-    let render = |checked| match (method, checked) {
-        ("line_text", false) => Ok(CtValue::Str(super::super::DataLite::line_text(
-            &groups, &options,
-        ))),
-        ("line_svg", false) => Ok(CtValue::Str(super::super::DataLite::line_svg(
-            &groups, &options,
-        ))),
-        ("line_text", true) => Ok(match super::super::DataLite::line_text_checked(
-            &groups, &options,
-        ) {
-            Ok(text) => CtValue::Present(Box::new(CtValue::Str(text))),
-            Err(error) => CtValue::failed(Box::new(data_line_error(error))),
-        }),
-        ("line_svg", true) => Ok(match super::super::DataLite::line_svg_checked(
-            &groups, &options,
-        ) {
-            Ok(svg) => CtValue::Present(Box::new(CtValue::Str(svg))),
-            Err(error) => CtValue::failed(Box::new(data_line_error(error))),
-        }),
+    let plot_error = |error: data_plot_rt::DataPlotError| data_kernel::jet_std::DataError {
+        kind: match error.kind {
+            "NonFinite" => data_kernel::jet_std::DataErrorKind::NonFinite,
+            _ => data_kernel::jet_std::DataErrorKind::InvalidArgument,
+        },
+        operation: error.operation.to_string(),
+        row: Err(jet_foundation::Outcome::JetAbsent),
+        column: Err(jet_foundation::Outcome::JetAbsent),
+        index: match error.index {
+            Some(index) => Ok(index),
+            None => Err(jet_foundation::Outcome::JetAbsent),
+        },
+        reason: error.reason.to_string(),
+        cause: Err(jet_foundation::Outcome::JetAbsent),
+    };
+    match method {
+        "line_text" => Ok(data_result_value(
+            data_plot_rt::jet_data_line_text_plot_checked(&groups, &options).map_err(plot_error),
+            || data_plot_rt::jet_data_line_text(&groups, &options),
+            CtValue::Str,
+        )),
+        "line_svg" => Ok(data_result_value(
+            data_plot_rt::jet_data_line_svg_plot_checked(&groups, &options).map_err(plot_error),
+            || data_plot_rt::jet_data_line_svg(&groups, &options),
+            CtValue::Str,
+        )),
         _ => Err(unsupported(
             &format!("unsupported core.data line renderer `{method}`"),
             span,
         )),
-    };
-    render(checked)
+    }
 }
 
 const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
@@ -2409,190 +2539,130 @@ pub fn apply_core_call(
             }
         }
         // --- D-DATA-SURFACE1/PLOT1/STATUS1: core.data's fixed-signature
-        // stats + plot surface (pure, ported verbatim from AOT's
-        // `jet_data_*` — see `DataLite.rs`). The generic call-site-typed
-        // table/lazy-pipeline half of `core.data` is a separate, larger
-        // design pass (see `DataLite.rs`'s doc comment) and isn't here.
-        ("core.data", "sum") => Ok(CtValue::Float(CtFloat::f64(super::super::DataLite::sum(
-            &as_float_list(one(0)?, span)?,
-        )))),
-        ("core.data", "mean") => Ok(CtValue::Float(CtFloat::f64(super::super::DataLite::mean(
-            &as_float_list(one(0)?, span)?,
-        )))),
-        ("core.data", "min") => Ok(CtValue::Float(CtFloat::f64(super::super::DataLite::min(
-            &as_float_list(one(0)?, span)?,
-        )))),
-        ("core.data", "max") => Ok(CtValue::Float(CtFloat::f64(super::super::DataLite::max(
-            &as_float_list(one(0)?, span)?,
-        )))),
-        ("core.data", "median") => Ok(CtValue::Float(CtFloat::f64(super::super::DataLite::median(
-            &as_float_list(one(0)?, span)?,
-        )))),
-        ("core.data", "variance") => Ok(CtValue::Float(CtFloat::f64(super::super::DataLite::variance(
-            &as_float_list(one(0)?, span)?,
-        )))),
-        ("core.data", "stddev") => Ok(CtValue::Float(CtFloat::f64(super::super::DataLite::stddev(
-            &as_float_list(one(0)?, span)?,
-        )))),
+        // stats + plot surface. #1657 / I9: every arm below calls the one
+        // Prelude kernel (`data_kernel`, included from
+        // `Prelude/CoreLib/Top/DataStats.rs`) that AOT embeds and the JIT host
+        // includes. The generic call-site-typed table/lazy-pipeline half of
+        // `core.data` is a separate design pass and isn't here.
+        ("core.data", "sum" | "mean" | "min" | "max" | "median" | "variance" | "stddev") => {
+            let values = as_float_list(one(0)?, span)?;
+            let (checked, unchecked): (_, fn(&Vec<f64>) -> f64) = match method {
+                "sum" => (
+                    data_kernel::jet_data_sum_checked(&values),
+                    data_kernel::jet_data_sum,
+                ),
+                "mean" => (
+                    data_kernel::jet_data_mean_checked(&values),
+                    data_kernel::jet_data_mean,
+                ),
+                "min" => (
+                    data_kernel::jet_data_min_checked(&values),
+                    data_kernel::jet_data_min,
+                ),
+                "max" => (
+                    data_kernel::jet_data_max_checked(&values),
+                    data_kernel::jet_data_max,
+                ),
+                "median" => (
+                    data_kernel::jet_data_median_checked(&values),
+                    data_kernel::jet_data_median,
+                ),
+                "variance" => (
+                    data_kernel::jet_data_variance_checked(&values),
+                    data_kernel::jet_data_variance,
+                ),
+                _ => (
+                    data_kernel::jet_data_stddev_checked(&values),
+                    data_kernel::jet_data_stddev,
+                ),
+            };
+            Ok(data_result_value(
+                checked,
+                || unchecked(&values),
+                data_float_value,
+            ))
+        }
         ("core.data", "quantile") => {
             let values = as_float_list(one(0)?, span)?;
             let q = as_float(one(1)?, span)?;
-            Ok(CtValue::Float(CtFloat::f64(super::super::DataLite::quantile(
-                &values, q,
-            ))))
+            Ok(data_result_value(
+                data_kernel::jet_data_quantile_checked(&values, q),
+                || data_kernel::jet_data_quantile(&values, q),
+                data_float_value,
+            ))
         }
         ("core.data", "rolling_mean") => {
             let values = as_float_list(one(0)?, span)?;
             let width = as_int(one(1)?, span)?;
-            Ok(CtValue::List(
-                super::super::DataLite::rolling_mean(&values, width)
-                    .into_iter()
-                    .map(|value| CtValue::Float(CtFloat::f64(value)))
-                    .collect(),
+            Ok(data_result_value(
+                data_kernel::jet_data_rolling_mean_checked(&values, width),
+                || data_kernel::jet_data_rolling_mean(&values, width),
+                |means| CtValue::List(means.into_iter().map(data_float_value).collect()),
             ))
         }
         ("core.data", "describe") => {
             let values = as_float_list(one(0)?, span)?;
-            Ok(CtValue::Struct {
-                type_name: "DataSummary".to_string(),
-                fields: vec![
-                    (
-                        "count".to_string(),
-                        CtValue::Int(values.len() as i64),
-                    ),
-                    ("sum".to_string(), CtValue::Float(CtFloat::f64(super::super::DataLite::sum(&values)))),
-                    ("mean".to_string(), CtValue::Float(CtFloat::f64(super::super::DataLite::mean(&values)))),
-                    ("min".to_string(), CtValue::Float(CtFloat::f64(super::super::DataLite::min(&values)))),
-                    ("max".to_string(), CtValue::Float(CtFloat::f64(super::super::DataLite::max(&values)))),
-                    (
-                        "median".to_string(),
-                        CtValue::Float(CtFloat::f64(super::super::DataLite::median(&values))),
-                    ),
-                    (
-                        "variance".to_string(),
-                        CtValue::Float(CtFloat::f64(super::super::DataLite::variance(&values))),
-                    ),
-                    (
-                        "stddev".to_string(),
-                        CtValue::Float(CtFloat::f64(super::super::DataLite::stddev(&values))),
-                    ),
-                ],
-            })
+            Ok(data_result_value(
+                data_kernel::jet_data_describe_checked(&values),
+                || data_kernel::jet_data_describe(&values),
+                |summary| CtValue::Struct {
+                    type_name: "DataSummary".to_string(),
+                    fields: vec![
+                        ("count".to_string(), CtValue::Int(summary.count)),
+                        ("sum".to_string(), data_float_value(summary.sum)),
+                        ("mean".to_string(), data_float_value(summary.mean)),
+                        ("min".to_string(), data_float_value(summary.min)),
+                        ("max".to_string(), data_float_value(summary.max)),
+                        ("median".to_string(), data_float_value(summary.median)),
+                        ("variance".to_string(), data_float_value(summary.variance)),
+                        ("stddev".to_string(), data_float_value(summary.stddev)),
+                    ],
+                },
+            ))
         }
         ("core.data", "status") => Ok(CtValue::List(
-            super::super::DataLite::status_rows()
+            data_kernel::jet_data_status()
                 .into_iter()
-                .map(
-                    |(step, path, copy, ownership, trust, fallback, replacement)| {
-                        CtValue::Struct {
-                            type_name: "DataStatus".to_string(),
-                            fields: vec![
-                                ("step".to_string(), CtValue::Str(step.to_string())),
-                                ("path".to_string(), CtValue::Str(path.to_string())),
-                                ("copy".to_string(), CtValue::Str(copy.to_string())),
-                                (
-                                    "ownership".to_string(),
-                                    CtValue::Str(ownership.to_string()),
-                                ),
-                                ("trust".to_string(), CtValue::Str(trust.to_string())),
-                                (
-                                    "fallback".to_string(),
-                                    CtValue::Str(fallback.to_string()),
-                                ),
-                                (
-                                    "replacement".to_string(),
-                                    CtValue::Str(replacement.to_string()),
-                                ),
-                            ],
-                        }
-                    },
-                )
+                .map(|row| CtValue::Struct {
+                    type_name: "DataStatus".to_string(),
+                    fields: vec![
+                        ("step".to_string(), CtValue::Str(row.step)),
+                        ("path".to_string(), CtValue::Str(row.path)),
+                        ("copy".to_string(), CtValue::Str(row.copy)),
+                        ("ownership".to_string(), CtValue::Str(row.ownership)),
+                        ("trust".to_string(), CtValue::Str(row.trust)),
+                        ("fallback".to_string(), CtValue::Str(row.fallback)),
+                        ("replacement".to_string(), CtValue::Str(row.replacement)),
+                    ],
+                })
                 .collect(),
         )),
         ("core.data", "require_bridge") => {
-            let provider = as_string(one(0)?, span)?;
-            let Some(step) = super::super::DataLite::normalize_bridge_provider(&provider) else {
-                return Ok(CtValue::failed(Box::new(CtValue::Struct {
-                    type_name: "DataError".to_string(),
-                    fields: vec![
-                        (
-                            "kind".to_string(),
-                            CtValue::Enum {
-                                type_name: "DataErrorKind".to_string(),
-                                variant: "InvalidArgument".to_string(),
-                                args: Vec::new(),
-                            },
-                        ),
-                        (
-                            "operation".to_string(),
-                            CtValue::Str("require_bridge".to_string()),
-                        ),
-                        ("row".to_string(), CtValue::absent(crate::AST::Type::Int)),
-                        ("column".to_string(), CtValue::absent(crate::AST::Type::Int)),
-                        ("index".to_string(), CtValue::absent(crate::AST::Type::Int)),
-                        (
-                            "reason".to_string(),
-                            CtValue::Str(format!(
-                                "unknown data bridge provider `{provider}`; expected py, r, or gpu"
-                            )),
-                        ),
-                        (
-                            "cause".to_string(),
-                            CtValue::absent(crate::AST::Type::Named("EncodingError".to_string())),
-                        ),
-                    ],
-                })));
-            };
-            let row = super::super::DataLite::status_rows()
-                .into_iter()
-                .find(|(s, ..)| *s == step)
-                .expect("bridge row");
-            let (_s, path, copy, ownership, trust, fallback, replacement) = row;
-            if path == "available" {
-                Ok(CtValue::Present(Box::new(CtValue::Unit)))
-            } else {
-                Ok(CtValue::failed(Box::new(CtValue::Struct {
-                    type_name: "DataError".to_string(),
-                    fields: vec![
-                        (
-                            "kind".to_string(),
-                            CtValue::Enum {
-                                type_name: "DataErrorKind".to_string(),
-                                variant: "Bridge".to_string(),
-                                args: Vec::new(),
-                            },
-                        ),
-                        (
-                            "operation".to_string(),
-                            CtValue::Str("require_bridge".to_string()),
-                        ),
-                        ("row".to_string(), CtValue::absent(crate::AST::Type::Int)),
-                        ("column".to_string(), CtValue::absent(crate::AST::Type::Int)),
-                        ("index".to_string(), CtValue::absent(crate::AST::Type::Int)),
-                        (
-                            "reason".to_string(),
-                            CtValue::Str(format!(
-                                "{step} unavailable (copy={copy}, ownership={ownership}, trust={trust}, fallback={fallback}, replacement={replacement})"
-                            )),
-                        ),
-                        (
-                            "cause".to_string(),
-                            CtValue::absent(crate::AST::Type::Named("EncodingError".to_string())),
-                        ),
-                    ],
-                })))
-            }
-        },
-        ("core.data", "bar_text") => Ok(CtValue::Str(super::super::DataLite::bar_text(
-            &as_data_groups(one(0)?, span)?,
-        ))),
-        ("core.data", "bar_svg") => Ok(CtValue::Str(super::super::DataLite::bar_svg(&as_data_groups(
-            one(0)?,
-            span,
-        )?))),
-        ("core.data", "line_text" | "line_svg") => {
-            apply_data_line_call(method, args, span, false)
+            let provider = as_string(one(0)?, span)?.to_string();
+            Ok(
+                match data_kernel::jet_data_require_bridge(&provider) {
+                    Ok(()) => CtValue::Present(Box::new(CtValue::Unit)),
+                    Err(error) => CtValue::failed(Box::new(data_error_value(&error))),
+                },
+            )
         }
+        ("core.data", "bar_text") => {
+            let groups = as_data_groups(one(0)?, span)?;
+            Ok(data_result_value(
+                data_kernel::jet_data_bar_text_checked(&groups),
+                || data_kernel::jet_data_bar_text(&groups),
+                CtValue::Str,
+            ))
+        }
+        ("core.data", "bar_svg") => {
+            let groups = as_data_groups(one(0)?, span)?;
+            Ok(data_result_value(
+                data_kernel::jet_data_bar_svg_checked(&groups),
+                || data_kernel::jet_data_bar_svg(&groups),
+                CtValue::Str,
+            ))
+        }
+        ("core.data", "line_text" | "line_svg") => apply_data_line_call(method, args, span),
         // --- core.text.unicode (std-only Unicode scalar helpers, pure) ---
         ("core.text.unicode", "scalar_count") => Ok(CtValue::Int(
             as_string(one(0)?, span)?.chars().count() as i64,

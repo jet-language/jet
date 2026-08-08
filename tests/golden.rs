@@ -411,6 +411,9 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
         eprintln!("note: skipping examples/features/{stem}.jet run (gtk4 runtime loader unavailable)");
         return;
     }
+    // Suffix rule (examples/README.md "Auxiliary golden stream suffix"):
+    // `.err.out` = expected non-zero exit (panic/uncaught Err); `.stderr.out`
+    // = expected exit 0 with pinned incidental stderr. Never a third suffix.
     let err_path = env.ex_dir.join("expected").join(format!("{}.err.out", stem));
     let success_err_path = env
         .ex_dir

@@ -32,7 +32,6 @@ pub mod ServicesLite;
 pub mod AppLite;
 pub mod AuthLite;
 pub mod SyncLite;
-mod DataLite;
 mod DataPipeline;
 mod Diagnostics;
 mod EncodingLite;
@@ -83,18 +82,10 @@ pub fn runtime_csv_parse(text: &str) -> Result<Vec<Vec<String>>, String> {
     EncodingLite::csv_parse(text)
 }
 
-/// D-DATA-STATUS1 / #708: same status rows as `data.status()` / AOT
-/// `jet_data_status` — used by `jet inspect dossier data`.
-pub fn data_status_rows() -> Vec<(
-    &'static str,
-    &'static str,
-    &'static str,
-    &'static str,
-    &'static str,
-    &'static str,
-    &'static str,
-)> {
-    DataLite::status_rows()
+/// D-DATA-STATUS1 / #708: the same rows `data.status()` returns, from the one
+/// Prelude kernel — used by `jet inspect dossier data`.
+pub fn data_status_rows() -> Vec<(String, String, String, String, String, String, String)> {
+    Methods::data_status_rows()
 }
 pub use Methods::apply_dollar_splices;
 pub use Purity::{check_build_time_io, walk_calls, walk_identifiers};

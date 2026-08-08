@@ -1249,12 +1249,10 @@ impl<'a> Checker<'a> {
                             // doesn't actually join it; use `.detach()` for fire-and-forget.
                             if let Some(ty) = recv_ty {
                                 if is_task_type(&ty) {
-                                    self.diags.push(Diagnostic::lint(
-                                        "L1101",
-                                        "a spawned task is dropped without `.join()`".to_string(),
-                                        "`.drop()` discards the task handle — the task may outlive the function".to_string(),
-                                        "use `.detach()` for fire-and-forget, or `.join()` to wait".to_string(),
-                                        Some(expr.span()),
+                                    self.diags.push(crate::Sema::CheckerOwnership::l1101_unjoined_task(
+                                        "this task",
+                                        "`.drop()` discards the handle without joining it, so the task may outlive the function",
+                                        expr.span(),
                                     ));
                                 }
                             }
@@ -1281,12 +1279,10 @@ impl<'a> Checker<'a> {
                             self.check_ignored_must_use(expr, &ty, expr.span());
                         }
                         if is_task_type(&ty) {
-                            self.diags.push(Diagnostic::lint(
-                                "L1101",
-                                "a spawned task is dropped without `.join()`".to_string(),
-                                "the program may end before this task finishes".to_string(),
-                                "store the task in a binding and call `.join()`, or chain `.detach()` for fire-and-forget".to_string(),
-                                Some(expr.span()),
+                            self.diags.push(crate::Sema::CheckerOwnership::l1101_unjoined_task(
+                                "this task",
+                                "the program may end before this task finishes",
+                                expr.span(),
                             ));
                         }
                     }

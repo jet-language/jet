@@ -1,7 +1,7 @@
-Error [E0140]: a `#SingleUse` value cannot be discarded
+Error [E0140]: this value still owes `consume`
   --> tests/ui/single_use_discarded.jet:10:5
     |
  10 |     _ :: acquire("db")
     |     ^
- Why: this value carries one job that must be completed exactly once
- Fix: bind it to a name, then move it exactly once to the operation that completes its job
+ Why: this value's type is `#SingleUse`, so it carries a job that has to be done — discarding it into `_` skips that job before it's done
+ Fix: bind it to a name, then consume it exactly once — or write `#Unsafe("reason") { consume(...) }` to discard it deliberately

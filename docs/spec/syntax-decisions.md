@@ -5792,6 +5792,49 @@ is the one slice this card left open: the ruling folds it into `--preset`,
 but that name is taken by the `presets:` selector, so the replacement word is
 an owner call. Card #1526.
 
+**2026-08-06 — one registration table: D-META-REG1=A, D-META-NAME1=A,
+D-META-FORM1=A** *(card #1538, proposal
+`docs/proposals/metaprogramming-one-compile-time-program.md`)*. Four registries
+were proposed in one week for one job. This ruling makes them one.
+
+**D-META-REG1 = A — one table, four uses.** A marker rule, a knowledge plane, a
+right, and a build fact are rows of the same table, separated only by what they
+attach to. The table is `crates/jet-foundation/src/Registry.rs`. A row states its
+name, its target, the two law columns below, the prover that publishes it where
+one does, and — for a row whose target is written code — its marker signature.
+Reflection, `jet explain`, and the drift guards read that one table and are
+written once: no kind gets a second table, a second lookup, or a guard of its
+own. Marker rows come from the marker registry, so law zero (`D-VERDICT-1455-1`)
+is unchanged and every marker is still a row.
+
+**D-META-NAME1 = A — the declaring word is `marker`.** The spec, the glossary,
+and the diagnostics already say marker, so no second name for one thing enters
+the language. `KW_MARKER` is the contextual keyword; `rule`, `derive`, and a
+clause-only form were declined.
+
+**D-META-FORM1 = A — one named-parameter list, facts marked at compile time.** A
+rule declaration is an ordinary Jet declaration. The rule's own arguments and the
+facts about the rule share one parameter list, and the compile-time mark says
+which is which:
+
+```jet
+marker Inline(mode: InlineMode = .Hint,
+              $sites: [.Function, .Method, .Constant])
+
+marker Pre(condition: Any, message: String,
+           $sites: [.Function, .Method], $repeatable: true)
+```
+
+`mode`, `condition`, and `message` are what a use site writes. `$sites` and
+`$repeatable` are facts about the rule itself. No keyword enters beyond the
+declaring word and the grammar gains no clause form: a trailing `on` clause, a
+second parameter list, and a scope block were each declined by name and each
+teaches E0381. A new fact about rules is a new named parameter, never a new
+clause. `$sites` takes `[Site]`, and `Site` is the eighteen-member menu published
+in `core.lang` beside the other marker-argument enums (`SITE_VARIANTS` in
+`crates/jet-foundation/src/Policy.rs`, generated from `RuleSite::ALL` under
+D-RULEARG-TYPES1=A).
+
 **2026-08-07 — the compiler-facts slate: D-FACT-LAW1=B, D-FACT-WORD1=A,
 D-FACT-GATE1=A, D-FACT-READ1=A, D-FACT-HOME1=A, D-FACT-OWN1=A,
 D-FACT-FLOW1=A** *(card #1620, proposal `docs/proposals/compiler-facts-one-law.md`)*.
@@ -5810,6 +5853,36 @@ its gate words, a row with no meaningful direction states `none`, and a row that
 states neither fails the build. The guard is the marker drift-guard, extended —
 one implementation, not a second. Existing rows are backfilled in the same
 change. Cards #1538 and #1460.
+
+The named instances, as rows of the one table
+(`crates/jet-foundation/src/Registry.rs`):
+
+| Instance | Row | Target | Safe direction | Gate words |
+| --- | --- | --- | --- | --- |
+| Marker law zero (`D-VERDICT-1455-1`) | every marker row | written code | `none` | none |
+| The plane law (`D-TYPE2-EXACT1`) | `Exactness` | a value | `gain` | `approx`, `raw`, `wrapping` |
+| Flow narrowing (`D-FLOWTYPE1`) | `Flow` | a value | `gain` | none |
+| Taint (`D-TAG-SURFACE1`) | `Taint` | a value | `gain` | `Scrub` |
+| Duty (`D-CONC-JOIN1`) | `Duty` | a value | `discharge` | `detach`, `drop` |
+| The rights law (`D-AUTHORITY-MODEL1`) | `Rights` | a scope | `shrink` | `Unsafe`, `Impure`, `Grant` |
+| Package policy (`D-PACKAGE-POLICY-SCOPE1`) | `PackagePolicy` | a scope | `shrink` | `Unsafe`, `Grant` |
+| The fact plane (`D-CONF-MERGE1`) | `BuildSettings` | the build | `shrink` | `Force` |
+
+Marker law zero is the instance with no meaningful direction. A rule on written
+code says what a writer may attach and where; it holds no fact that moves, so
+every marker row states `none` and names no gate. The moving facts a marker
+*writes* belong to the row that holds them — `#Grant` is a gate word on the
+`Rights` row, not a direction of its own. That is stated once, for every marker
+row at once, so no row can drift from it.
+
+A row states both columns because both are fields of the row, so a row that
+states neither cannot be written. The guard reads what the field types cannot:
+a gate word named with no direction to loosen, a gate word nothing spells
+(a gate is a registered marker or one of the Prelude gates `approx`, `raw`,
+`wrapping`, `detach`, `drop`, `Force`), a prover row that claims plane algebra,
+and a name registered twice. `Flow` shows the honest empty gate list: a narrowed
+optional gains certainty for free and the fact ends at the branch boundary, so
+nothing loosens it.
 
 **D-FACT-WORD1 = A — tighten and loosen.** One word pair names the law in
 diagnostics and docs. `attenuate`, `conserve`, and law-level `narrow` retire as
@@ -5859,8 +5932,10 @@ does not decompose into per-operation rules, so no card may re-express `&`, `^`,
 or `~` windows as plane algebra. Ownership checking continues to follow `D-MEM1`,
 `D-SHAPE-PLACE1`, and `D-MEM-VIEWRET1` as its own analysis. The facts it
 publishes — sendability, view provenance, moved-ness — enter the registry as
-read-only prover-supplied rows, so tools and other planes consume them like any
-other fact. The memory sigils obey the law's spirit but are the prover's surface,
+read-only prover-supplied rows (`Sendability`, `ViewProvenance`, `Movedness`),
+so tools and other planes consume them like any other fact. Each names the prover
+that publishes it and states safe direction `none` with no gate: a window is
+closed by the prover, never loosened by a written word. The memory sigils obey the law's spirit but are the prover's surface,
 not gates, and they never enter the gate ledger. Cards #1538 and #1622.
 
 **D-FACT-FLOW1 = A — one flow-fact store, planes supply joins.** One store on the
@@ -5904,3 +5979,27 @@ The corpus-wide first-principles audit's rulings. Tower is the decision home (D-
 - **D-ONCE-UITREE1=C** — the ratified-but-unbuilt `.Button.{ }` UI-tree spelling is marked unbuilt in the spec; the spelling decision reopens with card #1588's architecture result.
 - **D-ONCE-CASE1=A** — one naming lexicon (plain words, the blessed-abbreviation list, fixed acronym casing) governs every surface: source, CLI verbs and flags, manifest keys, and file names. New abbreviations earn a row by ballot.
 - **D-ONCE-HASH1=B** — interpolation format selectors respell to colon (`{x:Fixed(2)}`, `{user:Debug}`); `#` keeps its three non-colliding jobs: applied rules, fixed-size lists (`[T#4]`), and package version pins.
+
+## Marker rows are Prelude declarations (D-META-ONE1=A, card #1539)
+
+The marker vocabulary is written as ordinary Jet source, not as a Rust table.
+
+- `crates/jet-codegen/src/Prelude/Markers.jet` holds one `marker Name(params…)`
+  declaration per rule, in the ratified D-META-FORM1=A form. A plain parameter
+  is an argument the use site writes; a `$`-marked parameter is a fact about the
+  rule: `$sites`, `$repeatable`, `$owns_menu`, `$inherits`, `$resolution`,
+  `$scopes`, `$companion`, `$retired`.
+- `crates/jet-codegen/src/Prelude/Effects.jet` holds one `effect Name`
+  declaration per effect root.
+- The Rust constants `Policy::APPLIED_RULES` and `Facts::EFFECT_ROOTS` no longer
+  hold the vocabulary; both are read from those two files.
+- D-VARIADIC1: a marker that takes a list of arguments writes it the same way a
+  function does — `capabilities: ...Capability`. This is the only new spelling
+  the card adds, and it reuses the ratified rest-parameter form.
+- D-MARK-VOCAB1: `Policy::MarkerVocabulary` is the one vocabulary value. It
+  holds the registry rows plus the `derive T.Name { … }` providers a build can
+  see, and it answers both "may this name be written?" and "did you mean?". The
+  separate `known_derive_names` set is deleted.
+- `tests/marker_declarations.rs` is the drift guard: the real Jet parser reads
+  both files and must agree with the registry on every row, and no Rust file may
+  build a marker row or keep a copy of the effect roots.

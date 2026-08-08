@@ -242,6 +242,7 @@ renumbered, and no new `W` code may be allocated.
 | E0806 | sema  | a generator's `return` carries a value (D-STREAMYIELD1) |
 | E0807 | sema  | a `yield`ed value's type doesn't match the stream's element type (D-STREAMYIELD1) |
 | L0151 | sema  | typestate: a declared state has no outgoing `#Transition(S, …)` — a dead-end state (D-STATE-DECL, warning) |
+| L0152 | sema  | typestate: two paths meet and leave one value in different states, so it is untracked from there (D-STATE1, D-FACT-FLOW1, warning) |
 | E0201 | sema  | `take` (`^`) required; value can't be copied |
 | E0202 | sema  | `mut` (`&`) required at call site — write access not granted |
 | E0203 | sema  | `take` on a non-consuming parameter       |
@@ -1021,7 +1022,7 @@ CLI.
 |------|-----|-----|
 | `` `#Kernel(.parallel)` cannot prove `{obligation}` ``. | A safe kernel must carry sema facts for bounds, aliasing, captures, races, barrier uniformity, and control flow before TIR. The shipped subset is read-only, effect-free, straight-line code over checked Core compute operations. | Keep parameters read-only, remove effects/provider calls, and use the checked expression subset; put raw device code behind its typed `#Unsafe("reason")` boundary. |
 | a function has more than one `#Kernel` marker. | One function has one explicit kernel mode. | Keep one `#Kernel(.parallel)` marker. |
-| L1101 | A `Task` is dropped without `.join()` or `.detach()`. | The program may end before that task finishes. | Call `.join()` to wait for the result, or `.detach()` if fire-and-forget is intentional. |
+| L1101 | A `Task` still owes `join` (D-CONC-JOIN1, D-FACT-WORD1=A). | The program may end before that task finishes; a task's duty is discharged only by joining it. | Join it with `.join()`, or write `.detach()` to let it go free. |
 | E0040 | `async` or `await` was written. | Jet uses blocking tasks and channels rather than async syntax. | Use `core.tasks as tasks` and call `tasks.spawn(() => work())`. |
 | E0041 (`Mutex`/`RwLock`/`mutex`/`lock`) | `` `<name>` is not in Jet; share data through channels `` | Jet avoids shared mutable state: tasks communicate by sending messages, not sharing memory. | Import `core.tasks as tasks`, create a channel, and use `sender.send`/`channel.receive`. |
 | E0041 (`Semaphore`/`semaphore`) | `` `<name>` is not in Jet; use a bounded channel as a token pool `` | each received token admits one worker until that worker sends the token back | create `tasks.channel<Int>(capacity: N)`, seed N tokens, receive one before work, and send it back afterward |
@@ -1558,6 +1559,7 @@ is a **dead-end** warning (**L0151**) — a half-built machine still compiles.
 | E0163 | increment and decrement can't target an indexed slot. | Write the full update: `map[key] = map[key] + 1` (D-INCR1). | Use `+= 1` on a name, or assign through `=` with the whole right-hand side. |
 | E0154 | A protocol line does not name `client:` or `server:` as its sender. | A two-endpoint protocol needs only the sender. The other endpoint is the receiver, so a transport arrow repeats information. | Write `client: Message(…)` when the client sends, or `server: Message(…)` when the server sends. |
 | L0151 | `{state}` (in `state {type}`) has no outgoing transition. | Typestate (D-STATE-DECL): a state with no `#Transition({state}, …)` is a dead end — a value that reaches it can never advance further. | Add `#Transition({state}, NextState) fn …`, or remove `{state}` from the declaration. |
+| L0152 | `{value}` ends in state `{one}` on one path and `{other}` on another. | Typestate (D-STATE1, D-FACT-FLOW1): after two paths meet, a state holds only when both paths agree — here they do not, so the value is untracked from this point and later state checks on it stay silent. | Bring both paths to the same state before they meet, or do the work that needs the state inside the path that reaches it. |
 
 `check_in` requires a `Confirmed` reservation, but the value is still `Pending`:
 

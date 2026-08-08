@@ -6968,7 +6968,7 @@ fn run() {
 fn resident_jit_safety_detail_smoke() {
     for stem in [
         "basics/compound",
-        "basics/switch",
+        "basics/value_dispatch",
         "types/structs",
         "types/enums",
         "basics/branches",
@@ -6981,7 +6981,7 @@ fn resident_jit_safety_detail_smoke() {
         let stmts = jet_jit::jit_dump_main_stmts(&bundle);
         let funcs = jet_jit::jit_program_func_names(&bundle);
         eprintln!("{stem}: {detail}");
-        if stem == "basics/switch" {
+        if stem == "basics/value_dispatch" {
             eprintln!("  compile: {:?}", jet_jit::try_compile_bundle(&bundle));
         }
         if stem == "131_taskgroup" {

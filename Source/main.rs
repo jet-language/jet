@@ -1271,6 +1271,24 @@ fn main() {
             exit(CmdBudget::run(&raw));
         }
         "parts" => run_project_parts(&raw, mode),
+        "reserved" => {
+            if mode.json {
+                println!("{}", jet::CLI::reserved_report_json());
+            } else {
+                print!("{}", jet::CLI::reserved_report_text());
+            }
+            return;
+        }
+        // D-ONCE-LAW1=A (#1728): read out the one registration table — every
+        // registered truth with its home, its renderers, and its guard.
+        "facts" => {
+            if mode.json {
+                println!("{}", jet::Explain::facts_report_json());
+            } else {
+                print!("{}", jet::Explain::facts_report_text());
+            }
+            return;
+        }
         "prove" => {
             let prove_args: Vec<String> = raw.iter().skip(1).cloned().collect();
             run_prove(&prove_args, mode.json);

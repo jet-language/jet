@@ -865,6 +865,10 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
         out.push_str(include_str!("../Prelude/CoreLib/Top/DataFmt.rs"));
     }
     if needs_data {
+        // #1657: the one `core.data` statistics kernel. The JIT host and the
+        // comptime tier `include!` this same file, so every tier runs the same
+        // compensated arithmetic and reports the same `DataError` (I9).
+        out.push_str(include_str!("../Prelude/CoreLib/Top/DataStats.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/DataFlow.rs"));
     }
     if needs_compute {

@@ -5495,3 +5495,69 @@ fn already_migrated() {
         "`jet fix --edition=2027` must be idempotent on a re-run"
     );
 }
+
+/// #1659 criterion 4: `jet perf` and `jet diff`/`jet merge` route every exit
+/// through the `jet_foundation::ExitCodes` table, never a raw literal. This
+/// guards the two files migrated for #1659; it is not a repo-wide sweep.
+#[test]
+fn perf_and_structural_merge_never_raw_exit() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    for relative in ["Source/CmdPerf.rs", "Source/CmdStructuralMerge.rs"] {
+        let path = root.join(relative);
+        let source = fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {relative}: {e}"));
+        for (line_no, line) in source.lines().enumerate() {
+            let trimmed = line.trim();
+            // A raw numeric literal fed to any of the exit shapes this file
+            // uses (`exit(2)`, `Outcome::Exit(2)`, `return 2;`) — the exact
+            // shapes ExitCodes replaced in this file for #1659. Named
+            // constants (`ExitCodes::USAGE`) pass; unrelated numeric literals
+            // elsewhere in the file (never matching these exact shapes) pass.
+            let all_digits = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit());
+            let is_raw_exit_call = trimmed.starts_with("exit(")
+                && all_digits(trimmed[5..].trim_end_matches(';').trim_end_matches(')'));
+            let is_raw_outcome_exit = trimmed.starts_with("Outcome::Exit(")
+                && all_digits(trimmed[14..].trim_end_matches(';').trim_end_matches(')'));
+            let is_raw_return = trimmed.strip_prefix("return ").is_some_and(|rest| {
+                all_digits(rest.trim_end_matches(';'))
+            });
+            assert!(
+                !is_raw_exit_call && !is_raw_outcome_exit && !is_raw_return,
+                "{relative}:{}: raw exit-code literal `{trimmed}` — use jet_foundation::ExitCodes",
+                line_no + 1
+            );
+        }
+    }
+}
+
+/// #1659 criterion 5: `jet inspect reserved` lists Jet's real keywords, the
+/// five teaching-reserved words, and the sigil surface — both as human text
+/// and as `--json`.
+#[test]
+fn inspect_reserved_lists_keywords_teaching_words_and_sigils() {
+    let text = Command::new(jet())
+        .args(["inspect", "reserved"])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(text.status.success(), "{:?}", text);
+    let text = String::from_utf8_lossy(&text.stdout);
+    for word in ["copy", "mut", "take", "const", "unsafe"] {
+        assert!(text.contains(word), "reserved report missing teaching-reserved word `{word}`: {text}");
+    }
+    for sigil in ["::", ":=", "&", "^", "~", "$"] {
+        assert!(text.contains(sigil), "reserved report missing sigil `{sigil}`: {text}");
+    }
+    assert!(text.contains("fn"), "reserved report missing a real keyword: {text}");
+
+    let json = Command::new(jet())
+        .args(["inspect", "reserved", "--json"])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(json.status.success(), "{:?}", json);
+    let json = String::from_utf8_lossy(&json.stdout);
+    assert!(json.contains("\"keywords\":["), "{json}");
+    assert!(json.contains("\"teaching_reserved\":["), "{json}");
+    assert!(json.contains("\"sigils\":["), "{json}");
+    parse_json(&json).unwrap_or_else(|_| panic!("reserved --json must parse: {json}"));
+}

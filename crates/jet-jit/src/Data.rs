@@ -9,12 +9,50 @@ use std::collections::BTreeMap;
 #[allow(unused_imports)]
 use jet_foundation::Outcome::*;
 
-mod data_plot_rt {
+// #1657 / I9: the one `core.data` statistics, bar-plot and bridge-status
+// kernel, included from the exact Prelude source AOT embeds and comptime
+// includes. Only the `jet_std` value types are declared here; every rule lives
+// in the included file. A second copy of this math in the JIT host is an I9
+// violation.
+#[allow(dead_code)]
+mod data_kernel {
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
+
     pub(crate) mod jet_std {
         #[allow(unused_imports)]
         pub use jet_foundation::Outcome::*;
+
+        #[allow(dead_code)]
+        #[derive(Clone, Debug, PartialEq, Eq)]
+        pub(crate) enum DataErrorKind {
+            Decode,
+            Limit,
+            IO,
+            Empty,
+            InvalidArgument,
+            NonFinite,
+            Overflow,
+            State,
+            Bridge,
+        }
+
+        /// `DataError.cause` only ever carries an absence here: the kernel's
+        /// encoding-backed errors live in `DataFlow.rs`, not in this file.
+        #[derive(Clone, Debug, PartialEq, Eq)]
+        pub(crate) struct EncodingError;
+
+        #[derive(Clone, Debug)]
+        pub(crate) struct DataError {
+            pub(crate) kind: DataErrorKind,
+            pub(crate) operation: String,
+            pub(crate) row: JetOutcome<i64, JetAbsent>,
+            pub(crate) column: JetOutcome<i64, JetAbsent>,
+            pub(crate) index: JetOutcome<i64, JetAbsent>,
+            pub(crate) reason: String,
+            pub(crate) cause: JetOutcome<EncodingError, JetAbsent>,
+        }
+
         #[derive(Clone, Debug)]
         pub(crate) struct DataGroup {
             pub(crate) key: String,
@@ -23,6 +61,32 @@ mod data_plot_rt {
             pub(crate) mean: f64,
         }
 
+        #[derive(Clone, Debug)]
+        pub(crate) struct DataSummary {
+            pub(crate) count: i64,
+            pub(crate) sum: f64,
+            pub(crate) mean: f64,
+            pub(crate) min: f64,
+            pub(crate) max: f64,
+            pub(crate) median: f64,
+            pub(crate) variance: f64,
+            pub(crate) stddev: f64,
+        }
+
+        #[derive(Clone, Debug)]
+        pub(crate) struct DataStatus {
+            pub(crate) step: String,
+            pub(crate) path: String,
+            pub(crate) copy: String,
+            pub(crate) ownership: String,
+            pub(crate) trust: String,
+            pub(crate) fallback: String,
+            pub(crate) replacement: String,
+        }
+
+        /// D-DATA-PLOT1=A: shared options for the deterministic line renderers.
+        /// `Default` by hand: an empty reference line is a clean absence, which
+        /// the carrier spells rather than derives.
         #[derive(Clone, Debug)]
         pub(crate) struct DataLineOptions {
             pub(crate) title: String,
@@ -34,8 +98,6 @@ mod data_plot_rt {
             pub(crate) color: String,
             pub(crate) legend: String,
         }
-        // `Default` by hand: an empty reference line is a clean absence, which the
-        // carrier spells rather than derives.
         impl Default for DataLineOptions {
             fn default() -> Self {
                 Self {
@@ -52,25 +114,22 @@ mod data_plot_rt {
         }
     }
 
+    include!("../../jet-codegen/src/Prelude/CoreLib/Top/DataStats.rs");
+}
+
+mod data_plot_rt {
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
+    pub(crate) use super::data_kernel::jet_std;
     include!("../../jet-codegen/src/Prelude/CoreLib/Top/DataPlot.rs");
 }
 
-use data_plot_rt::jet_std::{DataGroup, DataLineOptions};
-
-#[derive(Clone, Debug)]
-struct DataError {
-    kind: &'static str,
-    operation: String,
-    reason: String,
-    index: Option<i64>,
-}
+use data_kernel::jet_std::{DataError, DataErrorKind, DataGroup, DataLineOptions, DataStatus};
 
 impl std::fmt::Display for DataError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut out = format!("{} {}", self.kind, self.operation);
-        if let Some(index) = self.index {
+        let mut out = format!("{:?} {}", self.kind, self.operation);
+        if let Ok(index) = self.index {
             out.push_str(&format!(", index {index}"));
         }
         out.push_str(&format!(": {}", self.reason));
@@ -78,395 +137,8 @@ impl std::fmt::Display for DataError {
     }
 }
 
-fn err(kind: &'static str, operation: &str, reason: impl Into<String>) -> DataError {
-    DataError {
-        kind,
-        operation: operation.into(),
-        reason: reason.into(),
-        index: None,
-    }
-}
-
-fn normalize_zero(value: f64) -> f64 {
-    if value == 0.0 {
-        0.0
-    } else {
-        value
-    }
-}
-
-fn reject_nonfinite(operation: &str, values: &[f64]) -> Result<(), DataError> {
-    for (i, v) in values.iter().enumerate() {
-        if !v.is_finite() {
-            return Err(DataError {
-                kind: "NonFinite",
-                operation: operation.into(),
-                reason: "numeric input must be finite".into(),
-                index: Some(i as i64),
-            });
-        }
-    }
-    Ok(())
-}
-
-/// Neumaier compensated sum — matches AOT `jet_data_neumaier_sum` (reports as `sum`).
-fn neumaier_sum(values: &[f64]) -> Result<f64, DataError> {
-    reject_nonfinite("sum", values)?;
-    let mut sum = 0.0f64;
-    let mut compensation = 0.0f64;
-    for value in values.iter().copied() {
-        let t = sum + value;
-        if sum.abs() >= value.abs() {
-            compensation += (sum - t) + value;
-        } else {
-            compensation += (value - t) + sum;
-        }
-        sum = t;
-        if !sum.is_finite() || !compensation.is_finite() {
-            return Err(err(
-                "Overflow",
-                "sum",
-                "finite overflow while summing",
-            ));
-        }
-    }
-    let out = sum + compensation;
-    if !out.is_finite() {
-        return Err(err(
-            "Overflow",
-            "sum",
-            "finite overflow while summing",
-        ));
-    }
-    Ok(normalize_zero(out))
-}
-
-fn mean_checked(values: &[f64]) -> Result<f64, DataError> {
-    if values.is_empty() {
-        return Err(err("Empty", "mean", "mean of empty data is undefined"));
-    }
-    let sum = neumaier_sum(values)?;
-    Ok(normalize_zero(sum / values.len() as f64))
-}
-
-fn sum_checked(values: &[f64]) -> Result<f64, DataError> {
-    if values.is_empty() {
-        return Ok(0.0);
-    }
-    neumaier_sum(values)
-}
-
-fn min_checked(values: &[f64]) -> Result<f64, DataError> {
-    if values.is_empty() {
-        return Err(err("Empty", "min", "min of empty data is undefined"));
-    }
-    reject_nonfinite("min", values)?;
-    Ok(normalize_zero(
-        values.iter().copied().fold(f64::INFINITY, f64::min),
-    ))
-}
-
-fn max_checked(values: &[f64]) -> Result<f64, DataError> {
-    if values.is_empty() {
-        return Err(err("Empty", "max", "max of empty data is undefined"));
-    }
-    reject_nonfinite("max", values)?;
-    Ok(normalize_zero(
-        values.iter().copied().fold(f64::NEG_INFINITY, f64::max),
-    ))
-}
-
-fn quantile_checked(values: &[f64], q: f64) -> Result<f64, DataError> {
-    if !q.is_finite() || !(0.0..=1.0).contains(&q) {
-        return Err(err(
-            "InvalidArgument",
-            "quantile",
-            "quantile q must be a finite value in 0.0 through 1.0",
-        ));
-    }
-    if values.is_empty() {
-        return Err(err(
-            "Empty",
-            "quantile",
-            "quantile of empty data is undefined",
-        ));
-    }
-    reject_nonfinite("quantile", values)?;
-    let mut sorted = values.to_vec();
-    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let pos = q * (sorted.len().saturating_sub(1)) as f64;
-    let lo = pos.floor() as usize;
-    let hi = pos.ceil() as usize;
-    let value = if lo == hi {
-        sorted[lo]
-    } else {
-        let t = pos - lo as f64;
-        sorted[lo] * (1.0 - t) + sorted[hi] * t
-    };
-    Ok(normalize_zero(value))
-}
-
-fn median_checked(values: &[f64]) -> Result<f64, DataError> {
-    quantile_checked(values, 0.5).map_err(|mut e| {
-        e.operation = "median".into();
-        e
-    })
-}
-
-fn variance_checked(values: &[f64]) -> Result<f64, DataError> {
-    if values.is_empty() {
-        return Err(err(
-            "Empty",
-            "variance",
-            "variance of empty data is undefined",
-        ));
-    }
-    reject_nonfinite("variance", values)?;
-    // Deterministic Welford population variance in input order (matches AOT).
-    let mut count = 0.0f64;
-    let mut mean = 0.0f64;
-    let mut m2 = 0.0f64;
-    for value in values.iter().copied() {
-        count += 1.0;
-        let delta = value - mean;
-        mean += delta / count;
-        let delta2 = value - mean;
-        m2 += delta * delta2;
-        if !mean.is_finite() || !m2.is_finite() {
-            return Err(err(
-                "Overflow",
-                "variance",
-                "finite overflow while computing variance",
-            ));
-        }
-    }
-    Ok(normalize_zero(m2 / count))
-}
-
-fn stddev_checked(values: &[f64]) -> Result<f64, DataError> {
-    Ok(normalize_zero(variance_checked(values)?.sqrt()))
-}
-
-#[derive(Clone)]
-struct DataSummary {
-    count: i64,
-    sum: f64,
-    mean: f64,
-    min: f64,
-    max: f64,
-    median: f64,
-    variance: f64,
-    stddev: f64,
-}
-
-fn describe_checked(values: &[f64]) -> Result<DataSummary, DataError> {
-    if values.is_empty() {
-        return Err(err(
-            "Empty",
-            "describe",
-            "describe of empty data is undefined",
-        ));
-    }
-    let variance = variance_checked(values)?;
-    Ok(DataSummary {
-        count: values.len() as i64,
-        sum: sum_checked(values)?,
-        mean: mean_checked(values)?,
-        min: min_checked(values)?,
-        max: max_checked(values)?,
-        median: median_checked(values)?,
-        variance,
-        stddev: normalize_zero(variance.sqrt()),
-    })
-}
-
-fn bar_text_checked(groups: &[DataGroup]) -> Result<String, DataError> {
-    for (index, g) in groups.iter().enumerate() {
-        if g.count < 0 {
-            return Err(DataError {
-                kind: "InvalidArgument",
-                operation: "bar_text".into(),
-                reason: "plot counts must be non-negative".into(),
-                index: Some(index as i64),
-            });
-        }
-        if !g.sum.is_finite() || !g.mean.is_finite() {
-            return Err(DataError {
-                kind: "NonFinite",
-                operation: "bar_text".into(),
-                reason: "plot values must be finite".into(),
-                index: Some(index as i64),
-            });
-        }
-    }
-    let mut lines = Vec::new();
-    for g in groups {
-        let n = if g.count < 0 {
-            0
-        } else {
-            g.count.min(40) as usize
-        };
-        lines.push(format!("{} | {} {}", g.key, "#".repeat(n), g.count));
-    }
-    Ok(lines.join("\n"))
-}
-
-fn svg_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-}
-
-fn bar_svg_checked(groups: &[DataGroup]) -> Result<String, DataError> {
-    for (index, g) in groups.iter().enumerate() {
-        if g.count < 0 {
-            return Err(DataError {
-                kind: "InvalidArgument",
-                operation: "bar_svg".into(),
-                reason: "plot counts must be non-negative".into(),
-                index: Some(index as i64),
-            });
-        }
-        if !g.sum.is_finite() || !g.mean.is_finite() {
-            return Err(DataError {
-                kind: "NonFinite",
-                operation: "bar_svg".into(),
-                reason: "plot values must be finite".into(),
-                index: Some(index as i64),
-            });
-        }
-    }
-    let width = 320.0f64;
-    let row_h = 24.0f64;
-    let height = 24.0 + row_h * groups.len() as f64;
-    let max = groups.iter().map(|g| g.count).max().unwrap_or(1).max(1) as f64;
-    let mut out = format!(
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"320\" height=\"{}\" viewBox=\"0 0 320 {}\">",
-        height as i64, height as i64
-    );
-    out.push_str("<rect width=\"320\" height=\"100%\" fill=\"white\"/>");
-    for (i, g) in groups.iter().enumerate() {
-        let y = 18.0 + i as f64 * row_h;
-        let bar_w = ((g.count as f64 / max) * (width - 120.0)).round();
-        out.push_str(&format!(
-            "<text x=\"8\" y=\"{}\" font-family=\"monospace\" font-size=\"12\">{}</text>",
-            y as i64,
-            svg_escape(&g.key)
-        ));
-        out.push_str(&format!(
-            "<rect x=\"96\" y=\"{}\" width=\"{}\" height=\"14\" fill=\"#2f6f73\"/>",
-            (y - 12.0) as i64,
-            bar_w as i64
-        ));
-        out.push_str(&format!(
-            "<text x=\"{}\" y=\"{}\" font-family=\"monospace\" font-size=\"12\">{}</text>",
-            (104.0 + bar_w) as i64,
-            y as i64,
-            g.count
-        ));
-    }
-    out.push_str("</svg>");
-    Ok(out)
-}
-
-struct DataStatus {
-    step: String,
-    path: String,
-    copy: String,
-    ownership: String,
-    trust: String,
-    fallback: String,
-    replacement: String,
-}
-
-fn status_native(step: &str) -> DataStatus {
-    DataStatus {
-        step: step.into(),
-        path: "native".into(),
-        copy: "none".into(),
-        ownership: "jet".into(),
-        trust: "native".into(),
-        fallback: "none".into(),
-        replacement: "native".into(),
-    }
-}
-
-fn bridge_status(step: &str) -> DataStatus {
-    match step {
-        "py.*" => DataStatus {
-            step: "py.*".into(),
-            path: "unavailable".into(),
-            copy: "owned-copy".into(),
-            ownership: "python-sidecar".into(),
-            trust: "untrusted-foreign".into(),
-            fallback: "none".into(),
-            replacement: "core.data native table/series/stats".into(),
-        },
-        "r.*" => DataStatus {
-            step: "r.*".into(),
-            path: "unavailable".into(),
-            copy: "owned-copy".into(),
-            ownership: "r-sidecar".into(),
-            trust: "untrusted-foreign".into(),
-            fallback: "none".into(),
-            replacement: "core.data.Table typed round-trip".into(),
-        },
-        _ => DataStatus {
-            step: "gpu.*".into(),
-            path: "unavailable".into(),
-            copy: "device-transfer".into(),
-            ownership: "device-buffer".into(),
-            trust: "untrusted-accelerator".into(),
-            fallback: "none".into(),
-            replacement: "core.data / Tensor native CPU path".into(),
-        },
-    }
-}
-
-fn data_status() -> Vec<DataStatus> {
-    vec![
-        status_native("core.data.csv"),
-        status_native("core.data.stats"),
-        status_native("core.data.table"),
-        status_native("core.data.lazy"),
-        status_native("core.data.missing"),
-        status_native("core.data.schema"),
-        status_native("core.data.json"),
-        bridge_status("py.*"),
-        bridge_status("r.*"),
-        bridge_status("gpu.*"),
-    ]
-}
-
-fn normalize_bridge(provider: &str) -> Option<&'static str> {
-    let lower = provider.trim().trim_end_matches('.').to_ascii_lowercase();
-    let p = lower.strip_suffix(".*").unwrap_or(lower.as_str());
-    match p {
-        "py" | "python" => Some("py.*"),
-        "r" => Some("r.*"),
-        "gpu" | "cuda" | "metal" | "vulkan" | "webgpu" => Some("gpu.*"),
-        _ => None,
-    }
-}
-
-fn require_bridge(provider: &str) -> Result<(), DataError> {
-    let Some(step) = normalize_bridge(provider) else {
-        return Err(err(
-            "InvalidArgument",
-            "require_bridge",
-            format!("unknown data bridge provider `{provider}`; expected py, r, or gpu"),
-        ));
-    };
-    let status = bridge_status(step);
-    Err(err(
-        "Bridge",
-        "require_bridge",
-        format!(
-            "{step} unavailable (copy={}, ownership={}, trust={}, fallback={}, replacement={})",
-            status.copy, status.ownership, status.trust, status.fallback, status.replacement
-        ),
-    ))
+fn err(kind: DataErrorKind, operation: &str, reason: impl Into<String>) -> DataError {
+    data_kernel::jet_data_error(kind, operation, reason)
 }
 
 fn float_list(handle: i64) -> Vec<f64> {
@@ -490,7 +162,7 @@ fn result_f64(r: Result<f64, DataError>) -> i64 {
 fn result_data_err(e: DataError) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let h = rt.heap.alloc_record(7);
-        let kind = rt.heap.alloc_string(e.kind);
+        let kind = rt.heap.alloc_string(format!("{:?}", e.kind));
         let _ = rt.heap.record_set_string(h, 0, kind);
         let op = rt.heap.alloc_string(e.operation.clone());
         let _ = rt.heap.record_set_string(h, 1, op);
@@ -568,25 +240,25 @@ fn pack_status(rows: Vec<DataStatus>) -> i64 {
 }
 
 extern "C" fn jet_jit_data_status() -> i64 {
-    pack_status(data_status())
+    pack_status(data_kernel::jet_data_status())
 }
 
 extern "C" fn jet_jit_data_require_bridge(provider: i64) -> i64 {
     let name =
         Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(provider).unwrap_or_default());
-    result_unit(require_bridge(&name))
+    result_unit(data_kernel::jet_data_require_bridge(&name))
 }
 
 extern "C" fn jet_jit_data_stat(values: i64, op: i64) -> i64 {
     let vals = float_list(values);
     let r = match op {
-        0 => mean_checked(&vals),
-        1 => sum_checked(&vals),
-        2 => min_checked(&vals),
-        3 => max_checked(&vals),
-        4 => median_checked(&vals),
-        5 => variance_checked(&vals),
-        _ => stddev_checked(&vals),
+        0 => data_kernel::jet_data_mean_checked(&vals),
+        1 => data_kernel::jet_data_sum_checked(&vals),
+        2 => data_kernel::jet_data_min_checked(&vals),
+        3 => data_kernel::jet_data_max_checked(&vals),
+        4 => data_kernel::jet_data_median_checked(&vals),
+        5 => data_kernel::jet_data_variance_checked(&vals),
+        _ => data_kernel::jet_data_stddev_checked(&vals),
     };
     result_f64(r)
 }
@@ -594,12 +266,12 @@ extern "C" fn jet_jit_data_stat(values: i64, op: i64) -> i64 {
 extern "C" fn jet_jit_data_quantile(values: i64, q_bits: i64) -> i64 {
     let vals = float_list(values);
     let q = f64::from_bits(q_bits as u64);
-    result_f64(quantile_checked(&vals, q))
+    result_f64(data_kernel::jet_data_quantile_checked(&vals, q))
 }
 
 extern "C" fn jet_jit_data_describe(values: i64) -> i64 {
     let vals = float_list(values);
-    Concurrency::with_runtime_mut(|rt| match describe_checked(&vals) {
+    Concurrency::with_runtime_mut(|rt| match data_kernel::jet_data_describe_checked(&vals) {
                 Ok(s) => {
             let h = rt.heap.alloc_record(8);
             let _ = rt.heap.record_set_int(h, 0, s.count);
@@ -643,7 +315,7 @@ fn load_groups(groups: i64) -> Vec<DataGroup> {
 
 extern "C" fn jet_jit_data_bar_text(groups: i64) -> i64 {
     let groups = load_groups(groups);
-    Concurrency::with_runtime_mut(|rt| match bar_text_checked(&groups) {
+    Concurrency::with_runtime_mut(|rt| match data_kernel::jet_data_bar_text_checked(&groups) {
         Ok(s) => {
             let sid = rt.heap.alloc_string(s);
             crate::runtime_host::alloc_jit_result(rt, true, sid as u64)
@@ -657,7 +329,7 @@ extern "C" fn jet_jit_data_bar_text(groups: i64) -> i64 {
 
 extern "C" fn jet_jit_data_bar_svg(groups: i64) -> i64 {
     let groups = load_groups(groups);
-    Concurrency::with_runtime_mut(|rt| match bar_svg_checked(&groups) {
+    Concurrency::with_runtime_mut(|rt| match data_kernel::jet_data_bar_svg_checked(&groups) {
         Ok(s) => {
             let sid = rt.heap.alloc_string(s);
             crate::runtime_host::alloc_jit_result(rt, true, sid as u64)
@@ -719,12 +391,11 @@ fn load_line_options(options: i64) -> DataLineOptions {
 }
 
 fn result_data_plot_err(error: data_plot_rt::DataPlotError) -> i64 {
-    result_data_err(DataError {
-        kind: error.kind,
-        operation: error.operation.to_string(),
-        reason: error.reason.to_string(),
-        index: error.index,
-    })
+    let kind = match error.kind {
+        "NonFinite" => DataErrorKind::NonFinite,
+        _ => DataErrorKind::InvalidArgument,
+    };
+    result_data_err(err_at(kind, error.operation, error.index, error.reason))
 }
 
 extern "C" fn jet_jit_data_line_text(groups: i64, options: i64) -> i64 {
@@ -901,7 +572,7 @@ extern "C" fn jet_jit_data_pivot_sum(row_keys: i64, col_keys: i64, values: i64) 
                 .unwrap_or_default();
             let v = rt.heap.list_get_float(values, i).unwrap_or(0.0);
             if !v.is_finite() {
-                let e = err("NonFinite", "pivot_sum", "pivot values must be finite");
+                let e = err(DataErrorKind::NonFinite, "pivot_sum", "pivot values must be finite");
                 let sid = rt.heap.alloc_string(e.to_string());
                 return crate::runtime_host::alloc_jit_result(rt, false, sid as u64);
             }
@@ -933,37 +604,10 @@ extern "C" fn jet_jit_data_pivot_sum(row_keys: i64, col_keys: i64, values: i64) 
 
 extern "C" fn jet_jit_data_rolling_mean(values: i64, width: i64) -> i64 {
     let vals = float_list(values);
-    if width < 1 {
-        return result_data_err(err(
-            "InvalidArgument",
-            "rolling_mean",
-            "rolling width must be positive",
-        ));
-    }
-    for (index, v) in vals.iter().enumerate() {
-        if !v.is_finite() {
-            return result_data_err(err_at(
-                "NonFinite",
-                "rolling_mean",
-                Some(index as i64),
-                "numeric input must be finite",
-            ));
-        }
-    }
-    let width = width as usize;
-    let mut out = Vec::with_capacity(vals.len());
-    for i in 0..vals.len() {
-        let start = i.saturating_add(1).saturating_sub(width);
-        let window = &vals[start..=i];
-        match neumaier_sum(window) {
-            Ok(sum) => out.push(normalize_zero(sum / window.len() as f64)),
-            Err(e) => {
-                let mut e = e;
-                e.operation = "rolling_mean".into();
-                return result_data_err(e);
-            }
-        }
-    }
+    let out = match data_kernel::jet_data_rolling_mean_checked(&vals, width) {
+        Ok(out) => out,
+        Err(error) => return result_data_err(error),
+    };
     Concurrency::with_runtime_mut(|rt| {
         let list = rt.heap.alloc_empty_list();
         for v in out {
@@ -1067,13 +711,13 @@ fn materialize_lazy_rows(rt: &mut crate::JitRuntime, frame: i64) -> Result<i64, 
     let resolved = match LAZY_RESOLVED.lock() {
         Ok(g) => g,
         Err(_) => {
-            return Err(err("State", "collect", "lazy resolve lock poisoned"));
+            return Err(err(DataErrorKind::State, "collect", "lazy resolve lock poisoned"));
         }
     };
     let table = match LAZY_FN_TABLE.lock() {
         Ok(g) => g,
         Err(_) => {
-            return Err(err("State", "collect", "lazy fn table lock poisoned"));
+            return Err(err(DataErrorKind::State, "collect", "lazy fn table lock poisoned"));
         }
     };
     let mut cur = rt
@@ -1083,21 +727,21 @@ fn materialize_lazy_rows(rt: &mut crate::JitRuntime, frame: i64) -> Result<i64, 
     for (kind, fid) in ops {
         let Some(&idx) = resolved.get(&fid) else {
             return Err(err(
-                "State",
+                DataErrorKind::State,
                 "collect",
                 format!("lazy callable {fid} was not finalized"),
             ));
         };
         if idx >= table.len() {
             return Err(err(
-                "State",
+                DataErrorKind::State,
                 "collect",
                 format!("lazy callable index {idx} out of range"),
             ));
         }
         let ptr = table[idx] as *const u8;
         if ptr.is_null() {
-            return Err(err("State", "collect", "lazy callable null"));
+            return Err(err(DataErrorKind::State, "collect", "lazy callable null"));
         }
         if kind == 0 {
             type Pred = unsafe extern "C" fn(i64) -> i8;
@@ -1236,9 +880,9 @@ extern "C" fn jet_jit_data_stream_next(handle: i64) -> i64 {
         let idx = match (handle as usize).checked_sub(1) {
             Some(i) => i,
             None => {
-                let e = err("InvalidArgument", "next", "bad DataStream");
+                let e = err(DataErrorKind::InvalidArgument, "next", "bad DataStream");
                 let h = rt.heap.alloc_record(7);
-                let kind = rt.heap.alloc_string(e.kind);
+                let kind = rt.heap.alloc_string(format!("{:?}", e.kind));
                 let _ = rt.heap.record_set_string(h, 0, kind);
                 let op = rt.heap.alloc_string(e.operation);
                 let _ = rt.heap.record_set_string(h, 1, op);
@@ -1252,9 +896,9 @@ extern "C" fn jet_jit_data_stream_next(handle: i64) -> i64 {
             }
         };
         let Some(stream) = rt.data_streams.get_mut(idx) else {
-            let e = err("InvalidArgument", "next", "bad DataStream");
+            let e = err(DataErrorKind::InvalidArgument, "next", "bad DataStream");
             let h = rt.heap.alloc_record(7);
-            let kind = rt.heap.alloc_string(e.kind);
+            let kind = rt.heap.alloc_string(format!("{:?}", e.kind));
             let _ = rt.heap.record_set_string(h, 0, kind);
             let op = rt.heap.alloc_string(e.operation);
             let _ = rt.heap.record_set_string(h, 1, op);
@@ -1280,9 +924,9 @@ extern "C" fn jet_jit_data_stream_rest(handle: i64) -> i64 {
         let idx = match (handle as usize).checked_sub(1) {
             Some(i) => i,
             None => {
-                let e = err("InvalidArgument", "group_mean", "bad DataStream");
+                let e = err(DataErrorKind::InvalidArgument, "group_mean", "bad DataStream");
                 let h = rt.heap.alloc_record(7);
-                let kind = rt.heap.alloc_string(e.kind);
+                let kind = rt.heap.alloc_string(format!("{:?}", e.kind));
                 let _ = rt.heap.record_set_string(h, 0, kind);
                 let op = rt.heap.alloc_string(e.operation);
                 let _ = rt.heap.record_set_string(h, 1, op);
@@ -1296,9 +940,9 @@ extern "C" fn jet_jit_data_stream_rest(handle: i64) -> i64 {
             }
         };
         let Some(stream) = rt.data_streams.get_mut(idx) else {
-            let e = err("InvalidArgument", "group_mean", "bad DataStream");
+            let e = err(DataErrorKind::InvalidArgument, "group_mean", "bad DataStream");
             let h = rt.heap.alloc_record(7);
-            let kind = rt.heap.alloc_string(e.kind);
+            let kind = rt.heap.alloc_string(format!("{:?}", e.kind));
             let _ = rt.heap.record_set_string(h, 0, kind);
             let op = rt.heap.alloc_string(e.operation);
             let _ = rt.heap.record_set_string(h, 1, op);
@@ -1340,7 +984,7 @@ extern "C" fn jet_jit_data_group_reduce_limited(keys: i64, values: i64, max_grou
             let val = rt.heap.list_get_float(values, i).unwrap_or(0.0);
             if !val.is_finite() {
                 let e = err_at(
-                    "NonFinite",
+                    DataErrorKind::NonFinite,
                     "group_mean",
                     Some(i),
                     "group values must be finite",
@@ -1349,7 +993,7 @@ extern "C" fn jet_jit_data_group_reduce_limited(keys: i64, values: i64, max_grou
             }
             if !map.contains_key(&key) && map.len() as i64 >= max_groups {
                 return result_data_err(err(
-                    "Limit",
+                    DataErrorKind::Limit,
                     "group_mean",
                     format!("max_groups {max_groups} exceeded"),
                 ));
@@ -1359,7 +1003,7 @@ extern "C" fn jet_jit_data_group_reduce_limited(keys: i64, values: i64, max_grou
             e.1 += val;
             if !e.1.is_finite() {
                 return result_data_err(err(
-                    "Overflow",
+                    DataErrorKind::Overflow,
                     "group_mean",
                     "finite overflow while grouping",
                 ));
@@ -1385,9 +1029,9 @@ extern "C" fn jet_jit_data_group_reduce_limited(keys: i64, values: i64, max_grou
     })
 }
 
-fn err_at(kind: &'static str, op: &str, index: Option<i64>, reason: impl Into<String>) -> DataError {
+fn err_at(kind: DataErrorKind, op: &str, index: Option<i64>, reason: impl Into<String>) -> DataError {
     let mut e = err(kind, op, reason);
-    e.index = index;
+    e.index = index.ok_or(JetAbsent);
     e
 }
 

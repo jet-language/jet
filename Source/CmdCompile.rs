@@ -2709,7 +2709,7 @@ fn rebuild_dev_web(
         }
     };
     let Some(web) = &out.web else {
-        let message = jet::Diagnostics::render_ice_report("missing web codegen output", "");
+        let message = jet::Diagnostics::render_ice_report("missing web codegen output", "", false);
         eprintln!("{message}");
         host.mark_error("ICE".to_string(), message, is_rebuild);
         return false;
@@ -2889,6 +2889,7 @@ pub(crate) fn write_web_artifacts(
         return Err(jet::Diagnostics::render_ice_report(
             "rustc rejected generated wasm module",
             &String::from_utf8_lossy(&rustc.stderr),
+            true,
         ));
     }
 
@@ -3151,7 +3152,7 @@ pub(crate) fn build(
         let web = web.unwrap_or_else(|| {
             eprintln!(
                 "{}",
-                jet::Diagnostics::render_ice_report("missing web codegen output", "")
+                jet::Diagnostics::render_ice_report("missing web codegen output", "", false)
             );
             exit(ExitCodes::ICE);
         });
@@ -3193,7 +3194,7 @@ pub(crate) fn build(
         let plugin = plugin.unwrap_or_else(|| {
             eprintln!(
                 "{}",
-                jet::Diagnostics::render_ice_report("missing plugin codegen output", "")
+                jet::Diagnostics::render_ice_report("missing plugin codegen output", "", false)
             );
             exit(ExitCodes::ICE);
         });
@@ -3202,7 +3203,7 @@ pub(crate) fn build(
             Err(PluginBuildError::GeneratedCodeRejected(msg)) => {
                 eprintln!(
                     "{}",
-                    jet::Diagnostics::render_ice_report("rustc rejected generated code", &msg)
+                    jet::Diagnostics::render_ice_report("rustc rejected generated code", &msg, true)
                 );
                 exit(ExitCodes::ICE);
             }
@@ -3376,7 +3377,7 @@ pub(crate) fn build(
         );
         eprintln!(
             "{}",
-            jet::Diagnostics::render_ice_report("the generated Rust did not compile.", &detail)
+            jet::Diagnostics::render_ice_report("the generated Rust did not compile.", &detail, true)
         );
         exit(ExitCodes::ICE);
     }

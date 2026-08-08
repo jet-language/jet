@@ -177,7 +177,7 @@ fn register_effect_facts(
     facts: &mut jet_foundation::Facts::FactRegistry,
 ) {
     use jet_foundation::Facts::FactKind;
-    for effect in jet_foundation::Facts::EFFECT_ROOTS {
+    for effect in jet_foundation::Facts::EFFECT_ROOTS.iter() {
         facts.declare(FactKind::Effect, (*effect).to_string(), std::iter::empty());
     }
     for name in crate::Syntax::BUILTIN_EFFECT_LEAVES {
@@ -1234,8 +1234,9 @@ fn check_bundle_opts_for_output_inner(
     // vocabulary — every `derive T.Name { … }` provider in the bundle, not
     // just this module's own, per the same bundle-wide orphan-rule view as
     // `derive_providers` above.
-    let known_derive_names: HashSet<String> =
-        derive_providers.iter().map(|(_, name, _, _, _)| name.clone()).collect();
+    let marker_vocabulary = jet_foundation::Policy::MarkerVocabulary::with_derives(
+        derive_providers.iter().map(|(_, name, _, _, _)| name.clone()),
+    );
     let ct_core_imports: Vec<HashMap<String, String>> = bundle
         .modules
         .iter()
@@ -1818,7 +1819,7 @@ fn check_bundle_opts_for_output_inner(
         // D-MARK-VOCAB1 (card #518): a marker name outside the registered
         // `@`/`#` plane vocabulary is E0927, instead of silently doing
         // nothing (the parser accepts any PascalCase name structurally).
-        diags.extend(check_marker_vocabulary(&module.items, &known_derive_names));
+        diags.extend(check_marker_vocabulary(&module.items, &marker_vocabulary));
         // D-CLIFLAG1: validate `#[CLI]`-derived structs (E1305/E1306), same
         // timing as the serde pass above (trait registry must be built so
         // `CLI` is visible on `s.derives`).

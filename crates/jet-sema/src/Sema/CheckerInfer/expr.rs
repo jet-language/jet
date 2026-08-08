@@ -527,6 +527,36 @@ impl<'a> Checker<'a> {
                 let else_ty = self.infer(else_value);
                 self.pop_scope();
                 let else_path = self.flow.clone();
+                // D-LIN1 / D-FACT-FLOW1: E0141 — a `#SingleUse` value consumed
+                // on one arm and not the other. `Moved::join` is a union (keeps
+                // either arm's move), so the merged store alone would call this
+                // value consumed and E0140 would never see the gap; check the
+                // two pre-merge snapshots directly for exactly one side moving
+                // it, over the bindings live at this scope before the branch.
+                let scope_depth = self.scope_depth();
+                let mut divergent_single_use: Vec<(String, Span)> = before
+                    .bindings
+                    .iter_at(scope_depth)
+                    .filter_map(|(name, info)| {
+                        let use_span = info.single_use_span?;
+                        if before.moved.contains(name) {
+                            return None;
+                        }
+                        let moved_then = then_path.moved.contains(name);
+                        let moved_else = else_path.moved.contains(name);
+                        if moved_then != moved_else {
+                            Some((name.to_string(), use_span))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                divergent_single_use.sort_by(|a, b| a.1.start.cmp(&b.1.start).then(a.0.cmp(&b.0)));
+                for (name, use_span) in divergent_single_use {
+                    self.diags.push(
+                        crate::Sema::CheckerOwnership::e0141_unconsumed_branch(&name, use_span),
+                    );
+                }
                 self.flow = crate::Sema::FlowFacts::FlowFacts::merge_paths(
                     &before,
                     &[then_path, else_path],

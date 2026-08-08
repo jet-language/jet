@@ -14,8 +14,8 @@ pub(super) use core_calls::{
 };
 /// Public host entry for the TIR evaluator (#777).
 pub use core_calls::{
-    apply_core_call, apply_data_line_call, apply_impure_core_call, display_core_pure_value,
-    eval_regex_replace_all_with,
+    apply_core_call, apply_data_line_call, apply_impure_core_call, data_status_rows,
+    display_core_pure_value, eval_regex_replace_all_with,
 };
 pub use dispatch::apply_dollar_splices;
 /// Public for TirBridge `Rng.shuffle(&list)` write-back (#777).

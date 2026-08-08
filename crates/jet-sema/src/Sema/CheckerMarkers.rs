@@ -15,7 +15,7 @@
 //! `Printable` and `Equatable`.
 
 use crate::AST::{Item, Marker};
-use crate::Diagnostics::{Diagnostic, Span};
+use crate::Diagnostics::Diagnostic;
 use crate::Syntax;
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -626,77 +626,49 @@ impl<'a> crate::Sema::Checker<'a> {
 /// E0927: `name` isn't a registered applied rule. `vocab` supplies nearest
 /// spelling suggestions. The text itself lives in the registry so the parser's
 /// function-site check and this type-site check cannot drift apart.
-fn e0927_unknown_marker(name: &str, vocab: &[String], span: Span) -> Diagnostic {
-    crate::Policy::marker_unknown_error(name, vocab, span)
+/// Every marker name written on `items`, wherever it sits: on the type
+/// (`s.type_markers` / `e.type_markers`, the full pre-classification list, so
+/// plane info from `Marker.sigil` survives) and on a field or a variant
+/// (`f.serde_markers` / `v.serde_markers`, which keep their `Marker`s whole;
+/// only `#Redact` is pulled out into `f.redact` upstream). One walk, so a new
+/// marker position is checked the moment it is read.
+fn markers_in(items: &[Item]) -> impl Iterator<Item = &Marker> {
+    items.iter().flat_map(|item| {
+        let (type_markers, member_markers): (&[Marker], Vec<&Marker>) = match item {
+            Item::Struct(s) => (
+                &s.type_markers,
+                s.fields.iter().flat_map(|f| f.serde_markers.iter()).collect(),
+            ),
+            Item::Enum(e) => (
+                &e.type_markers,
+                e.variants.iter().flat_map(|v| v.serde_markers.iter()).collect(),
+            ),
+            _ => (&[], Vec::new()),
+        };
+        type_markers.iter().chain(member_markers)
+    })
 }
 
-/// True when `name` is a built-in rule or visible user derive.
-fn is_legal_rule_name(name: &str, known_derive_names: &HashSet<String>) -> bool {
-    Syntax::is_applied_rule(name) || known_derive_names.contains(name)
-}
-
-/// Check one marker against its sigil's plane. Returns `None` when it's
-/// legal, or already reported elsewhere:
-/// - a name known on the OTHER plane already got E0062/E0063 from the
-///   parser's shared marker reader — never double-report.
-fn check_one(m: &Marker, known_derive_names: &HashSet<String>) -> Option<Diagnostic> {
-    let e0922_owns_debug = crate::Policy::applied_rule(&m.name).is_some_and(|row| {
-        row.name == "Debug"
-            && matches!(row.status, crate::Policy::RuleStatus::Retired { .. })
-    });
-    if e0922_owns_debug || is_legal_rule_name(&m.name, known_derive_names) {
-        return None;
-    }
-    let vocab: Vec<String> = crate::Policy::active_rule_names()
-        .into_iter()
-        .chain(known_derive_names.iter().cloned())
-        .collect();
-    Some(e0927_unknown_marker(&m.name, &vocab, m.name_span))
-}
-
-/// D-MARK-VOCAB1 (card #518): validate every marker name on `items` against
-/// its plane's registered vocabulary (E0927). Covers type-level markers
-/// (`s.type_markers`/`e.type_markers`, the full pre-classification list —
-/// `Syntax.rs` module docs — so plane info from `Marker.sigil` survives)
-/// and field/variant-level bracket markers (`f.serde_markers`,
-/// `v.serde_markers`, which keep their `Marker`s whole; only `#Redact` is
-/// pulled out into `f.redact` upstream). `known_derive_names` is the set of
-/// `derive T.Name { … }` providers visible to this build (bundle-wide in
-/// `Bundle.rs`, so a cross-module user derive is never a false unknown).
-pub(crate) fn check_marker_vocabulary(items: &[Item], known_derive_names: &HashSet<String>) -> Vec<Diagnostic> {
-    let mut out = Vec::new();
-    for item in items {
-        match item {
-            Item::Struct(s) => {
-                for m in &s.type_markers {
-                    if let Some(d) = check_one(m, known_derive_names) {
-                        out.push(d);
-                    }
-                }
-                for f in &s.fields {
-                    for m in &f.serde_markers {
-                        if let Some(d) = check_one(m, known_derive_names) {
-                            out.push(d);
-                        }
-                    }
-                }
-            }
-            Item::Enum(e) => {
-                for m in &e.type_markers {
-                    if let Some(d) = check_one(m, known_derive_names) {
-                        out.push(d);
-                    }
-                }
-                for v in &e.variants {
-                    for m in &v.serde_markers {
-                        if let Some(d) = check_one(m, known_derive_names) {
-                            out.push(d);
-                        }
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    out
+/// D-MARK-VOCAB1 (card #518) + D-META-ONE1=A: validate every marker name on
+/// `items` against the one vocabulary (E0927). `vocabulary` is the registry
+/// read from `Prelude/Markers.jet` plus the `derive T.Name { … }` providers
+/// visible to this build (bundle-wide in `Bundle.rs`, so a cross-module user
+/// derive is never a false unknown).
+pub(crate) fn check_marker_vocabulary(
+    items: &[Item],
+    vocabulary: &crate::Policy::MarkerVocabulary,
+) -> Vec<Diagnostic> {
+    markers_in(items)
+        .filter(|marker| {
+            // A name known on the OTHER plane already got E0062/E0063 from the
+            // parser's shared marker reader — never double-report. Retired
+            // `Debug` is E0922's business for the same reason.
+            let e0922_owns_debug = crate::Policy::applied_rule(&marker.name).is_some_and(|row| {
+                row.name == "Debug"
+                    && matches!(row.status, crate::Policy::RuleStatus::Retired { .. })
+            });
+            !e0922_owns_debug && !vocabulary.knows(&marker.name)
+        })
+        .map(|marker| vocabulary.unknown(&marker.name, marker.name_span))
+        .collect()
 }

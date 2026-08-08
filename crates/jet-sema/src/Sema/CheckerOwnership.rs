@@ -4164,12 +4164,10 @@ impl<'a> Checker<'a> {
             })
             .collect();
         for (name, span) in pending {
-            self.diags.push(Diagnostic::lint(
-                "L1101",
-                format!("task `{}` is dropped without `.join()`", name),
-                "the program may end before this task finishes".to_string(),
-                "call `.join()` on the task before it goes out of scope, or call `.detach()` if fire-and-forget is intentional".to_string(),
-                Some(span),
+            self.diags.push(l1101_unjoined_task(
+                &format!("`{name}`"),
+                "the program may end before this task finishes",
+                span,
             ));
         }
     }
@@ -5889,24 +5887,57 @@ mod discard_tests {
     }
 }
 
-/// D-LIN1 (ratified 2026-06-21): E0140 — a `#SingleUse` value reached the end of
-/// its scope without being consumed. The fix names the three legal exits.
+/// D-LIN1 (ratified 2026-06-21) / D-FACT-WORD1=A: E0140 — a `#SingleUse` value
+/// reached the end of its scope without being consumed. One duty voice: the
+/// value still owes its job; consuming it discharges the duty, and the
+/// audited `consume` gate (E0143) is the only written word that lets it go
+/// undone.
 pub(crate) fn e0140_unconsumed(name: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0140",
-        format!("`{}` must be used exactly once, but it is never used", name),
+        format!("`{}` still owes `consume`", name),
         "this value's type is `#SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)".to_string(),
         format!(
-            "give it away exactly once: move it to a `{}` parameter, or `return` it",
-            Syntax::SIGIL_MOVE
+            "consume it exactly once: move it to a `{}` parameter, or `return` it — or write `#{}(\"reason\") {{ consume({}) }}` to discard it deliberately",
+            Syntax::SIGIL_MOVE, Syntax::KW_UNSAFE, name
         ),
+        Some(span),
+    )
+}
+
+/// Same duty voice as [`e0140_unconsumed`], for the `_ :: value` discard case
+/// (D-FACT-WORD1=A): binding a `#SingleUse` value to `_` skips its job before
+/// it's done.
+pub(crate) fn e0140_discarded_wildcard(span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0140",
+        "this value still owes `consume`".to_string(),
+        "this value's type is `#SingleUse`, so it carries a job that has to be done — discarding it into `_` skips that job before it's done".to_string(),
+        format!(
+            "bind it to a name, then consume it exactly once — or write `#{}(\"reason\") {{ consume(...) }}` to discard it deliberately",
+            Syntax::KW_UNSAFE
+        ),
+        Some(span),
+    )
+}
+
+/// D-CONC-JOIN1 / D-FACT-WORD1=A: one duty voice for every task-owes-join
+/// site. `#SingleUse`'s duty and a task handle's duty are the same law
+/// (`lint_unjoined_tasks_in_current_scope` has always mirrored the
+/// `#SingleUse` check) — the value still owes `join`, and `.detach()` is the
+/// one written word that lets it go free.
+pub(crate) fn l1101_unjoined_task(subject: &str, why: &str, span: Span) -> Diagnostic {
+    Diagnostic::lint(
+        "L1101",
+        format!("{subject} still owes `join`"),
+        why.to_string(),
+        "join it with `.join()`, or write `.detach()` to let it go free".to_string(),
         Some(span),
     )
 }
 
 /// D-LIN1 (ratified 2026-06-21): E0141 — a `#SingleUse` value is consumed on one
 /// branch of an `if` but not the other, so some paths leave it unused.
-#[allow(dead_code)]
 pub(crate) fn e0141_unconsumed_branch(name: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0141",

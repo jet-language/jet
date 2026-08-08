@@ -151,10 +151,49 @@ pub(crate) fn is_text_error_type_name(name: &str) -> bool {
     name == "TextError"
 }
 
+/// D-FACT-HOME1=A: the fixed marker-argument menu (`Capability`, `InlineMode`,
+/// etc.) is a fact vocabulary published for reflection, never a general type —
+/// no constructor exists outside `#Marker(param: Name.Variant)` position. Each
+/// fix names the real path: the living counterpart when one exists (only
+/// `Capability` has one — `Authority`/`[Right]`), otherwise the marker that
+/// legitimately writes the name. `Layout` is excluded: it is also a real
+/// dot-ctor value type (D-LAYOUT-CTOR1, see the `matches!` in
+/// `core_type_known`), so that name resolves before this ever runs.
+fn phantom_fact_menu_fix(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "ABI" => "write it only inside `#ABI(name: system)`",
+        "Capability" => "take `Authority` (the rights value), or a rights list `[Right]`; inside a marker, write it in `#Grant(...)` or `#Caps(...)`",
+        "FfiLanguage" => "write it only inside `#FFI(language: c)`",
+        "InlineMode" => "write it only inside `#Inline(mode: Always)`",
+        "IntType" => "write it only inside `#Layout(tag: I32)`",
+        "KernelMode" => "write it only inside `#Kernel(mode: parallel)`",
+        "Maturity" => "write it only inside `#Meta(maturity: .Tested)`",
+        "NamingCase" => "write it only inside `#RenameAll(case: snake)`",
+        "ObligationMode" => "write it only inside `#Unsafe(\"reason\", obligations: .Track)`",
+        "PolicySetting" => "write it only inside `#Policy(no_alloc)`",
+        "Site" => "write it only as `$sites: [...]` on a `marker` declaration",
+        "State" => "write it only inside `#State(state: .Draft)` or `#Transition(from:, to:)`",
+        "TaintKind" => "it has no live marker: its only user was the retired `#Tainted`, now `#Input`",
+        "Target" => "write it only inside `#Target(target: Web)`",
+        "Track" => "write `#Track` instead — it takes no arguments",
+        _ => return None,
+    })
+}
+
+/// D-FACT-HOME1=A: "a phantom fact-menu name is refused at the signature, and
+/// the diagnostic names the real path rather than a bare unknown-type error."
+pub(crate) fn phantom_fact_menu_diag(name: &str, span: Span) -> Option<Diagnostic> {
+    let fix = phantom_fact_menu_fix(name)?;
+    Some(Diagnostic::error(
+        "E0119",
+        format!("`{name}` is a fact menu, not a type"),
+        format!("`{name}` names a fixed set of marker-argument values; it is never constructed as an ordinary value"),
+        fix.to_string(),
+        Some(span),
+    ))
+}
+
 pub(crate) fn core_type_known(name: &str) -> bool {
-    if crate::Policy::rule_arg_declaration(name).is_some() {
-        return true;
-    }
     matches!(
         name,
         "Unit" | "U8" | "Error" | "ProcessResult" | "ProcessSpec" | "ProcessChild" | "Stopwatch" | "Closed"
@@ -771,7 +810,8 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     if type_name == "MethodInfo" {
         return match field {
             "name" | "module" | "identity" | "return_type" | "signature" => Some(Type::String),
-            "params" | "markers" => Some(Type::List(Box::new(Type::String))),
+            "params" => Some(Type::List(Box::new(Type::String))),
+            "markers" => Some(Type::List(Box::new(Type::Named("MarkerInfo".to_string())))),
             "is_pub" => Some(Type::Bool),
             "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
             _ => None,
@@ -780,7 +820,7 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     if type_name == "FieldInfo" {
         return match field {
             "name" | "ty" => Some(Type::String),
-            "markers" => Some(Type::List(Box::new(Type::String))),
+            "markers" => Some(Type::List(Box::new(Type::Named("MarkerInfo".to_string())))),
             "is_pub" => Some(Type::Bool),
             "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
             _ => None,

@@ -119,6 +119,9 @@ pub struct MarkerDeclParam {
     pub name_span: Span,
     pub ty: Option<Type>,
     pub value: Option<Box<Expr>>,
+    /// D-VARIADIC1: `name: ...T` — the marker takes a list of arguments of this
+    /// type rather than one. Always false on a `$`-marked fact.
+    pub variadic: bool,
 }
 
 /// D-MOD1/2: code module — `module math;` or `module math { pub fn … }`.

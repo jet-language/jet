@@ -21,6 +21,87 @@
 pub use crate::Syntax::edit_distance;
 use crate::Syntax::BINARY_NAME;
 
+/// One reserved word or sigil, for `jet inspect reserved` (#1659 criterion 5).
+pub struct ReservedEntry {
+    pub spelling: &'static str,
+    pub kind: &'static str,
+    pub note: &'static str,
+}
+
+/// D-MEM1 / D-SHAPE-COPY1=A / D-CONST-RETIRE1: the five teaching-reserved
+/// words — real identifiers a user cannot bind because the lexer/parser
+/// recognizes them only to redirect to their current spelling. Never in
+/// `crate::Syntax::JET_KEYWORD_LIST`.
+pub const TEACHING_RESERVED: &[ReservedEntry] = &[
+    ReservedEntry { spelling: crate::Syntax::KW_COPY, kind: "teaching-reserved word", note: "retired; write `~value` instead (E0991)" },
+    ReservedEntry { spelling: crate::Syntax::KW_MUTATE, kind: "teaching-reserved word", note: "retired; write `&value` instead (E0056)" },
+    ReservedEntry { spelling: crate::Syntax::KW_MOVE, kind: "teaching-reserved word", note: "retired as a bare prefix; write `^value` instead (E0057); `.take(n)` stays a valid method" },
+    ReservedEntry { spelling: crate::Syntax::KW_CONST, kind: "teaching-reserved word", note: "retired; write `$name` instead (E0374)" },
+    ReservedEntry { spelling: crate::Syntax::FOREIGN_UNSAFE, kind: "teaching-reserved word", note: "the foreign spelling; write `#Unsafe(\"reason\") { … }` instead (E0031/E0003)" },
+];
+
+/// Sigils with compiler meaning outside ordinary operators.
+pub const RESERVED_SIGILS: &[ReservedEntry] = &[
+    ReservedEntry { spelling: crate::Syntax::SIGIL_BIND_IMMUT, kind: "sigil", note: "bind an immutable local" },
+    ReservedEntry { spelling: crate::Syntax::SIGIL_BIND_MUT, kind: "sigil", note: "bind a mutable local" },
+    ReservedEntry { spelling: crate::Syntax::SIGIL_WRITE, kind: "sigil", note: "borrow for write (D-MEM1)" },
+    ReservedEntry { spelling: crate::Syntax::SIGIL_MOVE, kind: "sigil", note: "take/move ownership (D-MEM1)" },
+    ReservedEntry { spelling: crate::Syntax::SIGIL_COPY, kind: "sigil", note: "produce an owned copy (D-SHAPE-COPY1)" },
+    ReservedEntry { spelling: crate::Syntax::COMPTIME_MARK, kind: "sigil", note: "compile-time value or block (S57)" },
+    ReservedEntry { spelling: crate::Syntax::SIGIL_FENCE_OPEN, kind: "sigil", note: "open a comptime fence" },
+    ReservedEntry { spelling: crate::Syntax::SIGIL_FENCE_CLOSE, kind: "sigil", note: "close a comptime fence" },
+    ReservedEntry { spelling: crate::Syntax::SIGIL_SPREAD, kind: "sigil", note: "spread elements" },
+];
+
+/// Plain-text render of `jet inspect reserved`.
+pub fn reserved_report_text() -> String {
+    let mut out = String::from("keywords:\n");
+    for word in crate::Syntax::JET_KEYWORD_LIST {
+        out.push_str(&format!("  {word}\n"));
+    }
+    out.push_str("\nteaching-reserved words (not valid identifiers):\n");
+    for entry in TEACHING_RESERVED {
+        out.push_str(&format!("  {:<10} {}\n", entry.spelling, entry.note));
+    }
+    out.push_str("\nsigils:\n");
+    for entry in RESERVED_SIGILS {
+        out.push_str(&format!("  {:<10} {}\n", entry.spelling, entry.note));
+    }
+    out
+}
+
+/// `--json` render of `jet inspect reserved`.
+pub fn reserved_report_json() -> String {
+    fn esc(s: &str) -> String {
+        s.chars().flat_map(|c| match c {
+            '"' => "\\\"".chars().collect::<Vec<_>>(),
+            '\\' => "\\\\".chars().collect(),
+            c => vec![c],
+        }).collect()
+    }
+    let keywords = crate::Syntax::JET_KEYWORD_LIST
+        .iter()
+        .map(|word| format!("\"{}\"", esc(word)))
+        .collect::<Vec<_>>()
+        .join(",");
+    let render_entries = |entries: &[ReservedEntry]| {
+        entries
+            .iter()
+            .map(|entry| format!(
+                "{{\"spelling\":\"{}\",\"kind\":\"{}\",\"note\":\"{}\"}}",
+                esc(entry.spelling), esc(entry.kind), esc(entry.note)
+            ))
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+    format!(
+        "{{\"schema_version\":1,\"keywords\":[{}],\"teaching_reserved\":[{}],\"sigils\":[{}]}}",
+        keywords,
+        render_entries(TEACHING_RESERVED),
+        render_entries(RESERVED_SIGILS),
+    )
+}
+
 /// One global flag that applies across commands.
 pub struct FlagSpec {
     /// Long form, e.g. `--json` (always present).
@@ -80,6 +161,8 @@ pub enum HandlerKey {
     Push, Bridge, Services, Config,
     Toolchain, Upgrade, Doctor, Completions, Man, Devtools, Lsp,
     Perf,
+    Reserved,
+    Facts,
 }
 
 impl HandlerKey {
@@ -100,6 +183,8 @@ impl HandlerKey {
             Self::Upgrade => "upgrade", Self::Doctor => "doctor", Self::Completions => "completions",
             Self::Man => "man", Self::Devtools => "devtools", Self::Lsp => "lsp",
             Self::Perf => "perf",
+            Self::Reserved => "reserved",
+            Self::Facts => "facts",
         }
     }
 
@@ -135,6 +220,14 @@ const INSPECT_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec { name: "search", usage: "search <query>", summary: "Search the local package catalog", handler: HandlerKey::Search },
     NestedCommandSpec { name: "info", usage: "info <source>.<package>", summary: "Show package details", handler: HandlerKey::Info },
     NestedCommandSpec { name: "outdated", usage: "outdated", summary: "List dependencies with available updates", handler: HandlerKey::Outdated },
+    // #1659 criterion 5: reserved words and sigils, including the five
+    // teaching-reserved words (copy/mut/take/const/unsafe) that reject valid
+    // identifiers with a redirect to their current spelling.
+    NestedCommandSpec { name: "reserved", usage: "reserved [--json]", summary: "List reserved words and sigils", handler: HandlerKey::Reserved },
+    // D-ONCE-LAW1=A (#1728): the one registration table, read out. Every
+    // registered truth shows its home, its renderers, and the guard that
+    // proves there is no second copy.
+    NestedCommandSpec { name: "facts", usage: "facts [--json]", summary: "List every registered truth and its guard", handler: HandlerKey::Facts },
 ];
 // D-CLI-STORE2=A / D-JPK-STORECLI1=D: the physical store lives under
 // `hangar`. Archive verbs share Jetpack's signed, versioned archive format,
@@ -1237,6 +1330,7 @@ mod tests {
             ("inspect", "live", Live, "live", false),
             ("inspect", "logs", Logs, "logs", false), ("inspect", "search", Search, "search", false),
             ("inspect", "info", Info, "info", false), ("inspect", "outdated", Outdated, "outdated", false),
+            ("inspect", "reserved", Reserved, "reserved", false), ("inspect", "facts", Facts, "facts", false),
             ("hangar", "verify", Hangar, "hangar", true), ("hangar", "repair", Hangar, "hangar", true),
             ("hangar", "copy", Hangar, "hangar", true), ("hangar", "import", Hangar, "hangar", true),
             ("hangar", "export", Hangar, "hangar", true), ("hangar", "dump", Hangar, "hangar", true),

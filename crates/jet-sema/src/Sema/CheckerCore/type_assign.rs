@@ -4,7 +4,7 @@ use crate::Diagnostics::{Diagnostic, Span};
 use crate::Generics::{e0905, e0909, generic_depth_exceeded, substitute_type, COMPARABLE};
 use crate::Sema::CheckerCoreLib::{
     core_type_known, data_renamed_to_datatree, layout_handle_renamed_to_layout,
-    retired_acronym_spelling_diag,
+    phantom_fact_menu_diag, retired_acronym_spelling_diag,
 };
 use crate::Sema::Checker;
 use crate::Sema::Diagnostics::{
@@ -221,6 +221,13 @@ impl<'a> Checker<'a> {
                         if found {
                             return;
                         }
+                    }
+                    // D-FACT-HOME1=A: a phantom fact-menu name (`Capability`,
+                    // `InlineMode`, ...) is refused with a fix naming the real
+                    // path, not the generic "no type called" message.
+                    if let Some(diag) = phantom_fact_menu_diag(n, span) {
+                        self.diags.push(diag);
+                        return;
                     }
                     self.diags.push(Diagnostic::error(
                         "E0119",

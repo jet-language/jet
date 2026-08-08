@@ -460,7 +460,6 @@ const PLAIN_CORE_CALLS: &[(&str, &str, &str, bool, &[bool])] = &[
     ("core.text", "graphemes", "jet_text_graphemes", true, &[true]),
     ("core.text", "words", "jet_text_words", true, &[true]),
     ("core.text", "sentences", "jet_text_sentences", true, &[true]),
-    ("core.text", "display_width", "jet_text_display_width_default", true, &[true]),
     ("core.text", "scalar_count", "jet_text_unicode_scalar_count", true, &[true]),
     ("core.text", "byte_count", "jet_text_unicode_byte_count", true, &[true]),
     ("core.text", "is_alphabetic", "jet_text_is_alphabetic", true, &[true]),
@@ -2249,6 +2248,12 @@ pub(crate) fn emit_tir_core_call(
             arg(0),
             arg(1)
         ),
+        // The 1-arg default stays here, not in `PLAIN_CORE_CALLS`: the table is
+        // read before this match, so a table row would answer the 2-arg call
+        // above and drop the policy argument.
+        ("core.text", "display_width") => {
+            format!("{}(&({}))", helper("jet_text_display_width_default"), arg(0))
+        }
         
         
         
@@ -3232,5 +3237,82 @@ pub(crate) fn emit_tir_core_call(
         ("core.time.date", "parse") => format!("JetDate::parse(&({})).map_err(|e| e)", arg(0)),
         
         _ => "/* unknown std call */".to_string(),
+    }
+}
+
+/// D-ONCE-LAW1=A: the guard for the `AotCoreCalls` truth row.
+///
+/// `emit_plain_core_call` reads `PLAIN_CORE_CALLS` before the bespoke match
+/// runs, so a bespoke arm keyed on a pair the table already holds is a second
+/// copy of the same call that nothing can reach. It compiles, it never runs,
+/// and it drifts. This counts the definition sites for every pair and refuses
+/// a second one.
+#[cfg(test)]
+mod tests {
+    /// The `(module, method)` pairs the table defines.
+    fn table_keys(source: &str) -> Vec<(String, String)> {
+        let start = source
+            .find("const PLAIN_CORE_CALLS")
+            .expect("the table is the one home for a plain core call");
+        let end = source[start..]
+            .find("\n];")
+            .expect("the table ends")
+            + start;
+        pairs(&source[start..end])
+    }
+
+    /// The `(module, method)` pairs the bespoke match arms below the table
+    /// define. Both readers use the same shape: `("a", "b"` at a line start.
+    fn pairs(text: &str) -> Vec<(String, String)> {
+        let mut found = Vec::new();
+        for line in text.lines() {
+            let line = line.trim_start();
+            let Some(rest) = line.strip_prefix("(\"") else {
+                continue;
+            };
+            let Some((module, rest)) = rest.split_once("\", \"") else {
+                continue;
+            };
+            let Some((method, _)) = rest.split_once('"') else {
+                continue;
+            };
+            found.push((module.to_string(), method.to_string()));
+        }
+        found
+    }
+
+    #[test]
+    fn no_bespoke_arm_repeats_a_table_row() {
+        let source = include_str!("core_calls.rs");
+        let table_end = source
+            .find("const PLAIN_CORE_CALLS")
+            .and_then(|start| source[start..].find("\n];").map(|end| start + end))
+            .expect("the table is the one home for a plain core call");
+        let keys = table_keys(source);
+        assert!(keys.len() > 500, "the table lost its rows: {}", keys.len());
+
+        let shadowed: Vec<String> = pairs(&source[table_end..])
+            .into_iter()
+            .filter(|pair| keys.contains(pair))
+            .map(|(module, method)| format!("(\"{module}\", \"{method}\")"))
+            .collect();
+        assert!(
+            shadowed.is_empty(),
+            "these calls are defined twice — once in PLAIN_CORE_CALLS and again \
+             in a bespoke arm the table already answers, so the arm is dead and \
+             free to drift ({}):\n{}",
+            shadowed.len(),
+            shadowed.join("\n")
+        );
+    }
+
+    /// The table itself says each call once.
+    #[test]
+    fn the_table_defines_each_call_once() {
+        let mut keys = table_keys(include_str!("core_calls.rs"));
+        let before = keys.len();
+        keys.sort();
+        keys.dedup();
+        assert_eq!(before, keys.len(), "PLAIN_CORE_CALLS holds a repeated key");
     }
 }

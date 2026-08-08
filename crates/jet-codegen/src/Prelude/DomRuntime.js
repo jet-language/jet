@@ -142,9 +142,15 @@ export function layout(backend, node, frame) {
   return frame;
 }
 
+// Card #1658: shared default mount viewport (classic 80x24 terminal), named
+// once so no host hand-types the literal. Matches DEFAULT_MOUNT_COLS/ROWS in
+// crates/jet-codegen/src/Prelude/Ui.rs.
+export const DEFAULT_MOUNT_COLS = 80;
+export const DEFAULT_MOUNT_ROWS = 24;
+
 /** D-UI-MOUNT1=A: measure → layout → paint (optional constraint; default 80×24). */
 export function mount(backend, node, constraint) {
-  const bounds = constraint ?? { minWidth: 0, minHeight: 0, maxWidth: 80, maxHeight: 24 };
+  const bounds = constraint ?? { minWidth: 0, minHeight: 0, maxWidth: DEFAULT_MOUNT_COLS, maxHeight: DEFAULT_MOUNT_ROWS };
   backend.commands = [];
   const size = measure(node, bounds);
   layout(backend, node, { x: 0, y: 0, width: size.width, height: size.height });

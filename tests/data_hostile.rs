@@ -118,6 +118,9 @@ fn hostile_corpus_covers_required_failure_classes() {
         "bad_window: InvalidArgument rolling_mean:",
         "hostile_svg_escaped: true",
         "large_limit: Limit group_mean:",
+        // #1657: the compensated kernel. A naive sum answers 0.0 for both.
+        "cancellation_sum: 1.0",
+        "cancellation_mean: 0.3333333333333333",
     ] {
         assert!(
             out.contains(needle),

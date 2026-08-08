@@ -191,6 +191,13 @@ const MODULE_CASES: &[&str] = &[
     "use core.data as data\n$comptime_value :: data.rolling_mean([1.0, 2.0, 3.0, 4.0], 2) ?? panic(\"data\")\n\nfn run() {\n    r :: data.rolling_mean([1.0, 2.0, 3.0, 4.0], 2) ?? panic(\"data\")\n    print(\"{$comptime_value}\")\n    print(\"{r}\")\n}\n",
     "use core.data as data\n$comptime_value :: data.min([3.0, -1.0, 5.0]) ?? panic(\"data\")\n\nfn run() {\n    r :: data.min([3.0, -1.0, 5.0]) ?? panic(\"data\")\n    print(\"{$comptime_value}\")\n    print(\"{r}\")\n}\n",
     "use core.data as data\n$comptime_value :: data.max([3.0, -1.0, 5.0]) ?? panic(\"data\")\n\nfn run() {\n    r :: data.max([3.0, -1.0, 5.0]) ?? panic(\"data\")\n    print(\"{$comptime_value}\")\n    print(\"{r}\")\n}\n",
+    // #1657: catastrophic cancellation. A naive left-to-right sum answers
+    // 0.0 here and the compensated kernel answers 1.0, so a second
+    // implementation on either tier fails these three cases.
+    "use core.data as data\n$comptime_value :: data.sum([10000000000000000.0, 1.0, -10000000000000000.0]) ?? panic(\"data\")\n\nfn run() {\n    r :: data.sum([10000000000000000.0, 1.0, -10000000000000000.0]) ?? panic(\"data\")\n    print(\"{$comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\n$comptime_value :: data.mean([10000000000000000.0, 1.0, -10000000000000000.0]) ?? panic(\"data\")\n\nfn run() {\n    r :: data.mean([10000000000000000.0, 1.0, -10000000000000000.0]) ?? panic(\"data\")\n    print(\"{$comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\n$comptime_value :: data.variance([10000000000000000.0, 1.0, -10000000000000000.0]) ?? panic(\"data\")\n\nfn run() {\n    r :: data.variance([10000000000000000.0, 1.0, -10000000000000000.0]) ?? panic(\"data\")\n    print(\"{$comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\n$comptime_value :: data.rolling_mean([10000000000000000.0, 1.0, -10000000000000000.0], 3) ?? panic(\"data\")\n\nfn run() {\n    r :: data.rolling_mean([10000000000000000.0, 1.0, -10000000000000000.0], 3) ?? panic(\"data\")\n    print(\"{$comptime_value}\")\n    print(\"{r}\")\n}\n",
     // card #392 pass 4: `core.encoding.{csv,toml,yaml,xml,cbor,jsonl}` +
     // `core.encoding.json.{canonical,events}`, ported verbatim from AOT's
     // `jet_ring_csv_*`/`toml`/`yaml` mods/`jet_std_xml_*`/`jet_cbor_*`/
@@ -710,6 +717,48 @@ fn xml_parse_options_match_comptime_and_runtime() {
     }
     let src = "use core.encoding.xml as xml\n$comptime_value :: xml.to_string(xml.parse_with(\"<r><a/></r>\", xml.XMLParseOptions.safe()) ?? panic(\"bad\"))\n\nfn run() {\n    r :: xml.to_string(xml.parse_with(\"<r><a/></r>\", xml.XMLParseOptions.safe()) ?? panic(\"bad\"))\n    print(\"{$comptime_value}\")\n    print(\"{r}\")\n}\n";
     check_comptime_src(2005, "typed XML options", src);
+}
+
+/// #1657 / I9: `core.data` statistics run one kernel on every tier, so an
+/// undefined answer is the same `DataError` everywhere. Empty input is the
+/// case a second implementation gets wrong: a naive copy returns 0.0 where the
+/// kernel reports `Empty`.
+#[test]
+fn data_empty_input_error_matches_comptime_and_runtime() {
+    if !have_rustc() {
+        eprintln!("note: rustc not found; skipping empty-input core.data differential");
+        return;
+    }
+    for (index, method) in ["sum", "mean", "min", "max", "median", "variance", "stddev"]
+        .into_iter()
+        .enumerate()
+    {
+        let src = format!(
+            r#"use core.data as data
+
+fn show(result: Float ? DataError) => String {{
+    if result == {{
+        .Ok(value) -> return "ok {{value}}"
+        .Err(e) -> return "{{e.operation}}|{{e.reason}}"
+    }}
+    return "unreachable"
+}}
+
+fn empty() => [Float] {{
+    return []
+}}
+
+$expected_empty :: show(data.{method}(empty()))
+
+fn run() {{
+    actual_empty :: show(data.{method}(empty()))
+    print("{{$expected_empty}}")
+    print("{{actual_empty}}")
+}}
+"#
+        );
+        check_comptime_src(2100 + index, &format!("empty core.data {method}"), &src);
+    }
 }
 
 #[test]
