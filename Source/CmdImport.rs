@@ -87,7 +87,7 @@ fn parse_args(raw: &[String]) -> Result<(String, PathBuf, Mode), (String, String
     let mut mode = Mode::Create;
     for arg in raw.iter().skip(1) {
         match arg.as_str() {
-            "--dry-run" if mode == Mode::Create => mode = Mode::DryRun,
+            jet::CLI::DRY_RUN_FLAG if mode == Mode::Create => mode = Mode::DryRun,
             "--update" if mode == Mode::Create => mode = Mode::Update,
             "--dry-run" | "--update" => {
                 return Err((

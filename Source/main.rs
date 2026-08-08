@@ -415,6 +415,7 @@ usage:
   {bin} fmt   -                     read from stdin, write formatted source to stdout
   {bin} fmt   --check               exit 1 if any file would change; list paths (CI gate)
   {bin} fmt   --check --diff        same, also print unified diffs
+  {bin} fmt   --dry-run             show formatting changes, write nothing
   {bin} fmt   --changed             format only VCS-changed .jet files (requires git)
   {bin} fix   <file.{ext}>          apply all auto-fixable diagnostics in place
   {bin} fix   <file.{ext}> --dry-run   show the fixes as a diff, write nothing
@@ -457,6 +458,7 @@ supply chain (E2-M8):
 flags:
   emit --rust <file.{ext}>     print generated Rust source
   --check                      with fmt: exit 1 if file would change (CI)
+  --dry-run                    with rewrite commands: preview changes without writing
   --sbom                       with build: write an SPDX SBOM beside the binary
   --vendor-dir <path>          with vendor: directory to copy dependencies into
   --small                      with build/run: smallest binary (S15)
@@ -997,6 +999,7 @@ fn main() {
     let emit_rust = false;
     let emit_generated = jet_argv.iter().any(|a| a == "--emit-generated");
     let fmt_check = jet_argv.iter().any(|a| a == "--check");
+    let dry_run = jet_argv.iter().any(|a| a == jet::CLI::DRY_RUN_FLAG);
     let json = jet_argv.iter().any(|a| a == "--json");
     let small = jet_argv.iter().any(|a| a == "--small");
     let freestanding_flag = jet_argv.iter().any(|a| a == "--freestanding");
@@ -1473,7 +1476,7 @@ fn main() {
             let stdin_path: Option<String> = jet_argv
                 .iter()
                 .find_map(|a| a.strip_prefix("--stdin-path=").map(str::to_string));
-            let show_diff = jet_argv.iter().any(|a| a == "--diff");
+            let show_diff = jet_argv.iter().any(|a| a == "--diff") || dry_run;
             let changed_only = jet_argv.iter().any(|a| a == "--changed");
             let explicit_paths: Vec<String> =
                 path_args.into_iter().filter(|p| p != "-").collect();
@@ -1481,7 +1484,7 @@ fn main() {
                 &explicit_paths,
                 stdin_mode,
                 stdin_path.as_deref(),
-                fmt_check,
+                fmt_check || dry_run,
                 show_diff,
                 changed_only,
                 mode,
@@ -2209,7 +2212,6 @@ fn main() {
 
     match cmd {
         "fix" => {
-            let dry_run = jet_argv.iter().any(|a| a == "--dry-run");
             let edition = jet_argv
                 .iter()
                 .find_map(|a| a.strip_prefix("--edition=").map(str::to_string));

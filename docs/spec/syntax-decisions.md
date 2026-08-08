@@ -4563,7 +4563,7 @@ call-graph/effects/member facts plus typed Package and workspace-overlay facts;
 foundation for dossier views, breadcrumb hints, impact analysis, and codemods
 (D-DOSSIER1/D-BREADCRUMB1/D-IMPACT1/D-CODEMOD1). `jet inspect dossier <file> [Symbol]`
 is the D-WD2 umbrella over those facts; `jet inspect codemod` starts with named JSON
-rename objects (`dry-run`/`apply`/`undo`) and replay logs. **D-DX5**: PATH `jet-*`
+rename objects (`<plan.json> --dry-run`, `apply <plan.json>`, `undo <log.json>`) and replay logs. **D-DX5**: PATH `jet-*`
 helper discovery (cargo/git-style external commands). **D-DX5-HOOK1=A**:
 compiler-extension WASM components (typed post-sema snapshot; see above) —
 not PATH helpers and not `target: plugin`. **D-REF3**: borrowed-return +
@@ -5043,7 +5043,7 @@ generation and reconcile through the proof-gated rollout object.
 #### Formatter, profiler, and notebooks
 
 **D-FMTPROJECT1=D — project formatter contract**: `jet fmt` discovers
-workspace/package/cwd scope, accepts explicit paths, `--check --diff`,
+workspace/package/cwd scope, accepts explicit paths, `--dry-run`, `--check --diff`,
 `--changed`, and stdin. Exit 0 means clean/formatted, 1 means check differences,
 and 2 means usage/parse/I/O failure. Preflight finds all failures before a
 zero-write abort. `jet fmt - --stdin-path=...` gives editor-equivalent stdin
