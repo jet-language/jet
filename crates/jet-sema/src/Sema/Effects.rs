@@ -26,7 +26,7 @@
 //! by default even with a matching declared bound absent — see
 //! `check_secret_grants`.
 //!
-//! D-EFFTREE1 (ratified 2026-07-03) amends D-EFF4/5: the ten flat names below
+//! D-EFFTREE1 (ratified 2026-07-03) amends D-EFF4/5: the 29 declared names below
 //! become tree **roots**. A user-written effect name may now be a dotted path
 //! rooted at one of them (`FS.Read`, `Net.HTTP.Get`) — the root is validated
 //! against the closed vocabulary (E0119 otherwise); further segments are an
@@ -37,7 +37,7 @@
 //! below it in the tree (`effect_covers`) — the same ancestor-subtree rule as
 //! D-TAG1's nested variant groups (CheckerCore.rs's switch-arm coverage:
 //! `variant.starts_with(&format!("{c}."))`). `Effect` itself stays the closed
-//! twelve-root enum (U13 added `Secret`), used for root validation/
+//! 29-root enum, used for root validation/
 //! classification and by the small set of call sites (D-TXN2, D-TAINT1,
 //! D-WASM1) that only ever care about a whole root regardless of leaf.
 
@@ -90,6 +90,8 @@ pub enum Effect {
     R,
     /// D-FFI-COM1=A: Windows COM apartment automation call.
     Com,
+    /// D-FFI-PY1=A: a supervised CPython sidecar or opt-in embedded runtime.
+    Py,
     /// D-WASM1=A: browser/DOM API use — implies JS partition for web targets.
     Browser,
     /// U13 (D-JPK-SECRETCRYPTO1): reading a decrypted repo secret
@@ -129,6 +131,7 @@ impl Effect {
             Effect::Php => "Php",
             Effect::R => "R",
             Effect::Com => "Com",
+            Effect::Py => "Py",
             Effect::Browser => "Browser",
             Effect::Secret => "Secret",
         }
@@ -163,6 +166,7 @@ impl Effect {
             "Php" => Effect::Php,
             "R" => Effect::R,
             "Com" => Effect::Com,
+            "Py" => Effect::Py,
             "Browser" => Effect::Browser,
             "Secret" => Effect::Secret,
             _ => return None,
@@ -200,7 +204,7 @@ pub fn effect_root(name: &str) -> &str {
 }
 
 /// D-EFFTREE1: validate a user-written effect path — bare (`FS`) or dotted
-/// (`FS.Read`, `Net.HTTP.Get`). The root must be one of the closed ten
+/// (`FS.Read`, `Net.HTTP.Get`). The root must be one of the closed 29
 /// D-EFF4/5 names (the caller reports E0119 on `None`); further segments are
 /// an open, user-chosen leaf path with no fixed vocabulary — mirrors D-TAG1's
 /// tag-tree dotted paths. Returns the path unchanged (as the canonical form)
