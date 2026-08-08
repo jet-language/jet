@@ -1820,63 +1820,70 @@ fn resident_safe_builtin_op(
     if !recv_safe {
         return false;
     }
+    // D-TAINT1/D-TAG-SURFACE1: a `#Input`/other user fact tag on the receiver's
+    // declared type (`Type::Tagged`) has no runtime representation — every
+    // check below must dispatch on the real underlying type, the same
+    // `erase_runtime_qualifiers` this file already uses for `intish_ty`, or a
+    // tagged receiver misses its op arm here and the whole function wrongly
+    // deopts to tier-0 interp even though the op is fully JIT-native-safe.
+    let recv_ty = erase_runtime_qualifiers(&recv.ty);
     match op {
         TBuiltinOp::LenString => {
-            (matches!(&recv.ty, Type::String) || is_process_result_string_field(recv))
+            (matches!(recv_ty, Type::String) || is_process_result_string_field(recv))
                 && args.is_empty()
         }
         TBuiltinOp::Trim | TBuiltinOp::ToUpper | TBuiltinOp::ToLower => {
-            (matches!(&recv.ty, Type::String) || is_process_result_string_field(recv))
+            (matches!(recv_ty, Type::String) || is_process_result_string_field(recv))
                 && args.is_empty()
         }
         TBuiltinOp::Replace => {
-            matches!(&recv.ty, Type::String)
+            matches!(recv_ty, Type::String)
                 && args.len() == 2
                 && args
                     .iter()
                     .all(|a| matches!(&a.ty, Type::String) && resident_safe_expr(a, callees))
         }
         TBuiltinOp::Push => {
-            (jit_list_native_type(&recv.ty)
-                || matches!(&recv.ty, Type::List(elem) if jit_value_type(elem))
-                || matches!(&recv.ty, Type::Apply { name, .. } if name == "PriorityQueue"))
+            (jit_list_native_type(recv_ty)
+                || matches!(recv_ty, Type::List(elem) if jit_value_type(elem))
+                || matches!(recv_ty, Type::Apply { name, .. } if name == "PriorityQueue"))
                 && args.len() == 1
                 && (jit_value_type(&args[0].ty) || jit_compound_type(&args[0].ty))
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::Keys | TBuiltinOp::Values => {
-            jit_map_string_type(&recv.ty) && args.is_empty()
+            jit_map_string_type(recv_ty) && args.is_empty()
         }
         TBuiltinOp::Sort => {
-            (jit_list_int_type(&recv.ty) || jit_list_string_type(&recv.ty)) && args.is_empty()
+            (jit_list_int_type(recv_ty) || jit_list_string_type(recv_ty)) && args.is_empty()
         }
         TBuiltinOp::LenList => {
-            (matches!(&recv.ty, Type::String)
-                || jit_list_native_type(&recv.ty)
-                || jit_list_iter_elem_type(&recv.ty).is_some()
-                || jit_closure_elem_type(&recv.ty).is_some()
+            (matches!(recv_ty, Type::String)
+                || jit_list_native_type(recv_ty)
+                || jit_list_iter_elem_type(recv_ty).is_some()
+                || jit_closure_elem_type(recv_ty).is_some()
                 || matches!(
-                    &recv.ty,
+                    recv_ty,
                     Type::Apply { name, .. }
                         if matches!(
                             name.as_str(),
                             "Set" | "Deque" | "SortedSet" | "PriorityQueue"
                         )
                 )
-                || matches!(&recv.ty, Type::Named(name) if name == "BitSet"))
+                || matches!(recv_ty, Type::Named(name) if name == "BitSet"))
                 && args.is_empty()
         }
         TBuiltinOp::GetList => {
-            jit_list_native_type(&recv.ty)
-                && !jit_list_intn_type(&recv.ty)
+            jit_list_native_type(recv_ty)
+                && !jit_list_intn_type(recv_ty)
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::Int)
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::GetMap => {
-            jit_map_resident_type(&recv.ty)
+            jit_map_resident_type(recv_ty)
                 && args.len() == 1
-                && (if jit_map_int_type(&recv.ty) {
+                && (if jit_map_int_type(recv_ty) {
                     matches!(&args[0].ty, Type::Int)
                 } else {
                     matches!(&args[0].ty, Type::String)
@@ -1884,9 +1891,9 @@ fn resident_safe_builtin_op(
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::InsertMap | TBuiltinOp::AddNewMap => {
-            jit_map_resident_type(&recv.ty)
+            jit_map_resident_type(recv_ty)
                 && args.len() == 2
-                && (if jit_map_int_type(&recv.ty) {
+                && (if jit_map_int_type(recv_ty) {
                     matches!(&args[0].ty, Type::Int)
                 } else {
                     matches!(&args[0].ty, Type::String)
@@ -1896,31 +1903,31 @@ fn resident_safe_builtin_op(
                 && resident_safe_expr(&args[1], callees)
         }
         TBuiltinOp::MapMerge => {
-            jit_map_resident_type(&recv.ty)
+            jit_map_resident_type(recv_ty)
                 && args.len() == 1
                 && jit_map_resident_type(&args[0].ty)
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::MapMergeWith => {
-            jit_map_resident_type(&recv.ty)
+            jit_map_resident_type(recv_ty)
                 && args.len() == 2
                 && jit_map_resident_type(&args[0].ty)
                 && resident_safe_expr(&args[0], callees)
                 && resident_safe_expr(&args[1], callees)
         }
         TBuiltinOp::JoinSep => {
-            (jit_list_native_type(&recv.ty) || jit_list_iter_elem_type(&recv.ty).is_some())
+            (jit_list_native_type(recv_ty) || jit_list_iter_elem_type(recv_ty).is_some())
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::String)
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::IsEmpty => {
-            (jit_list_native_type(&recv.ty)
-                || jit_list_iter_elem_type(&recv.ty).is_some()
-                || jit_list_record_type(&recv.ty)
-                || matches!(&recv.ty, Type::List(elem) | Type::FixedList { elem, .. } if jit_value_type(elem))
+            (jit_list_native_type(recv_ty)
+                || jit_list_iter_elem_type(recv_ty).is_some()
+                || jit_list_record_type(recv_ty)
+                || matches!(recv_ty, Type::List(elem) | Type::FixedList { elem, .. } if jit_value_type(elem))
                 || matches!(
-                    &recv.ty,
+                    recv_ty,
                     Type::Apply { name, .. }
                         if matches!(
                             name.as_str(),
@@ -1930,10 +1937,10 @@ fn resident_safe_builtin_op(
                 && args.is_empty()
         }
         TBuiltinOp::ParseInt | TBuiltinOp::ParseFloat => {
-            matches!(&recv.ty, Type::String) && args.is_empty()
+            matches!(recv_ty, Type::String) && args.is_empty()
         }
         TBuiltinOp::Slice { .. } => {
-            (jit_list_int_type(&recv.ty) || matches!(&recv.ty, Type::String))
+            (jit_list_int_type(recv_ty) || matches!(recv_ty, Type::String))
                 && args.len() == 2
                 && matches!(&args[0].ty, Type::Int)
                 && matches!(&args[1].ty, Type::Int)
@@ -1941,49 +1948,49 @@ fn resident_safe_builtin_op(
                 && resident_safe_expr(&args[1], callees)
         }
         TBuiltinOp::Lines => {
-            (matches!(&recv.ty, Type::String)
-                || matches!(&recv.ty, Type::Named(n) if n == "FileReader"))
+            (matches!(recv_ty, Type::String)
+                || matches!(recv_ty, Type::Named(n) if n == "FileReader"))
                 && args.is_empty()
         }
         TBuiltinOp::Split => {
-            matches!(&recv.ty, Type::String)
+            matches!(recv_ty, Type::String)
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::String)
                 && resident_safe_expr(&args[0], callees)
         }
-        TBuiltinOp::Chars | TBuiltinOp::Bytes => matches!(&recv.ty, Type::String) && args.is_empty(),
+        TBuiltinOp::Chars | TBuiltinOp::Bytes => matches!(recv_ty, Type::String) && args.is_empty(),
         TBuiltinOp::After | TBuiltinOp::Before => {
-            matches!(&recv.ty, Type::String)
+            matches!(recv_ty, Type::String)
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::String)
                 && resident_safe_expr(&args[0], callees)
         }
         // JIT ABI: Iter producers already materialize list handles.
         TBuiltinOp::IterToList | TBuiltinOp::IterCollect | TBuiltinOp::ListLazy => {
-            (jit_list_iter_elem_type(&recv.ty).is_some()
-                || jit_closure_elem_type(&recv.ty).is_some()
-                || jit_list_native_type(&recv.ty))
+            (jit_list_iter_elem_type(recv_ty).is_some()
+                || jit_closure_elem_type(recv_ty).is_some()
+                || jit_list_native_type(recv_ty))
                 && args.is_empty()
         }
         TBuiltinOp::Take | TBuiltinOp::Skip | TBuiltinOp::StepBy | TBuiltinOp::Chunks
         | TBuiltinOp::Windows => {
-            jit_list_iter_elem_type(&recv.ty).is_some()
+            jit_list_iter_elem_type(recv_ty).is_some()
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::Int)
                 && resident_safe_expr(&args[0], callees)
         }
-        TBuiltinOp::Dedup => jit_list_iter_elem_type(&recv.ty).is_some() && args.is_empty(),
+        TBuiltinOp::Dedup => jit_list_iter_elem_type(recv_ty).is_some() && args.is_empty(),
         TBuiltinOp::Sum { float: false } => {
-            matches!(jit_list_iter_elem_type(&recv.ty), Some(Type::Int)) && args.is_empty()
+            matches!(jit_list_iter_elem_type(recv_ty), Some(Type::Int)) && args.is_empty()
         }
         TBuiltinOp::Product { float: false }
         | TBuiltinOp::Min { float: false }
         | TBuiltinOp::Max { float: false } => {
-            matches!(jit_list_iter_elem_type(&recv.ty), Some(Type::Int)) && args.is_empty()
+            matches!(jit_list_iter_elem_type(recv_ty), Some(Type::Int)) && args.is_empty()
         }
-        TBuiltinOp::Flatten => jit_list_of_int_list_type(&recv.ty) && args.is_empty(),
+        TBuiltinOp::Flatten => jit_list_of_int_list_type(recv_ty) && args.is_empty(),
         TBuiltinOp::Intersperse => {
-            jit_list_iter_elem_type(&recv.ty).is_some()
+            jit_list_iter_elem_type(recv_ty).is_some()
                 && args.len() == 1
                 && resident_safe_expr(&args[0], callees)
         }
@@ -1993,32 +2000,32 @@ fn resident_safe_builtin_op(
             // owns heterogeneous rows and fill values.
             *mode == TIR::TZipMode::Short
                 && *input_count == 2
-                && matches!(jit_list_iter_elem_type(&recv.ty), Some(Type::Int))
+                && matches!(jit_list_iter_elem_type(recv_ty), Some(Type::Int))
                 && args.len() == 1
                 && matches!(jit_list_iter_elem_type(&args[0].ty), Some(Type::Int))
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::Unzip { .. } => args.is_empty(),
         TBuiltinOp::TryCollect => {
-            jit_result_list_elem(&recv.ty).is_some() && args.is_empty()
+            jit_result_list_elem(recv_ty).is_some() && args.is_empty()
         }
         // D-HOLE1: Option.zip — both sides packed Option; builds a Present pair.
         TBuiltinOp::OptionZip { .. } => {
-            matches!(&recv.ty, Type::Option(_))
+            matches!(recv_ty, Type::Option(_))
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::Option(_))
                 && resident_safe_expr(&args[0], callees)
         }
         // D-RANGE-EXCL1=C: `indexes()` → Iter<Int> of every valid index.
         TBuiltinOp::Indexes => {
-            (jit_list_native_type(&recv.ty)
-                || jit_list_iter_elem_type(&recv.ty).is_some()
-                || jit_closure_elem_type(&recv.ty).is_some())
+            (jit_list_native_type(recv_ty)
+                || jit_list_iter_elem_type(recv_ty).is_some()
+                || jit_closure_elem_type(recv_ty).is_some())
                 && args.is_empty()
         }
         // JIT ABI: View/ViewMut materialize as owned list handles (inclusive slice).
         TBuiltinOp::ViewNew { .. } | TBuiltinOp::ViewMutNew { .. } => {
-            (jit_list_native_type(&recv.ty) || jit_list_record_type(&recv.ty))
+            (jit_list_native_type(recv_ty) || jit_list_record_type(recv_ty))
                 && match args {
                     [range]
                         if matches!(&range.ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_RANGE) =>
@@ -2039,13 +2046,13 @@ fn resident_safe_builtin_op(
         // than inventing a second tensor representation in Cranelift.
         TBuiltinOp::ComputeViewNew { .. } | TBuiltinOp::ComputeViewMutNew { .. } => false,
         TBuiltinOp::SplitWrite { .. } => {
-            (jit_list_native_type(&recv.ty) || jit_list_record_type(&recv.ty))
+            (jit_list_native_type(recv_ty) || jit_list_record_type(recv_ty))
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::Int)
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::GetDisjointWrite => {
-            (jit_list_native_type(&recv.ty) || jit_list_record_type(&recv.ty))
+            (jit_list_native_type(recv_ty) || jit_list_record_type(recv_ty))
                 && args.len() == 1
                 && jit_list_int_type(&args[0].ty)
                 && resident_safe_expr(&args[0], callees)
@@ -2059,35 +2066,35 @@ fn resident_safe_builtin_op(
         | TBuiltinOp::ExtendList
         | TBuiltinOp::ConcatList => false,
         TBuiltinOp::SetFrom => {
-            (jit_list_int_type(&recv.ty) || jit_list_string_type(&recv.ty)) && args.is_empty()
+            (jit_list_int_type(recv_ty) || jit_list_string_type(recv_ty)) && args.is_empty()
         }
         TBuiltinOp::SetInsert | TBuiltinOp::SetRemove => {
-            matches!(&recv.ty, Type::Apply { name, args: targs }
+            matches!(recv_ty, Type::Apply { name, args: targs }
                 if name == "Set" && targs.len() == 1 && matches!(&targs[0], Type::Int | Type::String))
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::Int | Type::String)
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::SetToList => {
-            matches!(&recv.ty, Type::Apply { name, args: targs }
+            matches!(recv_ty, Type::Apply { name, args: targs }
                 if name == "Set" && targs.len() == 1 && matches!(&targs[0], Type::Int | Type::String))
                 && args.is_empty()
         }
         TBuiltinOp::SetCopy | TBuiltinOp::SetCapacity | TBuiltinOp::SetFirst | TBuiltinOp::SetValues => {
-            matches!(&recv.ty, Type::Apply { name, args: targs }
+            matches!(recv_ty, Type::Apply { name, args: targs }
                 if name == "Set" && targs.len() == 1 && matches!(&targs[0], Type::Int | Type::String))
                 && args.is_empty()
         }
         // #1478: `replace`/`take` — native swap-in / remove-and-return.
         TBuiltinOp::SetReplace | TBuiltinOp::SetTake => {
-            matches!(&recv.ty, Type::Apply { name, args: targs }
+            matches!(recv_ty, Type::Apply { name, args: targs }
                 if name == "Set" && targs.len() == 1 && matches!(&targs[0], Type::Int | Type::String))
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::Int | Type::String)
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::SetEqual => {
-            matches!(&recv.ty, Type::Apply { name, args: targs }
+            matches!(recv_ty, Type::Apply { name, args: targs }
                 if name == "Set" && targs.len() == 1 && matches!(&targs[0], Type::Int | Type::String))
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::Apply { name, args: targs }
@@ -2101,7 +2108,7 @@ fn resident_safe_builtin_op(
         | TBuiltinOp::SetIsSubset
         | TBuiltinOp::SetIsSuperset
         | TBuiltinOp::SetIsDisjoint => {
-            matches!(&recv.ty, Type::Apply { name, args: targs }
+            matches!(recv_ty, Type::Apply { name, args: targs }
                 if name == "Set" && targs.len() == 1 && matches!(&targs[0], Type::Int | Type::String))
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::Apply { name, args: targs }
@@ -2109,10 +2116,10 @@ fn resident_safe_builtin_op(
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::SortedSetFrom => {
-            (jit_list_int_type(&recv.ty) || jit_list_string_type(&recv.ty)) && args.is_empty()
+            (jit_list_int_type(recv_ty) || jit_list_string_type(recv_ty)) && args.is_empty()
         }
         TBuiltinOp::SortedSetInsert | TBuiltinOp::SortedSetRemove => {
-            matches!(&recv.ty, Type::Apply { name, args: targs }
+            matches!(recv_ty, Type::Apply { name, args: targs }
                 if name == "SortedSet" && targs.len() == 1 && matches!(&targs[0], Type::Int | Type::String))
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::Int | Type::String)
@@ -2125,7 +2132,7 @@ fn resident_safe_builtin_op(
         | TBuiltinOp::SortedSetIsSubset
         | TBuiltinOp::SortedSetIsSuperset
         | TBuiltinOp::SortedSetIsDisjoint => {
-            matches!(&recv.ty, Type::Apply { name, args: targs }
+            matches!(recv_ty, Type::Apply { name, args: targs }
                 if name == "SortedSet" && targs.len() == 1 && matches!(&targs[0], Type::Int | Type::String))
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::Apply { name, args: targs }
@@ -2133,7 +2140,7 @@ fn resident_safe_builtin_op(
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::PriorityQueueFrom => {
-            jit_list_int_type(&recv.ty) && args.is_empty()
+            jit_list_int_type(recv_ty) && args.is_empty()
         }
         TBuiltinOp::SortedSetToList
         | TBuiltinOp::PriorityQueuePeek
@@ -2143,82 +2150,82 @@ fn resident_safe_builtin_op(
         | TBuiltinOp::BitSetToList
         | TBuiltinOp::ByteBufferToBytes => args.is_empty(),
         TBuiltinOp::First | TBuiltinOp::Last => {
-            (matches!(&recv.ty, Type::Apply { name, .. } if name == "SortedSet")
-                || matches!(&recv.ty, Type::List(_) | Type::FixedList { .. })
-                || jit_list_native_type(&recv.ty))
+            (matches!(recv_ty, Type::Apply { name, .. } if name == "SortedSet")
+                || matches!(recv_ty, Type::List(_) | Type::FixedList { .. })
+                || jit_list_native_type(recv_ty))
                 && args.is_empty()
         }
         TBuiltinOp::Pop => {
-            (matches!(&recv.ty, Type::Apply { name, .. } if name == "PriorityQueue")
-                || jit_list_native_type(&recv.ty)
-                || matches!(&recv.ty, Type::List(elem) if jit_value_type(elem) || matches!(elem.as_ref(), Type::Apply { name, .. } if name == "Task")))
+            (matches!(recv_ty, Type::Apply { name, .. } if name == "PriorityQueue")
+                || jit_list_native_type(recv_ty)
+                || matches!(recv_ty, Type::List(elem) if jit_value_type(elem) || matches!(elem.as_ref(), Type::Apply { name, .. } if name == "Task")))
                 && args.is_empty()
         }
         TBuiltinOp::LruPut | TBuiltinOp::LruAddNew => {
-            matches!(&recv.ty, Type::Apply { name, .. } if name == "Cache")
+            matches!(recv_ty, Type::Apply { name, .. } if name == "Cache")
                 && args.len() == 2
                 && args.iter().all(|arg| resident_safe_expr(arg, callees))
         }
         TBuiltinOp::LruGet | TBuiltinOp::ContainsKey => {
-            matches!(&recv.ty, Type::Apply { name, .. } if name == "Cache")
+            matches!(recv_ty, Type::Apply { name, .. } if name == "Cache")
                 && args.len() == 1
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::BitSetAdd | TBuiltinOp::BitSetRemove => {
-            matches!(&recv.ty, Type::Named(name) if name == "BitSet")
+            matches!(recv_ty, Type::Named(name) if name == "BitSet")
                 && args.len() == 1
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::BitSetNew | TBuiltinOp::ByteBufferNew => args.is_empty(),
         TBuiltinOp::ByteBufferWithCapacity => {
-            matches!(&recv.ty, Type::Int) && args.is_empty() && resident_safe_expr(recv, callees)
+            matches!(recv_ty, Type::Int) && args.is_empty() && resident_safe_expr(recv, callees)
         }
         TBuiltinOp::ByteBufferFrom => {
-            matches!(&recv.ty, Type::List(_))
+            matches!(recv_ty, Type::List(_))
                 && args.is_empty()
                 && resident_safe_expr(recv, callees)
         }
         TBuiltinOp::ByteBufferWrite { .. } => {
-            matches!(&recv.ty, Type::Named(name) if name == "ByteBuffer")
+            matches!(recv_ty, Type::Named(name) if name == "ByteBuffer")
                 && args.len() == 1
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::ByteBufferMethod { .. } => {
-            matches!(&recv.ty, Type::Named(name) if name == "ByteBuffer")
+            matches!(recv_ty, Type::Named(name) if name == "ByteBuffer")
                 && args.iter().all(|arg| resident_safe_expr(arg, callees))
         }
-        TBuiltinOp::TrimView => matches!(&recv.ty, Type::String) && args.is_empty(),
+        TBuiltinOp::TrimView => matches!(recv_ty, Type::String) && args.is_empty(),
         TBuiltinOp::AfterView | TBuiltinOp::BeforeView => {
-            matches!(&recv.ty, Type::String)
+            matches!(recv_ty, Type::String)
                 && args.len() == 1
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::BagAdd | TBuiltinOp::BagRemove | TBuiltinOp::BagHas | TBuiltinOp::BagCount => {
-            matches!(&recv.ty, Type::Apply { name, args: targs }
+            matches!(recv_ty, Type::Apply { name, args: targs }
                 if name == "Bag" && targs.len() == 1 && jit_bag_raw_key_candidate(&targs[0]))
                 && args.len() == 1
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::BagLen => {
-            matches!(&recv.ty, Type::Apply { name, args: targs }
+            matches!(recv_ty, Type::Apply { name, args: targs }
                 if name == "Bag" && targs.len() == 1 && jit_bag_raw_key_candidate(&targs[0]))
                 && args.is_empty()
         }
         TBuiltinOp::Contains
-            if matches!(&recv.ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_RANGE) =>
+            if matches!(recv_ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_RANGE) =>
         {
             args.len() == 1
                 && matches!(&args[0].ty, Type::Int)
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::Contains
-            if matches!(&recv.ty, Type::Apply { name, args: targs }
+            if matches!(recv_ty, Type::Apply { name, args: targs }
                 if matches!(name.as_str(), "Set" | "SortedSet")
                     && targs.len() == 1
                     && matches!(&targs[0], Type::Int | Type::String)) =>
         {
             args.len() == 1
-                && match (&recv.ty, &args[0].ty) {
+                && match (recv_ty, &args[0].ty) {
                     (Type::Apply { args: targs, .. }, Type::Int) => {
                         matches!(targs.as_slice(), [Type::Int])
                     }
@@ -2230,32 +2237,32 @@ fn resident_safe_builtin_op(
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::Contains
-            if matches!(&recv.ty, Type::List(inner) if **inner == Type::String) =>
+            if matches!(recv_ty, Type::List(inner) if **inner == Type::String) =>
         {
             args.len() == 1
                 && matches!(&args[0].ty, Type::String)
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::Contains => {
-            matches!(&recv.ty, Type::String)
+            matches!(recv_ty, Type::String)
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::String)
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::StartsWith | TBuiltinOp::EndsWith => {
-            matches!(&recv.ty, Type::String)
+            matches!(recv_ty, Type::String)
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::String)
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::MatchGroup => {
-            (matches!(&recv.ty, Type::Named(n) if n == "Match")
+            (matches!(recv_ty, Type::Named(n) if n == "Match")
                 || matches!(&recv.kind, TExprKind::Local(_)))
                 && args.len() == 1
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::DequePushFront | TBuiltinOp::DequePushBack => {
-            matches!(&recv.ty, Type::Apply { name, args: targs }
+            matches!(recv_ty, Type::Apply { name, args: targs }
                 if name == "Deque" && targs.len() == 1 && matches!(&targs[0], Type::Int))
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::Int)
@@ -2268,26 +2275,26 @@ fn resident_safe_builtin_op(
         | TBuiltinOp::DequeCapacity
         | TBuiltinOp::DequeToList
         | TBuiltinOp::DequeReverse => {
-            matches!(&recv.ty, Type::Apply { name, args: targs }
+            matches!(recv_ty, Type::Apply { name, args: targs }
                 if name == "Deque" && targs.len() == 1 && matches!(&targs[0], Type::Int))
                 && args.is_empty()
         }
         TBuiltinOp::DequeContains | TBuiltinOp::DequeDelete => {
-            matches!(&recv.ty, Type::Apply { name, args: targs }
+            matches!(recv_ty, Type::Apply { name, args: targs }
                 if name == "Deque" && targs.len() == 1 && matches!(&targs[0], Type::Int))
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::Int)
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::DequeGet | TBuiltinOp::DequeSplit => {
-            matches!(&recv.ty, Type::Apply { name, args: targs }
+            matches!(recv_ty, Type::Apply { name, args: targs }
                 if name == "Deque" && targs.len() == 1 && matches!(&targs[0], Type::Int))
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::Int)
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::DequeJoin => {
-            matches!(&recv.ty, Type::Apply { name, args: targs }
+            matches!(recv_ty, Type::Apply { name, args: targs }
                 if name == "Deque" && targs.len() == 1 && matches!(&targs[0], Type::Int))
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::String)
@@ -2295,12 +2302,12 @@ fn resident_safe_builtin_op(
         }
         TBuiltinOp::DequeFrom => {
             matches!(
-                &recv.ty,
+                recv_ty,
                 Type::List(inner) if matches!(inner.as_ref(), Type::Int)
             ) && args.is_empty()
         }
         TBuiltinOp::InsertList => {
-            jit_list_int_type(&recv.ty)
+            jit_list_int_type(recv_ty)
                 && args.len() == 2
                 && matches!(&args[0].ty, Type::Int)
                 && matches!(&args[1].ty, Type::Int)
@@ -2309,17 +2316,17 @@ fn resident_safe_builtin_op(
         }
         // #1476 / #1409 ambient String surface — keep examples resident (I9).
         TBuiltinOp::TrimStart | TBuiltinOp::TrimEnd | TBuiltinOp::StringToTitle => {
-            matches!(&recv.ty, Type::String) && args.is_empty()
+            matches!(recv_ty, Type::String) && args.is_empty()
         }
         TBuiltinOp::PadStart | TBuiltinOp::PadEnd => {
-            matches!(&recv.ty, Type::String)
+            matches!(recv_ty, Type::String)
                 && args.len() == 2
                 && matches!(&args[0].ty, Type::Int)
                 && matches!(&args[1].ty, Type::String)
                 && args.iter().all(|a| resident_safe_expr(a, callees))
         }
         TBuiltinOp::StringIndexOf | TBuiltinOp::StringCount => {
-            matches!(&recv.ty, Type::String)
+            matches!(recv_ty, Type::String)
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::String)
                 && resident_safe_expr(&args[0], callees)
@@ -2327,15 +2334,15 @@ fn resident_safe_builtin_op(
         TBuiltinOp::StringIsAlphabetic
         | TBuiltinOp::StringIsNumeric
         | TBuiltinOp::StringIsWhitespace
-        | TBuiltinOp::StringIsAscii => matches!(&recv.ty, Type::String) && args.is_empty(),
+        | TBuiltinOp::StringIsAscii => matches!(recv_ty, Type::String) && args.is_empty(),
         TBuiltinOp::StringSplitOnce { .. } | TBuiltinOp::Split => {
-            matches!(&recv.ty, Type::String)
+            matches!(recv_ty, Type::String)
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::String)
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::StringMethod { method } => {
-            matches!(&recv.ty, Type::String)
+            matches!(recv_ty, Type::String)
                 && match method.as_str() {
                     "is_lower" | "is_upper" | "capitalize" | "swapcase" | "copy" | "reverse"
                     | "normalize" => args.is_empty(),

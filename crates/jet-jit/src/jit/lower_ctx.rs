@@ -13,7 +13,7 @@ use jet_codegen::Codegen::TIR::{
     ListSpreadPart,
     TFnValueKind, TMethodRef, TModuleCallForm, TNumericOp, TOrFallback, TPattern,
     TPatternPosition, TPlace,
-    TStaticOwner, TStmt, TStrPart, TTypedTextForm, TTypedTextInterpKind,
+    TStaticOwner, TStmt, TStrPart, TTypedTextForm, TTypedTextInterpKind, TZipFillMode,
 };
 use jet_foundation::AST::{BinOp, IncDecOp, PatSlot, Pattern, StrFormat, Type, UnOp};
 use std::collections::HashMap;
@@ -12263,7 +12263,7 @@ impl LowerCtx<'_, '_> {
                 Ok(self.finish_wait_call(status))
             }
             TExprKind::OrFallback { value, fallback } => {
-                if matches!(value.ty, Type::Option(_)) {
+                if self.or_fallback_operand_is_option(value) {
                     let status = self.lower_list_get_opt_status(value)?;
                     let ok_block = self.b.create_block();
                     let fail_block = self.b.create_block();
@@ -14319,6 +14319,61 @@ impl LowerCtx<'_, '_> {
         Ok(())
     }
 
+    /// `??`'s operand-kind test: does `value` carry the packed-Option ABI that
+    /// `lower_list_get_opt_status` decodes, even when TIR erased its static
+    /// `Type::Option` wrapper to `Unit` (generic handle methods like `Rng.pick`
+    /// resolve their return type through `handle_method_return_ty`, which has no
+    /// type-argument context and defaults untyped generics to `Unit`)? Mirrors
+    /// every recognized shape in `lower_list_get_opt_status` below so the two
+    /// stay in lockstep — this is the gate that decides whether `OrFallback`
+    /// takes the Option decode path at all; the callee's own recognition is
+    /// dead code for any shape missing here.
+    fn or_fallback_operand_is_option(&self, value: &TExpr) -> bool {
+        if matches!(value.ty, Type::Option(_)) {
+            return true;
+        }
+        if matches!(
+            &value.kind,
+            TExprKind::BuiltinMethod {
+                op: TBuiltinOp::GetList | TBuiltinOp::GetMap,
+                ..
+            }
+        ) {
+            return true;
+        }
+        if let TExprKind::HandleMethod { op, .. } = &value.kind {
+            if matches!(
+                op,
+                THandleOp::ParsedArgsOption
+                    | THandleOp::ParsedArgsOptionInt
+                    | THandleOp::ParsedArgsOptionFloat
+                    | THandleOp::ParsedArgsPositional
+                    | THandleOp::ParsedArgsSubcommand
+                    | THandleOp::RngPick
+                    | THandleOp::RngWeightedPick
+            ) {
+                return true;
+            }
+        }
+        if let Some(Type::Option(_)) = Self::recover_core_return_ty(value) {
+            return true;
+        }
+        if let TExprKind::CoreCall { module, method, .. } = &value.kind {
+            if module == "core.random" && method == "weighted_pick" {
+                return true;
+            }
+        }
+        if let TExprKind::Local(local) = &value.kind {
+            let key = TIR::local_place(&local.name);
+            if let Some(ty) = self.var_tys.get(&key) {
+                if matches!(ty, Type::Option(_)) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     fn lower_list_get_opt_status(&mut self, value: &TExpr) -> Result<Value, String> {
         if let TExprKind::BuiltinMethod {
             recv,
@@ -15128,8 +15183,31 @@ impl LowerCtx<'_, '_> {
                 Ok(self.call_host(self.host.coll.list_indexes, &[n]))
             }
             TBuiltinOp::Indexed { .. } => Err("jit builtin method unsupported".to_string()),
-            TBuiltinOp::Zip { .. } => {
-                let other = self.lower_expr(&args[0])?;
+            TBuiltinOp::Zip {
+                input_count,
+                flatten,
+                fill_mode,
+                ..
+            } => {
+                // `self.host.coll.list_zip` only implements the plain 2-input,
+                // no-pad case (unlabeled pairwise zip). The free zero-arg
+                // `zip()` lowers to `input_count: 0, args: []` (`TIR::
+                // lower_empty_zip_family`) — indexing `args[0]` there panicked
+                // (D-ZIPPAD1's own AOT path handles it via a dedicated empty
+                // constructor). N-ary (`input_count > 2`), `flatten`, and any
+                // `zip_pad` fill mode need richer host support this JIT layer
+                // doesn't have yet — decline instead of mis-zipping or
+                // panicking.
+                if *input_count != 2 || *flatten || !matches!(fill_mode, TZipFillMode::DefaultNone)
+                {
+                    return Err(
+                        "jit builtin method unsupported: n-ary/padded/empty zip".to_string(),
+                    );
+                }
+                let Some(arg0) = args.first() else {
+                    return Err("jit builtin method unsupported: empty zip".to_string());
+                };
+                let other = self.lower_expr(arg0)?;
                 Ok(self.call_host(self.host.coll.list_zip, &[recv_val, other]))
             }
             TBuiltinOp::OptionZip { tuple_struct, elem_ty } => {
@@ -16633,9 +16711,15 @@ impl LowerCtx<'_, '_> {
                 Ok(self.call_host(self.host.clock_advance, &[recv_val, value]))
             }
             THandleOp::ClockWait => {
-                // After `??` unwrap, Duration is the raw millisecond i64 (see
-                // `jet_jit_duration_from_*` / `duration_in`), not a struct handle.
-                let duration_ms = self.lower_expr(&args[0])?;
+                // A `Duration`'s raw i64 is nanoseconds (D-TIMERES1: Prelude's
+                // `Duration.ns`; see `DurationNew`'s scale table above), not
+                // milliseconds. AOT's `jet_clock_wait` advances by
+                // `d.as_millis()` = `ns / 1_000_000` (Prelude `CommonTypes.rs`);
+                // reproduce that same truncating scale here before the host add,
+                // matching `DurationIn`'s Milliseconds scale just above.
+                let duration_ns = self.lower_expr(&args[0])?;
+                let scale = self.b.ins().iconst(types::I64, 1_000_000);
+                let duration_ms = self.b.ins().sdiv(duration_ns, scale);
                 Ok(self.call_host(self.host.clock_wait, &[recv_val, duration_ms]))
             }
             THandleOp::RngInt => {
