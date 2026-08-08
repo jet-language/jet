@@ -28,6 +28,35 @@ mod mime_kernel {
     include!("../../../../jet-codegen/src/Prelude/CoreLib/JetStd/Mime.rs");
 }
 
+mod solver_kernel {
+    pub(crate) mod jet_std {
+        #[derive(Clone)]
+        pub(crate) struct Solver {
+            pub(crate) seed: i64,
+            pub(crate) checked: i64,
+            pub(crate) failures: i64,
+        }
+    }
+
+    include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/Solver.rs");
+}
+
+mod sketch_kernel {
+    include!("../../../../jet-codegen/src/Prelude/Core/Sketch.rs");
+}
+
+mod time_kernel {
+    include!("../../../../jet-codegen/src/Prelude/Core/Time.rs");
+}
+
+pub(super) mod duration_kernel {
+    include!("../../../../jet-codegen/src/Prelude/Core/Duration.rs");
+}
+
+mod measurement_kernel {
+    include!("../../../../jet-codegen/src/Prelude/Core/Measurement.rs");
+}
+
 // #1657 / I9: the one `core.data` statistics, bar-plot and bridge-status
 // kernel. This is the exact source AOT embeds and the Cranelift JIT host
 // includes, so comptime and the interpreter run the same compensated
@@ -1926,7 +1955,7 @@ pub fn apply_core_call(
         ("core.encoding.yaml", "to_string") => {
             Ok(CtValue::Str(super::super::EncodingLite::yaml_render(one(0)?)))
         }
-        // --- core.encoding.xml (ported verbatim, `EncodingLite.rs`) ---
+        // --- core.encoding.xml (CtValue adapters over XmlKernel) ---
         ("core.encoding.xml", "parse") => {
             let text = as_string(one(0)?, span)?;
             match super::super::EncodingLite::xml_parse(text) {

@@ -598,6 +598,80 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   JIT is a performance tier; semantic parity across AOT, JIT, interpreter, and
   web is mandatory. (D-ONECORE1=A, ratified 2026-07-24; I9 owner-directed
   2026-07-29; dumb-adapter rule owner-directed 2026-07-29.)
+
+  The comptime Core registry uses the following namespace classification. This
+  table covers every `core_calls.rs` namespace and its compatibility aliases.
+  `Kernel` means that comptime marshals `CtValue` into the exact Prelude part.
+  `Intrinsic` means that the evaluator implements a language value operation,
+  not a second Core policy. `Host` means that the call crosses an effect or
+  capability boundary. `Copied` marks remaining I9 migration work.
+
+  | Namespace | Class | Current semantic home or required action |
+  |---|---|---|
+  | `core.archive` | Host | Package bridge; comptime rejects unsupported host work. |
+  | `core.args` | Kernel | `Prelude/CoreLib/Top/Args.rs`; `ArgsLite` marshals values. |
+  | `core.auth` | Kernel | `AuthSession.rs` and `CryptoEntropy.rs`; `AuthLite` marshals values. |
+  | `core.color` | Intrinsic | `CtValue` constructor and field projection only. |
+  | `core.compress.gzip` | Host | Native compression boundary; comptime rejects unavailable calls. |
+  | `core.compress.zstd` | Host | Native compression boundary; comptime rejects unavailable calls. |
+  | `core.compute` | Kernel | `Prelude/CoreLib/Top/Compute.rs`; `ComputeLite` marshals values. |
+  | `core.crypto` | Copied | Move `CryptoLite` algorithms to Prelude kernels. |
+  | `core.crypto.expert` | Copied | Move expert crypto calls to the same Prelude kernels as AOT. |
+  | `core.data` | Kernel | `DataStats.rs` and `DataPlot.rs`; comptime marshals values. |
+  | `core.email` | Kernel | `Prelude/CoreLib/Email.rs`; `EmailAdapter` marshals values. |
+  | `core.encoding` | Copied | Move shared encoding value rules from `EncodingLite` to Prelude kernels. |
+  | `core.encoding.base32` | Copied | Move codec rules to `EncodingCodecs.rs` adapters. |
+  | `core.encoding.base64` | Copied | Move codec rules to `EncodingCodecs.rs` adapters. |
+  | `core.encoding.cbor` | Copied | Move CBOR rules to `EncodingCodecs.rs` adapters. |
+  | `core.encoding.csv` | Copied | Move CSV rules to the Prelude encoding kernel. |
+  | `core.encoding.hex` | Copied | Move codec rules to `EncodingCodecs.rs` adapters. |
+  | `core.encoding.json` | Copied | Move JSON rules to the Prelude encoding kernel. |
+  | `core.encoding.jsonl` | Copied | Move JSONL rules to the Prelude encoding kernel. |
+  | `core.encoding.toml` | Copied | Move TOML rules to the Prelude encoding kernel. |
+  | `core.encoding.xml` | Kernel | `jet-foundation/XmlKernel.rs`; AOT embeds it and comptime/JIT marshal `DataTree` values. |
+  | `core.encoding.yaml` | Copied | Move YAML rules to the Prelude encoding kernel. |
+  | `core.env` | Host | Explicit comptime environment capability and policy boundary. |
+  | `core.event` | Copied | Move `EventLite` state transitions to the reactive Prelude kernel. |
+  | `core.exec` | Host | Process execution boundary; comptime rejects or uses explicit policy. |
+  | `core.files` | Host | Explicit comptime filesystem capability and policy boundary. |
+  | `core.fmt` | Copied | Move formatting rules to `Prelude/CoreLib/Top/DataFmt.rs`. |
+  | `core.io` | Host | I/O capability boundary; pure progress values use `Core/Progress.rs`. |
+  | `core.json` | Compatibility alias | Route to `core.encoding.json`; do not add semantics. |
+  | `core.linalg` | Copied | Move linear-algebra arithmetic to its Prelude kernel. |
+  | `core.math` | Mixed | `MathLibPure.rs` is shared; move remaining inline rules or keep true numeric intrinsics. |
+  | `core.measurement` | Compatibility alias | Route to `core.science.measurement`; do not add semantics. |
+  | `core.mime` | Kernel | `Prelude/CoreLib/JetStd/Mime.rs`; comptime marshals values. |
+  | `core.net` | Mixed | Host network calls stay capability-bound; move pure value rules to Prelude. |
+  | `core.path` | Copied | Move lexical path rules to the same Prelude kernel as AOT. |
+  | `core.perf` | Host | Runtime performance capability; comptime rejects unavailable calls. |
+  | `core.process` | Host | Process capability boundary and REPL host adapter. |
+  | `core.random` | Copied | Move deterministic seeded RNG rules to the Prelude kernel; ambient RNG stays host-bound. |
+  | `core.raylib` | Intrinsic | `CtValue` constructor only; runtime graphics work stays host-bound. |
+  | `core.reactive.loadable` | Copied | Move loadable state rules to the reactive Prelude kernel. |
+  | `core.reflect` | Intrinsic | Compiler-owned type metadata construction. |
+  | `core.regex` | Copied | Move `RegexLite` matching rules to the shared regex kernel. |
+  | `core.science.measurement` | Kernel | `Prelude/Core/Measurement.rs`; all tiers marshal `(value, uncertainty)`. |
+  | `core.services` | Kernel | `ServiceAuthority.rs` and `Services.rs`; `ServicesLite` marshals values. |
+  | `core.sketch.cms` | Kernel | `Prelude/Core/Sketch.rs`; comptime and JIT marshal state. |
+  | `core.sketch.hll` | Kernel | `Prelude/Core/Sketch.rs`; comptime and JIT marshal state. |
+  | `core.sketch.reservoir` | Kernel | `Prelude/Core/Sketch.rs`; comptime and JIT marshal state. |
+  | `core.sketch.tdigest` | Kernel | `Prelude/Core/Sketch.rs`; comptime and JIT marshal state. |
+  | `core.solve` | Kernel | `Prelude/CoreLib/Top/Solver.rs`; comptime and JIT marshal state. |
+  | `core.sync` | Kernel | `Prelude/CoreLib/Top/Sync.rs`; `SyncLite` marshals values. |
+  | `core.testing` | Mixed | Shared deterministic capabilities call Prelude; harness and host work stay adapters. |
+  | `core.text` | Copied | Move Unicode and text rules from `TextLite` to Prelude kernels. |
+  | `core.text.unicode` | Copied | Move Unicode rules from `TextLite` to Prelude kernels. |
+  | `core.time` | Mixed | Civil and duration rules live in `Prelude/Core/Time.rs` and `Duration.rs`; ambient clock reads remain host effects. |
+  | `core.time.date` | Mixed | `Prelude/Core/Time.rs` owns calendar rules; `today` reads the host clock. |
+  | `core.time.datetime` | Mixed | `Prelude/Core/Time.rs` owns datetime/zone rules; `now` reads the host clock. |
+  | `core.time.duration` | Kernel | `Prelude/Core/Duration.rs`; all tiers use one checked nanosecond arithmetic kernel. |
+  | `core.time.instant` | Host | Monotonic clock read stays a host adapter; elapsed math uses Prelude. |
+  | `core.tls` | Host | Native TLS boundary; comptime rejects unavailable calls. |
+  | `core.ui` | Intrinsic | `CtValue` constructors and field projection only. |
+  | `core.units` | Intrinsic | Exact unit conversion uses the foundation kernel. |
+  | `core.url` | Copied | Move URL parse and render rules to `JetStd/UrlMime.rs`. |
+  | `core.xml` | Compatibility alias | Route to `core.encoding.xml`; do not add semantics. |
+
   Living core-vs-desugar inventory for the #668 freeze: `docs/spec/tir.md`.
 
 ## Exit codes (stable contract)

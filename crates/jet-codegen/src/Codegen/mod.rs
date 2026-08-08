@@ -63,6 +63,10 @@ const PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/Core/Disjoint.rs"),
     include_str!("../Prelude/Core/ExpiringSecret.rs"),
     include_str!("../Prelude/Core/SetAlgebra.rs"),
+    include_str!("../Prelude/Core/Duration.rs"),
+    include_str!("../Prelude/Core/Measurement.rs"),
+    include_str!("../Prelude/Core/Time.rs"),
+    include_str!("../Prelude/Core/Sketch.rs"),
     include_str!("../Prelude/Core.rs"),
     // D-EXPOP1=A / D-EXPSEM1=A: `^`. Shared verbatim with the wasm module
     // (Codegen/Web.rs) so every tier runs one power.
@@ -633,6 +637,10 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
     out.push_str("\nmod jet_xml_pull {\n");
     out.push_str(include_str!("../../../jet-foundation/src/XmlPull.rs"));
     out.push_str("\n}\n");
+    out.push_str("\n#[allow(non_snake_case)]\nmod XmlPull { pub use crate::jet_xml_pull::*; }\n");
+    out.push_str("\nmod jet_xml_kernel {\n");
+    out.push_str(include_str!("../../../jet-foundation/src/XmlKernel.rs"));
+    out.push_str("\n}\n");
     out.push_str("\nmod jet_base_encoding_strict {\n");
     out.push_str(include_str!("../../../jet-foundation/src/BaseEncodingStrict.rs"));
     out.push_str("\n}\n");
@@ -811,6 +819,7 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
     out.push_str(include_str!("../Prelude/CoreLib/Top/DNSResolverPolicy.rs"));
     out.push_str(include_str!("../Prelude/Deadline.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/NetHTTP.rs"));
+    out.push_str(include_str!("../Prelude/CoreLib/Top/Solver.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/MathRandomTime.rs"));
 
     if needs_email {
@@ -2075,6 +2084,8 @@ mod tests {
     fn core_prelude_stays_split_by_runtime_ownership() {
         const MAX_MODULE_LINES: usize = 2500;
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let outcome =
+            std::fs::read_to_string(root.join("../jet-foundation/src/Outcome.rs")).unwrap();
         let unicode =
             std::fs::read_to_string(root.join("src/Prelude/Core/UnicodeString.rs")).unwrap();
         let values = std::fs::read_to_string(root.join("src/Prelude/Core/Values.rs")).unwrap();
@@ -2086,6 +2097,12 @@ mod tests {
             std::fs::read_to_string(root.join("src/Prelude/Core/ExpiringSecret.rs")).unwrap();
         let set_algebra =
             std::fs::read_to_string(root.join("src/Prelude/Core/SetAlgebra.rs")).unwrap();
+        let duration =
+            std::fs::read_to_string(root.join("src/Prelude/Core/Duration.rs")).unwrap();
+        let measurement =
+            std::fs::read_to_string(root.join("src/Prelude/Core/Measurement.rs")).unwrap();
+        let time = std::fs::read_to_string(root.join("src/Prelude/Core/Time.rs")).unwrap();
+        let sketch = std::fs::read_to_string(root.join("src/Prelude/Core/Sketch.rs")).unwrap();
         let core = std::fs::read_to_string(root.join("src/Prelude/Core.rs")).unwrap();
         let power = std::fs::read_to_string(root.join("src/Prelude/Core/Power.rs")).unwrap();
         let division =
@@ -2113,6 +2130,7 @@ mod tests {
         let stream_cursor =
             std::fs::read_to_string(root.join("../jet-foundation/src/StreamCursor.rs")).unwrap();
         for (relative, source) in [
+            ("../jet-foundation/src/Outcome.rs", outcome.as_str()),
             ("src/Prelude/Core/UnicodeString.rs", unicode.as_str()),
             ("src/Prelude/Core/Values.rs", values.as_str()),
             ("src/Prelude/Core/RangeBounds.rs", range_bounds.as_str()),
@@ -2122,6 +2140,10 @@ mod tests {
                 expiring_secret.as_str(),
             ),
             ("src/Prelude/Core/SetAlgebra.rs", set_algebra.as_str()),
+            ("src/Prelude/Core/Duration.rs", duration.as_str()),
+            ("src/Prelude/Core/Measurement.rs", measurement.as_str()),
+            ("src/Prelude/Core/Time.rs", time.as_str()),
+            ("src/Prelude/Core/Sketch.rs", sketch.as_str()),
             ("src/Prelude/Core.rs", core.as_str()),
             ("src/Prelude/Core/Power.rs", power.as_str()),
             ("src/Prelude/Core/Division.rs", division.as_str()),
@@ -2161,6 +2183,9 @@ mod tests {
 
         let codegen = std::fs::read_to_string(root.join("src/Codegen/mod.rs")).unwrap();
         let production_codegen = codegen.split("#[cfg(test)]\nmod tests").next().unwrap();
+        let outcome_pos = production_codegen
+            .find("include_str!(\"../../../jet-foundation/src/Outcome.rs\")")
+            .unwrap();
         let unicode_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/UnicodeString.rs\")")
             .unwrap();
@@ -2178,6 +2203,18 @@ mod tests {
             .unwrap();
         let set_algebra_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/SetAlgebra.rs\")")
+            .unwrap();
+        let duration_pos = production_codegen
+            .find("include_str!(\"../Prelude/Core/Duration.rs\")")
+            .unwrap();
+        let measurement_pos = production_codegen
+            .find("include_str!(\"../Prelude/Core/Measurement.rs\")")
+            .unwrap();
+        let time_pos = production_codegen
+            .find("include_str!(\"../Prelude/Core/Time.rs\")")
+            .unwrap();
+        let sketch_pos = production_codegen
+            .find("include_str!(\"../Prelude/Core/Sketch.rs\")")
             .unwrap();
         let core_pos = production_codegen
             .find("include_str!(\"../Prelude/Core.rs\")")
@@ -2201,12 +2238,17 @@ mod tests {
             .find("include_str!(\"../../../jet-foundation/src/StreamCursor.rs\")")
             .unwrap();
         assert!(
-            unicode_pos < values_pos
+            outcome_pos < unicode_pos
+                && unicode_pos < values_pos
                 && values_pos < range_bounds_pos
                 && range_bounds_pos < disjoint_pos
                 && disjoint_pos < expiring_secret_pos
                 && expiring_secret_pos < set_algebra_pos
-                && set_algebra_pos < core_pos
+                && set_algebra_pos < duration_pos
+                && duration_pos < measurement_pos
+                && measurement_pos < time_pos
+                && time_pos < sketch_pos
+                && sketch_pos < core_pos
                 && core_pos < collections_pos
                 && collections_pos < control_pos
                 && control_pos < observe_pos
@@ -2220,12 +2262,17 @@ mod tests {
         assert_eq!(
             PRELUDE_PARTS,
             [
+                outcome.as_str(),
                 unicode.as_str(),
                 values.as_str(),
                 range_bounds.as_str(),
                 disjoint.as_str(),
                 expiring_secret.as_str(),
                 set_algebra.as_str(),
+                duration.as_str(),
+                measurement.as_str(),
+                time.as_str(),
+                sketch.as_str(),
                 core.as_str(),
                 power.as_str(),
                 division.as_str(),
@@ -2247,12 +2294,17 @@ mod tests {
         let mut emitted = String::new();
         push_prelude(&mut emitted);
         let expected = [
+            outcome.as_str(),
             unicode.as_str(),
             values.as_str(),
             range_bounds.as_str(),
             disjoint.as_str(),
             expiring_secret.as_str(),
             set_algebra.as_str(),
+            duration.as_str(),
+            measurement.as_str(),
+            time.as_str(),
+            sketch.as_str(),
             core.as_str(),
             power.as_str(),
             division.as_str(),
@@ -2273,10 +2325,10 @@ mod tests {
             emitted, expected,
             "owned prelude modules must concatenate without byte loss or boundary changes"
         );
-        assert_eq!(emitted.len(), 331_699, "split changed prelude byte length");
+        assert_eq!(emitted.len(), 344_633, "split changed prelude byte length");
         assert_eq!(
             crate::SHA256::sha256_hex(emitted.as_bytes()),
-            "4c073a5981cdb4e6476d54c674972a2157cbfec83b24be2a5630a6c7d04c83cf",
+            "5f06e715b4c38dbd0d75f561b08abd6e57e2584278568e92b32c049954d2f5d7",
             "split changed historical prelude bytes, order, or boundary newline"
         );
     }

@@ -1090,7 +1090,7 @@ extern "C" fn jet_jit_jsonl_to_string(rows: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(rendered))
 }
 
-// ── XML via jet_foundation::XmlPull (same runtime as EncodingCodecs) ─────────
+// ── XML via the shared foundation kernel ────────────────────────────────────
 
 fn xml_value_to_datatree(value: jet_foundation::XmlPull::Value) -> json_rt::DataTree {
     use jet_foundation::XmlPull::Value;
@@ -1154,9 +1154,8 @@ fn xml_decode_fields(error: jet_foundation::XmlPull::Error) -> Vec<json_rt::Fiel
 }
 
 extern "C" fn jet_jit_xml_parse(text: i64) -> i64 {
-    match jet_foundation::XmlPull::parse_document(&clone_string(text)) {
-        Ok(mut value) => {
-            jet_foundation::XmlPull::invalidate_untrusted_lexical_evidence(&mut value);
+    match jet_foundation::XmlKernel::parse_document(&clone_string(text)) {
+        Ok(value) => {
             result_ok(alloc_datatree(&xml_value_to_datatree(value)) as u64)
         }
         Err(e) => result_err_msg(&xml_err_msg(e)),
@@ -1166,7 +1165,7 @@ extern "C" fn jet_jit_xml_parse(text: i64) -> i64 {
 extern "C" fn jet_jit_xml_to_string(tree: i64) -> i64 {
     let rendered = read_datatree(tree)
         .and_then(|t| datatree_to_xml_value(&t).ok())
-        .and_then(|v| jet_foundation::XmlPull::render_document(&v).ok())
+        .and_then(|v| jet_foundation::XmlKernel::render_document(&v).ok())
         .unwrap_or_default();
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(rendered))
 }
@@ -1186,10 +1185,10 @@ fn pack_opt_string(opt: Option<String>) -> i64 {
     })
 }
 
-/// D-ENCXML-PROJECTION1: `xml.root` via XmlPull::document_root.
+/// D-ENCXML-PROJECTION1: `xml.root` via the shared XML kernel.
 extern "C" fn jet_jit_xml_root(tree: i64) -> i64 {
     match xml_tree_value(tree).and_then(|v| {
-        jet_foundation::XmlPull::document_root(&v).map_err(xml_err_msg)
+        jet_foundation::XmlKernel::document_root(&v).map_err(xml_err_msg)
     }) {
         Ok(root) => result_ok(alloc_datatree(&xml_value_to_datatree(root)) as u64),
         Err(e) => result_err_msg(&e),
@@ -1199,7 +1198,7 @@ extern "C" fn jet_jit_xml_root(tree: i64) -> i64 {
 /// `xml.expanded_name` → Result[(raw, prefix?, local, namespace_uri?), XMLError].
 extern "C" fn jet_jit_xml_expanded_name(tree: i64) -> i64 {
     match xml_tree_value(tree).and_then(|v| {
-        jet_foundation::XmlPull::expanded_name_parts(&v).map_err(xml_err_msg)
+        jet_foundation::XmlKernel::expanded_name_parts(&v).map_err(xml_err_msg)
     }) {
         Ok((raw, prefix, local, uri)) => {
             let handle = Concurrency::with_runtime_mut(|rt| {
@@ -1230,7 +1229,7 @@ extern "C" fn jet_jit_xml_expanded_name(tree: i64) -> i64 {
 extern "C" fn jet_jit_xml_attribute(tree: i64, name: i64) -> i64 {
     let key = clone_string(name);
     match xml_tree_value(tree).and_then(|v| {
-        jet_foundation::XmlPull::lookup_attribute(&v, &key).map_err(xml_err_msg)
+        jet_foundation::XmlKernel::lookup_attribute(&v, &key).map_err(xml_err_msg)
     }) {
         Ok(opt) => result_ok(pack_opt_string(opt) as u64),
         Err(e) => result_err_msg(&e),
@@ -1240,7 +1239,7 @@ extern "C" fn jet_jit_xml_attribute(tree: i64, name: i64) -> i64 {
 /// `xml.content` → Result[[DataTree], XMLError].
 extern "C" fn jet_jit_xml_content(tree: i64) -> i64 {
     match xml_tree_value(tree).and_then(|v| {
-        jet_foundation::XmlPull::element_content(&v).map_err(xml_err_msg)
+        jet_foundation::XmlKernel::element_content(&v).map_err(xml_err_msg)
     }) {
         Ok(nodes) => {
             let handles: Vec<i64> = nodes
@@ -1263,7 +1262,7 @@ extern "C" fn jet_jit_xml_content(tree: i64) -> i64 {
 /// `xml.to_bytes` with XMLRenderOptions::safe (UTF-8 + PreserveValid).
 extern "C" fn jet_jit_xml_to_bytes(tree: i64) -> i64 {
     match xml_tree_value(tree).and_then(|v| {
-        jet_foundation::XmlPull::render_document_bytes(
+        jet_foundation::XmlKernel::render_document_bytes(
             &v,
             jet_foundation::XmlPull::RenderEncoding::UTF8,
             jet_foundation::XmlPull::LexicalPolicy::PreserveValid,
@@ -1277,10 +1276,9 @@ extern "C" fn jet_jit_xml_to_bytes(tree: i64) -> i64 {
 
 /// Parse + `project_document_for_decode` — front half of typed `xml.decode`.
 extern "C" fn jet_jit_xml_project(text: i64) -> i64 {
-    match jet_foundation::XmlPull::parse_document(&clone_string(text)) {
-        Ok(mut value) => {
-            jet_foundation::XmlPull::invalidate_untrusted_lexical_evidence(&mut value);
-            match jet_foundation::XmlPull::project_document_for_decode(&value) {
+    match jet_foundation::XmlKernel::parse_document(&clone_string(text)) {
+        Ok(value) => {
+            match jet_foundation::XmlKernel::project_document_for_decode(&value) {
                 Ok(projected) => {
                     result_ok(alloc_datatree(&xml_value_to_datatree(projected)) as u64)
                 }
@@ -1294,10 +1292,9 @@ extern "C" fn jet_jit_xml_project(text: i64) -> i64 {
 /// Parse bytes + project — front half of typed `xml.decode_bytes`.
 extern "C" fn jet_jit_xml_project_bytes(bytes: i64) -> i64 {
     let input = clone_bytes(bytes);
-    match jet_foundation::XmlPull::parse_document_bytes(&input) {
-        Ok(mut value) => {
-            jet_foundation::XmlPull::invalidate_untrusted_lexical_evidence(&mut value);
-            match jet_foundation::XmlPull::project_document_for_decode(&value) {
+    match jet_foundation::XmlKernel::parse_document_bytes(&input) {
+        Ok(value) => {
+            match jet_foundation::XmlKernel::project_document_for_decode(&value) {
                 Ok(projected) => {
                     result_ok(alloc_datatree(&xml_value_to_datatree(projected)) as u64)
                 }
@@ -2493,5 +2490,4 @@ extern "C" fn jet_jit_datatree_migrate(type_name: i64, tree: i64) -> i64 {
         Err(msg) => result_err_msg(msg),
     }
 }
-
 

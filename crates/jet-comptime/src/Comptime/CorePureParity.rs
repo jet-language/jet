@@ -181,33 +181,26 @@ pub(super) fn evaluate_method(
         ("Date" | "LocalDate", "to_string", 0) => date_from_value(recv, type_name, span)
             .map(|date| CtValue::Str(date.to_string_fmt())),
         ("Date" | "LocalDate", "weekday", 0) => date_from_value(recv, type_name, span)
-            .map(|date| CtValue::Int((date.day_number() + 6) % 7)),
+            .map(|date| CtValue::Int(date.inner.weekday())),
         ("Date" | "LocalDate", "iso_weekday", 0) => date_from_value(recv, type_name, span)
-            .map(|date| CtValue::Int(date.day_number() % 7 + 1)),
+            .map(|date| CtValue::Int(date.inner.iso_weekday())),
         ("Date" | "LocalDate", "day_of_year", 0) => date_from_value(recv, type_name, span)
-            .map(|date| {
-                CtValue::Int(date.day_number() - Date::new(date.year, 1, 1).day_number() + 1)
-            }),
+            .map(|date| CtValue::Int(date.inner.day_of_year())),
         ("Date" | "LocalDate", "iso_week", 0) => date_from_value(recv, type_name, span)
-            .map(|date| {
-                let thursday = date.add_days(4 - (date.day_number() % 7 + 1));
-                CtValue::Int(
-                    (thursday.day_number() - Date::new(thursday.year, 1, 1).day_number()) / 7 + 1,
-                )
-            }),
+            .map(|date| CtValue::Int(date.inner.iso_week())),
         ("Date" | "LocalDate", "quarter_of_year", 0) => date_from_value(recv, type_name, span)
-            .map(|date| CtValue::Int((date.month - 1) / 3 + 1)),
+            .map(|date| CtValue::Int(date.inner.quarter_of_year())),
         ("Date" | "LocalDate", "days_in_month", 0) => date_from_value(recv, type_name, span)
-            .map(|date| CtValue::Int(Date::days_in_month(date.year, date.month))),
+            .map(|date| CtValue::Int(date.inner.days_in_month())),
         ("Date" | "LocalDate", "is_leap_year", 0) => date_from_value(recv, type_name, span)
-            .map(|date| CtValue::Bool(Date::is_leap(date.year))),
+            .map(|date| CtValue::Bool(date.inner.is_leap_year())),
         ("Date" | "LocalDate", "replace", 3) => date_from_value(recv, type_name, span).and_then(
-            |_date| {
-                Ok(Date::new(
+            |date| {
+                Ok(Date::from_inner(date.inner.replace(
                     as_int(&args[0], span)?,
                     as_int(&args[1], span)?,
                     as_int(&args[2], span)?,
-                )
+                ))
                 .value())
             },
         ),
@@ -217,10 +210,8 @@ pub(super) fn evaluate_method(
             .and_then(|date| Ok(date.add_months(as_int(&args[0], span)?).value())),
         ("Date" | "LocalDate", "diff_days", 1) => date_from_value(recv, type_name, span)
             .and_then(|date| {
-                Ok(CtValue::Int(
-                    date.day_number()
-                        - date_from_value(&args[0], "LocalDate", span)?.day_number(),
-                ))
+                let other = date_from_value(&args[0], "LocalDate", span)?;
+                Ok(CtValue::Int(date.inner.diff_days(&other.inner)))
             }),
         ("Date" | "LocalDate", "add_period", 1) => date_from_value(recv, type_name, span)
             .and_then(|date| date_add_period(date, &args[0], span).map(Date::value)),
@@ -240,8 +231,8 @@ pub(super) fn evaluate_method(
         ("LocalTime", "to_string", 0) => local_time_from_value(recv, span)
             .map(|time| CtValue::Str(time.to_string_fmt())),
         ("DateTime", "to_timestamp", 0) => value_field(recv, "DateTime", "secs", span),
-        ("DateTime", "to_unix_ms", 0) => int_field(recv, "DateTime", "secs", span)
-            .map(|seconds| CtValue::Int(seconds.saturating_mul(1_000))),
+        ("DateTime", "to_unix_ms", 0) => datetime_from_value(recv, span)
+            .map(|date_time| CtValue::Int(date_time.inner.to_unix_ms())),
         ("DateTime", "to_string", 0) => datetime_string(recv, span).map(CtValue::Str),
         ("DateTime", "date", 0) => {
             datetime_from_value(recv, span).map(|date_time| date_time.date().value())
@@ -250,26 +241,19 @@ pub(super) fn evaluate_method(
             datetime_from_value(recv, span).map(|date_time| date_time.time().value())
         }
         ("DateTime", "hour", 0) => datetime_from_value(recv, span)
-            .map(|date_time| CtValue::Int(date_time.time().hour)),
+            .map(|date_time| CtValue::Int(date_time.inner.hour())),
         ("DateTime", "minute", 0) => datetime_from_value(recv, span)
-            .map(|date_time| CtValue::Int(date_time.time().minute)),
+            .map(|date_time| CtValue::Int(date_time.inner.minute())),
         ("DateTime", "second", 0) => datetime_from_value(recv, span)
-            .map(|date_time| CtValue::Int(date_time.seconds.rem_euclid(60))),
+            .map(|date_time| CtValue::Int(date_time.inner.second())),
         ("DateTime", "millisecond", 0) => datetime_from_value(recv, span)
-            .map(|date_time| CtValue::Int((date_time.nanos / 1_000_000) as i64)),
+            .map(|date_time| CtValue::Int(date_time.inner.millisecond())),
         ("DateTime", "microsecond", 0) => datetime_from_value(recv, span)
-            .map(|date_time| CtValue::Int((date_time.nanos / 1_000) as i64)),
+            .map(|date_time| CtValue::Int(date_time.inner.microsecond())),
         ("DateTime", "nanosecond", 0) => datetime_from_value(recv, span)
-            .map(|date_time| CtValue::Int(date_time.nanos as i64)),
-        ("DateTime", "format_rfc3339", 0) => datetime_from_value(recv, span).map(
-            |date_time| {
-                CtValue::Str(format!(
-                    "{}T{}Z",
-                    date_time.date().to_string_fmt(),
-                    date_time.time().to_string_fmt()
-                ))
-            },
-        ),
+            .map(|date_time| CtValue::Int(date_time.inner.nanosecond())),
+        ("DateTime", "format_rfc3339", 0) => datetime_from_value(recv, span)
+            .map(|date_time| CtValue::Str(date_time.inner.format_rfc3339())),
         ("DateTime", "format", 1) => datetime_from_value(recv, span).and_then(|date_time| {
             Ok(CtValue::Str(format_time_pattern(
                 string_arg(args, 0, span)?,
@@ -285,7 +269,7 @@ pub(super) fn evaluate_method(
         }
         ("DateTime", "difference", 1) => datetime_from_value(recv, span).and_then(|left| {
             let right = datetime_from_value(&args[0], span)?;
-            Ok(duration_value(left.total_ns().saturating_sub(right.total_ns())))
+            Ok(duration_value(left.inner.difference_ns(&right.inner)))
         }),
         ("DateTime", "truncate" | "round" | "floor" | "ceil", 1) => {
             datetime_from_value(recv, span).and_then(|date_time| {
@@ -293,23 +277,18 @@ pub(super) fn evaluate_method(
             })
         }
         ("DateTime", "replace", 6) => datetime_from_value(recv, span).and_then(|date_time| {
-            Ok(DateTime::from_parts(
+            Ok(DateTime::from_inner(date_time.inner.replace(
                 as_int(&args[0], span)?,
                 as_int(&args[1], span)?,
                 as_int(&args[2], span)?,
                 as_int(&args[3], span)?,
                 as_int(&args[4], span)?,
                 as_int(&args[5], span)?,
-                date_time.nanos,
-            )
+            ))
             .value())
         }),
         ("DateTime", "in_zone", 1) => datetime_from_value(recv, span).and_then(|date_time| {
-            Ok(ZonedDateTime {
-                instant: date_time,
-                zone: zone_from_value(&args[0], span)?,
-            }
-            .value())
+            Ok(ZonedDateTime::from_datetime(date_time, zone_from_value(&args[0], span)?).value())
         }),
         ("Instant", "elapsed_millis", 0) => Ok(CtValue::Int(0)),
         ("Instant", "elapsed", 0) => Ok(duration_value(0)),
@@ -377,11 +356,7 @@ pub(super) fn evaluate_method(
         }),
         ("ZonedDateTime", "add_duration", 1) => zoned_from_value(recv, span).and_then(|zoned| {
             let ns = duration_ns(&args[0], span)?;
-            Ok(ZonedDateTime {
-                instant: zoned.instant.plus_ns(ns),
-                zone: zoned.zone,
-            }
-            .value())
+            Ok(ZonedDateTime::from_inner(zoned.inner.add_duration_ns(ns)).value())
         }),
         ("ZonedDateTime", "add_period", 1) => zoned_from_value(recv, span).and_then(|zoned| {
             let date = date_add_period(zoned.date(), &args[0], span)?;
@@ -444,14 +419,7 @@ pub(super) fn solver_require(
 /// D-SOLVER-LIB1=A: `solve.Solver.new(seed)` — same seed/checked/failures layout as AOT.
 pub(super) fn solver_new(args: &[CtValue], span: Span) -> EvalResult {
     let seed = as_int(one(args, 0, "Solver", "new", span)?, span)?;
-    Ok(structure(
-        crate::Syntax::SOLVER_TYPE,
-        vec![
-            ("seed", CtValue::Int(seed)),
-            ("checked", CtValue::Int(0)),
-            ("failures", CtValue::Int(0)),
-        ],
-    ))
+    Ok(solver_value(super::solver_kernel::jet_solver_new(seed)))
 }
 
 pub(super) fn display(value: &CtValue) -> Option<String> {
@@ -596,7 +564,10 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
             let CtValue::Float(uncertainty) = field(value, "Measurement", "uncertainty")? else {
                 return None;
             };
-            Some(format!("{measured:?} ± {uncertainty:?}"))
+            Some(super::measurement_kernel::jet_measurement_kernel_show((
+                measured.as_f64(),
+                uncertainty.as_f64(),
+            )))
         }
     }
 }
@@ -1313,112 +1284,64 @@ fn option_string(value: Option<&str>) -> CtValue {
     })
 }
 
-// ── Civil time ─────────────────────────────────────────────────────────────
+// ── Civil time: CtValue adapters for the shared Prelude kernel ──────────────
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct Date {
+    inner: super::time_kernel::JetDate,
     year: i64,
     month: i64,
     day: i64,
 }
 
 impl Date {
+    fn from_inner(inner: super::time_kernel::JetDate) -> Self {
+        Self {
+            year: inner.year(),
+            month: inner.month(),
+            day: inner.day(),
+            inner,
+        }
+    }
+
     fn is_leap(year: i64) -> bool {
-        (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
+        super::time_kernel::JetDate::is_leap(year)
     }
 
     fn days_in_month(year: i64, month: i64) -> i64 {
-        match month {
-            1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-            4 | 6 | 9 | 11 => 30,
-            2 if Self::is_leap(year) => 29,
-            2 => 28,
-            _ => 30,
-        }
+        super::time_kernel::JetDate::days_in_month_of(year, month)
     }
 
     fn new(year: i64, month: i64, day: i64) -> Self {
-        let month = month.clamp(1, 12);
-        let day = day.clamp(1, Self::days_in_month(year, month));
-        Self { year, month, day }
+        Self::from_inner(super::time_kernel::JetDate::new(year, month, day))
     }
 
     fn today_utc() -> Self {
-        let secs = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0) as i64;
-        let days_since_1970 = secs / 86_400;
-        let epoch = Date::new(1970, 1, 1).day_number();
-        Date::from_day_number(epoch + days_since_1970)
+        Self::from_inner(super::time_kernel::JetDate::today_utc())
     }
 
     fn parse(value: &str) -> Result<Self, String> {
-        let parts = value.splitn(3, '-').collect::<Vec<_>>();
-        if parts.len() != 3 {
-            return Err(format!("invalid date: {value}"));
-        }
-        let year = parts[0]
-            .parse::<i64>()
-            .map_err(|_| format!("bad year: {}", parts[0]))?;
-        let month = parts[1]
-            .parse::<i64>()
-            .map_err(|_| format!("bad month: {}", parts[1]))?;
-        let day = parts[2]
-            .parse::<i64>()
-            .map_err(|_| format!("bad day: {}", parts[2]))?;
-        if !(1..=12).contains(&month)
-            || day < 1
-            || day > Self::days_in_month(year, month)
-        {
-            return Err(format!("date out of range: {value}"));
-        }
-        Ok(Self::new(year, month, day))
+        super::time_kernel::JetDate::parse(value).map(Self::from_inner)
     }
 
-    fn day_number(self) -> i64 {
-        let year = self.year - 1;
-        365 * year + year / 4 - year / 100
-            + year / 400
-            + [0_i64, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334]
-                [(self.month - 1) as usize]
-            + i64::from(self.month > 2 && Self::is_leap(self.year))
-            + self.day
-            - 1
+    fn day_number(&self) -> i64 {
+        self.inner.to_day_number()
     }
 
-    fn from_day_number(mut day: i64) -> Self {
-        let mut year = day / 365 + 1;
-        loop {
-            let start = Self::new(year, 1, 1).day_number();
-            let next = Self::new(year + 1, 1, 1).day_number();
-            if day >= start && day < next {
-                break;
-            }
-            year += if day < start { -1 } else { 1 };
-        }
-        day -= Self::new(year, 1, 1).day_number();
-        let mut month = 1;
-        while month < 12 && day >= Self::days_in_month(year, month) {
-            day -= Self::days_in_month(year, month);
-            month += 1;
-        }
-        Self::new(year, month, day + 1)
+    fn from_day_number(day: i64) -> Self {
+        Self::from_inner(super::time_kernel::JetDate::from_day_number(day))
     }
 
-    fn add_days(self, days: i64) -> Self {
-        Self::from_day_number(self.day_number() + days)
+    fn add_days(&self, days: i64) -> Self {
+        Self::from_inner(self.inner.add_days(days))
     }
 
-    fn add_months(self, months: i64) -> Self {
-        let total = self.month - 1 + months;
-        let year = self.year + total / 12;
-        let month = total % 12 + 1;
-        Self::new(year, month, self.day.min(Self::days_in_month(year, month)))
+    fn add_months(&self, months: i64) -> Self {
+        Self::from_inner(self.inner.add_months(months))
     }
 
-    fn to_string_fmt(self) -> String {
-        format!("{:04}-{:02}-{:02}", self.year, self.month, self.day)
+    fn to_string_fmt(&self) -> String {
+        self.inner.to_string_fmt()
     }
 
     fn value(self) -> CtValue {
@@ -1433,55 +1356,38 @@ impl Date {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct LocalTime {
+    inner: super::time_kernel::JetLocalTime,
     hour: i64,
     minute: i64,
     second: i64,
 }
 
 impl LocalTime {
-    fn new(hour: i64, minute: i64, second: i64) -> Self {
+    fn from_inner(inner: super::time_kernel::JetLocalTime) -> Self {
         Self {
-            hour: hour.clamp(0, 23),
-            minute: minute.clamp(0, 59),
-            second: second.clamp(0, 59),
+            hour: inner.hour(),
+            minute: inner.minute(),
+            second: inner.second(),
+            inner,
         }
+    }
+
+    fn new(hour: i64, minute: i64, second: i64) -> Self {
+        Self::from_inner(super::time_kernel::JetLocalTime::new(hour, minute, second))
     }
 
     fn parse(value: &str) -> Result<Self, String> {
-        let parts = value.splitn(3, ':').collect::<Vec<_>>();
-        if parts.len() != 3 {
-            return Err(format!("invalid time: {value}"));
-        }
-        let hour = parts[0]
-            .parse::<i64>()
-            .map_err(|_| format!("bad hour: {}", parts[0]))?;
-        let minute = parts[1]
-            .parse::<i64>()
-            .map_err(|_| format!("bad minute: {}", parts[1]))?;
-        let second = parts[2]
-            .parse::<i64>()
-            .map_err(|_| format!("bad second: {}", parts[2]))?;
-        if !(0..=23).contains(&hour)
-            || !(0..=59).contains(&minute)
-            || !(0..=59).contains(&second)
-        {
-            return Err(format!("time out of range: {value}"));
-        }
-        Ok(Self {
-            hour,
-            minute,
-            second,
-        })
+        super::time_kernel::JetLocalTime::parse(value).map(Self::from_inner)
     }
 
-    fn seconds(self) -> i64 {
-        self.hour * 3600 + self.minute * 60 + self.second
+    fn seconds(&self) -> i64 {
+        self.inner.to_seconds()
     }
 
-    fn to_string_fmt(self) -> String {
-        format!("{:02}:{:02}:{:02}", self.hour, self.minute, self.second)
+    fn to_string_fmt(&self) -> String {
+        self.inner.to_string_fmt()
     }
 
     fn value(self) -> CtValue {
@@ -1496,13 +1402,26 @@ impl LocalTime {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct DateTime {
+    inner: super::time_kernel::JetDateTime,
     seconds: i64,
     nanos: u32,
 }
 
 impl DateTime {
+    fn from_inner(inner: super::time_kernel::JetDateTime) -> Self {
+        Self {
+            seconds: inner.to_timestamp(),
+            nanos: inner.nanosecond() as u32,
+            inner,
+        }
+    }
+
+    fn from_timestamp_ns(seconds: i64, nanos: u32) -> Self {
+        Self::from_inner(super::time_kernel::JetDateTime::from_timestamp_ns(seconds, nanos))
+    }
+
     fn from_parts(
         year: i64,
         month: i64,
@@ -1512,59 +1431,45 @@ impl DateTime {
         second: i64,
         nanos: u32,
     ) -> Self {
-        let date = Date::new(year, month, day);
-        let time = LocalTime::new(hour, minute, second);
-        Self {
-            seconds: utc_seconds(date, time),
-            nanos: nanos % 1_000_000_000,
-        }
+        Self::from_inner(super::time_kernel::JetDateTime::from_parts(
+            year, month, day, hour, minute, second, nanos,
+        ))
     }
 
-    fn date(self) -> Date {
-        let epoch = Date::new(1970, 1, 1).day_number();
-        Date::from_day_number(epoch + self.seconds.div_euclid(86_400))
+    fn date(&self) -> Date {
+        Date::from_inner(self.inner.date())
     }
 
-    fn time(self) -> LocalTime {
-        let seconds = self.seconds.rem_euclid(86_400);
-        LocalTime::new(seconds / 3_600, (seconds / 60) % 60, seconds % 60)
+    fn time(&self) -> LocalTime {
+        LocalTime::from_inner(self.inner.time())
     }
 
-    fn total_ns(self) -> i64 {
+    fn total_ns(&self) -> i64 {
         self.seconds
             .saturating_mul(1_000_000_000)
             .saturating_add(self.nanos as i64)
     }
 
     fn from_total_ns(total: i64) -> Self {
-        Self {
-            seconds: total.div_euclid(1_000_000_000),
-            nanos: total.rem_euclid(1_000_000_000) as u32,
-        }
+        Self::from_timestamp_ns(
+            total.div_euclid(1_000_000_000),
+            total.rem_euclid(1_000_000_000) as u32,
+        )
     }
 
-    fn plus_ns(self, ns: i64) -> Self {
-        Self::from_total_ns(self.total_ns().saturating_add(ns))
+    fn plus_ns(&self, ns: i64) -> Self {
+        Self::from_inner(self.inner.plus_duration_ns(ns))
     }
 
-    fn align(self, unit: &str, method: &str) -> Self {
-        let size_ns: i64 = match unit {
-            "day" => 86_400 * 1_000_000_000,
-            "hour" => 3_600 * 1_000_000_000,
-            "minute" => 60 * 1_000_000_000,
-            "second" => 1_000_000_000,
-            "millisecond" => 1_000_000,
-            "microsecond" => 1_000,
-            _ => return self,
+    fn align(&self, unit: &str, method: &str) -> Self {
+        let unit = unit.to_string();
+        let inner = match method {
+            "round" => self.inner.round(&unit),
+            "ceil" => self.inner.ceil(&unit),
+            "floor" => self.inner.floor(&unit),
+            _ => self.inner.truncate(&unit),
         };
-        let total = self.total_ns();
-        let floored = total.div_euclid(size_ns) * size_ns;
-        let aligned = match method {
-            "round" => (total + size_ns / 2).div_euclid(size_ns) * size_ns,
-            "ceil" if total != floored => floored.saturating_add(size_ns),
-            _ => floored, // truncate / floor
-        };
-        Self::from_total_ns(aligned)
+        Self::from_inner(inner)
     }
 
     fn value(self) -> CtValue {
@@ -1574,25 +1479,24 @@ impl DateTime {
 
 #[derive(Clone)]
 struct Zone {
+    inner: super::time_kernel::JetZone,
     name: String,
     offset: i64,
 }
 
 impl Zone {
+    fn from_inner(inner: super::time_kernel::JetZone) -> Self {
+        let name = inner.name();
+        let offset = inner.offset_at_utc(0);
+        Self { inner, name, offset }
+    }
+
     fn utc() -> Self {
-        Self {
-            name: "UTC".to_string(),
-            offset: 0,
-        }
+        Self::from_inner(super::time_kernel::JetZone::utc())
     }
 
     fn parse_name(name: &str) -> Result<Self, String> {
-        if name == "UTC" || name == "Etc/UTC" || name == "Z" {
-            return Ok(Self::utc());
-        }
-        Err(format!(
-            "unknown IANA time zone: {name}; comptime supports UTC/Etc/UTC/Z only (host TZif databases are a named ambient boundary)"
-        ))
+        super::time_kernel::JetZone::named(&name.to_string()).map(Self::from_inner)
     }
 
     fn value(self) -> CtValue {
@@ -1608,54 +1512,48 @@ impl Zone {
 
 #[derive(Clone)]
 struct ZonedDateTime {
+    inner: super::time_kernel::JetZonedDateTime,
     instant: DateTime,
     zone: Zone,
 }
 
 impl ZonedDateTime {
+    fn from_inner(inner: super::time_kernel::JetZonedDateTime) -> Self {
+        let instant = DateTime::from_inner(inner.to_datetime());
+        let zone = Zone::from_inner(inner.zone());
+        Self { inner, instant, zone }
+    }
+
+    fn from_datetime(instant: DateTime, zone: Zone) -> Self {
+        Self::from_inner(instant.inner.in_zone(&zone.inner))
+    }
+
     fn from_local(date: Date, time: LocalTime, zone: Zone) -> Self {
-        let local_secs = utc_seconds(date, time);
-        Self {
-            instant: DateTime {
-                seconds: local_secs.saturating_sub(zone.offset),
-                nanos: 0,
-            },
-            zone,
-        }
+        Self::from_inner(super::time_kernel::JetZonedDateTime::from_local(
+            &date.inner,
+            &time.inner,
+            &zone.inner,
+        ))
     }
 
     fn offset_seconds(&self) -> i64 {
-        self.zone.offset
+        self.inner.offset_seconds()
     }
 
     fn is_dst(&self) -> bool {
-        // Comptime Zone is fixed-offset UTC-only; DST is always false there.
-        false
-    }
-
-    fn local_instant(&self) -> DateTime {
-        DateTime {
-            seconds: self.instant.seconds.saturating_add(self.zone.offset),
-            nanos: self.instant.nanos,
-        }
+        self.inner.is_dst()
     }
 
     fn date(&self) -> Date {
-        self.local_instant().date()
+        Date::from_inner(self.inner.date())
     }
 
     fn time(&self) -> LocalTime {
-        self.local_instant().time()
+        LocalTime::from_inner(self.inner.time())
     }
 
     fn to_string_fmt(&self) -> String {
-        format!(
-            "{} {} {} ({})",
-            self.date().to_string_fmt(),
-            self.time().to_string_fmt(),
-            self.zone.name,
-            offset_string(self.offset_seconds())
-        )
+        self.inner.to_string_fmt()
     }
 
     fn value(self) -> CtValue {
@@ -1708,15 +1606,12 @@ fn zone_named(args: &[CtValue], span: Span) -> EvalResult {
 }
 
 fn zone_from_value(value: &CtValue, span: Span) -> Result<Zone, Diagnostic> {
-    Ok(Zone {
-        name: match field(value, "Zone", "name") {
-            Some(CtValue::Str(name)) => name.clone(),
-            _ => {
-                return Err(unsupported("malformed Zone.name value", span));
-            }
-        },
-        offset: int_field(value, "Zone", "offset", span)?,
-    })
+    let name = match field(value, "Zone", "name") {
+        Some(CtValue::Str(name)) => name,
+        _ => return Err(unsupported("malformed Zone.name value", span)),
+    };
+    let _ = int_field(value, "Zone", "offset", span)?;
+    Zone::parse_name(name).map_err(|error| unsupported(&error, span))
 }
 
 fn zoned_from_value(value: &CtValue, span: Span) -> Result<ZonedDateTime, Diagnostic> {
@@ -1732,7 +1627,7 @@ fn zoned_from_value(value: &CtValue, span: Span) -> Result<ZonedDateTime, Diagno
             return Err(unsupported("malformed ZonedDateTime.zone value", span));
         }
     };
-    Ok(ZonedDateTime { instant, zone })
+    Ok(ZonedDateTime::from_datetime(instant, zone))
 }
 
 fn zoned_from_datetime(args: &[CtValue], span: Span) -> EvalResult {
@@ -1746,7 +1641,7 @@ fn zoned_from_datetime(args: &[CtValue], span: Span) -> EvalResult {
             .ok_or_else(|| unsupported("time.zoned expects a Zone", span))?,
         span,
     )?;
-    Ok(ZonedDateTime { instant, zone }.value())
+    Ok(ZonedDateTime::from_datetime(instant, zone).value())
 }
 
 fn zoned_from_local(args: &[CtValue], span: Span) -> EvalResult {
@@ -1769,16 +1664,8 @@ fn zoned_from_local(args: &[CtValue], span: Span) -> EvalResult {
     Ok(ZonedDateTime::from_local(date, time, zone).value())
 }
 
-fn offset_string(offset: i64) -> String {
-    let sign = if offset < 0 { '-' } else { '+' };
-    let abs = offset.abs();
-    format!("{sign}{:02}:{:02}", abs / 3_600, (abs / 60) % 60)
-}
-
 fn format_zoned_pattern(pattern: &str, zoned: ZonedDateTime) -> String {
-    let mut output = format_time_pattern(pattern, zoned.date(), zoned.time());
-    output = output.replace("VV", &zoned.zone.name);
-    output.replace("XXX", &offset_string(zoned.offset_seconds()))
+    zoned.inner.format_pattern(&pattern.to_string())
 }
 
 fn date_from_value(value: &CtValue, type_name: &str, span: Span) -> Result<Date, Diagnostic> {
@@ -1790,78 +1677,53 @@ fn date_from_value(value: &CtValue, type_name: &str, span: Span) -> Result<Date,
 }
 
 fn local_time_from_value(value: &CtValue, span: Span) -> Result<LocalTime, Diagnostic> {
-    Ok(LocalTime {
-        hour: int_field(value, "LocalTime", "hour", span)?,
-        minute: int_field(value, "LocalTime", "minute", span)?,
-        second: int_field(value, "LocalTime", "second", span)?,
-    })
+    Ok(LocalTime::new(
+        int_field(value, "LocalTime", "hour", span)?,
+        int_field(value, "LocalTime", "minute", span)?,
+        int_field(value, "LocalTime", "second", span)?,
+    ))
 }
 
 fn datetime_from_value(value: &CtValue, span: Span) -> Result<DateTime, Diagnostic> {
-    Ok(DateTime {
-        seconds: int_field(value, "DateTime", "secs", span)?,
-        nanos: int_field(value, "DateTime", "nanos", span).unwrap_or(0) as u32,
-    })
+    Ok(DateTime::from_timestamp_ns(
+        int_field(value, "DateTime", "secs", span)?,
+        int_field(value, "DateTime", "nanos", span).unwrap_or(0) as u32,
+    ))
 }
 
 fn date_add_period(date: Date, period: &CtValue, span: Span) -> Result<Date, Diagnostic> {
-    let months = int_field(period, "Period", "years", span)?
-        .saturating_mul(12)
-        .saturating_add(int_field(period, "Period", "months", span)?);
-    Ok(date
-        .add_months(months)
-        .add_days(int_field(period, "Period", "days", span)?))
+    let period = super::time_kernel::JetPeriod::new(
+        int_field(period, "Period", "years", span)?,
+        int_field(period, "Period", "months", span)?,
+        int_field(period, "Period", "days", span)?,
+    );
+    Ok(Date::from_inner(date.inner.add_period(&period)))
 }
 
 fn date_truncate(date: Date, unit: &str) -> Date {
-    match unit {
-        "year" => Date::new(date.year, 1, 1),
-        "month" => Date::new(date.year, date.month, 1),
-        _ => date,
-    }
+    Date::from_inner(date.inner.truncate(&unit.to_string()))
 }
 
 fn format_time_pattern(pattern: &str, date: Date, time: LocalTime) -> String {
-    let mut output = pattern.to_string();
-    let weekday = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-        [(date.day_number() % 7) as usize];
-    output = output.replace("yyyy", &format!("{:04}", date.year));
-    output = output.replace(
-        "DDD",
-        &format!(
-            "{:03}",
-            date.day_number() - Date::new(date.year, 1, 1).day_number() + 1
-        ),
-    );
-    output = output.replace("EEE", weekday);
-    output = output.replace("MM", &format!("{:02}", date.month));
-    output = output.replace("dd", &format!("{:02}", date.day));
-    output = output.replace("HH", &format!("{:02}", time.hour));
-    output = output.replace("mm", &format!("{:02}", time.minute));
-    output.replace("ss", &format!("{:02}", time.second))
+    super::time_kernel::jet_time_format_pattern(
+        &pattern.to_string(),
+        &date.inner,
+        &time.inner,
+        None,
+    )
 }
 
 fn period_string(value: &CtValue, span: Span) -> Result<String, Diagnostic> {
-    Ok(format!(
-        "P{}Y{}M{}D",
+    Ok(super::time_kernel::JetPeriod::new(
         int_field(value, "Period", "years", span)?,
         int_field(value, "Period", "months", span)?,
-        int_field(value, "Period", "days", span)?
-    ))
+        int_field(value, "Period", "days", span)?,
+    )
+    .to_string_fmt())
 }
 
 fn datetime_string(value: &CtValue, span: Span) -> Result<String, Diagnostic> {
-    let seconds = int_field(value, "DateTime", "secs", span)?;
-    let epoch = Date::new(1970, 1, 1).day_number();
-    let date = Date::from_day_number(epoch + seconds.div_euclid(86_400));
-    let time = seconds.rem_euclid(86_400);
-    Ok(format!(
-        "{} {:02}:{:02}:{:02} UTC",
-        date.to_string_fmt(),
-        time / 3_600,
-        (time / 60) % 60,
-        time % 60
-    ))
+    Ok(datetime_from_value(value, span)?.inner.to_string_fmt())
 }
 
 fn date_value(year: i64, month: i64, day: i64) -> CtValue {
@@ -1884,6 +1746,8 @@ fn date_parse_call(args: &[CtValue], span: Span) -> EvalResult {
 }
 
 fn period_value(years: i64, months: i64, days: i64) -> CtValue {
+    let period = super::time_kernel::JetPeriod::new(years, months, days);
+    let (years, months, days) = period.components();
     structure(
         "Period",
         vec![
@@ -1934,57 +1798,22 @@ fn duration_ns(value: &CtValue, span: Span) -> Result<i64, Diagnostic> {
 }
 
 fn datetime_from_timestamp(args: &[CtValue], span: Span) -> EvalResult {
-    Ok(datetime_value(int_arg(args, 0, span)?, 0))
+    Ok(DateTime::from_inner(super::time_kernel::JetDateTime::from_timestamp(
+        int_arg(args, 0, span)?,
+    ))
+    .value())
 }
 
 fn datetime_from_unix_ms(args: &[CtValue], span: Span) -> EvalResult {
-    let ms = int_arg(args, 0, span)?;
-    Ok(datetime_value(
-        ms.div_euclid(1_000),
-        (ms.rem_euclid(1_000) as u32).saturating_mul(1_000_000),
+    Ok(DateTime::from_inner(super::time_kernel::JetDateTime::from_unix_ms(
+        int_arg(args, 0, span)?,
     ))
-}
-
-fn utc_seconds(date: Date, time: LocalTime) -> i64 {
-    let epoch = Date::new(1970, 1, 1).day_number();
-    (date.day_number() - epoch)
-        .saturating_mul(86_400)
-        .saturating_add(time.seconds())
-}
-
-fn parse_datetime(value: &str) -> Result<i64, String> {
-    let (date_part, rest) = value
-        .split_once('T')
-        .ok_or_else(|| format!("invalid RFC3339 datetime: {value}"))?;
-    let date = Date::parse(date_part)?;
-    let zone_pos = rest
-        .find('Z')
-        .or_else(|| rest.rfind('+'))
-        .or_else(|| rest.get(1..).and_then(|tail| tail.rfind('-').map(|i| i + 1)))
-        .ok_or_else(|| format!("RFC3339 datetime needs Z or an offset: {value}"))?;
-    let (time_part, zone_part) = rest.split_at(zone_pos);
-    let time = LocalTime::parse(time_part.split('.').next().unwrap_or(time_part))?;
-    let offset = if zone_part == "Z" {
-        0
-    } else {
-        let sign = if zone_part.starts_with('-') { -1 } else { 1 };
-        let (hours, minutes) = zone_part[1..]
-            .split_once(':')
-            .ok_or_else(|| format!("bad RFC3339 offset: {zone_part}"))?;
-        let hours = hours
-            .parse::<i64>()
-            .map_err(|_| format!("bad RFC3339 offset hour: {hours}"))?;
-        let minutes = minutes
-            .parse::<i64>()
-            .map_err(|_| format!("bad RFC3339 offset minute: {minutes}"))?;
-        sign * (hours * 3600 + minutes * 60)
-    };
-    Ok(utc_seconds(date, time) - offset)
+    .value())
 }
 
 fn datetime_parse(args: &[CtValue], span: Span) -> EvalResult {
-    Ok(match parse_datetime(string_arg(args, 0, span)?) {
-        Ok(seconds) => CtValue::Present(Box::new(datetime_value(seconds, 0))),
+    Ok(match super::time_kernel::JetDateTime::parse_rfc3339(string_arg(args, 0, span)?) {
+        Ok(datetime) => CtValue::Present(Box::new(DateTime::from_inner(datetime).value())),
         Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
     })
 }
@@ -2034,16 +1863,21 @@ fn duration_ctor(method: &str, args: &[CtValue], span: Span) -> EvalResult {
         "Hours" => 3_600_000_000_000,
         _ => unreachable!("closed duration unit set"),
     };
-    let ns = match args.first() {
-        Some(CtValue::Int(n)) => n.checked_mul(scale),
+    let (ns, reason) = match args.first() {
+        Some(CtValue::Int(n)) => (
+            super::duration_kernel::jet_duration_kernel_from_int(*n, scale),
+            super::duration_kernel::jet_duration_kernel_int_error_reason(),
+        ),
         Some(CtValue::Float(n)) => {
-            let scaled = n.as_f64() * scale as f64;
-            (scaled.is_finite()
-                && scaled >= i64::MIN as f64
-                && scaled < 9_223_372_036_854_775_808.0)
-                .then_some(scaled.trunc() as i64)
+            (
+                super::duration_kernel::jet_duration_kernel_from_float(n.as_f64(), scale),
+                super::duration_kernel::jet_duration_kernel_float_error_reason(),
+            )
         }
-        _ => None,
+        _ => (
+            None,
+            super::duration_kernel::jet_duration_kernel_float_error_reason(),
+        ),
     };
     Ok(match ns {
         Some(ns) => CtValue::Present(Box::new(duration_value(ns))),
@@ -2051,9 +1885,7 @@ fn duration_ctor(method: &str, args: &[CtValue], span: Span) -> EvalResult {
             crate::Syntax::DURATION_RANGE_ERROR_TYPE,
             vec![(
                 "reason",
-                CtValue::Str(
-                    "duration must be finite and inside the supported range".to_string(),
-                ),
+                CtValue::Str(reason.to_string()),
             )],
         ))),
     })
@@ -2067,14 +1899,15 @@ fn local_time_parse(args: &[CtValue], span: Span) -> EvalResult {
 }
 
 fn measurement(args: &[CtValue], span: Span) -> EvalResult {
+    let (value, uncertainty) = super::measurement_kernel::jet_measurement_kernel_new(
+        float_arg(args, 0, span)?,
+        float_arg(args, 1, span)?,
+    );
     Ok(structure(
         "Measurement",
         vec![
-            ("value", CtValue::Float(CtFloat::f64(float_arg(args, 0, span)?))),
-            (
-                "uncertainty",
-                CtValue::Float(CtFloat::f64(float_arg(args, 1, span)?)),
-            ),
+            ("value", CtValue::Float(CtFloat::f64(value))),
+            ("uncertainty", CtValue::Float(CtFloat::f64(uncertainty))),
         ],
     ))
 }
@@ -2101,27 +1934,13 @@ fn measurement_arithmetic(
         Some(CtValue::Float(value)) => value.as_f64(),
         _ => return Err(unsupported("malformed Measurement.uncertainty value", span)),
     };
+    let left = (left_value, left_uncertainty);
+    let right = (right_value, right_uncertainty);
     let (value, uncertainty) = match method {
-        "add" => (
-            left_value + right_value,
-            (left_uncertainty * left_uncertainty + right_uncertainty * right_uncertainty).sqrt(),
-        ),
-        "sub" => (
-            left_value - right_value,
-            (left_uncertainty * left_uncertainty + right_uncertainty * right_uncertainty).sqrt(),
-        ),
-        "mul" => (
-            left_value * right_value,
-            ((right_value * left_uncertainty).powi(2)
-                + (left_value * right_uncertainty).powi(2))
-            .sqrt(),
-        ),
-        "div" => (
-            left_value / right_value,
-            ((left_uncertainty / right_value).powi(2)
-                + (left_value * right_uncertainty / (right_value * right_value)).powi(2))
-            .sqrt(),
-        ),
+        "add" => super::measurement_kernel::jet_measurement_kernel_add(left, right),
+        "sub" => super::measurement_kernel::jet_measurement_kernel_sub(left, right),
+        "mul" => super::measurement_kernel::jet_measurement_kernel_mul(left, right),
+        "div" => super::measurement_kernel::jet_measurement_kernel_div(left, right),
         _ => unreachable!(),
     };
     Ok(structure(
@@ -2147,7 +1966,7 @@ fn xml_canonical(args: &[CtValue], span: Span) -> EvalResult {
         }
     };
     let (mode, comments, inclusive_prefixes) = xml_canonical_options(options, span)?;
-    let canonical = jet_foundation::XmlPull::canonical_document(
+    let canonical = jet_foundation::XmlKernel::canonical_document(
         &value,
         &jet_foundation::XmlPull::CanonicalOptions {
             mode,
@@ -2278,106 +2097,61 @@ impl<'a> crate::Comptime::Interpreter::Interp<'a> {
 
 // Email uses the shared Prelude kernel through `EmailAdapter`.
 
-// ── D-APPROX1=A: core.sketch — mirrors AOT Jet* sketches in Prelude/Core.rs ──
+// ── D-APPROX1=A: CtValue adapters for the shared Prelude kernel ──────────────
 
-const CMS_COLS: usize = 256;
-const HLL_REGS: usize = 256;
-const TDIGEST_DELTA: f64 = 100.0;
-
-fn fnv1a(data: &[u8]) -> u64 {
-    let mut hash: u64 = 14695981039346656037;
-    for &b in data {
-        hash ^= b as u64;
-        hash = hash.wrapping_mul(1099511628211);
-    }
-    hash
-}
-
-fn fnv1a_h2(data: &[u8]) -> u64 {
-    let mut hash: u64 = 0xcbf29ce484222325u64.wrapping_add(0xdeadbeef);
-    for &b in data {
-        hash ^= b as u64;
-        hash = hash.wrapping_mul(1099511628211);
-    }
-    hash
-}
-
-fn hll_new() -> CtValue {
-    structure(
-        "HyperLogLog",
-        vec![(
-            "registers",
-            CtValue::List((0..HLL_REGS).map(|_| CtValue::Int(0)).collect()),
-        )],
-    )
-}
-
-fn hll_registers(value: &CtValue, span: Span) -> Result<Vec<u8>, Diagnostic> {
-    let CtValue::List(regs) = field(value, "HyperLogLog", "registers")
+fn hll_from_value(value: &CtValue, span: Span) -> Result<super::sketch_kernel::JetHyperLogLog, Diagnostic> {
+    let CtValue::List(registers) = field(value, "HyperLogLog", "registers")
         .ok_or_else(|| unsupported("malformed HyperLogLog.registers value", span))?
     else {
         return Err(unsupported("malformed HyperLogLog.registers value", span));
     };
-    regs.iter()
-        .map(|reg| match reg {
-            CtValue::Int(n) if (0..=255).contains(n) => Ok(*n as u8),
+    let registers = registers
+        .iter()
+        .map(|value| match value {
+            CtValue::Int(value) if (0..=255).contains(value) => Ok(*value as u8),
             _ => Err(unsupported("malformed HyperLogLog register", span)),
         })
-        .collect()
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(super::sketch_kernel::JetHyperLogLog::from_registers(registers))
 }
 
-fn hll_value(registers: Vec<u8>) -> CtValue {
+fn hll_value(sketch: &super::sketch_kernel::JetHyperLogLog) -> CtValue {
     structure(
         "HyperLogLog",
         vec![(
             "registers",
-            CtValue::List(registers.into_iter().map(|n| CtValue::Int(n as i64)).collect()),
+            CtValue::List(
+                sketch
+                    .registers()
+                    .into_iter()
+                    .map(|value| CtValue::Int(value as i64))
+                    .collect(),
+            ),
         )],
     )
 }
 
+fn hll_new() -> CtValue {
+    hll_value(&super::sketch_kernel::JetHyperLogLog::new())
+}
+
 fn hll_add(recv: &CtValue, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
-    let item = string_arg(args, 0, span)?;
-    let mut regs = hll_registers(recv, span)?;
-    let h = fnv1a(item.as_bytes());
-    let reg = (h & 0xFF) as usize;
-    let rest = h >> 8;
-    let lz = if rest == 0 {
-        57u8
-    } else {
-        rest.leading_zeros() as u8 + 1
-    };
-    if lz > regs[reg] {
-        regs[reg] = lz;
-    }
-    Ok(hll_value(regs))
+    let sketch = hll_from_value(recv, span)?;
+    sketch.add(string_arg(args, 0, span)?);
+    Ok(hll_value(&sketch))
 }
 
 fn hll_count(recv: &CtValue, span: Span) -> EvalResult {
-    let regs = hll_registers(recv, span)?;
-    let m = regs.len() as f64;
-    let zeros = regs.iter().filter(|&&v| v == 0).count();
-    let estimate = if zeros > 0 {
-        m * (m / zeros as f64).ln()
-    } else {
-        let sum: f64 = regs.iter().map(|&v| 2f64.powi(-(v as i32))).sum();
-        let alpha = 0.7213 / (1.0 + 1.079 / m);
-        alpha * m * m / sum
-    };
-    Ok(CtValue::Int(estimate.round() as i64))
+    Ok(CtValue::Int(hll_from_value(recv, span)?.count()))
 }
 
-fn tdigest_new() -> CtValue {
-    structure("TDigest", vec![("centroids", CtValue::List(Vec::new()))])
-}
-
-fn tdigest_centroids(value: &CtValue, span: Span) -> Result<Vec<(f64, f64)>, Diagnostic> {
+fn tdigest_from_value(value: &CtValue, span: Span) -> Result<super::sketch_kernel::JetTDigest, Diagnostic> {
     let CtValue::List(items) = field(value, "TDigest", "centroids")
         .ok_or_else(|| unsupported("malformed TDigest.centroids value", span))?
     else {
         return Err(unsupported("malformed TDigest.centroids value", span));
     };
-    items
+    let centroids = items
         .iter()
         .map(|item| match item {
             CtValue::List(pair) if pair.len() == 2 => {
@@ -2385,16 +2159,18 @@ fn tdigest_centroids(value: &CtValue, span: Span) -> Result<Vec<(f64, f64)>, Dia
             }
             _ => Err(unsupported("malformed TDigest centroid", span)),
         })
-        .collect()
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(super::sketch_kernel::JetTDigest::from_centroids(centroids))
 }
 
-fn tdigest_value(centroids: Vec<(f64, f64)>) -> CtValue {
+fn tdigest_value(sketch: &super::sketch_kernel::JetTDigest) -> CtValue {
     structure(
         "TDigest",
         vec![(
             "centroids",
             CtValue::List(
-                centroids
+                sketch
+                    .centroids()
                     .into_iter()
                     .map(|(mean, weight)| {
                         CtValue::List(vec![
@@ -2408,70 +2184,24 @@ fn tdigest_value(centroids: Vec<(f64, f64)>) -> CtValue {
     )
 }
 
+fn tdigest_new() -> CtValue {
+    tdigest_value(&super::sketch_kernel::JetTDigest::new())
+}
+
 fn tdigest_add(recv: &CtValue, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
-    let v = float_arg(args, 0, span)?;
-    let mut cs = tdigest_centroids(recv, span)?;
-    let idx = cs.partition_point(|&(m, _)| m < v);
-    cs.insert(idx, (v, 1.0));
-    let total: f64 = cs.iter().map(|(_, w)| w).sum();
-    let mut merged: Vec<(f64, f64)> = Vec::with_capacity(cs.len());
-    let mut cum = 0.0f64;
-    for &(mean, weight) in cs.iter() {
-        if merged.is_empty() {
-            merged.push((mean, weight));
-            cum += weight;
-            continue;
-        }
-        let last = merged.last_mut().unwrap();
-        let q = cum / total;
-        let limit = 4.0 * total * q * (1.0 - q) / TDIGEST_DELTA;
-        if last.1 + weight <= limit.max(1.0) {
-            let new_w = last.1 + weight;
-            last.0 = (last.0 * last.1 + mean * weight) / new_w;
-            last.1 = new_w;
-        } else {
-            merged.push((mean, weight));
-            cum += weight;
-        }
-    }
-    Ok(tdigest_value(merged))
+    let sketch = tdigest_from_value(recv, span)?;
+    sketch.add(float_arg(args, 0, span)?);
+    Ok(tdigest_value(&sketch))
 }
 
 fn tdigest_quantile(recv: &CtValue, args: &[CtValue], span: Span) -> EvalResult {
-    let q = float_arg(args, 0, span)?;
-    let cs = tdigest_centroids(recv, span)?;
-    if cs.is_empty() {
-        return Ok(CtValue::Float(CtFloat::f64(0.0)));
-    }
-    let total: f64 = cs.iter().map(|(_, w)| w).sum();
-    let target = q * total;
-    let mut cum = 0.0f64;
-    for &(mean, weight) in cs.iter() {
-        cum += weight;
-        if cum >= target {
-            return Ok(CtValue::Float(CtFloat::f64(mean)));
-        }
-    }
-    Ok(CtValue::Float(CtFloat::f64(cs.last().unwrap().0)))
+    let sketch = tdigest_from_value(recv, span)?;
+    Ok(CtValue::Float(CtFloat::f64(
+        sketch.quantile(float_arg(args, 0, span)?),
+    )))
 }
 
-fn cms_new() -> CtValue {
-    structure(
-        "CountMinSketch",
-        vec![(
-            "rows",
-            CtValue::List(
-                (0..4)
-                    .map(|_| {
-                        CtValue::List((0..CMS_COLS).map(|_| CtValue::Int(0)).collect())
-                    })
-                    .collect(),
-            ),
-        )],
-    )
-}
-
-fn cms_rows(value: &CtValue, span: Span) -> Result<[[u32; CMS_COLS]; 4], Diagnostic> {
+fn cms_from_value(value: &CtValue, span: Span) -> Result<super::sketch_kernel::JetCountMinSketch, Diagnostic> {
     let CtValue::List(rows) = field(value, "CountMinSketch", "rows")
         .ok_or_else(|| unsupported("malformed CountMinSketch.rows value", span))?
     else {
@@ -2480,36 +2210,42 @@ fn cms_rows(value: &CtValue, span: Span) -> Result<[[u32; CMS_COLS]; 4], Diagnos
     if rows.len() != 4 {
         return Err(unsupported("malformed CountMinSketch.rows value", span));
     }
-    let mut out = [[0u32; CMS_COLS]; 4];
-    for (row_idx, row) in rows.iter().enumerate() {
-        let CtValue::List(cols) = row else {
+    let mut out = [[0; super::sketch_kernel::JET_CMS_COLS]; 4];
+    for (row_index, row) in rows.iter().enumerate() {
+        let CtValue::List(columns) = row else {
             return Err(unsupported("malformed CountMinSketch row", span));
         };
-        if cols.len() != CMS_COLS {
+        if columns.len() != super::sketch_kernel::JET_CMS_COLS {
             return Err(unsupported("malformed CountMinSketch row", span));
         }
-        for (col_idx, cell) in cols.iter().enumerate() {
-            let CtValue::Int(n) = cell else {
+        for (column_index, cell) in columns.iter().enumerate() {
+            let CtValue::Int(value) = cell else {
                 return Err(unsupported("malformed CountMinSketch cell", span));
             };
-            if !(0..=u32::MAX as i64).contains(n) {
+            if !(0..=u32::MAX as i64).contains(value) {
                 return Err(unsupported("malformed CountMinSketch cell", span));
             }
-            out[row_idx][col_idx] = *n as u32;
+            out[row_index][column_index] = *value as u32;
         }
     }
-    Ok(out)
+    Ok(super::sketch_kernel::JetCountMinSketch::from_rows(out))
 }
 
-fn cms_value(rows: [[u32; CMS_COLS]; 4]) -> CtValue {
+fn cms_value(sketch: &super::sketch_kernel::JetCountMinSketch) -> CtValue {
     structure(
         "CountMinSketch",
         vec![(
             "rows",
             CtValue::List(
-                rows.into_iter()
+                sketch
+                    .rows()
+                    .into_iter()
                     .map(|row| {
-                        CtValue::List(row.into_iter().map(|n| CtValue::Int(n as i64)).collect())
+                        CtValue::List(
+                            row.into_iter()
+                                .map(|value| CtValue::Int(value as i64))
+                                .collect(),
+                        )
                     })
                     .collect(),
             ),
@@ -2517,120 +2253,120 @@ fn cms_value(rows: [[u32; CMS_COLS]; 4]) -> CtValue {
     )
 }
 
+fn cms_new() -> CtValue {
+    cms_value(&super::sketch_kernel::JetCountMinSketch::new())
+}
+
 fn cms_add(recv: &CtValue, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
-    let key = string_arg(args, 0, span)?;
-    let bytes = key.as_bytes();
-    let h1 = fnv1a(bytes);
-    let h2 = fnv1a_h2(bytes);
-    let mut tbl = cms_rows(recv, span)?;
-    for row in 0..4usize {
-        let col = ((h1.wrapping_add(h2.wrapping_mul(row as u64 + 1))) & 0xFF) as usize;
-        tbl[row][col] = tbl[row][col].saturating_add(1);
-    }
-    Ok(cms_value(tbl))
+    let sketch = cms_from_value(recv, span)?;
+    sketch.add(string_arg(args, 0, span)?);
+    Ok(cms_value(&sketch))
 }
 
 fn cms_count(recv: &CtValue, args: &[CtValue], span: Span) -> EvalResult {
-    let key = string_arg(args, 0, span)?;
-    let bytes = key.as_bytes();
-    let h1 = fnv1a(bytes);
-    let h2 = fnv1a_h2(bytes);
-    let tbl = cms_rows(recv, span)?;
-    let min = (0..4usize)
-        .map(|row| {
-            let col = ((h1.wrapping_add(h2.wrapping_mul(row as u64 + 1))) & 0xFF) as usize;
-            tbl[row][col]
-        })
-        .min()
-        .unwrap();
-    Ok(CtValue::Int(min as i64))
+    let sketch = cms_from_value(recv, span)?;
+    Ok(CtValue::Int(sketch.count(string_arg(args, 0, span)?)))
 }
 
-fn reservoir_new(args: &[CtValue], span: Span) -> EvalResult {
-    let capacity = int_arg(args, 0, span)?.max(1);
-    Ok(structure(
-        "ReservoirSampler",
-        vec![
-            ("capacity", CtValue::Int(capacity)),
-            ("count", CtValue::Int(0)),
-            ("rng", CtValue::Int(0xdeadbeef_cafebabeu64 as i64)),
-            ("reservoir", CtValue::List(Vec::new())),
-        ],
+fn reservoir_from_value(
+    value: &CtValue,
+    span: Span,
+) -> Result<super::sketch_kernel::JetReservoirSampler, Diagnostic> {
+    let capacity = int_field(value, "ReservoirSampler", "capacity", span)?;
+    let count = int_field(value, "ReservoirSampler", "count", span)?;
+    let rng = int_field(value, "ReservoirSampler", "rng", span)?;
+    let CtValue::List(items) = value_field(value, "ReservoirSampler", "reservoir", span)? else {
+        return Err(unsupported("malformed ReservoirSampler.reservoir value", span));
+    };
+    let reservoir = items
+        .into_iter()
+        .map(|item| match item {
+            CtValue::Str(item) => Ok(item),
+            _ => Err(unsupported("malformed ReservoirSampler item", span)),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(super::sketch_kernel::JetReservoirSampler::from_parts(
+        capacity as usize,
+        reservoir,
+        count as u64,
+        rng as u64,
     ))
 }
 
-fn reservoir_add(recv: &CtValue, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
-    let item = string_arg(args, 0, span)?.to_string();
-    let capacity = int_field(recv, "ReservoirSampler", "capacity", span)? as usize;
-    let mut count = int_field(recv, "ReservoirSampler", "count", span)? as u64;
-    let mut rng = int_field(recv, "ReservoirSampler", "rng", span)? as u64;
-    let CtValue::List(mut reservoir) = value_field(recv, "ReservoirSampler", "reservoir", span)?
-    else {
-        return Err(unsupported("malformed ReservoirSampler.reservoir value", span));
-    };
-    count += 1;
-    if reservoir.len() < capacity {
-        reservoir.push(CtValue::Str(item));
-    } else {
-        let mut x = rng;
-        x ^= x << 13;
-        x ^= x >> 7;
-        x ^= x << 17;
-        rng = x;
-        let j = (x % count) as usize;
-        if j < capacity {
-            reservoir[j] = CtValue::Str(item);
-        }
-    }
-    Ok(structure(
+fn reservoir_value(sketch: &super::sketch_kernel::JetReservoirSampler) -> CtValue {
+    let (capacity, reservoir, count, rng) = sketch.parts();
+    structure(
         "ReservoirSampler",
         vec![
             ("capacity", CtValue::Int(capacity as i64)),
             ("count", CtValue::Int(count as i64)),
             ("rng", CtValue::Int(rng as i64)),
-            ("reservoir", CtValue::List(reservoir)),
+            (
+                "reservoir",
+                CtValue::List(reservoir.into_iter().map(CtValue::Str).collect()),
+            ),
         ],
-    ))
+    )
+}
+
+fn reservoir_new(args: &[CtValue], span: Span) -> EvalResult {
+    Ok(reservoir_value(&super::sketch_kernel::JetReservoirSampler::new(
+        int_arg(args, 0, span)?,
+    )))
+}
+
+fn reservoir_add(recv: &CtValue, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
+    let sketch = reservoir_from_value(recv, span)?;
+    sketch.add(string_arg(args, 0, span)?.to_string());
+    Ok(reservoir_value(&sketch))
 }
 
 fn reservoir_sample(recv: &CtValue, span: Span) -> EvalResult {
-    value_field(recv, "ReservoirSampler", "reservoir", span)
+    Ok(CtValue::List(
+        reservoir_from_value(recv, span)?
+            .sample()
+            .into_iter()
+            .map(CtValue::Str)
+            .collect(),
+    ))
 }
 
-// ── D-SOLVER-LIB1=A: mirrors AOT jet_solver_* in MathRandomTime.rs ──────────
+// ── D-SOLVER-LIB1=A: CtValue adapter for the shared Prelude kernel ──────────
 
-fn solver_require_update(recv: &CtValue, args: &[CtValue], span: Span) -> EvalResult {
-    let seed = int_field(recv, crate::Syntax::SOLVER_TYPE, "seed", span)?;
-    let checked = int_field(recv, crate::Syntax::SOLVER_TYPE, "checked", span)?;
-    let failures = int_field(recv, crate::Syntax::SOLVER_TYPE, "failures", span)?;
-    let ok = as_bool(one(args, 0, "Solver", "require", span)?, span)?;
-    Ok(structure(
+fn solver_from_value(value: &CtValue, span: Span) -> Result<super::solver_kernel::jet_std::Solver, Diagnostic> {
+    Ok(super::solver_kernel::jet_std::Solver {
+        seed: int_field(value, crate::Syntax::SOLVER_TYPE, "seed", span)?,
+        checked: int_field(value, crate::Syntax::SOLVER_TYPE, "checked", span)?,
+        failures: int_field(value, crate::Syntax::SOLVER_TYPE, "failures", span)?,
+    })
+}
+
+fn solver_value(solver: super::solver_kernel::jet_std::Solver) -> CtValue {
+    structure(
         crate::Syntax::SOLVER_TYPE,
         vec![
-            ("seed", CtValue::Int(seed)),
-            ("checked", CtValue::Int(checked + 1)),
-            (
-                "failures",
-                CtValue::Int(if ok { failures } else { failures + 1 }),
-            ),
+            ("seed", CtValue::Int(solver.seed)),
+            ("checked", CtValue::Int(solver.checked)),
+            ("failures", CtValue::Int(solver.failures)),
         ],
-    ))
+    )
+}
+
+fn solver_require_update(recv: &CtValue, args: &[CtValue], span: Span) -> EvalResult {
+    let mut solver = solver_from_value(recv, span)?;
+    let ok = as_bool(one(args, 0, "Solver", "require", span)?, span)?;
+    super::solver_kernel::jet_solver_require(&mut solver, ok);
+    Ok(solver_value(solver))
 }
 
 fn solver_failure_count(recv: &CtValue, span: Span) -> EvalResult {
-    Ok(CtValue::Int(int_field(
-        recv,
-        crate::Syntax::SOLVER_TYPE,
-        "failures",
-        span,
-    )?))
+    let solver = solver_from_value(recv, span)?;
+    Ok(CtValue::Int(super::solver_kernel::jet_solver_failure_count(&solver)))
 }
 
 fn solver_status(recv: &CtValue, span: Span) -> EvalResult {
-    let failures = int_field(recv, crate::Syntax::SOLVER_TYPE, "failures", span)?;
-    Ok(CtValue::Str(
-        if failures == 0 { "ok" } else { "failed" }.to_string(),
-    ))
+    let solver = solver_from_value(recv, span)?;
+    Ok(CtValue::Str(super::solver_kernel::jet_solver_status(&solver)))
 }
 
 #[cfg(test)]

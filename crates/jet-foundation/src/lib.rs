@@ -40,6 +40,7 @@ pub mod WasmDebug;
 pub mod WebApp;
 pub mod WebPartition;
 pub mod XmlPull;
+pub mod XmlKernel;
 #[path = "BaseEncodingStrict.rs"]
 pub mod base_encoding_strict;
 #[path = "BaseEncodingDispatch.rs"]

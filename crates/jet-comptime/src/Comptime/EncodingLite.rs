@@ -1603,8 +1603,7 @@ fn yaml_needs_quote(s: &str) -> bool {
 // ── core.encoding.xml ────────────────────────────────────────────────────────
 // Runtime and comptime share one parser/folder. These adapters only translate
 // the ordinary DataTree algebra to and from comptime's tagged representation.
-fn xml_to_ct(mut value: jet_foundation::XmlPull::Value) -> CtValue {
-    jet_foundation::XmlPull::invalidate_untrusted_lexical_evidence(&mut value);
+fn xml_to_ct(value: jet_foundation::XmlPull::Value) -> CtValue {
     xml_value_to_ct(value)
 }
 
@@ -1679,7 +1678,7 @@ pub(super) fn xml_from_ct(
 }
 
 pub(super) fn xml_parse(text: &str) -> Result<CtValue, jet_foundation::XmlPull::Error> {
-    jet_foundation::XmlPull::parse_document(text).map(xml_to_ct)
+    jet_foundation::XmlKernel::parse_document(text).map(xml_to_ct)
 }
 
 pub(super) fn xml_safe_limits_value() -> CtValue {
@@ -1730,7 +1729,7 @@ pub(super) fn xml_parse_with(
     options: &CtValue,
 ) -> Result<CtValue, jet_foundation::XmlPull::Error> {
     let options = xml_options(options)?;
-    jet_foundation::XmlPull::parse_document_with(text, &options).map(xml_to_ct)
+    jet_foundation::XmlKernel::parse_document_with(text, &options).map(xml_to_ct)
 }
 
 pub(super) fn xml_parse_bytes(
@@ -1741,7 +1740,7 @@ pub(super) fn xml_parse_bytes(
         Some(options) => xml_options(options)?,
         None => jet_foundation::XmlPull::ParseOptions::safe(),
     };
-    jet_foundation::XmlPull::parse_document_bytes_with(bytes, &options).map(xml_to_ct)
+    jet_foundation::XmlKernel::parse_document_bytes_with(bytes, &options).map(xml_to_ct)
 }
 
 fn xml_int(fields: &[(String, CtValue)], name: &str) -> i64 {
@@ -1839,13 +1838,13 @@ fn xml_shape_error_value(reason: String) -> CtValue {
 
 pub(super) fn xml_render(value: &CtValue) -> String {
     xml_from_ct(value)
-        .and_then(|value| jet_foundation::XmlPull::render_document(&value))
+        .and_then(|value| jet_foundation::XmlKernel::render_document(&value))
         .unwrap_or_default()
 }
 
 pub(super) fn xml_root(document: &CtValue) -> Result<CtValue, CtValue> {
     let value = xml_from_ct(document).map_err(xml_shape_error_value)?;
-    jet_foundation::XmlPull::document_root(&value)
+    jet_foundation::XmlKernel::document_root(&value)
         .map(xml_to_ct)
         .map_err(xml_error_value)
 }
@@ -1853,7 +1852,7 @@ pub(super) fn xml_root(document: &CtValue) -> Result<CtValue, CtValue> {
 pub(super) fn xml_expanded_name(node: &CtValue) -> Result<CtValue, CtValue> {
     let value = xml_from_ct(node).map_err(xml_shape_error_value)?;
     let (raw, prefix, local, namespace_uri) =
-        jet_foundation::XmlPull::expanded_name_parts(&value).map_err(xml_error_value)?;
+        jet_foundation::XmlKernel::expanded_name_parts(&value).map_err(xml_error_value)?;
     Ok(CtValue::Struct {
         type_name: String::new(),
         fields: vec![
@@ -1877,7 +1876,7 @@ pub(super) fn xml_expanded_name(node: &CtValue) -> Result<CtValue, CtValue> {
 
 pub(super) fn xml_attribute(element: &CtValue, name: &str) -> Result<CtValue, CtValue> {
     let value = xml_from_ct(element).map_err(xml_shape_error_value)?;
-    match jet_foundation::XmlPull::lookup_attribute(&value, name).map_err(xml_error_value)? {
+    match jet_foundation::XmlKernel::lookup_attribute(&value, name).map_err(xml_error_value)? {
         Some(text) => Ok(CtValue::Present(Box::new(CtValue::Str(text)))),
         None => Ok(CtValue::absent(Type::String)),
     }
@@ -1885,7 +1884,7 @@ pub(super) fn xml_attribute(element: &CtValue, name: &str) -> Result<CtValue, Ct
 
 pub(super) fn xml_content(element: &CtValue) -> Result<CtValue, CtValue> {
     let value = xml_from_ct(element).map_err(xml_shape_error_value)?;
-    let children = jet_foundation::XmlPull::element_content(&value).map_err(xml_error_value)?;
+    let children = jet_foundation::XmlKernel::element_content(&value).map_err(xml_error_value)?;
     Ok(CtValue::List(children.into_iter().map(xml_to_ct).collect()))
 }
 
@@ -1893,7 +1892,7 @@ pub(super) fn xml_content(element: &CtValue) -> Result<CtValue, CtValue> {
 /// (`@attr` / `$text` / child keys) before typed decode.
 pub(super) fn xml_project_for_decode(document: &CtValue) -> Result<CtValue, CtValue> {
     let value = xml_from_ct(document).map_err(xml_shape_error_value)?;
-    jet_foundation::XmlPull::project_document_for_decode(&value)
+    jet_foundation::XmlKernel::project_document_for_decode(&value)
         .map(xml_to_ct)
         .map_err(xml_error_value)
 }
@@ -1922,7 +1921,7 @@ pub(super) fn xml_to_bytes(
             jet_foundation::XmlPull::LexicalPolicy::PreserveValid,
         ),
     };
-    jet_foundation::XmlPull::render_document_bytes(&value, encoding, lexical).map_err(xml_error_value)
+    jet_foundation::XmlKernel::render_document_bytes(&value, encoding, lexical).map_err(xml_error_value)
 }
 
 #[cfg(test)]

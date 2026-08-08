@@ -1,5 +1,4 @@
-//! `core.time` / civil-time hosts (#1219). Algorithms from Prelude/Core.rs via
-//! build.rs extract — no third calendar implementation.
+//! `core.time` / civil-time marshalling hosts for the shared Prelude kernel.
 
 use super::Concurrency;
 use cranelift_codegen::ir::{types, AbiParam, Signature};
@@ -8,9 +7,7 @@ use cranelift_module::{FuncId, Linkage, Module};
 use crate::Marshal::{alloc_string, clone_string, result_err_msg, result_ok};
 
 pub(crate) mod time_rt {
-    #[allow(unused_imports)]
-    pub use jet_foundation::Outcome::*;
-    include!(concat!(env!("OUT_DIR"), "/time_rt.rs"));
+    include!("../../jet-codegen/src/Prelude/Core/Time.rs");
 }
 
 #[derive(Clone)]
@@ -144,9 +141,12 @@ extern "C" fn jet_jit_time_duration_unit(value: i64, unit: i64) -> i64 {
         5 => 3_600_000_000_000,
         _ => 1,
     };
-    match value.checked_mul(scale) {
+    match crate::jit::runtime_host::duration_kernel::jet_duration_kernel_from_int(value, scale) {
         Some(ns) => result_ok(ns as u64),
-        None => result_err("duration must be finite and inside the supported range".into()),
+        None => result_err(
+            crate::jit::runtime_host::duration_kernel::jet_duration_kernel_int_error_reason()
+                .into(),
+        ),
     }
 }
 
@@ -326,8 +326,5 @@ host_fns! {
     duration_unit: "jet_jit_time_duration_unit" => jet_jit_time_duration_unit: binary;
     civil_method: "jet_jit_civil_time_method" => jet_jit_civil_time_method: octonary;
 }
-
-
-
 
 
