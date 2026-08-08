@@ -737,6 +737,7 @@ renumbered, and no new `W` code may be allocated.
 | E1262 | jet   | a dev-supervised `Service` field jetpack doesn't recognize at supervision time (U12) |
 | E1338 | jet   | a loadable `.jetlib` artifact's compiler-identity stamp doesn't match the running compiler — refused before mapping (D-LIB-REUSE1=B) |
 | E1339 | jet   | a loaded library declares an effect the load site's grant doesn't cover — refused before mapping (D-LIB-DYNTRUST1=A) |
+| E1340 | jetpack | a Jetpack command failed and no more specific registered code owns the failure |
 | E1263 | jetpack | `jetpack secrets get <name>` names an entry that isn't in the encrypted store (D-JPK-SECRETCRYPTO1) |
 | E1264 | sema  | a function reaches `core.vault.get` without declaring the `Secret` effect (D-JPK-SECRETCRYPTO1) |
 | E1265 | comptime | `core.vault.get` reached from a build-time (comptime) context — secrets are never readable at build time (D-JPK-SECRETCRYPTO1) |
@@ -933,6 +934,7 @@ membership, profile, managed-file, service, or task state is applied.
 | E1336 | an environment image cannot project a service or verified package output | D-ENV-IMAGE1 keeps image layers tied to one verified Hangar package output. A service needs the typed supervisor, and an absent, empty, conflicting, or unsafe package `bin` projection cannot be copied into an image. | Run the declared service through `jetpack services`, or realize one executable package output and run `jet image` again. |
 | E1300 | `--profile` is retired | Profile answers how hard to optimize a build. A named environment composition is a preset, so one word never answers two questions. | Select the composition with `--preset <name>`, declared under `presets:`. |
 | E1337 | the requested environment module is not declared | One environment plan activates one `env.<name>` module; silently merging siblings would mix unrelated packages and variables. | Select one of the declared module names, or omit `--env-profile` to use `dev`, then `default`, then lexical order. |
+| E1340 | {problem} | Jetpack could not complete the command because the named input, project fact, tool, or operating-system operation did not satisfy it. | Correct the named problem, then run the command again. |
 
 ## Dev-loop diagnostics (E2-M4, `jet dev`)
 

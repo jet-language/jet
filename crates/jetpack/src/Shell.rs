@@ -208,8 +208,12 @@ fn run_command_in_mode(
             .unwrap_or(if status.success() { 0 } else { 1 }),
         Err(e) => {
             let suffix = if clean { " in a clean env" } else { "" };
-            eprintln!("jetpack: could not run `{program}`{suffix}: {e}");
-            127
+            Theme::resolve_choice(jet_foundation::Terminal::ColorChoice::Auto).error(
+                &format!("could not run `{program}`{suffix}"),
+                &e.to_string(),
+                "check that the command exists in this environment and can start",
+            );
+            jet_foundation::ExitCodes::USER_ERROR
         }
     };
     if !env.validate_cache(&Theme::resolve_choice(jet_foundation::Terminal::ColorChoice::Never)) {
@@ -307,8 +311,12 @@ fn enter_with_mode(theme: &Theme, env: &Env, kind: ShellKind, clean: bool) -> i3
     let code = match cmd.status() {
         Ok(status) => status.code().unwrap_or(0),
         Err(e) => {
-            eprintln!("jetpack: could not start `{}`: {e}", kind.binary());
-            127
+            theme.error(
+                &format!("could not start `{}`", kind.binary()),
+                &e.to_string(),
+                "install the shell or select a supported shell with `SHELL`",
+            );
+            jet_foundation::ExitCodes::USER_ERROR
         }
     };
     if !env.validate_cache(theme) {
