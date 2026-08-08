@@ -233,6 +233,19 @@ fn ui_snapshots() {
         let workspace_lock_e1202 = src
             .lines()
             .any(|line| line.trim() == "// @workspace_lock_e1202");
+        // Card #1421 c2 / D-LIB-REUSE1=B / E1338: a `.jetlib` artifact's
+        // compiler-identity stamp is checked before mapping. The build path
+        // that emits the stamp is a later slice (#1421 c4-6), so this drives
+        // the check directly against a fixture stamp.
+        let jetlib_version_mismatch = src
+            .lines()
+            .any(|line| line.trim() == "// @jetlib_version_mismatch");
+        // Card #1421 c3 / D-LIB-DYNTRUST1=A / E1339: a `.jetlib` artifact's
+        // declared effects are checked against the load site's grant before
+        // mapping. Same deferred-build-path note as above.
+        let jetlib_effect_refused = src
+            .lines()
+            .any(|line| line.trim() == "// @jetlib_effect_refused");
         // D-DX5-HOOK1 / Tower #549: `// @compiler_extension <repo-relative.wasm>`
         // sets JET_COMPILER_EXTENSION for this fixture only (no user syntax).
         let compiler_extension = src.lines().find_map(|line| {
@@ -257,6 +270,22 @@ fn ui_snapshots() {
                 jetpack::Lock::e1202_workspace(lock_path),
                 jetpack::Lock::e1202_workspace_write(lock_path, "permission denied"),
             ];
+            jet::render_diagnostics(&shown_path, &src, &diagnostics)
+        } else if jetlib_version_mismatch {
+            let stamp = jetpack::JetLib::JetLibStamp {
+                compiler_version: "0.0.1-old".to_string(),
+                declared_effects: Default::default(),
+            };
+            let diagnostic = jetpack::JetLib::check_compiler_identity(&stamp)
+                .expect_err("mismatched compiler identity must be refused before mapping");
+            jet::render_diagnostics(&shown_path, &src, &[diagnostic])
+        } else if jetlib_effect_refused {
+            let declared: jetpack::Sema::EffectSet =
+                ["Net".to_string()].into_iter().collect();
+            let stamp = jetpack::JetLib::JetLibStamp::for_this_compiler(declared);
+            let grant: jetpack::Sema::EffectSet = ["FS".to_string()].into_iter().collect();
+            let diagnostics = jetpack::JetLib::check_effect_grant("skyhawk", &stamp, &grant)
+                .expect_err("an effect outside the grant must be refused before mapping");
             jet::render_diagnostics(&shown_path, &src, &diagnostics)
         } else if programmable_build {
             let result = if build_locked {

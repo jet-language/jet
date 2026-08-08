@@ -59,6 +59,11 @@ pub mod Envelope;
 // isolated `jetpack` binary compiles it; the compiler never links Wasmtime.
 pub mod CompilerExtension;
 pub mod FFI;
+// Card #1421 criteria 2-3: `.jetlib` loadable-library artifact stamp and the
+// load-time trust boundary (D-LIB-REUSE1=B compiler-identity pin,
+// D-LIB-DYNTRUST1=A declared-effect grant). Pure data/check machinery, same
+// bar as `EffectBudget`/`Envelope` — no manifest/build-path wiring yet.
+pub mod JetLib;
 pub mod JSON;
 pub mod LintPolicy;
 pub mod Lock;
