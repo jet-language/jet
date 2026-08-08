@@ -841,6 +841,27 @@ fn show_typed_value(value: &CtValue, ty: &Type, debug: bool) -> Option<String> {
 }
 
 impl<'a> EvalCtx<'a> {
+    // #1799: these calls read or mutate runtime-owned clock/global state. A
+    // build-time fold uses a throwaway evaluator, so materializing any of them
+    // would freeze state that the running program cannot resync. Runtime and
+    // REPL evaluation are the live execution paths and remain allowed. Keep
+    // argument-only time constructors/conversions and the constant
+    // `core.perf.default_fidelity` out of this list. The current parity leaks
+    // are `date.today`'s SystemTime read and `time.instant`'s placeholder
+    // monotonic sample. E3403 remains the determinism gate, while this
+    // predicate only backs off D-VERDICT-1308-1.
+    fn should_decline_ambient_fold(&self, module: &str, method: &str) -> bool {
+        !self.runtime_execution
+            && !self.repl_mode
+            && matches!(
+                (module, method),
+                ("core.time", "now" | "now_utc" | "today" | "instant" | "start")
+                    | ("core.time.date", "today")
+                    | ("core.time.datetime", "now")
+                    | ("core.perf", "fidelity" | "override_fidelity" | "reset_fidelity")
+            )
+    }
+
     fn serde_codec(&self, ty: &Type, method: &str) -> Option<&'a crate::Codegen::TIR::TFunc> {
         let concrete = format!("{}::{method}", ty.name());
         self.funcs.get(&concrete).copied().or_else(|| match ty {
@@ -3182,6 +3203,12 @@ impl<'a> EvalCtx<'a> {
                         *source_span,
                     ));
                 }
+                if self.should_decline_ambient_fold(module, method) {
+                    return Err(unsupported(
+                        &format!("`{module}.{method}()` at compile time"),
+                        *source_span,
+                    ));
+                }
                 let is_tier2 =
                     crate::Comptime::is_tier2_core_call(module, method, self.repl_mode);
                 if !is_tier2 {
@@ -5160,6 +5187,12 @@ impl<'a> EvalCtx<'a> {
                         // Core-import alias may still lower as StaticCall when
                         // function bodies were typed before imports propagated.
                         if let Some(module) = self.core_imports.get(type_name) {
+                            if self.should_decline_ambient_fold(module, &method.name) {
+                                return Err(unsupported(
+                                    &format!("`{module}.{}()` at compile time", method.name),
+                                    self.span(),
+                                ));
+                            }
                             return apply_core_call(
                                 module,
                                 &method.name,

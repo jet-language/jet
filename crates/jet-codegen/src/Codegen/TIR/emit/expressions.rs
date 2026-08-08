@@ -44,11 +44,11 @@ use crate::Codegen::TIR::TTryConvert;
 use crate::Codegen::TIR::tuple_join;
 use crate::Codegen::TIR::struct_field_type;
 
-fn emit_tir_lambda(lam: &TLambda) -> String {
+fn emit_tir_lambda_with_arc(lam: &TLambda, force_arc: bool) -> String {
     let move_kw = if lam.is_move { "move " } else { "" };
     let closure = format!("{}|{}| {}", move_kw, lam.params.join(", "), lam.body);
     // Prefer Arc (HTTP) / Rc (cloneable Fn values) over Box (FnMut escape only).
-    let wrapped = if lam.arc {
+    let wrapped = if force_arc || lam.arc {
         format!("std::sync::Arc::new({closure})")
     } else if lam.rc {
         format!("std::rc::Rc::new({closure})")
@@ -62,6 +62,14 @@ fn emit_tir_lambda(lam: &TLambda) -> String {
     } else {
         format!("{{ {} {} }}", lam.prep, wrapped)
     }
+}
+
+fn emit_tir_lambda(lam: &TLambda) -> String {
+    emit_tir_lambda_with_arc(lam, false)
+}
+
+fn emit_tir_lambda_sync(lam: &TLambda) -> String {
+    emit_tir_lambda_with_arc(lam, true)
 }
 
 fn emit_shared_guard_projection(cx: &Cx, guard_ty: &Type, path: &[String]) -> String {
@@ -3060,6 +3068,18 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     .unwrap_or_default()
             };
             let web_handler = |i: usize| {
+                let arg = &args[i];
+                if let TExprKind::FnValue {
+                    kind: TFnValueKind::NamedFn {
+                        name: Some(name), ..
+                    },
+                } = &arg.kind
+                {
+                    return crate::Codegen::emit_named_fn_value_sync(cx, name, &arg.ty);
+                }
+                if let TExprKind::Lambda(lam) = &arg.kind {
+                    return emit_tir_lambda_sync(lam);
+                }
                 let mut rendered = a(i);
                 if let Some(end) = rendered.rfind('>') {
                     rendered.insert_str(end, " + Send + Sync");

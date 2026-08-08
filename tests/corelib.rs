@@ -7724,6 +7724,47 @@ fn run() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// #1799: an immutable `::` binding of `date.today()` must read the runtime
+/// clock. Before the fix, D-VERDICT-1308-1 folded the ambient wall-clock read
+/// into the generated literal, so the artifact kept the build date forever.
+#[test]
+fn immutable_binding_of_date_today_reads_the_runtime_clock() {
+    let src = r#"
+use core.time.date as date
+
+fn run() {
+    a :: date.today()
+    b :: date.today()
+    print(a == b)
+}
+"#;
+    let compiled = compile_temp("date_today_immutable", src);
+    let user_run = compiled
+        .rust
+        .split_once("pub fn user_run() {")
+        .and_then(|(_, body)| body.split_once("\n}\n").map(|(body, _)| body))
+        .expect("generated Rust must contain the user_run body");
+    assert_eq!(
+        user_run.matches("JetDate::today_utc()").count(),
+        2,
+        "both immutable date.today() calls must remain runtime reads:\n{user_run}"
+    );
+
+    let have_rustc = common::have_rustc();
+    if !have_rustc {
+        eprintln!("note: skipping immutable-date-today-binding test (need rustc)");
+        return;
+    }
+    let dir =
+        std::env::temp_dir().join(format!("jet_corelib_date_today_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(&dir, "date_today_immutable", src, &[], None);
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(stdout, "true\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn random_distribution_surface_is_deterministic() {
     let have_rustc = common::have_rustc();

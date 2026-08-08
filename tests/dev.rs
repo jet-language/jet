@@ -2776,6 +2776,47 @@ fn run_cranelift_without_fallback(src: &str, tag: &str) -> ProgramOutput {
 }
 
 #[test]
+fn post_contract_failure_matches_aot_under_quick_run() {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+        return;
+    }
+    let src = r#"
+#Post(result == 99, "must equal 99")
+fn get() => Int {
+    return 1
+}
+
+fn run() {
+    print(get())
+}
+"#;
+    let dir = std::env::temp_dir().join(format!(
+        "jet_contract_parity_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("post_failure.jet");
+    fs::write(&file, src).unwrap();
+    let shown = file.to_string_lossy().to_string();
+
+    let quick = match dev_iteration(&shown, false, false) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(ds) => panic!("quick run returned diagnostics: {ds:?}"),
+    };
+    let aot = compiled_binary_output(&dir, "post_contract", 0, "contracts/post_failure", &shown);
+
+    assert_eq!(quick.exit_code, 70, "quick run must trap: {quick:?}");
+    assert!(quick.stderr.contains("#Post contract failed: must equal 99"));
+    assert_eq!(quick, aot, "quick run and AOT contract behavior diverged");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn unicode_16_string_and_core_text_match_aot_comptime_and_resident_jit() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;

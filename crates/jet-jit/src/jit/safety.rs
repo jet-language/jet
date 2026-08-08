@@ -2862,6 +2862,9 @@ pub(crate) fn resident_safe_func_detail(tir: &TFunc, callees: &HashSet<String>) 
     ) {
         return Some("not top-level".into());
     }
+    if !tir.pre_contracts.is_empty() || !tir.post_contracts.is_empty() {
+        return Some("contracts run in interpreter".into());
+    }
     if !tir.generics.is_empty() || tir.is_unsafe || tir.is_reactive {
         return Some("func attrs unsupported".into());
     }

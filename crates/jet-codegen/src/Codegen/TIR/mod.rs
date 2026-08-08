@@ -1786,12 +1786,27 @@ pub struct TFunc {
     /// D-COMPUTE-KERNEL-SURFACE1=B: sema's complete safe-kernel proof. The
     /// emitter and interpreter carry this fact without re-deriving it.
     pub kernel_proof: Option<crate::AST::KernelProof>,
+    /// D-PREPOST1: lowered runtime contract facts. Every execution tier reads
+    /// these same TIR expressions; a tier that cannot execute them must deopt.
+    pub pre_contracts: Vec<TContract>,
+    pub post_contracts: Vec<TContract>,
     pub body: Vec<TStmt>,
     /// c109 Phase 7: how this function is emitted. A top-level function gets
     /// `pub fn name(…)` at module scope; a method gets `pub fn user_name(<self>, …)`
     /// inside an `impl` block (indented), with the `self` receiver form per the
     /// resolved convention (or no receiver for a static method).
     pub kind: TFuncKind,
+}
+
+/// One lowered `#Pre`/`#Post` clause. `condition` and `message` share the
+/// function's parameter bindings; postconditions additionally bind
+/// `__jet_result` to the returned value.
+pub struct TContract {
+    pub condition: TExpr,
+    pub message: TExpr,
+    pub file: String,
+    pub line: u32,
+    pub span: crate::Diagnostics::Span,
 }
 
 /// One typed parameter reconstructed by a flattened WebAssembly export wrapper.

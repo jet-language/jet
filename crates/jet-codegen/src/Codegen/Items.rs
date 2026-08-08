@@ -2258,10 +2258,10 @@ pub(crate) fn emit_func(cx: &Cx, f: &Func, out: &mut String) {
     // internal compiler error (I2-class), never an AST fallback.
     if TIR::tir_covers(f, cx) {
         let tir = TIR::lower_func(f, cx);
-        if f.pre.is_empty() && f.post.is_empty() {
+        if tir.pre_contracts.is_empty() && tir.post_contracts.is_empty() {
             TIR::emit_tir_func(&tir, cx, out);
         } else {
-            emit_func_with_contracts(cx, f, &tir, out);
+            emit_func_with_contracts(cx, &tir, out);
         }
         cx.current_type_params.borrow_mut().clear();
         return;
@@ -2289,7 +2289,7 @@ pub(crate) fn emit_func(cx: &Cx, f: &Func, out: &mut String) {
 /// body now runs inside a closure that may capture that parameter by value.
 /// `#Post` conditions should read `result` (and any parameter the body only
 /// borrows), matching every shipped example.
-fn emit_func_with_contracts(cx: &Cx, f: &Func, tir: &TIR::TFunc, out: &mut String) {
+fn emit_func_with_contracts(cx: &Cx, tir: &TIR::TFunc, out: &mut String) {
     let mut body_buf = String::new();
     TIR::emit_tir_func(tir, cx, &mut body_buf);
     // The signature line is `"{vis}{unsafe}fn name<gen>(params)[-> ret] {\n"` —
@@ -2301,40 +2301,36 @@ fn emit_func_with_contracts(cx: &Cx, f: &Func, tir: &TIR::TFunc, out: &mut Strin
     let body_only = &rest[..rest.len().saturating_sub("}\n\n".len())];
 
     out.push_str(sig);
-    for clause in &f.pre {
-        let cond = TIR::render_contract_cond(f, &clause.cond, None, cx);
-        let msg = TIR::render_contract_cond(f, &clause.message_expr, None, cx);
-        let (_, line, _) = TIR::tir_src_line_at(&cx.src, clause.span.start);
+    for clause in &tir.pre_contracts {
+        let cond = TIR::emit_tir_expr(&clause.condition, cx);
+        let msg = TIR::emit_tir_expr(&clause.message, cx);
         out.push_str(&format!(
             "    let __jet_contract_ok = {cond};\n    jet_proof_record(1, if __jet_contract_ok {{ 0 }} else {{ 1 }}, \"Pre\", &{msg}, {file}, {line});\n    if !__jet_contract_ok {{ jet_contract_fail({file}, {line}, \"Pre\", &{msg}); }}\n",
             cond = cond,
-            file = escape_rust_str(&cx.file),
-            line = line,
+            file = escape_rust_str(&clause.file),
+            line = clause.line,
             msg = msg,
         ));
     }
-    if f.post.is_empty() {
+    if tir.post_contracts.is_empty() {
         out.push_str(body_only);
     } else {
-        let ret_ty = f
-            .return_type
+        let ret_ty = tir
+            .ret
             .clone()
             .unwrap_or(crate::AST::Type::Named("Unit".to_string()));
         let ret_annot = TIR::rust_return_type(cx, &ret_ty);
         out.push_str(&format!("    let __jet_result = (|| -> {ret_annot} {{\n"));
         out.push_str(body_only);
         out.push_str("    })();\n");
-        for clause in &f.post {
-            let cond =
-                TIR::render_contract_cond(f, &clause.cond, Some(("__jet_result", &ret_ty)), cx);
-            let msg =
-                TIR::render_contract_cond(f, &clause.message_expr, Some(("__jet_result", &ret_ty)), cx);
-            let (_, line, _) = TIR::tir_src_line_at(&cx.src, clause.span.start);
+        for clause in &tir.post_contracts {
+            let cond = TIR::emit_tir_expr(&clause.condition, cx);
+            let msg = TIR::emit_tir_expr(&clause.message, cx);
             out.push_str(&format!(
                 "    let __jet_contract_ok = {cond};\n    jet_proof_record(1, if __jet_contract_ok {{ 0 }} else {{ 1 }}, \"Post\", &{msg}, {file}, {line});\n    if !__jet_contract_ok {{ jet_contract_fail({file}, {line}, \"Post\", &{msg}); }}\n",
                 cond = cond,
-                file = escape_rust_str(&cx.file),
-                line = line,
+                file = escape_rust_str(&clause.file),
+                line = clause.line,
                 msg = msg,
             ));
         }

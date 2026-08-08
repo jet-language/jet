@@ -354,6 +354,22 @@ pub(crate) fn emit_if_let_pattern(cx: &Cx, pattern: &Pattern) -> String {
 }
 
 pub(crate) fn emit_named_fn_value(cx: &Cx, name: &str, ft: &Type) -> String {
+    emit_named_fn_value_with_storage(cx, name, ft, false)
+}
+
+/// Emit a named function value for a host that stores callbacks behind a
+/// `Send + Sync` boundary. Ordinary Jet function values stay `Rc`; only the
+/// host boundary chooses `Arc`.
+pub(crate) fn emit_named_fn_value_sync(cx: &Cx, name: &str, ft: &Type) -> String {
+    emit_named_fn_value_with_storage(cx, name, ft, true)
+}
+
+fn emit_named_fn_value_with_storage(
+    cx: &Cx,
+    name: &str,
+    ft: &Type,
+    send_sync: bool,
+) -> String {
     let rust_name = mangle(name);
     let Type::Fn { params, ret, .. } = ft else {
         return rust_name;
@@ -361,17 +377,27 @@ pub(crate) fn emit_named_fn_value(cx: &Cx, name: &str, ft: &Type) -> String {
     let middleware = params.len() == 1
         && matches!(&params[0], Type::Named(name) if name == "HTTPHandler")
         && matches!(ret.as_deref(), Some(Type::Named(name)) if name == "HTTPHandler");
-    let wrap = if middleware {
+    let wrap = if middleware || send_sync {
         "std::sync::Arc::new"
     } else {
         "std::rc::Rc::new"
+    };
+    let rust_type = if send_sync && !middleware {
+        let ordinary = cx.rust_type(ft);
+        ordinary
+            .strip_prefix("std::rc::Rc<")
+            .and_then(|inner| inner.strip_suffix('>'))
+            .map(|inner| format!("std::sync::Arc<{inner} + Send + Sync>"))
+            .unwrap_or(ordinary)
+    } else {
+        cx.rust_type(ft)
     };
     if !middleware
         && ret
             .as_deref()
             .is_some_and(|ret| cx.type_contains_view(ret))
     {
-        return format!("{wrap}({rust_name}) as {}", cx.rust_type(ft));
+        return format!("{wrap}({rust_name}) as {rust_type}");
     }
     let arg_decls: Vec<String> = params
         .iter()
@@ -401,11 +427,10 @@ pub(crate) fn emit_named_fn_value(cx: &Cx, name: &str, ft: &Type) -> String {
         .collect();
     let _ = ret;
     format!(
-        "{wrap}(move |{}| {}({})) as {}",
+        "{wrap}(move |{}| {}({})) as {rust_type}",
         arg_decls.join(", "),
         rust_name,
         arg_calls.join(", "),
-        cx.rust_type(ft)
     )
 }
 
