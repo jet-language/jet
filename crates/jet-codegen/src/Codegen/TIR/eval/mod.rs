@@ -88,6 +88,8 @@ pub(super) fn raw_place_local(expr: &TExpr) -> Option<&TLocal> {
     }
 }
 
+pub use exprs::{stable_place_address, tir_place_address_key};
+
 pub(super) fn unsupported(what: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0956",
@@ -1354,6 +1356,16 @@ impl<'a> EvalCtx<'a> {
     }
 
     pub(super) fn take_task(&mut self, value: &CtValue) -> Result<CtValue, Diagnostic> {
+        if let CtValue::Struct { type_name, fields } = value {
+            if type_name == "__JetTirTask" {
+                if let Some(result) = fields
+                    .iter()
+                    .find_map(|(name, value)| (name == "value").then(|| value.clone()))
+                {
+                    return Ok(result);
+                }
+            }
+        }
         self.task_wait_cancel_check()?;
         let task = self.take_task_entry(value)?;
         let result = task.completion

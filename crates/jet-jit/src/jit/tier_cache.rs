@@ -80,6 +80,14 @@ thread_local! {
 
 /// Move a successful capture into the process-local "last artifact" slot.
 pub(crate) fn publish_capture() {
+    // FFI entries point into a process-local cdylib. A disk artifact cannot
+    // recreate that bridge on a warm run, so force the bundle through the cold
+    // entry that binds its FFI table before execution.
+    if crate::Ffi::has_bound_ffi() {
+        abort_capture();
+        LAST_ARTIFACT.with(|slot| *slot.borrow_mut() = None);
+        return;
+    }
     // Cell schema/projection/layout handles are iconst-baked at compile time.
     // A cache hit rebuilds a fresh CellState and would leave those handles dangling.
     let cell_handles = RESIDENT_RUNTIME.with(|slot| {

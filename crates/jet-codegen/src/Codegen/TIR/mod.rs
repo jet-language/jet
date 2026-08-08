@@ -39,7 +39,8 @@ mod emit;
 mod eval;
 pub use eval::{
     install_comptime_bridge, lower_interp_program, run_named_func, run_program,
-    run_program_with_structs, set_native_call_hook, NativeCallHook,
+    run_program_with_structs, set_native_call_hook, stable_place_address, tir_place_address_key,
+    NativeCallHook,
 };
 mod lower;
 mod subset;

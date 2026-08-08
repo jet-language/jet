@@ -546,13 +546,21 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
     Some(op)
 }
 
-/// c109 Phase 13: the resolved return type of a covered handle method, read from the
-/// authoritative sema handle tables (`file_handle_method_return`/`net_method_return`,
-/// Source/Sema/CheckerCoreLib.rs) — a pure `(handle, method)` dispatch, no inference.
-/// The return type is rarely load-bearing in emit (a binding carries sema's `b.ty`),
-/// but kept total per the design principle. A throwaway diags vec absorbs the table's
-/// diagnostic side-channel (sema already validated, so none fire here).
-pub(crate) fn handle_method_return_ty(handle: &str, method: &str, nargs: usize) -> Type {
+/// c109 Phase 13: resolve a covered handle method using sema's exact return when
+/// it is arg-dependent, then the authoritative fixed handle tables. The resolved
+/// receiver type keeps generic receiver arguments available to those tables.
+/// A throwaway diags vec absorbs their diagnostic side-channel (sema already
+/// validated, so none fire here).
+pub(crate) fn handle_method_return_ty(
+    handle: &str,
+    method: &str,
+    nargs: usize,
+    receiver_ty: &Type,
+    resolved_ret: Option<&Type>,
+) -> Type {
+    if let Some(ret) = resolved_ret {
+        return ret.clone();
+    }
     let span = crate::Diagnostics::Span { start: 0, end: 0 };
     let mut sink = Vec::new();
     let ret = crate::Sema::file_handle_method_return(handle, method, nargs, span, &mut sink)
@@ -602,7 +610,7 @@ pub(crate) fn handle_method_return_ty(handle: &str, method: &str, nargs: usize) 
                 || handle == crate::Syntax::DURATION_TYPE
             {
                 crate::Collections::builtin_method_return(
-                    &Type::Named(handle.to_string()),
+                    receiver_ty,
                     method,
                     nargs,
                     false,
@@ -678,7 +686,7 @@ pub(crate) fn handle_method_return_ty(handle: &str, method: &str, nargs: usize) 
         .or_else(|| {
             if handle == crate::Syntax::SOLVER_TYPE {
                 crate::Collections::builtin_method_return(
-                    &Type::Named(crate::Syntax::SOLVER_TYPE.to_string()),
+                    receiver_ty,
                     method,
                     nargs,
                     false,

@@ -3250,6 +3250,7 @@ impl<'a> Checker<'a> {
                             self.infer(&mut a.expr);
                         }
                         *recv_type_out = Some("ArgsSpec".to_string());
+                        *resolved_ret_out = ret.clone();
                         return ret;
                     }
                 }
@@ -3261,6 +3262,7 @@ impl<'a> Checker<'a> {
                             self.infer(&mut a.expr);
                         }
                         *recv_type_out = Some("ParsedArgs".to_string());
+                        *resolved_ret_out = ret.clone();
                         return ret;
                     }
                 }
@@ -3446,6 +3448,7 @@ impl<'a> Checker<'a> {
                     let handle_ty = handle_ty.clone();
                     let result = self.finish_rng_generic(receiver, method, args, span);
                     *recv_type_out = Some(handle_ty);
+                    *resolved_ret_out = result.clone();
                     return result;
                 }
                 if matches!(
@@ -3459,6 +3462,7 @@ impl<'a> Checker<'a> {
                         let result =
                             self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
                         *recv_type_out = Some(handle_ty);
+                        *resolved_ret_out = result.clone();
                         return result;
                     }
                 }

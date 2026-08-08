@@ -4129,7 +4129,13 @@ pub(crate) fn lower_method_call(
                         err: Box::new(Type::Named("DataError".to_string())),
                     }
                 }),
-                _ => handle_method_return_ty(handle, method, args.len()),
+                _ => handle_method_return_ty(
+                    handle,
+                    method,
+                    args.len(),
+                    &recv_t.ty,
+                    resolved_ret,
+                ),
             };
             return TExpr {
                 ty,

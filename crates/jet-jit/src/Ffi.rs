@@ -119,6 +119,13 @@ pub(crate) fn clear_ffi() {
     }
 }
 
+pub(crate) fn has_bound_ffi() -> bool {
+    FFI_STATE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .is_some()
+}
+
 fn load_cdylib(
     path: &Path,
     entries: &[jet_pkg_model::FFI::ExternEntry],

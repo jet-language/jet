@@ -760,6 +760,40 @@ impl<'a> Checker<'a> {
                 // Skipping every arm is itself a path through here.
                 paths.push(outside_table.clone());
             }
+            // D-LIN1 / D-FACT-FLOW1: E0141 — a `#SingleUse` value consumed
+            // on one arm and not another. `Moved::join` is a union (keeps
+            // either arm's move), so the merged store alone would call this
+            // value consumed and E0140 would never see the gap; check every
+            // pre-merge path directly for exactly one side moving it, over
+            // the bindings live at this scope before the table.
+            let scope_depth = self.scope_depth();
+            let mut divergent_single_use: Vec<(String, Span)> = outside_table
+                .bindings
+                .iter_at(scope_depth)
+                .filter_map(|(name, info)| {
+                    let use_span = info.single_use_span?;
+                    if outside_table.moved.contains(name) {
+                        return None;
+                    }
+                    let moved_paths = paths
+                        .iter()
+                        .map(|path| path.moved.contains(name))
+                        .collect::<Vec<_>>();
+                    if moved_paths.iter().any(|moved| *moved)
+                        && moved_paths.iter().any(|moved| !*moved)
+                    {
+                        Some((name.to_string(), use_span))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            divergent_single_use.sort_by(|a, b| a.1.start.cmp(&b.1.start).then(a.0.cmp(&b.0)));
+            for (name, use_span) in divergent_single_use {
+                self.diags.push(
+                    crate::Sema::CheckerOwnership::e0141_unconsumed_branch(&name, use_span),
+                );
+            }
             self.flow = crate::Sema::FlowFacts::FlowFacts::merge_paths(&outside_table, &paths);
         }
     

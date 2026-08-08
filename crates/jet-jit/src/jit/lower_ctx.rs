@@ -16,7 +16,7 @@ use jet_codegen::Codegen::TIR::{
     TStaticOwner, TStmt, TStrPart, TTypedTextForm, TTypedTextInterpKind, TZipFillMode,
 };
 use jet_foundation::AST::{BinOp, IncDecOp, PatSlot, Pattern, StrFormat, Type, UnOp};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::runtime_host::{
     HostFns, INTN_MODE_CHECKED, INTN_MODE_SATURATING, INTN_MODE_TRAP, INTN_MODE_WRAPPING,
@@ -65,6 +65,9 @@ pub(crate) struct LowerCtx<'a, 'b> {
     pub(crate) vars: &'a mut HashMap<String, Variable>,
     pub(crate) var_tys: &'a mut HashMap<String, Type>,
     pub(crate) raw_slots: HashMap<String, StackSlot>,
+    /// Pointer values minted from real local stack slots; synthetic place
+    /// identities are deliberately absent so volatile access declines them.
+    pub(crate) real_address_values: HashSet<Value>,
     pub(crate) func_ids: &'a HashMap<String, FuncId>,
     pub(crate) spawn_site: &'a mut usize,
     pub(crate) spawn_func_ids: &'a [FuncId],
@@ -257,43 +260,6 @@ impl LowerCtx<'_, '_> {
             TExprKind::Borrow { place, .. } => Self::raw_place_local(place),
             TExprKind::DistinctCtor { arg, .. } => Self::raw_place_local(arg),
             _ => None,
-        }
-    }
-
-    /// Same structural key as jet-codegen's `tir_place_address_key` (TIR eval)
-    /// — kept in sync deliberately rather than shared across the crate
-    /// boundary, since it is a small pure function over `TExpr` shape only.
-    fn jit_place_address_key(expr: &TExpr) -> String {
-        match &expr.kind {
-            TExprKind::Local(local) => local.name.clone(),
-            TExprKind::Field { recv, field, .. } => {
-                format!("{}.{}", Self::jit_place_address_key(recv), field)
-            }
-            TExprKind::Index { base, index, .. } => format!(
-                "{}[{}]",
-                Self::jit_place_address_key(base),
-                Self::jit_place_address_key(index)
-            ),
-            TExprKind::Borrow { place, .. } | TExprKind::Deref(place) => {
-                Self::jit_place_address_key(place)
-            }
-            _ => format!("ty:{}", expr.ty.show()),
-        }
-    }
-
-    /// Same FNV-1a-derived non-zero identity as jet-codegen's
-    /// `stable_place_address` (TIR eval) — see `jit_place_address_key`.
-    fn jit_stable_place_address(key: &str) -> i64 {
-        let mut hash: u64 = 0xcbf29ce484222325;
-        for byte in key.as_bytes() {
-            hash ^= u64::from(*byte);
-            hash = hash.wrapping_mul(0x100000001b3);
-        }
-        let addr = (hash as i64).wrapping_abs();
-        if addr == 0 {
-            1
-        } else {
-            addr
         }
     }
 
@@ -8739,11 +8705,13 @@ impl LowerCtx<'_, '_> {
                             self.raw_slots.insert(key, slot);
                             slot
                         };
-                        return Ok(self.b.ins().stack_addr(
+                        let address = self.b.ins().stack_addr(
                             self.module.target_config().pointer_type(),
                             slot,
                             0,
-                        ));
+                        );
+                        self.real_address_values.insert(address);
+                        return Ok(address);
                     }
                     // D-PIN1 / S58: the place is not a bare local (e.g. a field
                     // projection through a heap record, `node.payload`). Arena
@@ -8757,8 +8725,8 @@ impl LowerCtx<'_, '_> {
                     // that exact algorithm here so every non-AOT tier agrees on
                     // the one non-zero / inequality facts a program can observe
                     // (I9). AOT alone keeps the real `&place as *const _` cast.
-                    let key = Self::jit_place_address_key(place);
-                    let addr = Self::jit_stable_place_address(&key);
+                    let key = jet_codegen::Codegen::TIR::tir_place_address_key(place);
+                    let addr = jet_codegen::Codegen::TIR::stable_place_address(&key);
                     return Ok(self.b.ins().iconst(types::I64, addr));
                 }
                 if module == "core.mem" && method == "volatile_read" && args.len() == 1 {
@@ -8766,6 +8734,9 @@ impl LowerCtx<'_, '_> {
                         return Err("jit volatile read outside #Unsafe".to_string());
                     }
                     let pointer = self.lower_expr(&args[0])?;
+                    if !self.real_address_values.contains(&pointer) {
+                        return Err("jit volatile read address unsupported".to_string());
+                    }
                     let clif = self.meta.clif_ty(&expr.ty).ok_or_else(|| {
                         format!("jit volatile read result unsupported: {:?}", expr.ty)
                     })?;
@@ -8776,6 +8747,9 @@ impl LowerCtx<'_, '_> {
                         return Err("jit volatile write outside #Unsafe".to_string());
                     }
                     let pointer = self.lower_expr(&args[0])?;
+                    if !self.real_address_values.contains(&pointer) {
+                        return Err("jit volatile write address unsupported".to_string());
+                    }
                     let value = self.lower_expr(&args[1])?;
                     self.b
                         .ins()
@@ -12315,7 +12289,7 @@ impl LowerCtx<'_, '_> {
                 Ok(self.finish_wait_call(status))
             }
             TExprKind::OrFallback { value, fallback } => {
-                if self.or_fallback_operand_is_option(value) {
+                if matches!(value.ty, Type::Option(_)) {
                     let status = self.lower_list_get_opt_status(value)?;
                     let ok_block = self.b.create_block();
                     let fail_block = self.b.create_block();
@@ -13658,11 +13632,13 @@ impl LowerCtx<'_, '_> {
                         self.raw_slots.insert(key, slot);
                         slot
                     };
-                    return Ok(self.b.ins().stack_addr(
+                    let pointer = self.b.ins().stack_addr(
                         self.module.target_config().pointer_type(),
                         slot,
                         0,
-                    ));
+                    );
+                    self.real_address_values.insert(pointer);
+                    return Ok(pointer);
                 }
                 let value = self.lower_expr(inner)?;
                 let clif = self
@@ -14399,61 +14375,6 @@ impl LowerCtx<'_, '_> {
         Ok(())
     }
 
-    /// `??`'s operand-kind test: does `value` carry the packed-Option ABI that
-    /// `lower_list_get_opt_status` decodes, even when TIR erased its static
-    /// `Type::Option` wrapper to `Unit` (generic handle methods like `Rng.pick`
-    /// resolve their return type through `handle_method_return_ty`, which has no
-    /// type-argument context and defaults untyped generics to `Unit`)? Mirrors
-    /// every recognized shape in `lower_list_get_opt_status` below so the two
-    /// stay in lockstep — this is the gate that decides whether `OrFallback`
-    /// takes the Option decode path at all; the callee's own recognition is
-    /// dead code for any shape missing here.
-    fn or_fallback_operand_is_option(&self, value: &TExpr) -> bool {
-        if matches!(value.ty, Type::Option(_)) {
-            return true;
-        }
-        if matches!(
-            &value.kind,
-            TExprKind::BuiltinMethod {
-                op: TBuiltinOp::GetList | TBuiltinOp::GetMap,
-                ..
-            }
-        ) {
-            return true;
-        }
-        if let TExprKind::HandleMethod { op, .. } = &value.kind {
-            if matches!(
-                op,
-                THandleOp::ParsedArgsOption
-                    | THandleOp::ParsedArgsOptionInt
-                    | THandleOp::ParsedArgsOptionFloat
-                    | THandleOp::ParsedArgsPositional
-                    | THandleOp::ParsedArgsSubcommand
-                    | THandleOp::RngPick
-                    | THandleOp::RngWeightedPick
-            ) {
-                return true;
-            }
-        }
-        if let Some(Type::Option(_)) = Self::recover_core_return_ty(value) {
-            return true;
-        }
-        if let TExprKind::CoreCall { module, method, .. } = &value.kind {
-            if module == "core.random" && method == "weighted_pick" {
-                return true;
-            }
-        }
-        if let TExprKind::Local(local) = &value.kind {
-            let key = TIR::local_place(&local.name);
-            if let Some(ty) = self.var_tys.get(&key) {
-                if matches!(ty, Type::Option(_)) {
-                    return true;
-                }
-            }
-        }
-        false
-    }
-
     fn lower_list_get_opt_status(&mut self, value: &TExpr) -> Result<Value, String> {
         if let TExprKind::BuiltinMethod {
             recv,
@@ -14492,59 +14413,6 @@ impl LowerCtx<'_, '_> {
         // Already-carried Option ABI; IntN uses the result arena.
         if matches!(&value.ty, Type::Option(_)) {
             return self.lower_expr(value);
-        }
-        // ParsedArgs queries: hosts already return packed Option (TIR may stamp Unit).
-        if let TExprKind::HandleMethod { op, .. } = &value.kind {
-            if matches!(
-                op,
-                THandleOp::ParsedArgsOption
-                    | THandleOp::ParsedArgsOptionInt
-                    | THandleOp::ParsedArgsOptionFloat
-                    | THandleOp::ParsedArgsPositional
-                    | THandleOp::ParsedArgsSubcommand
-            ) {
-                return self.lower_expr(value);
-            }
-        }
-        // Recover Option when TIR erased the wrapper but Sema set is_option.
-        if let Some(Type::Option(_)) = Self::recover_core_return_ty(value) {
-            return self.lower_expr(value);
-        }
-        // `core.random.weighted_pick` / `Rng.weighted_pick` return the same
-        // packed Option encoding; TIR sometimes erases the Option wrapper.
-        if let TExprKind::CoreCall { module, method, .. } = &value.kind {
-            if module == "core.random" && method == "weighted_pick" {
-                return self.lower_expr(value);
-            }
-        }
-        if let TExprKind::HandleMethod {
-            op: THandleOp::RngPick | THandleOp::RngWeightedPick,
-            ..
-        } = &value.kind
-        {
-            return self.lower_expr(value);
-        }
-        // ParsedArgs option/positional queries use the same 0 / value+1 pack.
-        if let TExprKind::HandleMethod { op, .. } = &value.kind {
-            if matches!(
-                op,
-                THandleOp::ParsedArgsOption
-                    | THandleOp::ParsedArgsOptionInt
-                    | THandleOp::ParsedArgsOptionFloat
-                    | THandleOp::ParsedArgsPositional
-                    | THandleOp::ParsedArgsSubcommand
-            ) {
-                return self.lower_expr(value);
-            }
-        }
-        // Local holding a packed Option from ParsedArgs* (TIR erased Option).
-        if let TExprKind::Local(local) = &value.kind {
-            let key = TIR::local_place(&local.name);
-            if let Some(ty) = self.var_tys.get(&key) {
-                if matches!(ty, Type::Option(_)) {
-                    return self.lower_expr(value);
-                }
-            }
         }
         Err("jit list get_opt status unsupported".to_string())
     }

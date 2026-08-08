@@ -99,42 +99,61 @@ fn shape6_registry_routes_and_retired_bare_snapshots() {
     fs::remove_dir_all(tmp).unwrap();
 }
 
+// The FFI bridge cache root for a key `K` is
+// `<home>/.cache/jet/ffi/K/target/<triple>/release/`; `cached_crypto_helper_path()`
+// (called against the *test process's own* real HOME) returns the helper path
+// under that layout for the current deps/target key — that key is
+// HOME-independent, so it's safe to reuse for an isolated `home`.
+// `helper.ancestors().nth(4)` is `K`'s cache root (file, release dir, triple
+// dir, target dir, then K) — same arithmetic `crypto_c12.rs` relies on.
 fn isolated_crypto_helper_paths(home: &Path) -> (PathBuf, PathBuf) {
-    let helper = jetpack::FFI::cached_crypto_helper_path();
-    let cache_key = helper
+    let real_helper = jetpack::FFI::cached_crypto_helper_path();
+    let real_root = real_helper.ancestors().nth(4).unwrap();
+    let relative = real_helper.strip_prefix(real_root.parent().unwrap()).unwrap();
+    let helper = home.join(".cache/jet/ffi").join(relative);
+    let cache_key = real_root.file_name().and_then(|n| n.to_str()).unwrap();
+    let rlib = helper
         .parent()
-        .and_then(Path::parent)
-        .and_then(Path::parent)
-        .and_then(Path::file_name)
-        .and_then(|name| name.to_str())
-        .unwrap();
-    let release = home
-        .join(".cache/jet/ffi")
-        .join(cache_key)
-        .join("target/release");
-    (
-        release.join(format!("libjet_ffi_{cache_key}.rlib")),
-        release.join("jet-crypto-helper"),
-    )
+        .unwrap()
+        .join(format!("libjet_ffi_{cache_key}.rlib"));
+    (rlib, helper)
 }
 
+/// Install a fake crypto helper AND its cache-verification sidecar
+/// (`artifacts.sha256`) so `ensure_bridge_helper()`'s cache-hit fast path
+/// (`bridge_cache_verified`) accepts these files instead of falling through to
+/// a real `cargo build` that would silently bypass the fake helper.
 #[cfg(unix)]
 fn install_closed_status_crypto_helper(home: &Path) {
     use std::os::unix::fs::PermissionsExt;
 
     let (rlib, helper) = isolated_crypto_helper_paths(home);
     let release = helper.parent().unwrap();
-    fs::create_dir_all(&release).unwrap();
-    fs::write(rlib, b"test cache sentinel").unwrap();
+    fs::create_dir_all(release).unwrap();
+
+    let rlib_bytes = b"test cache sentinel".to_vec();
+    fs::write(&rlib, &rlib_bytes).unwrap();
+
+    let crate_stem = rlib.file_stem().unwrap().to_str().unwrap().to_string();
+    let cdylib = release.join(format!("{crate_stem}.{}", std::env::consts::DLL_EXTENSION));
+    let cdylib_bytes = b"test cache cdylib sentinel".to_vec();
+    fs::write(&cdylib, &cdylib_bytes).unwrap();
+
     let signature = "00".repeat(64);
-    fs::write(
-        &helper,
-        format!(
-            "#!/bin/sh\nIFS= read -r command\ncase \"$command\" in\n  keygen*) printf 'secret helper output' ; printf 'raw OS status and dependency text' >&2 ; exit 75 ;;\n  sign*) printf '%s\\n' '{signature}' ;;\n  verify*) exit 0 ;;\n  *) exit 1 ;;\nesac\n"
-        ),
+    let helper_bytes = format!(
+        "#!/bin/sh\nIFS= read -r command\ncase \"$command\" in\n  keygen*) printf 'secret helper output' ; printf 'raw OS status and dependency text' >&2 ; exit 75 ;;\n  sign*) printf '%s\\n' '{signature}' ;;\n  verify*) exit 0 ;;\n  *) exit 1 ;;\nesac\n"
     )
-    .unwrap();
+    .into_bytes();
+    fs::write(&helper, &helper_bytes).unwrap();
     fs::set_permissions(&helper, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let cache_root = helper.ancestors().nth(4).unwrap();
+    let mut manifest = String::from("jet-ffi-artifacts-v1\n");
+    for (bytes, path) in [(&rlib_bytes, &rlib), (&cdylib_bytes, &cdylib), (&helper_bytes, &helper)] {
+        let relative = path.strip_prefix(cache_root).unwrap().to_str().unwrap();
+        manifest.push_str(&format!("{} {relative}\n", jet::SHA256::sha256_hex(bytes)));
+    }
+    fs::write(cache_root.join("artifacts.sha256"), manifest).unwrap();
 }
 
 fn install_cached_crypto_helper(home: &Path) {
@@ -172,7 +191,7 @@ fn read_index_file(bare: &Path, name: &str) -> Option<String> {
 /// Write a minimal project and commit it (clean tree) so `jet registry publish` clears
 /// the dirty-tree gate (E2605).
 fn init_clean_project(dir: &Path, name: &str, version: &str) {
-    write(dir, "pkg.jet", &min_manifest(name, version));
+    write(dir, "package.jet", &min_manifest(name, version));
     write(
         dir,
         "main.jet",
@@ -206,7 +225,7 @@ fn with_store<T, F: FnOnce() -> T>(store_dir: &Path, f: F) -> T {
     result
 }
 
-// Minimal `pkg.jet` (Jet syntax, U1) for a named package with no deps.
+// Minimal `package.jet` (Jet syntax, U1) for a named package with no deps.
 fn min_manifest(name: &str, version: &str) -> String {
     format!(
         "name: \"{}\"\nversion: \"{}\"\njet: \">=0.1.0\"\ndescription: \"\"\nlicense: \"MIT\"\nrepository: \"\"\n",
@@ -1113,7 +1132,7 @@ repository: "https://example.com"
 deps: .{
 }
 "#;
-    let path = PathBuf::from("pkg.jet");
+    let path = PathBuf::from("package.jet");
     let mf = jet::Manifest::parse(&path, raw).expect("valid manifest should parse");
     assert_eq!(mf.package.name, "myapp");
     assert_eq!(mf.package.version, "1.2.3");
@@ -1126,7 +1145,7 @@ deps: .{
 #[test]
 fn manifest_parse_dep_path() {
     let raw = manifest_with_deps("root", "0.1.0", "    helpers: ../helpers,");
-    let mf = jet::Manifest::parse(&PathBuf::from("pkg.jet"), &raw).expect("path dep should parse");
+    let mf = jet::Manifest::parse(&PathBuf::from("package.jet"), &raw).expect("path dep should parse");
     let dep = mf.dependencies.get("helpers").expect("missing helpers dep");
     assert!(matches!(dep, jet::Manifest::DepSpec::Path { path } if path == "../helpers"));
 }
@@ -1139,7 +1158,7 @@ fn manifest_parse_dep_git_tag() {
         "    parsekit: { git: \"https://github.com/acme/parsekit\", tag: \"v0.4.1\" },",
     );
     let mf =
-        jet::Manifest::parse(&PathBuf::from("pkg.jet"), &raw).expect("git tag dep should parse");
+        jet::Manifest::parse(&PathBuf::from("package.jet"), &raw).expect("git tag dep should parse");
     let dep = mf.dependencies.get("parsekit").expect("missing parsekit");
     assert!(matches!(
         dep,
@@ -1155,7 +1174,7 @@ fn manifest_parse_e1206_missing_required_field() {
     // No `name:` at all is a shape error (E1206, D-CONF-NAME1: bare `name`/
     // `version`, `version:` alone is optional).
     let raw = "version: \"0.1.0\"\n";
-    let err = jet::Manifest::parse(&PathBuf::from("pkg.jet"), raw)
+    let err = jet::Manifest::parse(&PathBuf::from("package.jet"), raw)
         .expect_err("missing name should fail");
     assert_eq!(err.code, "E1206");
 }
@@ -1165,7 +1184,7 @@ fn manifest_parse_e1206_unknown_field() {
     // The retired `payload:` wrapper is now a normal unknown-field error
     // (D-CONF-PLANE1/D-CONF-NAME1).
     let raw = "payload: {\n    name: \"myapp\",\n    version: \"0.1.0\",\n}\n";
-    let err = jet::Manifest::parse(&PathBuf::from("pkg.jet"), raw)
+    let err = jet::Manifest::parse(&PathBuf::from("package.jet"), raw)
         .expect_err("payload: wrapper should fail");
     assert_eq!(err.code, "E1206");
     assert!(err.what.contains("payload"));
@@ -1174,7 +1193,7 @@ fn manifest_parse_e1206_unknown_field() {
 #[test]
 fn manifest_parse_e1209_reserved_nonempty() {
     let raw = min_manifest("myapp", "0.1.0") + "\ndev_deps: {\n    testlib: ../testlib,\n}\n";
-    let err = jet::Manifest::parse(&PathBuf::from("pkg.jet"), &raw)
+    let err = jet::Manifest::parse(&PathBuf::from("package.jet"), &raw)
         .expect_err("non-empty dev_deps should fail E1209");
     assert_eq!(err.code, "E1209");
 }
@@ -1253,7 +1272,7 @@ fn manifest_parse_effects_e1221_unknown_effect() {
     let raw = min_manifest("app", "0.1.0") + "\neffects: .{\n    allow: [NotAnEffect],\n}\n";
     let err = jetpack::Package::PackageFacts::parse(&raw, "test")
         .expect_err("unknown effect name should fail E1221");
-    let diag = jet::Manifest::parse(&PathBuf::from("pkg.jet"), &raw)
+    let diag = jet::Manifest::parse(&PathBuf::from("package.jet"), &raw)
         .expect_err("should surface through Manifest::parse too");
     assert_eq!(diag.code, "E1221");
     assert!(matches!(
@@ -1265,7 +1284,7 @@ fn manifest_parse_effects_e1221_unknown_effect() {
 #[test]
 fn manifest_parse_effects_e1221_unknown_field() {
     let raw = min_manifest("app", "0.1.0") + "\neffects: {\n    nope: [FS],\n}\n";
-    let diag = jet::Manifest::parse(&PathBuf::from("pkg.jet"), &raw)
+    let diag = jet::Manifest::parse(&PathBuf::from("package.jet"), &raw)
         .expect_err("unknown effects field should fail E1221");
     assert_eq!(diag.code, "E1221");
 }
@@ -1278,7 +1297,7 @@ fn effect_budget_load_ok_reports_via_compile_with_path() {
     let tmp = tmp_dir("effbudget_ok");
     write(
         &tmp,
-        "pkg.jet",
+        "package.jet",
         &(min_manifest("app", "0.1.0") + "\neffects: {\n    allow: [IO],\n}\n"),
     );
     let entry = tmp.join("main.jet");
@@ -1300,7 +1319,7 @@ fn effect_budget_load_ok_reports_via_compile_with_path() {
 #[test]
 fn cli_build_prints_effect_summary() {
     // D-EFFBUDGET1: every `jet build` prints a one-line effect summary, with
-    // zero config — no pkg.jet needed.
+    // zero config — no package.jet needed.
     if !jet_bin().is_file() {
         eprintln!("note: skipping cli_build_prints_effect_summary (run `cargo build` first)");
         return;
@@ -1345,7 +1364,7 @@ fn cli_build_enforces_effect_budget_e1220() {
     let store = tmp.join("store");
     fs::create_dir_all(&store).unwrap();
 
-    write(&tmp, "netdep/pkg.jet", &min_manifest("netdep", "0.1.0"));
+    write(&tmp, "netdep/package.jet", &min_manifest("netdep", "0.1.0"));
     write(
         &tmp,
         "netdep/netdep.jet",
@@ -1354,7 +1373,7 @@ fn cli_build_enforces_effect_budget_e1220() {
 
     write(
         &tmp,
-        "pkg.jet",
+        "package.jet",
         &(manifest_with_deps("app", "0.1.0", "    netdep: ./netdep,")
             + "\neffects: {\n    allow: [FS],\n}\n"),
     );
@@ -1391,7 +1410,7 @@ fn cli_build_rejects_undeclared_effect_budget_leaf() {
     fs::create_dir_all(&store).unwrap();
     write(
         &tmp,
-        "pkg.jet",
+        "package.jet",
         &(min_manifest("app", "0.1.0")
             + "\neffects: {\n    allow: [FS.Raed],\n}\n"),
     );
@@ -1412,7 +1431,7 @@ fn cli_build_rejects_undeclared_effect_budget_leaf() {
 fn cli_build_lint_never_blocks_by_default() {
     // D-LINTPOLICY1=A (the override law, card #505): warnings never fail a
     // build by default. A money-named `Float` field fires lint L0504, but
-    // with no `policy.lints` block in `pkg.jet` the build still succeeds.
+    // with no `policy.lints` block in `package.jet` the build still succeeds.
     if !jet_bin().is_file() {
         eprintln!(
             "note: skipping cli_build_lint_never_blocks_by_default (run `cargo build` first)"
@@ -1423,7 +1442,7 @@ fn cli_build_lint_never_blocks_by_default() {
     let store = tmp.join("store");
     fs::create_dir_all(&store).unwrap();
 
-    write(&tmp, "pkg.jet", &min_manifest("app", "0.1.0"));
+    write(&tmp, "package.jet", &min_manifest("app", "0.1.0"));
     write(
         &tmp,
         "main.jet",
@@ -1457,8 +1476,8 @@ fn cli_build_lint_never_blocks_by_default() {
 #[test]
 fn cli_build_enforces_lint_policy_e1293() {
     // D-LINTPOLICY1=A: a team's own `policy: { lints: { deny: [L0504] } }`
-    // in `pkg.jet` turns that same warning into a build failure (E1293),
-    // naming the denied lint. No other `pkg.jet` gets this behavior — the
+    // in `package.jet` turns that same warning into a build failure (E1293),
+    // naming the denied lint. No other `package.jet` gets this behavior — the
     // wall is opt-in, per team (the override law's third clause).
     if !jet_bin().is_file() {
         eprintln!("note: skipping cli_build_enforces_lint_policy_e1293 (run `cargo build` first)");
@@ -1470,7 +1489,7 @@ fn cli_build_enforces_lint_policy_e1293() {
 
     write(
         &tmp,
-        "pkg.jet",
+        "package.jet",
         &(min_manifest("app", "0.1.0") + "\npolicy: {\n    lints: { deny: [L0504] },\n}\n"),
     );
     write(
@@ -1500,16 +1519,16 @@ fn cli_build_enforces_lint_policy_e1293() {
 #[test]
 fn manifest_toolchain_ok() {
     let raw = min_manifest("myapp", "0.1.0");
-    let mf = jet::Manifest::parse(&PathBuf::from("pkg.jet"), &raw).unwrap();
-    assert!(jet::Manifest::check_toolchain(&mf, "pkg.jet").is_ok());
+    let mf = jet::Manifest::parse(&PathBuf::from("package.jet"), &raw).unwrap();
+    assert!(jet::Manifest::check_toolchain(&mf, "package.jet").is_ok());
 }
 
 #[test]
 fn manifest_toolchain_e1208_future_version() {
     let raw =
         "name: \"myapp\"\nversion: \"0.1.0\"\njet: \">=99.0.0\"\n";
-    let mf = jet::Manifest::parse(&PathBuf::from("pkg.jet"), raw).unwrap();
-    let err = jet::Manifest::check_toolchain(&mf, "pkg.jet").expect_err("E1208");
+    let mf = jet::Manifest::parse(&PathBuf::from("package.jet"), raw).unwrap();
+    let err = jet::Manifest::check_toolchain(&mf, "package.jet").expect_err("E1208");
     assert_eq!(err.code, "E1208");
 }
 
@@ -1521,7 +1540,7 @@ fn manifest_toolchain_e1208_future_version() {
 fn manifest_template_plain_parses() {
     let raw = jet::Manifest::new_template("myapp", false);
     let mf =
-        jet::Manifest::parse(&PathBuf::from("pkg.jet"), &raw).expect("plain template should parse");
+        jet::Manifest::parse(&PathBuf::from("package.jet"), &raw).expect("plain template should parse");
     assert_eq!(mf.package.name, "myapp");
     assert_eq!(mf.package.version, "0.1.0");
     assert!(
@@ -1539,7 +1558,7 @@ fn manifest_template_annotated_has_dep_comments() {
         raw
     );
     // Must still parse cleanly.
-    jet::Manifest::parse(&PathBuf::from("pkg.jet"), &raw).expect("annotated template should parse");
+    jet::Manifest::parse(&PathBuf::from("package.jet"), &raw).expect("annotated template should parse");
 }
 
 // ─────────────────────────────────────────────
@@ -1556,7 +1575,7 @@ fn manifest_add_dep_inserts_in_existing_table() {
             path: "../helpers".to_string(),
         },
     );
-    let mf = jet::Manifest::parse(&PathBuf::from("pkg.jet"), &updated).expect("should reparse");
+    let mf = jet::Manifest::parse(&PathBuf::from("package.jet"), &updated).expect("should reparse");
     assert!(matches!(
         mf.dependencies.get("helpers"),
         Some(jet::Manifest::DepSpec::Path { path }) if path == "../helpers"
@@ -1574,7 +1593,7 @@ fn manifest_add_dep_creates_table_when_absent() {
         },
     );
     assert!(updated.contains("deps:"), "should create deps: block");
-    let mf = jet::Manifest::parse(&PathBuf::from("pkg.jet"), &updated).expect("should reparse");
+    let mf = jet::Manifest::parse(&PathBuf::from("package.jet"), &updated).expect("should reparse");
     assert!(matches!(
         mf.dependencies.get("helpers"),
         Some(jet::Manifest::DepSpec::Path { path }) if path == "../helpers"
@@ -1586,7 +1605,7 @@ fn manifest_remove_dep_removes_correct_entry() {
     let raw = min_manifest("root", "0.1.0")
         + "\ndeps: {\n    helpers: ../helpers,\n    other: ../other,\n}\n";
     let updated = jet::Manifest::remove_dependency(&raw, "helpers");
-    let mf = jet::Manifest::parse(&PathBuf::from("pkg.jet"), &updated).expect("should reparse");
+    let mf = jet::Manifest::parse(&PathBuf::from("package.jet"), &updated).expect("should reparse");
     assert!(
         mf.dependencies.get("helpers").is_none(),
         "helpers should be removed"
@@ -1737,7 +1756,7 @@ fn store_ensure_path_dep_creates_entry() {
         "mylib.jet",
         "pub fn hello() => String { return \"hi\"; }\n",
     );
-    write(&src, "pkg.jet", &min_manifest("mylib", "0.1.0"));
+    write(&src, "package.jet", &min_manifest("mylib", "0.1.0"));
 
     let fp = "sha256-0000000000000000000000000000000000000000000000000000000000000000";
 
@@ -1763,7 +1782,7 @@ fn store_ensure_is_idempotent() {
 
     let src = tmp.join("mylib_src");
     write(&src, "mylib.jet", "pub fn x() {}\n");
-    write(&src, "pkg.jet", &min_manifest("mylib", "0.1.0"));
+    write(&src, "package.jet", &min_manifest("mylib", "0.1.0"));
 
     let fp = "sha256-1111111111111111111111111111111111111111111111111111111111111111";
 
@@ -1789,7 +1808,7 @@ fn store_tamper_detected_e1204() {
 
     let src = tmp.join("mylib_src");
     write(&src, "mylib.jet", "pub fn ok() {}\n");
-    write(&src, "pkg.jet", &min_manifest("mylib", "0.1.0"));
+    write(&src, "package.jet", &min_manifest("mylib", "0.1.0"));
 
     let fp = "sha256-2222222222222222222222222222222222222222222222222222222222222222";
 
@@ -1824,7 +1843,7 @@ fn content_hash_recorded_at_install() {
 
     let src = tmp.join("src");
     write(&src, "lib.jet", "pub fn x() {}\n");
-    write(&src, "pkg.jet", &min_manifest("mylib", "0.1.0"));
+    write(&src, "package.jet", &min_manifest("mylib", "0.1.0"));
 
     let fp = "sha256-aaaa0000000000000000000000000000000000000000000000000000000000aa";
 
@@ -1851,7 +1870,7 @@ fn content_hash_mismatch_after_tamper() {
 
     let src = tmp.join("src");
     write(&src, "lib.jet", "pub fn x() {}\n");
-    write(&src, "pkg.jet", &min_manifest("mylib", "0.1.0"));
+    write(&src, "package.jet", &min_manifest("mylib", "0.1.0"));
 
     let fp = "sha256-bbbb0000000000000000000000000000000000000000000000000000000000bb";
 
@@ -1941,7 +1960,7 @@ fn hardlink_projects_share_store_inode() {
 
     let src = tmp.join("mylib_src");
     write(&src, "mylib.jet", "pub fn hi() {}\n");
-    write(&src, "pkg.jet", &min_manifest("mylib", "0.1.0"));
+    write(&src, "package.jet", &min_manifest("mylib", "0.1.0"));
 
     let fp = "sha256-3333333333333333333333333333333333333333333333333333333333333333";
 
@@ -1977,7 +1996,7 @@ fn path_dep_compiles_ok() {
     let tmp = tmp_dir("pd_compile");
 
     // Greeter library.
-    write(&tmp, "greeter/pkg.jet", &min_manifest("greeter", "0.1.0"));
+    write(&tmp, "greeter/package.jet", &min_manifest("greeter", "0.1.0"));
     write(
         &tmp,
         "greeter/greeter.jet",
@@ -1987,7 +2006,7 @@ fn path_dep_compiles_ok() {
     // Root project with path dep.
     write(
         &tmp,
-        "pkg.jet",
+        "package.jet",
         &manifest_with_deps("myapp", "0.1.0", "    greeter: ./greeter,"),
     );
     let entry = tmp.join("main.jet");
@@ -2014,15 +2033,15 @@ fn path_dep_compiles_ok() {
 fn version_conflict_emits_e1201() {
     let tmp = tmp_dir("ver_conflict");
 
-    write(&tmp, "liba/pkg.jet", &min_manifest("mylib", "1.0.0"));
+    write(&tmp, "liba/package.jet", &min_manifest("mylib", "1.0.0"));
     write(&tmp, "liba/mylib.jet", "pub fn v1() {}\n");
 
-    write(&tmp, "libb/pkg.jet", &min_manifest("mylib", "2.0.0"));
+    write(&tmp, "libb/package.jet", &min_manifest("mylib", "2.0.0"));
     write(&tmp, "libb/mylib.jet", "pub fn v2() {}\n");
 
     write(
         &tmp,
-        "pkg.jet",
+        "package.jet",
         &manifest_with_deps(
             "conflict_app",
             "0.1.0",
@@ -2043,7 +2062,7 @@ fn version_conflict_emits_e1201() {
 fn stale_lock_emits_e1202() {
     let tmp = tmp_dir("stale_lock");
 
-    write(&tmp, "greeter/pkg.jet", &min_manifest("greeter", "0.1.0"));
+    write(&tmp, "greeter/package.jet", &min_manifest("greeter", "0.1.0"));
     write(
         &tmp,
         "greeter/greeter.jet",
@@ -2052,7 +2071,7 @@ fn stale_lock_emits_e1202() {
 
     write(
         &tmp,
-        "pkg.jet",
+        "package.jet",
         &manifest_with_deps("app", "0.1.0", "    greeter: ./greeter,"),
     );
     // Lock exists but lists no dependencies — stale.
@@ -2078,7 +2097,7 @@ fn toolchain_mismatch_emits_e1208() {
 
     write(
         &tmp,
-        "pkg.jet",
+        "package.jet",
         "name: \"app\"\nversion: \"0.1.0\"\njet: \">=99.0.0\"\n",
     );
     let entry = tmp.join("main.jet");
@@ -2097,7 +2116,7 @@ fn reserved_section_emits_e1209() {
 
     write(
         &tmp,
-        "pkg.jet",
+        "package.jet",
         &(min_manifest("app", "0.1.0") + "\ndev_deps: {\n    testlib: ../testlib,\n}\n"),
     );
     let entry = tmp.join("main.jet");
@@ -2121,9 +2140,9 @@ fn fetch_locked_rejects_missing_lock() {
     fs::create_dir_all(&store).unwrap();
 
     let raw = manifest_with_deps("app", "0.1.0", "    greeter: ./greeter,");
-    write(&tmp, "pkg.jet", &raw);
+    write(&tmp, "package.jet", &raw);
 
-    let mf = jet::Manifest::parse(&tmp.join("pkg.jet"), &raw).unwrap();
+    let mf = jet::Manifest::parse(&tmp.join("package.jet"), &raw).unwrap();
     let opts = jet::Fetch::FetchOptions {
         locked: true,
         update: false,
@@ -2143,8 +2162,8 @@ fn registry_dependency_reports_transport_failure() {
     let store = tmp.join("store");
     fs::create_dir_all(&store).unwrap();
     let raw = manifest_with_deps("app", "0.1.0", "    textkit: textkit#1.2.0,");
-    write(&tmp, "pkg.jet", &raw);
-    let mf = jet::Manifest::parse(&tmp.join("pkg.jet"), &raw).unwrap();
+    write(&tmp, "package.jet", &raw);
+    let mf = jet::Manifest::parse(&tmp.join("package.jet"), &raw).unwrap();
     let opts = jet::Fetch::FetchOptions {
         locked: false,
         update: false,
@@ -2154,7 +2173,7 @@ fn registry_dependency_reports_transport_failure() {
         .expect_err("registry dependency must report its verified transport diagnostic");
     assert_eq!(first_diag_code(&diags), "E1207");
     let rendered = jet::Diagnostics::render_all(
-        &tmp.join("pkg.jet").to_string_lossy(),
+        &tmp.join("package.jet").to_string_lossy(),
         &raw,
         &diags,
     );
@@ -2186,7 +2205,7 @@ fn git_dep_local_bare_repo_fetches_ok() {
     // Create a source directory to commit.
     let src = tmp.join("mylib_src");
     write(&src, "mylib.jet", "pub fn answer() => Int { return 42; }\n");
-    write(&src, "pkg.jet", &min_manifest("mylib", "0.1.0"));
+    write(&src, "package.jet", &min_manifest("mylib", "0.1.0"));
 
     // Init bare repo.
     let bare = tmp.join("mylib.git");
@@ -2243,12 +2262,12 @@ fn git_dep_local_bare_repo_fetches_ok() {
         "0.1.0",
         &format!("    mylib: {{ git: \"{}\", tag: \"v0.1.0\" }},", repo_url),
     );
-    write(&tmp, "pkg.jet", &raw);
+    write(&tmp, "package.jet", &raw);
 
     let store = tmp.join("store");
     fs::create_dir_all(&store).unwrap();
 
-    let mf = jet::Manifest::parse(&tmp.join("pkg.jet"), &raw).unwrap();
+    let mf = jet::Manifest::parse(&tmp.join("package.jet"), &raw).unwrap();
     let opts = jet::Fetch::FetchOptions {
         locked: false,
         update: false,
@@ -2281,7 +2300,7 @@ fn git_dep_branch_update_rewrites_lock() {
     // Create a source directory to commit.
     let src = tmp.join("mylib_src");
     write(&src, "mylib.jet", "pub fn answer() => Int { return 42; }\n");
-    write(&src, "pkg.jet", &min_manifest("mylib", "0.1.0"));
+    write(&src, "package.jet", &min_manifest("mylib", "0.1.0"));
 
     // Init a non-bare repo, commit, then mirror to a bare repo (avoids HEAD ambiguity).
     let init_repo = tmp.join("mylib_init");
@@ -2342,12 +2361,12 @@ fn git_dep_branch_update_rewrites_lock() {
         "0.1.0",
         &format!("    mylib: {{ git: \"{}\", branch: \"main\" }},", repo_url),
     );
-    write(&tmp, "pkg.jet", &raw);
+    write(&tmp, "package.jet", &raw);
 
     let store = tmp.join("store");
     fs::create_dir_all(&store).unwrap();
 
-    let mf = jet::Manifest::parse(&tmp.join("pkg.jet"), &raw).unwrap();
+    let mf = jet::Manifest::parse(&tmp.join("package.jet"), &raw).unwrap();
 
     // Initial fetch (no lock yet) — writes the lock file.
     let opts = jet::Fetch::FetchOptions {
@@ -2539,7 +2558,7 @@ fn cli_vendor_dir_flag_relocates() {
     let store = tmp.join("store");
     fs::create_dir_all(&store).unwrap();
 
-    write(&tmp, "greeter/pkg.jet", &min_manifest("greeter", "0.1.0"));
+    write(&tmp, "greeter/package.jet", &min_manifest("greeter", "0.1.0"));
     write(
         &tmp,
         "greeter/greeter.jet",
@@ -2547,7 +2566,7 @@ fn cli_vendor_dir_flag_relocates() {
     );
     write(
         &tmp,
-        "pkg.jet",
+        "package.jet",
         &manifest_with_deps("app", "0.1.0", "    greeter: ./greeter,"),
     );
 
@@ -2618,7 +2637,7 @@ fn cli_end_to_end_new_then_add_path() {
 
     // 2. Create a local lib for `jet add --path`.
     let lib = tmp.join("mylib");
-    write(&lib, "pkg.jet", &min_manifest("mylib", "0.1.0"));
+    write(&lib, "package.jet", &min_manifest("mylib", "0.1.0"));
     write(&lib, "mylib.jet", "pub fn answer() => Int { return 42; }\n");
 
     // 3. jet add mylib --path ../mylib (from inside the project)
@@ -3101,7 +3120,7 @@ fn vendored_offline_locked_build() {
     fs::create_dir_all(&store).unwrap();
 
     // Create a simple library.
-    write(&tmp, "greeter/pkg.jet", &min_manifest("greeter", "0.1.0"));
+    write(&tmp, "greeter/package.jet", &min_manifest("greeter", "0.1.0"));
     write(
         &tmp,
         "greeter/greeter.jet",
@@ -3111,7 +3130,7 @@ fn vendored_offline_locked_build() {
     // Project that depends on it.
     write(
         &tmp,
-        "pkg.jet",
+        "package.jet",
         &manifest_with_deps("vendored_app", "0.1.0", "    greeter: ./greeter,"),
     );
     write(
@@ -3121,7 +3140,7 @@ fn vendored_offline_locked_build() {
     );
 
     let entry = tmp.join("main.jet");
-    let pack_path = tmp.join("pkg.jet");
+    let pack_path = tmp.join("package.jet");
 
     // Fetch to create the lock.
     let mf = jet::Manifest::parse(&pack_path, &fs::read_to_string(&pack_path).unwrap()).unwrap();
@@ -3290,8 +3309,8 @@ fn e1217_missing_locked_revision() {
 
     let raw = manifest_with_deps("app", "0.1.0", "    greeter: ./greeter,");
     let tmp = tmp_dir("e1217");
-    write(&tmp, "pkg.jet", &raw);
-    let mf = jet::Manifest::parse(&tmp.join("pkg.jet"), &raw).unwrap();
+    write(&tmp, "package.jet", &raw);
+    let mf = jet::Manifest::parse(&tmp.join("package.jet"), &raw).unwrap();
 
     // Empty lock — greeter is declared but not pinned.
     let empty_lock = LockFile {
@@ -3425,7 +3444,7 @@ fn cli_publish_refuses_dirty_git_tree() {
     fs::create_dir_all(&store).unwrap();
 
     // Create a minimal project.
-    write(&tmp, "pkg.jet", &min_manifest("dirtypkg", "1.0.0"));
+    write(&tmp, "package.jet", &min_manifest("dirtypkg", "1.0.0"));
     write(&tmp, "main.jet", "fn run() { print(\"hello\"); }\n");
 
     // Init git, commit everything (clean tree first).
@@ -3677,7 +3696,7 @@ fn cli_yank_requires_version_arg() {
     let tmp = tmp_dir("yank_no_ver");
     let store = tmp.join("store");
     fs::create_dir_all(&store).unwrap();
-    write(&tmp, "pkg.jet", &min_manifest("mypkg", "1.0.0"));
+    write(&tmp, "package.jet", &min_manifest("mypkg", "1.0.0"));
 
     let out = jet_cmd(&["registry", "yank"], &tmp, &store);
     assert!(!out.status.success(), "jet registry yank with no version must fail");
@@ -3792,7 +3811,7 @@ fn pub_package_function_is_hidden_from_path_dependency_consumer() {
     fs::create_dir_all(&app).unwrap();
     fs::create_dir_all(&dep).unwrap();
     fs::write(
-        app.join("pkg.jet"),
+        app.join("package.jet"),
         "name: \"app\"\nversion: \"0.1.0\"\ndeps: .{ dep: ../dep }\n",
     )
     .unwrap();
@@ -3802,7 +3821,7 @@ fn pub_package_function_is_hidden_from_path_dependency_consumer() {
     )
     .unwrap();
     fs::write(
-        dep.join("pkg.jet"),
+        dep.join("package.jet"),
         "name: \"dep\"\nversion: \"0.1.0\"\n",
     )
     .unwrap();

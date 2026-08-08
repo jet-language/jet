@@ -382,8 +382,8 @@ mod progress_semantics {
     include!("../../../Prelude/Core/Progress.rs");
 }
 
-/// Stable place identity for `mem.address_of` under TIR-eval (no real ASLR).
-fn tir_place_address_key(expr: &TExpr) -> String {
+/// jet-jit shares this for tier-identical address identity.
+pub fn tir_place_address_key(expr: &TExpr) -> String {
     match &expr.kind {
         TExprKind::Local(local) => local.name.clone(),
         TExprKind::Field { recv, field, .. } => {
@@ -397,7 +397,8 @@ fn tir_place_address_key(expr: &TExpr) -> String {
     }
 }
 
-fn stable_place_address(key: &str) -> i64 {
+/// jet-jit shares this for tier-identical address identity.
+pub fn stable_place_address(key: &str) -> i64 {
     let mut hash: u64 = 0xcbf29ce484222325;
     for byte in key.as_bytes() {
         hash ^= u64::from(*byte);

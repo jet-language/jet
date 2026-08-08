@@ -322,8 +322,8 @@ fn isolated_cwd(tag: &str) -> PathBuf {
 fn tasks_lists_documented_scheduled_project_tasks_and_matches_run_outside_projects() {
     let project = isolated_cwd("tasks_project");
     fs::write(
-        project.join("pkg.jet"),
-        "payload: { name: \"task_runner\", version: \"0.1.0\" }\n",
+        project.join("package.jet"),
+        "name: \"task_runner\"\nversion: \"0.1.0\"\n",
     )
     .unwrap();
     fs::write(
@@ -551,8 +551,8 @@ fn budget_project(tag: &str, limit: u64) -> PathBuf {
     let dir = isolated_cwd(tag);
     fs::create_dir_all(dir.join("src")).unwrap();
     fs::write(
-        dir.join("pkg.jet"),
-        "payload: { name: \"app\", version: \"0.1.0\" }\n",
+        dir.join("package.jet"),
+        "name: \"app\"\nversion: \"0.1.0\"\n",
     ).unwrap();
     fs::write(
         dir.join("src/main.jet"),
@@ -576,8 +576,8 @@ fn artifact_budget_project(tag: &str, limit: u64) -> PathBuf {
     let dir = isolated_cwd(tag);
     fs::create_dir_all(dir.join("src")).unwrap();
     fs::write(
-        dir.join("pkg.jet"),
-        "payload: { name: \"app\", version: \"0.1.0\" }\n",
+        dir.join("package.jet"),
+        "name: \"app\"\nversion: \"0.1.0\"\n",
     ).unwrap();
     fs::write(
         dir.join("src/main.jet"),
@@ -602,8 +602,8 @@ fn mixed_budget_project(tag: &str) -> PathBuf {
     let dir = isolated_cwd(tag);
     fs::create_dir_all(dir.join("src")).unwrap();
     fs::write(
-        dir.join("pkg.jet"),
-        "payload: { name: \"app\", version: \"0.1.0\" }\n",
+        dir.join("package.jet"),
+        "name: \"app\"\nversion: \"0.1.0\"\n",
     ).unwrap();
     fs::write(
         dir.join("src/main.jet"),
@@ -636,7 +636,7 @@ fn run() {}
 fn benchmark_budget_project(tag: &str) -> PathBuf {
     let dir = isolated_cwd(tag);
     fs::create_dir_all(dir.join("src")).unwrap();
-    fs::write(dir.join("pkg.jet"), "payload: { name: \"app\", version: \"0.1.0\" }\n").unwrap();
+    fs::write(dir.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap();
     fs::write(dir.join("src/main.jet"), r#"module perf.package {
     budgets: [Budget.{
         name: "parse",
@@ -661,7 +661,7 @@ fn run() {}
 fn allocation_budget_project(tag: &str) -> PathBuf {
     let dir = isolated_cwd(tag);
     fs::create_dir_all(dir.join("src")).unwrap();
-    fs::write(dir.join("pkg.jet"), "payload: { name: \"app\", version: \"0.1.0\" }\n").unwrap();
+    fs::write(dir.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap();
     fs::write(dir.join("src/main.jet"), r#"use core.mem
 module perf.package {
     budgets: [
@@ -1571,7 +1571,7 @@ fn shape6_groups_inspect_and_registry_while_rejecting_bare_actions() {
         .unwrap();
     assert_eq!(publish.status.code(), Some(1));
     assert!(
-        String::from_utf8_lossy(&publish.stderr).contains("no `pkg.jet` found"),
+        String::from_utf8_lossy(&publish.stderr).contains("no package.jet found"),
         "grouped publish did not reach its handler: {}",
         String::from_utf8_lossy(&publish.stderr)
     );
@@ -1964,8 +1964,8 @@ fn bare_project_run_prefers_run_jet() {
     let dir = isolated_cwd("run_jet_default_entry");
     fs::create_dir_all(dir.join("src")).unwrap();
     fs::write(
-        dir.join("pkg.jet"),
-        "payload: { name: \"entry-default\", version: \"0.1.0\" }\n",
+        dir.join("package.jet"),
+        "name: \"entry-default\"\nversion: \"0.1.0\"\n",
     )
     .unwrap();
     fs::write(dir.join("run.jet"), "fn run() { print(\"run.jet\") }\n").unwrap();
@@ -2659,7 +2659,7 @@ fn default_jet_run_deopts_jit_gap_silently() {
 #[test]
 fn malformed_advisory_database_is_e2607_snapshot() {
     let dir = isolated_cwd("audit_e2607");
-    fs::write(dir.join("pkg.jet"), "package app 0.1.0\n").unwrap();
+    fs::write(dir.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap();
     fs::create_dir(dir.join(".jet")).unwrap();
     fs::write(dir.join(".jet/lock"), "version = 1\n").unwrap();
     let advisory_db = dir.join("advisories.txt");
@@ -2924,8 +2924,8 @@ fn doctor_failure_is_l2101_snapshot() {
 fn fetch_without_git_is_e1203_snapshot() {
     let dir = isolated_cwd("fetch_no_git");
     fs::write(
-        dir.join("pkg.jet"),
-        "payload: { name: \"app\", version: \"0.1.0\", jet: \">=0.1.0\", description: \"\", license: \"MIT\" }\npackages: { app: executable }\ndeps: { tool: { git: \"https://example.invalid/tool.git\", tag: \"v1\" } }\n",
+        dir.join("package.jet"),
+        "name: \"app\"\nversion: \"0.1.0\"\njet: \">=0.1.0\"\ndescription: \"\"\nlicense: \"MIT\"\npackages: { app: executable }\ndeps: { tool: { git: \"https://example.invalid/tool.git\", tag: \"v1\" } }\n",
     )
     .unwrap();
     let out = Command::new(jet())
@@ -4308,11 +4308,11 @@ fn ext_optional_missing_path_keeps_original_name() {
     );
 }
 
-// ── D-ILE1: implicit executable inference (no pkg.jet) ───────────────
+// ── D-ILE1: implicit executable inference (no package.jet) ───────────────
 
 #[test]
 fn simple_exec_runs_without_a_manifest() {
-    // A single file with a top-level `fn run` and no pkg.jet runs as an
+    // A single file with a top-level `fn run` and no package.jet runs as an
     // executable with zero ceremony (R9 / D-ILE1).
     let path =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/simple_exec/main.jet");
@@ -4442,7 +4442,7 @@ fn unknown_flag_before_separator_is_e2102_with_passthrough_hint() {
 
 #[test]
 fn profile_unknown_name_emits_e1219() {
-    // D-BUILDPROFILE1: `--profile=<unknown>` with no pkg.jet defining that name
+    // D-BUILDPROFILE1: `--profile=<unknown>` with no package.jet defining that name
     // must emit E1219 and exit 1 (user error).
     let p = std::env::temp_dir().join("jet_cli_profile_test.jet");
     fs::write(&p, "fn run() { print(\"ok\") }\n").unwrap();
@@ -4504,7 +4504,7 @@ fn profile_ci_flag_is_accepted() {
 }
 
 #[test]
-fn profile_custom_name_from_pkg_jet() {
+fn profile_custom_name_from_package_jet() {
     let dir = std::env::temp_dir().join(format!(
         "jet_cli_custom_profile_{}",
         std::time::SystemTime::now()
@@ -4514,8 +4514,9 @@ fn profile_custom_name_from_pkg_jet() {
     ));
     fs::create_dir_all(&dir).unwrap();
     fs::write(
-        dir.join("pkg.jet"),
-        r#"payload: { name: "p", version: "0.1.0" }
+        dir.join("package.jet"),
+        r#"name: "p"
+version: "0.1.0"
 build: { staging: Build.{ optimize: basic } }
 "#,
     )
@@ -4534,7 +4535,7 @@ build: { staging: Build.{ optimize: basic } }
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         !stderr.contains("E1219"),
-        "pkg.jet-defined profile must resolve:\n{stderr}"
+        "package.jet-defined profile must resolve:\n{stderr}"
     );
 }
 
@@ -4818,7 +4819,7 @@ fn stale_manifest_name_pack_jet_is_e1226() {
     let dir = isolated_cwd("stale_pack_jet");
     fs::write(
         dir.join("pack.jet"),
-        "payload: { name: \"x\", version: \"0.1.0\" }\n",
+        "name: \"x\"\nversion: \"0.1.0\"\n",
     )
     .unwrap();
     let out = Command::new(jet())
@@ -4840,7 +4841,7 @@ fn stale_manifest_name_pack_jet_is_e1226() {
         "names the found file:\n{stderr}"
     );
     assert!(
-        stderr.contains("pkg.jet"),
+        stderr.contains("package.jet"),
         "names the fix target:\n{stderr}"
     );
 }
@@ -4906,7 +4907,7 @@ fn jetpack_toml_alone_is_not_e1226() {
         "jetpack.toml is a different live file, not a retired manifest name:\n{stderr}"
     );
     assert!(
-        stderr.contains("no file given and no `pkg.jet` found") || stderr.contains("E1225"),
+        stderr.contains("no file given and no `package.jet` found") || stderr.contains("E1225"),
         "should fall back to the generic no-manifest message:\n{stderr}"
     );
 }
@@ -5007,7 +5008,7 @@ fn plugin_missing_wasm_tools_is_e1259() {
 //
 // `resolve_bare_entry` (Source/main.rs) delegated to a `find_project_entry`
 // that only ever checked `main.jet`/`.jet/main.jet`, never the package-named
-// D-ILE1 fallback (`<package>.jet`, using `pkg.jet`'s `payload.name`). The shipped
+// D-ILE1 fallback (`<package>.jet`, using `package.jet`'s `payload.name`). The shipped
 // `examples/features/packages/monorepo` fixture (members `hello.jet` /
 // `ranker.jet`, neither named `main.jet`) exposed it end to end: bare `jet
 // run` at the workspace root couldn't see either member as runnable, `-p
@@ -5064,7 +5065,7 @@ fn monorepo_bare_entry_honors_d_ile1_search_order() {
     );
     assert!(
         stderr.contains("hello") && stderr.contains("ranker"),
-        "ambiguity error should list both runnable members by their real pkg.jet name:\n{stderr}"
+        "ambiguity error should list both runnable members by their real package.jet name:\n{stderr}"
     );
     assert!(
         !stderr.contains("hello\"") && !stderr.contains("ranker\""),
@@ -5100,7 +5101,7 @@ fn monorepo_bare_entry_honors_d_ile1_search_order() {
     );
 
     // 4. `cd packages/hello && jet run` (bare, single-package convention):
-    //    the member directory's own `pkg.jet` names it `hello`, so D-ILE1
+    //    the member directory's own `package.jet` names it `hello`, so D-ILE1
     //    resolves `hello.jet` directly — no workspace ambiguity from inside.
     let member_dir = root.join("packages/hello");
     let out = run(&member_dir, &[]);
@@ -5124,7 +5125,7 @@ fn monorepo_bare_entry_honors_d_ile1_search_order() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert_eq!(out.status.code(), Some(2));
     assert!(
-        stderr.contains("no file given and no `pkg.jet` found"),
+        stderr.contains("no file given and no `package.jet` found"),
         "outside-package bare error text must stay the current usage error:\n{stderr}"
     );
 }
@@ -5190,7 +5191,7 @@ fn stale_workspace_lock_never_becomes_an_empty_member_index() {
 fn scene_probe_project(tag: &str) -> PathBuf {
     let dir = isolated_cwd(tag);
     fs::create_dir_all(dir.join("src")).unwrap();
-    fs::write(dir.join("pkg.jet"), "payload: { name: \"app\", version: \"0.1.0\" }\n").unwrap();
+    fs::write(dir.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap();
     fs::write(dir.join("src/main.jet"), r#"use core.game as game
 
 module perf.game {
@@ -5299,7 +5300,7 @@ fn scene_probe_produces_real_frame_time_samples_and_rejects_forged_cache() {
 fn service_probe_unavailable_without_dev_reports_diagnostic() {
     let dir = isolated_cwd("service_probe_no_env");
     fs::create_dir_all(dir.join("src")).unwrap();
-    fs::write(dir.join("pkg.jet"), "payload: { name: \"app\", version: \"0.1.0\" }\n").unwrap();
+    fs::write(dir.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap();
     fs::write(dir.join("src/main.jet"), r#"module env.dev {
     services: { mydb: { run: ["echo", "mydb"], ready: "true" } }
 }
@@ -5344,8 +5345,8 @@ fn service_probe_uses_jetpack_lifecycle_and_produces_twenty_samples() {
     let dir = isolated_cwd("service_probe_runtime");
     fs::create_dir_all(dir.join("src")).unwrap();
     fs::write(
-        dir.join("pkg.jet"),
-        "payload: { name: \"app\", version: \"0.1.0\" }\n",
+        dir.join("package.jet"),
+        "name: \"app\"\nversion: \"0.1.0\"\n",
     )
     .unwrap();
     fs::write(
@@ -5890,7 +5891,7 @@ fn quiet_suppresses_registry_publish_status_lines() {
 /// trailing `budgets: N passed · report ...` recap while the exit code stays
 /// identical. Uses a bare `jet init` project (no `#Budget` declared, so the
 /// real behavior is "0 budgets passed") rather than the `budget_project`
-/// helper above, which writes the stale `payload: {...}` manifest shape.
+/// helper above, which is tailored to a specific budget declaration.
 #[test]
 fn quiet_accepted_and_suppresses_budget_check_recap() {
     fn budget_dir(tag: &str) -> PathBuf {
