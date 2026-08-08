@@ -2190,8 +2190,7 @@ impl<'a> Checker<'a> {
             (
                 Type::Named(ref type_name),
                 TypedLitBody::Value(inner),
-            ) if matches!(type_name.as_str(), "SQL" | "HTML")
-                || type_name == Syntax::TYPE_SH =>
+            ) if Syntax::is_typed_text_type(type_name) =>
             {
                 *e = *inner;
                 return self.rewrite_typed_text_literal(e, type_name.clone(), span);
