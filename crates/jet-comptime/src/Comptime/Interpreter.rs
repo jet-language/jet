@@ -45,7 +45,7 @@ pub(super) enum Flow {
 
 /// Where a [`Interp`] running in whole-program "dev" mode sends program
 /// output. In pure comptime mode this is `None` and `print`/`eprint` never
-/// reach the evaluator (the purity check rejects them as E0951 first).
+/// reach the evaluator (the purity check rejects them as E3401 first).
 ///
 /// The dev interpreter (E2-M4 `jet dev`) buffers stdout/stderr so the
 /// watch loop can stream them; the bytes are produced exactly as the

@@ -1,6 +1,6 @@
 //! Shared compile-time fact model (D-FACTMODEL1=A).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::LazyLock;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -136,9 +136,194 @@ pub fn fact_covers(bound: &str, fact: &str) -> bool {
             .is_some_and(|suffix| suffix.starts_with('.'))
 }
 
+/// Values propagated by one call-graph fact row. Each row uses the finite-set
+/// lattice: facts only join by union, so cycles converge without a recursive
+/// walker.
+pub type ReachabilityValues = BTreeMap<String, BTreeSet<String>>;
+
+/// One property projection over a shared call graph.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReachabilityRow {
+    pub name: String,
+    pub seeds: ReachabilityValues,
+}
+
+impl ReachabilityRow {
+    pub fn new(name: impl Into<String>, seeds: ReachabilityValues) -> Self {
+        Self {
+            name: name.into(),
+            seeds,
+        }
+    }
+}
+
+/// All fact rows projected by one call-graph traversal.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ReachabilityResult {
+    rows: BTreeMap<String, ReachabilityValues>,
+    proofs: BTreeMap<(String, String, String), Vec<String>>,
+}
+
+impl ReachabilityResult {
+    pub fn row(&self, name: &str) -> Option<&ReachabilityValues> {
+        self.rows.get(name)
+    }
+
+    pub fn path(&self, row: &str, node: &str, fact: &str) -> Option<&[String]> {
+        self.proofs
+            .get(&(row.to_string(), node.to_string(), fact.to_string()))
+            .map(Vec::as_slice)
+    }
+
+    pub fn nodes_with(&self, row: &str, fact: &str) -> BTreeSet<String> {
+        self.row(row)
+            .into_iter()
+            .flat_map(|values| values.iter())
+            .filter(|(_, facts)| facts.contains(fact))
+            .map(|(node, _)| node.clone())
+            .collect()
+    }
+
+    /// Copy solved facts onto a unique short-name alias after qualification.
+    pub fn copy_node(&mut self, alias: &str, target: &str) {
+        let row_names: Vec<String> = self.rows.keys().cloned().collect();
+        for row_name in row_names {
+            let Some(facts) = self
+                .rows
+                .get(&row_name)
+                .and_then(|values| values.get(target))
+                .cloned()
+            else {
+                continue;
+            };
+            if let Some(values) = self.rows.get_mut(&row_name) {
+                values.insert(alias.to_string(), facts.clone());
+            }
+            for fact in facts {
+                if let Some(path) = self
+                    .proofs
+                    .get(&(row_name.clone(), target.to_string(), fact.clone()))
+                    .cloned()
+                {
+                    let mut alias_path = path;
+                    if alias_path.first().is_some_and(|node| node.as_str() == target) {
+                        alias_path[0] = alias.to_string();
+                    }
+                    self.proofs.insert(
+                        (row_name.clone(), alias.to_string(), fact),
+                        alias_path,
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Project every reachability property from one edge set.
+pub fn project_reachability(
+    edges: &BTreeMap<String, BTreeSet<String>>,
+    rows: impl IntoIterator<Item = ReachabilityRow>,
+) -> ReachabilityResult {
+    let rows: Vec<ReachabilityRow> = rows.into_iter().collect();
+    let mut nodes = BTreeSet::new();
+    for (caller, callees) in edges {
+        nodes.insert(caller.clone());
+        nodes.extend(callees.iter().cloned());
+    }
+    for row in &rows {
+        nodes.extend(row.seeds.keys().cloned());
+    }
+
+    let mut values = BTreeMap::new();
+    let mut proofs = BTreeMap::new();
+    for row in &rows {
+        let mut row_values = BTreeMap::new();
+        for node in &nodes {
+            row_values.insert(node.clone(), BTreeSet::new());
+        }
+        for (node, facts) in &row.seeds {
+            let destination = row_values.entry(node.clone()).or_default();
+            for fact in facts {
+                if destination.insert(fact.clone()) {
+                    proofs.insert(
+                        (row.name.clone(), node.clone(), fact.clone()),
+                        vec![node.clone()],
+                    );
+                }
+            }
+        }
+        values.insert(row.name.clone(), row_values);
+    }
+
+    let mut predecessors: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for (caller, callees) in edges {
+        for callee in callees {
+            predecessors
+                .entry(callee.clone())
+                .or_default()
+                .insert(caller.clone());
+        }
+    }
+
+    let mut queue = VecDeque::new();
+    let mut queued = BTreeSet::new();
+    for row in &rows {
+        for node in row.seeds.keys() {
+            for predecessor in predecessors.get(node).into_iter().flatten().cloned() {
+                if queued.insert(predecessor.clone()) {
+                    queue.push_back(predecessor);
+                }
+            }
+        }
+    }
+    while let Some(caller) = queue.pop_front() {
+        queued.remove(&caller);
+        let Some(callees) = edges.get(&caller) else {
+            continue;
+        };
+        for callee in callees {
+            for row in &rows {
+                let facts = values
+                    .get(&row.name)
+                    .and_then(|row_values| row_values.get(callee))
+                    .cloned()
+                    .unwrap_or_default();
+                for fact in facts {
+                    let changed = values
+                        .get_mut(&row.name)
+                        .and_then(|row_values| row_values.get_mut(&caller))
+                        .is_some_and(|destination| destination.insert(fact.clone()));
+                    if !changed {
+                        continue;
+                    }
+                    let mut path = proofs
+                        .get(&(row.name.clone(), callee.clone(), fact.clone()))
+                        .cloned()
+                        .unwrap_or_else(|| vec![callee.clone()]);
+                    path.insert(0, caller.clone());
+                    proofs.insert((row.name.clone(), caller.clone(), fact), path);
+                    for predecessor in predecessors
+                        .get(&caller)
+                        .into_iter()
+                        .flatten()
+                        .cloned()
+                    {
+                        if queued.insert(predecessor.clone()) {
+                            queue.push_back(predecessor);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    ReachabilityResult { rows: values, proofs }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{fact_covers, FactKind, FactRegistry};
+    use super::{fact_covers, project_reachability, FactKind, FactRegistry, ReachabilityRow};
+    use std::collections::{BTreeMap, BTreeSet};
 
     #[test]
     fn subsumption_uses_segment_boundaries() {
@@ -163,5 +348,45 @@ mod tests {
         assert_eq!(facts.get(FactKind::Effect, "Secret").unwrap().kind, FactKind::Effect);
         assert_eq!(facts.get(FactKind::Tag, "Secret").unwrap().deny.len(), 1);
         assert_eq!(facts.iter().count(), 2);
+    }
+
+    #[test]
+    fn one_traversal_projects_new_fact_row_with_existing_rows() {
+        let edges = BTreeMap::from([
+            ("root".to_string(), BTreeSet::from(["mid".to_string()])),
+            ("mid".to_string(), BTreeSet::from(["leaf".to_string()])),
+            ("leaf".to_string(), BTreeSet::from(["root".to_string()])),
+        ]);
+        let result = project_reachability(
+            &edges,
+            [
+                ReachabilityRow::new(
+                    "effects",
+                    BTreeMap::from([("leaf".to_string(), BTreeSet::from(["FS".to_string()]))]),
+                ),
+                ReachabilityRow::new(
+                    "panic",
+                    BTreeMap::from([(
+                        "leaf".to_string(),
+                        BTreeSet::from(["panic".to_string()]),
+                    )]),
+                ),
+                ReachabilityRow::new(
+                    "calls-exec",
+                    BTreeMap::from([(
+                        "leaf".to_string(),
+                        BTreeSet::from(["Exec".to_string()]),
+                    )]),
+                ),
+            ],
+        );
+
+        assert!(result.nodes_with("effects", "FS").contains("root"));
+        assert!(result.nodes_with("panic", "panic").contains("root"));
+        assert!(result.nodes_with("calls-exec", "Exec").contains("root"));
+        assert_eq!(
+            result.path("effects", "root", "FS").unwrap(),
+            &vec!["root".to_string(), "mid".to_string(), "leaf".to_string()]
+        );
     }
 }

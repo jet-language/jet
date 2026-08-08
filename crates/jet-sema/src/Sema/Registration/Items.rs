@@ -171,7 +171,7 @@ pub(crate) fn register_type_alias(
 }
 
 /// S57 (M9.5): evaluate every `$name :: expr;` in `items`. Purity and
-/// fuel are enforced by the interpreter (E0951/E0952); panics surface as
+/// fuel are enforced by the interpreter (E3401/E0952); panics surface as
 /// E0953. Each result's Jet type is registered in `consts` so references
 /// type-check, and the value is stashed on the item for codegen to inline.
 pub(crate) fn eval_comptime_items(

@@ -2462,26 +2462,8 @@ pub fn program_semantic_facts(
     bundle: &crate::AST::ProgramBundle,
     checked: &crate::Sema::SemIndexEffectFacts,
 ) -> crate::Comptime::ProgramSemanticFacts {
-    fn reaches_panic(
-        name: &str,
-        summaries: &std::collections::HashMap<String, crate::Sema::EffectSummary>,
-        visiting: &mut std::collections::BTreeSet<String>,
-    ) -> bool {
-        if !visiting.insert(name.to_string()) {
-            return false;
-        }
-        let reached = summaries.get(name).is_some_and(|summary| {
-            summary.edges.contains("__jet_panic__")
-                || summary
-                    .edges
-                    .iter()
-                    .any(|callee| reaches_panic(callee, summaries, visiting))
-        });
-        visiting.remove(name);
-        reached
-    }
     let mut effects = std::collections::HashMap::new();
-    let mut panic_facts = std::collections::BTreeSet::new();
+    let reaches_panic = checked.reachability.nodes_with("panic", "panic");
     for module in &bundle.modules {
         for item in &module.items {
             let crate::AST::Item::Func(func) = item else {
@@ -2494,16 +2476,8 @@ pub fn program_semantic_facts(
                 .map(|set| set.iter().cloned().collect())
                 .unwrap_or_default();
             effects.insert(qualified.clone(), values);
-            if reaches_panic(
-                &qualified,
-                &checked.summaries,
-                &mut std::collections::BTreeSet::new(),
-            ) {
-                panic_facts.insert(qualified);
-            }
         }
     }
-    let reaches_panic = panic_facts;
     crate::Comptime::ProgramSemanticFacts {
         effects,
         reaches_panic,

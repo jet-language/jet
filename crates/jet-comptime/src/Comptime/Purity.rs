@@ -1,8 +1,11 @@
 //! Purity check: walk the call graph reachable from a comptime `init` and
 //! reject the first impure call (IO, FFI) with the path that reached it
-//! (E0951). `embed_file`, `embed_bytes`, `find`, `panic`, and `require` are allowed.
+//! (E3401 — D-META-EFFECT1 c3: the one call-graph walk, shared with the
+//! run-time `=[]=>` declaration check in `jet-sema/Sema/Purity.rs`, since
+//! `jet-sema` depends on `jet-comptime` and not the other way around).
+//! `embed_file`, `embed_bytes`, `find`, `panic`, and `require` are allowed.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::{
@@ -12,20 +15,93 @@ use crate::AST::{
 
 use super::Diagnostics::impurity_diag;
 
+/// D-META-EFFECT1 c3 (merge review, card #1543): the one shared walker
+/// serves two callers whose meaning of "reachable at this stage" differs on
+/// exactly two statement kinds. Everything else about the walk is identical
+/// between the two — this enum is the only place they may differ, per the
+/// review's "one walk, explicit mode parameters" requirement.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum PurityStage {
+    /// jet-sema's `=[]=>` declared-effect check (also the `jet eval --pure`
+    /// whole-program root check): checks what actually executes at run
+    /// time. `#Impure(...)` bodies DO run at run time — the marker records
+    /// and gates the ambient call, it doesn't erase it — so a
+    /// declared-pure function must still be checked inside one; an empty
+    /// declared effect set can't silently admit an ambient call. `$ { ... }`
+    /// comptime blocks emit no runtime code at all (I3), so they are
+    /// excluded: nothing inside one can trip a run-time-voiced E3401.
+    RunTime,
+    /// jet-comptime's own build-time evaluation check (`check_purity`,
+    /// `check_purity_stmts`): checks what runs while the compiler itself
+    /// evaluates the expression. `#Impure(...)` bodies are gated by
+    /// `--allow-impure`/E3411 at the point they would actually execute
+    /// (unchanged prior behavior), so the build-time walk skips them here.
+    /// A nested `$ { ... }` block runs for real during build-time
+    /// evaluation too, so it stays in the walk.
+    BuildTime,
+}
+
+/// Threaded through the syntax-only expr/stmt walk beneath the purity
+/// checker. Three independent knobs because three different call shapes in
+/// this file need three different combinations — see each field's doc.
+#[derive(Clone, Copy)]
+struct WalkOpts {
+    /// `Expr::Lambda` bodies and `#AssumeDet` bodies: off for the purity
+    /// walk (a closure's or `#AssumeDet` body isn't checked while walking
+    /// its enclosing statement), on for `reachable_owned_funcs`, which wants
+    /// every name reachable from anywhere, suppressed body or not.
+    include_suppressed: bool,
+    /// `#Impure(...)` bodies — see [`PurityStage`].
+    descend_impure: bool,
+    /// `$ { ... }` comptime blocks — see [`PurityStage`].
+    descend_comptime_block: bool,
+}
+
+impl WalkOpts {
+    /// The shape every non-purity-check caller in this file already used
+    /// before the stage split existed: skip suppressed/impure bodies,
+    /// always cross into comptime blocks. Also `PurityStage::BuildTime`'s
+    /// shape — the split leaves build-time behavior unchanged.
+    const PLAIN: WalkOpts = WalkOpts {
+        include_suppressed: false,
+        descend_impure: false,
+        descend_comptime_block: true,
+    };
+
+    /// `reachable_owned_funcs` wants every reachable name, full stop.
+    const REACHABLE: WalkOpts = WalkOpts {
+        include_suppressed: true,
+        descend_impure: true,
+        descend_comptime_block: true,
+    };
+
+    fn for_stage(stage: PurityStage) -> WalkOpts {
+        match stage {
+            PurityStage::RunTime => WalkOpts {
+                include_suppressed: false,
+                descend_impure: true,
+                descend_comptime_block: false,
+            },
+            PurityStage::BuildTime => WalkOpts::PLAIN,
+        }
+    }
+}
+
 /// Walk the call graph reachable from `init`; reject the first impure call
-/// (IO, FFI) with the path that reached it (E0951). `embed_file`,
+/// (IO, FFI) with the path that reached it (E3401). `embed_file`,
 /// `embed_bytes`, `find`, `panic`, and `require` are allowed.
 pub(super) fn check_purity_stmts(
     stmts: &[Stmt],
     funcs: &HashMap<String, &Func>,
     extern_names: &HashSet<String>,
 ) -> Result<(), Diagnostic> {
-    let mut visited = HashSet::new();
-    let mut path = Vec::new();
-    for stmt in stmts {
-        check_purity_stmt(stmt, funcs, extern_names, &mut visited, &mut path)?;
-    }
-    Ok(())
+    walk_purity_stmts(
+        stmts,
+        funcs,
+        &|name| impure_builtin(name) || extern_names.contains(name),
+        &impurity_diag,
+        PurityStage::BuildTime,
+    )
 }
 
 pub(super) fn check_purity(
@@ -33,29 +109,104 @@ pub(super) fn check_purity(
     funcs: &HashMap<String, &Func>,
     extern_names: &HashSet<String>,
 ) -> Result<(), Diagnostic> {
-    let mut visited = HashSet::new();
-    let mut path = Vec::new();
-    check_purity_expr(init, funcs, extern_names, &mut visited, &mut path)
+    walk_purity_expr(
+        init,
+        funcs,
+        &|name| impure_builtin(name) || extern_names.contains(name),
+        &impurity_diag,
+        PurityStage::BuildTime,
+    )
 }
 
 fn impure_builtin(name: &str) -> bool {
     crate::Syntax::IMPURE_BUILTINS.contains(&name)
 }
 
-fn check_purity_expr(
+/// D-META-EFFECT1 c3: the one call-graph purity walk. Walks the call graph
+/// reachable from `e`, recursing into `funcs` when a callee is known (with
+/// cycle detection via `visited`), and reports the first call
+/// `is_leaf_impure` accepts — built into a diagnostic by `diag(name, path,
+/// span)` — with the full call-chain path that reached it. Empty `funcs`
+/// makes this a direct-body-only check (no transitive recursion), which is
+/// what a `=[]=>`-declared function's own body check needs; a populated
+/// `funcs` map (comptime's reachable functions, or a whole program's) makes
+/// it the transitive `jet eval --pure` / comptime-evaluation check. `stage`
+/// selects which statement kinds the walk descends into — see
+/// [`PurityStage`].
+pub fn walk_purity_expr(
     e: &Expr,
     funcs: &HashMap<String, &Func>,
-    externs: &HashSet<String>,
+    is_leaf_impure: &impl Fn(&str) -> bool,
+    diag: &impl Fn(&str, &[String], Span) -> Diagnostic,
+    stage: PurityStage,
+) -> Result<(), Diagnostic> {
+    walk_purity_expr_from(
+        e,
+        funcs,
+        is_leaf_impure,
+        diag,
+        &mut HashSet::new(),
+        &mut Vec::new(),
+        stage,
+    )
+}
+
+/// Like [`walk_purity_expr`] but over a statement list, and like
+/// [`walk_purity_stmts_from`] but with a fresh `visited`/`path`.
+pub fn walk_purity_stmts(
+    stmts: &[Stmt],
+    funcs: &HashMap<String, &Func>,
+    is_leaf_impure: &impl Fn(&str) -> bool,
+    diag: &impl Fn(&str, &[String], Span) -> Diagnostic,
+    stage: PurityStage,
+) -> Result<(), Diagnostic> {
+    walk_purity_stmts_from(
+        stmts,
+        funcs,
+        is_leaf_impure,
+        diag,
+        &mut HashSet::new(),
+        &mut Vec::new(),
+        stage,
+    )
+}
+
+/// [`walk_purity_stmts`] with a caller-seeded `visited`/`path` — used by the
+/// `jet eval --pure` whole-program root check, which seeds both with the
+/// entry function's own name so a direct violation in the root reads
+/// "`entry` calls `x`" instead of "`x` is impure, but `entry` declares
+/// `=[]=>`".
+pub fn walk_purity_stmts_from(
+    stmts: &[Stmt],
+    funcs: &HashMap<String, &Func>,
+    is_leaf_impure: &impl Fn(&str) -> bool,
+    diag: &impl Fn(&str, &[String], Span) -> Diagnostic,
     visited: &mut HashSet<String>,
     path: &mut Vec<String>,
+    stage: PurityStage,
+) -> Result<(), Diagnostic> {
+    for stmt in stmts {
+        walk_purity_stmt(stmt, funcs, is_leaf_impure, diag, visited, path, stage)?;
+    }
+    Ok(())
+}
+
+fn walk_purity_expr_from(
+    e: &Expr,
+    funcs: &HashMap<String, &Func>,
+    is_leaf_impure: &impl Fn(&str) -> bool,
+    diag: &impl Fn(&str, &[String], Span) -> Diagnostic,
+    visited: &mut HashSet<String>,
+    path: &mut Vec<String>,
+    stage: PurityStage,
 ) -> Result<(), Diagnostic> {
     let mut result = Ok(());
-    crate::Comptime::walk_calls(e, &mut |name, span| {
+    walk_calls(e, &mut |name, span| {
         if result.is_err() {
             return;
         }
-        if impure_builtin(name) || externs.contains(name) {
-            result = Err(impurity_diag(name, path, span));
+        if is_leaf_impure(name) {
+            result = Err(diag(name, path, span));
         } else if let Some(f) = funcs.get(name) {
             if visited.insert(name.to_string()) {
                 path.push(name.to_string());
@@ -63,7 +214,8 @@ fn check_purity_expr(
                     if result.is_err() {
                         break;
                     }
-                    result = check_purity_stmt(stmt, funcs, externs, visited, path);
+                    result =
+                        walk_purity_stmt(stmt, funcs, is_leaf_impure, diag, visited, path, stage);
                 }
                 path.pop();
             }
@@ -72,17 +224,19 @@ fn check_purity_expr(
     result
 }
 
-fn check_purity_stmt(
+fn walk_purity_stmt(
     s: &Stmt,
     funcs: &HashMap<String, &Func>,
-    externs: &HashSet<String>,
+    is_leaf_impure: &impl Fn(&str) -> bool,
+    diag: &impl Fn(&str, &[String], Span) -> Diagnostic,
     visited: &mut HashSet<String>,
     path: &mut Vec<String>,
+    stage: PurityStage,
 ) -> Result<(), Diagnostic> {
     let mut result = Ok(());
-    walk_stmt_expr_nodes(s, false, &mut |e| {
+    walk_stmt_expr_nodes(s, WalkOpts::for_stage(stage), &mut |e| {
         if result.is_ok() {
-            result = check_purity_expr(e, funcs, externs, visited, path);
+            result = walk_purity_expr_from(e, funcs, is_leaf_impure, diag, visited, path, stage);
         }
     });
     result
@@ -99,7 +253,7 @@ pub fn check_build_time_io(
     diags: &mut Vec<crate::Diagnostics::Diagnostic>,
 ) -> bool {
     let before = diags.len();
-    walk_expr_nodes(e, false, &mut |expr| {
+    walk_expr_nodes(e, WalkOpts::PLAIN, &mut |expr| {
         let Expr::Call(call) = expr else { return };
         if !matches!(
             call.name.as_str(),
@@ -127,7 +281,7 @@ pub fn check_build_time_io(
 /// Visit every direct `Call` name in an expression tree (shallow over
 /// nested functions — recursion is driven by the purity walker).
 pub fn walk_calls(e: &Expr, f: &mut impl FnMut(&str, Span)) {
-    walk_expr_nodes(e, false, &mut |expr| {
+    walk_expr_nodes(e, WalkOpts::PLAIN, &mut |expr| {
         if let Expr::Call(call) = expr {
             f(&call.name, call.name_span);
         }
@@ -141,7 +295,7 @@ pub fn walk_calls(e: &Expr, f: &mut impl FnMut(&str, Span)) {
 /// declaration table; function names and type names are also represented by
 /// `Expr::Ident` while the front end is still doing pure syntax traversal.
 pub fn walk_identifiers(e: &Expr, f: &mut impl FnMut(&str, Span)) {
-    walk_expr_nodes(e, false, &mut |expr| {
+    walk_expr_nodes(e, WalkOpts::PLAIN, &mut |expr| {
         if let Expr::Ident(name, span) = expr {
             f(name, *span);
         }
@@ -161,71 +315,59 @@ pub(super) fn reachable_owned_funcs(
             .filter(|qualified| funcs.contains_key(qualified))
     }
 
-    fn collect_name(
-        name: String,
-        funcs: &HashMap<String, Func>,
-        visited: &mut HashSet<String>,
-        reachable: &mut HashMap<String, Func>,
-    ) {
-        if !visited.insert(name.clone()) {
-            return;
-        }
-        let Some(function) = funcs.get(&name) else {
-            return;
-        };
-        reachable.insert(name, function.clone());
-
-        let mut dependencies = Vec::new();
-        for statement in &function.body {
-            walk_stmt_expr_nodes(statement, true, &mut |expr| match expr {
-                Expr::Call(call) => {
-                    if let Some(name) = known_name(&call.name, funcs) {
-                        dependencies.push(name);
-                    }
-                }
-                Expr::Ident(name, _) => {
-                    if let Some(name) = known_name(name, funcs) {
-                        dependencies.push(name);
-                    }
-                }
-                _ => {}
-            });
-        }
-        for dependency in dependencies {
-            collect_name(dependency, funcs, visited, reachable);
-        }
-    }
-
-    let mut roots = Vec::new();
-    walk_expr_nodes(init, true, &mut |expr| match expr {
+    let mut roots = BTreeSet::new();
+    walk_expr_nodes(init, WalkOpts::REACHABLE, &mut |expr| match expr {
         Expr::Call(call) => {
             if let Some(name) = known_name(&call.name, funcs) {
-                roots.push(name);
+                roots.insert(name);
             }
         }
         Expr::Ident(name, _) => {
             if let Some(name) = known_name(name, funcs) {
-                roots.push(name);
+                roots.insert(name);
             }
         }
         _ => {}
     });
 
-    let mut visited = HashSet::new();
-    let mut reachable = HashMap::new();
-    for root in roots {
-        collect_name(root, funcs, &mut visited, &mut reachable);
+    let mut reverse = BTreeMap::<String, BTreeSet<String>>::new();
+    for (name, function) in funcs {
+        for statement in &function.body {
+            walk_stmt_expr_nodes(statement, WalkOpts::REACHABLE, &mut |expr| {
+                let dependency = match expr {
+                    Expr::Call(call) => known_name(&call.name, funcs),
+                    Expr::Ident(name, _) => known_name(name, funcs),
+                    _ => None,
+                };
+                if let Some(dependency) = dependency {
+                    reverse.entry(dependency).or_default().insert(name.clone());
+                }
+            });
+        }
     }
-    reachable
+
+    let seeds = roots
+        .into_iter()
+        .map(|root| (root, BTreeSet::from(["reachable".to_string()])))
+        .collect();
+    let reachable_names = jet_foundation::Facts::project_reachability(
+        &reverse,
+        [jet_foundation::Facts::ReachabilityRow::new("reachable", seeds)],
+    )
+    .nodes_with("reachable", "reachable");
+    reachable_names
+        .into_iter()
+        .filter_map(|name| funcs.get(&name).cloned().map(|function| (name, function)))
+        .collect()
 }
 
-fn walk_expr_nodes(e: &Expr, include_suppressed: bool, f: &mut impl FnMut(&Expr)) {
+fn walk_expr_nodes(e: &Expr, opts: WalkOpts, f: &mut impl FnMut(&Expr)) {
     f(e);
     match e {
         Expr::Str(parts, _) => {
             for part in parts {
                 if let StrPart::Interp(expr, _) = part {
-                    walk_expr_nodes(expr, include_suppressed, f);
+                    walk_expr_nodes(expr, opts, f);
                 }
             }
         }
@@ -244,10 +386,10 @@ fn walk_expr_nodes(e: &Expr, include_suppressed: bool, f: &mut impl FnMut(&Expr)
         | Expr::ComptimeName { .. } => {}
         Expr::ListLit(items, _) | Expr::CompareChain { operands: items, .. } => {
             for item in items {
-                walk_expr_nodes(item, include_suppressed, f);
+                walk_expr_nodes(item, opts, f);
             }
         }
-        Expr::MemberSpread { base, .. } => walk_expr_nodes(base, include_suppressed, f),
+        Expr::MemberSpread { base, .. } => walk_expr_nodes(base, opts, f),
         Expr::Spread(inner, _)
         | Expr::Unary(_, inner, _)
         | Expr::Deref(inner, _)
@@ -262,22 +404,22 @@ fn walk_expr_nodes(e: &Expr, include_suppressed: bool, f: &mut impl FnMut(&Expr)
         | Expr::Try(inner, _, _)
         | Expr::Paren(inner, _)
         | Expr::IncDec { operand: inner, .. } => {
-            walk_expr_nodes(inner, include_suppressed, f);
+            walk_expr_nodes(inner, opts, f);
         }
-        Expr::OptField { base, .. } => walk_expr_nodes(base, include_suppressed, f),
+        Expr::OptField { base, .. } => walk_expr_nodes(base, opts, f),
         Expr::Range { start, end, .. } => {
-            walk_expr_nodes(start, include_suppressed, f);
-            walk_expr_nodes(end, include_suppressed, f);
+            walk_expr_nodes(start, opts, f);
+            walk_expr_nodes(end, opts, f);
         }
         Expr::MapLit(entries, _) => {
             for (key, value) in entries {
-                walk_expr_nodes(key, include_suppressed, f);
-                walk_expr_nodes(value, include_suppressed, f);
+                walk_expr_nodes(key, opts, f);
+                walk_expr_nodes(value, opts, f);
             }
         }
         Expr::Index { base, index, .. } => {
-            walk_expr_nodes(base, include_suppressed, f);
-            walk_expr_nodes(index, include_suppressed, f);
+            walk_expr_nodes(base, opts, f);
+            walk_expr_nodes(index, opts, f);
         }
         Expr::Slice {
             base,
@@ -286,36 +428,36 @@ fn walk_expr_nodes(e: &Expr, include_suppressed: bool, f: &mut impl FnMut(&Expr)
             range,
             ..
         } => {
-            walk_expr_nodes(base, include_suppressed, f);
+            walk_expr_nodes(base, opts, f);
             if let Some(range) = range {
-                walk_expr_nodes(range, include_suppressed, f);
+                walk_expr_nodes(range, opts, f);
             } else {
-                walk_expr_nodes(start, include_suppressed, f);
-                walk_expr_nodes(end, include_suppressed, f);
+                walk_expr_nodes(start, opts, f);
+                walk_expr_nodes(end, opts, f);
             }
         }
         Expr::Call(call) => {
             for arg in &call.args {
-                walk_expr_nodes(&arg.expr, include_suppressed, f);
+                walk_expr_nodes(&arg.expr, opts, f);
             }
         }
         Expr::Binary(_, left, right, _) => {
-            walk_expr_nodes(left, include_suppressed, f);
-            walk_expr_nodes(right, include_suppressed, f);
+            walk_expr_nodes(left, opts, f);
+            walk_expr_nodes(right, opts, f);
         }
         Expr::MethodCall { receiver, args, .. } => {
-            walk_expr_nodes(receiver, include_suppressed, f);
+            walk_expr_nodes(receiver, opts, f);
             for arg in args {
-                walk_expr_nodes(&arg.expr, include_suppressed, f);
+                walk_expr_nodes(&arg.expr, opts, f);
             }
         }
         Expr::StructLit { fields, .. } => {
             for (_, _, value) in fields {
-                walk_expr_nodes(value, include_suppressed, f);
+                walk_expr_nodes(value, opts, f);
             }
         }
         Expr::TypedLit { body, .. } => {
-            body.for_each_expr(|value| walk_expr_nodes(value, include_suppressed, f));
+            body.for_each_expr(|value| walk_expr_nodes(value, opts, f));
         }
         Expr::EnumLit { args, .. } => {
             for arg in args {
@@ -323,26 +465,26 @@ fn walk_expr_nodes(e: &Expr, include_suppressed: bool, f: &mut impl FnMut(&Expr)
                     EnumLitArg::Positional(value)
                     | EnumLitArg::Named { expr: value, .. } => value,
                 };
-                walk_expr_nodes(value, include_suppressed, f);
+                walk_expr_nodes(value, opts, f);
             }
         }
         Expr::PatternTest {
             subject, pattern, ..
         } => {
-            walk_expr_nodes(subject, include_suppressed, f);
-            walk_pattern_expr_nodes(pattern, include_suppressed, f);
+            walk_expr_nodes(subject, opts, f);
+            walk_pattern_expr_nodes(pattern, opts, f);
         }
         Expr::OrFallback {
             value, fallback, ..
         } => {
-            walk_expr_nodes(value, include_suppressed, f);
+            walk_expr_nodes(value, opts, f);
             match fallback {
                 OrFallback::Value(value) | OrFallback::Return(Some(value), _) => {
-                    walk_expr_nodes(value, include_suppressed, f);
+                    walk_expr_nodes(value, opts, f);
                 }
                 OrFallback::Panic { args, .. } => {
                     for arg in args {
-                        walk_expr_nodes(&arg.expr, include_suppressed, f);
+                        walk_expr_nodes(&arg.expr, opts, f);
                     }
                 }
                 OrFallback::Return(None, _)
@@ -360,58 +502,54 @@ fn walk_expr_nodes(e: &Expr, include_suppressed: bool, f: &mut impl FnMut(&Expr)
             else_value,
             ..
         } => {
-            walk_expr_nodes(cond, include_suppressed, f);
+            walk_expr_nodes(cond, opts, f);
             for stmt in then_body {
-                walk_stmt_expr_nodes(stmt, include_suppressed, f);
+                walk_stmt_expr_nodes(stmt, opts, f);
             }
-            walk_expr_nodes(then_value, include_suppressed, f);
+            walk_expr_nodes(then_value, opts, f);
             for stmt in else_body {
-                walk_stmt_expr_nodes(stmt, include_suppressed, f);
+                walk_stmt_expr_nodes(stmt, opts, f);
             }
-            walk_expr_nodes(else_value, include_suppressed, f);
+            walk_expr_nodes(else_value, opts, f);
         }
         Expr::TupleLit(fields, _, _) => {
             for (_, value) in fields {
-                walk_expr_nodes(value, include_suppressed, f);
+                walk_expr_nodes(value, opts, f);
             }
         }
         Expr::Lambda(lambda) => {
-            if include_suppressed {
+            if opts.include_suppressed {
                 match &lambda.body {
-                    LambdaBody::Expr(body) => walk_expr_nodes(body, include_suppressed, f),
+                    LambdaBody::Expr(body) => walk_expr_nodes(body, opts, f),
                     LambdaBody::Block(body) => {
                         for stmt in body {
-                            walk_stmt_expr_nodes(stmt, include_suppressed, f);
+                            walk_stmt_expr_nodes(stmt, opts, f);
                         }
                     }
                 }
             }
         }
         Expr::CallValue { callee, args, .. } => {
-            walk_expr_nodes(callee, include_suppressed, f);
+            walk_expr_nodes(callee, opts, f);
             for arg in args {
-                walk_expr_nodes(&arg.expr, include_suppressed, f);
+                walk_expr_nodes(&arg.expr, opts, f);
             }
         }
-        Expr::PtrFromAddr { addr, .. } => walk_expr_nodes(addr, include_suppressed, f),
+        Expr::PtrFromAddr { addr, .. } => walk_expr_nodes(addr, opts, f),
     }
 }
 
-fn walk_pattern_expr_nodes(
-    pattern: &Pattern,
-    include_suppressed: bool,
-    f: &mut impl FnMut(&Expr),
-) {
+fn walk_pattern_expr_nodes(pattern: &Pattern, opts: WalkOpts, f: &mut impl FnMut(&Expr)) {
     match pattern {
         Pattern::Or(patterns, _) => {
             for pattern in patterns {
-                walk_pattern_expr_nodes(pattern, include_suppressed, f);
+                walk_pattern_expr_nodes(pattern, opts, f);
             }
         }
         Pattern::Struct { fields, .. } => {
             for field in fields {
                 if let StructPatField::Value { value, .. } = field {
-                    walk_expr_nodes(value, include_suppressed, f);
+                    walk_expr_nodes(value, opts, f);
                 }
             }
         }
@@ -426,10 +564,10 @@ fn walk_pattern_expr_nodes(
     }
 }
 
-fn walk_stmt_expr_nodes(s: &Stmt, include_suppressed: bool, f: &mut impl FnMut(&Expr)) {
+fn walk_stmt_expr_nodes(s: &Stmt, opts: WalkOpts, f: &mut impl FnMut(&Expr)) {
     macro_rules! walk {
         ($expr:expr) => {
-            walk_expr_nodes($expr, include_suppressed, f)
+            walk_expr_nodes($expr, opts, f)
         };
     }
     match s {
@@ -458,7 +596,7 @@ fn walk_stmt_expr_nodes(s: &Stmt, include_suppressed: bool, f: &mut impl FnMut(&
         | Stmt::ContinueLabel(..) => {}
         Stmt::While { cond, body, .. } => {
             walk!(cond);
-            walk_stmt_body_nodes(body, include_suppressed, f);
+            walk_stmt_body_nodes(body, opts, f);
         }
         Stmt::For { kind, body, .. } => {
             match kind {
@@ -478,7 +616,7 @@ fn walk_stmt_expr_nodes(s: &Stmt, include_suppressed: bool, f: &mut impl FnMut(&
                     }
                 }
             }
-            walk_stmt_body_nodes(body, include_suppressed, f);
+            walk_stmt_body_nodes(body, opts, f);
         }
         Stmt::Switch {
             subject,
@@ -495,10 +633,10 @@ fn walk_stmt_expr_nodes(s: &Stmt, include_suppressed: bool, f: &mut impl FnMut(&
             walk!(subject);
             for arm in arms {
                 walk!(&arm.cond);
-                walk_stmt_body_nodes(&arm.body, include_suppressed, f);
+                walk_stmt_body_nodes(&arm.body, opts, f);
             }
             if let Some(body) = else_body {
-                walk_stmt_body_nodes(body, include_suppressed, f);
+                walk_stmt_body_nodes(body, opts, f);
             }
         }
         Stmt::CountedLoop {
@@ -511,9 +649,9 @@ fn walk_stmt_expr_nodes(s: &Stmt, include_suppressed: bool, f: &mut impl FnMut(&
             walk!(&init.init);
             walk!(cond);
             if let Some(step) = step {
-                walk_stmt_expr_nodes(step, include_suppressed, f);
+                walk_stmt_expr_nodes(step, opts, f);
             }
-            walk_stmt_body_nodes(body, include_suppressed, f);
+            walk_stmt_body_nodes(body, opts, f);
         }
         Stmt::Unsafe {
             audit_expr, body, ..
@@ -521,24 +659,28 @@ fn walk_stmt_expr_nodes(s: &Stmt, include_suppressed: bool, f: &mut impl FnMut(&
             if let Some(audit) = audit_expr {
                 walk!(audit);
             }
-            walk_stmt_body_nodes(body, include_suppressed, f);
+            walk_stmt_body_nodes(body, opts, f);
         }
         Stmt::Impure {
             reason_expr, body, ..
         } => {
-            if include_suppressed {
+            // See PurityStage: run-time descends (an `=[]=>` fn's declared
+            // empty effect set must still reject an ambient call fenced only
+            // by `#Impure`), build-time skips (the ambient call is checked
+            // by --allow-impure/E3411 at the point it would actually run).
+            if opts.descend_impure {
                 if let Some(reason) = reason_expr {
                     walk!(reason);
                 }
-                walk_stmt_body_nodes(body, include_suppressed, f);
+                walk_stmt_body_nodes(body, opts, f);
             }
         }
         Stmt::AssumeDet {
             reason_expr, body, ..
         } => {
-            if include_suppressed {
+            if opts.include_suppressed {
                 walk!(reason_expr);
-                walk_stmt_body_nodes(body, include_suppressed, f);
+                walk_stmt_body_nodes(body, opts, f);
             }
         }
         Stmt::ComptimeIf {
@@ -548,22 +690,31 @@ fn walk_stmt_expr_nodes(s: &Stmt, include_suppressed: bool, f: &mut impl FnMut(&
             ..
         } => {
             walk!(cond);
-            walk_stmt_body_nodes(then_body, include_suppressed, f);
+            walk_stmt_body_nodes(then_body, opts, f);
             if let Some(body) = else_body {
-                walk_stmt_body_nodes(body, include_suppressed, f);
+                walk_stmt_body_nodes(body, opts, f);
             }
         }
         Stmt::ContextBlock { fields, body, .. } => {
             for (_, value, _) in fields {
                 walk!(value);
             }
-            walk_stmt_body_nodes(body, include_suppressed, f);
+            walk_stmt_body_nodes(body, opts, f);
         }
         Stmt::ScopeMember { args, body, .. } => {
             for arg in args {
                 walk!(arg);
             }
-            walk_stmt_body_nodes(body, include_suppressed, f);
+            walk_stmt_body_nodes(body, opts, f);
+        }
+        Stmt::ComptimeBlock { body, .. } => {
+            // See PurityStage: build-time descends (a nested `$ { ... }`
+            // block runs for real during build-time evaluation), run-time
+            // skips (it emits no runtime code at all — I3 — so nothing
+            // inside one can trip a run-time-voiced E3401).
+            if opts.descend_comptime_block {
+                walk_stmt_body_nodes(body, opts, f);
+            }
         }
         Stmt::Loop { body, .. }
         | Stmt::Reactive { body, .. }
@@ -575,38 +726,29 @@ fn walk_stmt_expr_nodes(s: &Stmt, include_suppressed: bool, f: &mut impl FnMut(&
         | Stmt::Layout { body, .. }
         | Stmt::Caps { body, .. }
         | Stmt::Grant { body, .. }
-        | Stmt::ComptimeBlock { body, .. }
         | Stmt::Live { body, .. }
         | Stmt::Transact { body, .. } => {
-            walk_stmt_body_nodes(body, include_suppressed, f);
+            walk_stmt_body_nodes(body, opts, f);
         }
     }
 }
 
-fn walk_if_stmt_expr_nodes(
-    if_stmt: &crate::AST::IfStmt,
-    include_suppressed: bool,
-    f: &mut impl FnMut(&Expr),
-) {
-    walk_expr_nodes(&if_stmt.cond, include_suppressed, f);
-    walk_stmt_body_nodes(&if_stmt.then_body, include_suppressed, f);
+fn walk_if_stmt_expr_nodes(if_stmt: &crate::AST::IfStmt, opts: WalkOpts, f: &mut impl FnMut(&Expr)) {
+    walk_expr_nodes(&if_stmt.cond, opts, f);
+    walk_stmt_body_nodes(&if_stmt.then_body, opts, f);
     match &if_stmt.else_branch {
         Some(crate::AST::ElseBranch::ElseIf(inner)) => {
-            walk_if_stmt_expr_nodes(inner, include_suppressed, f);
+            walk_if_stmt_expr_nodes(inner, opts, f);
         }
         Some(crate::AST::ElseBranch::Else(body)) => {
-            walk_stmt_body_nodes(body, include_suppressed, f);
+            walk_stmt_body_nodes(body, opts, f);
         }
         None => {}
     }
 }
 
-fn walk_stmt_body_nodes(
-    body: &[Stmt],
-    include_suppressed: bool,
-    f: &mut impl FnMut(&Expr),
-) {
+fn walk_stmt_body_nodes(body: &[Stmt], opts: WalkOpts, f: &mut impl FnMut(&Expr)) {
     for stmt in body {
-        walk_stmt_expr_nodes(stmt, include_suppressed, f);
+        walk_stmt_expr_nodes(stmt, opts, f);
     }
 }

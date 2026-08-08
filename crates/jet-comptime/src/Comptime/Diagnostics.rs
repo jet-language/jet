@@ -1,6 +1,8 @@
-//! Comptime diagnostic constructors (E0951 impurity · E0953 panic family ·
-//! E0956 unsupported construct). E0952/E2202 fuel diagnostics are inline in
-//! `Interp::burn`; E0955 embed-file errors are inline in `eval_embed_file`.
+//! Comptime diagnostic constructors (E3401 impurity — D-META-EFFECT1 c3: the
+//! comptime purity gate shares its code with the run-time `=[]=>` check ·
+//! E0953 panic family · E0956 unsupported construct). E0952/E2202 fuel
+//! diagnostics are inline in `Interp::burn`; E0955 embed-file errors are
+//! inline in `eval_embed_file`.
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::Expr;
@@ -101,6 +103,7 @@ pub(super) fn unsupported_expr(e: &Expr) -> Diagnostic {
     unsupported("this expression", e.span())
 }
 
+/// D-META-EFFECT1 c3: comptime and run-time purity share E3401.
 pub(super) fn impurity_diag(name: &str, path: &[String], span: Span) -> Diagnostic {
     let why = if path.is_empty() {
         format!(
@@ -115,7 +118,7 @@ pub(super) fn impurity_diag(name: &str, path: &[String], span: Span) -> Diagnost
         )
     };
     Diagnostic::error(
-        "E0951",
+        "E3401",
         format!("`{}` is not allowed in comptime code", name),
         why,
         "compute this at runtime instead; the exceptions are `embed_file(\"path\")`, `embed_bytes(\"path\")`, and `find(\"glob\")`".to_string(),
