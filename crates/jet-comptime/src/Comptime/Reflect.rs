@@ -1,7 +1,9 @@
 //! D-METAREFLECT1 / D-REFLECT1: build comptime reflection handles for user derives.
 //!
 //! `T.reflect()` in a derive body receives a `TypeInfo` value whose `.fields`,
-//! `.methods`, `.type_params`, and `.markers` expose the target type's shape.
+//! `.methods`, `.type_params`, `.markers`, and `.expanded_markers` expose the
+//! target type's shape. `.markers` preserves written markers; the expanded
+//! view contains only derives lowered from them.
 
 use crate::AST::{EnumDef, Field, Func, Marker, StructDef, StructLayout, TypeParam, VariantPayload};
 
@@ -230,9 +232,13 @@ fn marker_info(marker: &Marker) -> CtValue {
             )
         })
         .collect();
+    marker_info_value(&marker.name, args)
+}
+
+fn marker_info_value(name: &str, args: Vec<CtValue>) -> CtValue {
     ct_struct(
         "MarkerInfo",
-        &[("name", ct_str(marker.name.clone())), ("args", ct_list(args))],
+        &[("name", ct_str(name)), ("args", ct_list(args))],
     )
 }
 
@@ -342,35 +348,39 @@ pub fn build_type_param_info(param: &TypeParam) -> CtValue {
     )
 }
 
-fn type_level_marker_names(s: &StructDef) -> Vec<String> {
-    let mut names: Vec<String> = s
-        .type_markers
-        .iter()
-        .chain(s.serde_markers.iter())
-        .map(|m| m.name.clone())
-        .collect();
-    for (derive, _) in &s.derives {
-        names.push(derive.clone());
-    }
-    names.sort();
-    names.dedup();
-    names
+fn derived_marker_info(name: &str) -> CtValue {
+    let name = jet_foundation::Registry::row(name)
+        .map(|row| row.name)
+        .unwrap_or(name);
+    marker_info_value(name, Vec::new())
 }
 
-fn type_level_markers(s: &StructDef) -> Vec<CtValue> {
-    let mut markers = s
-        .type_markers
-        .iter()
-        .chain(s.serde_markers.iter())
-        .map(marker_info)
-        .collect::<Vec<_>>();
-    markers.extend(s.derives.iter().map(|(name, _)| {
-        ct_struct(
-            "MarkerInfo",
-            &[("name", ct_str(name.clone())), ("args", ct_list(Vec::new()))],
-        )
-    }));
-    markers
+/// Keep user-written markers separate from derives lowered from them. The
+/// parser gives lowered derives the source marker's name span; body derive
+/// lines start at `derive`, so they stay in the written view.
+fn type_level_marker_views(
+    type_markers: &[Marker],
+    serde_markers: &[Marker],
+    derives: &[(String, crate::Diagnostics::Span)],
+) -> (Vec<CtValue>, Vec<CtValue>) {
+    let written_source = if type_markers.is_empty() {
+        serde_markers
+    } else {
+        type_markers
+    };
+    let mut written = marker_infos(written_source);
+    let mut expanded = Vec::new();
+    for (name, span) in derives {
+        if written_source
+            .iter()
+            .any(|marker| marker.name_span == *span)
+        {
+            expanded.push(derived_marker_info(name));
+        } else {
+            written.push(derived_marker_info(name));
+        }
+    }
+    (written, expanded)
 }
 
 fn state_path(owner: &str, state: &str) -> String {
@@ -479,7 +489,8 @@ pub fn build_struct_type_info_with_states(s: &StructDef, states: &[String]) -> C
             )
         })
         .collect::<Vec<_>>();
-    let marker_names = type_level_marker_names(s);
+    let (markers, expanded_markers) =
+        type_level_marker_views(&s.type_markers, &s.serde_markers, &s.derives);
     ct_struct(
         "TypeInfo",
         &[
@@ -498,11 +509,8 @@ pub fn build_struct_type_info_with_states(s: &StructDef, states: &[String]) -> C
             ("fields", ct_list(fields_info)),
             ("methods", ct_list(methods_info)),
             ("type_params", ct_list(type_params_info)),
-            ("markers", ct_list(type_level_markers(s))),
-            (
-                "marker_names",
-                ct_list(marker_names.into_iter().map(ct_str).collect()),
-            ),
+            ("markers", ct_list(markers)),
+            ("expanded_markers", ct_list(expanded_markers)),
             ("states", ct_list(state_info)),
             ("transitions", ct_list(transition_info)),
             ("facts", ct_list(facts)),
@@ -567,10 +575,8 @@ fn build_enum_type_info(def: &EnumDef, module: &str) -> CtValue {
         .map(|method| qualified_method_info(method, module, &def.name))
         .collect();
     let params = def.type_params.iter().map(build_type_param_info).collect();
-    let mut marker_names = def.type_markers.iter().chain(def.serde_markers.iter()).map(|marker| ct_str(marker.name.clone())).collect::<Vec<_>>();
-    marker_names.extend(def.derives.iter().map(|(name, _)| ct_str(name.clone())));
-    let mut markers = def.type_markers.iter().chain(def.serde_markers.iter()).map(marker_info).collect::<Vec<_>>();
-    markers.extend(def.derives.iter().map(|(name, _)| ct_struct("MarkerInfo", &[("name", ct_str(name.clone())), ("args", ct_list(Vec::new()))])));
+    let (markers, expanded_markers) =
+        type_level_marker_views(&def.type_markers, &def.serde_markers, &def.derives);
     let transitions = def
         .methods
         .iter()
@@ -589,7 +595,7 @@ fn build_enum_type_info(def: &EnumDef, module: &str) -> CtValue {
         ("methods", ct_list(methods)),
         ("type_params", ct_list(params)),
         ("markers", ct_list(markers)),
-        ("marker_names", ct_list(marker_names)),
+        ("expanded_markers", ct_list(expanded_markers)),
         ("states", ct_list(Vec::new())),
         ("transitions", ct_list(transitions)),
         ("facts", ct_list(Vec::new())),
@@ -920,14 +926,10 @@ mod tests {
                     if fields.iter().any(|(name, value)|
                         name == "name" && matches!(value, CtValue::Str(value) if value == "Debug"))
             )));
-        let marker_names = get("marker_names");
-        assert!(matches!(marker_names, CtValue::List(_)));
-        let CtValue::List(marker_names) = marker_names else {
-            return;
-        };
-        assert!(marker_names
-            .iter()
-            .any(|name| matches!(name, CtValue::Str(name) if name == "Debug")));
+        assert!(matches!(
+            get("expanded_markers"),
+            CtValue::List(expanded) if expanded.is_empty()
+        ));
     }
 
     #[test]

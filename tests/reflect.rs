@@ -174,8 +174,8 @@ fn type_info_exposes_methods_type_params_and_markers() {
             )
     ));
     assert!(matches!(
-        struct_field(&info, "marker_names"),
-        CtValue::List(xs) if matches!(&xs[0], CtValue::Str(name) if name == "Debug")
+        struct_field(&info, "expanded_markers"),
+        CtValue::List(xs) if xs.is_empty()
     ));
 }
 
@@ -222,7 +222,7 @@ fn field_info_carries_visibility() {
 }
 
 #[test]
-fn marker_arguments_are_typed_and_keep_the_compatibility_name() {
+fn marker_arguments_are_typed_in_the_written_view() {
     let marker = Marker {
         name: "Inline".to_string(),
         negated: false,
@@ -259,11 +259,6 @@ fn marker_arguments_are_typed_and_keep_the_compatibility_name() {
     };
 
     let info = build_struct_type_info(&s);
-    assert!(matches!(
-        struct_field(&info, "marker_names"),
-        CtValue::List(names)
-            if matches!(&names[0], CtValue::Str(name) if name == "Inline")
-    ));
     let CtValue::List(markers) = struct_field(&info, "markers") else {
         panic!("markers");
     };

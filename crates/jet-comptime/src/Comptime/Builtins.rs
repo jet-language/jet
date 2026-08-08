@@ -1722,10 +1722,8 @@ pub fn apply_method(
                 Some(CtValue::Str(s)) => s,
                 _ => return Err(unsupported("`has_marker` requires a string argument", span)),
             };
-            if let Some((_, CtValue::List(markers))) = fields
-                .iter()
-                .find(|(n, _)| n == "marker_names")
-                .or_else(|| fields.iter().find(|(n, _)| n == "markers"))
+            if let Some((_, CtValue::List(markers))) =
+                fields.iter().find(|(n, _)| n == "markers")
             {
                 let found = markers
                     .iter()
