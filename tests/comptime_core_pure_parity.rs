@@ -641,6 +641,15 @@ fn public_transcript_preserves_sequential_inline_hof_mutations_exactly() {
 
 #[test]
 fn public_transcript_comptime_only_evaluates_map_call_receiver_once() {
+    std::thread::Builder::new()
+        .stack_size(16 * 1024 * 1024)
+        .spawn(public_transcript_comptime_only_evaluates_map_call_receiver_once_inner)
+        .expect("comptime map-call-receiver test thread")
+        .join()
+        .expect("comptime map-call-receiver test thread panicked");
+}
+
+fn public_transcript_comptime_only_evaluates_map_call_receiver_once_inner() {
     let values = exact_values(&[
         MAP_DECLS,
         MAP_CALL_RECEIVER_DECLS,

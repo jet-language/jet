@@ -329,6 +329,10 @@ pub(super) fn substitute_stmts(
     types: &HashMap<String, Type>,
     values: &HashMap<String, crate::AST::CtValue>,
 ) {
+    // A binding shadows a module value for the rest of this lexical block.
+    // Clone on entry so a nested block cannot leak its shadow back out.
+    let mut values = values.clone();
+
     fn substitute_binding(
         binding: &mut crate::AST::Binding,
         types: &HashMap<String, Type>,
@@ -344,13 +348,16 @@ pub(super) fn substitute_stmts(
 
     for stmt in stmts {
         match stmt {
-            Stmt::Expr(value) | Stmt::Yield(value, _) => substitute_expr(value, types, values),
-            Stmt::Val(binding) => substitute_binding(binding, types, values),
+            Stmt::Expr(value) | Stmt::Yield(value, _) => substitute_expr(value, types, &values),
+            Stmt::Val(binding) => {
+                substitute_binding(binding, types, &values);
+                values.remove(&binding.name);
+            }
             Stmt::Assign { value, .. } | Stmt::Return(Some(value), _) => {
-                substitute_expr(value, types, values)
+                substitute_expr(value, types, &values)
             }
             Stmt::BreakValue(value, _) | Stmt::BreakLabelValue(_, _, value, _) => {
-                substitute_expr(value, types, values)
+                substitute_expr(value, types, &values)
             }
             Stmt::Return(None, _)
             | Stmt::Break(_)
@@ -358,24 +365,24 @@ pub(super) fn substitute_stmts(
             | Stmt::BreakLabel(..)
             | Stmt::ContinueLabel(..) => {}
             Stmt::While { cond, body, .. } => {
-                substitute_expr(cond, types, values);
-                substitute_stmts(body, types, values);
+                substitute_expr(cond, types, &values);
+                substitute_stmts(body, types, &values);
             }
             Stmt::For { kind, body, .. } => {
                 match kind {
                     ForKind::Range { start, end, step, exclusive: _ } => {
-                        substitute_expr(start, types, values);
-                        substitute_expr(end, types, values);
+                        substitute_expr(start, types, &values);
+                        substitute_expr(end, types, &values);
                         if let Some(step) = step {
-                            substitute_expr(step, types, values);
+                            substitute_expr(step, types, &values);
                         }
                     }
                     ForKind::In { collection, step } => {
-                        substitute_expr(collection, types, values);
-                        if let Some(step) = step { substitute_expr(step, types, values); }
+                        substitute_expr(collection, types, &values);
+                        if let Some(step) = step { substitute_expr(step, types, &values); }
                     }
                 }
-                substitute_stmts(body, types, values);
+                substitute_stmts(body, types, &values);
             }
             Stmt::Switch {
                 subject,
@@ -389,13 +396,13 @@ pub(super) fn substitute_stmts(
                 else_body,
                 ..
             } => {
-                substitute_expr(subject, types, values);
+                substitute_expr(subject, types, &values);
                 for arm in arms {
-                    substitute_expr(&mut arm.cond, types, values);
-                    substitute_stmts(&mut arm.body, types, values);
+                    substitute_expr(&mut arm.cond, types, &values);
+                    substitute_stmts(&mut arm.body, types, &values);
                 }
                 if let Some(body) = else_body {
-                    substitute_stmts(body, types, values);
+                    substitute_stmts(body, types, &values);
                 }
             }
             Stmt::CountedLoop {
@@ -405,12 +412,14 @@ pub(super) fn substitute_stmts(
                 body,
                 ..
             } => {
-                substitute_binding(init, types, values);
-                substitute_expr(cond, types, values);
+                let mut loop_values = values.clone();
+                substitute_binding(init, types, &loop_values);
+                loop_values.remove(&init.name);
+                substitute_expr(cond, types, &loop_values);
                 if let Some(step) = step {
-                    substitute_stmts(std::slice::from_mut(step), types, values);
+                    substitute_stmts(std::slice::from_mut(step), types, &loop_values);
                 }
-                substitute_stmts(body, types, values);
+                substitute_stmts(body, types, &loop_values);
             }
             Stmt::Loop { body, .. }
             | Stmt::Reactive { body, .. }
@@ -423,37 +432,37 @@ pub(super) fn substitute_stmts(
             | Stmt::Grant { body, .. }
             | Stmt::Transact { body, .. }
             | Stmt::ComptimeBlock { body, .. }
-            | Stmt::Live { body, .. } => substitute_stmts(body, types, values),
+            | Stmt::Live { body, .. } => substitute_stmts(body, types, &values),
             Stmt::Unsafe {
                 audit_expr, body, ..
             } => {
                 if let Some(expr) = audit_expr {
-                    substitute_expr(expr, types, values);
+                    substitute_expr(expr, types, &values);
                 }
-                substitute_stmts(body, types, values);
+                substitute_stmts(body, types, &values);
             }
             Stmt::Impure {
                 reason_expr, body, ..
             } => {
                 if let Some(expr) = reason_expr {
-                    substitute_expr(expr, types, values);
+                    substitute_expr(expr, types, &values);
                 }
-                substitute_stmts(body, types, values);
+                substitute_stmts(body, types, &values);
             }
             Stmt::Switched { marker, body, .. } => {
-                substitute_marker(marker, types, values);
-                substitute_stmts(body, types, values);
+                substitute_marker(marker, types, &values);
+                substitute_stmts(body, types, &values);
             }
             Stmt::AssumeDet {
                 reason_expr, body, ..
             } => {
-                substitute_expr(reason_expr, types, values);
-                substitute_stmts(body, types, values);
+                substitute_expr(reason_expr, types, &values);
+                substitute_stmts(body, types, &values);
             }
             Stmt::ScopeMember { args, body, .. } => {
                 args.iter_mut()
-                    .for_each(|arg| substitute_expr(arg, types, values));
-                substitute_stmts(body, types, values);
+                    .for_each(|arg| substitute_expr(arg, types, &values));
+                substitute_stmts(body, types, &values);
             }
             Stmt::ComptimeIf {
                 cond,
@@ -461,17 +470,17 @@ pub(super) fn substitute_stmts(
                 else_body,
                 ..
             } => {
-                substitute_expr(cond, types, values);
-                substitute_stmts(then_body, types, values);
+                substitute_expr(cond, types, &values);
+                substitute_stmts(then_body, types, &values);
                 if let Some(body) = else_body {
-                    substitute_stmts(body, types, values);
+                    substitute_stmts(body, types, &values);
                 }
             }
             Stmt::ContextBlock { fields, body, .. } => {
                 fields
                     .iter_mut()
-                    .for_each(|(_, value, _)| substitute_expr(value, types, values));
-                substitute_stmts(body, types, values);
+                    .for_each(|(_, value, _)| substitute_expr(value, types, &values));
+                substitute_stmts(body, types, &values);
             }
         }
     }

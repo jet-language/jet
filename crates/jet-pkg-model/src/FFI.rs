@@ -1109,7 +1109,7 @@ mod net_tls_close_tests {
                 pem: include_bytes!("../../../tests/fixtures/tls/smtp.ca.cert.pem").to_vec(),
             },
             limits: email::Limits::safe(),
-            dkim: None,
+            dkim: Err(jet_foundation::Outcome::JetAbsent),
         }
     }
 
