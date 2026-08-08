@@ -821,23 +821,11 @@ fn build_project_root(file: &str) -> std::path::PathBuf {
             .unwrap_or_else(|_| std::path::PathBuf::from("."))
             .join(entry)
     };
-    let mut directory = absolute
+    let directory = absolute
         .parent()
         .unwrap_or(std::path::Path::new("."))
         .to_path_buf();
-    let fallback = directory.clone();
-    loop {
-        if Loader::manifest_path(&directory).is_some() {
-            return directory;
-        }
-        let Some(parent) = directory.parent() else {
-            return fallback;
-        };
-        if parent == directory {
-            return fallback;
-        }
-        directory = parent.to_path_buf();
-    }
+    Loader::find_manifest_root(&directory).unwrap_or(directory)
 }
 
 fn resolve_build_grants(file: &str, cli: &[String]) -> Result<Vec<String>, Vec<Diagnostic>> {
@@ -847,7 +835,6 @@ fn resolve_build_grants(file: &str, cli: &[String]) -> Result<Vec<String>, Vec<D
         String,
         std::collections::BTreeSet<String>,
     >::new();
-    let mut package_seen = false;
     let mut package_name = None;
     // Build policy is rooted at the entry's real location.  A relative entry
     // such as `src/run.jet` must still discover the package/workspace files
@@ -861,41 +848,43 @@ fn resolve_build_grants(file: &str, cli: &[String]) -> Result<Vec<String>, Vec<D
             .unwrap_or_else(|_| std::path::PathBuf::from("."))
             .join(entry)
     };
-    let mut directory = absolute.parent();
-    while let Some(dir) = directory {
-        let package_path = Manifest::manifest_path_in(dir);
-        if !package_path.is_file() {
-            directory = dir.parent();
-            continue;
+    let entry_dir = absolute
+        .parent()
+        .unwrap_or(std::path::Path::new("."));
+    let package_root = Loader::find_manifest_root(entry_dir);
+    if package_root.is_none() {
+        if let Some((_, diagnostic)) = Loader::stale_manifest_name_diagnostic(entry_dir) {
+            return Err(vec![diagnostic]);
         }
-        if !package_seen {
-            if let Ok(source) = std::fs::read_to_string(&package_path) {
-                package_seen = true;
-                match Package::PackageFacts::parse(&source, package_path.display().to_string()) {
-                    Ok(package) => {
-                        package_name = Some(package.name.clone());
-                        for effect in package.build_allow {
-                            if let Some(capability) =
-                                Comptime::Build::BuildCapability::parse(&effect)
-                            {
-                                allowed.insert(capability.flag().to_string());
-                            }
+    }
+    if let Some(dir) = package_root.as_deref() {
+        let package_path = Loader::manifest_path(dir).expect("manifest root has a Package file");
+        if let Ok(source) = std::fs::read_to_string(&package_path) {
+            match Package::PackageFacts::parse(&source, package_path.display().to_string()) {
+                Ok(package) => {
+                    package_name = Some(package.name.clone());
+                    for effect in package.build_allow {
+                        if let Some(capability) = Comptime::Build::BuildCapability::parse(&effect) {
+                            allowed.insert(capability.flag().to_string());
                         }
                     }
-                    Err(error) => {
-                        let diagnostic = Manifest::parse(&package_path, &source).err()
-                            .unwrap_or_else(|| Diagnostic::error(
-                                "E3503",
-                                format!("build policy in `{}` is malformed", package_path.display()),
-                                format!("typed package policy parser rejected it: {error:?}"),
-                                "fix the `build: { allow: #(…) }` block before running build code".to_string(),
-                                None,
-                            ));
-                        return Err(vec![diagnostic]);
-                    }
+                }
+                Err(error) => {
+                    let diagnostic = Manifest::parse(&package_path, &source).err()
+                        .unwrap_or_else(|| Diagnostic::error(
+                            "E3503",
+                            format!("build policy in `{}` is malformed", package_path.display()),
+                            format!("typed package policy parser rejected it: {error:?}"),
+                            "fix the `build: { allow: #(…) }` block before running build code".to_string(),
+                            None,
+                        ));
+                    return Err(vec![diagnostic]);
                 }
             }
         }
+    }
+    let mut directory = Some(entry_dir);
+    while let Some(dir) = directory {
         let workspace = dir.join(Syntax::WORKSPACE_FILE);
         if let Ok(source) = std::fs::read_to_string(&workspace) {
             let policy = match jetpack::Overlay::parse_workspace_policy(&source) {
