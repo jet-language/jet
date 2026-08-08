@@ -1,16 +1,17 @@
-//! D-META-ONE1=A: the marker vocabulary and the effect roots are written as
-//! Jet declarations in the Prelude, and Rust keeps no copy.
+//! D-META-ONE1=A / D-FACT-LAW1=B: marker vocabulary, effect roots, and fact law
+//! rows are written as Prelude declarations, and Rust keeps no copy.
 //!
-//! Two guards. The first proves the real Jet parser reads the same file the
+//! The marker guard proves the real Jet parser reads the same file the
 //! compiler's registry reader reads, and agrees on every name, every parameter,
 //! and every site — so the small reader in `jet-foundation` (which sits below
 //! the parser in the crate graph and cannot call it) can never drift from the
-//! language. The second proves no Rust file holds a second copy of either
-//! vocabulary.
+//! language. The fact guard checks both law columns against the one registry.
+//! The source scan rejects second Rust copies.
 
 use jet::AST::{Item, MarkerDecl};
 use jet_foundation::Facts;
 use jet_foundation::Policy::{self, RuleSite};
+use jet_foundation::Registry;
 
 fn declarations(source: &str) -> Vec<Item> {
     let (tokens, lex_diagnostics) = jet::Lexer::lex(source);
@@ -119,9 +120,40 @@ fn every_effect_root_is_one_written_declaration() {
     assert_eq!(written, *Facts::EFFECT_ROOTS, "written roots are the served roots");
 }
 
-/// Rust files under the compiler, scanned for a second copy of either
-/// vocabulary. A marker row may be built only where the declarations are read;
-/// the retired effect-root array may not come back anywhere.
+/// D-FACT-LAW1=B: every non-code row writes both law columns in Prelude. The
+/// Rust reader and the one registry must preserve those values, including an
+/// empty gate list for a row that has no written escape.
+#[test]
+fn every_fact_row_carries_its_law_columns() {
+    let written: Vec<&str> = Registry::FACT_SOURCE
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with("fact "))
+        .collect();
+    let declarations = Registry::fact_declarations();
+    assert_eq!(written.len(), declarations.len(), "every fact declaration is read");
+
+    let rows: Vec<_> = Registry::rows()
+        .iter()
+        .filter(|row| row.rule.is_none() && row.kind() != Registry::RowKind::Truth)
+        .collect();
+    assert_eq!(rows.len(), declarations.len(), "every fact declaration serves one row");
+
+    for ((source, declaration), row) in written.iter().zip(declarations).zip(rows) {
+        assert!(source.starts_with(&format!("fact {}(", declaration.name)));
+        for column in ["$holds:", "$safe:", "$gates:"] {
+            assert!(source.contains(column), "`{}` must write `{column}`", declaration.name);
+        }
+        assert_eq!(row.name, declaration.name);
+        assert_eq!(row.target, declaration.target);
+        assert_eq!(row.safe_direction, declaration.safe_direction);
+        assert_eq!(row.gates, declaration.gates);
+    }
+}
+
+/// Rust files under the compiler, scanned for a second copy of the declaration
+/// rows. Marker and fact rows may be built only where their declarations are
+/// read; the retired effect-root array may not come back anywhere.
 #[test]
 fn no_rust_file_keeps_a_second_copy() {
     let mut offenders = Vec::new();
@@ -134,6 +166,9 @@ fn no_rust_file_keeps_a_second_copy() {
         let builds_a_row = text.contains("sites: &[RuleSite::") || text.contains("rule!(");
         if builds_a_row && !display.ends_with("Policy/MarkerSource.rs") {
             offenders.push(format!("{display} builds marker rows in Rust"));
+        }
+        if text.contains("NON_CODE_ROWS") || text.contains("PRELUDE_GATES") {
+            offenders.push(format!("{display} keeps fact law rows in Rust"));
         }
         if text.contains("\"Net\", \"FS\"") {
             offenders.push(format!("{display} keeps a copy of the effect roots"));
