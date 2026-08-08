@@ -8,6 +8,30 @@ enum TypedPatternKind {
     Text,
 }
 
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn shared_match_part_walk_parses_text_and_bytes() {
+        let src = r#"
+fn run() {
+    text :: "prefix-42-suffix"
+    if text == {
+        "prefix-{value}-suffix" -> print(value)
+        else -> print("miss")
+    }
+    bytes :: [U8].{ 7 }
+    if bytes == {
+        [U8].{"{value:U8}"} -> print(value)
+        else -> print("miss")
+    }
+}
+"#;
+        let (tokens, lex) = crate::Lexer::lex(src);
+        assert!(lex.is_empty(), "{lex:?}");
+        assert!(crate::Parser::parse(&tokens).is_ok());
+    }
+}
+
 fn is_byte_list_head(ty: &Type) -> bool {
     matches!(
         ty,
@@ -23,6 +47,37 @@ fn is_byte_list_head(ty: &Type) -> bool {
 }
 
 impl<'a> Parser<'a> {
+        /// D-PARSESTR1 / D-BINPAT1: one literal-part walk for both pattern
+        /// modes. Only hole elaboration and literal conversion vary by mode;
+        /// the pattern engine owns the token-part traversal.
+        fn build_match_parts<T, L, H>(
+            &mut self,
+            parts: Vec<StrTokPart>,
+            mut literal: L,
+            mut hole: H,
+        ) -> Result<Vec<T>, Diagnostic>
+        where
+            L: FnMut(String) -> Option<T>,
+            H: FnMut(&mut Self, Vec<Token>) -> Result<Option<T>, Diagnostic>,
+        {
+            let mut out = Vec::new();
+            for part in parts {
+                match part {
+                    StrTokPart::Lit(s) => {
+                        if let Some(part) = literal(s) {
+                            out.push(part);
+                        }
+                    }
+                    StrTokPart::Interp(toks) => {
+                        if let Some(part) = hole(self, toks)? {
+                            out.push(part);
+                        }
+                    }
+                }
+            }
+            Ok(out)
+        }
+
         /// D-PARSESTR1: try to read the string-literal token at the cursor as a
         /// str-match pattern — `"prefix-{id:Int}-suffix"`. Each hole must reduce
         /// to a bare identifier, optionally followed by `:Type`; any other hole
@@ -87,59 +142,11 @@ impl<'a> Parser<'a> {
             &mut self,
             parts: Vec<StrTokPart>,
         ) -> Result<Vec<StrMatchPart>, Diagnostic> {
-            let mut match_parts: Vec<StrMatchPart> = Vec::new();
-            for part in parts {
-                match part {
-                    StrTokPart::Lit(s) => match_parts.push(StrMatchPart::Lit(s)),
-                    StrTokPart::Interp(toks) => {
-                        let mut sub = Parser {
-                            toks: &toks,
-                            pos: 0,
-                            diags: Vec::new(),
-                            pending_type_gt: false,
-                            depth: self.depth,
-                            type_generic_depth: 0,
-                            type_generic_chain: Vec::new(),
-                            type_generic_truncated: false,
-                            pub_file_default: false,
-                            in_layout_body: self.in_layout_body,
-                            adjacent_if_body_depth: 0,
-                            block_depth: 0,
-                            callable_tail_block_depth: None,
-                            module_arg_expr_depth: None,
-                            allow_lowercase_leading_dot: self.allow_lowercase_leading_dot,
-                            policy_declarations: Vec::new(),
-                            applied_rules: Vec::new(),
-                            rule_facts: Vec::new(),
-                            block_spans: Vec::new(),
-                        };
-                        let (name, name_span) = sub.expect_ident("in a pattern hole")?;
-                        let ty = if matches!(sub.peek().kind, TokKind::Colon) {
-                            sub.bump();
-                            let (t, _) = sub.type_()?;
-                            Some(t)
-                        } else {
-                            None
-                        };
-                        if !sub.diags.is_empty() {
-                            let mut ds = sub.diags;
-                            let first = ds.remove(0);
-                            self.diags.extend(ds);
-                            return Err(first);
-                        }
-                        let hole_span = if matches!(sub.peek().kind, TokKind::Eof) {
-                            name_span
-                        } else {
-                            Span::new(name_span.start, sub.peek().span.end)
-                        };
-                        match_parts.push(StrMatchPart::Hole {
-                            name,
-                            ty,
-                            span: hole_span,
-                        });
-                    }
-                }
-            }
+            let match_parts = self.build_match_parts(
+                parts,
+                |s| Some(StrMatchPart::Lit(s)),
+                |parser, toks| parser.parse_str_match_hole(toks).map(Some),
+            )?;
     
             // E0147: two holes with no literal text (or only an empty literal)
             // between them — a pattern splits text at the fixed characters
@@ -185,6 +192,57 @@ impl<'a> Parser<'a> {
             }
     
             Ok(match_parts)
+        }
+
+        fn parse_str_match_hole(
+            &mut self,
+            toks: Vec<Token>,
+        ) -> Result<StrMatchPart, Diagnostic> {
+            let mut sub = Parser {
+                toks: &toks,
+                pos: 0,
+                diags: Vec::new(),
+                pending_type_gt: false,
+                depth: self.depth,
+                type_generic_depth: 0,
+                type_generic_chain: Vec::new(),
+                type_generic_truncated: false,
+                pub_file_default: false,
+                in_layout_body: self.in_layout_body,
+                adjacent_if_body_depth: 0,
+                block_depth: 0,
+                callable_tail_block_depth: None,
+                module_arg_expr_depth: None,
+                allow_lowercase_leading_dot: self.allow_lowercase_leading_dot,
+                policy_declarations: Vec::new(),
+                applied_rules: Vec::new(),
+                rule_facts: Vec::new(),
+                block_spans: Vec::new(),
+            };
+            let (name, name_span) = sub.expect_ident("in a pattern hole")?;
+            let ty = if matches!(sub.peek().kind, TokKind::Colon) {
+                sub.bump();
+                let (t, _) = sub.type_()?;
+                Some(t)
+            } else {
+                None
+            };
+            if !sub.diags.is_empty() {
+                let mut ds = sub.diags;
+                let first = ds.remove(0);
+                self.diags.extend(ds);
+                return Err(first);
+            }
+            let hole_span = if matches!(sub.peek().kind, TokKind::Eof) {
+                name_span
+            } else {
+                Span::new(name_span.start, sub.peek().span.end)
+            };
+            Ok(StrMatchPart::Hole {
+                name,
+                ty,
+                span: hole_span,
+            })
         }
     
         /// D-SHIFT1 / D-UNIFYLIT1=A: parse the sole argument of `take_pattern(…)`.
@@ -420,60 +478,12 @@ impl<'a> Parser<'a> {
             parts: Vec<StrTokPart>,
             lit_span: Span,
         ) -> Result<Vec<crate::AST::BinMatchPart>, Diagnostic> {
-            use crate::AST::{BinEndian, BinMatchPart, BinSpec};
-            let mut out: Vec<BinMatchPart> = Vec::new();
-            for part in parts {
-                match part {
-                    StrTokPart::Lit(s) => {
-                        if !s.is_empty() {
-                            out.push(BinMatchPart::Lit(s.into_bytes()));
-                        }
-                    }
-                    StrTokPart::Interp(toks) => {
-                        // Hole shape: `name : U<width>[be|le]` or `name : ...`.
-                        // Malformed holes are PUSHED (not returned) with a
-                        // recovery placeholder, so the rest of the arm table and
-                        // file still parse (M1 recovery, matching E0147).
-                        let (name, name_span) = match toks.first() {
-                            Some(Token {
-                                kind: TokKind::Ident(n),
-                                span,
-                            }) => (n.clone(), *span),
-                            _ => {
-                                self.diags.push(self.bin_bad_hole(lit_span));
-                                continue;
-                            }
-                        };
-                        if !matches!(toks.get(1).map(|t| &t.kind), Some(TokKind::Colon)) {
-                            self.diags.push(self.bin_bad_hole(name_span));
-                            continue;
-                        }
-                        let spec_span = toks.get(2).map(|t| t.span).unwrap_or(name_span);
-                        let trailing = toks
-                            .get(3)
-                            .is_some_and(|t| !matches!(t.kind, TokKind::Eof));
-                        let spec = match toks.get(2).map(|t| &t.kind) {
-                            Some(TokKind::DotDotDot) if !trailing => BinSpec::Rest,
-                            Some(TokKind::Ident(spec)) if !trailing => {
-                                self.parse_bin_bits(spec, spec_span)
-                            }
-                            _ => {
-                                self.diags.push(self.bin_bad_hole(spec_span));
-                                BinSpec::Bits {
-                                    width: 8,
-                                    endian: BinEndian::None,
-                                }
-                            }
-                        };
-                        let hole_span = Span::new(name_span.start, spec_span.end);
-                        out.push(BinMatchPart::Hole {
-                            name,
-                            spec,
-                            span: hole_span,
-                        });
-                    }
-                }
-            }
+            use crate::AST::{BinMatchPart, BinSpec};
+            let out = self.build_match_parts(
+                parts,
+                |s| (!s.is_empty()).then(|| BinMatchPart::Lit(s.into_bytes())),
+                |parser, toks| Ok(parser.parse_bin_match_hole(toks, lit_span)),
+            )?;
             // E1009 (byte-mode E0147 analog): a `...` rest capture must be the
             // final part — nothing can follow a greedy tail. Pushed, not
             // returned, so the rest of the file still parses (M1 recovery).
@@ -502,6 +512,55 @@ impl<'a> Parser<'a> {
                 }
             }
             Ok(out)
+        }
+
+        fn parse_bin_match_hole(
+            &mut self,
+            toks: Vec<Token>,
+            lit_span: Span,
+        ) -> Option<crate::AST::BinMatchPart> {
+            use crate::AST::{BinEndian, BinMatchPart, BinSpec};
+            // Hole shape: `name : U<width>[be|le]` or `name : ...`.
+            // Malformed holes are PUSHED (not returned) with a recovery
+            // placeholder, so the rest of the arm table and file still parse
+            // (M1 recovery, matching E0147).
+            let (name, name_span) = match toks.first() {
+                Some(Token {
+                    kind: TokKind::Ident(n),
+                    span,
+                }) => (n.clone(), *span),
+                _ => {
+                    self.diags.push(self.bin_bad_hole(lit_span));
+                    return None;
+                }
+            };
+            if !matches!(toks.get(1).map(|t| &t.kind), Some(TokKind::Colon)) {
+                self.diags.push(self.bin_bad_hole(name_span));
+                return None;
+            }
+            let spec_span = toks.get(2).map(|t| t.span).unwrap_or(name_span);
+            let trailing = toks
+                .get(3)
+                .is_some_and(|t| !matches!(t.kind, TokKind::Eof));
+            let spec = match toks.get(2).map(|t| &t.kind) {
+                Some(TokKind::DotDotDot) if !trailing => BinSpec::Rest,
+                Some(TokKind::Ident(spec)) if !trailing => {
+                    self.parse_bin_bits(spec, spec_span)
+                }
+                _ => {
+                    self.diags.push(self.bin_bad_hole(spec_span));
+                    BinSpec::Bits {
+                        width: 8,
+                        endian: BinEndian::None,
+                    }
+                }
+            };
+            let hole_span = Span::new(name_span.start, spec_span.end);
+            Some(BinMatchPart::Hole {
+                name,
+                spec,
+                span: hole_span,
+            })
         }
 
         /// D-BINPAT1: parse a bit-width spec ident — `U4`, `U16be`, `U16le`.
