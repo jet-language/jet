@@ -206,10 +206,10 @@ fn parser_binds_the_authoritative_declaration_site_matrix() {
 }
 
 #[test]
-fn task_metadata_binds_typed_platform_skip_and_formats_stably() {
+fn task_metadata_binds_typed_platform_skip_limits_and_formats_stably() {
     for (platform, spelling) in [("Linux", ".Linux"), ("MacOS", ".MacOS")] {
         let source = format!(
-            "#Job(skip: .Unless(.Platform({spelling}))) fn build() {{}}\nfn run() {{}}\n"
+            "#Job(skip: .Unless(.Platform({spelling})), limits: .{{ cpu: 2 }}) fn build() {{}}\nfn run() {{}}\n"
         );
         let (tokens, lexer_diagnostics) = jet::Lexer::lex(&source);
         assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
@@ -230,6 +230,14 @@ fn task_metadata_binds_typed_platform_skip_and_formats_stably() {
             Some(jet::AST::TaskSkip::UnlessPlatform { platform: actual })
                 if actual == platform
         ));
+        assert_eq!(
+            function
+                .task_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.limits.get("cpu"))
+                .map(String::as_str),
+            Some("2")
+        );
         let skip = function
             .task_metadata
             .as_ref()

@@ -229,9 +229,7 @@ impl<'a> Parser<'a> {
                     }
                 };
             }
-            metadata.authority =
-                Self::task_optional_string(arguments.parameter(6), marker.span, "authority")?;
-            if let Some(limits) = arguments.parameter(7) {
+            if let Some(limits) = arguments.parameter(6) {
                 metadata.limits = Self::task_limits(limits, marker.span)?;
             }
             Ok(Some(metadata))
