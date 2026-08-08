@@ -3020,6 +3020,14 @@ impl LowerCtx<'_, '_> {
                         Some(Type::Apply { name, .. })
                             if name == jet_foundation::Syntax::TYPE_PTR
                     ) {
+                        // Same provenance rule as Deref/volatile (bd15-rev):
+                        // a trusted store may only see a real stack-slot
+                        // pointer; synthetic place identities decline to deopt.
+                        if !self.real_address_values.contains(&dst) {
+                            return Err(
+                                "jit raw pointer store address unsupported".to_string()
+                            );
+                        }
                         let rhs = self.lower_expr(value)?;
                         self.b.ins().store(MemFlags::trusted(), rhs, dst, 0);
                         return Ok(());
@@ -13662,6 +13670,13 @@ impl LowerCtx<'_, '_> {
                     return Err("jit raw pointer dereference outside #Unsafe".to_string());
                 }
                 let pointer = self.lower_expr(inner)?;
+                // Same provenance rule as volatile_read (review bd15-rev): a
+                // trusted load may only see a pointer minted from a real stack
+                // slot. A synthetic place identity (field-place address_of)
+                // must decline to the deopt tier, where it is inert.
+                if !self.real_address_values.contains(&pointer) {
+                    return Err("jit raw pointer dereference address unsupported".to_string());
+                }
                 let clif = self
                     .meta
                     .clif_ty(&expr.ty)

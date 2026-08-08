@@ -47,8 +47,10 @@ fi
 # the nix shell, so the availability check must run AFTER the shell env is
 # materialized — hence the wrapper below. JET_NO_SCCACHE=1 opts out.
 cache_mode_env() {
+  # $1 = checkout root (baked in by the caller — the nix-develop transplant
+  # below has no access to this script's variables at runtime).
   if [ -z "${JET_NO_SCCACHE:-}" ] && [ -z "${RUSTC_WRAPPER:-}" ]; then
-    tgt="${CARGO_TARGET_DIR:-$PWD/target}"
+    tgt="${CARGO_TARGET_DIR:-$1/target}"
     if [ ! -d "$tgt/debug" ] && command -v sccache >/dev/null 2>&1; then
       export RUSTC_WRAPPER=sccache
       export CARGO_INCREMENTAL=0
@@ -62,7 +64,7 @@ cache_mode_env() {
 if command -v direnv >/dev/null 2>&1; then
   if env_dump="$(cd "$repo" && JET_DEV_SHELL="$profile" direnv export bash 2>/dev/null)"; then
     eval "$env_dump"
-    cache_mode_env
+    cache_mode_env "$repo"
     exec "$@"
   fi
 fi
@@ -71,6 +73,6 @@ fi
 # the check sees the shell's PATH.
 joined="$(printf '%q ' "$@")"
 if [ "$profile" = "full" ]; then
-  exec nix develop "$repo#full" -c bash -c "$(declare -f cache_mode_env); cache_mode_env; exec $joined"
+  exec nix develop "$repo#full" -c bash -c "$(declare -f cache_mode_env); cache_mode_env $(printf %q "$repo"); exec $joined"
 fi
-exec nix develop "$repo" -c bash -c "$(declare -f cache_mode_env); cache_mode_env; exec $joined"
+exec nix develop "$repo" -c bash -c "$(declare -f cache_mode_env); cache_mode_env $(printf %q "$repo"); exec $joined"

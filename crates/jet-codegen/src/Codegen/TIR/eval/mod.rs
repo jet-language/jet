@@ -1362,6 +1362,11 @@ impl<'a> EvalCtx<'a> {
                     .iter()
                     .find_map(|(name, value)| (name == "value").then(|| value.clone()))
                 {
+                    // The already-completed carrier still answers to the one
+                    // Prelude wait policy (bd15-rev): a cancelled scope or an
+                    // expired deadline refuses the join here exactly as
+                    // jet_task_wait_policy does on the other tiers.
+                    self.task_wait_cancel_check()?;
                     return Ok(result);
                 }
             }

@@ -523,32 +523,18 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
         eprintln!("error: invalid registry index path: {error}");
         exit(ExitCodes::USER_ERROR);
     });
-    // E1247 (consume-side policy for unsigned publishes) extends to the
-    // metadata chain: an unsigned publish to a registry with no root key
-    // pinned and none configured has no key to sign sparse metadata with, so
-    // there is no chain to refresh — the index entry and artifact publish
-    // alone, and consumption of the unsigned registry stays a consume-side
-    // policy call (resolution fails closed without a pinned root). A registry
-    // with a pinned or configured root key always refreshes and verifies.
-    let unsigned_keyless_registry = no_sign
-        && jet::Publish::read_registry_root_key(&registry.name).is_err()
-        && std::env::var_os("JET_REGISTRY_ROOT_KEY")
-            .filter(|value| !value.is_empty())
-            .is_none();
+    let metadata = match jet::Publish::refresh_registry_metadata(repo, &registry.name) {
+        Ok(metadata) => metadata,
+        Err(diagnostic) => {
+            eprint!(
+                "{}",
+                jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", &[diagnostic])
+            );
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
     let mut publish_paths = vec![artifact, index];
-    if !unsigned_keyless_registry {
-        let metadata = match jet::Publish::refresh_registry_metadata(repo, &registry.name) {
-            Ok(metadata) => metadata,
-            Err(diagnostic) => {
-                eprint!(
-                    "{}",
-                    jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", &[diagnostic])
-                );
-                exit(ExitCodes::USER_ERROR);
-            }
-        };
-        publish_paths.extend(metadata.paths);
-    }
+    publish_paths.extend(metadata.paths);
     if let Err(d) = jet::Publish::push_index(
         &registry,
         repo,
