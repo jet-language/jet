@@ -6,6 +6,8 @@ pub use jet_foundation::Outcome::*;
 use super::Concurrency;
 use super::Encoding::{alloc_datatree, read_datatree};
 use crate::Marshal::{clone_string, result_err_msg, result_ok};
+use cranelift_codegen::ir::{types, AbiParam, Signature};
+use cranelift_module::Module as _;
 
 /// Canonical stream runtime (jet_std types + EncodingStream algorithm).
 #[allow(dead_code, unused_imports, unused_variables, clippy::all)]
@@ -151,7 +153,15 @@ pub(crate) mod runtime {
             Object(Vec<(String, DataTree)>),
         }
 
-        include!("jet_bigint_snip.rs");
+        // #1636: one home for the limb-arithmetic bigint routine.
+        // `jet_foundation::Numeric::CtBigInt` (already a direct dependency of
+        // jet-jit) is the canonical compiled implementation; `EncodingStream.rs`
+        // below just borrows the name locally so its `jet_std::JetBigInt` call
+        // sites read unchanged. The Prelude's own `JetBigInt` (CommonTypes.rs)
+        // stays a separate, hand-mirrored copy — AOT output is a standalone
+        // Rust program that can't link back into the compiler, the same
+        // constraint `JetDecimal`/`CtDecimal` already document there.
+        pub use jet_foundation::Numeric::CtBigInt as JetBigInt;
 
         #[derive(Clone, Debug, PartialEq, Eq)]
         pub enum XMLReason {
@@ -1438,135 +1448,57 @@ pub(crate) extern "C" fn jet_jit_xml_reader_next(handle: i64) -> i64 {
     }
 }
 
-// ── symbol registration ──────────────────────────────────────────────────────
+// ── symbol registration (#1633: one host_fns! listing) ───────────────────────
 
-pub(crate) fn register_stream_symbols(builder: &mut cranelift_jit::JITBuilder) {
-    builder.symbol("jet_jit_fs_create", jet_jit_fs_create as *const u8);
-    builder.symbol("jet_jit_fs_open", jet_jit_fs_open as *const u8);
-    builder.symbol("jet_jit_json_writer", jet_jit_json_writer as *const u8);
-    builder.symbol("jet_jit_json_reader", jet_jit_json_reader as *const u8);
-    builder.symbol("jet_jit_jsonl_writer", jet_jit_jsonl_writer as *const u8);
-    builder.symbol("jet_jit_jsonl_reader", jet_jit_jsonl_reader as *const u8);
-    builder.symbol("jet_jit_csv_writer", jet_jit_csv_writer as *const u8);
-    builder.symbol("jet_jit_csv_reader", jet_jit_csv_reader as *const u8);
-    builder.symbol("jet_jit_cbor_writer", jet_jit_cbor_writer as *const u8);
-    builder.symbol("jet_jit_cbor_reader", jet_jit_cbor_reader as *const u8);
-    builder.symbol("jet_jit_xml_writer", jet_jit_xml_writer as *const u8);
-    builder.symbol("jet_jit_xml_reader", jet_jit_xml_reader as *const u8);
-    builder.symbol("jet_jit_json_writer_write", jet_jit_json_writer_write as *const u8);
-    builder.symbol("jet_jit_json_writer_flush", jet_jit_json_writer_flush as *const u8);
-    builder.symbol("jet_jit_json_writer_finish", jet_jit_json_writer_finish as *const u8);
-    builder.symbol("jet_jit_json_reader_next", jet_jit_json_reader_next as *const u8);
-    builder.symbol("jet_jit_jsonl_writer_write", jet_jit_jsonl_writer_write as *const u8);
-    builder.symbol("jet_jit_jsonl_writer_flush", jet_jit_jsonl_writer_flush as *const u8);
-    builder.symbol("jet_jit_jsonl_writer_finish", jet_jit_jsonl_writer_finish as *const u8);
-    builder.symbol("jet_jit_jsonl_reader_next", jet_jit_jsonl_reader_next as *const u8);
-    builder.symbol("jet_jit_csv_writer_write", jet_jit_csv_writer_write as *const u8);
-    builder.symbol("jet_jit_csv_writer_flush", jet_jit_csv_writer_flush as *const u8);
-    builder.symbol("jet_jit_csv_writer_finish", jet_jit_csv_writer_finish as *const u8);
-    builder.symbol("jet_jit_csv_reader_next", jet_jit_csv_reader_next as *const u8);
-    builder.symbol("jet_jit_cbor_writer_write", jet_jit_cbor_writer_write as *const u8);
-    builder.symbol("jet_jit_cbor_writer_flush", jet_jit_cbor_writer_flush as *const u8);
-    builder.symbol("jet_jit_cbor_writer_finish", jet_jit_cbor_writer_finish as *const u8);
-    builder.symbol("jet_jit_cbor_reader_next", jet_jit_cbor_reader_next as *const u8);
-    builder.symbol("jet_jit_xml_writer_write", jet_jit_xml_writer_write as *const u8);
-    builder.symbol("jet_jit_xml_writer_flush", jet_jit_xml_writer_flush as *const u8);
-    builder.symbol("jet_jit_xml_writer_finish", jet_jit_xml_writer_finish as *const u8);
-    builder.symbol("jet_jit_xml_reader_next", jet_jit_xml_reader_next as *const u8);
-}
-
-pub(crate) struct StreamHostFns {
-    pub fs_create: cranelift_module::FuncId,
-    pub fs_open: cranelift_module::FuncId,
-    pub json_writer: cranelift_module::FuncId,
-    pub json_reader: cranelift_module::FuncId,
-    pub jsonl_writer: cranelift_module::FuncId,
-    pub jsonl_reader: cranelift_module::FuncId,
-    pub csv_writer: cranelift_module::FuncId,
-    pub csv_reader: cranelift_module::FuncId,
-    pub cbor_writer: cranelift_module::FuncId,
-    pub cbor_reader: cranelift_module::FuncId,
-    pub xml_writer: cranelift_module::FuncId,
-    pub xml_reader: cranelift_module::FuncId,
-    pub json_writer_write: cranelift_module::FuncId,
-    pub json_writer_flush: cranelift_module::FuncId,
-    pub json_writer_finish: cranelift_module::FuncId,
-    pub json_reader_next: cranelift_module::FuncId,
-    pub jsonl_writer_write: cranelift_module::FuncId,
-    pub jsonl_writer_flush: cranelift_module::FuncId,
-    pub jsonl_writer_finish: cranelift_module::FuncId,
-    pub jsonl_reader_next: cranelift_module::FuncId,
-    pub csv_writer_write: cranelift_module::FuncId,
-    pub csv_writer_flush: cranelift_module::FuncId,
-    pub csv_writer_finish: cranelift_module::FuncId,
-    pub csv_reader_next: cranelift_module::FuncId,
-    pub cbor_writer_write: cranelift_module::FuncId,
-    pub cbor_writer_flush: cranelift_module::FuncId,
-    pub cbor_writer_finish: cranelift_module::FuncId,
-    pub cbor_reader_next: cranelift_module::FuncId,
-    pub xml_writer_write: cranelift_module::FuncId,
-    pub xml_writer_flush: cranelift_module::FuncId,
-    pub xml_writer_finish: cranelift_module::FuncId,
-    pub xml_reader_next: cranelift_module::FuncId,
-}
-
-pub(crate) fn declare_stream_host_fns(
-    module: &mut cranelift_jit::JITModule,
-) -> Result<StreamHostFns, String> {
-    use cranelift_codegen::ir::{types, AbiParam, Signature};
-    use cranelift_module::{Linkage, Module};
-
-    let cc = module.target_config().default_call_conv;
-    let mut sig_unary = Signature::new(cc);
-    sig_unary.params.push(AbiParam::new(types::I64));
-    sig_unary.returns.push(AbiParam::new(types::I64));
-    let mut sig_binary = Signature::new(cc);
-    sig_binary.params.push(AbiParam::new(types::I64));
-    sig_binary.params.push(AbiParam::new(types::I64));
-    sig_binary.returns.push(AbiParam::new(types::I64));
-    let mut sig_ternary = Signature::new(cc);
-    sig_ternary.params.push(AbiParam::new(types::I64));
-    sig_ternary.params.push(AbiParam::new(types::I64));
-    sig_ternary.params.push(AbiParam::new(types::I64));
-    sig_ternary.returns.push(AbiParam::new(types::I64));
-    // json.writer(file, limits, canonical:bool as i8) — use i64 for all.
-    let mut import = |name: &str, sig: &Signature| -> Result<cranelift_module::FuncId, String> {
-        module
-            .declare_function(name, Linkage::Import, sig)
-            .map_err(|e| e.to_string())
-    };
-    Ok(StreamHostFns {
-        fs_create: import("jet_jit_fs_create", &sig_unary)?,
-        fs_open: import("jet_jit_fs_open", &sig_unary)?,
-        json_writer: import("jet_jit_json_writer", &sig_ternary)?,
-        json_reader: import("jet_jit_json_reader", &sig_binary)?,
-        jsonl_writer: import("jet_jit_jsonl_writer", &sig_binary)?,
-        jsonl_reader: import("jet_jit_jsonl_reader", &sig_binary)?,
-        csv_writer: import("jet_jit_csv_writer", &sig_binary)?,
-        csv_reader: import("jet_jit_csv_reader", &sig_binary)?,
-        cbor_writer: import("jet_jit_cbor_writer", &sig_binary)?,
-        cbor_reader: import("jet_jit_cbor_reader", &sig_binary)?,
-        xml_writer: import("jet_jit_xml_writer", &sig_binary)?,
-        xml_reader: import("jet_jit_xml_reader", &sig_binary)?,
-        json_writer_write: import("jet_jit_json_writer_write", &sig_binary)?,
-        json_writer_flush: import("jet_jit_json_writer_flush", &sig_unary)?,
-        json_writer_finish: import("jet_jit_json_writer_finish", &sig_unary)?,
-        json_reader_next: import("jet_jit_json_reader_next", &sig_unary)?,
-        jsonl_writer_write: import("jet_jit_jsonl_writer_write", &sig_binary)?,
-        jsonl_writer_flush: import("jet_jit_jsonl_writer_flush", &sig_unary)?,
-        jsonl_writer_finish: import("jet_jit_jsonl_writer_finish", &sig_unary)?,
-        jsonl_reader_next: import("jet_jit_jsonl_reader_next", &sig_unary)?,
-        csv_writer_write: import("jet_jit_csv_writer_write", &sig_binary)?,
-        csv_writer_flush: import("jet_jit_csv_writer_flush", &sig_unary)?,
-        csv_writer_finish: import("jet_jit_csv_writer_finish", &sig_unary)?,
-        csv_reader_next: import("jet_jit_csv_reader_next", &sig_unary)?,
-        cbor_writer_write: import("jet_jit_cbor_writer_write", &sig_binary)?,
-        cbor_writer_flush: import("jet_jit_cbor_writer_flush", &sig_unary)?,
-        cbor_writer_finish: import("jet_jit_cbor_writer_finish", &sig_unary)?,
-        cbor_reader_next: import("jet_jit_cbor_reader_next", &sig_unary)?,
-        xml_writer_write: import("jet_jit_xml_writer_write", &sig_binary)?,
-        xml_writer_flush: import("jet_jit_xml_writer_flush", &sig_unary)?,
-        xml_writer_finish: import("jet_jit_xml_writer_finish", &sig_unary)?,
-        xml_reader_next: import("jet_jit_xml_reader_next", &sig_unary)?,
-    })
+host_fns! {
+    struct StreamHostFns;
+    register: register_stream_symbols;
+    declare: declare_stream_host_fns(module) {
+        let cc = module.target_config().default_call_conv;
+        let mut sig_unary = Signature::new(cc);
+        sig_unary.params.push(AbiParam::new(types::I64));
+        sig_unary.returns.push(AbiParam::new(types::I64));
+        let mut sig_binary = Signature::new(cc);
+        sig_binary.params.push(AbiParam::new(types::I64));
+        sig_binary.params.push(AbiParam::new(types::I64));
+        sig_binary.returns.push(AbiParam::new(types::I64));
+        // json.writer(file, limits, canonical:bool as i8) — use i64 for all.
+        let mut sig_ternary = Signature::new(cc);
+        sig_ternary.params.push(AbiParam::new(types::I64));
+        sig_ternary.params.push(AbiParam::new(types::I64));
+        sig_ternary.params.push(AbiParam::new(types::I64));
+        sig_ternary.returns.push(AbiParam::new(types::I64));
+    }
+    fs_create: "jet_jit_fs_create" => jet_jit_fs_create: sig_unary;
+    fs_open: "jet_jit_fs_open" => jet_jit_fs_open: sig_unary;
+    json_writer: "jet_jit_json_writer" => jet_jit_json_writer: sig_ternary;
+    json_reader: "jet_jit_json_reader" => jet_jit_json_reader: sig_binary;
+    jsonl_writer: "jet_jit_jsonl_writer" => jet_jit_jsonl_writer: sig_binary;
+    jsonl_reader: "jet_jit_jsonl_reader" => jet_jit_jsonl_reader: sig_binary;
+    csv_writer: "jet_jit_csv_writer" => jet_jit_csv_writer: sig_binary;
+    csv_reader: "jet_jit_csv_reader" => jet_jit_csv_reader: sig_binary;
+    cbor_writer: "jet_jit_cbor_writer" => jet_jit_cbor_writer: sig_binary;
+    cbor_reader: "jet_jit_cbor_reader" => jet_jit_cbor_reader: sig_binary;
+    xml_writer: "jet_jit_xml_writer" => jet_jit_xml_writer: sig_binary;
+    xml_reader: "jet_jit_xml_reader" => jet_jit_xml_reader: sig_binary;
+    json_writer_write: "jet_jit_json_writer_write" => jet_jit_json_writer_write: sig_binary;
+    json_writer_flush: "jet_jit_json_writer_flush" => jet_jit_json_writer_flush: sig_unary;
+    json_writer_finish: "jet_jit_json_writer_finish" => jet_jit_json_writer_finish: sig_unary;
+    json_reader_next: "jet_jit_json_reader_next" => jet_jit_json_reader_next: sig_unary;
+    jsonl_writer_write: "jet_jit_jsonl_writer_write" => jet_jit_jsonl_writer_write: sig_binary;
+    jsonl_writer_flush: "jet_jit_jsonl_writer_flush" => jet_jit_jsonl_writer_flush: sig_unary;
+    jsonl_writer_finish: "jet_jit_jsonl_writer_finish" => jet_jit_jsonl_writer_finish: sig_unary;
+    jsonl_reader_next: "jet_jit_jsonl_reader_next" => jet_jit_jsonl_reader_next: sig_unary;
+    csv_writer_write: "jet_jit_csv_writer_write" => jet_jit_csv_writer_write: sig_binary;
+    csv_writer_flush: "jet_jit_csv_writer_flush" => jet_jit_csv_writer_flush: sig_unary;
+    csv_writer_finish: "jet_jit_csv_writer_finish" => jet_jit_csv_writer_finish: sig_unary;
+    csv_reader_next: "jet_jit_csv_reader_next" => jet_jit_csv_reader_next: sig_unary;
+    cbor_writer_write: "jet_jit_cbor_writer_write" => jet_jit_cbor_writer_write: sig_binary;
+    cbor_writer_flush: "jet_jit_cbor_writer_flush" => jet_jit_cbor_writer_flush: sig_unary;
+    cbor_writer_finish: "jet_jit_cbor_writer_finish" => jet_jit_cbor_writer_finish: sig_unary;
+    cbor_reader_next: "jet_jit_cbor_reader_next" => jet_jit_cbor_reader_next: sig_unary;
+    xml_writer_write: "jet_jit_xml_writer_write" => jet_jit_xml_writer_write: sig_binary;
+    xml_writer_flush: "jet_jit_xml_writer_flush" => jet_jit_xml_writer_flush: sig_unary;
+    xml_writer_finish: "jet_jit_xml_writer_finish" => jet_jit_xml_writer_finish: sig_unary;
+    xml_reader_next: "jet_jit_xml_reader_next" => jet_jit_xml_reader_next: sig_unary;
 }

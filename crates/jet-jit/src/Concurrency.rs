@@ -1,12 +1,12 @@
 //! M4: scheduler-backed task/channel host shims for the Cranelift JIT.
 
 use jet_codegen::scheduler::{
-    jet_scheduler_all, jet_scheduler_any, jet_scheduler_ctx_deadline_ms,
-    jet_scheduler_current_task_trace, jet_scheduler_push_deadline, jet_scheduler_race,
-    jet_scheduler_select_int_channels_timed, jet_scheduler_deliver_shield_exit,
-    jet_scheduler_shield_enter, jet_scheduler_shield_leave_status, jet_scheduler_sleep_ms,
+    jet_ctx_deadline_ms, jet_ctx_push_deadline, jet_scheduler_all, jet_scheduler_any,
+    jet_scheduler_current_task_trace, jet_scheduler_deliver_shield_exit, jet_scheduler_race,
+    jet_scheduler_select_int_channels_timed, jet_scheduler_shield_enter,
+    jet_scheduler_shield_leave_status, jet_scheduler_sleep_ms,
     jet_scheduler_spawn_blocking_with_control, jet_scheduler_wait_without_unwind,
-    jet_scheduler_yield_now, JetSchedulerChannel, JetSchedulerDeadlineGuard, JetSchedulerJoin,
+    jet_scheduler_yield_now, JetDeadlineGuard, JetSchedulerChannel, JetSchedulerJoin,
     JetSchedulerWait, JetShieldExit, JetTaskControl,
 };
 use std::cell::{Cell, RefCell};
@@ -247,7 +247,7 @@ extern "C" fn jet_jit_deadline_push(deadline_ms: i64) {
     DEADLINE_STACK.with(|stack| {
         stack
             .borrow_mut()
-            .push(jet_scheduler_push_deadline(deadline_ms));
+            .push(jet_ctx_push_deadline(deadline_ms));
     });
 }
 
@@ -258,7 +258,7 @@ extern "C" fn jet_jit_deadline_pop() {
 }
 
 thread_local! {
-    static DEADLINE_STACK: RefCell<Vec<JetSchedulerDeadlineGuard>> = const { RefCell::new(Vec::new()) };
+    static DEADLINE_STACK: RefCell<Vec<JetDeadlineGuard>> = const { RefCell::new(Vec::new()) };
 }
 
 extern "C" fn jet_jit_channel_close(ch: i64) {
@@ -492,7 +492,7 @@ where
 {
     let rt_ptr = active_runtime_ptr().expect("jit spawn without active runtime");
     let rt_addr = rt_ptr as usize;
-    let inherited_deadline = jet_scheduler_ctx_deadline_ms();
+    let inherited_deadline = jet_ctx_deadline_ms();
     let control = JetTaskControl::new();
     let join = jet_scheduler_spawn_blocking_with_control(
         move || {
@@ -500,7 +500,7 @@ where
             // only touch mutex-backed channel state and indexed sender slots.
             let rt_ptr = rt_addr as *mut super::JitRuntime;
             set_active_runtime(Some(rt_ptr));
-            let _deadline = inherited_deadline.map(jet_scheduler_push_deadline);
+            let _deadline = inherited_deadline.map(jet_ctx_push_deadline);
             let _ = take_pending_shield_exit();
             let out = f();
             // Rich panic traps without Rust unwind (I1). Re-raise so g.all/join
@@ -830,11 +830,11 @@ extern "C" fn jet_jit_after_value(ms: i64, value: i64) -> i64 {
     })
     .expect("jit after_value without active runtime");
     let delay = ms.max(0) as u64;
-    let inherited_deadline = jet_scheduler_ctx_deadline_ms();
+    let inherited_deadline = jet_ctx_deadline_ms();
     let control = JetTaskControl::new();
     let _join = jet_scheduler_spawn_blocking_with_control(
         move || {
-            let _deadline = inherited_deadline.map(jet_scheduler_push_deadline);
+            let _deadline = inherited_deadline.map(jet_ctx_push_deadline);
             let _ = wait_status(|| {
                 jet_scheduler_sleep_ms(delay);
                 0

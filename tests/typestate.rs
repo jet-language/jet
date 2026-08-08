@@ -308,9 +308,8 @@ fn agreeing_switch_arms_over_an_exhaustive_enum_keep_the_state() {
 #[test]
 fn counted_loop_zero_iterations_reports_the_pre_loop_divergence() {
     let src = format!(
-        "{DIVERGENT}\nfn decide(n: Int) {{\n  order := Order.start(1)\n  loop i := 0, i < n {{\n    order = order.confirm()\n  }}\n  print(order.ship())\n}}\nfn run() {{ decide(1) }}\n"
+        "{DIVERGENT}\nfn decide(n: Int) {{\n  order := Order.start(1)\n  loop i := 0, i < n {{\n    fresh := Order.start(2)\n    order = fresh.confirm()\n  }}\n  print(order.ship())\n}}\nfn run() {{ decide(1) }}\n"
     );
-    eprintln!("DEBUG codes={:?} lints={:?}", codes(&src), lint_codes(&src));
     assert!(
         lint_codes(&src).iter().any(|c| c == "L0152"),
         "the loop may run zero times, so `Draft` (skipped) and `Confirmed` \

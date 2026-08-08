@@ -1,6 +1,6 @@
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_jit::{JITBuilder, JITModule};
-use cranelift_module::{FuncId, Linkage, Module};
+use cranelift_module::{FuncId, Module};
 use jet_codegen::scheduler::{
     JetSchedulerChannel, JetSchedulerJoin, JetSchedulerSender, JetStream, JetStreamSender,
     JetTaskControl,
@@ -11,7 +11,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use super::resident::resident_teardown;
 use super::{
     Archive, Cell as LocalCell, Collections, Compress, Concurrency, CoreHost, Crypto, Encoding, Fmt,
-    JitResultValue, Memory, Net, Numeric, Parse, Process, Random, Sketch, Solver, Text, Time,
+    JitResultValue, Memory, Net, Numeric, Process, Random, Solver, Text, Time,
     TRY_COMPILE_PANIC_HOOK_LOCK,
 };
 
@@ -1639,339 +1639,10 @@ extern "C" fn jet_jit_perf_reset_fidelity() {
     JIT_PERF_FIDELITY.with(|c| c.set(JIT_PERF_DEFAULT_FIDELITY_BITS));
 }
 
-pub(crate) struct HostFns {
-    pub(crate) add_i64: FuncId,
-    pub(crate) sub_i64: FuncId,
-    pub(crate) mul_i64: FuncId,
-    pub(crate) div_i64: FuncId,
-    pub(crate) rem_i64: FuncId,
-    pub(crate) pow_i64: FuncId,
-    pub(crate) floordiv_i64: FuncId,
-    pub(crate) mod_i64: FuncId,
-    pub(crate) floordiv_f64: FuncId,
-    pub(crate) pow_f64: FuncId,
-    pub(crate) intn_binop: FuncId,
-    pub(crate) intn_to_string: FuncId,
-    pub(crate) print_i64: FuncId,
-    pub(crate) print_f64: FuncId,
-    pub(crate) print_bool: FuncId,
-    pub(crate) print_char: FuncId,
-    pub(crate) print_str: FuncId,
-    pub(crate) str_begin: FuncId,
-    pub(crate) str_push_lit: FuncId,
-    pub(crate) str_push_i64: FuncId,
-    pub(crate) str_push_f64: FuncId,
-    pub(crate) str_push_compact_f64: FuncId,
-    pub(crate) str_push_bool: FuncId,
-    pub(crate) str_push_char: FuncId,
-    pub(crate) str_push_str: FuncId,
-    pub(crate) str_eq: FuncId,
-    pub(crate) str_contains: FuncId,
-    pub(crate) str_starts_with: FuncId,
-    pub(crate) str_ends_with: FuncId,
-    pub(crate) str_clone: FuncId,
-    pub(crate) str_len: FuncId,
-    pub(crate) str_byte_len: FuncId,
-    pub(crate) str_is_ascii: FuncId,
-    pub(crate) str_trim: FuncId,
-    pub(crate) str_to_upper: FuncId,
-    pub(crate) str_to_lower: FuncId,
-    pub(crate) str_replace: FuncId,
-    pub(crate) str_lines: FuncId,
-    pub(crate) str_split: FuncId,
-    pub(crate) str_rsplit: FuncId,
-    pub(crate) str_chars: FuncId,
-    pub(crate) str_bytes: FuncId,
-    pub(crate) str_scalar_strings: FuncId,
-    pub(crate) str_after: FuncId,
-    pub(crate) str_before: FuncId,
-    pub(crate) str_trim_view: FuncId,
-    pub(crate) str_after_view: FuncId,
-    pub(crate) str_before_view: FuncId,
-    pub(crate) str_slice: FuncId,
-    pub(crate) clock_new: FuncId,
-    pub(crate) clock_now: FuncId,
-    pub(crate) clock_tick: FuncId,
-    pub(crate) clock_advance: FuncId,
-    pub(crate) clock_wait: FuncId,
-    pub(crate) parse_i64: FuncId,
-    pub(crate) parse_f64: FuncId,
-    pub(crate) numeric_try_i64: FuncId,
-    pub(crate) numeric_float_to_int: FuncId,
-    pub(crate) numeric_float_narrow: FuncId,
-    pub(crate) numeric_checked_widen: FuncId,
-    pub(crate) distinct_range: FuncId,
-    pub(crate) distinct_range_result: FuncId,
-    pub(crate) numeric_predicate: FuncId,
-    pub(crate) numeric_bit_count: FuncId,
-    pub(crate) struct_new: FuncId,
-    pub(crate) struct_assign: FuncId,
-    pub(crate) struct_get_i64: FuncId,
-    pub(crate) struct_get_f64: FuncId,
-    pub(crate) struct_get_bool: FuncId,
-    pub(crate) struct_get_char: FuncId,
-    pub(crate) struct_get_str: FuncId,
-    pub(crate) struct_set_i64: FuncId,
-    pub(crate) struct_set_f64: FuncId,
-    pub(crate) struct_set_bool: FuncId,
-    pub(crate) struct_set_char: FuncId,
-    pub(crate) struct_set_str: FuncId,
-    pub(crate) measurement_new: FuncId,
-    pub(crate) measurement_arithmetic: FuncId,
-    pub(crate) measurement_get: FuncId,
-    pub(crate) measurement_show: FuncId,
-    pub(crate) result_new_i64: FuncId,
-    pub(crate) result_new_f64: FuncId,
-    pub(crate) result_new_i8: FuncId,
-    pub(crate) result_new_i32: FuncId,
-    pub(crate) unit_convert_exact: FuncId,
-    pub(crate) unit_convert_rounded: FuncId,
-    pub(crate) unit_convert_implicit: FuncId,
-    pub(crate) result_is_ok: FuncId,
-    pub(crate) result_get_i64: FuncId,
-    pub(crate) result_get_f64: FuncId,
-    pub(crate) result_get_i8: FuncId,
-    pub(crate) result_get_i32: FuncId,
-    pub(crate) trap_panic: FuncId,
-    pub(crate) rich_panic: FuncId,
-    pub(crate) trace_err: FuncId,
-    pub(crate) result_context: FuncId,
-
-    pub(crate) duration_from_int: FuncId,
-    pub(crate) duration_from_float: FuncId,
-    pub(crate) duration_in: FuncId,
-    pub(crate) duration_in_unit: FuncId,
-    pub(crate) duration_is_zero: FuncId,
-    pub(crate) duration_total_seconds: FuncId,
-    pub(crate) duration_difference: FuncId,
-    pub(crate) perf_fidelity: FuncId,
-    pub(crate) perf_default_fidelity: FuncId,
-    pub(crate) perf_override_fidelity: FuncId,
-    pub(crate) perf_reset_fidelity: FuncId,
-    pub(crate) is_trapped: FuncId,
-    pub(crate) deopt_call: FuncId,
-    pub(crate) coll: Collections::CollectionsHostFns,
-    pub(crate) memory: Memory::MemoryHostFns,
-    pub(crate) cell: LocalCell::CellHostFns,
-    pub(crate) conc: Concurrency::ConcurrencyHostFns,
-    pub(crate) core: CoreHost::CoreHostFns,
-    pub(crate) encoding: Encoding::EncodingHostFns,
-    pub(crate) stream: crate::enc_stream::StreamHostFns,
-    pub(crate) fmt: Fmt::FmtHostFns,
-    pub(crate) compress: Compress::CompressHostFns,
-    pub(crate) archive: Archive::ArchiveHostFns,
-    pub(crate) process: Process::ProcessHostFns,
-    pub(crate) num: Numeric::NumericHostFns,
-    pub(crate) solver: Solver::SolverHostFns,
-    pub(crate) random: Random::RandomHostFns,
-    pub(crate) text: crate::Text::TextHostFns,
-    pub(crate) sketch: crate::Sketch::SketchHostFns,
-    pub(crate) args: crate::Args::ArgsHostFns,
-    pub(crate) db: crate::DB::DBHostFns,
-    pub(crate) crypto: Crypto::CryptoHostFns,
-    pub(crate) net: Net::NetHostFns,
-    pub(crate) net_http: crate::net_http_rt::NetHttpHostFns,
-    pub(crate) game: crate::Game::GameHostFns,
-    pub(crate) raylib: crate::Raylib::RaylibHostFns,
-    pub(crate) layout: crate::Layout::LayoutHostFns,
-    pub(crate) reactive: crate::Reactive::ReactiveHostFns,
-    pub(crate) ui: crate::Ui::UiHostFns,
-    pub(crate) web: crate::Web::WebHostFns,
-    pub(crate) parse: crate::Parse::HostFns,
-    pub(crate) reflect_of_finish: FuncId,
-    pub(crate) reflect_field_new: FuncId,
-    pub(crate) reflect_type_name: FuncId,
-    pub(crate) reflect_display: FuncId,
-    pub(crate) reflect_fields: FuncId,
-    pub(crate) reflect_field_name: FuncId,
-    pub(crate) reflect_field_value: FuncId,
-    pub(crate) testing_temp_dir: FuncId,
-    pub(crate) testing_snap: FuncId,
-    pub(crate) data: crate::Data::DataHostFns,
-    pub(crate) time: crate::Time::TimeHostFns,
-    pub(crate) io: crate::IO::IOHostFns,
-    pub(crate) watcher: crate::Watcher::WatcherHostFns,
-    pub(crate) math: crate::Math::MathHostFns,
-    pub(crate) math_extra: crate::MathExtra::MathExtraHostFns,
-    pub(crate) ffi: crate::Ffi::FfiHostFns,
-}
-
 pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     let mut builder =
         JITBuilder::new(cranelift_module::default_libcall_names()).map_err(|e| e.to_string())?;
-    builder.symbol("jet_jit_add_i64", jet_jit_add_i64 as *const u8);
-    builder.symbol("jet_jit_sub_i64", jet_jit_sub_i64 as *const u8);
-    builder.symbol("jet_jit_mul_i64", jet_jit_mul_i64 as *const u8);
-    builder.symbol("jet_jit_div_i64", jet_jit_div_i64 as *const u8);
-    builder.symbol("jet_jit_rem_i64", jet_jit_rem_i64 as *const u8);
-    builder.symbol("jet_jit_pow_i64", jet_jit_pow_i64 as *const u8);
-    builder.symbol("jet_jit_pow_f64", jet_jit_pow_f64 as *const u8);
-    builder.symbol("jet_jit_floordiv_i64", jet_jit_floordiv_i64 as *const u8);
-    builder.symbol("jet_jit_mod_i64", jet_jit_mod_i64 as *const u8);
-    builder.symbol("jet_jit_floordiv_f64", jet_jit_floordiv_f64 as *const u8);
-    builder.symbol("jet_jit_intn_binop", jet_jit_intn_binop as *const u8);
-    builder.symbol(
-        "jet_jit_intn_to_string",
-        jet_jit_intn_to_string as *const u8,
-    );
-    builder.symbol("jet_jit_print_i64", jet_jit_print_i64 as *const u8);
-    builder.symbol("jet_jit_print_f64", jet_jit_print_f64 as *const u8);
-    builder.symbol("jet_jit_print_bool", jet_jit_print_bool as *const u8);
-    builder.symbol("jet_jit_print_char", jet_jit_print_char as *const u8);
-    builder.symbol("jet_jit_print_str", jet_jit_print_str as *const u8);
-    builder.symbol("jet_jit_str_begin", jet_jit_str_begin as *const u8);
-    builder.symbol("jet_jit_str_push_lit", jet_jit_str_push_lit as *const u8);
-    builder.symbol("jet_jit_str_push_i64", jet_jit_str_push_i64 as *const u8);
-    builder.symbol("jet_jit_str_push_f64", jet_jit_str_push_f64 as *const u8);
-    builder.symbol(
-        "jet_jit_str_push_compact_f64",
-        jet_jit_str_push_compact_f64 as *const u8,
-    );
-    builder.symbol("jet_jit_str_push_bool", jet_jit_str_push_bool as *const u8);
-    builder.symbol("jet_jit_str_push_char", jet_jit_str_push_char as *const u8);
-    builder.symbol("jet_jit_str_push_str", jet_jit_str_push_str as *const u8);
-    builder.symbol("jet_jit_str_eq", jet_jit_str_eq as *const u8);
-    builder.symbol("jet_jit_str_contains", jet_jit_str_contains as *const u8);
-    builder.symbol("jet_jit_str_starts_with", jet_jit_str_starts_with as *const u8);
-    builder.symbol("jet_jit_str_ends_with", jet_jit_str_ends_with as *const u8);
-    builder.symbol("jet_jit_str_clone", jet_jit_str_clone as *const u8);
-    builder.symbol("jet_jit_str_len", jet_jit_str_len as *const u8);
-    builder.symbol("jet_jit_str_byte_len", jet_jit_str_byte_len as *const u8);
-    builder.symbol("jet_jit_str_is_ascii", jet_jit_str_is_ascii as *const u8);
-    builder.symbol("jet_jit_str_trim", jet_jit_str_trim as *const u8);
-    builder.symbol("jet_jit_str_to_upper", jet_jit_str_to_upper as *const u8);
-    builder.symbol("jet_jit_str_to_lower", jet_jit_str_to_lower as *const u8);
-    builder.symbol("jet_jit_str_replace", jet_jit_str_replace as *const u8);
-    builder.symbol("jet_jit_str_lines", jet_jit_str_lines as *const u8);
-    builder.symbol("jet_jit_str_split", jet_jit_str_split as *const u8);
-    builder.symbol("jet_jit_str_rsplit", jet_jit_str_rsplit as *const u8);
-    builder.symbol("jet_jit_str_chars", jet_jit_str_chars as *const u8);
-    builder.symbol("jet_jit_str_bytes", jet_jit_str_bytes as *const u8);
-    builder.symbol("jet_jit_str_scalar_strings", jet_jit_str_scalar_strings as *const u8);
-    builder.symbol("jet_jit_str_after", jet_jit_str_after as *const u8);
-    builder.symbol("jet_jit_str_before", jet_jit_str_before as *const u8);
-    builder.symbol(
-        "jet_jit_str_trim_view",
-        jet_jit_str_trim_view as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_str_after_view",
-        jet_jit_str_after_view as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_str_before_view",
-        jet_jit_str_before_view as *const u8,
-    );
-    builder.symbol("jet_jit_str_slice", jet_jit_str_slice as *const u8);
-    builder.symbol("jet_jit_clock_new", jet_jit_clock_new as *const u8);
-    builder.symbol("jet_jit_clock_now", jet_jit_clock_now as *const u8);
-    builder.symbol("jet_jit_clock_tick", jet_jit_clock_tick as *const u8);
-    builder.symbol("jet_jit_clock_advance", jet_jit_clock_advance as *const u8);
-    builder.symbol("jet_jit_clock_wait", jet_jit_clock_wait as *const u8);
-    builder.symbol("jet_jit_trap_panic", jet_jit_trap_panic as *const u8);
-    builder.symbol("jet_jit_rich_panic", jet_jit_rich_panic as *const u8);
-    builder.symbol("jet_jit_trace_err", jet_jit_trace_err as *const u8);
-    builder.symbol("jet_jit_result_context", jet_jit_result_context as *const u8);
-
-    builder.symbol("jet_jit_parse_i64", jet_jit_parse_i64 as *const u8);
-    builder.symbol("jet_jit_parse_f64", jet_jit_parse_f64 as *const u8);
-    builder.symbol("jet_jit_numeric_try_i64", jet_jit_numeric_try_i64 as *const u8);
-    builder.symbol("jet_jit_numeric_float_to_int", jet_jit_numeric_float_to_int as *const u8);
-    builder.symbol("jet_jit_numeric_float_narrow", jet_jit_numeric_float_narrow as *const u8);
-    builder.symbol("jet_jit_numeric_checked_widen", jet_jit_numeric_checked_widen as *const u8);
-    builder.symbol("jet_jit_distinct_range", jet_jit_distinct_range as *const u8);
-    builder.symbol("jet_jit_distinct_range_result", jet_jit_distinct_range_result as *const u8);
-    builder.symbol("jet_jit_numeric_predicate", jet_jit_numeric_predicate as *const u8);
-    builder.symbol("jet_jit_numeric_bit_count", jet_jit_numeric_bit_count as *const u8);
-    builder.symbol("jet_jit_struct_new", jet_jit_struct_new as *const u8);
-    builder.symbol("jet_jit_struct_assign", jet_jit_struct_assign as *const u8);
-    builder.symbol(
-        "jet_jit_struct_get_i64",
-        jet_jit_struct_get_i64 as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_struct_get_f64",
-        jet_jit_struct_get_f64 as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_struct_get_bool",
-        jet_jit_struct_get_bool as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_struct_get_char",
-        jet_jit_struct_get_char as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_struct_get_str",
-        jet_jit_struct_get_str as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_struct_set_i64",
-        jet_jit_struct_set_i64 as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_struct_set_f64",
-        jet_jit_struct_set_f64 as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_struct_set_bool",
-        jet_jit_struct_set_bool as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_struct_set_char",
-        jet_jit_struct_set_char as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_struct_set_str",
-        jet_jit_struct_set_str as *const u8,
-    );
-    builder.symbol("jet_jit_measurement_new", jet_jit_measurement_new as *const u8);
-    builder.symbol(
-        "jet_jit_measurement_arithmetic",
-        jet_jit_measurement_arithmetic as *const u8,
-    );
-    builder.symbol("jet_jit_measurement_get", jet_jit_measurement_get as *const u8);
-    builder.symbol("jet_jit_measurement_show", jet_jit_measurement_show as *const u8);
-    builder.symbol("jet_jit_result_new_i64", jet_jit_result_new_i64 as *const u8);
-    builder.symbol("jet_jit_result_new_f64", jet_jit_result_new_f64 as *const u8);
-    builder.symbol("jet_jit_result_new_i8", jet_jit_result_new_i8 as *const u8);
-    builder.symbol("jet_jit_result_new_i32", jet_jit_result_new_i32 as *const u8);
-    builder.symbol("jet_jit_unit_convert_exact", jet_jit_unit_convert_exact as *const u8);
-    builder.symbol("jet_jit_unit_convert_rounded", jet_jit_unit_convert_rounded as *const u8);
-    builder.symbol("jet_jit_unit_convert_implicit", jet_jit_unit_convert_implicit as *const u8);
-    builder.symbol("jet_jit_result_is_ok", jet_jit_result_is_ok as *const u8);
-    builder.symbol("jet_jit_result_get_i64", jet_jit_result_get_i64 as *const u8);
-    builder.symbol("jet_jit_result_get_f64", jet_jit_result_get_f64 as *const u8);
-    builder.symbol("jet_jit_result_get_i8", jet_jit_result_get_i8 as *const u8);
-    builder.symbol("jet_jit_result_get_i32", jet_jit_result_get_i32 as *const u8);
-    builder.symbol("jet_jit_duration_from_int", jet_jit_duration_from_int as *const u8);
-    builder.symbol("jet_jit_duration_from_float", jet_jit_duration_from_float as *const u8);
-    builder.symbol("jet_jit_duration_in", jet_jit_duration_in as *const u8);
-    builder.symbol("jet_jit_duration_in_unit", jet_jit_duration_in_unit as *const u8);
-    builder.symbol("jet_jit_duration_is_zero", jet_jit_duration_is_zero as *const u8);
-    builder.symbol(
-        "jet_jit_duration_total_seconds",
-        jet_jit_duration_total_seconds as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_duration_difference",
-        jet_jit_duration_difference as *const u8,
-    );
-    builder.symbol("jet_jit_perf_fidelity", jet_jit_perf_fidelity as *const u8);
-    builder.symbol(
-        "jet_jit_perf_default_fidelity",
-        jet_jit_perf_default_fidelity as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_perf_override_fidelity",
-        jet_jit_perf_override_fidelity as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_perf_reset_fidelity",
-        jet_jit_perf_reset_fidelity as *const u8,
-    );
-    builder.symbol("jet_jit_is_trapped", jet_jit_is_trapped as *const u8);
-    builder.symbol("jet_deopt_call", super::deopt::jet_deopt_call as *const u8);
+    register_host_symbols(&mut builder);
     Collections::register_collections_symbols(&mut builder);
     Memory::register_memory_symbols(&mut builder);
     LocalCell::register_symbols(&mut builder);
@@ -1989,7 +1660,6 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     crate::Text::register_text_symbols(&mut builder);
     crate::Sketch::register_sketch_symbols(&mut builder);
     crate::Args::register_args_symbols(&mut builder);
-    crate::CLI::register_cli_symbols(&mut builder);
     crate::DB::register_db_symbols(&mut builder);
     Crypto::register_crypto_symbols(&mut builder);
     Net::register_net_symbols(&mut builder);
@@ -2002,15 +1672,6 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     crate::Web::register_web_symbols(&mut builder);
     crate::Parse::register_symbols(&mut builder);
     crate::Data::register_symbols(&mut builder);
-    builder.symbol("jet_jit_reflect_of_finish", jet_jit_reflect_of_finish as *const u8);
-    builder.symbol("jet_jit_reflect_field_new", jet_jit_reflect_field_new as *const u8);
-    builder.symbol("jet_jit_reflect_type_name", jet_jit_reflect_type_name as *const u8);
-    builder.symbol("jet_jit_reflect_display", jet_jit_reflect_display as *const u8);
-    builder.symbol("jet_jit_reflect_fields", jet_jit_reflect_fields as *const u8);
-    builder.symbol("jet_jit_reflect_field_name", jet_jit_reflect_field_name as *const u8);
-    builder.symbol("jet_jit_reflect_field_value", jet_jit_reflect_field_value as *const u8);
-    builder.symbol("jet_jit_testing_temp_dir", jet_jit_testing_temp_dir as *const u8);
-    builder.symbol("jet_jit_testing_snap", jet_jit_testing_snap as *const u8);
     crate::Time::register_time_symbols(&mut builder);
     crate::IO::register_io_symbols(&mut builder);
     crate::Watcher::register_watcher_symbols(&mut builder);
@@ -2222,436 +1883,382 @@ extern "C" fn jet_jit_testing_snap(name: i64, actual: i64) -> i8 {
     })
 }
 
+// #1633: one host_fns! listing for the top-level table + delegate composition.
+host_fns! {
+    struct HostFns;
+    register: register_host_symbols;
+    declare: declare_host_fns(module) {
+        let cc = module.target_config().default_call_conv;
+        let mut sig_bin_i64 = Signature::new(cc);
+        sig_bin_i64.params.push(AbiParam::new(types::I64));
+        sig_bin_i64.params.push(AbiParam::new(types::I64));
+        sig_bin_i64.params.push(AbiParam::new(types::I32));
+        sig_bin_i64.returns.push(AbiParam::new(types::I64));
+        let mut sig_pow_f64 = Signature::new(cc);
+        sig_pow_f64.params.push(AbiParam::new(types::F64));
+        sig_pow_f64.params.push(AbiParam::new(types::F64));
+        sig_pow_f64.returns.push(AbiParam::new(types::F64));
+        let mut sig_intn_binop = Signature::new(cc);
+        for _ in 0..7 {
+            sig_intn_binop.params.push(AbiParam::new(types::I64));
+        }
+        sig_intn_binop.returns.push(AbiParam::new(types::I64));
 
-fn declare_host_fns(
-    module: &mut JITModule,
-    coll: Collections::CollectionsHostFns,
-    memory: Memory::MemoryHostFns,
-    cell: LocalCell::CellHostFns,
-    conc: Concurrency::ConcurrencyHostFns,
-    core: CoreHost::CoreHostFns,
-    encoding: Encoding::EncodingHostFns,
-    stream: crate::enc_stream::StreamHostFns,
-    fmt: Fmt::FmtHostFns,
-    compress: Compress::CompressHostFns,
-    archive: Archive::ArchiveHostFns,
-    process: Process::ProcessHostFns,
-    num: Numeric::NumericHostFns,
-    solver: Solver::SolverHostFns,
-    random: Random::RandomHostFns,
-    text: crate::Text::TextHostFns,
-    sketch: crate::Sketch::SketchHostFns,
-    args: crate::Args::ArgsHostFns,
-    db: crate::DB::DBHostFns,
-    crypto: Crypto::CryptoHostFns,
-    net: Net::NetHostFns,
-    net_http: crate::net_http_rt::NetHttpHostFns,
-    game: crate::Game::GameHostFns,
-    raylib: crate::Raylib::RaylibHostFns,
-    layout: crate::Layout::LayoutHostFns,
-    reactive: crate::Reactive::ReactiveHostFns,
-    ui: crate::Ui::UiHostFns,
-    web: crate::Web::WebHostFns,
-    parse: crate::Parse::HostFns,
-    data: crate::Data::DataHostFns,
-    time: crate::Time::TimeHostFns,
-    io: crate::IO::IOHostFns,
-    watcher: crate::Watcher::WatcherHostFns,
-    math: crate::Math::MathHostFns,
-    math_extra: crate::MathExtra::MathExtraHostFns,
-    ffi: crate::Ffi::FfiHostFns,
-) -> Result<HostFns, String> {
-    let cc = module.target_config().default_call_conv;
-    let mut sig_bin_i64 = Signature::new(cc);
-    sig_bin_i64.params.push(AbiParam::new(types::I64));
-    sig_bin_i64.params.push(AbiParam::new(types::I64));
-    sig_bin_i64.params.push(AbiParam::new(types::I32));
-    sig_bin_i64.returns.push(AbiParam::new(types::I64));
-    let mut sig_pow_f64 = Signature::new(cc);
-    sig_pow_f64.params.push(AbiParam::new(types::F64));
-    sig_pow_f64.params.push(AbiParam::new(types::F64));
-    sig_pow_f64.returns.push(AbiParam::new(types::F64));
-    let mut sig_intn_binop = Signature::new(cc);
-    for _ in 0..7 {
-        sig_intn_binop.params.push(AbiParam::new(types::I64));
+        let mut sig_i64 = Signature::new(cc);
+        sig_i64.params.push(AbiParam::new(types::I64));
+        let mut sig_reflect_finish = Signature::new(cc);
+        for _ in 0..3 {
+            sig_reflect_finish.params.push(AbiParam::new(types::I64));
+        }
+        sig_reflect_finish.returns.push(AbiParam::new(types::I64));
+        let mut sig_rich_panic = Signature::new(cc);
+        for _ in 0..8 {
+            sig_rich_panic.params.push(AbiParam::new(types::I64));
+        }
+        sig_rich_panic.returns.push(AbiParam::new(types::I64));
+        let mut sig_f64 = Signature::new(cc);
+        sig_f64.params.push(AbiParam::new(types::F64));
+        let mut sig_i8 = Signature::new(cc);
+        sig_i8.params.push(AbiParam::new(types::I8));
+        let mut sig_i32 = Signature::new(cc);
+        sig_i32.params.push(AbiParam::new(types::I32));
+        let mut sig_str_push_lit = Signature::new(cc);
+        sig_str_push_lit.params.push(AbiParam::new(types::I64));
+        sig_str_push_lit.params.push(AbiParam::new(types::I64));
+        let mut sig_str_push_i64 = Signature::new(cc);
+        sig_str_push_i64.params.push(AbiParam::new(types::I64));
+        sig_str_push_i64.params.push(AbiParam::new(types::I64));
+        let mut sig_str_push_f64 = Signature::new(cc);
+        sig_str_push_f64.params.push(AbiParam::new(types::I64));
+        sig_str_push_f64.params.push(AbiParam::new(types::F64));
+        let mut sig_str_push_bool = Signature::new(cc);
+        sig_str_push_bool.params.push(AbiParam::new(types::I64));
+        sig_str_push_bool.params.push(AbiParam::new(types::I8));
+        let mut sig_str_push_char = Signature::new(cc);
+        sig_str_push_char.params.push(AbiParam::new(types::I64));
+        sig_str_push_char.params.push(AbiParam::new(types::I32));
+        let mut sig_str_eq = Signature::new(cc);
+        sig_str_eq.params.push(AbiParam::new(types::I64));
+        sig_str_eq.params.push(AbiParam::new(types::I64));
+        sig_str_eq.returns.push(AbiParam::new(types::I8));
+        let mut sig_str_unary_i64 = Signature::new(cc);
+        sig_str_unary_i64.params.push(AbiParam::new(types::I64));
+        sig_str_unary_i64.returns.push(AbiParam::new(types::I64));
+        let mut sig_str_unary_i8 = Signature::new(cc);
+        sig_str_unary_i8.params.push(AbiParam::new(types::I64));
+        sig_str_unary_i8.returns.push(AbiParam::new(types::I8));
+        let mut sig_str_replace = Signature::new(cc);
+        sig_str_replace.params.push(AbiParam::new(types::I64));
+        sig_str_replace.params.push(AbiParam::new(types::I64));
+        sig_str_replace.params.push(AbiParam::new(types::I64));
+        sig_str_replace.returns.push(AbiParam::new(types::I64));
+        let mut sig_str_binary_i64 = Signature::new(cc);
+        sig_str_binary_i64.params.push(AbiParam::new(types::I64));
+        sig_str_binary_i64.params.push(AbiParam::new(types::I64));
+        sig_str_binary_i64.returns.push(AbiParam::new(types::I64));
+        let mut sig_f64_i64 = Signature::new(cc);
+        sig_f64_i64.params.push(AbiParam::new(types::F64));
+        sig_f64_i64.returns.push(AbiParam::new(types::I64));
+        let mut sig_f64_i64_i8 = Signature::new(cc);
+        sig_f64_i64_i8.params.push(AbiParam::new(types::F64));
+        sig_f64_i64_i8.params.push(AbiParam::new(types::I64));
+        sig_f64_i64_i8.returns.push(AbiParam::new(types::I8));
+        let mut sig_i64_i64_i64 = Signature::new(cc);
+        sig_i64_i64_i64.params.push(AbiParam::new(types::I64));
+        sig_i64_i64_i64.params.push(AbiParam::new(types::I64));
+        sig_i64_i64_i64.returns.push(AbiParam::new(types::I64));
+        let mut sig_i64_i64_i64_i64 = Signature::new(cc);
+        sig_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
+        sig_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
+        sig_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
+        sig_i64_i64_i64_i64.returns.push(AbiParam::new(types::I64));
+        let mut sig_trace_err = Signature::new(cc);
+        sig_trace_err.params.push(AbiParam::new(types::I64));
+        sig_trace_err.params.push(AbiParam::new(types::I64));
+        sig_trace_err.params.push(AbiParam::new(types::I64));
+        let mut sig_f64_i64_i64 = Signature::new(cc);
+        sig_f64_i64_i64.params.push(AbiParam::new(types::F64));
+        sig_f64_i64_i64.params.push(AbiParam::new(types::I64));
+        sig_f64_i64_i64.returns.push(AbiParam::new(types::I64));
+        let mut sig_str_begin = Signature::new(cc);
+        sig_str_begin.returns.push(AbiParam::new(types::I64));
+        let mut sig_struct_new = Signature::new(cc);
+        sig_struct_new.params.push(AbiParam::new(types::I64));
+        sig_struct_new.returns.push(AbiParam::new(types::I64));
+        let mut sig_struct_assign = Signature::new(cc);
+        sig_struct_assign.params.push(AbiParam::new(types::I64));
+        sig_struct_assign.params.push(AbiParam::new(types::I64));
+        let mut sig_struct_get_i64 = Signature::new(cc);
+        sig_struct_get_i64.params.push(AbiParam::new(types::I64));
+        sig_struct_get_i64.params.push(AbiParam::new(types::I64));
+        sig_struct_get_i64.returns.push(AbiParam::new(types::I64));
+        let mut sig_struct_get_f64 = Signature::new(cc);
+        sig_struct_get_f64.params.push(AbiParam::new(types::I64));
+        sig_struct_get_f64.params.push(AbiParam::new(types::I64));
+        sig_struct_get_f64.returns.push(AbiParam::new(types::F64));
+        let mut sig_struct_get_i8 = Signature::new(cc);
+        sig_struct_get_i8.params.push(AbiParam::new(types::I64));
+        sig_struct_get_i8.params.push(AbiParam::new(types::I64));
+        sig_struct_get_i8.returns.push(AbiParam::new(types::I8));
+        let mut sig_struct_get_i32 = Signature::new(cc);
+        sig_struct_get_i32.params.push(AbiParam::new(types::I64));
+        sig_struct_get_i32.params.push(AbiParam::new(types::I64));
+        sig_struct_get_i32.returns.push(AbiParam::new(types::I32));
+        let mut sig_struct_set_i64 = Signature::new(cc);
+        sig_struct_set_i64.params.push(AbiParam::new(types::I64));
+        sig_struct_set_i64.params.push(AbiParam::new(types::I64));
+        sig_struct_set_i64.params.push(AbiParam::new(types::I64));
+        let mut sig_struct_set_f64 = Signature::new(cc);
+        sig_struct_set_f64.params.push(AbiParam::new(types::I64));
+        sig_struct_set_f64.params.push(AbiParam::new(types::I64));
+        sig_struct_set_f64.params.push(AbiParam::new(types::F64));
+        let mut sig_struct_set_i8 = Signature::new(cc);
+        sig_struct_set_i8.params.push(AbiParam::new(types::I64));
+        sig_struct_set_i8.params.push(AbiParam::new(types::I64));
+        sig_struct_set_i8.params.push(AbiParam::new(types::I8));
+        let mut sig_struct_set_i32 = Signature::new(cc);
+        sig_struct_set_i32.params.push(AbiParam::new(types::I64));
+        sig_struct_set_i32.params.push(AbiParam::new(types::I64));
+        sig_struct_set_i32.params.push(AbiParam::new(types::I32));
+        let mut sig_measurement_new = Signature::new(cc);
+        sig_measurement_new.params.push(AbiParam::new(types::F64));
+        sig_measurement_new.params.push(AbiParam::new(types::F64));
+        sig_measurement_new.returns.push(AbiParam::new(types::I64));
+        let mut sig_measurement_arithmetic = Signature::new(cc);
+        sig_measurement_arithmetic.params.push(AbiParam::new(types::I64));
+        sig_measurement_arithmetic.params.push(AbiParam::new(types::I64));
+        sig_measurement_arithmetic.params.push(AbiParam::new(types::I64));
+        sig_measurement_arithmetic.returns.push(AbiParam::new(types::I64));
+        let mut sig_measurement_get = Signature::new(cc);
+        sig_measurement_get.params.push(AbiParam::new(types::I64));
+        sig_measurement_get.params.push(AbiParam::new(types::I64));
+        sig_measurement_get.returns.push(AbiParam::new(types::F64));
+        let mut sig_is_trapped = Signature::new(cc);
+        sig_is_trapped.returns.push(AbiParam::new(types::I64));
+        let mut sig_numeric_checked_widen = Signature::new(cc);
+        sig_numeric_checked_widen
+            .params
+            .extend([AbiParam::new(types::I64); 3]);
+        sig_numeric_checked_widen
+            .returns
+            .push(AbiParam::new(types::F64));
+        let mut sig_result_new_i64 = Signature::new(cc);
+        sig_result_new_i64.params.push(AbiParam::new(types::I8));
+        sig_result_new_i64.params.push(AbiParam::new(types::I64));
+        sig_result_new_i64.returns.push(AbiParam::new(types::I64));
+        let mut sig_result_new_f64 = Signature::new(cc);
+        sig_result_new_f64.params.push(AbiParam::new(types::I8));
+        sig_result_new_f64.params.push(AbiParam::new(types::F64));
+        sig_result_new_f64.returns.push(AbiParam::new(types::I64));
+        let mut sig_result_new_i8 = Signature::new(cc);
+        sig_result_new_i8.params.push(AbiParam::new(types::I8));
+        sig_result_new_i8.params.push(AbiParam::new(types::I8));
+        sig_result_new_i8.returns.push(AbiParam::new(types::I64));
+        let mut sig_result_new_i32 = Signature::new(cc);
+        sig_result_new_i32.params.push(AbiParam::new(types::I8));
+        sig_result_new_i32.params.push(AbiParam::new(types::I32));
+        sig_result_new_i32.returns.push(AbiParam::new(types::I64));
+        let mut sig_unit_convert_exact = Signature::new(cc);
+        sig_unit_convert_exact.params.push(AbiParam::new(types::F64));
+        sig_unit_convert_exact.params.extend([AbiParam::new(types::I64); 4]);
+        sig_unit_convert_exact.returns.push(AbiParam::new(types::I64));
+        let mut sig_unit_convert_rounded = Signature::new(cc);
+        sig_unit_convert_rounded.params.push(AbiParam::new(types::F64));
+        sig_unit_convert_rounded.params.extend([AbiParam::new(types::I64); 6]);
+        sig_unit_convert_rounded.returns.push(AbiParam::new(types::I64));
+        let mut sig_unit_convert_implicit = Signature::new(cc);
+        sig_unit_convert_implicit.params.push(AbiParam::new(types::F64));
+        sig_unit_convert_implicit.params.extend([AbiParam::new(types::I64); 4]);
+        sig_unit_convert_implicit.returns.push(AbiParam::new(types::F64));
+        let mut sig_result_query_i8 = Signature::new(cc);
+        sig_result_query_i8.params.push(AbiParam::new(types::I64));
+        sig_result_query_i8.returns.push(AbiParam::new(types::I8));
+        let mut sig_result_query_i64 = Signature::new(cc);
+        sig_result_query_i64.params.push(AbiParam::new(types::I64));
+        sig_result_query_i64.returns.push(AbiParam::new(types::I64));
+        let mut sig_result_query_f64 = Signature::new(cc);
+        sig_result_query_f64.params.push(AbiParam::new(types::I64));
+        sig_result_query_f64.returns.push(AbiParam::new(types::F64));
+        let mut sig_result_query_i32 = Signature::new(cc);
+        sig_result_query_i32.params.push(AbiParam::new(types::I64));
+        sig_result_query_i32.returns.push(AbiParam::new(types::I32));
+        let mut sig_duration_float = Signature::new(cc);
+        sig_duration_float.params.push(AbiParam::new(types::F64));
+        sig_duration_float.params.push(AbiParam::new(types::I64));
+        sig_duration_float.returns.push(AbiParam::new(types::I64));
+        let mut sig_duration_int = Signature::new(cc);
+        sig_duration_int.params.push(AbiParam::new(types::I64));
+        sig_duration_int.params.push(AbiParam::new(types::I64));
+        sig_duration_int.returns.push(AbiParam::new(types::I64));
+        let mut sig_noarg_f64 = Signature::new(cc);
+        sig_noarg_f64.returns.push(AbiParam::new(types::F64));
+        let mut sig_perf_override = Signature::new(cc);
+        sig_perf_override.params.push(AbiParam::new(types::F64));
+        sig_perf_override.returns.push(AbiParam::new(types::I64));
+        let mut sig_deopt = Signature::new(cc);
+        // fn_idx, argc, a0..a7
+        for _ in 0..10 {
+            sig_deopt.params.push(AbiParam::new(types::I64));
+        }
+        sig_deopt.returns.push(AbiParam::new(types::I64));
+        let sig_noarg = Signature::new(cc);
     }
-    sig_intn_binop.returns.push(AbiParam::new(types::I64));
-
-    let mut sig_i64 = Signature::new(cc);
-    sig_i64.params.push(AbiParam::new(types::I64));
-    let mut sig_reflect_finish = Signature::new(cc);
-    for _ in 0..3 {
-        sig_reflect_finish.params.push(AbiParam::new(types::I64));
+    #extra {
+        coll: Collections::CollectionsHostFns,
+        memory: Memory::MemoryHostFns,
+        cell: LocalCell::CellHostFns,
+        conc: Concurrency::ConcurrencyHostFns,
+        core: CoreHost::CoreHostFns,
+        encoding: Encoding::EncodingHostFns,
+        stream: crate::enc_stream::StreamHostFns,
+        fmt: Fmt::FmtHostFns,
+        compress: Compress::CompressHostFns,
+        archive: Archive::ArchiveHostFns,
+        process: Process::ProcessHostFns,
+        num: Numeric::NumericHostFns,
+        solver: Solver::SolverHostFns,
+        random: Random::RandomHostFns,
+        text: crate::Text::TextHostFns,
+        sketch: crate::Sketch::SketchHostFns,
+        args: crate::Args::ArgsHostFns,
+        db: crate::DB::DBHostFns,
+        crypto: Crypto::CryptoHostFns,
+        net: Net::NetHostFns,
+        net_http: crate::net_http_rt::NetHttpHostFns,
+        game: crate::Game::GameHostFns,
+        raylib: crate::Raylib::RaylibHostFns,
+        layout: crate::Layout::LayoutHostFns,
+        reactive: crate::Reactive::ReactiveHostFns,
+        ui: crate::Ui::UiHostFns,
+        web: crate::Web::WebHostFns,
+        parse: crate::Parse::HostFns,
+        data: crate::Data::DataHostFns,
+        time: crate::Time::TimeHostFns,
+        io: crate::IO::IOHostFns,
+        watcher: crate::Watcher::WatcherHostFns,
+        math: crate::Math::MathHostFns,
+        math_extra: crate::MathExtra::MathExtraHostFns,
+        ffi: crate::Ffi::FfiHostFns,
     }
-    sig_reflect_finish.returns.push(AbiParam::new(types::I64));
-    let mut sig_rich_panic = Signature::new(cc);
-    for _ in 0..8 {
-        sig_rich_panic.params.push(AbiParam::new(types::I64));
-    }
-    sig_rich_panic.returns.push(AbiParam::new(types::I64));
-    let mut sig_f64 = Signature::new(cc);
-    sig_f64.params.push(AbiParam::new(types::F64));
-    let mut sig_i8 = Signature::new(cc);
-    sig_i8.params.push(AbiParam::new(types::I8));
-    let mut sig_i32 = Signature::new(cc);
-    sig_i32.params.push(AbiParam::new(types::I32));
-    let mut sig_str_push_lit = Signature::new(cc);
-    sig_str_push_lit.params.push(AbiParam::new(types::I64));
-    sig_str_push_lit.params.push(AbiParam::new(types::I64));
-    let mut sig_str_push_i64 = Signature::new(cc);
-    sig_str_push_i64.params.push(AbiParam::new(types::I64));
-    sig_str_push_i64.params.push(AbiParam::new(types::I64));
-    let mut sig_str_push_f64 = Signature::new(cc);
-    sig_str_push_f64.params.push(AbiParam::new(types::I64));
-    sig_str_push_f64.params.push(AbiParam::new(types::F64));
-    let mut sig_str_push_bool = Signature::new(cc);
-    sig_str_push_bool.params.push(AbiParam::new(types::I64));
-    sig_str_push_bool.params.push(AbiParam::new(types::I8));
-    let mut sig_str_push_char = Signature::new(cc);
-    sig_str_push_char.params.push(AbiParam::new(types::I64));
-    sig_str_push_char.params.push(AbiParam::new(types::I32));
-    let mut sig_str_eq = Signature::new(cc);
-    sig_str_eq.params.push(AbiParam::new(types::I64));
-    sig_str_eq.params.push(AbiParam::new(types::I64));
-    sig_str_eq.returns.push(AbiParam::new(types::I8));
-    let mut sig_str_unary_i64 = Signature::new(cc);
-    sig_str_unary_i64.params.push(AbiParam::new(types::I64));
-    sig_str_unary_i64.returns.push(AbiParam::new(types::I64));
-    let mut sig_str_unary_i8 = Signature::new(cc);
-    sig_str_unary_i8.params.push(AbiParam::new(types::I64));
-    sig_str_unary_i8.returns.push(AbiParam::new(types::I8));
-    let mut sig_str_replace = Signature::new(cc);
-    sig_str_replace.params.push(AbiParam::new(types::I64));
-    sig_str_replace.params.push(AbiParam::new(types::I64));
-    sig_str_replace.params.push(AbiParam::new(types::I64));
-    sig_str_replace.returns.push(AbiParam::new(types::I64));
-    let mut sig_str_binary_i64 = Signature::new(cc);
-    sig_str_binary_i64.params.push(AbiParam::new(types::I64));
-    sig_str_binary_i64.params.push(AbiParam::new(types::I64));
-    sig_str_binary_i64.returns.push(AbiParam::new(types::I64));
-    let mut sig_f64_i64 = Signature::new(cc);
-    sig_f64_i64.params.push(AbiParam::new(types::F64));
-    sig_f64_i64.returns.push(AbiParam::new(types::I64));
-    let mut sig_f64_i64_i8 = Signature::new(cc);
-    sig_f64_i64_i8.params.push(AbiParam::new(types::F64));
-    sig_f64_i64_i8.params.push(AbiParam::new(types::I64));
-    sig_f64_i64_i8.returns.push(AbiParam::new(types::I8));
-    let mut sig_i64_i64_i64 = Signature::new(cc);
-    sig_i64_i64_i64.params.push(AbiParam::new(types::I64));
-    sig_i64_i64_i64.params.push(AbiParam::new(types::I64));
-    sig_i64_i64_i64.returns.push(AbiParam::new(types::I64));
-    let mut sig_i64_i64_i64_i64 = Signature::new(cc);
-    sig_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
-    sig_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
-    sig_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
-    sig_i64_i64_i64_i64.returns.push(AbiParam::new(types::I64));
-    let mut sig_trace_err = Signature::new(cc);
-    sig_trace_err.params.push(AbiParam::new(types::I64));
-    sig_trace_err.params.push(AbiParam::new(types::I64));
-    sig_trace_err.params.push(AbiParam::new(types::I64));
-    let mut sig_rich_panic = Signature::new(cc);
-    for _ in 0..8 {
-        sig_rich_panic.params.push(AbiParam::new(types::I64));
-    }
-    sig_rich_panic.returns.push(AbiParam::new(types::I64));
-    let mut sig_f64_i64_i64 = Signature::new(cc);
-    sig_f64_i64_i64.params.push(AbiParam::new(types::F64));
-    sig_f64_i64_i64.params.push(AbiParam::new(types::I64));
-    sig_f64_i64_i64.returns.push(AbiParam::new(types::I64));
-    let mut sig_str_begin = Signature::new(cc);
-    sig_str_begin.returns.push(AbiParam::new(types::I64));
-    let mut sig_struct_new = Signature::new(cc);
-    sig_struct_new.params.push(AbiParam::new(types::I64));
-    sig_struct_new.returns.push(AbiParam::new(types::I64));
-    let mut sig_struct_assign = Signature::new(cc);
-    sig_struct_assign.params.push(AbiParam::new(types::I64));
-    sig_struct_assign.params.push(AbiParam::new(types::I64));
-    let mut sig_struct_get_i64 = Signature::new(cc);
-    sig_struct_get_i64.params.push(AbiParam::new(types::I64));
-    sig_struct_get_i64.params.push(AbiParam::new(types::I64));
-    sig_struct_get_i64.returns.push(AbiParam::new(types::I64));
-    let mut sig_struct_get_f64 = Signature::new(cc);
-    sig_struct_get_f64.params.push(AbiParam::new(types::I64));
-    sig_struct_get_f64.params.push(AbiParam::new(types::I64));
-    sig_struct_get_f64.returns.push(AbiParam::new(types::F64));
-    let mut sig_struct_get_i8 = Signature::new(cc);
-    sig_struct_get_i8.params.push(AbiParam::new(types::I64));
-    sig_struct_get_i8.params.push(AbiParam::new(types::I64));
-    sig_struct_get_i8.returns.push(AbiParam::new(types::I8));
-    let mut sig_struct_get_i32 = Signature::new(cc);
-    sig_struct_get_i32.params.push(AbiParam::new(types::I64));
-    sig_struct_get_i32.params.push(AbiParam::new(types::I64));
-    sig_struct_get_i32.returns.push(AbiParam::new(types::I32));
-    let mut sig_struct_set_i64 = Signature::new(cc);
-    sig_struct_set_i64.params.push(AbiParam::new(types::I64));
-    sig_struct_set_i64.params.push(AbiParam::new(types::I64));
-    sig_struct_set_i64.params.push(AbiParam::new(types::I64));
-    let mut sig_struct_set_f64 = Signature::new(cc);
-    sig_struct_set_f64.params.push(AbiParam::new(types::I64));
-    sig_struct_set_f64.params.push(AbiParam::new(types::I64));
-    sig_struct_set_f64.params.push(AbiParam::new(types::F64));
-    let mut sig_struct_set_i8 = Signature::new(cc);
-    sig_struct_set_i8.params.push(AbiParam::new(types::I64));
-    sig_struct_set_i8.params.push(AbiParam::new(types::I64));
-    sig_struct_set_i8.params.push(AbiParam::new(types::I8));
-    let mut sig_struct_set_i32 = Signature::new(cc);
-    sig_struct_set_i32.params.push(AbiParam::new(types::I64));
-    sig_struct_set_i32.params.push(AbiParam::new(types::I64));
-    sig_struct_set_i32.params.push(AbiParam::new(types::I32));
-    let mut sig_measurement_new = Signature::new(cc);
-    sig_measurement_new.params.push(AbiParam::new(types::F64));
-    sig_measurement_new.params.push(AbiParam::new(types::F64));
-    sig_measurement_new.returns.push(AbiParam::new(types::I64));
-    let mut sig_measurement_arithmetic = Signature::new(cc);
-    sig_measurement_arithmetic.params.push(AbiParam::new(types::I64));
-    sig_measurement_arithmetic.params.push(AbiParam::new(types::I64));
-    sig_measurement_arithmetic.params.push(AbiParam::new(types::I64));
-    sig_measurement_arithmetic.returns.push(AbiParam::new(types::I64));
-    let mut sig_measurement_get = Signature::new(cc);
-    sig_measurement_get.params.push(AbiParam::new(types::I64));
-    sig_measurement_get.params.push(AbiParam::new(types::I64));
-    sig_measurement_get.returns.push(AbiParam::new(types::F64));
-    let mut sig_is_trapped = Signature::new(cc);
-    sig_is_trapped.returns.push(AbiParam::new(types::I64));
-    let mut sig_numeric_checked_widen = Signature::new(cc);
-    sig_numeric_checked_widen
-        .params
-        .extend([AbiParam::new(types::I64); 3]);
-    sig_numeric_checked_widen
-        .returns
-        .push(AbiParam::new(types::F64));
-    let mut sig_result_new_i64 = Signature::new(cc);
-    sig_result_new_i64.params.push(AbiParam::new(types::I8));
-    sig_result_new_i64.params.push(AbiParam::new(types::I64));
-    sig_result_new_i64.returns.push(AbiParam::new(types::I64));
-    let mut sig_result_new_f64 = Signature::new(cc);
-    sig_result_new_f64.params.push(AbiParam::new(types::I8));
-    sig_result_new_f64.params.push(AbiParam::new(types::F64));
-    sig_result_new_f64.returns.push(AbiParam::new(types::I64));
-    let mut sig_result_new_i8 = Signature::new(cc);
-    sig_result_new_i8.params.push(AbiParam::new(types::I8));
-    sig_result_new_i8.params.push(AbiParam::new(types::I8));
-    sig_result_new_i8.returns.push(AbiParam::new(types::I64));
-    let mut sig_result_new_i32 = Signature::new(cc);
-    sig_result_new_i32.params.push(AbiParam::new(types::I8));
-    sig_result_new_i32.params.push(AbiParam::new(types::I32));
-    sig_result_new_i32.returns.push(AbiParam::new(types::I64));
-    let mut sig_unit_convert_exact = Signature::new(cc);
-    sig_unit_convert_exact.params.push(AbiParam::new(types::F64));
-    sig_unit_convert_exact.params.extend([AbiParam::new(types::I64); 4]);
-    sig_unit_convert_exact.returns.push(AbiParam::new(types::I64));
-    let mut sig_unit_convert_rounded = Signature::new(cc);
-    sig_unit_convert_rounded.params.push(AbiParam::new(types::F64));
-    sig_unit_convert_rounded.params.extend([AbiParam::new(types::I64); 6]);
-    sig_unit_convert_rounded.returns.push(AbiParam::new(types::I64));
-    let mut sig_unit_convert_implicit = Signature::new(cc);
-    sig_unit_convert_implicit.params.push(AbiParam::new(types::F64));
-    sig_unit_convert_implicit.params.extend([AbiParam::new(types::I64); 4]);
-    sig_unit_convert_implicit.returns.push(AbiParam::new(types::F64));
-    let mut sig_result_query_i8 = Signature::new(cc);
-    sig_result_query_i8.params.push(AbiParam::new(types::I64));
-    sig_result_query_i8.returns.push(AbiParam::new(types::I8));
-    let mut sig_result_query_i64 = Signature::new(cc);
-    sig_result_query_i64.params.push(AbiParam::new(types::I64));
-    sig_result_query_i64.returns.push(AbiParam::new(types::I64));
-    let mut sig_result_query_f64 = Signature::new(cc);
-    sig_result_query_f64.params.push(AbiParam::new(types::I64));
-    sig_result_query_f64.returns.push(AbiParam::new(types::F64));
-    let mut sig_result_query_i32 = Signature::new(cc);
-    sig_result_query_i32.params.push(AbiParam::new(types::I64));
-    sig_result_query_i32.returns.push(AbiParam::new(types::I32));
-    let mut sig_duration_float = Signature::new(cc);
-    sig_duration_float.params.push(AbiParam::new(types::F64));
-    sig_duration_float.params.push(AbiParam::new(types::I64));
-    sig_duration_float.returns.push(AbiParam::new(types::I64));
-    let mut sig_duration_int = Signature::new(cc);
-    sig_duration_int.params.push(AbiParam::new(types::I64));
-    sig_duration_int.params.push(AbiParam::new(types::I64));
-    sig_duration_int.returns.push(AbiParam::new(types::I64));
-    let mut sig_noarg_f64 = Signature::new(cc);
-    sig_noarg_f64.returns.push(AbiParam::new(types::F64));
-    let mut sig_perf_override = Signature::new(cc);
-    sig_perf_override.params.push(AbiParam::new(types::F64));
-    sig_perf_override.returns.push(AbiParam::new(types::I64));
-    let mut sig_deopt = Signature::new(cc);
-    // fn_idx, argc, a0..a7
-    for _ in 0..10 {
-        sig_deopt.params.push(AbiParam::new(types::I64));
-    }
-    sig_deopt.returns.push(AbiParam::new(types::I64));
-    let sig_noarg = Signature::new(cc);
-
-    let mut import = |name: &str, sig: &Signature| -> Result<FuncId, String> {
-        module
-            .declare_function(name, Linkage::Import, sig)
-            .map_err(|e| e.to_string())
-    };
-
-    Ok(HostFns {
-        add_i64: import("jet_jit_add_i64", &sig_bin_i64)?,
-        sub_i64: import("jet_jit_sub_i64", &sig_bin_i64)?,
-        mul_i64: import("jet_jit_mul_i64", &sig_bin_i64)?,
-        div_i64: import("jet_jit_div_i64", &sig_bin_i64)?,
-        rem_i64: import("jet_jit_rem_i64", &sig_bin_i64)?,
-        pow_i64: import("jet_jit_pow_i64", &sig_bin_i64)?,
-        pow_f64: import("jet_jit_pow_f64", &sig_pow_f64)?,
-        floordiv_i64: import("jet_jit_floordiv_i64", &sig_bin_i64)?,
-        mod_i64: import("jet_jit_mod_i64", &sig_bin_i64)?,
-        floordiv_f64: import("jet_jit_floordiv_f64", &sig_pow_f64)?,
-        intn_binop: import("jet_jit_intn_binop", &sig_intn_binop)?,
-        intn_to_string: import("jet_jit_intn_to_string", &sig_i64_i64_i64)?,
-        print_i64: import("jet_jit_print_i64", &sig_i64)?,
-        print_f64: import("jet_jit_print_f64", &sig_f64)?,
-        print_bool: import("jet_jit_print_bool", &sig_i8)?,
-        print_char: import("jet_jit_print_char", &sig_i32)?,
-        print_str: import("jet_jit_print_str", &sig_i64)?,
-        str_begin: import("jet_jit_str_begin", &sig_str_begin)?,
-        str_push_lit: import("jet_jit_str_push_lit", &sig_str_push_lit)?,
-        str_push_i64: import("jet_jit_str_push_i64", &sig_str_push_i64)?,
-        str_push_f64: import("jet_jit_str_push_f64", &sig_str_push_f64)?,
-        str_push_compact_f64: import(
-            "jet_jit_str_push_compact_f64",
-            &sig_str_push_f64,
-        )?,
-        str_push_bool: import("jet_jit_str_push_bool", &sig_str_push_bool)?,
-        str_push_char: import("jet_jit_str_push_char", &sig_str_push_char)?,
-        str_push_str: import("jet_jit_str_push_str", &sig_str_push_lit)?,
-        str_eq: import("jet_jit_str_eq", &sig_str_eq)?,
-        str_contains: import("jet_jit_str_contains", &sig_str_eq)?,
-        str_starts_with: import("jet_jit_str_starts_with", &sig_str_eq)?,
-        str_ends_with: import("jet_jit_str_ends_with", &sig_str_eq)?,
-        str_clone: import("jet_jit_str_clone", &sig_str_unary_i64)?,
-        str_len: import("jet_jit_str_len", &sig_str_unary_i64)?,
-        str_byte_len: import("jet_jit_str_byte_len", &sig_str_unary_i64)?,
-        str_is_ascii: import("jet_jit_str_is_ascii", &sig_str_unary_i8)?,
-        str_trim: import("jet_jit_str_trim", &sig_str_unary_i64)?,
-        str_to_upper: import("jet_jit_str_to_upper", &sig_str_unary_i64)?,
-        str_to_lower: import("jet_jit_str_to_lower", &sig_str_unary_i64)?,
-        str_replace: import("jet_jit_str_replace", &sig_str_replace)?,
-        str_lines: import("jet_jit_str_lines", &sig_str_unary_i64)?,
-        str_split: import("jet_jit_str_split", &sig_str_binary_i64)?,
-        str_rsplit: import("jet_jit_str_rsplit", &sig_str_binary_i64)?,
-        str_chars: import("jet_jit_str_chars", &sig_str_unary_i64)?,
-        str_bytes: import("jet_jit_str_bytes", &sig_str_unary_i64)?,
-        str_scalar_strings: import("jet_jit_str_scalar_strings", &sig_str_unary_i64)?,
-        str_after: import("jet_jit_str_after", &sig_str_binary_i64)?,
-        str_before: import("jet_jit_str_before", &sig_str_binary_i64)?,
-        str_trim_view: import("jet_jit_str_trim_view", &sig_str_unary_i64)?,
-        str_after_view: import("jet_jit_str_after_view", &sig_str_binary_i64)?,
-        str_before_view: import("jet_jit_str_before_view", &sig_str_binary_i64)?,
-        str_slice: import("jet_jit_str_slice", &sig_str_replace)?,
-        clock_new: import("jet_jit_clock_new", &sig_str_unary_i64)?,
-        clock_now: import("jet_jit_clock_now", &sig_str_unary_i64)?,
-        clock_tick: import("jet_jit_clock_tick", &sig_struct_assign)?,
-        clock_advance: import("jet_jit_clock_advance", &sig_str_binary_i64)?,
-        clock_wait: import("jet_jit_clock_wait", &sig_str_binary_i64)?,
-        parse_i64: import("jet_jit_parse_i64", &sig_str_unary_i64)?,
-        parse_f64: import("jet_jit_parse_f64", &sig_str_unary_i64)?,
-        numeric_try_i64: import("jet_jit_numeric_try_i64", &sig_i64_i64_i64_i64)?,
-        numeric_float_to_int: import("jet_jit_numeric_float_to_int", &sig_f64_i64_i64)?,
-        numeric_float_narrow: import("jet_jit_numeric_float_narrow", &sig_f64_i64)?,
-        numeric_checked_widen: import(
-            "jet_jit_numeric_checked_widen",
-            &sig_numeric_checked_widen,
-        )?,
-        distinct_range: import("jet_jit_distinct_range", &sig_i64_i64_i64_i64)?,
-        distinct_range_result: import("jet_jit_distinct_range_result", &sig_i64_i64_i64_i64)?,
-        numeric_predicate: import("jet_jit_numeric_predicate", &sig_f64_i64_i8)?,
-        numeric_bit_count: import("jet_jit_numeric_bit_count", &sig_i64_i64_i64_i64)?,
-        struct_new: import("jet_jit_struct_new", &sig_struct_new)?,
-        struct_assign: import("jet_jit_struct_assign", &sig_struct_assign)?,
-        struct_get_i64: import("jet_jit_struct_get_i64", &sig_struct_get_i64)?,
-        struct_get_f64: import("jet_jit_struct_get_f64", &sig_struct_get_f64)?,
-        struct_get_bool: import("jet_jit_struct_get_bool", &sig_struct_get_i8)?,
-        struct_get_char: import("jet_jit_struct_get_char", &sig_struct_get_i32)?,
-        struct_get_str: import("jet_jit_struct_get_str", &sig_struct_get_i64)?,
-        struct_set_i64: import("jet_jit_struct_set_i64", &sig_struct_set_i64)?,
-        struct_set_f64: import("jet_jit_struct_set_f64", &sig_struct_set_f64)?,
-        struct_set_bool: import("jet_jit_struct_set_bool", &sig_struct_set_i8)?,
-        struct_set_char: import("jet_jit_struct_set_char", &sig_struct_set_i32)?,
-        struct_set_str: import("jet_jit_struct_set_str", &sig_struct_set_i64)?,
-        measurement_new: import("jet_jit_measurement_new", &sig_measurement_new)?,
-        measurement_arithmetic: import(
-            "jet_jit_measurement_arithmetic",
-            &sig_measurement_arithmetic,
-        )?,
-        measurement_get: import("jet_jit_measurement_get", &sig_measurement_get)?,
-        measurement_show: import("jet_jit_measurement_show", &sig_str_unary_i64)?,
-        result_new_i64: import("jet_jit_result_new_i64", &sig_result_new_i64)?,
-        result_new_f64: import("jet_jit_result_new_f64", &sig_result_new_f64)?,
-        result_new_i8: import("jet_jit_result_new_i8", &sig_result_new_i8)?,
-        result_new_i32: import("jet_jit_result_new_i32", &sig_result_new_i32)?,
-        unit_convert_exact: import("jet_jit_unit_convert_exact", &sig_unit_convert_exact)?,
-        unit_convert_rounded: import("jet_jit_unit_convert_rounded", &sig_unit_convert_rounded)?,
-        unit_convert_implicit: import("jet_jit_unit_convert_implicit", &sig_unit_convert_implicit)?,
-        result_is_ok: import("jet_jit_result_is_ok", &sig_result_query_i8)?,
-        result_get_i64: import("jet_jit_result_get_i64", &sig_result_query_i64)?,
-        result_get_f64: import("jet_jit_result_get_f64", &sig_result_query_f64)?,
-        result_get_i8: import("jet_jit_result_get_i8", &sig_result_query_i8)?,
-        result_get_i32: import("jet_jit_result_get_i32", &sig_result_query_i32)?,
-        trap_panic: import("jet_jit_trap_panic", &sig_i64)?,
-        rich_panic: import("jet_jit_rich_panic", &sig_rich_panic)?,
-        trace_err: import("jet_jit_trace_err", &sig_trace_err)?,
-        result_context: import("jet_jit_result_context", &sig_str_binary_i64)?,
-
-        duration_from_int: import("jet_jit_duration_from_int", &sig_duration_int)?,
-        duration_from_float: import("jet_jit_duration_from_float", &sig_duration_float)?,
-        duration_in: import("jet_jit_duration_in", &sig_duration_int)?,
-        duration_in_unit: import("jet_jit_duration_in_unit", &sig_duration_int)?,
-        duration_is_zero: import("jet_jit_duration_is_zero", &sig_result_query_i8)?,
-        duration_total_seconds: import("jet_jit_duration_total_seconds", &sig_result_query_i64)?,
-        duration_difference: import("jet_jit_duration_difference", &sig_duration_int)?,
-        perf_fidelity: import("jet_jit_perf_fidelity", &sig_noarg_f64)?,
-        perf_default_fidelity: import("jet_jit_perf_default_fidelity", &sig_noarg_f64)?,
-        perf_override_fidelity: import("jet_jit_perf_override_fidelity", &sig_perf_override)?,
-        perf_reset_fidelity: import("jet_jit_perf_reset_fidelity", &sig_noarg)?,
-        is_trapped: import("jet_jit_is_trapped", &sig_is_trapped)?,
-        deopt_call: import("jet_deopt_call", &sig_deopt)?,
-        coll,
-        memory,
-        cell,
-        conc,
-        core,
-        encoding,
-        stream,
-        fmt,
-        compress,
-        archive,
-        process,
-        num,
-        solver,
-        random,
-        text,
-        sketch,
-        args,
-        db,
-        crypto,
-        net,
-        net_http,
-        game,
-        raylib,
-        layout,
-        reactive,
-        ui,
-        web,
-        parse,
-        reflect_of_finish: import("jet_jit_reflect_of_finish", &sig_reflect_finish)?,
-        reflect_field_new: import("jet_jit_reflect_field_new", &sig_str_binary_i64)?,
-        reflect_type_name: import("jet_jit_reflect_type_name", &sig_str_unary_i64)?,
-        reflect_display: import("jet_jit_reflect_display", &sig_str_unary_i64)?,
-        reflect_fields: import("jet_jit_reflect_fields", &sig_str_unary_i64)?,
-        reflect_field_name: import("jet_jit_reflect_field_name", &sig_str_unary_i64)?,
-        reflect_field_value: import("jet_jit_reflect_field_value", &sig_str_unary_i64)?,
-        testing_temp_dir: import("jet_jit_testing_temp_dir", &sig_str_unary_i64)?,
-        testing_snap: import("jet_jit_testing_snap", &sig_str_eq)?,
-        data,
-        time,
-        io,
-        watcher,
-        math,
-        math_extra,
-        ffi,
-    })
+    add_i64: "jet_jit_add_i64" => jet_jit_add_i64: sig_bin_i64;
+    sub_i64: "jet_jit_sub_i64" => jet_jit_sub_i64: sig_bin_i64;
+    mul_i64: "jet_jit_mul_i64" => jet_jit_mul_i64: sig_bin_i64;
+    div_i64: "jet_jit_div_i64" => jet_jit_div_i64: sig_bin_i64;
+    rem_i64: "jet_jit_rem_i64" => jet_jit_rem_i64: sig_bin_i64;
+    pow_i64: "jet_jit_pow_i64" => jet_jit_pow_i64: sig_bin_i64;
+    floordiv_i64: "jet_jit_floordiv_i64" => jet_jit_floordiv_i64: sig_bin_i64;
+    mod_i64: "jet_jit_mod_i64" => jet_jit_mod_i64: sig_bin_i64;
+    floordiv_f64: "jet_jit_floordiv_f64" => jet_jit_floordiv_f64: sig_pow_f64;
+    pow_f64: "jet_jit_pow_f64" => jet_jit_pow_f64: sig_pow_f64;
+    intn_binop: "jet_jit_intn_binop" => jet_jit_intn_binop: sig_intn_binop;
+    intn_to_string: "jet_jit_intn_to_string" => jet_jit_intn_to_string: sig_i64_i64_i64;
+    print_i64: "jet_jit_print_i64" => jet_jit_print_i64: sig_i64;
+    print_f64: "jet_jit_print_f64" => jet_jit_print_f64: sig_f64;
+    print_bool: "jet_jit_print_bool" => jet_jit_print_bool: sig_i8;
+    print_char: "jet_jit_print_char" => jet_jit_print_char: sig_i32;
+    print_str: "jet_jit_print_str" => jet_jit_print_str: sig_i64;
+    str_begin: "jet_jit_str_begin" => jet_jit_str_begin: sig_str_begin;
+    str_push_lit: "jet_jit_str_push_lit" => jet_jit_str_push_lit: sig_str_push_lit;
+    str_push_i64: "jet_jit_str_push_i64" => jet_jit_str_push_i64: sig_str_push_i64;
+    str_push_f64: "jet_jit_str_push_f64" => jet_jit_str_push_f64: sig_str_push_f64;
+    str_push_compact_f64: "jet_jit_str_push_compact_f64" => jet_jit_str_push_compact_f64: sig_str_push_f64;
+    str_push_bool: "jet_jit_str_push_bool" => jet_jit_str_push_bool: sig_str_push_bool;
+    str_push_char: "jet_jit_str_push_char" => jet_jit_str_push_char: sig_str_push_char;
+    str_push_str: "jet_jit_str_push_str" => jet_jit_str_push_str: sig_str_push_lit;
+    str_eq: "jet_jit_str_eq" => jet_jit_str_eq: sig_str_eq;
+    str_contains: "jet_jit_str_contains" => jet_jit_str_contains: sig_str_eq;
+    str_starts_with: "jet_jit_str_starts_with" => jet_jit_str_starts_with: sig_str_eq;
+    str_ends_with: "jet_jit_str_ends_with" => jet_jit_str_ends_with: sig_str_eq;
+    str_clone: "jet_jit_str_clone" => jet_jit_str_clone: sig_str_unary_i64;
+    str_len: "jet_jit_str_len" => jet_jit_str_len: sig_str_unary_i64;
+    str_byte_len: "jet_jit_str_byte_len" => jet_jit_str_byte_len: sig_str_unary_i64;
+    str_is_ascii: "jet_jit_str_is_ascii" => jet_jit_str_is_ascii: sig_str_unary_i8;
+    str_trim: "jet_jit_str_trim" => jet_jit_str_trim: sig_str_unary_i64;
+    str_to_upper: "jet_jit_str_to_upper" => jet_jit_str_to_upper: sig_str_unary_i64;
+    str_to_lower: "jet_jit_str_to_lower" => jet_jit_str_to_lower: sig_str_unary_i64;
+    str_replace: "jet_jit_str_replace" => jet_jit_str_replace: sig_str_replace;
+    str_lines: "jet_jit_str_lines" => jet_jit_str_lines: sig_str_unary_i64;
+    str_split: "jet_jit_str_split" => jet_jit_str_split: sig_str_binary_i64;
+    str_rsplit: "jet_jit_str_rsplit" => jet_jit_str_rsplit: sig_str_binary_i64;
+    str_chars: "jet_jit_str_chars" => jet_jit_str_chars: sig_str_unary_i64;
+    str_bytes: "jet_jit_str_bytes" => jet_jit_str_bytes: sig_str_unary_i64;
+    str_scalar_strings: "jet_jit_str_scalar_strings" => jet_jit_str_scalar_strings: sig_str_unary_i64;
+    str_after: "jet_jit_str_after" => jet_jit_str_after: sig_str_binary_i64;
+    str_before: "jet_jit_str_before" => jet_jit_str_before: sig_str_binary_i64;
+    str_trim_view: "jet_jit_str_trim_view" => jet_jit_str_trim_view: sig_str_unary_i64;
+    str_after_view: "jet_jit_str_after_view" => jet_jit_str_after_view: sig_str_binary_i64;
+    str_before_view: "jet_jit_str_before_view" => jet_jit_str_before_view: sig_str_binary_i64;
+    str_slice: "jet_jit_str_slice" => jet_jit_str_slice: sig_str_replace;
+    clock_new: "jet_jit_clock_new" => jet_jit_clock_new: sig_str_unary_i64;
+    clock_now: "jet_jit_clock_now" => jet_jit_clock_now: sig_str_unary_i64;
+    clock_tick: "jet_jit_clock_tick" => jet_jit_clock_tick: sig_struct_assign;
+    clock_advance: "jet_jit_clock_advance" => jet_jit_clock_advance: sig_str_binary_i64;
+    clock_wait: "jet_jit_clock_wait" => jet_jit_clock_wait: sig_str_binary_i64;
+    parse_i64: "jet_jit_parse_i64" => jet_jit_parse_i64: sig_str_unary_i64;
+    parse_f64: "jet_jit_parse_f64" => jet_jit_parse_f64: sig_str_unary_i64;
+    numeric_try_i64: "jet_jit_numeric_try_i64" => jet_jit_numeric_try_i64: sig_i64_i64_i64_i64;
+    numeric_float_to_int: "jet_jit_numeric_float_to_int" => jet_jit_numeric_float_to_int: sig_f64_i64_i64;
+    numeric_float_narrow: "jet_jit_numeric_float_narrow" => jet_jit_numeric_float_narrow: sig_f64_i64;
+    numeric_checked_widen: "jet_jit_numeric_checked_widen" => jet_jit_numeric_checked_widen: sig_numeric_checked_widen;
+    distinct_range: "jet_jit_distinct_range" => jet_jit_distinct_range: sig_i64_i64_i64_i64;
+    distinct_range_result: "jet_jit_distinct_range_result" => jet_jit_distinct_range_result: sig_i64_i64_i64_i64;
+    numeric_predicate: "jet_jit_numeric_predicate" => jet_jit_numeric_predicate: sig_f64_i64_i8;
+    numeric_bit_count: "jet_jit_numeric_bit_count" => jet_jit_numeric_bit_count: sig_i64_i64_i64_i64;
+    struct_new: "jet_jit_struct_new" => jet_jit_struct_new: sig_struct_new;
+    struct_assign: "jet_jit_struct_assign" => jet_jit_struct_assign: sig_struct_assign;
+    struct_get_i64: "jet_jit_struct_get_i64" => jet_jit_struct_get_i64: sig_struct_get_i64;
+    struct_get_f64: "jet_jit_struct_get_f64" => jet_jit_struct_get_f64: sig_struct_get_f64;
+    struct_get_bool: "jet_jit_struct_get_bool" => jet_jit_struct_get_bool: sig_struct_get_i8;
+    struct_get_char: "jet_jit_struct_get_char" => jet_jit_struct_get_char: sig_struct_get_i32;
+    struct_get_str: "jet_jit_struct_get_str" => jet_jit_struct_get_str: sig_struct_get_i64;
+    struct_set_i64: "jet_jit_struct_set_i64" => jet_jit_struct_set_i64: sig_struct_set_i64;
+    struct_set_f64: "jet_jit_struct_set_f64" => jet_jit_struct_set_f64: sig_struct_set_f64;
+    struct_set_bool: "jet_jit_struct_set_bool" => jet_jit_struct_set_bool: sig_struct_set_i8;
+    struct_set_char: "jet_jit_struct_set_char" => jet_jit_struct_set_char: sig_struct_set_i32;
+    struct_set_str: "jet_jit_struct_set_str" => jet_jit_struct_set_str: sig_struct_set_i64;
+    measurement_new: "jet_jit_measurement_new" => jet_jit_measurement_new: sig_measurement_new;
+    measurement_arithmetic: "jet_jit_measurement_arithmetic" => jet_jit_measurement_arithmetic: sig_measurement_arithmetic;
+    measurement_get: "jet_jit_measurement_get" => jet_jit_measurement_get: sig_measurement_get;
+    measurement_show: "jet_jit_measurement_show" => jet_jit_measurement_show: sig_str_unary_i64;
+    result_new_i64: "jet_jit_result_new_i64" => jet_jit_result_new_i64: sig_result_new_i64;
+    result_new_f64: "jet_jit_result_new_f64" => jet_jit_result_new_f64: sig_result_new_f64;
+    result_new_i8: "jet_jit_result_new_i8" => jet_jit_result_new_i8: sig_result_new_i8;
+    result_new_i32: "jet_jit_result_new_i32" => jet_jit_result_new_i32: sig_result_new_i32;
+    unit_convert_exact: "jet_jit_unit_convert_exact" => jet_jit_unit_convert_exact: sig_unit_convert_exact;
+    unit_convert_rounded: "jet_jit_unit_convert_rounded" => jet_jit_unit_convert_rounded: sig_unit_convert_rounded;
+    unit_convert_implicit: "jet_jit_unit_convert_implicit" => jet_jit_unit_convert_implicit: sig_unit_convert_implicit;
+    result_is_ok: "jet_jit_result_is_ok" => jet_jit_result_is_ok: sig_result_query_i8;
+    result_get_i64: "jet_jit_result_get_i64" => jet_jit_result_get_i64: sig_result_query_i64;
+    result_get_f64: "jet_jit_result_get_f64" => jet_jit_result_get_f64: sig_result_query_f64;
+    result_get_i8: "jet_jit_result_get_i8" => jet_jit_result_get_i8: sig_result_query_i8;
+    result_get_i32: "jet_jit_result_get_i32" => jet_jit_result_get_i32: sig_result_query_i32;
+    trap_panic: "jet_jit_trap_panic" => jet_jit_trap_panic: sig_i64;
+    rich_panic: "jet_jit_rich_panic" => jet_jit_rich_panic: sig_rich_panic;
+    trace_err: "jet_jit_trace_err" => jet_jit_trace_err: sig_trace_err;
+    result_context: "jet_jit_result_context" => jet_jit_result_context: sig_str_binary_i64;
+    duration_from_int: "jet_jit_duration_from_int" => jet_jit_duration_from_int: sig_duration_int;
+    duration_from_float: "jet_jit_duration_from_float" => jet_jit_duration_from_float: sig_duration_float;
+    duration_in: "jet_jit_duration_in" => jet_jit_duration_in: sig_duration_int;
+    duration_in_unit: "jet_jit_duration_in_unit" => jet_jit_duration_in_unit: sig_duration_int;
+    duration_is_zero: "jet_jit_duration_is_zero" => jet_jit_duration_is_zero: sig_result_query_i8;
+    duration_total_seconds: "jet_jit_duration_total_seconds" => jet_jit_duration_total_seconds: sig_result_query_i64;
+    duration_difference: "jet_jit_duration_difference" => jet_jit_duration_difference: sig_duration_int;
+    perf_fidelity: "jet_jit_perf_fidelity" => jet_jit_perf_fidelity: sig_noarg_f64;
+    perf_default_fidelity: "jet_jit_perf_default_fidelity" => jet_jit_perf_default_fidelity: sig_noarg_f64;
+    perf_override_fidelity: "jet_jit_perf_override_fidelity" => jet_jit_perf_override_fidelity: sig_perf_override;
+    perf_reset_fidelity: "jet_jit_perf_reset_fidelity" => jet_jit_perf_reset_fidelity: sig_noarg;
+    is_trapped: "jet_jit_is_trapped" => jet_jit_is_trapped: sig_is_trapped;
+    deopt_call: "jet_deopt_call" => super::deopt::jet_deopt_call: sig_deopt;
+    reflect_of_finish: "jet_jit_reflect_of_finish" => jet_jit_reflect_of_finish: sig_reflect_finish;
+    reflect_field_new: "jet_jit_reflect_field_new" => jet_jit_reflect_field_new: sig_str_binary_i64;
+    reflect_type_name: "jet_jit_reflect_type_name" => jet_jit_reflect_type_name: sig_str_unary_i64;
+    reflect_display: "jet_jit_reflect_display" => jet_jit_reflect_display: sig_str_unary_i64;
+    reflect_fields: "jet_jit_reflect_fields" => jet_jit_reflect_fields: sig_str_unary_i64;
+    reflect_field_name: "jet_jit_reflect_field_name" => jet_jit_reflect_field_name: sig_str_unary_i64;
+    reflect_field_value: "jet_jit_reflect_field_value" => jet_jit_reflect_field_value: sig_str_unary_i64;
+    testing_temp_dir: "jet_jit_testing_temp_dir" => jet_jit_testing_temp_dir: sig_str_unary_i64;
+    testing_snap: "jet_jit_testing_snap" => jet_jit_testing_snap: sig_str_eq;
+    cli_main: "jet_jit_cli_main" => crate::CLI::jet_jit_cli_main: sig_noarg;
 }
 
 #[cfg(test)]

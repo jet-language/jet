@@ -11,8 +11,8 @@
 //!     `Scheduler.rs`) — these are `include_str!`-embedded text compiled into
 //!     the USER's program, not compiler code; their panics are the `jet_panic`
 //!     runtime-panic path (`RUNTIME_PANIC` = 70), a different contract than I2.
-//!   - the compiled scheduler runtime module: one runtime-boundary panic and
-//!     five `#[cfg(test)]` runtime/assertion fixtures.
+//!   - the scheduler host bindings (`SchedulerHost.rs`): `#[cfg(test)]`
+//!     assertion fixtures only.
 //!
 //! A file not on the allowlist may have zero bare `panic!`s. A file on the
 //! allowlist may have AT MOST its listed count — so both a brand new bare
@@ -101,14 +101,9 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
         "include_str! runtime template — cbor.encode user-program runtime panic, not compiler code",
     ),
     (
-        "crates/jet-codegen/src/scheduler.rs",
-        6,
-        "one scheduler runtime unwind boundary plus five #[cfg(test)] fixtures: IOCP completion, deadline, cancel result, shield result, and body-panic cleanup",
-    ),
-    (
-        "crates/jet-codegen/src/scheduler/io.rs",
-        1,
-        "#[cfg(test)] Windows IOCP scale-result assertion fixture",
+        "crates/jet-codegen/src/SchedulerHost.rs",
+        5,
+        "#[cfg(test)] scheduler fixtures: stream producer failure, cancel result, shield result, yield deadline, and body-panic cleanup",
     ),
     (
         "crates/jet-codegen/src/Codegen/TIR/tests.rs",

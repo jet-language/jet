@@ -7,8 +7,27 @@ pub use jet_sema::{
 };
 pub mod Codegen;
 mod BrowserHost;
-/// D-ASYNCRT1=A: M:N scheduler substrate for jet-jit host shims.
-pub mod scheduler;
+/// D-ASYNCRT1=A: the one scheduler. AOT embeds `Prelude/Scheduler.rs` into the
+/// generated program; this module compiles that same source for the Cranelift
+/// JIT and the interpreter's ambient host, so no tier can drift (I9).
+/// `SchedulerHost.rs` adds sibling-prelude bindings and marshalling only.
+///
+/// The emitted program receives these files concatenated into one flat module,
+/// so the in-crate copy keeps them flat too.
+#[allow(dead_code)] // the emitted-program half of this source has no in-crate caller
+pub mod scheduler {
+    // Emitted programs carry `Prelude/TaskGroup.rs` as `mod jet_std`; in-crate
+    // it is `crate::task_group`. Same source either way.
+    use crate::task_group as jet_std;
+    include!("SchedulerHost.rs");
+    include!("Prelude/Scheduler.rs");
+    include!("Prelude/Stream.rs");
+    include!("Prelude/Observe.rs");
+}
+/// `Prelude/Scheduler.rs` calls `crate::jet_task_control_trace`. An emitted
+/// program gets it from the flat `StructuralDebug.rs` prelude; this crate gets
+/// it from the same file compiled as a seam dependency.
+pub(crate) use jet_foundation::StructuralDebug::jet_task_control_trace;
 /// D-LOCALCELL1=A: canonical local Cell runtime shared by emitted AOT code and
 /// the TIR evaluator's deopt adapter.
 pub mod local_cell {

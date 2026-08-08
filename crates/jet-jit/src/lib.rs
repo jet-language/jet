@@ -22,9 +22,13 @@
 /// `builder.symbol` registration function, and the `declare_function` import
 /// function from it, so a symbol with a missing piece is a compile error.
 ///
-/// `extra { field: Type, ... }` passes already-declared delegate values
+/// `#extra { field: Type, ... }` passes already-declared delegate values
 /// (nested per-module `Host*Fns` structs) straight through as plain struct
-/// fields / fn params, for the top-level table that composes them.
+/// fields / fn params, for the top-level table that composes them. The `#`
+/// is load-bearing, not decoration: `macro_rules!` can't tell an optional
+/// `extra { ... }` group apart from a `$field:ident` that happens to be
+/// spelled `extra` (`local ambiguity` error) unless the group starts on a
+/// token no field name can produce.
 ///
 /// `@shared field: "symbol": sig;` (no `=> host_fn`) declares and imports a
 /// `FuncId` whose `builder.symbol` registration is owned by a different
@@ -37,7 +41,7 @@ macro_rules! host_fns {
         struct $StructName:ident;
         register: $register_fn:ident;
         declare: $declare_fn:ident($module:ident) { $($sigs:tt)* }
-        $(extra { $($extra_field:ident : $extra_ty:ty),* $(,)? })?
+        $(#extra { $($extra_field:ident : $extra_ty:ty),* $(,)? })?
         $( $(@shared)? $field:ident : $symbol:literal $(=> $host_fn:path)? : $sig:expr ; )*
     ) => {
         pub(crate) struct $StructName {

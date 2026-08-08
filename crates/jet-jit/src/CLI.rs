@@ -2,9 +2,6 @@
 //! Zero-arg `jet_jit_cli_main` decodes argv and calls user `run(args)`.
 
 use super::Concurrency;
-use cranelift_codegen::ir::Signature;
-use cranelift_jit::{JITBuilder, JITModule};
-use cranelift_module::{FuncId, Linkage, Module};
 use jet_foundation::AST::{CtValue, Item, ProgramBundle, StructDef, Type, VariantPayload};
 use jet_foundation::CLISchema::{
     self, CLICommandSchema, CLIDefault, CLIInputSchema, CLIInputShape, CLIValueKind,
@@ -463,14 +460,8 @@ pub(crate) extern "C" fn jet_jit_cli_main() {
     run(args);
 }
 
-pub(crate) fn register_cli_symbols(builder: &mut JITBuilder) {
-    builder.symbol("jet_jit_cli_main", jet_jit_cli_main as *const u8);
-}
-
-pub(crate) fn declare_cli_main_import(module: &mut JITModule) -> Result<FuncId, String> {
-    let cc = module.target_config().default_call_conv;
-    let sig = Signature::new(cc);
-    module
-        .declare_function("jet_jit_cli_main", Linkage::Import, &sig)
-        .map_err(|e| e.to_string())
-}
+// `jet_jit_cli_main`'s registration + import lives in the top-level
+// `HostFns` table (jit/runtime_host.rs) — the CLI trampoline is present
+// on every JIT module (like every other host symbol), not only for
+// `cli_entry` programs, so `host_fns_audit` sees a matching pair on every
+// `new_jit_module()` call instead of only when compiling a CLI program.
