@@ -5,7 +5,7 @@ fn dynamic_material(key: [U8], nonce: [U8], signature: [U8]) {
     #Unsafe("protocol-selected interop material") {
         xchacha :: expert.xchacha20poly1305_seal(key, nonce, [], [])
         ed :: expert.ed25519_verify_strict(key, [], signature)
-        x :: expert.x25519(key, key)
+        x :: expert.x25519_raw(key, key)
     }
 }
 
@@ -19,8 +19,8 @@ fn run() {
         aes :: expert.aes256gcm_seal(bytes32, nonce12, [], [])
         sign :: expert.ed25519_sign(bytes32, [])
         verify :: expert.ed25519_verify_strict(bytes32, [], signature64)
-        shared_default :: expert.x25519(bytes32, bytes32)
-        shared_explicit :: expert.x25519(bytes32, bytes32, true)
+        shared_default :: expert.x25519_raw(bytes32, bytes32)
+        shared_explicit :: expert.x25519_raw(bytes32, bytes32)
     }
     dynamic_key :: [U8].{0}
     dynamic_nonce :: [U8].{0}

@@ -2,6 +2,22 @@
 // Reader consumes at most one scalar/container boundary per `next`; no read-to-end
 // or delimiter transcript sits behind this API.
 
+// D-ENCSTREAM-SURFACE1=A: every codec reader uses the ordinary bounded pull
+// adapter. One call advances one item; EOF ends iteration; errors remain
+// visible to the ordinary loop boundary.
+fn jet_encoding_reader_iter<T, F>(
+    mut next: F,
+) -> impl Iterator<Item = Result<T, jet_std::EncodingError>>
+where
+    F: FnMut() -> Result<JetOutcome<T, JetAbsent>, jet_std::EncodingError>,
+{
+    std::iter::from_fn(move || match next() {
+        Ok(Ok(item)) => Some(Ok(item)),
+        Ok(Err(JetAbsent)) => None,
+        Err(error) => Some(Err(error)),
+    })
+}
+
 enum JetJSONReadFrame {
     ArrayValueOrEnd { first: bool, index: usize },
     ArrayCommaOrEnd { index: usize },

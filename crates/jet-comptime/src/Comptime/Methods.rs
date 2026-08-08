@@ -48,6 +48,10 @@ mod structure_tests {
             ("eval_method", include_str!("Methods/dispatch/eval_method.rs")),
             ("repl_process", include_str!("Methods/repl_process.rs")),
             ("core_calls", include_str!("Methods/core_calls.rs")),
+            (
+                "core_calls/regex",
+                include_str!("Methods/core_calls/regex.rs"),
+            ),
             ("pool", include_str!("Methods/pool.rs")),
         ] {
             let lines = source.lines().count();

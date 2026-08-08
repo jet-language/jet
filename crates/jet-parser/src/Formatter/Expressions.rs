@@ -519,6 +519,10 @@ impl<'a> Fmt<'a> {
                 self.write(&dimension.display_name());
                 self.write(">");
             }
+            // D-COMPUTE-TYPE1: the literal shape argument in `Vec<3>` /
+            // `Matrix<2, 3>`, round-tripped through `fmt_type` like any other
+            // `Type::Apply` argument (see `type_generic_arg`).
+            Type::ComputeDim(value) => self.write(&value.to_string()),
             Type::TraitObject(t) => {
                 // Only the parser's `dyn`/`Box<dyn>` teaching-error recovery paths
                 // ever construct this AST-facing arm with more than a formatting
@@ -547,7 +551,9 @@ impl<'a> Fmt<'a> {
             // D-QUAL4=A: `#TagName Type` — prefix value-tag.
             Type::Tagged { marker, inner } => {
                 self.write(crate::Syntax::RULE_PREFIX);
-                self.write(marker);
+                // Only a parsed, user-written D-QUAL4 tag ever reaches the
+                // formatter — no parser path constructs an internal marker.
+                self.write(&marker.to_string());
                 self.write(" ");
                 self.fmt_type(inner);
             }
@@ -1192,10 +1198,17 @@ impl<'a> Fmt<'a> {
                 type_name,
                 variant,
                 args,
+                leading_dot,
                 ..
             } => {
-                self.write(type_name);
-                self.write(".");
+                if type_name.is_empty() {
+                    if *leading_dot {
+                        self.write(".");
+                    }
+                } else {
+                    self.write(type_name);
+                    self.write(".");
+                }
                 self.write(variant);
                 if !args.is_empty() {
                     // D-UITREE1/D-DOTCTOR1: named-payload variants use the struct

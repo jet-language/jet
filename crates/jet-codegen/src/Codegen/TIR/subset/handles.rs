@@ -9,8 +9,8 @@ use crate::Syntax;
 use std::collections::HashSet;
 
 /// c109 Phase 13: resolve a handle method `(handle, method, nargs)` into a total
-/// `THandleOp`, reproducing the handle arms of `emit_builtin_method`
-/// (Source/Codegen/Expression.rs). Returns `None` for anything not covered (so the
+/// `THandleOp`, reproducing built-in method lowering. Returns `None` for anything not
+/// covered (so the caller
 /// caller falls through to other shapes). Excluded (with reason): `lines` on
 /// FileReader/StdinHandle (dead — E2502, loop-source-only); all HTTPRouter `get`/
 /// `post`/`put`/`delete` (closure handler → `emit_router_handler`); HTTPRequest/
@@ -158,7 +158,7 @@ pub(crate) fn http_client_static_op(
 }
 
 /// c109 Phase 25: is `router.get(path, handler)` (and `.post`/`.put`/`.delete`) inside
-/// the subset? Reproduces `emit_router_handler` (Source/Codegen/Expression.rs): the
+/// the subset? Reproduces router-handler lowering: the
 /// handler (arg 1) must be either a BARE TOP-LEVEL FN name (an `Ident` not in locals —
 /// the `env.get(name).is_none()` branch → the `move |__req| user_<fn>(&__req)` wrapper)
 /// or an in-subset literal LAMBDA (the `Box::new(<lambda>)` branch). The path (arg 0) is
@@ -546,13 +546,21 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
     Some(op)
 }
 
-/// c109 Phase 13: the resolved return type of a covered handle method, read from the
-/// authoritative sema handle tables (`file_handle_method_return`/`net_method_return`,
-/// Source/Sema/CheckerCoreLib.rs) — a pure `(handle, method)` dispatch, no inference.
-/// The return type is rarely load-bearing in emit (a binding carries sema's `b.ty`),
-/// but kept total per the design principle. A throwaway diags vec absorbs the table's
-/// diagnostic side-channel (sema already validated, so none fire here).
-pub(crate) fn handle_method_return_ty(handle: &str, method: &str, nargs: usize) -> Type {
+/// c109 Phase 13: resolve a covered handle method using sema's exact return when
+/// it is arg-dependent, then the authoritative fixed handle tables. The resolved
+/// receiver type keeps generic receiver arguments available to those tables.
+/// A throwaway diags vec absorbs their diagnostic side-channel (sema already
+/// validated, so none fire here).
+pub(crate) fn handle_method_return_ty(
+    handle: &str,
+    method: &str,
+    nargs: usize,
+    receiver_ty: &Type,
+    resolved_ret: Option<&Type>,
+) -> Type {
+    if let Some(ret) = resolved_ret {
+        return ret.clone();
+    }
     let span = crate::Diagnostics::Span { start: 0, end: 0 };
     let mut sink = Vec::new();
     let ret = crate::Sema::file_handle_method_return(handle, method, nargs, span, &mut sink)
@@ -602,7 +610,7 @@ pub(crate) fn handle_method_return_ty(handle: &str, method: &str, nargs: usize) 
                 || handle == crate::Syntax::DURATION_TYPE
             {
                 crate::Collections::builtin_method_return(
-                    &Type::Named(handle.to_string()),
+                    receiver_ty,
                     method,
                     nargs,
                     false,
@@ -678,7 +686,7 @@ pub(crate) fn handle_method_return_ty(handle: &str, method: &str, nargs: usize) 
         .or_else(|| {
             if handle == crate::Syntax::SOLVER_TYPE {
                 crate::Collections::builtin_method_return(
-                    &Type::Named(crate::Syntax::SOLVER_TYPE.to_string()),
+                    receiver_ty,
                     method,
                     nargs,
                     false,
@@ -726,7 +734,7 @@ pub(crate) fn core_closure_call_return_ty(module: &str, method: &str, body_ty: T
             args: vec![body_ty],
         })),
         ("core.scope", "guard") => Type::Named("ScopeGuard".to_string()),
-        ("jet.reactive", "effect") => Type::Named(crate::Syntax::TYPE_EFFECT.to_string()),
+        ("core.reactive", "effect") => Type::Named(crate::Syntax::TYPE_EFFECT.to_string()),
         _ => unit_type(),
     }
 }
@@ -741,9 +749,9 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
     // this keeps the node's `ty` honest — `dispatch` → HTTPResponse composes with the
     // `.status()`/`.body()` accessors that read it).
     match (module, method) {
-        ("jet.http", "router") => return Type::Named("HTTPRouter".to_string()),
-        ("jet.http", "parse") => return Type::Named("HTTPRequest".to_string()),
-        ("jet.http", "dispatch") => return Type::Named("HTTPResponse".to_string()),
+        ("core.http", "router") => return Type::Named("HTTPRouter".to_string()),
+        ("core.http", "parse") => return Type::Named("HTTPRequest".to_string()),
+        ("core.http", "dispatch") => return Type::Named("HTTPResponse".to_string()),
         // c109 Phase 29: qualified `io.input(prompt)`. NOT in `core_fixed_sig` — its return
         // type is fixed (`Result<String, IOError>`) but lives in sema's bespoke
         // `infer_core_call` arm (CheckerCoreLib.rs `("core.io", "input")`), NOT the table.

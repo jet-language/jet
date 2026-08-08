@@ -43,7 +43,7 @@ fn is_fallible_void_return(
                     if n == Syntax::TYPE_ERROR
                         || (n == "CryptoError"
                             && !registry.contains(n)
-                            && core_imports.values().any(|module| module == "jet.crypto" || module == "core.crypto")))
+                            && core_imports.values().any(|module| module == "core.crypto")))
     )
 }
 
@@ -1271,6 +1271,7 @@ pub(crate) fn synthesize_delegation_method(
         args,
         recv_type: None,
         resolved_ret: None,
+        checked_widen: false,
     };
 
     // Wrap in a return stmt if there's a return type; otherwise a bare expr stmt.

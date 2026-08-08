@@ -117,7 +117,7 @@ const PLAIN_CORE_CALLS: &[(&str, &str, &str, bool, &[bool])] = &[
     ("core.tasks", "interval", "jet_std::interval", true, &[false]),
     ("core.tasks", "yield_now", "jet_std::jet_task_yield", true, &[]),
     ("core.tasks", "current_task", "jet_std::jet_task_current_trace", true, &[]),
-    ("jet.reactive", "signal", "jet_std::JetSignal::new", true, &[false]), // D-REACT1=B: `reactive.signal(initial)` producer → a `JetSignal<T>`.
+    ("core.reactive", "signal", "jet_std::JetSignal::new", true, &[false]), // D-REACT1=B: `reactive.signal(initial)` producer → a `JetSignal<T>`.
     ("core.event", "scope", "jet_std::JetEventScope::new", true, &[]), // D-EVENT1=D: first-party typed Event/Hook constructors.
     ("core.event", "policy_sync", "jet_std::JetEventPolicy::sync", true, &[]),
     ("core.science.measurement", "from", "jet_std::JetMeasurement::new", true, &[false, false]), // D-HONESTNUM1=A: `M.from(value, uncertainty)` → a `JetMeasurement<f64>`.
@@ -478,37 +478,35 @@ const PLAIN_CORE_CALLS: &[(&str, &str, &str, bool, &[bool])] = &[
     ("core.text", "starts_any", "jet_text_starts_any", true, &[true, true]),
     ("core.text", "ends_any", "jet_text_ends_any", true, &[true, true]),
     ("core.text", "char_indices", "jet_text_char_indices", true, &[true]),
-    ("jet.log", "info", "jet_ring_log_info", true, &[true]), // E2-M9: first-party ring packages.
-    ("jet.log", "warn", "jet_ring_log_warn", true, &[true]),
-    ("jet.log", "error", "jet_ring_log_error", true, &[true]),
-    ("jet.log", "debug", "jet_ring_log_debug", true, &[true]),
-    ("jet.log", "critical", "jet_ring_log_critical", true, &[true]),
-    ("jet.log", "fatal", "jet_ring_log_fatal", true, &[true]),
-    ("jet.log", "disable", "jet_ring_log_disable", true, &[]),
-    ("jet.log", "flush", "jet_ring_log_flush", true, &[]),
-    ("jet.log", "enabled", "jet_ring_log_enabled", true, &[true]),
-    ("jet.log", "field", "jet_ring_log_field", true, &[true, true]),
-    ("jet.log", "int", "jet_ring_log_int", true, &[true, false]),
-    ("jet.log", "float", "jet_ring_log_float", true, &[true, false]),
-    ("jet.log", "bool", "jet_ring_log_bool", true, &[true, false]),
-    ("jet.log", "redact", "jet_ring_log_redact", true, &[true]),
-    ("jet.log", "info_fields", "jet_ring_log_info_fields", true, &[true, true]),
-    ("jet.log", "warn_fields", "jet_ring_log_warn_fields", true, &[true, true]),
-    ("jet.log", "error_fields", "jet_ring_log_error_fields", true, &[true, true]),
-    ("jet.log", "debug_fields", "jet_ring_log_debug_fields", true, &[true, true]),
-    ("jet.log", "span", "jet_ring_log_span", true, &[true]),
-    ("jet.log", "enter", "jet_ring_log_enter", true, &[true]),
-    ("jet.log", "close", "jet_ring_log_close", true, &[true]),
-    ("jet.log", "set_sink", "jet_ring_log_set_sink", true, &[true, true]),
-    ("jet.log", "sample_every", "jet_ring_log_sample_every", true, &[false]),
-    ("jet.log", "counter", "jet_ring_log_counter", true, &[true, false]),
-    ("jet.log", "otlp_file", "jet_ring_log_otlp_file", true, &[true]),
-    ("jet.log", "set_level", "jet_ring_log_set_level", true, &[true]),
-    ("jet.log", "set_trace_id", "jet_ring_log_set_trace_id", true, &[true]), // E2-M12 D-OBS3: trace context for structured log records.
-    ("jet.log", "setup", "jet_ring_log_setup", true, &[true]), // D-LOGFMT1=A: explicit log format override.
-    ("jet.time", "now", "jet_std_time_now", true, &[]),
-    ("jet.time", "format", "jet_ring_time_format", true, &[false, true]),
-    ("jet.crypto", "sha256_bytes", "jet_ring_crypto_sha256_bytes", true, &[true]),
+    ("core.log", "info", "jet_ring_log_info", true, &[true]), // E2-M9: first-party ring packages.
+    ("core.log", "warn", "jet_ring_log_warn", true, &[true]),
+    ("core.log", "error", "jet_ring_log_error", true, &[true]),
+    ("core.log", "debug", "jet_ring_log_debug", true, &[true]),
+    ("core.log", "critical", "jet_ring_log_critical", true, &[true]),
+    ("core.log", "fatal", "jet_ring_log_fatal", true, &[true]),
+    ("core.log", "disable", "jet_ring_log_disable", true, &[]),
+    ("core.log", "flush", "jet_ring_log_flush", true, &[]),
+    ("core.log", "enabled", "jet_ring_log_enabled", true, &[true]),
+    ("core.log", "field", "jet_ring_log_field", true, &[true, true]),
+    ("core.log", "int", "jet_ring_log_int", true, &[true, false]),
+    ("core.log", "float", "jet_ring_log_float", true, &[true, false]),
+    ("core.log", "bool", "jet_ring_log_bool", true, &[true, false]),
+    ("core.log", "redact", "jet_ring_log_redact", true, &[true]),
+    ("core.log", "info_fields", "jet_ring_log_info_fields", true, &[true, true]),
+    ("core.log", "warn_fields", "jet_ring_log_warn_fields", true, &[true, true]),
+    ("core.log", "error_fields", "jet_ring_log_error_fields", true, &[true, true]),
+    ("core.log", "debug_fields", "jet_ring_log_debug_fields", true, &[true, true]),
+    ("core.log", "span", "jet_ring_log_span", true, &[true]),
+    ("core.log", "enter", "jet_ring_log_enter", true, &[true]),
+    ("core.log", "close", "jet_ring_log_close", true, &[true]),
+    ("core.log", "set_sink", "jet_ring_log_set_sink", true, &[true, true]),
+    ("core.log", "sample_every", "jet_ring_log_sample_every", true, &[false]),
+    ("core.log", "counter", "jet_ring_log_counter", true, &[true, false]),
+    ("core.log", "otlp_file", "jet_ring_log_otlp_file", true, &[true]),
+    ("core.log", "set_level", "jet_ring_log_set_level", true, &[true]),
+    ("core.log", "set_trace_id", "jet_ring_log_set_trace_id", true, &[true]), // E2-M12 D-OBS3: trace context for structured log records.
+    ("core.log", "setup", "jet_ring_log_setup", true, &[true]), // D-LOGFMT1=A: explicit log format override.
+    ("core.crypto", "sha256_bytes", "jet_ring_crypto_sha256_bytes", true, &[true]),
     ("core.auth", "session_validate", "jet_auth_session_validate", true, &[true, false]),
     ("core.auth", "session_show", "jet_auth_session_show", true, &[true]),
     ("core.auth", "session_user", "jet_auth_session_user", true, &[true]),
@@ -582,23 +580,23 @@ const PLAIN_CORE_CALLS: &[(&str, &str, &str, bool, &[bool])] = &[
     ("core.net", "dns_srv_port", "jet_net_dns_srv_port", true, &[true]),
     ("core.net", "dns_srv_priority", "jet_net_dns_srv_priority", true, &[true]),
     ("core.net", "dns_srv_weight", "jet_net_dns_srv_weight", true, &[true]),
-    ("jet.http", "router", "jet_http_router_new", true, &[]), // c109 Phase 25: HTTPRouter producer + parse/dispatch (D-ROUTE1=A), byte-for-byte // `emit_core_call` (Source/Codegen/Expression.rs ~L1411). `router()` is arg-free; // `parse(raw)` borrows the raw string; `dispatch(router, req)` borrows the router // and passes the request by value.
-    ("jet.http", "parse", "jet_http_parse_request", true, &[true]),
-    ("jet.http", "dispatch", "jet_http_router_dispatch", true, &[true, false]),
-    ("jet.regex", "flags", "jet_std::jet_regex_flags", true, &[false, false, false]), // D-REGEXENGINE1=A: core.regex — std-only runtime in jet_std, no bridge dep.
-    ("jet.regex", "escape", "jet_std::jet_regex_escape", true, &[true]),
-    ("jet.regex", "compile", "jet_std::jet_regex_compile", true, &[true]),
-    ("jet.regex", "compile_with", "jet_std::jet_regex_compile_with", true, &[true, true]),
-    ("jet.regex", "literal", "jet_std::jet_regex_literal", true, &[true]),
-    ("jet.regex", "is_match", "jet_std::jet_regex_is_match", true, &[true, true]),
-    ("jet.regex", "match", "jet_std::jet_regex_match", true, &[true, true]),
-    ("jet.regex", "find", "jet_std::jet_regex_find", true, &[true, true]),
-    ("jet.regex", "find_all", "jet_std::jet_regex_find_all", true, &[true, true]),
-    ("jet.regex", "matches", "jet_std::jet_regex_matches", true, &[true, true]),
-    ("jet.regex", "split", "jet_std::jet_regex_split", true, &[true, true]),
-    ("jet.regex", "split_limit", "jet_std::jet_regex_split_limit", true, &[true, true, false]),
-    ("jet.regex", "replace", "jet_std::jet_regex_replace", true, &[true, true, true]),
-    ("jet.regex", "replace_all", "jet_std::jet_regex_replace_all", true, &[true, true, true]),
+    ("core.http", "router", "jet_http_router_new", true, &[]), // c109 Phase 25: HTTPRouter producer + parse/dispatch (D-ROUTE1=A). `router()` is arg-free; `parse(raw)` borrows the raw string; `dispatch(router, req)` borrows the router and passes the request by value.
+    ("core.http", "parse", "jet_http_parse_request", true, &[true]),
+    ("core.http", "dispatch", "jet_http_router_dispatch", true, &[true, false]),
+    ("core.regex", "flags", "jet_std::jet_regex_flags", true, &[false, false, false]), // D-REGEXENGINE1=A: core.regex — std-only runtime in jet_std, no bridge dep.
+    ("core.regex", "escape", "jet_std::jet_regex_escape", true, &[true]),
+    ("core.regex", "compile", "jet_std::jet_regex_compile", true, &[true]),
+    ("core.regex", "compile_with", "jet_std::jet_regex_compile_with", true, &[true, true]),
+    ("core.regex", "literal", "jet_std::jet_regex_literal", true, &[true]),
+    ("core.regex", "is_match", "jet_std::jet_regex_is_match", true, &[true, true]),
+    ("core.regex", "match", "jet_std::jet_regex_match", true, &[true, true]),
+    ("core.regex", "find", "jet_std::jet_regex_find", true, &[true, true]),
+    ("core.regex", "find_all", "jet_std::jet_regex_find_all", true, &[true, true]),
+    ("core.regex", "matches", "jet_std::jet_regex_matches", true, &[true, true]),
+    ("core.regex", "split", "jet_std::jet_regex_split", true, &[true, true]),
+    ("core.regex", "split_limit", "jet_std::jet_regex_split_limit", true, &[true, true, false]),
+    ("core.regex", "replace", "jet_std::jet_regex_replace", true, &[true, true, true]),
+    ("core.regex", "replace_all", "jet_std::jet_regex_replace_all", true, &[true, true, true]),
     ("core.raylib", "window_open", "jet_raylib_window_open", true, &[false, false, true]), // D-RAYLIB1=A / D-FLAGSHIP-RAYLIB1=A: typed graphics bridge.
     ("core.raylib", "window_should_close", "jet_raylib_window_should_close", true, &[true]),
     ("core.raylib", "window_ready", "jet_raylib_window_ready", true, &[true]),
@@ -613,14 +611,14 @@ const PLAIN_CORE_CALLS: &[(&str, &str, &str, bool, &[bool])] = &[
     ("core.raylib", "load_sound", "jet_raylib_load_sound", true, &[true]),
     ("core.raylib", "play_sound", "jet_raylib_play_sound", true, &[true]),
     ("core.raylib", "color", "jet_raylib_color", true, &[false, false, false, false]),
-    ("jet.db", "params", "jet_std::jet_db_params_from_sql", true, &[true]),
-    ("jet.db", "row_value", "jet_std::jet_db_row_value", true, &[true, true]),
-    ("jet.db", "row_int", "jet_std::jet_db_row_int", true, &[true, true]),
-    ("jet.db", "row_float", "jet_std::jet_db_row_float", true, &[true, true]),
-    ("jet.db", "row_text", "jet_std::jet_db_row_text", true, &[true, true]),
-    ("jet.db", "row_bool", "jet_std::jet_db_row_bool", true, &[true, true]),
-    ("jet.db", "transaction", "jet_db_scope_transaction", false, &[true, true, true]),
-    ("jet.db", "migrate", "jet_db_scope_migrate", false, &[true, true, true]),
+    ("core.db", "params", "jet_std::jet_db_params_from_sql", true, &[true]),
+    ("core.db", "row_value", "jet_std::jet_db_row_value", true, &[true, true]),
+    ("core.db", "row_int", "jet_std::jet_db_row_int", true, &[true, true]),
+    ("core.db", "row_float", "jet_std::jet_db_row_float", true, &[true, true]),
+    ("core.db", "row_text", "jet_std::jet_db_row_text", true, &[true, true]),
+    ("core.db", "row_bool", "jet_std::jet_db_row_bool", true, &[true, true]),
+    ("core.db", "transaction", "jet_db_scope_transaction", false, &[true, true, true]),
+    ("core.db", "migrate", "jet_db_scope_migrate", false, &[true, true, true]),
     ("core.random", "pick", "jet_std_random_pick", true, &[true]),
     ("core.random", "weighted_pick", "jet_std_random_weighted_pick", true, &[true, true]),
     ("core.random", "sample", "jet_std_random_sample", true, &[true, false]),
@@ -747,9 +745,6 @@ pub(crate) fn emit_tir_core_call(
         regex_fn("jet_crypto_email_ed25519_sign_impl"),
         cx.root_prefix,
     );
-    let normalized_module =
-        crate::Syntax::normalize_core_module(module).unwrap_or_else(|| module.to_string());
-    let module = normalized_module.as_str();
     if let Some(rendered) = emit_plain_core_call(module, method, &arg, &helper) {
         return rendered;
     }
@@ -781,7 +776,7 @@ pub(crate) fn emit_tir_core_call(
     match (module, method) {
         ("jet.unit", "magnitude") => format!("({}).to_string()", arg(0)),
         // c109 Phase 18 (S58, E2-M13): low-level pointer ops, byte-for-byte
-        // `emit_core_call`. `address_of` is an inert address cast (no `unsafe`);
+        // TIR core-call emission. `address_of` is an inert address cast (no `unsafe`);
         // `volatile_read`/`volatile_write` access through a `Ptr<T>` — the volatile ops are
         // valid because the call only reaches codegen inside an `#Unsafe` region/fn (sema
         // E3101), already lowered to a Rust `unsafe` context.
@@ -986,8 +981,8 @@ pub(crate) fn emit_tir_core_call(
                 fields_code = fields_code
             )
         }
-        // c109 Phase 29: qualified `io.input(prompt)`, byte-for-byte `emit_core_call`
-        // (Expression.rs ~L1294): no arg → `jet_std_io_input(None)`; a prompt arg →
+        // c109 Phase 29: qualified `io.input(prompt)`: no arg → `jet_std_io_input(None)`;
+        // a prompt arg →
         // `jet_std_io_input(Some(&(prompt)))`. Same emitted helper as the ambient bare
         // `input(...)` (Phase 25), the only difference being the source node shape.
         ("core.io", "input") => {
@@ -2287,20 +2282,20 @@ pub(crate) fn emit_tir_core_call(
         
         
         
-        ("jet.crypto", "sha256") => format!("{}(&({}))", regex_fn("jet_crypto_sha256_typed_impl"), arg(0)),
-        ("jet.crypto", "sha512_bytes") => {
+        ("core.crypto", "sha256") => format!("{}(&({}))", regex_fn("jet_crypto_sha256_typed_impl"), arg(0)),
+        ("core.crypto", "sha512_bytes") => {
             format!("{}(&({}))", regex_fn("jet_crypto_sha512_impl"), arg(0))
         }
-        ("jet.crypto", "blake3_bytes") => {
+        ("core.crypto", "blake3_bytes") => {
             format!("{}(&({}))", regex_fn("jet_crypto_blake3_impl"), arg(0))
         }
-        ("jet.crypto", "constant_time_equal_bytes") => format!(
+        ("core.crypto", "constant_time_equal_bytes") => format!(
             "{}(&({}), &({}))",
             regex_fn("jet_crypto_constant_time_equal_bytes_impl"),
             arg(0),
             arg(1)
         ),
-        ("jet.crypto", "hkdf_sha256") => format!(
+        ("core.crypto", "hkdf_sha256") => format!(
             "{}(&({}), &({}), &({}), {})",
             regex_fn("jet_crypto_hkdf_typed_impl"),
             arg(0),
@@ -2308,47 +2303,47 @@ pub(crate) fn emit_tir_core_call(
             arg(2),
             arg(3)
         ),
-        ("jet.crypto", "x25519_public") => {
+        ("core.crypto", "x25519_public") => {
             format!(
                 "{}(&({}))",
                 regex_fn("jet_crypto_x25519_public_impl"),
                 arg(0)
             )
         }
-        ("jet.crypto", "x25519_shared") => format!(
+        ("core.crypto", "x25519_shared") => format!(
             "{}(&({}), &({}))",
             regex_fn("jet_crypto_x25519_shared_impl"),
             arg(0),
             arg(1)
         ),
-        ("jet.crypto", "password_hash") => {
+        ("core.crypto", "password_hash") => {
             format!(
                 "{}(&({}), jet_scheduler_wait_point_cancelled, jet_task_deliver_cancel, jet_scheduler_blocking_wait_enter, jet_scheduler_blocking_wait_leave)",
                 regex_fn("jet_crypto_password_hash_typed_cancel_impl"),
                 arg(0)
             )
         }
-        ("jet.crypto", "password_hash_with_salt") => format!(
+        ("core.crypto", "password_hash_with_salt") => format!(
             "{}(&({}), &({}))",
             regex_fn("jet_crypto_password_hash_with_salt_impl"),
             arg(0),
             arg(1)
         ),
-        ("jet.crypto", "password_verify") => format!(
+        ("core.crypto", "password_verify") => format!(
             "{}(&({}), &({}), jet_scheduler_wait_point_cancelled, jet_task_deliver_cancel, jet_scheduler_blocking_wait_enter, jet_scheduler_blocking_wait_leave)",
             regex_fn("jet_crypto_password_verify_typed_cancel_impl"),
             arg(0),
             arg(1)
         ),
         // D-CRYPTOENV1=A: misuse-resistant envelope (RustCrypto FFI bridge).
-        ("jet.crypto", "seal") => format!(
+        ("core.crypto", "seal") => format!(
             "{}({}, &({}), &({}))",
             regex_fn("jet_crypto_seal_typed_impl"),
             arg(0),
             arg(1),
             arg(2)
         ),
-        ("jet.crypto", "file_seal") => format!(
+        ("core.crypto", "file_seal") => format!(
             "{}({}, &({}.inner.to_string_lossy().into_owned()), &({}.inner.to_string_lossy().into_owned()), {}jet_scheduler_task_cancelled)",
             regex_fn("jet_crypto_file_seal_impl"),
             arg(0),
@@ -2356,14 +2351,14 @@ pub(crate) fn emit_tir_core_call(
             arg(2),
             cx.root_prefix,
         ),
-        ("jet.crypto", "open") => format!(
+        ("core.crypto", "open") => format!(
             "{}(&({}), {}, &({}))",
             regex_fn("jet_crypto_open_typed_impl"),
             arg(0),
             arg(1),
             arg(2)
         ),
-        ("jet.crypto", "file_open") => format!(
+        ("core.crypto", "file_open") => format!(
             "{}(&({}), &({}.inner.to_string_lossy().into_owned()), &({}.inner.to_string_lossy().into_owned()), {}jet_scheduler_task_cancelled)",
             regex_fn("jet_crypto_file_open_impl"),
             arg(0),
@@ -2371,49 +2366,49 @@ pub(crate) fn emit_tir_core_call(
             arg(2),
             cx.root_prefix,
         ),
-        ("jet.crypto", "sign") => format!(
+        ("core.crypto", "sign") => format!(
             "{}(&({}), &({}))",
             regex_fn("jet_crypto_sign_typed_impl"),
             arg(0),
             arg(1)
         ),
-        ("jet.crypto", "verify") => format!(
+        ("core.crypto", "verify") => format!(
             "{}({}, &({}), {})",
             regex_fn("jet_crypto_verify_typed_impl"),
             arg(0),
             arg(1),
             arg(2)
         ),
-        ("jet.crypto", "wrap") => format!("{}(&({}), {})", regex_fn("jet_crypto_wrap_typed_impl"), arg(0), arg(1)),
-        ("jet.crypto", "unwrap") => format!("{}(&({}), {})", regex_fn("jet_crypto_unwrap_typed_impl"), arg(0), arg(1)),
-        ("jet.crypto", "x25519") => format!("{}(&({}), {})", regex_fn("jet_crypto_x25519_typed_impl"), arg(0), arg(1)),
-        ("jet.crypto", "constant_time_equal") => format!("{}(&({}), &({}))", regex_fn("jet_crypto_constant_time_secret_impl"), arg(0), arg(1)),
-        ("jet.crypto", "blake3") => format!("{}(&({}))", regex_fn("jet_crypto_blake3_typed_impl"), arg(0)),
-        ("jet.crypto", "sha512") => format!("{}(&({}))", regex_fn("jet_crypto_sha512_typed_impl"), arg(0)),
-        ("jet.crypto", "__secret_from_text") => format!("{}({})", regex_fn("jet_crypto_secret_from_text_impl"), arg(0)),
-        ("jet.crypto", "__secret_from_bytes") => format!("{}({})", regex_fn("jet_crypto_secret_from_bytes_impl"), arg(0)),
-        ("jet.crypto", "__signing_generate") => format!("{}()", regex_fn("jet_crypto_signing_generate_impl")),
-        ("jet.crypto", "__x25519_generate") => format!("{}()", regex_fn("jet_crypto_x25519_generate_impl")),
-        ("jet.crypto", "__verify_key_from_bytes") => format!("{}({})", regex_fn("jet_crypto_verify_key_from_bytes_impl"), arg(0)),
-        ("jet.crypto", "__x25519_public_from_bytes") => format!("{}({})", regex_fn("jet_crypto_x25519_public_from_bytes_impl"), arg(0)),
-        ("jet.crypto", "__x25519_public_from_text") => format!("{}({})", regex_fn("jet_crypto_x25519_public_from_text_impl"), arg(0)),
-        ("jet.crypto", "__signature_from_bytes") => format!("{}({})", regex_fn("jet_crypto_signature_from_bytes_impl"), arg(0)),
-        ("jet.crypto", "__sealed_from_bytes") => format!("{}({})", regex_fn("jet_crypto_sealed_from_bytes_impl"), arg(0)),
-        ("jet.crypto", "__wrapped_from_bytes") => format!("{}({})", regex_fn("jet_crypto_wrapped_from_bytes_impl"), arg(0)),
-        ("jet.crypto", "__password_parse") => format!("{}({})", regex_fn("jet_crypto_password_parse_impl"), arg(0)),
-        ("jet.crypto", "__signing_public") => format!("{}(&({}))", regex_fn("jet_crypto_signing_public_impl"), arg(0)),
-        ("jet.crypto", "__x25519_public") => format!("{}(&({}))", regex_fn("jet_crypto_x25519_public_typed_impl"), arg(0)),
-        ("jet.crypto", "__verify_key_bytes") => format!("{}(&({}))", regex_fn("jet_crypto_verify_key_bytes_impl"), arg(0)),
-        ("jet.crypto", "__x25519_public_bytes") => format!("{}(&({}))", regex_fn("jet_crypto_x25519_public_bytes_impl"), arg(0)),
-        ("jet.crypto", "__x25519_public_text") => format!("{}(&({}))", regex_fn("jet_crypto_x25519_public_text_impl"), arg(0)),
-        ("jet.crypto", "__signature_bytes") => format!("{}(&({}))", regex_fn("jet_crypto_signature_bytes_impl"), arg(0)),
-        ("jet.crypto", "__sealed_bytes") => format!("{}(&({}))", regex_fn("jet_crypto_sealed_bytes_impl"), arg(0)),
-        ("jet.crypto", "__wrapped_bytes") => format!("{}(&({}))", regex_fn("jet_crypto_wrapped_bytes_impl"), arg(0)),
-        ("jet.crypto", "__digest256_bytes") => format!("{}(&({}))", regex_fn("jet_crypto_digest256_bytes_impl"), arg(0)),
-        ("jet.crypto", "__digest512_bytes") => format!("{}(&({}))", regex_fn("jet_crypto_digest512_bytes_impl"), arg(0)),
-        ("jet.crypto", "__digest256_hex") => format!("{}(&({}))", regex_fn("jet_crypto_digest256_hex_impl"), arg(0)),
-        ("jet.crypto", "__digest512_hex") => format!("{}(&({}))", regex_fn("jet_crypto_digest512_hex_impl"), arg(0)),
-        ("jet.crypto", "__password_text") => format!("{}(&({}))", regex_fn("jet_crypto_password_text_impl"), arg(0)),
+        ("core.crypto", "wrap") => format!("{}(&({}), {})", regex_fn("jet_crypto_wrap_typed_impl"), arg(0), arg(1)),
+        ("core.crypto", "unwrap") => format!("{}(&({}), {})", regex_fn("jet_crypto_unwrap_typed_impl"), arg(0), arg(1)),
+        ("core.crypto", "x25519") => format!("{}(&({}), {})", regex_fn("jet_crypto_x25519_typed_impl"), arg(0), arg(1)),
+        ("core.crypto", "constant_time_equal") => format!("{}(&({}), &({}))", regex_fn("jet_crypto_constant_time_secret_impl"), arg(0), arg(1)),
+        ("core.crypto", "blake3") => format!("{}(&({}))", regex_fn("jet_crypto_blake3_typed_impl"), arg(0)),
+        ("core.crypto", "sha512") => format!("{}(&({}))", regex_fn("jet_crypto_sha512_typed_impl"), arg(0)),
+        ("core.crypto", "__secret_from_text") => format!("{}({})", regex_fn("jet_crypto_secret_from_text_impl"), arg(0)),
+        ("core.crypto", "__secret_from_bytes") => format!("{}({})", regex_fn("jet_crypto_secret_from_bytes_impl"), arg(0)),
+        ("core.crypto", "__signing_generate") => format!("{}()", regex_fn("jet_crypto_signing_generate_impl")),
+        ("core.crypto", "__x25519_generate") => format!("{}()", regex_fn("jet_crypto_x25519_generate_impl")),
+        ("core.crypto", "__verify_key_from_bytes") => format!("{}({})", regex_fn("jet_crypto_verify_key_from_bytes_impl"), arg(0)),
+        ("core.crypto", "__x25519_public_from_bytes") => format!("{}({})", regex_fn("jet_crypto_x25519_public_from_bytes_impl"), arg(0)),
+        ("core.crypto", "__x25519_public_from_text") => format!("{}({})", regex_fn("jet_crypto_x25519_public_from_text_impl"), arg(0)),
+        ("core.crypto", "__signature_from_bytes") => format!("{}({})", regex_fn("jet_crypto_signature_from_bytes_impl"), arg(0)),
+        ("core.crypto", "__sealed_from_bytes") => format!("{}({})", regex_fn("jet_crypto_sealed_from_bytes_impl"), arg(0)),
+        ("core.crypto", "__wrapped_from_bytes") => format!("{}({})", regex_fn("jet_crypto_wrapped_from_bytes_impl"), arg(0)),
+        ("core.crypto", "__password_parse") => format!("{}({})", regex_fn("jet_crypto_password_parse_impl"), arg(0)),
+        ("core.crypto", "__signing_public") => format!("{}(&({}))", regex_fn("jet_crypto_signing_public_impl"), arg(0)),
+        ("core.crypto", "__x25519_public") => format!("{}(&({}))", regex_fn("jet_crypto_x25519_public_typed_impl"), arg(0)),
+        ("core.crypto", "__verify_key_bytes") => format!("{}(&({}))", regex_fn("jet_crypto_verify_key_bytes_impl"), arg(0)),
+        ("core.crypto", "__x25519_public_bytes") => format!("{}(&({}))", regex_fn("jet_crypto_x25519_public_bytes_impl"), arg(0)),
+        ("core.crypto", "__x25519_public_text") => format!("{}(&({}))", regex_fn("jet_crypto_x25519_public_text_impl"), arg(0)),
+        ("core.crypto", "__signature_bytes") => format!("{}(&({}))", regex_fn("jet_crypto_signature_bytes_impl"), arg(0)),
+        ("core.crypto", "__sealed_bytes") => format!("{}(&({}))", regex_fn("jet_crypto_sealed_bytes_impl"), arg(0)),
+        ("core.crypto", "__wrapped_bytes") => format!("{}(&({}))", regex_fn("jet_crypto_wrapped_bytes_impl"), arg(0)),
+        ("core.crypto", "__digest256_bytes") => format!("{}(&({}))", regex_fn("jet_crypto_digest256_bytes_impl"), arg(0)),
+        ("core.crypto", "__digest512_bytes") => format!("{}(&({}))", regex_fn("jet_crypto_digest512_bytes_impl"), arg(0)),
+        ("core.crypto", "__digest256_hex") => format!("{}(&({}))", regex_fn("jet_crypto_digest256_hex_impl"), arg(0)),
+        ("core.crypto", "__digest512_hex") => format!("{}(&({}))", regex_fn("jet_crypto_digest512_hex_impl"), arg(0)),
+        ("core.crypto", "__password_text") => format!("{}(&({}))", regex_fn("jet_crypto_password_text_impl"), arg(0)),
         // D-CRYPTO-API1=A: exact expert primitives, all checked in one bridge.
         ("core.crypto.expert", "xchacha20poly1305_seal") => format!("{}(&({}), &({}), &({}), &({}))", regex_fn("jet_crypto_expert_xchacha20poly1305_seal_impl"), arg(0), arg(1), arg(2), arg(3)),
         ("core.crypto.expert", "xchacha20poly1305_open") => format!("{}(&({}), &({}), &({}), &({}))", regex_fn("jet_crypto_expert_xchacha20poly1305_open_impl"), arg(0), arg(1), arg(2), arg(3)),
@@ -2431,11 +2426,8 @@ pub(crate) fn emit_tir_core_call(
         ),
         ("core.crypto.expert", "ed25519_sign") => format!("{}(&({}), &({}))", regex_fn("jet_crypto_expert_ed25519_sign_impl"), arg(0), arg(1)),
         ("core.crypto.expert", "ed25519_verify_strict") => format!("{}(&({}), &({}), &({}))", regex_fn("jet_crypto_expert_ed25519_verify_strict_impl"), arg(0), arg(1), arg(2)),
-        ("core.crypto.expert", "x25519") => {
-            let reject_all_zero = if args.len() == 3 { arg(2) } else { "true".to_string() };
-            format!("{}(&({}), &({}), {})", regex_fn("jet_crypto_expert_x25519_impl"), arg(0), arg(1), reject_all_zero)
-        }
-        ("core.crypto.expert", "hkdf_sha256") => format!("{}(&({}), &({}), &({}), {})", regex_fn("jet_crypto_expert_hkdf_sha256_impl"), arg(0), arg(1), arg(2), arg(3)),
+        ("core.crypto.expert", "x25519_raw") => format!("{}(&({}), &({}), true)", regex_fn("jet_crypto_expert_x25519_impl"), arg(0), arg(1)),
+        ("core.crypto.expert", "hkdf_sha256_raw") => format!("{}(&({}), &({}), &({}), {})", regex_fn("jet_crypto_expert_hkdf_sha256_impl"), arg(0), arg(1), arg(2), arg(3)),
         ("core.crypto.expert", "argon2id") => format!("{}(&({}), &({}), {}, {}, {}, {}, jet_scheduler_wait_point_cancelled, jet_task_deliver_cancel, jet_scheduler_blocking_wait_enter, jet_scheduler_blocking_wait_leave)", regex_fn("jet_crypto_expert_argon2id_cancel_impl"), arg(0), arg(1), arg(2), arg(3), arg(4), arg(5)),
         ("core.crypto.expert", "secret_bytes") => format!("{}(&({}))", regex_fn("jet_crypto_expert_secret_bytes_impl"), arg(0)),
         ("core.crypto.expert", "signing_key_bytes") => format!("{}(&({}))", regex_fn("jet_crypto_expert_signing_key_bytes_impl"), arg(0)),
@@ -2606,13 +2598,13 @@ pub(crate) fn emit_tir_core_call(
             format!("{}({}, {})", regex_fn("jet_vault_expert_commit_import_signing_impl"), arg(0), arg(1)),
         ("core.vault.expert", "commit_import_x25519") =>
             format!("{}({}, {})", regex_fn("jet_vault_expert_commit_import_x25519_impl"), arg(0), arg(1)),
-        ("jet.crypto", "__vault_wrapped_from_bytes") =>
+        ("core.crypto", "__vault_wrapped_from_bytes") =>
             format!("{}({})", regex_fn("jet_vault_wrapped_from_bytes_impl"), arg(0)),
-        ("jet.crypto", "__vault_wrapped_bytes") =>
+        ("core.crypto", "__vault_wrapped_bytes") =>
             format!("{}(&({}))", regex_fn("jet_vault_wrapped_bytes_impl"), arg(0)),
-        ("jet.crypto", "__vault_unlock_recipient") =>
+        ("core.crypto", "__vault_unlock_recipient") =>
             format!("{}(&({}))", regex_fn("jet_vault_unlock_recipient_impl"), arg(0)),
-        ("jet.crypto", "__vault_unlock_passphrase") =>
+        ("core.crypto", "__vault_unlock_passphrase") =>
             format!("{}(&({}))", regex_fn("jet_vault_unlock_passphrase_impl"), arg(0)),
         // D-NETSOCKET1=A: core.net — typed addresses, TCP/UDP/Unix/DNS, TLS handle.
         
@@ -2859,23 +2851,22 @@ pub(crate) fn emit_tir_core_call(
             "{}(&mut ({}))",
             helper("jet_net_tls_close"), arg(0)
         ),
-        // E2-M10: jet.http — HTTP client.
-        ("jet.http", "get") => {
+        // E2-M10: core.http — HTTP client.
+        ("core.http", "get") => {
             let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
             emit_http_response_from_bridge(
                 format!("{ffi}::JetHTTPAmbientDeadline::push(jet_deadline_remaining_ms()).and_then(|_ambient| {ffi}::jet_http_client_get_impl(&({})))", arg(0)),
                 ffi,
             )
         }
-        ("jet.http", "post") => {
+        ("core.http", "post") => {
             let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
             emit_http_response_from_bridge(
                 format!("{ffi}::JetHTTPAmbientDeadline::push(jet_deadline_remaining_ms()).and_then(|_ambient| {ffi}::jet_http_client_post_impl(&({}), &({})))", arg(0), arg(1)),
                 ffi,
             )
         }
-        // c109 Phase 25: HTTPRouter producer + parse/dispatch (D-ROUTE1=A), byte-for-byte
-        // `emit_core_call` (Source/Codegen/Expression.rs ~L1411). `router()` is arg-free;
+        // c109 Phase 25: HTTPRouter producer + parse/dispatch (D-ROUTE1=A).
         // `parse(raw)` borrows the raw string; `dispatch(router, req)` borrows the router
         // and passes the request by value.
         
@@ -2942,13 +2933,13 @@ pub(crate) fn emit_tir_core_call(
                 arg(0)
             )
         }
-        // D-DBDRIVER1: jet.db — SQLite via the FFI bridge crate. `open`/`open_memory`
+        // D-DBDRIVER1: core.db — SQLite via the FFI bridge crate. `open`/`open_memory`
         // are the only module-level entry points; they wrap the bridge's raw u64
         // handle in the Jet-visible `DBConnection` handle (`JetDbConnection`), so
         // every other operation dispatches by receiver TYPE as an instance method
         // (`THandleOp::DBQuery`/… in the `HandleMethod` arm below), not a second
         // module-call surface.
-        ("jet.db", "open") => {
+        ("core.db", "open") => {
             format!(
                 "{}JetDbConnection {{ handle: {}(&({})) }}",
                 cx.root_prefix,
@@ -2956,20 +2947,20 @@ pub(crate) fn emit_tir_core_call(
                 arg(0)
             )
         }
-        ("jet.db", "open_memory") => {
+        ("core.db", "open_memory") => {
             format!(
                 "{}JetDbConnection {{ handle: {}() }}",
                 cx.root_prefix,
                 regex_fn("jet_db_open_memory")
             )
         }
-        ("jet.db", "policy") => format!(
+        ("core.db", "policy") => format!(
             "{}jet_db_policy_new(({}).clone(), ({}).clone())",
             cx.root_prefix,
             arg(0),
             arg(1)
         ),
-        ("jet.plugin", "load") => {
+        ("core.plugin", "load") => {
             format!(
                 "{root}JetPlugin {{ handle: {root}jet_std::jet_plugin_load_handle(&{}(&({}))) }}",
                 regex_fn("jet_plugin_load"),
@@ -2977,11 +2968,11 @@ pub(crate) fn emit_tir_core_call(
                 root = cx.root_prefix,
             )
         }
-        // c109 Phase 20: the polymorphic core specials — byte-for-byte `emit_core_call`.
+        // c109 Phase 20: the polymorphic core specials.
         // Their return type is arg-type dependent (resolved by sema's bespoke
         // `infer_core_call` and written onto the node's `resolved_ret`, read at
         // lowering), but the EMITTED form is a fixed per-`(module, method)` string —
-        // no type decision here (I3). Args are emitted PLAINLY, exactly `emit_core_call`.
+        // no type decision here (I3). Args are emitted PLAINLY.
         ("core.math", "abs") => format!("({}).abs()", arg(0)),
         ("core.math", "min") => format!("({}).min({})", arg(0), arg(1)),
         ("core.math", "max") => format!("({}).max({})", arg(0), arg(1)),

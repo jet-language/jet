@@ -2707,7 +2707,8 @@ after the first `E`; Collect preserves
 all `E` values in order; Log records failure facts in trace without storing `E`;
 Ignore stores neither. A panic always stops that payload as HandlerFailed with
 `DispatchFailure.Panic`, independent of failure policy. DecisionHook remains
-in the same subscription and owner-lifetime family.
+in the same subscription and owner-lifetime family. The cross-primitive summary
+is the [Bounded buffering law](spec.md#bounded-buffering-law).
 
 **D-EVENT-CONTINUE1=C — Decision input, outcome output** *(ratified
 2026-07-14, card #286)*: `DecisionHook<T,E>` handlers return
@@ -2928,7 +2929,8 @@ index, not a substitute for that law.
   `EncodingError` records format, kind, zero-based byte offset, optional
   one-based line/column, DataTree path, reason, and handle-free IO cause. Whole and
   stream paths share parser, value tree, errors, limits, canonical bytes, and
-  bounded-memory law. Shipped `json.events(DataTree) => String` is unchanged;
+  bounded-memory law, summarized across primitives in the [Bounded buffering law](spec.md#bounded-buffering-law).
+  Shipped `json.events(DataTree) => String` is unchanged;
   pull events exist only through `json.reader` until an edition migration.
 
   **D-ENCXML1=A** selects one lossless namespace-aware ordinary-`DataTree` XML
@@ -3109,6 +3111,7 @@ index, not a substitute for that law.
   propagation, sampling, redaction, trace IDs, and export policy. Epoch 3
   ships typed `LogField` builders, `LogSpan` enter/close, stderr/text/JSON,
   JSONL file sinks, OTLP-file export, sampling, redaction, and counter fields.
+  Sink buffering is classified by the [Bounded buffering law](spec.md#bounded-buffering-law).
 - **D-ITERTOOLS1=A**: one lazy `Iterable`/`Iterator` model powers collection
   adapters. Collections expose beginner-friendly methods returning lazy views;
   materialization is explicit via `collect`, `to_list`, or reducers.
@@ -3119,7 +3122,7 @@ index, not a substitute for that law.
   `tasks.channel<T>(capacity: N)`, `tasks.after(ms: N)`,
   `tasks.after(ms: N, value: fallback)`, `tasks.interval(ms: N)`, and
   `g.select().recv(rx).after(ms: N, value: fallback).wait()` over one return
-  type.
+  type. Bounded channel pressure is classified by the [Bounded buffering law](spec.md#bounded-buffering-law).
 - **D-DATAFRAME1=A**: `core.data` exposes typed `Table`/`Series<T>`, schema,
   typed rows, lazy query plans, joins, windows, missing values, and plotting.
   Eager helpers and lazy plans share the same operations. Current shipped floor:
@@ -3191,7 +3194,7 @@ D-TIME-CALENDAR1; #295). PRNG
 **Crypto**: misuse-resistant `seal`/`open` + `sign`/`verify` defaults. The
 ratified raw surface is `core.crypto.expert.{xchacha20poly1305_seal,
 xchacha20poly1305_open,aes256gcm_seal,aes256gcm_open,ed25519_sign,
-ed25519_verify_strict,x25519,hkdf_sha256,argon2id}` plus the explicit
+ed25519_verify_strict,x25519_raw,hkdf_sha256_raw,argon2id}` plus the explicit
 `secret_bytes`, `signing_key_bytes`, `x25519_secret_bytes`, and
 `shared_secret_bytes` exposure functions (D-CRYPTO-API1). Every call requires
 an audited `#Unsafe` region (D-CRYPTOENV1, E0510/E0511). Secret-bearing values
@@ -4560,7 +4563,7 @@ call-graph/effects/member facts plus typed Package and workspace-overlay facts;
 foundation for dossier views, breadcrumb hints, impact analysis, and codemods
 (D-DOSSIER1/D-BREADCRUMB1/D-IMPACT1/D-CODEMOD1). `jet inspect dossier <file> [Symbol]`
 is the D-WD2 umbrella over those facts; `jet inspect codemod` starts with named JSON
-rename objects (`dry-run`/`apply`/`undo`) and replay logs. **D-DX5**: PATH `jet-*`
+rename objects (`<plan.json> --dry-run`, `apply <plan.json>`, `undo <log.json>`) and replay logs. **D-DX5**: PATH `jet-*`
 helper discovery (cargo/git-style external commands). **D-DX5-HOOK1=A**:
 compiler-extension WASM components (typed post-sema snapshot; see above) —
 not PATH helpers and not `target: plugin`. **D-REF3**: borrowed-return +
@@ -5008,7 +5011,7 @@ calls are at-most-once with per-sender FIFO. Full mailboxes wait under deadline
 or return `Full`; timeout after send returns `Ambiguous`, never retries silently.
 DurableAtLeastOnce requires typed idempotency key, dedup/transaction contract,
 retention, typed receipt, and handled dead-letter endpoint. Exactly-once is never
-claimed.
+claimed. Mailbox pressure is classified by the [Bounded buffering law](spec.md#bounded-buffering-law).
 
 **D-SERVICE-STATE1=D — explicit state adapters and one commit point**: services
 restart empty unless they declare `.Snapshot` or `.EventLog`; both reuse schema
@@ -5040,7 +5043,7 @@ generation and reconcile through the proof-gated rollout object.
 #### Formatter, profiler, and notebooks
 
 **D-FMTPROJECT1=D — project formatter contract**: `jet fmt` discovers
-workspace/package/cwd scope, accepts explicit paths, `--check --diff`,
+workspace/package/cwd scope, accepts explicit paths, `--dry-run`, `--check --diff`,
 `--changed`, and stdin. Exit 0 means clean/formatted, 1 means check differences,
 and 2 means usage/parse/I/O failure. Preflight finds all failures before a
 zero-write abort. `jet fmt - --stdin-path=...` gives editor-equivalent stdin

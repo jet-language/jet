@@ -478,8 +478,8 @@ pub(crate) fn is_prelude_struct_name(name: &str) -> bool {
 }
 
 /// c109 Phase 19: is a FOREIGN (imported user) struct literal `alias.Type { … }` in
-/// subset? The AST `emit_struct_lit` `import_ns` branch (Source/Codegen/Expression.rs)
-/// emits `{root}{import_mods[alias]}::{mangle(Type)}[::<args>]` with MANGLED field names.
+/// subset? The `import_ns` struct-literal branch emits
+/// `{root}{import_mods[alias]}::{mangle(Type)}[::<args>]` with MANGLED field names.
 /// Cover it when: the import alias resolves in `cx.import_mods` (so the module head is
 /// total), the type is a registered cross-module type (`cx.foreign_types`), and every
 /// turbofish type arg is a covered/type-var value. The field VALUES are checked in-subset

@@ -3,7 +3,9 @@ use jet_foundation::{
     AST::ProgramBundle,
 };
 
-use super::api_debug::{try_resident, try_resident_hot_swap, try_resident_restart};
+use super::api_debug::{
+    cranelift_host_supported, try_resident, try_resident_hot_swap, try_resident_restart,
+};
 use super::deopt::run_whole_interp;
 use super::tiers::plan_tiers;
 use super::trace::note_deopt_invoked_for_test;
@@ -23,6 +25,16 @@ impl JitBackend for CraneliftBackend {
     fn run(&mut self, bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
         let _ = try_anyway;
         TIR::install_comptime_bridge();
+        if cranelift_host_supported() {
+            if let Err(reason) = crate::Ffi::bind_bundle_ffi(bundle) {
+                let mut plan = plan_tiers(bundle, None);
+                if let Some(gap) = plan.gap.as_mut() {
+                    gap.reason = reason;
+                }
+                note_deopt_invoked_for_test();
+                return run_whole_interp(bundle, &plan);
+            }
+        }
         match try_resident(bundle) {
             Ok(outcome) => outcome,
             Err(plan) => {

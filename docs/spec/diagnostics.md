@@ -13,6 +13,18 @@ Every diagnostic has four parts:
 - **why** — the rule behind the error, so the user learns the model.
 - **fix** — a concrete next step, copy-pasteable when possible.
 
+## Diagnostic code grammar
+
+Jet uses one code grammar with two valid shapes:
+
+- numeric: `E` or `L` followed by four digits, such as `E0102` or `L0201`;
+- word-shaped: `E-<WORD>-<WORD>` with two or more uppercase words separated by
+  `-`, such as `E-WEB-ABI-TYPE`.
+
+Each word starts with an uppercase letter and continues with uppercase letters
+or digits. Both shapes are stable diagnostic codes. `jet explain` and I4
+coverage checks accept both.
+
 ## Adding a diagnostic
 
 1. Prove the rejection belongs in the Jet front end, not rustc or codegen, and
@@ -723,6 +735,8 @@ renumbered, and no new `W` code may be allocated.
 | E1260 | jet   | a plugin's exported `pub fn` isn't all-`Int` or all-`Float` (v1 plugin scope, D-PLUGIN-EXPORT1=A) |
 | E1261 | jet   | a dev-supervised service never became healthy within the readiness timeout (U12) |
 | E1262 | jet   | a dev-supervised `Service` field jetpack doesn't recognize at supervision time (U12) |
+| E1338 | jet   | a loadable `.jetlib` artifact's compiler-identity stamp doesn't match the running compiler — refused before mapping (D-LIB-REUSE1=B) |
+| E1339 | jet   | a loaded library declares an effect the load site's grant doesn't cover — refused before mapping (D-LIB-DYNTRUST1=A) |
 | E1263 | jetpack | `jetpack secrets get <name>` names an entry that isn't in the encrypted store (D-JPK-SECRETCRYPTO1) |
 | E1264 | sema  | a function reaches `core.vault.get` without declaring the `Secret` effect (D-JPK-SECRETCRYPTO1) |
 | E1265 | comptime | `core.vault.get` reached from a build-time (comptime) context — secrets are never readable at build time (D-JPK-SECRETCRYPTO1) |
@@ -1756,6 +1770,8 @@ front-end `.jet` diagnostics).
 | E1260 | A plugin's exported function has an unsupported signature. | v1 plugin exports (D-PLUGIN-EXPORT1=A) support only functions whose parameters and return type are all `Int` or all `Float` — Bool/Text need more of the Component Model's ABI machinery, a real follow-on rather than this increment's scope. | Narrow the signature to all-`Int`/all-`Float`, or drop `pub` if this function isn't meant to be called across the plugin boundary. |
 | E1261 | Service `{name}` never became healthy. | `jet dev`/`jetpack services up` supervises a `services:` process, then polls its readiness contract (`ready:`, else a TCP probe on its first `ports:` entry, else a bare process-alive check) until it passes or a timeout elapses (U12); it never passed in time. | Check `jetpack services logs {name}` for what the process printed, confirm its `run`/`ready` declarations are correct, or raise the timeout isn't configurable yet — fix the service itself. |
 | E1262 | Service `{name}` has a field jetpack doesn't recognize: `{field}`. | A dev-supervised `Service` stays the one ratified open record (U12) at parse time, but jetpack's dev-runtime tier is the only consumer of a dev service's fields — unlike the jetos `system.*.services` capture, nothing downstream forwards unread metadata, so an unrecognized key here is almost always a typo. | Rename `{field}` to one of the recognized keys (`enable`, `ports`, `run`, `shutdown`, `data_dir`, `ready`, `after`, `before_start`, `sockets`, `restart`, `watch`), or remove it. |
+| E1338 | This loadable library was built by Jet `{artifact_version}`, but the loading program uses Jet `{host_version}`. | A `.jetlib` artifact pins the exact compiler identity that built it (D-LIB-REUSE1=B) — Jet makes no cross-version binary layout promise, so a mismatched artifact is refused before it is mapped, never linked with stale layout assumptions. | Rebuild the library with the loading program's Jet version, or install a matching Jet toolchain. |
+| E1339 | Library `{name}` declares the `{effect}` effect, which this load site doesn't grant. | A loadable Jet library declares its effects like any package (D-LIB-DYNTRUST1=A); the host states what it grants at the load site, and a library asking for more is refused before it is mapped. Compiler identity is verified first, so this check only runs against an artifact already proven to come from this compiler. | Widen the grant at the load site to include `{effect}`, or remove the effect from the library. |
 | E1263 | No secret named `{name}`. | `jetpack secrets get {name}` decrypted the store (`.jet/secrets.age`) fine, but it has no entry called `{name}` (D-JPK-SECRETCRYPTO1). | Set it first with `jetpack secrets set {name} <value>`, or check the spelling. |
 | E1264 | `{fn}` reads a secret but doesn't declare the `Secret` effect. | Reading a secret (`core.vault.get`) always requires an explicit grant (D-JPK-SECRETCRYPTO1) — unlike every other effect, there is no silently inferred default. A bare `fn` with no `=[…]=>` list, or one that omits `Secret`, is rejected even though the same function may infer other effects. | Add `=[Secret]=>` to `{fn}`'s signature, or add `Secret` to its existing effect ceiling. |
 | E1265 | `core.vault.get` can't be reached from a build-time context. | Module-field and comptime evaluation run before secrets are decrypted (D-JPK-SECRETCRYPTO1). A repository opens its encrypted store only at ordinary runtime, such as inside a `=[Secret]=>` function. There is no `#Impure` or `--allow-impure` escape hatch because a build artifact must never contain a decrypted secret. | Move the secret read out of comptime or module-field evaluation and into ordinary runtime code. |

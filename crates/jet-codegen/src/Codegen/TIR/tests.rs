@@ -1203,10 +1203,10 @@ fn mk() {
         // c109 Phase 25: the HTTPRouter producer + parse/dispatch core calls are covered
         // (fixed-string emits; their return types live in sema's `infer_core_call`, not
         // `core_fixed_sig`). `http.serve` stays out (closure-taking → `CoreClosureCall`).
-        assert!(core_call_covered("jet.http", "router"));
-        assert!(core_call_covered("jet.http", "parse"));
-        assert!(core_call_covered("jet.http", "dispatch"));
-        assert!(!core_call_covered("jet.http", "serve"));
+        assert!(core_call_covered("core.http", "router"));
+        assert!(core_call_covered("core.http", "parse"));
+        assert!(core_call_covered("core.http", "dispatch"));
+        assert!(!core_call_covered("core.http", "serve"));
         // c109 Phase 29: qualified `io.input` is a covered core call. NOT in
         // `core_fixed_sig` (its `Result<String, IOError>` return lives in sema's bespoke
         // `infer_core_call` arm, reproduced in `core_call_return_ty`). Distinct from the
@@ -1435,9 +1435,9 @@ fn greet() => String { return input() }
         assert!(is_subset_param_ty(&apply("Derived"), &cx));
         assert!(!is_covered_reactive_ty(&apply("Receiver"), &cx));
         // The producer + closure-call shapes are covered.
-        assert!(core_call_covered("jet.reactive", "signal"));
+        assert!(core_call_covered("core.reactive", "signal"));
         assert!(crate::Sema::is_polymorphic_core_special(
-            "jet.reactive",
+            "core.reactive",
             "derived"
         ));
     }

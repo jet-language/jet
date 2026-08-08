@@ -18,6 +18,7 @@ fn tls_call_diag(impure_depth: usize, allow_impure: bool) -> Diagnostic {
         args: Vec::new(),
         recv_type: None,
         resolved_ret: None,
+        checked_widen: false,
     };
     let funcs = HashMap::new();
     let extern_names = HashSet::new();
@@ -119,6 +120,7 @@ fn core_tls_repl_requests_use_the_net_effect() {
         args: Vec::new(),
         recv_type: None,
         resolved_ret: None,
+        checked_widen: false,
     };
     let stmts = vec![Stmt::Grant {
         caps: vec![("Net".to_string(), span)],

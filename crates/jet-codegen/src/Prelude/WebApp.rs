@@ -51,75 +51,54 @@ mod jet_webapp_impl {
     }
 
     impl JetWebApp {
-        pub fn route<F>(&self, path: String, handler: F) -> JetWebApp
-        where
-            F: Fn() -> JetWebPage + Send + Sync + 'static,
-        {
+        pub fn route(&self, path: String, handler: PageHandler) -> JetWebApp {
             let mut state = self.state.lock().unwrap();
             let render = state.render.clone();
-            state.routes.push((path, Arc::new(handler), render));
+            state.routes.push((path, handler, render));
             self.clone()
         }
 
-        pub fn page<F>(&self, path: String, handler: F) -> JetWebApp
-        where
-            F: Fn() -> JetWebPage + Send + Sync + 'static,
-        {
+        pub fn page(&self, path: String, handler: PageHandler) -> JetWebApp {
             self.route(path, handler)
         }
 
-        pub fn layout<F>(&self, path: String, handler: F) -> JetWebApp
-        where
-            F: Fn() -> JetWebPage + Send + Sync + 'static,
-        {
+        pub fn layout(&self, path: String, handler: PageHandler) -> JetWebApp {
             self.route(path, handler)
         }
 
-        pub fn action<F>(&self, name: String, handler: F) -> JetWebApp
-        where
-            F: Fn() + Send + Sync + 'static,
-        {
+        pub fn action(&self, name: String, handler: ActionHandler) -> JetWebApp {
             self.state.lock().unwrap().actions.push((
                 name,
-                Arc::new(handler),
+                handler,
                 "action".to_string(),
             ));
             self.clone()
         }
 
-        pub fn form<F>(&self, name: String, handler: F) -> JetWebApp
-        where
-            F: Fn() + Send + Sync + 'static,
-        {
+        pub fn form(&self, name: String, handler: ActionHandler) -> JetWebApp {
             self.state.lock().unwrap().actions.push((
                 name,
-                Arc::new(handler),
+                handler,
                 "form".to_string(),
             ));
             self.clone()
         }
 
-        pub fn data<F>(&self, name: String, handler: F) -> JetWebApp
-        where
-            F: Fn() + Send + Sync + 'static,
-        {
+        pub fn data(&self, name: String, handler: ActionHandler) -> JetWebApp {
             self.state.lock().unwrap().actions.push((
                 name,
-                Arc::new(handler),
+                handler,
                 "data".to_string(),
             ));
             self.clone()
         }
 
-        pub fn mount<F>(&self, prefix: String, handler: F) -> JetWebApp
-        where
-            F: Fn(&String) + Send + Sync + 'static,
-        {
+        pub fn mount(&self, prefix: String, handler: MountHandler) -> JetWebApp {
             self.state
                 .lock()
                 .unwrap()
                 .mounts
-                .push((prefix, Arc::new(handler)));
+                .push((prefix, handler));
             self.clone()
         }
 

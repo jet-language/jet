@@ -15,6 +15,7 @@ use std::process::{exit, Command};
 
 use jet::Diagnostics::ColorChoice;
 use jet::ExitCodes;
+use jet_foundation::BuildEffect;
 
 mod CmdCodemod;
 mod CmdBudget;
@@ -367,6 +368,11 @@ pub(crate) fn usage() -> String {
     // #1659 criterion 1: rendered from jet::CLI's one COMMAND_GROUPS table.
     let inspect_commands = jet::CLI::command_group_usage("inspect");
     let registry_commands = jet::CLI::command_group_usage("registry");
+    let effect_roots = BuildEffect::ALL
+        .iter()
+        .map(|effect| effect.flag())
+        .collect::<Vec<_>>()
+        .join("/");
     format!(
         "\
 Welcome to {lang}! (v{ver})
@@ -401,14 +407,15 @@ usage:
   {bin} debug <file.{ext}>          step through a program at the Jet source level (D-DBG3)
   {bin} repl                         start an interactive session (E2-M18)
   {bin} repl  --project <dir>        same, with access to a project's imports
-  {bin} repl  --allow-<root>         pre-authorize one Core effect root (fs/env/exec/net/io)
-  {bin} repl  --deny-<root>          deny one Core effect root; overrides allow and prompts
+  {bin} repl  --allow-<root>         pre-authorize one Core effect root ({effect_roots})
+  {bin} repl  --deny-<root>          deny one Core effect root; overrides allow and prompts ({effect_roots})
   {bin} eval  <file.{ext}> --pure   evaluate a pure program to stable JSON (S60)
   {bin} fmt                         rewrite all .jet files in the project to canonical style
   {bin} fmt   <file|dir>...         rewrite specific files or directories (recurse)
   {bin} fmt   -                     read from stdin, write formatted source to stdout
   {bin} fmt   --check               exit 1 if any file would change; list paths (CI gate)
   {bin} fmt   --check --diff        same, also print unified diffs
+  {bin} fmt   --dry-run             show formatting changes, write nothing
   {bin} fmt   --changed             format only VCS-changed .jet files (requires git)
   {bin} fix   <file.{ext}>          apply all auto-fixable diagnostics in place
   {bin} fix   <file.{ext}> --dry-run   show the fixes as a diff, write nothing
@@ -451,6 +458,7 @@ supply chain (E2-M8):
 flags:
   emit --rust <file.{ext}>     print generated Rust source
   --check                      with fmt: exit 1 if file would change (CI)
+  --dry-run                    with rewrite commands: preview changes without writing
   --sbom                       with build: write an SPDX SBOM beside the binary
   --vendor-dir <path>          with vendor: directory to copy dependencies into
   --small                      with build/run: smallest binary (S15)
@@ -991,14 +999,19 @@ fn main() {
     let emit_rust = false;
     let emit_generated = jet_argv.iter().any(|a| a == "--emit-generated");
     let fmt_check = jet_argv.iter().any(|a| a == "--check");
+    let dry_run = jet_argv.iter().any(|a| a == jet::CLI::DRY_RUN_FLAG);
     let json = jet_argv.iter().any(|a| a == "--json");
     let small = jet_argv.iter().any(|a| a == "--small");
     let freestanding_flag = jet_argv.iter().any(|a| a == "--freestanding");
     let allow_impure = jet_argv.iter().any(|a| a == "--allow-impure");
-    let build_grants: Vec<String> = ["exec", "fs", "net", "env", "io", "db", "time", "rand", "log", "gpu"]
+    let build_grants: Vec<String> = BuildEffect::ALL
         .into_iter()
-        .filter(|effect| jet_argv.iter().any(|arg| arg == &format!("--allow-{effect}")))
-        .map(str::to_string)
+        .filter(|effect| {
+            jet_argv
+                .iter()
+                .any(|arg| arg == &format!("--allow-{}", effect.flag()))
+        })
+        .map(|effect| effect.flag().to_string())
         .collect();
     let locked = jet_argv.iter().any(|a| a == "--locked");
     let annotated = jet_argv.iter().any(|a| a == "--annotated");
@@ -1463,7 +1476,7 @@ fn main() {
             let stdin_path: Option<String> = jet_argv
                 .iter()
                 .find_map(|a| a.strip_prefix("--stdin-path=").map(str::to_string));
-            let show_diff = jet_argv.iter().any(|a| a == "--diff");
+            let show_diff = jet_argv.iter().any(|a| a == "--diff") || dry_run;
             let changed_only = jet_argv.iter().any(|a| a == "--changed");
             let explicit_paths: Vec<String> =
                 path_args.into_iter().filter(|p| p != "-").collect();
@@ -1471,7 +1484,7 @@ fn main() {
                 &explicit_paths,
                 stdin_mode,
                 stdin_path.as_deref(),
-                fmt_check,
+                fmt_check || dry_run,
                 show_diff,
                 changed_only,
                 mode,
@@ -1821,14 +1834,21 @@ fn main() {
                 .iter()
                 .find_map(|a| a.strip_prefix("--project=").map(str::to_string))
                 .or_else(|| flag_value(&raw, "--project").map(str::to_string));
-            let roots = ["exec", "fs", "net", "env", "io", "db", "time", "rand", "log", "gpu"];
-            let allow: Vec<String> = roots.into_iter()
-                .filter(|root| raw.iter().any(|arg| arg == &format!("--allow-{root}")))
-                .map(str::to_string)
+            let allow: Vec<String> = BuildEffect::ALL
+                .into_iter()
+                .filter(|effect| {
+                    raw.iter()
+                        .any(|arg| arg == &format!("--allow-{}", effect.flag()))
+                })
+                .map(|effect| effect.flag().to_string())
                 .collect();
-            let deny: Vec<String> = roots.into_iter()
-                .filter(|root| raw.iter().any(|arg| arg == &format!("--deny-{root}")))
-                .map(str::to_string)
+            let deny: Vec<String> = BuildEffect::ALL
+                .into_iter()
+                .filter(|effect| {
+                    raw.iter()
+                        .any(|arg| arg == &format!("--deny-{}", effect.flag()))
+                })
+                .map(|effect| effect.flag().to_string())
                 .collect();
             run_repl(project.as_deref(), &allow, &deny, mode.color);
             return;
@@ -2192,7 +2212,6 @@ fn main() {
 
     match cmd {
         "fix" => {
-            let dry_run = jet_argv.iter().any(|a| a == "--dry-run");
             let edition = jet_argv
                 .iter()
                 .find_map(|a| a.strip_prefix("--edition=").map(str::to_string));

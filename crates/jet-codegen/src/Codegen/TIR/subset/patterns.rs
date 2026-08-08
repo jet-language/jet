@@ -144,6 +144,7 @@ pub(crate) fn arm_variant_pattern(cx: &Cx, cond: &Expr, subject: &Expr) -> Optio
                     return Some(Pattern::Variant {
                         variant: variant.clone(),
                         bindings: Vec::new(),
+                        leading_dot: false,
                         span: *rhs_span,
                     });
                 }

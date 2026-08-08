@@ -46,10 +46,10 @@ module complete<T, count: Int, label: String> {
     module nested<U> { pub fn keep(value: U) => U { return ~value } }
     module nested_use = nested<T>
     #Meta(category: label)
-    pub fn marked(value: #Marked T) => #Marked T {
+    pub fn marked(value: ^#Marked T) => #Marked T {
         #Meta(category: label)
         local := T.{ value }
-        return ~local
+        return local
     }
     #Test fn identity(value: T) { expect(count == count) }
     #Bench("complete") { expect(label == label) }
@@ -145,6 +145,59 @@ fn run() {}
     let _ = std::fs::remove_dir_all(root);
     assert_nested_generic_module_execution();
     assert_closed_value_identity();
+}
+
+#[test]
+fn generic_module_local_bindings_shadow_substitution_values() {
+    let source = r#"
+module box<capacity: Int> {
+    $base :: capacity
+    pub fn shadowed() => Int {
+        $base :: 5
+        return $base
+    }
+    pub fn plain_shadowed() => Int {
+        capacity := 5
+        return capacity
+    }
+}
+module b32 = box<32>
+fn run() {
+    print(b32.shadowed())
+    print(b32.plain_shadowed())
+}
+"#;
+    let root = std::env::temp_dir().join(format!(
+        "jet_generic_module_shadowing_{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).expect("create generic-module shadowing directory");
+    let path = root.join("main.jet");
+    std::fs::write(&path, source).expect("write generic-module shadowing program");
+
+    for release in [false, true] {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
+        command.arg("run");
+        if release {
+            command.arg("--release");
+        }
+        let output = command
+            .arg(&path)
+            .output()
+            .unwrap_or_else(|error| panic!("run generic-module shadowing program: {error}"));
+        assert!(
+            output.status.success(),
+            "generic-module shadowing failed (release={release}):\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "5\n5\n",
+            "generic-module local bindings must shadow substitutions (release={release})"
+        );
+    }
+    let _ = std::fs::remove_dir_all(root);
 }
 
 fn assert_nested_generic_module_execution() {
@@ -299,8 +352,8 @@ fn generic_scalar_matrix() {
     for lit in types {
         let src = format!(
             r#"
-fn twice<T>(x: T) => Pair<T> {{
-    return Pair<T>.{{ first: x, second: x }}
+fn twice<T>(x: ^T, y: ^T) => Pair<T> {{
+    return Pair<T>.{{ first: x, second: y }}
 }}
 
 struct Pair<T> {{
@@ -309,7 +362,7 @@ struct Pair<T> {{
 }}
 
 fn run() {{
-    p :: twice({lit})
+    p :: twice({lit}, {lit})
     print(p.first)
 }}
 "#
@@ -322,8 +375,8 @@ fn run() {{
 #[test]
 fn generic_fn_with_scalar_types() {
     let src = r#"
-fn twice<T>(x: T) => Pair<T> {
-    return Pair<T>.{ first: x, second: x }
+fn twice<T>(x: ^T, y: ^T) => Pair<T> {
+    return Pair<T>.{ first: x, second: y }
 }
 
 struct Pair<T> {
@@ -332,8 +385,8 @@ struct Pair<T> {
 }
 
 fn run() {
-    a :: twice(1)
-    b :: twice(2.5)
+    a :: twice(1, 1)
+    b :: twice(2.5, 2.5)
     print(a.first)
     print(b.first)
 }
@@ -352,7 +405,7 @@ struct Wrap<Kind> {
     val: Kind
 }
 
-fn wrap<Kind>(x: Kind) => Wrap<Kind> {
+fn wrap<Kind>(x: ^Kind) => Wrap<Kind> {
     return Wrap<Kind>.{ val: x }
 }
 
@@ -373,7 +426,7 @@ fn run() {
 #[test]
 fn multi_char_type_param_fn_only() {
     let src = r#"
-fn identity<Elem>(x: Elem) => Elem {
+fn identity<Elem>(x: ^Elem) => Elem {
     return x
 }
 
@@ -397,8 +450,8 @@ fn run() {
 fn multi_char_matches_single_char() {
     // identical to generic_scalar_matrix but using `Elem` instead of `T`
     let src = r#"
-fn twice<Elem>(x: Elem) => Pair<Elem> {
-    return Pair<Elem>.{ first: x, second: x }
+fn twice<Elem>(x: ^Elem, y: ^Elem) => Pair<Elem> {
+    return Pair<Elem>.{ first: x, second: y }
 }
 
 struct Pair<Elem> {
@@ -407,7 +460,7 @@ struct Pair<Elem> {
 }
 
 fn run() {
-    p :: twice(1)
+    p :: twice(1, 1)
     print(p.first)
 }
 "#;

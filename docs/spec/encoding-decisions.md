@@ -33,8 +33,7 @@ doc :: xml.parse(input)?
 item :: xml.decode<Item>(input)?
 
 reader :: json.reader(^file)?
-loop {
-    ev :: reader.next()? ?? break
+loop ev, reader {
     handle(ev)
 }
 writer :: json.writer(^out, canonical: true)?
@@ -53,12 +52,13 @@ EncodingLimits fields are buffer_bytes, max_depth, max_item_bytes, max_total_byt
 EncodingError fields are format: EncodingFormat, kind: EncodingErrorKind, byte_offset: Int, line: Int?, column: Int?, path: String, reason: String, cause: EncodingCause?. EncodingCause is a Clone+Eq snapshot { kind: String, os_code: Int?, message: String }; it is not IOError and carries no host handle. EncodingError and EncodingCause derive Clone and Eq. cause is Val only for kind IO, otherwise None; cause() returns that snapshot. Display is exactly `<Format> <Kind> at byte <offset>[, line <line>, column <column>][, path <path>]: <reason>` with absent clauses omitted; cause text stays separate. byte_offset is zero-based wire bytes; textual line/column are one-based; path is the best known DataTree path or empty. The first terminal error is stored; every later method returns an equal clone. Clean EOF is stable None only after full structural validation and trailing-input checks. Runtime parse failures are returned Core values, not new compiler diagnostics; wrong methods/types reuse existing Core type diagnostics. Any new compiler diagnostic still needs diagnostics.md + UI snapshot under I4.
 
 Synchronous blocking is the v1 backpressure law. next reads only until one item or terminal state. write returns only after the item is accepted inside the bound, flushing underlying bytes when needed; no thread, task, channel, callback, hidden queue, WouldBlock, or partial-success status exists. flush pushes bytes but does not validate closure. finish validates closure, flushes, is required for successful output, and is idempotent after success. write after finish returns kind State. Drop closes handles; dropping unfinished output never claims success.
+The cross-primitive classification is the [Bounded buffering law](spec.md#bounded-buffering-law).
 
 A applicability: JSONReader.next => DataEvent? ? EncodingError and JSONWriter.write(DataEvent); exactly one root. CBOR uses the same DataEvent and rejects tags, non-text map keys, bignums, or other values outside DataTree as Unsupported, never coercing. DataEvent is Null, Bool(Bool), Int(Int), Float(Float), Text(String), Bytes([U8]), ArrayStart, ArrayEnd, ObjectStart, Key(String), ObjectEnd. JSONWriter rejects DataEvent.Bytes with kind Unsupported and reason `JSON cannot encode Bytes; encode bytes as Text explicitly`, and rejects a Float whose value is NaN or positive/negative infinity with kind Unsupported and reason `JSON cannot encode a non-finite Float`. Validation happens before accepting or emitting bytes for that event; bytes from earlier accepted events may already be flushed. canonical false and true use this identical rejection law. JSON canonical writing buffers/sorts each object within max_item_bytes. JSONLReader.next => DataTree?; writer.write(DataTree); one complete value per non-empty record. CSVReader.next => [String]?; writer.write([String]); one RFC-4180 record including quoted newlines.
 
 XMLReader/XMLWriter use D-ENCXML1's exact event/node algebra, item type, lexical-preservation law, namespace-expanded names, parse/render options, and field-by-field XMLError projection below. Safe parse options never open external identifiers, expand only an explicit in-memory map, and charge shared expansion budgets. Chunk boundaries cannot change events or errors. Collecting events reconstructs the structurally equal whole value tree; lexical evidence belongs only to D-ENCXML1 fields.
 
-Compatibility/evolution: all stream names are new; json.events remains unchanged as specified above. Stream types are non-Codable state handles and cannot be copied. EncodingFormat is exhaustive in v1, so adding a format variant is source-breaking for exhaustive matches and requires an edition-migration decision plus generated rewrite; adding format-specific handles alone does not change the enum. DataEvent changes only if DataTree changes through an owner decision. Beginner pass: whole-value calls remain smallest; JSONL/CSV use an explicit four-line fallible pull loop. Expert pass: ownership, exact event types, byte offsets, namespace/entity law, limits, flush/finish, deterministic output, and backpressure are explicit. Hybrid pass: whole and stream paths use one parser, one DataTree, one error law, and one event algebra.
+Compatibility/evolution: all stream names are new; json.events remains unchanged as specified above. Stream types are non-Codable state handles and cannot be copied. EncodingFormat is exhaustive in v1, so adding a format variant is source-breaking for exhaustive matches and requires an edition-migration decision plus generated rewrite; adding format-specific handles alone does not change the enum. DataEvent changes only if DataTree changes through an owner decision. Beginner pass: whole-value calls remain smallest; every stream reader uses the ordinary bounded reader loop. Expert pass: ownership, exact event types, byte offsets, namespace/entity law, limits, flush/finish, deterministic output, and backpressure are explicit. Hybrid pass: whole and stream paths use one parser, one DataTree, one error law, and one event algebra.
 
 ### Selected option: Codec-native pull handles
 
@@ -72,9 +72,7 @@ use core.files as files
 fn run() => () ? {
     input := files.open("catalog.json")?
     reader := json.reader(^input, limits: encoding.EncodingLimits.safe())?
-    loop {
-        next :: reader.next()?
-        if next == None { break }
+    loop next, reader {
         if next == Val(.Key(name)) and name == "item" { print("item") }
     }
 }

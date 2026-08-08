@@ -110,8 +110,8 @@ pub(super) fn evaluate(
         ("core.net", "udp_packet_truncated") => net_value_field(args, "UDPPacket", "truncated", span),
         ("core.crypto.expert", "ed25519_verify_strict") => crypto_ed25519_verify(args, span),
         ("core.crypto.expert", "ed25519_sign") => crypto_ed25519_sign(args, span),
-        ("core.crypto.expert", "hkdf_sha256") => crypto_hkdf(args, span),
-        ("core.crypto.expert", "x25519") => crypto_x25519(args, span),
+        ("core.crypto.expert", "hkdf_sha256_raw") => crypto_hkdf(args, span),
+        ("core.crypto.expert", "x25519_raw") => crypto_x25519(args, span),
         ("core.crypto.expert", "xchacha20poly1305_seal") => {
             crypto_aead_seal(args, span, "expert.xchacha20poly1305_seal", 24, false)
         }
@@ -129,14 +129,14 @@ pub(super) fn evaluate(
         ("core.crypto.expert", "signing_key_bytes") => crypto_extract(args, 0, "SigningKey", span),
         ("core.crypto.expert", "x25519_secret_bytes") => crypto_extract(args, 0, "X25519SecretKey", span),
         ("core.crypto.expert", "shared_secret_bytes") => crypto_extract(args, 0, "SharedSecret", span),
-        // TIR lowers Signature/VerifyKey/… `.bytes()` to jet.crypto.__*_bytes;
+        // TIR lowers Signature/VerifyKey/… `.bytes()` to core.crypto.__*_bytes;
         // keep those pure field extracts resident so REPL does not hit E1802.
-        ("jet.crypto", "__signature_bytes") => crypto_extract(args, 0, "Signature", span),
-        ("jet.crypto", "__verify_key_bytes") => crypto_extract(args, 0, "VerifyKey", span),
-        ("jet.crypto", "__x25519_public_bytes") => crypto_extract(args, 0, "X25519PublicKey", span),
-        ("jet.crypto", "__sealed_bytes") => crypto_extract(args, 0, "Sealed", span),
-        ("jet.crypto", "__digest256_bytes") => crypto_extract(args, 0, "Digest256", span),
-        ("jet.crypto", "__digest512_bytes") => crypto_extract(args, 0, "Digest512", span),
+        ("core.crypto", "__signature_bytes") => crypto_extract(args, 0, "Signature", span),
+        ("core.crypto", "__verify_key_bytes") => crypto_extract(args, 0, "VerifyKey", span),
+        ("core.crypto", "__x25519_public_bytes") => crypto_extract(args, 0, "X25519PublicKey", span),
+        ("core.crypto", "__sealed_bytes") => crypto_extract(args, 0, "Sealed", span),
+        ("core.crypto", "__digest256_bytes") => crypto_extract(args, 0, "Digest256", span),
+        ("core.crypto", "__digest512_bytes") => crypto_extract(args, 0, "Digest512", span),
         // Typed decode/decode_bytes run in eval_method; arms prove inventory coverage.
         ("core.encoding.xml", "decode") => Err(unsupported(
             "core.encoding.xml.decode() requires a type argument",
@@ -915,9 +915,9 @@ fn crypto_hkdf(args: &[CtValue], span: Span) -> EvalResult {
         return Ok(CtValue::failed(Box::new(crypto_error("HKDF-SHA256 output length must be 0..8160"))));
     }
     let bytes = crate::Comptime::CryptoLite::hkdf_sha256(
-        &bytes_value(one(args, 0, "core.crypto.expert", "hkdf_sha256", span)?, span)?,
-        &bytes_value(one(args, 1, "core.crypto.expert", "hkdf_sha256", span)?, span)?,
-        &bytes_value(one(args, 2, "core.crypto.expert", "hkdf_sha256", span)?, span)?,
+        &bytes_value(one(args, 0, "core.crypto.expert", "hkdf_sha256_raw", span)?, span)?,
+        &bytes_value(one(args, 1, "core.crypto.expert", "hkdf_sha256_raw", span)?, span)?,
+        &bytes_value(one(args, 2, "core.crypto.expert", "hkdf_sha256_raw", span)?, span)?,
         length as usize,
     );
     Ok(CtValue::Present(Box::new(crypto_secret("Secret", bytes))))
@@ -1146,17 +1146,13 @@ fn crypto_argon2id(args: &[CtValue], span: Span) -> EvalResult {
 }
 
 fn crypto_x25519(args: &[CtValue], span: Span) -> EvalResult {
-    let secret = bytes_value(one(args, 0, "core.crypto.expert", "x25519", span)?, span)?;
-    let public = bytes_value(one(args, 1, "core.crypto.expert", "x25519", span)?, span)?;
+    let secret = bytes_value(one(args, 0, "core.crypto.expert", "x25519_raw", span)?, span)?;
+    let public = bytes_value(one(args, 1, "core.crypto.expert", "x25519_raw", span)?, span)?;
     if secret.len() != 32 || public.len() != 32 {
         return Ok(CtValue::failed(Box::new(crypto_error("X25519 keys must contain exactly 32 bytes"))));
     }
     let shared = crate::Comptime::CryptoLite::x25519(&secret, &public).expect("length checked");
-    let reject_all_zero = match args.get(2) {
-        Some(CtValue::Bool(value)) => *value,
-        _ => return Err(unsupported("core.crypto.expert.x25519() needs a Bool third argument", span)),
-    };
-    if reject_all_zero && shared == [0; 32] {
+    if shared == [0; 32] {
         return Ok(CtValue::failed(Box::new(crypto_error("X25519 peer key does not contribute to a shared secret"))));
     }
     Ok(CtValue::Present(Box::new(crypto_secret("Secret", shared.to_vec()))))

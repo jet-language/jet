@@ -359,7 +359,10 @@ extern "C" fn jet_jit_shared_downgrade(handle: i64) -> i64 {
 extern "C" fn jet_jit_shared_strong_count(handle: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         shared(rt, handle)
-            .map(|state| Arc::strong_count(&state) as i64)
+            // `shared()` clones the Arc out of `rt.shareds` to hand back an
+            // owned handle, so `state` itself holds one strong ref the Jet
+            // program never asked for; subtract it back out (D-SHARED-CYCLE1=C).
+            .map(|state| (Arc::strong_count(&state) - 1) as i64)
             .unwrap_or(0)
     })
 }

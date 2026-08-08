@@ -15,7 +15,6 @@ fn provenance_cell(
     cell
 }
 
-
 // Serialize all tests that mutate the process-global JET_STORE_DIR to prevent
 // concurrent set_var races under cargo's parallel runner.
 static STORE_LOCK: Mutex<()> = Mutex::new(());

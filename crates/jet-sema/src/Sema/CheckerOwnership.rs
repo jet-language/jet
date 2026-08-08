@@ -2051,7 +2051,7 @@ impl<'a> Checker<'a> {
             matches!(
                 &info.ty,
                 Type::Tagged { marker, inner }
-                    if marker == crate::AST::SHARED_GUARD_EDIT_MARKER
+                    if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::SharedGuardEdit))
                         && matches!(
                             inner.as_ref(),
                             Type::Apply { name, .. }
@@ -2070,7 +2070,7 @@ impl<'a> Checker<'a> {
             ) || matches!(
                 &info.ty,
                 Type::Tagged { marker, inner }
-                    if marker == crate::AST::SHARED_GUARD_READ_MARKER
+                    if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::SharedGuardRead))
                         && matches!(
                             inner.as_ref(),
                             Type::Apply { name, .. }
@@ -3947,7 +3947,7 @@ impl<'a> Checker<'a> {
                         ) || matches!(
                             &ty,
                             Type::Tagged { marker, .. }
-                                if marker == crate::AST::SHARED_GUARD_READ_MARKER
+                                if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::SharedGuardRead))
                         ) {
                             return true;
                         }
@@ -4328,6 +4328,7 @@ impl<'a> Checker<'a> {
             | Type::IntN { .. }
             | Type::Float32 => false,
             Type::Quantity { .. } => false,
+            Type::ComputeDim(_) => false,
         }
     }
 
@@ -4424,6 +4425,7 @@ impl<'a> Checker<'a> {
             | Type::IntN { .. }
             | Type::Float32 => false,
             Type::Quantity { .. } => false,
+            Type::ComputeDim(_) => false,
         }
     }
 
@@ -4591,6 +4593,7 @@ impl<'a> Checker<'a> {
                 .iter()
                 .find_map(|m| self.sendability_problem_inner(m, closure_taken, seen)),
             Type::Quantity { base, .. } => self.sendability_problem_inner(base, closure_taken, seen),
+            Type::ComputeDim(_) => None,
         }
     }
 
@@ -5528,7 +5531,7 @@ impl<'a> Checker<'a> {
             return None;
         }
         let value_ty = guard_args[0].clone();
-        let editable = marker == crate::AST::SHARED_GUARD_EDIT_MARKER;
+        let editable = matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::SharedGuardEdit));
         let tagged = |ty: Type| Type::Tagged {
             marker: marker.clone(),
             inner: Box::new(Type::Apply {

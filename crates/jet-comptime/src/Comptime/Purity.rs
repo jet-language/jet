@@ -5,7 +5,7 @@
 //! `jet-sema` depends on `jet-comptime` and not the other way around).
 //! `embed_file`, `embed_bytes`, `find`, `panic`, and `require` are allowed.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::{
@@ -315,62 +315,50 @@ pub(super) fn reachable_owned_funcs(
             .filter(|qualified| funcs.contains_key(qualified))
     }
 
-    fn collect_name(
-        name: String,
-        funcs: &HashMap<String, Func>,
-        visited: &mut HashSet<String>,
-        reachable: &mut HashMap<String, Func>,
-    ) {
-        if !visited.insert(name.clone()) {
-            return;
-        }
-        let Some(function) = funcs.get(&name) else {
-            return;
-        };
-        reachable.insert(name, function.clone());
-
-        let mut dependencies = Vec::new();
-        for statement in &function.body {
-            walk_stmt_expr_nodes(statement, WalkOpts::REACHABLE, &mut |expr| match expr {
-                Expr::Call(call) => {
-                    if let Some(name) = known_name(&call.name, funcs) {
-                        dependencies.push(name);
-                    }
-                }
-                Expr::Ident(name, _) => {
-                    if let Some(name) = known_name(name, funcs) {
-                        dependencies.push(name);
-                    }
-                }
-                _ => {}
-            });
-        }
-        for dependency in dependencies {
-            collect_name(dependency, funcs, visited, reachable);
-        }
-    }
-
-    let mut roots = Vec::new();
+    let mut roots = BTreeSet::new();
     walk_expr_nodes(init, WalkOpts::REACHABLE, &mut |expr| match expr {
         Expr::Call(call) => {
             if let Some(name) = known_name(&call.name, funcs) {
-                roots.push(name);
+                roots.insert(name);
             }
         }
         Expr::Ident(name, _) => {
             if let Some(name) = known_name(name, funcs) {
-                roots.push(name);
+                roots.insert(name);
             }
         }
         _ => {}
     });
 
-    let mut visited = HashSet::new();
-    let mut reachable = HashMap::new();
-    for root in roots {
-        collect_name(root, funcs, &mut visited, &mut reachable);
+    let mut reverse = BTreeMap::<String, BTreeSet<String>>::new();
+    for (name, function) in funcs {
+        for statement in &function.body {
+            walk_stmt_expr_nodes(statement, WalkOpts::REACHABLE, &mut |expr| {
+                let dependency = match expr {
+                    Expr::Call(call) => known_name(&call.name, funcs),
+                    Expr::Ident(name, _) => known_name(name, funcs),
+                    _ => None,
+                };
+                if let Some(dependency) = dependency {
+                    reverse.entry(dependency).or_default().insert(name.clone());
+                }
+            });
+        }
     }
-    reachable
+
+    let seeds = roots
+        .into_iter()
+        .map(|root| (root, BTreeSet::from(["reachable".to_string()])))
+        .collect();
+    let reachable_names = jet_foundation::Facts::project_reachability(
+        &reverse,
+        [jet_foundation::Facts::ReachabilityRow::new("reachable", seeds)],
+    )
+    .nodes_with("reachable", "reachable");
+    reachable_names
+        .into_iter()
+        .filter_map(|name| funcs.get(&name).cloned().map(|function| (name, function)))
+        .collect()
 }
 
 fn walk_expr_nodes(e: &Expr, opts: WalkOpts, f: &mut impl FnMut(&Expr)) {

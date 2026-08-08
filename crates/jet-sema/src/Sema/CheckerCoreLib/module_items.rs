@@ -2,9 +2,6 @@ use crate::Syntax;
 
 /// Canonical Core module member names (completion, help, diagnostics).
 pub fn core_module_items(module: &str) -> Vec<String> {
-    let normalized_module =
-        Syntax::normalize_core_module(module).unwrap_or_else(|| module.to_string());
-    let module = normalized_module.as_str();
     if module == "core.lang" {
         return crate::Policy::RULE_ARG_DECLARATIONS
             .iter()
@@ -682,9 +679,8 @@ pub fn core_module_items(module: &str) -> Vec<String> {
         // D-TERM1 (ratified 2026-06-22): terminal direct-input primitive.
         "core.term" => &["read_key"],
         "core" => &[],
-        // D-CORENS-CANON1: ring packages normalize to `jet.*` internal key via
-        // normalize_core_module; `core.*` is only the user-facing spelling.
-        "jet.log" => &[
+        // D-CORENS-CANON1: ring packages use their canonical `core.*` keys.
+        "core.log" => &[
             "info",
             "warn",
             "error",
@@ -714,7 +710,7 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "flush",
             "enabled",
         ],
-        "jet.crypto" => &[
+        "core.crypto" => &[
             "Secret",
             "SigningKey",
             "VerifyKey",
@@ -763,8 +759,8 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "migrate_v1",
             "ed25519_sign",
             "ed25519_verify_strict",
-            "x25519",
-            "hkdf_sha256",
+            "x25519_raw",
+            "hkdf_sha256_raw",
             "argon2id",
             "secret_bytes",
             "signing_key_bytes",
@@ -868,9 +864,9 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "ClientConfig", "RootCertificates", "ClientIdentity", "TLSVersion",
             "client", "read", "read_text", "write", "write_all", "write_text", "close",
         ],
-        "jet.http" => &["get", "post", "serve"],
+        "core.http" => &["get", "post", "serve"],
         // D-REGEXENGINE1=A: std-only linear regex package.
-        "jet.regex" => &[
+        "core.regex" => &[
             "flags",
             "escape",
             "compile",
@@ -917,7 +913,7 @@ pub fn core_module_items(module: &str) -> Vec<String> {
         // D-DEP-DB1: SQLite ring package.
         // D-DBDRIVER1: `close`/`query`/`query_one`/`execute`/`begin`/`commit`/
         // `rollback` are `DBConnection` instance methods, not module items.
-        "jet.db" => &[
+        "core.db" => &[
             "open",
             "open_memory",
             "policy",
@@ -931,10 +927,10 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "migrate",
         ],
         // D-DEP-WASM1=A: sandboxed WASM plugin loader ring package.
-        "jet.plugin" => &["load"],
+        "core.plugin" => &["load"],
         // D-REACT1=B: opt-in reactive library — signals/derived/effects.
         // D-SIGNAL1: "computed" is the canonical alias for "derived".
-        "jet.reactive" => &["signal", "derived", "computed", "effect"],
+        "core.reactive" => &["signal", "derived", "computed", "effect"],
         // D-EVENT1=D: first-party typed Event/Hook family.
         "core.event" => &[
             "new",
@@ -1121,13 +1117,12 @@ pub fn core_module_items(module: &str) -> Vec<String> {
 /// Ratified nominal types exported by a Core module. Separate from callable
 /// items so `alias.Type.method()` is a static type call, not a nested module.
 pub(crate) fn core_module_type_item(module: &str, item: &str) -> bool {
-    let module = Syntax::normalize_core_module(module).unwrap_or_else(|| module.to_string());
     if module == "core.lang" {
         return crate::Policy::rule_arg_declaration(item).is_some();
     }
     matches!(
-        (module.as_str(), item),
-        ("jet.crypto", "Secret" | "SigningKey" | "VerifyKey" | "X25519SecretKey"
+        (module, item),
+        ("core.crypto", "Secret" | "SigningKey" | "VerifyKey" | "X25519SecretKey"
             | "X25519PublicKey" | "SharedSecret" | "Signature" | "Sealed" | "WrappedKey"
             | "PasswordHash" | "Digest256" | "Digest512" | "CryptoError" | "FileCryptoError")
         // D-AUTH-TOKENPOLICY1=A: typed verifier result and error records.
@@ -1136,7 +1131,7 @@ pub(crate) fn core_module_type_item(module: &str, item: &str) -> bool {
         | ("core.vault", "ExpiringSecret" | "KeyRef" | "MutationPlan" | "VaultWrite" | "Rotation" | "WrappedImportPlan"
             | "KeyStatus" | "VaultError" | "WrappedVaultKey" | "KeyUnlock" | "KeyWrapError")
         | ("core.tls", "ClientConfig" | "RootCertificates" | "ClientIdentity" | "TLSVersion")
-        | ("jet.http" | "core.http.client" | "core.http.server",
+        | ("core.http" | "core.http.client" | "core.http.server",
             "Method" | "Status" | "Version" | "HeaderName" | "HeaderValue"
             | "Headers" | "Request" | "Response" | "Body" | "Handler" | "HTTPError" | "Client" | "Proxy")
         | ("core.browser",

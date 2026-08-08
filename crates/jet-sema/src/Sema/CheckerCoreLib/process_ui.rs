@@ -256,7 +256,7 @@ pub(crate) fn process_spec_method_return(
         ("terminal", 0 | 1) => Some(Some(spec_ty.clone())),
         ("env_clear" | "detached", 0) => Some(Some(spec_ty)),
         ("capabilities", 0) => Some(Some(Type::Tagged {
-            marker: crate::AST::TERMINAL_FACT_SET_MARKER.to_string(),
+            marker: crate::AST::TagMarker::Internal(crate::AST::InternalTag::TerminalFactSet),
             inner: Box::new(Type::Apply {
                 name: "Set".to_string(),
                 args: vec![Type::String],

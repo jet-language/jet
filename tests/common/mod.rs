@@ -389,7 +389,7 @@ fn push_diff_line(out: &mut BoundedDiffOutput, marker: char, line: &str, cut_mid
 
 /// Cross-process advisory lock serializing access to Jet's hidden global FFI
 /// bridge cache (`~/.cache/jet/ffi/<key>/`, keyed by a hash of the `extern
-/// rust`/`jet.regex`/`core.archive`/etc. signature — see
+/// rust`/`core.regex`/`core.archive`/etc. signature — see
 /// `crates/jet-driver/src/FFI.rs` `build_bridge`/`cache_dir`).
 ///
 /// That cache has no synchronization of its own: `build_bridge` unconditionally

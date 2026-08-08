@@ -641,6 +641,15 @@ fn public_transcript_preserves_sequential_inline_hof_mutations_exactly() {
 
 #[test]
 fn public_transcript_comptime_only_evaluates_map_call_receiver_once() {
+    std::thread::Builder::new()
+        .stack_size(16 * 1024 * 1024)
+        .spawn(public_transcript_comptime_only_evaluates_map_call_receiver_once_inner)
+        .expect("comptime map-call-receiver test thread")
+        .join()
+        .expect("comptime map-call-receiver test thread panicked");
+}
+
+fn public_transcript_comptime_only_evaluates_map_call_receiver_once_inner() {
     let values = exact_values(&[
         MAP_DECLS,
         MAP_CALL_RECEIVER_DECLS,
@@ -1423,8 +1432,8 @@ fn crypto_value_view() => String {
     ed_signature :: [U8].{ 229, 86, 67, 0, 195, 96, 172, 114, 144, 134, 226, 204, 128, 110, 130, 138, 132, 135, 127, 30, 184, 229, 217, 116, 216, 115, 224, 101, 34, 73, 1, 85, 95, 184, 130, 21, 144, 163, 59, 172, 198, 30, 57, 112, 28, 249, 180, 107, 210, 91, 245, 240, 89, 91, 190, 36, 101, 81, 65, 67, 142, 122, 16, 11 }
     output := ""
     #Unsafe("fixed RFC interop vectors") {
-        derived :: expert.hkdf_sha256(ikm, salt, info, 42) ?? panic("hkdf")
-        shared :: expert.x25519(x_secret, x_public, true) ?? panic("x25519")
+        derived :: expert.hkdf_sha256_raw(ikm, salt, info, 42) ?? panic("hkdf")
+        shared :: expert.x25519_raw(x_secret, x_public) ?? panic("x25519")
         valid :: expert.ed25519_verify_strict(ed_public, [], ed_signature) ?? false
         invalid :: expert.ed25519_verify_strict(ed_public, [1], ed_signature) ?? true
         output = "{expert.secret_bytes(derived)}|{expert.secret_bytes(shared)}|{valid}|{invalid}"
@@ -1456,7 +1465,7 @@ fn run() {
         signed :: expert.ed25519_sign(ed_seed, []) ?? panic("sign")
         sealed :: expert.aes256gcm_seal(key, nonce, msg, []) ?? panic("seal")
         plain :: expert.aes256gcm_open(key, nonce, sealed, []) ?? panic("open")
-        password :: expert.hkdf_sha256([112], [], [], 4) ?? panic("pw")
+        password :: expert.hkdf_sha256_raw([112], [], [], 4) ?? panic("pw")
         derived :: expert.argon2id(password, [0, 1, 2, 3, 4, 5, 6, 7], 8192, 1, 1, 16) ?? panic("argon")
         print("{expert.ed25519_verify_strict(ed_public, [], signed.bytes()) ?? false}|{plain}|{expert.secret_bytes(derived).len()}")
     }

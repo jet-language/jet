@@ -428,7 +428,7 @@ impl<'a> Parser<'a> {
                 let (marker, _) = self.expect_ident("after `@` in type-tag position")?;
                 let (inner, _) = self.type_()?;
                 Type::Tagged {
-                    marker,
+                    marker: TagMarker::User(marker),
                     inner: Box::new(inner),
                 }
             }

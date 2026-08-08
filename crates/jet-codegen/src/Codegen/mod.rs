@@ -33,6 +33,12 @@ mod Utils;
 mod VariadicBound;
 mod Web;
 
+/// D-REPORT-TEST1=A: host-side `jet prove` uses the same source that test
+/// harnesses receive below as their report prelude.
+pub mod test_report {
+    include!("../Prelude/TestReport.rs");
+}
+
 pub(crate) use CModule::*;
 pub(crate) use Context::*;
 pub(crate) use Imports::*;
@@ -175,6 +181,7 @@ fn jet_test_shuffle_order(len: usize, seed: u64) -> Vec<usize> {
     order
 }
 "#;
+const TEST_REPORT_PRELUDE: &str = include_str!("../Prelude/TestReport.rs");
 /// D-TEST1 (ratified 2026-06-22, option B): property-test runtime. Emitted into
 /// the `jet test` harness only when the file declares a parameterized `#Test fn`.
 /// Std-only (I6): a deterministic splitmix64 PRNG, a `JetGen` trait that
@@ -641,7 +648,7 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
             "core.binary",
         ],
     );
-    let _needs_regex = core_usage_matches(used_core, &["core.regex", "jet.regex"]);
+    let _needs_regex = core_usage_matches(used_core, &["core.regex"]);
     // needs_xml / needs_base still drive encoding Top reachability below.
 
     for part in CORELIB_KERNEL_PARTS {
@@ -694,7 +701,6 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
             "core.crypto.random",
             "core.vault",
             "core.vault.expert",
-            "jet.crypto",
             "core.uuid",
         ],
     );
@@ -729,7 +735,6 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
             "core.sketch.tdigest",
             "core.sketch.cms",
             "core.sketch.reservoir",
-            "jet.db",
             "core.db",
         ],
     );
@@ -749,7 +754,6 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
             "core.http",
             "core.http.client",
             "core.http.server",
-            "jet.http",
             "core.ws",
             "core.email",
             "core.browser",
@@ -766,7 +770,6 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
             "core.http",
             "core.http.client",
             "core.http.server",
-            "jet.http",
             "core.web",
             "core.web.devserver",
         ],
@@ -786,7 +789,7 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
     let needs_reflect = core_usage_matches(used_core, &["core.reflect", "core.lang"]);
     let needs_auth_tokens = core_usage_matches(used_core, &["core.auth"]) || needs_crypto;
     let needs_auth_session = core_usage_matches(used_core, &["core.auth", "app"]);
-    let needs_sync = core_usage_matches(used_core, &["core.sync", "app", "jet.db"]);
+    let needs_sync = core_usage_matches(used_core, &["core.sync", "app", "core.db"]);
     let needs_services = core_usage_matches(used_core, &["core.services"]);
 
     // Kernel closure: JetStd brace-chain files name these Top symbols
@@ -958,7 +961,7 @@ fn push_web_app_preludes(out: &mut String, used_core: &std::collections::HashSet
             "core.web.devserver",
         ],
     );
-    let needs_live = core_usage_matches(used_core, &["app", "core.web", "jet.db"]);
+    let needs_live = core_usage_matches(used_core, &["app", "core.web", "core.db"]);
     if needs_webapp {
         out.push_str(DEVSERVER_PRELUDE);
         out.push_str(WEBAPP_PRELUDE);
@@ -1637,7 +1640,7 @@ pub(crate) fn emit_synthetic_close_builtin_impls(cx: &Cx, items: &[Item], out: &
             ));
         }
     }
-    if uses("jet.db") {
+    if uses("core.db") {
         // D-DBPOLICY-BIND1: `Driver` is a policy-bearing scope, never the raw
         // connection. Generic calls use the same policy-enforcing helpers as
         // concrete `DBScope` calls.
@@ -2437,6 +2440,7 @@ pub fn emit_tests(prog: &Program, src: &str, file: &str) -> String {
     push_gc_prelude(&mut out);
     out.push_str(LAYOUT_PRELUDE);
     out.push_str(TEST_PRELUDE);
+    out.push_str(TEST_REPORT_PRELUDE);
     if any_property_test(&tests) {
         out.push_str(PROP_PRELUDE);
     }
@@ -2619,11 +2623,12 @@ fn emit_test_main_cov(
     // most one test (no isolation benefit, and keeps single-test runs allocation-
     // free of the thread machinery).
     out.push_str("    let serial = std::env::var(\"JET_TEST_SERIAL\").is_ok();\n");
-    out.push_str("    let results: Vec<(String, bool, bool, Option<Result<(), String>>, String)> = if serial || slots.len() <= 1 {\n");
+    out.push_str("    let results: Vec<(String, bool, bool, Option<Result<(), String>>, String, Option<JetTestFailure>)> = if serial || slots.len() <= 1 {\n");
     out.push_str("        slots.iter().map(|s| {\n");
     out.push_str("            let res = if s.skip { None } else { Some((s.run)()) };\n");
     out.push_str("            let output = jet_test_take_output();\n");
-    out.push_str("            (s.name.to_string(), s.skip, s.property, res, output)\n");
+    out.push_str("            let failure = jet_test_take_failure();\n");
+    out.push_str("            (s.name.to_string(), s.skip, s.property, res, output, failure)\n");
     out.push_str("        }).collect()\n");
     out.push_str("    } else {\n");
     out.push_str("        let handles: Vec<_> = slots.iter().map(|s| {\n");
@@ -2634,37 +2639,28 @@ fn emit_test_main_cov(
     out.push_str("            std::thread::spawn(move || {\n");
     out.push_str("                let res = if skip { None } else { Some(run()) };\n");
     out.push_str("                let output = jet_test_take_output();\n");
-    out.push_str("                (name, skip, property, res, output)\n");
+    out.push_str("                let failure = jet_test_take_failure();\n");
+    out.push_str("                (name, skip, property, res, output, failure)\n");
     out.push_str("            })\n");
     out.push_str("        }).collect();\n");
-    out.push_str("        handles.into_iter().map(|h| h.join().unwrap_or_else(|_| (\"<thread panicked>\".to_string(), false, false, Some(Err(\"test thread panicked\".to_string())), String::new()))).collect()\n");
+    out.push_str("        handles.into_iter().map(|h| h.join().unwrap_or_else(|_| (\"<thread panicked>\".to_string(), false, false, Some(Err(\"test thread panicked\".to_string())), String::new(), None))).collect()\n");
     out.push_str("    };\n");
-    out.push_str("    let mut passed = 0usize;\n");
-    out.push_str("    let mut failed = 0usize;\n");
-    out.push_str("    let mut skipped = 0usize;\n");
-    out.push_str("    for (name, skip, property, res, output) in results {\n");
+    out.push_str("    let mut report = JetTestReport::new(0, 0, 0);\n");
+    out.push_str("    for (name, skip, property, res, output, failure) in results {\n");
     out.push_str("        if !output.is_empty() { print!(\"{}\", output); }\n");
     out.push_str("        match (skip, res) {\n");
-    out.push_str("            (true, _) => { println!(\"{}: skip\", name); jet_proof_record(0, 2, &name, \"\", \"\", 0); skipped += 1; }\n");
-    out.push_str("            (false, Some(Ok(()))) => { println!(\"{}: pass\", name); if !property { jet_proof_record(0, 0, &name, \"\", \"\", 0); } passed += 1; }\n");
-    out.push_str("            (false, Some(Err(msg))) => { println!(\"{}: FAIL\", name); eprintln!(\"  {}\", msg); if !property { jet_proof_record(0, 1, &name, &msg, \"\", 0); } failed += 1; }\n");
+    out.push_str("            (true, _) => { println!(\"{}: skip\", name); jet_proof_record(0, 2, &name, \"\", \"\", 0); report.skipped += 1; }\n");
+    out.push_str("            (false, Some(Ok(()))) => { println!(\"{}: pass\", name); if !property { jet_proof_record(0, 0, &name, \"\", \"\", 0); } report.passed += 1; }\n");
+    out.push_str("            (false, Some(Err(msg))) => { let failure = failure.unwrap_or_else(|| JetTestFailure::fallback(&msg)); println!(\"{}: FAIL\", name); eprint!(\"{}\", failure.render_detail()); if !property { jet_proof_record(0, 1, &name, &failure.message, &failure.file, failure.line); } report.failed += 1; }\n");
     out.push_str("            (false, None) => unreachable!(),\n");
     out.push_str("        }\n");
     out.push_str("    }\n");
-    // D-DOTSCOPE1: keep the classic `N passed, M failed` summary unless a test was
-    // skipped, so existing goldens are unchanged when nothing skips.
-    out.push_str("    if skipped > 0 {\n");
-    out.push_str(
-        "        println!(\"{} passed, {} failed, {} skipped\", passed, failed, skipped);\n",
-    );
-    out.push_str("    } else {\n");
-    out.push_str("        println!(\"{} passed, {} failed\", passed, failed);\n");
-    out.push_str("    }\n");
+    out.push_str("    println!(\"{}\", report.summary());\n");
     if coverage {
         // D-COV1: write the hit set before any `exit` (which would skip Drop).
         out.push_str("    jet_cov_dump();\n");
     }
-    out.push_str("    if failed > 0 { std::process::exit(1); }\n");
+    out.push_str("    if report.failed > 0 { std::process::exit(1); }\n");
     out.push_str("}\n");
 }
 
@@ -3075,6 +3071,7 @@ pub fn emit_bundle_tests_cov(
     push_gc_prelude(&mut out);
     out.push_str(LAYOUT_PRELUDE);
     out.push_str(TEST_PRELUDE);
+    out.push_str(TEST_REPORT_PRELUDE);
     if want_prop_prelude {
         out.push_str(PROP_PRELUDE);
     }
@@ -3282,6 +3279,7 @@ pub fn emit_bundle_fuzz(
     push_gc_prelude(&mut out);
     out.push_str(LAYOUT_PRELUDE);
     out.push_str(TEST_PRELUDE);
+    out.push_str(TEST_REPORT_PRELUDE);
     // Fuzzing always targets a property test, so the JetRng/JetGen/shrink
     // runtime is always needed (unlike `jet test`, which only emits it when a
     // property test is present).
@@ -3543,6 +3541,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
     push_gc_prelude(&mut out);
     out.push_str(LAYOUT_PRELUDE);
     out.push_str(TEST_PRELUDE);
+    out.push_str(TEST_REPORT_PRELUDE);
     if want_prop_prelude {
         out.push_str(PROP_PRELUDE);
     }

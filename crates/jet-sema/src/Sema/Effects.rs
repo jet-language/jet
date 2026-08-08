@@ -8,8 +8,8 @@
 //! pure (the ⊥ of the lattice).
 //!
 //! This module owns the effect vocabulary, the per-function summary the checker
-//! accumulates during its walk, the whole-program fixpoint that turns those
-//! summaries into transitive inferred sets, and the boundary diagnostics
+//! accumulates during its walk, the shared fact-row traversal that turns those
+//! summaries into transitive reachability facts, and the boundary diagnostics
 //! (E0740 out-of-set against a declared effect-arrow bound). Casing is
 //! PascalCase per D-CASING1.
 //!
@@ -42,13 +42,12 @@
 //! D-WASM1) that only ever care about a whole root regardless of leaf.
 
 use crate::Diagnostics::{Diagnostic, Span};
-use std::collections::{BTreeSet, HashMap, HashSet};
 /// D-META-EFFECT1: the effect facts live in `jet-foundation` so both stages
 /// read one table. Sema keeps the solver, the diagnostics, and the checks.
 pub use jet_foundation::Effects::{
     builtin_effect, core_effect, is_irreversible_effect, Effect, EffectSet,
 };
-
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 /// D-SHAPE8 open-row entry (`..E`). The parser stores row variables beside
 /// concrete effects so every consumer can preserve the exact source spelling.
@@ -355,8 +354,6 @@ impl<'a> super::Checker<'a> {
 pub fn show_set(set: &EffectSet) -> String {
     set.iter().cloned().collect::<Vec<_>>().join(", ")
 }
-
-
 /// E0746 (D-TXN2): an irreversible effect (Net/FS/Exec) used directly inside a
 /// `#Transact { … }` block. Points at the offending call; the fix is to move it
 /// after the block or register it via `name.on_commit(() => { … })`.
@@ -417,6 +414,8 @@ pub struct EffectSummary {
 pub struct SemIndexEffectFacts {
     pub summaries: HashMap<String, EffectSummary>,
     pub solved: HashMap<String, EffectSet>,
+    /// Every inter-function reachability fact projected from the same graph.
+    pub reachability: jet_foundation::Facts::ReachabilityResult,
     /// D-MEM-FACTS1 inspect/API/semver surface. These are the exact effective
     /// declarations and checker projections from the same graph used for E0921.
     pub memory_declarations: Vec<super::MemoryFacts::MemoryFactDeclaration>,
@@ -496,43 +495,76 @@ pub struct RegionSummary {
     pub grant: bool,
 }
 
-/// Whole-program fixpoint: turn per-function summaries into transitive inferred
-/// effect sets. `summaries` is keyed by function identity (bare name for
-/// top-level functions; `Type::method` for methods). Edges name bare functions,
-/// resolved against the same map. Iterates to a fixed point so mutual recursion
-/// converges.
-pub fn solve(summaries: &HashMap<String, EffectSummary>) -> HashMap<String, EffectSet> {
-    let mut sets: HashMap<String, EffectSet> = HashMap::new();
-    for (k, s) in summaries {
-        let mut init = s.direct.clone();
-        if s.maximal {
-            init.extend(Effect::all());
+fn add_seed(seeds: &mut BTreeMap<String, BTreeSet<String>>, node: &str, fact: &str) {
+    seeds
+        .entry(node.to_string())
+        .or_default()
+        .insert(fact.to_string());
+}
+
+fn resolve_seed_nodes(
+    graph: &BTreeMap<String, BTreeSet<String>>,
+    name: &str,
+) -> Vec<String> {
+    let suffix = format!("::{name}");
+    graph
+        .keys()
+        .filter(move |candidate| candidate.as_str() == name || candidate.ends_with(&suffix))
+        .cloned()
+        .collect()
+}
+
+/// Project effects, panic, taint, secret, and the `calls-exec` proof row from
+/// one edge set. New reachability facts belong as seed rows here; they do not
+/// get another recursive walker.
+pub fn solve_reachability(
+    summaries: &HashMap<String, EffectSummary>,
+    taint_seeds: &HashMap<String, BTreeSet<String>>,
+) -> jet_foundation::Facts::ReachabilityResult {
+    let graph: BTreeMap<String, BTreeSet<String>> = summaries
+        .iter()
+        .map(|(name, summary)| (name.clone(), summary.edges.clone()))
+        .collect();
+
+    let mut effects = BTreeMap::new();
+    let mut calls_exec = BTreeMap::new();
+    let mut secret = BTreeMap::new();
+    for (name, summary) in summaries {
+        let mut direct = summary.direct.clone();
+        if summary.maximal {
+            direct.extend(Effect::all());
         }
-        sets.insert(k.clone(), init);
-    }
-    // Worklist fixpoint. The lattice is finite (≤11 effects per node), so a
-    // simple round-robin until no set grows terminates quickly.
-    let mut changed = true;
-    while changed {
-        changed = false;
-        for (k, s) in summaries {
-            let mut add: EffectSet = BTreeSet::new();
-            for callee in &s.edges {
-                if let Some(cs) = sets.get(callee) {
-                    for e in cs {
-                        add.insert(e.clone());
-                    }
-                }
-            }
-            let cur = sets.get_mut(k).expect("seeded above");
-            let before = cur.len();
-            cur.extend(add);
-            if cur.len() != before {
-                changed = true;
-            }
+        if effect_set_has_root(&direct, Effect::Exec) {
+            add_seed(&mut calls_exec, name, Effect::Exec.name());
+        }
+        if effect_set_has_root(&summary.direct, Effect::Secret) {
+            add_seed(&mut secret, name, Effect::Secret.name());
+        }
+        if !direct.is_empty() {
+            effects.insert(name.clone(), direct);
         }
     }
-    sets
+
+    let mut panic = BTreeMap::new();
+    add_seed(&mut panic, "__jet_panic__", "panic");
+
+    let mut taint = BTreeMap::new();
+    for (name, facts) in taint_seeds {
+        for node in resolve_seed_nodes(&graph, name) {
+            taint.entry(node).or_insert_with(BTreeSet::new).extend(facts.clone());
+        }
+    }
+
+    jet_foundation::Facts::project_reachability(
+        &graph,
+        [
+            jet_foundation::Facts::ReachabilityRow::new("effects", effects),
+            jet_foundation::Facts::ReachabilityRow::new("panic", panic),
+            jet_foundation::Facts::ReachabilityRow::new("taint", taint),
+            jet_foundation::Facts::ReachabilityRow::new("secret", secret),
+            jet_foundation::Facts::ReachabilityRow::new("calls-exec", calls_exec),
+        ],
+    )
 }
 
 /// D-EFF3: a call through a trait value sees the trait method's declared
@@ -598,6 +630,55 @@ mod inferred_purity_display_tests {
     }
 }
 
+#[cfg(test)]
+mod reachability_tests {
+    use super::{solve_reachability, EffectSummary};
+    use std::collections::{BTreeSet, HashMap};
+
+    #[test]
+    fn one_graph_projects_all_reachability_rows() {
+        let summaries = HashMap::from([
+            (
+                "root".to_string(),
+                EffectSummary {
+                    edges: BTreeSet::from(["mid".to_string()]),
+                    ..Default::default()
+                },
+            ),
+            (
+                "mid".to_string(),
+                EffectSummary {
+                    edges: BTreeSet::from(["leaf".to_string()]),
+                    ..Default::default()
+                },
+            ),
+            (
+                "leaf".to_string(),
+                EffectSummary {
+                    direct: BTreeSet::from([
+                        "Exec".to_string(),
+                        "Secret".to_string(),
+                    ]),
+                    edges: BTreeSet::from(["__jet_panic__".to_string()]),
+                    ..Default::default()
+                },
+            ),
+        ]);
+        let taint = HashMap::from([(
+            "leaf".to_string(),
+            BTreeSet::from(["Credential".to_string()]),
+        )]);
+
+        let result = solve_reachability(&summaries, &taint);
+
+        assert!(result.nodes_with("effects", "Exec").contains("root"));
+        assert!(result.nodes_with("secret", "Secret").contains("root"));
+        assert!(result.nodes_with("panic", "panic").contains("root"));
+        assert!(result.nodes_with("taint", "Credential").contains("root"));
+        assert!(result.nodes_with("calls-exec", "Exec").contains("root"));
+    }
+}
+
 /// D-EFFECT-OMIT1: an explicit empty row proves the *inferred* body row is
 /// empty. Callees need not repeat `=[]=>`; their solved row is the authority.
 /// D-CRYPTO-DIAG1 defers E2702 facts until this solved-effect phase completes.
@@ -606,28 +687,9 @@ pub fn check_inferred_purity(
     module_alias: &str,
     summaries: &HashMap<String, EffectSummary>,
     solved: &HashMap<String, EffectSet>,
+    reachability: &jet_foundation::Facts::ReachabilityResult,
     diags: &mut Vec<Diagnostic>,
 ) {
-    fn first_effectful_chain(
-        key: &str,
-        summaries: &HashMap<String, EffectSummary>,
-        solved: &HashMap<String, EffectSet>,
-        seen: &mut BTreeSet<String>,
-    ) -> Vec<String> {
-        if !seen.insert(key.to_string()) {
-            return Vec::new();
-        }
-        let Some(summary) = summaries.get(key) else { return Vec::new() };
-        for callee in &summary.edges {
-            if solved.get(callee).is_some_and(|row| !row.is_empty()) {
-                let mut chain = vec![callee.clone()];
-                chain.extend(first_effectful_chain(callee, summaries, solved, seen));
-                return chain;
-            }
-        }
-        Vec::new()
-    }
-
     fn check_one(
         f: &crate::AST::Func,
         owner: Option<&str>,
@@ -635,6 +697,7 @@ pub fn check_inferred_purity(
         module_alias: &str,
         summaries: &HashMap<String, EffectSummary>,
         solved: &HashMap<String, EffectSet>,
+        reachability: &jet_foundation::Facts::ReachabilityResult,
         diags: &mut Vec<Diagnostic>,
     ) {
         if !f.is_pure {
@@ -647,12 +710,18 @@ pub fn check_inferred_purity(
         if solved.get(&key).map_or(true, EffectSet::is_empty) {
             return;
         }
-        let chain = first_effectful_chain(&key, summaries, solved, &mut BTreeSet::new());
-        let Some(first) = chain.first() else {
+        let Some(proof) = solved.get(&key).and_then(|effects| {
+            effects.iter().find_map(|effect| {
+                let path = reachability.path("effects", &key, effect)?;
+                (path.len() > 1).then(|| path.to_vec())
+            })
+        }) else {
             // Direct ambient operations are diagnosed while checking the body,
             // where their precise call span and API spelling are available.
             return;
         };
+        let chain = &proof[1..];
+        let Some(first) = chain.first() else { return };
         let summary = summaries.get(&key);
         let span = summary
             .and_then(|summary| summary.memory.calls.iter().find(|call| &call.callee == first))
@@ -689,15 +758,15 @@ pub fn check_inferred_purity(
     use crate::AST::Item;
     for item in items {
         match item {
-            Item::Func(f) => check_one(f, None, None, module_alias, summaries, solved, diags),
-            Item::Impl(i) => for f in &i.methods { check_one(f, Some(&i.type_name), None, module_alias, summaries, solved, diags); },
+            Item::Func(f) => check_one(f, None, None, module_alias, summaries, solved, reachability, diags),
+            Item::Impl(i) => for f in &i.methods { check_one(f, Some(&i.type_name), None, module_alias, summaries, solved, reachability, diags); },
             Item::Struct(s) => {
-                for f in &s.methods { check_one(f, Some(&s.name), None, module_alias, summaries, solved, diags); }
+                for f in &s.methods { check_one(f, Some(&s.name), None, module_alias, summaries, solved, reachability, diags); }
                 for block in &s.trait_impls {
-                    for f in &block.methods { check_one(f, Some(&s.name), None, module_alias, summaries, solved, diags); }
+                    for f in &block.methods { check_one(f, Some(&s.name), None, module_alias, summaries, solved, reachability, diags); }
                 }
             }
-            Item::Enum(e) => for f in &e.methods { check_one(f, Some(&e.name), None, module_alias, summaries, solved, diags); },
+            Item::Enum(e) => for f in &e.methods { check_one(f, Some(&e.name), None, module_alias, summaries, solved, reachability, diags); },
             Item::CodeModule(module) => {
                 if let Some(body) = &module.body {
                     for item in body {
@@ -710,6 +779,7 @@ pub fn check_inferred_purity(
                                 module_alias,
                                 summaries,
                                 solved,
+                                reachability,
                                 diags,
                             );
                         }
@@ -735,7 +805,8 @@ pub fn e0743(trait_method: &str, span: Span) -> Diagnostic {
 /// declared bound of its callback parameter `f`, so its published effect set is a
 /// tight pass-through of `f` (the set that holds even when the callback value
 /// escapes — the conservative flow-through can't see a callback the body stores
-/// or returns). Runs over the assembled summaries **before** the fixpoint solve.
+/// or returns). Runs over the assembled summaries **before** the shared
+/// reachability projection.
 ///
 /// - `f` must be a parameter of this function whose type is a function type
 ///   (`Type::Fn`), else E0748.
@@ -1484,21 +1555,15 @@ pub fn check_trait_obligations(
 /// function; a bare `fn` with no `#(…)` list, or one that omits `Secret`, is
 /// E1264. A helper fn two calls deep from the actual `core.vault.get` still
 /// requires the grant on itself — the same call-graph reach E0740 checks —
-/// but this deliberately does **not** use the general `solved` (whole-program)
-/// set: `solve()` inflates a function's set to the maximal (all-effects) set
-/// the instant it reaches *any* un-inspectable foreign (`extern rust`) call
-/// (`fx_maximal`), which would force `#(Secret)` onto every FFI-using function
-/// in the program regardless of whether it goes near a secret. So this walks
-/// its own small fixpoint over `direct`/`edges` only — real, syntactically
-/// traceable `core.vault.get` reaches, the same thing `apply_effect_via`/
-/// `record_edge` already track, just excluding the `maximal` blanket.
+/// but this deliberately uses the dedicated `secret` row rather than the
+/// general `effects` row: foreign calls seed every effect, but do not prove a
+/// secret read.
 pub(crate) fn check_secret_grants(
     items: &[crate::AST::Item],
     module_alias: &str,
-    summaries: &HashMap<String, EffectSummary>,
+    reaches_secret: &BTreeSet<String>,
     diags: &mut Vec<Diagnostic>,
 ) {
-    let reaches_secret = solve_secret_reach(summaries);
     fn declared_set(f: &crate::AST::Func) -> EffectSet {
         let mut declared = EffectSet::new();
         let Some(list) = &f.declared_effects else {
@@ -1520,7 +1585,7 @@ pub(crate) fn check_secret_grants(
         f: &crate::AST::Func,
         owner: Option<&str>,
         module_alias: &str,
-        reaches_secret: &std::collections::HashSet<String>,
+        reaches_secret: &BTreeSet<String>,
         diags: &mut Vec<Diagnostic>,
     ) {
         let key = format!("{module_alias}::{}", super::effect_key(owner, &f.name));
@@ -1544,59 +1609,30 @@ pub(crate) fn check_secret_grants(
     use crate::AST::Item;
     for item in items {
         match item {
-            Item::Func(f) => check_one(f, None, module_alias, &reaches_secret, diags),
+            Item::Func(f) => check_one(f, None, module_alias, reaches_secret, diags),
             Item::Impl(i) => {
                 for m in &i.methods {
-                    check_one(m, Some(&i.type_name), module_alias, &reaches_secret, diags);
+                    check_one(m, Some(&i.type_name), module_alias, reaches_secret, diags);
                 }
             }
             Item::Struct(s) => {
                 for m in &s.methods {
-                    check_one(m, Some(&s.name), module_alias, &reaches_secret, diags);
+                    check_one(m, Some(&s.name), module_alias, reaches_secret, diags);
                 }
                 for block in &s.trait_impls {
                     for m in &block.methods {
-                        check_one(m, Some(&s.name), module_alias, &reaches_secret, diags);
+                        check_one(m, Some(&s.name), module_alias, reaches_secret, diags);
                     }
                 }
             }
             Item::Enum(e) => {
                 for m in &e.methods {
-                    check_one(m, Some(&e.name), module_alias, &reaches_secret, diags);
+                    check_one(m, Some(&e.name), module_alias, reaches_secret, diags);
                 }
             }
             _ => {}
         }
     }
-}
-
-/// U13: the set of function keys whose body reaches `Secret` through a real,
-/// syntactically traceable path — direct effects and call-graph edges only,
-/// deliberately ignoring `EffectSummary.maximal` (an opaque `extern rust`
-/// call is not "reading a secret" for this specific mandatory-grant purpose;
-/// see `check_secret_grants`'s doc comment).
-fn solve_secret_reach(
-    summaries: &HashMap<String, EffectSummary>,
-) -> std::collections::HashSet<String> {
-    let mut reaches: std::collections::HashSet<String> = summaries
-        .iter()
-        .filter(|(_, s)| effect_set_has_root(&s.direct, Effect::Secret))
-        .map(|(k, _)| k.clone())
-        .collect();
-    let mut changed = true;
-    while changed {
-        changed = false;
-        for (k, s) in summaries {
-            if reaches.contains(k) {
-                continue;
-            }
-            if s.edges.iter().any(|callee| reaches.contains(callee)) {
-                reaches.insert(k.clone());
-                changed = true;
-            }
-        }
-    }
-    reaches
 }
 
 /// E1264 (U13, D-JPK-SECRETCRYPTO1): a function reaches `core.vault.get`

@@ -14,6 +14,7 @@ fn ct_value_expr(value: &crate::AST::CtValue, span: crate::Diagnostics::Span) ->
             type_name: type_name.clone(),
             variant: variant.clone(),
             args: Vec::new(),
+            leading_dot: false,
             span,
         },
         _ => unreachable!("generic-module value domain was checked before substitution"),
@@ -45,12 +46,44 @@ pub(super) fn substitute_meta(
     }
 }
 
+pub(super) fn substitute_marker(
+    marker: &mut crate::AST::Marker,
+    types: &HashMap<String, Type>,
+    values: &HashMap<String, crate::AST::CtValue>,
+) {
+    marker
+        .args
+        .iter_mut()
+        .for_each(|arg| substitute_expr(arg, types, values));
+}
+
+pub(super) fn substitute_markers(
+    markers: &mut [crate::AST::Marker],
+    types: &HashMap<String, Type>,
+    values: &HashMap<String, crate::AST::CtValue>,
+) {
+    markers
+        .iter_mut()
+        .for_each(|marker| substitute_marker(marker, types, values));
+}
+
 pub(super) fn substitute_expr(
     expr: &mut Expr,
     types: &HashMap<String, Type>,
     values: &HashMap<String, crate::AST::CtValue>,
 ) {
     if let Expr::Ident(name, span) = expr {
+        if let Some(value) = values.get(name) {
+            *expr = ct_value_expr(value, *span);
+            return;
+        }
+    }
+    // D-META-STAGE1=B: `$` is part of the identifier, so generic-module
+    // instantiation must substitute marked names by their written spelling.
+    // Otherwise a generated `alias_$value` declaration leaves `$value`
+    // references pointing at the template name, which is absent from the
+    // instantiated comptime environment.
+    if let Expr::ComptimeName { name, span, .. } = expr {
         if let Some(value) = values.get(name) {
             *expr = ct_value_expr(value, *span);
             return;
@@ -166,17 +199,35 @@ pub(super) fn substitute_expr(
             type_name,
             type_args,
             fields,
+            span,
             ..
         } => {
-            if let Some(Type::Named(resolved)) = types.get(type_name) {
-                *type_name = resolved.clone();
-            }
-            for ty in type_args {
+            for ty in type_args.iter_mut() {
                 *ty = crate::Generics::substitute_type(ty, types);
             }
             fields
                 .iter_mut()
                 .for_each(|(_, _, value)| substitute_expr(value, types, values));
+            match types.get(type_name) {
+                Some(Type::Named(resolved)) => *type_name = resolved.clone(),
+                // A type param may instantiate to a builtin (T=Int). The
+                // hand-written Int.{ … } parses as a TypedLit, so the
+                // substituted node must become one too — a StructLit with a
+                // builtin head is unnameable to sema (card #1797).
+                Some(resolved) => {
+                    let body = if fields.len() == 1 {
+                        crate::AST::TypedLitBody::Value(Box::new(fields.remove(0).2))
+                    } else {
+                        crate::AST::TypedLitBody::Fields(std::mem::take(fields))
+                    };
+                    *expr = Expr::TypedLit {
+                        head: Some(resolved.clone()),
+                        body,
+                        span: *span,
+                    };
+                }
+                None => {}
+            }
         }
         Expr::TypedLit { head, body, .. } => {
             if let Some(h) = head {
@@ -291,21 +342,35 @@ pub(super) fn substitute_stmts(
     types: &HashMap<String, Type>,
     values: &HashMap<String, crate::AST::CtValue>,
 ) {
+    // A binding shadows a module value for the rest of this lexical block.
+    // Clone on entry so a nested block cannot leak its shadow back out.
+    let mut values = values.clone();
+
+    fn substitute_binding(
+        binding: &mut crate::AST::Binding,
+        types: &HashMap<String, Type>,
+        values: &HashMap<String, crate::AST::CtValue>,
+    ) {
+        substitute_markers(&mut binding.markers, types, values);
+        substitute_meta(&mut binding.meta, types, values);
+        if let Some(ty) = &mut binding.ty {
+            *ty = specialize_module_type(ty, types, values);
+        }
+        substitute_expr(&mut binding.init, types, values);
+    }
+
     for stmt in stmts {
         match stmt {
-            Stmt::Expr(value) | Stmt::Yield(value, _) => substitute_expr(value, types, values),
+            Stmt::Expr(value) | Stmt::Yield(value, _) => substitute_expr(value, types, &values),
             Stmt::Val(binding) => {
-                substitute_meta(&mut binding.meta, types, values);
-                if let Some(ty) = &mut binding.ty {
-                    *ty = specialize_module_type(ty, types, values);
-                }
-                substitute_expr(&mut binding.init, types, values);
+                substitute_binding(binding, types, &values);
+                values.remove(&binding.name);
             }
             Stmt::Assign { value, .. } | Stmt::Return(Some(value), _) => {
-                substitute_expr(value, types, values)
+                substitute_expr(value, types, &values)
             }
             Stmt::BreakValue(value, _) | Stmt::BreakLabelValue(_, _, value, _) => {
-                substitute_expr(value, types, values)
+                substitute_expr(value, types, &values)
             }
             Stmt::Return(None, _)
             | Stmt::Break(_)
@@ -313,24 +378,24 @@ pub(super) fn substitute_stmts(
             | Stmt::BreakLabel(..)
             | Stmt::ContinueLabel(..) => {}
             Stmt::While { cond, body, .. } => {
-                substitute_expr(cond, types, values);
-                substitute_stmts(body, types, values);
+                substitute_expr(cond, types, &values);
+                substitute_stmts(body, types, &values);
             }
             Stmt::For { kind, body, .. } => {
                 match kind {
                     ForKind::Range { start, end, step, exclusive: _ } => {
-                        substitute_expr(start, types, values);
-                        substitute_expr(end, types, values);
+                        substitute_expr(start, types, &values);
+                        substitute_expr(end, types, &values);
                         if let Some(step) = step {
-                            substitute_expr(step, types, values);
+                            substitute_expr(step, types, &values);
                         }
                     }
                     ForKind::In { collection, step } => {
-                        substitute_expr(collection, types, values);
-                        if let Some(step) = step { substitute_expr(step, types, values); }
+                        substitute_expr(collection, types, &values);
+                        if let Some(step) = step { substitute_expr(step, types, &values); }
                     }
                 }
-                substitute_stmts(body, types, values);
+                substitute_stmts(body, types, &values);
             }
             Stmt::Switch {
                 subject,
@@ -344,13 +409,13 @@ pub(super) fn substitute_stmts(
                 else_body,
                 ..
             } => {
-                substitute_expr(subject, types, values);
+                substitute_expr(subject, types, &values);
                 for arm in arms {
-                    substitute_expr(&mut arm.cond, types, values);
-                    substitute_stmts(&mut arm.body, types, values);
+                    substitute_expr(&mut arm.cond, types, &values);
+                    substitute_stmts(&mut arm.body, types, &values);
                 }
                 if let Some(body) = else_body {
-                    substitute_stmts(body, types, values);
+                    substitute_stmts(body, types, &values);
                 }
             }
             Stmt::CountedLoop {
@@ -360,50 +425,75 @@ pub(super) fn substitute_stmts(
                 body,
                 ..
             } => {
-                if let Some(ty) = &mut init.ty {
-                    *ty = specialize_module_type(ty, types, values);
-                }
-                substitute_expr(&mut init.init, types, values);
-                substitute_expr(cond, types, values);
+                let mut loop_values = values.clone();
+                substitute_binding(init, types, &loop_values);
+                loop_values.remove(&init.name);
+                substitute_expr(cond, types, &loop_values);
                 if let Some(step) = step {
-                    substitute_stmts(std::slice::from_mut(step), types, values);
+                    substitute_stmts(std::slice::from_mut(step), types, &loop_values);
                 }
-                substitute_stmts(body, types, values);
+                substitute_stmts(body, types, &loop_values);
             }
             Stmt::Loop { body, .. }
-            | Stmt::Unsafe { body, .. }
-            | Stmt::Impure { body, .. }
             | Stmt::Reactive { body, .. }
             | Stmt::Shield { body, .. }
-            | Stmt::Switched { body, .. }
             | Stmt::Region { body, .. }
-        | Stmt::Policy { body, .. }
+            | Stmt::Policy { body, .. }
             | Stmt::TaskGroup { body, .. }
             | Stmt::Layout { body, .. }
             | Stmt::Caps { body, .. }
             | Stmt::Grant { body, .. }
             | Stmt::Transact { body, .. }
-            | Stmt::AssumeDet { body, .. }
             | Stmt::ComptimeBlock { body, .. }
-            | Stmt::Live { body, .. }
-            | Stmt::ScopeMember { body, .. } => substitute_stmts(body, types, values),
+            | Stmt::Live { body, .. } => substitute_stmts(body, types, &values),
+            Stmt::Unsafe {
+                audit_expr, body, ..
+            } => {
+                if let Some(expr) = audit_expr {
+                    substitute_expr(expr, types, &values);
+                }
+                substitute_stmts(body, types, &values);
+            }
+            Stmt::Impure {
+                reason_expr, body, ..
+            } => {
+                if let Some(expr) = reason_expr {
+                    substitute_expr(expr, types, &values);
+                }
+                substitute_stmts(body, types, &values);
+            }
+            Stmt::Switched { marker, body, .. } => {
+                substitute_marker(marker, types, &values);
+                substitute_stmts(body, types, &values);
+            }
+            Stmt::AssumeDet {
+                reason_expr, body, ..
+            } => {
+                substitute_expr(reason_expr, types, &values);
+                substitute_stmts(body, types, &values);
+            }
+            Stmt::ScopeMember { args, body, .. } => {
+                args.iter_mut()
+                    .for_each(|arg| substitute_expr(arg, types, &values));
+                substitute_stmts(body, types, &values);
+            }
             Stmt::ComptimeIf {
                 cond,
                 then_body,
                 else_body,
                 ..
             } => {
-                substitute_expr(cond, types, values);
-                substitute_stmts(then_body, types, values);
+                substitute_expr(cond, types, &values);
+                substitute_stmts(then_body, types, &values);
                 if let Some(body) = else_body {
-                    substitute_stmts(body, types, values);
+                    substitute_stmts(body, types, &values);
                 }
             }
             Stmt::ContextBlock { fields, body, .. } => {
                 fields
                     .iter_mut()
-                    .for_each(|(_, value, _)| substitute_expr(value, types, values));
-                substitute_stmts(body, types, values);
+                    .for_each(|(_, value, _)| substitute_expr(value, types, &values));
+                substitute_stmts(body, types, &values);
             }
         }
     }

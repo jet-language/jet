@@ -51,14 +51,13 @@ pub(crate) fn emit_tir_value_block(stmts: &[TStmt], value: &TExpr, cx: &Cx) -> S
     format!("{{ {} {} }}", inner, emit_tir_expr(value, cx))
 }
 
-/// c109 Phase 10: emit a core/stdlib module call, reproducing `emit_core_call`
-/// (Source/Codegen/Expression.rs) byte-for-byte. The `(module, method)` dispatch is
+/// c109 Phase 10: emit a core/stdlib module call. The `(module, method)` dispatch is
 /// a pure syntactic match on the two resolved strings — no type inference (I3). Args
 /// were lowered PLAINLY; the per-arm `&(…)`/`&mut (…)`/move wrappers are applied here
-/// exactly as the AST path applies them around its `arg(i)` = raw `emit_expr`.
+/// exactly as the TIR call shape requires around its raw arguments.
 /// `cx.root_prefix`/`cx.ffi_crate` are program-level. The gate only ever admits a
 /// `(module, method)` with a matching arm here, so the `/* unknown std call */`
-/// fallthrough is unreachable for a covered call (kept for parity with the AST path).
+/// fallthrough is unreachable for a covered call; it remains defensive handling.
 // D-SERDE: encoding-verb routing helpers — read the lowered arg type / resolved
 // return type to pick the dynamic vs typed helper. Total facts, never re-inferred (I3).
 pub(crate) fn enc_is_json_name(n: &str) -> bool {

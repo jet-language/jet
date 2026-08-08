@@ -13,10 +13,10 @@ use jet_codegen::Codegen::TIR::{
     ListSpreadPart,
     TFnValueKind, TMethodRef, TModuleCallForm, TNumericOp, TOrFallback, TPattern,
     TPatternPosition, TPlace,
-    TStaticOwner, TStmt, TStrPart, TTypedTextForm, TTypedTextInterpKind,
+    TStaticOwner, TStmt, TStrPart, TTypedTextForm, TTypedTextInterpKind, TZipFillMode,
 };
 use jet_foundation::AST::{BinOp, IncDecOp, PatSlot, Pattern, StrFormat, Type, UnOp};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::runtime_host::{
     HostFns, INTN_MODE_CHECKED, INTN_MODE_SATURATING, INTN_MODE_TRAP, INTN_MODE_WRAPPING,
@@ -65,6 +65,9 @@ pub(crate) struct LowerCtx<'a, 'b> {
     pub(crate) vars: &'a mut HashMap<String, Variable>,
     pub(crate) var_tys: &'a mut HashMap<String, Type>,
     pub(crate) raw_slots: HashMap<String, StackSlot>,
+    /// Pointer values minted from real local stack slots; synthetic place
+    /// identities are deliberately absent so volatile access declines them.
+    pub(crate) real_address_values: HashSet<Value>,
     pub(crate) func_ids: &'a HashMap<String, FuncId>,
     pub(crate) spawn_site: &'a mut usize,
     pub(crate) spawn_func_ids: &'a [FuncId],
@@ -2020,9 +2023,11 @@ impl LowerCtx<'_, '_> {
             Type::Apply { name, .. } if name == jet_foundation::Syntax::TYPE_SHARED_GUARD => true,
             Type::Tagged { marker, inner } => {
                 matches!(
-                    marker.as_str(),
-                    jet_foundation::AST::SHARED_GUARD_READ_MARKER
-                        | jet_foundation::AST::SHARED_GUARD_EDIT_MARKER
+                    marker,
+                    jet_foundation::AST::TagMarker::Internal(
+                        jet_foundation::AST::InternalTag::SharedGuardRead
+                            | jet_foundation::AST::InternalTag::SharedGuardEdit
+                    )
                 ) || Self::is_shared_guard_ty(inner)
             }
             _ => false,
@@ -3015,6 +3020,14 @@ impl LowerCtx<'_, '_> {
                         Some(Type::Apply { name, .. })
                             if name == jet_foundation::Syntax::TYPE_PTR
                     ) {
+                        // Same provenance rule as Deref/volatile (bd15-rev):
+                        // a trusted store may only see a real stack-slot
+                        // pointer; synthetic place identities decline to deopt.
+                        if !self.real_address_values.contains(&dst) {
+                            return Err(
+                                "jit raw pointer store address unsupported".to_string()
+                            );
+                        }
                         let rhs = self.lower_expr(value)?;
                         self.b.ins().store(MemFlags::trusted(), rhs, dst, 0);
                         return Ok(());
@@ -8700,19 +8713,38 @@ impl LowerCtx<'_, '_> {
                             self.raw_slots.insert(key, slot);
                             slot
                         };
-                        return Ok(self.b.ins().stack_addr(
+                        let address = self.b.ins().stack_addr(
                             self.module.target_config().pointer_type(),
                             slot,
                             0,
-                        ));
+                        );
+                        self.real_address_values.insert(address);
+                        return Ok(address);
                     }
-                    return Err("jit address_of needs a local place".to_string());
+                    // D-PIN1 / S58: the place is not a bare local (e.g. a field
+                    // projection through a heap record, `node.payload`). Arena
+                    // records can grow/reallocate their backing storage, so —
+                    // unlike the local's own Cranelift stack slot above — there
+                    // is no real, stable pointer to hand back safely. TIR-eval
+                    // faces the same "no real address" fact (see
+                    // `tir_place_address_key` / `stable_place_address` in
+                    // jet-codegen's TIR eval) and mints a stable non-zero
+                    // identity from the place's structural path instead; mirror
+                    // that exact algorithm here so every non-AOT tier agrees on
+                    // the one non-zero / inequality facts a program can observe
+                    // (I9). AOT alone keeps the real `&place as *const _` cast.
+                    let key = jet_codegen::Codegen::TIR::tir_place_address_key(place);
+                    let addr = jet_codegen::Codegen::TIR::stable_place_address(&key);
+                    return Ok(self.b.ins().iconst(types::I64, addr));
                 }
                 if module == "core.mem" && method == "volatile_read" && args.len() == 1 {
                     if self.unsafe_depth == 0 {
                         return Err("jit volatile read outside #Unsafe".to_string());
                     }
                     let pointer = self.lower_expr(&args[0])?;
+                    if !self.real_address_values.contains(&pointer) {
+                        return Err("jit volatile read address unsupported".to_string());
+                    }
                     let clif = self.meta.clif_ty(&expr.ty).ok_or_else(|| {
                         format!("jit volatile read result unsupported: {:?}", expr.ty)
                     })?;
@@ -8723,13 +8755,16 @@ impl LowerCtx<'_, '_> {
                         return Err("jit volatile write outside #Unsafe".to_string());
                     }
                     let pointer = self.lower_expr(&args[0])?;
+                    if !self.real_address_values.contains(&pointer) {
+                        return Err("jit volatile write address unsupported".to_string());
+                    }
                     let value = self.lower_expr(&args[1])?;
                     self.b
                         .ins()
                         .store(MemFlags::trusted(), value, pointer, 0);
                     return Ok(self.b.ins().iconst(types::I8, 0));
                 }
-                if module == "jet.crypto" {
+                if module == "core.crypto" {
                     let (host_id, arg_values): (FuncId, Vec<Value>) =
                         match (method.as_str(), args.as_slice()) {
                             ("__signing_generate", []) => {
@@ -8939,7 +8974,7 @@ impl LowerCtx<'_, '_> {
                                     self.lower_expr(dest)?,
                                 ],
                             ),
-                            ("x25519", [secret, public]) => (
+                            ("x25519_raw", [secret, public]) => (
                                 self.host.crypto.expert_x25519,
                                 vec![
                                     self.lower_expr(secret)?,
@@ -8947,22 +8982,15 @@ impl LowerCtx<'_, '_> {
                                     self.b.ins().iconst(types::I64, 1),
                                 ],
                             ),
-                            ("x25519", [secret, public, reject]) => {
-                                let secret_val = self.lower_expr(secret)?;
-                                let public_val = self.lower_expr(public)?;
-                                let reject_val = self.lower_expr(reject)?;
-                                let reject_i64 = if self.meta.clif_ty(&reject.ty)
-                                    == Some(types::I8)
-                                {
-                                    self.b.ins().uextend(types::I64, reject_val)
-                                } else {
-                                    reject_val
-                                };
-                                (
-                                    self.host.crypto.expert_x25519,
-                                    vec![secret_val, public_val, reject_i64],
-                                )
-                            }
+                            ("hkdf_sha256_raw", [ikm, salt, info, length]) => (
+                                self.host.crypto.expert_hkdf_sha256,
+                                vec![
+                                    self.lower_expr(ikm)?,
+                                    self.lower_expr(salt)?,
+                                    self.lower_expr(info)?,
+                                    self.lower_expr(length)?,
+                                ],
+                            ),
                             ("secret_bytes", [secret]) => (
                                 self.host.crypto.expert_secret_bytes,
                                 vec![self.lower_expr(secret)?],
@@ -9577,7 +9605,7 @@ impl LowerCtx<'_, '_> {
                     let call = self.b.ins().call(host_ref, &arg_vals);
                     return Ok(self.b.inst_results(call)[0]);
                 }
-                if matches!(module.as_str(), "jet.http" | "core.http" | "core.http.client") {
+                if matches!(module.as_str(), "core.http" | "core.http.client") {
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
                         "get" if args.len() == 1 => (
                             self.host.net_http.http_client_get,
@@ -9640,7 +9668,7 @@ impl LowerCtx<'_, '_> {
                     let call = self.b.ins().call(host_ref, &arg_vals);
                     return Ok(self.b.inst_results(call)[0]);
                 }
-                if module == "jet.log" {
+                if module == "core.log" {
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
                         "set_level" if args.len() == 1 => {
                             (self.host.core.log_set_level, vec![self.lower_expr(&args[0])?])
@@ -9967,27 +9995,26 @@ impl LowerCtx<'_, '_> {
                             self.host.encoding.json_to_string_pretty,
                             vec![self.lower_expr(&args[0])?],
                         ),
-                        "canonical"
-                            if args.len() == 1
-                                && datatree_arg
-                                && !jet_foundation::PackageEdition::package_edition_at_least("2027") =>
-                        {
+                        // D-JSONCANON1=A: sema already resolved which `canonical`
+                        // signature applies (arity 1 = pre-2027 infallible; 2 =
+                        // 2027+ fallible with a limits arg, default-filled when
+                        // the caller omits it) while its own edition scope was
+                        // live. Branch on that already-resolved TIR arity, not
+                        // a fresh `package_edition_at_least` read here: JIT
+                        // compile runs after sema's `with_package_edition`
+                        // scope has closed, so re-querying the thread-local
+                        // edition here reads the reverted default and can pick
+                        // the wrong host for a table already sized the other
+                        // way (desync, not a marshalling choice — I9).
+                        "canonical" if args.len() == 1 && datatree_arg => {
                             (
                                 self.host.encoding.json_canonical,
                                 vec![self.lower_expr(&args[0])?],
                             )
                         }
-                        "canonical"
-                            if (1..=2).contains(&args.len())
-                                && datatree_arg
-                                && jet_foundation::PackageEdition::package_edition_at_least("2027") =>
-                        {
+                        "canonical" if args.len() == 2 && datatree_arg => {
                             let tree = self.lower_expr(&args[0])?;
-                            let limits = if args.len() >= 2 {
-                                self.lower_expr(&args[1])?
-                            } else {
-                                self.b.ins().iconst(types::I64, 0)
-                            };
+                            let limits = self.lower_expr(&args[1])?;
                             (
                                 self.host.encoding.json_canonical_checked,
                                 vec![tree, limits],
@@ -11604,7 +11631,7 @@ impl LowerCtx<'_, '_> {
                     let call = self.b.ins().call(host_ref, &arg_vals);
                     return Ok(self.b.inst_results(call)[0]);
                 }
-                if module == "jet.regex" || module == "core.regex" {
+                if module == "core.regex" {
                     let widen_bool = |this: &mut Self, e: &TExpr| -> Result<Value, String> {
                         let v = this.lower_expr(e)?;
                         if this.b.func.dfg.value_type(v) == types::I8 {
@@ -11680,7 +11707,7 @@ impl LowerCtx<'_, '_> {
                     let call = self.b.ins().call(host_ref, &arg_vals);
                     return Ok(self.b.inst_results(call)[0]);
                 }
-                if module == "jet.db" {
+                if module == "core.db" {
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
                         "open_memory" if args.is_empty() => {
                             (self.host.db.open_memory, Vec::new())
@@ -11839,7 +11866,7 @@ impl LowerCtx<'_, '_> {
                     let call = self.b.ins().call(host_ref, &arg_vals);
                     return Ok(self.b.inst_results(call)[0]);
                 }
-                if module == "jet.reactive" {
+                if module == "core.reactive" {
                     match method.as_str() {
                         "signal" if args.len() == 1 => {
                             let init = self.lower_expr(&args[0])?;
@@ -12703,6 +12730,34 @@ impl LowerCtx<'_, '_> {
                         .is_some_and(|name| name.ends_with(".Patch"))
                 {
                     return self.lower_patch_merge(recv, &args[0]);
+                }
+                // D-FAIL-CARRIER1=A: `.or_err(why)` on `Option<T>` lifts a clean
+                // absence into a failure. One packed carrier (0 = absent), so
+                // presence/absence reuse the same test `lower_option_enum_match`
+                // uses; the report ("Error" erases to `String`, Context.rs:1345)
+                // shares the I64 handle ABI with every `T` this covers.
+                if method.name == jet_foundation::Syntax::METHOD_OUTCOME_OR_ERR
+                    && args.len() == 1
+                {
+                    if let Type::Option(inner) = &recv.ty {
+                        if self.meta.clif_ty(inner).or_else(|| clif_ty(inner))
+                            == Some(types::I64)
+                            && !matches!(inner.as_ref(), Type::IntN { .. })
+                        {
+                            let packed = self.lower_expr(recv)?;
+                            let why = self.lower_call_arg(&args[0])?;
+                            let zero = self.b.ins().iconst(types::I64, 0);
+                            let is_some =
+                                self.b.ins().icmp(IntCC::NotEqual, packed, zero);
+                            let ok_payload = self.unpack_option_payload(packed, inner)?;
+                            let ok_tag = self.b.ins().iconst(types::I8, 1);
+                            let err_tag = self.b.ins().iconst(types::I8, 0);
+                            let tag = self.b.ins().select(is_some, ok_tag, err_tag);
+                            let payload = self.b.ins().select(is_some, ok_payload, why);
+                            return Ok(self.call_host(self.host.result_new_i64, &[tag, payload]));
+                        }
+                        return Err(format!("jit or_err payload type unsupported: {inner:?}"));
+                    }
                 }
                 let key = self.method_key(&recv.ty, method, type_args)
                     .ok_or_else(|| format!("jit method on {:?}", recv.ty))?;
@@ -13578,11 +13633,13 @@ impl LowerCtx<'_, '_> {
                         self.raw_slots.insert(key, slot);
                         slot
                     };
-                    return Ok(self.b.ins().stack_addr(
+                    let pointer = self.b.ins().stack_addr(
                         self.module.target_config().pointer_type(),
                         slot,
                         0,
-                    ));
+                    );
+                    self.real_address_values.insert(pointer);
+                    return Ok(pointer);
                 }
                 let value = self.lower_expr(inner)?;
                 let clif = self
@@ -13606,6 +13663,13 @@ impl LowerCtx<'_, '_> {
                     return Err("jit raw pointer dereference outside #Unsafe".to_string());
                 }
                 let pointer = self.lower_expr(inner)?;
+                // Same provenance rule as volatile_read (review bd15-rev): a
+                // trusted load may only see a pointer minted from a real stack
+                // slot. A synthetic place identity (field-place address_of)
+                // must decline to the deopt tier, where it is inert.
+                if !self.real_address_values.contains(&pointer) {
+                    return Err("jit raw pointer dereference address unsupported".to_string());
+                }
                 let clif = self
                     .meta
                     .clif_ty(&expr.ty)
@@ -14358,59 +14422,6 @@ impl LowerCtx<'_, '_> {
         if matches!(&value.ty, Type::Option(_)) {
             return self.lower_expr(value);
         }
-        // ParsedArgs queries: hosts already return packed Option (TIR may stamp Unit).
-        if let TExprKind::HandleMethod { op, .. } = &value.kind {
-            if matches!(
-                op,
-                THandleOp::ParsedArgsOption
-                    | THandleOp::ParsedArgsOptionInt
-                    | THandleOp::ParsedArgsOptionFloat
-                    | THandleOp::ParsedArgsPositional
-                    | THandleOp::ParsedArgsSubcommand
-            ) {
-                return self.lower_expr(value);
-            }
-        }
-        // Recover Option when TIR erased the wrapper but Sema set is_option.
-        if let Some(Type::Option(_)) = Self::recover_core_return_ty(value) {
-            return self.lower_expr(value);
-        }
-        // `core.random.weighted_pick` / `Rng.weighted_pick` return the same
-        // packed Option encoding; TIR sometimes erases the Option wrapper.
-        if let TExprKind::CoreCall { module, method, .. } = &value.kind {
-            if module == "core.random" && method == "weighted_pick" {
-                return self.lower_expr(value);
-            }
-        }
-        if let TExprKind::HandleMethod {
-            op: THandleOp::RngPick | THandleOp::RngWeightedPick,
-            ..
-        } = &value.kind
-        {
-            return self.lower_expr(value);
-        }
-        // ParsedArgs option/positional queries use the same 0 / value+1 pack.
-        if let TExprKind::HandleMethod { op, .. } = &value.kind {
-            if matches!(
-                op,
-                THandleOp::ParsedArgsOption
-                    | THandleOp::ParsedArgsOptionInt
-                    | THandleOp::ParsedArgsOptionFloat
-                    | THandleOp::ParsedArgsPositional
-                    | THandleOp::ParsedArgsSubcommand
-            ) {
-                return self.lower_expr(value);
-            }
-        }
-        // Local holding a packed Option from ParsedArgs* (TIR erased Option).
-        if let TExprKind::Local(local) = &value.kind {
-            let key = TIR::local_place(&local.name);
-            if let Some(ty) = self.var_tys.get(&key) {
-                if matches!(ty, Type::Option(_)) {
-                    return self.lower_expr(value);
-                }
-            }
-        }
         Err("jit list get_opt status unsupported".to_string())
     }
 
@@ -15128,8 +15139,31 @@ impl LowerCtx<'_, '_> {
                 Ok(self.call_host(self.host.coll.list_indexes, &[n]))
             }
             TBuiltinOp::Indexed { .. } => Err("jit builtin method unsupported".to_string()),
-            TBuiltinOp::Zip { .. } => {
-                let other = self.lower_expr(&args[0])?;
+            TBuiltinOp::Zip {
+                input_count,
+                flatten,
+                fill_mode,
+                ..
+            } => {
+                // `self.host.coll.list_zip` only implements the plain 2-input,
+                // no-pad case (unlabeled pairwise zip). The free zero-arg
+                // `zip()` lowers to `input_count: 0, args: []` (`TIR::
+                // lower_empty_zip_family`) — indexing `args[0]` there panicked
+                // (D-ZIPPAD1's own AOT path handles it via a dedicated empty
+                // constructor). N-ary (`input_count > 2`), `flatten`, and any
+                // `zip_pad` fill mode need richer host support this JIT layer
+                // doesn't have yet — decline instead of mis-zipping or
+                // panicking.
+                if *input_count != 2 || *flatten || !matches!(fill_mode, TZipFillMode::DefaultNone)
+                {
+                    return Err(
+                        "jit builtin method unsupported: n-ary/padded/empty zip".to_string(),
+                    );
+                }
+                let Some(arg0) = args.first() else {
+                    return Err("jit builtin method unsupported: empty zip".to_string());
+                };
+                let other = self.lower_expr(arg0)?;
                 Ok(self.call_host(self.host.coll.list_zip, &[recv_val, other]))
             }
             TBuiltinOp::OptionZip { tuple_struct, elem_ty } => {
@@ -15826,6 +15860,13 @@ impl LowerCtx<'_, '_> {
         }
         // Shared<T> is a copyable door: cloning duplicates the handle, not T.
         if matches!(&inner.ty, Type::Shared(_)) {
+            return self.lower_expr(inner);
+        }
+        // D-SHARED-CYCLE1=C: Shared.Weak<T> is the same copyable-handle door as
+        // Shared<T> (upgrade() re-derives the strong count; the handle itself
+        // carries no owned T to deep-copy).
+        if matches!(&inner.ty, Type::Apply { name, .. } if name == jet_foundation::Syntax::TYPE_SHARED_WEAK)
+        {
             return self.lower_expr(inner);
         }
         if let Type::Apply { name, .. } = &inner.ty {
@@ -16633,9 +16674,15 @@ impl LowerCtx<'_, '_> {
                 Ok(self.call_host(self.host.clock_advance, &[recv_val, value]))
             }
             THandleOp::ClockWait => {
-                // After `??` unwrap, Duration is the raw millisecond i64 (see
-                // `jet_jit_duration_from_*` / `duration_in`), not a struct handle.
-                let duration_ms = self.lower_expr(&args[0])?;
+                // A `Duration`'s raw i64 is nanoseconds (D-TIMERES1: Prelude's
+                // `Duration.ns`; see `DurationNew`'s scale table above), not
+                // milliseconds. AOT's `jet_clock_wait` advances by
+                // `d.as_millis()` = `ns / 1_000_000` (Prelude `CommonTypes.rs`);
+                // reproduce that same truncating scale here before the host add,
+                // matching `DurationIn`'s Milliseconds scale just above.
+                let duration_ns = self.lower_expr(&args[0])?;
+                let scale = self.b.ins().iconst(types::I64, 1_000_000);
+                let duration_ms = self.b.ins().sdiv(duration_ns, scale);
                 Ok(self.call_host(self.host.clock_wait, &[recv_val, duration_ms]))
             }
             THandleOp::RngInt => {
@@ -19173,7 +19220,7 @@ impl LowerCtx<'_, '_> {
                         Type::Float => 2,
                         Type::IntN { signed: true, .. } => 3,
                         Type::IntN { signed: false, .. } => 4,
-                        _ => return Err("jit print type unsupported".to_string()),
+                        _ => return Err(format!("jit print type unsupported: Option<{inner_ty:?}>")),
                     };
                     if Self::uses_result_option_abi(inner) {
                         kind += 10;

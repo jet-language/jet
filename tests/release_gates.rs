@@ -166,8 +166,7 @@ fn ga_every_diagnostic_has_explain() {
 }
 
 fn is_code(s: &str) -> bool {
-    let b = s.as_bytes();
-    b.len() == 5 && (b[0] == b'E' || b[0] == b'L') && b[1..].iter().all(|c| c.is_ascii_digit())
+    jet::Explain::is_code(s)
 }
 
 // ── 2. Milestone feature examples are front-end clean ─────────────────────

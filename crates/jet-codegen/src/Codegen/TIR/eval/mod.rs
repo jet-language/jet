@@ -88,6 +88,8 @@ pub(super) fn raw_place_local(expr: &TExpr) -> Option<&TLocal> {
     }
 }
 
+pub use exprs::{stable_place_address, tir_place_address_key};
+
 pub(super) fn unsupported(what: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0956",
@@ -1354,6 +1356,21 @@ impl<'a> EvalCtx<'a> {
     }
 
     pub(super) fn take_task(&mut self, value: &CtValue) -> Result<CtValue, Diagnostic> {
+        if let CtValue::Struct { type_name, fields } = value {
+            if type_name == "__JetTirTask" {
+                if let Some(result) = fields
+                    .iter()
+                    .find_map(|(name, value)| (name == "value").then(|| value.clone()))
+                {
+                    // The already-completed carrier still answers to the one
+                    // Prelude wait policy (bd15-rev): a cancelled scope or an
+                    // expired deadline refuses the join here exactly as
+                    // jet_task_wait_policy does on the other tiers.
+                    self.task_wait_cancel_check()?;
+                    return Ok(result);
+                }
+            }
+        }
         self.task_wait_cancel_check()?;
         let task = self.take_task_entry(value)?;
         let result = task.completion
@@ -1436,6 +1453,64 @@ impl<'a> EvalCtx<'a> {
         self.current_span
     }
 
+    fn check_contracts(
+        &mut self,
+        contracts: &'a [TIR::TContract],
+        keyword: &str,
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<(), Diagnostic> {
+        for contract in contracts {
+            let previous_span = self.current_span;
+            self.current_span = contract.span;
+            let condition = match self.eval_expr(&contract.condition, scope) {
+                Ok(CtValue::Bool(value)) => value,
+                Ok(_) => {
+                    self.current_span = previous_span;
+                    return Err(unsupported("contract condition", contract.span));
+                }
+                Err(error) => {
+                    self.current_span = previous_span;
+                    return Err(error);
+                }
+            };
+            if condition {
+                self.current_span = previous_span;
+                continue;
+            }
+            let message = match self.eval_expr(&contract.message, scope) {
+                Ok(value) => value.jet_show(),
+                Err(error) => {
+                    self.current_span = previous_span;
+                    return Err(error);
+                }
+            };
+            self.current_span = previous_span;
+            if let Some(sink) = self.sink.as_ref() {
+                let mut sink = sink.lock().expect("evaluator sink poisoned");
+                sink.stderr.push_str(&format!(
+                    "#{} contract failed: {}\n  --> {}:{}\n",
+                    keyword, message, contract.file, contract.line
+                ));
+                sink.exit_code = Some(70);
+                return Err(Diagnostic::error(
+                    "SOFT_EXIT",
+                    "70".to_string(),
+                    "runtime contract failed".to_string(),
+                    String::new(),
+                    Some(contract.span),
+                ));
+            }
+            return Err(Diagnostic::error(
+                "E3005",
+                format!("#{keyword} contract failed: {message}"),
+                "a runtime contract condition evaluated false".to_string(),
+                "satisfy the contract or update it".to_string(),
+                Some(contract.span),
+            ));
+        }
+        Ok(())
+    }
+
     pub(super) fn burn(&mut self) -> Result<(), Diagnostic> {
         if self.fuel == 0 {
             // Dev/REPL fragments use E2202; pure comptime uses E0952.
@@ -1496,13 +1571,16 @@ impl<'a> EvalCtx<'a> {
                 scope.insert(name.clone(), value);
             }
         }
-        let result = match self.exec_stmts(&func.body, scope) {
-            Ok(Flow::Return(v)) => Ok(v),
-            Ok(Flow::Normal) => Ok(CtValue::Unit),
-            Ok(other) => Err(unsupported(
-                    &format!("control flow {other:?} escaping function"),
-                    self.span(),
-                )),
+        let result = match self.check_contracts(&func.pre_contracts, "Pre", scope) {
+            Ok(()) => match self.exec_stmts(&func.body, scope) {
+                Ok(Flow::Return(v)) => Ok(v),
+                Ok(Flow::Normal) => Ok(CtValue::Unit),
+                Ok(other) => Err(unsupported(
+                        &format!("control flow {other:?} escaping function"),
+                        self.span(),
+                    )),
+                Err(error) => Err(error),
+            },
             Err(error) => Err(error),
         };
         // Run scope.guard cleanups LIFO, matching Drop order in AOT/JIT.
@@ -1519,9 +1597,20 @@ impl<'a> EvalCtx<'a> {
         self.call_depth -= 1;
         self.source_nesting = previous_source_nesting;
         self.current_span = previous_span;
-        match (result, cleanup_result) {
-            (Err(error), _) | (Ok(_), Err(error)) => Err(error),
-            (Ok(value), Ok(())) => Ok(value),
+        let post_result = match (&result, &cleanup_result) {
+            (Ok(value), Ok(())) if !func.post_contracts.is_empty() => {
+                scope.insert("__jet_result".to_string(), value.clone());
+                let checked = self.check_contracts(&func.post_contracts, "Post", scope);
+                scope.remove("__jet_result");
+                checked
+            }
+            _ => Ok(()),
+        };
+        match (result, cleanup_result, post_result) {
+            (Err(error), _, _) | (Ok(_), Err(error), _) | (Ok(_), Ok(()), Err(error)) => {
+                Err(error)
+            }
+            (Ok(value), Ok(()), Ok(())) => Ok(value),
         }
     }
 

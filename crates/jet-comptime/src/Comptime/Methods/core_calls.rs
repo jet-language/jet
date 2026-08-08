@@ -12,6 +12,9 @@ use super::repl_process::run_repl_process;
 
 #[path = "../CorePureParity.rs"]
 mod core_pure_parity;
+#[path = "core_calls/regex.rs"]
+mod regex;
+use self::regex::*;
 
 mod progress_semantics {
     include!("../../../../jet-codegen/src/Prelude/Core/Progress.rs");
@@ -159,6 +162,9 @@ pub(in super::super) fn solver_new(
 pub fn display_core_pure_value(value: &CtValue) -> Option<String> {
     core_pure_parity::display(value)
 }
+
+pub(in super::super) use regex::apply_regex_method;
+pub use regex::eval_regex_replace_all_with;
 
 const PERF_DEFAULT_FIDELITY_BITS: u32 = 1.0f32.to_bits();
 // D-FIDELITY-API1=A: this signal must behave like the AOT binary's
@@ -672,17 +678,17 @@ fn base32_encode(bytes: &[u8]) -> String {
 /// Core modules the REPL interpreter cannot run (native FFI / threads / HTTP stack).
 fn repl_native_only_module(module: &str) -> Option<&'static str> {
     match module {
-        "core.http" | "core.http.client" | "core.http.server" | "jet.http" => {
+        "core.http" | "core.http.client" | "core.http.server" => {
             Some("the HTTP client/server (`core.http`)")
         }
-        "core.db" | "jet.db" => Some("`core.db` (SQLite)"),
+        "core.db" => Some("`core.db` (SQLite)"),
         "core.net" => Some("network sockets (`core.net`)"),
-        "core.reactive" | "jet.reactive" => Some("`core.reactive`"),
-        "core.crypto" | "core.crypto.random" | "jet.crypto" => Some("`core.crypto`"),
+        "core.reactive" => Some("`core.reactive`"),
+        "core.crypto" | "core.crypto.random" => Some("`core.crypto`"),
         "core.auth" => Some("`core.auth` token verification"),
         "core.tasks" | "core.channels" => Some("tasks/channels (`core.tasks`)"),
         "core.mem" | "core.mem.alloc" => Some("`core.mem` (low-level memory tier)"),
-        "jet.log" => Some("`core.log`"),
+        "core.log" => Some("`core.log`"),
         _ => None,
     }
 }
@@ -1001,7 +1007,7 @@ fn text_width_policy_flags(policy: &CtValue) -> (bool, bool) {
 }
 
 /// Evaluate a whitelisted pure Core call at comptime / in the REPL.
-/// `module` is the full path (e.g. `"core.math"`, `"jet.regex"`).
+/// `module` is the full path (e.g. `"core.math"`, `"core.regex"`).
 pub fn apply_core_call(
     module: &str,
     method: &str,
@@ -2025,8 +2031,8 @@ pub fn apply_core_call(
                 fields: vec![("now".to_string(), CtValue::Int(seed))],
             })
         }
-        // --- jet.regex / core.regex (D-REGEXENGINE1) ---
-        ("jet.regex", "literal") => {
+        // --- core.regex / core.regex (D-REGEXENGINE1) ---
+        ("core.regex", "literal") => {
             let pattern = as_string(one(0)?, span)?;
             jet_foundation::RegexSyntax::validate(pattern).map_err(|error| {
                 Diagnostic::error(
@@ -2045,15 +2051,15 @@ pub fn apply_core_call(
                 fields: vec![("pattern".to_string(), CtValue::Str(pattern.to_string()))],
             })
         }
-        ("jet.regex", "is_match") => regex_is_match(args, span),
-        ("jet.regex", "find") => regex_find(args, span),
-        ("jet.regex", "find_all") => regex_find_all(args, span),
-        ("jet.regex", "matches") => regex_matches(args, span),
-        ("jet.regex", "split") => regex_split(args, span),
-        ("jet.regex", "split_limit") => regex_split_limit(args, span),
-        ("jet.regex", "replace") => regex_replace(args, span, false),
-        ("jet.regex", "replace_all") => regex_replace(args, span, true),
-        ("jet.regex", "match") => regex_match(args, span),
+        ("core.regex", "is_match") => regex_is_match(args, span),
+        ("core.regex", "find") => regex_find(args, span),
+        ("core.regex", "find_all") => regex_find_all(args, span),
+        ("core.regex", "matches") => regex_matches(args, span),
+        ("core.regex", "split") => regex_split(args, span),
+        ("core.regex", "split_limit") => regex_split_limit(args, span),
+        ("core.regex", "replace") => regex_replace(args, span, false),
+        ("core.regex", "replace_all") => regex_replace(args, span, true),
+        ("core.regex", "match") => regex_match(args, span),
         // --- core.random (ambient; seed for deterministic REPL transcripts) ---
         ("core.random", "seed") => {
             let seed = match one(0)? {
@@ -2719,265 +2725,6 @@ pub fn apply_core_call(
                 span,
             ))
         }
-    }
-}
-
-pub(in super::super) fn apply_regex_method(
-    recv: &CtValue,
-    method: &str,
-    args: &[CtValue],
-    span: Span,
-) -> Option<Result<CtValue, Diagnostic>> {
-    if !matches!(
-        recv,
-        CtValue::Struct { type_name, .. } if type_name == "__JetRegex"
-    ) {
-        return None;
-    }
-    let mut call_args = Vec::with_capacity(args.len() + 1);
-    call_args.push(recv.clone());
-    call_args.extend_from_slice(args);
-    Some(match method {
-        "is_match" => regex_is_match(call_args, span),
-        "find" => regex_find(call_args, span),
-        "find_all" => regex_find_all(call_args, span),
-        "matches" => regex_matches(call_args, span),
-        "split" => regex_split(call_args, span),
-        "split_limit" => regex_split_limit(call_args, span),
-        "replace" => regex_replace(call_args, span, false),
-        "replace_all" => regex_replace(call_args, span, true),
-        "match" => regex_match(call_args, span),
-        _ => return None,
-    })
-}
-
-pub fn eval_regex_replace_all_with(
-    recv: &CtValue,
-    args: &[CtValue],
-    span: Span,
-    invoke: &mut impl FnMut(CtValue, Vec<CtValue>) -> Result<CtValue, Diagnostic>,
-) -> Option<Result<CtValue, Diagnostic>> {
-    if !matches!(
-        recv,
-        CtValue::Struct { type_name, .. } if type_name == "__JetRegex"
-    ) {
-        return None;
-    }
-    Some((|| {
-        let re = regex_pattern(std::slice::from_ref(recv), span)?;
-        let text = as_string(
-            args.first()
-                .ok_or_else(|| unsupported("regex.replace_all_with: missing text argument", span))?,
-            span,
-        )?;
-        let callback = args.get(1).ok_or_else(|| {
-            unsupported("regex.replace_all_with: missing callback argument", span)
-        })?;
-        let replaced = re.replace_all_with(text, |found| {
-            let value = invoke(callback.clone(), vec![regex_match_value(text, found)])?;
-            Ok::<String, Diagnostic>(as_string(&value, span)?.to_string())
-        })?;
-        Ok(CtValue::Str(replaced))
-    })())
-}
-
-fn regex_pattern(
-    args: &[CtValue],
-    span: Span,
-) -> Result<super::super::RegexLite::RegexLite, Diagnostic> {
-    let value = args
-        .first()
-        .ok_or_else(|| unsupported("regex call: missing pattern argument", span))?;
-    let pat = match value {
-        CtValue::Str(pattern) => pattern.as_str(),
-        CtValue::Struct { type_name, fields } if type_name == "__JetRegex" => fields
-            .iter()
-            .find_map(|(name, value)| match (name.as_str(), value) {
-                ("pattern", CtValue::Str(pattern)) => Some(pattern.as_str()),
-                _ => None,
-            })
-            .ok_or_else(|| unsupported("Regex literal value", span))?,
-        _ => return Err(unsupported("Regex pattern value", span)),
-    };
-    super::super::RegexLite::RegexLite::parse(pat).map_err(|e| {
-        Diagnostic::error(
-            "E0956",
-            format!("bad regex pattern: {}", e),
-            "the pattern could not be compiled".to_string(),
-            "fix the pattern syntax".to_string(),
-            Some(span),
-        )
-    })
-}
-
-fn regex_is_match(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
-    let re = regex_pattern(&args, span)?;
-    let text = as_string(
-        args.get(1)
-            .ok_or_else(|| unsupported("regex.is_match: missing text argument", span))?,
-        span,
-    )?;
-    Ok(CtValue::Bool(re.is_match(text)))
-}
-
-fn regex_find(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
-    let re = regex_pattern(&args, span)?;
-    let text = as_string(
-        args.get(1)
-            .ok_or_else(|| unsupported("regex.find: missing text argument", span))?,
-        span,
-    )?;
-    Ok(match re.find(text) {
-        Some(m) => CtValue::Present(Box::new(CtValue::Str(text[m.start..m.end].to_string()))),
-        None => CtValue::absent(crate::AST::Type::String),
-    })
-}
-
-fn regex_find_all(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
-    let re = regex_pattern(&args, span)?;
-    let text = as_string(
-        args.get(1)
-            .ok_or_else(|| unsupported("regex.find_all: missing text argument", span))?,
-        span,
-    )?;
-    let items: Vec<CtValue> = re
-        .find_all(text)
-        .into_iter()
-        .map(|m| CtValue::Str(m.to_string()))
-        .collect();
-    Ok(CtValue::List(items))
-}
-
-fn regex_matches(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
-    let re = regex_pattern(&args, span)?;
-    let text = as_string(
-        args.get(1)
-            .ok_or_else(|| unsupported("regex.matches: missing text argument", span))?,
-        span,
-    )?;
-    Ok(CtValue::List(
-        re.matches(text)
-            .into_iter()
-            .map(|found| regex_match_value(text, found))
-            .collect(),
-    ))
-}
-
-fn regex_split(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
-    let re = regex_pattern(&args, span)?;
-    let text = as_string(
-        args.get(1)
-            .ok_or_else(|| unsupported("regex.split: missing text argument", span))?,
-        span,
-    )?;
-    let items: Vec<CtValue> = re
-        .split(text)
-        .into_iter()
-        .map(|s| CtValue::Str(s.to_string()))
-        .collect();
-    Ok(CtValue::List(items))
-}
-
-fn regex_split_limit(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
-    let re = regex_pattern(&args, span)?;
-    let text = as_string(
-        args.get(1)
-            .ok_or_else(|| unsupported("regex.split_limit: missing text argument", span))?,
-        span,
-    )?;
-    let limit = as_int(
-        args.get(2)
-            .ok_or_else(|| unsupported("regex.split_limit: missing limit argument", span))?,
-        span,
-    )?;
-    Ok(CtValue::List(
-        re.split_limit(text, limit)
-            .into_iter()
-            .map(|item| CtValue::Str(item.to_string()))
-            .collect(),
-    ))
-}
-
-fn regex_replace(
-    args: Vec<CtValue>,
-    span: Span,
-    all: bool,
-) -> Result<CtValue, Diagnostic> {
-    let re = regex_pattern(&args, span)?;
-    let text = as_string(
-        args.get(1)
-            .ok_or_else(|| unsupported("regex.replace: missing text argument", span))?,
-        span,
-    )?;
-    let rep = as_string(
-        args.get(2)
-            .ok_or_else(|| unsupported("regex.replace: missing replacement argument", span))?,
-        span,
-    )?;
-    Ok(CtValue::Str(if all {
-        re.replace_all(text, rep)
-    } else {
-        re.replace(text, rep)
-    }))
-}
-
-fn regex_match(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
-    let re = regex_pattern(&args, span)?;
-    let text = as_string(
-        args.get(1)
-            .ok_or_else(|| unsupported("regex.match: missing text argument", span))?,
-        span,
-    )?;
-    Ok(match re.find(text) {
-        Some(found) => CtValue::Present(Box::new(regex_match_value(text, found))),
-        None => CtValue::absent(crate::AST::Type::Named("Match".to_string())),
-    })
-}
-
-fn regex_match_value(text: &str, found: super::super::RegexLite::MatchLite) -> CtValue {
-    let groups = found
-        .groups
-        .iter()
-        .map(|item| {
-            item.map(|(start, end)| {
-                CtValue::Present(Box::new(CtValue::Str(text[start..end].to_string())))
-            })
-            .unwrap_or_else(|| CtValue::absent(crate::AST::Type::String))
-        })
-        .collect();
-    let spans = found
-        .groups
-        .iter()
-        .map(|item| {
-            item.map(|(start, end)| {
-                CtValue::Present(Box::new(CtValue::Struct {
-                    type_name: "__RegexSpan".to_string(),
-                    fields: vec![
-                        ("start".to_string(), CtValue::Int(start as i64)),
-                        ("end".to_string(), CtValue::Int(end as i64)),
-                    ],
-                }))
-            })
-            .unwrap_or_else(|| {
-                CtValue::absent(crate::AST::Type::Named("__RegexSpan".to_string()))
-            })
-        })
-        .collect();
-    let names = found
-        .names
-        .into_iter()
-        .map(|name| {
-            name.map(|name| CtValue::Present(Box::new(CtValue::Str(name))))
-                .unwrap_or_else(|| CtValue::absent(crate::AST::Type::String))
-        })
-        .collect();
-    CtValue::Struct {
-        type_name: "Match".to_string(),
-        fields: vec![
-            ("groups".to_string(), CtValue::List(groups)),
-            ("spans".to_string(), CtValue::List(spans)),
-            ("names".to_string(), CtValue::List(names)),
-        ],
     }
 }
 

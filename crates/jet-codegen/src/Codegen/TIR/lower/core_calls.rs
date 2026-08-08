@@ -19,8 +19,7 @@ use crate::Diagnostics::Span;
 use std::collections::HashMap;
 
 /// c109 Phase 13: lower a closure-taking core call (`tasks.spawn`/`http.serve`/
-/// `scope.guard`) into a bespoke `CoreClosureCall` node, reproducing `emit_core_call`
-/// (Source/Codegen/Expression.rs) byte-for-byte. Returns `None` when `(module,
+/// `scope.guard`) into a bespoke `CoreClosureCall` node. Returns `None` when `(module,
 /// method)` isn't one of the three (so the caller falls through to the plain
 /// `CoreCall`). The gate (`core_closure_call_in_subset`) already proved a literal
 /// in-subset lambda in the closure-arg position.
@@ -117,7 +116,7 @@ pub(crate) fn lower_core_closure_call(
                 },
             });
         }
-        ("jet.http", "serve") => {
+        ("core.http", "serve") => {
             let lam = lam_at(1)?;
             let addr = lower_expr(&args[0].expr, cx, env);
             let closure = render_lambda_str_expecting_value(
@@ -328,7 +327,7 @@ pub(crate) fn lower_core_closure_call(
             });
         }
         // D-REACT1=B: the `derived` closure's body type is the `Derived<T>` element.
-        ("jet.reactive", "derived") => {
+        ("core.reactive", "derived") => {
             let lam = lam_at(0)?;
             let body_ty = lambda_body_ty(lam, cx, env);
             let closure = render_lambda_str(lam, cx, env);
@@ -349,7 +348,7 @@ pub(crate) fn lower_core_closure_call(
                 },
             });
         }
-        ("jet.reactive", "effect") => {
+        ("core.reactive", "effect") => {
             let lam = lam_at(0)?;
             let closure = render_lambda_str(lam, cx, env);
             let executable = Box::new(lower_lambda(lam, cx, env));
@@ -358,7 +357,7 @@ pub(crate) fn lower_core_closure_call(
             TCoreClosureKind::ReactiveEffect { closure, executable }
         }
         // D-SIGNAL1: `computed` is a canonical alias for `derived`.
-        ("jet.reactive", "computed") => {
+        ("core.reactive", "computed") => {
             let lam = lam_at(0)?;
             let body_ty = lambda_body_ty(lam, cx, env);
             let closure = render_lambda_str(lam, cx, env);

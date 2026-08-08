@@ -9,7 +9,7 @@ pub(super) fn is_fallible_void_entry_return(ty: &Type, state: &ModuleState) -> b
                     if n == Syntax::TYPE_ERROR
                         || (n == "CryptoError"
                             && !state.registry.contains(n)
-                            && state.core_imports.values().any(|module| module == "jet.crypto" || module == "core.crypto")))
+                            && state.core_imports.values().any(|module| module == "core.crypto")))
     )
 }
 /// D-CLIFLAG1: what `fn run`'s single parameter type turned out to be.

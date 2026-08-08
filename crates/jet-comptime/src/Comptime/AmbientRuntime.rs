@@ -1,6 +1,6 @@
 //! Optional host callbacks for whole-program interpreter deopt (`jet run`).
 //!
-//! Cranelift hosts for `jet.db` / `jet.crypto` live in `jet-jit` (rusqlite +
+//! Cranelift hosts for `core.db` / `core.crypto` live in `jet-jit` (rusqlite +
 //! bridge crypto). Pure comptime / REPL leave this unset so those modules stay
 //! unsupported or REPL-native-denied. `jet-jit` installs hooks only around
 //! `TirBridge::run_bundle` for runtime-tier deopt.

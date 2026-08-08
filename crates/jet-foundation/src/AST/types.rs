@@ -130,30 +130,70 @@ fn unescape_axis(axis: &str) -> Option<String> {
     Some(out)
 }
 
-/// Internal-only provenance tag for purpose-bound `core.crypto` nominal types.
-/// The NUL prefix cannot be written as a Jet marker identifier.
-pub const CORE_CRYPTO_NOMINAL_MARKER: &str = "\0core.crypto";
+/// The marker carried by `Type::Tagged`: either a user-written D-QUAL4 tag
+/// name, or one compiler-internal provenance/access fact. Card #1662: the
+/// internal facts used to be NUL-prefixed strings smuggled through the same
+/// `String` field as a real user tag name — unspellable in source, but still
+/// a `String` pretending to be one. `Internal` gives each fact a real enum
+/// variant instead; no parser path ever constructs it, so it stays exactly as
+/// unspellable as the retired marker constants.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TagMarker {
+    /// D-QUAL4=A: user-written `#TagName T` in signature/binding position.
+    User(String),
+    /// Compiler-internal provenance/access fact (card #1662).
+    Internal(InternalTag),
+}
 
-/// Internal provenance for deterministic and system-backed `Clock` values.
-/// The NUL prefix keeps both markers unspellable in Jet source.
-pub const DETERMINISTIC_CLOCK_MARKER: &str = "\0clock.deterministic";
-pub const SYSTEM_CLOCK_MARKER: &str = "\0clock.system";
+impl std::fmt::Display for TagMarker {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TagMarker::User(name) => write!(f, "{name}"),
+            TagMarker::Internal(tag) => write!(f, "{}", tag.spelling()),
+        }
+    }
+}
 
-/// Internal provenance for the temporary read-only value lent by
-/// `ExpiringSecret.with`. It cannot be named in source or stored anywhere.
-pub const EXPIRING_SECRET_LOAN_MARKER: &str = "\0expiring_secret.loan";
-/// Compiler-only access modes for the single public `SharedGuard<T>` type.
-pub const SHARED_GUARD_READ_MARKER: &str = "\0shared_guard.read";
-pub const SHARED_GUARD_EDIT_MARKER: &str = "\0shared_guard.edit";
+/// One compiler-internal `Type::Tagged` provenance/access fact (card #1662).
+/// Every variant here retires one `\0`-prefixed marker constant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InternalTag {
+    /// Was `CORE_CRYPTO_NOMINAL_MARKER`: purpose-bound `core.crypto` nominal
+    /// provenance. Identity-bearing (see the manual `PartialEq for Type`).
+    CoreCryptoNominal,
+    /// Was `DETERMINISTIC_CLOCK_MARKER` / `SYSTEM_CLOCK_MARKER`: provenance
+    /// for deterministic and system-backed `Clock` values.
+    DeterministicClock,
+    SystemClock,
+    /// Was `EXPIRING_SECRET_LOAN_MARKER`: the temporary read-only value lent
+    /// by `ExpiringSecret.with`. Cannot be named in source or stored anywhere.
+    ExpiringSecretLoan,
+    /// Was `SHARED_GUARD_READ_MARKER` / `SHARED_GUARD_EDIT_MARKER`: the
+    /// compiler-only access modes for the single public `SharedGuard<T>` type.
+    SharedGuardRead,
+    SharedGuardEdit,
+    /// Was `TERMINAL_FACT_SET_MARKER`: the open terminal capability-key set.
+    TerminalFactSet,
+    /// Was `CPP_CALLBACK_ABI_MARKER`: a generated C++ facade parameter that
+    /// keeps the source-level callback shape while telling the backend it is
+    /// already a raw C function pointer, not a boxed Jet closure.
+    CppCallbackAbi,
+}
 
-/// Internal provenance for the open terminal capability-key set.
-/// The NUL prefix keeps the marker unspellable in Jet source.
-pub const TERMINAL_FACT_SET_MARKER: &str = "\0terminal.fact_set";
-
-/// Compiler-owned representation tag used by generated C++ facade functions.
-/// The tag keeps the source-level callback shape while telling the backend that
-/// this parameter is already a raw C function pointer, not a boxed Jet closure.
-pub const CPP_CALLBACK_ABI_MARKER: &str = "\0cpp.callback_abi";
+impl InternalTag {
+    fn spelling(self) -> &'static str {
+        match self {
+            InternalTag::CoreCryptoNominal => "core.crypto",
+            InternalTag::DeterministicClock => "clock.deterministic",
+            InternalTag::SystemClock => "clock.system",
+            InternalTag::ExpiringSecretLoan => "expiring_secret.loan",
+            InternalTag::SharedGuardRead => "shared_guard.read",
+            InternalTag::SharedGuardEdit => "shared_guard.edit",
+            InternalTag::TerminalFactSet => "terminal.fact_set",
+            InternalTag::CppCallbackAbi => "cpp.callback_abi",
+        }
+    }
+}
 
 /// The access capability of a parameter / argument / receiver (D-MEM1, was
 /// D-CAP7/8/9/10).
@@ -282,8 +322,12 @@ pub enum Type {
     /// D-QUAL4=A: value-tag type qualifier — `#TagName T` in signature/binding
     /// position. Transparent to type identity (the tag is a flow annotation only,
     /// not a structural difference); sema treats it as `inner` for all purposes.
+    /// `marker` is `TagMarker::User` for these. `TagMarker::Internal` reuses
+    /// the same shape for compiler-owned provenance/access facts (card #1662);
+    /// `CoreCryptoNominal` is the one exception made identity-bearing (see the
+    /// manual `PartialEq for Type` below).
     Tagged {
-        marker: String,
+        marker: TagMarker,
         inner: Box<Type>,
     },
     /// D-UNIONTYPE1=A: closed structural sum `A | B | …`. Canonical form is
@@ -300,11 +344,17 @@ pub enum Type {
         base: Box<Type>,
         dimension: Dimension,
     },
+    /// D-COMPUTE-TYPE1: a fixed const dimension in `Vec<N>` / `Matrix<M, N>`,
+    /// carried as one `Type::Apply` argument. Card #1662: replaces the retired
+    /// `\0compute.dimension.<N>`-prefixed `Type::Named` string encoding — a
+    /// real `u64` payload can't be confused with a user type name, so unlike
+    /// that encoding this needs no unspellable-prefix trick.
+    ComputeDim(u64),
 }
 
-/// Compiler-owned encoding for the const dimensions in `Vec<N>` and
-/// `Matrix<M, N>`. The NUL prefix makes it impossible to spell as a user type.
-const COMPUTE_DIMENSION_PREFIX: &str = "\0compute.dimension.";
+fn is_core_crypto(marker: &TagMarker) -> bool {
+    matches!(marker, TagMarker::Internal(InternalTag::CoreCryptoNominal))
+}
 
 /// Manual structural equality (D-EFF2). Identical to a derived `PartialEq`
 /// except the `Fn` arm ignores `effect_bound`: a callback effect bound is a
@@ -383,22 +433,23 @@ impl PartialEq for Type {
             // Internal core nominal provenance is identity-bearing. User-written
             // D-QUAL4 tags remain transparent flow annotations.
             (Tagged { marker: ma, inner: a }, Tagged { marker: mb, inner: b })
-                if ma == CORE_CRYPTO_NOMINAL_MARKER && mb == CORE_CRYPTO_NOMINAL_MARKER =>
+                if is_core_crypto(ma) && is_core_crypto(mb) =>
             {
                 a == b
             }
-            (Tagged { marker, inner }, other) if marker != CORE_CRYPTO_NOMINAL_MARKER => {
+            (Tagged { marker, inner }, other) if !is_core_crypto(marker) => {
                 inner.as_ref() == other
             }
-            (other, Tagged { marker, inner }) if marker != CORE_CRYPTO_NOMINAL_MARKER => {
+            (other, Tagged { marker, inner }) if !is_core_crypto(marker) => {
                 other == inner.as_ref()
             }
             (Tagged { marker, .. }, _) | (_, Tagged { marker, .. })
-                if marker == CORE_CRYPTO_NOMINAL_MARKER => false,
+                if is_core_crypto(marker) => false,
             (Union(a), Union(b)) => a == b,
             (Quantity { base: b1, dimension: d1 }, Quantity { base: b2, dimension: d2 }) => {
                 b1 == b2 && d1 == d2
             }
+            (ComputeDim(a), ComputeDim(b)) => a == b,
             _ => false,
         }
     }
@@ -518,26 +569,17 @@ fn effect_names(row: &[(String, Span)]) -> String {
 }
 
 impl Type {
-    /// Compiler-private fact marker on an implicit checked integer-to-float
-    /// conversion. Sema writes it; lowering consumes it without reconstructing
-    /// the language rule.
-    pub const CHECKED_NUMERIC_WIDEN_MARKER: &'static str = "\0numeric.checked_widen";
-
     /// D-COMPUTE-TYPE1: preserve a fixed compute dimension in the type tree.
     pub fn compute_dimension_type(value: u64) -> Type {
-        Type::Named(format!("{COMPUTE_DIMENSION_PREFIX}{value}"))
+        Type::ComputeDim(value)
     }
 
     /// Return a fixed compute dimension, if this is the compiler-owned marker.
     pub fn compute_dimension_value(&self) -> Option<u64> {
-        let value = match self {
-            Type::Named(name) => name.strip_prefix(COMPUTE_DIMENSION_PREFIX)?,
-            _ => return None,
-        };
-        if value.is_empty() || !value.chars().all(|ch| ch.is_ascii_digit()) {
-            return None;
+        match self {
+            Type::ComputeDim(value) => Some(*value),
+            _ => None,
         }
-        value.parse().ok()
     }
 
     /// Build one of the fixed-shape compute aliases from its dimensions.
@@ -671,9 +713,8 @@ impl Type {
                     (None, None) => format!("fn({})", ps),
                 }
             }
-            Type::Named(n) => self
-                .compute_dimension_value()
-                .map_or_else(|| format!("`{}`", n), |value| format!("{value} (a fixed compute dimension)")),
+            Type::Named(n) => format!("`{}`", n),
+            Type::ComputeDim(value) => format!("{value} (a fixed compute dimension)"),
             // D-CAP9: the raw-pointer type shows as the canonical `*T`.
             Type::Apply { name, args } if name == crate::Syntax::TYPE_PTR && args.len() == 1 => {
                 format!("`*{}`", args[0].name())
@@ -715,20 +756,7 @@ impl Type {
                 )
             }
             Type::Float32 => "F32 (a 32-bit decimal number)".to_string(),
-            Type::Tagged { marker, inner }
-                if matches!(
-                    marker.as_str(),
-                    CORE_CRYPTO_NOMINAL_MARKER
-                        | DETERMINISTIC_CLOCK_MARKER
-                        | EXPIRING_SECRET_LOAN_MARKER
-                        | SHARED_GUARD_READ_MARKER
-                        | SHARED_GUARD_EDIT_MARKER
-                        | SYSTEM_CLOCK_MARKER
-                        | TERMINAL_FACT_SET_MARKER
-                ) =>
-            {
-                inner.show()
-            }
+            Type::Tagged { marker: TagMarker::Internal(_), inner } => inner.show(),
             Type::Tagged { marker, inner } => format!("#{} {}", marker, inner.show()),
             Type::Union(members) => members
                 .iter()
@@ -764,9 +792,8 @@ impl Type {
                     (None, None) => format!("fn({})", ps),
                 }
             }
-            Type::Named(n) => self
-                .compute_dimension_value()
-                .map_or_else(|| n.clone(), |value| value.to_string()),
+            Type::Named(n) => n.clone(),
+            Type::ComputeDim(value) => value.to_string(),
             // D-CAP9: the raw-pointer type names as the canonical `*T`.
             Type::Apply { name, args } if name == crate::Syntax::TYPE_PTR && args.len() == 1 => {
                 format!("*{}", args[0].name())
@@ -802,20 +829,7 @@ impl Type {
             Type::FixedList { elem, len, len_symbol } => format!("[{}#{}]", elem.name(), len_symbol.as_ref().map(|v| v.0.as_str()).map_or_else(|| len.to_string(), str::to_string)),
             Type::IntN { signed, bits } => int_spelling(*signed, *bits),
             Type::Float32 => "F32".to_string(),
-            Type::Tagged { marker, inner }
-                if matches!(
-                    marker.as_str(),
-                    CORE_CRYPTO_NOMINAL_MARKER
-                        | DETERMINISTIC_CLOCK_MARKER
-                        | EXPIRING_SECRET_LOAN_MARKER
-                        | SHARED_GUARD_READ_MARKER
-                        | SHARED_GUARD_EDIT_MARKER
-                        | SYSTEM_CLOCK_MARKER
-                        | TERMINAL_FACT_SET_MARKER
-                ) =>
-            {
-                inner.name()
-            }
+            Type::Tagged { marker: TagMarker::Internal(_), inner } => inner.name(),
             Type::Tagged { marker, inner } => format!("#{} {}", marker, inner.name()),
             Type::Union(members) => members
                 .iter()
@@ -965,11 +979,11 @@ impl Type {
 
 #[cfg(test)]
 mod tests {
-    use super::{numeric_type_from_name, Dimension, Type, CORE_CRYPTO_NOMINAL_MARKER};
+    use super::{numeric_type_from_name, Dimension, InternalTag, TagMarker, Type};
 
     fn core_secret() -> Type {
         Type::Tagged {
-            marker: CORE_CRYPTO_NOMINAL_MARKER.to_string(),
+            marker: TagMarker::Internal(InternalTag::CoreCryptoNominal),
             inner: Box::new(Type::Named("Secret".to_string())),
         }
     }
@@ -994,7 +1008,7 @@ mod tests {
         let local = Type::Named("Secret".to_string());
         let core = core_secret();
         let tainted_core = Type::Tagged {
-            marker: "Tainted(Credential)".to_string(),
+            marker: TagMarker::User("Tainted(Credential)".to_string()),
             inner: Box::new(core.clone()),
         };
 

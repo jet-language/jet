@@ -1688,6 +1688,7 @@ impl<'a> Checker<'a> {
                     }],
                     recv_type: None,
                     resolved_ret: Some(destination_ty.clone()),
+                    checked_widen: false,
                 };
                 return true;
             }

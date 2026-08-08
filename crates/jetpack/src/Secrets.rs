@@ -435,7 +435,7 @@ fn spawn_helper_command(helper: &Path, command: &str, directory: Option<&Path>) 
 // `jet_vault_decode_pairs` byte-for-byte — the two are independently built
 // crates (this one and the hidden bridge) that can't share Rust types, so the
 // wire format is duplicated rather than imported, same reasoning as
-// `jet.db`'s bind-param wire encoding.
+// `core.db`'s bind-param wire encoding.
 // ──────────────────────────────────────────────
 
 fn encode_pairs(pairs: &[(String, String)]) -> Vec<u8> {

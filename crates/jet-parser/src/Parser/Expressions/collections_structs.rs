@@ -427,7 +427,12 @@ impl<'a> Parser<'a> {
                 }
                 TokKind::KwNull => {
                     let span = self.bump().span;
-                    return Ok(Some(Pattern::Absent(span)));
+                    return Ok(Some(Pattern::Variant {
+                        variant: Syntax::LIT_NULL.to_string(),
+                        bindings: Vec::new(),
+                        leading_dot: false,
+                        span,
+                    }));
                 }
                 TokKind::Ident(name) if name == Syntax::LIT_VALUE => {
                     let start = self.bump().span;
@@ -438,9 +443,13 @@ impl<'a> Parser<'a> {
                         TokKind::RParen,
                         &format!("after the binding in `{}(...)`", Syntax::LIT_VALUE),
                     )?;
-                    return Ok(Some(Pattern::Present {
-                        binding,
-                        binding_span,
+                    return Ok(Some(Pattern::Variant {
+                        variant: Syntax::LIT_VALUE.to_string(),
+                        bindings: vec![crate::AST::PatSlot::Bind {
+                            name: binding,
+                            span: binding_span,
+                        }],
+                        leading_dot: false,
                         span: Span::new(start.start, binding_span.end),
                     }));
                 }
@@ -480,6 +489,7 @@ impl<'a> Parser<'a> {
                     let base = Pattern::Variant {
                         variant,
                         bindings: Vec::new(),
+                        leading_dot: false,
                         span,
                     };
                     let or_start = span;
@@ -577,6 +587,7 @@ impl<'a> Parser<'a> {
                     let base = Pattern::Variant {
                         variant,
                         bindings,
+                        leading_dot: false,
                         span: Span::new(span.start, end),
                     };
                     if matches!(self.peek().kind, TokKind::Pipe) {
@@ -606,7 +617,7 @@ impl<'a> Parser<'a> {
                 // D-ENUMDOT1 (ratified 2026-06-26): `.Variant` or `.Variant(binding)` in
                 // pattern position. Reads as "a member of the inferred enum", resolving the
                 // bare-name-vs-variable ambiguity from S31. Normalises to the same
-                // Pattern::Variant AST node — no `leading_dot` field added.
+                // Pattern::Variant AST node; source form remains until sema.
                 TokKind::Dot
                     if self.toks.get(self.pos + 1)
                         .and_then(|token| leading_dot_variant(&token.kind))
@@ -685,7 +696,12 @@ impl<'a> Parser<'a> {
                         (vec![], variant_span.end)
                     };
                     let span = Span::new(span_start, end);
-                    let base = Pattern::Variant { variant, bindings, span };
+                    let base = Pattern::Variant {
+                        variant,
+                        bindings,
+                        leading_dot: true,
+                        span,
+                    };
                     if matches!(self.peek().kind, TokKind::Pipe) {
                         let or_start = Span::new(span_start, end);
                         let mut alts = vec![base];
@@ -744,6 +760,7 @@ impl<'a> Parser<'a> {
             Ok(Some(Pattern::Variant {
                 variant,
                 bindings: Vec::new(),
+                leading_dot: false,
                 span,
             }))
         }

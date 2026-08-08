@@ -57,9 +57,11 @@ fn codemod_rename_dry_run_apply_and_undo() {
     .unwrap();
 
     let dry = Command::new(jet())
-        .args(["inspect", "codemod", "dry-run", object.to_str().unwrap()])
+        .args(["inspect", "codemod"])
+        .arg(object.to_str().unwrap())
+        .arg("--dry-run")
         .output()
-        .expect("jet inspect codemod dry-run");
+        .expect("jet inspect codemod --dry-run");
     assert!(
         dry.status.success(),
         "stderr: {}",
@@ -105,6 +107,18 @@ fn codemod_rename_dry_run_apply_and_undo() {
     let restored = fs::read_to_string(&source).unwrap();
     assert!(restored.contains("fn report"));
     assert!(restored.contains("report()"));
+}
+
+#[test]
+fn retired_codemod_dry_run_teaches_flag() {
+    let output = Command::new(jet())
+        .args(["inspect", "codemod", "dry-run", "missing.codemod.json"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("is retired"), "{stderr}");
+    assert!(stderr.contains("--dry-run"), "{stderr}");
 }
 
 #[test]
@@ -201,7 +215,9 @@ fn batch_rules_reindex_across_clean_and_fixture_roots_then_undo_exactly() {
     fs::write(&object, object_text).unwrap();
 
     let dry = Command::new(jet())
-        .args(["inspect", "codemod", "dry-run", object.to_str().unwrap()])
+        .args(["inspect", "codemod"])
+        .arg(object.to_str().unwrap())
+        .arg("--dry-run")
         .output()
         .unwrap();
     assert!(
@@ -275,7 +291,9 @@ fn batch_refuses_declared_count_and_unknown_fields_without_writes() {
     let source = project.join("examples/a.jet");
     let before = fs::read(&source).unwrap();
     let count = Command::new(jet())
-        .args(["inspect", "codemod", "dry-run", object.to_str().unwrap()])
+        .args(["inspect", "codemod"])
+        .arg(object.to_str().unwrap())
+        .arg("--dry-run")
         .output()
         .unwrap();
     assert!(!count.status.success());
@@ -289,7 +307,9 @@ fn batch_refuses_declared_count_and_unknown_fields_without_writes() {
     )
     .unwrap();
     let unknown = Command::new(jet())
-        .args(["inspect", "codemod", "dry-run", object.to_str().unwrap()])
+        .args(["inspect", "codemod"])
+        .arg(object.to_str().unwrap())
+        .arg("--dry-run")
         .output()
         .unwrap();
     assert!(!unknown.status.success());
@@ -335,7 +355,9 @@ fn interrupted_batch_recovers_before_the_next_plan() {
     assert_eq!(fs::read(&source_b).unwrap(), before_b);
 
     let recovered = Command::new(jet())
-        .args(["inspect", "codemod", "dry-run", object.to_str().unwrap()])
+        .args(["inspect", "codemod"])
+        .arg(object.to_str().unwrap())
+        .arg("--dry-run")
         .output()
         .unwrap();
     assert!(
@@ -394,7 +416,9 @@ fn batch_rejects_symlink_and_parent_escape_roots() {
     for root in ["examples/link.jet", "examples/../tests/ui/x.jet"] {
         fs::write(&object, format!("{{\"version\":2,\"name\":\"Bad\",\"project\":\".\",\"roots\":[{{\"path\":\"{root}\",\"validate\":\"clean\"}}],\"rules\":[{{\"id\":\"x\",\"kind\":\"symbol_rename\",\"from\":{{\"name\":\"run\",\"symbol_kind\":\"function\"}},\"to\":\"start\",\"matches\":1}}]}}\n")).unwrap();
         let output = Command::new(jet())
-            .args(["inspect", "codemod", "dry-run", object.to_str().unwrap()])
+            .args(["inspect", "codemod"])
+            .arg(object.to_str().unwrap())
+            .arg("--dry-run")
             .output()
             .unwrap();
         assert!(!output.status.success(), "root {root} must fail");
@@ -436,7 +460,9 @@ fn batch_refuses_collision_invalid_binding_and_overlapping_ast_nodes() {
 
     fs::write(&object, "{\"version\":2,\"name\":\"Collision\",\"project\":\".\",\"roots\":[{\"path\":\"examples/a.jet\",\"validate\":\"clean\"}],\"rules\":[{\"id\":\"rename\",\"kind\":\"symbol_rename\",\"from\":{\"name\":\"report\",\"symbol_kind\":\"function\"},\"to\":\"summarize\",\"matches\":3}]}\n").unwrap();
     let collision = Command::new(jet())
-        .args(["inspect", "codemod", "dry-run", object.to_str().unwrap()])
+        .args(["inspect", "codemod"])
+        .arg(object.to_str().unwrap())
+        .arg("--dry-run")
         .output()
         .unwrap();
     assert!(!collision.status.success());
@@ -444,7 +470,9 @@ fn batch_refuses_collision_invalid_binding_and_overlapping_ast_nodes() {
 
     fs::write(&object, "{\"version\":2,\"name\":\"Binding\",\"project\":\".\",\"roots\":[{\"path\":\"examples/a.jet\",\"validate\":\"clean\"}],\"rules\":[{\"id\":\"binding\",\"kind\":\"ast_rewrite\",\"node\":\"expr\",\"match\":\"report($value)\",\"replace\":\"missing($value)\",\"matches\":2}]}\n").unwrap();
     let binding = Command::new(jet())
-        .args(["inspect", "codemod", "dry-run", object.to_str().unwrap()])
+        .args(["inspect", "codemod"])
+        .arg(object.to_str().unwrap())
+        .arg("--dry-run")
         .output()
         .unwrap();
     assert!(!binding.status.success());
@@ -452,7 +480,9 @@ fn batch_refuses_collision_invalid_binding_and_overlapping_ast_nodes() {
 
     fs::write(&object, "{\"version\":2,\"name\":\"Overlap\",\"project\":\".\",\"roots\":[{\"path\":\"examples/a.jet\",\"validate\":\"clean\"}],\"rules\":[{\"id\":\"overlap\",\"kind\":\"ast_rewrite\",\"node\":\"expr\",\"match\":\"report($value)\",\"replace\":\"summarize($value)\",\"matches\":2}]}\n").unwrap();
     let overlap = Command::new(jet())
-        .args(["inspect", "codemod", "dry-run", object.to_str().unwrap()])
+        .args(["inspect", "codemod"])
+        .arg(object.to_str().unwrap())
+        .arg("--dry-run")
         .output()
         .unwrap();
     assert!(!overlap.status.success());
@@ -522,7 +552,9 @@ fn typed_ast_type_nodes_cover_params_returns_fields_distincts_and_alias_targets(
     let object = project.join("types.codemod.json");
     fs::write(&object, "{\"version\":2,\"name\":\"TypeCoverage\",\"project\":\".\",\"roots\":[{\"path\":\"examples/a.jet\",\"validate\":\"clean\"}],\"rules\":[{\"id\":\"alias-target\",\"kind\":\"ast_rewrite\",\"node\":\"type\",\"match\":\"Int ? Int\",\"replace\":\"Float ? Float\",\"matches\":1},{\"id\":\"simple-types\",\"kind\":\"ast_rewrite\",\"node\":\"type\",\"match\":\"Int\",\"replace\":\"Float\",\"matches\":4}]}\n").unwrap();
     let output = Command::new(jet())
-        .args(["inspect", "codemod", "dry-run", object.to_str().unwrap()])
+        .args(["inspect", "codemod"])
+        .arg(object.to_str().unwrap())
+        .arg("--dry-run")
         .output()
         .unwrap();
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
@@ -579,7 +611,9 @@ fn typed_ast_variadic_capture_is_rejected_in_binary_scalar_slot() {
     let object = project.join("variadic.codemod.json");
     fs::write(&object, "{\"version\":2,\"name\":\"ScalarVariadic\",\"project\":\".\",\"roots\":[{\"path\":\"examples/a.jet\",\"validate\":\"clean\"}],\"rules\":[{\"id\":\"scalar\",\"kind\":\"ast_rewrite\",\"node\":\"expr\",\"match\":\"$values... + 2\",\"replace\":\"$values... + 3\",\"matches\":1}]}\n").unwrap();
     let output = Command::new(jet())
-        .args(["inspect", "codemod", "dry-run", object.to_str().unwrap()])
+        .args(["inspect", "codemod"])
+        .arg(object.to_str().unwrap())
+        .arg("--dry-run")
         .output()
         .unwrap();
     assert!(!output.status.success());
@@ -613,7 +647,9 @@ fn transaction_rejects_swapped_temp_inode_before_destination_rename() {
     fs::write(&temp, b"hostile replacement\n").unwrap();
 
     let recovered = Command::new(jet())
-        .args(["inspect", "codemod", "dry-run", object.to_str().unwrap()])
+        .args(["inspect", "codemod"])
+        .arg(object.to_str().unwrap())
+        .arg("--dry-run")
         .output()
         .unwrap();
     assert!(!recovered.status.success());
@@ -642,7 +678,9 @@ fn transaction_rejects_destination_parent_directory_swap() {
     fs::write(&hostile, b"fn hostile() {}\n").unwrap();
 
     let recovered = Command::new(jet())
-        .args(["inspect", "codemod", "dry-run", object.to_str().unwrap()])
+        .args(["inspect", "codemod"])
+        .arg(object.to_str().unwrap())
+        .arg("--dry-run")
         .output()
         .unwrap();
     assert!(!recovered.status.success());
@@ -746,7 +784,9 @@ fn recovery_rejects_hostile_journal_paths_without_touching_outside_file() {
     fs::write(&journal_path, journal).unwrap();
 
     let output = Command::new(jet())
-        .args(["inspect", "codemod", "dry-run", object.to_str().unwrap()])
+        .args(["inspect", "codemod"])
+        .arg(object.to_str().unwrap())
+        .arg("--dry-run")
         .output()
         .unwrap();
     assert!(!output.status.success());
@@ -766,7 +806,9 @@ fn dry_run_diff_preserves_eof_newline_truth() {
     fs::write(&object, "{\"version\":2,\"name\":\"Eof\",\"project\":\".\",\"roots\":[{\"path\":\"examples/a.jet\",\"validate\":\"clean\"}],\"rules\":[{\"id\":\"rename\",\"kind\":\"symbol_rename\",\"from\":{\"name\":\"report\",\"symbol_kind\":\"function\"},\"to\":\"summarize\",\"matches\":2}]}\n").unwrap();
 
     let output = Command::new(jet())
-        .args(["inspect", "codemod", "dry-run", object.to_str().unwrap()])
+        .args(["inspect", "codemod"])
+        .arg(object.to_str().unwrap())
+        .arg("--dry-run")
         .output()
         .unwrap();
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));

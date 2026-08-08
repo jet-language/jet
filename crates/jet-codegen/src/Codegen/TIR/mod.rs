@@ -17,19 +17,12 @@
 //! emitter (`emit_tir_func`) makes ZERO decisions: it pattern-matches TIR fields
 //! and formats Rust. It never calls `expr_jet_ty` or `operand_is_integer`.
 //!
-//! ## Phase 1 scope (deliberately tiny)
+//! ## Coverage contract
 //!
-//! This is the foundational slice. It covers only the *simplest* top-level
-//! functions — scalar/String params, arithmetic/logic/comparison, bindings,
-//! assignments, returns, `if`, calls to plain functions and `print`. The gate
-//! `tir_covers` decides, conservatively, whether a function is fully inside that
-//! subset; anything outside stays on the existing AST `emit_func` path, untouched.
-//! The two paths must produce byte-identical Rust (golden parity, `tests/golden.rs`),
-//! which is how we prove the rest of the compiler is undisturbed.
-//!
-//! Later phases widen `tir_covers` and add TIR nodes until the AST codegen path
-//! is deleted. So the rule for this module is: **add a node only when its
-//! construct is in the covered subset, and make every field total.**
+//! `tir_covers` proves that every reachable function is fully represented by TIR.
+//! TIR is the only codegen seam: a coverage miss is an internal compiler error,
+//! never a fallback. Add a node only when its construct is covered, and make every
+//! field total.
 
 // Re-export the parent `Codegen` glob so the split-out submodules
 // (`subset`/`lower`/`emit`) reach `Cx`, `mangle`, `rust_*`, etc. via `use super::*`.
@@ -39,7 +32,8 @@ mod emit;
 mod eval;
 pub use eval::{
     install_comptime_bridge, lower_interp_program, run_named_func, run_program,
-    run_program_with_structs, set_native_call_hook, NativeCallHook,
+    run_program_with_structs, set_native_call_hook, stable_place_address, tir_place_address_key,
+    NativeCallHook,
 };
 mod lower;
 mod subset;
@@ -1785,12 +1779,27 @@ pub struct TFunc {
     /// D-COMPUTE-KERNEL-SURFACE1=B: sema's complete safe-kernel proof. The
     /// emitter and interpreter carry this fact without re-deriving it.
     pub kernel_proof: Option<crate::AST::KernelProof>,
+    /// D-PREPOST1: lowered runtime contract facts. Every execution tier reads
+    /// these same TIR expressions; a tier that cannot execute them must deopt.
+    pub pre_contracts: Vec<TContract>,
+    pub post_contracts: Vec<TContract>,
     pub body: Vec<TStmt>,
     /// c109 Phase 7: how this function is emitted. A top-level function gets
     /// `pub fn name(…)` at module scope; a method gets `pub fn user_name(<self>, …)`
     /// inside an `impl` block (indented), with the `self` receiver form per the
     /// resolved convention (or no receiver for a static method).
     pub kind: TFuncKind,
+}
+
+/// One lowered `#Pre`/`#Post` clause. `condition` and `message` share the
+/// function's parameter bindings; postconditions additionally bind
+/// `__jet_result` to the returned value.
+pub struct TContract {
+    pub condition: TExpr,
+    pub message: TExpr,
+    pub file: String,
+    pub line: u32,
+    pub span: crate::Diagnostics::Span,
 }
 
 /// One typed parameter reconstructed by a flattened WebAssembly export wrapper.
@@ -1860,9 +1869,9 @@ pub enum TFuncKind {
     },
 }
 
-/// c109 Phase 22: the method-call-collection iteration form on a `loop x; <coll>`,
-/// resolved at lowering from `emit_for_in`'s `Expr::MethodCall` branches
-/// (Source/Codegen/Statement.rs). Each carries the receiver's emitted Rust string;
+/// c109 Phase 22: a special source iteration form on a `loop x, <coll>`,
+/// resolved at lowering from the collection's type or method-call shape.
+/// Each carries the receiver's emitted Rust string;
 /// `file`/the panic line are program/source facts. The plain `.iter().cloned()` form
 /// (incl. a non-special method-call collection like `.split(…)`, which `emit_for_in`
 /// routes to its `else` default) is represented by `ForIn.method_kind == None`.
@@ -1884,6 +1893,8 @@ pub enum TForInMethod {
     /// `jet_process_stream_next_line(&recv)` via a `let Some(x) = … else { break }`,
     /// so (unlike `LinesFile`/`LinesStdin`) no extra wrapper block is needed.
     LinesProcessStream,
+    /// D-ENCSTREAM-SURFACE1=A: bounded synchronous codec-reader pull source.
+    EncodingReader { reader_type: String },
     /// D-ITER-HOOK: `loop x; mytype` when `mytype` implements `Iterable`.
     Iterable {
         coll_type: String,
@@ -2509,8 +2520,8 @@ pub enum TStmt {
         label: Option<String>,
         var: String,
         var2: Option<String>,
-        /// The expression iterated over: the method receiver for a `method_kind`
-        /// form, otherwise the whole collection.
+        /// The expression iterated over: the method receiver for a method-call
+        /// form, otherwise the whole collection (including codec readers).
         source: TExpr,
         /// The whole collection expression, whose type carries the element type.
         collection: TExpr,
@@ -2872,8 +2883,8 @@ pub enum TExprKind {
     ResourceTake(String),
     /// c109 Phase 25: the ambient prelude `input(...)` (D-PRELUDE1 = B). A bare call
     /// (no module alias) lowering to `{root}jet_std_io_input(None|Some(&(prompt)))`,
-    /// byte-for-byte the `emit_call` ambient-input branch (Source/Codegen/Expression.rs
-    /// ~L1778). `prompt` is `Some` when a String prompt arg is given, else `None`.
+    /// byte-for-byte the ambient-input call branch. `prompt` is `Some` when a String
+    /// prompt arg is given, else `None`.
     AmbientInput {
         prompt: Option<Box<TExpr>>,
     },
@@ -3249,9 +3260,9 @@ pub enum TExprKind {
         args: Vec<TExpr>,
     },
     /// c109 Phase 10: a core/stdlib module call `alias.method(args)` where `alias`
-    /// is a core import (`cx.core_imports`). The `(module, method)` dispatch in
-    /// `emit_core_call` (Source/Codegen/Expression.rs) is a pure syntactic match on
-    /// two already-resolved strings — NO type inference (I3) — so the TIR carries
+    /// is a core import (`cx.core_imports`). The `(module, method)` dispatch
+    /// is a pure syntactic match on two already-resolved strings — NO type inference
+    /// (I3) — so the TIR carries
     /// `module`/`method` as resolved strings and the emitter reproduces the match
     /// byte-for-byte. The args are lowered as plain expressions; the sole generic
     /// conversion fact is D-FIXARR1 widening. Per-arm `&(…)`/`&mut (…)`/move wrappers
@@ -3347,7 +3358,7 @@ pub enum TExprKind {
     /// `body` is the lowered closure body; `is_move`/`boxed` reproduce the AST path's
     /// `move ` keyword (off `needs_fn_mut`/`escapes`) and `Box::new(…)` (off `escapes`)
     /// wrappers. The whole thing is wrapped in `{ <prep> <closure> }` when `prep` is
-    /// non-empty — byte-for-byte `emit_lambda` (Source/Codegen/Expression.rs).
+    /// non-empty — byte-for-byte the TIR lambda encoding.
     Lambda(Box<TLambda>),
     /// D-TAG1: a binding-free enum variant/group pattern test (`d == .Fire`,
     /// `d == .Fire.Burn` in expression position). Lowers to `matches!(&subj, pat)`
@@ -3396,8 +3407,8 @@ pub enum TExprKind {
         op: TNumericOp,
     },
     /// c109 Phase 28: an overflow opt-out builtin `wrapping(e)`/`saturating(e)`/
-    /// `checked(e)` (D-NUMOPS1). The AST `emit_call` (Source/Codegen/Expression.rs
-    /// ~L1756) lowers the single integer `Expr::Binary` argument to Rust's matching
+    /// `checked(e)` (D-NUMOPS1). The single integer `Expr::Binary` argument lowers to
+    /// Rust's matching
     /// method: `(lhs).{prefix}_{op}(rhs)` where `prefix ∈ {wrapping, saturating,
     /// checked}` and `op ∈ {add, sub, mul, div}`. PLAIN operands (no overflow trap).
     /// `prefix` + `op` are resolved at lowering (total facts), emit only assembles.
@@ -3409,7 +3420,7 @@ pub enum TExprKind {
     },
     /// c109 Phase 13: a method ON a handle (FileReader/FileWriter/StdinHandle/
     /// Stopwatch/TcpListener/TcpStream/HTTPRequest/HTTPResponse) — the handle arms of
-    /// `emit_builtin_method` (Source/Codegen/Expression.rs). The handle-receiver
+    /// built-in method lowering. The handle-receiver
     /// dispatch (`rty == Some(Named(<handle>))`) is resolved at lowering into a total
     /// `THandleOp`, so emit makes no type decision (I3). Args are emitted PLAINLY
     /// (`emit_builtin_method`'s `arg(i)` is a raw `emit_expr`).
@@ -3420,8 +3431,8 @@ pub enum TExprKind {
     },
     /// c109 Phase 13: a closure-taking core/stdlib call — `tasks.spawn`,
     /// `http.serve`, `scope.guard`. These are NOT in `core_fixed_sig` and each has a
-    /// bespoke emit shape (`emit_core_call`, Source/Codegen/Expression.rs) the plain
-    /// `CoreCall` cannot reproduce: `spawn` wraps a `emit_spawn_lambda` (`move |…|`,
+    /// bespoke emit shape the plain `CoreCall` cannot reproduce: `spawn` wraps a
+    /// `emit_spawn_lambda` (`move |…|`,
     /// NEVER `Box::new`) in `JetTask::spawn(…)`; `serve` (lambda handler) emits
     /// `jet_http_serve(&(addr), <lambda>)`; `guard` emits `jet_scope_guard(<lambda>)`.
     /// The closure body is lowered + rendered at lowering (the lambda is in subset —
@@ -3603,8 +3614,8 @@ pub enum TFnValueKind {
     },
 }
 
-/// c109 Phase 12: a resolved numeric method form, one per `emit_builtin_method`
-/// numeric arm (Source/Codegen/Expression.rs). The width source/target and the
+/// c109 Phase 12: a resolved numeric method form, one per numeric arm. The width
+/// source/target and the
 /// widening-vs-narrowing branch (which `numeric_conversion` decides from the source
 /// width name) are decided ONCE at lowering — the variant encodes the chosen form so
 /// emit only formats.
@@ -3655,7 +3666,7 @@ pub enum TNumericOp {
 }
 
 /// c109 Phase 11: a resolved closure-taking collection-method op, one per
-/// `emit_builtin_method` closure arm (Source/Codegen/Expression.rs). The
+/// built-in collection-method closure arm. The
 /// receiver-type branch (Map vs list vs trait-object list) and the Fn-vs-FnMut
 /// branch (off the lambda arg's `needs_fn_mut` meta) are decided ONCE at lowering;
 /// the variant encodes the chosen form so emit only formats.
@@ -3858,7 +3869,7 @@ pub enum ListRemoveMode {
 }
 
 /// c109 Phase 9: a resolved built-in collection/string method op. Each variant is
-/// one emit form from `emit_builtin_method` (Source/Codegen/Expression.rs). The
+/// one emit form from built-in collection-method lowering. The
 /// receiver-type dispatch (`rty = expr_jet_ty(receiver)` → Map vs List vs String)
 /// is decided ONCE at lowering — the variant encodes the chosen branch, so emit
 /// only formats. Line numbers (for the bounds/remove panic frames) are resolved at
@@ -4259,7 +4270,7 @@ pub enum TBuiltinOp {
 }
 
 /// c109 Phase 13: a resolved handle-method op, one per handle arm of
-/// `emit_builtin_method` (Source/Codegen/Expression.rs). The handle-receiver branch
+/// built-in method lowering. The handle-receiver branch
 /// (keyed on `rty == Some(Named(<handle>))`) is decided ONCE at lowering from the
 /// total `recv_type` — emit only formats. Args are emitted plainly (raw `arg(i)`).
 /// `{root}` denotes `cx.root_prefix` (program-level, read at emit).
@@ -4500,8 +4511,8 @@ pub enum THandleOp {
     ReflectFieldName,
     ReflectFieldValue,
     /// c109 Phase 21: Task `join()` → `(recv).join()` (the no-arg `join` arm of
-    /// `emit_builtin_method`, Source/Codegen/Expression.rs ~L967 — shared with the dead
-    /// list no-arg join, but here it's the JetTask method). Returns the task's value `T`.
+    /// built-in method `join` arm — shared with list no-arg join, but here it's the
+    /// JetTask method. Returns the task's value `T`.
     TaskJoin,
     /// c109 Phase 21: Task `detach()` → `{ let _detach = (recv); }` (D-DETACH1 —
     /// fire-and-forget; drops the JoinHandle). Returns unit.

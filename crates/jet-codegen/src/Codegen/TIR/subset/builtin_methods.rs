@@ -2,7 +2,7 @@ use crate::Codegen::TIR::TNumericOp;
 
 /// c109 Phase 9: is `method` (with `nargs` arguments) a built-in collection/string
 /// method the TIR lowers? This is the NON-closure, non-numeric, non-handle slice of
-/// `emit_builtin_method` (Source/Codegen/Expression.rs), restricted to the list/map/
+/// built-in method lowering, restricted to the list/map/
 /// string surface (`Source/Collections.rs`). The closure-taking methods (`map`/
 /// `filter`/`each`/`find`/`any`/`all`/`sort_by`/`reduce` — `Collections::
 /// is_closure_method`) are deferred to the lambda phase; the numeric width/predicate/
@@ -627,7 +627,7 @@ fn numeric_rust_type_tir(name: &str) -> Option<(&'static str, Option<(bool, u8)>
     })
 }
 
-/// c109 Phase 12: TIR-local copy of `parse_int_name` (Source/Codegen/Expression.rs) —
+/// c109 Phase 12: TIR-local copy of `parse_int_name` —
 /// parse a numeric type name to `(signed, bits)`, `None` for floats/non-numeric.
 pub(crate) fn parse_int_name_tir(name: &str) -> Option<(bool, u8)> {
     match name {
@@ -672,7 +672,7 @@ pub(crate) fn is_covered_numeric_method(method: &str, nargs: usize) -> bool {
 
 /// c109 Phase 28: is `member` a per-type numeric bounds constant (`U8.MAX`,
 /// `I32.MIN`, `Float.INFINITY`, …)? Mirrors the AST `emit_expr` Field arm's filter
-/// (Source/Codegen/Expression.rs ~L226) exactly.
+/// exactly.
 pub(crate) fn is_numeric_bounds_const(member: &str) -> bool {
     matches!(
         member,

@@ -44,11 +44,11 @@ use crate::Codegen::TIR::TTryConvert;
 use crate::Codegen::TIR::tuple_join;
 use crate::Codegen::TIR::struct_field_type;
 
-fn emit_tir_lambda(lam: &TLambda) -> String {
+fn emit_tir_lambda_with_arc(lam: &TLambda, force_arc: bool) -> String {
     let move_kw = if lam.is_move { "move " } else { "" };
     let closure = format!("{}|{}| {}", move_kw, lam.params.join(", "), lam.body);
     // Prefer Arc (HTTP) / Rc (cloneable Fn values) over Box (FnMut escape only).
-    let wrapped = if lam.arc {
+    let wrapped = if force_arc || lam.arc {
         format!("std::sync::Arc::new({closure})")
     } else if lam.rc {
         format!("std::rc::Rc::new({closure})")
@@ -62,6 +62,14 @@ fn emit_tir_lambda(lam: &TLambda) -> String {
     } else {
         format!("{{ {} {} }}", lam.prep, wrapped)
     }
+}
+
+fn emit_tir_lambda(lam: &TLambda) -> String {
+    emit_tir_lambda_with_arc(lam, false)
+}
+
+fn emit_tir_lambda_sync(lam: &TLambda) -> String {
+    emit_tir_lambda_with_arc(lam, true)
 }
 
 fn emit_shared_guard_projection(cx: &Cx, guard_ty: &Type, path: &[String]) -> String {
@@ -791,7 +799,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         }
         TExprKind::ResourceTake(place) => format!("{}.take()", place),
         // c109 Phase 25: ambient prelude `input(...)`, byte-for-byte the `emit_call`
-        // ambient-input branch (Source/Codegen/Expression.rs): a bare call with NO arg
+        // ambient-input branch: a bare call with NO arg
         // emits `{root}jet_std_io_input(None)`; with a prompt arg `{root}jet_std_io_input(Some(&(arg)))`.
         TExprKind::AmbientInput { prompt } => {
             let helper = format!("{}jet_std_io_input", cx.root_prefix);
@@ -1067,8 +1075,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             emit_tir_expr(inner, cx)
         ),
         // c109 Phase 9: a built-in collection/string method. The Map-vs-List-vs-String
-        // branch was resolved into `op` at lowering; emit only formats, reproducing
-        // `emit_builtin_method` (Source/Codegen/Expression.rs) byte-for-byte. Args are
+        // branch was resolved into `op` at lowering; emit only formats. Args are
         // emitted PLAINLY (no clone/borrow wrappers — `arg(i)` is a raw `emit_expr`).
         TExprKind::BuiltinMethod { recv, op, args } => {
             // Eager fuse: `list.map(f).to_list()` → `jet_list_map` so borrowed
@@ -1925,7 +1932,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // c109 Phase 12: a numeric predicate / bit-pop / width-conversion method. The
         // width source/target + widening-vs-narrowing branch were resolved into `op` at
         // lowering; emit only formats, reproducing `emit_builtin_method`'s numeric arms
-        // + `numeric_conversion` (Source/Codegen/Expression.rs) byte-for-byte.
+        // + numeric conversion arms byte-for-byte.
         TExprKind::NumericMethod { recv, op } => {
             let recv = emit_tir_expr(recv, cx);
             emit_numeric_op(&recv, op, cx)
@@ -1950,12 +1957,10 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 call
             }
         }
-        // c109 Phase 10: a core/stdlib module call. Reproduces `emit_core_call`
-        // (Source/Codegen/Expression.rs) byte-for-byte. `module`/`method` were
-        // resolved at lowering; `cx.root_prefix`/`cx.ffi_crate` are program-level
-        // (read here, like Phase 9's `cx.file`). Args were lowered plainly, with
-        // D-FIXARR1 widening explicit; per-arm borrow/move wrappers stay baked into
-        // each arm exactly as `emit_core_call` requires.
+        // c109 Phase 10: a core/stdlib module call. `module`/`method` were resolved at
+        // lowering; `cx.root_prefix`/`cx.ffi_crate` are program-level (read here, like
+        // Phase 9's `cx.file`). Args were lowered plainly, with D-FIXARR1 widening
+        // explicit; per-arm borrow/move wrappers stay baked into each arm.
         TExprKind::CoreCall {
             module,
             method,
@@ -3048,8 +3053,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             }
         }
         // c109 Phase 13: a method ON a handle. The handle-receiver branch was resolved
-        // into `op` at lowering; emit only formats, reproducing the handle arms of
-        // `emit_builtin_method` (Source/Codegen/Expression.rs) byte-for-byte. Args are
+        // into `op` at lowering; emit only formats. Args are
         // emitted PLAINLY (raw `arg(i)`). `cx.root_prefix` is program-level.
         TExprKind::HandleMethod { recv, op, args } => {
             let recv_ty_for_stream = recv.ty.clone();
@@ -3060,6 +3064,18 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     .unwrap_or_default()
             };
             let web_handler = |i: usize| {
+                let arg = &args[i];
+                if let TExprKind::FnValue {
+                    kind: TFnValueKind::NamedFn {
+                        name: Some(name), ..
+                    },
+                } = &arg.kind
+                {
+                    return crate::Codegen::emit_named_fn_value_sync(cx, name, &arg.ty);
+                }
+                if let TExprKind::Lambda(lam) = &arg.kind {
+                    return emit_tir_lambda_sync(lam);
+                }
                 let mut rendered = a(i);
                 if let Some(end) = rendered.rfind('>') {
                     rendered.insert_str(end, " + Send + Sync");
@@ -3479,8 +3495,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::HTTPRespTrailers => {
                     format!("{}jet_http_srv_response_trailers({}, {})", root, recv, a(0))
                 }
-                // c109 Phase 21: Task/Channel/Sender methods, byte-for-byte the
-                // `emit_builtin_method` arms (Source/Codegen/Expression.rs). The handle
+                // c109 Phase 21: Task/Channel/Sender methods. The handle
                 // value's prelude methods take `&self`, so the receiver is emitted plainly
                 // (Rust autoref); args are plain (raw `emit_expr`). `join` reuses the
                 // no-arg `join` arm (`(recv).join()`); `detach` drops the handle (D-DETACH1).
@@ -4752,8 +4767,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         }
                     }
                 }
-                // c109 Phase 25: HTTPRouter route registration, byte-for-byte the
-                // `emit_builtin_method` router arm (Source/Codegen/Expression.rs ~L937).
+                // c109 Phase 25: HTTPRouter route registration.
                 // `recv` is `&mut`-borrowed; the path is plain (args[0]); the handler is
                 // the pre-rendered boxed closure.
                 THandleOp::HTTPRouterRegister {
@@ -5020,8 +5034,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             }
         }
         // c109 Phase 13: a closure-taking core call. The closure was rendered at
-        // lowering; emit assembles the bespoke shape, byte-for-byte `emit_core_call`
-        // (Source/Codegen/Expression.rs).
+        // lowering; emit assembles the bespoke shape.
         TExprKind::CoreClosureCall { kind } => match kind {
             TCoreClosureKind::Spawn {
                 group,
@@ -5157,7 +5170,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // c109 Phase 13: a fn-typed value. A bare fn-name value echoes the
         // already-rendered `Box::new(move |…| …) as <fn-type>` wrapper; a call through
         // a fn-value emits `({callee})({args})`, byte-for-byte `emit_expr`'s
-        // `Expr::CallValue` (Source/Codegen/Expression.rs).
+        // `Expr::CallValue`.
         TExprKind::FnValue { kind } => match kind {
             TFnValueKind::NamedFn { wrapper, .. } => wrapper.clone(),
             TFnValueKind::Call { callee, args } => {

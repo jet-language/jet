@@ -1342,27 +1342,27 @@ fn reject_feature(text: &str) -> Option<&'static str> {
     if t.contains("core.mem") {
         return Some("`core.mem` (low-level memory tier)");
     }
-    if t.contains("core.http") || t.contains("jet.http") {
+    if t.contains("core.http") {
         return Some("the HTTP client/server (`core.http`)");
     }
-    if t.contains("core.db") || t.contains("jet.db") {
+    if t.contains("core.db") {
         return Some("`core.db` (SQLite)");
     }
     if import != Some("core.reactive.loadable")
-        && (t.contains("core.reactive") || t.contains("jet.reactive"))
+        && t.contains("core.reactive")
     {
         return Some("`core.reactive`");
     }
     // Beginner `core.crypto` stays native-only; expert pure ports are tier-0.
     if import != Some("core.crypto.expert")
-        && (t.contains("core.crypto") || t.contains("jet.crypto"))
+        && t.contains("core.crypto")
     {
         return Some("`core.crypto`");
     }
     if t.contains("core.auth") {
         return Some("`core.auth` token verification");
     }
-    if t.contains("jet.log") {
+    if t.contains("core.log") {
         return Some("`core.log`");
     }
     if t.contains("core.term") || t.contains("live {") || t.contains("live{") {

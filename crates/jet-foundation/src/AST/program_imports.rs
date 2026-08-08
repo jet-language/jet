@@ -115,14 +115,18 @@ impl ImportDecl {
         }
     }
 
-    /// If this import refers to a compiler-known core/ring module, return its
-    /// canonical path (e.g. `"core.files"`, `"jet.http"`). Returns `None` for
-    /// file/unqualified imports and unknown module names.
+    /// If this import uses Core's canonical namespace, return its path. The
+    /// loader keeps unknown `core.*` paths in this lane so sema can report the
+    /// module-specific diagnostic.
     pub fn core_module_path(&self) -> Option<String> {
         let ImportKind::Module(name, _) = &self.kind else {
             return None;
         };
-        Syntax::normalize_core_module(name)
+        (name == Syntax::CORE_SHORT
+            || name == Syntax::CORE_CANONICAL
+            || name == "app"
+            || name.starts_with("core."))
+            .then(|| name.clone())
     }
 
     /// D-FFI-UNIFY1: parse a project-tier foreign namespace import,

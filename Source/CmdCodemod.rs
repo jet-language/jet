@@ -98,11 +98,13 @@ pub(crate) fn run_codemod(args: &[String]) {
         .map(String::as_str)
         .collect();
     let yes = args.iter().any(|a| a == "--yes");
+    let dry_run = args.iter().any(|a| a == jet::CLI::DRY_RUN_FLAG);
     match positional.as_slice() {
-        ["dry-run", object] => run_object(object, false, yes),
-        ["apply", object] => run_object(object, true, yes),
-        ["undo", log] => undo(&absolutize(log)),
-        _ => fail("`jet inspect codemod` needs `dry-run`, `apply`, or `undo`\n Fix: jet inspect codemod dry-run migration.codemod.json"),
+        ["dry-run", _] => fail("`jet inspect codemod dry-run` is retired; use `jet inspect codemod <plan.json> --dry-run`"),
+        [object] if dry_run => run_object(object, false, yes),
+        ["apply", object] if !dry_run => run_object(object, true, yes),
+        ["undo", log] if !dry_run => undo(&absolutize(log)),
+        _ => fail("`jet inspect codemod` needs `<plan.json> --dry-run`, `apply <plan.json>`, or `undo <log.json>`\n Fix: jet inspect codemod migration.codemod.json --dry-run"),
     }
 }
 

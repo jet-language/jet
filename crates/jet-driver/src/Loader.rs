@@ -301,6 +301,15 @@ fn load_entry_with_overlays_mode_with_sink(
         .map(normalize_path)
         .unwrap_or_else(|| cwd.clone());
     let manifest_root = find_manifest_root(&entry_dir);
+    if manifest_root.is_none() {
+        if let Some((path, diagnostic)) = stale_manifest_name_diagnostic(&entry_dir) {
+            let source = fs::read_to_string(&path).unwrap_or_default();
+            return Err(record_loader_error(
+                &mut sink,
+                LoaderError::at(&path.display().to_string(), &source, vec![diagnostic]),
+            ));
+        }
+    }
     let validates_project_parts = manifest_root.is_some()
         || entry_abs.file_name().and_then(|name| name.to_str()).is_some_and(|name| {
             matches!(name, Syntax::DEFAULT_ENTRY_FILE | Syntax::LEGACY_ENTRY_FILE)
@@ -943,19 +952,38 @@ pub fn find_stale_manifest_name(start: &Path) -> Option<(PathBuf, &'static str)>
     }
 }
 
+/// Build the shared E1226 diagnostic for a retired manifest filename.
+pub fn stale_manifest_name_diagnostic(start: &Path) -> Option<(PathBuf, Diagnostic)> {
+    let (dir, stale) = find_stale_manifest_name(start)?;
+    let path = dir.join(stale);
+    Some((
+        path.clone(),
+        Diagnostic::error(
+            "E1226",
+            format!(
+                "`{stale}` is not the package manifest name — Jet reads `{}`",
+                Syntax::PACKAGE_FILE
+            ),
+            "the Package root filename is frozen to one spelling (D-ECO-FILEROOT1) so tooling, docs, and every worked example never have to guess which file to read".to_string(),
+            format!(
+                "rename `{}` to `{}`",
+                path.display(),
+                dir.join(Syntax::PACKAGE_FILE).display()
+            ),
+            None,
+        ),
+    ))
+}
+
 /// Render the E1226 `old-manifest-filename` teaching diagnostic for `dir`
 /// carrying the retired manifest name `stale` — or `None` when `start`
 /// carries no retired name (the caller keeps its own "no pkg.jet found"
 /// message in that case).
 pub fn stale_manifest_name_message(start: &Path) -> Option<String> {
-    let (dir, stale) = find_stale_manifest_name(start)?;
+    let (_, diagnostic) = stale_manifest_name_diagnostic(start)?;
     Some(format!(
-        "Error [E1226]: `{stale}` is not the package manifest name — Jet reads `package.jet`\n \
-         Why: the Package root filename is frozen to one spelling (D-ECO-FILEROOT1) so \
-         tooling, docs, and every worked example never have to guess which file to read\n \
-         Fix: rename `{}` to `{}`\n",
-        dir.join(stale).display(),
-        dir.join(Syntax::PACKAGE_FILE).display(),
+        "Error [{}]: {}\n Why: {}\n Fix: {}\n",
+        diagnostic.code, diagnostic.what, diagnostic.why, diagnostic.fix,
     ))
 }
 
@@ -1473,7 +1501,7 @@ pub fn core_module_path(imp: &ImportDecl) -> Option<String> {
 
 pub use crate::Syntax::{
     core_modules_list, is_known_core_module, is_legacy_std_import, is_ring_module,
-    is_ring_module_staged, normalize_core_module, KNOWN_CORE_MODULES,
+    is_ring_module_staged, KNOWN_CORE_MODULES,
 };
 
 /// D-JPK-RINGSHIP1=C: where a ring module's implementation comes from.

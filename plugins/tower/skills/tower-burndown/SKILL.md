@@ -261,7 +261,14 @@ card streams **only when write paths and tests are disjoint**.
 
 ## Proof and review (burndown policy)
 
-One fresh reviewer agent reviews **all cards in the 3–5-card batch**. The
+Review is risk-tiered (owner decision, 2026-08-08; AGENTS.md is the law):
+**mechanical cards** (fixture migrations, ledger row deletions, golden
+blesses, comment/doc rewording) close on met criteria plus one orchestrator
+spot-check — no fresh reviewer. **Semantics cards** (compiler behavior,
+invariants, guards/ratchets) always get the fresh reviewer below, and one
+reviewer may cover the composed stack of 2–3 batches.
+
+One fresh reviewer agent reviews **all semantics cards in the batch**. The
 reviewer does not implement and does not rerun every implementer's tests.
 Review acceptance terms, diffs, invariants, false-green risk, generated files,
 and the composed stack. Findings follow **Close discipline**: blocking-only,

@@ -31,8 +31,8 @@ fn read(p: &PathBuf) -> String {
     fs::read_to_string(p).unwrap_or_else(|_| panic!("cannot read {}", p.display()))
 }
 
-/// Collect all [EL]NNNN codes emitted in Source/ via Diagnostic::error /
-/// Diagnostic::warn (the string literal form `"E0xxx"` / `"L0xxx"`).
+/// Collect all registered-shape codes emitted in Source/ via Diagnostic::error
+/// / Diagnostic::warn.
 fn emitted_codes() -> BTreeSet<String> {
     let mut codes: BTreeSet<String> = BTreeSet::new();
     let mut scan_dir = |dir: PathBuf| {
@@ -48,29 +48,36 @@ fn emitted_codes() -> BTreeSet<String> {
     codes
 }
 
-/// Extract Jet diagnostic codes from Rust source, in two forms:
-/// 1. `"E0xxx"` — standalone quoted string literal (used in Diagnostic::error calls)
-/// 2. `[E0xxx]` — bracket form inside a string literal (used in eprintln! / format! paths)
+/// Extract registered-shape Jet diagnostic codes from Rust source, in two forms:
+/// 1. a standalone quoted code (used in Diagnostic::error calls)
+/// 2. a bracketed code inside a string literal (used in eprintln! / format! paths)
 fn extract_quoted_codes(text: &str) -> Vec<String> {
+    let mut out = extract_delimited_codes(text, b'"', b'"');
+    out.extend(extract_delimited_codes(text, b'[', b']'));
+    out
+}
+
+fn extract_delimited_codes(text: &str, open: u8, close: u8) -> Vec<String> {
     let mut out = Vec::new();
     let bytes = text.as_bytes();
     let mut i = 0;
-    while i + 7 <= bytes.len() {
-        // Form 1: standalone "E0xxx" string literal
-        if bytes[i] == b'"'
-            && (bytes[i + 1] == b'E' || bytes[i + 1] == b'L')
-            && bytes[i + 2..i + 6].iter().all(|b| b.is_ascii_digit())
-            && bytes[i + 6] == b'"'
-        {
-            out.push(String::from_utf8_lossy(&bytes[i + 1..i + 6]).to_string());
-        }
-        // Form 2: [E0xxx] bracket form inside a string (e.g., eprintln!("Error [E0043]: ..."))
-        if bytes[i] == b'['
-            && (bytes[i + 1] == b'E' || bytes[i + 1] == b'L')
-            && bytes[i + 2..i + 6].iter().all(|b| b.is_ascii_digit())
-            && bytes[i + 6] == b']'
-        {
-            out.push(String::from_utf8_lossy(&bytes[i + 1..i + 6]).to_string());
+    while i < bytes.len() {
+        if bytes[i] == open {
+            let start = i + 1;
+            let mut end = start;
+            while end < bytes.len()
+                && (bytes[end].is_ascii_uppercase()
+                    || bytes[end].is_ascii_digit()
+                    || bytes[end] == b'-')
+            {
+                end += 1;
+            }
+            if end > start && end < bytes.len() && bytes[end] == close {
+                let code = &text[start..end];
+                if jet::Explain::is_code(code) {
+                    out.push(code.to_string());
+                }
+            }
         }
         i += 1;
     }
@@ -93,8 +100,8 @@ fn walk_rs(dir: &PathBuf, cb: &mut impl FnMut(&str)) {
     }
 }
 
-/// All codes registered in docs/spec/diagnostics.md (the `| E0xxx |` registry
-/// table rows, excluding separator lines).
+/// All codes registered in docs/spec/diagnostics.md (the registry table rows,
+/// excluding separator lines).
 fn registered_codes() -> BTreeSet<String> {
     let diag_md = read(&root().join("docs/spec/diagnostics.md"));
     let mut out = BTreeSet::new();
@@ -108,10 +115,7 @@ fn registered_codes() -> BTreeSet<String> {
             continue;
         }
         let code = cells[1].trim();
-        if code.len() == 5
-            && (code.starts_with('E') || code.starts_with('L'))
-            && code[1..].chars().all(|c| c.is_ascii_digit())
-        {
+        if jet::Explain::is_code(code) {
             out.insert(code.to_string());
         }
     }
@@ -142,10 +146,7 @@ fn registered_code_rows() -> Vec<(String, usize)> {
             continue;
         }
         let code = cells[1].trim();
-        if code.len() == 5
-            && (code.starts_with('E') || code.starts_with('L'))
-            && code[1..].chars().all(|c| c.is_ascii_digit())
-        {
+        if jet::Explain::is_code(code) {
             rows.push((code.to_string(), idx + 1));
         }
     }
@@ -343,39 +344,33 @@ fn diagnostic_voice_scope_includes_owned_runtime_artifacts() {
 /// Extract codes from Rust test assertions like `.contains("E1234")` or
 /// `d.code == "E1234"` or `assert_eq!(diag.code, "E1234")`.
 fn extract_assert_codes(text: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let bytes = text.as_bytes();
-    let mut i = 0;
-    while i + 7 <= bytes.len() {
-        // Match `"E0xxx"` or `"L0xxx"` in any assertion context
-        if bytes[i] == b'"'
-            && (bytes[i + 1] == b'E' || bytes[i + 1] == b'L')
-            && bytes[i + 2..i + 6].iter().all(|b| b.is_ascii_digit())
-            && bytes[i + 6] == b'"'
-        {
-            out.push(String::from_utf8_lossy(&bytes[i + 1..i + 6]).to_string());
-        }
-        i += 1;
-    }
-    out
+    extract_delimited_codes(text, b'"', b'"')
 }
 
-/// Extract [ENNNNN] / [LNNNNN] from snapshot text (the rendered-output form).
+/// Extract numeric or word-shaped bracket codes from snapshot text.
 fn extract_snapshot_codes(text: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let bytes = text.as_bytes();
-    let mut i = 0;
-    while i + 7 <= bytes.len() {
-        if bytes[i] == b'['
-            && (bytes[i + 1] == b'E' || bytes[i + 1] == b'L')
-            && bytes[i + 2..i + 6].iter().all(|b| b.is_ascii_digit())
-            && bytes[i + 6] == b']'
-        {
-            out.push(String::from_utf8_lossy(&bytes[i + 1..i + 6]).to_string());
-        }
-        i += 1;
+    extract_delimited_codes(text, b'[', b']')
+}
+
+#[test]
+fn word_shaped_codes_are_registered_and_explainable() {
+    let expected = [
+        "E-WEB-ABI-TYPE",
+        "E-WEB-CROSS-PARTITION",
+        "E-WEB-TARGET-BROWSER",
+        "E-WEB-TIR-UNSUPPORTED",
+        "E-OSTARGET-MIXED-AXIS",
+        "E-OSTARGET-UNMATCHED-CALL",
+        "E-OSTARGET-BUILD-CONTEXT",
+        "E-OSTARGET-DISPATCH-ARM",
+        "E-OSTARGET-DISPATCH-EXHAUSTIVE",
+    ];
+    let registered = registered_codes();
+    let live = jet::Explain::live_codes();
+    for code in expected {
+        assert!(registered.contains(code), "scanner missed {code}");
+        assert!(live.iter().any(|live_code| live_code == code), "explain missed {code}");
     }
-    out
 }
 
 // ---------------------------------------------------------------------------

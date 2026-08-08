@@ -165,6 +165,7 @@ fn method_call(receiver: Expr, method: &str, args: Vec<CallArg>, span: Span) -> 
         args,
         recv_type: None,
         resolved_ret: None,
+        checked_widen: false,
     }
 }
 

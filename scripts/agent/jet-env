@@ -39,17 +39,40 @@ if [ -n "${CARGO_TARGET_DIR:-}" ]; then
   esac
 fi
 
+# Cache-mode selection (card #1785): a COLD tree (no target/debug yet — fresh
+# worktree) compiles fastest through sccache's input-keyed shared cache, which
+# is safe across diverged branches (unlike a shared CARGO_TARGET_DIR, banned
+# above and by papercut pc08xq6wo). A WARM tree keeps cargo's incremental
+# cache, which beats sccache on delta rebuilds. The sccache binary lives in
+# the nix shell, so the availability check must run AFTER the shell env is
+# materialized — hence the wrapper below. JET_NO_SCCACHE=1 opts out.
+cache_mode_env() {
+  # $1 = checkout root (baked in by the caller — the nix-develop transplant
+  # below has no access to this script's variables at runtime).
+  if [ -z "${JET_NO_SCCACHE:-}" ] && [ -z "${RUSTC_WRAPPER:-}" ]; then
+    tgt="${CARGO_TARGET_DIR:-$1/target}"
+    if [ ! -d "$tgt/debug" ] && command -v sccache >/dev/null 2>&1; then
+      export RUSTC_WRAPPER=sccache
+      export CARGO_INCREMENTAL=0
+    fi
+  fi
+}
+
 # `direnv export` returns cached environment assignments when `.envrc` has
 # been allowed. Execute the requested command once; never fall back after its
 # own failure, which would duplicate writes/tests.
 if command -v direnv >/dev/null 2>&1; then
   if env_dump="$(cd "$repo" && JET_DEV_SHELL="$profile" direnv export bash 2>/dev/null)"; then
     eval "$env_dump"
+    cache_mode_env "$repo"
     exec "$@"
   fi
 fi
 
+# Inside `nix develop`, re-enter this script's cache selection via bash -c so
+# the check sees the shell's PATH.
+joined="$(printf '%q ' "$@")"
 if [ "$profile" = "full" ]; then
-  exec nix develop "$repo#full" -c "$@"
+  exec nix develop "$repo#full" -c bash -c "$(declare -f cache_mode_env); cache_mode_env $(printf %q "$repo"); exec $joined"
 fi
-exec nix develop "$repo" -c "$@"
+exec nix develop "$repo" -c bash -c "$(declare -f cache_mode_env); cache_mode_env $(printf %q "$repo"); exec $joined"

@@ -122,10 +122,7 @@ fn is_wwf_header(cells: &[String]) -> bool {
 }
 
 fn is_code_like(code: &str) -> bool {
-    let bytes = code.as_bytes();
-    bytes.len() == 5
-        && (bytes[0] == b'E' || bytes[0] == b'L')
-        && bytes[1..].iter().all(|b| b.is_ascii_digit())
+    jet::Explain::is_code(code)
 }
 
 fn diagnostic_code(cell: &str) -> Option<&str> {

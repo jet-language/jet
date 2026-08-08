@@ -476,6 +476,7 @@ pub(crate) fn lower_method_call(
     args: &[crate::AST::CallArg],
     recv_type: &Option<String>,
     resolved_ret: Option<&Type>,
+    checked_widen: bool,
     cx: &Cx,
     env: &mut LowerEnv,
     lowered_receiver: Option<TExpr>,
@@ -641,7 +642,7 @@ pub(crate) fn lower_method_call(
             {
                 Some((
                     args[0].clone(),
-                    marker == crate::AST::SHARED_GUARD_EDIT_MARKER,
+                    matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::SharedGuardEdit)),
                 ))
             }
             _ => None,
@@ -778,7 +779,7 @@ pub(crate) fn lower_method_call(
             // inferred typed literals. At a regex one-shot's first parameter, the
             // expected type is unambiguously Regex; lower the same checked literal
             // node that normal sema produces.
-            if module == "jet.regex"
+            if module == "core.regex"
                 && index == 0
                 && matches!(
                     method,
@@ -802,7 +803,7 @@ pub(crate) fn lower_method_call(
                     return TExpr {
                         ty: Type::Named(Syntax::TYPE_REGEX.to_string()),
                         kind: TExprKind::CoreCall {
-                            module: "jet.regex".to_string(),
+                            module: "core.regex".to_string(),
                             method: "literal".to_string(),
                             args: vec![lower_expr(pattern, cx, env)],
                             source_span: *span,
@@ -896,6 +897,7 @@ pub(crate) fn lower_method_call(
                 &lowered_args,
                 recv_type,
                 resolved_ret,
+                checked_widen,
                 cx,
                 env,
                 None,
@@ -1104,7 +1106,7 @@ pub(crate) fn lower_method_call(
         }
     }
     if let Some(helper) = crypto_static {
-        let module = "jet.crypto";
+        let module = "core.crypto";
         let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
         let widen_to_vec = core_widen_to_vec(module, helper, &targs);
         let ty = resolved_ret.cloned().unwrap_or_else(|| crypto_helper_return_ty(helper));
@@ -1136,10 +1138,10 @@ pub(crate) fn lower_method_call(
         if let Some(helper) = helper {
             let recv = lower_expr(receiver, cx, env);
             let args = vec![recv];
-            let widen_to_vec = core_widen_to_vec("jet.crypto", helper, &args);
+            let widen_to_vec = core_widen_to_vec("core.crypto", helper, &args);
             let ty = resolved_ret.cloned().unwrap_or_else(|| crypto_helper_return_ty(helper));
             return TExpr { ty, kind: TExprKind::CoreCall {
-                module: "jet.crypto".to_string(), method: helper.to_string(), args, source_span: method_span, widen_to_vec,
+                module: "core.crypto".to_string(), method: helper.to_string(), args, source_span: method_span, widen_to_vec,
             }};
         }
     }
@@ -1881,8 +1883,8 @@ pub(crate) fn lower_method_call(
     }
 
     // c109 Phase 10: a core/stdlib module call `alias.method(args)`.
-    // Mirror `emit_core_call` (Source/Codegen/Expression.rs): resolve the module here
-    // (total), lower args PLAINLY (no clone/borrow wrappers — `emit_core_call`'s
+    // Mirror TIR core-call emission: resolve the module here (total), lower args
+    // PLAINLY (no clone/borrow wrappers —
     // `arg(i)` is a raw `emit_expr`), and carry the return type from the authoritative
     // `core_fixed_sig` table. Tried BEFORE the builtin shape (a core method named
     // `get`/`split`/… must not be claimed by the receiver-keyed builtin op).
@@ -3378,12 +3380,12 @@ pub(crate) fn lower_method_call(
                 _ => Type::Int,
             };
             let marker = if method == "guard_edit" {
-                crate::AST::SHARED_GUARD_EDIT_MARKER
+                crate::AST::InternalTag::SharedGuardEdit
             } else {
-                crate::AST::SHARED_GUARD_READ_MARKER
+                crate::AST::InternalTag::SharedGuardRead
             };
             let ty = resolved_ret.cloned().unwrap_or_else(|| Type::Tagged {
-                marker: marker.to_string(),
+                marker: crate::AST::TagMarker::Internal(marker),
                 inner: Box::new(Type::Apply {
                     name: Syntax::TYPE_SHARED_GUARD.to_string(),
                     args: vec![inner],
@@ -3783,11 +3785,11 @@ pub(crate) fn lower_method_call(
         };
         }
     }
-    // D-NUMWIDEN-CROSS1=E: sema owns the checked-crossing decision and leaves
-    // this unspellable marker. Lowering only records adapter facts.
-    if recv_type.as_deref() == Some(Type::CHECKED_NUMERIC_WIDEN_MARKER)
-        && args.len() == 1
-    {
+    // D-NUMWIDEN-CROSS1=E / card #1662: sema owns the checked-crossing
+    // decision and records it in `Expr::MethodCall::checked_widen` (replaces
+    // the retired `\0numeric.checked_widen` fake-`recv_type` marker).
+    // Lowering only records adapter facts.
+    if checked_widen && args.len() == 1 {
         let source = lower_expr(&args[0].expr, cx, env);
         let source_signed = !matches!(source.ty, Type::IntN { signed: false, .. });
         let target = resolved_ret.cloned().unwrap_or(Type::Float);
@@ -4127,7 +4129,13 @@ pub(crate) fn lower_method_call(
                         err: Box::new(Type::Named("DataError".to_string())),
                     }
                 }),
-                _ => handle_method_return_ty(handle, method, args.len()),
+                _ => handle_method_return_ty(
+                    handle,
+                    method,
+                    args.len(),
+                    &recv_t.ty,
+                    resolved_ret,
+                ),
             };
             return TExpr {
                 ty,

@@ -1,7 +1,7 @@
-Error [E0120]: `resource` was not moved here, so it cannot fill an owned field
-  --> tests/ui/single_use_branch.jet:7:28
+Error [E0141]: `db` must be used exactly once, but one path through this `if` leaves it unused
+  --> tests/ui/single_use_branch.jet:15:5
     |
-  7 |     return Lock.{resource: resource}
-    |                            ^^^^^^^^
- Why: this function has read access only and does not own the value
- Fix: copy it explicitly with `~resource`
+ 15 |     db :: acquire("db")
+    |     ^^
+ Why: a `#SingleUse` value has to be used on every path — here it is consumed on one branch but not the other, so the program could reach the end of its scope without doing its job
+ Fix: use `db` exactly once on every branch: consume it in the missing arm, or move it out before the `if`

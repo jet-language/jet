@@ -138,7 +138,7 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
             // D-REACT1=B: the reactive producers return `Signal<T>`/`Derived<T>` whose
             // element type is inferred from the initial value / closure return — not in
             // `core_fixed_sig`, so codegen reads it from resolved_ret (I3).
-            | ("jet.reactive", "signal" | "derived")
+            | ("core.reactive", "signal" | "derived")
             // D-TUPLE-DESTRUCT1: `tasks.channel<T>()` returns `(Sender<T>, Receiver<T>)`,
             // `T` read off the call-site turbofish — not in `core_fixed_sig`, so codegen
             // reads the whole tuple type from resolved_ret (I3).
@@ -163,9 +163,6 @@ pub fn core_fixed_sig(
     module: &str,
     name: &str,
 ) -> Option<(Vec<(AccessConvention, Type)>, Option<Type>)> {
-    let normalized_module =
-        Syntax::normalize_core_module(module).unwrap_or_else(|| module.to_string());
-    let module = normalized_module.as_str();
     let read = AccessConvention::Read;
     let moved = AccessConvention::Move;
     let string = Type::String;
@@ -1782,84 +1779,78 @@ pub fn core_fixed_sig(
             vec![(read, Type::String)],
             Some(Type::List(Box::new(Type::String))),
         )),
-        // jet.log/core.log: structured logging, typed fields, spans, sinks.
-        ("jet.log", "info" | "warn" | "error" | "debug" | "critical" | "fatal") => {
+        // core.log: structured logging, typed fields, spans, sinks.
+        ("core.log", "info" | "warn" | "error" | "debug" | "critical" | "fatal") => {
             Some((vec![(read, string.clone())], None))
         }
-        ("jet.log", "field") => Some((
+        ("core.log", "field") => Some((
             vec![(read, string.clone()), (read, string.clone())],
             Some(Type::Named("LogField".to_string())),
         )),
-        ("jet.log", "int") => Some((
+        ("core.log", "int") => Some((
             vec![(read, string.clone()), (read, Type::Int)],
             Some(Type::Named("LogField".to_string())),
         )),
-        ("jet.log", "float") => Some((
+        ("core.log", "float") => Some((
             vec![(read, string.clone()), (read, Type::Float)],
             Some(Type::Named("LogField".to_string())),
         )),
-        ("jet.log", "bool") => Some((
+        ("core.log", "bool") => Some((
             vec![(read, string.clone()), (read, Type::Bool)],
             Some(Type::Named("LogField".to_string())),
         )),
-        ("jet.log", "redact") => Some((
+        ("core.log", "redact") => Some((
             vec![(read, string.clone())],
             Some(Type::Named("LogField".to_string())),
         )),
-        ("jet.log", "info_fields" | "warn_fields" | "error_fields" | "debug_fields") => Some((
+        ("core.log", "info_fields" | "warn_fields" | "error_fields" | "debug_fields") => Some((
             vec![
                 (read, string.clone()),
                 (read, Type::List(Box::new(Type::Named("LogField".to_string())))),
             ],
             None,
         )),
-        ("jet.log", "span") => Some((
+        ("core.log", "span") => Some((
             vec![(read, string.clone())],
             Some(Type::Named("LogSpan".to_string())),
         )),
-        ("jet.log", "enter" | "close") => {
+        ("core.log", "enter" | "close") => {
             Some((vec![(read, Type::Named("LogSpan".to_string()))], None))
         }
-        ("jet.log", "set_sink") => {
+        ("core.log", "set_sink") => {
             Some((vec![(read, string.clone()), (read, string.clone())], None))
         }
-        ("jet.log", "sample_every") => Some((vec![(read, Type::Int)], None)),
-        ("jet.log", "counter") => Some((
+        ("core.log", "sample_every") => Some((vec![(read, Type::Int)], None)),
+        ("core.log", "counter") => Some((
             vec![(read, string.clone()), (read, Type::Int)],
             Some(Type::Named("LogField".to_string())),
         )),
-        ("jet.log", "otlp_file") => Some((vec![(read, string.clone())], None)),
-        ("jet.log", "set_level") => Some((vec![(read, Type::String)], None)),
-        ("jet.log", "disable" | "flush") => Some((vec![], None)),
-        ("jet.log", "enabled") => Some((vec![(read, Type::String)], Some(bool_))),
+        ("core.log", "otlp_file") => Some((vec![(read, string.clone())], None)),
+        ("core.log", "set_level") => Some((vec![(read, Type::String)], None)),
+        ("core.log", "disable" | "flush") => Some((vec![], None)),
+        ("core.log", "enabled") => Some((vec![(read, Type::String)], Some(bool_))),
         // D-OBS3: set OTel trace_id for all subsequent log entries on this thread.
-        ("jet.log", "set_trace_id") => Some((vec![(read, Type::String)], None)),
+        ("core.log", "set_trace_id") => Some((vec![(read, Type::String)], None)),
         // D-LOGFMT1=A: override log output format ("json" | "text").
-        ("jet.log", "setup") => Some((vec![(read, Type::String)], None)),
-        // jet.time: extended time utilities.
-        ("jet.time", "now") => Some((vec![], Some(Type::Int))),
-        ("jet.time", "format") => Some((
-            vec![(read, Type::Int), (read, Type::String)],
-            Some(Type::String),
-        )),
-        // jet.crypto: vetted hash functions (D-LR3).
-        ("jet.crypto", "sha256") => Some((vec![(read, Type::List(Box::new(u8_ty())))], Some(Type::Named("Digest256".into())))),
-        ("jet.crypto", "sha256_bytes") => Some((
+        ("core.log", "setup") => Some((vec![(read, Type::String)], None)),
+        // core.crypto: vetted hash functions (D-LR3).
+        ("core.crypto", "sha256") => Some((vec![(read, Type::List(Box::new(u8_ty())))], Some(Type::Named("Digest256".into())))),
+        ("core.crypto", "sha256_bytes") => Some((
             vec![(read, Type::List(Box::new(u8_ty())))],
             Some(Type::String),
         )),
-        ("jet.crypto", "sha512_bytes" | "blake3_bytes") => Some((
+        ("core.crypto", "sha512_bytes" | "blake3_bytes") => Some((
             vec![(read, Type::List(Box::new(u8_ty())))],
             Some(Type::String),
         )),
-        ("jet.crypto", "constant_time_equal_bytes") => Some((
+        ("core.crypto", "constant_time_equal_bytes") => Some((
             vec![
                 (read, Type::List(Box::new(u8_ty()))),
                 (read, Type::List(Box::new(u8_ty()))),
             ],
             Some(Type::Bool),
         )),
-        ("jet.crypto", "hkdf_sha256") => Some((
+        ("core.crypto", "hkdf_sha256") => Some((
             vec![
                 (read, Type::Named("Secret".into())),
                 (read, Type::List(Box::new(u8_ty()))),
@@ -1868,31 +1859,31 @@ pub fn core_fixed_sig(
             ],
             Some(result_ty(Type::Named("Secret".into()), Type::Named("CryptoError".into()))),
         )),
-        ("jet.crypto", "x25519_public") => Some((
+        ("core.crypto", "x25519_public") => Some((
             vec![(read, Type::List(Box::new(u8_ty())))],
             Some(result_ty(Type::List(Box::new(u8_ty())), Type::String)),
         )),
-        ("jet.crypto", "x25519_shared") => Some((
+        ("core.crypto", "x25519_shared") => Some((
             vec![
                 (read, Type::List(Box::new(u8_ty()))),
                 (read, Type::List(Box::new(u8_ty()))),
             ],
             Some(result_ty(Type::List(Box::new(u8_ty())), Type::String)),
         )),
-        ("jet.crypto", "password_hash") => Some((
+        ("core.crypto", "password_hash") => Some((
             vec![(read, Type::Named("Secret".into()))],
             Some(result_ty(Type::Named("PasswordHash".into()), Type::Named("CryptoError".into()))),
         )),
-        ("jet.crypto", "password_hash_with_salt") => Some((
+        ("core.crypto", "password_hash_with_salt") => Some((
             vec![(read, Type::String), (read, Type::List(Box::new(u8_ty())))],
             Some(result_ty(Type::String, Type::String)),
         )),
-        ("jet.crypto", "password_verify") => Some((
+        ("core.crypto", "password_verify") => Some((
             vec![(read, Type::Named("Secret".into())), (read, Type::Named("PasswordHash".into()))],
             Some(result_ty(Type::Bool, Type::Named("CryptoError".into()))),
         )),
         // D-CRYPTOENV1=A: misuse-resistant envelope (RustCrypto via FFI bridge).
-        ("jet.crypto", "seal") => Some((
+        ("core.crypto", "seal") => Some((
             vec![
                 (read, Type::List(Box::new(Type::Named("X25519PublicKey".into())))),
                 (read, Type::List(Box::new(u8_ty()))),
@@ -1900,7 +1891,7 @@ pub fn core_fixed_sig(
             ],
             Some(result_ty(Type::Named("Sealed".into()), Type::Named("CryptoError".into()))),
         )),
-        ("jet.crypto", "open") => Some((
+        ("core.crypto", "open") => Some((
             vec![
                 (read, Type::Named("X25519SecretKey".into())),
                 (read, Type::Named("Sealed".into())),
@@ -1908,7 +1899,7 @@ pub fn core_fixed_sig(
             ],
             Some(result_ty(Type::List(Box::new(u8_ty())), Type::Named("CryptoError".into()))),
         )),
-        ("jet.crypto", "file_seal") => Some((
+        ("core.crypto", "file_seal") => Some((
             vec![
                 (read, Type::List(Box::new(Type::Named("X25519PublicKey".into())))),
                 (read, Type::Named("Path".into())),
@@ -1916,7 +1907,7 @@ pub fn core_fixed_sig(
             ],
             Some(result_ty(Type::Named("Unit".into()), Type::Named("FileCryptoError".into()))),
         )),
-        ("jet.crypto", "file_open") => Some((
+        ("core.crypto", "file_open") => Some((
             vec![
                 (read, Type::Named("X25519SecretKey".into())),
                 (read, Type::Named("Path".into())),
@@ -1924,14 +1915,14 @@ pub fn core_fixed_sig(
             ],
             Some(result_ty(Type::Named("Unit".into()), Type::Named("FileCryptoError".into()))),
         )),
-        ("jet.crypto", "sign") => Some((
+        ("core.crypto", "sign") => Some((
             vec![
                 (read, Type::Named("SigningKey".into())),
                 (read, Type::List(Box::new(u8_ty()))),
             ],
             Some(result_ty(Type::Named("Signature".into()), Type::Named("CryptoError".into()))),
         )),
-        ("jet.crypto", "verify") => Some((
+        ("core.crypto", "verify") => Some((
             vec![
                 (read, Type::Named("VerifyKey".into())),
                 (read, Type::List(Box::new(u8_ty()))),
@@ -1941,23 +1932,23 @@ pub fn core_fixed_sig(
         )),
         // D-CRYPTO-API1=A typed safe surface. Existing edition-2026 raw calls
         // are diagnosed/migrated separately; these signatures are nominal.
-        ("jet.crypto", "wrap") => Some((
+        ("core.crypto", "wrap") => Some((
             vec![(read, Type::Named("Secret".into())), (read, Type::Named("X25519PublicKey".into()))],
             Some(result_ty(Type::Named("WrappedKey".into()), Type::Named("CryptoError".into()))),
         )),
-        ("jet.crypto", "unwrap") => Some((
+        ("core.crypto", "unwrap") => Some((
             vec![(read, Type::Named("X25519SecretKey".into())), (read, Type::Named("WrappedKey".into()))],
             Some(result_ty(Type::Named("Secret".into()), Type::Named("CryptoError".into()))),
         )),
-        ("jet.crypto", "x25519") => Some((
+        ("core.crypto", "x25519") => Some((
             vec![(read, Type::Named("X25519SecretKey".into())), (read, Type::Named("X25519PublicKey".into()))],
             Some(result_ty(Type::Named("SharedSecret".into()), Type::Named("CryptoError".into()))),
         )),
-        ("jet.crypto", "constant_time_equal") => Some((
+        ("core.crypto", "constant_time_equal") => Some((
             vec![(read, Type::Named("Secret".into())), (read, Type::Named("Secret".into()))], Some(Type::Bool),
         )),
-        ("jet.crypto", "blake3") => Some((vec![(read, Type::List(Box::new(u8_ty())))], Some(Type::Named("Digest256".into())))),
-        ("jet.crypto", "sha512") => Some((vec![(read, Type::List(Box::new(u8_ty())))], Some(Type::Named("Digest512".into())))),
+        ("core.crypto", "blake3") => Some((vec![(read, Type::List(Box::new(u8_ty())))], Some(Type::Named("Digest256".into())))),
+        ("core.crypto", "sha512") => Some((vec![(read, Type::List(Box::new(u8_ty())))], Some(Type::Named("Digest512".into())))),
         // D-CRYPTO-API1=A: exact #Unsafe expert API. Bounds remain runtime
         // checked; lexical gating never waives memory safety or cleanup.
         ("core.crypto.expert", "xchacha20poly1305_seal" | "aes256gcm_seal") => Some((
@@ -1989,11 +1980,11 @@ pub fn core_fixed_sig(
             vec![(read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty())))],
             Some(result_ty(Type::Bool, Type::Named("CryptoError".into()))),
         )),
-        ("core.crypto.expert", "x25519") => Some((
-            vec![(read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty()))), (read, Type::Bool)],
+        ("core.crypto.expert", "x25519_raw") => Some((
+            vec![(read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty())))],
             Some(result_ty(Type::Named("Secret".into()), Type::Named("CryptoError".into()))),
         )),
-        ("core.crypto.expert", "hkdf_sha256") => Some((
+        ("core.crypto.expert", "hkdf_sha256_raw") => Some((
             vec![(read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty()))), (read, Type::Int)],
             Some(result_ty(Type::Named("Secret".into()), Type::Named("CryptoError".into()))),
         )),
@@ -2606,9 +2597,9 @@ pub fn core_fixed_sig(
             vec![(AccessConvention::Write, Type::Named("TLSStream".to_string()))],
             Some(result_ty(unit_ty(), Type::Named(Syntax::TYPE_IO_ERROR.to_string()))),
         )),
-        // E2-M10: jet.http — HTTP client/server over blocking I/O.
+        // E2-M10: core.http — HTTP client/server over blocking I/O.
         // GET / HEAD / DELETE requests (no body sent).
-        ("jet.http", "get") => Some((
+        ("core.http", "get") => Some((
             vec![(read, Type::String)],
             Some(result_ty(
                 Type::Named("HTTPResponse".to_string()),
@@ -2616,7 +2607,7 @@ pub fn core_fixed_sig(
             )),
         )),
         // POST / PUT / PATCH requests (body sent).
-        ("jet.http", "post") => Some((
+        ("core.http", "post") => Some((
             vec![(read, Type::String), (read, Type::String)],
             Some(result_ty(
                 Type::Named("HTTPResponse".to_string()),
@@ -2625,26 +2616,26 @@ pub fn core_fixed_sig(
         )),
         // serve blocks until the listener is closed; handler is called per request.
         // The handler type is resolved at the call site (lambda / fn pointer).
-        ("jet.http", "serve") => None, // special-cased in check_core_call
+        ("core.http", "serve") => None, // special-cased in check_core_call
         // D-REGEXENGINE1=A / D-REGEX-LIT1=D: runtime compilation stays
         // fallible; one-shot calls take a compile-checked Regex value.
-        ("jet.regex", "flags") => Some((
+        ("core.regex", "flags") => Some((
             vec![(read, Type::Bool), (read, Type::Bool), (read, Type::Bool)],
             Some(Type::Named("RegexFlags".to_string())),
         )),
-        ("jet.regex", "escape") => Some((vec![(read, Type::String)], Some(Type::String))),
-        ("jet.regex", "compile") => Some((
+        ("core.regex", "escape") => Some((vec![(read, Type::String)], Some(Type::String))),
+        ("core.regex", "compile") => Some((
             vec![(read, Type::String)],
             Some(result_ty(Type::Named("Regex".to_string()), Type::String)),
         )),
-        ("jet.regex", "compile_with") => Some((
+        ("core.regex", "compile_with") => Some((
             vec![
                 (read, Type::String),
                 (read, Type::Named("RegexFlags".to_string())),
             ],
             Some(result_ty(Type::Named("Regex".to_string()), Type::String)),
         )),
-        ("jet.regex", "is_match") => Some((
+        ("core.regex", "is_match") => Some((
             vec![
                 (read, Type::Named(Syntax::TYPE_REGEX.to_string())),
                 (read, Type::String),
@@ -2652,7 +2643,7 @@ pub fn core_fixed_sig(
             Some(Type::Bool),
         )),
         // First match anywhere: `Match?` (none when nothing matches).
-        ("jet.regex", "match") => Some((
+        ("core.regex", "match") => Some((
             vec![
                 (read, Type::Named(Syntax::TYPE_REGEX.to_string())),
                 (read, Type::String),
@@ -2660,28 +2651,28 @@ pub fn core_fixed_sig(
             Some(Type::Option(Box::new(Type::Named("Match".to_string())))),
         )),
         // First matched substring, or none.
-        ("jet.regex", "find") => Some((
+        ("core.regex", "find") => Some((
             vec![
                 (read, Type::Named(Syntax::TYPE_REGEX.to_string())),
                 (read, Type::String),
             ],
             Some(Type::Option(Box::new(Type::String))),
         )),
-        ("jet.regex", "find_all" | "split") => Some((
+        ("core.regex", "find_all" | "split") => Some((
             vec![
                 (read, Type::Named(Syntax::TYPE_REGEX.to_string())),
                 (read, Type::String),
             ],
             Some(Type::List(Box::new(Type::String))),
         )),
-        ("jet.regex", "matches") => Some((
+        ("core.regex", "matches") => Some((
             vec![
                 (read, Type::Named(Syntax::TYPE_REGEX.to_string())),
                 (read, Type::String),
             ],
             Some(Type::List(Box::new(Type::Named("Match".to_string())))),
         )),
-        ("jet.regex", "split_limit") => Some((
+        ("core.regex", "split_limit") => Some((
             vec![
                 (read, Type::Named(Syntax::TYPE_REGEX.to_string())),
                 (read, Type::String),
@@ -2689,7 +2680,7 @@ pub fn core_fixed_sig(
             ],
             Some(Type::List(Box::new(Type::String))),
         )),
-        ("jet.regex", "replace" | "replace_all") => Some((
+        ("core.regex", "replace" | "replace_all") => Some((
             vec![
                 (read, Type::Named(Syntax::TYPE_REGEX.to_string())),
                 (read, Type::String),
@@ -2810,7 +2801,7 @@ pub fn core_fixed_sig(
             vec![(read, Type::List(Box::new(u8_ty())))],
             Some(result_ty(Type::List(Box::new(u8_ty())), Type::String)),
         )),
-        // D-DBPOLICY-BIND1: jet.db — SQLite via rusqlite (bundled). `open`/`open_memory`
+        // D-DBPOLICY-BIND1: core.db — SQLite via rusqlite (bundled). `open`/`open_memory`
         // produce an unscoped `DBConnection`; `policy` creates a typed policy
         // and `with_policy` produces the only row-capable `DBScope`.
         // handle (mirrors `core.files`'s `open`/`create` producing a `FileReader`/
@@ -2820,55 +2811,55 @@ pub fn core_fixed_sig(
         // below), not a second module-call surface. There is no raw-string
         // `execute(sql)` escape (D-DBDRIVER1's build plan: "must not expose a
         // generic `execute_raw(sql)` escape").
-        ("jet.db", "open") => Some((
+        ("core.db", "open") => Some((
             vec![(read, Type::String)],
             Some(Type::Named("DBConnection".to_string())),
         )),
-        ("jet.db", "open_memory") => Some((vec![], Some(Type::Named("DBConnection".to_string())))),
-        ("jet.db", "policy") => Some((
+        ("core.db", "open_memory") => Some((vec![], Some(Type::Named("DBConnection".to_string())))),
+        ("core.db", "policy") => Some((
             vec![(read, Type::String), (read, Type::String)],
             Some(result_ty(Type::Named("RowPolicy".to_string()), Type::String)),
         )),
-        ("jet.db", "params") => Some((
+        ("core.db", "params") => Some((
             vec![(read, Type::Named("SQL".to_string()))],
             Some(Type::List(Box::new(Type::Named(Syntax::TYPE_DB_VALUE.to_string())))),
         )),
-        ("jet.db", "row_value") => Some((
+        ("core.db", "row_value") => Some((
             vec![(read, db_row_ty()), (read, Type::String)],
             Some(Type::Result {
                 ok: Box::new(Type::Named(Syntax::TYPE_DB_VALUE.to_string())),
                 err: Box::new(Type::String),
             }),
         )),
-        ("jet.db", "row_int") => Some((
+        ("core.db", "row_int") => Some((
             vec![(read, db_row_ty()), (read, Type::String)],
             Some(Type::Result {
                 ok: Box::new(Type::Int),
                 err: Box::new(Type::String),
             }),
         )),
-        ("jet.db", "row_float") => Some((
+        ("core.db", "row_float") => Some((
             vec![(read, db_row_ty()), (read, Type::String)],
             Some(Type::Result {
                 ok: Box::new(Type::Float),
                 err: Box::new(Type::String),
             }),
         )),
-        ("jet.db", "row_text") => Some((
+        ("core.db", "row_text") => Some((
             vec![(read, db_row_ty()), (read, Type::String)],
             Some(Type::Result {
                 ok: Box::new(Type::String),
                 err: Box::new(Type::String),
             }),
         )),
-        ("jet.db", "row_bool") => Some((
+        ("core.db", "row_bool") => Some((
             vec![(read, db_row_ty()), (read, Type::String)],
             Some(Type::Result {
                 ok: Box::new(Type::Bool),
                 err: Box::new(Type::String),
             }),
         )),
-        ("jet.db", "transaction") | ("jet.db", "migrate") => Some((
+        ("core.db", "transaction") | ("core.db", "migrate") => Some((
             vec![
                 (read, Type::Named("DBScope".to_string())),
                 (read, Type::String),
@@ -2879,10 +2870,10 @@ pub fn core_fixed_sig(
         // D-DEP-WASM1=A / D-PLUGIN1=B (c81): `core.plugin` — sandboxed WASM
         // Component Model plugin loader (wasmtime, runtime-side only, I6).
         // `load` is the only module-level entry point; it PRODUCES a `Plugin`
-        // handle (mirrors `jet.db`'s `open` producing a `DBConnection`). The
+        // handle (mirrors `core.db`'s `open` producing a `DBConnection`). The
         // actual calls (`.call`/`.call_int`) are instance methods dispatched by
         // the receiver's `Plugin` type (see `check_plugin_method` below).
-        ("jet.plugin", "load") => Some((
+        ("core.plugin", "load") => Some((
             vec![(read, Type::String)],
             Some(Type::Named("Plugin".to_string())),
         )),
@@ -3190,6 +3181,7 @@ impl CoreDefault {
                 args: Vec::new(),
                 recv_type: None,
                 resolved_ret: None,
+                checked_widen: false,
             },
         }
     }
@@ -3210,10 +3202,6 @@ const ENCODING_LIMITS_DEFAULT: CoreDefault =
     CoreDefault::StaticCall { type_name: "EncodingLimits", method: "safe" };
 
 pub fn core_param_contract(module: &str, name: &str) -> Option<Vec<CoreParam>> {
-
-    let normalized_module =
-        Syntax::normalize_core_module(module).unwrap_or_else(|| module.to_string());
-    let module = normalized_module.as_str();
     match (module, name) {
         (
             "core.encoding.json" | "core.encoding.jsonl" | "core.encoding.csv"

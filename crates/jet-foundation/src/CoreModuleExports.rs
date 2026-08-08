@@ -2,8 +2,8 @@
 //! import (`alias.Leaf` where `alias` names a Core module) resolves through
 //! one generic lookup instead of a hand-written match arm per module.
 //!
-//! Most modules canonicalize a qualified leaf straight to `Leaf`. `jet.crypto`
-//! / `core.crypto` additionally mark a narrow secret-bearing subset so the
+//! Most modules canonicalize a qualified leaf straight to `Leaf`. `core.crypto`
+//! additionally marks a narrow secret-bearing subset so the
 //! caller can wrap those in the nominal-provenance type instead of the plain
 //! one — everything else in the table is `Plain`.
 
@@ -71,7 +71,6 @@ const ENV_LEAVES: &[(&str, CoreLeafKind)] = &[("EnvError", CoreLeafKind::Plain)]
 /// types. Add a module here to give it resolve_type support — no new match
 /// arm required.
 const CORE_MODULE_EXPORTS: &[(&str, &[(&str, CoreLeafKind)])] = &[
-    ("jet.crypto", CRYPTO_LEAVES),
     ("core.crypto", CRYPTO_LEAVES),
     ("core.encoding", ENCODING_LEAVES),
     ("core.encoding.json", &[

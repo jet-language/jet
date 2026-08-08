@@ -181,10 +181,13 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
         }
     }
 
-    // Registry metadata is always signed. `--no-sign` only disables the
-    // optional author signature on the package entry.
+    // D-CRYPTO-KEYGEN-DIAG1/E1292: discover first-publish entropy failure
+    // before progress output, snapshots, registry cloning, or index mutation.
+    // Existing keys and `--no-sign` never enter key generation (c146,
+    // D-PKGSIGN1) — `--no-sign` opts all the way out of author signing, not
+    // just out of writing the signature field.
     let registry = jet::Publish::resolve_publish_registry();
-    let generated_key = if !jet::Publish::Sign::key_exists(&registry.name) {
+    let generated_key = if !no_sign && !jet::Publish::Sign::key_exists(&registry.name) {
         match jet::Publish::Sign::keygen(&registry.name, false) {
             Ok(generated) => Some(generated),
             Err(diagnostic) => {
@@ -195,15 +198,16 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
     } else {
         None
     };
-    let registry_public = match jet::Publish::Sign::read_public_key(&registry.name) {
-        Some(public) => public,
-        None => {
-            eprintln!("error: registry signing key has no public-key file");
+    // The registry root-key pin only applies when a signing key actually
+    // exists (either pre-existing or just generated above); `--no-sign` with
+    // no pre-existing key has nothing to pin.
+    if let Some(registry_public) = jet::Publish::Sign::read_public_key(&registry.name) {
+        if let Err(error) = jet::Publish::ensure_registry_root_key(&registry.name, &registry_public) {
+            eprintln!("error: registry root-key pin failed: {error}");
             exit(ExitCodes::USER_ERROR);
         }
-    };
-    if let Err(error) = jet::Publish::ensure_registry_root_key(&registry.name, &registry_public) {
-        eprintln!("error: registry root-key pin failed: {error}");
+    } else if !no_sign {
+        eprintln!("error: registry signing key has no public-key file");
         exit(ExitCodes::USER_ERROR);
     }
 

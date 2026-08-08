@@ -55,12 +55,12 @@ impl Capabilities {
                 .any(|k| prefixes.iter().any(|p| k.starts_with(p)))
         };
         Capabilities {
-            uses_network: any(&["core.net", "jet.http", "core.watcher::port"]),
+            uses_network: any(&["core.net", "core.http", "core.watcher::port"]),
             uses_file_io: any(&["core.io", "core.files", "core.path", "core.watcher"]),
             uses_unsafe: has_unsafe || any(&["core.mem"]),
             uses_ffi: has_ffi,
-            uses_crypto: any(&["jet.crypto", "core.crypto", "core.auth"]),
-            uses_concurrency: any(&["core.tasks", "core.time", "jet.time", "core.watcher"]),
+            uses_crypto: any(&["core.crypto", "core.auth"]),
+            uses_concurrency: any(&["core.tasks", "core.time", "core.watcher"]),
         }
     }
 

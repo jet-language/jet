@@ -15,7 +15,8 @@ use crate::AST::ProgramBundle;
 /// Tier-0 backend: the comptime interpreter. Stateless between runs (no
 /// resident heap), so every method funnels into [`run_checked`].
 ///
-/// Used only for explicit `jet dev --interpret` (D-JIT1 / D-LENS-RUN1).
+/// Used for explicit `jet run --interpret` and `jet dev --interpret`
+/// (D-JIT1 / D-LENS-RUN1).
 ///
 /// Every entry arms the `jet_jit` fallback tripwire. The call is not gated on
 /// `cfg(test)`: integration tests link this crate without `cfg(test)`, so a

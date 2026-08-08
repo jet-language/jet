@@ -68,19 +68,14 @@ pub fn package_facts_for_entry(entry: &Path) -> Result<Option<PackageFacts>, Str
         };
         dir = parent.to_path_buf();
     }
-    loop {
-        if dir.join("package.jet").is_file() || dir.join("pkg.jet").is_file() {
-            return match PackageFacts::load(&dir) {
-                Some(Ok(facts)) => Ok(Some(facts)),
-                Some(Err(error)) => Err(error.to_string()),
-                None => Err(format!("Package facts are missing at `{}`", dir.display())),
-            };
-        }
-        if !dir.pop() {
-            break;
-        }
+    let Some(root) = jet_driver::Loader::find_manifest_root(&dir) else {
+        return Ok(None);
+    };
+    match PackageFacts::load(&root) {
+        Some(Ok(facts)) => Ok(Some(facts)),
+        Some(Err(error)) => Err(error.to_string()),
+        None => Err(format!("Package facts are missing at `{}`", root.display())),
     }
-    Ok(None)
 }
 
 /// Render the registered package-shape diagnostic shared by semantic-index

@@ -9,6 +9,7 @@ use crate::Codegen::TIR::clone_env;
 use crate::Codegen::TIR::emit_tir_expr;
 use crate::Codegen::TIR::label_name;
 use crate::Codegen::TIR::lower::collect_txn_mut_roots;
+use crate::Codegen::TIR::lower::encoding_reader_item_type;
 use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::lower_expr;
 use crate::Codegen::TIR::lower_owned_expr;
@@ -1031,7 +1032,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             || matches!(
                 &ty,
                 Type::Tagged { marker, inner }
-                    if marker == crate::AST::SHARED_GUARD_EDIT_MARKER
+                    if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::SharedGuardEdit))
                         && matches!(
                             inner.as_ref(),
                             Type::Apply { name, .. }
@@ -1517,6 +1518,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                         ok: Box::new(Type::List(Box::new(Type::Named("U8".to_string())))),
                         err: Box::new(Type::Named("HTTPError".to_string())),
                     }),
+                    Type::Named(name) => encoding_reader_item_type(name),
                     // D-DYNARRAY1: `loop x; window` — a `View<T>`'s element type.
                     Type::Apply { name, args }
                         if matches!(name.as_str(), "View" | "ViewMut") && args.len() == 1 => {

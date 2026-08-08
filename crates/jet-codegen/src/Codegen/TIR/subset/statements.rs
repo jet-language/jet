@@ -471,6 +471,7 @@ pub(crate) fn if_cond_in_subset(
         if let Pattern::Variant {
             variant,
             bindings,
+            leading_dot: _,
             span: _,
         } = pattern
         {

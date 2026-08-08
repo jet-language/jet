@@ -2,7 +2,7 @@ use super::*;
 
 mod Substitution;
 
-use Substitution::{substitute_expr, substitute_meta, substitute_stmts};
+use Substitution::{substitute_expr, substitute_marker, substitute_markers, substitute_meta, substitute_stmts};
 
 // ---------------------------------------------------------------------------
 // D-GENMOD2=A: generic module expansion (R11 pre-pass)
@@ -37,6 +37,16 @@ fn specialize_func(
         }
     }
     substitute_meta(&mut func.meta, &types, &values);
+    substitute_markers(&mut func.markers, &types, &values);
+    for clause in func.pre.iter_mut().chain(func.post.iter_mut()) {
+        substitute_expr(&mut clause.cond, &types, &values);
+        substitute_expr(&mut clause.message_expr, &types, &values);
+    }
+    if let Some(every) = &mut func.every {
+        if let crate::AST::EveryArg::Expression(expression) = &mut every.arg {
+            substitute_expr(expression, &types, &values);
+        }
+    }
     for param in &mut func.params {
         param.ty = specialize_module_type(&param.ty, &types, &values);
         if let Some(default) = &mut param.default {
@@ -53,6 +63,16 @@ fn specialize_func(
 pub fn specialize_function_types(mut func: Func, types: &HashMap<String, Type>) -> Func {
     let values = HashMap::new();
     substitute_meta(&mut func.meta, types, &values);
+    substitute_markers(&mut func.markers, types, &values);
+    for clause in func.pre.iter_mut().chain(func.post.iter_mut()) {
+        substitute_expr(&mut clause.cond, types, &values);
+        substitute_expr(&mut clause.message_expr, types, &values);
+    }
+    if let Some(every) = &mut func.every {
+        if let crate::AST::EveryArg::Expression(expression) = &mut every.arg {
+            substitute_expr(expression, types, &values);
+        }
+    }
     for param in &mut func.params {
         param.ty = specialize_module_type(&param.ty, types, &values);
         if let Some(default) = &mut param.default {
@@ -209,7 +229,13 @@ fn specialize_module_type(
             Type::Apply { args, .. } => args.iter_mut().for_each(|arg| lengths(arg, types, values)),
             Type::Tuple(fields) => fields.iter_mut().for_each(|(_, ty)| lengths(ty, types, values)),
             Type::Tagged { marker, inner } => {
-                if let Some(Type::Named(mapped)) = types.get(marker) { *marker = mapped.clone(); }
+                // Only a user-written tag name (D-QUAL4) can coincide with a
+                // generic type-parameter name; an `Internal` fact never is one.
+                if let crate::AST::TagMarker::User(name) = marker {
+                    if let Some(Type::Named(mapped)) = types.get(name) {
+                        *marker = crate::AST::TagMarker::User(mapped.clone());
+                    }
+                }
                 **inner = crate::Generics::substitute_type(inner, types);
                 lengths(inner, types, values);
             }
@@ -283,10 +309,7 @@ fn specialize_struct(
             substitute_expr(computed, &types, definition_values);
         }
         for marker in &mut field.serde_markers {
-            marker
-                .args
-                .iter_mut()
-                .for_each(|arg| substitute_expr(arg, &types, definition_values));
+            substitute_marker(marker, &types, definition_values);
         }
     }
     let methods = source
@@ -343,6 +366,8 @@ fn specialize_struct(
     result.fields = fields;
     result.methods = methods;
     result.trait_impls = trait_impls;
+    substitute_markers(&mut result.serde_markers, &types, definition_values);
+    substitute_markers(&mut result.type_markers, &types, definition_values);
     result.derives = source.derives.iter().map(|(name, span)| {
         (mapped_definition_name(name, &types), *span)
     }).collect();
@@ -389,11 +414,7 @@ fn specialize_enum(
                 ),
             };
             let mut serde_markers = variant.serde_markers.clone();
-            for marker in &mut serde_markers {
-                marker.args.iter_mut().for_each(|arg| {
-                    substitute_expr(arg, &types, definition_values);
-                });
-            }
+            substitute_markers(&mut serde_markers, &types, definition_values);
             crate::AST::Variant {
                 name: variant.name.clone(),
                 name_span: variant.name_span,
@@ -457,6 +478,8 @@ fn specialize_enum(
     result.variants = variants;
     result.methods = methods;
     result.trait_impls = trait_impls;
+    substitute_markers(&mut result.serde_markers, &types, definition_values);
+    substitute_markers(&mut result.type_markers, &types, definition_values);
     result.derives = source.derives.iter().map(|(name, span)| {
         (mapped_definition_name(name, &types), *span)
     }).collect();
@@ -484,6 +507,53 @@ struct TemplateInfo {
     source_module: usize,
     source_items: Vec<Item>,
     source_values: HashMap<String, crate::AST::CtValue>,
+    source_rule_facts: Vec<crate::AST::AppliedRuleApplication>,
+}
+
+fn collect_generic_module_spans(
+    items: &[Item],
+    spans: &mut Vec<crate::Diagnostics::Span>,
+) {
+    for item in items {
+        match item {
+            Item::GenericModule(def) => {
+                spans.push(def.span);
+                collect_generic_module_spans(&def.body, spans);
+            }
+            Item::CodeModule(module) => {
+                if let Some(body) = &module.body {
+                    collect_generic_module_spans(body, spans);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn specialize_rule_facts(
+    facts: &[crate::AST::AppliedRuleApplication],
+    template: &GenericModuleDef,
+    types: &HashMap<String, Type>,
+    values: &HashMap<String, crate::AST::CtValue>,
+) -> Vec<crate::AST::AppliedRuleApplication> {
+    let mut nested_spans = Vec::new();
+    collect_generic_module_spans(&template.body, &mut nested_spans);
+    facts
+        .iter()
+        .filter(|application| {
+            let span = application.marker.span;
+            span.start >= template.span.start
+                && span.end <= template.span.end
+                && !nested_spans
+                    .iter()
+                    .any(|nested| span.start >= nested.start && span.end <= nested.end)
+        })
+        .cloned()
+        .map(|mut application| {
+            substitute_marker(&mut application.marker, types, values);
+            application
+        })
+        .collect()
 }
 
 fn clone_definition_items(items: &[Item]) -> Vec<Item> {
@@ -499,6 +569,7 @@ fn clone_definition_items(items: &[Item]) -> Vec<Item> {
 struct AliasExpansion {
     module: CodeModule,
     declarations: Vec<Item>,
+    rule_facts: Vec<crate::AST::AppliedRuleApplication>,
 }
 
 fn specialize_nested_template_outer(
@@ -547,6 +618,8 @@ fn expand_nested_generics_in_code_module(
     application_module: &str,
     enclosing_full_key: &[u8],
     inherited_values: &HashMap<String, crate::AST::CtValue>,
+    source_rule_facts: &[crate::AST::AppliedRuleApplication],
+    generated_rule_facts: &mut Vec<crate::AST::AppliedRuleApplication>,
     diags: &mut Vec<Diagnostic>,
     instances: &mut HashMap<ModuleInstanceKey, String>,
     fingerprints: &mut HashMap<String, Vec<u8>>,
@@ -568,6 +641,8 @@ fn expand_nested_generics_in_code_module(
             application_module,
             &scope_full_key,
             inherited_values,
+            source_rule_facts,
+            generated_rule_facts,
             diags,
             instances,
             fingerprints,
@@ -632,6 +707,7 @@ fn expand_nested_generics_in_code_module(
             source_module: consumer_module,
             source_items: Vec::new(),
             source_values: values.clone(),
+            source_rule_facts: source_rule_facts.to_vec(),
         })
     }).collect();
     let aliases: HashMap<String, &ModuleAliasDef> = alias_defs.iter()
@@ -798,6 +874,7 @@ fn type_full_key(ty: &Type) -> Vec<u8> {
                 write(out, base);
                 frame_text(out, &dimension.identity());
             }
+            ComputeDim(value) => { out.push(21); out.extend_from_slice(&value.to_be_bytes()); }
         }
     }
     let mut out = Vec::new();
@@ -1416,6 +1493,12 @@ fn expand_alias(
             resolved_output: source.resolved_output.clone(),
         }));
     }
+    let mut rule_facts = specialize_rule_facts(
+        &info.source_rule_facts,
+        template,
+        &definition_types,
+        &definition_values,
+    );
     for item in &template.body {
         if let Item::Struct(def) = item {
             declarations.push(Item::Struct(specialize_struct(
@@ -1484,6 +1567,8 @@ fn expand_alias(
                 application_module,
                 instance_full_key,
                 &definition_values,
+                &info.source_rule_facts,
+                &mut rule_facts,
                 diags,
                 instances,
                 fingerprints,
@@ -1556,7 +1641,8 @@ fn expand_alias(
             let full_key = definition_full_key("nested", "", &enclosing_identity, &def.name);
             (def.name.clone(), TemplateInfo { def: def.clone(), definition_id: crate::SHA256::sha256_hex(&full_key), definition_full_key: full_key,
                 params: resolve_params(def, &nested_traits, &nested_enums, diags),
-                source_module: consumer_module, source_items: Vec::new(), source_values: definition_values.clone() })
+                source_module: consumer_module, source_items: Vec::new(), source_values: definition_values.clone(),
+                source_rule_facts: info.source_rule_facts.clone() })
         }).collect();
         let nested_alias_defs: Vec<ModuleAliasDef> = template.body.iter().filter_map(|item| {
             let Item::ModuleAlias(def) = item else { return None };
@@ -1617,6 +1703,7 @@ fn expand_alias(
                 instances.insert(key, resolved_alias.name.clone());
                 declarations.push(Item::CodeModule(expansion.module));
                 declarations.extend(expansion.declarations);
+                rule_facts.extend(expansion.rule_facts);
             }
         }
         if !nested_projections.is_empty() {
@@ -1644,6 +1731,7 @@ fn expand_alias(
             span: alias.span,
         },
         declarations,
+        rule_facts,
     })
 }
 
@@ -1908,6 +1996,7 @@ pub(crate) fn expand_generic_module_aliases(
                                 source_module,
                                 source_items: clone_definition_items(&source_items),
                                 source_values: source_values.clone(),
+                                source_rule_facts: module.rule_facts.clone(),
                             },
                         ))
                     }
@@ -1949,6 +2038,8 @@ pub(crate) fn expand_generic_module_aliases(
     let module_aliases: Vec<String> = bundle.modules.iter().map(|m| m.alias.clone()).collect();
 
     for (module_idx, module) in bundle.modules.iter_mut().enumerate() {
+        let mut generic_module_spans = Vec::new();
+        collect_generic_module_spans(&module.items, &mut generic_module_spans);
         if report_generic_module_cycles(&module.items, diags) {
             continue;
         }
@@ -2142,10 +2233,22 @@ pub(crate) fn expand_generic_module_aliases(
         // 1. Replace each ModuleAlias with its CodeModule expansion (collected above)
         // 2. Remove all GenericModule items
         let mut declarations = Vec::new();
+        let mut generated_rule_facts = Vec::new();
         for (idx, expansion) in expansions {
             module.items[idx] = Item::CodeModule(expansion.module);
             declarations.extend(expansion.declarations);
+            generated_rule_facts.extend(expansion.rule_facts);
         }
+        module.rule_facts.retain(|application| {
+            let span = application.marker.span;
+            !generic_module_spans
+                .iter()
+                .any(|generic| span.start >= generic.start && span.end <= generic.end)
+        });
+        module.rule_facts.extend(generated_rule_facts);
+        module
+            .rule_facts
+            .sort_by_key(|application| application.marker.span.start);
         // Collapse forward-alias chains through the applicative canonical
         // instance selected above.
         for alias in projections.clone().keys() {

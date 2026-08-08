@@ -1280,6 +1280,34 @@ fn emit_tir_stmt(
                         0
                     ));
                 }
+                Some(TForInMethod::EncodingReader { reader_type }) => {
+                    let next_fn = match reader_type.as_str() {
+                        "JSONReader" => "jet_enc_json_reader_next",
+                        "JSONLReader" => "jet_enc_jsonl_reader_next",
+                        "CSVReader" => "jet_enc_csv_reader_next",
+                        "XMLReader" => "jet_enc_xml_reader_next",
+                        "CBORReader" => "jet_enc_cbor_reader_next",
+                        _ => unreachable!("unknown encoding reader type: {reader_type}"),
+                    };
+                    out.push_str(&format!(
+                        "{}{}for _jet_item_result in {}jet_encoding_reader_iter(|| {}{}(&mut ({}))){} {{\n",
+                        pad,
+                        lbl,
+                        cx.root_prefix,
+                        cx.root_prefix,
+                        next_fn,
+                        collection_str,
+                        stride_suffix,
+                    ));
+                    out.push_str(&format!(
+                        "{}    let {} = _jet_item_result.unwrap_or_else(|_e| {}jet_panic({:?}, {}, &format!(\"{{:?}}\", _e)));\n",
+                        pad,
+                        mangle(var),
+                        cx.root_prefix,
+                        cx.file,
+                        0
+                    ));
+                }
                 Some(TForInMethod::Iterable {
                     coll_type,
                     iter_type,

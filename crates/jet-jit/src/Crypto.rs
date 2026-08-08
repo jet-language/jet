@@ -661,6 +661,23 @@ extern "C" fn jet_jit_crypto_expert_x25519(secret: i64, public: i64, reject_all_
     }
 }
 
+extern "C" fn jet_jit_crypto_expert_hkdf_sha256(
+    ikm: i64,
+    salt: i64,
+    info: i64,
+    length: i64,
+) -> i64 {
+    match runtime::jet_crypto_expert_hkdf_sha256_impl(
+        &clone_bytes(ikm),
+        &clone_bytes(salt),
+        &clone_bytes(info),
+        length,
+    ) {
+        Ok(secret) => result(true, push(CryptoValue::Secret(secret)) as u64),
+        Err(err) => error(err.to_string()),
+    }
+}
+
 extern "C" fn jet_jit_crypto_expert_secret_bytes(secret: i64) -> i64 {
     match with_crypto(secret, |value| match value {
         CryptoValue::Secret(secret) => Some(runtime::jet_crypto_expert_secret_bytes_impl(secret)),
@@ -1389,6 +1406,7 @@ host_fns! {
     expert_open_v1: "jet_jit_crypto_expert_open_v1" => jet_jit_crypto_expert_open_v1: binary;
     expert_migrate_v1: "jet_jit_crypto_expert_migrate_v1" => jet_jit_crypto_expert_migrate_v1: quaternary;
     expert_x25519: "jet_jit_crypto_expert_x25519" => jet_jit_crypto_expert_x25519: ternary;
+    expert_hkdf_sha256: "jet_jit_crypto_expert_hkdf_sha256" => jet_jit_crypto_expert_hkdf_sha256: quaternary;
     expert_secret_bytes: "jet_jit_crypto_expert_secret_bytes" => jet_jit_crypto_expert_secret_bytes: unary;
     verify_jwt: "jet_jit_auth_verify_jwt" => jet_jit_auth_verify_jwt: quinary;
     verify_paseto: "jet_jit_auth_verify_paseto" => jet_jit_auth_verify_paseto: septenary;
@@ -1421,7 +1439,6 @@ host_fns! {
     vault_expert_prepare_import_signing: "jet_jit_vault_expert_prepare_import_signing" => jet_jit_vault_expert_prepare_import_signing: binary;
     vault_expert_commit_import_signing: "jet_jit_vault_expert_commit_import_signing" => jet_jit_vault_expert_commit_import_signing: binary;
 }
-
 
 
 

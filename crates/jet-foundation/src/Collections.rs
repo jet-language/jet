@@ -1307,8 +1307,8 @@ fn string_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
             err: Box::new(Type::Named("ParseError".to_string())),
         })),
         // D-STR-DECLINE1=C: `matches`/`match` route through the one core.regex
-        // engine (`jet.regex.compile` + `is_match`/`find`) — same `? String`
-        // bad-pattern error shape `jet.regex.compile` already returns.
+        // engine (`core.regex.compile` + `is_match`/`find`) — same `? String`
+        // bad-pattern error shape `core.regex.compile` already returns.
         ("matches", 1) => Some(Some(Type::Result {
             ok: Box::new(Type::Bool),
             err: Box::new(Type::String),
@@ -1474,11 +1474,11 @@ fn shared_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Opti
         ("read", 1) | ("edit", 1) => Some(Some(inner.clone())),
         ("guard_read", 0) => Some(Some(shared_guard_type(
             inner.clone(),
-            crate::AST::SHARED_GUARD_READ_MARKER,
+            crate::AST::InternalTag::SharedGuardRead,
         ))),
         ("guard_edit", 0) => Some(Some(shared_guard_type(
             inner.clone(),
-            crate::AST::SHARED_GUARD_EDIT_MARKER,
+            crate::AST::InternalTag::SharedGuardEdit,
         ))),
         // D-SHARED-CYCLE1=C: expert weak edge for intentional cycles.
         ("downgrade", 0) => Some(Some(Type::Apply {
@@ -1499,9 +1499,9 @@ fn shared_weak_method_return(inner: &Type, method: &str, nargs: usize) -> Option
     }
 }
 
-fn shared_guard_type(inner: Type, marker: &str) -> Type {
+fn shared_guard_type(inner: Type, marker: crate::AST::InternalTag) -> Type {
     Type::Tagged {
-        marker: marker.to_string(),
+        marker: crate::AST::TagMarker::Internal(marker),
         inner: Box::new(Type::Apply {
             name: Syntax::TYPE_SHARED_GUARD.to_string(),
             args: vec![inner],

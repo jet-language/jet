@@ -1,4 +1,3 @@
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use jet_driver::FixEngine;
@@ -1355,7 +1354,7 @@ pub(super) struct CanvasAuthority {
 
 pub(super) fn canvas_authority_context(path: &Path) -> CanvasAuthority {
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
-    if let Some(root) = find_canonical_package_root(dir) {
+    if let Some(root) = jet_driver::Loader::find_manifest_root(dir) {
         if let Some(Ok(package)) = jet_driver::Package::PackageFacts::load(&root) {
             return CanvasAuthority {
                 grant: "canvas.source_edit:package".to_string(),
@@ -1364,22 +1363,6 @@ pub(super) fn canvas_authority_context(path: &Path) -> CanvasAuthority {
                 touched_file: rel_path(&root, path),
                 project_root: root,
             };
-        }
-    }
-    if let Some(root) = jet_driver::Loader::find_manifest_root(dir) {
-        let manifest_path = root.join(jet_driver::Syntax::PAYLOAD_FILE);
-        if let Ok(raw) = fs::read_to_string(&manifest_path) {
-            if let Ok(manifest) =
-                jet_driver::Package::PackageFacts::parse(&raw, manifest_path.display().to_string())
-            {
-                return CanvasAuthority {
-                    grant: "canvas.source_edit:package".to_string(),
-                    package_id: manifest.name,
-                    version: manifest.version.unwrap_or_else(|| "unversioned".to_string()),
-                    touched_file: rel_path(&root, path),
-                    project_root: root,
-                };
-            }
         }
     }
     CanvasAuthority {
@@ -1392,15 +1375,5 @@ pub(super) fn canvas_authority_context(path: &Path) -> CanvasAuthority {
             .unwrap_or("current.jet")
             .to_string(),
         project_root: dir.to_path_buf(),
-    }
-}
-
-fn find_canonical_package_root(start: &Path) -> Option<PathBuf> {
-    let mut dir = start.to_path_buf();
-    loop {
-        if dir.join("package.jet").is_file() {
-            return Some(dir);
-        }
-        dir = dir.parent()?.to_path_buf();
     }
 }

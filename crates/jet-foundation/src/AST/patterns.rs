@@ -39,6 +39,9 @@ pub enum Pattern {
         variant: String,
         /// D-PATW/D-PATR: slots can be wildcards or ranges, not just names.
         bindings: Vec<PatSlot>,
+        /// D-ENUMDOT1: preserve whether source used the leading-dot spelling
+        /// until sema applies contextual Optional/Result normalization.
+        leading_dot: bool,
         span: Span,
     },
     Present {

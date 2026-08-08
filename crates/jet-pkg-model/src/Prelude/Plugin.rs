@@ -1,4 +1,4 @@
-// jet.plugin runtime (D-DEP-WASM1=A, c81) — sandboxed WASM Component Model
+// core.plugin runtime (D-DEP-WASM1=A, c81) — sandboxed WASM Component Model
 // plugin loader, via wasmtime's dynamic component API.
 //
 // This file is emitted verbatim into the hidden FFI bridge crate (see

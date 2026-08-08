@@ -504,7 +504,7 @@ mod tests {
         assert!(matches!(jet_crypto_expert_hkdf_sha256_impl(&ikm, &salt, &info, 8161), Err(JetCryptoError::OutputLength { .. })));
         assert_eq!(
             jet_crypto_expert_hkdf_sha256_impl(&ikm, &salt, &info, -1).err().unwrap().to_string(),
-            "expert.hkdf_sha256: output length must be 0..8160; got -1"
+            "expert.hkdf_sha256_raw: output length must be 0..8160; got -1"
         );
 
         let password = jet_crypto_secret_from_text_impl("password".to_string());

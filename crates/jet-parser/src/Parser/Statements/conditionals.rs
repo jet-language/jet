@@ -1342,7 +1342,12 @@ impl<'a> Parser<'a> {
                             (vec![], variant_span.end)
                         };
                         let pat_span = Span::new(dot_span.start, end);
-                        let pattern = Pattern::Variant { variant, bindings, span: pat_span };
+                        let pattern = Pattern::Variant {
+                            variant,
+                            bindings,
+                            leading_dot: true,
+                            span: pat_span,
+                        };
                         Expr::PatternTest {
                             subject: Box::new(subject.clone()),
                             pattern,

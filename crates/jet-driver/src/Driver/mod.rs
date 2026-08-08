@@ -2206,18 +2206,17 @@ fn build_package_name(file: &str) -> String {
             .map(|directory| directory.join(entry))
             .unwrap_or_else(|_| entry.to_path_buf())
     };
-    let mut directory = absolute.parent();
-    while let Some(dir) = directory {
-        let path = crate::Manifest::manifest_path_in(dir);
+    if let Some(root) = crate::Loader::find_manifest_root(
+        absolute.parent().unwrap_or(std::path::Path::new(".")),
+    ) {
+        let path = crate::Loader::manifest_path(&root).expect("manifest root has a Package file");
         if let Ok(source) = std::fs::read_to_string(&path) {
             if let Ok(manifest) = crate::Package::PackageFacts::parse(&source, "package.jet") {
                 if !manifest.name.is_empty() {
                     return manifest.name;
                 }
             }
-            break;
         }
-        directory = dir.parent();
     }
     absolute
         .file_stem()
@@ -2463,26 +2462,8 @@ pub fn program_semantic_facts(
     bundle: &crate::AST::ProgramBundle,
     checked: &crate::Sema::SemIndexEffectFacts,
 ) -> crate::Comptime::ProgramSemanticFacts {
-    fn reaches_panic(
-        name: &str,
-        summaries: &std::collections::HashMap<String, crate::Sema::EffectSummary>,
-        visiting: &mut std::collections::BTreeSet<String>,
-    ) -> bool {
-        if !visiting.insert(name.to_string()) {
-            return false;
-        }
-        let reached = summaries.get(name).is_some_and(|summary| {
-            summary.edges.contains("__jet_panic__")
-                || summary
-                    .edges
-                    .iter()
-                    .any(|callee| reaches_panic(callee, summaries, visiting))
-        });
-        visiting.remove(name);
-        reached
-    }
     let mut effects = std::collections::HashMap::new();
-    let mut panic_facts = std::collections::BTreeSet::new();
+    let reaches_panic = checked.reachability.nodes_with("panic", "panic");
     for module in &bundle.modules {
         for item in &module.items {
             let crate::AST::Item::Func(func) = item else {
@@ -2495,16 +2476,8 @@ pub fn program_semantic_facts(
                 .map(|set| set.iter().cloned().collect())
                 .unwrap_or_default();
             effects.insert(qualified.clone(), values);
-            if reaches_panic(
-                &qualified,
-                &checked.summaries,
-                &mut std::collections::BTreeSet::new(),
-            ) {
-                panic_facts.insert(qualified);
-            }
         }
     }
-    let reaches_panic = panic_facts;
     crate::Comptime::ProgramSemanticFacts {
         effects,
         reaches_panic,
@@ -2927,7 +2900,7 @@ fn build_execution_diagnostic(error: crate::Comptime::Build::BuildExecutionError
             "E3504",
             format!("build action `{action}` asks for ungranted `{capability:?}` authority"),
             "declaring a capability in `fn build` does not grant it; root policy must approve each ambient effect".to_string(),
-            format!("pass `--allow-{}` for this run, or grant it in package/workspace policy", format!("{capability:?}").to_ascii_lowercase()),
+            format!("pass `--allow-{}` for this run, or grant it in package/workspace policy", capability.flag()),
             None,
         ),
         BuildExecutionError::ActionFailed { action, exit_code, stderr } => Diagnostic::error(
@@ -3814,4 +3787,22 @@ pub fn compile_benches(
         crate::Codegen::emit_bundle_benches(&bundle, ffi.as_ref()),
         ffi,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_execution_diagnostic;
+    use crate::Comptime::Build::BuildExecutionError;
+
+    #[test]
+    fn e3504_fix_text_snapshot_uses_canonical_effect_flag() {
+        let diagnostic = build_execution_diagnostic(BuildExecutionError::MissingGrant {
+            action: "compile".to_string(),
+            capability: jet_foundation::BuildEffect::GPU,
+        });
+        assert_eq!(
+            diagnostic.fix,
+            "pass `--allow-gpu` for this run, or grant it in package/workspace policy"
+        );
+    }
 }

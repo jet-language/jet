@@ -1345,6 +1345,7 @@ fn resugar_layout_expr(layout_name: &str, e: &Expr) -> Expr {
             args,
             recv_type,
             resolved_ret,
+            checked_widen,
         } => Expr::MethodCall {
             receiver: Box::new(resugar_layout_expr(layout_name, receiver)),
             method: method.clone(),
@@ -1361,6 +1362,7 @@ fn resugar_layout_expr(layout_name: &str, e: &Expr) -> Expr {
                 .collect(),
             recv_type: recv_type.clone(),
             resolved_ret: resolved_ret.clone(),
+            checked_widen: *checked_widen,
         },
         Expr::Call(call) => {
             let mut call2 = call.clone();

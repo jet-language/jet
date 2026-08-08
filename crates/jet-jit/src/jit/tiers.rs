@@ -143,6 +143,10 @@ pub fn plan_tiers(bundle: &ProgramBundle, program: Option<&JitProgram>) -> TierP
     };
 
     let names: HashSet<String> = program.funcs.iter().map(|f| f.name.clone()).collect();
+    let has_contracts = program
+        .funcs
+        .iter()
+        .any(|f| !f.pre_contracts.is_empty() || !f.post_contracts.is_empty());
     let mut native = HashSet::new();
     let mut deopt = Vec::new();
     let mut rows = Vec::new();
@@ -225,7 +229,10 @@ pub fn plan_tiers(bundle: &ProgramBundle, program: Option<&JitProgram>) -> TierP
     // Mixed: entry native + every deopted helper marshallable + spawn lambdas covered.
     let mixed = entry_native && entry_shape_ok && deopt_ok && spawn_ok && !deopt.is_empty();
     let all_native = deopt.is_empty() && spawn_ok && entry_native && entry_shape_ok;
-    let whole_interp = !all_native && !mixed;
+    // Contracts are executable TIR facts. Keep the whole call graph on the
+    // canonical interpreter so a contract cannot disappear at a deopt ABI
+    // boundary or be evaluated by a second engine-specific implementation.
+    let whole_interp = has_contracts || (!all_native && !mixed);
 
     let ms = elapsed_ms(started);
     for row in &mut rows {

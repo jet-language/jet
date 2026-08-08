@@ -6,7 +6,7 @@ use jet_codegen::Codegen::TIR::{
     self, JitProgram, TFunc, TFuncKind, TJitSpawnBody, TJitSpawnLambda, TLambda, TLambdaBody, TStmt,
 };
 use jet_foundation::AST::Type;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::lower_ctx::LowerCtx;
 use super::runtime_host::HostFns;
@@ -111,6 +111,7 @@ fn lower_spawn_function(
             vars: &mut vars,
             var_tys: &mut var_tys,
             raw_slots: HashMap::new(),
+            real_address_values: HashSet::new(),
             func_ids,
             spawn_site: &mut spawn_site,
             spawn_func_ids,
@@ -322,6 +323,7 @@ pub(crate) fn lower_callable_lambda(
             vars: &mut vars,
             var_tys: &mut var_tys,
             raw_slots: HashMap::new(),
+            real_address_values: HashSet::new(),
             func_ids,
             spawn_site,
             spawn_func_ids,
@@ -482,6 +484,7 @@ fn lower_function(
             vars: &mut vars,
             var_tys: &mut var_tys,
             raw_slots: HashMap::new(),
+            real_address_values: HashSet::new(),
             func_ids,
             spawn_site,
             spawn_func_ids,
@@ -670,6 +673,7 @@ fn lower_generator_body(
             vars: &mut vars,
             var_tys: &mut var_tys,
             raw_slots: HashMap::new(),
+            real_address_values: HashSet::new(),
             func_ids,
             spawn_site,
             spawn_func_ids,

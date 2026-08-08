@@ -31,6 +31,9 @@ pub(crate) fn symbol_index(session: &Session) -> jet_semindex::SemanticSymbolInd
         }
     }
     for (name, value) in &session.scope {
+        // Docs keeps the type in the live symbol fact. The workspace renderer
+        // intentionally uses the bare binding spelling after D-BIND-BARE1.
+        let sigil = if session.mutable_names.contains(name) { ":=" } else { "::" };
         index.push(jet_semindex::SemanticSymbol {
             identity: format!("session:binding:{name}"),
             name: name.clone(),
@@ -38,10 +41,12 @@ pub(crate) fn symbol_index(session: &Session) -> jet_semindex::SemanticSymbolInd
             owner: None,
             module_path: "this session".to_string(),
             kind: jet_semindex::SemanticSymbolKind::Local,
-            signature: super::Render::format_binding(
+            signature: format!(
+                "{}: {} {} {}",
                 name,
-                value,
-                session.mutable_names.contains(name),
+                super::type_name(value),
+                sigil,
+                value.jet_show()
             ),
             summary: String::new(),
             examples: Vec::new(),

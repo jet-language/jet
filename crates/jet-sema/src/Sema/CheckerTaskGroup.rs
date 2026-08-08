@@ -988,6 +988,7 @@ fn cancel_call(name: &str, span: Span) -> Expr {
         args: Vec::new(),
         recv_type: None,
         resolved_ret: None,
+        checked_widen: false,
     }
 }
 
@@ -1001,6 +1002,7 @@ fn join_call(name: &str, span: Span) -> Expr {
         args: Vec::new(),
         recv_type: None,
         resolved_ret: None,
+        checked_widen: false,
     }
 }
 

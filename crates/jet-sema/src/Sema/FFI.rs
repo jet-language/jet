@@ -7,7 +7,7 @@ use std::collections::HashMap;
 pub(crate) fn cpp_callback_abi_type(ty: &Type) -> Option<&Type> {
     match ty {
         Type::Tagged { marker, inner }
-            if marker == crate::AST::CPP_CALLBACK_ABI_MARKER
+            if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::CppCallbackAbi))
                 && matches!(inner.as_ref(), Type::Fn { .. }) =>
         {
             Some(inner)
@@ -142,6 +142,7 @@ pub(crate) fn is_c_abi_type(ty: &Type, registry: &TypeRegistry) -> bool {
         Type::Tagged { inner, .. } => is_c_abi_type(inner, registry),
         Type::Union(_) => false,
         Type::Quantity { .. } => false,
+        Type::ComputeDim(_) => false,
     }
 }
 
@@ -389,6 +390,7 @@ pub(crate) fn is_ffi_type(ty: &Type, registry: &TypeRegistry) -> bool {
         Type::Tagged { inner, .. } => is_ffi_type(inner, registry),
         Type::Union(_) => false,
         Type::Quantity { .. } => false,
+        Type::ComputeDim(_) => false,
     }
 }
 

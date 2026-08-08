@@ -1531,7 +1531,7 @@ pub fn apply_method(
             _ => Err(unsupported("equal with a non-text argument", span)),
         },
         // D-STR-DECLINE1=C: `matches`/`match` — the same RegexLite engine
-        // `jet.regex.compile`/`is_match`/`find` already run (`regex_is_match`/
+        // `core.regex.compile`/`is_match`/`find` already run (`regex_is_match`/
         // `regex_find` in Methods/core_calls.rs), composed for a String receiver.
         (CtValue::Str(s), "matches") => match args.into_iter().next() {
             Some(CtValue::Str(pattern)) => Ok(match super::RegexLite::RegexLite::parse(&pattern) {
@@ -1722,10 +1722,8 @@ pub fn apply_method(
                 Some(CtValue::Str(s)) => s,
                 _ => return Err(unsupported("`has_marker` requires a string argument", span)),
             };
-            if let Some((_, CtValue::List(markers))) = fields
-                .iter()
-                .find(|(n, _)| n == "marker_names")
-                .or_else(|| fields.iter().find(|(n, _)| n == "markers"))
+            if let Some((_, CtValue::List(markers))) =
+                fields.iter().find(|(n, _)| n == "markers")
             {
                 let found = markers
                     .iter()

@@ -124,6 +124,7 @@ compile_covered:
   effects/all_sigils
   effects/asset_pipeline
   effects/capability_sigils
+  effects/determinism
   effects/effect_caps
   effects/effect_declarations
   effects/effect_grant
@@ -144,12 +145,14 @@ compile_covered:
   effects/single_use
   effects/single_use_discard
   effects/smart_context
+  effects/taint
   errors/discard_fallible
   errors/env_divisor_trap
   errors/error_context
   errors/errors
   errors/fallible_run
   errors/must_use
+  errors/or_err
   errors/panic
   errors/qq_control
   errors/rollback_trait
@@ -161,6 +164,7 @@ compile_covered:
   game/core_game_headless
   game/raylib_window
   io/archive
+  io/args_audit
   io/args_spec
   io/byte_buffer
   io/cli
@@ -218,6 +222,7 @@ compile_covered:
   math/numeric_floor
   math/power_operator
   math/power_semantics
+  math/random_audit
   math/xor_operator
   memory/arena
   memory/arena_parse
@@ -230,6 +235,7 @@ compile_covered:
   memory/owner_backed_views
   memory/ownership
   memory/parameter_modes
+  memory/pin
   memory/rawptr
   memory/ref_field
   memory/resource_close
@@ -237,6 +243,7 @@ compile_covered:
   memory/shared_config
   memory/shared_guard_queue
   memory/shared_transact
+  memory/shared_weak_cycle
   memory/string_view
   memory/uninit
   memory/uninit_buffer
@@ -294,6 +301,7 @@ compile_covered:
   serde/decode_traced
   serde/encoding
   serde/encoding_base
+  serde/encoding_breadth
   serde/encoding_cbor_stream
   serde/encoding_csv_stream
   serde/encoding_json_stream
@@ -425,18 +433,10 @@ gaps:
   collections/list_surface: run: jit #1477 list/map builtin pending host
   collections/map_surface: run: jit let type unsupported: Map { key: Int, key_span: None, value: Int }
   collections/set: run: jit closure method unsupported
-  collections/zip_family: jit compile panicked before returning an unsupported reason: index out of bounds: the len is 0 but the index is 0
+  collections/zip_family: run: jit builtin method unsupported: n-ary/padded/empty zip
   crypto/auth_sessions: run: jit core call unsupported: core.auth.register_user
-  effects/determinism: coin_and_card: jit result ?? operand is not Result
-  effects/taint: shell_arg: jit #1477 list/map builtin pending host
-  errors/or_err: birth_year: jit method on Option(String)
   errors/partial_and_notes: run: jit host call unsupported
-  io/args_audit: run: jit result ?? operand is not Result
   io/db_policy: run: jit let type unsupported: Result { ok: List(Map { key: String, key_span: None, value: Named("DBValue") }), err: Named("DBError") }
-  math/random_audit: run: jit result ?? operand is not Result
-  memory/pin: wire_self: jit address_of needs a local place
-  memory/shared_weak_cycle: run: jit clone unsupported type: Apply { name: "Shared.Weak", args: [Named("Node")] }
-  serde/encoding_breadth: run: jit core call unsupported: core.encoding.json.canonical
   serde/serde_generic: run: jit missing encode `Wrap::encode`
   tooling/app_live: run: jit core call unsupported: app.live
   tooling/branch_dispatch_bench: enum_dispatch: jit if-expression pattern match unsupported
@@ -447,14 +447,14 @@ gaps:
   tooling/compute_ndarray: run: jit core call unsupported: core.compute.vec
   tooling/compute_simd: run: jit core call unsupported: core.compute.profile_show
   tooling/compute_tensor: run: jit core call unsupported: core.compute.zeros
-  tooling/service_authority: receipt_id: jit enum `ServiceReceipt::Accepted`
+  tooling/service_authority: run: jit core call unsupported: core.services.runtime
   tooling/service_runtime: run: jit core call unsupported: core.services.tree
   tooling/service_tree: run: jit core call unsupported: core.services.tree
   tooling/sync_crdt: run: jit core call unsupported: core.sync.text_new
   types/enum_dot: label: jit if-expression pattern match unsupported
   types/enum_dot_patterns: area: jit if-expression pattern match unsupported
   types/enums: next: jit if-expression pattern match unsupported
-  types/traits: run: jit print type unsupported
+  types/traits: run: jit print type unsupported: Option<Named("T")>
   ui/ui_component_kit: paint_form: jit call to unknown function `button_view`
 
 # Run-tier gaps: stems this file calls compile_covered that the corpus gate
@@ -473,11 +473,3 @@ run_gaps:
   comptime/embed_bytes: call `embed_bytes` can't run at compile time yet — owed to #1543 (D-META-EFFECT1)
   comptime/find: call `find` can't run at compile time yet — owed to #1543 (D-META-EFFECT1)
   comptime/find_empty: call `find` can't run at compile time yet — owed to #1543 (D-META-EFFECT1)
-  crypto/crypto_suite: `jet.crypto.sha512_bytes()` at comptime (#1254 repro)
-  io/args_spec: `core.args.spec()` at comptime
-  io/dir_entry: `core.files.list_dir()` at comptime (impure tier)
-  lowlevel/ffi: expr `ExternCall`
-  lowlevel/inline_asm: expr `ExternCall`
-  lowlevel/inline_c: expr `ExternCall`
-  types/generic_constructor_inference: static `Box.new` (#1254 repro)
-  ui/events: `core.event.scope()` at comptime

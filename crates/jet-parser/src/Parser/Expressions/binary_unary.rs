@@ -14,6 +14,7 @@ fn write_window_at_maximal_place(expr: Expr, start: usize) -> Expr {
             args,
             recv_type,
             resolved_ret,
+            checked_widen,
         } => Expr::MethodCall {
             receiver: Box::new(write_window_at_maximal_place(*receiver, start)),
             method,
@@ -23,6 +24,7 @@ fn write_window_at_maximal_place(expr: Expr, start: usize) -> Expr {
             args,
             recv_type,
             resolved_ret,
+            checked_widen,
         },
         place => {
             let span = Span::new(start, place.span().end);
@@ -550,6 +552,7 @@ impl<'a> Parser<'a> {
                         args,
                         recv_type: None,
                         resolved_ret: None,
+                        checked_widen: false,
                     })
                 }
                 // D-ENUMDOT2=A: `.Variant`, `.Variant(arg)`, or `.Variant.{ field: val }` in
@@ -609,6 +612,7 @@ impl<'a> Parser<'a> {
                         type_name: String::new(),
                         variant,
                         args,
+                        leading_dot: true,
                         span: Span::new(dot_start, end),
                     })
                 }
@@ -668,6 +672,7 @@ impl<'a> Parser<'a> {
                         type_name: String::new(),
                         variant,
                         args,
+                        leading_dot: true,
                         span: Span::new(dot_start, end),
                     })
                 }

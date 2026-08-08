@@ -78,10 +78,10 @@ pub const TYPE_KEY: &str = "Key";
 
 /// D-REACT1 (ratified 2026-06-22, option B): reactivity is an opt-in *library*,
 /// not core semantics. Ordinary binding semantics are unchanged; runtime
-/// reactivity ships as the `jet.reactive` ring package. The surface is three
+/// reactivity ships as the `core.reactive` ring package. The surface is three
 /// explicit producers and their handle types — no new keyword or sigil (reactive
 /// values are ordinary values made with library calls, exactly as option B
-/// requires). `use jet.reactive as reactive` exposes:
+/// requires). `use core.reactive as reactive` exposes:
 ///   reactive.signal(initial) -> Signal<T>   — a mutable reactive source
 ///   reactive.derived(() => expr) -> Derived<T> — a value recomputed from signals
 ///   reactive.computed(() => expr)            — D-SIGNAL1 alias for `derived`
@@ -89,7 +89,7 @@ pub const TYPE_KEY: &str = "Key";
 /// Methods: `Signal.get()/set(v)`, `Derived.get()`/`Computed.get()`. Dependency
 /// tracking is explicit-by-read (a `.get()` inside a derived/effect body subscribes).
 /// `#Reactive { … }` lowers to the effect job (D-REACTCORE1).
-pub const REACTIVE_MODULE: &str = "jet.reactive";
+pub const REACTIVE_MODULE: &str = "core.reactive";
 pub const TYPE_SIGNAL: &str = "Signal";
 pub const TYPE_DERIVED: &str = "Derived";
 /// D-SIGNAL1 (ratified 2026-06-28, opt A): canonical name for a derived reactive

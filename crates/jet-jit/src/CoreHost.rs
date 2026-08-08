@@ -1,4 +1,4 @@
-//! Host shims for `core.os`, `jet.log`, `core.math`, `core.files`,
+//! Host shims for `core.os`, `core.log`, `core.math`, `core.files`,
 //! `core.path`, `core.env`, and `core.process` CoreCalls (#729). Behavior
 //! mirrors AOT helpers in the CoreLib prelude (`jet_std_os_*`, `jet_ring_log_*`,
 //! `jet_std_math_*`, `jet_std_fs_*`, `jet_std_path_*`, `jet_std_env_*`,
@@ -812,7 +812,7 @@ extern "C" fn jet_jit_os_stop(code: i64) {
     std::process::exit(code as i32);
 }
 
-// ── jet.log (mirrors jet_ring_log_* in RingCsvLogTimeCrypto.rs) ───────────────
+// ── core.log (mirrors jet_ring_log_* in RingCsvLogTimeCrypto.rs) ───────────────
 // Level: 0=debug, 1=info, 2=warn, 3=error. Format: 0=auto, 1=json, 2=text.
 
 thread_local! {

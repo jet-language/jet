@@ -2,7 +2,8 @@
 //!
 //! Default `jet run` and `jet dev` execute through tiered Cranelift with
 //! silent interpreter deopt on named coverage gaps. Explicit
-//! `jet dev --interpret` forces tier-0 only. Experts use `--trace-tiers`.
+//! `jet run --interpret` and `jet dev --interpret` force tier-0 only.
+//! Experts use `--trace-tiers`.
 
 use std::collections::HashMap;
 
@@ -473,6 +474,31 @@ pub fn run_jit_once_with_args_opts(
         }
         Err(diags) => RunOutcome::Problems(diags),
     }
+}
+
+/// Run one program through the tier-0 interpreter with the same argv shape as
+/// the default run path.
+pub fn run_interpreter_once_with_args(file: &str, program_args: &[&str]) -> RunOutcome {
+    crate::RunCache::reset_phases();
+    let trace_tiers = jet_jit::trace_tiers_enabled();
+    let (outcome, flags, rows) = jet_driver::run_compiler_work(|| {
+        jet_jit::set_trace_tiers(trace_tiers);
+        let outcome = match checked_bundle(file) {
+            Ok(bundle) => {
+                let mut args = Vec::with_capacity(program_args.len() + 1);
+                args.push(file.to_string());
+                args.extend(program_args.iter().map(|arg| (*arg).to_string()));
+                jet_jit::with_program_args(&args, || dev_run_bundle(&bundle, false, true))
+            }
+            Err(diags) => RunOutcome::Problems(diags),
+        };
+        let flags = jet_jit::jit_trace_flags_for_test();
+        let rows = jet_jit::take_last_trace();
+        (outcome, flags, rows)
+    });
+    jet_jit::merge_jit_trace_flags_for_test(flags);
+    jet_jit::publish_trace(rows);
+    outcome
 }
 
 pub fn dev_iteration(file: &str, try_anyway: bool, use_interpreter: bool) -> RunOutcome {

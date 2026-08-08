@@ -256,14 +256,9 @@ pub enum Hit {
     Code(Explanation),
 }
 
-/// Looks like a diagnostic code (`E0102`, `L1000`, case-insensitive) —
-/// mirrors `crate::Explain`'s own registry-table shape check.
+/// Looks like a diagnostic code — uses `crate::Explain`'s registry shape check.
 pub fn looks_like_code(s: &str) -> bool {
-    let s = s.trim();
-    let b = s.as_bytes();
-    b.len() == 5
-        && matches!(b[0], b'E' | b'L' | b'e' | b'l')
-        && b[1..].iter().all(|c| c.is_ascii_digit())
+    crate::Explain::is_code(s)
 }
 
 /// Fuzzy subsequence match: every char of `query` (case-insensitive) must

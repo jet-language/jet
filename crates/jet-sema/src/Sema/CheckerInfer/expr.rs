@@ -6,6 +6,7 @@ use super::*;
 use crate::Collections::is_map_key_type;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
+use crate::Sema::CheckerCore::{contextual_literal, ContextualLiteral};
 use crate::Sema::Diagnostics::soft_public_use;
 use crate::AST::{
     AccessConvention, Call, CallArg, CallArgFlags, EnumLitArg, Expr, IndexKind, StrPart, Type,
@@ -370,18 +371,24 @@ impl<'a> Checker<'a> {
         ty
     }
 
-    pub(crate) fn infer_inner(&mut self, e: &mut Expr) -> Option<Type> {
-        // D-SHAPE3b: `Ok`/`Err` are contextual identifiers, not reserved words.
-        // A user function wins; otherwise the canonical one-argument spelling
-        // reuses the existing Result AST nodes and diagnostics.
+    fn normalize_contextual_expr(&mut self, e: &mut Expr) {
+        // D-SHAPE3b: contextual Optional/Result spellings share one generic
+        // literal path before sema lowers them to the existing dedicated nodes.
+        // A user function still wins for bare `Ok`/`Err` calls.
         let contextual_result = match &mut *e {
             Expr::Call(call)
                 if !self.funcs.contains_key(&call.name)
-                    && matches!(call.name.as_str(), name if name == Syntax::LIT_OK || name == Syntax::LIT_ERR)
+                    && matches!(
+                        contextual_literal(&call.name),
+                        Some(ContextualLiteral::Ok) | Some(ContextualLiteral::Err)
+                    )
                     && call.args.len() == 1
                     && call.args[0].label.is_none() =>
             {
-                let is_ok = call.name == Syntax::LIT_OK;
+                let is_ok = matches!(
+                    contextual_literal(&call.name),
+                    Some(ContextualLiteral::Ok)
+                );
                 let arg = call.args.pop().unwrap().expr;
                 let span = Span::new(call.name_span.start, arg.span().end);
                 Some(if is_ok {
@@ -396,42 +403,69 @@ impl<'a> Checker<'a> {
             *e = replacement;
         }
 
-        // D-SHAPE3b: leading-dot Optional/Result variants are contextual forms.
-        // Rewrite them to the existing canonical AST nodes only when the expected
-        // wrapper type is known; every downstream pass then reuses one mechanism.
         let contextual_variant = match (&mut *e, self.expected_type.as_ref()) {
             (
-                Expr::EnumLit { type_name, variant, args, span },
-                Some(Type::Option(_)),
-            ) if type_name.is_empty() && variant == Syntax::LIT_NULL && args.is_empty() => {
-                Some(Expr::Absent(*span))
-            }
-            (
-                Expr::EnumLit { type_name, variant, args, span },
-                Some(Type::Option(_)),
-            ) if type_name.is_empty() && variant == Syntax::LIT_VALUE && args.len() == 1 => {
-                match args.pop().unwrap() {
-                    EnumLitArg::Positional(inner) => Some(Expr::Present(Box::new(inner), *span)),
-                    named @ EnumLitArg::Named { .. } => {
-                        args.push(named);
-                        None
+                Expr::EnumLit {
+                    type_name,
+                    variant,
+                    args,
+                    leading_dot,
+                    span,
+                },
+                expected,
+            ) if type_name.is_empty() => {
+                let kind = contextual_literal(variant);
+                let allowed = if !*leading_dot {
+                    matches!(
+                        kind,
+                        Some(ContextualLiteral::Value) | Some(ContextualLiteral::Null)
+                    )
+                } else {
+                    match (kind, expected) {
+                        (
+                            Some(ContextualLiteral::Value) | Some(ContextualLiteral::Null),
+                            Some(Type::Option(_)),
+                        )
+                        | (
+                            Some(ContextualLiteral::Ok) | Some(ContextualLiteral::Err),
+                            Some(Type::Result { .. }),
+                        ) => true,
+                        _ => false,
                     }
-                }
-            }
-            (
-                Expr::EnumLit { type_name, variant, args, span },
-                Some(Type::Result { .. }),
-            ) if type_name.is_empty()
-                && matches!(variant.as_str(), name if name == Syntax::LIT_OK || name == Syntax::LIT_ERR)
-                && args.len() == 1 =>
-            {
-                let is_ok = variant == Syntax::LIT_OK;
-                match args.pop().unwrap() {
-                    EnumLitArg::Positional(inner) if is_ok => Some(Expr::Ok(Box::new(inner), *span)),
-                    EnumLitArg::Positional(inner) => Some(Expr::Err(Box::new(inner), *span)),
-                    named @ EnumLitArg::Named { .. } => {
-                        args.push(named);
-                        None
+                };
+                if !allowed {
+                    None
+                } else {
+                    match (kind, args.len()) {
+                        (Some(ContextualLiteral::Null), 0) => Some(Expr::Absent(*span)),
+                        (Some(ContextualLiteral::Value), 1) => match args.pop().unwrap() {
+                            EnumLitArg::Positional(inner) => {
+                                Some(Expr::Present(Box::new(inner), *span))
+                            }
+                            named @ EnumLitArg::Named { .. } => {
+                                args.push(named);
+                                None
+                            }
+                        },
+                        (Some(ContextualLiteral::Ok), 1) => match args.pop().unwrap() {
+                            EnumLitArg::Positional(inner) => {
+                                Some(Expr::Ok(Box::new(inner), *span))
+                            }
+                            named @ EnumLitArg::Named { .. } => {
+                                args.push(named);
+                                None
+                            }
+                        },
+                        (Some(ContextualLiteral::Err), 1) => match args.pop().unwrap() {
+                            EnumLitArg::Positional(inner) => {
+                                Some(Expr::Err(Box::new(inner), *span))
+                            }
+                            named @ EnumLitArg::Named { .. } => {
+                                args.push(named);
+                                None
+                            }
+                        },
+                        _ => None,
                     }
                 }
             }
@@ -440,6 +474,10 @@ impl<'a> Checker<'a> {
         if let Some(replacement) = contextual_variant {
             *e = replacement;
         }
+    }
+
+    pub(crate) fn infer_inner(&mut self, e: &mut Expr) -> Option<Type> {
+        self.normalize_contextual_expr(e);
 
         // D-EMPTYLIT1: an empty `[]` always parses as `Expr::ListLit`. When the
         // expected-type context says Map, rewrite the node to an empty
@@ -712,6 +750,7 @@ impl<'a> Checker<'a> {
                     }],
                     recv_type: None,
                     resolved_ret: None,
+                    checked_widen: false,
                 };
                 self.infer(e)
             }
@@ -1529,6 +1568,7 @@ impl<'a> Checker<'a> {
                             type_name,
                             variant,
                             args: Vec::new(),
+                            leading_dot: false,
                             span,
                         };
                         return Some(ty);
@@ -1563,6 +1603,7 @@ impl<'a> Checker<'a> {
                             args: Vec::new(),
                             recv_type: None,
                             resolved_ret: None,
+                            checked_widen: false,
                         };
                         return self.infer(e);
                     }
@@ -1612,6 +1653,7 @@ impl<'a> Checker<'a> {
                 args,
                 recv_type,
                 resolved_ret,
+                checked_widen: _,
             } => {
                 // D-SHAPE3a=A: the parser's empty identifier is the unspellable
                 // receiver sentinel for `.new(...)`. Resolve it only from the same
@@ -1706,6 +1748,7 @@ impl<'a> Checker<'a> {
                             type_name,
                             variant,
                             args: enum_args,
+                            leading_dot: false,
                             span,
                         };
                         return Some(ty);
@@ -1813,6 +1856,7 @@ impl<'a> Checker<'a> {
                 variant,
                 args,
                 span,
+                ..
             } => {
                 if type_name.is_empty() {
                     // D-ENUMDOT2=A: leading-dot variant — resolve type from expected context.
@@ -3158,9 +3202,11 @@ impl<'a> Checker<'a> {
             }
             if let Type::Tagged { marker, inner } = t {
                 if matches!(
-                    marker.as_str(),
-                    crate::AST::SHARED_GUARD_READ_MARKER
-                        | crate::AST::SHARED_GUARD_EDIT_MARKER
+                    marker,
+                    crate::AST::TagMarker::Internal(
+                        crate::AST::InternalTag::SharedGuardRead
+                            | crate::AST::InternalTag::SharedGuardEdit
+                    )
                 ) {
                     if let Type::Apply { name, args } = inner.as_ref() {
                         if name == crate::Syntax::TYPE_SHARED_GUARD && args.len() == 1 {

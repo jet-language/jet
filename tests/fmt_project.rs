@@ -5,12 +5,13 @@
 //!   - explicit file and directory arguments
 //!   - `--check`: exit 1 when files would change, exit 0 when clean
 //!   - `--check --diff`: prints unified diffs
+//!   - `--dry-run`: prints unified diffs without writing
 //!   - `--changed` outside a git repo: exit 2 with a diagnostic
 //!   - `jet fmt -` stdin mode (including `--stdin-path`)
 //!   - preflight zero-write: one bad file among good ones writes NOTHING
 //!   - ignore: `vendor/` and other generated dirs are skipped on discovery
 //!   - idempotence: formatting twice equals once
-//!   - exit-code table: 0 = clean/formatted, 1 = --check dirty, 2 = error
+//!   - exit-code table: 0 = clean/formatted, 1 = preview/check dirty, 2 = error
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -305,16 +306,16 @@ fn check_lists_changed_paths() {
     );
 }
 
-/// `jet fmt --check --diff` prints a unified diff for changed files.
+/// `jet fmt --dry-run` prints a unified diff and does not write changed files.
 #[test]
-fn check_diff_prints_unified_diff() {
+fn dry_run_prints_unified_diff() {
     let dir = tmpdir(&line!().to_string());
-    let _f = write(&dir, "main.jet", UNFORMATTED);
+    let f = write(&dir, "main.jet", UNFORMATTED);
+    let before = read(&f);
 
     let out = Command::new(jet())
         .arg("fmt")
-        .arg("--check")
-        .arg("--diff")
+        .arg("--dry-run")
         .arg("main.jet")
         .current_dir(&dir)
         .output()
@@ -327,6 +328,7 @@ fn check_diff_prints_unified_diff() {
         "expected diff output, got: {}",
         stdout
     );
+    assert_eq!(read(&f), before, "--dry-run must not modify the file");
 }
 
 /// `jet fmt --changed` outside a git repo exits 2 with a diagnostic.

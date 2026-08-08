@@ -532,18 +532,20 @@ impl<'a> Checker<'a> {
                         self.check_declared_type_rules(t, span);
                     }
                 }
-                Type::Tagged { marker, inner } => {
-                    if marker != crate::AST::CORE_CRYPTO_NOMINAL_MARKER
-                        && !self.tag_is_declared(marker)
-                    {
+                // Only a user-written D-QUAL4 tag needs a "declared" check — a
+                // compiler `Internal` fact is synthesized after this pass runs
+                // over source-written types, so it never reaches here anyway.
+                Type::Tagged { marker: crate::AST::TagMarker::User(name), inner } => {
+                    if !self.tag_is_declared(name) {
                         self.diags.push(undeclared_value_tag(
-                            marker,
-                            self.closest_declared_tag(marker).as_deref(),
+                            name,
+                            self.closest_declared_tag(name).as_deref(),
                             span,
                         ));
                     }
                     self.check_declared_type_rules(inner, span);
                 }
+                Type::Tagged { inner, .. } => self.check_declared_type_rules(inner, span),
                 _ => {}
             }
         }

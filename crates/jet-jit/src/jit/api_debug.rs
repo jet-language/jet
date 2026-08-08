@@ -51,13 +51,6 @@ pub(crate) fn try_resident(bundle: &ProgramBundle) -> Result<RunOutcome, super::
     }
     crate::Encoding::register_migrations(bundle);
     super::types_meta::install_struct_redact(bundle);
-    if let Err(reason) = crate::Ffi::bind_bundle_ffi(bundle) {
-        let mut plan = plan_tiers(bundle, None);
-        if let Some(gap) = plan.gap.as_mut() {
-            gap.reason = reason;
-        }
-        return Err(plan);
-    }
     let program = match TIR::lower_jit_program(bundle) {
         Some(program) => program,
         None => return Err(plan_tiers(bundle, None)),

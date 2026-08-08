@@ -173,9 +173,9 @@ fn extern_entry(ef: &ExternFn, block: &ExternRustBlock, _file: &str) -> ExternEn
 
 /// Build (or reuse) the hidden wrapper crate. Returns `Ok(None)` when the
 /// program has no foreign declarations and does not use `core.archive`,
-/// `jet.db`, or `core.compress.{gzip,zstd}`.
+/// `core.db`, or `core.compress.{gzip,zstd}`.
 ///
-/// `core.archive` (zip/tar; D-CORE-COMPRESS1), `jet.db` (D-DEP-DB1), and
+/// `core.archive` (zip/tar; D-CORE-COMPRESS1), `core.db` (D-DEP-DB1), and
 /// `core.compress` (gzip/zstd; D-CORE-COMPRESS1) are delivered through this
 /// same hidden-cargo bridge: when a program imports any of them, the bridge
 /// crate gains the matching dependency and an audited runtime. Archive embeds
@@ -206,7 +206,7 @@ pub fn prepare_for_target(
     let needs_db = bundle
         .used_core
         .iter()
-        .any(|u| u == "jet.db" || u.starts_with("jet.db::"));
+        .any(|u| u == "core.db" || u.starts_with("core.db::"));
     // D-CODECS1: standalone `core.compress.gzip` / `core.compress.zstd` codecs.
     let needs_compress = bundle.used_core.iter().any(|u| {
         u == "core.compress.gzip"
@@ -227,9 +227,6 @@ pub fn prepare_for_target(
                     "core.http::get"
                         | "core.http::post"
                         | "core.http::request"
-                        | "jet.http::get"
-                        | "jet.http::post"
-                        | "jet.http::request"
                 )
         });
     // D-TLSSERVE1=A: server-side TLS uses rustls through the hidden bridge
@@ -249,8 +246,8 @@ pub fn prepare_for_target(
     });
     // D-DEP-CRYPTO1=A: RustCrypto AEAD + Ed25519 for core.crypto envelope APIs.
     let needs_crypto = bundle.used_core.iter().any(|u| {
-        u == "jet.crypto"
-            || u.starts_with("jet.crypto::")
+        u == "core.crypto"
+            || u.starts_with("core.crypto::")
             || u == "core.crypto"
             || u.starts_with("core.crypto::")
             || u == "core.crypto.expert"
@@ -269,7 +266,7 @@ pub fn prepare_for_target(
     let needs_plugin = bundle
         .used_core
         .iter()
-        .any(|u| u == "jet.plugin" || u.starts_with("jet.plugin::"));
+        .any(|u| u == "core.plugin" || u.starts_with("core.plugin::"));
     // U13 (D-JPK-SECRETCRYPTO1): `core.vault.get` — decrypted-repo-secret read,
     // age-style crypto FFI bridge.
     let needs_secrets = bundle
@@ -376,7 +373,7 @@ mod inline_asm_target_tests {
     }
 }
 
-/// The `rusqlite` crate version that backs `jet.db` (D-DEP-DB1).
+/// The `rusqlite` crate version that backs `core.db` (D-DEP-DB1).
 /// Lives only here — never in the compiler's Cargo.toml (I6).
 pub const DB_CRATE_SPEC: (&str, &str) = ("rusqlite", "0.31");
 
@@ -1109,7 +1106,7 @@ mod net_tls_close_tests {
                 pem: include_bytes!("../../../tests/fixtures/tls/smtp.ca.cert.pem").to_vec(),
             },
             limits: email::Limits::safe(),
-            dkim: None,
+            dkim: Err(jet_foundation::Outcome::JetAbsent),
         }
     }
 
@@ -1400,7 +1397,7 @@ const FEATURED_DEPS: &[(&str, &str)] = &[
 const ARCHIVE_SOURCE: &str =
     include_str!("../../../corelib/core.archive/pkgs/archive/src/lib.rs");
 
-/// Hand-written database runtime emitted into the bridge crate when `jet.db`
+/// Hand-written database runtime emitted into the bridge crate when `core.db`
 /// is used. This is the only code that touches the `rusqlite` crate.
 const DB_RUNTIME: &str = include_str!("Prelude/DB.rs");
 
@@ -2468,6 +2465,7 @@ fn type_key(ty: &Type) -> String {
         Type::Quantity { base, dimension } => {
             format!("Quantity<{},{}>", type_key(base), dimension.identity())
         }
+        Type::ComputeDim(value) => value.to_string(),
     }
 }
 
@@ -3494,6 +3492,9 @@ fn rust_type(ty: &Type, user_types: &HashSet<String>) -> String {
         // Runtime values carry no dimension metadata (I3): a quantity crosses
         // the C ABI as its erased base numeric type.
         Type::Quantity { base, .. } => rust_type(base, user_types),
+        // A const compute-dimension only ever appears as a `Vec`/`Matrix`
+        // shape arg, never as its own C-FFI-crossing type.
+        Type::ComputeDim(_) => unreachable!("compute-dimension arg is not a C-FFI surface type"),
     }
 }
 

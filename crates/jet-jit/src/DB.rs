@@ -1,4 +1,4 @@
-//! `jet.db` hosts (#729). `include!` canonical SQLite runtime + wire codec —
+//! `core.db` hosts (#729). `include!` canonical SQLite runtime + wire codec —
 //! no third algorithm.
 
 use super::Concurrency;
@@ -13,7 +13,7 @@ trait JetShow {
     fn jet_show(&self) -> String;
 }
 
-/// Canonical `jet.db` FFI runtime (rusqlite).
+/// Canonical `core.db` FFI runtime (rusqlite).
 mod runtime {
     include!("../../jet-pkg-model/src/Prelude/DB.rs");
 }

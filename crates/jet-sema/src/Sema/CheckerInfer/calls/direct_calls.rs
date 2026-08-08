@@ -1226,7 +1226,7 @@ impl<'a> Checker<'a> {
                         && !matches!(
                             &arg_ty,
                             Type::Tagged { marker, .. }
-                                if marker == crate::AST::SHARED_GUARD_EDIT_MARKER
+                                if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::SharedGuardEdit))
                         )
                         && !matches!(
                             &arg.expr,

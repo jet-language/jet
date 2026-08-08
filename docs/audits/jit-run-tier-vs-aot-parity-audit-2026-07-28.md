@@ -29,10 +29,10 @@ supported-feature gap; byte-identical output") is violated on every row below.
 | comptime/embed_bytes | call `embed_bytes` can't run at compile time yet |
 | comptime/find | call `find` can't run at compile time yet |
 | comptime/find_empty | call `find` can't run at compile time yet |
-| crypto/crypto_suite | `jet.crypto.sha512_bytes()` at comptime (#1254 repro) |
+| crypto/crypto_suite | `core.crypto.sha512_bytes()` at comptime (#1254 repro) |
 | io/args_audit | `core.args.spec()` at comptime |
 | io/args_spec | `core.args.spec()` at comptime |
-| io/db | `jet.db.open_memory()` at comptime |
+| io/db | `core.db.open_memory()` at comptime |
 | io/dir_entry | `core.files.list_dir()` at comptime (impure tier) |
 | lowlevel/ffi | expr `ExternCall` |
 | lowlevel/inline_asm | expr `ExternCall` |

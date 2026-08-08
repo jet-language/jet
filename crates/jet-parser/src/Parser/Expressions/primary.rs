@@ -1,6 +1,6 @@
 use super::super::{
-    AccessConvention, CallArg, Diagnostic, Expr, Parser, Span, StrPart, StrTokPart, Syntax,
-    TokKind, describe,
+    AccessConvention, CallArg, Diagnostic, EnumLitArg, Expr, Parser, Span, StrPart, StrTokPart,
+    Syntax, TokKind, describe,
 };
 
 impl<'a> Parser<'a> {
@@ -26,11 +26,23 @@ impl<'a> Parser<'a> {
                         &format!("after the value inside `{}(...)`", Syntax::LIT_VALUE),
                     )?;
                     let full = Span::new(span.start, inner.span().end);
-                    Ok(Expr::Present(Box::new(inner), full))
+                    Ok(Expr::EnumLit {
+                        type_name: String::new(),
+                        variant: Syntax::LIT_VALUE.to_string(),
+                        args: vec![EnumLitArg::Positional(inner)],
+                        leading_dot: false,
+                        span: full,
+                    })
                 }
                 TokKind::KwNull => {
                     let span = self.bump().span;
-                    return Ok(Expr::Absent(span));
+                    return Ok(Expr::EnumLit {
+                        type_name: String::new(),
+                        variant: Syntax::LIT_NULL.to_string(),
+                        args: Vec::new(),
+                        leading_dot: false,
+                        span,
+                    });
                 }
                 // D-VERDICT-1455-1: one marker read at expression position. The
                 // shared reader takes the name — any name, open vocabulary
@@ -515,6 +527,7 @@ impl<'a> Parser<'a> {
                                 args,
                                 recv_type: None,
                                 resolved_ret: None,
+                                checked_widen: false,
                             };
                             self.allow_lowercase_leading_dot = previous_lowercase;
                             return Ok(result);

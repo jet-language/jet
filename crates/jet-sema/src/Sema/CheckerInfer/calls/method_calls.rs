@@ -632,7 +632,7 @@ impl<'a> Checker<'a> {
                             return Some(Type::Named("KeyUnlock".to_string()));
                         }
                         if crate::Sema::CheckerCoreLib::core_module_type_item(&ns, leaf) {
-                            let type_name = if matches!(ns.as_str(), "jet.http" | "core.http.client" | "core.http.server") {
+                            let type_name = if matches!(ns.as_str(), "core.http" | "core.http.client" | "core.http.server") {
                                 match leaf.as_str() {
                                     "Method" | "Status" | "Version" | "HeaderName" | "HeaderValue"
                                     | "Headers" | "Request" | "Response" | "Body" | "Handler" | "Error" | "Proxy" => {
@@ -830,7 +830,7 @@ impl<'a> Checker<'a> {
                                     } else {
                                         ret
                                     }
-                                } else if matches!(ns.as_str(), "jet.crypto" | "core.crypto") {
+                                } else if ns.as_str() == "core.crypto" {
                                     ret.map(crate::Sema::Diagnostics::core_crypto_nominal)
                                 } else {
                                     ret
@@ -1814,7 +1814,7 @@ impl<'a> Checker<'a> {
             let expiring_clock_is_deterministic = matches!(
                 &recv_ty,
                 Type::Tagged { marker, inner }
-                    if marker == crate::AST::DETERMINISTIC_CLOCK_MARKER
+                    if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::DeterministicClock))
                         && matches!(
                             inner.as_ref(),
                             Type::Apply { name, .. } if name == "ExpiringSecret"
@@ -1825,11 +1825,13 @@ impl<'a> Checker<'a> {
             let recv_ty = match recv_ty {
                 Type::Tagged { marker, inner }
                     if matches!(
-                        marker.as_str(),
-                        crate::AST::SHARED_GUARD_READ_MARKER
-                            | crate::AST::SHARED_GUARD_EDIT_MARKER
-                            | crate::AST::TERMINAL_FACT_SET_MARKER
-                            | crate::AST::CORE_CRYPTO_NOMINAL_MARKER
+                        marker,
+                        crate::AST::TagMarker::Internal(
+                            crate::AST::InternalTag::SharedGuardRead
+                                | crate::AST::InternalTag::SharedGuardEdit
+                                | crate::AST::InternalTag::TerminalFactSet
+                                | crate::AST::InternalTag::CoreCryptoNominal
+                        )
                     ) =>
                 {
                     Type::Tagged { marker, inner }
@@ -3248,6 +3250,7 @@ impl<'a> Checker<'a> {
                             self.infer(&mut a.expr);
                         }
                         *recv_type_out = Some("ArgsSpec".to_string());
+                        *resolved_ret_out = ret.clone();
                         return ret;
                     }
                 }
@@ -3259,6 +3262,7 @@ impl<'a> Checker<'a> {
                             self.infer(&mut a.expr);
                         }
                         *recv_type_out = Some("ParsedArgs".to_string());
+                        *resolved_ret_out = ret.clone();
                         return ret;
                     }
                 }
@@ -3444,6 +3448,7 @@ impl<'a> Checker<'a> {
                     let handle_ty = handle_ty.clone();
                     let result = self.finish_rng_generic(receiver, method, args, span);
                     *recv_type_out = Some(handle_ty);
+                    *resolved_ret_out = result.clone();
                     return result;
                 }
                 if matches!(
@@ -3457,6 +3462,7 @@ impl<'a> Checker<'a> {
                         let result =
                             self.finish_builtin_method(receiver, method, &recv_ty, args, span, ret);
                         *recv_type_out = Some(handle_ty);
+                        *resolved_ret_out = result.clone();
                         return result;
                     }
                 }
@@ -3688,9 +3694,11 @@ impl<'a> Checker<'a> {
             let shared_guard_ty = match &recv_ty {
                 Type::Tagged { marker, inner }
                     if matches!(
-                        marker.as_str(),
-                        crate::AST::SHARED_GUARD_READ_MARKER
-                            | crate::AST::SHARED_GUARD_EDIT_MARKER
+                        marker,
+                        crate::AST::TagMarker::Internal(
+                            crate::AST::InternalTag::SharedGuardRead
+                                | crate::AST::InternalTag::SharedGuardEdit
+                        )
                     ) && matches!(
                         inner.as_ref(),
                         Type::Apply { name, .. }
@@ -3707,12 +3715,11 @@ impl<'a> Checker<'a> {
                         _ => false,
                     };
                     Some(Type::Tagged {
-                        marker: if editable {
-                            crate::AST::SHARED_GUARD_EDIT_MARKER
+                        marker: crate::AST::TagMarker::Internal(if editable {
+                            crate::AST::InternalTag::SharedGuardEdit
                         } else {
-                            crate::AST::SHARED_GUARD_READ_MARKER
-                        }
-                        .to_string(),
+                            crate::AST::InternalTag::SharedGuardRead
+                        }),
                         inner: Box::new(recv_ty.clone()),
                     })
                 }
@@ -3765,6 +3772,7 @@ impl<'a> Checker<'a> {
                             variant,
                             args: enum_args,
                             span: value_span,
+                            ..
                         } = &args[0].expr
                         {
                             let valid = (type_name.is_empty()
@@ -4057,7 +4065,7 @@ impl<'a> Checker<'a> {
                 let nominal_recv = match &recv_ty {
                     Type::Named(name) => Some(name.as_str()),
                     Type::Tagged { marker, inner }
-                        if marker == crate::AST::CORE_CRYPTO_NOMINAL_MARKER =>
+                        if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::CoreCryptoNominal)) =>
                     {
                         match inner.as_ref() {
                             Type::Named(name) => Some(name.as_str()),

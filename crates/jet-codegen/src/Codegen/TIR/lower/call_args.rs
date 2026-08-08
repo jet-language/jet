@@ -55,7 +55,7 @@ fn callback_fn_type(ty: &Type) -> Option<&Type> {
     match ty {
         Type::Fn { .. } => Some(ty),
         Type::Tagged { marker, inner }
-            if marker == crate::AST::CPP_CALLBACK_ABI_MARKER
+            if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::CppCallbackAbi))
                 && matches!(inner.as_ref(), Type::Fn { .. }) =>
         {
             Some(inner)
@@ -111,8 +111,7 @@ pub(crate) fn lambda_body_ty_expecting(
     }
 }
 
-/// c109 Phase 6/13: lower method-call arguments, mirroring `emit_call_args`
-/// (Source/Codegen/Expression.rs). The clone/Arc wrappers, the borrow/mut-borrow
+/// c109 Phase 6/13: lower method-call arguments. The clone/Arc, borrow, and mut-borrow
 /// wrappers, and the Fn-typed Box-coercion are all decided here from total facts
 /// (`CallArg.flags` + the resolved param convention/type), never re-derived in emit.
 pub(crate) fn lower_method_args(
@@ -130,8 +129,7 @@ pub(crate) fn lower_method_args(
         .collect()
 }
 
-/// c109 Phase 13: lower ONE call argument, reproducing `emit_call_args`
-/// (Source/Codegen/Expression.rs) byte-for-byte — the single source of truth for
+/// c109 Phase 13: lower ONE call argument — the single source of truth for
 /// the clone/Arc, Fn-coercion, and borrow/mut-borrow wrapper order. `conv` is the
 /// resolved param `(convention, type)` for this position (`None` when the callee has
 /// no known signature, e.g. a `CallValue`). The emit order is exactly the AST path's:
@@ -287,8 +285,7 @@ pub(crate) fn lower_module_args(
         .collect()
 }
 
-/// c109 Phase 14: lower one FFI extern-call argument, reproducing
-/// `emit_extern_call_args` (Source/Codegen/Expression.rs). The value is wrapped in
+/// c109 Phase 14: lower one FFI extern-call argument. The value is wrapped in
 /// `(…).clone()` when the arg carries `implicit_clone`, OR when its param is a
 /// non-scalar `Read`-convention type and `implicit_clone` is NOT already set (the AST
 /// `if a.flags.implicit_clone { … } else if … } if let Some((_, ty)) = sig … if
@@ -336,8 +333,8 @@ pub(crate) fn ast_arg_is_named_fn_value(e: &Expr, cx: &Cx, env: &LowerEnv) -> bo
     false
 }
 
-/// c109 Phase 9: reproduce codegen's `expr_jet_ty(receiver, env)`
-/// (Source/Codegen/Expression.rs) for a built-in method receiver, using the TIR
+/// c109 Phase 9: reproduce codegen's `expr_jet_ty(receiver, env)` for a built-in
+/// method receiver, using the TIR
 /// lowering env's slot types. This MUST match `expr_jet_ty` bit-for-bit (incl. its
 /// `None` results) because the Map-vs-List-vs-String emit branch in
 /// `emit_builtin_method` is keyed on it: a divergence here flips a branch and breaks
@@ -347,16 +344,39 @@ pub(crate) fn ast_arg_is_named_fn_value(e: &Expr, cx: &Cx, env: &LowerEnv) -> bo
 /// receiver lands on the AST's default branch (the list/else arm).
 pub(crate) fn tir_recv_jet_ty(e: &Expr, env: &LowerEnv) -> Option<Type> {
     fn dispatch_ty(ty: Type) -> Type {
-        // D-PROCESS-SESSION2=D: this internal tag exists only so sema can
-        // distinguish the terminal capability report from an arbitrary
-        // Set<String>. TIR dispatch must see the report's real collection
-        // type; the tag has no runtime representation.
+        // D-TAINT1/D-TAG-SURFACE1: most `Type::Tagged` markers (the terminal
+        // capability report's own D-PROCESS-SESSION2 tag, `#Input`/other user
+        // taint facts, …) are compile-time-only dataflow facts with no runtime
+        // representation — the same erasure `Expr::Tainted` gets in
+        // `expr_in_subset` (TIR/subset/expressions.rs). Builtin-method
+        // dispatch here must see the real underlying type (String/List/Map/…)
+        // or a tagged receiver's `.split()`/`.get()`/etc. misses the curated
+        // `TBuiltinOp` fast path and falls back to a generic call the JIT
+        // declines to native-compile.
+        //
+        // The 4 compiler-owned exceptions mirror sema's OWN rule at
+        // `infer_method_call` (Sema/CheckerInfer/calls/method_calls.rs,
+        // "Most fact tags are type-transparent"): SharedGuard read/edit,
+        // the terminal fact-set, and the crypto nominal tag carry method
+        // POLICY, not just a dataflow fact — `SharedGuard.wait()` dispatches
+        // through the tagged type's own handle-method table, not a generic
+        // `TypeName::method` lookup. Stripping those here misroutes the call
+        // and regresses an already-JIT-covered stem (memory/shared_guard_queue).
         match ty {
             Type::Tagged { marker, inner }
-                if marker == crate::AST::TERMINAL_FACT_SET_MARKER =>
+                if matches!(
+                    marker,
+                    crate::AST::TagMarker::Internal(
+                        crate::AST::InternalTag::SharedGuardRead
+                            | crate::AST::InternalTag::SharedGuardEdit
+                            | crate::AST::InternalTag::TerminalFactSet
+                            | crate::AST::InternalTag::CoreCryptoNominal
+                    )
+                ) =>
             {
-                dispatch_ty(*inner)
+                Type::Tagged { marker, inner }
             }
+            Type::Tagged { inner, .. } => dispatch_ty(*inner),
             other => other,
         }
     }

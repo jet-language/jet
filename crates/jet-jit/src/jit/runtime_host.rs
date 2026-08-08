@@ -164,7 +164,7 @@ pub(crate) struct JitRuntime {
     pub(crate) raylib_colors: Vec<crate::Raylib::RaylibColorState>,
     pub(crate) raylib_sounds: Vec<crate::Raylib::RaylibSoundState>,
     pub(crate) time_values: Vec<Option<Time::TimeValue>>,
-    /// Regex / Match handles for jet.regex (#1219).
+    /// Regex / Match handles for core.regex (#1219).
     pub(crate) regex_values: Vec<Option<Text::RegexValue>>,
     /// Decimal handles for D-DECIMAL1 (#1219) — side table of CtDecimal.
     pub(crate) decimal_values: Vec<Option<jet_foundation::Numeric::CtDecimal>>,

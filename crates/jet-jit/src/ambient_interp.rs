@@ -1,4 +1,4 @@
-//! Whole-program interpreter hosts for `jet.db` / `jet.crypto` (#1254).
+//! Whole-program interpreter hosts for `core.db` / `core.crypto` (#1254).
 //!
 //! Same bridge runtimes as Cranelift hosts; CtValue at the boundary. Installed
 //! only around `run_whole_interp` so comptime/REPL stay pure / native-denied.
@@ -336,11 +336,13 @@ fn service_error_value(error: service_prelude::JetServiceError) -> CtValue {
 
 fn service_duration_ms(value: &CtValue) -> Option<i64> {
     match value {
+        // The `Duration` carrier's one field is `ns` (see eval/handles.rs
+        // `duration_new`); this host wants milliseconds, so convert.
         CtValue::Struct { type_name, fields } if type_name == "Duration" => fields
             .iter()
-            .find_map(|(name, value)| (name == "ms").then_some(value))
+            .find_map(|(name, value)| (name == "ns").then_some(value))
             .and_then(|value| match value {
-                CtValue::Int(ms) => Some(*ms),
+                CtValue::Int(ns) => Some(ns / 1_000_000),
                 _ => None,
             }),
         _ => None,
@@ -548,11 +550,11 @@ pub fn ambient_core_call(
             };
             Some(Ok(service_runtime_value(store.clone(), retention_ms)))
         }
-        ("jet.db" | "core.db", "policy") => {
+        ("core.db", "policy") => {
             let (Some(CtValue::Str(table)), Some(CtValue::Str(expression))) =
                 (args.first(), args.get(1))
             else {
-                return Some(Err(unsupported("jet.db.policy arguments", span)));
+                return Some(Err(unsupported("core.db.policy arguments", span)));
             };
             Some(Ok(match wire::jet_db_policy_validate(table, expression) {
                 Ok(()) => CtValue::Present(Box::new(db_policy_value(
@@ -562,7 +564,7 @@ pub fn ambient_core_call(
                 Err(error) => CtValue::failed(Box::new(CtValue::Str(error))),
             }))
         }
-        ("jet.db" | "core.db", "transaction" | "migrate") => {
+        ("core.db", "transaction" | "migrate") => {
             let Some(scope_value) = args.first() else {
                 return Some(Err(unsupported("database scope", span)));
             };
@@ -630,15 +632,15 @@ pub fn ambient_core_call(
                 }
             }))
         }
-        ("jet.db" | "core.db", "open_memory") => Some(Ok(db_conn_value(DB::runtime_open_memory()))),
-        ("jet.db" | "core.db", "open") => {
+        ("core.db", "open_memory") => Some(Ok(db_conn_value(DB::runtime_open_memory()))),
+        ("core.db", "open") => {
             let path = match args.first() {
                 Some(CtValue::Str(s)) => s.clone(),
-                _ => return Some(Err(unsupported("jet.db.open path", span))),
+                _ => return Some(Err(unsupported("core.db.open path", span))),
             };
             Some(Ok(db_conn_value(DB::runtime_open(&path))))
         }
-        ("jet.crypto", "sha512_bytes") => {
+        ("core.crypto", "sha512_bytes") => {
             let data = match as_bytes(args.first()?, span) {
                 Ok(b) => b,
                 Err(e) => return Some(Err(e)),
@@ -647,7 +649,7 @@ pub fn ambient_core_call(
                 &data,
             ))))
         }
-        ("jet.crypto", "blake3_bytes") => {
+        ("core.crypto", "blake3_bytes") => {
             let data = match as_bytes(args.first()?, span) {
                 Ok(b) => b,
                 Err(e) => return Some(Err(e)),
@@ -656,7 +658,7 @@ pub fn ambient_core_call(
                 &data,
             ))))
         }
-        ("jet.crypto", "constant_time_equal_bytes") => {
+        ("core.crypto", "constant_time_equal_bytes") => {
             let a = match as_bytes(args.first()?, span) {
                 Ok(b) => b,
                 Err(e) => return Some(Err(e)),
@@ -669,7 +671,7 @@ pub fn ambient_core_call(
                 Crypto::runtime::jet_crypto_constant_time_equal_bytes_impl(&a, &b),
             )))
         }
-        ("jet.crypto", "constant_time_equal") => {
+        ("core.crypto", "constant_time_equal") => {
             let a = match to_secret(args.first()?, span) {
                 Ok(s) => s,
                 Err(e) => return Some(Err(e)),
@@ -682,7 +684,7 @@ pub fn ambient_core_call(
                 Crypto::runtime::jet_crypto_constant_time_secret_impl(&a, &b),
             )))
         }
-        ("jet.crypto", "hkdf_sha256") => {
+        ("core.crypto", "hkdf_sha256") => {
             let ikm = match to_secret(args.first()?, span) {
                 Ok(s) => s,
                 Err(e) => return Some(Err(e)),
@@ -708,7 +710,7 @@ pub fn ambient_core_call(
                 },
             ))
         }
-        ("jet.crypto", "x25519_public") => {
+        ("core.crypto", "x25519_public") => {
             let secret = match as_bytes(args.first()?, span) {
                 Ok(b) => b,
                 Err(e) => return Some(Err(e)),
@@ -720,7 +722,7 @@ pub fn ambient_core_call(
                 },
             ))
         }
-        ("jet.crypto", "x25519_shared") => {
+        ("core.crypto", "x25519_shared") => {
             let secret = match as_bytes(args.first()?, span) {
                 Ok(b) => b,
                 Err(e) => return Some(Err(e)),
@@ -736,7 +738,7 @@ pub fn ambient_core_call(
                 },
             ))
         }
-        ("jet.crypto", "password_hash") => {
+        ("core.crypto", "password_hash") => {
             let password = match to_secret(args.first()?, span) {
                 Ok(s) => s,
                 Err(e) => return Some(Err(e)),
@@ -750,7 +752,7 @@ pub fn ambient_core_call(
                 },
             ))
         }
-        ("jet.crypto", "password_verify") => {
+        ("core.crypto", "password_verify") => {
             let password = match to_secret(args.first()?, span) {
                 Ok(s) => s,
                 Err(e) => return Some(Err(e)),
@@ -779,7 +781,7 @@ pub fn ambient_core_call(
                 },
             ))
         }
-        ("jet.crypto", "__secret_from_text") => {
+        ("core.crypto", "__secret_from_text") => {
             let text = match args.first() {
                 Some(CtValue::Str(s)) => s.clone(),
                 _ => return Some(Err(unsupported("Secret.from_text", span))),
@@ -789,7 +791,7 @@ pub fn ambient_core_call(
                 Crypto::runtime::jet_crypto_expert_secret_bytes_impl(&secret),
             )))
         }
-        ("jet.crypto", "__secret_from_bytes") => {
+        ("core.crypto", "__secret_from_bytes") => {
             let bytes = match as_bytes(args.first()?, span) {
                 Ok(b) => b,
                 Err(e) => return Some(Err(e)),
@@ -799,7 +801,7 @@ pub fn ambient_core_call(
                 Crypto::runtime::jet_crypto_expert_secret_bytes_impl(&secret),
             )))
         }
-        ("jet.crypto", "__x25519_generate") => Some(Ok(
+        ("core.crypto", "__x25519_generate") => Some(Ok(
             match Crypto::runtime::jet_crypto_x25519_generate_impl() {
                 Ok(key) => CtValue::Present(Box::new(x25519_secret_value(
                     Crypto::runtime::jet_crypto_expert_x25519_secret_bytes_impl(&key),
@@ -807,7 +809,7 @@ pub fn ambient_core_call(
                 Err(e) => CtValue::failed(Box::new(crypto_err(e.to_string()))),
             },
         )),
-        ("jet.crypto", "__x25519_public") => {
+        ("core.crypto", "__x25519_public") => {
             let bytes = match struct_bytes(args.first()?, "X25519SecretKey", span) {
                 Ok(b) => b,
                 Err(e) => return Some(Err(e)),
@@ -817,7 +819,7 @@ pub fn ambient_core_call(
                 Err(e) => Some(Err(unsupported(&e, span))),
             }
         }
-        ("jet.crypto", "__password_text") => {
+        ("core.crypto", "__password_text") => {
             let text = match args.first() {
                 Some(CtValue::Struct { type_name, fields }) if type_name == "PasswordHash" => {
                     fields.iter().find_map(|(n, v)| match (n.as_str(), v) {
@@ -832,7 +834,7 @@ pub fn ambient_core_call(
                 None => Some(Err(unsupported("PasswordHash.text", span))),
             }
         }
-        ("jet.crypto", "file_seal") => {
+        ("core.crypto", "file_seal") => {
             let recipients = match args.first() {
                 Some(CtValue::List(items)) => {
                     let mut out = Vec::new();
@@ -874,7 +876,7 @@ pub fn ambient_core_call(
                 },
             ))
         }
-        ("jet.crypto", "file_open") => {
+        ("core.crypto", "file_open") => {
             let key_bytes = match struct_bytes(args.first()?, "X25519SecretKey", span) {
                 Ok(b) => b,
                 Err(e) => return Some(Err(e)),
@@ -1057,9 +1059,9 @@ fn materialize_interp_web_app(
                         .unwrap_or_default()
                 };
                 match method.as_str() {
-                    "route" => app.route(path, handler),
-                    "page" => app.page(path, handler),
-                    _ => app.layout(path, handler),
+                    "route" => app.route(path, std::sync::Arc::new(handler)),
+                    "page" => app.page(path, std::sync::Arc::new(handler)),
+                    _ => app.layout(path, std::sync::Arc::new(handler)),
                 }
             }
             "action" | "form" | "data" => {
@@ -1075,9 +1077,9 @@ fn materialize_interp_web_app(
                     }
                 };
                 match method.as_str() {
-                    "action" => app.action(name, handler),
-                    "form" => app.form(name, handler),
-                    _ => app.data(name, handler),
+                    "action" => app.action(name, std::sync::Arc::new(handler)),
+                    "form" => app.form(name, std::sync::Arc::new(handler)),
+                    _ => app.data(name, std::sync::Arc::new(handler)),
                 }
             }
             "mount" => {
@@ -1087,7 +1089,7 @@ fn materialize_interp_web_app(
                     .cloned()
                     .ok_or_else(|| unsupported("WebApp mount callback", span))?;
                 let callback_sender = sender.cloned();
-                app.mount(prefix, move |path| {
+                app.mount(prefix, std::sync::Arc::new(move |path: &String| {
                     if let Some(sender) = &callback_sender {
                         let _ = interp_web_callback(
                             sender,
@@ -1095,7 +1097,7 @@ fn materialize_interp_web_app(
                             vec![CtValue::Str(path.clone())],
                         );
                     }
-                })
+                }))
             }
             "routes" => app.routes(interp_web_string(&args, 0, span)?),
             "security" => app.security(interp_web_string(&args, 0, span)?),

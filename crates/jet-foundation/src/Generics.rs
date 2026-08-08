@@ -143,7 +143,16 @@ pub fn substitute_type(ty: &Type, subst: &HashMap<String, Type>) -> Type {
         ),
         Type::TraitObject(t) => Type::TraitObject(t.clone()),
         Type::Tagged { marker, inner } => Type::Tagged {
-            marker: match subst.get(marker) { Some(Type::Named(name)) => name.clone(), _ => marker.clone() },
+            // Only a user-written tag name (D-QUAL4) can coincide with a
+            // generic type-parameter name and get substituted; a compiler
+            // `Internal` fact is never a substitutable name.
+            marker: match marker {
+                crate::AST::TagMarker::User(name) => match subst.get(name) {
+                    Some(Type::Named(sub_name)) => crate::AST::TagMarker::User(sub_name.clone()),
+                    _ => marker.clone(),
+                },
+                crate::AST::TagMarker::Internal(_) => marker.clone(),
+            },
             inner: Box::new(substitute_type(inner, subst)),
         },
         Type::Union(members) => crate::AST::canonicalize_union(
@@ -245,6 +254,7 @@ fn collect_free(ty: &Type, out: &mut HashSet<String>) {
         Type::Tagged { inner, .. } => collect_free(inner, out),
         Type::Union(members) => members.iter().for_each(|m| collect_free(m, out)),
         Type::Quantity { base, .. } => collect_free(base, out),
+        Type::ComputeDim(_) => {}
     }
 }
 

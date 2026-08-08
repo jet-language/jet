@@ -66,8 +66,8 @@ mod tests {
             let entry = root.join("test.jet").to_string_lossy().into_owned();
             let project = Self { root, entry };
             std::fs::write(
-                project.root.join(crate::Syntax::PAYLOAD_FILE),
-                "identity: .{ name: \"lsp_unit\", version: \"0.1.0\" }\n",
+                project.root.join(crate::Syntax::PACKAGE_FILE),
+                "name: \"lsp_unit\"\nversion: \"0.1.0\"\n",
             )
             .expect("write isolated LSP test manifest");
             project

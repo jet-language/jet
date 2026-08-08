@@ -2014,6 +2014,9 @@ pub fn resolved_decode_wire_shapes(items: &[Item], ty: &Type) -> Option<Vec<Serd
             Type::Apply { name, args } => return named(items, name, args, seen),
             Type::Tagged { inner, .. } => return resolve(items, inner, seen),
             Type::Result { .. } | Type::Fn { .. } | Type::TraitObject(_) => return None,
+            // A const compute-dimension only ever appears as a `Type::Apply`
+            // argument (`Vec<N>`), never as its own serialized value.
+            Type::ComputeDim(_) => return None,
         };
         finish(shapes)
     }

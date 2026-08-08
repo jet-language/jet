@@ -1,9 +1,8 @@
-use crate::AST::{AccessConvention, Expr, Func, Param, Stmt, Type};
+use crate::AST::{AccessConvention, ContractClause, Expr, Func, Param, Stmt, Type};
 use crate::Codegen::Cx;
 use crate::Codegen::mangle;
 use crate::Codegen::rust_param_type;
 use crate::Codegen::rust_return_type;
-use crate::Codegen::TIR::emit_tir_expr;
 use crate::Codegen::TIR::emit_tir_stmts;
 use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::lower_expr;
@@ -13,7 +12,7 @@ use crate::Codegen::TIR::SerdeCodec;
 use crate::Codegen::TIR::TFunc;
 use crate::Codegen::TIR::TFuncKind;
 use crate::Codegen::TIR::TLocal;
-use crate::Codegen::TIR::{TExpr, TExprKind, TStmt};
+use crate::Codegen::TIR::{TContract, TExpr, TExprKind, TStmt};
 use crate::Codegen::TIR::TWebParamReconstruction;
 use crate::Syntax;
 
@@ -44,12 +43,11 @@ fn bind_resource_param(
     if !resource {
         let local_ty = match ty {
             Type::Apply { name, .. } if name == Syntax::TYPE_SHARED_GUARD => Type::Tagged {
-                marker: if convention == AccessConvention::Write {
-                    crate::AST::SHARED_GUARD_EDIT_MARKER
+                marker: crate::AST::TagMarker::Internal(if convention == AccessConvention::Write {
+                    crate::AST::InternalTag::SharedGuardEdit
                 } else {
-                    crate::AST::SHARED_GUARD_READ_MARKER
-                }
-                .to_string(),
+                    crate::AST::InternalTag::SharedGuardRead
+                }),
                 inner: Box::new(ty.clone()),
             },
             _ => ty.clone(),
@@ -136,6 +134,8 @@ pub(crate) fn lower_error_conv(
         is_inline: false,
         is_inline_always: false,
         kernel_proof: None,
+        pre_contracts: Vec::new(),
+        post_contracts: Vec::new(),
         body: lower_stmts(&conversion.body, cx, &mut env),
         kind: TFuncKind::TopLevel,
     }
@@ -223,6 +223,7 @@ fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool)
     body.extend(lower_stmts(&f.body, cx, &mut env));
     let clone_types = env.cloned_types.borrow().clone();
     let generics = render_generics(&f.type_params, &clone_types);
+    let (pre_contracts, post_contracts) = lower_contracts(f, cx);
     TFunc {
         name: f.name.clone(),
         source_span: f.span,
@@ -242,31 +243,27 @@ fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool)
         is_inline: f.is_inline,
         is_inline_always: f.is_inline_always,
         kernel_proof: f.kernel.as_ref().and_then(|marker| marker.proof),
+        pre_contracts,
+        post_contracts,
         body,
         kind: TFuncKind::TopLevel,
     }
 }
 
-/// D-PREPOST1: lower a `#Pre`/`#Post` condition expression to a Rust bool
-/// expression string, in a fresh env with `f`'s params bound exactly as
-/// `lower_func` binds them (same place/deref rules) — `#Post` additionally
-/// binds `result` to `result_binding` (Rust name, type). Standalone: does not
-/// lower/emit the function body itself, so it can run before or independently
-/// of the normal body lowering.
-pub(crate) fn render_contract_cond(
+fn lower_contract_cond(
     f: &Func,
     cond: &Expr,
     result_binding: Option<(&str, &Type)>,
     cx: &Cx,
-) -> String {
+) -> TExpr {
     let mut env = LowerEnv::new(f.name.clone());
     env.gc_return = f.gc_return;
     for p in &f.params {
-        let param_ty = if p.variadic {
+        let param_ty = cx.expand_type_aliases(&if p.variadic {
             Type::List(Box::new(p.ty.clone()))
         } else {
             p.ty.clone()
-        };
+        });
         let mut slot_param = p.clone();
         slot_param.ty = param_ty.clone();
         let place = param_place_generic(&p.name, &slot_param, &f.type_params);
@@ -275,7 +272,42 @@ pub(crate) fn render_contract_cond(
     if let Some((rust_name, ty)) = result_binding {
         env.bind("result", TLocal::generated(rust_name), Some(ty.clone()));
     }
-    emit_tir_expr(&lower_expr(cond, cx, &mut env), cx)
+    lower_expr(cond, cx, &mut env)
+}
+
+fn lower_contract_clause(
+    f: &Func,
+    clause: &ContractClause,
+    result_binding: Option<(&str, &Type)>,
+    cx: &Cx,
+) -> TContract {
+    let (_, line, _) = crate::Codegen::TIR::tir_src_line_at(&cx.src, clause.span.start);
+    TContract {
+        condition: lower_contract_cond(f, &clause.cond, result_binding, cx),
+        message: lower_contract_cond(f, &clause.message_expr, result_binding, cx),
+        file: cx.file.clone(),
+        line,
+        span: clause.span,
+    }
+}
+
+pub(crate) fn lower_contracts(f: &Func, cx: &Cx) -> (Vec<TContract>, Vec<TContract>) {
+    let ret_ty = f
+        .return_type
+        .as_ref()
+        .map(|ty| cx.expand_type_aliases(ty))
+        .unwrap_or(Type::Named("Unit".to_string()));
+    let pre = f
+        .pre
+        .iter()
+        .map(|clause| lower_contract_clause(f, clause, None, cx))
+        .collect();
+    let post = f
+        .post
+        .iter()
+        .map(|clause| lower_contract_clause(f, clause, Some(("__jet_result", &ret_ty)), cx))
+        .collect();
+    (pre, post)
 }
 
 /// c109: lower + emit a `#Test` block body through the TIR, reproducing the legacy
@@ -475,6 +507,8 @@ pub(crate) fn lower_method_for_owner(
         is_inline: f.is_inline,
         is_inline_always: f.is_inline_always,
         kernel_proof: f.kernel.as_ref().and_then(|marker| marker.proof),
+        pre_contracts: Vec::new(),
+        post_contracts: Vec::new(),
         body,
         kind,
     }
@@ -582,6 +616,8 @@ pub(crate) fn lower_trait_method(f: &Func, type_name: &str, cx: &Cx, trait_name:
         is_inline: f.is_inline,
         is_inline_always: f.is_inline_always,
         kernel_proof: f.kernel.as_ref().and_then(|marker| marker.proof),
+        pre_contracts: Vec::new(),
+        post_contracts: Vec::new(),
         body,
         kind: TFuncKind::TraitMethod {
             is_unsafe: f.is_unsafe,
@@ -676,6 +712,8 @@ pub(crate) fn lower_delegation_method(f: &Func, field: &str, cx: &Cx) -> TFunc {
         is_inline: false,
         is_inline_always: false,
         kernel_proof: None,
+        pre_contracts: Vec::new(),
+        post_contracts: Vec::new(),
         body: Vec::new(),
         kind: TFuncKind::Delegation {
             sig,
