@@ -24,11 +24,12 @@ pub(super) fn qualified_effect_facts(
     }
     let mut qualified = HashMap::new();
     for (alias, summaries) in modules {
+        let local_keys: HashSet<String> = summaries.keys().cloned().collect();
         for (key, summary) in summaries {
             let mut summary = summary.clone();
             let resolve_edge = |edge: &String| {
                 if edge == "__jet_panic__" { return edge.clone(); }
-                if summaries.contains_key(edge) { return format!("{alias}::{edge}"); }
+                if local_keys.contains(edge) { return format!("{alias}::{edge}"); }
                 if let Some((module, symbol)) = edge.split_once('.') {
                     if aliases.contains(module) { return format!("{module}::{symbol}"); }
                 }

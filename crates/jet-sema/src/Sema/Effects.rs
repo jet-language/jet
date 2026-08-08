@@ -783,14 +783,14 @@ pub fn solve_reachability(
         if summary.maximal {
             direct.extend(Effect::all());
         }
-        if !direct.is_empty() {
-            effects.insert(name.clone(), direct);
-        }
         if effect_set_has_root(&direct, Effect::Exec) {
             add_seed(&mut calls_exec, name, Effect::Exec.name());
         }
         if effect_set_has_root(&summary.direct, Effect::Secret) {
             add_seed(&mut secret, name, Effect::Secret.name());
+        }
+        if !direct.is_empty() {
+            effects.insert(name.clone(), direct);
         }
     }
 
@@ -814,20 +814,6 @@ pub fn solve_reachability(
             jet_foundation::Facts::ReachabilityRow::new("calls-exec", calls_exec),
         ],
     )
-}
-
-/// Compatibility projection for callers that only need inferred effects.
-pub fn solve(summaries: &HashMap<String, EffectSummary>) -> HashMap<String, EffectSet> {
-    let reachability = solve_reachability(summaries, &HashMap::new());
-    summaries
-        .keys()
-        .filter_map(|key| {
-            reachability
-                .row("effects")
-                .and_then(|row| row.get(key))
-                .map(|effects| (key.clone(), effects.clone()))
-        })
-        .collect()
 }
 
 /// D-EFF3: a call through a trait value sees the trait method's declared
