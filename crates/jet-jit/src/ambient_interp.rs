@@ -1059,9 +1059,9 @@ fn materialize_interp_web_app(
                         .unwrap_or_default()
                 };
                 match method.as_str() {
-                    "route" => app.route(path, handler),
-                    "page" => app.page(path, handler),
-                    _ => app.layout(path, handler),
+                    "route" => app.route(path, std::sync::Arc::new(handler)),
+                    "page" => app.page(path, std::sync::Arc::new(handler)),
+                    _ => app.layout(path, std::sync::Arc::new(handler)),
                 }
             }
             "action" | "form" | "data" => {
@@ -1077,9 +1077,9 @@ fn materialize_interp_web_app(
                     }
                 };
                 match method.as_str() {
-                    "action" => app.action(name, handler),
-                    "form" => app.form(name, handler),
-                    _ => app.data(name, handler),
+                    "action" => app.action(name, std::sync::Arc::new(handler)),
+                    "form" => app.form(name, std::sync::Arc::new(handler)),
+                    _ => app.data(name, std::sync::Arc::new(handler)),
                 }
             }
             "mount" => {
@@ -1089,7 +1089,7 @@ fn materialize_interp_web_app(
                     .cloned()
                     .ok_or_else(|| unsupported("WebApp mount callback", span))?;
                 let callback_sender = sender.cloned();
-                app.mount(prefix, move |path| {
+                app.mount(prefix, std::sync::Arc::new(move |path: &String| {
                     if let Some(sender) = &callback_sender {
                         let _ = interp_web_callback(
                             sender,
@@ -1097,7 +1097,7 @@ fn materialize_interp_web_app(
                             vec![CtValue::Str(path.clone())],
                         );
                     }
-                })
+                }))
             }
             "routes" => app.routes(interp_web_string(&args, 0, span)?),
             "security" => app.security(interp_web_string(&args, 0, span)?),

@@ -116,9 +116,9 @@ extern "C" fn jet_jit_web_app_method(app: i64, method: i64, a0: i64, a1: i64) ->
                             })
                         };
                         match method.as_str() {
-                            "route" => app_handle.route(key, handler),
-                            "page" => app_handle.page(key, handler),
-                            _ => app_handle.layout(key, handler),
+                            "route" => app_handle.route(key, std::sync::Arc::new(handler)),
+                            "page" => app_handle.page(key, std::sync::Arc::new(handler)),
+                            _ => app_handle.layout(key, std::sync::Arc::new(handler)),
                         }
                     }
                     "action" | "form" | "data" => {
@@ -130,9 +130,9 @@ extern "C" fn jet_jit_web_app_method(app: i64, method: i64, a0: i64, a1: i64) ->
                             });
                         };
                         match method.as_str() {
-                            "action" => app_handle.action(key, handler),
-                            "form" => app_handle.form(key, handler),
-                            _ => app_handle.data(key, handler),
+                            "action" => app_handle.action(key, std::sync::Arc::new(handler)),
+                            "form" => app_handle.form(key, std::sync::Arc::new(handler)),
+                            _ => app_handle.data(key, std::sync::Arc::new(handler)),
                         }
                     }
                     _ => unreachable!(),
@@ -140,14 +140,14 @@ extern "C" fn jet_jit_web_app_method(app: i64, method: i64, a0: i64, a1: i64) ->
             }
             "mount" => {
                 let key = rt.heap.clone_string(a0).unwrap_or_default();
-                app_handle.mount(key, move |path| {
+                app_handle.mount(key, std::sync::Arc::new(move |path: &String| {
                     Concurrency::with_http_jet_runtime(|| {
                         let path = with_rt(|rt| rt.heap.alloc_string(path.clone()));
                         let call: extern "C" fn(i64) =
                             unsafe { std::mem::transmute(a1 as usize) };
                         call(path);
                     });
-                })
+                }))
             }
             "routes" | "security" | "assets" | "split" | "code_split" | "cache" | "a11y"
             | "adapter" => {
