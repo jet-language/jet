@@ -5,12 +5,14 @@ use core.files as files
 use core.path as path
 
 fn write_catalog(path: String) {
-    output :: files.create(path) ?? panic("create")
+    out :: files.create(path) ?? panic("create")
     // D-APILABEL1=A: skip the `limits` default and name only the policy that changes.
-    writer :: json.writer(^output, canonical: false) ?? panic("writer")
+    writer :: json.writer(^out, canonical: true) ?? panic("writer")
     writer.write(encoding.DataEvent.ObjectStart) ?? panic("object")
-    writer.write(encoding.DataEvent.Key("ok")) ?? panic("key")
-    writer.write(encoding.DataEvent.Bool(true)) ?? panic("bool")
+    writer.write(encoding.DataEvent.Key("b")) ?? panic("key b")
+    writer.write(encoding.DataEvent.Int(2)) ?? panic("value b")
+    writer.write(encoding.DataEvent.Key("a")) ?? panic("key a")
+    writer.write(encoding.DataEvent.Int(1)) ?? panic("value a")
     writer.write(encoding.DataEvent.ObjectEnd) ?? panic("end")
     writer.flush() ?? panic("flush")
     writer.finish() ?? panic("finish")
@@ -28,4 +30,5 @@ fn run() {
         print("event")
     }
     print("eof")
+    print(files.read(path) ?? panic("read"))
 }
