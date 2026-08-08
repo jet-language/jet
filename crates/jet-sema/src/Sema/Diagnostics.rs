@@ -1397,6 +1397,7 @@ mod tests {
                 .map(|(_, ty)| count_core_crypto_markers(ty))
                 .sum(),
             Type::FixedList { elem, .. } => count_core_crypto_markers(elem),
+            Type::Quantity { base, .. } => count_core_crypto_markers(base),
             Type::Tagged { marker, inner } => {
                 usize::from(marker == CORE_CRYPTO_NOMINAL_MARKER)
                     + count_core_crypto_markers(inner)

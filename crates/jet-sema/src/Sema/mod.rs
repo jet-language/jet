@@ -985,6 +985,7 @@ mod view_fact_graph_tests {
 
     fn fact(owner_span: usize, scope_len: usize, kind: ViewKind) -> ViewFact {
         ViewFact {
+            seq: 0,
             binding_span: Span::new(owner_span + 10, owner_span + 11),
             output_path: Vec::new(),
             place: ViewPlace {
