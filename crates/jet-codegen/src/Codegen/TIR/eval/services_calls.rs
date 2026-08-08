@@ -41,10 +41,12 @@ impl<'a> EvalCtx<'a> {
                 )),
             };
             let retention_ms = match argv.get(1) {
+                // The `Duration` carrier's one field is `ns` (eval/handles.rs
+                // `duration_new`); this call wants milliseconds, so convert.
                 Some(CtValue::Struct { type_name, fields }) if type_name == "Duration" => fields
                     .iter()
                     .find_map(|(name, value)| match (name.as_str(), value) {
-                        ("ms", CtValue::Int(ms)) => Some(*ms),
+                        ("ns", CtValue::Int(ns)) => Some(*ns / 1_000_000),
                         _ => None,
                     })
                     .ok_or_else(|| Diagnostic::error(

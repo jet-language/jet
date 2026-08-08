@@ -260,6 +260,43 @@ impl LowerCtx<'_, '_> {
         }
     }
 
+    /// Same structural key as jet-codegen's `tir_place_address_key` (TIR eval)
+    /// — kept in sync deliberately rather than shared across the crate
+    /// boundary, since it is a small pure function over `TExpr` shape only.
+    fn jit_place_address_key(expr: &TExpr) -> String {
+        match &expr.kind {
+            TExprKind::Local(local) => local.name.clone(),
+            TExprKind::Field { recv, field, .. } => {
+                format!("{}.{}", Self::jit_place_address_key(recv), field)
+            }
+            TExprKind::Index { base, index, .. } => format!(
+                "{}[{}]",
+                Self::jit_place_address_key(base),
+                Self::jit_place_address_key(index)
+            ),
+            TExprKind::Borrow { place, .. } | TExprKind::Deref(place) => {
+                Self::jit_place_address_key(place)
+            }
+            _ => format!("ty:{}", expr.ty.show()),
+        }
+    }
+
+    /// Same FNV-1a-derived non-zero identity as jet-codegen's
+    /// `stable_place_address` (TIR eval) — see `jit_place_address_key`.
+    fn jit_stable_place_address(key: &str) -> i64 {
+        let mut hash: u64 = 0xcbf29ce484222325;
+        for byte in key.as_bytes() {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+        let addr = (hash as i64).wrapping_abs();
+        if addr == 0 {
+            1
+        } else {
+            addr
+        }
+    }
+
     fn enum_discriminant(&mut self, subject: Value, heap: bool) -> Value {
         if heap {
             let zero = self.b.ins().iconst(types::I64, 0);
@@ -8708,7 +8745,21 @@ impl LowerCtx<'_, '_> {
                             0,
                         ));
                     }
-                    return Err("jit address_of needs a local place".to_string());
+                    // D-PIN1 / S58: the place is not a bare local (e.g. a field
+                    // projection through a heap record, `node.payload`). Arena
+                    // records can grow/reallocate their backing storage, so —
+                    // unlike the local's own Cranelift stack slot above — there
+                    // is no real, stable pointer to hand back safely. TIR-eval
+                    // faces the same "no real address" fact (see
+                    // `tir_place_address_key` / `stable_place_address` in
+                    // jet-codegen's TIR eval) and mints a stable non-zero
+                    // identity from the place's structural path instead; mirror
+                    // that exact algorithm here so every non-AOT tier agrees on
+                    // the one non-zero / inequality facts a program can observe
+                    // (I9). AOT alone keeps the real `&place as *const _` cast.
+                    let key = Self::jit_place_address_key(place);
+                    let addr = Self::jit_stable_place_address(&key);
+                    return Ok(self.b.ins().iconst(types::I64, addr));
                 }
                 if module == "core.mem" && method == "volatile_read" && args.len() == 1 {
                     if self.unsafe_depth == 0 {
@@ -9969,27 +10020,26 @@ impl LowerCtx<'_, '_> {
                             self.host.encoding.json_to_string_pretty,
                             vec![self.lower_expr(&args[0])?],
                         ),
-                        "canonical"
-                            if args.len() == 1
-                                && datatree_arg
-                                && !jet_foundation::PackageEdition::package_edition_at_least("2027") =>
-                        {
+                        // D-JSONCANON1=A: sema already resolved which `canonical`
+                        // signature applies (arity 1 = pre-2027 infallible; 2 =
+                        // 2027+ fallible with a limits arg, default-filled when
+                        // the caller omits it) while its own edition scope was
+                        // live. Branch on that already-resolved TIR arity, not
+                        // a fresh `package_edition_at_least` read here: JIT
+                        // compile runs after sema's `with_package_edition`
+                        // scope has closed, so re-querying the thread-local
+                        // edition here reads the reverted default and can pick
+                        // the wrong host for a table already sized the other
+                        // way (desync, not a marshalling choice — I9).
+                        "canonical" if args.len() == 1 && datatree_arg => {
                             (
                                 self.host.encoding.json_canonical,
                                 vec![self.lower_expr(&args[0])?],
                             )
                         }
-                        "canonical"
-                            if (1..=2).contains(&args.len())
-                                && datatree_arg
-                                && jet_foundation::PackageEdition::package_edition_at_least("2027") =>
-                        {
+                        "canonical" if args.len() == 2 && datatree_arg => {
                             let tree = self.lower_expr(&args[0])?;
-                            let limits = if args.len() >= 2 {
-                                self.lower_expr(&args[1])?
-                            } else {
-                                self.b.ins().iconst(types::I64, 0)
-                            };
+                            let limits = self.lower_expr(&args[1])?;
                             (
                                 self.host.encoding.json_canonical_checked,
                                 vec![tree, limits],
@@ -12705,6 +12755,34 @@ impl LowerCtx<'_, '_> {
                         .is_some_and(|name| name.ends_with(".Patch"))
                 {
                     return self.lower_patch_merge(recv, &args[0]);
+                }
+                // D-FAIL-CARRIER1=A: `.or_err(why)` on `Option<T>` lifts a clean
+                // absence into a failure. One packed carrier (0 = absent), so
+                // presence/absence reuse the same test `lower_option_enum_match`
+                // uses; the report ("Error" erases to `String`, Context.rs:1345)
+                // shares the I64 handle ABI with every `T` this covers.
+                if method.name == jet_foundation::Syntax::METHOD_OUTCOME_OR_ERR
+                    && args.len() == 1
+                {
+                    if let Type::Option(inner) = &recv.ty {
+                        if self.meta.clif_ty(inner).or_else(|| clif_ty(inner))
+                            == Some(types::I64)
+                            && !matches!(inner.as_ref(), Type::IntN { .. })
+                        {
+                            let packed = self.lower_expr(recv)?;
+                            let why = self.lower_call_arg(&args[0])?;
+                            let zero = self.b.ins().iconst(types::I64, 0);
+                            let is_some =
+                                self.b.ins().icmp(IntCC::NotEqual, packed, zero);
+                            let ok_payload = self.unpack_option_payload(packed, inner)?;
+                            let ok_tag = self.b.ins().iconst(types::I8, 1);
+                            let err_tag = self.b.ins().iconst(types::I8, 0);
+                            let tag = self.b.ins().select(is_some, ok_tag, err_tag);
+                            let payload = self.b.ins().select(is_some, ok_payload, why);
+                            return Ok(self.call_host(self.host.result_new_i64, &[tag, payload]));
+                        }
+                        return Err(format!("jit or_err payload type unsupported: {inner:?}"));
+                    }
                 }
                 let key = self.method_key(&recv.ty, method, type_args)
                     .ok_or_else(|| format!("jit method on {:?}", recv.ty))?;
@@ -15906,6 +15984,13 @@ impl LowerCtx<'_, '_> {
         }
         // Shared<T> is a copyable door: cloning duplicates the handle, not T.
         if matches!(&inner.ty, Type::Shared(_)) {
+            return self.lower_expr(inner);
+        }
+        // D-SHARED-CYCLE1=C: Shared.Weak<T> is the same copyable-handle door as
+        // Shared<T> (upgrade() re-derives the strong count; the handle itself
+        // carries no owned T to deep-copy).
+        if matches!(&inner.ty, Type::Apply { name, .. } if name == jet_foundation::Syntax::TYPE_SHARED_WEAK)
+        {
             return self.lower_expr(inner);
         }
         if let Type::Apply { name, .. } = &inner.ty {
@@ -19259,7 +19344,7 @@ impl LowerCtx<'_, '_> {
                         Type::Float => 2,
                         Type::IntN { signed: true, .. } => 3,
                         Type::IntN { signed: false, .. } => 4,
-                        _ => return Err("jit print type unsupported".to_string()),
+                        _ => return Err(format!("jit print type unsupported: Option<{inner_ty:?}>")),
                     };
                     if Self::uses_result_option_abi(inner) {
                         kind += 10;
