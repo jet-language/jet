@@ -29,7 +29,8 @@ fn run() {}
 
     let body_items = r#"
 module complete<T, count: Int, label: String> {
-    #Meta(category: label)
+    $label :: label
+    #Meta(category: $label)
     $value :: count
     $comptime_value :: count + 1
     tag Marked { deny: [Net] }
@@ -45,14 +46,14 @@ module complete<T, count: Int, label: String> {
     module plain { pub fn value() => Int { return count } }
     module nested<U> { pub fn keep(value: U) => U { return ~value } }
     module nested_use = nested<T>
-    #Meta(category: label)
+    #Meta(category: $label)
     pub fn marked(value: #Marked T) => #Marked T {
-        #Meta(category: label)
+        #Meta(category: $label)
         local := T.{ value }
         return ~local
     }
     #Test fn identity(value: T) { expect(count == count) }
-    #Bench("complete") { expect(label == label) }
+    #Bench("complete") { expect($label == $label) }
 }
 module complete_use = complete<Int, 3, "generic module">
 fn run() {}
@@ -299,8 +300,8 @@ fn generic_scalar_matrix() {
     for lit in types {
         let src = format!(
             r#"
-fn twice<T>(x: T) => Pair<T> {{
-    return Pair<T>.{{ first: x, second: x }}
+fn twice<T>(x: ^T, y: ^T) => Pair<T> {{
+    return Pair<T>.{{ first: x, second: y }}
 }}
 
 struct Pair<T> {{
@@ -309,7 +310,7 @@ struct Pair<T> {{
 }}
 
 fn run() {{
-    p :: twice({lit})
+    p :: twice({lit}, {lit})
     print(p.first)
 }}
 "#
@@ -322,8 +323,8 @@ fn run() {{
 #[test]
 fn generic_fn_with_scalar_types() {
     let src = r#"
-fn twice<T>(x: T) => Pair<T> {
-    return Pair<T>.{ first: x, second: x }
+fn twice<T>(x: ^T, y: ^T) => Pair<T> {
+    return Pair<T>.{ first: x, second: y }
 }
 
 struct Pair<T> {
@@ -332,8 +333,8 @@ struct Pair<T> {
 }
 
 fn run() {
-    a :: twice(1)
-    b :: twice(2.5)
+    a :: twice(1, 1)
+    b :: twice(2.5, 2.5)
     print(a.first)
     print(b.first)
 }
@@ -352,7 +353,7 @@ struct Wrap<Kind> {
     val: Kind
 }
 
-fn wrap<Kind>(x: Kind) => Wrap<Kind> {
+fn wrap<Kind>(x: ^Kind) => Wrap<Kind> {
     return Wrap<Kind>.{ val: x }
 }
 
@@ -373,7 +374,7 @@ fn run() {
 #[test]
 fn multi_char_type_param_fn_only() {
     let src = r#"
-fn identity<Elem>(x: Elem) => Elem {
+fn identity<Elem>(x: ^Elem) => Elem {
     return x
 }
 
@@ -397,8 +398,8 @@ fn run() {
 fn multi_char_matches_single_char() {
     // identical to generic_scalar_matrix but using `Elem` instead of `T`
     let src = r#"
-fn twice<Elem>(x: Elem) => Pair<Elem> {
-    return Pair<Elem>.{ first: x, second: x }
+fn twice<Elem>(x: ^Elem, y: ^Elem) => Pair<Elem> {
+    return Pair<Elem>.{ first: x, second: y }
 }
 
 struct Pair<Elem> {
@@ -407,7 +408,7 @@ struct Pair<Elem> {
 }
 
 fn run() {
-    p :: twice(1)
+    p :: twice(1, 1)
     print(p.first)
 }
 "#;
