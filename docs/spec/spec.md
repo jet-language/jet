@@ -2214,6 +2214,11 @@ explicit and observable in its dispatch report. No primitive gains a new
 overflow knob here. See [D-EVENT2=A](syntax-decisions.md) and
 [D-TASKRUNTIME1=A](syntax-decisions.md).
 
+Both queue APIs use `capacity` for the numeric bound:
+`tasks.channel<T>(capacity: N)` and
+`AsyncPolicy.{ capacity: N, overflow: ... }`. Channel capacity applies
+backpressure only; channels have no drop policy.
+
 | Primitive | Full behavior | Buffering law |
 |---|---|---|
 | `tasks.channel<T>(capacity: N)` | `send` waits for receiver space; deadline or cancellation can wake the wait | Preserve work-queue values and FIFO; capacity bounds queued memory and producer pressure |
@@ -2372,11 +2377,18 @@ tasks, channels, and `tasks.spawn` are unchanged — they still require ownershi
 
 Combinators are methods on the group handle only (no detached work):
 
-- `g.all([t1, t2, …]) => [Task]` — every task must succeed; fail-fast cancels
-  siblings and exits with `panic: a task panicked` (example `169_all_failfast.jet`).
-- `g.race([t1, t2, …]) => T` — first **successful** result wins; losers are
-  cancelled (D-RACEWIN1; example `167_race_cancel.jet`).
-- `g.any([t1, t2, …]) => T` — first **completion** wins, including errors.
+| Operation | Completion and cancellation |
+| --- | --- |
+| `g.all([t1, t2, …]) => [Task]` | Every task must succeed. Fail-fast cancels siblings and exits with `panic: a task panicked` (example `169_all_failfast.jet`). |
+| `g.race([t1, t2, …]) => T` | The first **successful** result wins. Losers are cancelled (D-RACEWIN1; example `167_race_cancel.jet`). |
+| `g.any([t1, t2, …]) => T` | The first **completion** wins, including errors. |
+| `[Task<T>].join_all()` / `.wait_all()` | Both methods consume the list and return results in list order. They use the same fail-fast rule as `g.all`: a failure cancels remaining siblings. |
+| `[Task<T>].cancel_all()` | The method borrows the list and requests cancellation for every task. It does not select a winner or loser and does not wait. Each task unwinds at its next wait point under D-CANCELMODEL1. |
+
+`.join_all()` and `.wait_all()` therefore cancel remaining siblings and fail
+fast like `g.all`; `.cancel_all()` is explicit cancellation of every task, not
+loser selection.
+
 - Waiting on several sources at once — a select — is a subjectless `if` table
   whose arm heads are a binding and a source (D-CONC-CHAN2=D; amends
   D-CONCSELECT1=A's fluent builder and D-CONC-CHAN1's spelling of it). The
