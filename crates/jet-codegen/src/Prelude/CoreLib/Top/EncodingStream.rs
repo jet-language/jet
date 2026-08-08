@@ -3,18 +3,30 @@
 // or delimiter transcript sits behind this API.
 
 // D-ENCSTREAM-SURFACE1=A: every codec reader uses the ordinary bounded pull
-// adapter. One call advances one item; EOF ends iteration; errors remain
-// visible to the ordinary loop boundary.
+// adapter. One call advances one item; EOF and errors are terminal at the
+// ordinary loop boundary, matching the prior explicit break/panic path.
 fn jet_encoding_reader_iter<T, F>(
     mut next: F,
 ) -> impl Iterator<Item = Result<T, jet_std::EncodingError>>
 where
     F: FnMut() -> Result<JetOutcome<T, JetAbsent>, jet_std::EncodingError>,
 {
-    std::iter::from_fn(move || match next() {
-        Ok(Ok(item)) => Some(Ok(item)),
-        Ok(Err(JetAbsent)) => None,
-        Err(error) => Some(Err(error)),
+    let mut finished = false;
+    std::iter::from_fn(move || {
+        if finished {
+            return None;
+        }
+        match next() {
+            Ok(Ok(item)) => Some(Ok(item)),
+            Ok(Err(JetAbsent)) => {
+                finished = true;
+                None
+            }
+            Err(error) => {
+                finished = true;
+                Some(Err(error))
+            }
+        }
     })
 }
 

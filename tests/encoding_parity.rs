@@ -1145,13 +1145,10 @@ fn run() {
     writer.finish() ?? panic("finish")
     input :: files.open(path) ?? panic("open")
     reader :: fmt.reader(^input, encoding.EncodingLimits.safe()) ?? panic("reader")
-    count := 0
-    loop count < 5 {
-        maybe :: reader.next() ?? panic("next")
-        if maybe == None { print("eof"); break }
+    loop event, reader {
         print("event")
-        count++
     }
+    print("eof")
     print(files.read(path) ?? panic("read"))
 }
 "#;
