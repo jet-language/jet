@@ -359,6 +359,7 @@ fn jet_cov_dump() {
 const CORELIB_KERNEL_PARTS: &[&str] = &[
     include_str!("../Prelude/CoreLib/JetStd/Open.rs"),
     include_str!("../Prelude/TaskGroup.rs"),
+    include_str!("../Prelude/CoreLib/JetStd/Mime.rs"),
     include_str!("../Prelude/CoreLib/JetStd/UrlMime.rs"),
     include_str!("../Prelude/CoreLib/JetStd/JSONCodec.rs"),
     include_str!("../Prelude/CoreLib/JetStd/CommonTypes.rs"),
@@ -652,7 +653,9 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
     // needs_xml / needs_base still drive encoding Top reachability below.
 
     for part in CORELIB_KERNEL_PARTS {
-        out.push_str(part);
+        // Host crates include UrlMime.rs directly, so it includes its sibling
+        // MIME kernel. AOT already embeds that kernel as the preceding part.
+        out.push_str(part.strip_prefix("    include!(\"Mime.rs\");\n\n").unwrap_or(part));
     }
     out.push_str("\npub use crate::jet_std::JetTaskGroupRuntime;\n");
     // Card #1751: the one 80x24 terminal default, read by CommonTypes.rs's

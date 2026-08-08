@@ -949,6 +949,30 @@ fn rustc_backed_aot_comptime_differentials_cover_return_shapes() {
 }
 
 #[test]
+fn mime_and_email_shared_kernels_match_all_execution_tiers() {
+    let cases = [
+        (
+            "mime-one-kernel",
+            parity_source(
+                "mime_view()",
+                "use core.mime as mime\nfn mime_view() => String {\n    value :: mime.parse(\"Text/HTML; charset=UTF-8\") ?? panic(\"mime\")\n    return \"{value.media_type()}|{value.subtype()}|{value.essence()}|{value.param(\"charset\") ?? \"none\"}|{value.params()}|{value.to_string()}\"\n}",
+            ),
+        ),
+        (
+            "email-one-kernel",
+            parity_source(
+                "email_wire()",
+                "use core.email as email\nuse core.encoding.hex as hex\nfn email_wire() => String {\n    message :: email.message(email.address(\"a@example.com\") ?? panic(\"a\"), [email.address(\"b@example.com\") ?? panic(\"b\")], [], \"s\", \"body\", \"\", []) ?? panic(\"m\")\n    return hex.encode(email.serialize(message) ?? panic(\"serialize\"))\n}",
+            ),
+        ),
+    ];
+    for (label, source) in cases {
+        let expected = check_aot_comptime(label, &source);
+        check_dev_tiers(label, &source, &expected);
+    }
+}
+
+#[test]
 fn rustc_backed_integer_bit_queries_match_all_execution_tiers_exactly() {
     let source = format!(
         "{INTEGER_BIT_QUERIES_DECLS}\nfn run() {{\n    print(\"{{integer_bit_queries_view()}}\")\n}}\n"

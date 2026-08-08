@@ -24,6 +24,10 @@ mod math_lib_pure {
     include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs");
 }
 
+mod mime_kernel {
+    include!("../../../../jet-codegen/src/Prelude/CoreLib/JetStd/Mime.rs");
+}
+
 // #1657 / I9: the one `core.data` statistics, bar-plot and bridge-status
 // kernel. This is the exact source AOT embeds and the Cranelift JIT host
 // includes, so comptime and the interpreter run the same compensated
