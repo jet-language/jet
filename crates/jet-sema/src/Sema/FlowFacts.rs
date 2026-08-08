@@ -251,8 +251,9 @@ impl<P: Plane> Facts<P> {
         diverged: &mut Vec<Divergence<P::Fact>>,
     ) -> Self {
         let mut out = Self::new();
+        let mut seen = std::collections::HashSet::new();
         for name in self.rows.keys().chain(other.rows.keys()) {
-            if out.rows.contains_key(name) {
+            if !seen.insert(name) {
                 continue;
             }
             let mut depths: Vec<usize> = self
