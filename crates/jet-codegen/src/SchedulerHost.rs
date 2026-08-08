@@ -49,53 +49,11 @@ enum JetParaRuntimeFailure {
 }
 
 // ---------------------------------------------------------------------------
-// Task deadline. AOT source: Prelude/CoreLib/Top/MathRandomTime.rs.
-// The clock and the `#Context(deadline: …)` budget are read the same way, and
-// the E3003 text comes from the one renderer in Prelude/TaskGroup.rs, so the
-// message cannot drift between tiers.
+// Task deadline. Clock, budget, and JetDeadlineGuard: one home in
+// Prelude/Deadline.rs (card #1747), included above by `lib.rs`'s `scheduler`
+// module and by the AOT emission list in `Codegen/mod.rs`, so the two cannot
+// drift. The E3003 text comes from the one renderer in Prelude/TaskGroup.rs.
 // ---------------------------------------------------------------------------
-
-fn jet_std_time_now() -> i64 {
-    if let Ok(s) = std::env::var("JET_PROVE_REPLAY_TIME_MS") {
-        if let Ok(n) = s.parse::<i64>() {
-            return n;
-        }
-    }
-    if let Ok(s) = std::env::var("LEX_TEST_EPOCH") {
-        if let Ok(n) = s.parse::<i64>() {
-            return n;
-        }
-    }
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64
-}
-
-thread_local! {
-    static JET_CTX_DEADLINE_MS: std::cell::Cell<Option<i64>> = const { std::cell::Cell::new(None) };
-}
-
-/// Absolute deadline millis currently installed for this task/thread, if any.
-pub fn jet_ctx_deadline_ms() -> Option<i64> {
-    JET_CTX_DEADLINE_MS.with(|c| c.get())
-}
-
-/// Push a `#Context(deadline: …)` budget; drop restores the previous value.
-pub fn jet_ctx_push_deadline(deadline_ms: i64) -> JetDeadlineGuard {
-    let saved = JET_CTX_DEADLINE_MS.with(|c| c.replace(Some(deadline_ms)));
-    JetDeadlineGuard { saved }
-}
-
-pub struct JetDeadlineGuard {
-    saved: Option<i64>,
-}
-
-impl Drop for JetDeadlineGuard {
-    fn drop(&mut self) {
-        JET_CTX_DEADLINE_MS.with(|c| c.set(self.saved));
-    }
-}
 
 #[cfg(test)]
 thread_local! {
@@ -628,12 +586,6 @@ mod scheduler_host_tests {
         match result {
             JetSchedulerWait::Deadline(rendered) => {
                 assert_eq!(rendered, jet_std::jet_task_deadline("task yield").render());
-                assert_eq!(
-                    rendered,
-                    "Error [E3003]: deadline exceeded while waiting in task yield\n\
-Why: this wait point observed the task context deadline from `#Context(deadline: …)`\n\
-Fix: raise the deadline budget or shorten the work before this wait point"
-                );
             }
             _ => panic!("yield deadline must cross native boundary as typed status"),
         }

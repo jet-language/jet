@@ -197,6 +197,10 @@ Type::Fn { params, ret, effect_bound, param_contract, return_view_provenance } =
                 Type::TraitObject(names) => Type::TraitObject(names),
                 Type::IntN { signed, bits } => Type::IntN { signed, bits },
                 Type::Float32 => Type::Float32,
+                Type::Quantity { base, dimension } => Type::Quantity {
+                    base: Box::new(self.resolve_type(*base)),
+                    dimension,
+                },
             }
         }
     

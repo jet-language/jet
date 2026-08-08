@@ -291,6 +291,15 @@ pub enum Type {
     /// identity is order-insensitive. Desugars to one compiler-generated enum
     /// whose arms are named by the member types.
     Union(Vec<Type>),
+    /// D-COMPUTE-TYPE1 family: a physical quantity — a numeric `base` type
+    /// tagged with an open `Dimension`. Card #1662: replaces the retired
+    /// `Type::Apply{name: "\0Quantity", ..}` string-serialized encoding with a
+    /// real variant. Runtime values still carry no dimension metadata; the
+    /// dimension is compile-time only.
+    Quantity {
+        base: Box<Type>,
+        dimension: Dimension,
+    },
 }
 
 /// Compiler-owned encoding for the const dimensions in `Vec<N>` and
@@ -387,6 +396,9 @@ impl PartialEq for Type {
             (Tagged { marker, .. }, _) | (_, Tagged { marker, .. })
                 if marker == CORE_CRYPTO_NOMINAL_MARKER => false,
             (Union(a), Union(b)) => a == b,
+            (Quantity { base: b1, dimension: d1 }, Quantity { base: b2, dimension: d2 }) => {
+                b1 == b2 && d1 == d2
+            }
             _ => false,
         }
     }
@@ -510,9 +522,6 @@ impl Type {
     /// conversion. Sema writes it; lowering consumes it without reconstructing
     /// the language rule.
     pub const CHECKED_NUMERIC_WIDEN_MARKER: &'static str = "\0numeric.checked_widen";
-    /// Compiler-private call name left by `approx(value)` until its surrounding
-    /// numeric widening consumes the explicit loss opt-out.
-    pub const APPROX_NUMERIC_WIDEN_MARKER: &'static str = "\0numeric.approx_widen";
 
     /// D-COMPUTE-TYPE1: preserve a fixed compute dimension in the type tree.
     pub fn compute_dimension_type(value: u64) -> Type {
@@ -614,27 +623,24 @@ impl Type {
             Type::Union(members) => canonicalize_union(
                 members.iter().map(|m| m.map_named_types(map)).collect(),
             ),
+            Type::Quantity { base, dimension } => Type::Quantity {
+                base: Box::new(base.map_named_types(map)),
+                dimension: dimension.clone(),
+            },
             other => other.clone(),
         }
     }
 
     pub fn quantity(base: Type, dimension: Dimension) -> Type {
-        Type::Apply {
-            name: crate::Syntax::TYPE_QUANTITY.to_string(),
-            args: vec![base, Type::Named(dimension.identity())],
+        Type::Quantity {
+            base: Box::new(base),
+            dimension,
         }
     }
 
     pub fn quantity_parts(&self) -> Option<(&Type, Dimension)> {
         match self {
-            Type::Apply { name, args }
-                if name == crate::Syntax::TYPE_QUANTITY && args.len() == 2 =>
-            {
-                let Type::Named(identity) = &args[1] else {
-                    return None;
-                };
-                Some((&args[0], Dimension::from_identity(identity)?))
-            }
+            Type::Quantity { base, dimension } => Some((base, dimension.clone())),
             _ => None,
         }
     }
@@ -672,8 +678,7 @@ impl Type {
             Type::Apply { name, args } if name == crate::Syntax::TYPE_PTR && args.len() == 1 => {
                 format!("`*{}`", args[0].name())
             }
-            Type::Apply { .. } if self.quantity_parts().is_some() => {
-                let (_, dimension) = self.quantity_parts().unwrap();
+            Type::Quantity { dimension, .. } => {
                 format!("{} (a physical quantity)", dimension.display_name())
             }
             Type::Apply { name, args } => {
@@ -766,8 +771,7 @@ impl Type {
             Type::Apply { name, args } if name == crate::Syntax::TYPE_PTR && args.len() == 1 => {
                 format!("*{}", args[0].name())
             }
-            Type::Apply { .. } if self.quantity_parts().is_some() => {
-                let (base, dimension) = self.quantity_parts().unwrap();
+            Type::Quantity { base, dimension } => {
                 format!(
                     "Quantity<{}, {}; {}>",
                     dimension.display_name(),

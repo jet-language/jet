@@ -278,6 +278,7 @@ impl<'a> Checker<'a> {
                 args: call_args,
                 range_checked: false,
                 resolved_ret: None,
+                widen_approx: false,
             };
             let result = self.check_call(&mut call, true).flatten();
             call_args = call.args;

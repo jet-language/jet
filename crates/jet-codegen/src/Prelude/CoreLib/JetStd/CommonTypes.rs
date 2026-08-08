@@ -33,7 +33,12 @@
     impl Default for TerminalPolicy {
         fn default() -> Self {
             Self {
-                size: TerminalSize { cols: 80, rows: 24 },
+                // Card #1751: one 80x24 fact, shared with ProcessPty.rs's
+                // PtyConfig::default via Prelude/TerminalDefault.rs.
+                size: TerminalSize {
+                    cols: super::terminal_default::JET_TERMINAL_DEFAULT_COLS,
+                    rows: super::terminal_default::JET_TERMINAL_DEFAULT_ROWS,
+                },
                 mode: TerminalMode::Cooked,
             }
         }

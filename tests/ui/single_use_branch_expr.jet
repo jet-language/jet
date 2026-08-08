@@ -7,7 +7,7 @@
 }
 
 fn acquire(resource: String) => Lock {
-    return Lock.{resource: resource}
+    return Lock.{resource: ~resource}
 }
 
 fn release(lock: ^Lock) {
@@ -17,9 +17,9 @@ fn release(lock: ^Lock) {
 fn run() {
     db :: acquire("db")
     flag :: true
-    x :: if flag -> {
+    x :: if { flag -> {
         release(^db)
         1
-    } else -> 2
+    } else -> 2 }
     print(x)
 }

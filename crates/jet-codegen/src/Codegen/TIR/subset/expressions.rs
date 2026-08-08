@@ -145,7 +145,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             // D-NUMWIDEN-CROSS1=E: an `approx(value)` marker not consumed by a
             // surrounding numeric crossing erases to `value`. Admit only the
             // exact compiler-private one-argument shape sema writes.
-            if c.name == Type::APPROX_NUMERIC_WIDEN_MARKER {
+            if c.widen_approx {
                 return c.args.len() == 1
                     && c.args[0].label.is_none()
                     && expr_in_subset(&c.args[0].expr, cx, locals);

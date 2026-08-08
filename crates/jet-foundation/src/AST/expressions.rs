@@ -22,6 +22,12 @@ pub struct Call {
     /// checked constructor as a `Result`, while the ordinary constructor form
     /// still stays infallible and is rejected for runtime values.
     pub range_checked: bool,
+    /// D-NUMWIDEN-CROSS1=E / card #1662: sema sets this when `approx(value)`
+    /// validates as one integer-to-float precision opt-out. Replaces the
+    /// retired `\0numeric.approx_widen` fake-call-name marker. Lowering
+    /// consumes it: a surrounding numeric widen folds the crossing in;
+    /// otherwise the call erases to its one argument.
+    pub widen_approx: bool,
 }
 
 #[derive(Debug, Default, Clone)]

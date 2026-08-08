@@ -526,9 +526,7 @@ extern "C" fn jet_jit_shield_leave() -> i64 {
     let exit = jet_scheduler_shield_leave_status();
     if matches!(exit, JetShieldExit::Deadline) {
         with_runtime_mut(|rt| {
-            rt.set_deadline(
-                "Error [E3003]: deadline exceeded while waiting at shield exit\nWhy: this wait point observed the task context deadline from `#Context(deadline: …)`\nFix: raise the deadline budget or shorten the work before this wait point".to_string(),
-            )
+            rt.set_deadline(jet_codegen::task_group::jet_task_deadline("shield exit").render())
         });
     }
     set_pending_shield_exit(exit);

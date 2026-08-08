@@ -977,7 +977,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         Expr::Call(call) => {
             // An `approx(value)` not consumed immediately by an integer-to-float
             // crossing grants nothing later. Erase its unspellable marker now.
-            if call.name == Type::APPROX_NUMERIC_WIDEN_MARKER && call.args.len() == 1 {
+            if call.widen_approx && call.args.len() == 1 {
                 return lower_expr(&call.args[0].expr, cx, env);
             }
             // c109 Phase 13: `f(args)` where `f` is a LOCAL (a fn-typed binding/param)

@@ -1997,6 +1997,7 @@ pub fn resolved_decode_wire_shapes(items: &[Item], ty: &Type) -> Option<Vec<Serd
             Type::List(_) | Type::FixedList { .. } => vec![SerdeWireShape::Array],
             Type::Map { .. } | Type::Tuple(_) => vec![SerdeWireShape::Object],
             Type::Shared(inner) => resolve(items, inner, seen)?,
+            Type::Quantity { base, .. } => resolve(items, base, seen)?,
             Type::Option(inner) => {
                 let mut shapes = vec![SerdeWireShape::Null];
                 shapes.extend(resolve(items, inner, seen)?);

@@ -648,6 +648,13 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
         out.push_str(part);
     }
     out.push_str("\npub use crate::jet_std::JetTaskGroupRuntime;\n");
+    // Card #1751: the one 80x24 terminal default, read by CommonTypes.rs's
+    // TerminalPolicy::default (in the kernel closure above) and by
+    // ProcessPty.rs's PtyConfig::default when process/PTY support is emitted.
+    // Unconditional like the kernel closure, so both can always reach it.
+    out.push_str("\nmod terminal_default {\n");
+    out.push_str(include_str!("../Prelude/TerminalDefault.rs"));
+    out.push_str("\n}\n");
 
     let needs_email = core_usage_matches(used_core, &["core.email"]);
     let needs_raylib = core_usage_matches(used_core, &["core.raylib"]);
@@ -796,6 +803,7 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
     out.push_str(include_str!("../Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/CryptoEntropy.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/DNSResolverPolicy.rs"));
+    out.push_str(include_str!("../Prelude/Deadline.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/NetHTTP.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/MathRandomTime.rs"));
 

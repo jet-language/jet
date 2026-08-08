@@ -4327,6 +4327,7 @@ impl<'a> Checker<'a> {
             | Type::TraitObject(_)
             | Type::IntN { .. }
             | Type::Float32 => false,
+            Type::Quantity { .. } => false,
         }
     }
 
@@ -4422,6 +4423,7 @@ impl<'a> Checker<'a> {
             | Type::TraitObject(_)
             | Type::IntN { .. }
             | Type::Float32 => false,
+            Type::Quantity { .. } => false,
         }
     }
 
@@ -4588,6 +4590,7 @@ impl<'a> Checker<'a> {
             Type::Union(members) => members
                 .iter()
                 .find_map(|m| self.sendability_problem_inner(m, closure_taken, seen)),
+            Type::Quantity { base, .. } => self.sendability_problem_inner(base, closure_taken, seen),
         }
     }
 

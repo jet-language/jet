@@ -5561,3 +5561,44 @@ fn inspect_reserved_lists_keywords_teaching_words_and_sigils() {
     assert!(json.contains("\"sigils\":["), "{json}");
     parse_json(&json).unwrap_or_else(|_| panic!("reserved --json must parse: {json}"));
 }
+
+/// #1659 criterion 3: `--quiet` is one real spelling wired through the shared
+/// `OutputMode`, not a declared-but-unread facade. `jet init` prints a
+/// confirmation status line on success; `--quiet` must suppress it while
+/// still succeeding (exit 0) and still creating the same files.
+#[test]
+fn quiet_suppresses_status_output_without_changing_behavior() {
+    let loud = std::env::temp_dir().join("jet_cli_quiet_init_loud");
+    let quiet = std::env::temp_dir().join("jet_cli_quiet_init_quiet");
+    let _ = fs::remove_dir_all(&loud);
+    let _ = fs::remove_dir_all(&quiet);
+    fs::create_dir_all(&loud).unwrap();
+    fs::create_dir_all(&quiet).unwrap();
+
+    let loud_out = Command::new(jet()).arg("init").current_dir(&loud).env("NO_COLOR", "1").output().unwrap();
+    assert!(loud_out.status.success(), "{:?}", loud_out);
+    assert!(
+        !String::from_utf8_lossy(&loud_out.stdout).trim().is_empty(),
+        "jet init without --quiet should print a confirmation"
+    );
+
+    let quiet_out = Command::new(jet()).args(["init", "--quiet"]).current_dir(&quiet).env("NO_COLOR", "1").output().unwrap();
+    assert!(quiet_out.status.success(), "{:?}", quiet_out);
+    assert!(
+        String::from_utf8_lossy(&quiet_out.stdout).trim().is_empty(),
+        "jet init --quiet must suppress its non-error status line, got: {}",
+        String::from_utf8_lossy(&quiet_out.stdout)
+    );
+    assert!(quiet.join(jet::Syntax::PACKAGE_FILE).is_file(), "--quiet must not change what init creates");
+
+    let _ = fs::remove_dir_all(&loud);
+    let _ = fs::remove_dir_all(&quiet);
+}
+
+/// `--quiet` is declared exactly once in the shared flag table (I7-style
+/// one-spelling law for the CLI surface).
+#[test]
+fn quiet_flag_declared_once_in_the_shared_table() {
+    let count = jet::CLI::FLAGS.iter().filter(|f| f.long == "--quiet").count();
+    assert_eq!(count, 1, "--quiet must have exactly one spelling in jet::CLI::FLAGS");
+}

@@ -2172,6 +2172,9 @@ impl Cx {
             Type::Union(members) => {
                 format!("user_{}", crate::AST::union_enum_name(members))
             }
+            // Erased by the `quantity_parts()` guard above `rust_type` returns
+            // through; a runtime quantity value IS its base numeric type.
+            Type::Quantity { .. } => unreachable!("quantity_parts() erased above"),
         }
     }
 
@@ -3902,6 +3905,9 @@ pub(crate) fn field_type_cloneable(
         Type::Union(members) => members
             .iter()
             .all(|m| field_type_cloneable(m, types, param_names)),
+        // Runtime values carry no dimension metadata (I3): cloneable iff the
+        // erased base numeric type is.
+        Type::Quantity { base, .. } => field_type_cloneable(base, types, param_names),
     }
 }
 
@@ -3975,6 +3981,9 @@ pub(crate) fn field_type_comparable(
         Type::Union(members) => members
             .iter()
             .all(|m| field_type_comparable(m, types, param_names)),
+        // Runtime values carry no dimension metadata (I3): comparable iff the
+        // erased base numeric type is.
+        Type::Quantity { base, .. } => field_type_comparable(base, types, param_names),
     }
 }
 
@@ -4039,6 +4048,10 @@ pub(crate) fn field_type_hashable(
         Type::Union(members) => members
             .iter()
             .all(|m| field_type_hashable(m, types, param_names)),
+        // Runtime values carry no dimension metadata (I3): hashable iff the
+        // erased base numeric type is (a `Quantity<Float, _>` is never
+        // hashable, same as bare `Float`).
+        Type::Quantity { base, .. } => field_type_hashable(base, types, param_names),
     }
 }
 

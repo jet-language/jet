@@ -540,7 +540,7 @@ fn bench_measurement_provider(request:&ProviderRequest,_:&ProviderCancellation)-
     let Some(CanonicalJson::String(path))=workload.get("path") else{return Err(ProviderFailure::malformed("BenchMeasurement workload has no source path"))};
     let Some(CanonicalJson::String(name))=workload.get("name") else{return Err(ProviderFailure::malformed("BenchMeasurement workload has no benchmark name"))};
     let source=std::fs::read_to_string(path).map_err(|error|ProviderFailure::malformed(format!("cannot read benchmark source: {error}")))?;
-    let mode=crate::OutputMode{json:false,color:jet::Diagnostics::ColorChoice::Never};
+    let mode=crate::OutputMode{json:false,color:jet::Diagnostics::ColorChoice::Never,quiet:false};
     let evidence=crate::CmdDevTools::collect_bench_evidence(path,&source,mode,false);
     let bench=evidence.into_iter().find(|bench|bench.name==*name).ok_or_else(||ProviderFailure::malformed(format!("#Bench `{name}` was not emitted by its selected benchmark target")))?;
     let mut events=Vec::new();
@@ -553,7 +553,7 @@ fn allocation_probe_provider(request:&ProviderRequest,_:&ProviderCancellation)->
     let Some(CanonicalJson::String(path))=workload.get("path") else{return Err(ProviderFailure::malformed("AllocationProbe workload has no source path"))};
     let Some(CanonicalJson::String(name))=workload.get("name") else{return Err(ProviderFailure::malformed("AllocationProbe workload has no benchmark name"))};
     let source=std::fs::read_to_string(path).map_err(|error|ProviderFailure::malformed(format!("cannot read allocation workload source: {error}")))?;
-    let mode=crate::OutputMode{json:false,color:jet::Diagnostics::ColorChoice::Never};
+    let mode=crate::OutputMode{json:false,color:jet::Diagnostics::ColorChoice::Never,quiet:false};
     let evidence=crate::CmdDevTools::collect_bench_evidence(path,&source,mode,false);
     let bench=evidence.into_iter().find(|bench|bench.name==*name).ok_or_else(||ProviderFailure::malformed(format!("#Bench `{name}` was not emitted by its selected allocation workload")))?;
     if bench.allocation_samples.len()!=20{return Err(ProviderFailure::malformed(format!("AllocationProbe `{name}` emitted {} trials; policy requires 20",bench.allocation_samples.len())))}

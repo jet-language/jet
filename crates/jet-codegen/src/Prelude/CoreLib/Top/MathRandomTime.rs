@@ -1,43 +1,6 @@
-fn jet_std_time_now() -> i64 {
-    if let Ok(s) = std::env::var("JET_PROVE_REPLAY_TIME_MS") {
-        if let Ok(n) = s.parse::<i64>() {
-            return n;
-        }
-    }
-    if let Ok(s) = std::env::var("LEX_TEST_EPOCH") {
-        if let Ok(n) = s.parse::<i64>() {
-            return n;
-        }
-    }
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64
-}
-
-thread_local! {
-    static JET_CTX_DEADLINE_MS: std::cell::Cell<Option<i64>> = std::cell::Cell::new(None);
-}
-
-struct JetDeadlineGuard {
-    saved: Option<i64>,
-}
-
-impl Drop for JetDeadlineGuard {
-    fn drop(&mut self) {
-        JET_CTX_DEADLINE_MS.with(|c| c.set(self.saved));
-    }
-}
-
-fn jet_ctx_deadline_ms() -> Option<i64> {
-    JET_CTX_DEADLINE_MS.with(|c| c.get())
-}
-
-fn jet_ctx_push_deadline(deadline_ms: i64) -> JetDeadlineGuard {
-    let saved = JET_CTX_DEADLINE_MS.with(|c| c.get());
-    JET_CTX_DEADLINE_MS.with(|c| c.set(Some(deadline_ms)));
-    JetDeadlineGuard { saved }
-}
+// Deadline clock, budget, and JetDeadlineGuard: card #1747, one home in
+// Prelude/Deadline.rs (included by this AOT emission list and by
+// jet_codegen::scheduler for the JIT host).
 
 fn jet_deadline_remaining_ms() -> Option<i64> {
     let deadline = jet_ctx_deadline_ms()?;
@@ -45,11 +8,7 @@ fn jet_deadline_remaining_ms() -> Option<i64> {
 }
 
 fn jet_deadline_exceeded(wait_kind: &str) -> ! {
-    let rendered = format!(
-        "Error [E3003]: deadline exceeded while waiting in {wait_kind}\n\
-Why: this wait point observed the task context deadline from `#Context(deadline: …)`\n\
-Fix: raise the deadline budget or shorten the work before this wait point"
-    );
+    let rendered = jet_std::jet_task_deadline(wait_kind).render();
     if jet_interrupt_handler_should_unwind()
         || jet_scheduler_wait_boundary_should_unwind()
         || jet_typed_deadline_boundary_should_unwind()

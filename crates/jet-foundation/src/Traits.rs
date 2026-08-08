@@ -1001,6 +1001,9 @@ impl TraitRegistry {
             | Type::Char
             | Type::IntN { .. }
             | Type::Float32 => true,
+            Type::Quantity { base, .. } => {
+                self.auto_derive_type_ready(base, trait_name, type_params, foreign_supports)
+            }
             Type::Shared(_) | Type::TraitObject(_) | Type::Fn { .. } => false,
         }
     }
@@ -2161,6 +2164,7 @@ fn field_auto_ok(ty: &Type, owner: &str) -> bool {
         // implementation.
         Type::Named(_) => true,
         Type::Apply { name, .. } => name != Syntax::TYPE_SHARED_GUARD,
+        Type::Quantity { base, .. } => field_auto_ok(base, owner),
         Type::Shared(_) | Type::TraitObject(_) | Type::Fn { .. } => false,
     }
 }

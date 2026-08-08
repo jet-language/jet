@@ -19,6 +19,7 @@ pub mod scheduler {
     // Emitted programs carry `Prelude/TaskGroup.rs` as `mod jet_std`; in-crate
     // it is `crate::task_group`. Same source either way.
     use crate::task_group as jet_std;
+    include!("Prelude/Deadline.rs");
     include!("SchedulerHost.rs");
     include!("Prelude/Scheduler.rs");
     include!("Prelude/Stream.rs");
@@ -65,6 +66,10 @@ pub mod typed_text {
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
 }
+/// Card #1751: the one 80x24 terminal default, read by both AOT's
+/// `TerminalPolicy::default` and this crate's `PtyConfig::default`.
+#[path = "Prelude/TerminalDefault.rs"]
+pub mod terminal_default;
 /// D-PROCESS-SESSION1=A / #1181: shared native Unix PTY substrate used by the
 /// emitted process prelude and the resident JIT adapter.
 #[path = "Prelude/CoreLib/ProcessPty.rs"]

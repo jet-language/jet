@@ -271,7 +271,7 @@ pub(crate) fn run_compile_cmd(
         }
         if mode.json && lints.is_empty() {
             println!("{}", jet::render_all_json(file, &src, &[]).trim_end());
-        } else if !mode.json && lints.is_empty() {
+        } else if !mode.json && lints.is_empty() && !mode.quiet {
             println!("ok: `{}` has no problems", file);
         }
         return;
@@ -619,12 +619,14 @@ pub(crate) fn run_compile_cmd(
             if crate::CmdBudget::run_build_gates(file,&artifact_path,budget_target,&budget_profile)!=0{
                 exit(ExitCodes::USER_ERROR);
             }
-            if is_web {
-                println!("built: build/app.wasm + build/app.js");
-            } else if is_plugin {
-                println!("built: build/{}.wasm (sandboxed plugin)", stem(file));
-            } else {
-                println!("built: {}", bin_path(file).display());
+            if !mode.quiet {
+                if is_web {
+                    println!("built: build/app.wasm + build/app.js");
+                } else if is_plugin {
+                    println!("built: build/{}.wasm (sandboxed plugin)", stem(file));
+                } else {
+                    println!("built: {}", bin_path(file).display());
+                }
             }
             if explain_partition {
                 if let Some(report) = &web_partition_report {
@@ -632,7 +634,9 @@ pub(crate) fn run_compile_cmd(
                 }
             }
             if let Some(triple) = cross_target {
-                println!("target: {}", triple);
+                if !mode.quiet {
+                    println!("target: {}", triple);
+                }
             }
             // D-SUPPLY1: `--sbom` writes an SPDX SBOM next to the binary.
             if sbom {

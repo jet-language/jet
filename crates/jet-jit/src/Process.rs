@@ -639,11 +639,7 @@ fn terminal_size_from_handle(size: i64) -> (i64, i64) {
 
 extern "C" fn jet_jit_process_spec_terminal(spec: i64) -> i64 {
     match with_spec_mut(spec, |s| {
-        s.terminal = Some(PtyConfig {
-            cols: 80,
-            rows: 24,
-            raw: false,
-        });
+        s.terminal = Some(PtyConfig::default());
     }) {
         Some(()) => spec,
         None => 0,

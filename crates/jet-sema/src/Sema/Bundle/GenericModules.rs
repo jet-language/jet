@@ -793,6 +793,11 @@ fn type_full_key(ty: &Type) -> Vec<u8> {
                     write(out, m);
                 }
             }
+            Quantity { base, dimension } => {
+                out.push(20);
+                write(out, base);
+                frame_text(out, &dimension.identity());
+            }
         }
     }
     let mut out = Vec::new();

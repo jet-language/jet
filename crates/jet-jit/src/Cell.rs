@@ -107,6 +107,9 @@ impl CellSchema {
             | Type::Fn { .. }
             | Type::TraitObject(_)
             | Type::Union(_) => Ok(Self::Handle),
+            // Runtime values carry no dimension metadata (I3): a quantity's
+            // cell shape is its erased base numeric type.
+            Type::Quantity { base, .. } => Self::from_type(base, meta),
         }
     }
 }

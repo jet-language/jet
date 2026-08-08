@@ -640,6 +640,10 @@ pub const FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--report", help: "with structural diff/merge: text, json, or editor report" },
     FlagSpec { long: "--repo", help: "with merge install-driver: Git worktree to configure" },
     FlagSpec { long: "--json", help: "emit machine-readable facts or diagnostics" },
+    // #1659 criterion 3: one spelling, every command. Suppresses non-error
+    // status/progress output (watch banners, hot-swap notices,
+    // confirmations); never suppresses errors or requested data.
+    FlagSpec { long: "--quiet", help: "suppress non-error status output" },
     FlagSpec { long: "--color", help: "color: auto | always | never" },
     FlagSpec { long: "--version", help: "print compiler version" },
     FlagSpec { long: "--check", help: "with fmt: exit 1 if any file would change (CI gate)" },

@@ -44,7 +44,9 @@ pub(crate) fn run_dev(
         exit_dev_outcome(outcome);
     }
 
-    println!("watching {} … (Ctrl-C to stop)", file);
+    if !mode.quiet {
+        println!("watching {} … (Ctrl-C to stop)", file);
+    }
 
     // The bundle from the last successful load, kept so a resident edit can be
     // diffed against it for type stability (D-HOTSWAP1).
@@ -150,7 +152,9 @@ fn run_due_tasks(
         return;
     }
     for name in clock.due(&tasks) {
-        println!("\n— due task `{}` —", name);
+        if !mode.quiet {
+            println!("\n— due task `{}` —", name);
+        }
         match jet::Interpreter::run_named_task(bundle, &name, try_anyway) {
             jet::Interpreter::RunOutcome::Ran {
                 stdout,
@@ -299,10 +303,12 @@ fn render_dev_change(
             Some(old) => {
                 match jet::Sema::HotSwap::type_stable_check(old, &new_bundle, &module_name) {
                     Ok(()) => {
-                        println!(
-                            "\n[hot-swap] {} — types stable, code re-applied",
-                            module_name
-                        );
+                        if !mode.quiet {
+                            println!(
+                                "\n[hot-swap] {} — types stable, code re-applied",
+                                module_name
+                            );
+                        }
                         if !run_resident_swap(
                             &new_bundle,
                             try_anyway,
@@ -317,7 +323,9 @@ fn render_dev_change(
                     Err(diags) => {
                         // E2210 names what changed; surface it on the restart line.
                         let what = diags.first().map(|d| d.what.clone()).unwrap_or_default();
-                        println!("\n[restart] {} — {}", module_name, what);
+                        if !mode.quiet {
+                            println!("\n[restart] {} — {}", module_name, what);
+                        }
                         if !run_resident_restart(&new_bundle, try_anyway, file, mode, use_interpreter)
                         {
                             return None;
@@ -327,7 +335,9 @@ fn render_dev_change(
             }
             None => {
                 // No baseline yet (first run after an error): a clean restart.
-                println!("\n[restart] {} — first run", module_name);
+                if !mode.quiet {
+                    println!("\n[restart] {} — first run", module_name);
+                }
                 if !run_resident_restart(&new_bundle, try_anyway, file, mode, use_interpreter) {
                     return None;
                 }
@@ -335,7 +345,9 @@ fn render_dev_change(
         }
     } else {
         // Run-to-completion (default / `--restart`): plain rerun.
-        println!("\n— {} changed, re-running —", file);
+        if !mode.quiet {
+            println!("\n— {} changed, re-running —", file);
+        }
         let outcome = jet::Interpreter::dev_iteration(file, try_anyway, use_interpreter);
         render_dev_outcome(&outcome, file, mode);
     }
@@ -538,7 +550,9 @@ fn render_outcome_timed(
                 eprint!("{}", stderr);
             }
             if let Some(e) = elapsed {
-                println!("✓ ran in {} ms", e.as_millis());
+                if !mode.quiet {
+                    println!("✓ ran in {} ms", e.as_millis());
+                }
             }
         }
         jet::Interpreter::RunOutcome::Problems(diags) => {
@@ -2882,7 +2896,7 @@ pub(crate) fn run_devtools_probe(args: &[&String]) {
             exit(jet::ExitCodes::USER_ERROR);
         }
     };
-    let mode = OutputMode { json: false, color: jet::Diagnostics::ColorChoice::Never };
+    let mode = OutputMode { json: false, color: jet::Diagnostics::ColorChoice::Never, quiet: false };
     let bundle = match jet::Loader::load_entry(file) {
         Ok(mut b) => {
             let _ = jet::Sema::check_bundle(&mut b, jet::Sema::CompileMode::Run);

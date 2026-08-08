@@ -315,6 +315,7 @@ fn type_mentions_encoding_surface(ty: &Type) -> bool {
         | Type::Char
         | Type::IntN { .. }
         | Type::Float32 => false,
+        Type::Quantity { base, .. } => type_mentions_encoding_surface(base),
     }
 }
 

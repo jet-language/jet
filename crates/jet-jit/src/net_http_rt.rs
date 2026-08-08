@@ -13,8 +13,8 @@ use jet_codegen::scheduler::{
     jet_ctx_deadline_ms, jet_ctx_push_deadline, jet_scheduler_blocking_wait_enter,
     jet_scheduler_blocking_wait_leave, jet_scheduler_park_ms, jet_scheduler_sleep_ms,
     jet_scheduler_spawn, jet_scheduler_spawn_blocking_with_control, jet_scheduler_task_cancelled,
-    jet_scheduler_wait_point_cancelled, jet_scheduler_wait_without_unwind, JetDeadlineGuard,
-    JetSchedulerJoin, JetSchedulerResult, JetSchedulerWait, JetTaskControl,
+    jet_scheduler_wait_point_cancelled, jet_scheduler_wait_without_unwind, jet_std_time_now,
+    JetDeadlineGuard, JetSchedulerJoin, JetSchedulerResult, JetSchedulerWait, JetTaskControl,
 };
 use std::sync::Arc;
 
@@ -237,23 +237,6 @@ pub mod jet_std {
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/JSONCodec.rs");
-}
-
-fn jet_std_time_now() -> i64 {
-    if let Ok(s) = std::env::var("JET_PROVE_REPLAY_TIME_MS") {
-        if let Ok(n) = s.parse::<i64>() {
-            return n;
-        }
-    }
-    if let Ok(s) = std::env::var("LEX_TEST_EPOCH") {
-        if let Ok(n) = s.parse::<i64>() {
-            return n;
-        }
-    }
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64
 }
 
 fn jet_deadline_remaining_ms() -> Option<i64> {

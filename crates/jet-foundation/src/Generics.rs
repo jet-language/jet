@@ -236,6 +236,7 @@ fn collect_free(ty: &Type, out: &mut HashSet<String>) {
         Type::FixedList { elem, .. } => collect_free(elem, out),
         Type::Tagged { inner, .. } => collect_free(inner, out),
         Type::Union(members) => members.iter().for_each(|m| collect_free(m, out)),
+        Type::Quantity { base, .. } => collect_free(base, out),
     }
 }
 

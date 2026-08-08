@@ -324,9 +324,6 @@ pub fn retired_numeric_conversion_target(method: &str) -> Option<&'static str> {
     })
 }
 
-// D-SHAPE-QUANTITY1=A adds no source spelling. Physical dimensions use this
-// unwriteable internal type marker.
-pub const TYPE_QUANTITY: &str = "\0Quantity";
 /// D-QUANTITY-TYPE1=A: the sole source-written quantity-bound constructor.
 pub const BOUND_QUANTITY: &str = "Quantity";
 /// D-QUANTITY-CONVERT1=B: the closed explicit unit-rounding policies.

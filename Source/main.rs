@@ -75,6 +75,11 @@ pub(crate) struct OutputMode {
     pub(crate) json: bool,
     /// User's `--color` choice (resolved against TTY-ness at print time).
     pub(crate) color: ColorChoice,
+    /// #1659 criterion 3: `--quiet`/`-q` — suppress non-error status/progress
+    /// output (watch banners, hot-swap notices, confirmations). Never
+    /// suppresses errors (stderr) or requested data (a command's actual
+    /// result, `--json` output).
+    pub(crate) quiet: bool,
 }
 
 impl OutputMode {
@@ -1068,9 +1073,14 @@ fn main() {
         }
         found
     };
+    // #1659 criterion 3: one spelling, parsed once, threaded everywhere
+    // OutputMode already reaches (build/run/test/dev/fmt/publish/doctor/…).
+    // Criterion 3 says "one spelling" — no `-q` short alias.
+    let quiet = jet_argv.iter().any(|a| a == "--quiet");
     let mode = OutputMode {
         json,
         color: parse_color(jet_argv),
+        quiet,
     };
     // Positional args only. Keep bare `-` (stdin for `jet fmt -`); drop every
     // other dash-flag including short forms like `-u` / `-v` so they never become
@@ -2909,7 +2919,7 @@ fn print_transition_result(
             json_quote(&result.summary.journal.to_string_lossy()),
             changes
         );
-    } else {
+    } else if !mode.quiet {
         for change in &result.summary.changes {
             if check_only {
                 println!("Would {}: {}", change.action, change.path.display());
@@ -3002,7 +3012,9 @@ fn run_init(
                 }
             }
         }
-        println!("No migration-era role files found.\nNo files changed.");
+        if !mode.quiet {
+            println!("No migration-era role files found.\nNo files changed.");
+        }
         exit(ExitCodes::OK);
     }
     if script.is_none()
@@ -3029,7 +3041,9 @@ fn run_init(
             if let Some(script) = script {
                 lift_inline_deps_into_manifest(&cwd, script);
             }
-            println!("{msg}");
+            if !mode.quiet {
+                println!("{msg}");
+            }
             exit(ExitCodes::OK);
         }
         Err(d) => {
@@ -3149,10 +3163,12 @@ fn run_lock(script: Option<&str>, mode: OutputMode) {
     };
     match jetpack::ScriptLock::write(script_path, &lock) {
         Ok(()) => {
-            println!(
-                "wrote {}",
-                jetpack::ScriptLock::sidecar_path(script_path).display()
-            );
+            if !mode.quiet {
+                println!(
+                    "wrote {}",
+                    jetpack::ScriptLock::sidecar_path(script_path).display()
+                );
+            }
             exit(ExitCodes::OK);
         }
         Err(e) => {

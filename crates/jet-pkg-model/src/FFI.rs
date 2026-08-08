@@ -2465,6 +2465,9 @@ fn type_key(ty: &Type) -> String {
         Type::FixedList { elem, len, .. } => format!("List<{}#{}>", type_key(elem), len),
         Type::Tagged { marker, inner } => format!("#{marker}:{}", type_key(inner)),
         Type::Union(members) => members.iter().map(type_key).collect::<Vec<_>>().join("|"),
+        Type::Quantity { base, dimension } => {
+            format!("Quantity<{},{}>", type_key(base), dimension.identity())
+        }
     }
 }
 
@@ -3488,6 +3491,9 @@ fn rust_type(ty: &Type, user_types: &HashSet<String>) -> String {
         Type::Tagged { inner, .. } => rust_type(inner, user_types),
         // D-UNIONTYPE1=A: anonymous unions are not a C-FFI surface type.
         Type::Union(_) => unreachable!("anonymous unions are rejected by FFI sema"),
+        // Runtime values carry no dimension metadata (I3): a quantity crosses
+        // the C ABI as its erased base numeric type.
+        Type::Quantity { base, .. } => rust_type(base, user_types),
     }
 }
 
