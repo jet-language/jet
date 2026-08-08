@@ -10,7 +10,7 @@ use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::{BindPattern, CtFloat, Expr, Func, Stmt, Type};
 
 use super::Diagnostics::comptime_panic;
-use super::Value::{CtReport, CtValue};
+use crate::AST::{CtReport, CtValue};
 
 /// Default step budget per binding (S26 rule 3). Compiler-internal, not a
 /// user knob (philosophy: minimal configuration).

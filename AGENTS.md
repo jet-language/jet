@@ -76,6 +76,17 @@ on host tools unless testing host-shell independence. Group dependent checks whe
 Rebuild before compiler smoke tests: the `jet` wrapper runs `target/debug/jet`. Check `/tmp` before trusting ENOSPC.
 The verification skill owns snapshot, golden, formatter, grammar, and full-suite traps.
 
+`/tmp` is RAM-backed tmpfs on this machine. Never place cargo target dirs, alternate `CARGO_TARGET_DIR`s, or
+multi-GB logs there — tmpfs pages fill swap and end in kernel OOM kills. Use a gitignored disk path such as
+`<repo>/target-<name>`, and delete large session outputs when the task closes. `jet-env` rejects a `/tmp`
+target dir; `scripts/agent/tmp-guard.sh` auto-cleans stale junk and blocks commands under critical memory
+pressure — if it blocks you, free the space it names before continuing.
+
+`target/` is build cache with no automatic pruning; it once reached 619G unnoticed. Tests and scripts never
+write scratch, fixtures, or logs inside it — use temp-dir scratch cleaned on exit (the shared test `Scratch`).
+`verify-full.sh` prints the footprint each run and warns past 150G; on that warning, run `cargo clean` and
+rebuild.
+
 Only the owner starts the Tower board server (`node plugins/tower/tower.mjs
 serve --open`). Agents never run `tower serve` — not on another port, not in a
 worktree, not to "restart" a stale one; a second server holds divergent
@@ -126,8 +137,10 @@ Violating an invariant means stop and fix it.
 - **I9 — Execution-tier parity (one Prelude, dumb engines).** AOT, Cranelift
   JIT (`jet run` / `jet dev`), the interpreter (TIR-eval deopt / ambient), and
   web targets preserve one executable meaning for every language feature and
-  Core library API. **Semantics live only in** `crates/jet-codegen/src/Prelude/**`
-  (and ratified CoreLib). AOT emit, Cranelift hosts, and interpreter ambient are
+  Core library API. **Semantics live only in the embedded Prelude parts**
+  (`crates/jet-foundation` prelude modules and `crates/jet-codegen/src/Prelude/**`;
+  a part sits in `jet-foundation` when a comptime-reachable seam crate must call
+  it, per I6) (and ratified CoreLib). AOT emit, Cranelift hosts, and interpreter ambient are
   **marshalling adapters only**: they convert arguments/results and call those
   Prelude functions. Re-encoding validation, policy, defaults, or error meaning
   in an engine is an invariant violation — not a “host helper.” Parking work in
@@ -210,6 +223,13 @@ Shared-tree safety is absolute:
 Worktrees are allowed for isolated or concurrent writes. Record ownership before use. Integrate successful work into
 the intended branch promptly, verify it there, then remove the worktree and temporary branch immediately. Never park
 finished work unmerged. Paused work keeps a named coherent handoff branch and resume note, not an orphaned worktree.
+
+Build-heavy agent tasks reuse the persistent builder worktree at `.claude/worktrees/builder` instead of a fresh
+random-path worktree: cargo fingerprints embed absolute paths, so a fresh path means a full cold workspace rebuild
+(~15-20 minutes) while the fixed path rebuilds only what changed. Claim it with
+`scripts/agent/builder-sync.sh <claimant>` (refreshes to master HEAD; exits 75 when busy), release with
+`--release`, and never remove it or its `target/`. One build agent at a time; doc-only and board-only tasks keep
+disposable isolated worktrees.
 
 Worktree location is absolute (no exceptions for cloud agents, Cursor, Claude, or temp names):
 

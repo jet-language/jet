@@ -14,6 +14,31 @@ if [ "$#" -eq 0 ]; then
   exit 64
 fi
 
+# /tmp is RAM-backed tmpfs on this machine; a cargo target dir there fills
+# swap and triggers kernel OOM kills. Use a disk path instead.
+case "${CARGO_TARGET_DIR:-}" in
+  /tmp/*)
+    echo "jet-env: CARGO_TARGET_DIR=$CARGO_TARGET_DIR is on tmpfs /tmp (RAM-backed)." >&2
+    echo "jet-env: build artifacts there cause OOM crashes; use a disk path (e.g. \$repo/target-<name>)." >&2
+    exit 64
+    ;;
+esac
+
+# A target dir outside this checkout can be shared by another same-name
+# checkout; cargo then reports "Finished" while target/debug/<bin> still holds
+# the other checkout's binary with its embedded assets. Per-checkout caches
+# only (card 1640).
+if [ -n "${CARGO_TARGET_DIR:-}" ]; then
+  case "$(realpath -m -- "$CARGO_TARGET_DIR")" in
+    "$repo"/*) ;;
+    *)
+      echo "jet-env: CARGO_TARGET_DIR=$CARGO_TARGET_DIR lies outside this checkout." >&2
+      echo "jet-env: shared caches serve stale cross-checkout binaries; use $repo/target-<name>." >&2
+      exit 64
+      ;;
+  esac
+fi
+
 # `direnv export` returns cached environment assignments when `.envrc` has
 # been allowed. Execute the requested command once; never fall back after its
 # own failure, which would duplicate writes/tests.

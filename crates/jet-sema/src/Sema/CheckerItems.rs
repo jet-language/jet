@@ -614,6 +614,7 @@ impl<'a> Checker<'a> {
                 args: std::mem::take(args),
                 resolved_ret: None,
                 range_checked: false,
+                widen_approx: false,
             };
             let fake_sig = crate::AST::FuncSig {
                 params: sig.params[self_offset..].to_vec(),

@@ -2,15 +2,13 @@
 //! Zero-arg `jet_jit_cli_main` decodes argv and calls user `run(args)`.
 
 use super::Concurrency;
-use cranelift_codegen::ir::Signature;
-use cranelift_jit::{JITBuilder, JITModule};
-use cranelift_module::{FuncId, Linkage, Module};
 use jet_foundation::AST::{CtValue, Item, ProgramBundle, StructDef, Type, VariantPayload};
 use jet_foundation::CLISchema::{
     self, CLICommandSchema, CLIDefault, CLIInputSchema, CLIInputShape, CLIValueKind,
 };
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicPtr, Ordering};
+use crate::Marshal::alloc_string;
 
 #[allow(dead_code, unused_imports, clippy::all)]
 mod runtime {
@@ -187,10 +185,6 @@ fn struct_fields(items: &[Item], name: &str) -> Option<Vec<(String, Type)>> {
     )
 }
 
-fn alloc_str(s: String) -> i64 {
-    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s))
-}
-
 fn build_spec(inputs: &[CLIInputSchema], prog: &str) -> Spec {
     let mut spec = empty_spec(prog);
     for input in inputs {
@@ -305,7 +299,7 @@ fn decode_struct(
                         }
                     },
                 };
-                alloc_str(text)
+                alloc_string(text)
             }
             (
                 CLIInputShape::Value {
@@ -315,7 +309,7 @@ fn decode_struct(
                 },
                 Type::Option(_),
             ) => match option_val(parsed, flag_name) {
-                Some(v) => alloc_str(v).wrapping_add(1),
+                Some(v) => alloc_string(v).wrapping_add(1),
                 None => 0,
             },
             _ => {
@@ -466,14 +460,8 @@ pub(crate) extern "C" fn jet_jit_cli_main() {
     run(args);
 }
 
-pub(crate) fn register_cli_symbols(builder: &mut JITBuilder) {
-    builder.symbol("jet_jit_cli_main", jet_jit_cli_main as *const u8);
-}
-
-pub(crate) fn declare_cli_main_import(module: &mut JITModule) -> Result<FuncId, String> {
-    let cc = module.target_config().default_call_conv;
-    let sig = Signature::new(cc);
-    module
-        .declare_function("jet_jit_cli_main", Linkage::Import, &sig)
-        .map_err(|e| e.to_string())
-}
+// `jet_jit_cli_main`'s registration + import lives in the top-level
+// `HostFns` table (jit/runtime_host.rs) — the CLI trampoline is present
+// on every JIT module (like every other host symbol), not only for
+// `cli_entry` programs, so `host_fns_audit` sees a matching pair on every
+// `new_jit_module()` call instead of only when compiling a CLI program.

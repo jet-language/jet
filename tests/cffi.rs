@@ -1852,7 +1852,7 @@ fn ffi_example_compiles_and_runs() {
         eprintln!("note: cargo not found; skipping FFI integration test");
         return;
     }
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: rustc not found; skipping FFI integration test");
         return;

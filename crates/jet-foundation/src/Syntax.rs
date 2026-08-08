@@ -7,8 +7,16 @@
 //!
 //! Agents: do NOT add an entry here without a decision ID approved by the
 //! owner in docs/spec/syntax-decisions.md.
+// D-META-REG1=A / D-META-NAME1=A / D-META-FORM1=A: KW_MARKER is the one
+// declaring word, and `Registry::rows` is the one registration table behind it —
+// a marker rule, a knowledge plane, a right, and a build fact are rows of the
+// same table, separated only by what they attach to. Facts about a rule ride the
+// declaration's own named-parameter list under the compile-time mark
+// (`$sites: [Site]`, `$repeatable: true`); no clause form and no second keyword
+// enter the grammar. Every row states its safe direction and its gate words
+// (D-FACT-LAW1=B); a prover may publish a read-only row (D-FACT-OWN1=A).
 // Marker-plane reconciliation anchors: MARKER_PUB_FILE, MARKER_NO_PRELUDE, MARKER_TARGET,
-// MARKER_LAYOUT, MARKER_CODABLE, Policy::APPLIED_RULES, KW_CAPS, KW_GRANT,
+// MARKER_LAYOUT, MARKER_CODABLE, Policy::APPLIED_RULES, Registry::rows, KW_CAPS, KW_GRANT,
 // KW_COMPTIME, KW_DERIVE, MARKER_TRACK, MARKER_LOCAL, MARKER_SHARED. Constants live in the private modules
 // below; keep this root file mentioning them so I7 audits can check one
 // canonical surface entrypoint.
@@ -20,6 +28,15 @@
 // a parameter list rather than as operators. It also gives a parameter an
 // optional public label ahead of its local name (`timeout seconds: Int`),
 // which needs no new token. Retires the S61 fixed-position label rule.
+//
+// D-CONF-WORD1=A gives the word `profile` one meaning, the optimize bundle
+// behind `--profile` and its `--release` sugar. The machine axis is
+// `--target`, which now takes a declared machine name (`board.<name>`) beside
+// a rustc triple. A named environment composition is a preset:
+// ENV_FIELD_PRESETS (`presets:`) and ENV_FLAG_PRESET (`--preset`) replace the
+// retired `profiles:` field and `--profile` flag, and package/user profiles
+// read as generations in prose. Retires ENV_FIELD_PROFILES and the env
+// namespace's `--profile`; ENV_FLAG_PROFILE_RETIRED exists only to teach.
 //
 // D-TRAILBLOCK2=A adds no token: retires D-TRAILBLOCK1 trailing `{ }` sugar.
 // Code arguments are ordinary `() => { … }` lambdas inside call parentheses;
@@ -307,9 +324,6 @@ pub fn retired_numeric_conversion_target(method: &str) -> Option<&'static str> {
     })
 }
 
-// D-SHAPE-QUANTITY1=A adds no source spelling. Physical dimensions use this
-// unwriteable internal type marker.
-pub const TYPE_QUANTITY: &str = "\0Quantity";
 /// D-QUANTITY-TYPE1=A: the sole source-written quantity-bound constructor.
 pub const BOUND_QUANTITY: &str = "Quantity";
 /// D-QUANTITY-CONVERT1=B: the closed explicit unit-rounding policies.
@@ -466,3 +480,5 @@ mod highlights;
 pub use highlights::*;
 mod predicates;
 pub use predicates::*;
+mod retirements;
+pub use retirements::*;

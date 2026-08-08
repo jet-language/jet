@@ -5,6 +5,7 @@ use super::Concurrency;
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
+use crate::Marshal::{alloc_string, clone_string, result_err_msg, result_ok};
 
 pub(crate) mod time_rt {
     #[allow(unused_imports)]
@@ -40,30 +41,8 @@ fn with_time<R: Default>(handle: i64, f: impl FnOnce(&TimeValue) -> R) -> R {
     })
 }
 
-fn clone_str(id: i64) -> String {
-    Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(id).unwrap_or_default())
-}
-
-fn alloc_str(s: String) -> i64 {
-    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s))
-}
-
-fn result_ok(bits: u64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        rt.results.push(super::JitResultValue { ok: true, bits });
-        rt.results.len() as i64
-    })
-}
-
 fn result_err(msg: String) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let sid = rt.heap.alloc_string(msg);
-        rt.results.push(super::JitResultValue {
-            ok: false,
-            bits: sid as u64,
-        });
-        rt.results.len() as i64
-    })
+    result_err_msg(&msg)
 }
 
 extern "C" fn jet_jit_date_new(y: i64, m: i64, d: i64) -> i64 {
@@ -75,7 +54,7 @@ extern "C" fn jet_jit_date_today() -> i64 {
 }
 
 extern "C" fn jet_jit_date_parse(s: i64) -> i64 {
-    match time_rt::JetDate::parse(&clone_str(s)) {
+    match time_rt::JetDate::parse(&clone_string(s)) {
         Ok(d) => result_ok(push(TimeValue::Date(d)) as u64),
         Err(e) => result_err(e),
     }
@@ -90,7 +69,7 @@ extern "C" fn jet_jit_datetime_now() -> i64 {
 }
 
 extern "C" fn jet_jit_time_parse_rfc3339(s: i64) -> i64 {
-    match time_rt::JetDateTime::parse_rfc3339(&clone_str(s)) {
+    match time_rt::JetDateTime::parse_rfc3339(&clone_string(s)) {
         Ok(dt) => result_ok(push(TimeValue::DateTime(dt)) as u64),
         Err(e) => result_err(e),
     }
@@ -183,12 +162,12 @@ extern "C" fn jet_jit_civil_time_method(
     arg4: i64,
     arg5: i64,
 ) -> i64 {
-    let method = clone_str(method);
+    let method = clone_string(method);
     with_time(recv, |v| match (v, method.as_str()) {
         (TimeValue::Date(d), "year") => d.year(),
         (TimeValue::Date(d), "month") => d.month(),
         (TimeValue::Date(d), "day") => d.day(),
-        (TimeValue::Date(d), "to_string") => alloc_str(d.to_string_fmt()),
+        (TimeValue::Date(d), "to_string") => alloc_string(d.to_string_fmt()),
         (TimeValue::Date(d), "add_days") => push(TimeValue::Date(d.add_days(arg0))),
         (TimeValue::Date(d), "add_months") => push(TimeValue::Date(d.add_months(arg0))),
         (TimeValue::Date(d), "diff_days") => {
@@ -224,7 +203,7 @@ extern "C" fn jet_jit_civil_time_method(
                 .unwrap_or(0)
         }
         (TimeValue::Date(d), "format") => {
-            alloc_str(d.format_pattern(&clone_str(arg0)))
+            alloc_string(d.format_pattern(&clone_string(arg0)))
         }
         (TimeValue::DateTime(dt), "to_timestamp") => dt.to_timestamp(),
         (TimeValue::DateTime(dt), "date") => push(TimeValue::Date(dt.date())),
@@ -235,20 +214,20 @@ extern "C" fn jet_jit_civil_time_method(
         (TimeValue::DateTime(dt), "millisecond") => dt.millisecond(),
         (TimeValue::DateTime(dt), "microsecond") => dt.microsecond(),
         (TimeValue::DateTime(dt), "nanosecond") => dt.nanosecond(),
-        (TimeValue::DateTime(dt), "to_string") => alloc_str(dt.to_string_fmt()),
-        (TimeValue::DateTime(dt), "format_rfc3339") => alloc_str(dt.format_rfc3339()),
+        (TimeValue::DateTime(dt), "to_string") => alloc_string(dt.to_string_fmt()),
+        (TimeValue::DateTime(dt), "format_rfc3339") => alloc_string(dt.format_rfc3339()),
         (TimeValue::DateTime(dt), "to_unix_ms") => dt.to_unix_ms(),
         (TimeValue::DateTime(dt), "format") => {
-            alloc_str(dt.format_pattern(&clone_str(arg0)))
+            alloc_string(dt.format_pattern(&clone_string(arg0)))
         }
         (TimeValue::DateTime(dt), "truncate" | "floor") => {
-            push(TimeValue::DateTime(dt.floor(&clone_str(arg0))))
+            push(TimeValue::DateTime(dt.floor(&clone_string(arg0))))
         }
         (TimeValue::DateTime(dt), "ceil") => {
-            push(TimeValue::DateTime(dt.ceil(&clone_str(arg0))))
+            push(TimeValue::DateTime(dt.ceil(&clone_string(arg0))))
         }
         (TimeValue::DateTime(dt), "round") => {
-            push(TimeValue::DateTime(dt.round(&clone_str(arg0))))
+            push(TimeValue::DateTime(dt.round(&clone_string(arg0))))
         }
         (TimeValue::DateTime(dt), "replace") => push(TimeValue::DateTime(dt.replace(
             arg0, arg1, arg2, arg3, arg4, arg5,
@@ -273,9 +252,9 @@ extern "C" fn jet_jit_civil_time_method(
         }
         (TimeValue::Instant(i), "elapsed_millis") => i.elapsed_millis(),
         (TimeValue::Instant(i), "elapsed") => i.elapsed_nanos(),
-        (TimeValue::LocalTime(t), "to_string") => alloc_str(t.to_string_fmt()),
+        (TimeValue::LocalTime(t), "to_string") => alloc_string(t.to_string_fmt()),
         (TimeValue::Zoned(z), "format") => {
-            alloc_str(z.format_pattern(&clone_str(arg0)))
+            alloc_string(z.format_pattern(&clone_string(arg0)))
         }
         (TimeValue::Zoned(z), "offset_seconds") => z.offset_seconds(),
         (TimeValue::Zoned(z), "is_dst") => {
@@ -289,129 +268,66 @@ extern "C" fn jet_jit_civil_time_method(
     })
 }
 
-pub(crate) struct TimeHostFns {
-    pub date_new: FuncId,
-    pub date_today: FuncId,
-    pub date_parse: FuncId,
-    pub datetime_from_timestamp: FuncId,
-    pub datetime_now: FuncId,
-    pub parse_rfc3339: FuncId,
-    pub from_unix_ms: FuncId,
-    pub utc: FuncId,
-    pub period_months: FuncId,
-    pub instant: FuncId,
-    pub zoned: FuncId,
-    pub days_in_month: FuncId,
-    pub is_leap_year: FuncId,
-    pub datetime: FuncId,
-    pub local_time: FuncId,
-    pub duration_unit: FuncId,
-    pub civil_method: FuncId,
+host_fns! {
+    struct TimeHostFns;
+    register: register_time_symbols;
+    declare: declare_time_host_fns(module) {
+        let cc = module.target_config().default_call_conv;
+        let mut nullary = Signature::new(cc);
+        nullary.returns.push(AbiParam::new(types::I64));
+        let mut unary = Signature::new(cc);
+        unary.params.push(AbiParam::new(types::I64));
+        unary.returns.push(AbiParam::new(types::I64));
+        let mut binary = Signature::new(cc);
+        binary.params.push(AbiParam::new(types::I64));
+        binary.params.push(AbiParam::new(types::I64));
+        binary.returns.push(AbiParam::new(types::I64));
+        let mut ternary = Signature::new(cc);
+        for _ in 0..3 {
+            ternary.params.push(AbiParam::new(types::I64));
+        }
+        ternary.returns.push(AbiParam::new(types::I64));
+        let mut quaternary = Signature::new(cc);
+        for _ in 0..4 {
+            quaternary.params.push(AbiParam::new(types::I64));
+        }
+        quaternary.returns.push(AbiParam::new(types::I64));
+        let mut hexary = Signature::new(cc);
+        for _ in 0..6 {
+            hexary.params.push(AbiParam::new(types::I64));
+        }
+        hexary.returns.push(AbiParam::new(types::I64));
+        let mut unary_i8 = Signature::new(cc);
+        unary_i8.params.push(AbiParam::new(types::I64));
+        unary_i8.returns.push(AbiParam::new(types::I8));
+        let mut octonary = Signature::new(cc);
+        for _ in 0..8 {
+            octonary.params.push(AbiParam::new(types::I64));
+        }
+        octonary.returns.push(AbiParam::new(types::I64));
+
+
+    }
+    date_new: "jet_jit_date_new" => jet_jit_date_new: ternary;
+    date_today: "jet_jit_date_today" => jet_jit_date_today: nullary;
+    date_parse: "jet_jit_date_parse" => jet_jit_date_parse: unary;
+    datetime_from_timestamp: "jet_jit_datetime_from_timestamp" => jet_jit_datetime_from_timestamp: unary;
+    datetime_now: "jet_jit_datetime_now" => jet_jit_datetime_now: nullary;
+    parse_rfc3339: "jet_jit_time_parse_rfc3339" => jet_jit_time_parse_rfc3339: unary;
+    from_unix_ms: "jet_jit_time_from_unix_ms" => jet_jit_time_from_unix_ms: unary;
+    utc: "jet_jit_time_utc" => jet_jit_time_utc: nullary;
+    period_months: "jet_jit_time_period_months" => jet_jit_time_period_months: unary;
+    instant: "jet_jit_time_instant" => jet_jit_time_instant: nullary;
+    zoned: "jet_jit_time_zoned" => jet_jit_time_zoned: binary;
+    days_in_month: "jet_jit_time_days_in_month" => jet_jit_time_days_in_month: binary;
+    is_leap_year: "jet_jit_time_is_leap_year" => jet_jit_time_is_leap_year: unary_i8;
+    datetime: "jet_jit_time_datetime" => jet_jit_time_datetime: hexary;
+    local_time: "jet_jit_time_local_time" => jet_jit_time_local_time: ternary;
+    duration_unit: "jet_jit_time_duration_unit" => jet_jit_time_duration_unit: binary;
+    civil_method: "jet_jit_civil_time_method" => jet_jit_civil_time_method: octonary;
 }
 
-pub(crate) fn register_time_symbols(builder: &mut JITBuilder) {
-    builder.symbol("jet_jit_date_new", jet_jit_date_new as *const u8);
-    builder.symbol("jet_jit_date_today", jet_jit_date_today as *const u8);
-    builder.symbol("jet_jit_date_parse", jet_jit_date_parse as *const u8);
-    builder.symbol(
-        "jet_jit_datetime_from_timestamp",
-        jet_jit_datetime_from_timestamp as *const u8,
-    );
-    builder.symbol("jet_jit_datetime_now", jet_jit_datetime_now as *const u8);
-    builder.symbol(
-        "jet_jit_time_parse_rfc3339",
-        jet_jit_time_parse_rfc3339 as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_time_from_unix_ms",
-        jet_jit_time_from_unix_ms as *const u8,
-    );
-    builder.symbol("jet_jit_time_utc", jet_jit_time_utc as *const u8);
-    builder.symbol(
-        "jet_jit_time_period_months",
-        jet_jit_time_period_months as *const u8,
-    );
-    builder.symbol("jet_jit_time_instant", jet_jit_time_instant as *const u8);
-    builder.symbol("jet_jit_time_zoned", jet_jit_time_zoned as *const u8);
-    builder.symbol(
-        "jet_jit_time_days_in_month",
-        jet_jit_time_days_in_month as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_time_is_leap_year",
-        jet_jit_time_is_leap_year as *const u8,
-    );
-    builder.symbol("jet_jit_time_datetime", jet_jit_time_datetime as *const u8);
-    builder.symbol(
-        "jet_jit_time_local_time",
-        jet_jit_time_local_time as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_time_duration_unit",
-        jet_jit_time_duration_unit as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_civil_time_method",
-        jet_jit_civil_time_method as *const u8,
-    );
-}
 
-pub(crate) fn declare_time_host_fns(module: &mut JITModule) -> Result<TimeHostFns, String> {
-    let cc = module.target_config().default_call_conv;
-    let mut nullary = Signature::new(cc);
-    nullary.returns.push(AbiParam::new(types::I64));
-    let mut unary = Signature::new(cc);
-    unary.params.push(AbiParam::new(types::I64));
-    unary.returns.push(AbiParam::new(types::I64));
-    let mut binary = Signature::new(cc);
-    binary.params.push(AbiParam::new(types::I64));
-    binary.params.push(AbiParam::new(types::I64));
-    binary.returns.push(AbiParam::new(types::I64));
-    let mut ternary = Signature::new(cc);
-    for _ in 0..3 {
-        ternary.params.push(AbiParam::new(types::I64));
-    }
-    ternary.returns.push(AbiParam::new(types::I64));
-    let mut quaternary = Signature::new(cc);
-    for _ in 0..4 {
-        quaternary.params.push(AbiParam::new(types::I64));
-    }
-    quaternary.returns.push(AbiParam::new(types::I64));
-    let mut hexary = Signature::new(cc);
-    for _ in 0..6 {
-        hexary.params.push(AbiParam::new(types::I64));
-    }
-    hexary.returns.push(AbiParam::new(types::I64));
-    let mut unary_i8 = Signature::new(cc);
-    unary_i8.params.push(AbiParam::new(types::I64));
-    unary_i8.returns.push(AbiParam::new(types::I8));
-    let mut octonary = Signature::new(cc);
-    for _ in 0..8 {
-        octonary.params.push(AbiParam::new(types::I64));
-    }
-    octonary.returns.push(AbiParam::new(types::I64));
-    let mut import = |name: &str, sig: &Signature| {
-        module
-            .declare_function(name, Linkage::Import, sig)
-            .map_err(|e| e.to_string())
-    };
-    Ok(TimeHostFns {
-        date_new: import("jet_jit_date_new", &ternary)?,
-        date_today: import("jet_jit_date_today", &nullary)?,
-        date_parse: import("jet_jit_date_parse", &unary)?,
-        datetime_from_timestamp: import("jet_jit_datetime_from_timestamp", &unary)?,
-        datetime_now: import("jet_jit_datetime_now", &nullary)?,
-        parse_rfc3339: import("jet_jit_time_parse_rfc3339", &unary)?,
-        from_unix_ms: import("jet_jit_time_from_unix_ms", &unary)?,
-        utc: import("jet_jit_time_utc", &nullary)?,
-        period_months: import("jet_jit_time_period_months", &unary)?,
-        instant: import("jet_jit_time_instant", &nullary)?,
-        zoned: import("jet_jit_time_zoned", &binary)?,
-        days_in_month: import("jet_jit_time_days_in_month", &binary)?,
-        is_leap_year: import("jet_jit_time_is_leap_year", &unary_i8)?,
-        datetime: import("jet_jit_time_datetime", &hexary)?,
-        local_time: import("jet_jit_time_local_time", &ternary)?,
-        duration_unit: import("jet_jit_time_duration_unit", &binary)?,
-        civil_method: import("jet_jit_civil_time_method", &octonary)?,
-    })
-}
+
+
+

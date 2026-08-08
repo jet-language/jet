@@ -14,70 +14,6 @@ use jet_foundation::PackageEdition;
 
 use super::{unsupported, EvalCtx};
 
-fn data_error(kind: &str, operation: &str, reason: &str) -> CtValue {
-    data_error_at(kind, operation, None, reason)
-}
-
-fn data_error_at(kind: &str, operation: &str, index: Option<i64>, reason: &str) -> CtValue {
-    CtValue::Struct {
-        type_name: "DataError".to_string(),
-        fields: vec![
-            (
-                "kind".to_string(),
-                CtValue::Enum {
-                    type_name: "DataErrorKind".to_string(),
-                    variant: kind.to_string(),
-                    args: Vec::new(),
-                },
-            ),
-            ("operation".to_string(), CtValue::Str(operation.to_string())),
-            ("row".to_string(), CtValue::absent(Type::Int)),
-            ("column".to_string(), CtValue::absent(Type::Int)),
-            (
-                "index".to_string(),
-                index
-                    .map(|value| CtValue::Present(Box::new(CtValue::Int(value))))
-                    .unwrap_or(CtValue::absent(Type::Int)),
-            ),
-            ("reason".to_string(), CtValue::Str(reason.to_string())),
-            (
-                "cause".to_string(),
-                CtValue::absent(Type::Named("EncodingError".to_string())),
-            ),
-        ],
-    }
-}
-
-fn checked_neumaier_sum(values: &[f64]) -> Result<f64, CtValue> {
-    let mut sum = 0.0f64;
-    let mut compensation = 0.0f64;
-    for value in values.iter().copied() {
-        let total = sum + value;
-        if sum.abs() >= value.abs() {
-            compensation += (sum - total) + value;
-        } else {
-            compensation += (value - total) + sum;
-        }
-        sum = total;
-        if !sum.is_finite() || !compensation.is_finite() {
-            return Err(data_error(
-                "Overflow",
-                "sum",
-                "finite overflow while summing",
-            ));
-        }
-    }
-    let total = sum + compensation;
-    if !total.is_finite() {
-        return Err(data_error(
-            "Overflow",
-            "sum",
-            "finite overflow while summing",
-        ));
-    }
-    Ok(if total == 0.0 { 0.0 } else { total })
-}
-
 fn ok(v: CtValue) -> CtValue {
     CtValue::Present(Box::new(v))
 }
@@ -227,7 +163,7 @@ impl<'a> EvalCtx<'a> {
             }
             "mean" | "sum" | "min" | "max" | "median" | "variance" | "stddev" => {
                 let values = as_float_list(&self.eval_expr(&args[0], scope)?, span)?;
-                self.eval_stat(method, &values, checked)
+                self.eval_stat(method, &values)
             }
             "quantile" => {
                 let values = as_float_list(&self.eval_expr(&args[0], scope)?, span)?;
@@ -236,7 +172,7 @@ impl<'a> EvalCtx<'a> {
                     CtValue::Int(n) => n as f64,
                     _ => return Err(unsupported("quantile q", span)),
                 };
-                self.eval_quantile(&values, q, checked)
+                self.eval_quantile(&values, q)
             }
             "rolling_mean" => {
                 let values = as_float_list(&self.eval_expr(&args[0], scope)?, span)?;
@@ -244,42 +180,6 @@ impl<'a> EvalCtx<'a> {
                     CtValue::Int(width) => width,
                     _ => return Err(unsupported("rolling_mean width", span)),
                 };
-                if checked && width < 1 {
-                    return Ok(err(data_error(
-                        "InvalidArgument",
-                        "rolling_mean",
-                        "rolling width must be positive",
-                    )));
-                }
-                if checked {
-                    if let Some((index, _)) =
-                        values.iter().enumerate().find(|(_, value)| !value.is_finite())
-                    {
-                        return Ok(err(data_error_at(
-                            "NonFinite",
-                            "rolling_mean",
-                            Some(index as i64),
-                            "numeric input must be finite",
-                        )));
-                    }
-                    let width = width as usize;
-                    let mut out = Vec::with_capacity(values.len());
-                    for index in 0..values.len() {
-                        let start = index.saturating_add(1).saturating_sub(width);
-                        let window = &values[start..=index];
-                        let sum = match checked_neumaier_sum(window) {
-                            Ok(sum) => sum,
-                            Err(error) => return Ok(err(error)),
-                        };
-                        let mean = sum / window.len() as f64;
-                        out.push(CtValue::Float(CtFloat::f64(if mean == 0.0 {
-                            0.0
-                        } else {
-                            mean
-                        })));
-                    }
-                    return Ok(ok(CtValue::List(out)));
-                }
                 apply_core_call(
                     "core.data",
                     "rolling_mean",
@@ -441,18 +341,10 @@ impl<'a> EvalCtx<'a> {
                 if args.len() > 1 {
                     call_args.push(self.eval_expr(&args[1], scope)?);
                 }
-                let v = if matches!(method, "line_text" | "line_svg") {
-                    apply_data_line_call(method, call_args, span, checked)?
+                if matches!(method, "line_text" | "line_svg") {
+                    apply_data_line_call(method, call_args, span)
                 } else {
-                    apply_core_call("core.data", method, call_args, span, self.repl_mode)?
-                };
-                if checked {
-                    match v {
-                        CtValue::Str(_) => Ok(ok(v)),
-                        other => Ok(other),
-                    }
-                } else {
-                    Ok(v)
+                    apply_core_call("core.data", method, call_args, span, self.repl_mode)
                 }
             }
             "series" => {
@@ -521,20 +413,11 @@ impl<'a> EvalCtx<'a> {
         }
     }
 
-    fn eval_stat(
-        &self,
-        method: &str,
-        values: &[f64],
-        checked: bool,
-    ) -> Result<CtValue, Diagnostic> {
-        if checked && values.is_empty() && matches!(method, "mean" | "min" | "max" | "median") {
-            return Ok(err(data_error(
-                "Empty",
-                method,
-                &format!("{method} of empty data is undefined"),
-            )));
-        }
-        let v = apply_core_call(
+    /// #1657 / I9: one hop to the shared `core.data` entry, which runs the one
+    /// Prelude kernel. The deopt tier decides nothing about empty input,
+    /// finiteness, or overflow.
+    fn eval_stat(&self, method: &str, values: &[f64]) -> Result<CtValue, Diagnostic> {
+        apply_core_call(
             "core.data",
             method,
             vec![CtValue::List(
@@ -546,35 +429,11 @@ impl<'a> EvalCtx<'a> {
             )],
             self.span(),
             self.repl_mode,
-        )?;
-        if checked {
-            Ok(ok(v))
-        } else {
-            Ok(v)
-        }
+        )
     }
 
-    fn eval_quantile(
-        &self,
-        values: &[f64],
-        q: f64,
-        checked: bool,
-    ) -> Result<CtValue, Diagnostic> {
-        if checked && (!q.is_finite() || !(0.0..=1.0).contains(&q)) {
-            return Ok(err(data_error(
-                "InvalidArgument",
-                "quantile",
-                "quantile q must be a finite value in 0.0 through 1.0",
-            )));
-        }
-        if checked && values.is_empty() {
-            return Ok(err(data_error(
-                "Empty",
-                "quantile",
-                "quantile of empty data is undefined",
-            )));
-        }
-        let v = apply_core_call(
+    fn eval_quantile(&self, values: &[f64], q: f64) -> Result<CtValue, Diagnostic> {
+        apply_core_call(
             "core.data",
             "quantile",
             vec![
@@ -589,12 +448,7 @@ impl<'a> EvalCtx<'a> {
             ],
             self.span(),
             self.repl_mode,
-        )?;
-        if checked {
-            Ok(ok(v))
-        } else {
-            Ok(v)
-        }
+        )
     }
 
     fn decode_csv_rows(&self, text: &str, elem_ty: &Type, span: Span) -> CtValue {

@@ -309,6 +309,7 @@ fn is_cloneable_rec(
         Type::Union(members) => members
             .iter()
             .all(|m| is_cloneable_rec(m, registry, visiting)),
+        Type::Quantity { base, .. } => is_cloneable_rec(base, registry, visiting),
     }
 }
 
@@ -424,6 +425,7 @@ fn type_owns_heap_rec(ty: &Type, registry: &TypeRegistry, visiting: &mut HashSet
         Type::Union(members) => members
             .iter()
             .any(|m| type_owns_heap_rec(m, registry, visiting)),
+        Type::Quantity { base, .. } => type_owns_heap_rec(base, registry, visiting),
     }
 }
 
@@ -682,6 +684,10 @@ Type::Fn { params, ret, effect_bound, param_contract, return_view_provenance } =
         Type::TraitObject(names) => Type::TraitObject(names),
         Type::IntN { signed, bits } => Type::IntN { signed, bits },
         Type::Float32 => Type::Float32,
+        Type::Quantity { base, dimension } => Type::Quantity {
+            base: Box::new(core_crypto_nominal(*base)),
+            dimension,
+        },
     }
 }
 
@@ -850,7 +856,7 @@ pub(crate) fn is_printable(
                 || trait_reg.implements_trait(n, Generics::PRINTABLE)
                 || is_core_shown_type(n)
         }
-        Type::Apply { .. } if ty.quantity_parts().is_some() => true,
+        Type::Quantity { .. } => true,
         Type::Apply { name, .. } if name == "KeyRef" => true,
         Type::Apply { name, args } => {
             (name == "View"
@@ -904,7 +910,7 @@ pub(crate) fn is_displayable(
                         | Syntax::TYPE_CHAR
                 )
         }
-        Type::Apply { .. } if ty.quantity_parts().is_some() => true,
+        Type::Quantity { .. } => true,
         Type::Apply { name, .. } if name == "KeyRef" => true,
         Type::Apply { name, args } => {
             (name == "View"
@@ -1001,7 +1007,7 @@ pub(crate) fn is_debuggable(
                 || is_core_shown_type(n)
         }
         Type::Apply { name, .. } if name == "KeyRef" => true,
-        Type::Apply { .. } if ty.quantity_parts().is_some() => true,
+        Type::Quantity { .. } => true,
         Type::Apply { name, args } => {
             trait_reg.implements_trait(name, Generics::DEBUG)
                 && args
@@ -1076,6 +1082,10 @@ pub(crate) fn is_equatable(
         Type::Union(members) => members
             .iter()
             .all(|member| is_equatable(member, registry, trait_reg)),
+        // Same as the prior `\0Quantity` encoding: falls through the generic
+        // `Type::Apply` trait-lookup path, which never registered an
+        // `Equatable` impl for the marker name, so this stayed non-equatable.
+        Type::Quantity { .. } => false,
     }
 }
 
@@ -1117,6 +1127,10 @@ pub(crate) fn types_comparable(ty: &Type, registry: &TypeRegistry) -> bool {
         Type::FixedList { elem, .. } => types_comparable(elem, registry),
         Type::Tagged { inner, .. } => types_comparable(inner, registry),
         Type::Union(members) => members.iter().all(|m| types_comparable(m, registry)),
+        // Same as the prior `\0Quantity` encoding: falls through the generic
+        // `Type::Apply` trait-lookup path, which never registered an
+        // `Equatable` impl for the marker name, so this stayed non-comparable.
+        Type::Quantity { .. } => false,
     }
 }
 
@@ -1383,6 +1397,7 @@ mod tests {
                 .map(|(_, ty)| count_core_crypto_markers(ty))
                 .sum(),
             Type::FixedList { elem, .. } => count_core_crypto_markers(elem),
+            Type::Quantity { base, .. } => count_core_crypto_markers(base),
             Type::Tagged { marker, inner } => {
                 usize::from(marker == CORE_CRYPTO_NOMINAL_MARKER)
                     + count_core_crypto_markers(inner)

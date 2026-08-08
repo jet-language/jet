@@ -17,7 +17,7 @@ use common::{panic_message, test_worker_count, FfiBridgeLock};
 fn ownership_ui_fixes_compile() {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/ui");
     let ext = jet::Syntax::FILE_EXT;
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     let have_cargo = Command::new("cargo").arg("--version").output().is_ok();
 
     let mut entries: Vec<_> = fs::read_dir(&dir)

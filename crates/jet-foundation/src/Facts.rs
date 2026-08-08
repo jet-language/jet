@@ -1,6 +1,7 @@
 //! Shared compile-time fact model (D-FACTMODEL1=A).
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::LazyLock;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum FactKind {
@@ -19,13 +20,20 @@ impl FactKind {
     }
 }
 
-/// Canonical closed effect roots. Effect parsing, rule arguments, fact
-/// registration, diagnostics, and reflection all consume this list.
-pub const EFFECT_ROOTS: &[&str] = &[
-    "Net", "FS", "IO", "DB", "Time", "Rand", "Env", "Exec", "Log", "GPU", "Go", "Java",
-    "DotNet", "Fortran", "Cobol", "Tcl", "Lua", "Ada", "Pascal", "Dart", "PowerShell",
-    "Perl", "Ruby", "Php", "R", "Com", "Browser", "Secret",
-];
+/// D-META-ONE1=A: the effect roots are written as `effect Name` declarations
+/// in `Prelude/Effects.jet`, so this file keeps no copy of the vocabulary.
+pub const EFFECT_SOURCE: &str = include_str!("../../jet-codegen/src/Prelude/Effects.jet");
+
+/// Canonical closed effect roots, read from `EFFECT_SOURCE`. Effect parsing,
+/// rule arguments, fact registration, diagnostics, and reflection all consume
+/// this list.
+pub static EFFECT_ROOTS: LazyLock<Vec<&'static str>> = LazyLock::new(|| {
+    EFFECT_SOURCE
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("effect "))
+        .map(str::trim)
+        .collect()
+});
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FactDeclaration {

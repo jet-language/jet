@@ -149,6 +149,10 @@ pub fn substitute_type(ty: &Type, subst: &HashMap<String, Type>) -> Type {
         Type::Union(members) => crate::AST::canonicalize_union(
             members.iter().map(|m| substitute_type(m, subst)).collect(),
         ),
+        Type::Quantity { base, dimension } => Type::Quantity {
+            base: Box::new(substitute_type(base, subst)),
+            dimension: dimension.clone(),
+        },
         other => other.clone(),
     }
 }
@@ -192,6 +196,10 @@ pub fn unify_types(
             unify_types(o1, o2, subst, type_params) && unify_types(e1, e2, subst, type_params)
         }
         (Type::TraitObject(t1), Type::TraitObject(t2)) if t1 == t2 => true,
+        (
+            Type::Quantity { base: b1, dimension: d1 },
+            Type::Quantity { base: b2, dimension: d2 },
+        ) if d1 == d2 => unify_types(b1, b2, subst, type_params),
         _ => false,
     }
 }
@@ -236,6 +244,7 @@ fn collect_free(ty: &Type, out: &mut HashSet<String>) {
         Type::FixedList { elem, .. } => collect_free(elem, out),
         Type::Tagged { inner, .. } => collect_free(inner, out),
         Type::Union(members) => members.iter().for_each(|m| collect_free(m, out)),
+        Type::Quantity { base, .. } => collect_free(base, out),
     }
 }
 

@@ -269,136 +269,60 @@ extern "C" fn jet_jit_fraction_is_zero(a: i64) -> i8 {
     with_fraction(a, |f| f.numerator == 0).unwrap_or(false) as i8
 }
 
-pub(crate) struct NumericHostFns {
-    pub bigint_from_int: cranelift_module::FuncId,
-    pub bigint_from_str: cranelift_module::FuncId,
-    pub bigint_add: cranelift_module::FuncId,
-    pub bigint_sub: cranelift_module::FuncId,
-    pub bigint_mul: cranelift_module::FuncId,
-    pub bigint_eq: cranelift_module::FuncId,
-    pub bigint_neg: cranelift_module::FuncId,
-    pub bigint_to_string: cranelift_module::FuncId,
-    pub decimal_from_str: cranelift_module::FuncId,
-    pub decimal_add: cranelift_module::FuncId,
-    pub decimal_sub: cranelift_module::FuncId,
-    pub decimal_mul: cranelift_module::FuncId,
-    pub decimal_to_string: cranelift_module::FuncId,
-    pub fraction_new: cranelift_module::FuncId,
-    pub fraction_add: cranelift_module::FuncId,
-    pub fraction_sub: cranelift_module::FuncId,
-    pub fraction_mul: cranelift_module::FuncId,
-    pub fraction_div: cranelift_module::FuncId,
-    pub fraction_equal: cranelift_module::FuncId,
-    pub fraction_numerator: cranelift_module::FuncId,
-    pub fraction_denominator: cranelift_module::FuncId,
-    pub fraction_to_string: cranelift_module::FuncId,
-    pub fraction_to_float: cranelift_module::FuncId,
-    pub fraction_is_zero: cranelift_module::FuncId,
+host_fns! {
+    struct NumericHostFns;
+    register: register_numeric_symbols;
+    declare: declare_numeric_host_fns(module) {
+        use cranelift_codegen::ir::{types, AbiParam, Signature};
+        use cranelift_module::{Linkage, Module};
+        let cc = module.target_config().default_call_conv;
+        let mut sig_unary = Signature::new(cc);
+        sig_unary.params.push(AbiParam::new(types::I64));
+        sig_unary.returns.push(AbiParam::new(types::I64));
+        let mut sig_binary = Signature::new(cc);
+        sig_binary.params.push(AbiParam::new(types::I64));
+        sig_binary.params.push(AbiParam::new(types::I64));
+        sig_binary.returns.push(AbiParam::new(types::I64));
+        let mut sig_compare = Signature::new(cc);
+        sig_compare.params.push(AbiParam::new(types::I64));
+        sig_compare.params.push(AbiParam::new(types::I64));
+        sig_compare.returns.push(AbiParam::new(types::I8));
+        let mut sig_unary_bool = Signature::new(cc);
+        sig_unary_bool.params.push(AbiParam::new(types::I64));
+        sig_unary_bool.returns.push(AbiParam::new(types::I8));
+        let mut sig_unary_f64 = Signature::new(cc);
+        sig_unary_f64.params.push(AbiParam::new(types::I64));
+        sig_unary_f64.returns.push(AbiParam::new(types::F64));
+
+
+    }
+    bigint_from_int: "jet_jit_bigint_from_int" => jet_jit_bigint_from_int: sig_unary;
+    bigint_from_str: "jet_jit_bigint_from_str" => jet_jit_bigint_from_str: sig_unary;
+    bigint_add: "jet_jit_bigint_add" => jet_jit_bigint_add: sig_binary;
+    bigint_sub: "jet_jit_bigint_sub" => jet_jit_bigint_sub: sig_binary;
+    bigint_mul: "jet_jit_bigint_mul" => jet_jit_bigint_mul: sig_binary;
+    bigint_eq: "jet_jit_bigint_eq" => jet_jit_bigint_eq: sig_compare;
+    bigint_neg: "jet_jit_bigint_neg" => jet_jit_bigint_neg: sig_unary;
+    bigint_to_string: "jet_jit_bigint_to_string" => jet_jit_bigint_to_string: sig_unary;
+    decimal_from_str: "jet_jit_decimal_from_str" => jet_jit_decimal_from_str: sig_unary;
+    decimal_add: "jet_jit_decimal_add" => jet_jit_decimal_add: sig_binary;
+    decimal_sub: "jet_jit_decimal_sub" => jet_jit_decimal_sub: sig_binary;
+    decimal_mul: "jet_jit_decimal_mul" => jet_jit_decimal_mul: sig_binary;
+    decimal_to_string: "jet_jit_decimal_to_string" => jet_jit_decimal_to_string: sig_unary;
+    fraction_new: "jet_jit_fraction_new" => jet_jit_fraction_new: sig_binary;
+    fraction_add: "jet_jit_fraction_add" => jet_jit_fraction_add: sig_binary;
+    fraction_sub: "jet_jit_fraction_sub" => jet_jit_fraction_sub: sig_binary;
+    fraction_mul: "jet_jit_fraction_mul" => jet_jit_fraction_mul: sig_binary;
+    fraction_div: "jet_jit_fraction_div" => jet_jit_fraction_div: sig_binary;
+    fraction_equal: "jet_jit_fraction_equal" => jet_jit_fraction_equal: sig_compare;
+    fraction_numerator: "jet_jit_fraction_numerator" => jet_jit_fraction_numerator: sig_unary;
+    fraction_denominator: "jet_jit_fraction_denominator" => jet_jit_fraction_denominator: sig_unary;
+    fraction_to_string: "jet_jit_fraction_to_string" => jet_jit_fraction_to_string: sig_unary;
+    fraction_to_float: "jet_jit_fraction_to_float" => jet_jit_fraction_to_float: sig_unary_f64;
+    fraction_is_zero: "jet_jit_fraction_is_zero" => jet_jit_fraction_is_zero: sig_unary_bool;
 }
 
-pub(crate) fn register_numeric_symbols(builder: &mut cranelift_jit::JITBuilder) {
-    builder.symbol("jet_jit_bigint_from_int", jet_jit_bigint_from_int as *const u8);
-    builder.symbol("jet_jit_bigint_from_str", jet_jit_bigint_from_str as *const u8);
-    builder.symbol("jet_jit_bigint_add", jet_jit_bigint_add as *const u8);
-    builder.symbol("jet_jit_bigint_sub", jet_jit_bigint_sub as *const u8);
-    builder.symbol("jet_jit_bigint_mul", jet_jit_bigint_mul as *const u8);
-    builder.symbol("jet_jit_bigint_eq", jet_jit_bigint_eq as *const u8);
-    builder.symbol("jet_jit_bigint_neg", jet_jit_bigint_neg as *const u8);
-    builder.symbol(
-        "jet_jit_bigint_to_string",
-        jet_jit_bigint_to_string as *const u8,
-    );
-    builder.symbol("jet_jit_decimal_from_str", jet_jit_decimal_from_str as *const u8);
-    builder.symbol("jet_jit_decimal_add", jet_jit_decimal_add as *const u8);
-    builder.symbol("jet_jit_decimal_sub", jet_jit_decimal_sub as *const u8);
-    builder.symbol("jet_jit_decimal_mul", jet_jit_decimal_mul as *const u8);
-    builder.symbol(
-        "jet_jit_decimal_to_string",
-        jet_jit_decimal_to_string as *const u8,
-    );
-    builder.symbol("jet_jit_fraction_new", jet_jit_fraction_new as *const u8);
-    builder.symbol("jet_jit_fraction_add", jet_jit_fraction_add as *const u8);
-    builder.symbol("jet_jit_fraction_sub", jet_jit_fraction_sub as *const u8);
-    builder.symbol("jet_jit_fraction_mul", jet_jit_fraction_mul as *const u8);
-    builder.symbol("jet_jit_fraction_div", jet_jit_fraction_div as *const u8);
-    builder.symbol("jet_jit_fraction_equal", jet_jit_fraction_equal as *const u8);
-    builder.symbol(
-        "jet_jit_fraction_numerator",
-        jet_jit_fraction_numerator as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_fraction_denominator",
-        jet_jit_fraction_denominator as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_fraction_to_string",
-        jet_jit_fraction_to_string as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_fraction_to_float",
-        jet_jit_fraction_to_float as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_fraction_is_zero",
-        jet_jit_fraction_is_zero as *const u8,
-    );
-}
 
-pub(crate) fn declare_numeric_host_fns(
-    module: &mut cranelift_jit::JITModule,
-) -> Result<NumericHostFns, String> {
-    use cranelift_codegen::ir::{types, AbiParam, Signature};
-    use cranelift_module::{Linkage, Module};
 
-    let cc = module.target_config().default_call_conv;
-    let mut sig_unary = Signature::new(cc);
-    sig_unary.params.push(AbiParam::new(types::I64));
-    sig_unary.returns.push(AbiParam::new(types::I64));
-    let mut sig_binary = Signature::new(cc);
-    sig_binary.params.push(AbiParam::new(types::I64));
-    sig_binary.params.push(AbiParam::new(types::I64));
-    sig_binary.returns.push(AbiParam::new(types::I64));
-    let mut sig_compare = Signature::new(cc);
-    sig_compare.params.push(AbiParam::new(types::I64));
-    sig_compare.params.push(AbiParam::new(types::I64));
-    sig_compare.returns.push(AbiParam::new(types::I8));
-    let mut sig_unary_bool = Signature::new(cc);
-    sig_unary_bool.params.push(AbiParam::new(types::I64));
-    sig_unary_bool.returns.push(AbiParam::new(types::I8));
-    let mut sig_unary_f64 = Signature::new(cc);
-    sig_unary_f64.params.push(AbiParam::new(types::I64));
-    sig_unary_f64.returns.push(AbiParam::new(types::F64));
 
-    let mut import = |name: &str, sig: &Signature| -> Result<cranelift_module::FuncId, String> {
-        module
-            .declare_function(name, Linkage::Import, sig)
-            .map_err(|e| e.to_string())
-    };
 
-    Ok(NumericHostFns {
-        bigint_from_int: import("jet_jit_bigint_from_int", &sig_unary)?,
-        bigint_from_str: import("jet_jit_bigint_from_str", &sig_unary)?,
-        bigint_add: import("jet_jit_bigint_add", &sig_binary)?,
-        bigint_sub: import("jet_jit_bigint_sub", &sig_binary)?,
-        bigint_mul: import("jet_jit_bigint_mul", &sig_binary)?,
-        bigint_eq: import("jet_jit_bigint_eq", &sig_compare)?,
-        bigint_neg: import("jet_jit_bigint_neg", &sig_unary)?,
-        bigint_to_string: import("jet_jit_bigint_to_string", &sig_unary)?,
-        decimal_from_str: import("jet_jit_decimal_from_str", &sig_unary)?,
-        decimal_add: import("jet_jit_decimal_add", &sig_binary)?,
-        decimal_sub: import("jet_jit_decimal_sub", &sig_binary)?,
-        decimal_mul: import("jet_jit_decimal_mul", &sig_binary)?,
-        decimal_to_string: import("jet_jit_decimal_to_string", &sig_unary)?,
-        fraction_new: import("jet_jit_fraction_new", &sig_binary)?,
-        fraction_add: import("jet_jit_fraction_add", &sig_binary)?,
-        fraction_sub: import("jet_jit_fraction_sub", &sig_binary)?,
-        fraction_mul: import("jet_jit_fraction_mul", &sig_binary)?,
-        fraction_div: import("jet_jit_fraction_div", &sig_binary)?,
-        fraction_equal: import("jet_jit_fraction_equal", &sig_compare)?,
-        fraction_numerator: import("jet_jit_fraction_numerator", &sig_unary)?,
-        fraction_denominator: import("jet_jit_fraction_denominator", &sig_unary)?,
-        fraction_to_string: import("jet_jit_fraction_to_string", &sig_unary)?,
-        fraction_to_float: import("jet_jit_fraction_to_float", &sig_unary_f64)?,
-        fraction_is_zero: import("jet_jit_fraction_is_zero", &sig_unary_bool)?,
-    })
-}

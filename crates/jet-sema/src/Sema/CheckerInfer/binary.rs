@@ -106,10 +106,7 @@ impl<'a> Checker<'a> {
     fn take_numeric_approx_operand(expr: &mut Expr, span: Span) -> Option<Expr> {
         match expr {
             Expr::Paren(inner, _) => Self::take_numeric_approx_operand(inner, span),
-            Expr::Call(call)
-                if call.name == Type::APPROX_NUMERIC_WIDEN_MARKER
-                    && call.args.len() == 1 =>
-            {
+            Expr::Call(call) if call.widen_approx && call.args.len() == 1 => {
                 Some(std::mem::replace(
                     &mut call.args[0].expr,
                     Expr::Absent(span),

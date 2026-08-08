@@ -271,7 +271,7 @@ pub(crate) fn run_compile_cmd(
         }
         if mode.json && lints.is_empty() {
             println!("{}", jet::render_all_json(file, &src, &[]).trim_end());
-        } else if !mode.json && lints.is_empty() {
+        } else if !mode.json && lints.is_empty() && !mode.quiet {
             println!("ok: `{}` has no problems", file);
         }
         return;
@@ -619,12 +619,14 @@ pub(crate) fn run_compile_cmd(
             if crate::CmdBudget::run_build_gates(file,&artifact_path,budget_target,&budget_profile)!=0{
                 exit(ExitCodes::USER_ERROR);
             }
-            if is_web {
-                println!("built: build/app.wasm + build/app.js");
-            } else if is_plugin {
-                println!("built: build/{}.wasm (sandboxed plugin)", stem(file));
-            } else {
-                println!("built: {}", bin_path(file).display());
+            if !mode.quiet {
+                if is_web {
+                    println!("built: build/app.wasm + build/app.js");
+                } else if is_plugin {
+                    println!("built: build/{}.wasm (sandboxed plugin)", stem(file));
+                } else {
+                    println!("built: {}", bin_path(file).display());
+                }
             }
             if explain_partition {
                 if let Some(report) = &web_partition_report {
@@ -632,11 +634,13 @@ pub(crate) fn run_compile_cmd(
                 }
             }
             if let Some(triple) = cross_target {
-                println!("target: {}", triple);
+                if !mode.quiet {
+                    println!("target: {}", triple);
+                }
             }
             // D-SUPPLY1: `--sbom` writes an SPDX SBOM next to the binary.
             if sbom {
-                write_sbom_for_build(file, &bin_path(file));
+                write_sbom_for_build(file, &bin_path(file), mode);
             }
             // D-TOOL5 (E2-M11): print capability summary after a successful build.
             if capabilities_json {
@@ -1010,7 +1014,7 @@ pub(crate) fn run_tasks(file: &str, mode: OutputMode) {
 /// program with no project is emitted with just the root component. When a
 /// Package root and lockfile exist, the SBOM lists every locked dependency with
 /// its tree-hash checksum.
-fn write_sbom_for_build(file: &str, bin: &Path) {
+fn write_sbom_for_build(file: &str, bin: &Path, mode: OutputMode) {
     let file_path = Path::new(file);
     let search_from = file_path.parent().unwrap_or(Path::new("."));
 
@@ -1047,7 +1051,13 @@ fn write_sbom_for_build(file: &str, bin: &Path) {
     let sbom = jet::Publish::emit_spdx(&lock, &name, &version);
     let out = bin.with_extension("spdx");
     match fs::write(&out, sbom) {
-        Ok(()) => println!("sbom: {}", out.display()),
+        // #1659 criterion 3: the SBOM was still written; `--quiet` only mutes
+        // this confirmation line, never the warning below.
+        Ok(()) => {
+            if !mode.quiet {
+                println!("sbom: {}", out.display());
+            }
+        }
         Err(e) => eprintln!("warning: couldn't write SBOM to {}: {}", out.display(), e),
     }
 }
@@ -1173,7 +1183,7 @@ fn rewrite_json_canonical_calls(src: &str) -> String {
 /// `src` fallible (S34 `-> T ? E` / bare `T ?`)? Walks outward through
 /// nested `{ }` scopes — `if`/`for`/`match`/struct-literal bodies aren't
 /// functions — until a scope's header text parses as a `fn` signature, or
-/// there is no enclosing scope (top-level, e.g. a `#Known` initializer:
+/// there is no enclosing scope (top-level, e.g. a `$` initializer:
 /// not fallible, since `?` propagation requires an enclosing fallible fn).
 fn enclosing_fn_is_fallible(src: &str, at: usize) -> bool {
     let mut scan_from = at;
@@ -1312,7 +1322,7 @@ fn edition_2027_encoding_audit(before: &str, after: &str) -> Vec<String> {
     notes
 }
 
-pub(crate) fn run_new(name: &str, annotated: bool) {
+pub(crate) fn run_new(name: &str, annotated: bool, mode: OutputMode) {
     if name.is_empty() || name.contains('/') || name.contains('\\') {
         eprintln!("error: project name must be a simple folder name");
         eprintln!(" fix: try: {} new my_app", jet::Syntax::BINARY_NAME);
@@ -1347,11 +1357,15 @@ pub(crate) fn run_new(name: &str, annotated: bool) {
         eprintln!("error: couldn't write .gitignore: {}", e);
         exit(ExitCodes::USER_ERROR);
     });
-    println!("created {}/", name);
-    println!("  {}", jet::Syntax::PACKAGE_FILE);
-    println!("  {}", jet::Syntax::DEFAULT_ENTRY_FILE);
-    println!("  .gitignore");
-    println!("next: cd {} && {} run", name, jet::Syntax::BINARY_NAME);
+    // #1659 criterion 3: `--quiet` suppresses this confirmation; the project
+    // itself was still created — only the non-error status narration mutes.
+    if !mode.quiet {
+        println!("created {}/", name);
+        println!("  {}", jet::Syntax::PACKAGE_FILE);
+        println!("  {}", jet::Syntax::DEFAULT_ENTRY_FILE);
+        println!("  .gitignore");
+        println!("next: cd {} && {} run", name, jet::Syntax::BINARY_NAME);
+    }
 }
 
 /// `jet test` flags beyond the file/dir target (D-TESTKIT1=A gaps #2-#4).
@@ -2709,8 +2723,8 @@ fn rebuild_dev_web(
         }
     };
     let Some(web) = &out.web else {
-        let message = "internal compiler error: missing web codegen output".to_string();
-        eprintln!("error: {message}");
+        let message = jet::Diagnostics::render_ice_report("missing web codegen output", "", false);
+        eprintln!("{message}");
         host.mark_error("ICE".to_string(), message, is_rebuild);
         return false;
     };
@@ -2886,9 +2900,10 @@ pub(crate) fn write_web_artifacts(
         .map_err(|e| format!("error: couldn't run rustc for wasm: {}", e))?;
 
     if !rustc.status.success() {
-        return Err(format!(
-            "error: rustc rejected generated wasm module (internal compiler error)\n{}",
-            String::from_utf8_lossy(&rustc.stderr)
+        return Err(jet::Diagnostics::render_ice_report(
+            "rustc rejected generated wasm module",
+            &String::from_utf8_lossy(&rustc.stderr),
+            true,
         ));
     }
 
@@ -3149,7 +3164,10 @@ pub(crate) fn build(
     // D-WEBKIND1=A (c123 M2): `web` is a Jet backend target — emit WASM + JS.
     if cross_target == Some(jet::Syntax::BUILD_TARGET_WEB) {
         let web = web.unwrap_or_else(|| {
-            eprintln!("error: internal compiler error: missing web codegen output");
+            eprintln!(
+                "{}",
+                jet::Diagnostics::render_ice_report("missing web codegen output", "", false)
+            );
             exit(ExitCodes::ICE);
         });
         let emit_maps = !matches!(profile, BuildProfile::Release);
@@ -3188,15 +3206,18 @@ pub(crate) fn build(
     // sandboxed wasm32 Component Model module instead of a native binary.
     if cross_target == Some(jet::Syntax::TARGET_PLUGIN) {
         let plugin = plugin.unwrap_or_else(|| {
-            eprintln!("error: internal compiler error: missing plugin codegen output");
+            eprintln!(
+                "{}",
+                jet::Diagnostics::render_ice_report("missing plugin codegen output", "", false)
+            );
             exit(ExitCodes::ICE);
         });
         let paths = match write_plugin_artifacts(file, plugin, verbose, Path::new("build")) {
             Ok(p) => p,
             Err(PluginBuildError::GeneratedCodeRejected(msg)) => {
                 eprintln!(
-                    "error: rustc rejected generated code (internal compiler error)\n{}",
-                    msg
+                    "{}",
+                    jet::Diagnostics::render_ice_report("rustc rejected generated code", &msg, true)
                 );
                 exit(ExitCodes::ICE);
             }
@@ -3363,15 +3384,15 @@ pub(crate) fn build(
             );
             exit(ExitCodes::USER_ERROR);
         }
-        eprintln!("internal compiler error: the generated Rust did not compile.");
-        eprintln!(
-            "This is a bug in {}, NOT in your program. Please report it,",
-            jet::Syntax::BINARY_NAME
+        let detail = format!(
+            "  generated: {}\n--- rustc said ---\n{}",
+            rs_path.display(),
+            stderr
         );
-        eprintln!("attaching your source file and the generated file below.");
-        eprintln!("  generated: {}", rs_path.display());
-        eprintln!("--- rustc said ---");
-        eprintln!("{}", stderr);
+        eprintln!(
+            "{}",
+            jet::Diagnostics::render_ice_report("the generated Rust did not compile.", &detail, true)
+        );
         exit(ExitCodes::ICE);
     }
 

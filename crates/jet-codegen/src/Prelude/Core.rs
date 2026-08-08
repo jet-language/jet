@@ -1928,7 +1928,7 @@ where
 {
     xs.iter().map(f).collect()
 }
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct JetMap<K, V>(std::sync::Arc<std::collections::BTreeMap<K, V>>);
 
 impl<K, V> JetMap<K, V> {

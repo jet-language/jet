@@ -855,14 +855,14 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 gc_transferred: false,
                 };
             }
-            // c109 (S57/M9.5): a comptime LOCAL `#Known name :: expr`. The AST `emit_let`
+            // c109 (S57/M9.5): a comptime LOCAL `$name :: expr`. The AST `emit_let`
             // builds `init` from `b.ct.serialize()` (the sema-evaluated value rendered to a
             // Rust literal) — the runtime `init` expr is never emitted. Reproduce it: a
             // verbatim `ConstInline` of the same serialized string, with `kw: "let"` (the
             // `(b.mutable && !b.is_comptime)` guard makes it `let`, never `let mut`) and the
             // type clause from `b.ty` (rendered exactly as the non-comptime path below). All
             // facts are pre-resolved (I3): no inference here.
-            // A comptime local inside a `#Known { … }` block is evaluated by
+            // A comptime local inside a `$ { … }` block is evaluated by
             // the interpreter itself, so sema never pre-resolves `b.ct`. There
             // the binding is an ordinary one whose init runs now; only a
             // pre-resolved value becomes literal data.
@@ -871,10 +871,19 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             // source literal (retag below) instead of baking a CtLit.
             // D-SG9: same for `[U8]`/`[I32]`/… — serialize always suffixes `i64`, which
             // rustc rejects against `Vec<u8>` (I2). Lower + preserve_typed_list_shape.
+            // Trait-object elements (`[Shape].{ Circle.{…}, Square.{…} }`) need the
+            // same skip: `CtValue::serialize`/`bake_comptime_value_with_type` have no
+            // concept of `Box<dyn Trait>` boxing, so a comptime-baked `CtLit` emits
+            // bare struct literals where rustc expects `Box::new(...)` (I2). Lower +
+            // preserve_typed_list_shape instead, which already boxes trait elements.
+            let is_trait_elem = |elem: &Type| {
+                matches!(elem, Type::TraitObject(_))
+                    || matches!(elem, Type::Named(name) if cx.trait_names.contains(name))
+            };
             let skip_ct_list_bake = matches!(b.ty.as_ref(), Some(Type::FixedList { .. }))
                 || matches!(
                     b.ty.as_ref(),
-                    Some(Type::List(elem)) if matches!(elem.as_ref(), Type::IntN { .. })
+                    Some(Type::List(elem)) if matches!(elem.as_ref(), Type::IntN { .. }) || is_trait_elem(elem)
                 );
             if b.ct.is_some() && !skip_ct_list_bake {
                 let let_ty = crate::Codegen::TIR::let_ty_for_opt(b.ty.as_ref(), cx, false, false, false);
@@ -905,9 +914,14 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             }
             let mut init =
                 moved_view.unwrap_or_else(|| lower_owned_expr(&b.init, cx, env));
-            if let Some(want) = &b.ty {
-                init = preserve_typed_list_shape(init, want, cx);
-            }
+            // No declared `b.ty`? A typed list head (`[Shape].{ Circle.{…}, … }`)
+            // still carries its own resolved element type on `init.ty` — reuse it
+            // self-referentially so trait-object elements still get boxed
+            // (`Box::new(...)`) below. Without this, an inferred `shapes :: [Shape].{…}`
+            // binding skipped the same coercion an explicit `shapes: [Shape] :: …`
+            // binding got, and rustc rejected the un-boxed struct literals (I2).
+            let want = b.ty.clone().unwrap_or_else(|| init.ty.clone());
+            init = preserve_typed_list_shape(init, &want, cx);
             // D-FIXARR1: if the binding type is `[T#N]` and the init lowered as a
             // growable list (e.g. a typed-head literal elaborated to ListLit), re-tag
             // so emit produces a Rust array `[e1, …]` instead of `vec![…]`.
@@ -1620,7 +1634,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             else_body,
             span,
         } => lower_switch(subject, arms, else_body, *span, cx, env),
-        // D-CTMARKER1 (ratified 2026-06-25, piece 2): `#Known { … }` runs at
+        // D-META-STAGE1=B (formerly D-CTMARKER1, ratified 2026-06-25, piece 2): `$ { … }` runs at
         // build time and erases entirely — no runtime Rust is emitted (I3).
         Stmt::ComptimeBlock { .. } => TStmt::Inline(vec![]),
         // D-CANVASSTATE1=D: `#Off` type-checks in sema but emits no runtime TIR.

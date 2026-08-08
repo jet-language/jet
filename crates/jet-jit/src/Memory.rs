@@ -640,189 +640,70 @@ extern "C" fn jet_jit_expiring_is_valid(handle: i64, clock: i64) -> i8 {
     i8::from(jet_jit_expiring_get(handle, clock) != 0)
 }
 
-pub(crate) struct MemoryHostFns {
-    pub allocator_new: cranelift_module::FuncId,
-    pub allocator_alloc: cranelift_module::FuncId,
-    pub allocator_reset: cranelift_module::FuncId,
-    pub pool_new: cranelift_module::FuncId,
-    pub pool_add: cranelift_module::FuncId,
-    pub pool_get: cranelift_module::FuncId,
-    pub pool_remove: cranelift_module::FuncId,
-    pub pool_ids: cranelift_module::FuncId,
-    pub shared_new: cranelift_module::FuncId,
-    pub shared_begin: cranelift_module::FuncId,
-    pub shared_end_read: cranelift_module::FuncId,
-    pub shared_end_write: cranelift_module::FuncId,
-    pub shared_downgrade: cranelift_module::FuncId,
-    pub shared_strong_count: cranelift_module::FuncId,
-    pub shared_weak_upgrade: cranelift_module::FuncId,
-    pub condition_new: cranelift_module::FuncId,
-    pub condition_notify_one: cranelift_module::FuncId,
-    pub condition_notify_all: cranelift_module::FuncId,
-    pub shared_guard_begin: cranelift_module::FuncId,
-    pub shared_guard_value: cranelift_module::FuncId,
-    pub shared_guard_set_value: cranelift_module::FuncId,
-    pub shared_guard_end: cranelift_module::FuncId,
-    pub shared_guard_wait_once: cranelift_module::FuncId,
-    pub shared_txn_begin: cranelift_module::FuncId,
-    pub shared_txn_get: cranelift_module::FuncId,
-    pub shared_txn_set: cranelift_module::FuncId,
-    pub shared_txn_commit: cranelift_module::FuncId,
-    pub shared_txn_abort: cranelift_module::FuncId,
-    pub expiring_new: cranelift_module::FuncId,
-    pub expiring_get: cranelift_module::FuncId,
-    pub expiring_is_valid: cranelift_module::FuncId,
-}
+host_fns! {
+    struct MemoryHostFns;
+    register: register_memory_symbols;
+    declare: declare_memory_host_fns(module) {
+        use cranelift_codegen::ir::{types, AbiParam, Signature};
+        use cranelift_module::{Linkage, Module};
+        let cc = module.target_config().default_call_conv;
+        let mut noarg_i64 = Signature::new(cc);
+        noarg_i64.returns.push(AbiParam::new(types::I64));
+        let mut unary = Signature::new(cc);
+        unary.params.push(AbiParam::new(types::I64));
+        unary.returns.push(AbiParam::new(types::I64));
+        let mut binary = unary.clone();
+        binary.params.push(AbiParam::new(types::I64));
+        let mut unary_void = Signature::new(cc);
+        unary_void.params.push(AbiParam::new(types::I64));
+        let mut binary_void = unary_void.clone();
+        binary_void.params.push(AbiParam::new(types::I64));
+        let mut quaternary = Signature::new(cc);
+        for _ in 0..4 {
+            quaternary.params.push(AbiParam::new(types::I64));
+        }
+        quaternary.returns.push(AbiParam::new(types::I64));
+        let mut binary_i8 = Signature::new(cc);
+        binary_i8.params.push(AbiParam::new(types::I64));
+        binary_i8.params.push(AbiParam::new(types::I64));
+        binary_i8.returns.push(AbiParam::new(types::I8));
 
-pub(crate) fn register_memory_symbols(builder: &mut cranelift_jit::JITBuilder) {
-    builder.symbol("jet_jit_allocator_new", jet_jit_allocator_new as *const u8);
-    builder.symbol(
-        "jet_jit_allocator_alloc",
-        jet_jit_allocator_alloc as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_allocator_reset",
-        jet_jit_allocator_reset as *const u8,
-    );
-    builder.symbol("jet_jit_pool_new", jet_jit_pool_new as *const u8);
-    builder.symbol("jet_jit_pool_add", jet_jit_pool_add as *const u8);
-    builder.symbol("jet_jit_pool_get", jet_jit_pool_get as *const u8);
-    builder.symbol("jet_jit_pool_remove", jet_jit_pool_remove as *const u8);
-    builder.symbol("jet_jit_pool_ids", jet_jit_pool_ids as *const u8);
-    builder.symbol("jet_jit_shared_new", jet_jit_shared_new as *const u8);
-    builder.symbol("jet_jit_shared_begin", jet_jit_shared_begin as *const u8);
-    builder.symbol(
-        "jet_jit_shared_end_read",
-        jet_jit_shared_end_read as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_shared_end_write",
-        jet_jit_shared_end_write as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_shared_downgrade",
-        jet_jit_shared_downgrade as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_shared_strong_count",
-        jet_jit_shared_strong_count as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_shared_weak_upgrade",
-        jet_jit_shared_weak_upgrade as *const u8,
-    );
-    builder.symbol("jet_jit_condition_new", jet_jit_condition_new as *const u8);
-    builder.symbol(
-        "jet_jit_condition_notify_one",
-        jet_jit_condition_notify_one as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_condition_notify_all",
-        jet_jit_condition_notify_all as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_shared_guard_begin",
-        jet_jit_shared_guard_begin as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_shared_guard_value",
-        jet_jit_shared_guard_value as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_shared_guard_set_value",
-        jet_jit_shared_guard_set_value as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_shared_guard_end",
-        jet_jit_shared_guard_end as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_shared_guard_wait_once",
-        jet_jit_shared_guard_wait_once as *const u8,
-    );
-    builder.symbol("jet_jit_shared_txn_begin", jet_jit_shared_txn_begin as *const u8);
-    builder.symbol("jet_jit_shared_txn_get", jet_jit_shared_txn_get as *const u8);
-    builder.symbol("jet_jit_shared_txn_set", jet_jit_shared_txn_set as *const u8);
-    builder.symbol(
-        "jet_jit_shared_txn_commit",
-        jet_jit_shared_txn_commit as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_shared_txn_abort",
-        jet_jit_shared_txn_abort as *const u8,
-    );
-    builder.symbol("jet_jit_expiring_new", jet_jit_expiring_new as *const u8);
-    builder.symbol("jet_jit_expiring_get", jet_jit_expiring_get as *const u8);
-    builder.symbol(
-        "jet_jit_expiring_is_valid",
-        jet_jit_expiring_is_valid as *const u8,
-    );
-}
 
-pub(crate) fn declare_memory_host_fns(
-    module: &mut cranelift_jit::JITModule,
-) -> Result<MemoryHostFns, String> {
-    use cranelift_codegen::ir::{types, AbiParam, Signature};
-    use cranelift_module::{Linkage, Module};
-
-    let cc = module.target_config().default_call_conv;
-    let mut noarg_i64 = Signature::new(cc);
-    noarg_i64.returns.push(AbiParam::new(types::I64));
-    let mut unary = Signature::new(cc);
-    unary.params.push(AbiParam::new(types::I64));
-    unary.returns.push(AbiParam::new(types::I64));
-    let mut binary = unary.clone();
-    binary.params.push(AbiParam::new(types::I64));
-    let mut unary_void = Signature::new(cc);
-    unary_void.params.push(AbiParam::new(types::I64));
-    let mut binary_void = unary_void.clone();
-    binary_void.params.push(AbiParam::new(types::I64));
-    let mut quaternary = Signature::new(cc);
-    for _ in 0..4 {
-        quaternary.params.push(AbiParam::new(types::I64));
     }
-    quaternary.returns.push(AbiParam::new(types::I64));
-    let mut binary_i8 = Signature::new(cc);
-    binary_i8.params.push(AbiParam::new(types::I64));
-    binary_i8.params.push(AbiParam::new(types::I64));
-    binary_i8.returns.push(AbiParam::new(types::I8));
-    let mut import = |name: &str, sig: &Signature| {
-        module
-            .declare_function(name, Linkage::Import, sig)
-            .map_err(|error| error.to_string())
-    };
-
-    Ok(MemoryHostFns {
-        allocator_new: import("jet_jit_allocator_new", &noarg_i64)?,
-        allocator_alloc: import("jet_jit_allocator_alloc", &binary)?,
-        allocator_reset: import("jet_jit_allocator_reset", &unary_void)?,
-        pool_new: import("jet_jit_pool_new", &noarg_i64)?,
-        pool_add: import("jet_jit_pool_add", &binary)?,
-        pool_get: import("jet_jit_pool_get", &binary)?,
-        pool_remove: import("jet_jit_pool_remove", &binary)?,
-        pool_ids: import("jet_jit_pool_ids", &unary)?,
-        shared_new: import("jet_jit_shared_new", &unary)?,
-        shared_begin: import("jet_jit_shared_begin", &unary)?,
-        shared_end_read: import("jet_jit_shared_end_read", &unary_void)?,
-        shared_end_write: import("jet_jit_shared_end_write", &binary_void)?,
-        shared_downgrade: import("jet_jit_shared_downgrade", &unary)?,
-        shared_strong_count: import("jet_jit_shared_strong_count", &unary)?,
-        shared_weak_upgrade: import("jet_jit_shared_weak_upgrade", &unary)?,
-        condition_new: import("jet_jit_condition_new", &noarg_i64)?,
-        condition_notify_one: import("jet_jit_condition_notify_one", &unary_void)?,
-        condition_notify_all: import("jet_jit_condition_notify_all", &unary_void)?,
-        shared_guard_begin: import("jet_jit_shared_guard_begin", &binary)?,
-        shared_guard_value: import("jet_jit_shared_guard_value", &unary)?,
-        shared_guard_set_value: import("jet_jit_shared_guard_set_value", &binary_void)?,
-        shared_guard_end: import("jet_jit_shared_guard_end", &unary_void)?,
-        shared_guard_wait_once: import("jet_jit_shared_guard_wait_once", &binary_void)?,
-        shared_txn_begin: import("jet_jit_shared_txn_begin", &Signature::new(cc))?,
-        shared_txn_get: import("jet_jit_shared_txn_get", &unary)?,
-        shared_txn_set: import("jet_jit_shared_txn_set", &binary_void)?,
-        shared_txn_commit: import("jet_jit_shared_txn_commit", &Signature::new(cc))?,
-        shared_txn_abort: import("jet_jit_shared_txn_abort", &Signature::new(cc))?,
-        expiring_new: import("jet_jit_expiring_new", &quaternary)?,
-        expiring_get: import("jet_jit_expiring_get", &binary)?,
-        expiring_is_valid: import("jet_jit_expiring_is_valid", &binary_i8)?,
-    })
+    allocator_new: "jet_jit_allocator_new" => jet_jit_allocator_new: noarg_i64;
+    allocator_alloc: "jet_jit_allocator_alloc" => jet_jit_allocator_alloc: binary;
+    allocator_reset: "jet_jit_allocator_reset" => jet_jit_allocator_reset: unary_void;
+    pool_new: "jet_jit_pool_new" => jet_jit_pool_new: noarg_i64;
+    pool_add: "jet_jit_pool_add" => jet_jit_pool_add: binary;
+    pool_get: "jet_jit_pool_get" => jet_jit_pool_get: binary;
+    pool_remove: "jet_jit_pool_remove" => jet_jit_pool_remove: binary;
+    pool_ids: "jet_jit_pool_ids" => jet_jit_pool_ids: unary;
+    shared_new: "jet_jit_shared_new" => jet_jit_shared_new: unary;
+    shared_begin: "jet_jit_shared_begin" => jet_jit_shared_begin: unary;
+    shared_end_read: "jet_jit_shared_end_read" => jet_jit_shared_end_read: unary_void;
+    shared_end_write: "jet_jit_shared_end_write" => jet_jit_shared_end_write: binary_void;
+    shared_downgrade: "jet_jit_shared_downgrade" => jet_jit_shared_downgrade: unary;
+    shared_strong_count: "jet_jit_shared_strong_count" => jet_jit_shared_strong_count: unary;
+    shared_weak_upgrade: "jet_jit_shared_weak_upgrade" => jet_jit_shared_weak_upgrade: unary;
+    condition_new: "jet_jit_condition_new" => jet_jit_condition_new: noarg_i64;
+    condition_notify_one: "jet_jit_condition_notify_one" => jet_jit_condition_notify_one: unary_void;
+    condition_notify_all: "jet_jit_condition_notify_all" => jet_jit_condition_notify_all: unary_void;
+    shared_guard_begin: "jet_jit_shared_guard_begin" => jet_jit_shared_guard_begin: binary;
+    shared_guard_value: "jet_jit_shared_guard_value" => jet_jit_shared_guard_value: unary;
+    shared_guard_set_value: "jet_jit_shared_guard_set_value" => jet_jit_shared_guard_set_value: binary_void;
+    shared_guard_end: "jet_jit_shared_guard_end" => jet_jit_shared_guard_end: unary_void;
+    shared_guard_wait_once: "jet_jit_shared_guard_wait_once" => jet_jit_shared_guard_wait_once: binary_void;
+    shared_txn_begin: "jet_jit_shared_txn_begin" => jet_jit_shared_txn_begin: Signature::new(cc);
+    shared_txn_get: "jet_jit_shared_txn_get" => jet_jit_shared_txn_get: unary;
+    shared_txn_set: "jet_jit_shared_txn_set" => jet_jit_shared_txn_set: binary_void;
+    shared_txn_commit: "jet_jit_shared_txn_commit" => jet_jit_shared_txn_commit: Signature::new(cc);
+    shared_txn_abort: "jet_jit_shared_txn_abort" => jet_jit_shared_txn_abort: Signature::new(cc);
+    expiring_new: "jet_jit_expiring_new" => jet_jit_expiring_new: quaternary;
+    expiring_get: "jet_jit_expiring_get" => jet_jit_expiring_get: binary;
+    expiring_is_valid: "jet_jit_expiring_is_valid" => jet_jit_expiring_is_valid: binary_i8;
 }
+
+
+
+
+

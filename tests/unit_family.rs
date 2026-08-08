@@ -62,6 +62,38 @@ fn open_base_and_derived_dimension_claims_parse() {
     ));
 }
 
+/// D-QUANTITY-DECL1=A: `base` documents a default of "first member". A family
+/// that claims a dimension, or writes conversion metadata on a member,
+/// applies the default when `base` is omitted.
+#[test]
+fn omitted_base_defaults_to_first_member() {
+    let dimensioned = parse_family("#UnitFamily(Length, dimension) { meter foot }");
+    assert_eq!(
+        dimensioned.base.as_ref().map(|(name, _)| name.as_str()),
+        Some("meter")
+    );
+
+    let converted = parse_family("#UnitFamily(Length) { meter millimeter(scale: 1/1000) }");
+    assert_eq!(
+        converted.base.as_ref().map(|(name, _)| name.as_str()),
+        Some("meter")
+    );
+    let codes = codes_of(
+        "#UnitFamily(Length) { meter millimeter(scale: 1/1000) }\n\
+         fn run() { m :: Millimeter.from_float(1000.0); print(\"{(m.raw())}\") }\n",
+    );
+    assert!(codes.is_empty(), "expected clean compile, got {codes:?}");
+}
+
+/// A bare family — no `dimension`, no member conversion metadata — stays
+/// fully nominal (D-QUAL3/D-DIMENSION-OPEN1): the default never applies, so
+/// members keep no base and no cross-member conversion.
+#[test]
+fn omitted_base_without_dimension_or_conversion_stays_none() {
+    let family = parse_family("#UnitFamily(Currency) { usd eur }");
+    assert!(family.base.is_none());
+}
+
 #[test]
 fn derived_dimension_requires_one_scale_one_anchor() {
     let src = "#UnitFamily(Energy, dimension: Force * Length) { joule }";
@@ -1693,7 +1725,7 @@ fn standard_units_share_canonical_owner_across_dependency_boundary() {
     std::fs::create_dir_all(&dep).unwrap();
     std::fs::write(
         app.join("pkg.jet"),
-        "payload: { name: \"app\", version: \"0.1.0\" }\ndeps: { dep: ../dep }\n",
+        "name: \"app\"\nversion: \"0.1.0\"\ndeps: { dep: ../dep }\n",
     )
     .unwrap();
     std::fs::write(
@@ -1703,7 +1735,7 @@ fn standard_units_share_canonical_owner_across_dependency_boundary() {
     .unwrap();
     std::fs::write(
         dep.join("pkg.jet"),
-        "payload: { name: \"dep\", version: \"0.1.0\" }\n",
+        "name: \"dep\"\nversion: \"0.1.0\"\n",
     )
     .unwrap();
     std::fs::write(
@@ -1788,7 +1820,7 @@ fn custom_axis_identity_ignores_checkout_root_and_separates_packages() {
         std::fs::create_dir_all(root).unwrap();
         std::fs::write(
             root.join("pkg.jet"),
-            format!("payload: {{ name: \"{package}\", version: \"1.0.0\" }}\n"),
+            format!("name: \"{package}\"\nversion: \"1.0.0\"\n"),
         )
         .unwrap();
         std::fs::write(

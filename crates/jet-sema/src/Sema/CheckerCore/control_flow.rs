@@ -54,12 +54,12 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0989",
                     format!(
-                        "a `#Known if` condition must be {}, not another type",
+                        "a `$if` condition must be {}, not another type",
                         Type::Bool.show()
                     ),
                     "the condition selects a branch at compile time — it must be true or false"
                         .to_string(),
-                    "write a Bool known-time expression, like `#Known if flag { … }`"
+                    "write a Bool known-time expression, like `$if flag { … }`"
                         .to_string(),
                     Some(*cond_span),
                 ));
@@ -68,9 +68,9 @@ impl<'a> Checker<'a> {
             Err(_) => {
                 self.diags.push(Diagnostic::error(
                     "E0989",
-                    "this `#Known if` condition can't be known at compile time".to_string(),
-                    "a `#Known if` condition must be a known-time expression — a `#Known` binding, a literal, or a pure function call with known arguments (D-WHEN1)".to_string(),
-                    "use a `#Known` binding: `#Known flag :: …; #Known if flag { … }`"
+                    "this `$if` condition can't be known at compile time".to_string(),
+                    "a `$if` condition must be a known-time expression — a `$` binding, a literal, or a pure function call with known arguments (D-WHEN1)".to_string(),
+                    "use a `$` binding: `$flag :: …; $if flag { … }`"
                         .to_string(),
                     Some(*cond_span),
                 ));
@@ -93,9 +93,14 @@ impl<'a> Checker<'a> {
         if let Some(dropped) = dropped_arm {
             let diagnostic_start = self.diags.len();
             let previous = self.in_dropped_comptime_arm;
+            // D-FACT-FLOW1: the dropped arm is walked for name resolution only.
+            // It is not a path through this code, so nothing it does to the
+            // flow facts survives it.
+            let facts = self.flow.clone();
             self.in_dropped_comptime_arm = true;
             self.check_block(dropped, true);
             self.in_dropped_comptime_arm = previous;
+            self.flow = facts;
             let diagnostics: Vec<Diagnostic> =
                 self.diags.drain(diagnostic_start..).collect();
             self.diags.extend(

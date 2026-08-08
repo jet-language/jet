@@ -375,137 +375,77 @@ extern "C" fn jet_jit_rng_split(handle: i64) -> i64 {
     })
 }
 
-pub(crate) struct RandomHostFns {
-    pub seed: cranelift_module::FuncId,
-    pub bool_p: cranelift_module::FuncId,
-    pub float_range: cranelift_module::FuncId,
-    pub normal: cranelift_module::FuncId,
-    pub exponential: cranelift_module::FuncId,
-    pub bytes: cranelift_module::FuncId,
-    pub weighted_pick: cranelift_module::FuncId,
-    pub sample: cranelift_module::FuncId,
-    pub rng_new: cranelift_module::FuncId,
-    pub rng_int: cranelift_module::FuncId,
-    pub rng_float_range: cranelift_module::FuncId,
-    pub rng_bool: cranelift_module::FuncId,
-    pub rng_bool_p: cranelift_module::FuncId,
-    pub rng_pick: cranelift_module::FuncId,
-    pub rng_shuffle: cranelift_module::FuncId,
-    pub rng_weighted_pick: cranelift_module::FuncId,
-    pub rng_sample: cranelift_module::FuncId,
-    pub rng_bytes: cranelift_module::FuncId,
-    pub rng_split: cranelift_module::FuncId,
+host_fns! {
+    struct RandomHostFns;
+    register: register_random_symbols;
+    declare: declare_random_host_fns(module) {
+        use cranelift_codegen::ir::{types, AbiParam, Signature};
+        use cranelift_module::{Linkage, Module};
+        let cc = module.target_config().default_call_conv;
+
+        let mut sig_void_i64 = Signature::new(cc);
+        sig_void_i64.params.push(AbiParam::new(types::I64));
+        let mut sig_void_i64_i64 = Signature::new(cc);
+        sig_void_i64_i64.params.push(AbiParam::new(types::I64));
+        sig_void_i64_i64.params.push(AbiParam::new(types::I64));
+        let mut sig_f64_i8 = Signature::new(cc);
+        sig_f64_i8.params.push(AbiParam::new(types::F64));
+        sig_f64_i8.returns.push(AbiParam::new(types::I8));
+        let mut sig_f64_f64_f64 = Signature::new(cc);
+        sig_f64_f64_f64.params.push(AbiParam::new(types::F64));
+        sig_f64_f64_f64.params.push(AbiParam::new(types::F64));
+        sig_f64_f64_f64.returns.push(AbiParam::new(types::F64));
+        let mut sig_f64 = Signature::new(cc);
+        sig_f64.params.push(AbiParam::new(types::F64));
+        sig_f64.returns.push(AbiParam::new(types::F64));
+        let mut sig_i64_i64 = Signature::new(cc);
+        sig_i64_i64.params.push(AbiParam::new(types::I64));
+        sig_i64_i64.returns.push(AbiParam::new(types::I64));
+        let mut sig_i64_i64_i64 = Signature::new(cc);
+        sig_i64_i64_i64.params.push(AbiParam::new(types::I64));
+        sig_i64_i64_i64.params.push(AbiParam::new(types::I64));
+        sig_i64_i64_i64.returns.push(AbiParam::new(types::I64));
+        let mut sig_i64_i64_i64_i64 = Signature::new(cc);
+        sig_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
+        sig_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
+        sig_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
+        sig_i64_i64_i64_i64.returns.push(AbiParam::new(types::I64));
+        let mut sig_rng_fr = Signature::new(cc);
+        sig_rng_fr.params.push(AbiParam::new(types::I64));
+        sig_rng_fr.params.push(AbiParam::new(types::F64));
+        sig_rng_fr.params.push(AbiParam::new(types::F64));
+        sig_rng_fr.returns.push(AbiParam::new(types::F64));
+        let mut sig_rng_bool = Signature::new(cc);
+        sig_rng_bool.params.push(AbiParam::new(types::I64));
+        sig_rng_bool.params.push(AbiParam::new(types::F64));
+        sig_rng_bool.returns.push(AbiParam::new(types::I8));
+        let mut sig_rng_bool_default = Signature::new(cc);
+        sig_rng_bool_default.params.push(AbiParam::new(types::I64));
+        sig_rng_bool_default.returns.push(AbiParam::new(types::I8));
+
+    }
+    seed: "jet_jit_random_seed" => jet_jit_random_seed: sig_void_i64;
+    bool_p: "jet_jit_random_bool" => jet_jit_random_bool: sig_f64_i8;
+    float_range: "jet_jit_random_float_range" => jet_jit_random_float_range: sig_f64_f64_f64;
+    normal: "jet_jit_random_normal" => jet_jit_random_normal: sig_f64_f64_f64;
+    exponential: "jet_jit_random_exponential" => jet_jit_random_exponential: sig_f64;
+    bytes: "jet_jit_random_bytes" => jet_jit_random_bytes: sig_i64_i64;
+    weighted_pick: "jet_jit_random_weighted_pick" => jet_jit_random_weighted_pick: sig_i64_i64_i64;
+    sample: "jet_jit_random_sample" => jet_jit_random_sample: sig_i64_i64_i64;
+    rng_new: "jet_jit_rng_new" => jet_jit_rng_new: sig_i64_i64;
+    rng_int: "jet_jit_rng_int" => jet_jit_rng_int: sig_i64_i64_i64_i64;
+    rng_float_range: "jet_jit_rng_float_range" => jet_jit_rng_float_range: sig_rng_fr;
+    rng_bool: "jet_jit_rng_bool" => jet_jit_rng_bool: sig_rng_bool_default;
+    rng_bool_p: "jet_jit_rng_bool_p" => jet_jit_rng_bool_p: sig_rng_bool;
+    rng_pick: "jet_jit_rng_pick" => jet_jit_rng_pick: sig_i64_i64_i64;
+    rng_shuffle: "jet_jit_rng_shuffle" => jet_jit_rng_shuffle: sig_void_i64_i64;
+    rng_weighted_pick: "jet_jit_rng_weighted_pick" => jet_jit_rng_weighted_pick: sig_i64_i64_i64_i64;
+    rng_sample: "jet_jit_rng_sample" => jet_jit_rng_sample: sig_i64_i64_i64_i64;
+    rng_bytes: "jet_jit_rng_bytes" => jet_jit_rng_bytes: sig_i64_i64_i64;
+    rng_split: "jet_jit_rng_split" => jet_jit_rng_split: sig_i64_i64;
 }
 
-pub(crate) fn register_random_symbols(builder: &mut cranelift_jit::JITBuilder) {
-    builder.symbol("jet_jit_random_seed", jet_jit_random_seed as *const u8);
-    builder.symbol("jet_jit_random_bool", jet_jit_random_bool as *const u8);
-    builder.symbol(
-        "jet_jit_random_float_range",
-        jet_jit_random_float_range as *const u8,
-    );
-    builder.symbol("jet_jit_random_normal", jet_jit_random_normal as *const u8);
-    builder.symbol(
-        "jet_jit_random_exponential",
-        jet_jit_random_exponential as *const u8,
-    );
-    builder.symbol("jet_jit_random_bytes", jet_jit_random_bytes as *const u8);
-    builder.symbol(
-        "jet_jit_random_weighted_pick",
-        jet_jit_random_weighted_pick as *const u8,
-    );
-    builder.symbol("jet_jit_random_sample", jet_jit_random_sample as *const u8);
-    builder.symbol("jet_jit_rng_new", jet_jit_rng_new as *const u8);
-    builder.symbol("jet_jit_rng_int", jet_jit_rng_int as *const u8);
-    builder.symbol(
-        "jet_jit_rng_float_range",
-        jet_jit_rng_float_range as *const u8,
-    );
-    builder.symbol("jet_jit_rng_bool_p", jet_jit_rng_bool_p as *const u8);
-    builder.symbol("jet_jit_rng_bool", jet_jit_rng_bool as *const u8);
-    builder.symbol("jet_jit_rng_pick", jet_jit_rng_pick as *const u8);
-    builder.symbol("jet_jit_rng_shuffle", jet_jit_rng_shuffle as *const u8);
-    builder.symbol(
-        "jet_jit_rng_weighted_pick",
-        jet_jit_rng_weighted_pick as *const u8,
-    );
-    builder.symbol("jet_jit_rng_sample", jet_jit_rng_sample as *const u8);
-    builder.symbol("jet_jit_rng_bytes", jet_jit_rng_bytes as *const u8);
-    builder.symbol("jet_jit_rng_split", jet_jit_rng_split as *const u8);
-}
 
-pub(crate) fn declare_random_host_fns(
-    module: &mut cranelift_jit::JITModule,
-) -> Result<RandomHostFns, String> {
-    use cranelift_codegen::ir::{types, AbiParam, Signature};
-    use cranelift_module::{Linkage, Module};
 
-    let cc = module.target_config().default_call_conv;
-    let mut import = |name: &str, sig: &Signature| -> Result<cranelift_module::FuncId, String> {
-        module
-            .declare_function(name, Linkage::Import, sig)
-            .map_err(|e| e.to_string())
-    };
 
-    let mut sig_void_i64 = Signature::new(cc);
-    sig_void_i64.params.push(AbiParam::new(types::I64));
-    let mut sig_void_i64_i64 = Signature::new(cc);
-    sig_void_i64_i64.params.push(AbiParam::new(types::I64));
-    sig_void_i64_i64.params.push(AbiParam::new(types::I64));
-    let mut sig_f64_i8 = Signature::new(cc);
-    sig_f64_i8.params.push(AbiParam::new(types::F64));
-    sig_f64_i8.returns.push(AbiParam::new(types::I8));
-    let mut sig_f64_f64_f64 = Signature::new(cc);
-    sig_f64_f64_f64.params.push(AbiParam::new(types::F64));
-    sig_f64_f64_f64.params.push(AbiParam::new(types::F64));
-    sig_f64_f64_f64.returns.push(AbiParam::new(types::F64));
-    let mut sig_f64 = Signature::new(cc);
-    sig_f64.params.push(AbiParam::new(types::F64));
-    sig_f64.returns.push(AbiParam::new(types::F64));
-    let mut sig_i64_i64 = Signature::new(cc);
-    sig_i64_i64.params.push(AbiParam::new(types::I64));
-    sig_i64_i64.returns.push(AbiParam::new(types::I64));
-    let mut sig_i64_i64_i64 = Signature::new(cc);
-    sig_i64_i64_i64.params.push(AbiParam::new(types::I64));
-    sig_i64_i64_i64.params.push(AbiParam::new(types::I64));
-    sig_i64_i64_i64.returns.push(AbiParam::new(types::I64));
-    let mut sig_i64_i64_i64_i64 = Signature::new(cc);
-    sig_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
-    sig_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
-    sig_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
-    sig_i64_i64_i64_i64.returns.push(AbiParam::new(types::I64));
-    let mut sig_rng_fr = Signature::new(cc);
-    sig_rng_fr.params.push(AbiParam::new(types::I64));
-    sig_rng_fr.params.push(AbiParam::new(types::F64));
-    sig_rng_fr.params.push(AbiParam::new(types::F64));
-    sig_rng_fr.returns.push(AbiParam::new(types::F64));
-    let mut sig_rng_bool = Signature::new(cc);
-    sig_rng_bool.params.push(AbiParam::new(types::I64));
-    sig_rng_bool.params.push(AbiParam::new(types::F64));
-    sig_rng_bool.returns.push(AbiParam::new(types::I8));
-    let mut sig_rng_bool_default = Signature::new(cc);
-    sig_rng_bool_default.params.push(AbiParam::new(types::I64));
-    sig_rng_bool_default.returns.push(AbiParam::new(types::I8));
 
-    Ok(RandomHostFns {
-        seed: import("jet_jit_random_seed", &sig_void_i64)?,
-        bool_p: import("jet_jit_random_bool", &sig_f64_i8)?,
-        float_range: import("jet_jit_random_float_range", &sig_f64_f64_f64)?,
-        normal: import("jet_jit_random_normal", &sig_f64_f64_f64)?,
-        exponential: import("jet_jit_random_exponential", &sig_f64)?,
-        bytes: import("jet_jit_random_bytes", &sig_i64_i64)?,
-        weighted_pick: import("jet_jit_random_weighted_pick", &sig_i64_i64_i64)?,
-        sample: import("jet_jit_random_sample", &sig_i64_i64_i64)?,
-        rng_new: import("jet_jit_rng_new", &sig_i64_i64)?,
-        rng_int: import("jet_jit_rng_int", &sig_i64_i64_i64_i64)?,
-        rng_float_range: import("jet_jit_rng_float_range", &sig_rng_fr)?,
-        rng_bool: import("jet_jit_rng_bool", &sig_rng_bool_default)?,
-        rng_bool_p: import("jet_jit_rng_bool_p", &sig_rng_bool)?,
-        rng_pick: import("jet_jit_rng_pick", &sig_i64_i64_i64)?,
-        rng_shuffle: import("jet_jit_rng_shuffle", &sig_void_i64_i64)?,
-        rng_weighted_pick: import("jet_jit_rng_weighted_pick", &sig_i64_i64_i64_i64)?,
-        rng_sample: import("jet_jit_rng_sample", &sig_i64_i64_i64_i64)?,
-        rng_bytes: import("jet_jit_rng_bytes", &sig_i64_i64_i64)?,
-        rng_split: import("jet_jit_rng_split", &sig_i64_i64)?,
-    })
-}

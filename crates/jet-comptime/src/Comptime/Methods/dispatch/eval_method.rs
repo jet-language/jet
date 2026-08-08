@@ -1,5 +1,5 @@
 use super::*;
-use crate::Comptime::Value::CtReport;
+use crate::AST::CtReport;
 
 fn decode_path(path: &str) -> String {
     if path == "$" {
@@ -450,8 +450,7 @@ impl<'a> Interp<'a> {
                     );
                 }
                 if module == "core.data" && matches!(method, "line_text" | "line_svg") {
-                    let checked = matches!(resolved_ret, Some(Type::Result { .. }));
-                    return apply_data_line_call(method, argv, span, checked);
+                    return apply_data_line_call(method, argv, span);
                 }
                 // D-ENC-CBOR-SURFACE1: encoding a Codable value needs its
                 // declared field types. CtValue intentionally erases `[U8]`

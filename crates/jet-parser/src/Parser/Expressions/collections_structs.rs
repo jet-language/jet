@@ -1,16 +1,7 @@
 use super::super::{
-    Diagnostic, EnumLitArg, Expr, Parser, Pattern, Span, Syntax, TokKind, Token, Type, TypedLitBody,
+    Diagnostic, EnumLitArg, Expr, Parser, Pattern, Span, Syntax, TokKind, Token, Type,
+    TypedLitBody, leading_dot_variant,
 };
-
-fn leading_dot_variant(kind: &TokKind) -> Option<String> {
-    match kind {
-        TokKind::Ident(name) if name.chars().next().is_some_and(char::is_uppercase) => {
-            Some(name.clone())
-        }
-        TokKind::KwNull => Some(Syntax::LIT_NULL.to_string()),
-        _ => None,
-    }
-}
 
 /// D-DOTCTOR3: does the brace body start like record fields / field punning?
 /// `pos` points at the first token inside `{ … }` (not at `{`).

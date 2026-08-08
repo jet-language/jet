@@ -118,7 +118,13 @@ pub fn lookup(code: &str) -> Option<Explanation> {
             })
         })
         .or_else(|| {
-            let row = jet_foundation::Policy::applied_rule(code.trim())?;
+            // D-META-REG1=A: one lookup over the one registration table. A
+            // marker, a knowledge plane, a right, and a build fact are rows of
+            // the same table, so `jet explain` has one path, not one per kind.
+            let registered = jet_foundation::Registry::row(code.trim())?;
+            let Some(row) = registered.rule else {
+                return Some(explain_fact_row(registered));
+            };
             let (retired, replacement) = match row.status {
                 jet_foundation::Policy::RuleStatus::Active => (false, None),
                 jet_foundation::Policy::RuleStatus::Retired { replacement } => {
@@ -153,6 +159,77 @@ pub fn lookup(code: &str) -> Option<Explanation> {
                 retired,
             })
         })
+}
+
+/// D-FACT-LAW1=B: a row that is not a rule on written code answers with the one
+/// law it obeys — which way its facts tighten for free, and the written words
+/// that loosen them. D-FACT-OWN1=A: a row a prover publishes is read-only, so it
+/// states no direction and names no gate.
+fn explain_fact_row(row: &jet_foundation::Registry::RegistryRow) -> Explanation {
+    use jet_foundation::Registry::{RowTarget, SafeDirection};
+
+    let attaches_to = match row.target {
+        RowTarget::Code(_) => "written code",
+        RowTarget::Value => "a value",
+        RowTarget::Scope => "a scope",
+        RowTarget::Build => "the build",
+        RowTarget::Corpus => "the compiler's own source",
+    };
+    // D-ONCE-LAW1=A: a corpus truth answers with its home, its renderers, and
+    // the guard that proves there is no second copy.
+    if let (Some(home), Some(guard)) = (row.home, row.guard) {
+        return Explanation {
+            code: row.name.to_string(),
+            stage: "registration table".to_string(),
+            meaning: format!(
+                "`{}` — a truth stated once, in {home} ({})",
+                row.name, row.decision
+            ),
+            what: Some(format!("rendered from there by: {}.", row.renderers.join(", "))),
+            why: Some(format!(
+                "`{}` in {} proves there is no second copy; it {}",
+                guard.test,
+                guard.file,
+                guard.proof.name()
+            )),
+            fix: Some(format!(
+                "change the meaning in {home}; a second copy anywhere else fails the guard"
+            )),
+            retired: false,
+        };
+    }
+    Explanation {
+        code: row.name.to_string(),
+        stage: "registration table".to_string(),
+        meaning: format!(
+            "`{}` — a registered {} on {} ({})",
+            row.name,
+            row.kind().name(),
+            attaches_to,
+            row.decision
+        ),
+        what: Some(match row.published_by {
+            Some(prover) => format!(
+                "the {prover} prover publishes this row; it is read-only and carries no plane algebra."
+            ),
+            None => format!("attaches to {attaches_to}."),
+        }),
+        why: Some(match row.safe_direction {
+            SafeDirection::None => {
+                "this row holds no fact that moves, so it states no safe direction".to_string()
+            }
+            direction => format!(
+                "facts tighten silently in the `{}` direction; loosening one is always written",
+                direction.name()
+            ),
+        }),
+        fix: Some(if row.gates.is_empty() {
+            "nothing loosens this row; read it and act on what it says".to_string()
+        } else {
+            format!("to loosen it, write one of: {}", row.gates.join(", "))
+        }),
+        retired: false,
+    }
 }
 
 fn marker_argument_declarations(row: &jet_foundation::Policy::AppliedRule) -> String {
@@ -311,8 +388,123 @@ fn split_cells(s: &str) -> Vec<String> {
     cells
 }
 
+/// D-ONCE-LAW1=A: `jet inspect facts` reads the one registration table. Every
+/// registered row is listed, and a corpus truth also shows its home, everything
+/// that renders it, and the guard that proves there is no second copy.
+pub fn facts_report_text() -> String {
+    use jet_foundation::Registry::{self, RowKind};
+
+    let mut out = String::new();
+    for kind in [
+        RowKind::Truth,
+        RowKind::Plane,
+        RowKind::Right,
+        RowKind::Fact,
+        RowKind::Marker,
+    ] {
+        let rows: Vec<_> = Registry::rows()
+            .iter()
+            .filter(|row| row.kind() == kind)
+            .collect();
+        if rows.is_empty() {
+            continue;
+        }
+        out.push_str(&format!("{}s ({}):\n", kind.name(), rows.len()));
+        for row in rows {
+            out.push_str(&format!("  {:<20} {}\n", row.name, row.decision));
+            if let Some(home) = row.home {
+                out.push_str(&format!("    home      {home}\n"));
+                out.push_str(&format!("    renders   {}\n", row.renderers.join(", ")));
+            }
+            if let Some(guard) = row.guard {
+                out.push_str(&format!(
+                    "    guard     {} in {} ({})\n",
+                    guard.test,
+                    guard.file,
+                    guard.proof.name()
+                ));
+            }
+        }
+        out.push('\n');
+    }
+    out
+}
+
+/// `--json` render of `jet inspect facts`.
+pub fn facts_report_json() -> String {
+    fn esc(s: &str) -> String {
+        s.replace('\\', "\\\\").replace('"', "\\\"")
+    }
+    let rows: Vec<String> = jet_foundation::Registry::rows()
+        .iter()
+        .map(|row| {
+            let mut fields = vec![
+                format!("\"name\":\"{}\"", esc(row.name)),
+                format!("\"kind\":\"{}\"", row.kind().name()),
+                format!("\"decision\":\"{}\"", esc(row.decision)),
+                format!("\"safe_direction\":\"{}\"", row.safe_direction.name()),
+            ];
+            if let Some(home) = row.home {
+                fields.push(format!("\"home\":\"{}\"", esc(home)));
+                let renderers: Vec<String> = row
+                    .renderers
+                    .iter()
+                    .map(|r| format!("\"{}\"", esc(r)))
+                    .collect();
+                fields.push(format!("\"renderers\":[{}]", renderers.join(",")));
+            }
+            if let Some(guard) = row.guard {
+                fields.push(format!(
+                    "\"guard\":{{\"test\":\"{}\",\"file\":\"{}\",\"proof\":\"{}\"}}",
+                    esc(guard.test),
+                    esc(guard.file),
+                    guard.proof.name()
+                ));
+            }
+            format!("{{{}}}", fields.join(","))
+        })
+        .collect();
+    format!(
+        "{{\"schema_version\":1,\"rows\":[{}]}}",
+        rows.join(",")
+    )
+}
+
 #[cfg(test)]
 mod marker_registry_tests {
+    /// D-ONCE-LAW1=A: the report lists every registered truth, with the guard
+    /// that proves it. A truth missing from the report is a truth nobody can
+    /// audit.
+    #[test]
+    fn inspect_facts_lists_every_registered_truth() {
+        let text = super::facts_report_text();
+        let json = super::facts_report_json();
+        let mut truths = 0;
+        for row in jet_foundation::Registry::truths() {
+            truths += 1;
+            let home = row.home.expect("a truth names a home");
+            let guard = row.guard.expect("a truth names a guard");
+            assert!(text.contains(row.name), "`{}` is missing from the report", row.name);
+            assert!(text.contains(home), "`{}` does not show its home", row.name);
+            assert!(text.contains(guard.test), "`{}` does not show its guard", row.name);
+            assert!(json.contains(guard.test), "`{}` is missing from --json", row.name);
+        }
+        assert!(truths >= 7, "the registry is born non-empty");
+        // Every other kind is listed too, so one report reads the whole table.
+        assert!(text.contains("Exactness") && text.contains("Rights"));
+    }
+
+    /// A corpus truth explains itself with its home and its guard.
+    #[test]
+    fn explain_reads_a_corpus_truth() {
+        let ice = super::lookup("IceReport").expect("IceReport is a registered truth");
+        assert!(ice.meaning.contains("crates/jet-foundation/src/Diagnostics.rs"));
+        assert!(ice
+            .why
+            .as_deref()
+            .is_some_and(|why| why.contains("no_hand_typed_ice_banner_outside_the_one_home")));
+    }
+
     #[test]
     fn marker_explain_reports_typed_signature_and_retirement() {
         let inline = super::lookup("Inline").expect("Inline registry explanation");
@@ -321,6 +513,6 @@ mod marker_registry_tests {
 
         let pure = super::lookup("Pure").expect("Pure retirement explanation");
         assert!(pure.retired);
-        assert_eq!(pure.fix.as_deref(), Some("replace it with `pure fn`"));
+        assert_eq!(pure.fix.as_deref(), Some("replace it with `=[]=>`"));
     }
 }

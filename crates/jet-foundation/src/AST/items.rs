@@ -119,6 +119,9 @@ pub struct MarkerDeclParam {
     pub name_span: Span,
     pub ty: Option<Type>,
     pub value: Option<Box<Expr>>,
+    /// D-VARIADIC1: `name: ...T` — the marker takes a list of arguments of this
+    /// type rather than one. Always false on a `$`-marked fact.
+    pub variadic: bool,
 }
 
 /// D-MOD1/2: code module — `module math;` or `module math { pub fn … }`.
@@ -1994,6 +1997,7 @@ pub fn resolved_decode_wire_shapes(items: &[Item], ty: &Type) -> Option<Vec<Serd
             Type::List(_) | Type::FixedList { .. } => vec![SerdeWireShape::Array],
             Type::Map { .. } | Type::Tuple(_) => vec![SerdeWireShape::Object],
             Type::Shared(inner) => resolve(items, inner, seen)?,
+            Type::Quantity { base, .. } => resolve(items, base, seen)?,
             Type::Option(inner) => {
                 let mut shapes = vec![SerdeWireShape::Null];
                 shapes.extend(resolve(items, inner, seen)?);

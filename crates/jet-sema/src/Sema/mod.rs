@@ -21,7 +21,7 @@ mod Casing;
 pub use crate::AST::FuncSig;
 
 #[derive(Debug, Clone)]
-struct UninitState {
+pub(crate) struct UninitState {
     fixed_len: Option<u64>,
     initialized_indexes: BTreeSet<u64>,
 }
@@ -41,7 +41,9 @@ impl UninitState {
         }
     }
 
-    #[allow(dead_code)]
+    /// D-UNINIT1 branch merge: a place is initialised after a branch only where
+    /// every path initialised it, so the initialised parts intersect. Called by
+    /// the [`FlowFacts::Uninit`] plane's join rule, nowhere else.
     fn merge_paths(&mut self, other: &Self) {
         if self.fixed_len == other.fixed_len {
             self.initialized_indexes = self
@@ -871,57 +873,71 @@ pub(crate) struct ViewFact {
     place: ViewPlace,
     kind: ViewKind,
     access: ViewAccess,
-    /// `scopes.len()` at declaration; facts disappear with their binding.
+    /// `FlowFacts::depth` at declaration; facts disappear with their binding.
     scope_len: usize,
+    /// Order the window was opened in. The prover reports the newest window
+    /// that matches, so the order has to survive the store, not the container.
+    seq: usize,
     /// Owner operation that invalidated storage, when invalidation is allowed
     /// to happen (arena reset). Ordinary owner writes/moves are rejected.
     invalidated: Option<(String, Span)>,
 }
 
-#[derive(Debug, Clone, Default)]
-pub(crate) struct ViewFactGraph {
-    /// Ordered by declaration. Reverse lookup preserves shadowing; scope pop
-    /// removes only facts declared at that depth and reveals outer facts again.
-    bindings: Vec<(String, ViewFact)>,
+/// D-MEM1 S9 / #649: the one store of open borrow windows, one plane of the
+/// checker's flow facts. Reads live here; invalidation lives with the ownership
+/// prover (D-FACT-OWN1).
+pub(crate) type ViewStore = FlowFacts::Facts<FlowFacts::View>;
+
+/// Record one window. The fact carries the scope that owns it, so it leaves
+/// with that scope and reveals any window it shadowed.
+pub(crate) fn push_view_fact(store: &mut ViewStore, name: &str, mut fact: ViewFact) {
+    let depth = fact.scope_len;
+    fact.seq = store
+        .all()
+        .flat_map(|(_, facts)| facts.iter())
+        .map(|held| held.seq + 1)
+        .max()
+        .unwrap_or(0);
+    store.entry_at(name, depth).push(fact);
 }
 
-impl ViewFactGraph {
-    fn current(&self, name: &str) -> Option<&ViewFact> {
-        self.bindings
-            .iter()
-            .rev()
-            .find_map(|(binding, fact)| (binding == name).then_some(fact))
-    }
+/// Every open window, newest first. Several bindings can hold a window over one
+/// place; the prover answers with the one opened last.
+pub(crate) fn view_facts_newest_first(store: &ViewStore) -> Vec<(&str, &ViewFact)> {
+    let mut all: Vec<(&str, &ViewFact)> = store
+        .all()
+        .flat_map(|(name, facts)| facts.iter().map(move |fact| (name, fact)))
+        .collect();
+    all.sort_by_key(|(_, fact)| std::cmp::Reverse(fact.seq));
+    all
+}
 
-    fn current_for_binding(&self, name: &str, binding_span: Span) -> Option<&ViewFact> {
-        self.current(name)
-            .filter(|fact| fact.binding_span == binding_span)
-    }
+/// The innermost window this name currently opens.
+pub(crate) fn current_view_fact<'a>(store: &'a ViewStore, name: &str) -> Option<&'a ViewFact> {
+    store.get(name)?.last()
+}
 
-    fn all_for_binding(&self, name: &str, binding_span: Span) -> Vec<&ViewFact> {
-        self.bindings
-            .iter()
-            .filter_map(|(binding, fact)| {
-                (binding == name && fact.binding_span == binding_span).then_some(fact)
-            })
-            .collect()
-    }
+/// The innermost window this name opens, only when it belongs to this binding.
+/// A non-view shadow with the same spelling never exposes an outer window.
+pub(crate) fn current_view_fact_for_binding<'a>(
+    store: &'a ViewStore,
+    name: &str,
+    binding_span: Span,
+) -> Option<&'a ViewFact> {
+    current_view_fact(store, name).filter(|fact| fact.binding_span == binding_span)
+}
 
-    fn push(&mut self, name: String, fact: ViewFact) {
-        self.bindings.push((name, fact));
-    }
-
-    fn leave_scope(&mut self, depth: usize) {
-        self.bindings.retain(|(_, fact)| fact.scope_len < depth);
-    }
-
-    fn invalidate_owner(&mut self, owner: &ViewOwnerId, verb: &str, span: Span) {
-        for (_, fact) in &mut self.bindings {
-            if &fact.place.owner == owner && fact.invalidated.is_none() {
-                fact.invalidated = Some((verb.to_string(), span));
-            }
-        }
-    }
+/// Every window this binding opens, at every depth.
+pub(crate) fn view_facts_for_binding<'a>(
+    store: &'a ViewStore,
+    name: &str,
+    binding_span: Span,
+) -> Vec<&'a ViewFact> {
+    store
+        .facts_of(name)
+        .flatten()
+        .filter(|fact| fact.binding_span == binding_span)
+        .collect()
 }
 
 impl ViewPlace {
@@ -969,6 +985,7 @@ mod view_fact_graph_tests {
 
     fn fact(owner_span: usize, scope_len: usize, kind: ViewKind) -> ViewFact {
         ViewFact {
+            seq: 0,
             binding_span: Span::new(owner_span + 10, owner_span + 11),
             output_path: Vec::new(),
             place: ViewPlace {
@@ -988,21 +1005,25 @@ mod view_fact_graph_tests {
 
     #[test]
     fn nested_shadow_reveals_outer_fact_after_scope_exit() {
-        let mut graph = ViewFactGraph::default();
-        graph.push("window".to_string(), fact(1, 1, ViewKind::List));
-        graph.push("window".to_string(), fact(2, 2, ViewKind::String));
-        assert_eq!(graph.current("window").map(|f| f.kind), Some(ViewKind::String));
-        graph.leave_scope(2);
-        assert_eq!(graph.current("window").map(|f| f.kind), Some(ViewKind::List));
+        let mut graph = ViewStore::new();
+        push_view_fact(&mut graph, "window", fact(1, 1, ViewKind::List));
+        push_view_fact(&mut graph, "window", fact(2, 2, ViewKind::String));
+        assert_eq!(
+            current_view_fact(&graph, "window").map(|f| f.kind),
+            Some(ViewKind::String)
+        );
+        graph.leave_depth(2);
+        assert_eq!(
+            current_view_fact(&graph, "window").map(|f| f.kind),
+            Some(ViewKind::List)
+        );
     }
 
     #[test]
     fn non_view_binding_identity_hides_stale_same_spelling_fact() {
-        let mut graph = ViewFactGraph::default();
-        graph.push("window".to_string(), fact(1, 1, ViewKind::List));
-        assert!(graph
-            .current_for_binding("window", Span::new(99, 100))
-            .is_none());
+        let mut graph = ViewStore::new();
+        push_view_fact(&mut graph, "window", fact(1, 1, ViewKind::List));
+        assert!(current_view_fact_for_binding(&graph, "window", Span::new(99, 100)).is_none());
     }
 
     #[test]
@@ -1014,17 +1035,23 @@ mod view_fact_graph_tests {
 
     #[test]
     fn invalidation_uses_owner_identity_not_spelling() {
-        let mut graph = ViewFactGraph::default();
+        let mut graph = ViewStore::new();
         let outer = fact(1, 1, ViewKind::Arena);
         let inner = fact(2, 2, ViewKind::Arena);
         let inner_owner = inner.place.owner.clone();
-        graph.push("outer".to_string(), outer);
-        graph.push("inner".to_string(), inner);
+        push_view_fact(&mut graph, "outer", outer);
+        push_view_fact(&mut graph, "inner", inner);
 
-        graph.invalidate_owner(&inner_owner, "reset", Span::new(40, 41));
+        CheckerOwnership::invalidate_view_owner(&mut graph, &inner_owner, "reset", Span::new(40, 41));
 
-        assert!(graph.current("outer").unwrap().invalidated.is_none());
-        assert!(graph.current("inner").unwrap().invalidated.is_some());
+        assert!(current_view_fact(&graph, "outer")
+            .unwrap()
+            .invalidated
+            .is_none());
+        assert!(current_view_fact(&graph, "inner")
+            .unwrap()
+            .invalidated
+            .is_some());
     }
 
     #[test]
@@ -1247,10 +1274,11 @@ pub(crate) struct Checker<'a> {
     current_function_span: Span,
     reference_anchors: &'a mut HashMap<(String, usize, usize), Effects::DefinitionAnchorFact>,
     diags: Vec<Diagnostic>,
-    scopes: Vec<HashMap<String, LocalInfo>>,
+    /// D-FACT-FLOW1: the one store of per-binding facts — declarations, flow
+    /// narrowing, moves, uninitialised places and open borrow windows. Every
+    /// plane joins through `FlowFacts`; nothing here keeps the last-walked path.
+    flow: FlowFacts::FlowFacts,
     concrete_unit_values: Vec<HashMap<String, f64>>,
-    /// name -> span of the use that gave the value away.
-    moved: HashMap<String, Span>,
     /// Field inference reads its base only to discover its type. Suppress a
     /// partial-root move report there; the complete field place is checked first.
     suppress_partial_move_root_read: bool,
@@ -1335,7 +1363,7 @@ pub(crate) struct Checker<'a> {
     /// is E0144 instead of the normal "undefined name" error.
     in_pre_clause: bool,
     /// True while inferring a comptime binding's RHS or inside a comptime
-    /// context — suppresses E2712 for `$name` comptime splice expressions.
+    /// context (D-META-STAGE1=B).
     in_comptime: bool,
     /// True only while checking the selected package/workspace `fn build`.
     /// This is passed by the Driver's build authority, never inferred from a
@@ -1355,9 +1383,6 @@ pub(crate) struct Checker<'a> {
     /// Loop bindings that lend one `ViewMut<T>` element from a collection.
     /// These values may edit during the iteration but may not be retained.
     lending_view_loop_vars: HashSet<String>,
-    /// D-MEM1 S9 / #649: sole provenance/alias state for arena, list, string,
-    /// buffer, matrix, and future named mutable views.
-    view_facts: ViewFactGraph,
     /// D-MEM-VIEWRET1=B: one canonical public source inferred from every
     /// successful named-view return in this function.
     return_view_provenance: Option<crate::AST::ViewProvenanceMap>,
@@ -1372,12 +1397,6 @@ pub(crate) struct Checker<'a> {
     /// #1196: argument and receiver loans that remain active until their call
     /// finishes. Nested calls see every outer frame.
     call_access_frames: Vec<CallAccessFrame>,
-    /// D-UNINIT1 engine, reused unchanged by D-UNINIT-SENTINEL2:
-    /// `Type.{ uninit }` bindings not yet definitely written — maps name → the
-    /// decl span. A read while still in this map is E0420 (write-before-read
-    /// proof); a write clears it. Branch-merged in `check_if` (intersection of
-    /// "initialized").
-    uninit: HashMap<String, UninitState>,
     /// True while inferring an expression that the generated Rust will only
     /// borrow (method receivers, field/index bases, lvalues). Field reads in
     /// borrow position must NOT be rewritten to `.clone()`.
@@ -1458,7 +1477,7 @@ pub(crate) struct Checker<'a> {
     /// by Bundle.rs after the full bundle is checked.
     pub(super) ct_embed_inputs: Vec<crate::AST::ComptimeInput>,
     /// D-WHEN2 (ratified 2026-06-19): when true, we are inside a dropped
-    /// `#Known if` arm — name-resolution runs normally (so unknown-name
+    /// `$if` arm — name-resolution runs normally (so unknown-name
     /// typos are caught) but all other diagnostics are suppressed and the arm
     /// is never lowered to codegen.
     in_dropped_comptime_arm: bool,
@@ -1895,6 +1914,7 @@ mod CheckerValidate;
 mod Diagnostics;
 mod Edition;
 mod Effects;
+mod FlowFacts;
 mod MemoryFacts;
 mod MemberSpread;
 pub mod UnsafeObligations;

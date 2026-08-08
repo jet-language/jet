@@ -350,14 +350,14 @@ use core.encoding.cbor as cbor
 use core.encoding.base64 as base64
 use core.encoding.base32 as base32
 
-#Known json_canon :: json.to_string(json.parse("{{\"b\":2,\"a\":1}}") ?? panic("json"))
-#Known jsonl_n :: (jsonl.parse("{{\"a\":1}}\n{{\"a\":2}}\n") ?? panic("jsonl")).len()
-#Known csv_n :: (csv.parse("name,score\nada,9\n") ?? panic("csv")).len()
-#Known xml_text :: xml.to_string(xml.parse("<r xmlns=\"urn:r\">a&amp;</r>") ?? panic("xml"))
-#Known cbor_round :: json.to_string(cbor.parse(cbor.to_bytes(json.parse("{{\"a\":1}}") ?? panic("j")) ?? panic("e")) ?? panic("p"))
-#Known b64_n :: (base64.decode("Zg==") ?? panic("b64")).len()
-#Known b64url_n :: (base64.decode_url("aGk") ?? panic("b64url")).len()
-#Known b32_n :: (base32.decode("MZXQ====") ?? panic("b32")).len()
+$json_canon :: json.to_string(json.parse("{{\"b\":2,\"a\":1}}") ?? panic("json"))
+$jsonl_n :: (jsonl.parse("{{\"a\":1}}\n{{\"a\":2}}\n") ?? panic("jsonl")).len()
+$csv_n :: (csv.parse("name,score\nada,9\n") ?? panic("csv")).len()
+$xml_text :: xml.to_string(xml.parse("<r xmlns=\"urn:r\">a&amp;</r>") ?? panic("xml"))
+$cbor_round :: json.to_string(cbor.parse(cbor.to_bytes(json.parse("{{\"a\":1}}") ?? panic("j")) ?? panic("e")) ?? panic("p"))
+$b64_n :: (base64.decode("Zg==") ?? panic("b64")).len()
+$b64url_n :: (base64.decode_url("aGk") ?? panic("b64url")).len()
+$b32_n :: (base32.decode("MZXQ====") ?? panic("b32")).len()
 
 fn run() {
     print("{json_canon}|{json.to_string(json.parse("{{\"b\":2,\"a\":1}}") ?? panic("json"))}")
@@ -415,8 +415,8 @@ struct Packet {
     payload: [U8]
 }
 
-#Known root :: hex.encode(cbor.to_bytes_canonical([U8].{222, 173}) ?? panic("root"))
-#Known packet :: hex.encode(cbor.to_bytes_canonical(Packet.{ id: 7, payload: [222, 173] }) ?? panic("packet"))
+$root :: hex.encode(cbor.to_bytes_canonical([U8].{222, 173}) ?? panic("root"))
+$packet :: hex.encode(cbor.to_bytes_canonical(Packet.{ id: 7, payload: [222, 173] }) ?? panic("packet"))
 
 fn gap() => String {
     folded := text.casefold("Straße")
@@ -1353,7 +1353,7 @@ fn comptime_rejects_file_backed_streams_at_named_boundary() {
     ] {
         let scratch = Scratch::new(label);
         let source = format!(
-            "use core.encoding.{module}\nuse core.files as files\n\n#Known probe :: files.read(\"probe.txt\")\n\nfn run() {{\n    print(probe)\n}}\n"
+            "use core.encoding.{module}\nuse core.files as files\n\n$probe :: files.read(\"probe.txt\")\n\nfn run() {{\n    print(probe)\n}}\n"
         );
         let path = scratch.write_project("2026", &source);
         let diags = jet::check_with_path(path.to_str().unwrap());

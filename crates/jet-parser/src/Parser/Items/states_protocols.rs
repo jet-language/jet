@@ -401,11 +401,7 @@ impl<'a> Parser<'a> {
             let start = self.peek().span.start;
             self.bump(); // consume `derive`
             let (type_param, type_param_span) = self.expect_ident("after `derive`")?;
-            let old_derive_for = match &self.peek().kind {
-                TokKind::KwFor => true,
-                TokKind::Ident(n) if n == "for" => true,
-                _ => false,
-            };
+            let old_derive_for = matches!(&self.peek().kind, TokKind::Ident(n) if n == "for");
             if old_derive_for {
                 // Old spelling `derive Trait for T`: the first ident was the trait name.
                 return Err(Diagnostic::error(
@@ -478,18 +474,33 @@ impl<'a> Parser<'a> {
                 loop {
                     let marked =
                         matches!(&self.peek().kind, TokKind::Ident(n) if Syntax::is_comptime_name(n));
-                    let (name, name_span) = self.expect_ident(if marked {
-                        "a marker fact name"
-                    } else {
-                        "a marker parameter name"
-                    })?;
+                    // D-VERDICT-1455-1: a marker parameter is named by any
+                    // written word, including one the lexer reads as a keyword
+                    // (`#Scrub(tag: …)`, `#Layout(tag: …)`).
+                    let (name, name_span) = match crate::Lexer::keyword_spelling(&self.peek().kind)
+                    {
+                        Some(word) => (word.to_string(), self.bump().span),
+                        None => self.expect_ident(if marked {
+                            "a marker fact name"
+                        } else {
+                            "a marker parameter name"
+                        })?,
+                    };
                     self.expect(
                         TokKind::Colon,
                         "between the parameter name and its type or value",
                     )?;
+                    let mut variadic = false;
                     let (ty, value) = if marked {
                         (None, Some(Box::new(self.expr_no_struct_lit()?)))
                     } else {
+                        // D-VARIADIC1: `name: ...T` is the one rest-parameter
+                        // spelling, so a marker that takes a list of arguments
+                        // (`#Caps(Net, FS)`) writes it the same way a function does.
+                        if matches!(self.peek().kind, TokKind::DotDotDot) {
+                            self.bump();
+                            variadic = true;
+                        }
                         let (ty, _ty_span) = self.type_()?;
                         let default = if matches!(self.peek().kind, TokKind::Eq) {
                             self.bump();
@@ -504,6 +515,7 @@ impl<'a> Parser<'a> {
                         name_span,
                         ty,
                         value,
+                        variadic,
                     });
                     if matches!(self.peek().kind, TokKind::RParen) {
                         break;
@@ -612,6 +624,45 @@ mod marker_decl_tests {
         assert_eq!(decl.params.len(), 2);
         assert_eq!(decl.params[0].name, "mode");
         assert_eq!(decl.params[1].name, "$sites");
+    }
+
+    /// D-META-FORM1=A: `$repeatable` is a named parameter like every other
+    /// fact about a rule, never a trailing word. A new fact about rules is a
+    /// new named parameter, so the list stays open-ended and the grammar does
+    /// not grow. `$sites` takes `[Site]`, the eighteen-member menu published in
+    /// `core.lang` (`Policy::SITE_VARIANTS`).
+    #[test]
+    fn a_fact_about_the_rule_is_one_more_named_parameter() {
+        let source = "marker Pre(condition: String, message: String, $sites: [.Function, .Method], $repeatable: true)\nfn run() {}\n";
+        let (tokens, lex_diags) = Lexer::lex(source);
+        assert!(lex_diags.is_empty(), "{lex_diags:?}");
+        let program = Parser::parse(&tokens).expect("ratified marker declaration must parse");
+        let decl = program
+            .items
+            .iter()
+            .find_map(|item| match item {
+                AST::Item::MarkerDecl(decl) => Some(decl),
+                _ => None,
+            })
+            .expect("a MarkerDecl item");
+        let names: Vec<&str> = decl.params.iter().map(|param| param.name.as_str()).collect();
+        assert_eq!(names, ["condition", "message", "$sites", "$repeatable"]);
+
+        // A fact about the rule carries a value, not a type; an argument the
+        // use site supplies carries a type.
+        for param in &decl.params {
+            if param.name.starts_with('$') {
+                assert!(param.ty.is_none(), "{}", param.name);
+                assert!(param.value.is_some(), "{}", param.name);
+            } else {
+                assert!(param.ty.is_some(), "{}", param.name);
+            }
+        }
+
+        // The site names `$sites` may hold are exactly the published menu.
+        for site in jet_foundation::Policy::RuleSite::ALL {
+            assert!(jet_foundation::Policy::SITE_VARIANTS.contains(&site.name()));
+        }
     }
 
     /// D-META-FORM1=A rejected a trailing `on` clause, a second parameter

@@ -761,5 +761,6 @@ fn serde_type_source(ty: &Type) -> String {
             .map(serde_type_source)
             .collect::<Vec<_>>()
             .join(" | "),
+        Type::Quantity { .. } => ty.name(),
     }
 }

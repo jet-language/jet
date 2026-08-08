@@ -931,7 +931,7 @@ fn duration_new(
 #[cfg(test)]
 mod tests {
     use super::datatree_int_result;
-    use crate::AST::{CtFloat, CtValue};
+    use crate::AST::{CtFloat, CtReport, CtValue};
 
     fn tree(variant: &str, value: CtValue) -> CtValue {
         CtValue::Enum {
@@ -942,7 +942,7 @@ mod tests {
     }
 
     fn decode_reason(value: CtValue) -> Option<String> {
-        let CtValue::failed(error) = value else {
+        let CtValue::Failed(CtReport::Told(error)) = value else {
             return None;
         };
         let CtValue::Struct { fields, .. } = *error else {

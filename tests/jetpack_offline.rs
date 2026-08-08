@@ -5,63 +5,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 mod common;
-use common::jetpack_bin;
+use common::{jetpack_bin, Scratch};
 
 fn jetpack() -> Command {
     Command::new(jetpack_bin())
-}
-
-struct Scratch {
-    path: PathBuf,
-}
-
-impl Scratch {
-    fn new(tag: &str) -> Scratch {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!(
-            "jpk-offline-{tag}-{nanos}-{:?}",
-            std::thread::current().id()
-        ));
-        fs::create_dir_all(&path).unwrap();
-        Scratch { path }
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        make_tree_writable(&self.path);
-        let _ = fs::remove_dir_all(&self.path);
-    }
-}
-
-#[cfg(unix)]
-fn make_tree_writable(path: &Path) {
-    use std::os::unix::fs::PermissionsExt as _;
-    let Ok(meta) = fs::symlink_metadata(path) else {
-        return;
-    };
-    if meta.is_dir() {
-        for entry in fs::read_dir(path).unwrap() {
-            make_tree_writable(&entry.unwrap().path());
-        }
-    }
-    if !meta.file_type().is_symlink() {
-        let mode = if meta.is_dir() { 0o755 } else { meta.permissions().mode() | 0o600 };
-        fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
-    }
-}
-
-#[cfg(not(unix))]
-fn make_tree_writable(path: &Path) {
-    let Ok(meta) = fs::metadata(path) else {
-        return;
-    };
-    let mut permissions = meta.permissions();
-    permissions.set_readonly(false);
-    fs::set_permissions(path, permissions).unwrap();
 }
 
 fn write_runnable_fixture(

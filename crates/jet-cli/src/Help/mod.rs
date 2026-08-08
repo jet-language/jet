@@ -217,7 +217,7 @@ pub fn build_index() -> Vec<Entry> {
             keywords: keywords_for(c.name),
         })
         .collect();
-    for group in CLI::COMMAND_GROUPS {
+    for group in CLI::command_groups() {
         for action in group.actions {
             entries.push(Entry {
                 symbol: command_symbol(
@@ -395,12 +395,12 @@ mod tests {
     fn index_covers_every_cli_command() {
         let index = build_index();
         let expected = CLI::COMMANDS.iter().filter(|c| CLI::is_canonical_top_level(c.name)).count()
-            + CLI::COMMAND_GROUPS.iter().map(|g| g.actions.len()).sum::<usize>();
+            + CLI::command_groups().map(|g| g.actions.len()).sum::<usize>();
         assert_eq!(index.len(), expected);
         for c in CLI::COMMANDS.iter().filter(|c| CLI::is_canonical_top_level(c.name)) {
             assert!(index.iter().any(|e| e.symbol.name == c.name), "missing {}", c.name);
         }
-        for group in CLI::COMMAND_GROUPS {
+        for group in CLI::command_groups() {
             for action in group.actions {
                 let route = format!("{} {}", group.name, action.name);
                 assert!(index.iter().any(|e| e.symbol.name == route), "missing {route}");

@@ -80,10 +80,10 @@ pub(super) fn apply_project_add_dependency(
     let name = required_project_string(request, "name")?;
     validate_ident_for_project(&name)?;
     let spec_text = required_project_string(request, "spec")?;
-    project_dep_spec(&spec_text)?;
+    let spec = project_dep_spec(&spec_text)?;
     let manifest_path = ctx.project_root.join(&manifest_rel);
     let before = fs::read_to_string(&manifest_path).map_err(|e| project_edit_error("io", &e.to_string()))?;
-    apply_canonical_dependency(ctx, request, &manifest_rel, before, &name, Some(spec_text))
+    apply_canonical_dependency(ctx, request, &manifest_rel, before, &name, Some((spec_text, spec)))
 }
 
 pub(super) fn apply_project_remove_dependency(
@@ -569,44 +569,36 @@ fn is_canonical_package_file(path: &str) -> bool {
         == Some(jet_driver::Syntax::PACKAGE_FILE)
 }
 
+/// #1664 criterion 2: one engine edits the `deps: { … }` block for both the
+/// `jet add`/`jet remove` CLI verbs and this Canvas schema action —
+/// `jet_driver::Manifest::add_dependency`/`remove_dependency` (comment- and
+/// order-preserving). Canvas no longer hand-rolls a second BTreeMap-diff
+/// rewrite of the whole block.
 fn apply_canonical_dependency(
     ctx: &ProjectContext,
     request: &str,
     manifest_rel: &str,
     before: String,
     name: &str,
-    add: Option<String>,
+    add: Option<(String, jet_driver::Manifest::DepSpec)>,
 ) -> Result<String, String> {
     let adding = add.is_some();
-    let facts = jet_driver::Package::PackageFacts::parse(&before, manifest_rel.to_string())
-        .map_err(|error| project_edit_error("diagnostic", &error.to_string()))?;
-    let mut deps: std::collections::BTreeMap<String, String> = facts
-        .deps
-        .iter()
-        .map(|(key, value)| (key.clone(), jet_driver::Package::dep_display(value)))
-        .collect();
-    match add {
-        Some(spec) => {
-            if let Some(existing) = deps.get(name) {
-                if existing != &spec {
+    let after = match add {
+        Some((spec_text, spec)) => {
+            let facts = jet_driver::Package::PackageFacts::parse(&before, manifest_rel.to_string())
+                .map_err(|error| project_edit_error("diagnostic", &error.to_string()))?;
+            if let Some(existing) = facts.deps.get(name) {
+                if jet_driver::Package::dep_display(existing) != spec_text {
                     return Err(project_edit_error(
                         "conflict",
                         "the canonical Package already declares this dependency with another spec",
                     ));
                 }
             }
-            deps.insert(name.to_string(), spec);
+            jet_driver::Manifest::add_dependency(&before, name, &spec)
         }
-        None => {
-            deps.remove(name);
-        }
-    }
-    let body = deps
-        .iter()
-        .map(|(key, value)| format!("\"{}\": \"{}\"", manifest_string(key), manifest_string(value)))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let after = replace_top_level_field(&before, "deps", &format!(".{{ {body} }}"));
+        None => jet_driver::Manifest::remove_dependency(&before, name),
+    };
     jet_driver::Package::PackageFacts::parse(&after, manifest_rel.to_string())
         .map_err(|error| project_edit_error("diagnostic", &error.to_string()))?;
     finish_project_changes(

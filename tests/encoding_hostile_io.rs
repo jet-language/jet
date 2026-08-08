@@ -6,6 +6,8 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
+mod common;
+
 fn build_and_run(
     dir: &PathBuf,
     name: &str,
@@ -392,7 +394,7 @@ fn run() {{
 
 #[test]
 fn encoding_hostile_one_byte_reads_match_baseline_for_all_codecs() {
-    if !Command::new("rustc").arg("--version").output().is_ok() {
+    if !common::have_rustc() {
         eprintln!("note: skipping hostile one-byte read matrix (need rustc)");
         return;
     }
@@ -435,7 +437,7 @@ fn encoding_hostile_one_byte_reads_match_baseline_for_all_codecs() {
 
 #[test]
 fn encoding_hostile_short_writes_match_baseline_for_all_codecs() {
-    if !Command::new("rustc").arg("--version").output().is_ok() {
+    if !common::have_rustc() {
         eprintln!("note: skipping hostile short-write matrix (need rustc)");
         return;
     }
@@ -490,7 +492,7 @@ fn encoding_hostile_short_writes_match_baseline_for_all_codecs() {
 
 #[test]
 fn encoding_hostile_io_failures_latch_terminal_for_read_and_write() {
-    if !Command::new("rustc").arg("--version").output().is_ok() {
+    if !common::have_rustc() {
         eprintln!("note: skipping hostile interrupt matrix (need rustc)");
         return;
     }
@@ -588,7 +590,7 @@ fn run() {{
 
 #[test]
 fn encoding_hostile_fail_after_write_preserves_prefix_without_duplication() {
-    if !Command::new("rustc").arg("--version").output().is_ok() {
+    if !common::have_rustc() {
         eprintln!("note: skipping hostile fail-after write test (need rustc)");
         return;
     }
@@ -638,7 +640,7 @@ fn run() {{
 
 #[test]
 fn encoding_hostile_malformed_and_truncated_corpora_latch_under_chunked_io() {
-    if !Command::new("rustc").arg("--version").output().is_ok() {
+    if !common::have_rustc() {
         eprintln!("note: skipping hostile malformed corpus (need rustc)");
         return;
     }
@@ -685,7 +687,7 @@ fn encoding_hostile_malformed_and_truncated_corpora_latch_under_chunked_io() {
 
 #[test]
 fn encoding_hostile_drop_scope_emits_no_false_success() {
-    if !Command::new("rustc").arg("--version").output().is_ok() {
+    if !common::have_rustc() {
         eprintln!("note: skipping hostile drop test (need rustc)");
         return;
     }
@@ -729,7 +731,7 @@ fn run() {{
 #[cfg(target_os = "linux")]
 #[test]
 fn encoding_hostile_retains_real_file_and_dev_full_probes() {
-    if !Command::new("rustc").arg("--version").output().is_ok() {
+    if !common::have_rustc() {
         eprintln!("note: skipping /dev/full probe (need rustc)");
         return;
     }

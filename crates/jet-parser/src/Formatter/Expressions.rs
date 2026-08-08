@@ -507,6 +507,18 @@ impl<'a> Fmt<'a> {
                 }
                 self.write(">");
             }
+            // D-QUANTITY-TYPE1=A: `Type::Quantity` is sema-synthesized (card
+            // #1662) from the source-written `Quantity<Base, Dim>` bound
+            // constructor; the formatter only ever sees pre-sema AST, so this
+            // arm exists solely for match exhaustiveness.
+            Type::Quantity { base, dimension } => {
+                self.write(Syntax::BOUND_QUANTITY);
+                self.write("<");
+                self.fmt_type(base);
+                self.write(", ");
+                self.write(&dimension.display_name());
+                self.write(">");
+            }
             Type::TraitObject(t) => {
                 // Only the parser's `dyn`/`Box<dyn>` teaching-error recovery paths
                 // ever construct this AST-facing arm with more than a formatting
@@ -1310,9 +1322,10 @@ impl<'a> Fmt<'a> {
                 self.fmt_expr(addr, Prec::OrFallback);
                 self.write(")");
             }
-            // D-CTMARKER1=C: `$name` comptime splice expression.
-            Expr::ComptimeSplice { name, .. } => {
-                self.write(&format!("${}", name));
+            // D-META-STAGE1=B: the mark is part of the name, so the name is
+            // written back exactly as it was read.
+            Expr::ComptimeName { name, .. } => {
+                self.write(name);
             }
             // D-FMTPARENS1=A: author-written grouping parens are always re-emitted.
             Expr::Paren(inner, _) => {

@@ -1,15 +1,7 @@
-Error [E3411]: `core.files.read()` inside `#Impure` gate, but `--allow-impure` was not passed
-  --> tests/ui/impure_no_flag.jet:5:26
-    |
-  5 |         #Known cfg :: fs.read("config.txt")
-    |                          ^^^^
- Why: the `#Impure` block opts in to ambient comptime I/O, but the build flag is required so CI can audit builds that touch the host
- Fix: add `--allow-impure` to your `jet build` / `jet run` invocation
-
-Error [E0915]: `String ? IOError` has no `Display` implementation
+Error [E0107]: nothing named `$cfg` exists here
   --> tests/ui/impure_no_flag.jet:6:17
     |
-  6 |         print("{cfg}")
-    |                 ^^^
- Why: bare `{value}` interpolation calls `Display` — there is no default for user types
- Fix: add `impl String ? IOError.Display { fn display(self) => String { … } }`, or use `{value#Debug}` for debug output
+  6 |         print("{$cfg}")
+    |                 ^^^^
+ Why: a name must be declared before it's used
+ Fix: did you mean `$cfg`?

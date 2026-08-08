@@ -70,7 +70,7 @@ pub struct JetTaskDeadline {
 impl JetTaskDeadline {
     pub fn render(&self) -> String {
         format!(
-            "Error [E3003]: {}\nWhy: {}\nFix: {}",
+            "Error [E3003]: {}\n Why: {}\n Fix: {}",
             self.what, self.why, self.fix
         )
     }

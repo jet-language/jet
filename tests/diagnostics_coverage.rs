@@ -450,13 +450,6 @@ const ACKNOWLEDGED_COVERAGE_GAPS: &[&str] = &[
     // E0153: protocol expansion parse failure — internal compiler error path only
     // (D-PROTO1); no user-writable fixture triggers a failed fragment re-parse.
     "E0153",
-    // E3504: runtime grant re-check in execute_build_plan. Unreachable today —
-    // the driver's single call path runs validate_build_authority (E3502/E3503)
-    // over the same plan and grants first, and its required set is a superset of
-    // what the executor re-checks. The reachable enforcement point is the
-    // Epoch-5 dependency-build policy ceiling (docs/plans/epoch-5/
-    // metaprogramming.md §15.4); add the ui snapshot when that path is wired.
-    "E3504",
     // E3001/E3005: `jet prove --json` (Source/CmdProve.rs render_report) now embeds these
     // as literal quoted `"E3001"`/`"E3005"` JSON-field values in generated evidence records,
     // which the literal-scan `emitted_codes()` picks up. But the real user-facing rendering
@@ -851,7 +844,6 @@ fn registered_unimplemented_codes_are_expected() {
         "E2412", // D-SERDE: runtime decode error (unknown field under #[DenyUnknownFields]) — emitted as a FieldError string, not a compile Diagnostic
         "E2413", // retired (D-SERDE12): generic #[Codable] is first-class; no gate
         "E2701", // E2-M9 (ring library) — staged
-        "E2712", // retired by D-CTBLOCKEXPOSE1; runtime `$name` now uses E2713 only on missing comptime value
         "E2801", // E2-M10 (networking) — staged
         "E2802", // E2-M10 — staged
         "E2803", // E2-M10 — staged
@@ -883,6 +875,15 @@ fn registered_unimplemented_codes_are_expected() {
                  // guards a SHA256 fingerprint collision between two distinct generic-module
                  // instance keys — an invariant violation, not a user-triggerable condition; no
                  // .jet fixture can force a hash collision. Card #521.
+        "E0416", // retired by D-MARK-REPEAT1=A: was duplicate `#PubFile` marker in one file;
+                 // registry row already says "retired" — kept for historical reference only.
+        "E0428", // retired by D-MARK-REPEAT1=A: was duplicate `#NoPrelude` marker in one file;
+                 // registry row already says "retired" — kept for historical reference only.
+        "E2407", // D-SERDE: `#[Rename(...)]` string-literal-only check — registered ahead of
+                 // its own emission site; serde_diags.rs currently only emits E2408-E2415.
+        "E3626", // D-JREPLAY1: replay capture lacks an existing authority for an operation —
+                 // registered ahead of implementation; ProveReplay.rs emits E3620-E3625/E3627-E3629
+                 // but not this one yet. Card #521.
     ];
 
     let expected: BTreeSet<String> = EXPECTED_SPEC_AHEAD_OF_IMPL

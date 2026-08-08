@@ -310,9 +310,7 @@ fn parallel_collection_adapters_select_across_runtime_failure_carriers() {
     }
     assert_eq!(
         stderr,
-        "Error [E3003]: deadline exceeded while waiting in time sleep\n\
-         Why: this wait point observed the task context deadline from `#Context(deadline: …)`\n\
-         Fix: raise the deadline budget or shorten the work before this wait point\n"
+        "Error [E3003]: deadline exceeded while waiting in time sleep\n Why: this wait point observed the task context deadline from `#Context(deadline: …)`\n Fix: raise the deadline budget or shorten the work before this wait point\n"
     );
     assert!(!stderr.contains("contract-high"), "{stderr}");
 }

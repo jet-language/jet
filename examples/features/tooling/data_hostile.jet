@@ -82,6 +82,13 @@ fn run() {
     print("signed_zero_sum: {signed_sum}")
     print("signed_zero_mean: {signed_mean}")
 
+    // #1657: catastrophic cancellation. One compensated kernel answers on every
+    // tier; a naive left-to-right sum would answer 0.0 for both of these.
+    cancel_sum :: data.sum([1e16, 1.0, -1e16]) ?? panic("cancel_sum")
+    cancel_mean :: data.mean([1e16, 1.0, -1e16]) ?? panic("cancel_mean")
+    print("cancellation_sum: {cancel_sum}")
+    print("cancellation_mean: {cancel_mean}")
+
     // Population variance (divide by n); singleton series is defined as 0.0.
     pop_var :: data.variance([1.0, 2.0, 3.0]) ?? panic("pop_var")
     one_var :: data.variance([4.0]) ?? panic("one_var")

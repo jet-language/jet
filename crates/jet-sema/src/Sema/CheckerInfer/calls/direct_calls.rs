@@ -84,7 +84,7 @@ impl<'a> Checker<'a> {
                 ));
                 return None;
             }
-            call.name = Type::APPROX_NUMERIC_WIDEN_MARKER.to_string();
+            call.widen_approx = true;
             Some(ty)
         }
     

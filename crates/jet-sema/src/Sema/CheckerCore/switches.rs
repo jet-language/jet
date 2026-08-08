@@ -150,16 +150,16 @@ impl<'a> Checker<'a> {
             if name == "_" {
                 return;
             }
-            if self
-                .scopes
-                .last()
-                .is_some_and(|scope| scope.contains_key(name))
+            let depth = self.scope_depth();
+            if self.flow.bindings.get_at(name, depth).is_some()
+                || self.flow.narrow.get_at(name, depth).is_some()
             {
                 self.diags
                     .push(crate::Sema::Registration::already_defined(name, name_span));
             }
-            self.scopes.last_mut().unwrap().insert(
-                name.to_string(),
+            self.flow.narrow.set_at(
+                name,
+                depth,
                 LocalInfo {
                     def_span: name_span,
                     ty: inner,
@@ -183,7 +183,7 @@ impl<'a> Checker<'a> {
             ty: Type,
         ) -> Option<(String, Span)> {
             let restore = if self.is_optional_flow_refine(name, &ty) {
-                let moved_at = self.moved.remove(name);
+                let moved_at = self.flow.moved.remove(name);
                 self.declare_optional_flow_narrow(name, span, ty);
                 moved_at.map(|at| (name.to_string(), at))
             } else {
@@ -283,7 +283,7 @@ impl<'a> Checker<'a> {
                     let mut right_bindings = self.check_condition_with_bindings(r);
                     self.pop_scope();
                     for (name, at) in restore_moved {
-                        self.moved.insert(name, at);
+                        self.flow.moved.set(&name, at);
                     }
                     left_bindings.into_iter().for_each(|(k, v)| {
                         right_bindings.entry(k).or_insert(v);
@@ -320,10 +320,9 @@ impl<'a> Checker<'a> {
                 // D-TAG1: an earlier group arm already covers every leaf in
                 // its subtree, so `.Fire ->` makes a later `.Fire.Burn ->`
                 // unreachable (ancestor-or-equal test on the dotted path).
-                let already = covered.contains(&variant)
-                    || covered
-                        .iter()
-                        .any(|c| variant.starts_with(&format!("{c}.")));
+                let already = covered
+                    .iter()
+                    .any(|c| jet_foundation::Facts::fact_covers(c, &variant));
                 if already {
                     let what = format!(
                         "arm `{}` is unreachable — that case is already handled",
@@ -554,10 +553,12 @@ impl<'a> Checker<'a> {
                 false
             };
             let mut covered = HashSet::new();
-            let move_before = self.moved.clone();
-            let mut move_after = move_before.clone();
+            // D-FACT-FLOW1: one snapshot before the table, one store per arm,
+            // and one shared join at the end. No plane keeps the last-walked arm.
+            let before = self.flow.clone();
+            let mut paths: Vec<crate::Sema::FlowFacts::FlowFacts> = Vec::new();
             for arm in arms.iter_mut() {
-                self.moved = move_before.clone();
+                self.flow = before.clone();
                 if all_pattern {
                     if let Some(ref st) = subj_ty {
                         let Some(pattern) =
@@ -582,11 +583,9 @@ impl<'a> Checker<'a> {
                         self.check_block(&mut arm.body, false);
                         self.pop_scope();
                         for (name, at) in restore_moved {
-                            self.moved.insert(name, at);
+                            self.flow.moved.set(&name, at);
                         }
-                        for (k, v) in self.moved.drain() {
-                            move_after.entry(k).or_insert(v);
-                        }
+                        paths.push(self.flow.clone());
                         continue;
                     }
                 }
@@ -607,19 +606,30 @@ impl<'a> Checker<'a> {
                     self.check_block(&mut arm.body, false);
                     self.pop_scope();
                     for (name, at) in restore_moved {
-                        self.moved.insert(name, at);
+                        self.flow.moved.set(&name, at);
                     }
                 }
-                for (k, v) in self.moved.drain() {
-                    move_after.entry(k).or_insert(v);
-                }
+                paths.push(self.flow.clone());
             }
+            self.flow = before.clone();
             if it_scope {
                 self.pop_scope();
+                for path in &mut paths {
+                    path.leave_scope();
+                }
             }
+            // The store as it stands outside the table, at the depth the merge
+            // happens. The lint probes below may walk expressions, so the merge
+            // reads this copy rather than whatever they touched.
+            let outside_table = self.flow.clone();
+            // True when some path can reach the code after the table without
+            // running any arm. That path carries the pre-table facts into the
+            // merge; a table that covers every case has no such path.
+            let mut can_skip_every_arm = else_body.is_none();
             if all_pattern {
                 if let Some(st) = subj_ty {
                     let insert_at = arms.last().map(|a| Span::new(a.span.end, a.span.end));
+                    let reported = self.diags.len();
                     self.check_pattern_coverage_complete(
                         &st,
                         &covered,
@@ -628,6 +638,7 @@ impl<'a> Checker<'a> {
                         insert_at,
                         subj_name.as_deref(),
                     );
+                    can_skip_every_arm = else_body.is_none() && self.diags.len() > reported;
                 }
             } else if else_body.is_none() && !subjectless_guard {
                 // D-PARSESTR1: a str-match pattern arm is always refutable — the
@@ -742,13 +753,14 @@ impl<'a> Checker<'a> {
                 }
             }
             if let Some(body) = else_body {
-                self.moved = move_before.clone();
+                self.flow = outside_table.clone();
                 self.check_block(body, true);
-                for (k, v) in self.moved.drain() {
-                    move_after.entry(k).or_insert(v);
-                }
+                paths.push(self.flow.clone());
+            } else if can_skip_every_arm {
+                // Skipping every arm is itself a path through here.
+                paths.push(outside_table.clone());
             }
-            self.moved = move_after;
+            self.flow = crate::Sema::FlowFacts::FlowFacts::merge_paths(&outside_table, &paths);
         }
     
 }

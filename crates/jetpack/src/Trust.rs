@@ -333,11 +333,11 @@ pub fn environment_definition_hash(
         content.push_str(name);
         content.push('\n');
     }
-    if let Some(profile) = &facts.selected_profile {
+    if let Some(profile) = &facts.selected_preset {
         content.push_str("selected=");
         content.push_str(&profile.name);
         content.push('\n');
-        for name in &profile.selected_profiles {
+        for name in &profile.selected_presets {
             content.push_str("selected-profile=");
             content.push_str(name);
             content.push('\n');
@@ -524,7 +524,7 @@ pub fn is_typed_environment(facts: &jet_env_model::ModuleEval::EnvironmentFacts)
         || !facts.profiles.is_empty()
         || !facts.package_profiles.is_empty()
         || !facts.languages.is_empty()
-        || facts.selected_profile.is_some()
+        || facts.selected_preset.is_some()
         || !facts.language_packs.is_empty()
         || !facts.files.is_empty()
         || !facts.integration_facts.tasks.is_empty()

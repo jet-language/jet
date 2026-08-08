@@ -11,6 +11,7 @@ use jet_foundation::PackageEdition;
 use jet_foundation::AST::{CtKey, CtValue, Expr, Item, MigrationOp, ProgramBundle, StrPart};
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
+use crate::Marshal::{clone_string, clone_bytes, alloc_byte_list, result_ok, result_err_msg};
 
 /// Canonical `jet_std` JSON/DataTree runtime — adapter types, shared algorithm via include!
 pub(crate) mod json_rt {
@@ -336,49 +337,6 @@ pub(crate) fn read_datatree(handle: i64) -> Option<json_rt::DataTree> {
     }
 }
 
-pub(crate) fn clone_heap_string(id: i64) -> String {
-    Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(id).unwrap_or_default())
-}
-
-fn clone_heap_bytes(list: i64) -> Vec<u8> {
-    Concurrency::with_runtime_mut(|rt| {
-        let len = rt.heap.list_len(list).unwrap_or(0);
-        let mut out = Vec::with_capacity(len as usize);
-        for i in 0..len {
-            out.push(rt.heap.list_get_int(list, i).unwrap_or(0) as u8);
-        }
-        out
-    })
-}
-
-fn alloc_byte_list(bytes: &[u8]) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let list = rt.heap.alloc_empty_list();
-        for &b in bytes {
-            let _ = rt.heap.list_push_int(list, b as i64);
-        }
-        list
-    })
-}
-
-pub(crate) fn result_ok_bits(bits: u64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        rt.results.push(super::JitResultValue { ok: true, bits });
-        rt.results.len() as i64
-    })
-}
-
-pub(crate) fn result_err_msg(msg: &str) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let sid = rt.heap.alloc_string(msg.to_string());
-        rt.results.push(super::JitResultValue {
-            ok: false,
-            bits: sid as u64,
-        });
-        rt.results.len() as i64
-    })
-}
-
 fn result_err_fields(errors: Vec<json_rt::FieldError>) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let error_list = rt.heap.alloc_empty_list();
@@ -516,46 +474,46 @@ fn hex_decode(text: &str) -> Result<Vec<u8>, String> {
 }
 
 extern "C" fn jet_jit_hex_encode(bytes: i64) -> i64 {
-    let encoded = hex_encode(&clone_heap_bytes(bytes));
+    let encoded = hex_encode(&clone_bytes(bytes));
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(encoded))
 }
 
 extern "C" fn jet_jit_hex_decode(text: i64) -> i64 {
-    match hex_decode(&clone_heap_string(text)) {
-        Ok(bytes) => result_ok_bits(alloc_byte_list(&bytes) as u64),
+    match hex_decode(&clone_string(text)) {
+        Ok(bytes) => result_ok(alloc_byte_list(&bytes) as u64),
         Err(e) => result_err_msg(&e),
     }
 }
 
 extern "C" fn jet_jit_b64_encode(bytes: i64) -> i64 {
-    let encoded = b64_encode(&clone_heap_bytes(bytes));
+    let encoded = b64_encode(&clone_bytes(bytes));
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(encoded))
 }
 
 extern "C" fn jet_jit_b64_encode_url(bytes: i64) -> i64 {
-    let encoded = b64url_encode(&clone_heap_bytes(bytes));
+    let encoded = b64url_encode(&clone_bytes(bytes));
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(encoded))
 }
 
 extern "C" fn jet_jit_b64_decode(text: i64) -> i64 {
     let edition = PackageEdition::package_edition();
-    match base_encoding_dispatch::decode_base64(&edition, &clone_heap_string(text), false, false) {
-        Ok(bytes) => result_ok_bits(alloc_byte_list(&bytes) as u64),
+    match base_encoding_dispatch::decode_base64(&edition, &clone_string(text), false, false) {
+        Ok(bytes) => result_ok(alloc_byte_list(&bytes) as u64),
         Err(e) => result_err_msg(&e),
     }
 }
 
 extern "C" fn jet_jit_b64_decode_url(text: i64) -> i64 {
     let edition = PackageEdition::package_edition();
-    match base_encoding_dispatch::decode_base64url(&edition, &clone_heap_string(text), false, false)
+    match base_encoding_dispatch::decode_base64url(&edition, &clone_string(text), false, false)
     {
-        Ok(bytes) => result_ok_bits(alloc_byte_list(&bytes) as u64),
+        Ok(bytes) => result_ok(alloc_byte_list(&bytes) as u64),
         Err(e) => result_err_msg(&e),
     }
 }
 
 extern "C" fn jet_jit_base32_encode(bytes: i64) -> i64 {
-    let encoded = base32_encode(&clone_heap_bytes(bytes));
+    let encoded = base32_encode(&clone_bytes(bytes));
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(encoded))
 }
 
@@ -563,12 +521,12 @@ extern "C" fn jet_jit_base32_decode(text: i64) -> i64 {
     let edition = PackageEdition::package_edition();
     match base_encoding_dispatch::decode_base32(
         &edition,
-        &clone_heap_string(text),
+        &clone_string(text),
         false,
         false,
         false,
     ) {
-        Ok(bytes) => result_ok_bits(alloc_byte_list(&bytes) as u64),
+        Ok(bytes) => result_ok(alloc_byte_list(&bytes) as u64),
         Err(e) => result_err_msg(&e),
     }
 }
@@ -749,8 +707,8 @@ fn clone_string_rows(list: i64) -> Vec<Vec<String>> {
 }
 
 extern "C" fn jet_jit_csv_parse(text: i64) -> i64 {
-    match csv_parse(&clone_heap_string(text)) {
-        Ok(rows) => result_ok_bits(alloc_string_rows(rows) as u64),
+    match csv_parse(&clone_string(text)) {
+        Ok(rows) => result_ok(alloc_string_rows(rows) as u64),
         Err(e) => result_err_msg(&e),
     }
 }
@@ -918,29 +876,29 @@ fn uuid_sha1(data: &[u8]) -> [u8; 20] {
 }
 
 extern "C" fn jet_jit_uuid_parse(text: i64) -> i64 {
-    match uuid_bytes(&clone_heap_string(text)) {
+    match uuid_bytes(&clone_string(text)) {
         Ok(bytes) => {
             let normalized = uuid_format(&bytes);
-            Concurrency::with_runtime_mut(|rt| result_ok_bits(rt.heap.alloc_string(normalized) as u64))
+            Concurrency::with_runtime_mut(|rt| result_ok(rt.heap.alloc_string(normalized) as u64))
         }
         Err(e) => result_err_msg(&e),
     }
 }
 
 extern "C" fn jet_jit_uuid_v5(namespace: i64, name: i64) -> i64 {
-    let ns = match uuid_bytes(&clone_heap_string(namespace)) {
+    let ns = match uuid_bytes(&clone_string(namespace)) {
         Ok(ns) => ns,
         Err(e) => return result_err_msg(&e),
     };
     let mut input = ns.to_vec();
-    input.extend_from_slice(clone_heap_string(name).as_bytes());
+    input.extend_from_slice(clone_string(name).as_bytes());
     let digest = uuid_sha1(&input);
     let mut bytes = [0u8; 16];
     bytes.copy_from_slice(&digest[..16]);
     bytes[6] = (bytes[6] & 0x0f) | 0x50;
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
     let s = uuid_format(&bytes);
-    Concurrency::with_runtime_mut(|rt| result_ok_bits(rt.heap.alloc_string(s) as u64))
+    Concurrency::with_runtime_mut(|rt| result_ok(rt.heap.alloc_string(s) as u64))
 }
 
 extern "C" fn jet_jit_uuid_v4() -> i64 {
@@ -978,15 +936,15 @@ extern "C" fn jet_jit_uuid_v7(clock: i64) -> i64 {
 // ── JSON / DataTree (core.encoding.json) ─────────────────────────────────────
 
 extern "C" fn jet_jit_json_parse(text: i64) -> i64 {
-    match json_rt::parse_datatree(&clone_heap_string(text)) {
-        Ok(tree) => result_ok_bits(alloc_datatree(&tree) as u64),
+    match json_rt::parse_datatree(&clone_string(text)) {
+        Ok(tree) => result_ok(alloc_datatree(&tree) as u64),
         Err(e) => result_err_msg(&format!("invalid JSON (line {}): {}", e.line, e.message)),
     }
 }
 
 extern "C" fn jet_jit_json_decode(text: i64) -> i64 {
-    match json_rt::decode_lenient(&clone_heap_string(text)) {
-        Ok(tree) => result_ok_bits(alloc_datatree(&tree) as u64),
+    match json_rt::decode_lenient(&clone_string(text)) {
+        Ok(tree) => result_ok(alloc_datatree(&tree) as u64),
         Err(e) => result_err_msg(&format!("invalid JSON (line {}): {}", e.line, e.message)),
     }
 }
@@ -1080,7 +1038,7 @@ extern "C" fn jet_jit_json_events(tree: i64) -> i64 {
 
 /// `core.encoding.jsonl.parse` — same as `jet_std_jsonl_parse`.
 extern "C" fn jet_jit_jsonl_parse(text: i64) -> i64 {
-    let src = clone_heap_string(text);
+    let src = clone_string(text);
     let mut handles = Vec::new();
     for (idx, line) in src.lines().enumerate() {
         let trimmed = line.trim();
@@ -1105,7 +1063,7 @@ extern "C" fn jet_jit_jsonl_parse(text: i64) -> i64 {
         }
         list
     });
-    result_ok_bits(list as u64)
+    result_ok(list as u64)
 }
 
 /// `core.encoding.jsonl.to_string` — same as `jet_std_jsonl_render`.
@@ -1196,10 +1154,10 @@ fn xml_decode_fields(error: jet_foundation::XmlPull::Error) -> Vec<json_rt::Fiel
 }
 
 extern "C" fn jet_jit_xml_parse(text: i64) -> i64 {
-    match jet_foundation::XmlPull::parse_document(&clone_heap_string(text)) {
+    match jet_foundation::XmlPull::parse_document(&clone_string(text)) {
         Ok(mut value) => {
             jet_foundation::XmlPull::invalidate_untrusted_lexical_evidence(&mut value);
-            result_ok_bits(alloc_datatree(&xml_value_to_datatree(value)) as u64)
+            result_ok(alloc_datatree(&xml_value_to_datatree(value)) as u64)
         }
         Err(e) => result_err_msg(&xml_err_msg(e)),
     }
@@ -1233,7 +1191,7 @@ extern "C" fn jet_jit_xml_root(tree: i64) -> i64 {
     match xml_tree_value(tree).and_then(|v| {
         jet_foundation::XmlPull::document_root(&v).map_err(xml_err_msg)
     }) {
-        Ok(root) => result_ok_bits(alloc_datatree(&xml_value_to_datatree(root)) as u64),
+        Ok(root) => result_ok(alloc_datatree(&xml_value_to_datatree(root)) as u64),
         Err(e) => result_err_msg(&e),
     }
 }
@@ -1262,7 +1220,7 @@ extern "C" fn jet_jit_xml_expanded_name(tree: i64) -> i64 {
                 let _ = rt.heap.record_set_int(rec, 3, uri_bits);
                 rec
             });
-            result_ok_bits(handle as u64)
+            result_ok(handle as u64)
         }
         Err(e) => result_err_msg(&e),
     }
@@ -1270,11 +1228,11 @@ extern "C" fn jet_jit_xml_expanded_name(tree: i64) -> i64 {
 
 /// `xml.attribute` → Result[String?, XMLError] (Option packed as 0 / sid+1).
 extern "C" fn jet_jit_xml_attribute(tree: i64, name: i64) -> i64 {
-    let key = clone_heap_string(name);
+    let key = clone_string(name);
     match xml_tree_value(tree).and_then(|v| {
         jet_foundation::XmlPull::lookup_attribute(&v, &key).map_err(xml_err_msg)
     }) {
-        Ok(opt) => result_ok_bits(pack_opt_string(opt) as u64),
+        Ok(opt) => result_ok(pack_opt_string(opt) as u64),
         Err(e) => result_err_msg(&e),
     }
 }
@@ -1296,7 +1254,7 @@ extern "C" fn jet_jit_xml_content(tree: i64) -> i64 {
                 }
                 list
             });
-            result_ok_bits(list as u64)
+            result_ok(list as u64)
         }
         Err(e) => result_err_msg(&e),
     }
@@ -1312,19 +1270,19 @@ extern "C" fn jet_jit_xml_to_bytes(tree: i64) -> i64 {
         )
         .map_err(xml_err_msg)
     }) {
-        Ok(bytes) => result_ok_bits(alloc_byte_list(&bytes) as u64),
+        Ok(bytes) => result_ok(alloc_byte_list(&bytes) as u64),
         Err(e) => result_err_msg(&e),
     }
 }
 
 /// Parse + `project_document_for_decode` — front half of typed `xml.decode`.
 extern "C" fn jet_jit_xml_project(text: i64) -> i64 {
-    match jet_foundation::XmlPull::parse_document(&clone_heap_string(text)) {
+    match jet_foundation::XmlPull::parse_document(&clone_string(text)) {
         Ok(mut value) => {
             jet_foundation::XmlPull::invalidate_untrusted_lexical_evidence(&mut value);
             match jet_foundation::XmlPull::project_document_for_decode(&value) {
                 Ok(projected) => {
-                    result_ok_bits(alloc_datatree(&xml_value_to_datatree(projected)) as u64)
+                    result_ok(alloc_datatree(&xml_value_to_datatree(projected)) as u64)
                 }
                 Err(e) => result_err_fields(xml_decode_fields(e)),
             }
@@ -1335,13 +1293,13 @@ extern "C" fn jet_jit_xml_project(text: i64) -> i64 {
 
 /// Parse bytes + project — front half of typed `xml.decode_bytes`.
 extern "C" fn jet_jit_xml_project_bytes(bytes: i64) -> i64 {
-    let input = clone_heap_bytes(bytes);
+    let input = clone_bytes(bytes);
     match jet_foundation::XmlPull::parse_document_bytes(&input) {
         Ok(mut value) => {
             jet_foundation::XmlPull::invalidate_untrusted_lexical_evidence(&mut value);
             match jet_foundation::XmlPull::project_document_for_decode(&value) {
                 Ok(projected) => {
-                    result_ok_bits(alloc_datatree(&xml_value_to_datatree(projected)) as u64)
+                    result_ok(alloc_datatree(&xml_value_to_datatree(projected)) as u64)
                 }
                 Err(e) => result_err_fields(xml_decode_fields(e)),
             }
@@ -1647,7 +1605,7 @@ fn jet_jit_cbor_to_bytes_impl(tree: i64, canonical: bool) -> i64 {
         Some(t) => {
             let mut out = Vec::new();
             match cbor_encode_val(&t, &mut out, canonical) {
-                Ok(()) => result_ok_bits(alloc_byte_list(&out) as u64),
+                Ok(()) => result_ok(alloc_byte_list(&out) as u64),
                 Err(e) => result_err_msg(&e),
             }
         }
@@ -1787,7 +1745,7 @@ fn cbor_decode_fields(value: CtValue) -> Vec<json_rt::FieldError> {
 }
 
 fn jet_jit_cbor_parse_impl(bytes: i64, options: Option<i64>, allow_bytes: bool) -> i64 {
-    let input = clone_heap_bytes(bytes);
+    let input = clone_bytes(bytes);
     let options = options.map(|handle| {
         let (max_depth, max_items, max_bytes, require_canonical) =
             Concurrency::with_runtime_mut(|rt| {
@@ -1815,7 +1773,7 @@ fn jet_jit_cbor_parse_impl(bytes: i64, options: Option<i64>, allow_bytes: bool) 
     });
     match jet_codegen::Comptime::cbor_parse_for_tir(&input, options.as_ref(), allow_bytes) {
         Ok(tree) => match cbor_ct_datatree(&tree) {
-            Some(tree) => result_ok_bits(alloc_datatree(&tree) as u64),
+            Some(tree) => result_ok(alloc_datatree(&tree) as u64),
             None if allow_bytes => result_err_fields(json_rt::FieldError::one(
                 "invalid DataTree from CBOR parser",
             )),
@@ -1850,12 +1808,12 @@ extern "C" fn jet_jit_cbor_decode_tree_options(bytes: i64, options: i64) -> i64 
 /// CSV typed decode front half: header+rows → `[DataTree]` of Text-cell objects
 /// (mirrors `jet_enc_csv_decode` before `T::jet_decode`).
 extern "C" fn jet_jit_csv_decode_trees(text: i64) -> i64 {
-    match csv_parse(&clone_heap_string(text)) {
+    match csv_parse(&clone_string(text)) {
         Ok(rows) => {
             let mut it = rows.into_iter();
             let Some(header) = it.next() else {
                 let empty = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_empty_list());
-                return result_ok_bits(empty as u64);
+                return result_ok(empty as u64);
             };
             let mut handles = Vec::new();
             for row in it {
@@ -1876,19 +1834,19 @@ extern "C" fn jet_jit_csv_decode_trees(text: i64) -> i64 {
                 }
                 list
             });
-            result_ok_bits(list as u64)
+            result_ok(list as u64)
         }
         Err(e) => result_err_msg(&e),
     }
 }
 
 extern "C" fn jet_jit_datatree_field(tree: i64, name: i64) -> i64 {
-    let key = clone_heap_string(name);
+    let key = clone_string(name);
     let Some(tree) = read_datatree(tree) else {
         return result_err_decode(&key, "invalid DataTree");
     };
     match tree.field(&key) {
-        Ok(value) => result_ok_bits(alloc_datatree(&value) as u64),
+        Ok(value) => result_ok(alloc_datatree(&value) as u64),
         Err(errors) => result_err_fields(errors),
     }
 }
@@ -1898,7 +1856,7 @@ extern "C" fn jet_jit_datatree_at(tree: i64, index: i64) -> i64 {
         return result_err_decode(&format!("[{index}]"), "invalid DataTree");
     };
     match tree.at(index) {
-        Ok(value) => result_ok_bits(alloc_datatree(&value) as u64),
+        Ok(value) => result_ok(alloc_datatree(&value) as u64),
         Err(errors) => result_err_fields(errors),
     }
 }
@@ -1908,7 +1866,7 @@ extern "C" fn jet_jit_datatree_int(tree: i64) -> i64 {
         return result_err_decode("", "invalid DataTree");
     };
     match tree.int() {
-        Ok(value) => result_ok_bits(value as u64),
+        Ok(value) => result_ok(value as u64),
         Err(errors) => result_err_fields(errors),
     }
 }
@@ -1919,7 +1877,7 @@ extern "C" fn jet_jit_datatree_decode_int(tree: i64) -> i64 {
         return result_err_decode("", "invalid DataTree");
     };
     match json_rt::decode_int(&tree) {
-        Ok(value) => result_ok_bits(value as u64),
+        Ok(value) => result_ok(value as u64),
         Err(errors) => result_err_fields(errors),
     }
 }
@@ -1941,7 +1899,7 @@ extern "C" fn jet_jit_decode_int_range(
         return result;
     }
     let value = value.bits as i64;
-    let type_name = clone_heap_string(type_name);
+    let type_name = clone_string(type_name);
     match json_rt::check_int_range(Ok(value), lo, hi, &type_name) {
         Ok(_) => result,
         Err(errors) => result_err_fields(errors),
@@ -2012,7 +1970,7 @@ extern "C" fn jet_jit_decode_error_under_segment(result: i64, segment: i64) -> i
     let Some(errors) = result_errors(result) else {
         return result;
     };
-    let segment = clone_heap_string(segment);
+    let segment = clone_string(segment);
     result_err_fields(json_rt::FieldError::under_errors(&segment, errors))
 }
 
@@ -2043,7 +2001,7 @@ extern "C" fn jet_jit_datatree_text(tree: i64) -> i64 {
     match json_rt::decode_string(&tree) {
         Ok(value) => {
             let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(value));
-            result_ok_bits(sid as u64)
+            result_ok(sid as u64)
         }
         Err(errors) => result_err_fields(errors),
     }
@@ -2054,7 +2012,7 @@ extern "C" fn jet_jit_datatree_bool(tree: i64) -> i64 {
         return result_err_decode("", "invalid DataTree");
     };
     match json_rt::decode_bool(&tree) {
-        Ok(value) => result_ok_bits(u64::from(value)),
+        Ok(value) => result_ok(u64::from(value)),
         Err(errors) => result_err_fields(errors),
     }
 }
@@ -2064,14 +2022,14 @@ extern "C" fn jet_jit_datatree_float(tree: i64) -> i64 {
         return result_err_decode("", "invalid DataTree");
     };
     match json_rt::decode_float(&tree) {
-        Ok(value) => result_ok_bits(value.to_bits()),
+        Ok(value) => result_ok(value.to_bits()),
         Err(errors) => result_err_fields(errors),
     }
 }
 
 extern "C" fn jet_jit_toml_parse(text: i64) -> i64 {
-    match json_rt::toml::parse_to_tree(&clone_heap_string(text)) {
-        Ok(tree) => result_ok_bits(alloc_datatree(&tree) as u64),
+    match json_rt::toml::parse_to_tree(&clone_string(text)) {
+        Ok(tree) => result_ok(alloc_datatree(&tree) as u64),
         Err(e) => result_err_msg(&format!("invalid TOML (line {}): {}", e.line, e.message)),
     }
 }
@@ -2084,8 +2042,8 @@ extern "C" fn jet_jit_toml_to_string(tree: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_yaml_parse(text: i64) -> i64 {
-    match yaml_rt::yaml::parse_to_tree(&clone_heap_string(text)) {
-        Ok(tree) => result_ok_bits(alloc_datatree(&tree) as u64),
+    match yaml_rt::yaml::parse_to_tree(&clone_string(text)) {
+        Ok(tree) => result_ok(alloc_datatree(&tree) as u64),
         Err(e) => result_err_msg(&format!("invalid YAML (line {}): {}", e.line, e.message)),
     }
 }
@@ -2161,203 +2119,105 @@ extern "C" fn jet_jit_bytes_datatree(bytes: i64) -> i64 {
     alloc_dt_record(DT_BYTES, bytes)
 }
 
-pub(crate) struct EncodingHostFns {
-    pub hex_encode: cranelift_module::FuncId,
-    pub hex_decode: cranelift_module::FuncId,
-    pub b64_encode: cranelift_module::FuncId,
-    pub b64_encode_url: cranelift_module::FuncId,
-    pub b64_decode: cranelift_module::FuncId,
-    pub b64_decode_url: cranelift_module::FuncId,
-    pub base32_encode: cranelift_module::FuncId,
-    pub base32_decode: cranelift_module::FuncId,
-    pub csv_parse: cranelift_module::FuncId,
-    pub csv_to_string: cranelift_module::FuncId,
-    pub csv_tree_to_string: cranelift_module::FuncId,
-    pub uuid_v4: cranelift_module::FuncId,
-    pub uuid_v7: cranelift_module::FuncId,
-    pub uuid_v5: cranelift_module::FuncId,
-    pub uuid_parse: cranelift_module::FuncId,
-    pub json_parse: cranelift_module::FuncId,
-    pub json_decode: cranelift_module::FuncId,
-    pub json_to_string: cranelift_module::FuncId,
-    pub json_to_string_pretty: cranelift_module::FuncId,
-    pub json_canonical: cranelift_module::FuncId,
-    pub json_canonical_checked: cranelift_module::FuncId,
-    pub json_events: cranelift_module::FuncId,
-    pub jsonl_parse: cranelift_module::FuncId,
-    pub jsonl_to_string: cranelift_module::FuncId,
-    pub xml_parse: cranelift_module::FuncId,
-    pub xml_to_string: cranelift_module::FuncId,
-    pub xml_root: cranelift_module::FuncId,
-    pub xml_expanded_name: cranelift_module::FuncId,
-    pub xml_attribute: cranelift_module::FuncId,
-    pub xml_content: cranelift_module::FuncId,
-    pub xml_to_bytes: cranelift_module::FuncId,
-    pub xml_project: cranelift_module::FuncId,
-    pub xml_project_bytes: cranelift_module::FuncId,
-    pub cbor_to_bytes: cranelift_module::FuncId,
-    pub cbor_to_bytes_canonical: cranelift_module::FuncId,
-    pub cbor_parse: cranelift_module::FuncId,
-    pub cbor_parse_options: cranelift_module::FuncId,
-    pub cbor_decode_tree: cranelift_module::FuncId,
-    pub cbor_decode_tree_options: cranelift_module::FuncId,
-    pub bytes_datatree: cranelift_module::FuncId,
-    pub csv_decode_trees: cranelift_module::FuncId,
-    pub datatree_field: cranelift_module::FuncId,
-    pub datatree_at: cranelift_module::FuncId,
-    pub datatree_int: cranelift_module::FuncId,
-    pub datatree_decode_int: cranelift_module::FuncId,
-    pub decode_int_range: cranelift_module::FuncId,
-    pub decode_f32_range: cranelift_module::FuncId,
-    pub decode_fixed_len: cranelift_module::FuncId,
-    pub datatree_decode_list_error: cranelift_module::FuncId,
-    pub decode_error_under: cranelift_module::FuncId,
-    pub decode_error_under_segment: cranelift_module::FuncId,
-    pub decode_error_accumulate: cranelift_module::FuncId,
-    pub datatree_decode_union_error: cranelift_module::FuncId,
-    pub datatree_text: cranelift_module::FuncId,
-    pub datatree_bool: cranelift_module::FuncId,
-    pub datatree_float: cranelift_module::FuncId,
-    pub datatree_pack: cranelift_module::FuncId,
-    pub object_from_map: cranelift_module::FuncId,
-    pub object_entries_to_map: cranelift_module::FuncId,
-    pub datatree_migrate: cranelift_module::FuncId,
-    pub toml_parse: cranelift_module::FuncId,
-    pub toml_to_string: cranelift_module::FuncId,
-    pub yaml_parse: cranelift_module::FuncId,
-    pub yaml_to_string: cranelift_module::FuncId,
-    pub decode_error_show: cranelift_module::FuncId,
-    pub encoding_error_show: cranelift_module::FuncId,
+host_fns! {
+    struct EncodingHostFns;
+    register: register_encoding_symbols;
+    declare: declare_encoding_host_fns(module) {
+        use cranelift_codegen::ir::{types, AbiParam, Signature};
+        use cranelift_module::{Linkage, Module};
+        let cc = module.target_config().default_call_conv;
+        let mut sig_unary = Signature::new(cc);
+        sig_unary.params.push(AbiParam::new(types::I64));
+        sig_unary.returns.push(AbiParam::new(types::I64));
+        let mut sig_nullary = Signature::new(cc);
+        sig_nullary.returns.push(AbiParam::new(types::I64));
+        let mut sig_binary = Signature::new(cc);
+        sig_binary.params.push(AbiParam::new(types::I64));
+        sig_binary.params.push(AbiParam::new(types::I64));
+        sig_binary.returns.push(AbiParam::new(types::I64));
+        let mut sig_ternary = Signature::new(cc);
+        for _ in 0..3 {
+            sig_ternary.params.push(AbiParam::new(types::I64));
+        }
+        sig_ternary.returns.push(AbiParam::new(types::I64));
+        let mut sig_quaternary = Signature::new(cc);
+        for _ in 0..4 {
+            sig_quaternary.params.push(AbiParam::new(types::I64));
+        }
+        sig_quaternary.returns.push(AbiParam::new(types::I64));
+
+
+    }
+    hex_encode: "jet_jit_hex_encode" => jet_jit_hex_encode: sig_unary;
+    hex_decode: "jet_jit_hex_decode" => jet_jit_hex_decode: sig_unary;
+    b64_encode: "jet_jit_b64_encode" => jet_jit_b64_encode: sig_unary;
+    b64_encode_url: "jet_jit_b64_encode_url" => jet_jit_b64_encode_url: sig_unary;
+    b64_decode: "jet_jit_b64_decode" => jet_jit_b64_decode: sig_unary;
+    b64_decode_url: "jet_jit_b64_decode_url" => jet_jit_b64_decode_url: sig_unary;
+    base32_encode: "jet_jit_base32_encode" => jet_jit_base32_encode: sig_unary;
+    base32_decode: "jet_jit_base32_decode" => jet_jit_base32_decode: sig_unary;
+    csv_parse: "jet_jit_csv_parse" => jet_jit_csv_parse: sig_unary;
+    csv_to_string: "jet_jit_csv_to_string" => jet_jit_csv_to_string: sig_unary;
+    csv_tree_to_string: "jet_jit_csv_tree_to_string" => jet_jit_csv_tree_to_string: sig_unary;
+    uuid_v4: "jet_jit_uuid_v4" => jet_jit_uuid_v4: sig_nullary;
+    uuid_v7: "jet_jit_uuid_v7" => jet_jit_uuid_v7: sig_unary;
+    uuid_v5: "jet_jit_uuid_v5" => jet_jit_uuid_v5: sig_binary;
+    uuid_parse: "jet_jit_uuid_parse" => jet_jit_uuid_parse: sig_unary;
+    json_parse: "jet_jit_json_parse" => jet_jit_json_parse: sig_unary;
+    json_decode: "jet_jit_json_decode" => jet_jit_json_decode: sig_unary;
+    json_to_string: "jet_jit_json_to_string" => jet_jit_json_to_string: sig_unary;
+    json_to_string_pretty: "jet_jit_json_to_string_pretty" => jet_jit_json_to_string_pretty: sig_unary;
+    json_canonical: "jet_jit_json_canonical" => jet_jit_json_canonical: sig_unary;
+    json_canonical_checked: "jet_jit_json_canonical_checked" => jet_jit_json_canonical_checked: sig_binary;
+    json_events: "jet_jit_json_events" => jet_jit_json_events: sig_unary;
+    jsonl_parse: "jet_jit_jsonl_parse" => jet_jit_jsonl_parse: sig_unary;
+    jsonl_to_string: "jet_jit_jsonl_to_string" => jet_jit_jsonl_to_string: sig_unary;
+    xml_parse: "jet_jit_xml_parse" => jet_jit_xml_parse: sig_unary;
+    xml_to_string: "jet_jit_xml_to_string" => jet_jit_xml_to_string: sig_unary;
+    xml_root: "jet_jit_xml_root" => jet_jit_xml_root: sig_unary;
+    xml_expanded_name: "jet_jit_xml_expanded_name" => jet_jit_xml_expanded_name: sig_unary;
+    xml_attribute: "jet_jit_xml_attribute" => jet_jit_xml_attribute: sig_binary;
+    xml_content: "jet_jit_xml_content" => jet_jit_xml_content: sig_unary;
+    xml_to_bytes: "jet_jit_xml_to_bytes" => jet_jit_xml_to_bytes: sig_unary;
+    xml_project: "jet_jit_xml_project" => jet_jit_xml_project: sig_unary;
+    xml_project_bytes: "jet_jit_xml_project_bytes" => jet_jit_xml_project_bytes: sig_unary;
+    cbor_to_bytes: "jet_jit_cbor_to_bytes" => jet_jit_cbor_to_bytes: sig_unary;
+    cbor_to_bytes_canonical: "jet_jit_cbor_to_bytes_canonical" => jet_jit_cbor_to_bytes_canonical: sig_unary;
+    cbor_parse: "jet_jit_cbor_parse" => jet_jit_cbor_parse: sig_unary;
+    cbor_parse_options: "jet_jit_cbor_parse_options" => jet_jit_cbor_parse_options: sig_binary;
+    cbor_decode_tree: "jet_jit_cbor_decode_tree" => jet_jit_cbor_decode_tree: sig_unary;
+    cbor_decode_tree_options: "jet_jit_cbor_decode_tree_options" => jet_jit_cbor_decode_tree_options: sig_binary;
+    bytes_datatree: "jet_jit_bytes_datatree" => jet_jit_bytes_datatree: sig_unary;
+    csv_decode_trees: "jet_jit_csv_decode_trees" => jet_jit_csv_decode_trees: sig_unary;
+    datatree_field: "jet_jit_datatree_field" => jet_jit_datatree_field: sig_binary;
+    datatree_at: "jet_jit_datatree_at" => jet_jit_datatree_at: sig_binary;
+    datatree_int: "jet_jit_datatree_int" => jet_jit_datatree_int: sig_unary;
+    datatree_decode_int: "jet_jit_datatree_decode_int" => jet_jit_datatree_decode_int: sig_unary;
+    decode_int_range: "jet_jit_decode_int_range" => jet_jit_decode_int_range: sig_quaternary;
+    decode_f32_range: "jet_jit_decode_f32_range" => jet_jit_decode_f32_range: sig_unary;
+    decode_fixed_len: "jet_jit_decode_fixed_len" => jet_jit_decode_fixed_len: sig_binary;
+    datatree_decode_list_error: "jet_jit_datatree_decode_list_error" => jet_jit_datatree_decode_list_error: sig_unary;
+    decode_error_under: "jet_jit_decode_error_under" => jet_jit_decode_error_under: sig_binary;
+    decode_error_under_segment: "jet_jit_decode_error_under_segment" => jet_jit_decode_error_under_segment: sig_binary;
+    decode_error_accumulate: "jet_jit_decode_error_accumulate" => jet_jit_decode_error_accumulate: sig_ternary;
+    datatree_decode_union_error: "jet_jit_datatree_decode_union_error" => jet_jit_datatree_decode_union_error: sig_nullary;
+    datatree_text: "jet_jit_datatree_text" => jet_jit_datatree_text: sig_unary;
+    datatree_bool: "jet_jit_datatree_bool" => jet_jit_datatree_bool: sig_unary;
+    datatree_float: "jet_jit_datatree_float" => jet_jit_datatree_float: sig_unary;
+    datatree_pack: "jet_jit_datatree_pack" => jet_jit_datatree_pack: sig_binary;
+    object_from_map: "jet_jit_object_from_map" => jet_jit_object_from_map: sig_unary;
+    object_entries_to_map: "jet_jit_object_entries_to_map" => jet_jit_object_entries_to_map: sig_unary;
+    datatree_migrate: "jet_jit_datatree_migrate" => jet_jit_datatree_migrate: sig_binary;
+    toml_parse: "jet_jit_toml_parse" => jet_jit_toml_parse: sig_unary;
+    toml_to_string: "jet_jit_toml_to_string" => jet_jit_toml_to_string: sig_unary;
+    yaml_parse: "jet_jit_yaml_parse" => jet_jit_yaml_parse: sig_unary;
+    yaml_to_string: "jet_jit_yaml_to_string" => jet_jit_yaml_to_string: sig_unary;
+    decode_error_show: "jet_jit_decode_error_show" => jet_jit_decode_error_show: sig_unary;
+    encoding_error_show: "jet_jit_encoding_error_show" => jet_jit_encoding_error_show: sig_unary;
 }
 
-pub(crate) fn register_encoding_symbols(builder: &mut cranelift_jit::JITBuilder) {
-    builder.symbol("jet_jit_hex_encode", jet_jit_hex_encode as *const u8);
-    builder.symbol("jet_jit_hex_decode", jet_jit_hex_decode as *const u8);
-    builder.symbol("jet_jit_b64_encode", jet_jit_b64_encode as *const u8);
-    builder.symbol("jet_jit_b64_encode_url", jet_jit_b64_encode_url as *const u8);
-    builder.symbol("jet_jit_b64_decode", jet_jit_b64_decode as *const u8);
-    builder.symbol("jet_jit_b64_decode_url", jet_jit_b64_decode_url as *const u8);
-    builder.symbol("jet_jit_base32_encode", jet_jit_base32_encode as *const u8);
-    builder.symbol("jet_jit_base32_decode", jet_jit_base32_decode as *const u8);
-    builder.symbol("jet_jit_csv_parse", jet_jit_csv_parse as *const u8);
-    builder.symbol("jet_jit_csv_to_string", jet_jit_csv_to_string as *const u8);
-    builder.symbol(
-        "jet_jit_csv_tree_to_string",
-        jet_jit_csv_tree_to_string as *const u8,
-    );
-    builder.symbol("jet_jit_uuid_v4", jet_jit_uuid_v4 as *const u8);
-    builder.symbol("jet_jit_uuid_v7", jet_jit_uuid_v7 as *const u8);
-    builder.symbol("jet_jit_uuid_v5", jet_jit_uuid_v5 as *const u8);
-    builder.symbol("jet_jit_uuid_parse", jet_jit_uuid_parse as *const u8);
-    builder.symbol("jet_jit_json_parse", jet_jit_json_parse as *const u8);
-    builder.symbol("jet_jit_json_decode", jet_jit_json_decode as *const u8);
-    builder.symbol("jet_jit_json_to_string", jet_jit_json_to_string as *const u8);
-    builder.symbol(
-        "jet_jit_json_to_string_pretty",
-        jet_jit_json_to_string_pretty as *const u8,
-    );
-    builder.symbol("jet_jit_json_canonical", jet_jit_json_canonical as *const u8);
-    builder.symbol(
-        "jet_jit_json_canonical_checked",
-        jet_jit_json_canonical_checked as *const u8,
-    );
-    builder.symbol("jet_jit_json_events", jet_jit_json_events as *const u8);
-    builder.symbol("jet_jit_jsonl_parse", jet_jit_jsonl_parse as *const u8);
-    builder.symbol("jet_jit_jsonl_to_string", jet_jit_jsonl_to_string as *const u8);
-    builder.symbol("jet_jit_xml_parse", jet_jit_xml_parse as *const u8);
-    builder.symbol("jet_jit_xml_to_string", jet_jit_xml_to_string as *const u8);
-    builder.symbol("jet_jit_xml_root", jet_jit_xml_root as *const u8);
-    builder.symbol("jet_jit_xml_expanded_name", jet_jit_xml_expanded_name as *const u8);
-    builder.symbol("jet_jit_xml_attribute", jet_jit_xml_attribute as *const u8);
-    builder.symbol("jet_jit_xml_content", jet_jit_xml_content as *const u8);
-    builder.symbol("jet_jit_xml_to_bytes", jet_jit_xml_to_bytes as *const u8);
-    builder.symbol("jet_jit_xml_project", jet_jit_xml_project as *const u8);
-    builder.symbol("jet_jit_xml_project_bytes", jet_jit_xml_project_bytes as *const u8);
-    builder.symbol("jet_jit_cbor_to_bytes", jet_jit_cbor_to_bytes as *const u8);
-    builder.symbol(
-        "jet_jit_cbor_to_bytes_canonical",
-        jet_jit_cbor_to_bytes_canonical as *const u8,
-    );
-    builder.symbol("jet_jit_cbor_parse", jet_jit_cbor_parse as *const u8);
-    builder.symbol(
-        "jet_jit_cbor_parse_options",
-        jet_jit_cbor_parse_options as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_cbor_decode_tree",
-        jet_jit_cbor_decode_tree as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_cbor_decode_tree_options",
-        jet_jit_cbor_decode_tree_options as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_bytes_datatree",
-        jet_jit_bytes_datatree as *const u8,
-    );
-    builder.symbol("jet_jit_csv_decode_trees", jet_jit_csv_decode_trees as *const u8);
-    builder.symbol("jet_jit_datatree_field", jet_jit_datatree_field as *const u8);
-    builder.symbol("jet_jit_datatree_at", jet_jit_datatree_at as *const u8);
-    builder.symbol("jet_jit_datatree_int", jet_jit_datatree_int as *const u8);
-    builder.symbol(
-        "jet_jit_datatree_decode_int",
-        jet_jit_datatree_decode_int as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_decode_int_range",
-        jet_jit_decode_int_range as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_decode_f32_range",
-        jet_jit_decode_f32_range as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_decode_fixed_len",
-        jet_jit_decode_fixed_len as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_datatree_decode_list_error",
-        jet_jit_datatree_decode_list_error as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_decode_error_under",
-        jet_jit_decode_error_under as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_decode_error_under_segment",
-        jet_jit_decode_error_under_segment as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_decode_error_accumulate",
-        jet_jit_decode_error_accumulate as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_datatree_decode_union_error",
-        jet_jit_datatree_decode_union_error as *const u8,
-    );
-    builder.symbol("jet_jit_datatree_text", jet_jit_datatree_text as *const u8);
-    builder.symbol("jet_jit_datatree_bool", jet_jit_datatree_bool as *const u8);
-    builder.symbol("jet_jit_datatree_float", jet_jit_datatree_float as *const u8);
-    builder.symbol("jet_jit_datatree_pack", jet_jit_datatree_pack as *const u8);
-    builder.symbol("jet_jit_object_from_map", jet_jit_object_from_map as *const u8);
-    builder.symbol(
-        "jet_jit_object_entries_to_map",
-        jet_jit_object_entries_to_map as *const u8,
-    );
-    builder.symbol("jet_jit_datatree_migrate", jet_jit_datatree_migrate as *const u8);
-    builder.symbol("jet_jit_toml_parse", jet_jit_toml_parse as *const u8);
-    builder.symbol("jet_jit_toml_to_string", jet_jit_toml_to_string as *const u8);
-    builder.symbol("jet_jit_yaml_parse", jet_jit_yaml_parse as *const u8);
-    builder.symbol("jet_jit_yaml_to_string", jet_jit_yaml_to_string as *const u8);
-    builder.symbol(
-        "jet_jit_decode_error_show",
-        jet_jit_decode_error_show as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_encoding_error_show",
-        jet_jit_encoding_error_show as *const u8,
-    );
-}
+
+
 
 extern "C" fn jet_jit_datatree_pack(disc: i64, payload: i64) -> i64 {
     alloc_dt_record(disc, payload)
@@ -2577,7 +2437,7 @@ fn apply_step(pairs: &mut Vec<(String, json_rt::DataTree)>, ops: &[MigrateStepOp
 
 /// Try walking an older shape forward. Ok payload = record `[tree, from, steps]`.
 extern "C" fn jet_jit_datatree_migrate(type_name: i64, tree: i64) -> i64 {
-    let name = clone_heap_string(type_name);
+    let name = clone_string(type_name);
     let Some(src) = read_datatree(tree) else {
         return result_err_msg("invalid DataTree");
     };
@@ -2628,118 +2488,10 @@ extern "C" fn jet_jit_datatree_migrate(type_name: i64, tree: i64) -> i64 {
                 let _ = rt.heap.record_set_int(h, 2, steps_h);
                 h
             });
-            result_ok_bits(rec as u64)
+            result_ok(rec as u64)
         }
         Err(msg) => result_err_msg(msg),
     }
 }
 
-pub(crate) fn declare_encoding_host_fns(
-    module: &mut cranelift_jit::JITModule,
-) -> Result<EncodingHostFns, String> {
-    use cranelift_codegen::ir::{types, AbiParam, Signature};
-    use cranelift_module::{Linkage, Module};
 
-    let cc = module.target_config().default_call_conv;
-    let mut sig_unary = Signature::new(cc);
-    sig_unary.params.push(AbiParam::new(types::I64));
-    sig_unary.returns.push(AbiParam::new(types::I64));
-    let mut sig_nullary = Signature::new(cc);
-    sig_nullary.returns.push(AbiParam::new(types::I64));
-    let mut sig_binary = Signature::new(cc);
-    sig_binary.params.push(AbiParam::new(types::I64));
-    sig_binary.params.push(AbiParam::new(types::I64));
-    sig_binary.returns.push(AbiParam::new(types::I64));
-    let mut sig_ternary = Signature::new(cc);
-    for _ in 0..3 {
-        sig_ternary.params.push(AbiParam::new(types::I64));
-    }
-    sig_ternary.returns.push(AbiParam::new(types::I64));
-    let mut sig_quaternary = Signature::new(cc);
-    for _ in 0..4 {
-        sig_quaternary.params.push(AbiParam::new(types::I64));
-    }
-    sig_quaternary.returns.push(AbiParam::new(types::I64));
-    let mut import = |name: &str, sig: &Signature| -> Result<cranelift_module::FuncId, String> {
-        module
-            .declare_function(name, Linkage::Import, sig)
-            .map_err(|e| e.to_string())
-    };
-    Ok(EncodingHostFns {
-        hex_encode: import("jet_jit_hex_encode", &sig_unary)?,
-        hex_decode: import("jet_jit_hex_decode", &sig_unary)?,
-        b64_encode: import("jet_jit_b64_encode", &sig_unary)?,
-        b64_encode_url: import("jet_jit_b64_encode_url", &sig_unary)?,
-        b64_decode: import("jet_jit_b64_decode", &sig_unary)?,
-        b64_decode_url: import("jet_jit_b64_decode_url", &sig_unary)?,
-        base32_encode: import("jet_jit_base32_encode", &sig_unary)?,
-        base32_decode: import("jet_jit_base32_decode", &sig_unary)?,
-        csv_parse: import("jet_jit_csv_parse", &sig_unary)?,
-        csv_to_string: import("jet_jit_csv_to_string", &sig_unary)?,
-        csv_tree_to_string: import("jet_jit_csv_tree_to_string", &sig_unary)?,
-        uuid_v4: import("jet_jit_uuid_v4", &sig_nullary)?,
-        uuid_v7: import("jet_jit_uuid_v7", &sig_unary)?,
-        uuid_v5: import("jet_jit_uuid_v5", &sig_binary)?,
-        uuid_parse: import("jet_jit_uuid_parse", &sig_unary)?,
-        json_parse: import("jet_jit_json_parse", &sig_unary)?,
-        json_decode: import("jet_jit_json_decode", &sig_unary)?,
-        json_to_string: import("jet_jit_json_to_string", &sig_unary)?,
-        json_to_string_pretty: import("jet_jit_json_to_string_pretty", &sig_unary)?,
-        json_canonical: import("jet_jit_json_canonical", &sig_unary)?,
-        json_canonical_checked: import("jet_jit_json_canonical_checked", &sig_binary)?,
-        json_events: import("jet_jit_json_events", &sig_unary)?,
-        jsonl_parse: import("jet_jit_jsonl_parse", &sig_unary)?,
-        jsonl_to_string: import("jet_jit_jsonl_to_string", &sig_unary)?,
-        xml_parse: import("jet_jit_xml_parse", &sig_unary)?,
-        xml_to_string: import("jet_jit_xml_to_string", &sig_unary)?,
-        xml_root: import("jet_jit_xml_root", &sig_unary)?,
-        xml_expanded_name: import("jet_jit_xml_expanded_name", &sig_unary)?,
-        xml_attribute: import("jet_jit_xml_attribute", &sig_binary)?,
-        xml_content: import("jet_jit_xml_content", &sig_unary)?,
-        xml_to_bytes: import("jet_jit_xml_to_bytes", &sig_unary)?,
-        xml_project: import("jet_jit_xml_project", &sig_unary)?,
-        xml_project_bytes: import("jet_jit_xml_project_bytes", &sig_unary)?,
-        cbor_to_bytes: import("jet_jit_cbor_to_bytes", &sig_unary)?,
-        cbor_to_bytes_canonical: import("jet_jit_cbor_to_bytes_canonical", &sig_unary)?,
-        cbor_parse: import("jet_jit_cbor_parse", &sig_unary)?,
-        cbor_parse_options: import("jet_jit_cbor_parse_options", &sig_binary)?,
-        cbor_decode_tree: import("jet_jit_cbor_decode_tree", &sig_unary)?,
-        cbor_decode_tree_options: import("jet_jit_cbor_decode_tree_options", &sig_binary)?,
-        bytes_datatree: import("jet_jit_bytes_datatree", &sig_unary)?,
-        csv_decode_trees: import("jet_jit_csv_decode_trees", &sig_unary)?,
-        datatree_field: import("jet_jit_datatree_field", &sig_binary)?,
-        datatree_at: import("jet_jit_datatree_at", &sig_binary)?,
-        datatree_int: import("jet_jit_datatree_int", &sig_unary)?,
-        datatree_decode_int: import("jet_jit_datatree_decode_int", &sig_unary)?,
-        decode_int_range: import("jet_jit_decode_int_range", &sig_quaternary)?,
-        decode_f32_range: import("jet_jit_decode_f32_range", &sig_unary)?,
-        decode_fixed_len: import("jet_jit_decode_fixed_len", &sig_binary)?,
-        datatree_decode_list_error: import(
-            "jet_jit_datatree_decode_list_error",
-            &sig_unary,
-        )?,
-        decode_error_under: import("jet_jit_decode_error_under", &sig_binary)?,
-        decode_error_under_segment: import(
-            "jet_jit_decode_error_under_segment",
-            &sig_binary,
-        )?,
-        decode_error_accumulate: import("jet_jit_decode_error_accumulate", &sig_ternary)?,
-        datatree_decode_union_error: import(
-            "jet_jit_datatree_decode_union_error",
-            &sig_nullary,
-        )?,
-        datatree_text: import("jet_jit_datatree_text", &sig_unary)?,
-        datatree_bool: import("jet_jit_datatree_bool", &sig_unary)?,
-        datatree_float: import("jet_jit_datatree_float", &sig_unary)?,
-        datatree_pack: import("jet_jit_datatree_pack", &sig_binary)?,
-        object_from_map: import("jet_jit_object_from_map", &sig_unary)?,
-        object_entries_to_map: import("jet_jit_object_entries_to_map", &sig_unary)?,
-        datatree_migrate: import("jet_jit_datatree_migrate", &sig_binary)?,
-        toml_parse: import("jet_jit_toml_parse", &sig_unary)?,
-        toml_to_string: import("jet_jit_toml_to_string", &sig_unary)?,
-        yaml_parse: import("jet_jit_yaml_parse", &sig_unary)?,
-        yaml_to_string: import("jet_jit_yaml_to_string", &sig_unary)?,
-        decode_error_show: import("jet_jit_decode_error_show", &sig_unary)?,
-        encoding_error_show: import("jet_jit_encoding_error_show", &sig_unary)?,
-    })
-}

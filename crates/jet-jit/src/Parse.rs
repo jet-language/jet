@@ -13,6 +13,7 @@ use jet_foundation::MatchScan::{
 };
 use jet_foundation::StreamCursor as kernel;
 use std::sync::Mutex;
+use crate::Marshal::result_err_msg;
 
 /// Pattern tables live outside `Runtime` so ids baked into Cranelift IR during
 /// lowering survive Runtime resets between compile and execute.
@@ -53,14 +54,11 @@ fn with_cursor_mut<R>(handle: i64, f: impl FnOnce(&mut CursorSlot) -> R) -> Opti
 }
 
 fn result_ok(bits: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| crate::runtime_host::alloc_jit_result(rt, true, bits as u64))
+    crate::Marshal::result_ok(bits as u64)
 }
 
 fn result_err(msg: String) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let sid = rt.heap.alloc_string(msg);
-        crate::runtime_host::alloc_jit_result(rt, false, sid as u64)
-    })
+    result_err_msg(&msg)
 }
 
 fn result_ok_bytes(bytes: Vec<u8>) -> i64 {
@@ -316,121 +314,52 @@ extern "C" fn jet_jit_reader_take_pattern(handle: i64, pattern: i64) -> i64 {
     }
 }
 
-pub(crate) struct HostFns {
-    pub reader_over: FuncId,
-    pub reader_read_u8: FuncId,
-    pub reader_read_u16_le: FuncId,
-    pub reader_read_u16_be: FuncId,
-    pub reader_read_u32_le: FuncId,
-    pub reader_read_u32_be: FuncId,
-    pub reader_read_u64_le: FuncId,
-    pub reader_read_u64_be: FuncId,
-    pub reader_take: FuncId,
-    pub reader_remaining: FuncId,
-    pub reader_at_end: FuncId,
-    pub cursor_over: FuncId,
-    pub cursor_skip_ws: FuncId,
-    pub cursor_take_until: FuncId,
-    pub cursor_advance: FuncId,
-    pub str_match_is_some: FuncId,
-    pub str_match_unwrap: FuncId,
-    pub bin_match_is_some: FuncId,
-    pub bin_match_unwrap: FuncId,
-    pub cursor_take_pattern: FuncId,
-    pub reader_take_pattern: FuncId,
+host_fns! {
+    struct HostFns;
+    register: register_symbols;
+    declare: declare(module) {
+        let cc = module.target_config().default_call_conv;
+        let mut sig_unary = Signature::new(cc);
+        sig_unary.params.push(AbiParam::new(types::I64));
+        sig_unary.returns.push(AbiParam::new(types::I64));
+        let mut sig_binary = sig_unary.clone();
+        sig_binary.params.push(AbiParam::new(types::I64));
+        let mut sig_void_unary = Signature::new(cc);
+        sig_void_unary.params.push(AbiParam::new(types::I64));
+        let mut sig_i8 = Signature::new(cc);
+        sig_i8.params.push(AbiParam::new(types::I64));
+        sig_i8.returns.push(AbiParam::new(types::I8));
+        let mut sig_binary_i8 = Signature::new(cc);
+        sig_binary_i8.params.push(AbiParam::new(types::I64));
+        sig_binary_i8.params.push(AbiParam::new(types::I64));
+        sig_binary_i8.returns.push(AbiParam::new(types::I8));
+
+
+    }
+    reader_over: "jet_jit_reader_over" => jet_jit_reader_over: sig_unary;
+    reader_read_u8: "jet_jit_reader_read_u8" => jet_jit_reader_read_u8: sig_unary;
+    reader_read_u16_le: "jet_jit_reader_read_u16_le" => jet_jit_reader_read_u16_le: sig_unary;
+    reader_read_u16_be: "jet_jit_reader_read_u16_be" => jet_jit_reader_read_u16_be: sig_unary;
+    reader_read_u32_le: "jet_jit_reader_read_u32_le" => jet_jit_reader_read_u32_le: sig_unary;
+    reader_read_u32_be: "jet_jit_reader_read_u32_be" => jet_jit_reader_read_u32_be: sig_unary;
+    reader_read_u64_le: "jet_jit_reader_read_u64_le" => jet_jit_reader_read_u64_le: sig_unary;
+    reader_read_u64_be: "jet_jit_reader_read_u64_be" => jet_jit_reader_read_u64_be: sig_unary;
+    reader_take: "jet_jit_reader_take" => jet_jit_reader_take: sig_binary;
+    reader_remaining: "jet_jit_reader_remaining" => jet_jit_reader_remaining: sig_unary;
+    reader_at_end: "jet_jit_reader_at_end" => jet_jit_reader_at_end: sig_i8;
+    cursor_over: "jet_jit_cursor_over" => jet_jit_cursor_over: sig_unary;
+    cursor_skip_ws: "jet_jit_cursor_skip_ws" => jet_jit_cursor_skip_ws: sig_void_unary;
+    cursor_take_until: "jet_jit_cursor_take_until" => jet_jit_cursor_take_until: sig_binary;
+    cursor_advance: "jet_jit_cursor_advance" => jet_jit_cursor_advance: sig_binary;
+    str_match_is_some: "jet_jit_str_match_is_some" => jet_jit_str_match_is_some: sig_binary_i8;
+    str_match_unwrap: "jet_jit_str_match_unwrap" => jet_jit_str_match_unwrap: sig_binary;
+    bin_match_is_some: "jet_jit_bin_match_is_some" => jet_jit_bin_match_is_some: sig_binary_i8;
+    bin_match_unwrap: "jet_jit_bin_match_unwrap" => jet_jit_bin_match_unwrap: sig_binary;
+    cursor_take_pattern: "jet_jit_cursor_take_pattern" => jet_jit_cursor_take_pattern: sig_binary;
+    reader_take_pattern: "jet_jit_reader_take_pattern" => jet_jit_reader_take_pattern: sig_binary;
 }
 
-pub(crate) fn register_symbols(builder: &mut JITBuilder) {
-    builder.symbol("jet_jit_reader_over", jet_jit_reader_over as *const u8);
-    builder.symbol("jet_jit_reader_read_u8", jet_jit_reader_read_u8 as *const u8);
-    builder.symbol(
-        "jet_jit_reader_read_u16_le",
-        jet_jit_reader_read_u16_le as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_reader_read_u16_be",
-        jet_jit_reader_read_u16_be as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_reader_read_u32_le",
-        jet_jit_reader_read_u32_le as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_reader_read_u32_be",
-        jet_jit_reader_read_u32_be as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_reader_read_u64_le",
-        jet_jit_reader_read_u64_le as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_reader_read_u64_be",
-        jet_jit_reader_read_u64_be as *const u8,
-    );
-    builder.symbol("jet_jit_reader_take", jet_jit_reader_take as *const u8);
-    builder.symbol(
-        "jet_jit_reader_remaining",
-        jet_jit_reader_remaining as *const u8,
-    );
-    builder.symbol("jet_jit_reader_at_end", jet_jit_reader_at_end as *const u8);
-    builder.symbol("jet_jit_cursor_over", jet_jit_cursor_over as *const u8);
-    builder.symbol("jet_jit_cursor_skip_ws", jet_jit_cursor_skip_ws as *const u8);
-    builder.symbol(
-        "jet_jit_cursor_take_until",
-        jet_jit_cursor_take_until as *const u8,
-    );
-    builder.symbol("jet_jit_cursor_advance", jet_jit_cursor_advance as *const u8);
-    builder.symbol("jet_jit_str_match_is_some", jet_jit_str_match_is_some as *const u8);
-    builder.symbol("jet_jit_str_match_unwrap", jet_jit_str_match_unwrap as *const u8);
-    builder.symbol("jet_jit_bin_match_is_some", jet_jit_bin_match_is_some as *const u8);
-    builder.symbol("jet_jit_bin_match_unwrap", jet_jit_bin_match_unwrap as *const u8);
-    builder.symbol("jet_jit_cursor_take_pattern", jet_jit_cursor_take_pattern as *const u8);
-    builder.symbol("jet_jit_reader_take_pattern", jet_jit_reader_take_pattern as *const u8);
-    let _ = jet_jit_reader_advance_bits;
-}
 
-pub(crate) fn declare(module: &mut JITModule) -> Result<HostFns, String> {
-    let cc = module.target_config().default_call_conv;
-    let mut sig_unary = Signature::new(cc);
-    sig_unary.params.push(AbiParam::new(types::I64));
-    sig_unary.returns.push(AbiParam::new(types::I64));
-    let mut sig_binary = sig_unary.clone();
-    sig_binary.params.push(AbiParam::new(types::I64));
-    let mut sig_void_unary = Signature::new(cc);
-    sig_void_unary.params.push(AbiParam::new(types::I64));
-    let mut sig_i8 = Signature::new(cc);
-    sig_i8.params.push(AbiParam::new(types::I64));
-    sig_i8.returns.push(AbiParam::new(types::I8));
-    let mut sig_binary_i8 = Signature::new(cc);
-    sig_binary_i8.params.push(AbiParam::new(types::I64));
-    sig_binary_i8.params.push(AbiParam::new(types::I64));
-    sig_binary_i8.returns.push(AbiParam::new(types::I8));
-    let mut import = |name: &str, sig: &Signature| -> Result<FuncId, String> {
-        module
-            .declare_function(name, Linkage::Import, sig)
-            .map_err(|e| e.to_string())
-    };
-    Ok(HostFns {
-        reader_over: import("jet_jit_reader_over", &sig_unary)?,
-        reader_read_u8: import("jet_jit_reader_read_u8", &sig_unary)?,
-        reader_read_u16_le: import("jet_jit_reader_read_u16_le", &sig_unary)?,
-        reader_read_u16_be: import("jet_jit_reader_read_u16_be", &sig_unary)?,
-        reader_read_u32_le: import("jet_jit_reader_read_u32_le", &sig_unary)?,
-        reader_read_u32_be: import("jet_jit_reader_read_u32_be", &sig_unary)?,
-        reader_read_u64_le: import("jet_jit_reader_read_u64_le", &sig_unary)?,
-        reader_read_u64_be: import("jet_jit_reader_read_u64_be", &sig_unary)?,
-        reader_take: import("jet_jit_reader_take", &sig_binary)?,
-        reader_remaining: import("jet_jit_reader_remaining", &sig_unary)?,
-        reader_at_end: import("jet_jit_reader_at_end", &sig_i8)?,
-        cursor_over: import("jet_jit_cursor_over", &sig_unary)?,
-        cursor_skip_ws: import("jet_jit_cursor_skip_ws", &sig_void_unary)?,
-        cursor_take_until: import("jet_jit_cursor_take_until", &sig_binary)?,
-        cursor_advance: import("jet_jit_cursor_advance", &sig_binary)?,
-        str_match_is_some: import("jet_jit_str_match_is_some", &sig_binary_i8)?,
-        str_match_unwrap: import("jet_jit_str_match_unwrap", &sig_binary)?,
-        bin_match_is_some: import("jet_jit_bin_match_is_some", &sig_binary_i8)?,
-        bin_match_unwrap: import("jet_jit_bin_match_unwrap", &sig_binary)?,
-        cursor_take_pattern: import("jet_jit_cursor_take_pattern", &sig_binary)?,
-        reader_take_pattern: import("jet_jit_reader_take_pattern", &sig_binary)?,
-    })
-}
+
+
+

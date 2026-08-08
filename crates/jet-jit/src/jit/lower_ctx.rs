@@ -153,6 +153,18 @@ pub(crate) struct TxnFrame {
 }
 
 impl LowerCtx<'_, '_> {
+    /// #1634: the single-result JIT host-call idiom (declare the func ref in
+    /// this function, emit the call, pull the sole `Value` result out of the
+    /// returned `Inst`) collapsed to one line. Every host FuncId is declared
+    /// through `HostFns` (#1633), never invented here. Void host calls and
+    /// multi-result host calls still spell the three steps by hand — see the
+    /// remaining `declare_func_in_func` sites in this file.
+    fn call_host(&mut self, id: FuncId, args: &[Value]) -> Value {
+        let func_ref = self.module.declare_func_in_func(id, self.b.func);
+        let call = self.b.ins().call(func_ref, args);
+        self.b.inst_results(call)[0]
+    }
+
     fn is_range_ty(ty: &Type) -> bool {
         matches!(ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_RANGE)
     }
@@ -251,11 +263,7 @@ impl LowerCtx<'_, '_> {
     fn enum_discriminant(&mut self, subject: Value, heap: bool) -> Value {
         if heap {
             let zero = self.b.ins().iconst(types::I64, 0);
-            let get = self
-                .module
-                .declare_func_in_func(self.host.struct_get_i64, self.b.func);
-            let call = self.b.ins().call(get, &[subject, zero]);
-            self.b.inst_results(call)[0]
+            self.call_host(self.host.struct_get_i64, &[subject, zero])
         } else {
             let mask = self.b.ins().iconst(types::I64, 0xff);
             self.b.ins().band(subject, mask)
@@ -436,11 +444,7 @@ impl LowerCtx<'_, '_> {
             .expect("jit wait cleanup");
         self.b.switch_to_block(ready);
         self.b.seal_block(ready);
-        let value_ref = self
-            .module
-            .declare_func_in_func(self.host.conc.wait_value, self.b.func);
-        let call = self.b.ins().call(value_ref, &[]);
-        self.b.inst_results(call)[0]
+        self.call_host(self.host.conc.wait_value, &[])
     }
 
     fn result_new(&mut self, ok: bool, inner: &TExpr) -> Result<Value, String> {
@@ -458,9 +462,7 @@ impl LowerCtx<'_, '_> {
             };
             (host, value)
         };
-        let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-        let call = self.b.ins().call(host_ref, &[tag, payload]);
-        Ok(self.b.inst_results(call)[0])
+        Ok(self.call_host(host_id, &[tag, payload]))
     }
 
     fn result_from_packed_i64(&mut self, status: Value) -> Value {
@@ -472,11 +474,7 @@ impl LowerCtx<'_, '_> {
         let ok_one = self.b.ins().iconst(types::I8, 1);
         let ok_zero = self.b.ins().iconst(types::I8, 0);
         let ok = self.b.ins().select(present, ok_one, ok_zero);
-        let host = self
-            .module
-            .declare_func_in_func(self.host.result_new_i64, self.b.func);
-        let call = self.b.ins().call(host, &[ok, payload]);
-        self.b.inst_results(call)[0]
+        self.call_host(self.host.result_new_i64, &[ok, payload])
     }
 
     fn result_payload(&mut self, handle: Value, ty: &Type) -> Result<Value, String> {
@@ -496,9 +494,7 @@ impl LowerCtx<'_, '_> {
             Some(clif) if clif == types::I64 => self.host.result_get_i64,
             _ => return Err(format!("jit Result payload unsupported: {ty:?}")),
         };
-        let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-        let call = self.b.ins().call(host_ref, &[handle]);
-        Ok(self.b.inst_results(call)[0])
+        Ok(self.call_host(host_id, &[handle]))
     }
 
     fn scalar_bitcast_memflags() -> MemFlags {
@@ -575,11 +571,7 @@ impl LowerCtx<'_, '_> {
             // instead: record [disc:i64, payload:f64], return the handle.
             Some(types::F64) => {
                 let n = self.b.ins().iconst(types::I64, 2);
-                let new_ref = self
-                    .module
-                    .declare_func_in_func(self.host.struct_new, self.b.func);
-                let call = self.b.ins().call(new_ref, &[n]);
-                let handle = self.b.inst_results(call)[0];
+                let handle = self.call_host(self.host.struct_new, &[n]);
                 let zero = self.b.ins().iconst(types::I64, 0);
                 let one = self.b.ins().iconst(types::I64, 1);
                 let set_i = self
@@ -612,11 +604,7 @@ impl LowerCtx<'_, '_> {
         match self.meta.clif_ty(payload_ty) {
             Some(types::F64) => {
                 let one = self.b.ins().iconst(types::I64, 1);
-                let get_f = self
-                    .module
-                    .declare_func_in_func(self.host.struct_get_f64, self.b.func);
-                let call = self.b.ins().call(get_f, &[packed, one]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.struct_get_f64, &[packed, one]))
             }
             Some(types::I64) => {
                 let raw = self.b.ins().sshr_imm(packed, 8);
@@ -812,33 +800,17 @@ impl LowerCtx<'_, '_> {
         let one = self.b.ins().iconst(types::I64, 1);
         match self.meta.clif_ty(payload_ty) {
             Some(types::F64) => {
-                let get_f = self
-                    .module
-                    .declare_func_in_func(self.host.struct_get_f64, self.b.func);
-                let call = self.b.ins().call(get_f, &[packed, one]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.struct_get_f64, &[packed, one]))
             }
             Some(types::I64) => {
-                let get_i = self
-                    .module
-                    .declare_func_in_func(self.host.struct_get_i64, self.b.func);
-                let call = self.b.ins().call(get_i, &[packed, one]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.struct_get_i64, &[packed, one]))
             }
             Some(types::I8) => {
-                let get_i = self
-                    .module
-                    .declare_func_in_func(self.host.struct_get_i64, self.b.func);
-                let call = self.b.ins().call(get_i, &[packed, one]);
-                let raw = self.b.inst_results(call)[0];
+                let raw = self.call_host(self.host.struct_get_i64, &[packed, one]);
                 Ok(self.b.ins().ireduce(types::I8, raw))
             }
             Some(types::I32) => {
-                let get_i = self
-                    .module
-                    .declare_func_in_func(self.host.struct_get_i64, self.b.func);
-                let call = self.b.ins().call(get_i, &[packed, one]);
-                let raw = self.b.inst_results(call)[0];
+                let raw = self.call_host(self.host.struct_get_i64, &[packed, one]);
                 Ok(self.b.ins().ireduce(types::I32, raw))
             }
             other => Err(format!(
@@ -874,11 +846,7 @@ impl LowerCtx<'_, '_> {
                 }
             },
         };
-        let host_ref = self
-            .module
-            .declare_func_in_func(self.host.encoding.datatree_pack, self.b.func);
-        let call = self.b.ins().call(host_ref, &[disc_v, payload_bits]);
-        Ok(self.b.inst_results(call)[0])
+        Ok(self.call_host(self.host.encoding.datatree_pack, &[disc_v, payload_bits]))
     }
 
     /// `DataTree.Object([k: v, …])` — source/Codable field order, not Map sort.
@@ -895,11 +863,7 @@ impl LowerCtx<'_, '_> {
         &mut self,
         entries: &[(&TExpr, &TExpr)],
     ) -> Result<Value, String> {
-        let new_list = self
-            .module
-            .declare_func_in_func(self.host.coll.list_new, self.b.func);
-        let call = self.b.ins().call(new_list, &[]);
-        let list = self.b.inst_results(call)[0];
+        let list = self.call_host(self.host.coll.list_new, &[]);
         let push = self
             .module
             .declare_func_in_func(self.host.coll.list_push, self.b.func);
@@ -946,21 +910,13 @@ impl LowerCtx<'_, '_> {
                 }
                 // Non-desugar if: evaluate as Map, then snapshot (key-sorted).
                 let map = self.lower_expr(expr)?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.encoding.object_from_map, self.b.func);
-                let call = self.b.ins().call(host, &[map]);
-                let list = self.b.inst_results(call)[0];
+                let list = self.call_host(self.host.encoding.object_from_map, &[map]);
                 self.emit_trap_check()?;
                 self.pack_datatree_enum(disc, Some((list, &Type::List(Box::new(Type::Int)))))
             }
             _ => {
                 let map = self.lower_expr(expr)?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.encoding.object_from_map, self.b.func);
-                let call = self.b.ins().call(host, &[map]);
-                let list = self.b.inst_results(call)[0];
+                let list = self.call_host(self.host.encoding.object_from_map, &[map]);
                 self.emit_trap_check()?;
                 self.pack_datatree_enum(disc, Some((list, &Type::List(Box::new(Type::Int)))))
             }
@@ -1021,11 +977,7 @@ impl LowerCtx<'_, '_> {
                     }
                 ) || matches!(elem.as_ref(), Type::Named(name) if name == "U8") =>
             {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.encoding.bytes_datatree, self.b.func);
-                let call = self.b.ins().call(host_ref, &[val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.encoding.bytes_datatree, &[val]))
             }
             Type::List(elem) | Type::FixedList { elem, .. } => {
                 self.lower_serde_encode_list(val, elem)
@@ -1078,9 +1030,7 @@ impl LowerCtx<'_, '_> {
                     .get(&key)
                     .copied()
                     .ok_or_else(|| format!("jit missing encode `{key}`"))?;
-                let func_ref = self.module.declare_func_in_func(func_id, self.b.func);
-                let call = self.b.ins().call(func_ref, &[val]);
-                let result = self.b.inst_results(call)[0];
+                let result = self.call_host(func_id, &[val]);
                 self.emit_trap_check()?;
                 Ok(result)
             }
@@ -1104,12 +1054,9 @@ impl LowerCtx<'_, '_> {
     fn lower_serde_encode_list(&mut self, list: Value, elem_ty: &Type) -> Result<Value, String> {
         let list_var = self.fresh_var(types::I64);
         self.b.def_var(list_var, list);
-        let new_ref = self
-            .module
-            .declare_func_in_func(self.host.coll.list_new, self.b.func);
-        let out_call = self.b.ins().call(new_ref, &[]);
         let out_var = self.fresh_var(types::I64);
-        self.b.def_var(out_var, self.b.inst_results(out_call)[0]);
+        let out_init = self.call_host(self.host.coll.list_new, &[]);
+        self.b.def_var(out_var, out_init);
 
         let header = self.b.create_block();
         let body = self.b.create_block();
@@ -1123,11 +1070,7 @@ impl LowerCtx<'_, '_> {
         self.b.switch_to_block(header);
         let idx = self.b.use_var(idx_var);
         let coll = self.b.use_var(list_var);
-        let len_ref = self
-            .module
-            .declare_func_in_func(self.host.coll.list_len, self.b.func);
-        let len_call = self.b.ins().call(len_ref, &[coll]);
-        let len = self.b.inst_results(len_call)[0];
+        let len = self.call_host(self.host.coll.list_len, &[coll]);
         let done = self
             .b
             .ins()
@@ -1191,30 +1134,18 @@ impl LowerCtx<'_, '_> {
             let hi = self.b.ins().iconst(types::I64, hi);
             let name = self.runtime.heap.alloc_string(target.name());
             let name = self.b.ins().iconst(types::I64, name);
-            let host = self
-                .module
-                .declare_func_in_func(self.host.encoding.decode_int_range, self.b.func);
-            let call = self.b.ins().call(host, &[decoded, lo, hi, name]);
-            return Ok(self.b.inst_results(call)[0]);
+            return Ok(self.call_host(self.host.encoding.decode_int_range, &[decoded, lo, hi, name]));
         }
         if matches!(target, Type::Float32) {
             let decoded = self.lower_datatree_decode(tree, &Type::Float)?;
-            let host = self
-                .module
-                .declare_func_in_func(self.host.encoding.decode_f32_range, self.b.func);
-            let call = self.b.ins().call(host, &[decoded]);
-            return Ok(self.b.inst_results(call)[0]);
+            return Ok(self.call_host(self.host.encoding.decode_f32_range, &[decoded]));
         }
         if let Type::FixedList { elem, len, .. } = target {
             let decoded = self.lower_datatree_decode_list(tree, elem)?;
             let len = i64::try_from(*len)
                 .map_err(|_| format!("jit fixed-list length `{len}` exceeds I64"))?;
             let len = self.b.ins().iconst(types::I64, len);
-            let host = self
-                .module
-                .declare_func_in_func(self.host.encoding.decode_fixed_len, self.b.func);
-            let call = self.b.ins().call(host, &[decoded, len]);
-            return Ok(self.b.inst_results(call)[0]);
+            return Ok(self.call_host(self.host.encoding.decode_fixed_len, &[decoded, len]));
         }
         if let Type::Named(name) = target {
             if let Some((lo, hi)) = self.meta.distinct_range(name) {
@@ -1228,50 +1159,26 @@ impl LowerCtx<'_, '_> {
                 let hi = self.b.ins().iconst(types::I64, hi);
                 let name = self.runtime.heap.alloc_string(name.clone());
                 let name = self.b.ins().iconst(types::I64, name);
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.encoding.decode_int_range, self.b.func);
-                let call = self.b.ins().call(host, &[decoded, lo, hi, name]);
-                return Ok(self.b.inst_results(call)[0]);
+                return Ok(self.call_host(self.host.encoding.decode_int_range, &[decoded, lo, hi, name]));
             }
         }
         let target = self.erase_distinct_ty(target);
         if Self::is_datatree_value_ty(&target) {
             let tag = self.b.ins().iconst(types::I8, 1);
-            let host_ref = self
-                .module
-                .declare_func_in_func(self.host.result_new_i64, self.b.func);
-            let call = self.b.ins().call(host_ref, &[tag, tree]);
-            return Ok(self.b.inst_results(call)[0]);
+            return Ok(self.call_host(self.host.result_new_i64, &[tag, tree]));
         }
         match &target {
             Type::Int | Type::IntN { .. } => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.encoding.datatree_decode_int, self.b.func);
-                let call = self.b.ins().call(host_ref, &[tree]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.encoding.datatree_decode_int, &[tree]))
             }
             Type::String => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.encoding.datatree_text, self.b.func);
-                let call = self.b.ins().call(host_ref, &[tree]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.encoding.datatree_text, &[tree]))
             }
             Type::Bool => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.encoding.datatree_bool, self.b.func);
-                let call = self.b.ins().call(host_ref, &[tree]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.encoding.datatree_bool, &[tree]))
             }
             Type::Float | Type::Float32 => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.encoding.datatree_float, self.b.func);
-                let call = self.b.ins().call(host_ref, &[tree]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.encoding.datatree_float, &[tree]))
             }
             Type::Option(inner) => self.lower_datatree_decode_option(tree, inner),
             Type::List(elem) | Type::FixedList { elem, .. } => {
@@ -1292,11 +1199,7 @@ impl LowerCtx<'_, '_> {
                     }) =>
             {
                 let zero = self.b.ins().iconst(types::I64, 0);
-                let get = self
-                    .module
-                    .declare_func_in_func(self.host.struct_get_i64, self.b.func);
-                let call = self.b.ins().call(get, &[tree, zero]);
-                let tree_disc = self.b.inst_results(call)[0];
+                let tree_disc = self.call_host(self.host.struct_get_i64, &[tree, zero]);
                 let merge = self.b.create_block();
                 self.b.append_block_param(merge, types::I64);
                 for (index, member) in members.iter().enumerate() {
@@ -1315,11 +1218,7 @@ impl LowerCtx<'_, '_> {
                     self.b.switch_to_block(arm);
                     self.b.seal_block(arm);
                     let decoded = self.lower_datatree_decode(tree, member)?;
-                    let status = self
-                        .module
-                        .declare_func_in_func(self.host.result_is_ok, self.b.func);
-                    let status_call = self.b.ins().call(status, &[decoded]);
-                    let ok = self.b.inst_results(status_call)[0];
+                    let ok = self.call_host(self.host.result_is_ok, &[decoded]);
                     let success = self.b.create_block();
                     let failure = self.b.create_block();
                     self.b.ins().brif(ok, success, &[], failure, &[]);
@@ -1331,11 +1230,7 @@ impl LowerCtx<'_, '_> {
                     let payload = self.result_payload(decoded, member)?;
                     let packed = self.pack_enum_scalar(index as i64, payload, member)?;
                     let ok_tag = self.b.ins().iconst(types::I8, 1);
-                    let result = self
-                        .module
-                        .declare_func_in_func(self.host.result_new_i64, self.b.func);
-                    let result_call = self.b.ins().call(result, &[ok_tag, packed]);
-                    let result_value = self.b.inst_results(result_call)[0];
+                    let result_value = self.call_host(self.host.result_new_i64, &[ok_tag, packed]);
                     self.b.ins().jump(merge, &[result_value]);
                     self.b.switch_to_block(next);
                     self.b.seal_block(next);
@@ -1360,9 +1255,7 @@ impl LowerCtx<'_, '_> {
                     .get(&key)
                     .copied()
                     .ok_or_else(|| format!("jit missing decode `{key}`"))?;
-                let func_ref = self.module.declare_func_in_func(func_id, self.b.func);
-                let call = self.b.ins().call(func_ref, &[tree]);
-                let result = self.b.inst_results(call)[0];
+                let result = self.call_host(func_id, &[tree]);
                 self.emit_trap_check()?;
                 Ok(result)
             }
@@ -1376,11 +1269,7 @@ impl LowerCtx<'_, '_> {
         inner: &Type,
     ) -> Result<Value, String> {
         let zero = self.b.ins().iconst(types::I64, 0);
-        let get_i = self
-            .module
-            .declare_func_in_func(self.host.struct_get_i64, self.b.func);
-        let disc_call = self.b.ins().call(get_i, &[tree, zero]);
-        let disc = self.b.inst_results(disc_call)[0];
+        let disc = self.call_host(self.host.struct_get_i64, &[tree, zero]);
         let is_null = self.b.ins().icmp(IntCC::Equal, disc, zero);
         let none_block = self.b.create_block();
         let some_block = self.b.create_block();
@@ -1394,21 +1283,13 @@ impl LowerCtx<'_, '_> {
         self.b.seal_block(none_block);
         let tag = self.b.ins().iconst(types::I8, 1);
         let none_val = self.b.ins().iconst(types::I64, 0);
-        let host_ref = self
-            .module
-            .declare_func_in_func(self.host.result_new_i64, self.b.func);
-        let ok_none = self.b.ins().call(host_ref, &[tag, none_val]);
-        let ok_none = self.b.inst_results(ok_none)[0];
+        let ok_none = self.call_host(self.host.result_new_i64, &[tag, none_val]);
         self.b.ins().jump(merge, &[ok_none]);
 
         self.b.switch_to_block(some_block);
         self.b.seal_block(some_block);
         let inner_r = self.lower_datatree_decode(tree, inner)?;
-        let status_ref = self
-            .module
-            .declare_func_in_func(self.host.result_is_ok, self.b.func);
-        let status_call = self.b.ins().call(status_ref, &[inner_r]);
-        let is_ok = self.b.inst_results(status_call)[0];
+        let is_ok = self.call_host(self.host.result_is_ok, &[inner_r]);
         let ok_block = self.b.create_block();
         let err_block = self.b.create_block();
         self.b.ins().brif(is_ok, ok_block, &[], err_block, &[]);
@@ -1422,11 +1303,7 @@ impl LowerCtx<'_, '_> {
         let payload = self.result_payload(inner_r, inner)?;
         let present = self.pack_option_payload(payload, inner)?;
         let tag = self.b.ins().iconst(types::I8, 1);
-        let host_ref = self
-            .module
-            .declare_func_in_func(self.host.result_new_i64, self.b.func);
-        let ok_some = self.b.ins().call(host_ref, &[tag, present]);
-        let ok_some = self.b.inst_results(ok_some)[0];
+        let ok_some = self.call_host(self.host.result_new_i64, &[tag, present]);
         self.b.ins().jump(merge, &[ok_some]);
 
         self.b.switch_to_block(merge);
@@ -1441,11 +1318,7 @@ impl LowerCtx<'_, '_> {
     ) -> Result<Value, String> {
         // Expect Array; reuse `.at` path via host disc check + payload list.
         let zero = self.b.ins().iconst(types::I64, 0);
-        let get_i = self
-            .module
-            .declare_func_in_func(self.host.struct_get_i64, self.b.func);
-        let disc_call = self.b.ins().call(get_i, &[tree, zero]);
-        let disc = self.b.inst_results(disc_call)[0];
+        let disc = self.call_host(self.host.struct_get_i64, &[tree, zero]);
         let want = self.b.ins().iconst(types::I64, 5); // Array
         let is_arr = self.b.ins().icmp(IntCC::Equal, disc, want);
         let byte_elements = matches!(
@@ -1480,33 +1353,23 @@ impl LowerCtx<'_, '_> {
 
         self.b.switch_to_block(bad_block);
         self.b.seal_block(bad_block);
-        let host_ref = self
-            .module
-            .declare_func_in_func(self.host.encoding.datatree_decode_list_error, self.b.func);
-        let err = self.b.ins().call(host_ref, &[tree]);
-        let err = self.b.inst_results(err)[0];
+        let err = self.call_host(self.host.encoding.datatree_decode_list_error, &[tree]);
         self.b.ins().jump(merge, &[err]);
 
         if let Some(bytes_block) = bytes_block {
             self.b.switch_to_block(bytes_block);
             self.b.seal_block(bytes_block);
             let one = self.b.ins().iconst(types::I64, 1);
-            let payload_call = self.b.ins().call(get_i, &[tree, one]);
-            let payload = self.b.inst_results(payload_call)[0];
+            let payload = self.call_host(self.host.struct_get_i64, &[tree, one]);
             let tag = self.b.ins().iconst(types::I8, 1);
-            let result_ref = self
-                .module
-                .declare_func_in_func(self.host.result_new_i64, self.b.func);
-            let result_call = self.b.ins().call(result_ref, &[tag, payload]);
-            let result = self.b.inst_results(result_call)[0];
+            let result = self.call_host(self.host.result_new_i64, &[tag, payload]);
             self.b.ins().jump(merge, &[result]);
         }
 
         self.b.switch_to_block(good_block);
         self.b.seal_block(good_block);
         let one = self.b.ins().iconst(types::I64, 1);
-        let payload_call = self.b.ins().call(get_i, &[tree, one]);
-        let src_list = self.b.inst_results(payload_call)[0];
+        let src_list = self.call_host(self.host.struct_get_i64, &[tree, one]);
         let decoded = self.lower_datatree_decode_list_items(src_list, elem_ty)?;
         self.b.ins().jump(merge, &[decoded]);
 
@@ -1522,12 +1385,9 @@ impl LowerCtx<'_, '_> {
     ) -> Result<Value, String> {
         let list_var = self.fresh_var(types::I64);
         self.b.def_var(list_var, src_list);
-        let new_ref = self
-            .module
-            .declare_func_in_func(self.host.coll.list_new, self.b.func);
-        let out_call = self.b.ins().call(new_ref, &[]);
         let out_var = self.fresh_var(types::I64);
-        self.b.def_var(out_var, self.b.inst_results(out_call)[0]);
+        let out_init = self.call_host(self.host.coll.list_new, &[]);
+        self.b.def_var(out_var, out_init);
 
         let header = self.b.create_block();
         let body = self.b.create_block();
@@ -1549,11 +1409,7 @@ impl LowerCtx<'_, '_> {
         self.b.switch_to_block(header);
         let idx = self.b.use_var(idx_var);
         let coll = self.b.use_var(list_var);
-        let len_ref = self
-            .module
-            .declare_func_in_func(self.host.coll.list_len, self.b.func);
-        let len_call = self.b.ins().call(len_ref, &[coll]);
-        let len = self.b.inst_results(len_call)[0];
+        let len = self.call_host(self.host.coll.list_len, &[coll]);
         let done = self
             .b
             .ins()
@@ -1570,11 +1426,7 @@ impl LowerCtx<'_, '_> {
         let elem_tree = self.b.inst_results(get_call)[0];
         self.emit_trap_check()?;
         let decoded_r = self.lower_datatree_decode(elem_tree, elem_ty)?;
-        let status_ref = self
-            .module
-            .declare_func_in_func(self.host.result_is_ok, self.b.func);
-        let status_call = self.b.ins().call(status_ref, &[decoded_r]);
-        let is_ok = self.b.inst_results(status_call)[0];
+        let is_ok = self.call_host(self.host.result_is_ok, &[decoded_r]);
         let ok_block = self.b.create_block();
         self.b.def_var(failed_result_var, decoded_r);
         self.b.ins().brif(is_ok, ok_block, &[], bad, &[]);
@@ -1625,11 +1477,7 @@ impl LowerCtx<'_, '_> {
         self.b.seal_block(ok_result);
         let out = self.b.use_var(out_var);
         let tag = self.b.ins().iconst(types::I8, 1);
-        let host_ref = self
-            .module
-            .declare_func_in_func(self.host.result_new_i64, self.b.func);
-        let ok = self.b.ins().call(host_ref, &[tag, out]);
-        let ok = self.b.inst_results(ok)[0];
+        let ok = self.call_host(self.host.result_new_i64, &[tag, out]);
         self.b.ins().jump(merge, &[ok]);
 
         self.b.switch_to_block(error_result);
@@ -1663,11 +1511,7 @@ impl LowerCtx<'_, '_> {
         let limit = limit.unwrap_or_else(|| self.b.ins().iconst(types::I64, 0));
         let text_r = self.b.ins().call(host, &[body, has_limit, limit]);
         let text_r = self.b.inst_results(text_r)[0];
-        let status_ref = self
-            .module
-            .declare_func_in_func(self.host.result_is_ok, self.b.func);
-        let status_call = self.b.ins().call(status_ref, &[text_r]);
-        let is_ok = self.b.inst_results(status_call)[0];
+        let is_ok = self.call_host(self.host.result_is_ok, &[text_r]);
         let ok_block = self.b.create_block();
         let err_block = self.b.create_block();
         let merge = self.b.create_block();
@@ -1717,16 +1561,8 @@ impl LowerCtx<'_, '_> {
             }
         };
         let text_v = self.lower_expr(text)?;
-        let host_ref = self
-            .module
-            .declare_func_in_func(self.host.encoding.json_parse, self.b.func);
-        let parse_call = self.b.ins().call(host_ref, &[text_v]);
-        let parsed = self.b.inst_results(parse_call)[0];
-        let status_ref = self
-            .module
-            .declare_func_in_func(self.host.result_is_ok, self.b.func);
-        let status_call = self.b.ins().call(status_ref, &[parsed]);
-        let is_ok = self.b.inst_results(status_call)[0];
+        let parsed = self.call_host(self.host.encoding.json_parse, &[text_v]);
+        let is_ok = self.call_host(self.host.result_is_ok, &[parsed]);
         let ok_block = self.b.create_block();
         let err_block = self.b.create_block();
         let merge = self.b.create_block();
@@ -1758,11 +1594,7 @@ impl LowerCtx<'_, '_> {
         let Type::Named(type_name) = target else {
             return Ok(decoded);
         };
-        let status_ref = self
-            .module
-            .declare_func_in_func(self.host.result_is_ok, self.b.func);
-        let status_call = self.b.ins().call(status_ref, &[decoded]);
-        let is_ok = self.b.inst_results(status_call)[0];
+        let is_ok = self.call_host(self.host.result_is_ok, &[decoded]);
         let done = self.b.create_block();
         let try_mig = self.b.create_block();
         let merge = self.b.create_block();
@@ -1777,13 +1609,8 @@ impl LowerCtx<'_, '_> {
         self.b.seal_block(try_mig);
         let name_id = self.runtime.heap.alloc_string(type_name.clone());
         let name_v = self.b.ins().iconst(types::I64, name_id);
-        let mig_ref = self
-            .module
-            .declare_func_in_func(self.host.encoding.datatree_migrate, self.b.func);
-        let mig_call = self.b.ins().call(mig_ref, &[name_v, tree]);
-        let mig_r = self.b.inst_results(mig_call)[0];
-        let mig_ok_call = self.b.ins().call(status_ref, &[mig_r]);
-        let mig_ok = self.b.inst_results(mig_ok_call)[0];
+        let mig_r = self.call_host(self.host.encoding.datatree_migrate, &[name_v, tree]);
+        let mig_ok = self.call_host(self.host.result_is_ok, &[mig_r]);
         let mig_yes = self.b.create_block();
         let mig_no = self.b.create_block();
         self.b.ins().brif(mig_ok, mig_yes, &[], mig_no, &[]);
@@ -1813,11 +1640,7 @@ impl LowerCtx<'_, '_> {
 
     fn lower_migration_status_fresh(&mut self) -> Result<Value, String> {
         let n = self.b.ins().iconst(types::I64, 3);
-        let new_ref = self
-            .module
-            .declare_func_in_func(self.host.struct_new, self.b.func);
-        let new_call = self.b.ins().call(new_ref, &[n]);
-        let handle = self.b.inst_results(new_call)[0];
+        let handle = self.call_host(self.host.struct_new, &[n]);
         let set_b = self
             .module
             .declare_func_in_func(self.host.struct_set_bool, self.b.func);
@@ -1834,11 +1657,7 @@ impl LowerCtx<'_, '_> {
         let empty_v = self.b.ins().iconst(types::I64, empty);
         let idx1 = self.b.ins().iconst(types::I64, 1);
         self.b.ins().call(set_s, &[handle, idx1, empty_v]);
-        let list_ref = self
-            .module
-            .declare_func_in_func(self.host.coll.list_new, self.b.func);
-        let list_call = self.b.ins().call(list_ref, &[]);
-        let empty_list = self.b.inst_results(list_call)[0];
+        let empty_list = self.call_host(self.host.coll.list_new, &[]);
         let idx2 = self.b.ins().iconst(types::I64, 2);
         self.b.ins().call(set_i, &[handle, idx2, empty_list]);
         Ok(handle)
@@ -1855,11 +1674,7 @@ impl LowerCtx<'_, '_> {
         let steps_call = self.b.ins().call(get_i, &[mig_rec, two]);
         let steps = self.b.inst_results(steps_call)[0];
         let n = self.b.ins().iconst(types::I64, 3);
-        let new_ref = self
-            .module
-            .declare_func_in_func(self.host.struct_new, self.b.func);
-        let new_call = self.b.ins().call(new_ref, &[n]);
-        let handle = self.b.inst_results(new_call)[0];
+        let handle = self.call_host(self.host.struct_new, &[n]);
         let set_b = self
             .module
             .declare_func_in_func(self.host.struct_set_bool, self.b.func);
@@ -1885,11 +1700,7 @@ impl LowerCtx<'_, '_> {
         migration: Value,
     ) -> Result<Value, String> {
         let n = self.b.ins().iconst(types::I64, 2);
-        let new_ref = self
-            .module
-            .declare_func_in_func(self.host.struct_new, self.b.func);
-        let new_call = self.b.ins().call(new_ref, &[n]);
-        let handle = self.b.inst_results(new_call)[0];
+        let handle = self.call_host(self.host.struct_new, &[n]);
         let set_i = self
             .module
             .declare_func_in_func(self.host.struct_set_i64, self.b.func);
@@ -1898,11 +1709,7 @@ impl LowerCtx<'_, '_> {
         self.b.ins().call(set_i, &[handle, idx0, value]);
         self.b.ins().call(set_i, &[handle, idx1, migration]);
         let tag = self.b.ins().iconst(types::I8, 1);
-        let host_ref = self
-            .module
-            .declare_func_in_func(self.host.result_new_i64, self.b.func);
-        let call = self.b.ins().call(host_ref, &[tag, handle]);
-        Ok(self.b.inst_results(call)[0])
+        Ok(self.call_host(self.host.result_new_i64, &[tag, handle]))
     }
 
     fn lower_datatree_decode_traced(
@@ -1911,11 +1718,7 @@ impl LowerCtx<'_, '_> {
         inner_ty: &Type,
     ) -> Result<Value, String> {
         let decoded = self.lower_datatree_decode(tree, inner_ty)?;
-        let status_ref = self
-            .module
-            .declare_func_in_func(self.host.result_is_ok, self.b.func);
-        let status_call = self.b.ins().call(status_ref, &[decoded]);
-        let is_ok = self.b.inst_results(status_call)[0];
+        let is_ok = self.call_host(self.host.result_is_ok, &[decoded]);
         let fresh_b = self.b.create_block();
         let try_mig = self.b.create_block();
         let merge = self.b.create_block();
@@ -1940,13 +1743,8 @@ impl LowerCtx<'_, '_> {
         };
         let name_id = self.runtime.heap.alloc_string(type_name.clone());
         let name_v = self.b.ins().iconst(types::I64, name_id);
-        let mig_ref = self
-            .module
-            .declare_func_in_func(self.host.encoding.datatree_migrate, self.b.func);
-        let mig_call = self.b.ins().call(mig_ref, &[name_v, tree]);
-        let mig_r = self.b.inst_results(mig_call)[0];
-        let mig_ok_call = self.b.ins().call(status_ref, &[mig_r]);
-        let mig_ok = self.b.inst_results(mig_ok_call)[0];
+        let mig_r = self.call_host(self.host.encoding.datatree_migrate, &[name_v, tree]);
+        let mig_ok = self.call_host(self.host.result_is_ok, &[mig_r]);
         let mig_yes = self.b.create_block();
         let mig_no = self.b.create_block();
         self.b.ins().brif(mig_ok, mig_yes, &[], mig_no, &[]);
@@ -1958,15 +1756,10 @@ impl LowerCtx<'_, '_> {
         self.b.switch_to_block(mig_yes);
         self.b.seal_block(mig_yes);
         let mig_rec = self.result_payload(mig_r, &Type::Named("MigrationProbe".into()))?;
-        let get_i = self
-            .module
-            .declare_func_in_func(self.host.struct_get_i64, self.b.func);
         let zero = self.b.ins().iconst(types::I64, 0);
-        let new_tree_call = self.b.ins().call(get_i, &[mig_rec, zero]);
-        let new_tree = self.b.inst_results(new_tree_call)[0];
+        let new_tree = self.call_host(self.host.struct_get_i64, &[mig_rec, zero]);
         let decoded2 = self.lower_datatree_decode(new_tree, inner_ty)?;
-        let d2_ok_call = self.b.ins().call(status_ref, &[decoded2]);
-        let d2_ok = self.b.inst_results(d2_ok_call)[0];
+        let d2_ok = self.call_host(self.host.result_is_ok, &[decoded2]);
         let d2_yes = self.b.create_block();
         let d2_no = self.b.create_block();
         self.b.ins().brif(d2_ok, d2_yes, &[], d2_no, &[]);
@@ -2007,11 +1800,7 @@ impl LowerCtx<'_, '_> {
         let host_ref = self.module.declare_func_in_func(parse_host, self.b.func);
         let parse_call = self.b.ins().call(host_ref, parse_args);
         let parsed = self.b.inst_results(parse_call)[0];
-        let status_ref = self
-            .module
-            .declare_func_in_func(self.host.result_is_ok, self.b.func);
-        let status_call = self.b.ins().call(status_ref, &[parsed]);
-        let is_ok = self.b.inst_results(status_call)[0];
+        let is_ok = self.call_host(self.host.result_is_ok, &[parsed]);
         let ok_block = self.b.create_block();
         let err_block = self.b.create_block();
         let merge = self.b.create_block();
@@ -2028,9 +1817,7 @@ impl LowerCtx<'_, '_> {
         let tree = self.result_payload(parsed, &Type::Named("DataTree".into()))?;
         let mut decoded = self.lower_datatree_decode_migrating(tree, ok_ty)?;
         if let Some(project) = error_project {
-            let project_ref = self.module.declare_func_in_func(project, self.b.func);
-            let project_call = self.b.ins().call(project_ref, &[decoded]);
-            decoded = self.b.inst_results(project_call)[0];
+            decoded = self.call_host(project, &[decoded]);
         }
         self.b.ins().jump(merge, &[decoded]);
 
@@ -2058,9 +1845,7 @@ impl LowerCtx<'_, '_> {
         host_id: FuncId,
     ) -> Result<Value, String> {
         let tree = self.lower_serde_encode(arg)?;
-        let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-        let call = self.b.ins().call(host_ref, &[tree]);
-        Ok(self.b.inst_results(call)[0])
+        Ok(self.call_host(host_id, &[tree]))
     }
 
     fn lower_typed_csv_decode(
@@ -2069,16 +1854,8 @@ impl LowerCtx<'_, '_> {
         elem_ty: &Type,
     ) -> Result<Value, String> {
         let text_v = self.lower_expr(text)?;
-        let host_ref = self
-            .module
-            .declare_func_in_func(self.host.encoding.csv_decode_trees, self.b.func);
-        let trees_call = self.b.ins().call(host_ref, &[text_v]);
-        let trees_r = self.b.inst_results(trees_call)[0];
-        let status_ref = self
-            .module
-            .declare_func_in_func(self.host.result_is_ok, self.b.func);
-        let status_call = self.b.ins().call(status_ref, &[trees_r]);
-        let is_ok = self.b.inst_results(status_call)[0];
+        let trees_r = self.call_host(self.host.encoding.csv_decode_trees, &[text_v]);
+        let is_ok = self.call_host(self.host.result_is_ok, &[trees_r]);
         let ok_block = self.b.create_block();
         let err_block = self.b.create_block();
         let merge = self.b.create_block();
@@ -2130,11 +1907,7 @@ impl LowerCtx<'_, '_> {
         fn_name: &str,
     ) -> Result<Value, String> {
         let handle = self.lower_expr(inner)?;
-        let status_ref = self
-            .module
-            .declare_func_in_func(self.host.result_is_ok, self.b.func);
-        let status_call = self.b.ins().call(status_ref, &[handle]);
-        let is_ok = self.b.inst_results(status_call)[0];
+        let is_ok = self.call_host(self.host.result_is_ok, &[handle]);
         let ok_block = self.b.create_block();
         let err_block = self.b.create_block();
         self.b.ins().brif(is_ok, ok_block, &[], err_block, &[]);
@@ -2165,15 +1938,9 @@ impl LowerCtx<'_, '_> {
                     .get(conv_fn)
                     .copied()
                     .ok_or_else(|| format!("jit typed Result conversion unknown `{conv_fn}`"))?;
-                let func_ref = self.module.declare_func_in_func(func_id, self.b.func);
-                let call = self.b.ins().call(func_ref, &[err_payload]);
-                let converted = self.b.inst_results(call)[0];
+                let converted = self.call_host(func_id, &[err_payload]);
                 let tag = self.b.ins().iconst(types::I8, 0);
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.result_new_i64, self.b.func);
-                let pack = self.b.ins().call(host, &[tag, converted]);
-                self.b.inst_results(pack)[0]
+                self.call_host(self.host.result_new_i64, &[tag, converted])
             }
             TIR::TTryConvert::Fallible | TIR::TTryConvert::WidenUnion { .. } => {
                 return Err("jit typed Result conversion unsupported".to_string());
@@ -2331,16 +2098,10 @@ impl LowerCtx<'_, '_> {
             self.b.ins().call(leave, &[layout, returned]);
         }
 
-        let trapped = self
-            .module
-            .declare_func_in_func(self.host.is_trapped, self.b.func);
-        let call = self.b.ins().call(trapped, &[]);
-        status = self.merge_exit_status(status, self.b.inst_results(call)[0]);
-        let pending = self
-            .module
-            .declare_func_in_func(self.host.conc.pending_exit_status, self.b.func);
-        let call = self.b.ins().call(pending, &[]);
-        status = self.merge_exit_status(status, self.b.inst_results(call)[0]);
+        let trapped = self.call_host(self.host.is_trapped, &[]);
+        status = self.merge_exit_status(status, trapped);
+        let pending = self.call_host(self.host.conc.pending_exit_status, &[]);
+        status = self.merge_exit_status(status, pending);
         let status = status.expect("trap status always contributes");
 
         if let Some(sender) = self.yield_sender {
@@ -2517,18 +2278,11 @@ impl LowerCtx<'_, '_> {
         if self.in_lexical_exit {
             return Ok(());
         }
-        let is_ref = self
-            .module
-            .declare_func_in_func(self.host.is_trapped, self.b.func);
-        let call = self.b.ins().call(is_ref, &[]);
-        let mut flag = self.b.inst_results(call)[0];
+        let mut flag = self.call_host(self.host.is_trapped, &[]);
         if self.shield_depth == 0 {
-            let pending = self
-                .module
-                .declare_func_in_func(self.host.conc.pending_exit_status, self.b.func);
-            let call = self.b.ins().call(pending, &[]);
+            let pending = self.call_host(self.host.conc.pending_exit_status, &[]);
             flag = self
-                .merge_exit_status(Some(flag), self.b.inst_results(call)[0])
+                .merge_exit_status(Some(flag), pending)
                 .expect("existing exit status");
         }
         let zero = self.b.ins().iconst(types::I64, 0);
@@ -2581,9 +2335,7 @@ impl LowerCtx<'_, '_> {
                 } else {
                     self.host.watcher.watch_poll
                 };
-                let host = self.module.declare_func_in_func(host_id, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(host_id, &[recv_val]))
             }
             "cancel" if args.is_empty() && !is_set => {
                 let host = self
@@ -2593,11 +2345,7 @@ impl LowerCtx<'_, '_> {
                 Ok(self.b.ins().iconst(types::I8, 0))
             }
             "is_active" if args.is_empty() && !is_set => {
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.watcher.watch_is_active, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.watcher.watch_is_active, &[recv_val]))
             }
             "summary" if args.is_empty() => {
                 let host_id = if is_set {
@@ -2605,9 +2353,7 @@ impl LowerCtx<'_, '_> {
                 } else {
                     self.host.watcher.watch_summary
                 };
-                let host = self.module.declare_func_in_func(host_id, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(host_id, &[recv_val]))
             }
             "add" if args.len() == 1 && is_set => {
                 let other = self.lower_expr(&args[0])?;
@@ -3016,11 +2762,7 @@ impl LowerCtx<'_, '_> {
                         Type::Float => self.host.coll.list_get_f64,
                         _ => self.host.coll.list_get,
                     };
-                    let get_ref = self
-                        .module
-                        .declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(get_ref, &[list, start_v, line_c]);
-                    let result = self.b.inst_results(call)[0];
+                    let result = self.call_host(host_id, &[list, start_v, line_c]);
                     self.emit_trap_check()?;
                     (result, elem_ty.clone())
                 } else {
@@ -3066,26 +2808,14 @@ impl LowerCtx<'_, '_> {
                 {
                     if module == "core.tasks" && method == "channel" {
                         let ch_val = if args.is_empty() {
-                            let ch_ref = self
-                                .module
-                                .declare_func_in_func(self.host.conc.channel_new, self.b.func);
-                            let ch_call = self.b.ins().call(ch_ref, &[]);
-                            self.b.inst_results(ch_call)[0]
+                            self.call_host(self.host.conc.channel_new, &[])
                         } else if args.len() == 1 {
                             let cap = self.lower_expr(&args[0])?;
-                            let ch_ref = self
-                                .module
-                                .declare_func_in_func(self.host.conc.channel_bounded, self.b.func);
-                            let ch_call = self.b.ins().call(ch_ref, &[cap]);
-                            self.b.inst_results(ch_call)[0]
+                            self.call_host(self.host.conc.channel_bounded, &[cap])
                         } else {
                             return Err("jit tasks.channel arity unsupported".to_string());
                         };
-                        let tx_ref = self
-                            .module
-                            .declare_func_in_func(self.host.conc.channel_sender, self.b.func);
-                        let tx_call = self.b.ins().call(tx_ref, &[ch_val]);
-                        let tx_val = self.b.inst_results(tx_call)[0];
+                        let tx_val = self.call_host(self.host.conc.channel_sender, &[ch_val]);
                         let tx_var = self.fresh_var(types::I64);
                         self.b.def_var(tx_var, tx_val);
                         self.vars.insert(binds[0].0.clone(), tx_var);
@@ -3114,11 +2844,7 @@ impl LowerCtx<'_, '_> {
                     {
                         let pool_handle = self.lower_expr(pool)?;
                         let id_value = self.lower_expr(id)?;
-                        let getter = self
-                            .module
-                            .declare_func_in_func(self.host.memory.pool_get, self.b.func);
-                        let get_call = self.b.ins().call(getter, &[pool_handle, id_value]);
-                        let record = self.b.inst_results(get_call)[0];
+                        let record = self.call_host(self.host.memory.pool_get, &[pool_handle, id_value]);
                         self.emit_trap_check()?;
                         let elem_ty = match &pool.ty {
                             Type::Apply { args, .. } if !args.is_empty() => &args[0],
@@ -3173,11 +2899,7 @@ impl LowerCtx<'_, '_> {
                             {
                                 let (list, start, _) = self.unpack_view_mut(handle)?;
                                 let line = self.b.ins().iconst(types::I32, 1);
-                                let get = self
-                                    .module
-                                    .declare_func_in_func(self.host.coll.list_get, self.b.func);
-                                let call = self.b.ins().call(get, &[list, start, line]);
-                                handle = self.b.inst_results(call)[0];
+                                handle = self.call_host(self.host.coll.list_get, &[list, start, line]);
                                 self.emit_trap_check()?;
                                 args[0].clone()
                             }
@@ -3318,9 +3040,7 @@ impl LowerCtx<'_, '_> {
                                 Type::Float => self.host.coll.list_get_f64,
                                 _ => self.host.coll.list_get,
                             };
-                            let get = self.module.declare_func_in_func(get_id, self.b.func);
-                            let call = self.b.ins().call(get, &[list, start, line]);
-                            let current = self.b.inst_results(call)[0];
+                            let current = self.call_host(get_id, &[list, start, line]);
                             self.emit_trap_check()?;
                             let rhs = self.lower_expr(value)?;
                             self.apply_binop_to_var(current, *op, rhs, &elem_ty, *assign_line)?
@@ -3420,11 +3140,7 @@ impl LowerCtx<'_, '_> {
                     (base, index)
                 };
                 let line = self.b.ins().iconst(types::I32, assign.line as i64);
-                let get_ref = self
-                    .module
-                    .declare_func_in_func(self.host.coll.list_get, self.b.func);
-                let get_call = self.b.ins().call(get_ref, &[list, abs_index, line]);
-                let handle = self.b.inst_results(get_call)[0];
+                let handle = self.call_host(self.host.coll.list_get, &[list, abs_index, line]);
                 self.emit_trap_check()?;
 
                 let elem_ty = match &assign.base.ty {
@@ -4104,9 +3820,7 @@ impl LowerCtx<'_, '_> {
                     } else {
                         self.host.coll.list_len
                     };
-                    let len_ref = self.module.declare_func_in_func(len_id, self.b.func);
-                    let len_call = self.b.ins().call(len_ref, &[coll]);
-                    let len = self.b.inst_results(len_call)[0];
+                    let len = self.call_host(len_id, &[coll]);
                     let done = self.b.ins().icmp(IntCC::SignedGreaterThanOrEqual, idx, len);
                     self.b.ins().brif(done, exhausted, &[], body_block, &[]);
 
@@ -4140,16 +3854,8 @@ impl LowerCtx<'_, '_> {
                             Type::Map { value, .. } => value.as_ref().clone(),
                             _ => unreachable!(),
                         };
-                        let key_ref = self
-                            .module
-                            .declare_func_in_func(self.host.coll.map_key_at, self.b.func);
-                        let key_call = self.b.ins().call(key_ref, &[coll, idx]);
-                        let key_val = self.b.inst_results(key_call)[0];
-                        let val_ref = self
-                            .module
-                            .declare_func_in_func(self.host.coll.map_value_at, self.b.func);
-                        let val_call = self.b.ins().call(val_ref, &[coll, idx]);
-                        let val_raw = self.b.inst_results(val_call)[0];
+                        let key_val = self.call_host(self.host.coll.map_key_at, &[coll, idx]);
+                        let val_raw = self.call_host(self.host.coll.map_value_at, &[coll, idx]);
                         let key_var = self.fresh_var(types::I64);
                         self.b.def_var(key_var, key_val);
                         self.vars.insert(TIR::local_place(var), key_var);
@@ -4261,11 +3967,7 @@ impl LowerCtx<'_, '_> {
                     // dominates both the header and the body.
                     let coll = if matches!(method_kind, Some(TForInMethod::Chars)) {
                         let text = self.lower_expr(source)?;
-                        let host_ref = self
-                            .module
-                            .declare_func_in_func(self.host.str_chars, self.b.func);
-                        let call = self.b.ins().call(host_ref, &[text]);
-                        self.b.inst_results(call)[0]
+                        self.call_host(self.host.str_chars, &[text])
                     } else if matches!(method_kind, Some(TForInMethod::LinesProcessStream)) {
                         let (child_expr, stream_tag) = match &source.kind {
                             TExprKind::Field {
@@ -4288,25 +3990,13 @@ impl LowerCtx<'_, '_> {
                         };
                         let child_val = self.lower_expr(child_expr)?;
                         let tag = self.b.ins().iconst(types::I64, stream_tag);
-                        let host_ref = self
-                            .module
-                            .declare_func_in_func(self.host.process.stream_lines, self.b.func);
-                        let call = self.b.ins().call(host_ref, &[child_val, tag]);
-                        self.b.inst_results(call)[0]
+                        self.call_host(self.host.process.stream_lines, &[child_val, tag])
                     } else if matches!(method_kind, Some(TForInMethod::LinesFile)) {
                         let file = self.lower_expr(source)?;
-                        let host_ref = self
-                            .module
-                            .declare_func_in_func(self.host.io.file_lines, self.b.func);
-                        let call = self.b.ins().call(host_ref, &[file]);
-                        self.b.inst_results(call)[0]
+                        self.call_host(self.host.io.file_lines, &[file])
                     } else if matches!(method_kind, Some(TForInMethod::LinesStdin)) {
                         let stdin = self.lower_expr(source)?;
-                        let host_ref = self
-                            .module
-                            .declare_func_in_func(self.host.io.stdin_lines, self.b.func);
-                        let call = self.b.ins().call(host_ref, &[stdin]);
-                        self.b.inst_results(call)[0]
+                        self.call_host(self.host.io.stdin_lines, &[stdin])
                     } else {
                         self.lower_expr(source)?
                     };
@@ -4322,11 +4012,7 @@ impl LowerCtx<'_, '_> {
 
                     self.b.switch_to_block(header);
                     let idx = self.b.use_var(idx_var);
-                    let len_ref = self
-                        .module
-                        .declare_func_in_func(self.host.coll.list_len, self.b.func);
-                    let len_call = self.b.ins().call(len_ref, &[coll]);
-                    let len = self.b.inst_results(len_call)[0];
+                    let len = self.call_host(self.host.coll.list_len, &[coll]);
                     let done = self.b.ins().icmp(IntCC::SignedGreaterThanOrEqual, idx, len);
                     self.b.ins().brif(done, exhausted, &[], body_block, &[]);
 
@@ -4551,11 +4237,7 @@ impl LowerCtx<'_, '_> {
                 self.lower_mixed_switch(subject, *class, arms, else_body.as_deref())?;
             }
             TStmt::TaskGroup { group, body } => {
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.conc.task_group_new, self.b.func);
-                let call = self.b.ins().call(host, &[]);
-                let handle = self.b.inst_results(call)[0];
+                let handle = self.call_host(self.host.conc.task_group_new, &[]);
                 let var = self.fresh_var(types::I64);
                 self.b.def_var(var, handle);
                 let place = Self::local_key(group);
@@ -4767,11 +4449,7 @@ impl LowerCtx<'_, '_> {
             TStmt::Layout { handle, label, body } => {
                 let label_id = self.runtime.heap.alloc_string(label.clone());
                 let label_ptr = self.b.ins().iconst(types::I64, label_id);
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.layout.new, self.b.func);
-                let call = self.b.ins().call(host, &[label_ptr]);
-                let h = self.b.inst_results(call)[0];
+                let h = self.call_host(self.host.layout.new, &[label_ptr]);
                 let var = self.fresh_var(types::I64);
                 self.b.def_var(var, h);
                 self.vars.insert(TIR::local_place(&handle.name), var);
@@ -4882,9 +4560,7 @@ impl LowerCtx<'_, '_> {
                                     "jit transaction snapshot missing `{type_name}::snapshot`"
                                 )
                             })?;
-                        let snap_ref = self.module.declare_func_in_func(snap_id, self.b.func);
-                        let call = self.b.ins().call(snap_ref, &[current]);
-                        (self.b.inst_results(call)[0], TxnSnap::Rollback(type_name))
+                        (self.call_host(snap_id, &[current]), TxnSnap::Rollback(type_name))
                     } else if scalar_mut {
                         let clif = match self.var_tys.get(&place) {
                             Some(Type::Apply { args, .. }) if !args.is_empty() => self
@@ -4969,19 +4645,13 @@ impl LowerCtx<'_, '_> {
             .copied()
             .ok_or_else(|| format!("jit missing method `{iterator_type}::next`"))?;
         let collection = self.lower_expr(source)?;
-        let iter_ref = self.module.declare_func_in_func(iter_id, self.b.func);
-        let iter_call = self.b.ins().call(iter_ref, &[collection]);
-        let iterator = self.b.inst_results(iter_call)[0];
+        let iterator = self.call_host(iter_id, &[collection]);
         let iterator_var = self.fresh_var(types::I64);
         self.b.def_var(iterator_var, iterator);
         let stride = match step {
             Some(step) => {
                 let value = self.lower_expr(step)?;
-                let check = self
-                    .module
-                    .declare_func_in_func(self.host.coll.loop_stride_check, self.b.func);
-                let call = self.b.ins().call(check, &[value]);
-                let value = self.b.inst_results(call)[0];
+                let value = self.call_host(self.host.coll.loop_stride_check, &[value]);
                 self.emit_trap_check()?;
                 value
             }
@@ -4999,9 +4669,7 @@ impl LowerCtx<'_, '_> {
 
         self.b.switch_to_block(header);
         let iterator = self.b.use_var(iterator_var);
-        let next_ref = self.module.declare_func_in_func(next_id, self.b.func);
-        let next_call = self.b.ins().call(next_ref, &[iterator]);
-        let packed = self.b.inst_results(next_call)[0];
+        let packed = self.call_host(next_id, &[iterator]);
         self.emit_trap_check()?;
         let zero = self.b.ins().iconst(types::I64, 0);
         let closed = self.b.ins().icmp(IntCC::Equal, packed, zero);
@@ -5219,9 +4887,7 @@ impl LowerCtx<'_, '_> {
         let type_v = self.b.ins().iconst(types::I64, type_h);
 
         // display string — reuse Display path / scalar push
-        let begin = self.module.declare_func_in_func(self.host.str_begin, self.b.func);
-        let call = self.b.ins().call(begin, &[]);
-        let buf = self.b.inst_results(call)[0];
+        let buf = self.call_host(self.host.str_begin, &[]);
         match &arg.ty {
             Type::Named(n) => {
                 self.lower_named_str_interp(buf, arg, n, jet_foundation::AST::StrFormat::Display)?;
@@ -5255,9 +4921,7 @@ impl LowerCtx<'_, '_> {
         let display_v = buf; // str_begin buffer IS the string handle
 
         // fields
-        let list_new = self.module.declare_func_in_func(self.host.coll.list_new, self.b.func);
-        let fields_call = self.b.ins().call(list_new, &[]);
-        let fields = self.b.inst_results(fields_call)[0];
+        let fields = self.call_host(self.host.coll.list_new, &[]);
         if let Type::Named(n) = &arg.ty {
             if let Some((names, tys)) = self.meta.struct_layout(n) {
                 let recv = self.lower_expr(arg)?;
@@ -5270,9 +4934,7 @@ impl LowerCtx<'_, '_> {
                     let name_h = self.runtime.heap.alloc_string(jet_name.to_string());
                     let name_v = self.b.ins().iconst(types::I64, name_h);
                     let field_val = self.lower_record_field(recv, n, fname, fty)?;
-                    let begin = self.module.declare_func_in_func(self.host.str_begin, self.b.func);
-                    let bcall = self.b.ins().call(begin, &[]);
-                    let fbuf = self.b.inst_results(bcall)[0];
+                    let fbuf = self.call_host(self.host.str_begin, &[]);
                     match fty {
                         Type::Int | Type::IntN { .. } => {
                             let p = self.module.declare_func_in_func(self.host.str_push_i64, self.b.func);
@@ -5302,11 +4964,7 @@ impl LowerCtx<'_, '_> {
                 }
             }
         }
-        let finish = self
-            .module
-            .declare_func_in_func(self.host.reflect_of_finish, self.b.func);
-        let call = self.b.ins().call(finish, &[type_v, display_v, fields]);
-        Ok(self.b.inst_results(call)[0])
+        Ok(self.call_host(self.host.reflect_of_finish, &[type_v, display_v, fields]))
     }
 
     fn lower_testing_call(
@@ -5318,36 +4976,20 @@ impl LowerCtx<'_, '_> {
         match method {
             "temp_dir" if args.len() == 1 => {
                 let p = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.testing_temp_dir, self.b.func);
-                let call = self.b.ins().call(host, &[p]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.testing_temp_dir, &[p]))
             }
             "snap" if args.len() == 2 => {
                 let a = self.lower_expr(&args[0])?;
                 let b = self.lower_expr(&args[1])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.testing_snap, self.b.func);
-                let call = self.b.ins().call(host, &[a, b]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.testing_snap, &[a, b]))
             }
             "fake_clock" if args.len() == 1 => {
                 let ms = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.clock_new, self.b.func);
-                let call = self.b.ins().call(host, &[ms]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.clock_new, &[ms]))
             }
             "fake_rng" if args.len() == 1 => {
                 let seed = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.random.rng_new, self.b.func);
-                let call = self.b.ins().call(host, &[seed]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.random.rng_new, &[seed]))
             }
             other => Err(format!("jit core call unsupported: core.testing.{other}")),
         }
@@ -5393,11 +5035,7 @@ impl LowerCtx<'_, '_> {
                 match &args[0].ty {
                     Type::Named(n) if n == "Table" || n == "LazyFrame" => {
                         if n == "LazyFrame" {
-                            let host = self
-                                .module
-                                .declare_func_in_func(self.host.data.lazy_count, self.b.func);
-                            let call = self.b.ins().call(host, &[recv]);
-                            return Ok(self.b.inst_results(call)[0]);
+                            return Ok(self.call_host(self.host.data.lazy_count, &[recv]));
                         }
                         let rows = self.lower_record_field(recv, n, "rows", &Type::List(Box::new(Type::Int)))?;
                         let call = self.b.ins().call(host, &[rows]);
@@ -5410,11 +5048,7 @@ impl LowerCtx<'_, '_> {
                     }
                     Type::Apply { name, .. } if name == "Table" || name == "LazyFrame" => {
                         if name == "LazyFrame" {
-                            let host = self
-                                .module
-                                .declare_func_in_func(self.host.data.lazy_count, self.b.func);
-                            let call = self.b.ins().call(host, &[recv]);
-                            return Ok(self.b.inst_results(call)[0]);
+                            return Ok(self.call_host(self.host.data.lazy_count, &[recv]));
                         }
                         let rows = self.lower_record_field(recv, name, "rows", &Type::List(Box::new(Type::Int)))?;
                         let call = self.b.ins().call(host, &[rows]);
@@ -5437,15 +5071,11 @@ impl LowerCtx<'_, '_> {
                 }
             }
             "status" if args.is_empty() => {
-                let host = self.module.declare_func_in_func(self.host.data.status, self.b.func);
-                let call = self.b.ins().call(host, &[]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.data.status, &[]))
             }
             "require_bridge" if args.len() == 1 => {
                 let p = self.lower_expr(&args[0])?;
-                let host = self.module.declare_func_in_func(self.host.data.require_bridge, self.b.func);
-                let call = self.b.ins().call(host, &[p]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.data.require_bridge, &[p]))
             }
             "mean" | "sum" | "min" | "max" | "median" | "variance" | "stddev" if args.len() == 1 => {
                 let v = self.lower_expr(&args[0])?;
@@ -5471,9 +5101,7 @@ impl LowerCtx<'_, '_> {
                     Self::scalar_bitcast_memflags(),
                     q,
                 );
-                let host = self.module.declare_func_in_func(self.host.data.quantile, self.b.func);
-                let call = self.b.ins().call(host, &[v, q_bits]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.data.quantile, &[v, q_bits]))
             }
             "filter" if args.len() == 2 => self.lower_data_filter(&args[0], &args[1]),
             "sort_by" if args.len() == 2 => self.lower_data_sort_by(&args[0], &args[1], ty),
@@ -5496,11 +5124,7 @@ impl LowerCtx<'_, '_> {
             }
             "describe" if args.len() == 1 => {
                 let v = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.data.describe, self.b.func);
-                let call = self.b.ins().call(host, &[v]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.data.describe, &[v]))
             }
             "bar_text" | "bar_svg" if args.len() == 1 => {
                 let v = self.lower_expr(&args[0])?;
@@ -5509,9 +5133,7 @@ impl LowerCtx<'_, '_> {
                 } else {
                     self.host.data.bar_svg
                 };
-                let host = self.module.declare_func_in_func(host_id, self.b.func);
-                let call = self.b.ins().call(host, &[v]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(host_id, &[v]))
             }
             "line_text" | "line_svg" if args.len() == 2 => {
                 let groups = self.lower_expr(&args[0])?;
@@ -5521,9 +5143,7 @@ impl LowerCtx<'_, '_> {
                 } else {
                     self.host.data.line_svg
                 };
-                let host = self.module.declare_func_in_func(host_id, self.b.func);
-                let call = self.b.ins().call(host, &[groups, options]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(host_id, &[groups, options]))
             }
             "table" if args.len() == 1 => {
                 let rows = self.lower_expr(&args[0])?;
@@ -5533,11 +5153,7 @@ impl LowerCtx<'_, '_> {
                 let zero = self.b.ins().iconst(types::I64, 0);
                 self.set_record_slot(rec, 1, zero, &Type::Int)?;
                 let plan = {
-                    let host = self
-                        .module
-                        .declare_func_in_func(self.host.coll.list_new, self.b.func);
-                    let call = self.b.ins().call(host, &[]);
-                    let list = self.b.inst_results(call)[0];
+                    let list = self.call_host(self.host.coll.list_new, &[]);
                     let step = self.runtime.heap.alloc_string("table");
                     let step_v = self.b.ins().iconst(types::I64, step);
                     let push = self
@@ -5573,11 +5189,7 @@ impl LowerCtx<'_, '_> {
             "schema" if args.len() == 1 => self.lower_data_schema(&args[0]),
             "missing_count" if args.len() == 1 => {
                 let recv = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.data.missing_count, self.b.func);
-                let call = self.b.ins().call(host, &[recv]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.data.missing_count, &[recv]))
             }
             "plan" if args.len() == 1 => {
                 let recv = self.lower_expr(&args[0])?;
@@ -5635,11 +5247,7 @@ impl LowerCtx<'_, '_> {
             }
             "collect" if args.len() == 1 => {
                 let frame = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.data.collect, self.b.func);
-                let call = self.b.ins().call(host, &[frame]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.data.collect, &[frame]))
             }
             "inner_join" if args.len() == 4 => {
                 self.lower_data_join(&args[0], &args[1], &args[2], &args[3], false)
@@ -5655,20 +5263,12 @@ impl LowerCtx<'_, '_> {
                     self.lower_iter_map_filter(rows, std::slice::from_ref(&args[2]), false)?;
                 let values =
                     self.lower_iter_map_filter(rows, std::slice::from_ref(&args[3]), false)?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.data.pivot_sum, self.b.func);
-                let call = self.b.ins().call(host, &[row_keys, col_keys, values]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.data.pivot_sum, &[row_keys, col_keys, values]))
             }
             "rolling_mean" if args.len() == 2 => {
                 let v = self.lower_expr(&args[0])?;
                 let w = self.lower_expr(&args[1])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.data.rolling_mean, self.b.func);
-                let call = self.b.ins().call(host, &[v, w]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.data.rolling_mean, &[v, w]))
             }
             "csv_reader" if args.len() == 2 => {
                 let file = self.lower_expr(&args[0])?;
@@ -5681,11 +5281,7 @@ impl LowerCtx<'_, '_> {
                     "encoding",
                     &Type::Named("EncodingLimits".into()),
                 )?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.data.csv_reader, self.b.func);
-                let call = self.b.ins().call(host, &[file, encoding, max_groups]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.data.csv_reader, &[file, encoding, max_groups]))
             }
             other => Err(format!("jit core call unsupported: core.data.{other}")),
         }
@@ -5699,18 +5295,10 @@ impl LowerCtx<'_, '_> {
     ) -> Result<Value, String> {
         let stream_v = self.lower_expr(stream)?;
         // Remaining rows as a list handle (advances stream to EOF).
-        let rest_host = self
-            .module
-            .declare_func_in_func(self.host.data.stream_rest, self.b.func);
-        let rest_call = self.b.ins().call(rest_host, &[stream_v]);
-        let rest = self.b.inst_results(rest_call)[0];
+        let rest = self.call_host(self.host.data.stream_rest, &[stream_v]);
         // rest is Result<list, DataError>
         // For group we need Ok list — use result payload helpers.
-        let is_ok = self
-            .module
-            .declare_func_in_func(self.host.result_is_ok, self.b.func);
-        let ok_call = self.b.ins().call(is_ok, &[rest]);
-        let ok = self.b.inst_results(ok_call)[0];
+        let ok = self.call_host(self.host.result_is_ok, &[rest]);
         // Branch: if err, return rest; else group_reduce_limited
         let err_block = self.b.create_block();
         let ok_block = self.b.create_block();
@@ -5724,20 +5312,12 @@ impl LowerCtx<'_, '_> {
 
         self.b.switch_to_block(ok_block);
         self.b.seal_block(ok_block);
-        let payload = self
-            .module
-            .declare_func_in_func(self.host.result_get_i64, self.b.func);
-        let rows_call = self.b.ins().call(payload, &[rest]);
-        let rows = self.b.inst_results(rows_call)[0];
+        let rows = self.call_host(self.host.result_get_i64, &[rest]);
         let elem_ty = match &stream.ty {
             Type::Apply { args, .. } if !args.is_empty() => args[0].clone(),
             _ => Type::Named("Event".into()),
         };
-        let max_g_host = self
-            .module
-            .declare_func_in_func(self.host.data.stream_max_groups, self.b.func);
-        let max_call = self.b.ins().call(max_g_host, &[stream_v]);
-        let max_g = self.b.inst_results(max_call)[0];
+        let max_g = self.call_host(self.host.data.stream_max_groups, &[stream_v]);
         let key_list = self.lower_list_value_map_only(rows, &elem_ty, key_fn)?;
         let val_list = self.lower_list_value_map_only(rows, &elem_ty, value_fn)?;
         let host = self
@@ -5767,11 +5347,7 @@ impl LowerCtx<'_, '_> {
         let (param_place, body_expr) = self.closure_unary_lambda(std::slice::from_ref(lambda))?;
         let coll_var = self.fresh_var(types::I64);
         self.b.def_var(coll_var, list);
-        let new_ref = self
-            .module
-            .declare_func_in_func(self.host.coll.list_new, self.b.func);
-        let out_call = self.b.ins().call(new_ref, &[]);
-        let out_val = self.b.inst_results(out_call)[0];
+        let out_val = self.call_host(self.host.coll.list_new, &[]);
         let out_var = self.fresh_var(types::I64);
         self.b.def_var(out_var, out_val);
         let header = self.b.create_block();
@@ -5785,11 +5361,7 @@ impl LowerCtx<'_, '_> {
         self.b.switch_to_block(header);
         let idx = self.b.use_var(idx_var);
         let coll = self.b.use_var(coll_var);
-        let len_ref = self
-            .module
-            .declare_func_in_func(self.host.coll.list_len, self.b.func);
-        let len_call = self.b.ins().call(len_ref, &[coll]);
-        let len = self.b.inst_results(len_call)[0];
+        let len = self.call_host(self.host.coll.list_len, &[coll]);
         let done = self
             .b
             .ins()
@@ -5938,11 +5510,7 @@ impl LowerCtx<'_, '_> {
         let coll_var = self.fresh_var(types::I64);
         self.b.def_var(coll_var, list);
 
-        let new_ref = self
-            .module
-            .declare_func_in_func(self.host.coll.list_new, self.b.func);
-        let out_call = self.b.ins().call(new_ref, &[]);
-        let out_val = self.b.inst_results(out_call)[0];
+        let out_val = self.call_host(self.host.coll.list_new, &[]);
         let out_var = self.fresh_var(types::I64);
         self.b.def_var(out_var, out_val);
 
@@ -5958,11 +5526,7 @@ impl LowerCtx<'_, '_> {
         self.b.switch_to_block(header);
         let idx = self.b.use_var(idx_var);
         let coll = self.b.use_var(coll_var);
-        let len_ref = self
-            .module
-            .declare_func_in_func(self.host.coll.list_len, self.b.func);
-        let len_call = self.b.ins().call(len_ref, &[coll]);
-        let len = self.b.inst_results(len_call)[0];
+        let len = self.call_host(self.host.coll.list_len, &[coll]);
         let done = self
             .b
             .ins()
@@ -6051,18 +5615,10 @@ impl LowerCtx<'_, '_> {
             Type::Apply { args, .. } if !args.is_empty() => args[0].clone(),
             Type::List(inner) => inner.as_ref().clone(),
             _ => {
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.coll.list_new, self.b.func);
-                let call = self.b.ins().call(host, &[]);
-                return Ok(self.b.inst_results(call)[0]);
+                return Ok(self.call_host(self.host.coll.list_new, &[]));
             }
         };
-        let host_new = self
-            .module
-            .declare_func_in_func(self.host.coll.list_new, self.b.func);
-        let out_call = self.b.ins().call(host_new, &[]);
-        let out = self.b.inst_results(out_call)[0];
+        let out = self.call_host(self.host.coll.list_new, &[]);
         let push = self
             .module
             .declare_func_in_func(self.host.coll.list_push, self.b.func);
@@ -6158,18 +5714,10 @@ impl LowerCtx<'_, '_> {
             // bit-casting through the same list_push (stores raw i64 bits).
             self.lower_iter_map_filter(rows, std::slice::from_ref(vf), false)?
         } else {
-            let host = self
-                .module
-                .declare_func_in_func(self.host.coll.list_new, self.b.func);
-            let call = self.b.ins().call(host, &[]);
-            self.b.inst_results(call)[0]
+            self.call_host(self.host.coll.list_new, &[])
         };
         let mode_v = self.b.ins().iconst(types::I64, mode);
-        let host = self
-            .module
-            .declare_func_in_func(self.host.data.group_reduce, self.b.func);
-        let call = self.b.ins().call(host, &[keys, values, mode_v]);
-        Ok(self.b.inst_results(call)[0])
+        Ok(self.call_host(self.host.data.group_reduce, &[keys, values, mode_v]))
     }
 
     fn lower_data_filter(&mut self, rows: &TExpr, pred: &TExpr) -> Result<Value, String> {
@@ -6206,11 +5754,7 @@ impl LowerCtx<'_, '_> {
         let host = self.module.declare_func_in_func(sort_id, self.b.func);
         self.b.ins().call(host, &[cloned, keys]);
         let ok = self.b.ins().iconst(types::I8, 1);
-        let pack = self
-            .module
-            .declare_func_in_func(self.host.result_new_i64, self.b.func);
-        let packed = self.b.ins().call(pack, &[ok, cloned]);
-        Ok(self.b.inst_results(packed)[0])
+        Ok(self.call_host(self.host.result_new_i64, &[ok, cloned]))
     }
 
     fn lower_host_call(&mut self, host: &THostCall, ty: &Type) -> Result<Value, String> {
@@ -6229,11 +5773,7 @@ impl LowerCtx<'_, '_> {
                 );
                 let kind = self.b.ins().iconst(types::I64, i64::from(*editable) + 1);
                 let projection = self.b.ins().iconst(types::I64, projection);
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.cell.guard_project, self.b.func);
-                let call = self.b.ins().call(host, &[kind, guard, projection]);
-                let result = self.b.inst_results(call)[0];
+                let result = self.call_host(self.host.cell.guard_project, &[kind, guard, projection]);
                 self.emit_trap_check()?;
                 Ok(result)
             }
@@ -6249,11 +5789,7 @@ impl LowerCtx<'_, '_> {
                 match (receiver_name, method.as_str(), args.as_slice()) {
                     ("Cell", "get", []) => {
                         let schema = self.cell_schema(&inner)?;
-                        let host = self
-                            .module
-                            .declare_func_in_func(self.host.cell.get, self.b.func);
-                        let call = self.b.ins().call(host, &[handle, schema]);
-                        let raw = self.b.inst_results(call)[0];
+                        let raw = self.call_host(self.host.cell.get, &[handle, schema]);
                         self.emit_trap_check()?;
                         self.cell_unpack_value(raw, &inner)
                     }
@@ -6272,29 +5808,17 @@ impl LowerCtx<'_, '_> {
                         let value = self.lower_expr(value)?;
                         let raw = self.cell_pack_value(value, &inner)?;
                         let schema = self.cell_schema(&inner)?;
-                        let host = self
-                            .module
-                            .declare_func_in_func(self.host.cell.replace, self.b.func);
-                        let call = self.b.ins().call(host, &[handle, raw, schema]);
-                        let old = self.b.inst_results(call)[0];
+                        let old = self.call_host(self.host.cell.replace, &[handle, raw, schema]);
                         self.emit_trap_check()?;
                         self.cell_unpack_value(old, &inner)
                     }
                     ("Cell", "guard_read", []) => {
-                        let host = self
-                            .module
-                            .declare_func_in_func(self.host.cell.guard_read, self.b.func);
-                        let call = self.b.ins().call(host, &[handle]);
-                        let guard = self.b.inst_results(call)[0];
+                        let guard = self.call_host(self.host.cell.guard_read, &[handle]);
                         self.emit_trap_check()?;
                         Ok(guard)
                     }
                     ("Cell", "guard_edit", []) => {
-                        let host = self
-                            .module
-                            .declare_func_in_func(self.host.cell.guard_edit, self.b.func);
-                        let call = self.b.ins().call(host, &[handle]);
-                        let guard = self.b.inst_results(call)[0];
+                        let guard = self.call_host(self.host.cell.guard_edit, &[handle]);
                         self.emit_trap_check()?;
                         Ok(guard)
                     }
@@ -6304,24 +5828,12 @@ impl LowerCtx<'_, '_> {
                         };
                         let value_ty = value_ty.as_ref().clone();
                         let schema = self.cell_schema(&value_ty)?;
-                        let begin = self
-                            .module
-                            .declare_func_in_func(self.host.cell.get_or_set_begin, self.b.func);
-                        let call = self.b.ins().call(begin, &[handle, schema]);
-                        let state = self.b.inst_results(call)[0];
+                        let state = self.call_host(self.host.cell.get_or_set_begin, &[handle, schema]);
                         self.emit_trap_check()?;
                         let zero = self.b.ins().iconst(types::I64, 0);
                         let one = self.b.ins().iconst(types::I64, 1);
-                        let get_bool = self
-                            .module
-                            .declare_func_in_func(self.host.struct_get_bool, self.b.func);
-                        let present_call = self.b.ins().call(get_bool, &[state, zero]);
-                        let present = self.b.inst_results(present_call)[0];
-                        let get_raw = self
-                            .module
-                            .declare_func_in_func(self.host.struct_get_i64, self.b.func);
-                        let raw_call = self.b.ins().call(get_raw, &[state, one]);
-                        let state_value = self.b.inst_results(raw_call)[0];
+                        let present = self.call_host(self.host.struct_get_bool, &[state, zero]);
+                        let state_value = self.call_host(self.host.struct_get_i64, &[state, one]);
                         let present_block = self.b.create_block();
                         let empty_block = self.b.create_block();
                         let merge = self.b.create_block();
@@ -6374,9 +5886,7 @@ impl LowerCtx<'_, '_> {
                             } else {
                                 self.host.cell.guard_read
                             };
-                            let host = self.module.declare_func_in_func(host_id, self.b.func);
-                            let call = self.b.ins().call(host, &[handle]);
-                            (self.b.inst_results(call)[0], true)
+                            (self.call_host(host_id, &[handle]), true)
                         } else {
                             (handle, false)
                         };
@@ -6385,11 +5895,7 @@ impl LowerCtx<'_, '_> {
                             .ins()
                             .iconst(types::I64, i64::from(receiver_name == "CellEditGuard" || editable) + 1);
                         let schema = self.cell_schema(&inner)?;
-                        let get = self
-                            .module
-                            .declare_func_in_func(self.host.cell.guard_get, self.b.func);
-                        let call = self.b.ins().call(get, &[kind, guard, schema]);
-                        let raw = self.b.inst_results(call)[0];
+                        let raw = self.call_host(self.host.cell.guard_get, &[kind, guard, schema]);
                         self.emit_trap_check()?;
                         let payload = self.cell_unpack_value(raw, &inner)?;
                         let TExprKind::Lambda(lambda) = &callback.kind else {
@@ -6418,11 +5924,7 @@ impl LowerCtx<'_, '_> {
                             .ins()
                             .iconst(types::I64, if receiver_name == "CellReadGuard" { 1 } else { 2 });
                         let schema = self.cell_schema(&inner)?;
-                        let host = self
-                            .module
-                            .declare_func_in_func(self.host.cell.guard_get, self.b.func);
-                        let call = self.b.ins().call(host, &[kind, handle, schema]);
-                        let raw = self.b.inst_results(call)[0];
+                        let raw = self.call_host(self.host.cell.guard_get, &[kind, handle, schema]);
                         self.emit_trap_check()?;
                         self.cell_unpack_value(raw, &inner)
                     }
@@ -6487,9 +5989,7 @@ impl LowerCtx<'_, '_> {
                 } else {
                     self.host.memory.shared_begin
                 };
-                let begin = self.module.declare_func_in_func(begin_id, self.b.func);
-                let call = self.b.ins().call(begin, &[handle]);
-                let payload = self.b.inst_results(call)[0];
+                let payload = self.call_host(begin_id, &[handle]);
                 let TExprKind::Lambda(lambda) = &args[0].kind else {
                     return Err("jit Shared callback must be a lambda".to_string());
                 };
@@ -6521,9 +6021,7 @@ impl LowerCtx<'_, '_> {
                 } else {
                     self.host.memory.shared_strong_count
                 };
-                let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                let call = self.b.ins().call(host_ref, &[handle]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(host_id, &[handle]))
             }
             // D-SHARED-CYCLE1=C: Shared.Weak.upgrade → packed Option<Shared>.
             THostCall::Method { recv, method, args }
@@ -6553,11 +6051,7 @@ impl LowerCtx<'_, '_> {
             {
                 let handle = self.lower_expr(recv)?;
                 let zero_clock = self.b.ins().iconst(types::I64, 0);
-                let get = self
-                    .module
-                    .declare_func_in_func(self.host.memory.expiring_get, self.b.func);
-                let call = self.b.ins().call(get, &[handle, zero_clock]);
-                let status = self.b.inst_results(call)[0];
+                let status = self.call_host(self.host.memory.expiring_get, &[handle, zero_clock]);
                 let zero = self.b.ins().iconst(types::I64, 0);
                 let present = self.b.ins().icmp(IntCC::NotEqual, status, zero);
                 let one = self.b.ins().iconst(types::I64, 1);
@@ -6595,11 +6089,8 @@ impl LowerCtx<'_, '_> {
                 if self.b.func.dfg.value_type(value) != types::I64 {
                     return Err("jit generator item type unsupported".to_string());
                 }
-                let send = self
-                    .module
-                    .declare_func_in_func(self.host.conc.sender_send, self.b.func);
-                let call = self.b.ins().call(send, &[sender, value]);
-                let sent = self.finish_wait_call(self.b.inst_results(call)[0]);
+                let sent_status = self.call_host(self.host.conc.sender_send, &[sender, value]);
+                let sent = self.finish_wait_call(sent_status);
                 let zero = self.b.ins().iconst(types::I64, 0);
                 let closed = self.b.ins().icmp(IntCC::Equal, sent, zero);
                 let stop = self.b.create_block();
@@ -6658,20 +6149,12 @@ impl LowerCtx<'_, '_> {
                     Some(THostArg::Expr(e) | THostArg::Borrow(e)) => self.lower_expr(e)?,
                     _ => return Err("jit Clock.new args unsupported".to_string()),
                 };
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.clock_new, self.b.func);
-                let call = self.b.ins().call(host_ref, &[ms]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.clock_new, &[ms]))
             }
             THostCall::EnvSet { name, value, .. } => {
                 let name_v = self.lower_expr(name)?;
                 let value_v = self.lower_expr(value)?;
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.core.env_set, self.b.func);
-                let call = self.b.ins().call(host_ref, &[name_v, value_v]);
-                let _ = self.b.inst_results(call)[0];
+                let _ = self.call_host(self.host.core.env_set, &[name_v, value_v]);
                 self.emit_trap_check()?;
                 let _ = ty;
                 Ok(self.b.ins().iconst(types::I8, 0))
@@ -6749,9 +6232,7 @@ impl LowerCtx<'_, '_> {
                 } else {
                     self.host.coll.list_get
                 };
-                let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                let call = self.b.ins().call(host_ref, &[list, idx, line]);
-                let value = self.b.inst_results(call)[0];
+                let value = self.call_host(host_id, &[list, idx, line]);
                 self.emit_trap_check()?;
                 Ok(match self.meta.clif_ty(ty).or_else(|| clif_ty(ty)) {
                     Some(types::I8) => self.b.ins().ireduce(types::I8, value),
@@ -6777,9 +6258,7 @@ impl LowerCtx<'_, '_> {
                         return Err(format!("jit tuple index field type unsupported: {other:?}"))
                     }
                 };
-                let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                let call = self.b.ins().call(host_ref, &[handle, idx_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(host_id, &[handle, idx_val]))
             }
             THostCall::SwitchSubjectField { field } => {
                 let (handle, subject_ty) = self
@@ -6804,56 +6283,28 @@ impl LowerCtx<'_, '_> {
                     Some(THostArg::Expr(e)) => self.lower_expr(e)?,
                     _ => return Err("jit jet_context missing message".to_string()),
                 };
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.result_context, self.b.func);
-                let call = self.b.ins().call(host, &[recv, msg]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.result_context, &[recv, msg]))
             }
             THostCall::TypedText { kind, arg } => {
                 let val = self.lower_expr(arg)?;
                 match kind {
                     TTypedTextForm::SQLRaw => {
-                        let host = self
-                            .module
-                            .declare_func_in_func(self.host.math.typed_sql_raw, self.b.func);
-                        let call = self.b.ins().call(host, &[val]);
-                        Ok(self.b.inst_results(call)[0])
+                        Ok(self.call_host(self.host.math.typed_sql_raw, &[val]))
                     }
                     TTypedTextForm::SQLTemplate => {
-                        let host = self
-                            .module
-                            .declare_func_in_func(self.host.math.typed_sql_template, self.b.func);
-                        let call = self.b.ins().call(host, &[val]);
-                        Ok(self.b.inst_results(call)[0])
+                        Ok(self.call_host(self.host.math.typed_sql_template, &[val]))
                     }
                     TTypedTextForm::SQLParams => {
-                        let host = self
-                            .module
-                            .declare_func_in_func(self.host.math.typed_sql_params, self.b.func);
-                        let call = self.b.ins().call(host, &[val]);
-                        Ok(self.b.inst_results(call)[0])
+                        Ok(self.call_host(self.host.math.typed_sql_params, &[val]))
                     }
                     TTypedTextForm::HTMLRaw => {
-                        let host = self
-                            .module
-                            .declare_func_in_func(self.host.math.typed_html_raw, self.b.func);
-                        let call = self.b.ins().call(host, &[val]);
-                        Ok(self.b.inst_results(call)[0])
+                        Ok(self.call_host(self.host.math.typed_html_raw, &[val]))
                     }
                     TTypedTextForm::HTMLText => {
-                        let host = self
-                            .module
-                            .declare_func_in_func(self.host.math.typed_html_text, self.b.func);
-                        let call = self.b.ins().call(host, &[val]);
-                        Ok(self.b.inst_results(call)[0])
+                        Ok(self.call_host(self.host.math.typed_html_text, &[val]))
                     }
                     TTypedTextForm::ShRaw => {
-                        let host = self
-                            .module
-                            .declare_func_in_func(self.host.math.typed_sh_raw, self.b.func);
-                        let call = self.b.ins().call(host, &[val]);
-                        Ok(self.b.inst_results(call)[0])
+                        Ok(self.call_host(self.host.math.typed_sh_raw, &[val]))
                     }
                 }
             }
@@ -6881,11 +6332,7 @@ impl LowerCtx<'_, '_> {
                     let shown = self.lower_jet_show(hole)?;
                     self.b.ins().call(push, &[hole_values, shown]);
                 }
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.math.typed_sql_interp, self.b.func);
-                let call = self.b.ins().call(host, &[literal_values, hole_values]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.math.typed_sql_interp, &[literal_values, hole_values]))
             }
             THostCall::TypedTextInterp {
                 kind: TTypedTextInterpKind::Sh,
@@ -6911,11 +6358,7 @@ impl LowerCtx<'_, '_> {
                     let shown = self.lower_jet_show(hole)?;
                     self.b.ins().call(push, &[hole_values, shown]);
                 }
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.math.typed_sh_interp, self.b.func);
-                let call = self.b.ins().call(host, &[literal_values, hole_values]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.math.typed_sh_interp, &[literal_values, hole_values]))
             }
             THostCall::TypedTextInterp {
                 kind: TTypedTextInterpKind::HTML,
@@ -6941,11 +6384,7 @@ impl LowerCtx<'_, '_> {
                     let shown = self.lower_jet_show(hole)?;
                     self.b.ins().call(push, &[hole_values, shown]);
                 }
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.math.typed_html_interp, self.b.func);
-                let call = self.b.ins().call(host, &[literal_values, hole_values]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.math.typed_html_interp, &[literal_values, hole_values]))
             }
             THostCall::Helper { helper, .. } => {
                 Err(format!("jit helper unsupported: {helper}"))
@@ -6959,18 +6398,10 @@ impl LowerCtx<'_, '_> {
                 let pid_v = self.b.ins().iconst(types::I64, pid);
                 match probe {
                     TIR::TMatchProbe::IsSome => {
-                        let host = self
-                            .module
-                            .declare_func_in_func(self.host.parse.str_match_is_some, self.b.func);
-                        let call = self.b.ins().call(host, &[subject, pid_v]);
-                        Ok(self.b.inst_results(call)[0])
+                        Ok(self.call_host(self.host.parse.str_match_is_some, &[subject, pid_v]))
                     }
                     TIR::TMatchProbe::Unwrap => {
-                        let host = self
-                            .module
-                            .declare_func_in_func(self.host.parse.str_match_unwrap, self.b.func);
-                        let call = self.b.ins().call(host, &[subject, pid_v]);
-                        Ok(self.b.inst_results(call)[0])
+                        Ok(self.call_host(self.host.parse.str_match_unwrap, &[subject, pid_v]))
                     }
                 }
             }
@@ -6983,18 +6414,10 @@ impl LowerCtx<'_, '_> {
                 let pid_v = self.b.ins().iconst(types::I64, pid);
                 match probe {
                     TIR::TMatchProbe::IsSome => {
-                        let host = self
-                            .module
-                            .declare_func_in_func(self.host.parse.bin_match_is_some, self.b.func);
-                        let call = self.b.ins().call(host, &[subject, pid_v]);
-                        Ok(self.b.inst_results(call)[0])
+                        Ok(self.call_host(self.host.parse.bin_match_is_some, &[subject, pid_v]))
                     }
                     TIR::TMatchProbe::Unwrap => {
-                        let host = self
-                            .module
-                            .declare_func_in_func(self.host.parse.bin_match_unwrap, self.b.func);
-                        let call = self.b.ins().call(host, &[subject, pid_v]);
-                        Ok(self.b.inst_results(call)[0])
+                        Ok(self.call_host(self.host.parse.bin_match_unwrap, &[subject, pid_v]))
                     }
                 }
             }
@@ -7012,11 +6435,7 @@ impl LowerCtx<'_, '_> {
             Type::Int | Type::IntN { .. } => {
                 let v = self.lower_expr(expr)?;
                 let signed = self.b.ins().iconst(types::I64, 1);
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.intn_to_string, self.b.func);
-                let call = self.b.ins().call(host, &[v, signed]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.intn_to_string, &[v, signed]))
             }
             Type::Bool => {
                 let v = self.lower_expr(expr)?;
@@ -7366,11 +6785,7 @@ impl LowerCtx<'_, '_> {
             return self.pack_enum_scalar(disc, val, ty);
         }
         if arg.widen_to_vec {
-            let host_ref = self
-                .module
-                .declare_func_in_func(self.host.coll.list_clone, self.b.func);
-            let call = self.b.ins().call(host_ref, &[val]);
-            return Ok(self.b.inst_results(call)[0]);
+            return Ok(self.call_host(self.host.coll.list_clone, &[val]));
         }
         Ok(val)
     }
@@ -7407,11 +6822,7 @@ impl LowerCtx<'_, '_> {
             let id = self.runtime.heap.alloc_string(text);
             return Ok(self.b.ins().iconst(types::I64, id));
         }
-        let begin_ref = self
-            .module
-            .declare_func_in_func(self.host.str_begin, self.b.func);
-        let begin_call = self.b.ins().call(begin_ref, &[]);
-        let buf_id = self.b.inst_results(begin_call)[0];
+        let buf_id = self.call_host(self.host.str_begin, &[]);
         for part in parts {
             match part {
                 TStrPart::Lit(s) => {
@@ -7497,11 +6908,7 @@ impl LowerCtx<'_, '_> {
                         let uses_result = matches!(inner.as_ref(), Type::IntN { .. })
                             || Self::uses_result_option_abi(e);
                         let is_none = if uses_result {
-                            let is_ok = self
-                                .module
-                                .declare_func_in_func(self.host.result_is_ok, self.b.func);
-                            let call = self.b.ins().call(is_ok, &[val]);
-                            let ok = self.b.inst_results(call)[0];
+                            let ok = self.call_host(self.host.result_is_ok, &[val]);
                             let ok_wide = self.b.ins().uextend(types::I64, ok);
                             let zero = self.b.ins().iconst(types::I64, 0);
                             self.bool_from_icmp(IntCC::Equal, ok_wide, zero)
@@ -7527,11 +6934,7 @@ impl LowerCtx<'_, '_> {
                         self.b.switch_to_block(some_block);
                         self.b.seal_block(some_block);
                         let payload = if uses_result {
-                            let host = self
-                                .module
-                                .declare_func_in_func(self.host.result_get_i64, self.b.func);
-                            let call = self.b.ins().call(host, &[val]);
-                            self.b.inst_results(call)[0]
+                            self.call_host(self.host.result_get_i64, &[val])
                         } else {
                             self.unpack_option_payload(val, inner)?
                         };
@@ -7616,11 +7019,7 @@ impl LowerCtx<'_, '_> {
                             .b
                             .ins()
                             .iconst(types::I64, kind);
-                        let show_ref = self
-                            .module
-                            .declare_func_in_func(self.host.coll.list_show, self.b.func);
-                        let show_call = self.b.ins().call(show_ref, &[val, flag]);
-                        let text = self.b.inst_results(show_call)[0];
+                        let text = self.call_host(self.host.coll.list_show, &[val, flag]);
                         let push_ref = self
                             .module
                             .declare_func_in_func(self.host.str_push_str, self.b.func);
@@ -7632,11 +7031,7 @@ impl LowerCtx<'_, '_> {
                             .b
                             .ins()
                             .iconst(types::I64, i64::from(*signed));
-                        let show = self
-                            .module
-                            .declare_func_in_func(self.host.intn_to_string, self.b.func);
-                        let call = self.b.ins().call(show, &[val, signed]);
-                        let text = self.b.inst_results(call)[0];
+                        let text = self.call_host(self.host.intn_to_string, &[val, signed]);
                         let push = self
                             .module
                             .declare_func_in_func(self.host.str_push_str, self.b.func);
@@ -7684,11 +7079,7 @@ impl LowerCtx<'_, '_> {
         if matches!(fmt, StrFormat::Display) {
             if type_name == "EncodingError" {
                 let recv = self.lower_expr(expr)?;
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.encoding.encoding_error_show, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv]);
-                let text = self.b.inst_results(call)[0];
+                let text = self.call_host(self.host.encoding.encoding_error_show, &[recv]);
                 let push_ref = self
                     .module
                     .declare_func_in_func(self.host.str_push_str, self.b.func);
@@ -7701,11 +7092,7 @@ impl LowerCtx<'_, '_> {
                     .b
                     .ins()
                     .iconst(types::I64, i64::from(type_name == "GameSound"));
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.game.asset_show, self.b.func);
-                let call = self.b.ins().call(host, &[kind, recv]);
-                let text = self.b.inst_results(call)[0];
+                let text = self.call_host(self.host.game.asset_show, &[kind, recv]);
                 let push_ref = self
                     .module
                     .declare_func_in_func(self.host.str_push_str, self.b.func);
@@ -7714,11 +7101,7 @@ impl LowerCtx<'_, '_> {
             }
             if type_name == "DataError" {
                 let recv = self.lower_expr(expr)?;
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.data.error_show, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv]);
-                let text = self.b.inst_results(call)[0];
+                let text = self.call_host(self.host.data.error_show, &[recv]);
                 let push_ref = self
                     .module
                     .declare_func_in_func(self.host.str_push_str, self.b.func);
@@ -7728,9 +7111,7 @@ impl LowerCtx<'_, '_> {
             let display_key = format!("{type_name}::display");
             if let Some(&func_id) = self.func_ids.get(&display_key) {
                 let recv = self.lower_expr(expr)?;
-                let func_ref = self.module.declare_func_in_func(func_id, self.b.func);
-                let call = self.b.ins().call(func_ref, &[recv]);
-                let text = self.b.inst_results(call)[0];
+                let text = self.call_host(func_id, &[recv]);
                 let host_ref = self
                     .module
                     .declare_func_in_func(self.host.str_push_str, self.b.func);
@@ -7744,11 +7125,7 @@ impl LowerCtx<'_, '_> {
                 .b
                 .ins()
                 .iconst(types::I64, i64::from(type_name == "GameSound"));
-            let host = self
-                .module
-                .declare_func_in_func(self.host.game.asset_show, self.b.func);
-            let call = self.b.ins().call(host, &[kind, recv]);
-            let text = self.b.inst_results(call)[0];
+            let text = self.call_host(self.host.game.asset_show, &[kind, recv]);
             let push_ref = self
                 .module
                 .declare_func_in_func(self.host.str_push_str, self.b.func);
@@ -7759,9 +7136,7 @@ impl LowerCtx<'_, '_> {
             let debug_key = format!("{type_name}::debug");
             if let Some(&func_id) = self.func_ids.get(&debug_key) {
                 let recv = self.lower_expr(expr)?;
-                let func_ref = self.module.declare_func_in_func(func_id, self.b.func);
-                let call = self.b.ins().call(func_ref, &[recv]);
-                let text = self.b.inst_results(call)[0];
+                let text = self.call_host(func_id, &[recv]);
                 let push_ref = self
                     .module
                     .declare_func_in_func(self.host.str_push_str, self.b.func);
@@ -7797,44 +7172,28 @@ impl LowerCtx<'_, '_> {
             let idx = self.b.ins().iconst(types::I64, i as i64);
             match fty {
                 Type::Int => {
-                    let get = self
-                        .module
-                        .declare_func_in_func(self.host.struct_get_i64, self.b.func);
-                    let call = self.b.ins().call(get, &[handle, idx]);
-                    let val = self.b.inst_results(call)[0];
+                    let val = self.call_host(self.host.struct_get_i64, &[handle, idx]);
                     let push = self
                         .module
                         .declare_func_in_func(self.host.str_push_i64, self.b.func);
                     self.b.ins().call(push, &[buf_id, val]);
                 }
                 Type::Float => {
-                    let get = self
-                        .module
-                        .declare_func_in_func(self.host.struct_get_f64, self.b.func);
-                    let call = self.b.ins().call(get, &[handle, idx]);
-                    let val = self.b.inst_results(call)[0];
+                    let val = self.call_host(self.host.struct_get_f64, &[handle, idx]);
                     let push = self
                         .module
                         .declare_func_in_func(self.host.str_push_f64, self.b.func);
                     self.b.ins().call(push, &[buf_id, val]);
                 }
                 Type::Bool => {
-                    let get = self
-                        .module
-                        .declare_func_in_func(self.host.struct_get_bool, self.b.func);
-                    let call = self.b.ins().call(get, &[handle, idx]);
-                    let val = self.b.inst_results(call)[0];
+                    let val = self.call_host(self.host.struct_get_bool, &[handle, idx]);
                     let push = self
                         .module
                         .declare_func_in_func(self.host.str_push_bool, self.b.func);
                     self.b.ins().call(push, &[buf_id, val]);
                 }
                 Type::Char => {
-                    let get = self
-                        .module
-                        .declare_func_in_func(self.host.struct_get_char, self.b.func);
-                    let call = self.b.ins().call(get, &[handle, idx]);
-                    let val = self.b.inst_results(call)[0];
+                    let val = self.call_host(self.host.struct_get_char, &[handle, idx]);
                     let push = self
                         .module
                         .declare_func_in_func(self.host.str_push_char, self.b.func);
@@ -7843,11 +7202,7 @@ impl LowerCtx<'_, '_> {
                 Type::String => {
                     // Rust Debug quotes string fields; JetShow/`{:?}` matches.
                     self.push_str_lit(buf_id, "\"")?;
-                    let get = self
-                        .module
-                        .declare_func_in_func(self.host.struct_get_str, self.b.func);
-                    let call = self.b.ins().call(get, &[handle, idx]);
-                    let val = self.b.inst_results(call)[0];
+                    let val = self.call_host(self.host.struct_get_str, &[handle, idx]);
                     let push = self
                         .module
                         .declare_func_in_func(self.host.str_push_str, self.b.func);
@@ -7930,11 +7285,7 @@ impl LowerCtx<'_, '_> {
         end: Value,
     ) -> Result<Value, String> {
         let n = self.b.ins().iconst(types::I64, 3);
-        let new_ref = self
-            .module
-            .declare_func_in_func(self.host.struct_new, self.b.func);
-        let call = self.b.ins().call(new_ref, &[n]);
-        let handle = self.b.inst_results(call)[0];
+        let handle = self.call_host(self.host.struct_new, &[n]);
         let set = self
             .module
             .declare_func_in_func(self.host.struct_set_i64, self.b.func);
@@ -7982,11 +7333,7 @@ impl LowerCtx<'_, '_> {
     /// Write-through field place: heap record `[struct, field_index]`.
     fn emit_field_mut(&mut self, structure: Value, field_idx: i64) -> Result<Value, String> {
         let n = self.b.ins().iconst(types::I64, 2);
-        let new_ref = self
-            .module
-            .declare_func_in_func(self.host.struct_new, self.b.func);
-        let call = self.b.ins().call(new_ref, &[n]);
-        let handle = self.b.inst_results(call)[0];
+        let handle = self.call_host(self.host.struct_new, &[n]);
         let set = self
             .module
             .declare_func_in_func(self.host.struct_set_i64, self.b.func);
@@ -8045,11 +7392,7 @@ impl LowerCtx<'_, '_> {
                 Type::Float => self.host.coll.list_get_f64,
                 _ => self.host.coll.list_get,
             };
-            let get = self
-                .module
-                .declare_func_in_func(host_id, self.b.func);
-            let call = self.b.ins().call(get, &[list, start, line]);
-            let result = self.b.inst_results(call)[0];
+            let result = self.call_host(host_id, &[list, start, line]);
             self.emit_trap_check()?;
             return Ok(result);
         }
@@ -8067,11 +7410,7 @@ impl LowerCtx<'_, '_> {
         }
         if ty.as_ref().is_some_and(Self::is_field_mut_ty) {
             let (structure, idx) = self.unpack_field_mut(raw)?;
-            let get = self
-                .module
-                .declare_func_in_func(self.host.struct_get_i64, self.b.func);
-            let call = self.b.ins().call(get, &[structure, idx]);
-            return Ok(self.b.inst_results(call)[0]);
+            return Ok(self.call_host(self.host.struct_get_i64, &[structure, idx]));
         }
         Ok(raw)
     }
@@ -8222,11 +7561,7 @@ impl LowerCtx<'_, '_> {
 
     fn new_record(&mut self, field_count: usize) -> Value {
         let count = self.b.ins().iconst(types::I64, field_count as i64);
-        let host = self
-            .module
-            .declare_func_in_func(self.host.struct_new, self.b.func);
-        let call = self.b.ins().call(host, &[count]);
-        self.b.inst_results(call)[0]
+        self.call_host(self.host.struct_new, &[count])
     }
 
     fn record_slot(&mut self, handle: Value, index: usize, ty: &Type) -> Result<Value, String> {
@@ -8241,9 +7576,7 @@ impl LowerCtx<'_, '_> {
             other => return Err(format!("jit patch field type unsupported: {ty:?} ({other:?})")),
             },
         };
-        let host = self.module.declare_func_in_func(host, self.b.func);
-        let call = self.b.ins().call(host, &[handle, index]);
-        Ok(self.b.inst_results(call)[0])
+        Ok(self.call_host(host, &[handle, index]))
     }
 
     fn set_record_slot(
@@ -8416,11 +7749,7 @@ impl LowerCtx<'_, '_> {
     ) -> Result<Value, String> {
         let values: Vec<&TExpr> = fields.collect();
         let n = self.b.ins().iconst(types::I64, values.len() as i64);
-        let new_ref = self
-            .module
-            .declare_func_in_func(self.host.struct_new, self.b.func);
-        let new_call = self.b.ins().call(new_ref, &[n]);
-        let handle = self.b.inst_results(new_call)[0];
+        let handle = self.call_host(self.host.struct_new, &[n]);
         for (i, value) in values.iter().enumerate() {
             let raw = self.lower_expr(value)?;
             let abi_ty = self.erase_distinct_ty(&value.ty);
@@ -8497,9 +7826,7 @@ impl LowerCtx<'_, '_> {
             other if clif_ty(other) == Some(types::I64) => self.host.struct_get_i64,
             other => return Err(format!("jit field type unsupported: {other:?}")),
         };
-        let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-        let call = self.b.ins().call(host_ref, &[handle, idx_val]);
-        Ok(self.b.inst_results(call)[0])
+        Ok(self.call_host(host_id, &[handle, idx_val]))
     }
 
     fn lower_tuple_destructure(
@@ -8601,11 +7928,7 @@ impl LowerCtx<'_, '_> {
     }
 
     fn lower_list_lit(&mut self, list_ty: &Type, elems: &[TExpr]) -> Result<Value, String> {
-        let new_ref = self
-            .module
-            .declare_func_in_func(self.host.coll.list_new, self.b.func);
-        let new_call = self.b.ins().call(new_ref, &[]);
-        let handle = self.b.inst_results(new_call)[0];
+        let handle = self.call_host(self.host.coll.list_new, &[]);
         for e in elems {
             if Self::is_range_ty(&e.ty) {
                 let [start, end, exclusive] = self.lower_range_expr(e)?;
@@ -8657,11 +7980,7 @@ impl LowerCtx<'_, '_> {
                 Ok(self.b.ins().iconst(types::I64, handle))
             }
             CtValue::List(values) => {
-                let new_ref = self
-                    .module
-                    .declare_func_in_func(self.host.coll.list_new, self.b.func);
-                let new_call = self.b.ins().call(new_ref, &[]);
-                let handle = self.b.inst_results(new_call)[0];
+                let handle = self.call_host(self.host.coll.list_new, &[]);
                 let push_i = self
                     .module
                     .declare_func_in_func(self.host.coll.list_push, self.b.func);
@@ -8683,11 +8002,7 @@ impl LowerCtx<'_, '_> {
                 Ok(handle)
             }
             CtValue::Map(entries) => {
-                let new_ref = self
-                    .module
-                    .declare_func_in_func(self.host.coll.map_new, self.b.func);
-                let new_call = self.b.ins().call(new_ref, &[]);
-                let handle = self.b.inst_results(new_call)[0];
+                let handle = self.call_host(self.host.coll.map_new, &[]);
                 let insert_ref = self
                     .module
                     .declare_func_in_func(self.host.coll.map_insert, self.b.func);
@@ -8757,11 +8072,7 @@ impl LowerCtx<'_, '_> {
         let tag = self.b.ins().iconst(types::I8, i64::from(ok));
         if matches!(inner, CtValue::Unit) {
             let payload = self.b.ins().iconst(types::I64, 0);
-            let host = self
-                .module
-                .declare_func_in_func(self.host.result_new_i64, self.b.func);
-            let call = self.b.ins().call(host, &[tag, payload]);
-            return Ok(self.b.inst_results(call)[0]);
+            return Ok(self.call_host(self.host.result_new_i64, &[tag, payload]));
         }
         let ty = inner.jet_type();
         let payload = self.lower_ct_value(inner)?;
@@ -8772,9 +8083,7 @@ impl LowerCtx<'_, '_> {
             Some(ty) if ty == types::I64 => self.host.result_new_i64,
             _ => self.host.result_new_i64,
         };
-        let host = self.module.declare_func_in_func(host_id, self.b.func);
-        let call = self.b.ins().call(host, &[tag, payload]);
-        Ok(self.b.inst_results(call)[0])
+        Ok(self.call_host(host_id, &[tag, payload]))
     }
 
     fn lower_ct_struct(
@@ -8825,11 +8134,7 @@ impl LowerCtx<'_, '_> {
                 .collect()
         };
         let n = self.b.ins().iconst(types::I64, ordered.len() as i64);
-        let new_ref = self
-            .module
-            .declare_func_in_func(self.host.struct_new, self.b.func);
-        let new_call = self.b.ins().call(new_ref, &[n]);
-        let handle = self.b.inst_results(new_call)[0];
+        let handle = self.call_host(self.host.struct_new, &[n]);
         for (i, (field_ty, ct)) in ordered.iter().enumerate() {
             let raw = self.lower_ct_value(ct)?;
             let abi_ty = self.erase_distinct_ty(field_ty);
@@ -8880,11 +8185,7 @@ impl LowerCtx<'_, '_> {
         }
         // Named / multi-arg: heap carrier [disc, field0, …].
         let n = self.b.ins().iconst(types::I64, (args.len() + 1) as i64);
-        let new_ref = self
-            .module
-            .declare_func_in_func(self.host.struct_new, self.b.func);
-        let call = self.b.ins().call(new_ref, &[n]);
-        let handle = self.b.inst_results(call)[0];
+        let handle = self.call_host(self.host.struct_new, &[n]);
         let set_i = self
             .module
             .declare_func_in_func(self.host.struct_set_i64, self.b.func);
@@ -8916,11 +8217,7 @@ impl LowerCtx<'_, '_> {
         list_ty: &Type,
         parts: &[ListSpreadPart],
     ) -> Result<Value, String> {
-        let new_ref = self
-            .module
-            .declare_func_in_func(self.host.coll.list_new, self.b.func);
-        let new_call = self.b.ins().call(new_ref, &[]);
-        let out = self.b.inst_results(new_call)[0];
+        let out = self.call_host(self.host.coll.list_new, &[]);
         let push_id = if jit_list_float_type(list_ty) {
             self.host.coll.list_push_f64
         } else {
@@ -8935,11 +8232,7 @@ impl LowerCtx<'_, '_> {
                 }
                 ListSpreadPart::Spread(list) => {
                     let input = self.lower_expr(list)?;
-                    let len_ref = self
-                        .module
-                        .declare_func_in_func(self.host.coll.list_len, self.b.func);
-                    let len_call = self.b.ins().call(len_ref, &[input]);
-                    let len = self.b.inst_results(len_call)[0];
+                    let len = self.call_host(self.host.coll.list_len, &[input]);
                     let idx_var = self.fresh_var(types::I64);
                     let zero = self.b.ins().iconst(types::I64, 0);
                     self.b.def_var(idx_var, zero);
@@ -8960,9 +8253,7 @@ impl LowerCtx<'_, '_> {
                     } else {
                         self.host.coll.list_get
                     };
-                    let get_ref = self.module.declare_func_in_func(get_id, self.b.func);
-                    let get_call = self.b.ins().call(get_ref, &[input, idx, line]);
-                    let value = self.b.inst_results(get_call)[0];
+                    let value = self.call_host(get_id, &[input, idx, line]);
                     self.emit_trap_check()?;
                     self.b.ins().call(push_ref, &[out, value]);
                     let one = self.b.ins().iconst(types::I64, 1);
@@ -8988,11 +8279,7 @@ impl LowerCtx<'_, '_> {
     where
         I: IntoIterator<Item = (&'a TExpr, &'a TExpr)>,
     {
-        let new_ref = self
-            .module
-            .declare_func_in_func(self.host.coll.map_new, self.b.func);
-        let new_call = self.b.ins().call(new_ref, &[]);
-        let handle = self.b.inst_results(new_call)[0];
+        let handle = self.call_host(self.host.coll.map_new, &[]);
         for (k, v) in entries {
             if !matches!(&k.ty, Type::String) {
                 return Err(format!("jit map key type unsupported: {:?}", k.ty));
@@ -9074,11 +8361,7 @@ impl LowerCtx<'_, '_> {
     }
 
     fn lower_i64_value_list(&mut self, vals: &[Value]) -> Result<Value, String> {
-        let new_ref = self
-            .module
-            .declare_func_in_func(self.host.coll.list_new, self.b.func);
-        let new_call = self.b.ins().call(new_ref, &[]);
-        let handle = self.b.inst_results(new_call)[0];
+        let handle = self.call_host(self.host.coll.list_new, &[]);
         for v in vals {
             let push_ref = self
                 .module
@@ -9198,9 +8481,7 @@ impl LowerCtx<'_, '_> {
                     } else {
                         self.host.layout.sub
                     };
-                    let host = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host, &[l, r]);
-                    return Ok(self.b.inst_results(call)[0]);
+                    return Ok(self.call_host(host_id, &[l, r]));
                 }
                 self.lower_binary(*op, *overflow, *line, lhs, rhs)
             }
@@ -9370,11 +8651,7 @@ impl LowerCtx<'_, '_> {
                 }
                 if module == "jet.unit" && method == "magnitude" && args.len() == 1 {
                     let value = self.lower_expr(&args[0])?;
-                    let begin = self
-                        .module
-                        .declare_func_in_func(self.host.str_begin, self.b.func);
-                    let call = self.b.ins().call(begin, &[]);
-                    let text = self.b.inst_results(call)[0];
+                    let text = self.call_host(self.host.str_begin, &[]);
                     let push = match self.meta.clif_ty(&args[0].ty) {
                         Some(ty) if ty == types::I64 => self.host.str_push_i64,
                         Some(ty) if ty == types::F64 => {
@@ -9701,11 +8978,7 @@ impl LowerCtx<'_, '_> {
                     return Ok(self.b.inst_results(call)[0]);
                 }
                 if module == "core.io" && method == "args" && args.is_empty() {
-                    let host_ref = self
-                        .module
-                        .declare_func_in_func(self.host.coll.io_args, self.b.func);
-                    let call = self.b.ins().call(host_ref, &[]);
-                    return Ok(self.b.inst_results(call)[0]);
+                    return Ok(self.call_host(self.host.coll.io_args, &[]));
                 }
                 if module == "core.io" && method == "print" && args.len() == 1 {
                     self.emit_print(&args[0])?;
@@ -9720,11 +8993,7 @@ impl LowerCtx<'_, '_> {
                     // `jet_std_io_readline` Prelude symbol AOT emits (I9).
                     // Do not route through `io_input`: that host backs the
                     // separate `core.io.input` surface.
-                    let host_ref = self
-                        .module
-                        .declare_func_in_func(self.host.io.readline, self.b.func);
-                    let call = self.b.ins().call(host_ref, &[]);
-                    return Ok(self.b.inst_results(call)[0]);
+                    return Ok(self.call_host(self.host.io.readline, &[]));
                 }
                 if module == "core.science.measurement"
                     && method == "from"
@@ -9732,11 +9001,7 @@ impl LowerCtx<'_, '_> {
                 {
                     let value = self.lower_expr(&args[0])?;
                     let uncertainty = self.lower_expr(&args[1])?;
-                    let host = self
-                        .module
-                        .declare_func_in_func(self.host.measurement_new, self.b.func);
-                    let call = self.b.ins().call(host, &[value, uncertainty]);
-                    return Ok(self.b.inst_results(call)[0]);
+                    return Ok(self.call_host(self.host.measurement_new, &[value, uncertainty]));
                 }
                 if module == "core.io" && method == "input" && args.len() <= 1 {
                     let (has_prompt, prompt) = if args.is_empty() {
@@ -9750,11 +9015,7 @@ impl LowerCtx<'_, '_> {
                             self.lower_expr(&args[0])?,
                         )
                     };
-                    let host_ref = self
-                        .module
-                        .declare_func_in_func(self.host.core.io_input, self.b.func);
-                    let call = self.b.ins().call(host_ref, &[has_prompt, prompt]);
-                    return Ok(self.b.inst_results(call)[0]);
+                    return Ok(self.call_host(self.host.core.io_input, &[has_prompt, prompt]));
                 }
                 if module == "core.io" {
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
@@ -9966,11 +9227,7 @@ impl LowerCtx<'_, '_> {
                         .unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)));
                 }
                 if module == "core.event" && method == "scope" && args.is_empty() {
-                    let host_ref = self
-                        .module
-                        .declare_func_in_func(self.host.watcher.event_scope, self.b.func);
-                    let call = self.b.ins().call(host_ref, &[]);
-                    return Ok(self.b.inst_results(call)[0]);
+                    return Ok(self.call_host(self.host.watcher.event_scope, &[]));
                 }
                 if module == "core.net" {
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
@@ -11189,11 +10446,7 @@ impl LowerCtx<'_, '_> {
                     return Ok(self.b.inst_results(call)[0]);
                 }
                 if module == "core.env" && method == "vars" && args.is_empty() {
-                    let host_ref = self
-                        .module
-                        .declare_func_in_func(self.host.core.env_vars, self.b.func);
-                    let call = self.b.ins().call(host_ref, &[]);
-                    return Ok(self.b.inst_results(call)[0]);
+                    return Ok(self.call_host(self.host.core.env_vars, &[]));
                 }
                 if module == "core.process" && method == "exit" && args.len() == 1 {
                     let host_ref = self
@@ -11234,11 +10487,7 @@ impl LowerCtx<'_, '_> {
                     if args.len() >= 3 {
                         backend = self.lower_expr(&args[2])?;
                     }
-                    let host = self
-                        .module
-                        .declare_func_in_func(self.host.game.run, self.b.func);
-                    let call = self.b.ins().call(host, &[scene, replay, backend]);
-                    return Ok(self.b.inst_results(call)[0]);
+                    return Ok(self.call_host(self.host.game.run, &[scene, replay, backend]));
                 }
                 if module == "core.raylib" {
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
@@ -11465,11 +10714,7 @@ impl LowerCtx<'_, '_> {
                 }
                 if module == "core.crypto.random" && method == "bytes" && args.len() == 1 {
                     let count = self.lower_expr(&args[0])?;
-                    let host = self
-                        .module
-                        .declare_func_in_func(self.host.crypto.random_bytes, self.b.func);
-                    let call = self.b.ins().call(host, &[count]);
-                    return Ok(self.b.inst_results(call)[0]);
+                    return Ok(self.call_host(self.host.crypto.random_bytes, &[count]));
                 }
                 if module == "core.auth" && method == "verify_jwt" && (3..=5).contains(&args.len()) {
                     let token = self.lower_expr(&args[0])?;
@@ -11516,20 +10761,12 @@ impl LowerCtx<'_, '_> {
                     let footer = if args.len() >= 6 {
                         self.lower_expr(&args[5])?
                     } else {
-                        let empty = self
-                            .module
-                            .declare_func_in_func(self.host.coll.list_new, self.b.func);
-                        let call = self.b.ins().call(empty, &[]);
-                        self.b.inst_results(call)[0]
+                        self.call_host(self.host.coll.list_new, &[])
                     };
                     let implicit = if args.len() >= 7 {
                         self.lower_expr(&args[6])?
                     } else {
-                        let empty = self
-                            .module
-                            .declare_func_in_func(self.host.coll.list_new, self.b.func);
-                        let call = self.b.ins().call(empty, &[]);
-                        self.b.inst_results(call)[0]
+                        self.call_host(self.host.coll.list_new, &[])
                     };
                     let host = self
                         .module
@@ -12034,19 +11271,11 @@ impl LowerCtx<'_, '_> {
                     return Ok(result);
                 }
                 if module == "core.tasks" && method == "channel" && args.is_empty() {
-                    let host_ref = self
-                        .module
-                        .declare_func_in_func(self.host.conc.channel_new, self.b.func);
-                    let call = self.b.ins().call(host_ref, &[]);
-                    return Ok(self.b.inst_results(call)[0]);
+                    return Ok(self.call_host(self.host.conc.channel_new, &[]));
                 }
                 if module == "core.tasks" && method == "channel" && args.len() == 1 {
                     let cap = self.lower_expr(&args[0])?;
-                    let host_ref = self
-                        .module
-                        .declare_func_in_func(self.host.conc.channel_bounded, self.b.func);
-                    let call = self.b.ins().call(host_ref, &[cap]);
-                    return Ok(self.b.inst_results(call)[0]);
+                    return Ok(self.call_host(self.host.conc.channel_bounded, &[cap]));
                 }
                 if module == "core.tasks" && method == "after" {
                     let ms = self.lower_expr(&args[0])?;
@@ -12055,19 +11284,11 @@ impl LowerCtx<'_, '_> {
                     } else {
                         self.b.ins().iconst(types::I64, 0)
                     };
-                    let host_ref = self
-                        .module
-                        .declare_func_in_func(self.host.conc.after_value, self.b.func);
-                    let call = self.b.ins().call(host_ref, &[ms, value]);
-                    return Ok(self.b.inst_results(call)[0]);
+                    return Ok(self.call_host(self.host.conc.after_value, &[ms, value]));
                 }
                 if module == "core.tasks" && method == "interval" && args.len() == 1 {
                     let ms = self.lower_expr(&args[0])?;
-                    let host_ref = self
-                        .module
-                        .declare_func_in_func(self.host.conc.interval, self.b.func);
-                    let call = self.b.ins().call(host_ref, &[ms]);
-                    return Ok(self.b.inst_results(call)[0]);
+                    return Ok(self.call_host(self.host.conc.interval, &[ms]));
                 }
                 if module == "core.tasks" && method == "yield_now" && args.is_empty() {
                     let host_ref = self
@@ -12077,26 +11298,15 @@ impl LowerCtx<'_, '_> {
                     return Ok(self.b.ins().iconst(types::I8, 0));
                 }
                 if module == "core.tasks" && method == "current_task" && args.is_empty() {
-                    let host_ref = self
-                        .module
-                        .declare_func_in_func(self.host.conc.task_current_trace, self.b.func);
-                    let call = self.b.ins().call(host_ref, &[]);
-                    return Ok(self.b.inst_results(call)[0]);
+                    return Ok(self.call_host(self.host.conc.task_current_trace, &[]));
                 }
                 if module == "core.time" && method == "now" && args.is_empty() {
-                    let host_ref = self
-                        .module
-                        .declare_func_in_func(self.host.conc.time_now, self.b.func);
-                    let call = self.b.ins().call(host_ref, &[]);
-                    return Ok(self.b.inst_results(call)[0]);
+                    return Ok(self.call_host(self.host.conc.time_now, &[]));
                 }
                 if module == "core.time" && method == "sleep" && args.len() == 1 {
                     let millis = self.lower_expr(&args[0])?;
-                    let host_ref = self
-                        .module
-                        .declare_func_in_func(self.host.conc.sleep, self.b.func);
-                    let call = self.b.ins().call(host_ref, &[millis]);
-                    let _ = self.finish_wait_call(self.b.inst_results(call)[0]);
+                    let sleep_status = self.call_host(self.host.conc.sleep, &[millis]);
+                    let _ = self.finish_wait_call(sleep_status);
                     return Ok(self.b.ins().iconst(types::I8, 0));
                 }
                 if module == "core.text" {
@@ -12212,11 +11422,7 @@ impl LowerCtx<'_, '_> {
                     return Ok(self.b.inst_results(call)[0]);
                 }
                 if module == "core.args" && method == "spec" && args.is_empty() {
-                    let host_ref = self
-                        .module
-                        .declare_func_in_func(self.host.args.spec, self.b.func);
-                    let call = self.b.ins().call(host_ref, &[]);
-                    return Ok(self.b.inst_results(call)[0]);
+                    return Ok(self.call_host(self.host.args.spec, &[]));
                 }
                 if module == "core.text.unicode" && args.len() == 1 {
                     let host_id = match method.as_str() {
@@ -12234,9 +11440,7 @@ impl LowerCtx<'_, '_> {
                         }
                     };
                     let text = self.lower_expr(&args[0])?;
-                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host_ref, &[text]);
-                    return Ok(self.b.inst_results(call)[0]);
+                    return Ok(self.call_host(host_id, &[text]));
                 }
                 if module == "core.fmt" {
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
@@ -12651,11 +11855,7 @@ impl LowerCtx<'_, '_> {
                             } else {
                                 init
                             };
-                            let host = self
-                                .module
-                                .declare_func_in_func(self.host.reactive.signal, self.b.func);
-                            let call = self.b.ins().call(host, &[packed]);
-                            return Ok(self.b.inst_results(call)[0]);
+                            return Ok(self.call_host(self.host.reactive.signal, &[packed]));
                         }
                         _ => {
                             return Err(format!("jit core call unsupported: {module}.{method}"))
@@ -12718,11 +11918,7 @@ impl LowerCtx<'_, '_> {
                     if method == "async_result" {
                         let h = self.b.inst_results(call)[0];
                         let ok = self.b.ins().iconst(types::I8, 1);
-                        let host = self
-                            .module
-                            .declare_func_in_func(self.host.result_new_i64, self.b.func);
-                        let packed = self.b.ins().call(host, &[ok, h]);
-                        return Ok(self.b.inst_results(packed)[0]);
+                        return Ok(self.call_host(self.host.result_new_i64, &[ok, h]));
                     }
                     return Ok(self.b.inst_results(call)[0]);
                 }
@@ -12881,11 +12077,7 @@ impl LowerCtx<'_, '_> {
                 TCoreClosureKind::SpawnGroup { count, .. } => {
                     // D-VERDICT-1323-1: n identical spawn sites → list of handles.
                     let count_v = self.lower_expr(count)?;
-                    let list_new = self
-                        .module
-                        .declare_func_in_func(self.host.coll.list_new, self.b.func);
-                    let list_call = self.b.ins().call(list_new, &[]);
-                    let list = self.b.inst_results(list_call)[0];
+                    let list = self.call_host(self.host.coll.list_new, &[]);
                     let push = self
                         .module
                         .declare_func_in_func(self.host.coll.list_push, self.b.func);
@@ -13024,27 +12216,18 @@ impl LowerCtx<'_, '_> {
             }
             TExprKind::TaskGroupAll { tasks } => {
                 let list = self.lower_expr(tasks)?;
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.conc.task_all, self.b.func);
-                let call = self.b.ins().call(host_ref, &[list]);
-                Ok(self.finish_wait_call(self.b.inst_results(call)[0]))
+                let status = self.call_host(self.host.conc.task_all, &[list]);
+                Ok(self.finish_wait_call(status))
             }
             TExprKind::TaskGroupRace { tasks } => {
                 let list = self.lower_expr(tasks)?;
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.conc.task_race, self.b.func);
-                let call = self.b.ins().call(host_ref, &[list]);
-                Ok(self.finish_wait_call(self.b.inst_results(call)[0]))
+                let status = self.call_host(self.host.conc.task_race, &[list]);
+                Ok(self.finish_wait_call(status))
             }
             TExprKind::TaskGroupAny { tasks } => {
                 let list = self.lower_expr(tasks)?;
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.conc.task_any, self.b.func);
-                let call = self.b.ins().call(host_ref, &[list]);
-                Ok(self.finish_wait_call(self.b.inst_results(call)[0]))
+                let status = self.call_host(self.host.conc.task_any, &[list]);
+                Ok(self.finish_wait_call(status))
             }
             TExprKind::SelectStart => Ok(self.b.ins().iconst(types::I64, 0)),
             TExprKind::SelectRecv { builder, channel } => {
@@ -13076,11 +12259,8 @@ impl LowerCtx<'_, '_> {
                 }
                 let recv_list = self.lower_i64_value_list(&recv_vals)?;
                 let after_list = self.lower_i64_value_list(&after_flat)?;
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.conc.select_wait, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_list, after_list]);
-                Ok(self.finish_wait_call(self.b.inst_results(call)[0]))
+                let status = self.call_host(self.host.conc.select_wait, &[recv_list, after_list]);
+                Ok(self.finish_wait_call(status))
             }
             TExprKind::OrFallback { value, fallback } => {
                 if matches!(value.ty, Type::Option(_)) {
@@ -13091,11 +12271,7 @@ impl LowerCtx<'_, '_> {
                     self.b.append_block_param(merge, types::I64);
                     let is_result_option = Self::uses_result_option_abi(value);
                     let present = if is_result_option {
-                        let is_ok = self
-                            .module
-                            .declare_func_in_func(self.host.result_is_ok, self.b.func);
-                        let call = self.b.ins().call(is_ok, &[status]);
-                        self.b.inst_results(call)[0]
+                        self.call_host(self.host.result_is_ok, &[status])
                     } else {
                         // Packed Option ABI: 0 = None, nonzero (incl. negative) = Some(bits-1).
                         let zero = self.b.ins().iconst(types::I64, 0);
@@ -13107,11 +12283,7 @@ impl LowerCtx<'_, '_> {
                     let val = if is_result_option
                         || matches!(&value.kind, TExprKind::OverflowOpt { .. })
                     {
-                        let host = self
-                            .module
-                            .declare_func_in_func(self.host.result_get_i64, self.b.func);
-                        let call = self.b.ins().call(host, &[status]);
-                        self.b.inst_results(call)[0]
+                        self.call_host(self.host.result_get_i64, &[status])
                     } else if let Type::Option(inner) = &value.ty {
                         self.unpack_option_payload(status, inner)?
                     } else if let Some(Type::Option(inner)) =
@@ -13234,11 +12406,7 @@ impl LowerCtx<'_, '_> {
                             format!("jit result ?? type unsupported: ok={ok_ty:?} expr={:?}", expr.ty)
                         })?
                 };
-                let status_ref = self
-                    .module
-                    .declare_func_in_func(self.host.result_is_ok, self.b.func);
-                let status_call = self.b.ins().call(status_ref, &[handle]);
-                let is_ok = self.b.inst_results(status_call)[0];
+                let is_ok = self.call_host(self.host.result_is_ok, &[handle]);
                 let ok_block = self.b.create_block();
                 let fail_block = self.b.create_block();
                 let merge = self.b.create_block();
@@ -13306,11 +12474,7 @@ impl LowerCtx<'_, '_> {
                     let map = self.lower_expr(base)?;
                     let key = self.lower_expr(index)?;
                     let line_const = self.b.ins().iconst(types::I32, *line as i64);
-                    let host_ref = self
-                        .module
-                        .declare_func_in_func(self.host.coll.map_get, self.b.func);
-                    let call = self.b.ins().call(host_ref, &[map, key, line_const]);
-                    let raw = self.b.inst_results(call)[0];
+                    let raw = self.call_host(self.host.coll.map_get, &[map, key, line_const]);
                     self.emit_trap_check()?;
                     let val = match self.meta.clif_ty(&expr.ty) {
                         Some(types::I32) => self.b.ins().ireduce(types::I32, raw),
@@ -13337,9 +12501,7 @@ impl LowerCtx<'_, '_> {
                     Type::Float => self.host.coll.list_get_f64,
                     _other => self.host.coll.list_get,
                 };
-                let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                let call = self.b.ins().call(host_ref, &[list, idx, line_const]);
-                let result = self.b.inst_results(call)[0];
+                let result = self.call_host(host_id, &[list, idx, line_const]);
                 self.emit_trap_check()?;
                 Ok(result)
             }
@@ -13360,11 +12522,7 @@ impl LowerCtx<'_, '_> {
                     (s, self.b.ins().iadd(e, one))
                 };
                 let line_const = self.b.ins().iconst(types::I32, *line as i64);
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.coll.list_slice, self.b.func);
-                let call = self.b.ins().call(host_ref, &[list, s, end_excl, line_const]);
-                let result = self.b.inst_results(call)[0];
+                let result = self.call_host(self.host.coll.list_slice, &[list, s, end_excl, line_const]);
                 self.emit_trap_check()?;
                 Ok(result)
             }
@@ -13398,11 +12556,7 @@ impl LowerCtx<'_, '_> {
                     Type::Apply { name, args } if name == "ViewMut" && args.len() == 1 => {
                         let (list, start, _) = self.unpack_view_mut(handle)?;
                         let line = self.b.ins().iconst(types::I32, 1);
-                        let get = self
-                            .module
-                            .declare_func_in_func(self.host.coll.list_get, self.b.func);
-                        let call = self.b.ins().call(get, &[list, start, line]);
-                        handle = self.b.inst_results(call)[0];
+                        handle = self.call_host(self.host.coll.list_get, &[list, start, line]);
                         self.emit_trap_check()?;
                         args[0].clone()
                     }
@@ -13414,11 +12568,7 @@ impl LowerCtx<'_, '_> {
                 if matches!(&record_ty, Type::Named(name) if name == "ProcessChild")
                     && field == "terminal"
                 {
-                    let host = self
-                        .module
-                        .declare_func_in_func(self.host.process.child_terminal, self.b.func);
-                    let call = self.b.ins().call(host, &[handle]);
-                    return Ok(self.b.inst_results(call)[0]);
+                    return Ok(self.call_host(self.host.process.child_terminal, &[handle]));
                 }
                 let type_name = record_type_key(&record_ty)
                     .or_else(|| self.method_struct.clone());
@@ -13437,11 +12587,7 @@ impl LowerCtx<'_, '_> {
                     if field == "input" {
                         return Ok(handle);
                     }
-                    let host = self
-                        .module
-                        .declare_func_in_func(self.host.game.frame_index, self.b.func);
-                    let call = self.b.ins().call(host, &[handle]);
-                    return Ok(self.b.inst_results(call)[0]);
+                    return Ok(self.call_host(self.host.game.frame_index, &[handle]));
                 }
                 // GameScene.assets / .input — identity projection onto the scene handle.
                 if matches!(
@@ -13464,22 +12610,14 @@ impl LowerCtx<'_, '_> {
                 ) {
                     return match field.as_str() {
                         "label" => {
-                            let host = self
-                                .module
-                                .declare_func_in_func(self.host.ui.node_label, self.b.func);
-                            let call = self.b.ins().call(host, &[handle]);
-                            Ok(self.b.inst_results(call)[0])
+                            Ok(self.call_host(self.host.ui.node_label, &[handle]))
                         }
                         "width" | "height" => {
                             let which =
                                 self.b
                                     .ins()
                                     .iconst(types::I64, if field == "width" { 0 } else { 1 });
-                            let host = self
-                                .module
-                                .declare_func_in_func(self.host.ui.node_dim, self.b.func);
-                            let call = self.b.ins().call(host, &[handle, which]);
-                            Ok(self.b.inst_results(call)[0])
+                            Ok(self.call_host(self.host.ui.node_dim, &[handle, which]))
                         }
                         other => Err(format!("jit field `{other}` on `UiNode`")),
                     };
@@ -13623,11 +12761,7 @@ impl LowerCtx<'_, '_> {
                                 || path.ends_with(".VecDeque")
                     );
                 if is_deque_new {
-                    let host_ref = self
-                        .module
-                        .declare_func_in_func(self.host.coll.deque_new, self.b.func);
-                    let call = self.b.ins().call(host_ref, &[]);
-                    return Ok(self.b.inst_results(call)[0]);
+                    return Ok(self.call_host(self.host.coll.deque_new, &[]));
                 }
                 // #1478: `Set.new()` → empty HashSet handle.
                 let is_set_new = method.name == "new"
@@ -13664,11 +12798,7 @@ impl LowerCtx<'_, '_> {
                     )
                     && matches!(&expr.ty, Type::Apply { name, .. } if name == "Bag");
                 if is_bag_new {
-                    let host_ref = self
-                        .module
-                        .declare_func_in_func(self.host.coll.bag_new, self.b.func);
-                    let call = self.b.ins().call(host_ref, &[]);
-                    return Ok(self.b.inst_results(call)[0]);
+                    return Ok(self.call_host(self.host.coll.bag_new, &[]));
                 }
                 let prelude_path = match owner {
                     TStaticOwner::Prelude { path, .. } => Some(path.as_str()),
@@ -13687,11 +12817,7 @@ impl LowerCtx<'_, '_> {
                     let value = self.lower_call_arg(&args[0])?;
                     let raw = self.cell_pack_value(value, &inner)?;
                     let schema = self.cell_schema(&inner)?;
-                    let host = self
-                        .module
-                        .declare_func_in_func(self.host.cell.new, self.b.func);
-                    let call = self.b.ins().call(host, &[raw, schema]);
-                    let cell = self.b.inst_results(call)[0];
+                    let cell = self.call_host(self.host.cell.new, &[raw, schema]);
                     self.emit_trap_check()?;
                     return Ok(cell);
                 }
@@ -13758,11 +12884,7 @@ impl LowerCtx<'_, '_> {
                     && prelude_path.is_some_and(|path| path.ends_with("JetCache"))
                 {
                     let capacity = self.lower_call_arg(&args[0])?;
-                    let host_ref = self
-                        .module
-                        .declare_func_in_func(self.host.coll.lru_new, self.b.func);
-                    let call = self.b.ins().call(host_ref, &[capacity]);
-                    return Ok(self.b.inst_results(call)[0]);
+                    return Ok(self.call_host(self.host.coll.lru_new, &[capacity]));
                 }
                 let is_pool_new = method.name == "new"
                     && args.is_empty()
@@ -13772,11 +12894,7 @@ impl LowerCtx<'_, '_> {
                             if path.ends_with("JetPool") || path.ends_with("::JetPool")
                     );
                 if is_pool_new {
-                    let host_ref = self
-                        .module
-                        .declare_func_in_func(self.host.memory.pool_new, self.b.func);
-                    let call = self.b.ins().call(host_ref, &[]);
-                    return Ok(self.b.inst_results(call)[0]);
+                    return Ok(self.call_host(self.host.memory.pool_new, &[]));
                 }
                 let is_shared_new = method.name == "new"
                     && args.len() == 1
@@ -13787,11 +12905,7 @@ impl LowerCtx<'_, '_> {
                     );
                 if is_shared_new {
                     let value = self.lower_call_arg(&args[0])?;
-                    let host_ref = self
-                        .module
-                        .declare_func_in_func(self.host.memory.shared_new, self.b.func);
-                    let call = self.b.ins().call(host_ref, &[value]);
-                    return Ok(self.b.inst_results(call)[0]);
+                    return Ok(self.call_host(self.host.memory.shared_new, &[value]));
                 }
                 // D-ENCSTREAM-SURFACE1: `EncodingLimits.safe()` — fixed defaults, no host.
                 let is_encoding_limits_safe = method.name == "safe"
@@ -13811,11 +12925,7 @@ impl LowerCtx<'_, '_> {
                 if is_encoding_limits_safe {
                     // Field order matches jet_std::EncodingLimits / sema core_types.
                     let n = self.b.ins().iconst(types::I64, 6);
-                    let new_ref = self
-                        .module
-                        .declare_func_in_func(self.host.struct_new, self.b.func);
-                    let new_call = self.b.ins().call(new_ref, &[n]);
-                    let handle = self.b.inst_results(new_call)[0];
+                    let handle = self.call_host(self.host.struct_new, &[n]);
                     let set_i = self
                         .module
                         .declare_func_in_func(self.host.struct_set_i64, self.b.func);
@@ -13852,11 +12962,7 @@ impl LowerCtx<'_, '_> {
                         .unwrap_or(true);
                 if is_email_limits_safe {
                     let n = self.b.ins().iconst(types::I64, 6);
-                    let new_ref = self
-                        .module
-                        .declare_func_in_func(self.host.struct_new, self.b.func);
-                    let new_call = self.b.ins().call(new_ref, &[n]);
-                    let handle = self.b.inst_results(new_call)[0];
+                    let handle = self.call_host(self.host.struct_new, &[n]);
                     let set_i = self
                         .module
                         .declare_func_in_func(self.host.struct_set_i64, self.b.func);
@@ -13892,15 +12998,10 @@ impl LowerCtx<'_, '_> {
                         .unwrap_or(true);
                 if is_data_limits_safe {
                     let n = self.b.ins().iconst(types::I64, 5);
-                    let new_ref = self
-                        .module
-                        .declare_func_in_func(self.host.struct_new, self.b.func);
-                    let new_call = self.b.ins().call(new_ref, &[n]);
-                    let handle = self.b.inst_results(new_call)[0];
+                    let handle = self.call_host(self.host.struct_new, &[n]);
                     // encoding: EncodingLimits.safe() as nested struct handle
                     let enc_n = self.b.ins().iconst(types::I64, 6);
-                    let enc_new = self.b.ins().call(new_ref, &[enc_n]);
-                    let enc = self.b.inst_results(enc_new)[0];
+                    let enc = self.call_host(self.host.struct_new, &[enc_n]);
                     let set_i = self
                         .module
                         .declare_func_in_func(self.host.struct_set_i64, self.b.func);
@@ -14029,11 +13130,7 @@ impl LowerCtx<'_, '_> {
                         .ok_or_else(|| format!("jit enum lit `{enum_type}::{variant}`"))?;
                     // Heap carrier: [disc, field0, field1, …] in source field order.
                     let n = self.b.ins().iconst(types::I64, (fields.len() + 1) as i64);
-                    let new_ref = self
-                        .module
-                        .declare_func_in_func(self.host.struct_new, self.b.func);
-                    let call = self.b.ins().call(new_ref, &[n]);
-                    let handle = self.b.inst_results(call)[0];
+                    let handle = self.call_host(self.host.struct_new, &[n]);
                     let set_i = self
                         .module
                         .declare_func_in_func(self.host.struct_set_i64, self.b.func);
@@ -14104,11 +13201,7 @@ impl LowerCtx<'_, '_> {
                 let g = self.lower_expr(guard)?;
                 // Two aliases of the same lease — match eval's split shape lightly.
                 let n = self.b.ins().iconst(types::I64, 2);
-                let new_ref = self
-                    .module
-                    .declare_func_in_func(self.host.struct_new, self.b.func);
-                let call = self.b.ins().call(new_ref, &[n]);
-                let tuple = self.b.inst_results(call)[0];
+                let tuple = self.call_host(self.host.struct_new, &[n]);
                 let set = self
                     .module
                     .declare_func_in_func(self.host.struct_set_i64, self.b.func);
@@ -14158,11 +13251,7 @@ impl LowerCtx<'_, '_> {
                 // Result<(), String> Ok — empty ok payload.
                 let tag = self.b.ins().iconst(types::I8, 1);
                 let zero = self.b.ins().iconst(types::I64, 0);
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.result_new_i64, self.b.func);
-                let call = self.b.ins().call(host, &[tag, zero]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.result_new_i64, &[tag, zero]))
             }
             TExprKind::ConditionNotify { condition, all } => {
                 let c = self.lower_expr(condition)?;
@@ -14191,11 +13280,7 @@ impl LowerCtx<'_, '_> {
             }
             TExprKind::DataEntriesToMap(local) => {
                 let payload = self.load_local(local)?;
-                let convert = self
-                    .module
-                    .declare_func_in_func(self.host.encoding.object_entries_to_map, self.b.func);
-                let call = self.b.ins().call(convert, &[payload]);
-                let map = self.b.inst_results(call)[0];
+                let map = self.call_host(self.host.encoding.object_entries_to_map, &[payload]);
                 self.emit_trap_check()?;
                 Ok(map)
             }
@@ -14211,11 +13296,7 @@ impl LowerCtx<'_, '_> {
                 };
                 let pool = self.lower_expr(pool)?;
                 let id = self.lower_expr(id)?;
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.memory.pool_get, self.b.func);
-                let call = self.b.ins().call(host_ref, &[pool, id]);
-                let value = self.b.inst_results(call)[0];
+                let value = self.call_host(self.host.memory.pool_get, &[pool, id]);
                 self.emit_trap_check()?;
                 if let Some(field) = field {
                     let elem_ty =
@@ -14301,11 +13382,7 @@ impl LowerCtx<'_, '_> {
                     ),
                     Some(p) => (self.b.ins().iconst(types::I8, 1), self.lower_expr(p)?),
                 };
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.core.io_input, self.b.func);
-                let call = self.b.ins().call(host_ref, &[has_prompt, prompt_v]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.core.io_input, &[has_prompt, prompt_v]))
             }
             TExprKind::RequireStop {
                 kind,
@@ -14355,11 +13432,7 @@ impl LowerCtx<'_, '_> {
                         self.b.ins().iconst(types::I64, h)
                     }
                 };
-                let begin = self
-                    .module
-                    .declare_func_in_func(self.host.str_begin, self.b.func);
-                let call = self.b.ins().call(begin, &[]);
-                let loc_buf = self.b.inst_results(call)[0];
+                let loc_buf = self.call_host(self.host.str_begin, &[]);
                 let mut first = true;
                 for (name, place) in &loc.locals {
                     let key = Self::local_key(place);
@@ -14456,9 +13529,7 @@ impl LowerCtx<'_, '_> {
                     BinOp::Eq => self.host.layout.eq,
                     _ => return Err(format!("jit layout compare unsupported op {op:?}")),
                 };
-                let host = self.module.declare_func_in_func(host_id, self.b.func);
-                let call = self.b.ins().call(host, &[l, r]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(host_id, &[l, r]))
             }
             TExprKind::LayoutLit { inner } => {
                 let v = self.lower_expr(inner)?;
@@ -14469,11 +13540,7 @@ impl LowerCtx<'_, '_> {
                         return Err(format!("jit layout lit unsupported type {other:?}"))
                     }
                 };
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.layout.from_const, self.b.func);
-                let call = self.b.ins().call(host, &[f]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.layout.from_const, &[f]))
             }
             TExprKind::PtrFromAddr { addr, .. } => self.lower_expr(addr),
             TExprKind::RawOf(inner) => {
@@ -14546,11 +13613,7 @@ impl LowerCtx<'_, '_> {
                 Ok(self.b.ins().load(clif, MemFlags::trusted(), pointer, 0))
             }
             TExprKind::AllocNew { .. } => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.memory.allocator_new, self.b.func);
-                let call = self.b.ins().call(host_ref, &[]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.memory.allocator_new, &[]))
             }
             TExprKind::JSONLit { variant, arg } => {
                 let disc = self
@@ -14588,11 +13651,7 @@ impl LowerCtx<'_, '_> {
                     None => {
                         let disc_v = self.b.ins().iconst(types::I64, disc);
                         let zero = self.b.ins().iconst(types::I64, 0);
-                        let host_ref = self
-                            .module
-                            .declare_func_in_func(self.host.db.dbvalue_pack, self.b.func);
-                        let call = self.b.ins().call(host_ref, &[disc_v, zero]);
-                        Ok(self.b.inst_results(call)[0])
+                        Ok(self.call_host(self.host.db.dbvalue_pack, &[disc_v, zero]))
                     }
                     Some(boxed) => {
                         let (expr, _) = boxed.as_ref();
@@ -14614,11 +13673,7 @@ impl LowerCtx<'_, '_> {
                             }
                         };
                         let disc_v = self.b.ins().iconst(types::I64, disc);
-                        let host_ref = self
-                            .module
-                            .declare_func_in_func(self.host.db.dbvalue_pack, self.b.func);
-                        let call = self.b.ins().call(host_ref, &[disc_v, payload_bits]);
-                        Ok(self.b.inst_results(call)[0])
+                        Ok(self.call_host(self.host.db.dbvalue_pack, &[disc_v, payload_bits]))
                     }
                 }
             }
@@ -14644,9 +13699,7 @@ impl LowerCtx<'_, '_> {
                     .ok_or_else(|| format!("jit missing method `{key}`"))?;
                 let recv = self.lower_expr(base)?;
                 let index = self.lower_expr(index)?;
-                let func_ref = self.module.declare_func_in_func(func_id, self.b.func);
-                let call = self.b.ins().call(func_ref, &[recv, index]);
-                let packed = self.b.inst_results(call)[0];
+                let packed = self.call_host(func_id, &[recv, index]);
                 let zero = self.b.ins().iconst(types::I64, 0);
                 let missing = self.b.ins().icmp(IntCC::Equal, packed, zero);
                 let ok = self.b.create_block();
@@ -14804,11 +13857,7 @@ impl LowerCtx<'_, '_> {
                         let call = self.b.ins().call(host, &[fn_addr, cap0]);
                         Ok(self.b.inst_results(call)[0])
                     } else {
-                        let empty = self
-                            .module
-                            .declare_func_in_func(self.host.coll.list_new, self.b.func);
-                        let call = self.b.ins().call(empty, &[]);
-                        let env = self.b.inst_results(call)[0];
+                        let env = self.call_host(self.host.coll.list_new, &[]);
                         let push = self
                             .module
                             .declare_func_in_func(self.host.coll.list_push, self.b.func);
@@ -14878,9 +13927,7 @@ impl LowerCtx<'_, '_> {
                 } else {
                     self.host.distinct_range
                 };
-                let host = self.module.declare_func_in_func(host, self.b.func);
-                let call = self.b.ins().call(host, &[converted, lo, hi]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(host, &[converted, lo, hi]))
             }
             TExprKind::UnitConvert {
                 arg,
@@ -15009,11 +14056,7 @@ impl LowerCtx<'_, '_> {
             TExprKind::ExternCall { wrapper, args } => {
                 let wid = self.runtime.heap.alloc_string(wrapper.clone());
                 let wrapper_v = self.b.ins().iconst(types::I64, wid);
-                let list_new = self
-                    .module
-                    .declare_func_in_func(self.host.coll.list_new, self.b.func);
-                let call = self.b.ins().call(list_new, &[]);
-                let list = self.b.inst_results(call)[0];
+                let list = self.call_host(self.host.coll.list_new, &[]);
                 let push = self
                     .module
                     .declare_func_in_func(self.host.coll.list_push, self.b.func);
@@ -15022,11 +14065,7 @@ impl LowerCtx<'_, '_> {
                     if arg.clone {
                         // Strings: clone for Read non-scalars, matching AOT.
                         if matches!(arg.value.ty, Type::String) {
-                            let host_ref = self
-                                .module
-                                .declare_func_in_func(self.host.str_clone, self.b.func);
-                            let call = self.b.ins().call(host_ref, &[v]);
-                            v = self.b.inst_results(call)[0];
+                            v = self.call_host(self.host.str_clone, &[v]);
                         }
                     }
                     let bits = match self.meta.clif_ty(&arg.value.ty) {
@@ -15039,11 +14078,7 @@ impl LowerCtx<'_, '_> {
                     };
                     self.b.ins().call(push, &[list, bits]);
                 }
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.ffi.call, self.b.func);
-                let call = self.b.ins().call(host, &[wrapper_v, list]);
-                let result = self.b.inst_results(call)[0];
+                let result = self.call_host(self.host.ffi.call, &[wrapper_v, list]);
                 self.emit_trap_check()?;
                 match &expr.ty {
                     Type::Float | Type::Float32 => Ok(self.b.ins().bitcast(
@@ -15208,11 +14243,7 @@ impl LowerCtx<'_, '_> {
             }
         };
         let handle = self.lower_expr(scrutinee)?;
-        let status_ref = self
-            .module
-            .declare_func_in_func(self.host.result_is_ok, self.b.func);
-        let status_call = self.b.ins().call(status_ref, &[handle]);
-        let is_ok = self.b.inst_results(status_call)[0];
+        let is_ok = self.call_host(self.host.result_is_ok, &[handle]);
         let zero_b = self.b.ins().iconst(types::I8, 0);
         let ok_cond = self.b.ins().icmp(IntCC::NotEqual, is_ok, zero_b);
 
@@ -15304,11 +14335,7 @@ impl LowerCtx<'_, '_> {
             }
             let list = self.lower_expr(recv)?;
             let idx = self.lower_expr(&args[0])?;
-            let host_ref = self
-                .module
-                .declare_func_in_func(self.host.coll.list_get_opt, self.b.func);
-            let call = self.b.ins().call(host_ref, &[list, idx]);
-            return Ok(self.b.inst_results(call)[0]);
+            return Ok(self.call_host(self.host.coll.list_get_opt, &[list, idx]));
         }
         // Map.get(k) ?? … — same 0 / value+1 Option encoding as list_get_opt.
         if let TExprKind::BuiltinMethod {
@@ -15325,11 +14352,7 @@ impl LowerCtx<'_, '_> {
             }
             let map = self.lower_expr(recv)?;
             let key = self.lower_expr(&args[0])?;
-            let host_ref = self
-                .module
-                .declare_func_in_func(self.host.coll.map_get_opt, self.b.func);
-            let call = self.b.ins().call(host_ref, &[map, key]);
-            return Ok(self.b.inst_results(call)[0]);
+            return Ok(self.call_host(self.host.coll.map_get_opt, &[map, key]));
         }
         // Already-carried Option ABI; IntN uses the result arena.
         if matches!(&value.ty, Type::Option(_)) {
@@ -15433,41 +14456,21 @@ impl LowerCtx<'_, '_> {
         };
         match op {
             TBuiltinOp::LenString => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.str_len, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.str_len, &[recv_val]))
             }
             TBuiltinOp::Trim => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.str_trim, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.str_trim, &[recv_val]))
             }
             TBuiltinOp::ToUpper => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.str_to_upper, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.str_to_upper, &[recv_val]))
             }
             TBuiltinOp::ToLower => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.str_to_lower, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.str_to_lower, &[recv_val]))
             }
             TBuiltinOp::Replace => {
                 let from = self.lower_expr(&args[0])?;
                 let to = self.lower_expr(&args[1])?;
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.str_replace, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val, from, to]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.str_replace, &[recv_val, from, to]))
             }
             TBuiltinOp::Push => {
                 let v = self.lower_expr(&args[0])?;
@@ -15498,11 +14501,7 @@ impl LowerCtx<'_, '_> {
                 // CoreCall String receivers often lower `.len()` as LenList because
                 // `tir_recv_jet_ty` can't see through CoreCall — treat as char len.
                 if matches!(&recv.ty, Type::String) {
-                    let host_ref = self
-                        .module
-                        .declare_func_in_func(self.host.str_len, self.b.func);
-                    let call = self.b.ins().call(host_ref, &[recv_val]);
-                    return Ok(self.b.inst_results(call)[0]);
+                    return Ok(self.call_host(self.host.str_len, &[recv_val]));
                 }
                 if Self::is_view_mut_ty(&recv.ty) {
                     let (_, start, end) = self.unpack_view_mut(recv_val)?;
@@ -15523,9 +14522,7 @@ impl LowerCtx<'_, '_> {
                 } else {
                     self.host.coll.list_len
                 };
-                let host_ref = self.module.declare_func_in_func(host, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(host, &[recv_val]))
             }
             TBuiltinOp::GetList => {
                 if matches!(
@@ -15536,19 +14533,11 @@ impl LowerCtx<'_, '_> {
                     return Err("jit List<IntN>.get needs typed Option lowering".to_string());
                 }
                 let idx = self.lower_expr(&args[0])?;
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.coll.list_get_opt, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val, idx]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.list_get_opt, &[recv_val, idx]))
             }
             TBuiltinOp::JoinSep => {
                 let sep = self.lower_expr(&args[0])?;
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.coll.list_join_str, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val, sep]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.list_join_str, &[recv_val, sep]))
             }
             // Remaining TBuiltinOp variants have no JIT lowering: each is named
             // explicitly (no catch-all) so a future TIR/mod.rs variant fails this
@@ -15568,19 +14557,13 @@ impl LowerCtx<'_, '_> {
                 } else {
                     self.host.coll.list_len
                 };
-                let host_ref = self.module.declare_func_in_func(host, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                let len = self.b.inst_results(call)[0];
+                let len = self.call_host(host, &[recv_val]);
                 let zero = self.b.ins().iconst(types::I64, 0);
                 Ok(self.bool_from_icmp(IntCC::Equal, len, zero))
             }
             TBuiltinOp::Pop => {
                 if matches!(&recv.ty, Type::Apply { name, .. } if name == "PriorityQueue") {
-                    let host = self
-                        .module
-                        .declare_func_in_func(self.host.coll.priority_queue_pop, self.b.func);
-                    let call = self.b.ins().call(host, &[recv_val]);
-                    Ok(self.b.inst_results(call)[0])
+                    Ok(self.call_host(self.host.coll.priority_queue_pop, &[recv_val]))
                 } else if jit_list_native_type(&recv.ty)
                     || matches!(
                         &recv.ty,
@@ -15589,11 +14572,7 @@ impl LowerCtx<'_, '_> {
                     )
                     || matches!(&recv.ty, Type::List(elem) if jit_value_type(elem) || matches!(elem.as_ref(), Type::Apply { name, .. } if name == "Task"))
                 {
-                    let host = self
-                        .module
-                        .declare_func_in_func(self.host.coll.list_pop, self.b.func);
-                    let call = self.b.ins().call(host, &[recv_val]);
-                    Ok(self.b.inst_results(call)[0])
+                    Ok(self.call_host(self.host.coll.list_pop, &[recv_val]))
                 } else {
                     Err(format!("jit builtin method unsupported: Pop on {:?}", recv.ty))
                 }
@@ -15612,11 +14591,7 @@ impl LowerCtx<'_, '_> {
                     ),
                     _ => val,
                 };
-                let get_ref = self
-                    .module
-                    .declare_func_in_func(self.host.coll.map_get_opt, self.b.func);
-                let prev_call = self.b.ins().call(get_ref, &[recv_val, key]);
-                let prev = self.b.inst_results(prev_call)[0];
+                let prev = self.call_host(self.host.coll.map_get_opt, &[recv_val, key]);
                 let insert_ref = self
                     .module
                     .declare_func_in_func(self.host.coll.map_insert, self.b.func);
@@ -15637,17 +14612,9 @@ impl LowerCtx<'_, '_> {
                     ),
                     _ => val,
                 };
-                let get_ref = self
-                    .module
-                    .declare_func_in_func(self.host.coll.map_get_opt, self.b.func);
-                let prev_call = self.b.ins().call(get_ref, &[recv_val, key]);
-                let prev = self.b.inst_results(prev_call)[0];
+                let prev = self.call_host(self.host.coll.map_get_opt, &[recv_val, key]);
                 // map_get_opt → result-arena Option; never compare handle to 0.
-                let is_ok = self
-                    .module
-                    .declare_func_in_func(self.host.result_is_ok, self.b.func);
-                let occ_call = self.b.ins().call(is_ok, &[prev]);
-                let occupied = self.b.inst_results(occ_call)[0];
+                let occupied = self.call_host(self.host.result_is_ok, &[prev]);
                 let vac_block = self.b.create_block();
                 let occ_block = self.b.create_block();
                 let merge = self.b.create_block();
@@ -15673,11 +14640,7 @@ impl LowerCtx<'_, '_> {
             }
             TBuiltinOp::MapMerge => {
                 let other = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.coll.map_merge, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, other]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.map_merge, &[recv_val, other]))
             }
             TBuiltinOp::MapMergeWith => {
                 // D-MAP-MERGE1=E: clone left, then for each right entry either insert
@@ -15699,11 +14662,7 @@ impl LowerCtx<'_, '_> {
                 let right_place = TIR::local_place(&lam.source_params[2]);
 
                 let other = self.lower_expr(&args[0])?;
-                let clone_ref = self
-                    .module
-                    .declare_func_in_func(self.host.coll.map_clone, self.b.func);
-                let out_call = self.b.ins().call(clone_ref, &[recv_val]);
-                let out = self.b.inst_results(out_call)[0];
+                let out = self.call_host(self.host.coll.map_clone, &[recv_val]);
                 let out_var = self.fresh_var(types::I64);
                 self.b.def_var(out_var, out);
                 let right_var = self.fresh_var(types::I64);
@@ -15721,11 +14680,7 @@ impl LowerCtx<'_, '_> {
                 self.b.switch_to_block(header);
                 let idx = self.b.use_var(idx_var);
                 let right = self.b.use_var(right_var);
-                let len_ref = self
-                    .module
-                    .declare_func_in_func(self.host.coll.map_len, self.b.func);
-                let len_call = self.b.ins().call(len_ref, &[right]);
-                let len = self.b.inst_results(len_call)[0];
+                let len = self.call_host(self.host.coll.map_len, &[right]);
                 let done = self
                     .b
                     .ins()
@@ -15745,17 +14700,9 @@ impl LowerCtx<'_, '_> {
                 let rval_call = self.b.ins().call(val_at, &[right, idx]);
                 let right_v = self.b.inst_results(rval_call)[0];
                 let out_now = self.b.use_var(out_var);
-                let get_opt = self
-                    .module
-                    .declare_func_in_func(self.host.coll.map_get_opt, self.b.func);
-                let prev_call = self.b.ins().call(get_opt, &[out_now, key]);
-                let prev = self.b.inst_results(prev_call)[0];
+                let prev = self.call_host(self.host.coll.map_get_opt, &[out_now, key]);
                 // map_get_opt returns a result-arena Option handle (never 0/value+1).
-                let is_ok = self
-                    .module
-                    .declare_func_in_func(self.host.result_is_ok, self.b.func);
-                let has_call = self.b.ins().call(is_ok, &[prev]);
-                let has = self.b.inst_results(has_call)[0];
+                let has = self.call_host(self.host.result_is_ok, &[prev]);
                 let conflict_block = self.b.create_block();
                 let fresh_block = self.b.create_block();
                 let after = self.b.create_block();
@@ -15765,11 +14712,7 @@ impl LowerCtx<'_, '_> {
 
                 self.b.switch_to_block(conflict_block);
                 self.b.seal_block(conflict_block);
-                let get_payload = self
-                    .module
-                    .declare_func_in_func(self.host.result_get_i64, self.b.func);
-                let old_call = self.b.ins().call(get_payload, &[prev]);
-                let old_v = self.b.inst_results(old_call)[0];
+                let old_v = self.call_host(self.host.result_get_i64, &[prev]);
                 let resolved = self.with_bound_local(&key_place, (**key_ty).clone(), key, |this| {
                     this.with_bound_local(&left_place, (**val_ty).clone(), old_v, |mid| {
                         mid.with_bound_local(
@@ -15838,11 +14781,7 @@ impl LowerCtx<'_, '_> {
                     return Err("jit Map<_, IntN>.get needs typed Option lowering".to_string());
                 }
                 let key = self.lower_expr(&args[0])?;
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.coll.map_get_opt, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val, key]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.map_get_opt, &[recv_val, key]))
             }
             TBuiltinOp::First | TBuiltinOp::Last => {
                 if matches!(&recv.ty, Type::Apply { name, .. } if name == "SortedSet") {
@@ -15851,9 +14790,7 @@ impl LowerCtx<'_, '_> {
                     } else {
                         self.host.coll.sorted_set_last
                     };
-                    let host = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host, &[recv_val]);
-                    Ok(self.b.inst_results(call)[0])
+                    Ok(self.call_host(host_id, &[recv_val]))
                 } else if matches!(
                     &recv.ty,
                     Type::List(_) | Type::FixedList { .. }
@@ -15863,19 +14800,11 @@ impl LowerCtx<'_, '_> {
                     let idx = if matches!(op, TBuiltinOp::First) {
                         self.b.ins().iconst(types::I64, 0)
                     } else {
-                        let len_host = self
-                            .module
-                            .declare_func_in_func(self.host.coll.list_len, self.b.func);
-                        let call = self.b.ins().call(len_host, &[recv_val]);
-                        let len = self.b.inst_results(call)[0];
+                        let len = self.call_host(self.host.coll.list_len, &[recv_val]);
                         let one = self.b.ins().iconst(types::I64, 1);
                         self.b.ins().isub(len, one)
                     };
-                    let host = self
-                        .module
-                        .declare_func_in_func(self.host.coll.list_get_opt, self.b.func);
-                    let call = self.b.ins().call(host, &[recv_val, idx]);
-                    Ok(self.b.inst_results(call)[0])
+                    Ok(self.call_host(self.host.coll.list_get_opt, &[recv_val, idx]))
                 } else {
                     Err("jit builtin method unsupported".to_string())
                 }
@@ -15884,27 +14813,15 @@ impl LowerCtx<'_, '_> {
                 // Set.has(x) / SortedSet.has — Int/String elems.
                 if matches!(&recv.ty, Type::Apply { name, .. } if name == "Set") {
                     let needle = self.lower_expr(&args[0])?;
-                    let host_ref = self
-                        .module
-                        .declare_func_in_func(self.host.coll.set_has, self.b.func);
-                    let call = self.b.ins().call(host_ref, &[recv_val, needle]);
-                    return Ok(self.b.inst_results(call)[0]);
+                    return Ok(self.call_host(self.host.coll.set_has, &[recv_val, needle]));
                 }
                 if matches!(&recv.ty, Type::Apply { name, .. } if name == "SortedSet") {
                     let needle = self.lower_expr(&args[0])?;
-                    let host_ref = self
-                        .module
-                        .declare_func_in_func(self.host.coll.sorted_set_has, self.b.func);
-                    let call = self.b.ins().call(host_ref, &[recv_val, needle]);
-                    return Ok(self.b.inst_results(call)[0]);
+                    return Ok(self.call_host(self.host.coll.sorted_set_has, &[recv_val, needle]));
                 }
                 if matches!(&recv.ty, Type::List(inner) if **inner == Type::String) {
                     let needle = self.lower_expr(&args[0])?;
-                    let host_ref = self
-                        .module
-                        .declare_func_in_func(self.host.coll.list_contains_str, self.b.func);
-                    let call = self.b.ins().call(host_ref, &[recv_val, needle]);
-                    return Ok(self.b.inst_results(call)[0]);
+                    return Ok(self.call_host(self.host.coll.list_contains_str, &[recv_val, needle]));
                 }
                 // String.contains(needle) — other list Contains stays unsupported.
                 let recv_is_str = matches!(&recv.ty, Type::String)
@@ -15924,26 +14841,14 @@ impl LowerCtx<'_, '_> {
                     return Err("jit builtin method unsupported".to_string());
                 }
                 let needle = self.lower_expr(&args[0])?;
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.str_contains, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val, needle]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.str_contains, &[recv_val, needle]))
             }
             TBuiltinOp::IndexOf => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::TrimStart => {
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.text.trim_start, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.text.trim_start, &[recv_val]))
             }
             TBuiltinOp::TrimEnd => {
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.text.trim_end, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.text.trim_end, &[recv_val]))
             }
             TBuiltinOp::PadStart | TBuiltinOp::PadEnd => {
                 let width = self.lower_expr(&args[0])?;
@@ -15953,25 +14858,15 @@ impl LowerCtx<'_, '_> {
                 } else {
                     self.host.text.pad_end
                 };
-                let host = self.module.declare_func_in_func(host_id, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, width, fill]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(host_id, &[recv_val, width, fill]))
             }
             TBuiltinOp::StringIndexOf => {
                 let needle = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.text.index_of, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, needle]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.text.index_of, &[recv_val, needle]))
             }
             TBuiltinOp::StringCount => {
                 let needle = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.text.count, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, needle]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.text.count, &[recv_val, needle]))
             }
             TBuiltinOp::StringIsAlphabetic
             | TBuiltinOp::StringIsNumeric
@@ -15984,16 +14879,10 @@ impl LowerCtx<'_, '_> {
                     TBuiltinOp::StringIsAscii => self.host.text.is_ascii,
                     _ => unreachable!(),
                 };
-                let host = self.module.declare_func_in_func(host_id, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(host_id, &[recv_val]))
             }
             TBuiltinOp::StringToTitle => {
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.text.title, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.text.title, &[recv_val]))
             }
             TBuiltinOp::StringMethod { method } => {
                 let method_id = match method.as_str() {
@@ -16011,11 +14900,7 @@ impl LowerCtx<'_, '_> {
                     "normalize" => 11,
                     "rsplit" => {
                         let sep = self.lower_expr(&args[0])?;
-                        let host = self
-                            .module
-                            .declare_func_in_func(self.host.str_rsplit, self.b.func);
-                        let call = self.b.ins().call(host, &[recv_val, sep]);
-                        return Ok(self.b.inst_results(call)[0]);
+                        return Ok(self.call_host(self.host.str_rsplit, &[recv_val, sep]));
                     }
                     other => {
                         return Err(format!("jit string method unsupported: {other}"));
@@ -16027,11 +14912,7 @@ impl LowerCtx<'_, '_> {
                     self.lower_expr(&args[0])?
                 };
                 let method_v = self.b.ins().iconst(types::I64, method_id);
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.text.string_method, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, method_v, arg0]);
-                let raw = self.b.inst_results(call)[0];
+                let raw = self.call_host(self.host.text.string_method, &[recv_val, method_v, arg0]);
                 Ok(match method.as_str() {
                     "is_lower" | "is_upper" | "equal" => {
                         self.b.ins().ireduce(types::I8, raw)
@@ -16041,11 +14922,7 @@ impl LowerCtx<'_, '_> {
             }
             TBuiltinOp::StringSplitOnce { .. } => {
                 let separator = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.text.split_once, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, separator]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.text.split_once, &[recv_val, separator]))
             }
             TBuiltinOp::Reverse => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::Sum { float: false } => {
@@ -16055,99 +14932,51 @@ impl LowerCtx<'_, '_> {
                 ) {
                     return Err("jit builtin method unsupported".to_string());
                 }
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.coll.list_sum_i64, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.list_sum_i64, &[recv_val]))
             }
             TBuiltinOp::Sum { float: true } => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::Product { float: false } => {
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.coll.list_product_i64, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.list_product_i64, &[recv_val]))
             }
             TBuiltinOp::Product { float: true } => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::Min { float: false } => {
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.coll.list_min_i64, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.list_min_i64, &[recv_val]))
             }
             TBuiltinOp::Max { float: false } => {
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.coll.list_max_i64, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.list_max_i64, &[recv_val]))
             }
             TBuiltinOp::Min { float: true } | TBuiltinOp::Max { float: true } => {
                 Err("jit builtin method unsupported".to_string())
             }
             TBuiltinOp::Flatten => {
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.coll.list_flatten, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.list_flatten, &[recv_val]))
             }
             TBuiltinOp::Intersperse => {
                 let separator = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.coll.list_intersperse, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, separator]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.list_intersperse, &[recv_val, separator]))
             }
             TBuiltinOp::Unzip { .. } => {
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.coll.list_unzip, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.list_unzip, &[recv_val]))
             }
             TBuiltinOp::Clear => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::Chars => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.str_chars, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.str_chars, &[recv_val]))
             }
             TBuiltinOp::Bytes => {
                 if !matches!(&recv.ty, Type::String) {
                     return Err("jit builtin method unsupported".to_string());
                 }
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.str_bytes, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.str_bytes, &[recv_val]))
             }
             TBuiltinOp::Split => {
                 let sep = self.lower_expr(&args[0])?;
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.str_split, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val, sep]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.str_split, &[recv_val, sep]))
             }
             TBuiltinOp::Lines => {
                 if matches!(&recv.ty, Type::Named(n) if n == "FileReader") {
-                    let host_ref = self
-                        .module
-                        .declare_func_in_func(self.host.io.file_lines, self.b.func);
-                    let call = self.b.ins().call(host_ref, &[recv_val]);
-                    return Ok(self.b.inst_results(call)[0]);
+                    return Ok(self.call_host(self.host.io.file_lines, &[recv_val]));
                 }
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.str_lines, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.str_lines, &[recv_val]))
             }
             TBuiltinOp::ParseInt | TBuiltinOp::ParseFloat => {
                 let host = if matches!(op, TBuiltinOp::ParseInt) {
@@ -16155,9 +14984,7 @@ impl LowerCtx<'_, '_> {
                 } else {
                     self.host.parse_f64
                 };
-                let host_ref = self.module.declare_func_in_func(host, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(host, &[recv_val]))
             }
             TBuiltinOp::StartsWith | TBuiltinOp::EndsWith => {
                 // FileReader.lines() for-in vars may still be typed Unit in TIR;
@@ -16173,9 +15000,7 @@ impl LowerCtx<'_, '_> {
                 } else {
                     self.host.str_ends_with
                 };
-                let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val, needle]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(host_id, &[recv_val, needle]))
             }
             TBuiltinOp::Repeat => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::Slice { .. } => {
@@ -16187,34 +15012,18 @@ impl LowerCtx<'_, '_> {
                 }
                 let start = self.lower_expr(&args[0])?;
                 let end = self.lower_expr(&args[1])?;
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.str_slice, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val, start, end]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.str_slice, &[recv_val, start, end]))
             }
             TBuiltinOp::After => {
                 let sep = self.lower_expr(&args[0])?;
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.str_after, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val, sep]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.str_after, &[recv_val, sep]))
             }
             TBuiltinOp::Before => {
                 let sep = self.lower_expr(&args[0])?;
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.str_before, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val, sep]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.str_before, &[recv_val, sep]))
             }
             TBuiltinOp::TrimView => {
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.str_trim_view, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.str_trim_view, &[recv_val]))
             }
             TBuiltinOp::AfterView | TBuiltinOp::BeforeView => {
                 let separator = self.lower_expr(&args[0])?;
@@ -16223,9 +15032,7 @@ impl LowerCtx<'_, '_> {
                 } else {
                     self.host.str_before_view
                 };
-                let host = self.module.declare_func_in_func(host_id, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, separator]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(host_id, &[recv_val, separator]))
             }
             TBuiltinOp::Keys | TBuiltinOp::Values => {
                 if !matches!(&recv.ty, Type::Map { .. }) {
@@ -16236,18 +15043,12 @@ impl LowerCtx<'_, '_> {
                 } else {
                     self.host.coll.map_values
                 };
-                let host = self.module.declare_func_in_func(host_id, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(host_id, &[recv_val]))
             }
             TBuiltinOp::ContainsKey => {
                 if matches!(&recv.ty, Type::Apply { name, .. } if name == "Cache") {
                     let key = self.lower_expr(&args[0])?;
-                    let host = self
-                        .module
-                        .declare_func_in_func(self.host.coll.lru_has, self.b.func);
-                    let call = self.b.ins().call(host, &[recv_val, key]);
-                    Ok(self.b.inst_results(call)[0])
+                    Ok(self.call_host(self.host.coll.lru_has, &[recv_val, key]))
                 } else {
                     Err("jit builtin method unsupported".to_string())
                 }
@@ -16259,11 +15060,7 @@ impl LowerCtx<'_, '_> {
                 let method_val = self.b.ins().iconst(types::I64, method_id);
                 let arg0 = self.lower_expr(&args[0])?;
                 let zero = self.b.ins().iconst(types::I64, 0);
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.text.regex_method, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, method_val, arg0, zero]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.text.regex_method, &[recv_val, method_val, arg0, zero]))
             }
             TBuiltinOp::Take => {
                 self.lower_iter_adapter(self.host.coll.iter_take, recv_val, Some(&args[0]), None)
@@ -16327,25 +15124,13 @@ impl LowerCtx<'_, '_> {
             }
             TBuiltinOp::Indexes => {
                 // AOT: `jet_iter_indexes(recv.len())` — JIT materializes list.
-                let len_ref = self
-                    .module
-                    .declare_func_in_func(self.host.coll.list_len, self.b.func);
-                let len_call = self.b.ins().call(len_ref, &[recv_val]);
-                let n = self.b.inst_results(len_call)[0];
-                let idx_ref = self
-                    .module
-                    .declare_func_in_func(self.host.coll.list_indexes, self.b.func);
-                let idx_call = self.b.ins().call(idx_ref, &[n]);
-                Ok(self.b.inst_results(idx_call)[0])
+                let n = self.call_host(self.host.coll.list_len, &[recv_val]);
+                Ok(self.call_host(self.host.coll.list_indexes, &[n]))
             }
             TBuiltinOp::Indexed { .. } => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::Zip { .. } => {
                 let other = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.coll.list_zip, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, other]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.list_zip, &[recv_val, other]))
             }
             TBuiltinOp::OptionZip { tuple_struct, elem_ty } => {
                 let other = args
@@ -16368,11 +15153,7 @@ impl LowerCtx<'_, '_> {
             }
             TBuiltinOp::SetInsert => {
                 let v = self.lower_expr(&args[0])?;
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.coll.set_insert, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val, v]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.set_insert, &[recv_val, v]))
             }
             TBuiltinOp::SetRemove => {
                 let v = self.lower_expr(&args[0])?;
@@ -16385,58 +15166,30 @@ impl LowerCtx<'_, '_> {
             // #1478: `Set.values()` is List-shaped at this tier too (same
             // boxed handle `to_list` already returns) — reuse the host fn.
             TBuiltinOp::SetToList | TBuiltinOp::SetValues => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.coll.set_to_list, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.set_to_list, &[recv_val]))
             }
             TBuiltinOp::SetCopy => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.coll.set_copy, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.set_copy, &[recv_val]))
             }
             TBuiltinOp::SetEqual => {
                 let other = self.lower_expr(&args[0])?;
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.coll.set_equal, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val, other]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.set_equal, &[recv_val, other]))
             }
             TBuiltinOp::SetCapacity => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.coll.set_capacity, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.set_capacity, &[recv_val]))
             }
             // #1478: `Set.replace(v)` — native swap-in, packed-Option return.
             TBuiltinOp::SetReplace => {
                 let v = self.lower_expr(&args[0])?;
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.coll.set_replace, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val, v]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.set_replace, &[recv_val, v]))
             }
             // #1478: `Set.take(v)` — native remove-and-return, packed-Option return.
             TBuiltinOp::SetTake => {
                 let v = self.lower_expr(&args[0])?;
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.coll.set_take, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val, v]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.set_take, &[recv_val, v]))
             }
             TBuiltinOp::SetFirst => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.coll.set_first, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.set_first, &[recv_val]))
             }
             // D-SET-DECLINE1=C: no resident host lowering, same as Set's other
             // to-list-then-List ops (filter/map/fold/each/all/min/max) — deopts
@@ -16448,11 +15201,7 @@ impl LowerCtx<'_, '_> {
             }
             TBuiltinOp::SetUnion => {
                 let other = self.lower_expr(&args[0])?;
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.coll.set_union, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val, other]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.set_union, &[recv_val, other]))
             }
             TBuiltinOp::SetIntersection
             | TBuiltinOp::SetDifference
@@ -16470,9 +15219,7 @@ impl LowerCtx<'_, '_> {
                     TBuiltinOp::SetIsDisjoint => self.host.coll.set_is_disjoint,
                     _ => unreachable!(),
                 };
-                let host = self.module.declare_func_in_func(host_id, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, other]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(host_id, &[recv_val, other]))
             }
             TBuiltinOp::SortedSetFrom => {
                 let host = self
@@ -16489,11 +15236,7 @@ impl LowerCtx<'_, '_> {
             }
             TBuiltinOp::SortedSetInsert => {
                 let value = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.coll.sorted_set_insert, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, value]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.sorted_set_insert, &[recv_val, value]))
             }
             TBuiltinOp::SortedSetRemove => {
                 let value = self.lower_expr(&args[0])?;
@@ -16504,11 +15247,7 @@ impl LowerCtx<'_, '_> {
                 Ok(self.b.ins().iconst(types::I8, 0))
             }
             TBuiltinOp::SortedSetToList => {
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.coll.sorted_set_to_list, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.sorted_set_to_list, &[recv_val]))
             }
             TBuiltinOp::SortedSetUnion
             | TBuiltinOp::SortedSetIntersection
@@ -16530,23 +15269,13 @@ impl LowerCtx<'_, '_> {
                     TBuiltinOp::SortedSetIsDisjoint => self.host.coll.sorted_set_is_disjoint,
                     _ => unreachable!(),
                 };
-                let host = self.module.declare_func_in_func(host_id, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, other]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(host_id, &[recv_val, other]))
             }
             TBuiltinOp::PriorityQueueFrom => {
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.coll.priority_queue_from, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.priority_queue_from, &[recv_val]))
             }
             TBuiltinOp::PriorityQueuePeek => {
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.coll.priority_queue_peek, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.priority_queue_peek, &[recv_val]))
             }
             TBuiltinOp::PriorityQueueToSortedList => {
                 let host = self.module.declare_func_in_func(
@@ -16559,35 +15288,19 @@ impl LowerCtx<'_, '_> {
             TBuiltinOp::LruPut | TBuiltinOp::LruAddNew => {
                 let key = self.lower_expr(&args[0])?;
                 let value = self.lower_expr(&args[1])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.coll.lru_put, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, key, value]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.lru_put, &[recv_val, key, value]))
             }
             TBuiltinOp::LruGet => {
                 let key = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.coll.lru_get, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, key]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.lru_get, &[recv_val, key]))
             }
             TBuiltinOp::LruCapacity => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::LruKeys => {
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.coll.lru_keys, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.lru_keys, &[recv_val]))
             }
             TBuiltinOp::BitSetAdd => {
                 let value = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.coll.bit_set_add, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, value]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.bit_set_add, &[recv_val, value]))
             }
             TBuiltinOp::BitSetRemove => {
                 let value = self.lower_expr(&args[0])?;
@@ -16598,32 +15311,16 @@ impl LowerCtx<'_, '_> {
                 Ok(self.b.ins().iconst(types::I8, 0))
             }
             TBuiltinOp::BitSetCount => {
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.coll.bit_set_count, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.bit_set_count, &[recv_val]))
             }
             TBuiltinOp::BitSetToList => {
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.coll.bit_set_to_list, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.bit_set_to_list, &[recv_val]))
             }
             TBuiltinOp::BitSetNew => {
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.coll.bit_set_new, self.b.func);
-                let call = self.b.ins().call(host, &[]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.bit_set_new, &[]))
             }
             TBuiltinOp::ByteBufferNew => {
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.coll.byte_buffer_new, self.b.func);
-                let call = self.b.ins().call(host, &[]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.byte_buffer_new, &[]))
             }
             TBuiltinOp::ByteBufferWithCapacity => {
                 let host = self.module.declare_func_in_func(
@@ -16634,11 +15331,7 @@ impl LowerCtx<'_, '_> {
                 Ok(self.b.inst_results(call)[0])
             }
             TBuiltinOp::ByteBufferFrom => {
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.coll.byte_buffer_from, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.byte_buffer_from, &[recv_val]))
             }
             TBuiltinOp::ByteBufferWrite { method } => {
                 let value = self.lower_expr(&args[0])?;
@@ -16754,11 +15447,7 @@ impl LowerCtx<'_, '_> {
             TBuiltinOp::BagAdd => {
                 self.require_raw_bag_key(&recv.ty)?;
                 let value = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.coll.bag_add, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, value]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.bag_add, &[recv_val, value]))
             }
             TBuiltinOp::BagRemove => {
                 self.require_raw_bag_key(&recv.ty)?;
@@ -16772,28 +15461,16 @@ impl LowerCtx<'_, '_> {
             TBuiltinOp::BagHas => {
                 self.require_raw_bag_key(&recv.ty)?;
                 let value = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.coll.bag_has, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, value]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.bag_has, &[recv_val, value]))
             }
             TBuiltinOp::BagCount => {
                 self.require_raw_bag_key(&recv.ty)?;
                 let value = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.coll.bag_count, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, value]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.bag_count, &[recv_val, value]))
             }
             TBuiltinOp::BagLen => {
                 self.require_raw_bag_key(&recv.ty)?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.coll.bag_len, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.bag_len, &[recv_val]))
             }
             TBuiltinOp::DequePushFront => {
                 let v = self.lower_expr(&args[0])?;
@@ -16812,55 +15489,27 @@ impl LowerCtx<'_, '_> {
                 Ok(self.b.ins().iconst(types::I8, 0))
             }
             TBuiltinOp::DequePopFront => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.coll.deque_pop_front, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.deque_pop_front, &[recv_val]))
             }
             TBuiltinOp::DequePopBack => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.coll.deque_pop_back, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.deque_pop_back, &[recv_val]))
             }
             TBuiltinOp::DequePeekFront => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.coll.deque_peek_front, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.deque_peek_front, &[recv_val]))
             }
             TBuiltinOp::DequePeekBack => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.coll.deque_peek_back, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.deque_peek_back, &[recv_val]))
             }
             TBuiltinOp::DequeCapacity => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.coll.deque_capacity, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.deque_capacity, &[recv_val]))
             }
             TBuiltinOp::DequeContains => {
                 let v = self.lower_expr(&args[0])?;
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.coll.deque_contains, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val, v]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.deque_contains, &[recv_val, v]))
             }
             TBuiltinOp::DequeGet => {
                 let idx = self.lower_expr(&args[0])?;
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.coll.deque_get, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val, idx]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.deque_get, &[recv_val, idx]))
             }
             TBuiltinOp::DequeDelete => {
                 let v = self.lower_expr(&args[0])?;
@@ -16871,19 +15520,11 @@ impl LowerCtx<'_, '_> {
                 Ok(self.b.ins().iconst(types::I8, 0))
             }
             TBuiltinOp::DequeToList => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.coll.deque_to_list, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.deque_to_list, &[recv_val]))
             }
             TBuiltinOp::DequeJoin => {
                 let sep = self.lower_expr(&args[0])?;
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.coll.deque_join, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val, sep]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.deque_join, &[recv_val, sep]))
             }
             TBuiltinOp::DequeReverse => {
                 let host_ref = self
@@ -16894,18 +15535,10 @@ impl LowerCtx<'_, '_> {
             }
             TBuiltinOp::DequeSplit => {
                 let idx = self.lower_expr(&args[0])?;
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.coll.deque_split, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val, idx]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.deque_split, &[recv_val, idx]))
             }
             TBuiltinOp::DequeFrom => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.coll.deque_from, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.deque_from, &[recv_val]))
             }
             TBuiltinOp::TryCollect => self.lower_try_collect(recv),
             TBuiltinOp::ViewNew { line } => {
@@ -16973,39 +15606,23 @@ impl LowerCtx<'_, '_> {
             }
             TBuiltinOp::SplitWrite { .. } => {
                 let mid = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.coll.split_write, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, mid]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.split_write, &[recv_val, mid]))
             }
             TBuiltinOp::GetDisjointWrite => {
                 let targets = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.coll.get_disjoint_write, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, targets]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.coll.get_disjoint_write, &[recv_val, targets]))
             }
             // D-ITERTOOLS1=A: JIT ABI can't carry true JetIter handles. Producers
             // (String.split, list adapters) already return list handles of the same
             // pieces AOT would yield lazily — to_list / collect is identity.
             TBuiltinOp::IterToList | TBuiltinOp::IterCollect => {
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.io.progress_collect, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.io.progress_collect, &[recv_val]))
             }
             // D-LOOPMAP1=B: JIT uses list handles as the iter plane. Keep an
             // exact-size fact beside the handle so a later bound `io.progress`
             // call agrees with AOT's `size_hint()` result.
             TBuiltinOp::ListLazy => {
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.io.progress_mark_exact, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.io.progress_mark_exact, &[recv_val]))
             }
         }
     }
@@ -17021,11 +15638,7 @@ impl LowerCtx<'_, '_> {
                     _ => return Err(format!("jit numeric predicate unsupported: {name}")),
                 };
                 let op = self.b.ins().iconst(types::I64, op);
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.numeric_predicate, self.b.func);
-                let call = self.b.ins().call(host, &[value, op]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.numeric_predicate, &[value, op]))
             }
             TNumericOp::BitCount { method: name, .. } => {
                 let op = match name.as_str() {
@@ -17043,11 +15656,7 @@ impl LowerCtx<'_, '_> {
                     },
                 };
                 let width = self.b.ins().iconst(types::I64, width);
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.numeric_bit_count, self.b.func);
-                let call = self.b.ins().call(host, &[value, op, width]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.numeric_bit_count, &[value, op, width]))
             }
             TNumericOp::ToShow => {
                 if let Type::IntN { signed, .. } = &recv.ty {
@@ -17055,17 +15664,9 @@ impl LowerCtx<'_, '_> {
                         .b
                         .ins()
                         .iconst(types::I64, i64::from(*signed));
-                    let host = self
-                        .module
-                        .declare_func_in_func(self.host.intn_to_string, self.b.func);
-                    let call = self.b.ins().call(host, &[value, signed]);
-                    return Ok(self.b.inst_results(call)[0]);
+                    return Ok(self.call_host(self.host.intn_to_string, &[value, signed]));
                 }
-                let begin = self
-                    .module
-                    .declare_func_in_func(self.host.str_begin, self.b.func);
-                let call = self.b.ins().call(begin, &[]);
-                let text = self.b.inst_results(call)[0];
+                let text = self.call_host(self.host.str_begin, &[]);
                 let push = match clif_ty(&recv.ty) {
                     Some(ty) if ty == types::I64 => self.host.str_push_i64,
                     Some(ty) if ty == types::F64 => self.host.str_push_f64,
@@ -17108,11 +15709,7 @@ impl LowerCtx<'_, '_> {
                     .b
                     .ins()
                     .iconst(types::I64, i64::from(*target_f32));
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.numeric_checked_widen, self.b.func);
-                let call = self.b.ins().call(host, &[value, source_signed, target_f32]);
-                let widened = self.b.inst_results(call)[0];
+                let widened = self.call_host(self.host.numeric_checked_widen, &[value, source_signed, target_f32]);
                 self.emit_trap_check()?;
                 Ok(widened)
             }
@@ -17120,20 +15717,14 @@ impl LowerCtx<'_, '_> {
                 let unsigned = i64::from(matches!(recv.ty, Type::IntN { signed: false, .. }));
                 let unsigned = self.b.ins().iconst(types::I64, unsigned);
                 let kind = self.b.ins().iconst(types::I64, *host_kind);
-                let host = self.module.declare_func_in_func(self.host.numeric_try_i64, self.b.func);
-                let call = self.b.ins().call(host, &[value, unsigned, kind]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.numeric_try_i64, &[value, unsigned, kind]))
             }
             TNumericOp::FloatToInt { host_kind, .. } => {
                 let kind = self.b.ins().iconst(types::I64, *host_kind);
-                let host = self.module.declare_func_in_func(self.host.numeric_float_to_int, self.b.func);
-                let call = self.b.ins().call(host, &[value, kind]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.numeric_float_to_int, &[value, kind]))
             }
             TNumericOp::FloatNarrow { .. } => {
-                let host = self.module.declare_func_in_func(self.host.numeric_float_narrow, self.b.func);
-                let call = self.b.ins().call(host, &[value]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.numeric_float_narrow, &[value]))
             }
             TNumericOp::Origin(origin) => {
                 let _ = value; // AOT: let _ = recv
@@ -17164,9 +15755,7 @@ impl LowerCtx<'_, '_> {
             || matches!(&inner.ty, Type::Named(name) if name == "HTML")
         {
             let val = self.lower_expr(inner)?;
-            let host_ref = self.module.declare_func_in_func(self.host.str_clone, self.b.func);
-            let call = self.b.ins().call(host_ref, &[val]);
-            return Ok(self.b.inst_results(call)[0]);
+            return Ok(self.call_host(self.host.str_clone, &[val]));
         }
         // Math lane/matrix values are opaque i64 handles in the side table — clone
         // is a bitwise copy of the handle (values are immutable Copy).
@@ -17175,22 +15764,16 @@ impl LowerCtx<'_, '_> {
         }
         if jit_list_native_type(&inner.ty) {
             let val = self.lower_expr(inner)?;
-            let host_ref = self.module.declare_func_in_func(self.host.coll.list_clone, self.b.func);
-            let call = self.b.ins().call(host_ref, &[val]);
-            return Ok(self.b.inst_results(call)[0]);
+            return Ok(self.call_host(self.host.coll.list_clone, &[val]));
         }
         if jit_map_string_type(&inner.ty) {
             let val = self.lower_expr(inner)?;
-            let host_ref = self.module.declare_func_in_func(self.host.coll.map_clone, self.b.func);
-            let call = self.b.ins().call(host_ref, &[val]);
-            return Ok(self.b.inst_results(call)[0]);
+            return Ok(self.call_host(self.host.coll.map_clone, &[val]));
         }
         // List of records — same opaque-handle clone as List(Int/String/Float).
         if jit_list_record_type(&inner.ty) {
             let val = self.lower_expr(inner)?;
-            let host_ref = self.module.declare_func_in_func(self.host.coll.list_clone, self.b.func);
-            let call = self.b.ins().call(host_ref, &[val]);
-            return Ok(self.b.inst_results(call)[0]);
+            return Ok(self.call_host(self.host.coll.list_clone, &[val]));
         }
         // Named user enums — packed i64 ABI: clone is a bitwise copy (Link trees
         // embed nested payloads in the same word). Named structs allocate fresh.
@@ -17233,11 +15816,7 @@ impl LowerCtx<'_, '_> {
         }
         if matches!(&inner.ty, Type::Apply { name, .. } if name == "Sender") {
             let val = self.lower_expr(inner)?;
-            let host_ref = self
-                .module
-                .declare_func_in_func(self.host.conc.sender_clone, self.b.func);
-            let call = self.b.ins().call(host_ref, &[val]);
-            return Ok(self.b.inst_results(call)[0]);
+            return Ok(self.call_host(self.host.conc.sender_clone, &[val]));
         }
         // Receiver is an i64 index into `rt.channels` (Arc-backed under AOT).
         // Cloning the handle shares the same channel entry — same semantics as
@@ -17287,11 +15866,7 @@ impl LowerCtx<'_, '_> {
             .ok_or_else(|| format!("jit clone unsupported type: {:?}", inner.ty))?;
         let src = self.lower_expr(inner)?;
         let n = self.b.ins().iconst(types::I64, n_fields as i64);
-        let new_ref = self
-            .module
-            .declare_func_in_func(self.host.struct_new, self.b.func);
-        let call = self.b.ins().call(new_ref, &[n]);
-        let dst = self.b.inst_results(call)[0];
+        let dst = self.call_host(self.host.struct_new, &[n]);
         let assign_ref = self
             .module
             .declare_func_in_func(self.host.struct_assign, self.b.func);
@@ -17304,11 +15879,7 @@ impl LowerCtx<'_, '_> {
     fn pack_option_payload(&mut self, payload: Value, inner: &Type) -> Result<Value, String> {
         if matches!(inner, Type::IntN { .. }) {
             let ok = self.b.ins().iconst(types::I8, 1);
-            let host = self
-                .module
-                .declare_func_in_func(self.host.result_new_i64, self.b.func);
-            let call = self.b.ins().call(host, &[ok, payload]);
-            return Ok(self.b.inst_results(call)[0]);
+            return Ok(self.call_host(self.host.result_new_i64, &[ok, payload]));
         }
         let bits = match clif_ty(inner) {
             Some(ty) if ty == types::F64 => self.b.ins().bitcast(
@@ -17338,11 +15909,7 @@ impl LowerCtx<'_, '_> {
 
     fn unpack_option_payload(&mut self, packed: Value, inner: &Type) -> Result<Value, String> {
         if matches!(inner, Type::IntN { .. }) {
-            let host = self
-                .module
-                .declare_func_in_func(self.host.result_get_i64, self.b.func);
-            let call = self.b.ins().call(host, &[packed]);
-            return Ok(self.b.inst_results(call)[0]);
+            return Ok(self.call_host(self.host.result_get_i64, &[packed]));
         }
         let one = self.b.ins().iconst(types::I64, 1);
         let bits = self.b.ins().isub(packed, one);
@@ -17415,11 +15982,7 @@ impl LowerCtx<'_, '_> {
         let pb = self.unpack_option_payload(b_val, inner_b)?;
         // Build the named-tuple record in declaration field order (a, b).
         let n = self.b.ins().iconst(types::I64, 2);
-        let new_ref = self
-            .module
-            .declare_func_in_func(self.host.struct_new, self.b.func);
-        let call = self.b.ins().call(new_ref, &[n]);
-        let handle = self.b.inst_results(call)[0];
+        let handle = self.call_host(self.host.struct_new, &[n]);
         for (i, (payload, fty)) in [pa, pb].into_iter().zip(field_tys.iter()).enumerate() {
             let idx = self.b.ins().iconst(types::I64, i as i64);
             let host_id = match fty {
@@ -17554,31 +16117,19 @@ impl LowerCtx<'_, '_> {
         };
         let src = self.lower_expr(inner)?;
         let n = self.b.ins().iconst(types::I64, fields.len() as i64);
-        let new_ref = self
-            .module
-            .declare_func_in_func(self.host.struct_new, self.b.func);
-        let call = self.b.ins().call(new_ref, &[n]);
-        let dst = self.b.inst_results(call)[0];
+        let dst = self.call_host(self.host.struct_new, &[n]);
         for (i, (_, field_ty)) in fields.iter().enumerate() {
             let idx = self.b.ins().iconst(types::I64, i as i64);
             match field_ty.as_ref() {
                 Type::Int => {
-                    let get = self
-                        .module
-                        .declare_func_in_func(self.host.struct_get_i64, self.b.func);
-                    let gcall = self.b.ins().call(get, &[src, idx]);
-                    let val = self.b.inst_results(gcall)[0];
+                    let val = self.call_host(self.host.struct_get_i64, &[src, idx]);
                     let set = self
                         .module
                         .declare_func_in_func(self.host.struct_set_i64, self.b.func);
                     self.b.ins().call(set, &[dst, idx, val]);
                 }
                 Type::Float => {
-                    let get = self
-                        .module
-                        .declare_func_in_func(self.host.struct_get_f64, self.b.func);
-                    let gcall = self.b.ins().call(get, &[src, idx]);
-                    let val = self.b.inst_results(gcall)[0];
+                    let val = self.call_host(self.host.struct_get_f64, &[src, idx]);
                     let set = self
                         .module
                         .declare_func_in_func(self.host.struct_set_f64, self.b.func);
@@ -17801,26 +16352,14 @@ impl LowerCtx<'_, '_> {
             }
             "emit" if args.len() == 1 => {
                 let payload = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.reactive.event_emit, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, payload]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.reactive.event_emit, &[recv_val, payload]))
             }
             "emit_async" if args.len() == 1 => {
                 let payload = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.reactive.async_event_emit, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, payload]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.reactive.async_event_emit, &[recv_val, payload]))
             }
             "join" if args.is_empty() => {
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.reactive.async_event_join, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.reactive.async_event_join, &[recv_val]))
             }
             "close" if args.is_empty() => {
                 let host = self
@@ -17830,18 +16369,10 @@ impl LowerCtx<'_, '_> {
                 Ok(self.b.ins().iconst(types::I8, 0))
             }
             "summary" if args.is_empty() => {
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.reactive.event_trace_summary, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.reactive.event_trace_summary, &[recv_val]))
             }
             "active_count" if args.is_empty() => {
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.reactive.event_scope_active, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.reactive.event_scope_active, &[recv_val]))
             }
             "cancel" if args.is_empty() => {
                 let host = self
@@ -17862,26 +16393,14 @@ impl LowerCtx<'_, '_> {
                 if args.len() == 2 {
                     let payload = self.lower_expr(&args[0])?;
                     let fallback = self.lower_expr(&args[1])?;
-                    let host = self
-                        .module
-                        .declare_func_in_func(self.host.reactive.hook_run, self.b.func);
-                    let call = self.b.ins().call(host, &[recv_val, payload, fallback]);
-                    Ok(self.b.inst_results(call)[0])
+                    Ok(self.call_host(self.host.reactive.hook_run, &[recv_val, payload, fallback]))
                 } else {
                     let payload = self.lower_expr(&args[0])?;
-                    let host = self
-                        .module
-                        .declare_func_in_func(self.host.reactive.decision_hook_run, self.b.func);
-                    let call = self.b.ins().call(host, &[recv_val, payload]);
-                    Ok(self.b.inst_results(call)[0])
+                    Ok(self.call_host(self.host.reactive.decision_hook_run, &[recv_val, payload]))
                 }
             }
             "state" if args.is_empty() => {
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.reactive.dispatch_report_state, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.reactive.dispatch_report_state, &[recv_val]))
             }
             "delivered_handlers" if args.is_empty() => {
                 let host = self.module.declare_func_in_func(
@@ -17920,11 +16439,8 @@ impl LowerCtx<'_, '_> {
         let recv_val = self.lower_expr(recv)?;
         match op {
             THandleOp::TaskJoin => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.conc.task_join, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                let result = self.finish_wait_call(self.b.inst_results(call)[0]);
+                let status = self.call_host(self.host.conc.task_join, &[recv_val]);
+                let result = self.finish_wait_call(status);
                 if clif_ty(ret_ty).is_some() {
                     Ok(result)
                 } else {
@@ -17932,11 +16448,7 @@ impl LowerCtx<'_, '_> {
                 }
             }
             THandleOp::TaskTraceAll => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.conc.task_trace_all, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.conc.task_trace_all, &[recv_val]))
             }
             THandleOp::TaskDetachAll
             | THandleOp::TaskCancelAll
@@ -17961,11 +16473,8 @@ impl LowerCtx<'_, '_> {
             }
             THandleOp::ChannelReceive => {
                 let line = self.b.ins().iconst(types::I32, 1);
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.conc.channel_receive, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val, line]);
-                let result = self.finish_wait_call(self.b.inst_results(call)[0]);
+                let status = self.call_host(self.host.conc.channel_receive, &[recv_val, line]);
+                let result = self.finish_wait_call(status);
                 self.emit_trap_check()?;
                 Ok(result)
             }
@@ -17987,11 +16496,8 @@ impl LowerCtx<'_, '_> {
             }
             THandleOp::SenderSend => {
                 let val = self.lower_expr(&args[0])?;
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.conc.sender_send, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val, val]);
-                let _ = self.finish_wait_call(self.b.inst_results(call)[0]);
+                let status = self.call_host(self.host.conc.sender_send, &[recv_val, val]);
+                let _ = self.finish_wait_call(status);
                 Ok(self.b.ins().iconst(types::I8, 0))
             }
             // Remaining THandleOp variants have no JIT lowering: named explicitly
@@ -18000,255 +16506,119 @@ impl LowerCtx<'_, '_> {
             THandleOp::FileReaderReadLine => Err("jit handle method unsupported".to_string()),
             THandleOp::FileWriterWriteLine => {
                 let line = self.lower_expr(&args[0])?;
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.io.file_writer_write_line, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val, line]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.io.file_writer_write_line, &[recv_val, line]))
             }
             THandleOp::FileWriterFlush => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.io.file_writer_flush, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.io.file_writer_flush, &[recv_val]))
             }
             THandleOp::JSONReaderNext => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.stream.json_reader_next, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.stream.json_reader_next, &[recv_val]))
             }
             THandleOp::JSONWriterWrite => {
                 let ev = self.lower_expr(&args[0])?;
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.stream.json_writer_write, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val, ev]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.stream.json_writer_write, &[recv_val, ev]))
             }
             THandleOp::JSONWriterFlush => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.stream.json_writer_flush, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.stream.json_writer_flush, &[recv_val]))
             }
             THandleOp::JSONWriterFinish => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.stream.json_writer_finish, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.stream.json_writer_finish, &[recv_val]))
             }
             THandleOp::JSONLReaderNext => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.stream.jsonl_reader_next, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.stream.jsonl_reader_next, &[recv_val]))
             }
             THandleOp::JSONLWriterWrite => {
                 let v = self.lower_expr(&args[0])?;
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.stream.jsonl_writer_write, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val, v]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.stream.jsonl_writer_write, &[recv_val, v]))
             }
             THandleOp::JSONLWriterFlush => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.stream.jsonl_writer_flush, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.stream.jsonl_writer_flush, &[recv_val]))
             }
             THandleOp::JSONLWriterFinish => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.stream.jsonl_writer_finish, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.stream.jsonl_writer_finish, &[recv_val]))
             }
             THandleOp::CSVReaderNext => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.stream.csv_reader_next, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.stream.csv_reader_next, &[recv_val]))
             }
             THandleOp::DataStreamNext => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.data.stream_next, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.data.stream_next, &[recv_val]))
             }
             THandleOp::CSVWriterWrite => {
                 let v = self.lower_expr(&args[0])?;
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.stream.csv_writer_write, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val, v]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.stream.csv_writer_write, &[recv_val, v]))
             }
             THandleOp::CSVWriterFlush => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.stream.csv_writer_flush, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.stream.csv_writer_flush, &[recv_val]))
             }
             THandleOp::CSVWriterFinish => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.stream.csv_writer_finish, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.stream.csv_writer_finish, &[recv_val]))
             }
             THandleOp::XMLReaderNext => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.stream.xml_reader_next, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.stream.xml_reader_next, &[recv_val]))
             }
             THandleOp::XMLWriterWrite => {
                 let v = self.lower_expr(&args[0])?;
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.stream.xml_writer_write, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val, v]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.stream.xml_writer_write, &[recv_val, v]))
             }
             THandleOp::XMLWriterFlush => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.stream.xml_writer_flush, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.stream.xml_writer_flush, &[recv_val]))
             }
             THandleOp::XMLWriterFinish => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.stream.xml_writer_finish, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.stream.xml_writer_finish, &[recv_val]))
             }
             THandleOp::CBORReaderNext => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.stream.cbor_reader_next, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.stream.cbor_reader_next, &[recv_val]))
             }
             THandleOp::CBORWriterWrite => {
                 let ev = self.lower_expr(&args[0])?;
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.stream.cbor_writer_write, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val, ev]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.stream.cbor_writer_write, &[recv_val, ev]))
             }
             THandleOp::CBORWriterFlush => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.stream.cbor_writer_flush, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.stream.cbor_writer_flush, &[recv_val]))
             }
             THandleOp::CBORWriterFinish => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.stream.cbor_writer_finish, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.stream.cbor_writer_finish, &[recv_val]))
             }
             THandleOp::StdinReadLine => Err("jit handle method unsupported".to_string()),
             THandleOp::StdoutWrite => {
                 let text = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.io.stdout_write, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, text]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.io.stdout_write, &[recv_val, text]))
             }
             THandleOp::StdoutWriteLine => {
                 let text = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.io.stdout_write_line, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, text]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.io.stdout_write_line, &[recv_val, text]))
             }
             THandleOp::StdoutWriteBytes => {
                 let bytes = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.io.stdout_write_bytes, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, bytes]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.io.stdout_write_bytes, &[recv_val, bytes]))
             }
             THandleOp::StdoutFlush => {
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.io.stdout_flush, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.io.stdout_flush, &[recv_val]))
             }
             THandleOp::StdoutIsTty => {
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.io.stdout_is_tty, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.io.stdout_is_tty, &[recv_val]))
             }
             THandleOp::StderrWrite => {
                 let text = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.io.stderr_write, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, text]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.io.stderr_write, &[recv_val, text]))
             }
             THandleOp::StderrWriteLine => {
                 let text = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.io.stderr_write_line, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, text]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.io.stderr_write_line, &[recv_val, text]))
             }
             THandleOp::StderrWriteBytes => {
                 let bytes = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.io.stderr_write_bytes, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, bytes]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.io.stderr_write_bytes, &[recv_val, bytes]))
             }
             THandleOp::StderrFlush => {
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.io.stderr_flush, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.io.stderr_flush, &[recv_val]))
             }
             THandleOp::StderrIsTty => {
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.io.stderr_is_tty, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.io.stderr_is_tty, &[recv_val]))
             }
             THandleOp::StopwatchElapsedMillis => Err("jit handle method unsupported".to_string()),
             THandleOp::ClockNow => {
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.clock_now, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.clock_now, &[recv_val]))
             }
             THandleOp::ClockTick => {
                 let delta = self.lower_expr(&args[0])?;
@@ -18260,80 +16630,44 @@ impl LowerCtx<'_, '_> {
             }
             THandleOp::ClockAdvance => {
                 let value = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.clock_advance, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, value]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.clock_advance, &[recv_val, value]))
             }
             THandleOp::ClockWait => {
                 // After `??` unwrap, Duration is the raw millisecond i64 (see
                 // `jet_jit_duration_from_*` / `duration_in`), not a struct handle.
                 let duration_ms = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.clock_wait, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, duration_ms]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.clock_wait, &[recv_val, duration_ms]))
             }
             THandleOp::RngInt => {
                 let lo = self.lower_expr(&args[0])?;
                 let hi = self.lower_expr(&args[1])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.random.rng_int, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, lo, hi]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.random.rng_int, &[recv_val, lo, hi]))
             }
             THandleOp::RngFloat => Err("jit handle method unsupported".to_string()),
             THandleOp::RngFloatRange => {
                 let lo = self.lower_expr(&args[0])?;
                 let hi = self.lower_expr(&args[1])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.random.rng_float_range, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, lo, hi]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.random.rng_float_range, &[recv_val, lo, hi]))
             }
             THandleOp::RngBool => {
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.random.rng_bool, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.random.rng_bool, &[recv_val]))
             }
             THandleOp::RngBoolP => {
                 let p = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.random.rng_bool_p, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, p]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.random.rng_bool_p, &[recv_val, p]))
             }
             THandleOp::RngNormal => Err("jit handle method unsupported".to_string()),
             THandleOp::RngExponential => Err("jit handle method unsupported".to_string()),
             THandleOp::RngBytes => {
                 let n = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.random.rng_bytes, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, n]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.random.rng_bytes, &[recv_val, n]))
             }
             THandleOp::RngSplit => {
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.random.rng_split, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.random.rng_split, &[recv_val]))
             }
             THandleOp::RngPick => {
                 let items = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.random.rng_pick, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, items]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.random.rng_pick, &[recv_val, items]))
             }
             THandleOp::RngWeightedPick => {
                 if matches!(
@@ -18347,20 +16681,12 @@ impl LowerCtx<'_, '_> {
                 }
                 let items = self.lower_expr(&args[0])?;
                 let weights = self.lower_expr(&args[1])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.random.rng_weighted_pick, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, items, weights]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.random.rng_weighted_pick, &[recv_val, items, weights]))
             }
             THandleOp::RngSample => {
                 let items = self.lower_expr(&args[0])?;
                 let k = self.lower_expr(&args[1])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.random.rng_sample, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, items, k]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.random.rng_sample, &[recv_val, items, k]))
             }
             THandleOp::RngShuffle => {
                 let items = self.lower_expr(&args[0])?;
@@ -18371,9 +16697,7 @@ impl LowerCtx<'_, '_> {
                 Ok(self.b.ins().iconst(types::I8, 0))
             }
             THandleOp::SolverNew => {
-                let host = self.module.declare_func_in_func(self.host.solver.new, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.solver.new, &[recv_val]))
             }
             THandleOp::SolverRequire => {
                 let ok = self.lower_expr(&args[0])?;
@@ -18382,42 +16706,22 @@ impl LowerCtx<'_, '_> {
                 Ok(self.b.ins().iconst(types::I8, 0))
             }
             THandleOp::SolverFailureCount => {
-                let host = self.module.declare_func_in_func(self.host.solver.failure_count, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.solver.failure_count, &[recv_val]))
             }
             THandleOp::SolverStatus => {
-                let host = self.module.declare_func_in_func(self.host.solver.status, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.solver.status, &[recv_val]))
             }
             THandleOp::GameSceneNew => {
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.game.scene_new, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.game.scene_new, &[recv_val]))
             }
             THandleOp::GameReplayRecord => {
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.game.replay_record, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.game.replay_record, &[recv_val]))
             }
             THandleOp::GameBackendHeadless => {
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.game.backend_headless, self.b.func);
-                let call = self.b.ins().call(host, &[]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.game.backend_headless, &[]))
             }
             THandleOp::GameBackendShouldContinue => {
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.game.backend_should_continue, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.game.backend_should_continue, &[recv_val]))
             }
             THandleOp::GameBackendPresent => {
                 let host = self
@@ -18437,27 +16741,15 @@ impl LowerCtx<'_, '_> {
             }
             THandleOp::GameSceneQuery => {
                 let names = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.game.query, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, names]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.game.query, &[recv_val, names]))
             }
             THandleOp::GameAssetsImage => {
                 let path = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.game.assets_image, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, path]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.game.assets_image, &[recv_val, path]))
             }
             THandleOp::GameAssetsSound => {
                 let path = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.game.assets_sound, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, path]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.game.assets_sound, &[recv_val, path]))
             }
             THandleOp::GameInputBind => {
                 let action = self.lower_expr(&args[0])?;
@@ -18470,11 +16762,7 @@ impl LowerCtx<'_, '_> {
             }
             THandleOp::GameInputPressed => {
                 let action = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.game.input_pressed, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, action]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.game.input_pressed, &[recv_val, action]))
             }
             THandleOp::DurationNew { unit, float } => {
                 let scale = match *unit {
@@ -18492,9 +16780,7 @@ impl LowerCtx<'_, '_> {
                 } else {
                     self.host.duration_from_int
                 };
-                let host = self.module.declare_func_in_func(host_id, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, scale]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(host_id, &[recv_val, scale]))
             }
             THandleOp::DurationIn { unit: Some(unit) } => {
                 let scale = match *unit {
@@ -18507,39 +16793,21 @@ impl LowerCtx<'_, '_> {
                     _ => return Err("jit duration unit unsupported".to_string()),
                 };
                 let scale = self.b.ins().iconst(types::I64, scale);
-                let host = self.module.declare_func_in_func(self.host.duration_in, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, scale]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.duration_in, &[recv_val, scale]))
             }
             THandleOp::DurationIn { unit: None } => {
                 let unit_val = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.duration_in_unit, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, unit_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.duration_in_unit, &[recv_val, unit_val]))
             }
             THandleOp::DurationIsZero => {
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.duration_is_zero, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.duration_is_zero, &[recv_val]))
             }
             THandleOp::DurationTotalSeconds => {
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.duration_total_seconds, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.duration_total_seconds, &[recv_val]))
             }
             THandleOp::DurationDifference => {
                 let other = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.duration_difference, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, other]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.duration_difference, &[recv_val, other]))
             }
             // D-BIGINT1 / D-DECIMAL1: instance methods on precise numerics.
             THandleOp::PreciseMethod { type_name, method }
@@ -18587,44 +16855,24 @@ impl LowerCtx<'_, '_> {
             }
             THandleOp::PreciseMethod { .. } => Err("jit handle method unsupported".to_string()),
             THandleOp::TcpListenerAccept => {
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.net_http.tcp_accept, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.net_http.tcp_accept, &[recv_val]))
             }
             THandleOp::TcpListenerLocalAddr => {
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.net_http.tcp_local_addr, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.net_http.tcp_local_addr, &[recv_val]))
             }
             THandleOp::TcpStreamReadText if args.len() == 1 => {
                 let limit = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.net_http.tcp_read_text, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, limit]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.net_http.tcp_read_text, &[recv_val, limit]))
             }
             THandleOp::TcpStreamWriteAllBytes if args.len() == 1 => {
                 let data = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.net_http.tcp_write_all_bytes, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, data]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.net_http.tcp_write_all_bytes, &[recv_val, data]))
             }
             THandleOp::TcpStreamReadText | THandleOp::TcpStreamWriteAllBytes => {
                 Err("jit handle method unsupported".to_string())
             }
             THandleOp::TcpStreamClose => {
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.net_http.tcp_close, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.net_http.tcp_close, &[recv_val]))
             }
             THandleOp::TcpStreamRead => Err("jit handle method unsupported".to_string()),
             THandleOp::TcpStreamWrite => Err("jit handle method unsupported".to_string()),
@@ -18679,11 +16927,7 @@ impl LowerCtx<'_, '_> {
                         ))
                     }
                 };
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.memory.allocator_alloc, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, bits]);
-                let bits = self.b.inst_results(call)[0];
+                let bits = self.call_host(self.host.memory.allocator_alloc, &[recv_val, bits]);
                 self.emit_trap_check()?;
                 match self.meta.clif_ty(&args[0].ty) {
                     Some(ty) if ty == types::F64 => Ok(self.b.ins().bitcast(
@@ -18715,27 +16959,19 @@ impl LowerCtx<'_, '_> {
             THandleOp::ArgsSpecFlag => {
                 let a0 = self.lower_expr(&args[0])?;
                 let a1 = self.lower_expr(&args[1])?;
-                let host = self.module.declare_func_in_func(self.host.args.flag, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, a0, a1]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.args.flag, &[recv_val, a0, a1]))
             }
             THandleOp::ArgsSpecFlagShort => {
                 let a0 = self.lower_expr(&args[0])?;
                 let a1 = self.lower_expr(&args[1])?;
                 let a2 = self.lower_expr(&args[2])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.args.flag_short, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, a0, a1, a2]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.args.flag_short, &[recv_val, a0, a1, a2]))
             }
             THandleOp::ArgsSpecOption => {
                 let a0 = self.lower_expr(&args[0])?;
                 let a1 = self.lower_expr(&args[1])?;
                 let a2 = self.lower_expr(&args[2])?;
-                let host = self.module.declare_func_in_func(self.host.args.option, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, a0, a1, a2]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.args.option, &[recv_val, a0, a1, a2]))
             }
             THandleOp::ArgsSpecOptionShort => Err("jit handle method unsupported".to_string()),
             THandleOp::ArgsSpecOptionDefault => {
@@ -18743,22 +16979,14 @@ impl LowerCtx<'_, '_> {
                 let a1 = self.lower_expr(&args[1])?;
                 let a2 = self.lower_expr(&args[2])?;
                 let a3 = self.lower_expr(&args[3])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.args.option_default, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, a0, a1, a2, a3]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.args.option_default, &[recv_val, a0, a1, a2, a3]))
             }
             THandleOp::ArgsSpecOptionEnv => Err("jit handle method unsupported".to_string()),
             THandleOp::ArgsSpecOptionInt => {
                 let a0 = self.lower_expr(&args[0])?;
                 let a1 = self.lower_expr(&args[1])?;
                 let a2 = self.lower_expr(&args[2])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.args.option_int, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, a0, a1, a2]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.args.option_int, &[recv_val, a0, a1, a2]))
             }
             THandleOp::ArgsSpecOptionFloat => Err("jit handle method unsupported".to_string()),
             THandleOp::ArgsSpecOptionChoice => {
@@ -18766,127 +16994,71 @@ impl LowerCtx<'_, '_> {
                 let a1 = self.lower_expr(&args[1])?;
                 let a2 = self.lower_expr(&args[2])?;
                 let a3 = self.lower_expr(&args[3])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.args.option_choice, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, a0, a1, a2, a3]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.args.option_choice, &[recv_val, a0, a1, a2, a3]))
             }
             THandleOp::ArgsSpecRepeat => {
                 let a0 = self.lower_expr(&args[0])?;
                 let a1 = self.lower_expr(&args[1])?;
                 let a2 = self.lower_expr(&args[2])?;
-                let host = self.module.declare_func_in_func(self.host.args.repeat, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, a0, a1, a2]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.args.repeat, &[recv_val, a0, a1, a2]))
             }
             THandleOp::ArgsSpecRequiredOption => Err("jit handle method unsupported".to_string()),
             THandleOp::ArgsSpecPositional => {
                 let a0 = self.lower_expr(&args[0])?;
                 let a1 = self.lower_expr(&args[1])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.args.positional, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, a0, a1]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.args.positional, &[recv_val, a0, a1]))
             }
             THandleOp::ArgsSpecSubcommand => {
                 let a0 = self.lower_expr(&args[0])?;
                 let a1 = self.lower_expr(&args[1])?;
                 let a2 = self.lower_expr(&args[2])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.args.subcommand, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, a0, a1, a2]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.args.subcommand, &[recv_val, a0, a1, a2]))
             }
             THandleOp::ArgsSpecVersion => {
                 let a0 = self.lower_expr(&args[0])?;
-                let host = self.module.declare_func_in_func(self.host.args.version, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, a0]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.args.version, &[recv_val, a0]))
             }
             THandleOp::ArgsSpecCompletion => {
                 let a0 = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.args.completion, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, a0]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.args.completion, &[recv_val, a0]))
             }
             THandleOp::ArgsSpecHelp => {
-                let host = self.module.declare_func_in_func(self.host.args.help, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.args.help, &[recv_val]))
             }
             THandleOp::ArgsSpecParse => {
                 let a0 = self.lower_expr(&args[0])?;
-                let host = self.module.declare_func_in_func(self.host.args.parse, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, a0]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.args.parse, &[recv_val, a0]))
             }
             THandleOp::ArgsSpecParseOrExit => {
                 let a0 = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.args.parse_or_exit, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, a0]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.args.parse_or_exit, &[recv_val, a0]))
             }
             THandleOp::ParsedArgsFlag => {
                 let a0 = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.args.parsed_flag, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, a0]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.args.parsed_flag, &[recv_val, a0]))
             }
             THandleOp::ParsedArgsOption => {
                 let a0 = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.args.parsed_option, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, a0]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.args.parsed_option, &[recv_val, a0]))
             }
             THandleOp::ParsedArgsOptionInt => {
                 let a0 = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.args.parsed_option_int, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, a0]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.args.parsed_option_int, &[recv_val, a0]))
             }
             THandleOp::ParsedArgsOptionFloat => {
                 let a0 = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.args.parsed_option_float, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, a0]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.args.parsed_option_float, &[recv_val, a0]))
             }
             THandleOp::ParsedArgsOptions => {
                 let a0 = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.args.parsed_options, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, a0]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.args.parsed_options, &[recv_val, a0]))
             }
             THandleOp::ParsedArgsSubcommand => {
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.args.parsed_subcommand, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.args.parsed_subcommand, &[recv_val]))
             }
             THandleOp::ParsedArgsPositional => {
                 let a0 = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.args.parsed_positional, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, a0]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.args.parsed_positional, &[recv_val, a0]))
             }
             THandleOp::ProcessSpecMethod { method } => {
                 let (host_fn, arity) = match method.as_str() {
@@ -18918,56 +17090,28 @@ impl LowerCtx<'_, '_> {
             }
             THandleOp::ProcessChildMethod { method } => match method.as_str() {
                 "id" if args.is_empty() => {
-                    let host = self
-                        .module
-                        .declare_func_in_func(self.host.process.child_id, self.b.func);
-                    let call = self.b.ins().call(host, &[recv_val]);
-                    Ok(self.b.inst_results(call)[0])
+                    Ok(self.call_host(self.host.process.child_id, &[recv_val]))
                 }
                 "exited" if args.is_empty() => {
-                    let host = self
-                        .module
-                        .declare_func_in_func(self.host.process.child_exited, self.b.func);
-                    let call = self.b.ins().call(host, &[recv_val]);
-                    Ok(self.b.inst_results(call)[0])
+                    Ok(self.call_host(self.host.process.child_exited, &[recv_val]))
                 }
                 "kill" if args.is_empty() => {
-                    let host = self
-                        .module
-                        .declare_func_in_func(self.host.process.child_kill, self.b.func);
-                    let call = self.b.ins().call(host, &[recv_val]);
-                    Ok(self.b.inst_results(call)[0])
+                    Ok(self.call_host(self.host.process.child_kill, &[recv_val]))
                 }
                 "terminate" if args.is_empty() => {
-                    let host = self
-                        .module
-                        .declare_func_in_func(self.host.process.child_terminate, self.b.func);
-                    let call = self.b.ins().call(host, &[recv_val]);
-                    Ok(self.b.inst_results(call)[0])
+                    Ok(self.call_host(self.host.process.child_terminate, &[recv_val]))
                 }
                 "interrupt" if args.is_empty() => {
-                    let host = self
-                        .module
-                        .declare_func_in_func(self.host.process.child_interrupt, self.b.func);
-                    let call = self.b.ins().call(host, &[recv_val]);
-                    Ok(self.b.inst_results(call)[0])
+                    Ok(self.call_host(self.host.process.child_interrupt, &[recv_val]))
                 }
                 "wait" if args.is_empty() => {
-                    let host = self
-                        .module
-                        .declare_func_in_func(self.host.process.child_wait, self.b.func);
-                    let call = self.b.ins().call(host, &[recv_val]);
-                    Ok(self.b.inst_results(call)[0])
+                    Ok(self.call_host(self.host.process.child_wait, &[recv_val]))
                 }
                 _ => Err("jit handle method unsupported".to_string()),
             },
             THandleOp::TerminalSessionResize if args.len() == 1 => {
                 let size = self.lower_expr(&args[0])?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.process.terminal_resize, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, size]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.process.terminal_resize, &[recv_val, size]))
             }
             THandleOp::TerminalSessionResize => {
                 Err("jit terminal resize arity unsupported".to_string())
@@ -18995,43 +17139,25 @@ impl LowerCtx<'_, '_> {
                 Ok(self.b.ins().iconst(types::I8, 0))
             }
             THandleOp::TaskTrace => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.conc.task_trace, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.conc.task_trace, &[recv_val]))
             }
             THandleOp::TaskException => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.conc.task_exception, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.conc.task_exception, &[recv_val]))
             }
             THandleOp::ReflectValueTypeName => {
-                let host = self.module.declare_func_in_func(self.host.reflect_type_name, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.reflect_type_name, &[recv_val]))
             }
             THandleOp::ReflectValueDisplay => {
-                let host = self.module.declare_func_in_func(self.host.reflect_display, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.reflect_display, &[recv_val]))
             }
             THandleOp::ReflectValueFields => {
-                let host = self.module.declare_func_in_func(self.host.reflect_fields, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.reflect_fields, &[recv_val]))
             }
             THandleOp::ReflectFieldName => {
-                let host = self.module.declare_func_in_func(self.host.reflect_field_name, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.reflect_field_name, &[recv_val]))
             }
             THandleOp::ReflectFieldValue => {
-                let host = self.module.declare_func_in_func(self.host.reflect_field_value, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.reflect_field_value, &[recv_val]))
             }
             THandleOp::HTTPRouterRegister { .. } => Err("jit handle method unsupported".to_string()),
             THandleOp::MathMethod {
@@ -19078,9 +17204,7 @@ impl LowerCtx<'_, '_> {
                 } else {
                     self.host.reactive.get
                 };
-                let host = self.module.declare_func_in_func(host_id, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                let bits = self.b.inst_results(call)[0];
+                let bits = self.call_host(host_id, &[recv_val]);
                 let payload_ty = match &recv.ty {
                     Type::Apply { args, .. } => args.first().cloned(),
                     _ => None,
@@ -19165,11 +17289,7 @@ impl LowerCtx<'_, '_> {
                         .b
                         .ins()
                         .iconst(types::I64, i64::from(method == "uncertainty"));
-                    let host = self
-                        .module
-                        .declare_func_in_func(self.host.measurement_get, self.b.func);
-                    let call = self.b.ins().call(host, &[recv_val, field]);
-                    Ok(self.b.inst_results(call)[0])
+                    Ok(self.call_host(self.host.measurement_get, &[recv_val, field]))
                 }
                 "add" | "sub" | "mul" | "div" if args.len() == 1 => {
                     let right = self.lower_expr(&args[0])?;
@@ -19181,11 +17301,7 @@ impl LowerCtx<'_, '_> {
                         _ => unreachable!(),
                     };
                     let op = self.b.ins().iconst(types::I64, op);
-                    let host = self
-                        .module
-                        .declare_func_in_func(self.host.measurement_arithmetic, self.b.func);
-                    let call = self.b.ins().call(host, &[recv_val, right, op]);
-                    Ok(self.b.inst_results(call)[0])
+                    Ok(self.call_host(self.host.measurement_arithmetic, &[recv_val, right, op]))
                 }
                 _ => Err("jit handle method unsupported".to_string()),
             },
@@ -19198,17 +17314,11 @@ impl LowerCtx<'_, '_> {
                     } else {
                         self.host.layout.v
                     };
-                    let host = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host, &[recv_val, box_n, anchor]);
-                    Ok(self.b.inst_results(call)[0])
+                    Ok(self.call_host(host_id, &[recv_val, box_n, anchor]))
                 }
                 "value" if args.len() == 1 => {
                     let expr = self.lower_expr(&args[0])?;
-                    let host = self
-                        .module
-                        .declare_func_in_func(self.host.layout.value, self.b.func);
-                    let call = self.b.ins().call(host, &[recv_val, expr]);
-                    Ok(self.b.inst_results(call)[0])
+                    Ok(self.call_host(self.host.layout.value, &[recv_val, expr]))
                 }
                 "suggest" if args.len() == 2 => {
                     let expr = self.lower_expr(&args[0])?;
@@ -19220,11 +17330,7 @@ impl LowerCtx<'_, '_> {
                     Ok(self.b.ins().iconst(types::I8, 0))
                 }
                 "is_feasible" if args.is_empty() => {
-                    let host = self
-                        .module
-                        .declare_func_in_func(self.host.layout.is_feasible, self.b.func);
-                    let call = self.b.ins().call(host, &[recv_val]);
-                    Ok(self.b.inst_results(call)[0])
+                    Ok(self.call_host(self.host.layout.is_feasible, &[recv_val]))
                 }
                 "required" | "strong" | "medium" | "weak" if args.is_empty() => {
                     let kind = match method.as_str() {
@@ -19234,11 +17340,7 @@ impl LowerCtx<'_, '_> {
                         _ => 3,
                     };
                     let kind = self.b.ins().iconst(types::I64, kind);
-                    let host = self
-                        .module
-                        .declare_func_in_func(self.host.layout.strength, self.b.func);
-                    let call = self.b.ins().call(host, &[recv_val, kind]);
-                    Ok(self.b.inst_results(call)[0])
+                    Ok(self.call_host(self.host.layout.strength, &[recv_val, kind]))
                 }
                 _ => Err(format!("jit LayoutMethod unsupported: {method}")),
             },
@@ -19251,28 +17353,16 @@ impl LowerCtx<'_, '_> {
                         _ => 3,
                     };
                     let kind = self.b.ins().iconst(types::I64, kind);
-                    let host = self
-                        .module
-                        .declare_func_in_func(self.host.reactive.loadable_is, self.b.func);
-                    let call = self.b.ins().call(host, &[recv_val, kind]);
-                    Ok(self.b.inst_results(call)[0])
+                    Ok(self.call_host(self.host.reactive.loadable_is, &[recv_val, kind]))
                 }
                 "loaded" if args.is_empty() => {
-                    let host = self
-                        .module
-                        .declare_func_in_func(self.host.reactive.loadable_payload, self.b.func);
-                    let call = self.b.ins().call(host, &[recv_val]);
-                    let payload = self.b.inst_results(call)[0];
+                    let payload = self.call_host(self.host.reactive.loadable_payload, &[recv_val]);
                     // Option packing for Some when is_loaded
                     self.pack_option_payload(payload, &Type::Int)
                 }
                 "or_else" if args.len() == 1 => {
                     let def = self.lower_expr(&args[0])?;
-                    let host = self
-                        .module
-                        .declare_func_in_func(self.host.reactive.loadable_or_else, self.b.func);
-                    let call = self.b.ins().call(host, &[recv_val, def]);
-                    Ok(self.b.inst_results(call)[0])
+                    Ok(self.call_host(self.host.reactive.loadable_or_else, &[recv_val, def]))
                 }
                 _ => Err(format!("jit LoadableMethod unsupported: {method}")),
             },
@@ -19283,11 +17373,7 @@ impl LowerCtx<'_, '_> {
                 let clock = self.lower_expr(clock)?;
                 match method.as_str() {
                     "get" => {
-                        let host = self
-                            .module
-                            .declare_func_in_func(self.host.memory.expiring_get, self.b.func);
-                        let call = self.b.ins().call(host, &[recv_val, clock]);
-                        let status = self.b.inst_results(call)[0];
+                        let status = self.call_host(self.host.memory.expiring_get, &[recv_val, clock]);
                         Ok(self.result_from_packed_i64(status))
                     }
                     "is_valid" => {
@@ -19328,34 +17414,18 @@ impl LowerCtx<'_, '_> {
                         Ok(self.b.ins().iconst(types::I8, 0))
                     }
                     "count" if args.is_empty() => {
-                        let host = self
-                            .module
-                            .declare_func_in_func(self.host.sketch.count0, self.b.func);
-                        let call = self.b.ins().call(host, &[recv_val]);
-                        Ok(self.b.inst_results(call)[0])
+                        Ok(self.call_host(self.host.sketch.count0, &[recv_val]))
                     }
                     "count" if args.len() == 1 => {
                         let key = self.lower_expr(&args[0])?;
-                        let host = self
-                            .module
-                            .declare_func_in_func(self.host.sketch.count1, self.b.func);
-                        let call = self.b.ins().call(host, &[recv_val, key]);
-                        Ok(self.b.inst_results(call)[0])
+                        Ok(self.call_host(self.host.sketch.count1, &[recv_val, key]))
                     }
                     "quantile" if args.len() == 1 => {
                         let q = self.lower_expr(&args[0])?;
-                        let host = self
-                            .module
-                            .declare_func_in_func(self.host.sketch.quantile, self.b.func);
-                        let call = self.b.ins().call(host, &[recv_val, q]);
-                        Ok(self.b.inst_results(call)[0])
+                        Ok(self.call_host(self.host.sketch.quantile, &[recv_val, q]))
                     }
                     "sample" if args.is_empty() => {
-                        let host = self
-                            .module
-                            .declare_func_in_func(self.host.sketch.sample, self.b.func);
-                        let call = self.b.ins().call(host, &[recv_val]);
-                        Ok(self.b.inst_results(call)[0])
+                        Ok(self.call_host(self.host.sketch.sample, &[recv_val]))
                     }
                     _ => Err(format!("jit sketch method unsupported: {sketch}.{method}")),
                 }
@@ -19481,11 +17551,7 @@ impl LowerCtx<'_, '_> {
                 } else {
                     self.b.ins().iconst(types::I64, 0)
                 };
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.text.regex_method, self.b.func);
-                let call = self.b.ins().call(host, &[recv_v, method_val, a0, a1]);
-                let raw = self.b.inst_results(call)[0];
+                let raw = self.call_host(self.host.text.regex_method, &[recv_v, method_val, a0, a1]);
                 // `regex_method` returns i64; Bool methods need the i8 print ABI.
                 if matches!(ret_ty, Type::Bool)
                     || matches!(method.as_str(), "is_match" | "is_match_at")
@@ -19498,11 +17564,7 @@ impl LowerCtx<'_, '_> {
             THandleOp::HTTPClientMethod { kind, method } => {
                 match (kind.as_str(), method.as_str()) {
                     ("HTTPResponse", "status") if args.is_empty() => {
-                        let host = self
-                            .module
-                            .declare_func_in_func(self.host.net_http.http_resp_status, self.b.func);
-                        let call = self.b.ins().call(host, &[recv_val]);
-                        Ok(self.b.inst_results(call)[0])
+                        Ok(self.call_host(self.host.net_http.http_resp_status, &[recv_val]))
                     }
                     ("HTTPResponse", "body") if args.is_empty() => {
                         let host = self.module.declare_func_in_func(
@@ -19514,26 +17576,14 @@ impl LowerCtx<'_, '_> {
                     }
                     ("HTTPResponse", "header") if args.len() == 1 => {
                         let name = self.lower_expr(&args[0])?;
-                        let host = self
-                            .module
-                            .declare_func_in_func(self.host.net_http.http_resp_header, self.b.func);
-                        let call = self.b.ins().call(host, &[recv_val, name]);
-                        Ok(self.b.inst_results(call)[0])
+                        Ok(self.call_host(self.host.net_http.http_resp_header, &[recv_val, name]))
                     }
                     ("HTTPResponse", "cookies") if args.is_empty() => {
-                        let host = self
-                            .module
-                            .declare_func_in_func(self.host.net_http.http_resp_cookies, self.b.func);
-                        let call = self.b.ins().call(host, &[recv_val]);
-                        Ok(self.b.inst_results(call)[0])
+                        Ok(self.call_host(self.host.net_http.http_resp_cookies, &[recv_val]))
                     }
                     ("HTTPBody", "text") if args.len() == 1 => {
                         let limit = self.lower_expr(&args[0])?;
-                        let host = self
-                            .module
-                            .declare_func_in_func(self.host.net_http.http_body_text, self.b.func);
-                        let call = self.b.ins().call(host, &[recv_val, limit]);
-                        Ok(self.b.inst_results(call)[0])
+                        Ok(self.call_host(self.host.net_http.http_body_text, &[recv_val, limit]))
                     }
                     ("HTTPBody", "json") if args.len() == 1 => {
                         let limit = self.lower_expr(&args[0])?;
@@ -19680,18 +17730,10 @@ impl LowerCtx<'_, '_> {
                         Ok(self.b.inst_results(call)[0])
                     }
                     ("HTTPRequest", "body") if args.is_empty() => {
-                        let host = self
-                            .module
-                            .declare_func_in_func(self.host.net_http.http_req_body, self.b.func);
-                        let call = self.b.ins().call(host, &[recv_val]);
-                        Ok(self.b.inst_results(call)[0])
+                        Ok(self.call_host(self.host.net_http.http_req_body, &[recv_val]))
                     }
                     ("HTTPRequest", "json") if args.is_empty() => {
-                        let body_host = self
-                            .module
-                            .declare_func_in_func(self.host.net_http.http_req_body, self.b.func);
-                        let body = self.b.ins().call(body_host, &[recv_val]);
-                        let body = self.b.inst_results(body)[0];
+                        let body = self.call_host(self.host.net_http.http_req_body, &[recv_val]);
                         let ok_ty = match ret_ty {
                             Type::Result { ok, .. } => ok.as_ref(),
                             other => other,
@@ -19699,34 +17741,18 @@ impl LowerCtx<'_, '_> {
                         self.lower_http_body_json(body, None, ok_ty)
                     }
                     ("HTTPRequest", "method") if args.is_empty() => {
-                        let host = self
-                            .module
-                            .declare_func_in_func(self.host.net_http.http_req_method, self.b.func);
-                        let call = self.b.ins().call(host, &[recv_val]);
-                        Ok(self.b.inst_results(call)[0])
+                        Ok(self.call_host(self.host.net_http.http_req_method, &[recv_val]))
                     }
                     ("HTTPRequest", "path") if args.is_empty() => {
-                        let host = self
-                            .module
-                            .declare_func_in_func(self.host.net_http.http_req_path, self.b.func);
-                        let call = self.b.ins().call(host, &[recv_val]);
-                        Ok(self.b.inst_results(call)[0])
+                        Ok(self.call_host(self.host.net_http.http_req_path, &[recv_val]))
                     }
                     ("HTTPRequest", "param") if args.len() == 1 => {
                         let name = self.lower_expr(&args[0])?;
-                        let host = self
-                            .module
-                            .declare_func_in_func(self.host.net_http.http_req_param, self.b.func);
-                        let call = self.b.ins().call(host, &[recv_val, name]);
-                        Ok(self.b.inst_results(call)[0])
+                        Ok(self.call_host(self.host.net_http.http_req_param, &[recv_val, name]))
                     }
                     ("HTTPRequest", "header") if args.len() == 1 => {
                         let name = self.lower_expr(&args[0])?;
-                        let host = self
-                            .module
-                            .declare_func_in_func(self.host.net_http.http_req_header, self.b.func);
-                        let call = self.b.ins().call(host, &[recv_val, name]);
-                        Ok(self.b.inst_results(call)[0])
+                        Ok(self.call_host(self.host.net_http.http_req_header, &[recv_val, name]))
                     }
                     ("HTTPRequest", "trailers") if args.is_empty() => {
                         let host = self.module.declare_func_in_func(
@@ -19765,11 +17791,7 @@ impl LowerCtx<'_, '_> {
                     }
                     ("HTTPBody", "text") if args.len() == 1 => {
                         let limit = self.lower_expr(&args[0])?;
-                        let host = self
-                            .module
-                            .declare_func_in_func(self.host.net_http.http_body_text, self.b.func);
-                        let call = self.b.ins().call(host, &[recv_val, limit]);
-                        Ok(self.b.inst_results(call)[0])
+                        Ok(self.call_host(self.host.net_http.http_body_text, &[recv_val, limit]))
                     }
                     ("HTTPBody", "json") if args.len() == 1 => {
                         let limit = self.lower_expr(&args[0])?;
@@ -19780,18 +17802,10 @@ impl LowerCtx<'_, '_> {
                         self.lower_http_body_json(recv_val, Some(limit), ok_ty)
                     }
                     ("HTTPResponse", "status") if args.is_empty() => {
-                        let host = self
-                            .module
-                            .declare_func_in_func(self.host.net_http.http_resp_status, self.b.func);
-                        let call = self.b.ins().call(host, &[recv_val]);
-                        Ok(self.b.inst_results(call)[0])
+                        Ok(self.call_host(self.host.net_http.http_resp_status, &[recv_val]))
                     }
                     ("HTTPResponse", "body") if args.is_empty() => {
-                        let host = self
-                            .module
-                            .declare_func_in_func(self.host.net_http.http_resp_body, self.b.func);
-                        let call = self.b.ins().call(host, &[recv_val]);
-                        Ok(self.b.inst_results(call)[0])
+                        Ok(self.call_host(self.host.net_http.http_resp_body, &[recv_val]))
                     }
                     ("HTTPServer", "local_addr") if args.is_empty() => {
                         let host = self.module.declare_func_in_func(
@@ -19802,11 +17816,7 @@ impl LowerCtx<'_, '_> {
                         Ok(self.b.inst_results(call)[0])
                     }
                     ("HTTPServer", "serve") if args.is_empty() => {
-                        let host = self
-                            .module
-                            .declare_func_in_func(self.host.net_http.http_server_serve, self.b.func);
-                        let call = self.b.ins().call(host, &[recv_val]);
-                        Ok(self.b.inst_results(call)[0])
+                        Ok(self.call_host(self.host.net_http.http_server_serve, &[recv_val]))
                     }
                     ("HTTPServer", "shutdown") if args.len() == 1 => {
                         // Duration handle -> ms via DurationIn not available here; pass
@@ -19821,27 +17831,15 @@ impl LowerCtx<'_, '_> {
                     }
                     ("WsConn", "send_text") if args.len() == 1 => {
                         let text = self.lower_expr(&args[0])?;
-                        let host = self
-                            .module
-                            .declare_func_in_func(self.host.net_http.ws_send_text, self.b.func);
-                        let call = self.b.ins().call(host, &[recv_val, text]);
-                        Ok(self.b.inst_results(call)[0])
+                        Ok(self.call_host(self.host.net_http.ws_send_text, &[recv_val, text]))
                     }
                     ("WsConn", "recv") if args.is_empty() => {
-                        let host = self
-                            .module
-                            .declare_func_in_func(self.host.net_http.ws_recv, self.b.func);
-                        let call = self.b.ins().call(host, &[recv_val]);
-                        Ok(self.b.inst_results(call)[0])
+                        Ok(self.call_host(self.host.net_http.ws_recv, &[recv_val]))
                     }
                     ("WsConn", "close") if args.len() == 2 => {
                         let code = self.lower_expr(&args[0])?;
                         let reason = self.lower_expr(&args[1])?;
-                        let host = self
-                            .module
-                            .declare_func_in_func(self.host.net_http.ws_close, self.b.func);
-                        let call = self.b.ins().call(host, &[recv_val, code, reason]);
-                        Ok(self.b.inst_results(call)[0])
+                        Ok(self.call_host(self.host.net_http.ws_close, &[recv_val, code, reason]))
                     }
                     ("WsMessage", "is_text") if args.is_empty() => {
                         let host = self.module.declare_func_in_func(
@@ -19853,11 +17851,7 @@ impl LowerCtx<'_, '_> {
                         Ok(self.b.ins().ireduce(types::I8, v))
                     }
                     ("WsMessage", "text") if args.is_empty() => {
-                        let host = self
-                            .module
-                            .declare_func_in_func(self.host.net_http.ws_message_text, self.b.func);
-                        let call = self.b.ins().call(host, &[recv_val]);
-                        Ok(self.b.inst_results(call)[0])
+                        Ok(self.call_host(self.host.net_http.ws_message_text, &[recv_val]))
                     }
                     _ => Err(format!(
                         "jit handle method unsupported: {kind}::{method}"
@@ -19883,116 +17877,56 @@ impl LowerCtx<'_, '_> {
             }
             THandleOp::DataTreeField | THandleOp::JSONField => {
                 let name = self.lower_expr(&args[0])?;
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.encoding.datatree_field, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val, name]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.encoding.datatree_field, &[recv_val, name]))
             }
             THandleOp::DataTreeAt | THandleOp::JSONAt => {
                 let idx = self.lower_expr(&args[0])?;
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.encoding.datatree_at, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val, idx]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.encoding.datatree_at, &[recv_val, idx]))
             }
             THandleOp::DataTreeInt | THandleOp::JSONInt => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.encoding.datatree_int, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.encoding.datatree_int, &[recv_val]))
             }
             THandleOp::DataTreeText | THandleOp::JSONText => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.encoding.datatree_text, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.encoding.datatree_text, &[recv_val]))
             }
             THandleOp::DataTreeBool | THandleOp::JSONBool => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.encoding.datatree_bool, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.encoding.datatree_bool, &[recv_val]))
             }
             THandleOp::DataTreeFloat | THandleOp::JSONFloat => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.encoding.datatree_float, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
                 // Result stores f64 bits; convert via result_get_f64 at use sites.
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.encoding.datatree_float, &[recv_val]))
             }
             THandleOp::PathFrom => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.core.path_from, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.core.path_from, &[recv_val]))
             }
             THandleOp::PathJoin => {
                 let part = self.lower_expr(&args[0])?;
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.core.path_join_handle, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val, part]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.core.path_join_handle, &[recv_val, part]))
             }
             THandleOp::PathParent => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.core.path_parent, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.core.path_parent, &[recv_val]))
             }
             THandleOp::PathExtension => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.core.path_extension, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.core.path_extension, &[recv_val]))
             }
             THandleOp::PathStem => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.core.path_stem, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.core.path_stem, &[recv_val]))
             }
             THandleOp::PathToString => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.core.path_to_string, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.core.path_to_string, &[recv_val]))
             }
             THandleOp::PathWalk => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.core.path_walk, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.core.path_walk, &[recv_val]))
             }
             THandleOp::PathWriteAtomic => {
                 let bytes = self.lower_expr(&args[0])?;
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.core.path_write_atomic, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val, bytes]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.core.path_write_atomic, &[recv_val, bytes]))
             }
             THandleOp::UiBackendMethod { method } => match method.as_str() {
                 "measure" if args.len() == 2 => {
                     let node = self.lower_expr(&args[0])?;
                     let c = self.lower_expr(&args[1])?;
-                    let host = self
-                        .module
-                        .declare_func_in_func(self.host.ui.measure, self.b.func);
-                    let call = self.b.ins().call(host, &[recv_val, node, c]);
-                    Ok(self.b.inst_results(call)[0])
+                    Ok(self.call_host(self.host.ui.measure, &[recv_val, node, c]))
                 }
                 "layout" if args.len() == 2 => {
                     let node = self.lower_expr(&args[0])?;
@@ -20030,11 +17964,7 @@ impl LowerCtx<'_, '_> {
                 }
                 "on_event" if args.len() == 1 => {
                     let ev = self.lower_expr(&args[0])?;
-                    let host = self
-                        .module
-                        .declare_func_in_func(self.host.ui.on_event, self.b.func);
-                    let call = self.b.ins().call(host, &[recv_val, ev]);
-                    Ok(self.b.inst_results(call)[0])
+                    Ok(self.call_host(self.host.ui.on_event, &[recv_val, ev]))
                 }
                 "commands" | "frame_lines" if args.is_empty() => {
                     let host_id = if method == "commands" {
@@ -20042,16 +17972,10 @@ impl LowerCtx<'_, '_> {
                     } else {
                         self.host.ui.frame_lines
                     };
-                    let host = self.module.declare_func_in_func(host_id, self.b.func);
-                    let call = self.b.ins().call(host, &[recv_val]);
-                    Ok(self.b.inst_results(call)[0])
+                    Ok(self.call_host(host_id, &[recv_val]))
                 }
                 "render_count" if args.is_empty() => {
-                    let host = self
-                        .module
-                        .declare_func_in_func(self.host.ui.render_count, self.b.func);
-                    let call = self.b.ins().call(host, &[recv_val]);
-                    Ok(self.b.inst_results(call)[0])
+                    Ok(self.call_host(self.host.ui.render_count, &[recv_val]))
                 }
                 "set_focus_group" if args.len() == 1 => {
                     let nodes = self.lower_expr(&args[0])?;
@@ -20062,19 +17986,11 @@ impl LowerCtx<'_, '_> {
                     Ok(self.b.ins().iconst(types::I8, 0))
                 }
                 "focused_label" if args.is_empty() => {
-                    let host = self
-                        .module
-                        .declare_func_in_func(self.host.ui.focused_label, self.b.func);
-                    let call = self.b.ins().call(host, &[recv_val]);
-                    Ok(self.b.inst_results(call)[0])
+                    Ok(self.call_host(self.host.ui.focused_label, &[recv_val]))
                 }
                 "button" if args.len() == 1 => {
                     let label = self.lower_expr(&args[0])?;
-                    let host = self
-                        .module
-                        .declare_func_in_func(self.host.ui.gtk_button, self.b.func);
-                    let call = self.b.ins().call(host, &[recv_val, label]);
-                    Ok(self.b.inst_results(call)[0])
+                    Ok(self.call_host(self.host.ui.gtk_button, &[recv_val, label]))
                 }
                 "on_click" if args.len() == 2 => {
                     let widget = self.lower_expr(&args[0])?;
@@ -20104,19 +18020,11 @@ impl LowerCtx<'_, '_> {
             THandleOp::DevServerMethod { method } => match method.as_str() {
                 "html" if args.len() == 1 => {
                     let html = self.lower_expr(&args[0])?;
-                    let host = self
-                        .module
-                        .declare_func_in_func(self.host.web.devserver_html, self.b.func);
-                    let call = self.b.ins().call(host, &[recv_val, html]);
-                    Ok(self.b.inst_results(call)[0])
+                    Ok(self.call_host(self.host.web.devserver_html, &[recv_val, html]))
                 }
                 "port" if args.len() == 1 => {
                     let port = self.lower_expr(&args[0])?;
-                    let host = self
-                        .module
-                        .declare_func_in_func(self.host.web.devserver_port, self.b.func);
-                    let call = self.b.ins().call(host, &[recv_val, port]);
-                    Ok(self.b.inst_results(call)[0])
+                    Ok(self.call_host(self.host.web.devserver_port, &[recv_val, port]))
                 }
                 "serve" if args.is_empty() => {
                     let host = self
@@ -20140,20 +18048,12 @@ impl LowerCtx<'_, '_> {
                 } else {
                     self.lower_expr(&args[1])?
                 };
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.web.app_method, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, method_v, a0, a1]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.web.app_method, &[recv_val, method_v, a0, a1]))
             },
             THandleOp::DBWithPolicy => {
                 let policy = self.lower_expr(&args[0])?;
                 let user = self.lower_expr(&args[1])?;
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.db.with_policy, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val, policy, user]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.db.with_policy, &[recv_val, policy, user]))
             }
             // D-SERVICE-AUTHORITY1: durable receipts are ambient-backed so the
             // interpreter and the JIT deopt path call the same shared authority.
@@ -20167,162 +18067,88 @@ impl LowerCtx<'_, '_> {
             THandleOp::DBQuery => {
                 let sql = self.lower_expr(&args[0])?;
                 let params = self.lower_expr(&args[1])?;
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.db.query, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val, sql, params]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.db.query, &[recv_val, sql, params]))
             }
             THandleOp::DBQueryOne => {
                 let sql = self.lower_expr(&args[0])?;
                 let params = self.lower_expr(&args[1])?;
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.db.query_one, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val, sql, params]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.db.query_one, &[recv_val, sql, params]))
             }
             THandleOp::DBExecute => {
                 let sql = self.lower_expr(&args[0])?;
                 let params = self.lower_expr(&args[1])?;
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.db.execute, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val, sql, params]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.db.execute, &[recv_val, sql, params]))
             }
             THandleOp::DBLive => Err("DBLive is ambient-backed".to_string()),
             THandleOp::DBBegin => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.db.begin, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.db.begin, &[recv_val]))
             }
             THandleOp::DBCommit => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.db.commit, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.db.commit, &[recv_val]))
             }
             THandleOp::DBRollback => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.db.rollback, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.db.rollback, &[recv_val]))
             }
             THandleOp::DBClose => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.db.close, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.db.close, &[recv_val]))
             }
             THandleOp::DBValueInt => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.db.dbvalue_int, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.db.dbvalue_int, &[recv_val]))
             }
             THandleOp::DBValueFloat => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.db.dbvalue_float, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.db.dbvalue_float, &[recv_val]))
             }
             THandleOp::DBValueText => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.db.dbvalue_text, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.db.dbvalue_text, &[recv_val]))
             }
             THandleOp::DBValueBool => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.db.dbvalue_bool, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.db.dbvalue_bool, &[recv_val]))
             }
             THandleOp::DBValueIsNull => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.db.dbvalue_is_null, self.b.func);
-                let call = self.b.ins().call(host_ref, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.db.dbvalue_is_null, &[recv_val]))
             }
             THandleOp::PluginCall => Err("jit handle method unsupported".to_string()),
             THandleOp::PluginCallInt => Err("jit handle method unsupported".to_string()),
             THandleOp::ReaderOver => {
-                let host = self.module.declare_func_in_func(self.host.parse.reader_over, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.parse.reader_over, &[recv_val]))
             }
             THandleOp::ReaderReadU8 => {
-                let host = self.module.declare_func_in_func(self.host.parse.reader_read_u8, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.parse.reader_read_u8, &[recv_val]))
             }
             THandleOp::ReaderReadU16Le => {
-                let host = self.module.declare_func_in_func(self.host.parse.reader_read_u16_le, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.parse.reader_read_u16_le, &[recv_val]))
             }
             THandleOp::ReaderReadU16Be => {
-                let host = self.module.declare_func_in_func(self.host.parse.reader_read_u16_be, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.parse.reader_read_u16_be, &[recv_val]))
             }
             THandleOp::ReaderReadU32Le => {
-                let host = self.module.declare_func_in_func(self.host.parse.reader_read_u32_le, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.parse.reader_read_u32_le, &[recv_val]))
             }
             THandleOp::ReaderReadU32Be => {
-                let host = self.module.declare_func_in_func(self.host.parse.reader_read_u32_be, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.parse.reader_read_u32_be, &[recv_val]))
             }
             THandleOp::ReaderReadU64Le => {
-                let host = self.module.declare_func_in_func(self.host.parse.reader_read_u64_le, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.parse.reader_read_u64_le, &[recv_val]))
             }
             THandleOp::ReaderReadU64Be => {
-                let host = self.module.declare_func_in_func(self.host.parse.reader_read_u64_be, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.parse.reader_read_u64_be, &[recv_val]))
             }
             THandleOp::ReaderTake => {
                 let n = self.lower_expr(&args[0])?;
-                let host = self.module.declare_func_in_func(self.host.parse.reader_take, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, n]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.parse.reader_take, &[recv_val, n]))
             }
             THandleOp::ReaderRemaining => {
-                let host = self.module.declare_func_in_func(self.host.parse.reader_remaining, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.parse.reader_remaining, &[recv_val]))
             }
             THandleOp::ReaderAtEnd => {
-                let host = self.module.declare_func_in_func(self.host.parse.reader_at_end, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.parse.reader_at_end, &[recv_val]))
             }
             THandleOp::CursorOver => {
-                let host = self.module.declare_func_in_func(self.host.parse.cursor_over, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.parse.cursor_over, &[recv_val]))
             }
             THandleOp::CursorTakeUntil => {
                 let d = self.lower_expr(&args[0])?;
-                let host = self.module.declare_func_in_func(self.host.parse.cursor_take_until, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, d]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.parse.cursor_take_until, &[recv_val, d]))
             }
             THandleOp::CursorSkipWs => {
                 let host = self.module.declare_func_in_func(self.host.parse.cursor_skip_ws, self.b.func);
@@ -20332,16 +18158,12 @@ impl LowerCtx<'_, '_> {
             THandleOp::CursorTakePattern { parts, .. } => {
                 let pid = crate::Parse::install_str_pattern(parts.clone());
                 let pid_v = self.b.ins().iconst(types::I64, pid);
-                let host = self.module.declare_func_in_func(self.host.parse.cursor_take_pattern, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, pid_v]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.parse.cursor_take_pattern, &[recv_val, pid_v]))
             }
             THandleOp::ReaderTakePattern { parts, .. } => {
                 let pid = crate::Parse::install_bin_pattern(parts.clone());
                 let pid_v = self.b.ins().iconst(types::I64, pid);
-                let host = self.module.declare_func_in_func(self.host.parse.reader_take_pattern, self.b.func);
-                let call = self.b.ins().call(host, &[recv_val, pid_v]);
-                Ok(self.b.inst_results(call)[0])
+                Ok(self.call_host(self.host.parse.reader_take_pattern, &[recv_val, pid_v]))
             }
             THandleOp::DataTreeDecode(target) => {
                 let tree = self.lower_expr(recv)?;
@@ -20362,11 +18184,8 @@ impl LowerCtx<'_, '_> {
                 return Err("jit receive status arity".to_string());
             }
             let ch = self.lower_expr(recv)?;
-            let host_ref = self
-                .module
-                .declare_func_in_func(self.host.conc.channel_receive_status, self.b.func);
-            let call = self.b.ins().call(host_ref, &[ch]);
-            return Ok(self.finish_wait_call(self.b.inst_results(call)[0]));
+            let status = self.call_host(self.host.conc.channel_receive_status, &[ch]);
+            return Ok(self.finish_wait_call(status));
         }
         Err("jit result status unsupported".to_string())
     }
@@ -20438,9 +18257,7 @@ impl LowerCtx<'_, '_> {
                     .get(&key)
                     .copied()
                     .ok_or_else(|| format!("jit missing method `{key}`"))?;
-                let func_ref = self.module.declare_func_in_func(func_id, self.b.func);
-                let call = self.b.ins().call(func_ref, &[vals[i], vals[i + 1]]);
-                let ordering = self.b.inst_results(call)[0];
+                let ordering = self.call_host(func_id, &[vals[i], vals[i + 1]]);
                 self.emit_trap_check()?;
                 let (condition, discriminant) = match op {
                     BinOp::Lt => (IntCC::Equal, 0),
@@ -20845,33 +18662,21 @@ impl LowerCtx<'_, '_> {
         let fn_id = self.runtime.heap.alloc_string(func.to_string());
         let ty_v = self.b.ins().iconst(types::I64, ty_id);
         let fn_v = self.b.ins().iconst(types::I64, fn_id);
-        let list_new = self
-            .module
-            .declare_func_in_func(self.host.coll.list_new, self.b.func);
-        let call = self.b.ins().call(list_new, &[]);
-        let args = self.b.inst_results(call)[0];
+        let args = self.call_host(self.host.coll.list_new, &[]);
         let push = self
             .module
             .declare_func_in_func(self.host.coll.list_push, self.b.func);
         for &v in arg_vals {
             self.b.ins().call(push, &[args, v]);
         }
-        let host = self
-            .module
-            .declare_func_in_func(self.host.math.call, self.b.func);
-        let call = self.b.ins().call(host, &[ty_v, fn_v, args]);
-        let packed = self.b.inst_results(call)[0];
+        let packed = self.call_host(self.host.math.call, &[ty_v, fn_v, args]);
         self.emit_trap_check()?;
         self.unpack_math_result(packed, ret_ty)
     }
 
     fn unpack_math_result(&mut self, packed: Value, ret_ty: &Type) -> Result<Value, String> {
         if matches!(ret_ty, Type::Float | Type::Float32) {
-            let is_f = self
-                .module
-                .declare_func_in_func(self.host.math.result_is_float, self.b.func);
-            let call = self.b.ins().call(is_f, &[packed]);
-            let flag = self.b.inst_results(call)[0];
+            let flag = self.call_host(self.host.math.result_is_float, &[packed]);
             let float_block = self.b.create_block();
             let bad_block = self.b.create_block();
             let merge = self.b.create_block();
@@ -20883,21 +18688,13 @@ impl LowerCtx<'_, '_> {
             self.b.ins().jump(merge, &[zero]);
             self.b.switch_to_block(float_block);
             self.b.seal_block(float_block);
-            let get = self
-                .module
-                .declare_func_in_func(self.host.math.result_float, self.b.func);
-            let call = self.b.ins().call(get, &[packed]);
-            let f = self.b.inst_results(call)[0];
+            let f = self.call_host(self.host.math.result_float, &[packed]);
             self.b.ins().jump(merge, &[f]);
             self.b.switch_to_block(merge);
             self.b.seal_block(merge);
             return Ok(self.b.block_params(merge)[0]);
         }
-        let get = self
-            .module
-            .declare_func_in_func(self.host.math.result_handle, self.b.func);
-        let call = self.b.ins().call(get, &[packed]);
-        Ok(self.b.inst_results(call)[0])
+        Ok(self.call_host(self.host.math.result_handle, &[packed]))
     }
 
     fn lower_binary(
@@ -21008,9 +18805,7 @@ impl LowerCtx<'_, '_> {
                 _ => return Err("jit overflow op unsupported".to_string()),
             };
             let line_const = self.b.ins().iconst(types::I32, line as i64);
-            let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
-            let call = self.b.ins().call(host_ref, &[l, r, line_const]);
-            let result = self.b.inst_results(call)[0];
+            let result = self.call_host(host_id, &[l, r, line_const]);
             self.emit_trap_check()?;
             return Ok(result);
         }
@@ -21034,11 +18829,7 @@ impl LowerCtx<'_, '_> {
                 ) || matches!(&lhs_ty, Type::Named(n) if n == "str")
             );
         if ui_label_eq {
-            let host_ref = self
-                .module
-                .declare_func_in_func(self.host.str_eq, self.b.func);
-            let call = self.b.ins().call(host_ref, &[l, r]);
-            let eq = self.b.inst_results(call)[0];
+            let eq = self.call_host(self.host.str_eq, &[l, r]);
             return Ok(if matches!(op, BinOp::Eq) {
                 eq
             } else {
@@ -21087,11 +18878,7 @@ impl LowerCtx<'_, '_> {
             (Type::Bool, BinOp::Eq) => self.bool_from_icmp(IntCC::Equal, l, r),
             (Type::Bool, BinOp::Ne) => self.bool_from_icmp(IntCC::NotEqual, l, r),
             (Type::Named(name), BinOp::Eq | BinOp::Ne) if name == "BigInt" => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.num.bigint_eq, self.b.func);
-                let call = self.b.ins().call(host_ref, &[l, r]);
-                let eq = self.b.inst_results(call)[0];
+                let eq = self.call_host(self.host.num.bigint_eq, &[l, r]);
                 if matches!(op, BinOp::Eq) {
                     eq
                 } else {
@@ -21102,34 +18889,18 @@ impl LowerCtx<'_, '_> {
             (Type::Named(_) | Type::Apply { .. }, BinOp::Eq) => self.bool_from_icmp(IntCC::Equal, l, r),
             (Type::Named(_) | Type::Apply { .. }, BinOp::Ne) => self.bool_from_icmp(IntCC::NotEqual, l, r),
             (Type::String, BinOp::Eq) => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.str_eq, self.b.func);
-                let call = self.b.ins().call(host_ref, &[l, r]);
-                self.b.inst_results(call)[0]
+                self.call_host(self.host.str_eq, &[l, r])
             }
             (Type::String, BinOp::Ne) => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.str_eq, self.b.func);
-                let call = self.b.ins().call(host_ref, &[l, r]);
-                let eq = self.b.inst_results(call)[0];
+                let eq = self.call_host(self.host.str_eq, &[l, r]);
                 let one = self.b.ins().iconst(types::I8, 1);
                 self.b.ins().isub(one, eq)
             }
             (Type::List(_) | Type::FixedList { .. }, BinOp::Eq) => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.coll.list_eq, self.b.func);
-                let call = self.b.ins().call(host_ref, &[l, r]);
-                self.b.inst_results(call)[0]
+                self.call_host(self.host.coll.list_eq, &[l, r])
             }
             (Type::List(_) | Type::FixedList { .. }, BinOp::Ne) => {
-                let host_ref = self
-                    .module
-                    .declare_func_in_func(self.host.coll.list_eq, self.b.func);
-                let call = self.b.ins().call(host_ref, &[l, r]);
-                let eq = self.b.inst_results(call)[0];
+                let eq = self.call_host(self.host.coll.list_eq, &[l, r]);
                 let one = self.b.ins().iconst(types::I8, 1);
                 self.b.ins().isub(one, eq)
             }
@@ -21279,15 +19050,13 @@ impl LowerCtx<'_, '_> {
                 let list = self.lower_expr(base)?;
                 let index = self.lower_expr(index)?;
                 let line = self.b.ins().iconst(types::I32, *line as i64);
-                let mut get = |host| {
-                    let host = self.module.declare_func_in_func(host, self.b.func);
-                    let call = self.b.ins().call(host, &[list, index, line]);
-                    self.b.inst_results(call)[0]
-                };
+                let start_id = self.host.coll.list_get_range_start;
+                let end_id = self.host.coll.list_get_range_end;
+                let exclusive_id = self.host.coll.list_get_range_exclusive;
                 let values = [
-                    get(self.host.coll.list_get_range_start),
-                    get(self.host.coll.list_get_range_end),
-                    get(self.host.coll.list_get_range_exclusive),
+                    self.call_host(start_id, &[list, index, line]),
+                    self.call_host(end_id, &[list, index, line]),
+                    self.call_host(exclusive_id, &[list, index, line]),
                 ];
                 self.emit_trap_check()?;
                 Ok(values)
@@ -21299,11 +19068,7 @@ impl LowerCtx<'_, '_> {
     fn lower_range_show(&mut self, values: [Value; 3]) -> Result<Value, String> {
         let [start, end, exclusive] = values;
         let exclusive = self.b.ins().uextend(types::I64, exclusive);
-        let host = self
-            .module
-            .declare_func_in_func(self.host.coll.range_show, self.b.func);
-        let call = self.b.ins().call(host, &[start, end, exclusive]);
-        Ok(self.b.inst_results(call)[0])
+        Ok(self.call_host(self.host.coll.range_show, &[start, end, exclusive]))
     }
 
     /// `TExprKind::Print` payload lowering: literal-kind exprs (`IntLit`/
@@ -21327,11 +19092,7 @@ impl LowerCtx<'_, '_> {
                 .b
                 .ins()
                 .iconst(types::I64, i64::from(*signed));
-            let show = self
-                .module
-                .declare_func_in_func(self.host.intn_to_string, self.b.func);
-            let call = self.b.ins().call(show, &[value, signed]);
-            let text = self.b.inst_results(call)[0];
+            let text = self.call_host(self.host.intn_to_string, &[value, signed]);
             let print = self
                 .module
                 .declare_func_in_func(self.host.print_str, self.b.func);
@@ -21378,11 +19139,7 @@ impl LowerCtx<'_, '_> {
                     &print_ty,
                     Type::List(inner) if matches!(inner.as_ref(), Type::Named(name) if name == "FieldError")
                 ) {
-                    let show_ref = self
-                        .module
-                        .declare_func_in_func(self.host.encoding.decode_error_show, self.b.func);
-                    let call = self.b.ins().call(show_ref, &[val]);
-                    let shown = self.b.inst_results(call)[0];
+                    let shown = self.call_host(self.host.encoding.decode_error_show, &[val]);
                     let print_ref = self
                         .module
                         .declare_func_in_func(self.host.print_str, self.b.func);
@@ -21433,11 +19190,7 @@ impl LowerCtx<'_, '_> {
                     Type::Apply { name, args }
                         if name == "Measurement" && args.as_slice() == [Type::Float]
                 ) {
-                    let show = self
-                        .module
-                        .declare_func_in_func(self.host.measurement_show, self.b.func);
-                    let call = self.b.ins().call(show, &[val]);
-                    let text = self.b.inst_results(call)[0];
+                    let text = self.call_host(self.host.measurement_show, &[val]);
                     let print = self
                         .module
                         .declare_func_in_func(self.host.print_str, self.b.func);
@@ -21483,11 +19236,7 @@ impl LowerCtx<'_, '_> {
                     Type::Char => self.host.print_char,
                     Type::Named(n) if n == "DataTree" || n == "JSON" => {
                         // JetShow DataTree/JSON via shared encoding host (same as AOT).
-                        let host_ref = self
-                            .module
-                            .declare_func_in_func(self.host.encoding.json_to_string, self.b.func);
-                        let call = self.b.ins().call(host_ref, &[val]);
-                        let s = self.b.inst_results(call)[0];
+                        let s = self.call_host(self.host.encoding.json_to_string, &[val]);
                         let print_ref = self
                             .module
                             .declare_func_in_func(self.host.print_str, self.b.func);
@@ -21520,9 +19269,7 @@ impl LowerCtx<'_, '_> {
         } else {
             self.b.ins().iconst(types::I64, const_flag.unwrap_or(0))
         };
-        let host_ref = self.module.declare_func_in_func(host, self.b.func);
-        let call = self.b.ins().call(host_ref, &[recv_val, second]);
-        Ok(self.b.inst_results(call)[0])
+        Ok(self.call_host(host, &[recv_val, second]))
     }
 
     fn transfer_progress(&mut self, source: Value, target: Value) {
@@ -21548,11 +19295,7 @@ impl LowerCtx<'_, '_> {
     }
 
     fn progress_source_pull(&mut self, source: Value, index: Value) -> Value {
-        let host = self
-            .module
-            .declare_func_in_func(self.host.io.progress_source_pull, self.b.func);
-        let call = self.b.ins().call(host, &[source, index]);
-        self.b.inst_results(call)[0]
+        self.call_host(self.host.io.progress_source_pull, &[source, index])
     }
 
     fn transfer_progress_plan(
@@ -21569,11 +19312,7 @@ impl LowerCtx<'_, '_> {
     }
 
     fn collect_progress(&mut self, value: Value) -> Value {
-        let host = self
-            .module
-            .declare_func_in_func(self.host.io.progress_collect, self.b.func);
-        let call = self.b.ins().call(host, &[value]);
-        self.b.inst_results(call)[0]
+        self.call_host(self.host.io.progress_collect, &[value])
     }
 
     fn progress_pull(&mut self, source: Value, pulls: Value) {
@@ -21661,21 +19400,13 @@ impl LowerCtx<'_, '_> {
 
         let recv_val = self.lower_expr(recv)?;
         let targets = self.lower_expr(targets)?;
-        let disjoint = self
-            .module
-            .declare_func_in_func(self.host.coll.get_disjoint_write, self.b.func);
-        let call = self.b.ins().call(disjoint, &[recv_val, targets]);
-        let result = self.b.inst_results(call)[0];
+        let result = self.call_host(self.host.coll.get_disjoint_write, &[recv_val, targets]);
 
         let success = self.b.create_block();
         let failure = self.b.create_block();
         let merge = self.b.create_block();
         self.b.append_block_param(merge, types::I64);
-        let is_ok_host = self
-            .module
-            .declare_func_in_func(self.host.result_is_ok, self.b.func);
-        let is_ok_call = self.b.ins().call(is_ok_host, &[result]);
-        let is_ok = self.b.inst_results(is_ok_call)[0];
+        let is_ok = self.call_host(self.host.result_is_ok, &[result]);
         let zero = self.b.ins().iconst(types::I8, 0);
         let ok = self.b.ins().icmp(IntCC::NotEqual, is_ok, zero);
         self.b.ins().brif(ok, success, &[], failure, &[]);
@@ -21716,11 +19447,7 @@ impl LowerCtx<'_, '_> {
         })?;
         let tag = self.b.ins().iconst(types::I8, 1);
         let unit = self.b.ins().iconst(types::I64, 0);
-        let make_result = self
-            .module
-            .declare_func_in_func(self.host.result_new_i64, self.b.func);
-        let ok_call = self.b.ins().call(make_result, &[tag, unit]);
-        let ok_result = self.b.inst_results(ok_call)[0];
+        let ok_result = self.call_host(self.host.result_new_i64, &[tag, unit]);
         self.b.ins().jump(merge, &[ok_result]);
 
         self.b.switch_to_block(merge);
@@ -21743,11 +19470,7 @@ impl LowerCtx<'_, '_> {
         let recv_val = self.collect_progress(recv_val);
         let coll_var = self.fresh_var(types::I64);
         self.b.def_var(coll_var, recv_val);
-        let map_new = self
-            .module
-            .declare_func_in_func(self.host.coll.map_new, self.b.func);
-        let map_call = self.b.ins().call(map_new, &[]);
-        let map = self.b.inst_results(map_call)[0];
+        let map = self.call_host(self.host.coll.map_new, &[]);
         let map_var = self.fresh_var(types::I64);
         self.b.def_var(map_var, map);
 
@@ -21763,11 +19486,7 @@ impl LowerCtx<'_, '_> {
         self.b.switch_to_block(header);
         let idx = self.b.use_var(idx_var);
         let coll = self.b.use_var(coll_var);
-        let len_ref = self
-            .module
-            .declare_func_in_func(self.host.coll.list_len, self.b.func);
-        let len_call = self.b.ins().call(len_ref, &[coll]);
-        let len = self.b.inst_results(len_call)[0];
+        let len = self.call_host(self.host.coll.list_len, &[coll]);
         let done = self
             .b
             .ins()
@@ -21876,11 +19595,7 @@ impl LowerCtx<'_, '_> {
         let coll_var = self.fresh_var(types::I64);
         self.b.def_var(coll_var, recv_val);
 
-        let new_ref = self
-            .module
-            .declare_func_in_func(self.host.coll.list_new, self.b.func);
-        let out_call = self.b.ins().call(new_ref, &[]);
-        let out_val = self.b.inst_results(out_call)[0];
+        let out_val = self.call_host(self.host.coll.list_new, &[]);
         let out_var = self.fresh_var(types::I64);
         self.b.def_var(out_var, out_val);
 
@@ -21896,11 +19611,7 @@ impl LowerCtx<'_, '_> {
         self.b.switch_to_block(header);
         let idx = self.b.use_var(idx_var);
         let coll = self.b.use_var(coll_var);
-        let len_ref = self
-            .module
-            .declare_func_in_func(self.host.coll.list_len, self.b.func);
-        let len_call = self.b.ins().call(len_ref, &[coll]);
-        let len = self.b.inst_results(len_call)[0];
+        let len = self.call_host(self.host.coll.list_len, &[coll]);
         let done = self
             .b
             .ins()
@@ -22005,11 +19716,7 @@ impl LowerCtx<'_, '_> {
         self.b.switch_to_block(header);
         let idx = self.b.use_var(idx_var);
         let coll = self.b.use_var(coll_var);
-        let len_ref = self
-            .module
-            .declare_func_in_func(self.host.coll.list_len, self.b.func);
-        let len_call = self.b.ins().call(len_ref, &[coll]);
-        let len = self.b.inst_results(len_call)[0];
+        let len = self.call_host(self.host.coll.list_len, &[coll]);
         let done = self
             .b
             .ins()
@@ -22326,11 +20033,7 @@ impl LowerCtx<'_, '_> {
             _ => return Err("jit if-let pattern unsupported".to_string()),
         };
         let handle = self.lower_expr(subj)?;
-        let status_ref = self
-            .module
-            .declare_func_in_func(self.host.result_is_ok, self.b.func);
-        let status_call = self.b.ins().call(status_ref, &[handle]);
-        let is_ok = self.b.inst_results(status_call)[0];
+        let is_ok = self.call_host(self.host.result_is_ok, &[handle]);
         let zero_b = self.b.ins().iconst(types::I8, 0);
         let cond = if want_ok {
             self.b.ins().icmp(IntCC::NotEqual, is_ok, zero_b)
@@ -22487,11 +20190,7 @@ impl LowerCtx<'_, '_> {
 
         let handle = self.lower_expr(subj)?;
         let zero = self.b.ins().iconst(types::I64, 0);
-        let get_i = self
-            .module
-            .declare_func_in_func(self.host.struct_get_i64, self.b.func);
-        let disc_call = self.b.ins().call(get_i, &[handle, zero]);
-        let actual_disc = self.b.inst_results(disc_call)[0];
+        let actual_disc = self.call_host(self.host.struct_get_i64, &[handle, zero]);
         let want = self.b.ins().iconst(types::I64, want_disc);
         let cond = self.bool_from_icmp(IntCC::Equal, actual_disc, want);
 
@@ -22600,15 +20299,10 @@ impl LowerCtx<'_, '_> {
         let coll_var = self.fresh_var(types::I64);
         self.b.def_var(coll_var, recv_val);
 
-        let new_ref = self
-            .module
-            .declare_func_in_func(self.host.coll.list_new, self.b.func);
-        let out_call = self.b.ins().call(new_ref, &[]);
-        let out_val = self.b.inst_results(out_call)[0];
+        let out_val = self.call_host(self.host.coll.list_new, &[]);
         let out_var = self.fresh_var(types::I64);
         self.b.def_var(out_var, out_val);
-        let plan_call = self.b.ins().call(new_ref, &[]);
-        let plan_init = self.b.inst_results(plan_call)[0];
+        let plan_init = self.call_host(self.host.coll.list_new, &[]);
         let plan_var = self.fresh_var(types::I64);
         self.b.def_var(plan_var, plan_init);
         let pending_var = self.fresh_var(types::I64);
@@ -22627,11 +20321,7 @@ impl LowerCtx<'_, '_> {
         self.b.switch_to_block(header);
         let idx = self.b.use_var(idx_var);
         let coll = self.b.use_var(coll_var);
-        let len_ref = self
-            .module
-            .declare_func_in_func(self.host.coll.list_len, self.b.func);
-        let len_call = self.b.ins().call(len_ref, &[coll]);
-        let len = self.b.inst_results(len_call)[0];
+        let len = self.call_host(self.host.coll.list_len, &[coll]);
         let done = self
             .b
             .ins()
@@ -22656,11 +20346,7 @@ impl LowerCtx<'_, '_> {
             this.lower_expr(body_expr)
         })?;
         let keep = self.b.create_block();
-        let status_ref = self
-            .module
-            .declare_func_in_func(self.host.result_is_ok, self.b.func);
-        let status_call = self.b.ins().call(status_ref, &[res]);
-        let is_ok = self.b.inst_results(status_call)[0];
+        let is_ok = self.call_host(self.host.result_is_ok, &[res]);
         let zero_b = self.b.ins().iconst(types::I8, 0);
         let ok = self.b.ins().icmp(IntCC::NotEqual, is_ok, zero_b);
         self.b.ins().brif(ok, keep, &[], step, &[]);
@@ -22718,11 +20404,7 @@ impl LowerCtx<'_, '_> {
         let coll_var = self.fresh_var(types::I64);
         self.b.def_var(coll_var, recv_val);
 
-        let new_ref = self
-            .module
-            .declare_func_in_func(self.host.coll.list_new, self.b.func);
-        let keys_call = self.b.ins().call(new_ref, &[]);
-        let keys_init = self.b.inst_results(keys_call)[0];
+        let keys_init = self.call_host(self.host.coll.list_new, &[]);
         let keys_var = self.fresh_var(types::I64);
         self.b.def_var(keys_var, keys_init);
 
@@ -22738,11 +20420,7 @@ impl LowerCtx<'_, '_> {
         self.b.switch_to_block(header);
         let idx = self.b.use_var(idx_var);
         let coll = self.b.use_var(coll_var);
-        let len_ref = self
-            .module
-            .declare_func_in_func(self.host.coll.list_len, self.b.func);
-        let len_call = self.b.ins().call(len_ref, &[coll]);
-        let len = self.b.inst_results(len_call)[0];
+        let len = self.call_host(self.host.coll.list_len, &[coll]);
         let done = self
             .b
             .ins()
@@ -22795,11 +20473,7 @@ impl LowerCtx<'_, '_> {
         let coll_var = self.fresh_var(types::I64);
         self.b.def_var(coll_var, recv_val);
 
-        let new_ref = self
-            .module
-            .declare_func_in_func(self.host.coll.list_new, self.b.func);
-        let out_call = self.b.ins().call(new_ref, &[]);
-        let out_init = self.b.inst_results(out_call)[0];
+        let out_init = self.call_host(self.host.coll.list_new, &[]);
         let out_var = self.fresh_var(types::I64);
         self.b.def_var(out_var, out_init);
 
@@ -22819,11 +20493,7 @@ impl LowerCtx<'_, '_> {
         self.b.switch_to_block(header);
         let idx = self.b.use_var(idx_var);
         let coll = self.b.use_var(coll_var);
-        let len_ref = self
-            .module
-            .declare_func_in_func(self.host.coll.list_len, self.b.func);
-        let len_call = self.b.ins().call(len_ref, &[coll]);
-        let len = self.b.inst_results(len_call)[0];
+        let len = self.call_host(self.host.coll.list_len, &[coll]);
         let done = self
             .b
             .ins()
@@ -22841,11 +20511,7 @@ impl LowerCtx<'_, '_> {
         self.emit_trap_check()?;
         let one = self.b.ins().iconst(types::I64, 1);
         self.progress_pull(coll, one);
-        let status_ref = self
-            .module
-            .declare_func_in_func(self.host.result_is_ok, self.b.func);
-        let status_call = self.b.ins().call(status_ref, &[res]);
-        let is_ok = self.b.inst_results(status_call)[0];
+        let is_ok = self.call_host(self.host.result_is_ok, &[res]);
         let zero_b = self.b.ins().iconst(types::I8, 0);
         let ok = self.b.ins().icmp(IntCC::NotEqual, is_ok, zero_b);
         let push_block = self.b.create_block();
@@ -22877,11 +20543,7 @@ impl LowerCtx<'_, '_> {
         let out = self.b.use_var(out_var);
         // Ok(list) — list handle is i64 payload.
         let tag = self.b.ins().iconst(types::I8, 1);
-        let host_ref = self
-            .module
-            .declare_func_in_func(self.host.result_new_i64, self.b.func);
-        let ok_call = self.b.ins().call(host_ref, &[tag, out]);
-        let ok_handle = self.b.inst_results(ok_call)[0];
+        let ok_handle = self.call_host(self.host.result_new_i64, &[tag, out]);
         self.b.ins().jump(merge, &[ok_handle]);
 
         self.b.switch_to_block(exit_err);
@@ -22891,11 +20553,7 @@ impl LowerCtx<'_, '_> {
         let err_res = self.b.block_params(exit_err)[0];
         let err_payload = self.result_payload(err_res, &err_ty)?;
         let tag = self.b.ins().iconst(types::I8, 0);
-        let host_ref = self
-            .module
-            .declare_func_in_func(self.host.result_new_i64, self.b.func);
-        let err_call = self.b.ins().call(host_ref, &[tag, err_payload]);
-        let err_handle = self.b.inst_results(err_call)[0];
+        let err_handle = self.call_host(self.host.result_new_i64, &[tag, err_payload]);
         self.b.ins().jump(merge, &[err_handle]);
 
         self.b.switch_to_block(merge);
@@ -22919,11 +20577,7 @@ impl LowerCtx<'_, '_> {
         let coll_var = self.fresh_var(types::I64);
         self.b.def_var(coll_var, recv_val);
 
-        let new_ref = self
-            .module
-            .declare_func_in_func(self.host.coll.list_new, self.b.func);
-        let out_call = self.b.ins().call(new_ref, &[]);
-        let out_init = self.b.inst_results(out_call)[0];
+        let out_init = self.call_host(self.host.coll.list_new, &[]);
         let out_var = self.fresh_var(types::I64);
         self.b.def_var(out_var, out_init);
 
@@ -22943,11 +20597,7 @@ impl LowerCtx<'_, '_> {
         self.b.switch_to_block(header);
         let idx = self.b.use_var(idx_var);
         let coll = self.b.use_var(coll_var);
-        let len_ref = self
-            .module
-            .declare_func_in_func(self.host.coll.list_len, self.b.func);
-        let len_call = self.b.ins().call(len_ref, &[coll]);
-        let len = self.b.inst_results(len_call)[0];
+        let len = self.call_host(self.host.coll.list_len, &[coll]);
         let done = self
             .b
             .ins()
@@ -23065,11 +20715,7 @@ impl LowerCtx<'_, '_> {
         self.b.switch_to_block(header);
         let idx = self.b.use_var(idx_var);
         let coll = self.b.use_var(coll_var);
-        let len_ref = self
-            .module
-            .declare_func_in_func(self.host.coll.list_len, self.b.func);
-        let len_call = self.b.ins().call(len_ref, &[coll]);
-        let len = self.b.inst_results(len_call)[0];
+        let len = self.call_host(self.host.coll.list_len, &[coll]);
         let done = self
             .b
             .ins()
@@ -23121,15 +20767,10 @@ impl LowerCtx<'_, '_> {
         let coll_var = self.fresh_var(types::I64);
         self.b.def_var(coll_var, recv_val);
 
-        let new_list = self
-            .module
-            .declare_func_in_func(self.host.coll.list_new, self.b.func);
-        let falses_call = self.b.ins().call(new_list, &[]);
-        let falses = self.b.inst_results(falses_call)[0];
+        let falses = self.call_host(self.host.coll.list_new, &[]);
         let falses_var = self.fresh_var(types::I64);
         self.b.def_var(falses_var, falses);
-        let trues_call = self.b.ins().call(new_list, &[]);
-        let trues = self.b.inst_results(trues_call)[0];
+        let trues = self.call_host(self.host.coll.list_new, &[]);
         let trues_var = self.fresh_var(types::I64);
         self.b.def_var(trues_var, trues);
 
@@ -23145,11 +20786,7 @@ impl LowerCtx<'_, '_> {
         self.b.switch_to_block(header);
         let idx = self.b.use_var(idx_var);
         let coll = self.b.use_var(coll_var);
-        let len_ref = self
-            .module
-            .declare_func_in_func(self.host.coll.list_len, self.b.func);
-        let len_call = self.b.ins().call(len_ref, &[coll]);
-        let len = self.b.inst_results(len_call)[0];
+        let len = self.call_host(self.host.coll.list_len, &[coll]);
         let done = self
             .b
             .ins()
@@ -23256,11 +20893,7 @@ impl LowerCtx<'_, '_> {
         self.b.switch_to_block(header);
         let idx = self.b.use_var(idx_var);
         let coll = self.b.use_var(coll_var);
-        let len_ref = self
-            .module
-            .declare_func_in_func(self.host.coll.list_len, self.b.func);
-        let len_call = self.b.ins().call(len_ref, &[coll]);
-        let len = self.b.inst_results(len_call)[0];
+        let len = self.call_host(self.host.coll.list_len, &[coll]);
         let done = self
             .b
             .ins()
@@ -23326,11 +20959,7 @@ impl LowerCtx<'_, '_> {
         self.b.switch_to_block(header);
         let idx = self.b.use_var(idx_var);
         let coll = self.b.use_var(coll_var);
-        let len_ref = self
-            .module
-            .declare_func_in_func(self.host.coll.list_len, self.b.func);
-        let len_call = self.b.ins().call(len_ref, &[coll]);
-        let len = self.b.inst_results(len_call)[0];
+        let len = self.call_host(self.host.coll.list_len, &[coll]);
         let done = self
             .b
             .ins()
@@ -23433,11 +21062,7 @@ impl LowerCtx<'_, '_> {
         self.b.switch_to_block(header);
         let idx = self.b.use_var(idx_var);
         let coll = self.b.use_var(coll_var);
-        let len_ref = self
-            .module
-            .declare_func_in_func(self.host.coll.list_len, self.b.func);
-        let len_call = self.b.ins().call(len_ref, &[coll]);
-        let len = self.b.inst_results(len_call)[0];
+        let len = self.call_host(self.host.coll.list_len, &[coll]);
         let done = self
             .b
             .ins()
@@ -23529,15 +21154,10 @@ impl LowerCtx<'_, '_> {
         let recv_val = self.lower_expr(recv)?;
         let coll_var = self.fresh_var(types::I64);
         self.b.def_var(coll_var, recv_val);
-        let new_ref = self
-            .module
-            .declare_func_in_func(self.host.coll.list_new, self.b.func);
-        let out_call = self.b.ins().call(new_ref, &[]);
-        let out_init = self.b.inst_results(out_call)[0];
+        let out_init = self.call_host(self.host.coll.list_new, &[]);
         let out_var = self.fresh_var(types::I64);
         self.b.def_var(out_var, out_init);
-        let plan_call = self.b.ins().call(new_ref, &[]);
-        let plan_init = self.b.inst_results(plan_call)[0];
+        let plan_init = self.call_host(self.host.coll.list_new, &[]);
         let plan_var = self.fresh_var(types::I64);
         self.b.def_var(plan_var, plan_init);
         let pending_var = self.fresh_var(types::I64);
@@ -23556,11 +21176,7 @@ impl LowerCtx<'_, '_> {
         self.b.switch_to_block(header);
         let idx = self.b.use_var(idx_var);
         let coll = self.b.use_var(coll_var);
-        let len_ref = self
-            .module
-            .declare_func_in_func(self.host.coll.list_len, self.b.func);
-        let len_call = self.b.ins().call(len_ref, &[coll]);
-        let len = self.b.inst_results(len_call)[0];
+        let len = self.call_host(self.host.coll.list_len, &[coll]);
         let done = self
             .b
             .ins()
@@ -23597,8 +21213,7 @@ impl LowerCtx<'_, '_> {
         self.b.switch_to_block(inner_header);
         let j = self.b.use_var(j_var);
         let mapped_list = self.b.use_var(mapped_var);
-        let inner_len_call = self.b.ins().call(len_ref, &[mapped_list]);
-        let inner_len = self.b.inst_results(inner_len_call)[0];
+        let inner_len = self.call_host(self.host.coll.list_len, &[mapped_list]);
         let inner_done = self
             .b
             .ins()

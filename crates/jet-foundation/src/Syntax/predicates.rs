@@ -28,7 +28,8 @@ pub const UNIT_SUFFIX_EXPONENT_RESERVED: &str = "e"; // D-UNITLIT1
 // parser/sema desugaring (`0 <= sev < 10` → `0 <= sev && sev < 10`, middle
 // operand evaluated once).
 // D-CLIFLAG1: the struct-level CLI-derive marker and field-level doc marker
-// spellings ride D-CONTRACTCASE1/D-MARKERMOVE1 — constants land with them.
+// spellings ride D-CONTRACTCASE1/D-VERDICT-732-1 (formerly D-MARKERMOVE1) —
+// constants land with them.
 // D-EFFBUDGET1: `effects`/`allow`/`deny`/`grants` are package.jet manifest
 // keys (jet_pkg_model::Package), not language tokens; effect names reuse D-EFF4.
 // D-ANY-JAI1 + D-VARARGBOUND1: reuses D-VARIADIC1 `...T`; multi-trait

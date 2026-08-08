@@ -1602,8 +1602,8 @@ mod tests {
             name: "halcyon-gnome".to_string(),
             target: "linux.x64".to_string(),
             packages: vec![
-                crate::Merge::Pkg::new("default", "firefox"),
-                crate::Merge::Pkg::new("default", "btop"),
+                jet_pkg_model::Merge::Pkg::new("default", "firefox"),
+                jet_pkg_model::Merge::Pkg::new("default", "btop"),
             ],
             services: vec![
                 ServicePlan {
@@ -1734,7 +1734,7 @@ mod tests {
     fn non_nixpkgs_package_is_rejected() {
         let table = table_with_nixpkgs();
         let mut system = full_system();
-        system.packages.push(crate::Merge::Pkg::new("mine", "hello"));
+        system.packages.push(jet_pkg_model::Merge::Pkg::new("mine", "hello"));
         let err = map_system_to_nixos(&system, &table).unwrap_err();
         assert!(err.iter().any(|m| m.contains("package `mine.hello`")), "{err:?}");
     }

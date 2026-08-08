@@ -2,7 +2,7 @@
 
 use crate::Diagnostics::{Diagnostic, Span};
 use super::super::Diagnostics::unsupported;
-use super::super::Value::CtValue;
+use crate::AST::CtValue;
 use super::core_calls::{as_string, io_error_value};
 
 pub(super) fn repl_effect_request(module: &str, method: &str, args: &[CtValue]) -> super::super::ReplEffectRequest {

@@ -64,9 +64,8 @@ impl<'a> Checker<'a> {
             }
             let mut best: Option<(String, usize)> = None;
             let candidates: Vec<String> = self
-                .scopes
-                .iter()
-                .flat_map(|s| s.keys().cloned())
+                .visible_names()
+                .into_iter()
                 .chain(self.consts.keys().cloned())
                 .collect();
             for cand in candidates {
@@ -137,7 +136,7 @@ impl<'a> Checker<'a> {
             let ty = match &lvalue {
                 LValue::Local { name, name_span } => {
                     let name_span = *name_span;
-                    if let Some(info) = self.uninit.get(name) {
+                    if let Some(info) = self.flow.uninit.get(name) {
                         let _ = info;
                         self.diags.push(Diagnostic::error(
                             "E0420",

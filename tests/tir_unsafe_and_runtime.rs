@@ -42,6 +42,73 @@ cell :: 1337
     assert_eq!(stdout, "1337\n1337\n");
 }
 
+/// Regression for a real memory-safety bug: sema's D-VERDICT-1308-1 implicit
+/// comptime fold used to bake `mem.address_of`'s TIR-eval synthetic "stable
+/// place identity" (an FNV-1a hash, meaningful only inside that evaluator) as
+/// a literal AOT `i64` — the compiled program then dereferenced a wild
+/// address. The one syntactic guard that used to sit in
+/// crates/jet-sema/src/Sema/CheckerCore/bindings.rs was bypassable by any
+/// wrapping form (e.g. one extra `( )`, preserved as `Expr::Paren` under
+/// D-FMTPARENS1=A) and never covered the `#Known` / method-call / constant
+/// paths at all. Fixed at the one place the value is actually minted
+/// (crates/jet-codegen/src/Codegen/TIR/eval/exprs.rs's CoreCall handling for
+/// `core.mem.address_of`): it now refuses outside `runtime_execution`,
+/// so every fold attempt — however it's spelled or reached — declines and
+/// falls through to real runtime codegen instead.
+#[test]
+fn mem_address_of_never_folds_plain_or_parenthesized() {
+    if !have_rustc() {
+        return;
+    }
+    for (name, addr_init) in [
+        ("tir_addr_of_plain", "mem.address_of(cell)"),
+        ("tir_addr_of_paren", "(mem.address_of(cell))"),
+    ] {
+        let src = format!(
+            "\
+use core.mem
+#Unsafe(\"reads through a raw pointer; addr must be a live, valid Int\")
+fn read_reg(addr: Int) => Int {{
+    p :: mem.Ptr<Int>.from_addr(addr)
+    return mem.volatile_read(p)
+}}
+fn run() {{
+    cell :: 1337
+    addr :: {addr_init}
+    #Unsafe(\"addr is the address of `cell`, a live Int on this stack frame\") {{
+        print(read_reg(addr))
+    }}
+}}
+"
+        );
+        let (code, stdout) = build_and_run(name, &src);
+        assert_eq!(code, 0, "case {name}");
+        assert_eq!(stdout, "1337\n", "case {name}");
+    }
+}
+
+/// The explicit `#Known` path demands a compile-time answer (unlike the
+/// silent-decline implicit path above) — `mem.address_of` genuinely has none,
+/// so it must now surface a real diagnostic instead of silently baking the
+/// same wild-address bug under an even stronger "I promise this is checked"
+/// spelling.
+#[test]
+fn mem_address_of_known_binding_is_a_compile_error_not_a_silent_bake() {
+    let src = "\
+use core.mem
+fn run() {
+    cell :: 1337
+    #Known addr :: mem.address_of(cell)
+    print(addr)
+}
+";
+    let diags = jet::compile(src).expect_err("#Known mem.address_of must not silently fold");
+    assert!(
+        diags.iter().any(|d| d.code == "E0956"),
+        "expected E0956 (can't run at compile time), got: {diags:?}"
+    );
+}
+
 /// c109 Phase 18 / D-UNSAFE2: assert the EMITTED Rust for the unsafe tier is byte-exact
 /// (the gate forms + ptr ops), and that EVERY `unsafe` is a gated form (`unsafe fn` /
 /// `unsafe {`) — the I1 self-check. The reason string emits no comment/marker.
@@ -137,7 +204,7 @@ cell :: 1337
 fn volatile_write_emit_is_byte_exact() {
     let src = "\
 use core.mem
-#Unsafe(\"UART TX register is mapped by the target profile\")
+#Unsafe(\"UART TX register is mapped by the target machine\")
 fn write_reg(value: Int) {
     p :: mem.Ptr<Int>.from_addr(0x40000100)
     mem.volatile_write(p, value)
@@ -189,7 +256,7 @@ struct Pair<T> {
     second: T
 }
 fn make_pair<T>(a: T, b: T) => Pair<T> {
-    return Pair<T>.{first: a, second: b}
+    return Pair<T>.{first: ~a, second: ~b}
 }
 struct Stack<T> {
     items: [T]
@@ -198,7 +265,7 @@ fn empty_stack<T>() => Stack<T> {
     return Stack<T>.{items: []}
 }
 fn push<T>(s: Stack<T>, item: T) => Stack<T> {
-    dup := s
+    dup := ~s
     dup.items.push(item)
     return dup
 }

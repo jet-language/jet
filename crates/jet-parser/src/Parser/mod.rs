@@ -558,6 +558,18 @@ fn pat_span(pat: &Pattern) -> Span {
     pat.span()
 }
 
+/// D-DOTSCOPE1/leading-dot patterns share one head classifier: an uppercase
+/// ident or `null` (spelled `Syntax::LIT_NULL`) may follow a leading `.`.
+fn leading_dot_variant(kind: &TokKind) -> Option<String> {
+    match kind {
+        TokKind::Ident(name) if name.chars().next().is_some_and(char::is_uppercase) => {
+            Some(name.clone())
+        }
+        TokKind::KwNull => Some(Syntax::LIT_NULL.to_string()),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod s61_tests {
     use super::*;
@@ -1094,8 +1106,11 @@ fn notify(ready: Bool) =[Net]=> () {
         assert!(once.contains("fn classify(score: Int) => Grade = if {"), "{once}");
         assert!(once.contains("score >= 90 -> .A"), "{once}");
         assert!(once.contains("fn notify(ready: Bool) =[Net]=> ()"), "{once}");
-        assert!(once.contains("if ready send() else skip()"), "{once}");
-        assert!(once.contains("loop item; items audit(item)"), "{once}");
+        // D-BRACE1=A (card #808/c08mu840, done): braces are mandatory for
+        // if/else/loop bodies now; fmt auto-wraps and collapses a fitting
+        // one-liner instead of preserving the old braceless spelling.
+        assert!(once.contains("if ready { send() } else { skip() }"), "{once}");
+        assert!(once.contains("loop item, items { audit(item) }"), "{once}");
         assert!(once.contains("next(outer)"), "{once}");
         assert!(once.contains("task :: group.task => fetch()"), "{once}");
         assert!(once.contains("#Grant(caps: FS, Net)"), "{once}");

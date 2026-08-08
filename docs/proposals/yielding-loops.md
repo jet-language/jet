@@ -16,9 +16,9 @@ Jet keeps one `loop` controller.
 An effect-only loop has no arrow:
 
 ```jet
-loop user; users audit(user)
+loop user, users audit(user)
 
-loop user; users {
+loop user, users {
     audit(user)
     notify(user)
 }
@@ -27,9 +27,9 @@ loop user; users {
 A finite loop uses `->` when each accepted iteration yields one value:
 
 ```jet
-names :: loop user; users -> user.name
+names :: loop user, users -> user.name
 
-labels :: loop user; users -> {
+labels :: loop user, users -> {
     name :: user.name.trim()
     if user.admin -> "admin:{name}" else -> name
 }
@@ -48,17 +48,17 @@ All current loop headers remain:
 ```jet
 loop tick()
 loop ready poll()
-loop item; items audit(item)
-loop key, value; map audit(key)
-loop i; 0..<limit; 2 audit(i)
-loop i := 0; i < limit; i++ draw(i)
+loop item, items audit(item)
+loop (key, value), map audit(key)
+loop i, 0..<limit, 2 audit(i)
+loop i := 0, i < limit { draw(i); i += 1 }
 ```
 
-Only source loops and finite C-style loops may yield items:
+Only source loops may yield items:
 
 ```jet
-names :: loop user; users -> user.name
-squares :: loop i := 0; i < limit; i++ -> i * i
+names :: loop user, users -> user.name
+squares :: loop i, 0..<limit -> i * i
 ```
 
 Bare infinite and condition-only loops have no exhaustion edge. They cannot use
@@ -69,13 +69,13 @@ a yield arrow.
 A header guard filters before the body:
 
 ```jet
-names :: loop user; users if user.active -> user.name
+names :: loop user, users if user.active -> user.name
 ```
 
 `next` omits the current item:
 
 ```jet
-names :: loop user; users -> {
+names :: loop user, users -> {
     if !user.active next
     user.name
 }
@@ -86,8 +86,8 @@ names :: loop user; users -> {
 Source clauses nest from left to right:
 
 ```jet
-rows :: loop team; teams,
-             user; team.users if user.active
+rows :: loop team, teams,
+             user, team.users if user.active
 -> Row.{
     team: team.name,
     user: user.name,
@@ -98,8 +98,8 @@ One header yields one flat List. An explicit inner yielding loop preserves
 nesting:
 
 ```jet
-groups :: loop team; teams ->
-    loop user; team.users -> user.name
+groups :: loop team, teams ->
+    loop user, team.users -> user.name
 ```
 
 Lockstep iteration stays explicit through `zip`.
@@ -109,16 +109,16 @@ Lockstep iteration stays explicit through `zip`.
 A yielding loop always returns an eager List:
 
 ```jet
-names :: loop user; users -> user.name
+names :: loop user, users -> user.name
 ```
 
 Other collectors stay visible:
 
 ```jet
 by_id := [UserId: User].{}
-loop user; users by_id.add(user.id, user)
+loop user, users by_id.add(user.id, user)
 
-unique_names :: Set.from(loop user; users -> user.name)
+unique_names :: Set.from(loop user, users -> user.name)
 lazy_names :: users.map(user => user.name)
 ```
 
@@ -146,7 +146,7 @@ does not return the loop value.
 A loop name stays on the declaration:
 
 ```jet
-outer :: loop row; rows {
+outer :: loop row, rows {
     ...
 }
 ```
@@ -170,8 +170,8 @@ Example:
 
 ```jet
 found :: loop {
-    loop row; rows {
-        loop cell; row {
+    loop row, rows {
+        loop cell, row {
             if wanted(cell) break(found, Val(cell))
         }
     }
@@ -212,8 +212,8 @@ Mutable-view output remains gated by the existing view and lending laws.
 Short loops stay on one line:
 
 ```jet
-loop item; items audit(item)
-values :: loop item; items -> transform(item)
+loop item, items audit(item)
+values :: loop item, items -> transform(item)
 ```
 
 Several operations use braces. Long source headers wrap before the yield
@@ -252,10 +252,10 @@ Existing statement loops lose braces only when the body is one clear line:
 
 ```jet
 // Before
-loop item; items { audit(item) }
+loop item, items { audit(item) }
 
 // After
-loop item; items audit(item)
+loop item, items audit(item)
 ```
 
 Braces remain valid when they improve clarity.

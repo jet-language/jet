@@ -1515,14 +1515,14 @@ impl<'a> Parser<'a> {
                 ))
             }
             TokKind::KwComptime => {
-                // D-WHEN1 (ratified 2026-06-19): `#Known if <cond> { … }` is
+                // D-WHEN1 (ratified 2026-06-19): `$if <cond> { … }` is
                 // a compile-time conditional — not a binding. Detect by peeking
                 // at the second token; `comptime NAME` is always a binding.
                 if matches!(self.peek2().kind, TokKind::KwIf) {
                     let stmt = self.comptime_if_stmt()?;
                     return Ok(stmt);
                 }
-                // D-CTMARKER1 (ratified 2026-06-25, piece 2): `#Known { … }` block.
+                // D-META-STAGE1=B (formerly D-CTMARKER1, ratified 2026-06-25, piece 2): `$ { … }` block.
                 if matches!(self.peek2().kind, TokKind::LBrace) {
                     let stmt = self.comptime_block_stmt()?;
                     return Ok(stmt);
@@ -1643,6 +1643,7 @@ impl<'a> Parser<'a> {
                     }],
                     resolved_ret: None,
                     range_checked: false,
+                    widen_approx: false,
                 })))
             }
             TokKind::Ident(n) if n == Syntax::KW_ASSERT && matches!(self.peek2().kind, TokKind::Ident(_)) => {
@@ -1669,6 +1670,7 @@ impl<'a> Parser<'a> {
                     args,
                     resolved_ret: None,
                     range_checked: false,
+                    widen_approx: false,
                 })))
             }
             TokKind::KwYield => {
@@ -1678,113 +1680,6 @@ impl<'a> Parser<'a> {
                 Ok(Stmt::Yield(expr, span))
             }
             TokKind::KwIf => self.if_or_dispatch(),
-            TokKind::KwWhile if false => {
-                // D-S14-PAUSE: `while` teaching is paused.
-                let t = self.bump();
-                let span = t.span;
-                self.diags.push(Diagnostic::error(
-                    "E0050",
-                    format!(
-                        "`{}` is not a keyword; write `{}` instead",
-                        Syntax::FOREIGN_WHILE,
-                        Syntax::KW_LOOP,
-                    ),
-                    format!(
-                        "`{}` has a single loop keyword: `loop cond {{ }}` for conditional loops",
-                        Syntax::LANG_NAME,
-                    ),
-                    format!(
-                        "replace `{}` with `{}`",
-                        Syntax::FOREIGN_WHILE,
-                        Syntax::KW_LOOP,
-                    ),
-                    Some(span),
-                ));
-                let cond = self.expr_no_struct_lit()?;
-                self.expect(TokKind::LBrace, "to open the loop body")?;
-                let body = self.block_stmts();
-                Ok(Stmt::While {
-                    cond,
-                    body,
-                    span,
-                    label: None,
-                })
-            }
-            TokKind::KwFor if false => {
-                // D-S14-PAUSE: `for` teaching is paused.
-                let t = self.bump();
-                let span = t.span;
-                self.diags.push(Diagnostic::error(
-                    "E0051",
-                    format!(
-                        "`{}` is not a keyword; write `{} x; collection {{ }}` instead",
-                        Syntax::FOREIGN_FOR,
-                        Syntax::KW_LOOP,
-                    ),
-                    format!(
-                        "`{}` has a single loop keyword: `loop x; list {{ }}` for iteration",
-                        Syntax::LANG_NAME,
-                    ),
-                    format!(
-                        "replace `{}` with `{}`",
-                        Syntax::FOREIGN_FOR,
-                        Syntax::KW_LOOP,
-                    ),
-                    Some(span),
-                ));
-                let (var, var_span) = self.expect_ident("after the loop variable name")?;
-                let mut var2 = None;
-                if matches!(self.peek().kind, TokKind::Comma) {
-                    self.bump();
-                    let (v2, s2) = self.expect_ident("after `,` in the loop binding")?;
-                    var2 = Some((v2, s2));
-                }
-                self.expect(TokKind::Semi, "after the loop binding")?;
-                let first = self.expr_no_struct_lit()?;
-                let kind = if let Expr::Range {
-                    start,
-                    end,
-                    exclusive,
-                    ..
-                } = &first
-                {
-                    ForKind::Range {
-                        start: (**start).clone(),
-                        end: (**end).clone(),
-                        step: None,
-                        exclusive: *exclusive,
-                    }
-                } else if matches!(self.peek().kind, TokKind::DotDot | TokKind::DotDotLt) {
-                    let exclusive = matches!(self.peek().kind, TokKind::DotDotLt);
-                    self.bump();
-                    let end = self.expr_no_struct_lit()?;
-                    let step = if matches!(self.peek().kind, TokKind::Semi) {
-                        self.bump();
-                        Some(self.expr_no_struct_lit()?)
-                    } else {
-                        None
-                    };
-                    ForKind::Range {
-                        start: first,
-                        end,
-                        step,
-                        exclusive,
-                    }
-                } else {
-                    ForKind::In { collection: first, step: None }
-                };
-                self.expect(TokKind::LBrace, "to open the loop body")?;
-                let body = self.block_stmts();
-                Ok(Stmt::For {
-                    var,
-                    var_span,
-                    var2,
-                    kind,
-                    body,
-                    span,
-                    label: None,
-                })
-            }
             // D-S14-PAUSE: `when` teaching is paused.
             TokKind::KwSwitch if false => {
                 let span = self.bump().span;
@@ -1972,7 +1867,7 @@ impl<'a> Parser<'a> {
             // D-LOOPLABEL3: retired suffix declaration, recovered for one teaching error.
             TokKind::Ident(_)
                 if matches!(self.peek2().kind, TokKind::At)
-                    && matches!(self.peek3().kind, TokKind::KwLoop | TokKind::KwFor) =>
+                    && matches!(self.peek3().kind, TokKind::KwLoop) =>
             {
                 let (label, lspan) = self.expect_ident("for the loop label")?;
                 let end = self.bump().span.end; // `@`
@@ -2229,8 +2124,8 @@ impl<'a> Parser<'a> {
                     Expr::Call(_)
                     | Expr::Field(_, _, _)
                     | Expr::MethodCall { .. }
-                    // D-CTMARKER1=C: `$name;` as a standalone statement — valid in comptime contexts.
-                    | Expr::ComptimeSplice { .. }
+                    // D-META-STAGE1=B (formerly D-CTMARKER1=C): `$name;` as a standalone statement — valid in comptime contexts.
+                    | Expr::ComptimeName { .. }
                     // S7: `expr?;` propagates a fallible result as a statement (E2-M7).
                     | Expr::Try(_, _, _)
                     | Expr::OrFallback { .. }

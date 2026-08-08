@@ -134,6 +134,12 @@ fn jet_ui_advance_focus(
     Some(JetEventResult::Handled)
 }
 
+/// Card #1658 (corpus say-it-once): the default mount viewport (classic
+/// 80x24 terminal), named once so no host hand-types the literal. Every
+/// `mount_node_default` — Rust and DomRuntime.js — renders from this pair.
+pub const DEFAULT_MOUNT_COLS: f64 = 80.0;
+pub const DEFAULT_MOUNT_ROWS: f64 = 24.0;
+
 /// D-RENDERTGT2=A: portable backend seam between Jet UI and platform renderers.
 pub trait JetBackend {
     fn measure(&mut self, node: &JetUiNode, constraint: JetSizeConstraint) -> JetSize;
@@ -286,7 +292,10 @@ impl JetNullBackend {
 
     /// Default viewport for the two-arg beginner mount (`backend.mount(tree)`).
     pub fn mount_node_default(&self, node: JetUiNode) {
-        self.mount_node(node, jet_ui_constraint(0.0, 0.0, 80.0, 24.0));
+        self.mount_node(
+            node,
+            jet_ui_constraint(0.0, 0.0, DEFAULT_MOUNT_COLS, DEFAULT_MOUNT_ROWS),
+        );
     }
 
     pub fn dispatch_event(&self, event: JetInputEvent) -> JetEventResult {
@@ -479,7 +488,10 @@ impl JetTuiBackend {
     }
 
     pub fn mount_node_default(&self, node: JetUiNode) {
-        self.mount_node(node, jet_ui_constraint(0.0, 0.0, 80.0, 24.0));
+        self.mount_node(
+            node,
+            jet_ui_constraint(0.0, 0.0, DEFAULT_MOUNT_COLS, DEFAULT_MOUNT_ROWS),
+        );
     }
 
     pub fn dispatch_event(&self, event: JetInputEvent) -> JetEventResult {
@@ -935,7 +947,7 @@ mod tests {
     fn tui_backend_reactive_paint_is_deterministic() {
         let backend = JetTuiBackend::new();
         let node = jet_ui_node("hi", 2.0, 1.0);
-        let constraint = jet_ui_constraint(0.0, 0.0, 80.0, 24.0);
+        let constraint = jet_ui_constraint(0.0, 0.0, DEFAULT_MOUNT_COLS, DEFAULT_MOUNT_ROWS);
         let size = backend.measure_node(node.clone(), constraint);
         let frame = jet_ui_rect(0.0, 0.0, size.width, size.height);
         backend.layout_node(node.clone(), frame);
@@ -988,7 +1000,10 @@ mod tests {
             HITS.fetch_add(1, Ordering::SeqCst);
         });
         let tree = jet_ui_box(vec![button]);
-        backend.mount_node(tree, jet_ui_constraint(0.0, 0.0, 80.0, 24.0));
+        backend.mount_node(
+            tree,
+            jet_ui_constraint(0.0, 0.0, DEFAULT_MOUNT_COLS, DEFAULT_MOUNT_ROWS),
+        );
         // NullBackend keys the root as `null#0`; the button is child 0.
         jet_ui_dispatch("null#0/0");
         assert_eq!(HITS.load(Ordering::SeqCst), 1);

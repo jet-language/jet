@@ -1393,9 +1393,9 @@ impl<'a> Parser<'a> {
                     | Syntax::MARKER_SKIP
                     | Syntax::MARKER_DEFAULT
                     | Syntax::MARKER_FLATTEN => serde.push(m),
-                    // Any other name is a derive-trait: the D-MARKERMOVE3 built-ins
-                    // (`#[Debug]`, `#[Summarize]`, `#[Comparable]`) or a user
-                    // derive-trait name.
+                    // Any other name is a derive-trait: the D-VERDICT-732-1
+                    // (formerly D-MARKERMOVE3) built-ins (`#[Debug]`,
+                    // `#[Summarize]`, `#[Comparable]`) or a user derive-trait name.
                     _ => derives.push((m.name.clone(), m.name_span)),
                 }
             }

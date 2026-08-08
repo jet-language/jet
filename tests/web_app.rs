@@ -1,6 +1,9 @@
 //! Tower #438 CLI/runtime smoke for D-WEBAPP1 / D-WEBAUTHOR1.
 #![allow(non_snake_case)]
 
+mod common;
+use common::Scratch;
+
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -110,8 +113,8 @@ fn web_app_expand_facts_web() {
 
 #[test]
 fn web_app_routes_from_exhaustive() {
-    let tmp = repo_root().join("target/webapp-routes-test");
-    let _ = fs::remove_dir_all(&tmp);
+    let scratch = Scratch::new("webapp-routes");
+    let tmp = scratch.path.clone();
     fs::create_dir_all(tmp.join("routes/orders")).unwrap();
     fs::write(
         tmp.join("app.jet"),
@@ -186,9 +189,8 @@ fn web_app_dev_forced_interpreter_serves_callbacks() {
 
 #[test]
 fn web_app_dev_auto_serves_with_reload_without_dev_function() {
-    let tmp = repo_root().join("target/webapp-reload-test");
-    let _ = fs::remove_dir_all(&tmp);
-    fs::create_dir_all(&tmp).unwrap();
+    let scratch = Scratch::new("webapp-reload");
+    let tmp = scratch.path.clone();
     let source = fs::read_to_string(repo_root().join("examples/features/web/web_app.jet")).unwrap();
     let app = tmp.join("app.jet");
     fs::write(&app, source).unwrap();

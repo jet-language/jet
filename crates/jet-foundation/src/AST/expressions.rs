@@ -22,6 +22,12 @@ pub struct Call {
     /// checked constructor as a `Result`, while the ordinary constructor form
     /// still stays infallible and is rejected for runtime values.
     pub range_checked: bool,
+    /// D-NUMWIDEN-CROSS1=E / card #1662: sema sets this when `approx(value)`
+    /// validates as one integer-to-float precision opt-out. Replaces the
+    /// retired `\0numeric.approx_widen` fake-call-name marker. Lowering
+    /// consumes it: a surrounding numeric widen folds the crossing in;
+    /// otherwise the call erases to its one argument.
+    pub widen_approx: bool,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -621,12 +627,15 @@ pub enum Expr {
         addr: Box<Expr>,
         span: Span,
     },
-    /// D-CTMARKER1=C: `$name` — comptime splice expression. In a comptime
-    /// context (derive body, `#Known {}` block, comptime binding RHS), looks
-    /// up `name` in the comptime scope. Outside comptime context: E2712.
-    /// Inside `emit("… $name …")` strings, `$name` is handled by
-    /// `apply_dollar_splices` (string interpolation, not this AST node).
-    ComptimeSplice {
+    /// D-META-STAGE1=B (formerly D-CTMARKER1's splice-expression spelling):
+    /// a compile-time name, `$limit`. The mark is part of the
+    /// name and is written at every mention, so this is an ordinary identifier
+    /// read that happens to name a value the compiler already computed. `name`
+    /// holds the written text, mark included, and never denotes the same
+    /// binding as the unmarked spelling. There is no scope to cross and nothing
+    /// to carry: sema folds the value into `value` before codegen, and codegen
+    /// emits it as a literal.
+    ComptimeName {
         name: String,
         span: Span,
         value: Option<CtValue>,
@@ -689,7 +698,7 @@ impl Expr {
             | Expr::If { span: s, .. }
             | Expr::CallValue { span: s, .. }
             | Expr::PtrFromAddr { span: s, .. }
-            | Expr::ComptimeSplice { span: s, .. }
+            | Expr::ComptimeName { span: s, .. }
             | Expr::CompareChain { span: s, .. }
             | Expr::UnitLit { span: s, .. }
             | Expr::IncDec { span: s, .. } => *s,

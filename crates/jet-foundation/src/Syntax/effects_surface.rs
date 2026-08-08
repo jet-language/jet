@@ -264,7 +264,7 @@ pub const INTERP_SELECTOR_FIXED: &str = "Fixed";
 pub const INTERP_SELECTOR_UNIT: &str = "Unit";
 pub const INTERP_UNIT_STYLE_NAME: &str = "name";
 pub const INTERP_UNIT_STYLE_BARE: &str = "bare";
-/// D-DEBUG-REDACT / D-MARKERMOVE1 (contract plane, `#Redact`): hide a field
+/// D-DEBUG-REDACT / D-VERDICT-732-1 (formerly D-MARKERMOVE1, `#Redact`): hide a field
 /// from auto-derived Debug output.
 pub const MARKER_REDACT: &str = "Redact";
 
@@ -411,6 +411,23 @@ pub const REF_SOURCE_RUBY: &str = "ruby";
 pub const REF_SOURCE_PERL: &str = "perl";
 /// D-FFI-PHP1 / D-JPK7: direct Packagist ecosystem root.
 pub const REF_SOURCE_PHP: &str = "php";
+
+/// The one home for "which source tokens are built-in providers" — every
+/// recognized `REF_SOURCE_*` above, in the order a ref may not put them
+/// (D-JPK-REF1=A: `target@provider`, never `provider@target`).
+/// `jet-pkg-model`'s `RefSpec::Source::is_builtin` and
+/// `Syntax/retirements.rs`'s `package-ref-order` ratchet both read this list
+/// instead of hand-copying it, so they can never drift apart.
+pub const REF_SOURCE_PROVIDERS: &[&str] = &[
+    REF_SOURCE_NIXPKGS,
+    REF_SOURCE_GITHUB,
+    REF_SOURCE_PATH,
+    REF_SOURCE_CRAN,
+    REF_SOURCE_LUAROCKS,
+    REF_SOURCE_RUBY,
+    REF_SOURCE_PERL,
+    REF_SOURCE_PHP,
+];
 
 /// D-JPK2/9: the Phase 1 verb set.
 pub const JETPACK_VERBS: &[&str] = &[

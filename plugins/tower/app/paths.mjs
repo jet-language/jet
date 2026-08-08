@@ -6,17 +6,56 @@
 //   2. nearest `.tower/tower.json` walking up from cwd (project-local layout)
 //   3. TOOL_ROOT/.tower when that vendored board exists
 //   4. nowhere → commands that need data fail with a "run `tower init`" hint
+// A hit inside a linked git worktree is never the live board — it is a stale
+// tracked copy — so steps 2 and 3 map it to the same path in the main working
+// tree, and refuse it when the main side has no board there.
 import { fileURLToPath } from 'node:url';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
 import {
   closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, openSync,
-  readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync,
+  readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync,
 } from 'node:fs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const TOOL_ROOT = dirname(here);            // plugin root
 export const UI = join(here, 'ui');
 export const DEFAULT_DATA_DIR = join(TOOL_ROOT, '.tower');
+
+// In a linked worktree `.git` is a file: `gitdir: <main>/.git/worktrees/<name>`.
+function linkedWorktreeRoot(p) {
+  let dir = resolve(p);
+  for (;;) {
+    const g = join(dir, '.git');
+    if (existsSync(g)) {
+      let text = null;
+      try { if (statSync(g).isFile()) text = readFileSync(g, 'utf8'); } catch { /* unreadable → not a worktree */ }
+      const m = text && text.match(/^gitdir:\s*(.+?)\s*$/m);
+      const link = m && resolve(dir, m[1]);
+      const wt = link && link.match(/^(.+)[\\/]\.git[\\/]worktrees[\\/][^\\/]+$/);
+      return wt ? { root: dir, main: wt[1] } : null;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+
+const redirectNoted = new Set();
+
+// The canonical home of a data dir: itself, its main-checkout counterpart when
+// it sits inside a linked worktree, or null when that counterpart has no board
+// (a worktree copy must never be read or written — its changes would orphan).
+export function canonicalDataDir(dataDir) {
+  const wt = linkedWorktreeRoot(dataDir);
+  if (!wt) return dataDir;
+  const main = join(wt.main, relative(wt.root, resolve(dataDir)));
+  if (!existsSync(join(main, 'tower.json'))) return null;
+  if (!redirectNoted.has(main)) {
+    redirectNoted.add(main);
+    console.error(`tower: worktree checkout detected — using canonical board at ${main}`);
+  }
+  return main;
+}
 
 export function findDataDir(from = process.cwd()) {
   if (process.env.TOWER_DATA) {
@@ -25,7 +64,11 @@ export function findDataDir(from = process.cwd()) {
   }
   let dir = resolve(from);
   for (;;) {
-    if (existsSync(join(dir, '.tower', 'tower.json'))) return join(dir, '.tower');
+    if (existsSync(join(dir, '.tower', 'tower.json'))) {
+      const canon = canonicalDataDir(join(dir, '.tower'));
+      if (canon) return canon;
+      // stale worktree copy with no canonical board — keep walking, never use it
+    }
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;
@@ -36,7 +79,10 @@ export function findDataDir(from = process.cwd()) {
     const rel = relative(host, start);
     return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
   })();
-  if (withinHost && existsSync(join(DEFAULT_DATA_DIR, 'tower.json'))) return DEFAULT_DATA_DIR;
+  if (withinHost) {
+    const dd = canonicalDataDir(DEFAULT_DATA_DIR);
+    if (dd && existsSync(join(dd, 'tower.json'))) return dd;
+  }
   return null;
 }
 

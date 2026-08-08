@@ -2286,7 +2286,7 @@ fn scheduler() -> Arc<Scheduler> {
         .clone()
 }
 
-enum JetSchedulerResult<T> {
+pub enum JetSchedulerResult<T> {
     Value(T),
     Panicked,
     Cancelled,
@@ -2328,7 +2328,7 @@ impl<T> JetSchedulerJoin<T> {
         }
     }
 
-    fn try_recv(&self) -> Option<JetSchedulerResult<T>> {
+    pub fn try_recv(&self) -> Option<JetSchedulerResult<T>> {
         match self.rx.try_recv() {
             Ok(r) => Some(r),
             Err(std::sync::mpsc::TryRecvError::Empty) => None,
@@ -2340,7 +2340,7 @@ impl<T> JetSchedulerJoin<T> {
         self.completion_order.get().copied()
     }
 
-    fn drain(self) {
+    pub fn drain(self) {
         let _ = self.rx.recv();
     }
 }

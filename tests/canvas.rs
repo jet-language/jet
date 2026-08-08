@@ -2787,7 +2787,8 @@ fn canvas_project_transactions_preview_apply_and_conflict_on_touched_files() {
     assert!(preview.contains("\"protocol\":\"jet.canvas.project.edit\""), "{preview}");
     assert!(preview.contains("\"preview\":true"), "{preview}");
     assert!(preview.contains("\"writes\":\"preview_only\""), "{preview}");
-    assert!(preview.contains("+deps: .{ \\\"logging\\\": \\\"../logging\\\" }"), "{preview}");
+    assert!(preview.contains("+deps: .{"), "{preview}");
+    assert!(preview.contains("+    logging: ../logging,"), "{preview}");
     let before_apply = fs::read_to_string(app.join("pkg.jet")).unwrap();
     assert!(!before_apply.contains("logging"), "{before_apply}");
 
@@ -2798,7 +2799,7 @@ fn canvas_project_transactions_preview_apply_and_conflict_on_touched_files() {
     assert!(applied.contains("\"preview\":false"), "{applied}");
     assert!(applied.contains("\"writes\":\"source_transaction\""), "{applied}");
     let after_apply = fs::read_to_string(app.join("pkg.jet")).unwrap();
-    assert!(after_apply.contains("\"logging\": \"../logging\""), "{after_apply}");
+    assert!(after_apply.contains("logging: ../logging,"), "{after_apply}");
     assert!(
         jetpack::Package::PackageFacts::parse(&after_apply, "test").is_ok(),
         "{after_apply}"
@@ -2907,7 +2908,7 @@ fn canvas_project_transactions_remove_dependency() {
     let preview = jet::Canvas::apply_project_transaction_json(&entry, &req)
         .expect("remove dependency preview");
     assert!(preview.contains("\"op\":\"remove_dependency\""), "{preview}");
-    assert!(preview.contains("-deps: {"), "{preview}");
+    assert!(preview.contains("-    logging: logging#0.1.0,"), "{preview}");
     assert!(fs::read_to_string(dir.join("pkg.jet")).unwrap().contains("logging"));
 
     let apply = req.replace("\"preview\":true", "\"preview\":false");
@@ -2916,7 +2917,7 @@ fn canvas_project_transactions_remove_dependency() {
     assert!(applied.contains("\"writes\":\"source_transaction\""), "{applied}");
     let manifest = fs::read_to_string(dir.join("pkg.jet")).unwrap();
     assert!(!manifest.contains("logging"), "{manifest}");
-    assert!(manifest.contains("\"tools\": \"../tools\""), "{manifest}");
+    assert!(manifest.contains("tools: ../tools"), "{manifest}");
     assert!(
         jetpack::Package::PackageFacts::parse(&manifest, "test").is_ok(),
         "{manifest}"

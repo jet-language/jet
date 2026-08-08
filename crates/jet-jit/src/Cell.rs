@@ -107,6 +107,9 @@ impl CellSchema {
             | Type::Fn { .. }
             | Type::TraitObject(_)
             | Type::Union(_) => Ok(Self::Handle),
+            // Runtime values carry no dimension metadata (I3): a quantity's
+            // cell shape is its erased base numeric type.
+            Type::Quantity { base, .. } => Self::from_type(base, meta),
         }
     }
 }
@@ -644,86 +647,47 @@ extern "C" fn jet_jit_cell_get_or_set_begin(cell: i64, schema_handle: i64) -> i6
     })
 }
 
-pub(crate) struct CellHostFns {
-    pub frame_enter: FuncId,
-    pub frame_leave: FuncId,
-    pub new: FuncId,
-    pub get: FuncId,
-    pub set: FuncId,
-    pub replace: FuncId,
-    pub guard_read: FuncId,
-    pub guard_edit: FuncId,
-    pub guard_get: FuncId,
-    pub guard_set: FuncId,
-    pub get_or_set_store: FuncId,
-    pub guard_drop: FuncId,
-    pub guard_project: FuncId,
-    pub get_or_set_begin: FuncId,
+host_fns! {
+    struct CellHostFns;
+    register: register_symbols;
+    declare: declare_host_fns(module) {
+        let cc = module.target_config().default_call_conv;
+        let noarg = Signature::new(cc);
+        let mut noarg_i64 = Signature::new(cc);
+        noarg_i64.returns.push(AbiParam::new(types::I64));
+        let mut unary = noarg_i64.clone();
+        unary.params.push(AbiParam::new(types::I64));
+        let mut binary = unary.clone();
+        binary.params.push(AbiParam::new(types::I64));
+        let mut ternary = binary.clone();
+        ternary.params.push(AbiParam::new(types::I64));
+        let mut binary_void = noarg.clone();
+        binary_void.params.extend([AbiParam::new(types::I64); 2]);
+        let mut ternary_void = noarg.clone();
+        ternary_void.params.extend([AbiParam::new(types::I64); 3]);
+
+
+    }
+    frame_enter: "jet_jit_cell_frame_enter" => jet_jit_cell_frame_enter: noarg;
+    frame_leave: "jet_jit_cell_frame_leave" => jet_jit_cell_frame_leave: binary_void;
+    new: "jet_jit_cell_new" => jet_jit_cell_new: binary;
+    get: "jet_jit_cell_get" => jet_jit_cell_get: binary;
+    set: "jet_jit_cell_set" => jet_jit_cell_set: ternary_void;
+    replace: "jet_jit_cell_replace" => jet_jit_cell_replace: ternary;
+    guard_read: "jet_jit_cell_guard_read" => jet_jit_cell_guard_read: unary;
+    guard_edit: "jet_jit_cell_guard_edit" => jet_jit_cell_guard_edit: unary;
+    guard_get: "jet_jit_cell_guard_get" => jet_jit_cell_guard_get: ternary;
+    guard_set: "jet_jit_cell_guard_set" => jet_jit_cell_guard_set: ternary_void;
+    get_or_set_store: "jet_jit_cell_get_or_set_store" => jet_jit_cell_get_or_set_store: ternary_void;
+    guard_drop: "jet_jit_cell_guard_drop" => jet_jit_cell_guard_drop: binary_void;
+    guard_project: "jet_jit_cell_guard_project" => jet_jit_cell_guard_project: ternary;
+    get_or_set_begin: "jet_jit_cell_get_or_set_begin" => jet_jit_cell_get_or_set_begin: binary;
 }
 
-pub(crate) fn register_symbols(builder: &mut JITBuilder) {
-    builder.symbol("jet_jit_cell_frame_enter", jet_jit_cell_frame_enter as *const u8);
-    builder.symbol("jet_jit_cell_frame_leave", jet_jit_cell_frame_leave as *const u8);
-    builder.symbol("jet_jit_cell_new", jet_jit_cell_new as *const u8);
-    builder.symbol("jet_jit_cell_get", jet_jit_cell_get as *const u8);
-    builder.symbol("jet_jit_cell_set", jet_jit_cell_set as *const u8);
-    builder.symbol("jet_jit_cell_replace", jet_jit_cell_replace as *const u8);
-    builder.symbol("jet_jit_cell_guard_read", jet_jit_cell_guard_read as *const u8);
-    builder.symbol("jet_jit_cell_guard_edit", jet_jit_cell_guard_edit as *const u8);
-    builder.symbol("jet_jit_cell_guard_get", jet_jit_cell_guard_get as *const u8);
-    builder.symbol("jet_jit_cell_guard_set", jet_jit_cell_guard_set as *const u8);
-    builder.symbol(
-        "jet_jit_cell_get_or_set_store",
-        jet_jit_cell_get_or_set_store as *const u8,
-    );
-    builder.symbol("jet_jit_cell_guard_drop", jet_jit_cell_guard_drop as *const u8);
-    builder.symbol(
-        "jet_jit_cell_guard_project",
-        jet_jit_cell_guard_project as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_cell_get_or_set_begin",
-        jet_jit_cell_get_or_set_begin as *const u8,
-    );
-}
 
-pub(crate) fn declare_host_fns(module: &mut JITModule) -> Result<CellHostFns, String> {
-    let cc = module.target_config().default_call_conv;
-    let noarg = Signature::new(cc);
-    let mut noarg_i64 = Signature::new(cc);
-    noarg_i64.returns.push(AbiParam::new(types::I64));
-    let mut unary = noarg_i64.clone();
-    unary.params.push(AbiParam::new(types::I64));
-    let mut binary = unary.clone();
-    binary.params.push(AbiParam::new(types::I64));
-    let mut ternary = binary.clone();
-    ternary.params.push(AbiParam::new(types::I64));
-    let mut binary_void = noarg.clone();
-    binary_void.params.extend([AbiParam::new(types::I64); 2]);
-    let mut ternary_void = noarg.clone();
-    ternary_void.params.extend([AbiParam::new(types::I64); 3]);
-    let mut import = |name: &str, signature: &Signature| {
-        module
-            .declare_function(name, Linkage::Import, signature)
-            .map_err(|error| error.to_string())
-    };
-    Ok(CellHostFns {
-        frame_enter: import("jet_jit_cell_frame_enter", &noarg)?,
-        frame_leave: import("jet_jit_cell_frame_leave", &binary_void)?,
-        new: import("jet_jit_cell_new", &binary)?,
-        get: import("jet_jit_cell_get", &binary)?,
-        set: import("jet_jit_cell_set", &ternary_void)?,
-        replace: import("jet_jit_cell_replace", &ternary)?,
-        guard_read: import("jet_jit_cell_guard_read", &unary)?,
-        guard_edit: import("jet_jit_cell_guard_edit", &unary)?,
-        guard_get: import("jet_jit_cell_guard_get", &ternary)?,
-        guard_set: import("jet_jit_cell_guard_set", &ternary_void)?,
-        get_or_set_store: import("jet_jit_cell_get_or_set_store", &ternary_void)?,
-        guard_drop: import("jet_jit_cell_guard_drop", &binary_void)?,
-        guard_project: import("jet_jit_cell_guard_project", &ternary)?,
-        get_or_set_begin: import("jet_jit_cell_get_or_set_begin", &binary)?,
-    })
-}
+
+
+
 
 fn project_ref<'a>(value: &'a CtValue, path: &[String]) -> Option<&'a CtValue> {
     let Some((field, rest)) = path.split_first() else {

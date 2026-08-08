@@ -139,7 +139,7 @@ fn collect_tuple_shapes_from_expr(expr: &Expr, out: &mut CollectedTypeShapes) {
         | Expr::Todo { .. }
         | Expr::NoElse(_)
         | Expr::UnitLit { .. }
-        | Expr::ComptimeSplice { .. }
+        | Expr::ComptimeName { .. }
         // D-SHIFT1 (c7shift) / D-BINPAT1 (card #506 follow-up): a leaf
         // literal, no nested tuple shapes.
         | Expr::StrMatchLit(_, _)
@@ -407,7 +407,7 @@ fn collect_tuple_shapes_from_stmt(stmt: &Stmt, out: &mut CollectedTypeShapes) {
                 collect_tuple_shapes_from_stmt(s, out);
             }
         }
-        // D-CTMARKER1: comptime block erases; no tuple shapes in emitted Rust.
+        // D-META-STAGE1=B (formerly D-CTMARKER1): comptime block erases; no tuple shapes in emitted Rust.
         Stmt::ComptimeBlock { .. } => {}
         // D-WHEN1: collect tuple shapes from both arms (conservative).
         Stmt::ComptimeIf {

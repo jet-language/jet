@@ -5,6 +5,7 @@ use super::Concurrency;
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
+use crate::Marshal::clone_string;
 
 /// Sketch runtime extracted by `build.rs` from `jet-codegen` Prelude/Core.rs.
 pub(crate) mod sketch_rt {
@@ -38,10 +39,6 @@ fn with_sketch_mut<R: Default>(handle: i64, f: impl FnOnce(&mut SketchSlot) -> R
     })
 }
 
-fn clone_str(id: i64) -> String {
-    Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(id).unwrap_or_default())
-}
-
 fn list_from_strings(items: Vec<String>) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let list = rt.heap.alloc_empty_list();
@@ -73,7 +70,7 @@ extern "C" fn jet_jit_reservoir_new(capacity: i64) -> i64 {
 
 /// `kind`: 0=HLL, 1=TDigest (unused here), 2=CMS, 3=Reservoir.
 extern "C" fn jet_jit_sketch_add_str(handle: i64, kind: i64, s: i64) {
-    let item = clone_str(s);
+    let item = clone_string(s);
     with_sketch_mut(handle, |slot| match (kind, slot) {
         (0, SketchSlot::Hll(h)) => h.add(&item),
         (2, SketchSlot::Cms(c)) => c.add(&item),
@@ -98,7 +95,7 @@ extern "C" fn jet_jit_sketch_count0(handle: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_sketch_count1(handle: i64, key: i64) -> i64 {
-    let k = clone_str(key);
+    let k = clone_string(key);
     with_sketch_mut(handle, |slot| match slot {
         SketchSlot::Cms(c) => c.count(&k),
         _ => 0,
@@ -122,69 +119,47 @@ extern "C" fn jet_jit_sketch_sample(handle: i64) -> i64 {
     list_from_strings(items.unwrap_or_default())
 }
 
-pub(crate) struct SketchHostFns {
-    pub hll_new: FuncId,
-    pub tdigest_new: FuncId,
-    pub cms_new: FuncId,
-    pub reservoir_new: FuncId,
-    pub add_str: FuncId,
-    pub add_f64: FuncId,
-    pub count0: FuncId,
-    pub count1: FuncId,
-    pub quantile: FuncId,
-    pub sample: FuncId,
+host_fns! {
+    struct SketchHostFns;
+    register: register_sketch_symbols;
+    declare: declare_sketch_host_fns(module) {
+        let cc = module.target_config().default_call_conv;
+        let mut nullary = Signature::new(cc);
+        nullary.returns.push(AbiParam::new(types::I64));
+        let mut unary = Signature::new(cc);
+        unary.params.push(AbiParam::new(types::I64));
+        unary.returns.push(AbiParam::new(types::I64));
+        let mut unary_void = Signature::new(cc);
+        unary_void.params.push(AbiParam::new(types::I64));
+        unary_void.params.push(AbiParam::new(types::F64));
+        let mut binary = Signature::new(cc);
+        binary.params.push(AbiParam::new(types::I64));
+        binary.params.push(AbiParam::new(types::I64));
+        binary.returns.push(AbiParam::new(types::I64));
+        let mut ternary_void = Signature::new(cc);
+        ternary_void.params.push(AbiParam::new(types::I64));
+        ternary_void.params.push(AbiParam::new(types::I64));
+        ternary_void.params.push(AbiParam::new(types::I64));
+        let mut quant = Signature::new(cc);
+        quant.params.push(AbiParam::new(types::I64));
+        quant.params.push(AbiParam::new(types::F64));
+        quant.returns.push(AbiParam::new(types::F64));
+
+
+    }
+    hll_new: "jet_jit_hll_new" => jet_jit_hll_new: nullary;
+    tdigest_new: "jet_jit_tdigest_new" => jet_jit_tdigest_new: nullary;
+    cms_new: "jet_jit_cms_new" => jet_jit_cms_new: nullary;
+    reservoir_new: "jet_jit_reservoir_new" => jet_jit_reservoir_new: unary;
+    add_str: "jet_jit_sketch_add_str" => jet_jit_sketch_add_str: ternary_void;
+    add_f64: "jet_jit_sketch_add_f64" => jet_jit_sketch_add_f64: unary_void;
+    count0: "jet_jit_sketch_count0" => jet_jit_sketch_count0: unary;
+    count1: "jet_jit_sketch_count1" => jet_jit_sketch_count1: binary;
+    quantile: "jet_jit_sketch_quantile" => jet_jit_sketch_quantile: quant;
+    sample: "jet_jit_sketch_sample" => jet_jit_sketch_sample: unary;
 }
 
-pub(crate) fn register_sketch_symbols(builder: &mut JITBuilder) {
-    builder.symbol("jet_jit_hll_new", jet_jit_hll_new as *const u8);
-    builder.symbol("jet_jit_tdigest_new", jet_jit_tdigest_new as *const u8);
-    builder.symbol("jet_jit_cms_new", jet_jit_cms_new as *const u8);
-    builder.symbol("jet_jit_reservoir_new", jet_jit_reservoir_new as *const u8);
-    builder.symbol("jet_jit_sketch_add_str", jet_jit_sketch_add_str as *const u8);
-    builder.symbol("jet_jit_sketch_add_f64", jet_jit_sketch_add_f64 as *const u8);
-    builder.symbol("jet_jit_sketch_count0", jet_jit_sketch_count0 as *const u8);
-    builder.symbol("jet_jit_sketch_count1", jet_jit_sketch_count1 as *const u8);
-    builder.symbol("jet_jit_sketch_quantile", jet_jit_sketch_quantile as *const u8);
-    builder.symbol("jet_jit_sketch_sample", jet_jit_sketch_sample as *const u8);
-}
 
-pub(crate) fn declare_sketch_host_fns(module: &mut JITModule) -> Result<SketchHostFns, String> {
-    let cc = module.target_config().default_call_conv;
-    let mut nullary = Signature::new(cc);
-    nullary.returns.push(AbiParam::new(types::I64));
-    let mut unary = Signature::new(cc);
-    unary.params.push(AbiParam::new(types::I64));
-    unary.returns.push(AbiParam::new(types::I64));
-    let mut unary_void = Signature::new(cc);
-    unary_void.params.push(AbiParam::new(types::I64));
-    unary_void.params.push(AbiParam::new(types::F64));
-    let mut binary = Signature::new(cc);
-    binary.params.push(AbiParam::new(types::I64));
-    binary.params.push(AbiParam::new(types::I64));
-    binary.returns.push(AbiParam::new(types::I64));
-    let mut ternary_void = Signature::new(cc);
-    ternary_void.params.push(AbiParam::new(types::I64));
-    ternary_void.params.push(AbiParam::new(types::I64));
-    ternary_void.params.push(AbiParam::new(types::I64));
-    let mut quant = Signature::new(cc);
-    quant.params.push(AbiParam::new(types::I64));
-    quant.params.push(AbiParam::new(types::F64));
-    quant.returns.push(AbiParam::new(types::F64));
-    let mut import = |name: &str, sig: &Signature| {
-        module
-            .declare_function(name, Linkage::Import, sig)
-            .map_err(|e| e.to_string())
-    };
-    Ok(SketchHostFns {
-        hll_new: import("jet_jit_hll_new", &nullary)?,
-        tdigest_new: import("jet_jit_tdigest_new", &nullary)?,
-        cms_new: import("jet_jit_cms_new", &nullary)?,
-        reservoir_new: import("jet_jit_reservoir_new", &unary)?,
-        add_str: import("jet_jit_sketch_add_str", &ternary_void)?,
-        add_f64: import("jet_jit_sketch_add_f64", &unary_void)?,
-        count0: import("jet_jit_sketch_count0", &unary)?,
-        count1: import("jet_jit_sketch_count1", &binary)?,
-        quantile: import("jet_jit_sketch_quantile", &quant)?,
-        sample: import("jet_jit_sketch_sample", &unary)?,
-    })
-}
+
+
+

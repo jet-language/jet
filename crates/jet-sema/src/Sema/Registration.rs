@@ -212,8 +212,8 @@ impl<'a> Checker<'a> {
             if p.name == Syntax::KW_SELF {
                 if let Some(owner) = owner_type {
                     let self_ty = Type::Named(owner.to_string());
-                    self.scopes.last_mut().unwrap().insert(
-                        p.name.clone(),
+                    self.declare_in_scope(
+                        &p.name,
                         LocalInfo {
                             def_span: p.name_span,
                             ty: self_ty,
@@ -267,8 +267,8 @@ impl<'a> Checker<'a> {
                 // recipient is where linearity is satisfied — making the param
                 // re-consume would be infinite regress. Borrow/read params can't
                 // own it at all. So `single_use_span` stays `None` for every param.
-                self.scopes.last_mut().unwrap().insert(
-                    p.name.clone(),
+                self.declare_in_scope(
+                    &p.name,
                     LocalInfo {
                         def_span: p.name_span,
                         ty: pty,
@@ -643,7 +643,7 @@ fn scan_stmt_for_variadic_uses(
             }
         }
         // Every other statement kind (lexical-scope wrappers like `#Unsafe { }`,
-        // `region`, `taskgroup`, `#Transact`, `#Known { }`, …) is out of scope
+        // `region`, `taskgroup`, `#Transact`, `$ { }`, …) is out of scope
         // for v1 — a trait-bounded variadic used inside one of these isn't
         // caught here; codegen's own "internal compiler error" guard
         // (`VariadicBound.rs`) is the backstop.

@@ -226,73 +226,47 @@ extern "C" fn jet_jit_devserver_serve(server: i64) {
     let _ = server;
 }
 
-pub(crate) struct WebHostFns {
-    pub(crate) on: FuncId,
-    pub(crate) value: FuncId,
-    pub(crate) app: FuncId,
-    pub(crate) page: FuncId,
-    pub(crate) app_method: FuncId,
-    pub(crate) devserver_app: FuncId,
-    pub(crate) devserver_for_app: FuncId,
-    pub(crate) devserver_html: FuncId,
-    pub(crate) devserver_port: FuncId,
-    pub(crate) devserver_serve: FuncId,
-}
+host_fns! {
+    struct WebHostFns;
+    register: register_web_symbols;
+    declare: declare_web_host_fns(module) {
+        let cc = module.target_config().default_call_conv;
 
-pub(crate) fn register_web_symbols(builder: &mut JITBuilder) {
-    builder.symbol("jet_jit_web_on", jet_jit_web_on as *const u8);
-    builder.symbol("jet_jit_web_value", jet_jit_web_value as *const u8);
-    builder.symbol("jet_jit_web_app", jet_jit_web_app as *const u8);
-    builder.symbol("jet_jit_web_page", jet_jit_web_page as *const u8);
-    builder.symbol("jet_jit_web_app_method", jet_jit_web_app_method as *const u8);
-    builder.symbol("jet_jit_devserver_app", jet_jit_devserver_app as *const u8);
-    builder.symbol(
-        "jet_jit_devserver_for_app",
-        jet_jit_devserver_for_app as *const u8,
-    );
-    builder.symbol("jet_jit_devserver_html", jet_jit_devserver_html as *const u8);
-    builder.symbol("jet_jit_devserver_port", jet_jit_devserver_port as *const u8);
-    builder.symbol("jet_jit_devserver_serve", jet_jit_devserver_serve as *const u8);
-}
+        let mut nullary = Signature::new(cc);
+        nullary.returns.push(AbiParam::new(types::I64));
+        let mut unary = Signature::new(cc);
+        unary.params.push(AbiParam::new(types::I64));
+        unary.returns.push(AbiParam::new(types::I64));
+        let mut unary_void = Signature::new(cc);
+        unary_void.params.push(AbiParam::new(types::I64));
+        let mut binary = Signature::new(cc);
+        binary.params.push(AbiParam::new(types::I64));
+        binary.params.push(AbiParam::new(types::I64));
+        binary.returns.push(AbiParam::new(types::I64));
+        let mut ternary_void = Signature::new(cc);
+        ternary_void.params.push(AbiParam::new(types::I64));
+        ternary_void.params.push(AbiParam::new(types::I64));
+        ternary_void.params.push(AbiParam::new(types::I64));
+        let mut app_method = Signature::new(cc);
+        for _ in 0..4 {
+            app_method.params.push(AbiParam::new(types::I64));
+        }
+        app_method.returns.push(AbiParam::new(types::I64));
 
-pub(crate) fn declare_web_host_fns(module: &mut JITModule) -> Result<WebHostFns, String> {
-    let cc = module.target_config().default_call_conv;
-    let mut import = |name: &str, sig: &Signature| {
-        module
-            .declare_function(name, Linkage::Import, sig)
-            .map_err(|e| e.to_string())
-    };
-    let mut nullary = Signature::new(cc);
-    nullary.returns.push(AbiParam::new(types::I64));
-    let mut unary = Signature::new(cc);
-    unary.params.push(AbiParam::new(types::I64));
-    unary.returns.push(AbiParam::new(types::I64));
-    let mut unary_void = Signature::new(cc);
-    unary_void.params.push(AbiParam::new(types::I64));
-    let mut binary = Signature::new(cc);
-    binary.params.push(AbiParam::new(types::I64));
-    binary.params.push(AbiParam::new(types::I64));
-    binary.returns.push(AbiParam::new(types::I64));
-    let mut ternary_void = Signature::new(cc);
-    ternary_void.params.push(AbiParam::new(types::I64));
-    ternary_void.params.push(AbiParam::new(types::I64));
-    ternary_void.params.push(AbiParam::new(types::I64));
-    let mut app_method = Signature::new(cc);
-    for _ in 0..4 {
-        app_method.params.push(AbiParam::new(types::I64));
     }
-    app_method.returns.push(AbiParam::new(types::I64));
-
-    Ok(WebHostFns {
-        on: import("jet_jit_web_on", &ternary_void)?,
-        value: import("jet_jit_web_value", &nullary)?,
-        app: import("jet_jit_web_app", &nullary)?,
-        page: import("jet_jit_web_page", &binary)?,
-        app_method: import("jet_jit_web_app_method", &app_method)?,
-        devserver_app: import("jet_jit_devserver_app", &nullary)?,
-        devserver_for_app: import("jet_jit_devserver_for_app", &unary)?,
-        devserver_html: import("jet_jit_devserver_html", &binary)?,
-        devserver_port: import("jet_jit_devserver_port", &binary)?,
-        devserver_serve: import("jet_jit_devserver_serve", &unary_void)?,
-    })
+    on: "jet_jit_web_on" => jet_jit_web_on: ternary_void;
+    value: "jet_jit_web_value" => jet_jit_web_value: nullary;
+    app: "jet_jit_web_app" => jet_jit_web_app: nullary;
+    page: "jet_jit_web_page" => jet_jit_web_page: binary;
+    app_method: "jet_jit_web_app_method" => jet_jit_web_app_method: app_method;
+    devserver_app: "jet_jit_devserver_app" => jet_jit_devserver_app: nullary;
+    devserver_for_app: "jet_jit_devserver_for_app" => jet_jit_devserver_for_app: unary;
+    devserver_html: "jet_jit_devserver_html" => jet_jit_devserver_html: binary;
+    devserver_port: "jet_jit_devserver_port" => jet_jit_devserver_port: binary;
+    devserver_serve: "jet_jit_devserver_serve" => jet_jit_devserver_serve: unary_void;
 }
+
+
+
+
+

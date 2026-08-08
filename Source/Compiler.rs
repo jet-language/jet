@@ -1432,8 +1432,6 @@ fn token_kind_name(kind: &TokKind) -> &'static str {
         TokKind::KwPriv => "keyword.priv",
         TokKind::KwIf => "keyword.if",
         TokKind::KwElse => "keyword.else",
-        TokKind::KwWhile => "keyword.while",
-        TokKind::KwFor => "keyword.for",
         TokKind::KwSwitch => "keyword.switch",
         TokKind::KwBreak => "keyword.break",
         TokKind::KwTrue => "literal.true",

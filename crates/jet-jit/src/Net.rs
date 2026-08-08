@@ -7,6 +7,7 @@ use super::Concurrency;
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
+use crate::Marshal::{alloc_string, clone_string, result_err_msg, result_ok};
 
 mod runtime {
     use crate::JetShow;
@@ -216,30 +217,8 @@ fn with_net<R>(handle: i64, f: impl FnOnce(&NetValue) -> Option<R>) -> Option<R>
     })
 }
 
-fn clone_string(handle: i64) -> String {
-    Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(handle).unwrap_or_default())
-}
-
-fn alloc_string(s: String) -> i64 {
-    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s))
-}
-
-fn result_ok(bits: u64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        rt.results.push(super::JitResultValue { ok: true, bits });
-        rt.results.len() as i64
-    })
-}
-
-fn result_err(message: String) -> i64 {
-    let handle = alloc_string(message);
-    Concurrency::with_runtime_mut(|rt| {
-        rt.results.push(super::JitResultValue {
-            ok: false,
-            bits: handle as u64,
-        });
-        rt.results.len() as i64
-    })
+fn result_err(msg: String) -> i64 {
+    result_err_msg(&msg)
 }
 
 fn option_string(s: Option<String>) -> i64 {
@@ -880,162 +859,67 @@ extern "C" fn jet_jit_net_socket_port(addr: i64) -> i64 {
     })
 }
 
-pub(crate) struct NetHostFns {
-    pub tcp_listen: FuncId,
-    pub listener_local_socket_addr: FuncId,
-    pub socket_port: FuncId,
-    pub url_parse: FuncId,
-    pub url_file: FuncId,
-    pub url_data: FuncId,
-    pub url_query: FuncId,
-    pub url_percent_encode: FuncId,
-    pub url_percent_decode: FuncId,
-    pub mime_parse: FuncId,
-    pub mime_from_extension: FuncId,
-    pub mime_extension: FuncId,
-    pub url_to_string: FuncId,
-    pub url_host: FuncId,
-    pub url_path: FuncId,
-    pub url_query_pairs: FuncId,
-    pub url_path_segments: FuncId,
-    pub url_fragment: FuncId,
-    pub url_username: FuncId,
-    pub url_password: FuncId,
-    pub url_userinfo: FuncId,
-    pub url_authority: FuncId,
-    pub url_default_port: FuncId,
-    pub url_join: FuncId,
-    pub mime_essence: FuncId,
-    pub mime_param: FuncId,
-    pub browser_profile: FuncId,
-    pub browser_timeout: FuncId,
-    pub email_address: FuncId,
-    pub email_attachment: FuncId,
-    pub email_message: FuncId,
-    pub email_serialize: FuncId,
-    pub email_smtp: FuncId,
+host_fns! {
+    struct NetHostFns;
+    register: register_net_symbols;
+    declare: declare_net_host_fns(module) {
+        let cc = module.target_config().default_call_conv;
+        let mut sig1 = Signature::new(cc);
+        sig1.params.push(AbiParam::new(types::I64));
+        sig1.returns.push(AbiParam::new(types::I64));
+        let mut sig2 = Signature::new(cc);
+        sig2.params.push(AbiParam::new(types::I64));
+        sig2.params.push(AbiParam::new(types::I64));
+        sig2.returns.push(AbiParam::new(types::I64));
+        let mut sig3 = Signature::new(cc);
+        for _ in 0..3 {
+            sig3.params.push(AbiParam::new(types::I64));
+        }
+        sig3.returns.push(AbiParam::new(types::I64));
+        let mut sig7 = Signature::new(cc);
+        for _ in 0..7 {
+            sig7.params.push(AbiParam::new(types::I64));
+        }
+        sig7.returns.push(AbiParam::new(types::I64));
+
+
+    }
+    tcp_listen: "jet_jit_net_tcp_listen" => jet_jit_net_tcp_listen: sig1;
+    listener_local_socket_addr: "jet_jit_net_listener_local_socket_addr" => jet_jit_net_listener_local_socket_addr: sig1;
+    socket_port: "jet_jit_net_socket_port" => jet_jit_net_socket_port: sig1;
+    url_parse: "jet_jit_url_parse" => jet_jit_url_parse: sig1;
+    url_file: "jet_jit_url_file" => jet_jit_url_file: sig1;
+    url_data: "jet_jit_url_data" => jet_jit_url_data: sig2;
+    url_query: "jet_jit_url_query" => jet_jit_url_query: sig1;
+    url_percent_encode: "jet_jit_url_percent_encode" => jet_jit_url_percent_encode: sig1;
+    url_percent_decode: "jet_jit_url_percent_decode" => jet_jit_url_percent_decode: sig1;
+    mime_parse: "jet_jit_mime_parse" => jet_jit_mime_parse: sig1;
+    mime_from_extension: "jet_jit_mime_from_extension" => jet_jit_mime_from_extension: sig1;
+    mime_extension: "jet_jit_mime_extension" => jet_jit_mime_extension: sig1;
+    url_to_string: "jet_jit_url_to_string" => jet_jit_url_to_string: sig1;
+    url_host: "jet_jit_url_host" => jet_jit_url_host: sig1;
+    url_path: "jet_jit_url_path" => jet_jit_url_path: sig1;
+    url_query_pairs: "jet_jit_url_query_pairs" => jet_jit_url_query_pairs: sig1;
+    url_path_segments: "jet_jit_url_path_segments" => jet_jit_url_path_segments: sig1;
+    url_fragment: "jet_jit_url_fragment" => jet_jit_url_fragment: sig1;
+    url_username: "jet_jit_url_username" => jet_jit_url_username: sig1;
+    url_password: "jet_jit_url_password" => jet_jit_url_password: sig1;
+    url_userinfo: "jet_jit_url_userinfo" => jet_jit_url_userinfo: sig1;
+    url_authority: "jet_jit_url_authority" => jet_jit_url_authority: sig1;
+    url_default_port: "jet_jit_url_default_port" => jet_jit_url_default_port: sig1;
+    url_join: "jet_jit_url_join" => jet_jit_url_join: sig2;
+    mime_essence: "jet_jit_mime_essence" => jet_jit_mime_essence: sig1;
+    mime_param: "jet_jit_mime_param" => jet_jit_mime_param: sig2;
+    browser_profile: "jet_jit_browser_profile" => jet_jit_browser_profile: sig1;
+    browser_timeout: "jet_jit_browser_timeout" => jet_jit_browser_timeout: sig1;
+    email_address: "jet_jit_email_address" => jet_jit_email_address: sig1;
+    email_attachment: "jet_jit_email_attachment" => jet_jit_email_attachment: sig3;
+    email_message: "jet_jit_email_message" => jet_jit_email_message: sig7;
+    email_serialize: "jet_jit_email_serialize" => jet_jit_email_serialize: sig1;
+    email_smtp: "jet_jit_email_smtp" => jet_jit_email_smtp: sig1;
 }
 
-pub(crate) fn register_net_symbols(builder: &mut JITBuilder) {
-    builder.symbol("jet_jit_net_tcp_listen", jet_jit_net_tcp_listen as *const u8);
-    builder.symbol(
-        "jet_jit_net_listener_local_socket_addr",
-        jet_jit_net_listener_local_socket_addr as *const u8,
-    );
-    builder.symbol("jet_jit_net_socket_port", jet_jit_net_socket_port as *const u8);
-    builder.symbol("jet_jit_url_parse", jet_jit_url_parse as *const u8);
-    builder.symbol("jet_jit_url_file", jet_jit_url_file as *const u8);
-    builder.symbol("jet_jit_url_data", jet_jit_url_data as *const u8);
-    builder.symbol("jet_jit_url_query", jet_jit_url_query as *const u8);
-    builder.symbol(
-        "jet_jit_url_percent_encode",
-        jet_jit_url_percent_encode as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_url_percent_decode",
-        jet_jit_url_percent_decode as *const u8,
-    );
-    builder.symbol("jet_jit_mime_parse", jet_jit_mime_parse as *const u8);
-    builder.symbol(
-        "jet_jit_mime_from_extension",
-        jet_jit_mime_from_extension as *const u8,
-    );
-    builder.symbol("jet_jit_mime_extension", jet_jit_mime_extension as *const u8);
-    builder.symbol("jet_jit_url_to_string", jet_jit_url_to_string as *const u8);
-    builder.symbol("jet_jit_url_host", jet_jit_url_host as *const u8);
-    builder.symbol("jet_jit_url_path", jet_jit_url_path as *const u8);
-    builder.symbol("jet_jit_url_query_pairs", jet_jit_url_query_pairs as *const u8);
-    builder.symbol(
-        "jet_jit_url_path_segments",
-        jet_jit_url_path_segments as *const u8,
-    );
-    builder.symbol("jet_jit_url_fragment", jet_jit_url_fragment as *const u8);
-    builder.symbol("jet_jit_url_username", jet_jit_url_username as *const u8);
-    builder.symbol("jet_jit_url_password", jet_jit_url_password as *const u8);
-    builder.symbol("jet_jit_url_userinfo", jet_jit_url_userinfo as *const u8);
-    builder.symbol("jet_jit_url_authority", jet_jit_url_authority as *const u8);
-    builder.symbol("jet_jit_url_default_port", jet_jit_url_default_port as *const u8);
-    builder.symbol("jet_jit_url_join", jet_jit_url_join as *const u8);
-    builder.symbol("jet_jit_mime_essence", jet_jit_mime_essence as *const u8);
-    builder.symbol("jet_jit_mime_param", jet_jit_mime_param as *const u8);
-    builder.symbol(
-        "jet_jit_browser_profile",
-        jet_jit_browser_profile as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_browser_timeout",
-        jet_jit_browser_timeout as *const u8,
-    );
-    builder.symbol("jet_jit_email_address", jet_jit_email_address as *const u8);
-    builder.symbol(
-        "jet_jit_email_attachment",
-        jet_jit_email_attachment as *const u8,
-    );
-    builder.symbol("jet_jit_email_message", jet_jit_email_message as *const u8);
-    builder.symbol(
-        "jet_jit_email_serialize",
-        jet_jit_email_serialize as *const u8,
-    );
-    builder.symbol("jet_jit_email_smtp", jet_jit_email_smtp as *const u8);
-}
 
-pub(crate) fn declare_net_host_fns(module: &mut JITModule) -> Result<NetHostFns, String> {
-    let cc = module.target_config().default_call_conv;
-    let mut sig1 = Signature::new(cc);
-    sig1.params.push(AbiParam::new(types::I64));
-    sig1.returns.push(AbiParam::new(types::I64));
-    let mut sig2 = Signature::new(cc);
-    sig2.params.push(AbiParam::new(types::I64));
-    sig2.params.push(AbiParam::new(types::I64));
-    sig2.returns.push(AbiParam::new(types::I64));
-    let mut sig3 = Signature::new(cc);
-    for _ in 0..3 {
-        sig3.params.push(AbiParam::new(types::I64));
-    }
-    sig3.returns.push(AbiParam::new(types::I64));
-    let mut sig7 = Signature::new(cc);
-    for _ in 0..7 {
-        sig7.params.push(AbiParam::new(types::I64));
-    }
-    sig7.returns.push(AbiParam::new(types::I64));
-    let import = |module: &mut JITModule, name: &str, sig: &Signature| {
-        module
-            .declare_function(name, Linkage::Import, sig)
-            .map_err(|e| e.to_string())
-    };
-    Ok(NetHostFns {
-        tcp_listen: import(module, "jet_jit_net_tcp_listen", &sig1)?,
-        listener_local_socket_addr: import(module, "jet_jit_net_listener_local_socket_addr", &sig1)?,
-        socket_port: import(module, "jet_jit_net_socket_port", &sig1)?,
-        url_parse: import(module, "jet_jit_url_parse", &sig1)?,
-        url_file: import(module, "jet_jit_url_file", &sig1)?,
-        url_data: import(module, "jet_jit_url_data", &sig2)?,
-        url_query: import(module, "jet_jit_url_query", &sig1)?,
-        url_percent_encode: import(module, "jet_jit_url_percent_encode", &sig1)?,
-        url_percent_decode: import(module, "jet_jit_url_percent_decode", &sig1)?,
-        mime_parse: import(module, "jet_jit_mime_parse", &sig1)?,
-        mime_from_extension: import(module, "jet_jit_mime_from_extension", &sig1)?,
-        mime_extension: import(module, "jet_jit_mime_extension", &sig1)?,
-        url_to_string: import(module, "jet_jit_url_to_string", &sig1)?,
-        url_host: import(module, "jet_jit_url_host", &sig1)?,
-        url_path: import(module, "jet_jit_url_path", &sig1)?,
-        url_query_pairs: import(module, "jet_jit_url_query_pairs", &sig1)?,
-        url_path_segments: import(module, "jet_jit_url_path_segments", &sig1)?,
-        url_fragment: import(module, "jet_jit_url_fragment", &sig1)?,
-        url_username: import(module, "jet_jit_url_username", &sig1)?,
-        url_password: import(module, "jet_jit_url_password", &sig1)?,
-        url_userinfo: import(module, "jet_jit_url_userinfo", &sig1)?,
-        url_authority: import(module, "jet_jit_url_authority", &sig1)?,
-        url_default_port: import(module, "jet_jit_url_default_port", &sig1)?,
-        url_join: import(module, "jet_jit_url_join", &sig2)?,
-        mime_essence: import(module, "jet_jit_mime_essence", &sig1)?,
-        mime_param: import(module, "jet_jit_mime_param", &sig2)?,
-        browser_profile: import(module, "jet_jit_browser_profile", &sig1)?,
-        browser_timeout: import(module, "jet_jit_browser_timeout", &sig1)?,
-        email_address: import(module, "jet_jit_email_address", &sig1)?,
-        email_attachment: import(module, "jet_jit_email_attachment", &sig3)?,
-        email_message: import(module, "jet_jit_email_message", &sig7)?,
-        email_serialize: import(module, "jet_jit_email_serialize", &sig1)?,
-        email_smtp: import(module, "jet_jit_email_smtp", &sig1)?,
-    })
-}
+
+
+

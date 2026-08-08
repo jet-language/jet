@@ -635,179 +635,107 @@ extern "C" fn jet_jit_ui_reactive_render(
     crate::Reactive::reactive_rt::jet_reactive_effect_rooted(move || cb.invoke_void());
 }
 
-pub(crate) struct UiHostFns {
-    pub(crate) null_backend: FuncId,
-    pub(crate) tui_backend: FuncId,
-    pub(crate) gtk_backend: FuncId,
-    pub(crate) node: FuncId,
-    pub(crate) text: FuncId,
-    pub(crate) button: FuncId,
-    pub(crate) button_on_click: FuncId,
-    pub(crate) node_color: FuncId,
-    pub(crate) node_role: FuncId,
-    pub(crate) box_node: FuncId,
-    pub(crate) constraint: FuncId,
-    pub(crate) rect: FuncId,
-    pub(crate) key_event: FuncId,
-    pub(crate) aria_role: FuncId,
-    pub(crate) node_label: FuncId,
-    pub(crate) node_dim: FuncId,
-    pub(crate) measure: FuncId,
-    pub(crate) layout: FuncId,
-    pub(crate) paint: FuncId,
-    pub(crate) mount: FuncId,
-    pub(crate) mount_default: FuncId,
-    pub(crate) on_event: FuncId,
-    pub(crate) commands: FuncId,
-    pub(crate) frame_lines: FuncId,
-    pub(crate) render_count: FuncId,
-    pub(crate) set_focus_group: FuncId,
-    pub(crate) focused_label: FuncId,
-    pub(crate) gtk_button: FuncId,
-    pub(crate) gtk_on_click: FuncId,
-    pub(crate) gtk_present: FuncId,
-    pub(crate) reactive_render: FuncId,
+host_fns! {
+    struct UiHostFns;
+    register: register_ui_symbols;
+    declare: declare_ui_host_fns(module) {
+        let cc = module.target_config().default_call_conv;
+
+        let mut nullary = Signature::new(cc);
+        nullary.returns.push(AbiParam::new(types::I64));
+        let mut unary = Signature::new(cc);
+        unary.params.push(AbiParam::new(types::I64));
+        unary.returns.push(AbiParam::new(types::I64));
+        let mut unary_void = Signature::new(cc);
+        unary_void.params.push(AbiParam::new(types::I64));
+        let mut binary = Signature::new(cc);
+        binary.params.push(AbiParam::new(types::I64));
+        binary.params.push(AbiParam::new(types::I64));
+        binary.returns.push(AbiParam::new(types::I64));
+        let mut binary_void = Signature::new(cc);
+        binary_void.params.push(AbiParam::new(types::I64));
+        binary_void.params.push(AbiParam::new(types::I64));
+        let mut node3 = Signature::new(cc);
+        node3.params.push(AbiParam::new(types::I64));
+        node3.params.push(AbiParam::new(types::F64));
+        node3.params.push(AbiParam::new(types::F64));
+        node3.returns.push(AbiParam::new(types::I64));
+        let mut node4 = Signature::new(cc);
+        node4.params.push(AbiParam::new(types::I64));
+        node4.params.push(AbiParam::new(types::F64));
+        node4.params.push(AbiParam::new(types::F64));
+        node4.params.push(AbiParam::new(types::I64));
+        node4.returns.push(AbiParam::new(types::I64));
+        let mut f4 = Signature::new(cc);
+        for _ in 0..4 {
+            f4.params.push(AbiParam::new(types::F64));
+        }
+        f4.returns.push(AbiParam::new(types::I64));
+        let mut measure = Signature::new(cc);
+        measure.params.push(AbiParam::new(types::I64));
+        measure.params.push(AbiParam::new(types::I64));
+        measure.params.push(AbiParam::new(types::I64));
+        measure.returns.push(AbiParam::new(types::I64));
+        let mut layout = Signature::new(cc);
+        layout.params.push(AbiParam::new(types::I64));
+        layout.params.push(AbiParam::new(types::I64));
+        layout.params.push(AbiParam::new(types::I64));
+        let mut paint = Signature::new(cc);
+        paint.params.push(AbiParam::new(types::I64));
+        paint.params.push(AbiParam::new(types::I64));
+        let mut cb6 = Signature::new(cc);
+        for _ in 0..6 {
+            cb6.params.push(AbiParam::new(types::I64));
+        }
+        let mut btn_on_click = Signature::new(cc);
+        for _ in 0..7 {
+            btn_on_click.params.push(AbiParam::new(types::I64));
+        }
+        btn_on_click.returns.push(AbiParam::new(types::I64));
+        let mut gtk_click = Signature::new(cc);
+        for _ in 0..8 {
+            gtk_click.params.push(AbiParam::new(types::I64));
+        }
+        let mut node_dim = Signature::new(cc);
+        node_dim.params.push(AbiParam::new(types::I64));
+        node_dim.params.push(AbiParam::new(types::I64));
+        node_dim.returns.push(AbiParam::new(types::F64));
+
+    }
+    null_backend: "jet_jit_ui_null_backend" => jet_jit_ui_null_backend: nullary;
+    tui_backend: "jet_jit_ui_tui_backend" => jet_jit_ui_tui_backend: nullary;
+    gtk_backend: "jet_jit_ui_gtk_backend" => jet_jit_ui_gtk_backend: nullary;
+    node: "jet_jit_ui_node" => jet_jit_ui_node: node3;
+    text: "jet_jit_ui_text" => jet_jit_ui_text: unary;
+    button: "jet_jit_ui_button" => jet_jit_ui_button: unary;
+    button_on_click: "jet_jit_ui_button_on_click" => jet_jit_ui_button_on_click: btn_on_click;
+    node_color: "jet_jit_ui_node_color" => jet_jit_ui_node_color: node4;
+    node_role: "jet_jit_ui_node_role" => jet_jit_ui_node_role: node4;
+    box_node: "jet_jit_ui_box" => jet_jit_ui_box: unary;
+    constraint: "jet_jit_ui_constraint" => jet_jit_ui_constraint: f4;
+    rect: "jet_jit_ui_rect" => jet_jit_ui_rect: f4;
+    key_event: "jet_jit_ui_key_event" => jet_jit_ui_key_event: unary;
+    aria_role: "jet_jit_ui_aria_role" => jet_jit_ui_aria_role: unary;
+    node_label: "jet_jit_ui_node_label" => jet_jit_ui_node_label: unary;
+    node_dim: "jet_jit_ui_node_dim" => jet_jit_ui_node_dim: node_dim;
+    measure: "jet_jit_ui_measure" => jet_jit_ui_measure: measure;
+    layout: "jet_jit_ui_layout" => jet_jit_ui_layout: layout;
+    paint: "jet_jit_ui_paint" => jet_jit_ui_paint: paint;
+    mount: "jet_jit_ui_mount" => jet_jit_ui_mount: layout;
+    mount_default: "jet_jit_ui_mount_default" => jet_jit_ui_mount_default: paint;
+    on_event: "jet_jit_ui_on_event" => jet_jit_ui_on_event: binary;
+    commands: "jet_jit_ui_commands" => jet_jit_ui_commands: unary;
+    frame_lines: "jet_jit_ui_frame_lines" => jet_jit_ui_frame_lines: unary;
+    render_count: "jet_jit_ui_render_count" => jet_jit_ui_render_count: unary;
+    set_focus_group: "jet_jit_ui_set_focus_group" => jet_jit_ui_set_focus_group: binary_void;
+    focused_label: "jet_jit_ui_focused_label" => jet_jit_ui_focused_label: unary;
+    gtk_button: "jet_jit_ui_gtk_button" => jet_jit_ui_gtk_button: binary;
+    gtk_on_click: "jet_jit_ui_gtk_on_click" => jet_jit_ui_gtk_on_click: gtk_click;
+    gtk_present: "jet_jit_ui_gtk_present" => jet_jit_ui_gtk_present: binary_void;
+    reactive_render: "jet_jit_ui_reactive_render" => jet_jit_ui_reactive_render: cb6;
 }
 
-pub(crate) fn register_ui_symbols(builder: &mut JITBuilder) {
-    builder.symbol("jet_jit_ui_null_backend", jet_jit_ui_null_backend as *const u8);
-    builder.symbol("jet_jit_ui_tui_backend", jet_jit_ui_tui_backend as *const u8);
-    builder.symbol("jet_jit_ui_gtk_backend", jet_jit_ui_gtk_backend as *const u8);
-    builder.symbol("jet_jit_ui_node", jet_jit_ui_node as *const u8);
-    builder.symbol("jet_jit_ui_text", jet_jit_ui_text as *const u8);
-    builder.symbol("jet_jit_ui_button", jet_jit_ui_button as *const u8);
-    builder.symbol(
-        "jet_jit_ui_button_on_click",
-        jet_jit_ui_button_on_click as *const u8,
-    );
-    builder.symbol("jet_jit_ui_node_color", jet_jit_ui_node_color as *const u8);
-    builder.symbol("jet_jit_ui_node_role", jet_jit_ui_node_role as *const u8);
-    builder.symbol("jet_jit_ui_box", jet_jit_ui_box as *const u8);
-    builder.symbol("jet_jit_ui_constraint", jet_jit_ui_constraint as *const u8);
-    builder.symbol("jet_jit_ui_rect", jet_jit_ui_rect as *const u8);
-    builder.symbol("jet_jit_ui_key_event", jet_jit_ui_key_event as *const u8);
-    builder.symbol("jet_jit_ui_aria_role", jet_jit_ui_aria_role as *const u8);
-    builder.symbol("jet_jit_ui_node_label", jet_jit_ui_node_label as *const u8);
-    builder.symbol("jet_jit_ui_node_dim", jet_jit_ui_node_dim as *const u8);
-    builder.symbol("jet_jit_ui_measure", jet_jit_ui_measure as *const u8);
-    builder.symbol("jet_jit_ui_layout", jet_jit_ui_layout as *const u8);
-    builder.symbol("jet_jit_ui_paint", jet_jit_ui_paint as *const u8);
-    builder.symbol("jet_jit_ui_mount", jet_jit_ui_mount as *const u8);
-    builder.symbol("jet_jit_ui_mount_default", jet_jit_ui_mount_default as *const u8);
-    builder.symbol("jet_jit_ui_on_event", jet_jit_ui_on_event as *const u8);
-    builder.symbol("jet_jit_ui_commands", jet_jit_ui_commands as *const u8);
-    builder.symbol("jet_jit_ui_frame_lines", jet_jit_ui_frame_lines as *const u8);
-    builder.symbol("jet_jit_ui_render_count", jet_jit_ui_render_count as *const u8);
-    builder.symbol("jet_jit_ui_set_focus_group", jet_jit_ui_set_focus_group as *const u8);
-    builder.symbol("jet_jit_ui_focused_label", jet_jit_ui_focused_label as *const u8);
-    builder.symbol("jet_jit_ui_gtk_button", jet_jit_ui_gtk_button as *const u8);
-    builder.symbol("jet_jit_ui_gtk_on_click", jet_jit_ui_gtk_on_click as *const u8);
-    builder.symbol("jet_jit_ui_gtk_present", jet_jit_ui_gtk_present as *const u8);
-    builder.symbol(
-        "jet_jit_ui_reactive_render",
-        jet_jit_ui_reactive_render as *const u8,
-    );
-}
 
-pub(crate) fn declare_ui_host_fns(module: &mut JITModule) -> Result<UiHostFns, String> {
-    let cc = module.target_config().default_call_conv;
-    let mut import = |name: &str, sig: &Signature| {
-        module
-            .declare_function(name, Linkage::Import, sig)
-            .map_err(|e| e.to_string())
-    };
-    let mut nullary = Signature::new(cc);
-    nullary.returns.push(AbiParam::new(types::I64));
-    let mut unary = Signature::new(cc);
-    unary.params.push(AbiParam::new(types::I64));
-    unary.returns.push(AbiParam::new(types::I64));
-    let mut unary_void = Signature::new(cc);
-    unary_void.params.push(AbiParam::new(types::I64));
-    let mut binary = Signature::new(cc);
-    binary.params.push(AbiParam::new(types::I64));
-    binary.params.push(AbiParam::new(types::I64));
-    binary.returns.push(AbiParam::new(types::I64));
-    let mut binary_void = Signature::new(cc);
-    binary_void.params.push(AbiParam::new(types::I64));
-    binary_void.params.push(AbiParam::new(types::I64));
-    let mut node3 = Signature::new(cc);
-    node3.params.push(AbiParam::new(types::I64));
-    node3.params.push(AbiParam::new(types::F64));
-    node3.params.push(AbiParam::new(types::F64));
-    node3.returns.push(AbiParam::new(types::I64));
-    let mut node4 = Signature::new(cc);
-    node4.params.push(AbiParam::new(types::I64));
-    node4.params.push(AbiParam::new(types::F64));
-    node4.params.push(AbiParam::new(types::F64));
-    node4.params.push(AbiParam::new(types::I64));
-    node4.returns.push(AbiParam::new(types::I64));
-    let mut f4 = Signature::new(cc);
-    for _ in 0..4 {
-        f4.params.push(AbiParam::new(types::F64));
-    }
-    f4.returns.push(AbiParam::new(types::I64));
-    let mut measure = Signature::new(cc);
-    measure.params.push(AbiParam::new(types::I64));
-    measure.params.push(AbiParam::new(types::I64));
-    measure.params.push(AbiParam::new(types::I64));
-    measure.returns.push(AbiParam::new(types::I64));
-    let mut layout = Signature::new(cc);
-    layout.params.push(AbiParam::new(types::I64));
-    layout.params.push(AbiParam::new(types::I64));
-    layout.params.push(AbiParam::new(types::I64));
-    let mut paint = Signature::new(cc);
-    paint.params.push(AbiParam::new(types::I64));
-    paint.params.push(AbiParam::new(types::I64));
-    let mut cb6 = Signature::new(cc);
-    for _ in 0..6 {
-        cb6.params.push(AbiParam::new(types::I64));
-    }
-    let mut btn_on_click = Signature::new(cc);
-    for _ in 0..7 {
-        btn_on_click.params.push(AbiParam::new(types::I64));
-    }
-    btn_on_click.returns.push(AbiParam::new(types::I64));
-    let mut gtk_click = Signature::new(cc);
-    for _ in 0..8 {
-        gtk_click.params.push(AbiParam::new(types::I64));
-    }
 
-    let mut node_dim = Signature::new(cc);
-    node_dim.params.push(AbiParam::new(types::I64));
-    node_dim.params.push(AbiParam::new(types::I64));
-    node_dim.returns.push(AbiParam::new(types::F64));
 
-    Ok(UiHostFns {
-        null_backend: import("jet_jit_ui_null_backend", &nullary)?,
-        tui_backend: import("jet_jit_ui_tui_backend", &nullary)?,
-        gtk_backend: import("jet_jit_ui_gtk_backend", &nullary)?,
-        node: import("jet_jit_ui_node", &node3)?,
-        text: import("jet_jit_ui_text", &unary)?,
-        button: import("jet_jit_ui_button", &unary)?,
-        button_on_click: import("jet_jit_ui_button_on_click", &btn_on_click)?,
-        node_color: import("jet_jit_ui_node_color", &node4)?,
-        node_role: import("jet_jit_ui_node_role", &node4)?,
-        box_node: import("jet_jit_ui_box", &unary)?,
-        constraint: import("jet_jit_ui_constraint", &f4)?,
-        rect: import("jet_jit_ui_rect", &f4)?,
-        key_event: import("jet_jit_ui_key_event", &unary)?,
-        aria_role: import("jet_jit_ui_aria_role", &unary)?,
-        node_label: import("jet_jit_ui_node_label", &unary)?,
-        node_dim: import("jet_jit_ui_node_dim", &node_dim)?,
-        measure: import("jet_jit_ui_measure", &measure)?,
-        layout: import("jet_jit_ui_layout", &layout)?,
-        paint: import("jet_jit_ui_paint", &paint)?,
-        mount: import("jet_jit_ui_mount", &layout)?,
-        mount_default: import("jet_jit_ui_mount_default", &paint)?,
-        on_event: import("jet_jit_ui_on_event", &binary)?,
-        commands: import("jet_jit_ui_commands", &unary)?,
-        frame_lines: import("jet_jit_ui_frame_lines", &unary)?,
-        render_count: import("jet_jit_ui_render_count", &unary)?,
-        set_focus_group: import("jet_jit_ui_set_focus_group", &binary_void)?,
-        focused_label: import("jet_jit_ui_focused_label", &unary)?,
-        gtk_button: import("jet_jit_ui_gtk_button", &binary)?,
-        gtk_on_click: import("jet_jit_ui_gtk_on_click", &gtk_click)?,
-        gtk_present: import("jet_jit_ui_gtk_present", &binary_void)?,
-        reactive_render: import("jet_jit_ui_reactive_render", &cb6)?,
-    })
-}
+

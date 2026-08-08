@@ -95,6 +95,7 @@ fn decode_hex(value: &str) -> String {
 }
 
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_import_writes_semantic_nixos_facts_with_audit() {
     let src = Scratch::new("os-import-src");
     fs::write(
@@ -162,6 +163,7 @@ fn os_import_writes_semantic_nixos_facts_with_audit() {
 
 
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_import_live_recovers_package_provenance_from_flake_inputs() {
     let src = Scratch::new("os-import-provenance-src");
     let tools = Scratch::new("os-import-provenance-tools");
@@ -240,6 +242,7 @@ exit 0
 
 
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_import_live_semantic_eval_maps_real_options() {
     let src = Scratch::new("os-import-live-src");
     let tools = Scratch::new("os-import-live-tools");
@@ -291,6 +294,7 @@ fn os_import_live_semantic_eval_maps_real_options() {
 
 
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_import_live_semantic_eval_reports_omissions() {
     let src = Scratch::new("os-import-live-audit-src");
     let tools = Scratch::new("os-import-live-audit-tools");
@@ -339,6 +343,7 @@ fn os_import_live_semantic_eval_reports_omissions() {
 
 
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_import_live_eval_failure_is_loud() {
     let src = Scratch::new("os-import-live-fail-src");
     let tools = Scratch::new("os-import-live-fail-tools");
@@ -364,6 +369,7 @@ fn os_import_live_eval_failure_is_loud() {
 
 
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_import_missing_source_has_snapshot() {
     let out = jet()
         .args([
@@ -385,6 +391,7 @@ fn os_import_missing_source_has_snapshot() {
 
 
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_lift_is_audited_facts_only_import_draft() {
     let src = Scratch::new("os-lift-src");
     fs::write(
@@ -422,6 +429,7 @@ fn os_lift_is_audited_facts_only_import_draft() {
 
 
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_build_realizes_selected_system_offline() {
     // I5/D-JPK-OSVERB1/D-JPK-OSHOST1: `jet os build <host>` loads config.jet
     // from the current repo, selects system.<host>, and realizes its packages
@@ -558,6 +566,7 @@ fn os_build_realizes_selected_system_offline() {
 }
 
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_published_name_binds_imported_source_closure() {
     let root = Scratch::new("os-imported-closure-root");
     let project = Scratch::new("os-imported-closure-project");
@@ -606,6 +615,7 @@ fn os_published_name_binds_imported_source_closure() {
 }
 
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_zero_hangar_generation_has_ledger_without_external_root() {
     let root = Scratch::new("os-zero-hangar-root");
     let project = Scratch::new("os-zero-hangar-project");
@@ -666,6 +676,7 @@ fn os_zero_hangar_generation_has_ledger_without_external_root() {
 }
 
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_generation_recovers_prepared_root_after_durable_ledger_crash_window() {
     let root = Scratch::new("os-generation-root-recovery");
     let project = Scratch::new("os-generation-root-project");
@@ -801,6 +812,7 @@ fn os_generation_recovers_prepared_root_after_durable_ledger_crash_window() {
 
 
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_switch_activates_and_sets_current() {
     // U15: `switch` builds the generation, then activates it — flips a `current`
     // pointer (and a boot `default`). The internal mechanic is a symlink in the
@@ -2251,6 +2263,7 @@ fn os_switch_activates_and_sets_current() {
 
 
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_plan_prints_checked_system_contract_without_building() {
     let root = Scratch::new("os-plan-root");
     let out = jet()
@@ -2281,6 +2294,7 @@ fn os_plan_prints_checked_system_contract_without_building() {
 
 
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn jetos_user_commands_use_same_generation_engine() {
     let root = Scratch::new("jetos-user-root");
     let plan = jetos()
@@ -2350,6 +2364,7 @@ fn jetos_user_commands_use_same_generation_engine() {
 
 
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_build_bare_host_uses_current_repo_config() {
     // D-JPK-OSHOST1=C: bare host discovers system.<host> in ./config.jet.
     let proj = Scratch::new("os-repo");
@@ -2396,6 +2411,7 @@ fn os_build_bare_host_uses_current_repo_config() {
 
 
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_cachyos_kernel_source_recipe_builds_boot_artifacts() {
     let proj = Scratch::new("os-kernel-source-build");
     let root = Scratch::new("os-kernel-source-build-root");
@@ -2464,6 +2480,7 @@ fn os_cachyos_kernel_source_recipe_builds_boot_artifacts() {
 
 
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_cachyos_kernel_source_builder_failure_is_diagnostic() {
     let proj = Scratch::new("os-kernel-source-build-fail");
     let root = Scratch::new("os-kernel-source-build-fail-root");
@@ -2508,6 +2525,7 @@ fn os_cachyos_kernel_source_builder_failure_is_diagnostic() {
 
 
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_cachyos_kernel_requires_first_party_source() {
     let proj = Scratch::new("os-missing-kernel");
     let root = Scratch::new("os-missing-kernel-root");
@@ -2530,6 +2548,7 @@ fn os_cachyos_kernel_requires_first_party_source() {
 
 
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_systemd_init_requires_first_party_source() {
     let proj = Scratch::new("os-missing-systemd");
     let root = Scratch::new("os-missing-systemd-root");
@@ -2570,6 +2589,7 @@ fn os_systemd_init_requires_first_party_source() {
 
 
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_default_gnome_desktop_requires_first_party_packages() {
     let proj = Scratch::new("os-missing-gnome-desktop");
     let root = Scratch::new("os-missing-gnome-desktop-root");
@@ -2614,6 +2634,7 @@ fn os_default_gnome_desktop_requires_first_party_packages() {
 
 
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_cachyos_kernel_requires_boot_artifacts() {
     let proj = Scratch::new("os-missing-kernel-artifacts");
     let root = Scratch::new("os-missing-kernel-artifacts-root");
@@ -2656,6 +2677,7 @@ fn os_cachyos_kernel_requires_boot_artifacts() {
 
 
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_cachyos_kernel_rejects_text_boot_artifacts() {
     let proj = Scratch::new("os-text-kernel-artifacts");
     let root = Scratch::new("os-text-kernel-artifacts-root");
@@ -2701,6 +2723,7 @@ fn os_cachyos_kernel_rejects_text_boot_artifacts() {
 
 
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_cachyos_kernel_requires_source_recipe() {
     let proj = Scratch::new("os-missing-kernel-source");
     let root = Scratch::new("os-missing-kernel-source-root");
@@ -2744,6 +2767,7 @@ fn os_cachyos_kernel_requires_source_recipe() {
 
 
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_systemd_init_requires_init_artifact() {
     let proj = Scratch::new("os-missing-systemd-artifact");
     let root = Scratch::new("os-missing-systemd-artifact-root");
@@ -2787,6 +2811,7 @@ fn os_systemd_init_requires_init_artifact() {
 
 
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_missing_host_is_friendly_and_exits_2() {
     let root = Scratch::new("os-no-host");
     let out = jet()
@@ -2801,6 +2826,7 @@ fn os_missing_host_is_friendly_and_exits_2() {
 
 
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_missing_external_root_is_friendly_and_exits_2() {
     let root = Scratch::new("os-no-root");
     let out = jet()
@@ -2817,6 +2843,7 @@ fn os_missing_external_root_is_friendly_and_exits_2() {
 
 
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_unknown_host_lists_available_systems() {
     let root = Scratch::new("os-bad-host");
     let out = jet()
@@ -2832,6 +2859,7 @@ fn os_unknown_host_lists_available_systems() {
 
 
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_missing_config_file_is_friendly() {
     let root = Scratch::new("os-no-config");
     let out = jet()
@@ -2846,6 +2874,7 @@ fn os_missing_config_file_is_friendly() {
 
 
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_retired_option_namespace_is_snapshot_pinned() {
     let proj = Scratch::new("os-bad-namespace");
     let root = Scratch::new("os-bad-namespace-root");
@@ -2867,6 +2896,7 @@ fn os_retired_option_namespace_is_snapshot_pinned() {
 
 
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_generations_are_newest_first_and_rollback_activates_prior() {
     let root = Scratch::new("os-gens-root");
     for name in ["first", "second"] {
@@ -3009,6 +3039,7 @@ fn os_generations_are_newest_first_and_rollback_activates_prior() {
 
 
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_vm_run_never_reaches_nixos_migration_backend() {
     let proj = Scratch::new("os-vm-real-no-nixpkgs-pin");
     let root = Scratch::new("os-vm-real-no-nixpkgs-pin-root");
@@ -3034,6 +3065,7 @@ fn os_vm_run_never_reaches_nixos_migration_backend() {
 
 
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_vm_prove_requires_pinned_media_tools() {
     let root = Scratch::new("os-vm-tools-root");
     let tools = Scratch::new("os-vm-tools-empty");
@@ -3064,6 +3096,7 @@ fn os_vm_prove_requires_pinned_media_tools() {
 
 
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_vm_run_requires_proved_installed_disk() {
     let root = Scratch::new("os-vm-run-unproven-root");
     let tools = Scratch::new("os-vm-run-unproven-tools");
@@ -3091,6 +3124,7 @@ fn os_vm_run_requires_proved_installed_disk() {
 
 
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_vm_prove_real_tier_is_retired_to_explicit_migration() {
     let root = Scratch::new("os-vm-real-root");
     let tools = Scratch::new("os-vm-real-tools");
@@ -3129,6 +3163,7 @@ fn os_vm_prove_real_tier_is_retired_to_explicit_migration() {
 
 #[cfg(target_os = "linux")]
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_migrate_compare_nixos_is_explicit_and_proof_gated() {
     let root = Scratch::new("os-migrate-nixos-root");
     let (path, outputs) = build_nixos_migration_test_tools(&root.path);
@@ -3174,6 +3209,7 @@ fn os_migrate_compare_nixos_is_explicit_and_proof_gated() {
 }
 
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn nixos_migration_prompt_probe_executes_interactive_shell_init() {
     let root = Scratch::new("nixos-interactive-prompt");
     let bashrc = root.join("bashrc");
@@ -3200,6 +3236,7 @@ fn nixos_migration_prompt_probe_executes_interactive_shell_init() {
 
 #[cfg(target_os = "linux")]
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn nixos_migration_protects_stage_before_writing_inputs() {
     let root = Scratch::new("nixos-private-stage");
     let out_dir = root.join("published");
@@ -3475,6 +3512,7 @@ fn traced_nixos_migration(
 
 #[cfg(target_os = "linux")]
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn nixos_migration_publish_stage_is_private_and_collision_safe() {
     let root = Scratch::new("nixos-private-publish");
     let (path, outputs) = build_nixos_migration_test_tools(&root.path);
@@ -3604,6 +3642,7 @@ fn nixos_migration_publish_stage_is_private_and_collision_safe() {
 }
 
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn nixos_migration_rejects_direct_engine_front_doors() {
     let marker = std::process::id().to_string();
     for (name, mut command, prefix) in [
@@ -3641,6 +3680,7 @@ fn nixos_migration_rejects_direct_engine_front_doors() {
 }
 
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn direct_os_engines_install_the_config_eval_bridge() {
     for (mut command, args) in [
         (jetpack(), &["os", "check", "halcyon", "--no-color"][..]),
@@ -3663,6 +3703,7 @@ fn direct_os_engines_install_the_config_eval_bridge() {
 }
 
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn nixos_migration_backend_has_no_product_path_or_rebranding_rewrite() {
     let vm = fs::read_to_string("crates/jetpack/src/JetOS/vm_commands.rs").unwrap();
     let generation = fs::read_to_string("crates/jetpack/src/JetOS/generation.rs").unwrap();
@@ -3699,6 +3740,7 @@ fn nixos_migration_backend_has_no_product_path_or_rebranding_rewrite() {
 
 
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_vm_prove_writes_media_bound_harness() {
     let root = Scratch::new("os-vm-proof-root");
     let tools = Scratch::new("os-vm-proof-tools");
@@ -3847,6 +3889,7 @@ fn os_vm_prove_writes_media_bound_harness() {
 
 
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_vm_prove_runs_qemu_and_records_guest_proof() {
     let root = Scratch::new("os-vm-run-root");
     let tools = Scratch::new("os-vm-run-tools");
@@ -3951,6 +3994,7 @@ fn os_vm_prove_runs_qemu_and_records_guest_proof() {
 
 
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_vm_test_runs_declared_scenario_and_records_proof() {
     let project = Scratch::new("os-vmtest-project");
     copy_dir_recursive(&config_example_dir(), &project.path);
@@ -4031,6 +4075,7 @@ module vmtest.ssh-smoke {
 
 
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_vm_prove_accepts_matching_guest_proof() {
     let root = Scratch::new("os-vm-guest-proof-root");
     let tools = Scratch::new("os-vm-guest-proof-tools");
@@ -4102,6 +4147,7 @@ fn os_vm_prove_accepts_matching_guest_proof() {
 
 
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_vm_prove_rejects_incomplete_guest_proof() {
     let root = Scratch::new("os-vm-stale-guest-proof-root");
     let tools = Scratch::new("os-vm-stale-guest-proof-tools");
@@ -4170,6 +4216,7 @@ fn os_vm_prove_rejects_incomplete_guest_proof() {
 
 
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_vm_prove_rejects_stale_guest_generation() {
     let root = Scratch::new("os-vm-stale-generation-root");
     let tools = Scratch::new("os-vm-stale-generation-tools");
@@ -4231,6 +4278,7 @@ fn os_vm_prove_rejects_stale_guest_generation() {
 
 
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_image_writes_jetos_installer_media_proof() {
     let root = Scratch::new("os-image-root");
     let tools = Scratch::new("os-image-tools");
@@ -4533,6 +4581,7 @@ fn os_image_writes_jetos_installer_media_proof() {
 
 
 #[test]
+#[ignore = "epoch-7 jetos suite: writes ~24G into tmpfs /tmp (card 1638); run deliberately with -- --ignored"]
 fn os_init_writes_guided_ext4_config() {
     let proj = Scratch::new("os-init");
     let out = jet()

@@ -5,15 +5,22 @@ use crate::Traits::TraitRegistry;
 use crate::AST::{
     CodeModule, ConstAttr, EnumDef, EnumLitArg, Expr, ForKind, Func, GenericModuleDef,
     GenericModuleParam, ImportKind, Item, LValue, LambdaBody, ModuleAliasDef, ModuleArg, OrFallback,
-    Pattern, ProgramBundle, RustConstKind, Stmt, StrPart, StructPatField, Type, VariantPayload,
+    ProgramBundle, RustConstKind, Stmt, StrPart, Type, VariantPayload,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+
+mod Comptime;
+mod Units;
 
 mod GenericModules;
 mod InlineCalls;
 mod Outputs;
 mod Validation;
+
+pub use Comptime::bundle_has_comptime_evaluation;
+use Comptime::stmts_have_comptime_evaluation;
+use Units::{inject_units_prelude, resolve_unit_dimensions};
 
 pub(crate) use InlineCalls::{mangle_inline_sibling_calls, rewrite_inline_calls_stmts};
 
@@ -177,7 +184,7 @@ fn register_effect_facts(
     facts: &mut jet_foundation::Facts::FactRegistry,
 ) {
     use jet_foundation::Facts::FactKind;
-    for effect in jet_foundation::Facts::EFFECT_ROOTS {
+    for effect in jet_foundation::Facts::EFFECT_ROOTS.iter() {
         facts.declare(FactKind::Effect, (*effect).to_string(), std::iter::empty());
     }
     for name in crate::Syntax::BUILTIN_EFFECT_LEAVES {
@@ -567,285 +574,6 @@ fn clear_callable_bodies(item: &mut Item) {
     }
 }
 
-pub fn bundle_has_comptime_evaluation(bundle: &ProgramBundle) -> bool {
-    bundle
-        .modules
-        .iter()
-        .flat_map(|module| &module.items)
-        .any(item_has_comptime_evaluation)
-}
-
-fn item_has_comptime_evaluation(item: &Item) -> bool {
-    let function = |function: &Func| stmts_have_comptime_evaluation(&function.body);
-    match item {
-        Item::Func(value) => function(value),
-        Item::Struct(value) => {
-            value.methods.iter().any(function)
-                || value
-                    .trait_impls
-                    .iter()
-                    .flat_map(|implementation| &implementation.methods)
-                    .any(function)
-        }
-        Item::Enum(value) => {
-            value.methods.iter().any(function)
-                || value
-                    .trait_impls
-                    .iter()
-                    .flat_map(|implementation| &implementation.methods)
-                    .any(function)
-        }
-        Item::Trait(value) => value
-            .methods
-            .iter()
-            .filter_map(|method| method.default_body.as_deref())
-            .any(stmts_have_comptime_evaluation),
-        Item::Impl(value) => value.methods.iter().any(function),
-        Item::Const(value) => value.is_comptime,
-        Item::Test(value) => stmts_have_comptime_evaluation(&value.body),
-        Item::Bench(value) => stmts_have_comptime_evaluation(&value.body),
-        Item::CodeModule(value) => value
-            .body
-            .as_deref()
-            .is_some_and(|body| body.iter().any(item_has_comptime_evaluation)),
-        Item::ErrorConv(value) => stmts_have_comptime_evaluation(&value.body),
-        Item::UserDerive(value) => stmts_have_comptime_evaluation(&value.body),
-        Item::GenericModule(value) => value.body.iter().any(item_has_comptime_evaluation),
-        _ => false,
-    }
-}
-
-fn stmts_have_comptime_evaluation(stmts: &[Stmt]) -> bool {
-    stmts.iter().any(|stmt| match stmt {
-        Stmt::Expr(value) | Stmt::Yield(value, _) => expr_has_comptime_evaluation(value),
-        Stmt::Val(binding) => {
-            binding.is_comptime || expr_has_comptime_evaluation(&binding.init)
-        }
-        Stmt::Assign { value, .. } => expr_has_comptime_evaluation(value),
-        Stmt::Return(Some(value), _) => expr_has_comptime_evaluation(value),
-        Stmt::BreakValue(value, _) | Stmt::BreakLabelValue(_, _, value, _) => {
-            expr_has_comptime_evaluation(value)
-        }
-        Stmt::Return(None, _) => false,
-        Stmt::While { cond, body, .. } => {
-            expr_has_comptime_evaluation(cond) || stmts_have_comptime_evaluation(body)
-        }
-        Stmt::For { kind, body, .. } => {
-            let iterable = match kind {
-                ForKind::Range { start, end, step, exclusive: _ } => {
-                    expr_has_comptime_evaluation(start)
-                        || expr_has_comptime_evaluation(end)
-                        || step.as_ref().is_some_and(expr_has_comptime_evaluation)
-                }
-                ForKind::In { collection, step } => {
-                    expr_has_comptime_evaluation(collection)
-                        || step.as_ref().is_some_and(expr_has_comptime_evaluation)
-                }
-            };
-            iterable || stmts_have_comptime_evaluation(body)
-        }
-        Stmt::Switch {
-            subject,
-            arms,
-            else_body,
-            ..
-        } => {
-            expr_has_comptime_evaluation(subject)
-                || arms.iter().any(|arm| {
-                    expr_has_comptime_evaluation(&arm.cond)
-                        || stmts_have_comptime_evaluation(&arm.body)
-                })
-                || else_body
-                    .as_deref()
-                    .is_some_and(stmts_have_comptime_evaluation)
-        }
-        Stmt::CountedLoop {
-            init,
-            cond,
-            step,
-            body,
-            ..
-        } => {
-            init.is_comptime
-                || expr_has_comptime_evaluation(&init.init)
-                || expr_has_comptime_evaluation(cond)
-                || step
-                    .as_deref()
-                    .is_some_and(|step| {
-                        stmts_have_comptime_evaluation(std::slice::from_ref(step))
-                    })
-                || stmts_have_comptime_evaluation(body)
-        }
-        Stmt::Loop { body, .. }
-        | Stmt::Unsafe { body, .. }
-        | Stmt::Impure { body, .. }
-        | Stmt::Reactive { body, .. }
-        | Stmt::Shield { body, .. }
-        | Stmt::Switched { body, .. }
-        | Stmt::Region { body, .. }
-        | Stmt::Policy { body, .. }
-        | Stmt::TaskGroup { body, .. }
-        | Stmt::Layout { body, .. }
-        | Stmt::Caps { body, .. }
-        | Stmt::Grant { body, .. }
-        | Stmt::Transact { body, .. }
-        | Stmt::AssumeDet { body, .. }
-        | Stmt::Live { body, .. }
-        | Stmt::ScopeMember { body, .. } => stmts_have_comptime_evaluation(body),
-        Stmt::ContextBlock { fields, body, .. } => {
-            fields
-                .iter()
-                .any(|(_, value, _)| expr_has_comptime_evaluation(value))
-                || stmts_have_comptime_evaluation(body)
-        }
-        Stmt::ComptimeIf { .. }
-        | Stmt::ComptimeSwitch { .. }
-        | Stmt::ComptimeBlock { .. } => true,
-        Stmt::Break(_)
-        | Stmt::Continue(_)
-        | Stmt::BreakLabel(..)
-        | Stmt::ContinueLabel(..) => false,
-    })
-}
-
-fn expr_has_comptime_evaluation(expr: &Expr) -> bool {
-    let argument = |arg: &crate::AST::CallArg| expr_has_comptime_evaluation(&arg.expr);
-    match expr {
-        Expr::Str(parts, _) => parts.iter().any(|part| match part {
-            StrPart::Interp(value, _) => expr_has_comptime_evaluation(value),
-            StrPart::Lit(_) => false,
-        }),
-        Expr::ListLit(values, _) => values.iter().any(expr_has_comptime_evaluation),
-        Expr::MemberSpread { base, .. } => expr_has_comptime_evaluation(base),
-        Expr::Spread(value, _)
-        | Expr::Unary(_, value, _)
-        | Expr::Deref(value, _)
-        | Expr::RawOf(value, _)
-        | Expr::Copy(value, _)
-        | Expr::Place(value, _, _)
-        | Expr::Field(value, _, _)
-        | Expr::Tainted(value, _, _)
-        | Expr::Present(value, _)
-        | Expr::Ok(value, _)
-        | Expr::Err(value, _)
-        | Expr::Try(value, _, _)
-        | Expr::Paren(value, _)
-        | Expr::IncDec { operand: value, .. }
-        | Expr::PtrFromAddr { addr: value, .. } => expr_has_comptime_evaluation(value),
-        Expr::MapLit(entries, _) => entries.iter().any(|(key, value)| {
-            expr_has_comptime_evaluation(key) || expr_has_comptime_evaluation(value)
-        }),
-        Expr::Index { base, index, .. } => {
-            expr_has_comptime_evaluation(base) || expr_has_comptime_evaluation(index)
-        }
-        Expr::Slice {
-            base, start, end, range, ..
-        } => {
-            expr_has_comptime_evaluation(base)
-                || range.as_deref().map_or_else(
-                    || {
-                        expr_has_comptime_evaluation(start)
-                            || expr_has_comptime_evaluation(end)
-                    },
-                    expr_has_comptime_evaluation,
-                )
-        }
-        Expr::Range { start, end, .. } => {
-            expr_has_comptime_evaluation(start) || expr_has_comptime_evaluation(end)
-        }
-        Expr::Call(call) => call.args.iter().any(argument),
-        Expr::Binary(_, left, right, _) => {
-            expr_has_comptime_evaluation(left) || expr_has_comptime_evaluation(right)
-        }
-        Expr::CompareChain { operands, .. } => {
-            operands.iter().any(expr_has_comptime_evaluation)
-        }
-        Expr::OptField { base, .. } => expr_has_comptime_evaluation(base),
-        Expr::MethodCall { receiver, args, .. } => {
-            expr_has_comptime_evaluation(receiver) || args.iter().any(argument)
-        }
-        Expr::StructLit { fields, .. } => fields
-            .iter()
-            .any(|(_, _, value)| expr_has_comptime_evaluation(value)),
-        Expr::TypedLit { body, .. } => {
-            let mut hit = false;
-            body.for_each_expr(|value| {
-                if expr_has_comptime_evaluation(value) {
-                    hit = true;
-                }
-            });
-            hit
-        }
-        Expr::EnumLit { args, .. } => args.iter().any(|arg| match arg {
-            EnumLitArg::Positional(value) | EnumLitArg::Named { expr: value, .. } => {
-                expr_has_comptime_evaluation(value)
-            }
-        }),
-        Expr::PatternTest {
-            subject, pattern, ..
-        } => {
-            expr_has_comptime_evaluation(subject)
-                || match pattern {
-                    Pattern::Struct { fields, .. } => fields.iter().any(|field| match field {
-                        StructPatField::Value { value, .. } => {
-                            expr_has_comptime_evaluation(value)
-                        }
-                        StructPatField::Bind { .. } => false,
-                    }),
-                    _ => false,
-                }
-        }
-        Expr::OrFallback {
-            value, fallback, ..
-        } => {
-            expr_has_comptime_evaluation(value)
-                || match fallback {
-                    OrFallback::Value(value) | OrFallback::Return(Some(value), _) => {
-                        expr_has_comptime_evaluation(value)
-                    }
-                    _ => false,
-                }
-        }
-        Expr::If {
-            cond,
-            then_body,
-            then_value,
-            else_body,
-            else_value,
-            ..
-        } => {
-            expr_has_comptime_evaluation(cond)
-                || stmts_have_comptime_evaluation(then_body)
-                || expr_has_comptime_evaluation(then_value)
-                || stmts_have_comptime_evaluation(else_body)
-                || expr_has_comptime_evaluation(else_value)
-        }
-        Expr::TupleLit(fields, _, _) => fields
-            .iter()
-            .any(|(_, value)| expr_has_comptime_evaluation(value)),
-        Expr::Lambda(lambda) => match &lambda.body {
-            LambdaBody::Expr(value) => expr_has_comptime_evaluation(value),
-            LambdaBody::Block(body) => stmts_have_comptime_evaluation(body),
-        },
-        Expr::CallValue { callee, args, .. } => {
-            expr_has_comptime_evaluation(callee) || args.iter().any(argument)
-        }
-        Expr::ComptimeSplice { .. } => true,
-        Expr::Int(..)
-        | Expr::Float(..)
-        | Expr::Bool(..)
-        | Expr::Char(..)
-        | Expr::StrMatchLit(..)
-        | Expr::BinMatchLit(..)
-        | Expr::Ident(..)
-        | Expr::UnitLit { .. }
-        | Expr::Absent(_)
-        | Expr::Todo { .. }
-        | Expr::NoElse(_)
-        | Expr::ReduceMarker(..) => false,
-    }
-}
-
 fn builtin_type_registry() -> TypeRegistry {
     let zero = Span::new(0, 0);
     let variants = ["Less", "Equal", "Greater"].into_iter().map(|name| {
@@ -1084,10 +812,10 @@ fn check_bundle_opts_for_output_inner(
     diags.extend(inject_units_prelude(bundle));
     diags.extend(super::Casing::validate_bundle(bundle));
     diags.extend(resolve_unit_dimensions(bundle));
-    // D-OSTARGET2=B (ratified 2026-07-03): fold every `#Known if build.os == {
+    // D-OSTARGET2=B (ratified 2026-07-03): fold every `$if build.os == {
     // … }` switch to the arm matching this build's active OS *before* any other
     // pass sees a body — so OS-gating checks, the type-checker, and codegen only
-    // meet the taken arm. Rewrites into a `#Known if` chain (reuses D-WHEN1).
+    // meet the taken arm. Rewrites into a `$if` chain (reuses D-WHEN1).
     diags.extend(super::desugar_os_switches(bundle));
     // D-MIGRATE4: desugar each `change … via { (old) => … }` converter on a
     // decodable `#PublishedSchema` type into a synthetic top-level converter
@@ -1234,8 +962,9 @@ fn check_bundle_opts_for_output_inner(
     // vocabulary — every `derive T.Name { … }` provider in the bundle, not
     // just this module's own, per the same bundle-wide orphan-rule view as
     // `derive_providers` above.
-    let known_derive_names: HashSet<String> =
-        derive_providers.iter().map(|(_, name, _, _, _)| name.clone()).collect();
+    let marker_vocabulary = jet_foundation::Policy::MarkerVocabulary::with_derives(
+        derive_providers.iter().map(|(_, name, _, _, _)| name.clone()),
+    );
     let ct_core_imports: Vec<HashMap<String, String>> = bundle
         .modules
         .iter()
@@ -1818,7 +1547,7 @@ fn check_bundle_opts_for_output_inner(
         // D-MARK-VOCAB1 (card #518): a marker name outside the registered
         // `@`/`#` plane vocabulary is E0927, instead of silently doing
         // nothing (the parser accepts any PascalCase name structurally).
-        diags.extend(check_marker_vocabulary(&module.items, &known_derive_names));
+        diags.extend(check_marker_vocabulary(&module.items, &marker_vocabulary));
         // D-CLIFLAG1: validate `#[CLI]`-derived structs (E1305/E1306), same
         // timing as the serde pass above (trait registry must be built so
         // `CLI` is visible on `s.derives`).
@@ -2675,511 +2404,6 @@ fn check_bundle_opts_for_output_inner(
     )
 }
 
-/// Load the standard dimension catalog from ordinary Jet source. Local names
-/// shadow Prelude members; physical dimension behavior remains explicit opt-in.
-fn inject_units_prelude(bundle: &mut ProgramBundle) -> Vec<Diagnostic> {
-    const SOURCE: &str = include_str!("../../../jet-codegen/src/Prelude/Units.jet");
-    let (tokens, mut diagnostics) = crate::Lexer::lex_generated(SOURCE);
-    let mut prelude = match crate::Parser::parse(&tokens) {
-        Ok(program) => program
-            .items
-            .into_iter()
-            .filter_map(|item| match item {
-                Item::UnitFamily(family) => Some(family),
-                _ => None,
-            })
-            .collect::<Vec<_>>(),
-        Err(mut parse_diagnostics) => {
-            diagnostics.append(&mut parse_diagnostics);
-            return diagnostics;
-        }
-    };
-    resolve_standard_unit_dimensions(&mut prelude);
-
-    for module in &mut bundle.modules {
-        if module.no_prelude {
-            continue;
-        }
-        let occupied = module
-            .items
-            .iter()
-            .flat_map(|item| match item {
-                Item::UnitFamily(family) => family
-                    .distinct_defs()
-                    .into_iter()
-                    .map(|definition| definition.name)
-                    .collect::<Vec<_>>(),
-                Item::Distinct(definition) => vec![definition.name.clone()],
-                Item::Struct(definition) => vec![definition.name.clone()],
-                Item::Enum(definition) => vec![definition.name.clone()],
-                Item::TypeAlias(definition) => vec![definition.name.clone()],
-                _ => Vec::new(),
-            })
-            .collect::<HashSet<_>>();
-        let mut selected = prelude
-            .iter()
-            .filter(|family| {
-                source_mentions_identifier(&module.source, &family.family)
-                    || family
-                        .members
-                        .iter()
-                        .any(|member| source_mentions_unit_member(&module.source, &member.name))
-            })
-            .map(|family| family.family.clone())
-            .collect::<HashSet<_>>();
-        loop {
-            let mut added = false;
-            for family in &prelude {
-                if !selected.contains(&family.family) {
-                    continue;
-                }
-                let Some(crate::AST::UnitDimensionDecl::Derived(expression)) = &family.dimension
-                else {
-                    continue;
-                };
-                for dependency in dimension_dependencies(expression) {
-                    added |= selected.insert(dependency);
-                }
-            }
-            if !added {
-                break;
-            }
-        }
-        for standard in &prelude {
-            if module
-                .items
-                .iter()
-                .any(|item| matches!(item, Item::UnitFamily(local) if local.family == standard.family))
-            {
-                continue;
-            }
-            let mut standard = standard.clone();
-            let used_members = standard
-                .members
-                .iter()
-                .filter(|member| source_mentions_unit_member(&module.source, &member.name))
-                .map(|member| member.name.clone())
-                .collect::<HashSet<_>>();
-            if !selected.contains(&standard.family) {
-                continue;
-            }
-            standard.members.retain(|member| {
-                let is_base = standard
-                    .base
-                    .as_ref()
-                    .is_some_and(|base| base.0 == member.name);
-                (is_base || used_members.contains(&member.name))
-                    && !occupied.contains(&crate::AST::UnitFamilyDef::type_name(&member.name))
-            });
-            module.items.push(Item::UnitFamily(standard));
-        }
-    }
-    diagnostics
-}
-
-fn dimension_dependencies(expression: &crate::AST::Expr) -> Vec<String> {
-    match expression {
-        crate::AST::Expr::Ident(name, _) => vec![name.clone()],
-        crate::AST::Expr::Binary(_, left, right, _) => {
-            let mut dependencies = dimension_dependencies(left);
-            dependencies.extend(dimension_dependencies(right));
-            dependencies
-        }
-        _ => Vec::new(),
-    }
-}
-
-fn source_mentions_identifier(source: &str, name: &str) -> bool {
-    source.match_indices(name).any(|(start, _)| {
-        let before = source[..start].chars().next_back();
-        let after = source[start + name.len()..].chars().next();
-        !before.is_some_and(|ch| ch.is_alphanumeric() || ch == '_')
-            && !after.is_some_and(|ch| ch.is_alphanumeric() || ch == '_')
-    })
-}
-
-fn source_mentions_unit_member(source: &str, member: &str) -> bool {
-    source_mentions_unqualified_identifier(
-        source,
-        &crate::AST::UnitFamilyDef::type_name(member),
-    ) || source.contains(&format!("from_{member}"))
-        || source.match_indices(member).any(|(start, _)| {
-            source[..start]
-                .chars()
-                .next_back()
-                .is_some_and(|ch| ch.is_ascii_digit())
-        })
-}
-
-fn source_mentions_unqualified_identifier(source: &str, name: &str) -> bool {
-    source.match_indices(name).any(|(start, _)| {
-        let before = source[..start].chars().next_back();
-        let after = source[start + name.len()..].chars().next();
-        before != Some('.')
-            && !before.is_some_and(|ch| ch.is_alphanumeric() || ch == '_')
-            && !after.is_some_and(|ch| ch.is_alphanumeric() || ch == '_')
-    })
-}
-
-/// Give the shared catalog one stable identity, independent of the package
-/// whose module receives the ordinary Prelude declarations.
-fn resolve_standard_unit_dimensions(prelude: &mut [crate::AST::UnitFamilyDef]) {
-    let mut known = HashMap::<String, crate::AST::Dimension>::new();
-    for family in prelude.iter() {
-        if matches!(family.dimension, Some(crate::AST::UnitDimensionDecl::Base(_))) {
-            known.insert(
-                family.family.clone(),
-                crate::AST::Dimension::base(format!("core.units::{}", family.family)),
-            );
-        }
-    }
-    loop {
-        let mut progress = false;
-        for family in prelude.iter() {
-            if known.contains_key(&family.family) {
-                continue;
-            }
-            let Some(crate::AST::UnitDimensionDecl::Derived(expression)) = &family.dimension else {
-                continue;
-            };
-            let DimensionLookup::Found(dimension) = resolve_dimension_expression(
-                expression,
-                &|qualifier, name| {
-                    if qualifier.is_none() {
-                        known
-                            .get(name)
-                            .cloned()
-                            .map_or(DimensionLookup::Missing, DimensionLookup::Found)
-                    } else {
-                        DimensionLookup::Missing
-                    }
-                },
-            ) else {
-                continue;
-            };
-            known.insert(family.family.clone(), dimension);
-            progress = true;
-        }
-        if !progress {
-            break;
-        }
-    }
-    for family in prelude {
-        family.resolved_dimension = known.get(&family.family).cloned();
-        family.resolved_owner = Some("core.units".to_string());
-    }
-}
-
-fn stable_unit_owner(bundle: &ProgramBundle, module: usize) -> (String, String) {
-    let module = &bundle.modules[module];
-    let (package_root, dependency_name) =
-        GenericModules::owning_package(bundle, &module.path);
-    let package = GenericModules::package_identity(bundle, package_root, dependency_name);
-    let module_path = module
-        .path
-        .strip_prefix(package_root)
-        .unwrap_or(&module.path)
-        .to_string_lossy()
-        .replace('\\', "/");
-    (package.clone(), format!("{package}::{module_path}"))
-}
-
-/// Resolve open unit dimensions before registration. The declaration graph is
-/// compile-time only; backends receive the normalized map already attached to
-/// each family.
-fn resolve_unit_dimensions(bundle: &mut ProgramBundle) -> Vec<Diagnostic> {
-    #[derive(Clone)]
-    struct Declaration {
-        module: usize,
-        item: usize,
-        family: String,
-        span: Span,
-        is_pub: bool,
-        claim: crate::AST::UnitDimensionDecl,
-        preset: Option<crate::AST::Dimension>,
-    }
-
-    let declarations = bundle
-        .modules
-        .iter()
-        .enumerate()
-        .flat_map(|(module_index, module)| {
-            module
-            .items
-            .iter()
-            .enumerate()
-            .filter_map(move |(item_index, item)| match item {
-                Item::UnitFamily(family) => family.dimension.clone().map(|claim| Declaration {
-                    module: module_index,
-                    item: item_index,
-                    family: family.family.clone(),
-                    span: family.family_span,
-                    is_pub: family.is_pub,
-                    claim,
-                    preset: family.resolved_dimension.clone(),
-                }),
-                _ => None,
-            })
-        })
-        .collect::<Vec<_>>();
-
-    let imported_modules = bundle
-        .modules
-        .iter()
-        .enumerate()
-        .map(|(module_index, module)| {
-            module
-                .imports
-                .iter()
-                .filter_map(|import| bundle.import_targets.get(&(module_index, import.span)).copied())
-                .collect::<Vec<_>>()
-        })
-        .collect::<Vec<_>>();
-    let import_aliases = bundle
-        .modules
-        .iter()
-        .enumerate()
-        .map(|(module_index, module)| {
-            module
-                .imports
-                .iter()
-                .filter_map(|import| {
-                    bundle
-                        .import_targets
-                        .get(&(module_index, import.span))
-                        .copied()
-                        .map(|target| (import.import_alias(), target))
-                })
-                .collect::<HashMap<_, _>>()
-        })
-        .collect::<Vec<_>>();
-    let mut known = HashMap::<(usize, String), crate::AST::Dimension>::new();
-    for declaration in &declarations {
-        if let Some(dimension) = declaration.preset.clone() {
-            known.insert(
-                (declaration.module, declaration.family.clone()),
-                dimension,
-            );
-        } else if matches!(declaration.claim, crate::AST::UnitDimensionDecl::Base(_)) {
-            let (_, module_identity) = stable_unit_owner(bundle, declaration.module);
-            known.insert(
-                (declaration.module, declaration.family.clone()),
-                crate::AST::Dimension::base(format!(
-                    "{module_identity}::{}",
-                    declaration.family
-                )),
-            );
-        }
-    }
-
-    let mut pending = declarations
-        .iter()
-        .filter(|declaration| {
-            declaration.preset.is_none()
-                && matches!(declaration.claim, crate::AST::UnitDimensionDecl::Derived(_))
-        })
-        .cloned()
-        .collect::<Vec<_>>();
-    loop {
-        let mut progress = false;
-        pending.retain(|declaration| {
-            let crate::AST::UnitDimensionDecl::Derived(expression) = &declaration.claim else {
-                unreachable!()
-            };
-            let visible = |qualifier: Option<&str>, name: &str| {
-                if let Some(alias) = qualifier {
-                    let Some(target) = import_aliases[declaration.module].get(alias) else {
-                        return DimensionLookup::Missing;
-                    };
-                    let Some(candidate) = declarations.iter().find(|candidate| {
-                        candidate.module == *target
-                            && candidate.is_pub
-                            && candidate.family == name
-                    }) else {
-                        return DimensionLookup::Missing;
-                    };
-                    return known
-                        .get(&(candidate.module, candidate.family.clone()))
-                        .cloned()
-                        .map_or(DimensionLookup::Missing, DimensionLookup::Found);
-                }
-                if declarations.iter().any(|candidate| {
-                    candidate.module == declaration.module && candidate.family == name
-                }) {
-                    return known
-                        .get(&(declaration.module, name.to_string()))
-                        .cloned()
-                        .map_or(DimensionLookup::Missing, DimensionLookup::Found);
-                }
-                let candidates = imported_modules[declaration.module]
-                    .iter()
-                    .copied()
-                    .filter(|target| {
-                        declarations.iter().any(|candidate| {
-                            candidate.module == *target
-                                && candidate.is_pub
-                                && candidate.family == name
-                        })
-                    })
-                    .collect::<HashSet<_>>();
-                if candidates.len() > 1 {
-                    return DimensionLookup::Ambiguous(name.to_string());
-                }
-                let Some(target) = candidates.into_iter().next() else {
-                    return DimensionLookup::Missing;
-                };
-                known
-                    .get(&(target, name.to_string()))
-                    .cloned()
-                    .map_or(DimensionLookup::Missing, DimensionLookup::Found)
-            };
-            let dimension = match resolve_dimension_expression(expression, &visible) {
-                DimensionLookup::Found(dimension) => dimension,
-                DimensionLookup::Missing | DimensionLookup::Ambiguous(_) => return true,
-            };
-            known.insert(
-                (declaration.module, declaration.family.clone()),
-                dimension,
-            );
-            progress = true;
-            false
-        });
-        if !progress {
-            break;
-        }
-    }
-
-    let mut diagnostics = Vec::new();
-    for declaration in &declarations {
-        let resolved = known
-            .get(&(declaration.module, declaration.family.clone()))
-            .cloned();
-        if resolved.is_none() {
-            let ambiguity = match &declaration.claim {
-                crate::AST::UnitDimensionDecl::Derived(expression) => {
-                    let visible = |qualifier: Option<&str>, name: &str| {
-                        if qualifier.is_some() {
-                            return DimensionLookup::Missing;
-                        }
-                        if declarations.iter().any(|candidate| {
-                            candidate.module == declaration.module
-                                && candidate.family == name
-                        }) {
-                            return DimensionLookup::Missing;
-                        }
-                        let matches = imported_modules[declaration.module]
-                            .iter()
-                            .copied()
-                            .filter(|target| {
-                                declarations.iter().any(|candidate| {
-                                    candidate.module == *target
-                                        && candidate.is_pub
-                                        && candidate.family == name
-                                })
-                            })
-                            .collect::<HashSet<_>>();
-                        if matches.len() > 1 {
-                            DimensionLookup::Ambiguous(name.to_string())
-                        } else {
-                            DimensionLookup::Missing
-                        }
-                    };
-                    match resolve_dimension_expression(expression, &visible) {
-                        DimensionLookup::Ambiguous(name) => Some(name),
-                        _ => None,
-                    }
-                }
-                crate::AST::UnitDimensionDecl::Base(_) => None,
-            };
-            diagnostics.push(if let Some(name) = ambiguity {
-                Diagnostic::error(
-                    "E0905",
-                    format!("dimension name `{name}` is ambiguous"),
-                    "more than one imported module exports that dimension".to_string(),
-                    format!("qualify it with the intended module alias, such as `dep.{name}`"),
-                    Some(declaration.span),
-                )
-            } else {
-                Diagnostic::error(
-                    "E0905",
-                    format!("dimension `{}` cannot be resolved", declaration.family),
-                    "derived dimensions can use visible declared dimensions and cannot form a cycle"
-                        .to_string(),
-                    "import or declare every base dimension and remove any dimension cycle".to_string(),
-                    Some(declaration.span),
-                )
-            });
-        }
-        let owner = stable_unit_owner(bundle, declaration.module).0;
-        if let Item::UnitFamily(definition) =
-            &mut bundle.modules[declaration.module].items[declaration.item]
-        {
-            definition.resolved_dimension = resolved;
-            if definition.resolved_owner.is_none() {
-                definition.resolved_owner = Some(owner);
-            }
-        }
-    }
-
-    // D-DIMENSION-OPEN1=D: a family that never claimed a dimension still needs
-    // its owning package recorded, because its unit facts carry the scale,
-    // offset, and kind that same-family conversion depends on.
-    let owners = (0..bundle.modules.len())
-        .map(|module| stable_unit_owner(bundle, module).0)
-        .collect::<Vec<_>>();
-    for (module, owner) in owners.into_iter().enumerate() {
-        for item in &mut bundle.modules[module].items {
-            if let Item::UnitFamily(definition) = item {
-                if definition.resolved_owner.is_none() {
-                    definition.resolved_owner = Some(owner.clone());
-                }
-            }
-        }
-    }
-    diagnostics
-}
-
-enum DimensionLookup {
-    Found(crate::AST::Dimension),
-    Missing,
-    Ambiguous(String),
-}
-
-fn resolve_dimension_expression(
-    expression: &crate::AST::Expr,
-    visible: &impl Fn(Option<&str>, &str) -> DimensionLookup,
-) -> DimensionLookup {
-    match expression {
-        crate::AST::Expr::Ident(name, _) => visible(None, name),
-        crate::AST::Expr::Field(base, name, _) => match base.as_ref() {
-            crate::AST::Expr::Ident(alias, _) => visible(Some(alias), name),
-            _ => DimensionLookup::Missing,
-        },
-        crate::AST::Expr::Binary(
-            op @ (crate::AST::BinOp::Mul | crate::AST::BinOp::Div),
-            left,
-            right,
-            _,
-        ) => {
-            let left = resolve_dimension_expression(left, visible);
-            let right = resolve_dimension_expression(right, visible);
-            match (left, right) {
-                (DimensionLookup::Ambiguous(name), _)
-                | (_, DimensionLookup::Ambiguous(name)) => DimensionLookup::Ambiguous(name),
-                (DimensionLookup::Found(left), DimensionLookup::Found(right)) => {
-                    let dimension = if *op == crate::AST::BinOp::Mul {
-                        left.multiply(&right)
-                    } else {
-                        left.divide(&right)
-                    };
-                    dimension.map_or(DimensionLookup::Missing, DimensionLookup::Found)
-                }
-                _ => DimensionLookup::Missing,
-            }
-        }
-        _ => DimensionLookup::Missing,
-    }
-}
 
 #[cfg(test)]
 mod structure_tests {
@@ -3265,7 +2489,8 @@ mod structure_tests {
     fn ordinary_units_prelude_supplies_standard_axes_and_provenance() {
         let mut bundle = incremental_bundle(
             "#UnitFamily(Token, dimension, base: token) { token }\n\
-             #UnitFamily(TokenRate, dimension: Token / Time, base: token_per_second) { token_per_second }\n",
+             #UnitFamily(TokenRate, dimension: Token / Time, base: token_per_second) { token_per_second }\n\
+             fn touch_mass() { _ :: 1dalton }\n",
         );
         assert!(inject_units_prelude(&mut bundle).is_empty());
         assert!(resolve_unit_dimensions(&mut bundle).is_empty());
@@ -3387,17 +2612,22 @@ mod structure_tests {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let read = |relative: &str| std::fs::read_to_string(root.join(relative)).unwrap();
         let bundle = read("src/Sema/Bundle.rs");
+        let comptime = read("src/Sema/Bundle/Comptime.rs");
+        let units = read("src/Sema/Bundle/Units.rs");
         let generic = read("src/Sema/Bundle/GenericModules.rs");
         let substitution = read("src/Sema/Bundle/GenericModules/Substitution.rs");
         let outputs = read("src/Sema/Bundle/Outputs.rs");
         let inline_calls = read("src/Sema/Bundle/InlineCalls.rs");
         let validation = read("src/Sema/Bundle/Validation.rs");
+        let core_usage = read("src/Sema/Bundle/Validation/CoreUsage.rs");
         let production = bundle
             .split("#[cfg(test)]\nmod structure_tests")
             .next()
             .unwrap();
         for (relative, source) in [
             ("src/Sema/Bundle.rs", production),
+            ("src/Sema/Bundle/Comptime.rs", comptime.as_str()),
+            ("src/Sema/Bundle/Units.rs", units.as_str()),
             ("src/Sema/Bundle/GenericModules.rs", generic.as_str()),
             (
                 "src/Sema/Bundle/GenericModules/Substitution.rs",
@@ -3406,6 +2636,7 @@ mod structure_tests {
             ("src/Sema/Bundle/InlineCalls.rs", inline_calls.as_str()),
             ("src/Sema/Bundle/Outputs.rs", outputs.as_str()),
             ("src/Sema/Bundle/Validation.rs", validation.as_str()),
+            ("src/Sema/Bundle/Validation/CoreUsage.rs", core_usage.as_str()),
         ] {
             assert!(
                 source.lines().count() < MAX_MODULE_LINES,
@@ -3416,6 +2647,7 @@ mod structure_tests {
         }
         assert!(production.contains("\nmod GenericModules;\nmod InlineCalls;\nmod Outputs;\nmod Validation;\n"));
         assert!(generic.contains("\nmod Substitution;\n"));
+        assert!(validation.contains("\nmod CoreUsage;\n"));
 
         let ordered = [
             "expand_generic_module_aliases(bundle, &mut diags);",

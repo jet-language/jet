@@ -415,133 +415,61 @@ extern "C" fn jet_jit_game_run(scene: i64, replay: i64, backend: i64) -> i64 {
     })
 }
 
-pub(crate) struct GameHostFns {
-    pub(crate) scene_new: cranelift_module::FuncId,
-    pub(crate) replay_record: cranelift_module::FuncId,
-    pub(crate) backend_headless: cranelift_module::FuncId,
-    pub(crate) backend_should_continue: cranelift_module::FuncId,
-    pub(crate) backend_present: cranelift_module::FuncId,
-    pub(crate) on_frame: cranelift_module::FuncId,
-    pub(crate) component: cranelift_module::FuncId,
-    pub(crate) query: cranelift_module::FuncId,
-    pub(crate) assets_image: cranelift_module::FuncId,
-    pub(crate) assets_sound: cranelift_module::FuncId,
-    pub(crate) input_bind: cranelift_module::FuncId,
-    pub(crate) input_pressed: cranelift_module::FuncId,
-    pub(crate) frame_index: cranelift_module::FuncId,
-    pub(crate) asset_show: cranelift_module::FuncId,
-    pub(crate) run: cranelift_module::FuncId,
-}
+host_fns! {
+    struct GameHostFns;
+    register: register_game_symbols;
+    declare: declare_game_host_fns(module) {
+        use cranelift_codegen::ir::{types, AbiParam, Signature};
+        use cranelift_module::{Linkage, Module};
+        let cc = module.target_config().default_call_conv;
 
-pub(crate) fn register_game_symbols(builder: &mut cranelift_jit::JITBuilder) {
-    builder.symbol("jet_jit_game_scene_new", jet_jit_game_scene_new as *const u8);
-    builder.symbol(
-        "jet_jit_game_replay_record",
-        jet_jit_game_replay_record as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_game_backend_headless",
-        jet_jit_game_backend_headless as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_game_backend_should_continue",
-        jet_jit_game_backend_should_continue as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_game_backend_present",
-        jet_jit_game_backend_present as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_game_scene_on_frame",
-        jet_jit_game_scene_on_frame as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_game_scene_component",
-        jet_jit_game_scene_component as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_game_scene_query",
-        jet_jit_game_scene_query as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_game_assets_image",
-        jet_jit_game_assets_image as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_game_assets_sound",
-        jet_jit_game_assets_sound as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_game_input_bind",
-        jet_jit_game_input_bind as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_game_input_pressed",
-        jet_jit_game_input_pressed as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_game_frame_index",
-        jet_jit_game_frame_index as *const u8,
-    );
-    builder.symbol("jet_jit_game_asset_show", jet_jit_game_asset_show as *const u8);
-    builder.symbol("jet_jit_game_run", jet_jit_game_run as *const u8);
-}
+        let mut sig_i64 = Signature::new(cc);
+        sig_i64.params.push(AbiParam::new(types::I64));
+        sig_i64.returns.push(AbiParam::new(types::I64));
+        let mut sig_void = Signature::new(cc);
+        sig_void.params.push(AbiParam::new(types::I64));
+        let mut sig_ii = Signature::new(cc);
+        sig_ii.params.push(AbiParam::new(types::I64));
+        sig_ii.params.push(AbiParam::new(types::I64));
+        let mut sig_iii = Signature::new(cc);
+        sig_iii.params.push(AbiParam::new(types::I64));
+        sig_iii.params.push(AbiParam::new(types::I64));
+        sig_iii.params.push(AbiParam::new(types::I64));
+        let mut sig_ii_ret = sig_ii.clone();
+        sig_ii_ret.returns.push(AbiParam::new(types::I64));
+        let mut sig_ii_i8 = sig_ii.clone();
+        sig_ii_i8.returns.push(AbiParam::new(types::I8));
+        let mut sig_on_frame = Signature::new(cc);
+        for _ in 0..7 {
+            sig_on_frame.params.push(AbiParam::new(types::I64));
+        }
+        let mut sig_run = Signature::new(cc);
+        for _ in 0..3 {
+            sig_run.params.push(AbiParam::new(types::I64));
+        }
+        sig_run.returns.push(AbiParam::new(types::I64));
+        let mut sig_new0 = Signature::new(cc);
+        sig_new0.returns.push(AbiParam::new(types::I64));
 
-pub(crate) fn declare_game_host_fns(
-    module: &mut cranelift_jit::JITModule,
-) -> Result<GameHostFns, String> {
-    use cranelift_codegen::ir::{types, AbiParam, Signature};
-    use cranelift_module::{Linkage, Module};
-
-    let cc = module.target_config().default_call_conv;
-    let mut import = |name: &str, sig: &Signature| -> Result<cranelift_module::FuncId, String> {
-        module
-            .declare_function(name, Linkage::Import, sig)
-            .map_err(|e| e.to_string())
-    };
-    let mut sig_i64 = Signature::new(cc);
-    sig_i64.params.push(AbiParam::new(types::I64));
-    sig_i64.returns.push(AbiParam::new(types::I64));
-    let mut sig_void = Signature::new(cc);
-    sig_void.params.push(AbiParam::new(types::I64));
-    let mut sig_ii = Signature::new(cc);
-    sig_ii.params.push(AbiParam::new(types::I64));
-    sig_ii.params.push(AbiParam::new(types::I64));
-    let mut sig_iii = Signature::new(cc);
-    sig_iii.params.push(AbiParam::new(types::I64));
-    sig_iii.params.push(AbiParam::new(types::I64));
-    sig_iii.params.push(AbiParam::new(types::I64));
-    let mut sig_ii_ret = sig_ii.clone();
-    sig_ii_ret.returns.push(AbiParam::new(types::I64));
-    let mut sig_ii_i8 = sig_ii.clone();
-    sig_ii_i8.returns.push(AbiParam::new(types::I8));
-    let mut sig_on_frame = Signature::new(cc);
-    for _ in 0..7 {
-        sig_on_frame.params.push(AbiParam::new(types::I64));
     }
-    let mut sig_run = Signature::new(cc);
-    for _ in 0..3 {
-        sig_run.params.push(AbiParam::new(types::I64));
-    }
-    sig_run.returns.push(AbiParam::new(types::I64));
-    let mut sig_new0 = Signature::new(cc);
-    sig_new0.returns.push(AbiParam::new(types::I64));
-
-    Ok(GameHostFns {
-        scene_new: import("jet_jit_game_scene_new", &sig_i64)?,
-        replay_record: import("jet_jit_game_replay_record", &sig_i64)?,
-        backend_headless: import("jet_jit_game_backend_headless", &sig_new0)?,
-        backend_should_continue: import("jet_jit_game_backend_should_continue", &sig_i64)?,
-        backend_present: import("jet_jit_game_backend_present", &sig_void)?,
-        on_frame: import("jet_jit_game_scene_on_frame", &sig_on_frame)?,
-        component: import("jet_jit_game_scene_component", &sig_ii)?,
-        query: import("jet_jit_game_scene_query", &sig_ii_ret)?,
-        assets_image: import("jet_jit_game_assets_image", &sig_ii_ret)?,
-        assets_sound: import("jet_jit_game_assets_sound", &sig_ii_ret)?,
-        input_bind: import("jet_jit_game_input_bind", &sig_iii)?,
-        input_pressed: import("jet_jit_game_input_pressed", &sig_ii_i8)?,
-        frame_index: import("jet_jit_game_frame_index", &sig_i64)?,
-        asset_show: import("jet_jit_game_asset_show", &sig_ii_ret)?,
-        run: import("jet_jit_game_run", &sig_run)?,
-    })
+    scene_new: "jet_jit_game_scene_new" => jet_jit_game_scene_new: sig_i64;
+    replay_record: "jet_jit_game_replay_record" => jet_jit_game_replay_record: sig_i64;
+    backend_headless: "jet_jit_game_backend_headless" => jet_jit_game_backend_headless: sig_new0;
+    backend_should_continue: "jet_jit_game_backend_should_continue" => jet_jit_game_backend_should_continue: sig_i64;
+    backend_present: "jet_jit_game_backend_present" => jet_jit_game_backend_present: sig_void;
+    on_frame: "jet_jit_game_scene_on_frame" => jet_jit_game_scene_on_frame: sig_on_frame;
+    component: "jet_jit_game_scene_component" => jet_jit_game_scene_component: sig_ii;
+    query: "jet_jit_game_scene_query" => jet_jit_game_scene_query: sig_ii_ret;
+    assets_image: "jet_jit_game_assets_image" => jet_jit_game_assets_image: sig_ii_ret;
+    assets_sound: "jet_jit_game_assets_sound" => jet_jit_game_assets_sound: sig_ii_ret;
+    input_bind: "jet_jit_game_input_bind" => jet_jit_game_input_bind: sig_iii;
+    input_pressed: "jet_jit_game_input_pressed" => jet_jit_game_input_pressed: sig_ii_i8;
+    frame_index: "jet_jit_game_frame_index" => jet_jit_game_frame_index: sig_i64;
+    asset_show: "jet_jit_game_asset_show" => jet_jit_game_asset_show: sig_ii_ret;
+    run: "jet_jit_game_run" => jet_jit_game_run: sig_run;
 }
+
+
+
+
+

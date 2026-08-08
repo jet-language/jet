@@ -11,6 +11,116 @@
 
 #![allow(non_snake_case)]
 
+/// #1633: one canonical listing per JIT host symbol.
+///
+/// Each per-module host-symbol table used to write every symbol four times:
+/// the `extern "C" fn` (real code, unaffected here), a `FuncId` struct field,
+/// a `builder.symbol(...)` registration, and a `module.declare_function(...)`
+/// import — about 1,300 symbols x the last three listings. Missing one of
+/// those three did not fail the build; it failed silently at JIT run time.
+/// `host_fns!` takes one entry per symbol and generates the struct, the
+/// `builder.symbol` registration function, and the `declare_function` import
+/// function from it, so a symbol with a missing piece is a compile error.
+///
+/// `#extra { field: Type, ... }` passes already-declared delegate values
+/// (nested per-module `Host*Fns` structs) straight through as plain struct
+/// fields / fn params, for the top-level table that composes them. The `#`
+/// is load-bearing, not decoration: `macro_rules!` can't tell an optional
+/// `extra { ... }` group apart from a `$field:ident` that happens to be
+/// spelled `extra` (`local ambiguity` error) unless the group starts on a
+/// token no field name can produce.
+///
+/// `@shared field: "symbol": sig;` (no `=> host_fn`) declares and imports a
+/// `FuncId` whose `builder.symbol` registration is owned by a different
+/// module's `host_fns!` block (a handful of symbols — e.g.
+/// `jet_jit_event_scope` — are registered once by `Reactive` and imported by
+/// both `Reactive` and `Watcher`). Left out of `$register_fn` so
+/// registration stays single-owner per symbol.
+macro_rules! host_fns {
+    (
+        struct $StructName:ident;
+        register: $register_fn:ident;
+        declare: $declare_fn:ident($module:ident) { $($sigs:tt)* }
+        $(#extra { $($extra_field:ident : $extra_ty:ty),* $(,)? })?
+        $( $(@shared)? $field:ident : $symbol:literal $(=> $host_fn:path)? : $sig:expr ; )*
+    ) => {
+        pub(crate) struct $StructName {
+            $( pub(crate) $field: cranelift_module::FuncId, )*
+            $( $( pub(crate) $extra_field: $extra_ty, )* )?
+        }
+
+        pub(crate) fn $register_fn(builder: &mut cranelift_jit::JITBuilder) {
+            $(
+                $(
+                    builder.symbol($symbol, $host_fn as *const u8);
+                    #[cfg(test)]
+                    $crate::host_fns_audit::record_registered($symbol);
+                )?
+            )*
+        }
+
+        #[allow(unused_mut)]
+        pub(crate) fn $declare_fn(
+            $module: &mut cranelift_jit::JITModule,
+            $( $( $extra_field: $extra_ty, )* )?
+        ) -> Result<$StructName, String> {
+            $($sigs)*
+            let mut import = |name: &str, sig: &cranelift_codegen::ir::Signature| -> Result<cranelift_module::FuncId, String> {
+                #[cfg(test)]
+                $crate::host_fns_audit::record_declared(name);
+                cranelift_module::Module::declare_function(
+                    $module,
+                    name,
+                    cranelift_module::Linkage::Import,
+                    sig,
+                )
+                .map_err(|e| e.to_string())
+            };
+            Ok($StructName {
+                $( $field: import($symbol, &$sig)?, )*
+                $( $( $extra_field, )* )?
+            })
+        }
+    };
+}
+pub(crate) use host_fns;
+
+/// #1633 criterion #3 backstop: `JITModule::new`'s eager symbol resolution
+/// (cranelift-jit 0.112.3, `backend.rs` `declare_function` for
+/// `Linkage::Import`) does `lookup_symbol(name).unwrap_or(null)` and
+/// installs a null PLT entry on a miss — it does not fail. So a declared
+/// import with no matching registered symbol (e.g. an `@shared` entry whose
+/// owning module's registration was deleted) builds and passes `new_jit_module`
+/// silently, then calls a null pointer at run time. Every `host_fns!`
+/// `register_fn`/`declare_fn` records into these two sets so a test can
+/// compare them directly instead of trusting `JITModule::new`'s `Ok`.
+#[cfg(test)]
+pub(crate) mod host_fns_audit {
+    use std::collections::BTreeSet;
+    use std::sync::Mutex;
+
+    static REGISTERED: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
+    static DECLARED: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
+
+    pub(crate) fn record_registered(name: &str) {
+        REGISTERED.lock().unwrap().insert(name.to_string());
+    }
+
+    pub(crate) fn record_declared(name: &str) {
+        DECLARED.lock().unwrap().insert(name.to_string());
+    }
+
+    /// Snapshot both sets and clear them for the next test.
+    pub(crate) fn take_snapshot() -> (BTreeSet<String>, BTreeSet<String>) {
+        let mut registered = REGISTERED.lock().unwrap();
+        let mut declared = DECLARED.lock().unwrap();
+        (
+            std::mem::take(&mut *registered),
+            std::mem::take(&mut *declared),
+        )
+    }
+}
+
 mod Archive;
 mod Args;
 mod ambient_interp;
@@ -29,6 +139,7 @@ mod Fmt;
 mod Game;
 mod IO;
 mod Layout;
+mod Marshal;
 mod Math;
 mod MathExtra;
 mod Ffi;

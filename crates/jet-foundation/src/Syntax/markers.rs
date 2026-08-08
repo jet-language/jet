@@ -1,6 +1,12 @@
 /// D-VERDICT-732-1: the sole prefix for applying a typed rule. A rule may target a
 /// declaration, expression, or brace scope when that rule declares the target
 /// legal. `@` is reserved for locations, addresses, and sources.
+///
+/// `#` has two other jobs, told apart by parser position only (no lookahead
+/// heuristics): inside a bracketed type, `[T#N]`, it is the fixed-size-list
+/// separator (S76/D-FIXARR1, `TYPE_FIXED_SIZE_SEP` in `package_files.rs`);
+/// after a package name it is the version-pin separator (`pkg#1.2.0`, same
+/// constant). D-ONCE-HASH1=B keeps all three jobs on one token.
 pub const RULE_PREFIX: &str = "#"; // D-VERDICT-732-1
 
 /// D-PREPOST1 / D-CONTRACTCASE1: precondition contract on a function
@@ -30,13 +36,14 @@ pub const MARKER_INLINE: &str = "Inline"; // D-METHODMACRO1
 /// D-CAPBUNDLE1 / D-CONTRACTCASE1: capability bundles on a nominal distinct
 /// type — each re-exposes a curated slice of the base type's operations
 /// while keeping nominal identity. Stackable. The `numeric` bundle merged
-/// into `MARKER_NUMERIC` (`#Numeric`, D-MARKERMOVE1) — there is no
-/// `MARKER_BUNDLE_NUMERIC` constant.
+/// into `MARKER_NUMERIC` (`#Numeric`, D-VERDICT-732-1, formerly
+/// D-MARKERMOVE1) — there is no `MARKER_BUNDLE_NUMERIC` constant.
 pub const MARKER_BUNDLE_COMPARABLE: &str = "Comparable"; // D-CAPBUNDLE1
 pub const MARKER_BUNDLE_PRINTABLE: &str = "Printable"; // D-CAPBUNDLE1
 pub const MARKER_BUNDLE_CODABLE_AS_BASE: &str = "CodableAsBase"; // D-CAPBUNDLE1
 
-/// D-CLIFLAG1 / D-SHAPE-CLI1 (rides D-CONTRACTCASE1/D-MARKERMOVE1):
+/// D-CLIFLAG1 / D-SHAPE-CLI1 (rides D-CONTRACTCASE1/D-VERDICT-732-1,
+/// formerly D-MARKERMOVE1):
 /// struct-level CLI derive marker — `#CLI`. A resolved `fn run(args: T)`
 /// parameter type owns parsing, defaults, help, completion, validation, and
 /// audit facts. The marker is optional because plain `fn run()` remains a

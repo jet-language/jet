@@ -35,6 +35,80 @@ pub fn have_rustc() -> bool {
     present
 }
 
+/// A throwaway directory under the system temp dir, removed on drop.
+///
+/// `tag` names the case. The path also carries the pid, a nanosecond stamp and
+/// the thread id, so concurrent tests never share a directory — in one binary
+/// or across binaries.
+pub struct Scratch {
+    pub path: PathBuf,
+}
+
+impl Scratch {
+    pub fn new(tag: &str) -> Scratch {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "jet-it-{tag}-{}-{nanos}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        fs::create_dir_all(&path).unwrap();
+        Scratch { path }
+    }
+
+    pub fn join(&self, p: &str) -> PathBuf {
+        self.path.join(p)
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        // Store trees are realized read-only; chmod first or the directory
+        // leaks in the temp dir.
+        make_tree_writable(&self.path);
+        let _ = fs::remove_dir_all(&self.path);
+    }
+}
+
+#[cfg(unix)]
+pub fn make_tree_writable(path: &Path) {
+    use std::os::unix::fs::PermissionsExt as _;
+    let Ok(meta) = fs::symlink_metadata(path) else {
+        return;
+    };
+    // Runs inside Drop for every suite: a file the tested daemon removes
+    // mid-walk, or a dir we cannot read yet, must not panic during unwind
+    // and bury the original assertion.
+    if !meta.file_type().is_symlink() {
+        let mode = if meta.is_dir() {
+            0o755
+        } else {
+            meta.permissions().mode() | 0o600
+        };
+        let _ = fs::set_permissions(path, fs::Permissions::from_mode(mode));
+    }
+    if meta.is_dir() {
+        let Ok(entries) = fs::read_dir(path) else { return };
+        for entry in entries {
+            let Ok(entry) = entry else { continue };
+            make_tree_writable(&entry.path());
+        }
+    }
+}
+
+#[cfg(not(unix))]
+pub fn make_tree_writable(path: &Path) {
+    let Ok(meta) = fs::metadata(path) else {
+        return;
+    };
+    let mut permissions = meta.permissions();
+    permissions.set_readonly(false);
+    let _ = fs::set_permissions(path, permissions);
+}
+
 pub fn test_worker_count(cap: usize) -> usize {
     let requested = std::env::var("JET_TEST_JOBS")
         .ok()

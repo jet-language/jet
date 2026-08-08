@@ -3682,8 +3682,15 @@ fn validate_encoding_limits(limits: &EncodingLimitsLite) -> Result<(), CtValue> 
     }
 }
 
+// #1636: one home for the limb-arithmetic bigint routine. `crate::Numeric::CtBigInt`
+// (jet-foundation, already a direct dependency of every seam crate) is the
+// canonical compiled implementation; JCS float formatting here just borrows
+// its name locally so the call sites below read unchanged. The Prelude's
+// `JetBigInt` (CommonTypes.rs) stays a separate, hand-mirrored copy — AOT
+// output is a standalone Rust program that can't link back into the compiler,
+// the same constraint `JetDecimal`/`CtDecimal` already document there.
 mod jcs_big {
-    include!("jet_bigint_snip.rs");
+    pub use crate::Numeric::CtBigInt as JetBigInt;
 }
 
 fn jcs_big_pow(mut base: jcs_big::JetBigInt, mut exponent: usize) -> jcs_big::JetBigInt {

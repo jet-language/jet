@@ -99,7 +99,7 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
                     // (the placeholder `Expr::Int(0, …)` init is never evaluated or
                     // lowered).
                     //
-                    // c109 (S57/M9.5): a comptime LOCAL `#Known name :: expr`. Sema
+                    // c109 (S57/M9.5): a comptime LOCAL `$name :: expr`. Sema
                     // evaluates the value into `b.ct` and the AST `emit_let` emits it as
                     // literal data (`let <name>[: <ty>] = <ct.serialize()>;`) — the runtime
                     // `init` expr is NEVER emitted, so it need not be in-subset. Covered
@@ -108,7 +108,7 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
                     let ok = if b.uninit {
                         true
                     } else if b.is_comptime {
-                        // Unresolved inside a `#Known { … }` block: the
+                        // Unresolved inside a `$ { … }` block: the
                         // interpreter evaluates the init itself.
                         b.ct.is_some() || expr_in_subset(&b.init, cx, locals)
                     } else {
@@ -278,7 +278,7 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
             else_body,
             span,
         } => switch_in_subset(subject, arms, else_body, *span, cx, locals),
-        // D-CTMARKER1 (ratified 2026-06-25, piece 2): `#Known { … }` erases entirely.
+        // D-META-STAGE1=B (formerly D-CTMARKER1, ratified 2026-06-25, piece 2): `$ { … }` erases entirely.
         // Always "in subset" since it emits nothing in Rust (I3).
         Stmt::ComptimeBlock { .. } => true,
         // Scope classification mirrors lowering: an emitted Rust block gets a cloned

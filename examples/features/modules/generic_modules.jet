@@ -4,8 +4,8 @@
 // `module cache<K>` defines the template; `module int_cache = cache<Int>`
 // instantiates it, producing a concrete module with all type params resolved.
 module cache<K, capacity: Int> {
-    #Known base :: capacity
-    #Known computed_size :: base + 1
+    $base :: capacity
+    $computed_size :: $base + 1
 
     pub struct Entry {
         key: K
@@ -27,7 +27,7 @@ module cache<K, capacity: Int> {
     }
 
     pub fn describe() => String = "generic cache"
-    pub fn size() => Int = computed_size
+    pub fn size() => Int = $computed_size
 }
 
 // Forward alias chain: declaration order does not affect resolution.

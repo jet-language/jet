@@ -942,8 +942,9 @@ impl<'a> Parser<'a> {
                                     self.bump(); // consume `pub`
                                     self.layout_type_def(true)
                                 }
-                                // D-MIGRATE1/D-MARKERMOVE1: `pub #PublishedSchema struct
-                                // Name { … }` (retired `pub #PublishedSchema` teaches E0062).
+                                // D-MIGRATE1/D-VERDICT-732-1 (formerly D-MARKERMOVE1):
+                                // `pub #PublishedSchema struct Name { … }` (retired
+                                // `pub #PublishedSchema` teaches E0062).
                                 TokKind::Hash
                                     if {
                                         matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::MARKER_PUBLISHED_SCHEMA)
@@ -961,8 +962,9 @@ impl<'a> Parser<'a> {
                                     self.bump(); // consume `pub`
                                     self.single_use_type_def(true)
                                 }
-                                // D-MUSTUSE1/D-MARKERMOVE1: `pub #MustUse struct|enum Name
-                                // { … }` (retired `pub #MustUse` teaches E0062).
+                                // D-MUSTUSE1/D-VERDICT-732-1 (formerly D-MARKERMOVE1):
+                                // `pub #MustUse struct|enum Name { … }` (retired
+                                // `pub #MustUse` teaches E0062).
                                 TokKind::Hash
                                     if {
                                         matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::MARKER_MUST_USE)
@@ -1064,13 +1066,13 @@ impl<'a> Parser<'a> {
                     TokKind::Hash if self.at_layout_struct() => {
                         self.layout_type_def(false)
                     }
-                    // D-MIGRATE1/D-MARKERMOVE1: `#PublishedSchema struct Name { … }`
+                    // D-MIGRATE1/D-VERDICT-732-1 (formerly D-MARKERMOVE1): `#PublishedSchema struct Name { … }`
                     TokKind::Hash if self.at_published_schema_struct() => {
                         self.published_schema_struct_def(false).map(Item::Struct)
                     }
                     // D-LIN1: `#SingleUse struct|enum Name { … }`
                     TokKind::Hash if self.at_single_use_type() => self.single_use_type_def(false),
-                    // D-MUSTUSE1/D-MARKERMOVE1: `#MustUse struct|enum Name { … }`
+                    // D-MUSTUSE1/D-VERDICT-732-1 (formerly D-MARKERMOVE1): `#MustUse struct|enum Name { … }`
                     TokKind::Hash if self.at_must_use_type() => {
                         self.must_use_type_def(false)
                     }

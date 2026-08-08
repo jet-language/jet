@@ -1741,7 +1741,7 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
             else_body,
             ..
         }
-        // D-OSTARGET2=B: `#Known if build.os == { … }` — index arm bodies
+        // D-OSTARGET2=B: `$if build.os == { … }` — index arm bodies
         // the same as a runtime dispatch (sema desugars it away later).
         | AST::Stmt::ComptimeSwitch {
             subject,
@@ -1833,7 +1833,7 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
         AST::Stmt::BreakLabel(name, span) | AST::Stmt::ContinueLabel(name, span) => {
             collect_loop_label_ref(name, *span, mp, ctx);
         }
-        // D-CTMARKER1: collect symbols from comptime block body.
+        // D-META-STAGE1=B (formerly D-CTMARKER1): collect symbols from comptime block body.
         AST::Stmt::ComptimeBlock { body, .. } => structural_slot(ctx, "body", StructuralSlotKind::List, |ctx| collect_stmts(body, mp, module, ctx)),
         AST::Stmt::ComptimeIf {
             cond,
@@ -2217,7 +2217,7 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
         | AST::Expr::Todo { .. }
         | AST::Expr::NoElse(_)
         | AST::Expr::UnitLit { .. }
-        | AST::Expr::ComptimeSplice { .. }
+        | AST::Expr::ComptimeName { .. }
         // D-SHIFT1 (c7shift) / D-BINPAT1 (card #506 follow-up): a leaf
         // literal, no nested `Expr` to recurse into.
         | AST::Expr::StrMatchLit(_, _)

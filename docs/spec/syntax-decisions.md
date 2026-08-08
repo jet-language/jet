@@ -1384,6 +1384,16 @@ bearing rules require a visible brace scope, reason, and audit treatment, and
 before `@` and its source after it. A leading `@Rule` produces E0063
 with the canonical `#Rule` fix.
 
+**`#` disambiguation** *(D-ONCE-HASH1=B, ratified 2026-08-07)*: `#` lexes to
+one `TokKind::Hash` and carries three jobs, told apart by parser position
+alone, never lookahead heuristics. At a declaration, statement, or expression
+target it is the rule prefix (D-VERDICT-732-1): `#Rule`, `#[A, B]`. Inside a
+bracketed type, `[T#N]`, it is the fixed-size-list separator (S76/D-FIXARR1).
+After a package name, `pkg#1.2.0`, it is the version-pin separator (same
+constant as the fixed-size form). Interpolation selectors do not use `#`; they
+respell to colon (`{x:Fixed(2)}`) so they never collide with any of the three
+jobs above.
+
 **D-SHAPE2=A — One applied-rule marker** *(ratified 2026-07-14, card #534;
 sigil assignment superseded by D-VERDICT-732-1)*: every typed rule uses the
 single `#Rule` mechanism. Non-rule `#` constructs remain unchanged: effect sets
@@ -1407,7 +1417,7 @@ bracket group, is written immediately before its target. The registry says
 which targets each rule accepts. Parentheses appear exactly when arguments are
 written; empty parentheses are an error the formatter fixes.
 
-That one sentence covers every position. `#Codable struct …`, `#Known limit ::
+That one sentence covers every position. `#Codable struct …`, `$limit ::
 32`, `#Inline fn hot(…)`, and `#Unsafe("reason") { … }` are the same shape —
 marker, then target — differing only in what the target is. The five written
 forms (`Bare`, `Call`, `BareOrCall`, `Block`, `Prefix`) are retired; they
@@ -2042,14 +2052,48 @@ results lower to constant data. Permanent differential CI: interpreter and
 compiled runtime must agree bit-for-bit. **Rejected forever**: token/AST/
 attribute macros, custom syntax, comptime types, const generics in v1.
 
-**S57 — Compile-time demand** (amended by D-VERDICT-1308-1/2):
-ordinary foldable expressions fold implicitly. `#Known x :: f()` demands an
-immutable value now and fails the build if evaluation cannot complete.
-`#Known { … }` is the execution-block form (Jai `#run` analog); bindings
-inside leak to the enclosing scope as `$name` (E2713). `#Known if` is the
-conditional form. The `comptime` keyword is retired (E0374).
-**D-CTMARKER1**: `$name` is reserved **only** for compile-time splices into
-generated code.
+**S57 — Compile-time demand** *(as amended by D-META-STAGE1=B,
+ratified 2026-08-06, card #1537)*: ordinary foldable expressions fold
+implicitly. Compile time has one mark, `$`, and **the mark belongs to the
+name**, so it is written at every mention:
+
+```jet
+$limit :: 1000
+
+fn run() {
+    $ {
+        $ratio :: $limit /% 10
+    }
+    $if debug { … }
+    print("limit: {$limit}")
+    print("ratio: {$ratio}")
+}
+```
+
+`$name :: expr` demands an immutable value now and fails the build if
+evaluation cannot complete. A bare mark opens the execution block (`$ { … }`,
+the Jai `#run` analog) and precedes the compile-time verbs `$if` and
+`$loop`. Sema treats the mark as part of the identifier, so a plain name and
+a marked name can never denote the same binding, and codegen keeps them apart:
+a marked name spells `userct_<name>` in generated Rust where a plain name
+spells `user_<name>`.
+
+Because the name is the same name inside and outside a compile-time block,
+there is nothing to carry out. **D-CTMARKER1 retires outright** — the splice
+concept, its carry-out rule, and E2713 are deleted rather than generalized; an
+unresolved marked name now reports the ordinary E0107. `#Known`, `#Known if`
+and the `#Known` block retire together and teach E0377, and `#Known` leaves
+the marker registry because a stage is not a rule about a target. The
+`comptime` keyword stays retired (E0374).
+
+Constants: `COMPTIME_MARK` and `is_comptime_name` in
+`crates/jet-foundation/src/Syntax/core_surface.rs`. Examples:
+`examples/features/comptime/comptime_block.jet` and `comptime_if.jet`.
+
+**D-LAYOUT-FACTS1=B — Compiler-owned type facts**: `T.$layout`, `T.$name`
+and `T.$fields` are one closed spelling, each projecting the matching
+`TypeInfo` member. The mark after `.` is not a general user-member escape:
+any other marked member reports E0302 and names the three facts.
 
 **D-CTCORE1 / D-CTIO1 / D-PURE2 — Comptime I/O**: only a curated whitelist of
 pure Core functions evaluates at comptime; the sole I/O escapes are
@@ -2397,7 +2441,7 @@ inputs (`{parameter}`), the single integer return is anchored by
 Every declared parameter must be referenced and exactly one return anchor is
 required. Requires `use core.mem`
 plus an enclosing `#Unsafe("reason")` (S58); outside the gate is E0208-class.
-Target variants select via the existing `#Known if build.os ==` /
+Target variants select via the existing `$if build.os ==` /
 `#Target` machinery. Lowering emits Rust `asm!` so rustc verifies
 register/clobber facts per target; every user-facing error stays a Jet
 diagnostic (I2). `core.mem.intrinsics` may wrap popular cases as named
@@ -3428,12 +3472,12 @@ arms; non-matching arms are discarded before OS-gating checks run.
 fn-level `#Target(OS.*)` gating (option A) rejected.
 *Shipped spelling (2026-07-03):* the ballot wrote the dispatch loosely as `match
 build.os { … }`; reconciled to Jet's one canonical branching form (D-IF1/D-IF3
-`if subject == { }` if-table) with the existing `#Known if` lead (D-WHEN1) —
+`if subject == { }` if-table) with the existing `$if` lead (D-WHEN1) —
 **no `match` keyword was added** (I8). Statement-position dispatch:
 
 ```jet
 fn run() {
-    #Known if build.os == {
+    $if build.os == {
         .Linux   -> { b :: LinuxBackend.{ name: "gtk" }    print(b.label()) }
         .MacOS   -> { b :: MacOSBackend.{ name: "appkit" } print(b.label()) }
         .Windows -> { b :: WinBackend.{ name: "win32" }    print(b.label()) }
@@ -3443,7 +3487,7 @@ fn run() {
 
 `build.os` resolves to `ProgramBundle.active_os` (the `--target=<triple>` OS
 bucket, host OS when omitted; a web/wasm target falls back to the host per
-`OSTarget::active`). Sema desugars the dispatch into a `#Known if` chain
+`OSTarget::active`). Sema desugars the dispatch into a `$if` chain
 (D-WHEN1/D-WHEN2 machinery) as the *first* step of `check_bundle`, folding to
 the arm matching `active_os` and discarding the rest before any OS-gating
 check, type-check, or codegen sees a body — so constructing an OS-gated type
@@ -3467,7 +3511,7 @@ handle, `set_text`/`set_size`/`set_color` mutate a live widget, `on_click(id,
 handler)` wires a button, `present(title)` opens the window and runs the GLib
 loop. The flagship example is a live counter — a button click sets a
 `reactive.signal` and the `ui.reactive_render` effect updates the label text
-in place (the shipped reactive core, I8). Selected by the shipped `#Known if
+in place (the shipped reactive core, I8). Selected by the shipped `$if
 build.os` dispatch (D-OSTARGET2=B) and emitted only on a Linux target; all gtk
 C-ABI calls are confined to the vetted `jet_gtk` prelude module (I1 — user
 code writes no low-level tier). The native link (`-lgtk-4 …`) is named by `use
@@ -5339,6 +5383,11 @@ Control flow).
 **S43 — `test` blocks**: superseded by `#Test("name")` (see Testing).
 **S53 — concurrency**: deferred past v1.0 (see Capabilities & memory).
 **S81 — `?continue`**: superseded by `expr ?? next` (D-LOOP-CONTROLWORD1=B).
+**D-MARKER-FAMILY1 / D-MARKERMOVE1/2/3 — two-plane `@`/`#` sigil law**:
+superseded by D-VERDICT-732-1; every marker is back on `#`, `@` is reserved
+for locations/sources.
+**D-CTMARKER1 — `$name` splice marker**: retired outright by D-META-STAGE1=B;
+`$` is the one compile-time mark, not a splice-only sigil.
 **U1 / U10 filenames, D-JPK3/8/13, D-BIND1/2, D-ATTR1/3, D-CAP1/2-words,
 D-JSONOUT1, D-LITSUFFIX-SCOPE, D-UNIT1-spelling, the bare-brace constructor
 spelling superseded by D-DOTCTOR2**: all
@@ -5727,3 +5776,245 @@ rather than reporting it as a malformed field.
 Every in-repo `package.jet`/`pkg.jet` (examples, tests, fixtures) moved to
 the bare-identity spelling in the same change; no fallback parse path
 remains. Flagship: `examples/features/packages/outputs_build/`. Card #1517.
+
+## D-CONF-WORD1=A — one meaning for the word profile (2026-08-06, card #1526)
+
+`profile` names exactly one thing: the optimize bundle selected by
+`--profile` and its ratified `--release` sugar. `release`, `debug`, and `ci`
+keep the word, and D-BUILDPROFILE1 is untouched.
+
+The board identity is a machine description, so it moved into the machine
+vocabulary: `TargetProfile` is now `TargetMachine`, and `--target` selects it
+by a declared machine name (`board.sensor_v1`, `board.virt_aarch64`, `hosted`)
+beside an ordinary rustc triple. A no-OS machine carries the freestanding fact
+itself, so naming it is enough. The `targets:` manifest field (D-TGT1-4) and
+build-graph targets (D-BUILDTARGET1) keep their own words, and E1216 is
+unchanged.
+
+A named environment composition is a preset. `ENV_FIELD_PROFILES` becomes
+`ENV_FIELD_PRESETS` (`presets:`) and `ENV_FLAG_PROFILE` becomes
+`ENV_FLAG_PRESET` (`--preset`); the retired `--profile` spelling teaches E1300
+and selects nothing. `ProfileSpec`, `ProfileSet`, `ResolvedProfile`, and
+`ProfileError` renamed to their `Preset` spellings.
+
+Package and user profiles are generations. D-JPK-PROFILE1's wording only:
+docs and diagnostic text (E1332, E1335) read `generation`, and no flag,
+field, or on-disk schema changed.
+
+Every in-repo consumer moved in the same change; no alias or fallback
+spelling remains. `--env-profile` still selects one `env.<name>` module and
+is the one slice this card left open: the ruling folds it into `--preset`,
+but that name is taken by the `presets:` selector, so the replacement word is
+an owner call. Card #1526.
+
+**2026-08-06 — one registration table: D-META-REG1=A, D-META-NAME1=A,
+D-META-FORM1=A** *(card #1538, proposal
+`docs/proposals/metaprogramming-one-compile-time-program.md`)*. Four registries
+were proposed in one week for one job. This ruling makes them one.
+
+**D-META-REG1 = A — one table, four uses.** A marker rule, a knowledge plane, a
+right, and a build fact are rows of the same table, separated only by what they
+attach to. The table is `crates/jet-foundation/src/Registry.rs`. A row states its
+name, its target, the two law columns below, the prover that publishes it where
+one does, and — for a row whose target is written code — its marker signature.
+Reflection, `jet explain`, and the drift guards read that one table and are
+written once: no kind gets a second table, a second lookup, or a guard of its
+own. Marker rows come from the marker registry, so law zero (`D-VERDICT-1455-1`)
+is unchanged and every marker is still a row.
+
+**D-META-NAME1 = A — the declaring word is `marker`.** The spec, the glossary,
+and the diagnostics already say marker, so no second name for one thing enters
+the language. `KW_MARKER` is the contextual keyword; `rule`, `derive`, and a
+clause-only form were declined.
+
+**D-META-FORM1 = A — one named-parameter list, facts marked at compile time.** A
+rule declaration is an ordinary Jet declaration. The rule's own arguments and the
+facts about the rule share one parameter list, and the compile-time mark says
+which is which:
+
+```jet
+marker Inline(mode: InlineMode = .Hint,
+              $sites: [.Function, .Method, .Constant])
+
+marker Pre(condition: Any, message: String,
+           $sites: [.Function, .Method], $repeatable: true)
+```
+
+`mode`, `condition`, and `message` are what a use site writes. `$sites` and
+`$repeatable` are facts about the rule itself. No keyword enters beyond the
+declaring word and the grammar gains no clause form: a trailing `on` clause, a
+second parameter list, and a scope block were each declined by name and each
+teaches E0381. A new fact about rules is a new named parameter, never a new
+clause. `$sites` takes `[Site]`, and `Site` is the eighteen-member menu published
+in `core.lang` beside the other marker-argument enums (`SITE_VARIANTS` in
+`crates/jet-foundation/src/Policy.rs`, generated from `RuleSite::ALL` under
+D-RULEARG-TYPES1=A).
+
+**2026-08-07 — the compiler-facts slate: D-FACT-LAW1=B, D-FACT-WORD1=A,
+D-FACT-GATE1=A, D-FACT-READ1=A, D-FACT-HOME1=A, D-FACT-OWN1=A,
+D-FACT-FLOW1=A** *(card #1620, proposal `docs/proposals/compiler-facts-one-law.md`)*.
+The capstone over four ratified rethinks — type v2 knowledge, authority rights,
+concurrency state/duty/reach, and memory v5 ownership. It amends none of their
+decisions; it names the one law they each drew a corner of. The law itself is
+stated in `docs/spec/philosophy.md`.
+
+**D-FACT-LAW1 = B — one law, plus a guarded registry.** A fact moves toward
+safety silently; every move away is one written word, at the site, on the
+record; at runtime no fact remains. `D-TYPE2-EXACT1`, `D-AUTHORITY-MODEL1`,
+`D-PACKAGE-POLICY-SCOPE1`, `D-CONF-MERGE1`, `D-FLOWTYPE1`, and `D-CONC-JOIN1`
+are recorded as named instances, not as separate rules. The law is enforced by
+the registry: every row on the `D-META-REG1` table states its safe direction and
+its gate words, a row with no meaningful direction states `none`, and a row that
+states neither fails the build. The guard is the marker drift-guard, extended —
+one implementation, not a second. Existing rows are backfilled in the same
+change. Cards #1538 and #1460.
+
+The named instances, as rows of the one table
+(`crates/jet-foundation/src/Registry.rs`):
+
+| Instance | Row | Target | Safe direction | Gate words |
+| --- | --- | --- | --- | --- |
+| Marker law zero (`D-VERDICT-1455-1`) | every marker row | written code | `none` | none |
+| The plane law (`D-TYPE2-EXACT1`) | `Exactness` | a value | `gain` | `approx`, `raw`, `wrapping` |
+| Flow narrowing (`D-FLOWTYPE1`) | `Flow` | a value | `gain` | none |
+| Taint (`D-TAG-SURFACE1`) | `Taint` | a value | `gain` | `Scrub` |
+| Duty (`D-CONC-JOIN1`) | `Duty` | a value | `discharge` | `detach`, `drop` |
+| The rights law (`D-AUTHORITY-MODEL1`) | `Rights` | a scope | `shrink` | `Unsafe`, `Impure`, `Grant` |
+| Package policy (`D-PACKAGE-POLICY-SCOPE1`) | `PackagePolicy` | a scope | `shrink` | `Unsafe`, `Grant` |
+| The fact plane (`D-CONF-MERGE1`) | `BuildSettings` | the build | `shrink` | `Force` |
+
+Marker law zero is the instance with no meaningful direction. A rule on written
+code says what a writer may attach and where; it holds no fact that moves, so
+every marker row states `none` and names no gate. The moving facts a marker
+*writes* belong to the row that holds them — `#Grant` is a gate word on the
+`Rights` row, not a direction of its own. That is stated once, for every marker
+row at once, so no row can drift from it.
+
+A row states both columns because both are fields of the row, so a row that
+states neither cannot be written. The guard reads what the field types cannot:
+a gate word named with no direction to loosen, a gate word nothing spells
+(a gate is a registered marker or one of the Prelude gates `approx`, `raw`,
+`wrapping`, `detach`, `drop`, `Force`), a prover row that claims plane algebra,
+and a name registered twice. `Flow` shows the honest empty gate list: a narrowed
+optional gains certainty for free and the fact ends at the branch boundary, so
+nothing loosens it.
+
+**D-FACT-WORD1 = A — tighten and loosen.** One word pair names the law in
+diagnostics and docs. `attenuate`, `conserve`, and law-level `narrow` retire as
+law words. Operation names are untouched: flow narrowing keeps its name,
+widening conversions keep theirs, and no user-typed spelling changes. Duty
+diagnostics use the *owes* phrasing, which the ballot records as the one plane
+where `tighten` reads poorly: "this value still owes `join` — join it, or write
+`detach`". The E0140 family and the `#SingleUse` message speak with that one
+voice. Card #1624.
+
+**D-FACT-GATE1 = A — one full ledger, grouped by kind.** Every gate lands in one
+ledger: unsafe regions with obligation status, `#Impure` marks, dependency
+grants, trust grants, build and session flags, `.Force` pins, taint scrubs, duty
+drops, and precision demotions. `jet inspect gates` reads it, groups by kind with
+the security kinds first, and summarizes a large kind as a count so numeric code
+cannot bury the security rows. This generalizes `D-AUTHORITY-GATE1`:
+`jet inspect authority` stays as the rights-kind filter of the same ledger, and
+`jet unsafe` as another filter. Compile-time only, no runtime cost, no new write
+surface, and no gate gains new ceremony — reasons stay exactly where ratified law
+already puts them. Card #1571.
+
+**D-FACT-READ1 = A — the `$` mark reads every plane.** Reading a compiler-held
+fact is one act with one mark: `Severity.$range`, `send_report.$effects`,
+`Order.$states`, `Meters.$dimension`, and `$build.profile` as the same act with
+the build as its subject. This extends `D-META-STAGE1` from build facts and
+splices to member position on types and functions. Facts answer typed values
+from the registry. `reflect()` remains the aggregate view and loses its string
+fallback; the `"\0state:"` encoding is deleted. Comptime only: S26 holds, a fact
+is a value and never mints a type, and `D-FACTMODEL1` holds, facts classify and
+never dispatch. Card #1623.
+
+**D-FACT-HOME1 = A — home the user-facing orphans.** Send-safety, failure
+attribution, `#Track` origin (`D-PROVENANCE1`), view provenance
+(`D-MEMPROVENANCE3`), unit-scale provenance, and maturity become typed registry
+rows, readable like every other fact. Prover internals — uninit tracking and
+exhaustiveness — stay engine-side and gain no row, matching the wall in
+`D-FACT-OWN1`; the line is written down per fact rather than left to folklore.
+Phantom fact-menu names such as `Capability` are refused at the signature
+instead of compiling to a dead end at every call, and each refusal names its
+living counterpart (`Authority`, or a rights list) or says plainly that none
+exists. The census is about eighteen names, not the rule-arg seven. Cards #1622
+and #1501.
+
+**D-FACT-OWN1 = A — the ownership wall: prover, not plane.** The borrow checker
+is a prover and never a registered plane. Alias and flow analysis over places
+does not decompose into per-operation rules, so no card may re-express `&`, `^`,
+or `~` windows as plane algebra. Ownership checking continues to follow `D-MEM1`,
+`D-SHAPE-PLACE1`, and `D-MEM-VIEWRET1` as its own analysis. The facts it
+publishes — sendability, view provenance, moved-ness — enter the registry as
+read-only prover-supplied rows (`Sendability`, `ViewProvenance`, `Movedness`),
+so tools and other planes consume them like any other fact. Each names the prover
+that publishes it and states safe direction `none` with no gate: a window is
+closed by the prover, never loosened by a written word. The memory sigils obey the law's spirit but are the prover's surface,
+not gates, and they never enter the gate ledger. Cards #1538 and #1622.
+
+**D-FACT-FLOW1 = A — one flow-fact store, planes supply joins.** One store on the
+checker, keyed by binding and plane, replaces the six hand-written stores (moved,
+uninit, typestate, taint, narrowing, view facts) and the twelve one-off fact
+columns on `LocalInfo`. Each plane supplies only its join rule, and the shared
+walker applies joins at every `if`, loop, and arm-table merge point, so a
+forgotten join becomes impossible by construction. This closes the two dead joins
+— `State.rs` `join_after` and `UninitState::merge_paths`, both
+`#[allow(dead_code)]` — which today let typestate and partial-init keep whatever
+branch the walker saw last. The walker states its loop fixpoint rule once. Sema
+only: no TIR or codegen change, and generated Rust stays byte-identical. View
+facts are stored here while their invalidation logic stays with the ownership
+prover. Card #1621.
+
+**Sequencing (owner directive, 2026-08-07).** The substrate cards outrank every
+per-plane implementation card. Ranked order: #1538 (the guarded registry), #1621
+(the flow-fact store), #1539 (rows in readable Prelude source), #1547 (fact
+planes on the one registry), #1622 (home the orphans), #1501 (phantom-name
+refusal), #1623 (the `$` read surface), #1571 (the gate ledger), #1624 (the one
+law voice). No per-plane card in #1517–#1579 closes before its substrate
+prerequisite closes.
+
+**2026-08-07 — D-NAME-FILES1 = C** *(card #1625, proposal `docs/proposals/names-one-tree.md`)*. Manual named imports stay: every cross-file name keeps an explicit import line, and no invisible auto-import of project files ships. Owner's words: "Let's just stick with manual named imports like we used to have rather than the magic auto imports that are invisible." D-NAME-AUDIT1 (the refuse-the-magic switch) is withdrawn as moot. The rest of the D-NAME slate stays open on the card.
+
+## The say-it-once slate (D-ONCE-*, ratified 2026-08-07, card #1656)
+
+The corpus-wide first-principles audit's rulings. Tower is the decision home (D-ONCE-LEDGER1=A); this block is the spec render.
+
+- **D-ONCE-LAW1=A** — the corpus law: every truth has one home with named renderers and a guard; a guardless law row fails lint; a hand-written second copy fails the build.
+- **D-ONCE-TIER1=A** — full tier parity; the interpreter is a first-class tier; supersedes D-VERDICT-1254-1's interpreter carve-out.
+- **D-ONCE-RETIRE1=C** — retirements ship as code, split by category: pure renames auto-rewrite with a notice; semantic changes hard-error with a fix line; every retirement carries an adoption ratchet that ends at zero.
+- **D-ONCE-WORD1=A** — `Stream<T>` owns the word stream; codec modes are readers and writers; events are events; eager loop comprehensions are collecting loops. One vocabulary page; the retired senses are doc-lint errors.
+- **D-ONCE-DERIVE1=A** — the marker (`#Comparable`) is the one spelling to request a derived capability; the body-line `derive X` retires; the `derive` keyword keeps only its provider-definition meaning (amends D-USERDERIVE1; keeps D-METADERIVE1).
+- **D-ONCE-SANDBOX1=A** — the isolated package kind is `target: sandbox`; `target: plugin` retires as a rename (amends D-PLUGIN1 naming).
+- **D-ONCE-GATE1=A** — one org-policy ladder governs every audited escape (`#Unsafe`, `#Impure`, `#Nondeterministic`); `--gate <name>=allow` is the per-invocation escape the org file can refuse; `--allow-impure` retires. The shared ledger is D-FACT-GATE1's.
+- **D-ONCE-LEDGER1=A** — Tower is the one decision home; spec text renders it; `tower lint --docs` walks `docs/spec/**`; supersession links are mandatory on verdicts.
+- **D-ONCE-VERB1=A** — one verb per job across collections: `pop` is remove-and-return everywhere; `replace` keeps only the List swap meaning; bare `.from()` is the blessed conversion constructor, `from_x()` for source-qualified variants (amends the D-API-STORE1 table and D-STDRUBRIC1 idioms).
+- **D-ONCE-AT1=D** — `@` is the word *at*, in space and time: infix `@` stays the package-source separator (D-JPK-REF1, unchanged); prefix `@` becomes the compile-time mark and the fact-read glyph (`@config`, `T.@range`, `@build.profile`), amending D-FACT-READ1's spelling half and the `$` comptime-mention mark. The location reservation rides the same word, minted by a future ballot.
+- **D-ONCE-DOLLAR1=B** — the freed `$` becomes typed environment access in config surfaces (`$HOME` in `env.jet` and deploy files, listed by `jet inspect env`); outside config surfaces it is a teaching error.
+- **D-ONCE-UITREE1=C** — the ratified-but-unbuilt `.Button.{ }` UI-tree spelling is marked unbuilt in the spec; the spelling decision reopens with card #1588's architecture result.
+- **D-ONCE-CASE1=A** — one naming lexicon (plain words, the blessed-abbreviation list, fixed acronym casing) governs every surface: source, CLI verbs and flags, manifest keys, and file names. New abbreviations earn a row by ballot.
+- **D-ONCE-HASH1=B** — interpolation format selectors respell to colon (`{x:Fixed(2)}`, `{user:Debug}`); `#` keeps its three non-colliding jobs: applied rules, fixed-size lists (`[T#4]`), and package version pins.
+
+## Marker rows are Prelude declarations (D-META-ONE1=A, card #1539)
+
+The marker vocabulary is written as ordinary Jet source, not as a Rust table.
+
+- `crates/jet-codegen/src/Prelude/Markers.jet` holds one `marker Name(params…)`
+  declaration per rule, in the ratified D-META-FORM1=A form. A plain parameter
+  is an argument the use site writes; a `$`-marked parameter is a fact about the
+  rule: `$sites`, `$repeatable`, `$owns_menu`, `$inherits`, `$resolution`,
+  `$scopes`, `$companion`, `$retired`.
+- `crates/jet-codegen/src/Prelude/Effects.jet` holds one `effect Name`
+  declaration per effect root.
+- The Rust constants `Policy::APPLIED_RULES` and `Facts::EFFECT_ROOTS` no longer
+  hold the vocabulary; both are read from those two files.
+- D-VARIADIC1: a marker that takes a list of arguments writes it the same way a
+  function does — `capabilities: ...Capability`. This is the only new spelling
+  the card adds, and it reuses the ratified rest-parameter form.
+- D-MARK-VOCAB1: `Policy::MarkerVocabulary` is the one vocabulary value. It
+  holds the registry rows plus the `derive T.Name { … }` providers a build can
+  see, and it answers both "may this name be written?" and "did you mean?". The
+  separate `known_derive_names` set is deleted.
+- `tests/marker_declarations.rs` is the drift guard: the real Jet parser reads
+  both files and must agree with the registry on every row, and no Rust file may
+  build a marker row or keep a copy of the effect roots.

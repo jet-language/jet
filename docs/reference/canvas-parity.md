@@ -21,6 +21,7 @@ contract; it does not mean every form has a bespoke graph gesture. Status values
 - [Item::Tag] status=readonly marker facts, source edits.
 - [Item::Impl] status=readonly method facts, source edits.
 - [Item::Const] status=readonly symbol facts, source edits.
+- [Item::MarkerDecl] status=readonly marker registry facts, source edits.
 - [Item::Test] status=readonly marker scope, source edits.
 - [Item::Bench] status=readonly marker scope, source edits.
 - [Item::ExternRust] status=unsupported expert FFI surface, source edits only.
@@ -78,6 +79,7 @@ contract; it does not mean every form has a bespoke graph gesture. Status values
 - [Stmt::Transact] status=readonly transaction block, source edits.
 - [Stmt::Yield] status=readonly stream yield, source edits.
 - [Stmt::ScopeMember] status=readonly marker-scope member, source edits.
+- [Stmt::Switched] status=readonly statement-switch block (#Off badge planned on card #387), source edits.
 
 ## Expressions
 
@@ -129,6 +131,8 @@ contract; it does not mean every form has a bespoke graph gesture. Status values
 - [Expr::ComptimeSplice] status=readonly comptime splice, source edits.
 - [Expr::Paren] status=graph grouped expression detail.
 - [Expr::IncDec] status=graph increment/decrement node.
+- [Expr::NoElse] status=readonly dispatch no-else arm, source edits.
+- [Expr::ComptimeName] status=readonly comptime name mention, source edits.
 
 ## Types
 
@@ -152,6 +156,7 @@ contract; it does not mean every form has a bespoke graph gesture. Status values
 - [Type::Float32] status=readonly type detail.
 - [Type::Tagged] status=readonly type detail.
 - [Type::Union] status=readonly type detail.
+- [Type::Quantity] status=readonly unit quantity type detail.
 
 ## Patterns
 

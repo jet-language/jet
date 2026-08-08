@@ -176,7 +176,7 @@ pub struct Binding {
     pub ty: Option<Type>,
     pub ty_span: Option<Span>,
     pub init: Expr,
-    /// S57 (M9.5): local `#Known name :: expr;` — immutable, evaluated
+    /// S57 (M9.5): local `$name :: expr;` — immutable, evaluated
     /// after ordinary type checking and emitted as literal data.
     pub is_comptime: bool,
     pub ct: Option<CtValue>,

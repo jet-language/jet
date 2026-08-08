@@ -115,9 +115,9 @@
         install_comptime_bridge();
         let lowered = lower_after_sema(
             r#"
-#Known narrow :: F32.{16777217.0}
-#Known wide :: 2.5
-#Known label :: "ready"
+$narrow :: F32.{16777217.0}
+$wide :: 2.5
+$label :: "ready"
 
 fn run() {
     print(narrow)
@@ -1015,7 +1015,7 @@ fn mk() {
         // the gate's `stmt_in_subset` admits `Stmt::ComptimeIf` unconditionally; the
         // lowering reads `selected_then`, but the gate does not need sema for routing.)
         let src =
-            "fn f(x: Int) => Int {\n #Known if true {\n return x\n } else {\n return 0\n }\n}\n";
+            "fn f(x: Int) => Int {\n $if true {\n return x\n } else {\n return 0\n }\n}\n";
         assert!(covers(src, "f"));
     }
 
@@ -1726,7 +1726,7 @@ fn mk(k: Kind) => Query {
         // c109 Phase 24: a comptime const inlines its value at the use site
         // (`cx.consts`), so a fn interpolating a const routes.
         let src = "\
-#Known header :: \"<html>\"
+$header :: \"<html>\"
 fn wrap(s: String) => String {
     return \"{header}: {s}\"
 }
@@ -1736,7 +1736,7 @@ fn wrap(s: String) => String {
 
     #[test]
     fn covers_comptime_local_binding() {
-        // c109 (S57/M9.5): a comptime LOCAL `#Known name :: expr` in a function body
+        // c109 (S57/M9.5): a comptime LOCAL `$name :: expr` in a function body
         // routes once sema fills `b.ct`. The runtime `init` (`build()`) is NOT in-subset
         // on its own merits, but the comptime path never emits it — it emits the
         // sema-evaluated literal — so the gate admits it on `b.ct.is_some()`. Needs the
@@ -1750,7 +1750,7 @@ fn build() => [Int] {
     return xs
 }
 fn run() {
-    #Known xs :: build()
+    $xs :: build()
     print(\"{xs}\")
 }
 ";
@@ -2052,9 +2052,9 @@ fn run() {
 
     #[test]
     fn covers_field_read_and_eq_on_inlined_comptime_values() {
-        // c109: a FIELD READ off a comptime-const struct value (`#Known pair_value ::
+        // c109: a FIELD READ off a comptime-const struct value (`$pair_value ::
         // Pair{…}`; then `pair_value.left`) and an `==` against a comptime-const enum value
-        // (`#Known light_value :: Light.Green`; then `light_value == Light.Green`). The const inlines to
+        // (`$light_value :: Light.Green`; then `light_value == Light.Green`). The const inlines to
         // its pre-rendered Rust value string (`cx.consts[…]`); reading a field off the
         // inlined struct / comparing the inlined enum is byte-identical to the AST path.
         // The Field gate now admits a non-local comptime-const receiver.
@@ -2069,8 +2069,8 @@ enum Light {
     Green
 }
 
-#Known pair_value :: Pair.{left: 7, right: "seven"}
-#Known light_value :: Light.Green
+$pair_value :: Pair.{left: 7, right: "seven"}
+$light_value :: Light.Green
 
 fn run() {
     print("{pair_value.left}")

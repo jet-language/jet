@@ -3,6 +3,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod common;
+
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
@@ -53,7 +55,7 @@ fn build_and_run(dir: &Path, name: &str, src: &str) -> (i32, String, String) {
 }
 
 fn assert_example_matches_golden(stem: &str) {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping {stem} AOT corpus (need rustc)");
         return;
@@ -116,6 +118,9 @@ fn hostile_corpus_covers_required_failure_classes() {
         "bad_window: InvalidArgument rolling_mean:",
         "hostile_svg_escaped: true",
         "large_limit: Limit group_mean:",
+        // #1657: the compensated kernel. A naive sum answers 0.0 for both.
+        "cancellation_sum: 1.0",
+        "cancellation_mean: 0.3333333333333333",
     ] {
         assert!(
             out.contains(needle),

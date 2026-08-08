@@ -75,6 +75,11 @@ pub(crate) struct OutputMode {
     pub(crate) json: bool,
     /// User's `--color` choice (resolved against TTY-ness at print time).
     pub(crate) color: ColorChoice,
+    /// #1659 criterion 3: `--quiet`/`-q` — suppress non-error status/progress
+    /// output (watch banners, hot-swap notices, confirmations). Never
+    /// suppresses errors (stderr) or requested data (a command's actual
+    /// result, `--json` output).
+    pub(crate) quiet: bool,
 }
 
 impl OutputMode {
@@ -358,26 +363,10 @@ impl BuildProfile {
     }
 }
 
-fn command_group_usage(name: &str) -> String {
-    let group = jet::CLI::command_group(name).expect("command group must exist");
-    let mut output = String::new();
-    for action in group.actions {
-        for usage in action.usage.lines() {
-            output.push_str(&format!(
-                "  {} {} {:<48} {}\n",
-                jet::Syntax::BINARY_NAME,
-                group.name,
-                usage,
-                action.summary
-            ));
-        }
-    }
-    output
-}
-
 pub(crate) fn usage() -> String {
-    let inspect_commands = command_group_usage("inspect");
-    let registry_commands = command_group_usage("registry");
+    // #1659 criterion 1: rendered from jet::CLI's one COMMAND_GROUPS table.
+    let inspect_commands = jet::CLI::command_group_usage("inspect");
+    let registry_commands = jet::CLI::command_group_usage("registry");
     format!(
         "\
 Welcome to {lang}! (v{ver})
@@ -466,7 +455,8 @@ flags:
   --vendor-dir <path>          with vendor: directory to copy dependencies into
   --small                      with build/run: smallest binary (S15)
   --freestanding               with build/run: no OS; rejects std-only APIs (E2-M15)
-  --target=<triple>            with build: cross-compile for a rustc target triple (E2-M15)
+  --profile=<name>             how hard to optimize: release, debug, ci (D-BUILDPROFILE1)
+  --target=<triple|machine>    what machine this is for: a rustc triple or board.<name> (D-CONF-WORD1)
   --explain-partition          with build --target=web: print the JS/WASM partition report (D-WASM1)
   --locked                     with fetch: verify only, refuse network
   --verbose, -v                with build: print the bridge steps
@@ -489,6 +479,54 @@ flags:
         inspect_commands = inspect_commands,
         registry_commands = registry_commands,
     )
+}
+
+/// #1659 criterion 2: `jet <cmd> --help`/`-h`. Rendered from the same
+/// `jet::CLI` tables and `usage()` text as `jet help` and the man page — not
+/// a hand-duplicated per-command help string.
+fn command_help(cmd: &str) -> String {
+    let bin = jet::Syntax::BINARY_NAME;
+    // A bare group name (`registry`/`inspect`/`hangar`/`project`/`self`/`gc`)
+    // reaches here only for a non-exhaustive group (`os`) — the exhaustive
+    // ones are already handled by `normalize_frequency_ring_argv`.
+    if let Some(group) = jet::CLI::command_group(cmd) {
+        return format!(
+            "{bin} {cmd} — {}\n\n{}",
+            group.summary,
+            jet::CLI::command_group_usage(cmd)
+        );
+    }
+    // A normalized nested-action dispatch word (`publish`, `graph`, …).
+    if let Some((group, action)) = jet::CLI::moved_command(cmd) {
+        let mut lines = String::new();
+        for usage_line in action.usage.lines() {
+            lines.push_str(&format!("  {bin} {} {}\n", group.name, usage_line));
+        }
+        return format!(
+            "{bin} {} {cmd} — {}\n\n{lines}",
+            group.name, action.summary
+        );
+    }
+    // A canonical flat top-level command: pull its summary and the matching
+    // usage lines straight out of `usage()` so the two never drift.
+    let summary = jet::CLI::COMMANDS.iter().find(|c| c.name == cmd).map(|c| c.summary);
+    let full = usage();
+    let matched: Vec<&str> = full
+        .lines()
+        .filter(|line| {
+            let mut words = line.trim_start().split_whitespace();
+            words.next() == Some(bin) && words.next() == Some(cmd)
+        })
+        .collect();
+    let header = match summary {
+        Some(s) => format!("{bin} {cmd} — {s}\n\n"),
+        None => format!("{bin} {cmd}\n\n"),
+    };
+    if matched.is_empty() {
+        format!("{header}Run `{bin} help` to see every command.\n")
+    } else {
+        format!("{header}{}\n", matched.join("\n"))
+    }
 }
 
 /// True when `arg` names a Jet source file or project directory (c6vz465 sugar:
@@ -652,9 +690,15 @@ fn normalize_frequency_ring_argv(raw: &mut Vec<String>) {
     // group's (partial) action list.
     let exhaustive = jet::CLI::command_group(&group).map(|spec| spec.exhaustive).unwrap_or(false);
     if let Some(spec) = jet::CLI::command_group(&group) {
-        if exhaustive && (raw.len() == 1 || raw.get(1).map(String::as_str) == Some("help")) {
+        // #1659 criterion 2: `--help`/`-h` are real help requests here, not
+        // an unmodeled subword — retiring the E2101 that used to fire for
+        // e.g. `jet hangar --help`.
+        let asks_help = raw.len() == 1
+            || matches!(raw.get(1).map(String::as_str), Some("help"))
+            || raw.get(1).is_some_and(|a| jet::CLI::is_help_flag(a));
+        if exhaustive && asks_help {
             println!("jet {group} — {}", spec.summary);
-            print!("{}", command_group_usage(&group));
+            print!("{}", jet::CLI::command_group_usage(&group));
             exit(ExitCodes::OK);
         }
     }
@@ -891,6 +935,11 @@ fn is_executable(p: &Path) -> bool {
 }
 
 fn main() {
+    // I2: install first, before any other work, so every uncaught panic
+    // (including one triggered before argv parsing) renders the branded
+    // ICE report instead of raw Rust panic text.
+    jet::Diagnostics::install_ice_panic_hook();
+
     // Process-wide: any derive/comptime path may hit TirBridge before Loader.
     jet::boot_tir_eval();
 
@@ -944,7 +993,7 @@ fn main() {
     let fmt_check = jet_argv.iter().any(|a| a == "--check");
     let json = jet_argv.iter().any(|a| a == "--json");
     let small = jet_argv.iter().any(|a| a == "--small");
-    let freestanding = jet_argv.iter().any(|a| a == "--freestanding");
+    let freestanding_flag = jet_argv.iter().any(|a| a == "--freestanding");
     let allow_impure = jet_argv.iter().any(|a| a == "--allow-impure");
     let build_grants: Vec<String> = ["exec", "fs", "net", "env", "io", "db", "time", "rand", "log", "gpu"]
         .into_iter()
@@ -960,10 +1009,32 @@ fn main() {
     let capabilities_json = jet_argv.iter().any(|a| a == "--capabilities-json");
     // D-SUPPLY1: `jet build --sbom` writes an SPDX SBOM next to the binary.
     let sbom = jet_argv.iter().any(|a| a == "--sbom");
-    // E2-M15: cross-compilation target triple (`--target=<triple>`).
-    let cross_target: Option<String> = jet_argv
+    // E2-M15 / D-CONF-WORD1=A: the machine axis. `--target=` takes a rustc
+    // triple or a declared machine name; a machine supplies its own triple and
+    // brings its no-OS facts with it.
+    let requested_target: Option<String> = jet_argv
         .iter()
         .find_map(|a| a.strip_prefix("--target=").map(str::to_string));
+    let selected_machine = requested_target
+        .as_deref()
+        .and_then(jet::Driver::target_machine_by_name);
+    if let Some(name) = requested_target.as_deref() {
+        if selected_machine.is_none() && name.starts_with("board.") {
+            eprintln!("error: unknown target machine `{name}`");
+            eprintln!(
+                " fix: use one of {}, or a rustc target triple",
+                jet::Driver::TARGET_MACHINE_NAMES.join(", ")
+            );
+            exit(ExitCodes::USAGE);
+        }
+    }
+    let cross_target: Option<String> = match &selected_machine {
+        Some(machine) => Some(machine.triple.clone()),
+        None => requested_target.clone(),
+    };
+    // A no-OS machine carries the freestanding fact, so naming it is enough.
+    let freestanding = freestanding_flag
+        || selected_machine.as_ref().is_some_and(|machine| machine.no_os);
     let remote_builder: Option<String> = jet_argv.iter().enumerate().find_map(|(index, arg)| {
         arg.strip_prefix("--builder=")
             .map(str::to_string)
@@ -1040,9 +1111,14 @@ fn main() {
         }
         found
     };
+    // #1659 criterion 3: one spelling, parsed once, threaded everywhere
+    // OutputMode already reaches (build/run/test/dev/fmt/publish/doctor/…).
+    // Criterion 3 says "one spelling" — no `-q` short alias.
+    let quiet = jet_argv.iter().any(|a| a == "--quiet");
     let mode = OutputMode {
         json,
         color: parse_color(jet_argv),
+        quiet,
     };
     // Positional args only. Keep bare `-` (stdin for `jet fmt -`); drop every
     // other dash-flag including short forms like `-u` / `-v` so they never become
@@ -1075,6 +1151,12 @@ fn main() {
     };
 
     if args.first().map(|s| s.as_str()) == Some("lsp") {
+        // #1659 c2 (round 2): `jet self lsp --help`/`-h` must print help, not
+        // start the language server on stdio.
+        if jet_argv.iter().any(|a| jet::CLI::is_help_flag(a)) {
+            print!("{}", command_help("lsp"));
+            exit(ExitCodes::OK);
+        }
         let sub = args.get(1).map(|s| s.as_str());
         let bench_flag = raw.iter().any(|a| a == "--bench");
         match (sub, bench_flag) {
@@ -1100,6 +1182,12 @@ fn main() {
     let cmd = match args.first() {
         Some(c) => c.as_str(),
         None => {
+            // #1659 criterion 2: `jet --help`/`jet -h` are real requests for
+            // the full command table, not the short orientation greeting.
+            if jet_argv.iter().any(|a| jet::CLI::is_help_flag(a)) {
+                print!("{}", usage());
+                exit(ExitCodes::OK);
+            }
             // No-args: a friendly greeting that orients, NOT a usage error.
             print!("{}", greeting());
             exit(ExitCodes::OK);
@@ -1189,6 +1277,31 @@ fn main() {
         }
     }
 
+    // #1659 criterion 2 (round 2): `jet <cmd> --help`/`-h` works for every
+    // command, including the ones that own a bespoke flag vocabulary — not
+    // just the generic ones. A handful of `owns_flags` commands already
+    // render *better*, sub-verb-specific bespoke help deep in their own
+    // dispatch and every one of their sub-verbs checks `is_help_flag` itself
+    // (`bind`'s per-language usage; `diff`/`merge`'s `wants_help`; `perf`
+    // which short-circuits earlier above) — those keep their own renderer
+    // instead of being downgraded to the generic table text here.
+    // `devtools` does NOT qualify: none of its sub-verbs (`grammars`,
+    // `reduce`, `bless`, …) check for `--help` themselves, so without this
+    // gate `jet self devtools grammars --help` silently executes (writes
+    // files) instead of printing help — the exact bug this criterion exists
+    // to close. Every other `owns_flags` command
+    // (`prove`/`budget`/`report`/`clean`/`update`/`image`/`trust`/`hangar`/
+    // `devtools`/…) previously either error-taught E2102 or, worse, executed
+    // for real — this is checked before the pinned-toolchain re-exec so a
+    // help request never pays for one.
+    const BESPOKE_DEEP_HELP: &[&str] = &["bind", "diff", "merge", "perf"];
+    let owns_flags = jet::CLI::owns_flag_vocabulary(cmd);
+    let wants_help = jet_argv.iter().any(|a| jet::CLI::is_help_flag(a));
+    if wants_help && !(owns_flags && BESPOKE_DEEP_HELP.contains(&cmd)) {
+        print!("{}", command_help(cmd));
+        exit(ExitCodes::OK);
+    }
+
     // D-JPK-TOOLCHAIN1=A (#179): a version-pinned project hands off to its
     // pinned `jet` toolchain before any manifest-driven verb runs. A running
     // `jet` in the pinned channel runs natively; a genuine version mismatch
@@ -1200,7 +1313,6 @@ fn main() {
     // Validate flags against the registry; an unknown/half-typed flag is E2102.
     // Skipped for commands that own a bespoke flag vocabulary or forward flags
     // downstream (so their flags aren't measured against the global set).
-    let owns_flags = jet::CLI::owns_flag_vocabulary(cmd);
     if !owns_flags {
         check_flags(jet_argv, cmd);
     }
@@ -1243,6 +1355,24 @@ fn main() {
             exit(CmdBudget::run(&raw));
         }
         "parts" => run_project_parts(&raw, mode),
+        "reserved" => {
+            if mode.json {
+                println!("{}", jet::CLI::reserved_report_json());
+            } else {
+                print!("{}", jet::CLI::reserved_report_text());
+            }
+            return;
+        }
+        // D-ONCE-LAW1=A (#1728): read out the one registration table — every
+        // registered truth with its home, its renderers, and its guard.
+        "facts" => {
+            if mode.json {
+                println!("{}", jet::Explain::facts_report_json());
+            } else {
+                print!("{}", jet::Explain::facts_report_text());
+            }
+            return;
+        }
         "prove" => {
             let prove_args: Vec<String> = raw.iter().skip(1).cloned().collect();
             run_prove(&prove_args, mode.json);
@@ -1284,7 +1414,7 @@ fn main() {
             // global `args` filter would otherwise strip (same reason `bind`
             // reads from `raw` below).
             let devtool_args: Vec<&String> = raw.iter().skip(1).collect();
-            run_devtools(&devtool_args);
+            run_devtools(&devtool_args, mode);
             return;
         }
         "man" => {
@@ -2068,7 +2198,7 @@ fn main() {
                 .find_map(|a| a.strip_prefix("--edition=").map(str::to_string));
             run_fix(target, dry_run, edition.as_deref());
         }
-        "new" => run_new(target, annotated),
+        "new" => run_new(target, annotated, mode),
         "test" => {
             let update_snapshots = jet_argv
                 .iter()
@@ -2863,7 +2993,7 @@ fn print_transition_result(
             json_quote(&result.summary.journal.to_string_lossy()),
             changes
         );
-    } else {
+    } else if !mode.quiet {
         for change in &result.summary.changes {
             if check_only {
                 println!("Would {}: {}", change.action, change.path.display());
@@ -2956,7 +3086,9 @@ fn run_init(
                 }
             }
         }
-        println!("No migration-era role files found.\nNo files changed.");
+        if !mode.quiet {
+            println!("No migration-era role files found.\nNo files changed.");
+        }
         exit(ExitCodes::OK);
     }
     if script.is_none()
@@ -2983,7 +3115,9 @@ fn run_init(
             if let Some(script) = script {
                 lift_inline_deps_into_manifest(&cwd, script);
             }
-            println!("{msg}");
+            if !mode.quiet {
+                println!("{msg}");
+            }
             exit(ExitCodes::OK);
         }
         Err(d) => {
@@ -3103,10 +3237,12 @@ fn run_lock(script: Option<&str>, mode: OutputMode) {
     };
     match jetpack::ScriptLock::write(script_path, &lock) {
         Ok(()) => {
-            println!(
-                "wrote {}",
-                jetpack::ScriptLock::sidecar_path(script_path).display()
-            );
+            if !mode.quiet {
+                println!(
+                    "wrote {}",
+                    jetpack::ScriptLock::sidecar_path(script_path).display()
+                );
+            }
             exit(ExitCodes::OK);
         }
         Err(e) => {

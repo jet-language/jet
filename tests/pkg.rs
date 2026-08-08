@@ -15,6 +15,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
 
+mod common;
+use common::Scratch;
+
 // Serialize tests that mutate process-global package environment or helper selection.
 static STORE_LOCK: Mutex<()> = Mutex::new(());
 
@@ -3008,7 +3011,16 @@ fn physical_unit_trait_methods_use_canonical_dimensions() {
 
     let dir = tmp_dir("physical_unit_trait_api");
     let path = dir.join("current.jet");
-    let source = "#UnitFamily(Length) { meter }\npub trait Measure { fn scale(value: Meter) => Meter; }\n";
+    // No local `#UnitFamily(Length)` here: D-DIMENSION-OPEN1=D says a
+    // same-named local declaration shadows the standard Prelude catalog
+    // (`Bundle/Units.rs`'s "Local names shadow Prelude members; physical
+    // dimension behavior remains explicit opt-in"), so it would stay
+    // nominal and could never carry `core.units::Length`. Referencing
+    // `Meter` bare lets the ambient standard-unit prelude supply the real,
+    // canonical Length family instead (card #1765/#1769 root cause: the
+    // prior fixture redeclared the family and shadowed the very identity
+    // it meant to assert on).
+    let source = "pub trait Measure { fn scale(value: Meter) => Meter; }\n";
     fs::write(&path, source).unwrap();
 
     let api = extract_public_api(source, path.to_str().unwrap());
@@ -3018,7 +3030,7 @@ fn physical_unit_trait_methods_use_canonical_dimensions() {
         .expect("public trait method");
     assert_eq!(
         method.signature,
-        "fn Measure.scale(value: Meter{family=Length; base=Float; dimension=core.units%3A%3ALength:1}) => Meter{family=Length; base=Float; dimension=core.units%3A%3ALength:1}"
+        "fn Measure.scale(value: Meter{package=core.units; family=Length; base=Meter; dimension=core.units%3A%3ALength:1; scale=1; provenance=Rational; offset=0}) => Meter{package=core.units; family=Length; base=Meter; dimension=core.units%3A%3ALength:1; scale=1; provenance=Rational; offset=0}"
     );
 
     let mut bundle = jet::Loader::load_entry_with_overlay(path.to_str().unwrap(), None, true)
@@ -3750,32 +3762,6 @@ fn resolver_no_candidates_returns_e2602() {
 // concurrent test runs never collide on a bare label) and cleans up via
 // `Drop`. Kept separate rather than forced onto the shared helper.
 // ============================================================================
-
-struct Scratch {
-    path: PathBuf,
-}
-
-impl Scratch {
-    fn new(tag: &str) -> Scratch {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!("jet-pub-package-{tag}-{nanos}"));
-        fs::create_dir_all(&path).unwrap();
-        Scratch { path }
-    }
-
-    fn join(&self, path: &str) -> PathBuf {
-        self.path.join(path)
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.path);
-    }
-}
 
 #[test]
 fn pub_package_function_is_visible_inside_project_scope() {

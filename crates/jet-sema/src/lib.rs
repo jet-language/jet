@@ -5,7 +5,7 @@
 pub use jet_comptime::Comptime;
 pub use jet_parser::{
     CanonicalAST, Collections, Diagnostics, Formatter, Generics, Lexer, Numeric, Parser, Syntax,
-    TargetProfile, Traits, Policy, AST, SHA256,
+    TargetMachine, Traits, Policy, AST, SHA256,
 };
 pub mod Sema;
 pub use Sema::{effect_key, DefinitionAnchorFact, SemIndexEffectFacts};

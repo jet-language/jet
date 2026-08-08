@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { CanvasScenario, scenarios } from "./scenario.mjs";
+import os from "node:os";
+import path from "node:path";
 
 function arg(name) {
   const idx = process.argv.indexOf(name);
@@ -8,7 +10,9 @@ function arg(name) {
 
 const scenarioName = arg("--scenario");
 const port = Number(arg("--port") || process.env.JET_CANVAS_PORT || "0");
-const outDir = arg("--out-dir") || process.env.JET_CANVAS_OUT_DIR || "target/canvas-screenshots";
+// card 1640: nothing writes inside target/ — default screenshots to temp.
+const outDir = arg("--out-dir") || process.env.JET_CANVAS_OUT_DIR
+  || path.join(os.tmpdir(), "jet-canvas-screenshots");
 const seed = Number(arg("--seed") || process.env.JET_CANVAS_SEED || "373");
 const browser = arg("--browser") || process.env.JET_CANVAS_BROWSER || "chromium";
 

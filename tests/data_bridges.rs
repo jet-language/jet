@@ -3,6 +3,8 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
+mod common;
+
 fn build_and_run_env(
     dir: &PathBuf,
     name: &str,
@@ -102,7 +104,7 @@ fn run() {
 
 #[test]
 fn data_bridges_declare_costs_and_fail_closed() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping data bridges test (need rustc)");
         return;
@@ -149,7 +151,7 @@ fn data_bridges_declare_costs_and_fail_closed() {
 
 #[test]
 fn data_bridges_r_available_with_opt_in_and_rscript() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping R available test (need rustc)");
         return;
@@ -185,7 +187,7 @@ fn data_bridges_r_available_with_opt_in_and_rscript() {
 
 #[test]
 fn data_bridges_r_fails_closed_without_rscript_on_path() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping data bridges PATH test (need rustc)");
         return;

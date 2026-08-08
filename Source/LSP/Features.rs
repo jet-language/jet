@@ -1266,9 +1266,7 @@ fn semantic_token_type_for(tokens: &[Token], idx: usize, src: &str) -> Option<(u
 
         TokKind::KwCopy => Some((st::OWNERSHIP, sm::COPY)),
 
-        TokKind::KwWhile
-        | TokKind::KwFor
-        | TokKind::KwSwitch
+        TokKind::KwSwitch
         | TokKind::KwMutate
         | TokKind::KwMove => None,
 

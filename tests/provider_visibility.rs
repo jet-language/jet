@@ -26,7 +26,9 @@ fn raw_provider_backends_are_not_external_api() {
     let output = Command::new("cargo")
         .args(["check", "--offline"])
         .current_dir(&scratch)
-        .env("CARGO_TARGET_DIR", root.join("target/provider-visibility"))
+        // card 1640: share the checkout's one build cache — a per-test
+        // namespace inside target/ regrows forever and nothing prunes it.
+        .env("CARGO_TARGET_DIR", root.join("target"))
         .output()
         .unwrap();
     assert!(!output.status.success(), "raw provider API unexpectedly compiled");

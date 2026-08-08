@@ -87,6 +87,7 @@ impl<'a> Checker<'a> {
             args,
             resolved_ret: None,
             range_checked: false,
+            widen_approx: false,
         });
         Some(Type::Named(type_name))
     }
@@ -152,6 +153,7 @@ impl<'a> Checker<'a> {
             }],
             resolved_ret: None,
             range_checked: false,
+            widen_approx: false,
         });
         Some(Type::Named(Syntax::TYPE_REGEX.to_string()))
     }
@@ -480,8 +482,8 @@ impl<'a> Checker<'a> {
                 span,
             } => {
                 let span = *span;
-                let before = self.moved.clone();
-                let mut after = before.clone();
+                // D-FACT-FLOW1: one snapshot, one store per arm, one join.
+                let before = self.flow.clone();
                 // D-FLOWTYPE1=A: same Optional presence desugar as statement `if`.
                 self.rewrite_optional_flow_ne_none(cond);
                 // Value-if always has an else arm; invert atomic `== None` so the
@@ -518,20 +520,49 @@ impl<'a> Checker<'a> {
                 let then_ty = self.infer(then_value);
                 self.pop_scope();
                 for (name, at) in restore_moved {
-                    self.moved.insert(name, at);
+                    self.flow.moved.set(&name, at);
                 }
-                for (k, v) in self.moved.drain() {
-                    after.entry(k).or_insert(v);
-                }
-                self.moved = before.clone();
+                let then_path = self.flow.clone();
+                self.flow = before.clone();
                 self.push_scope();
                 self.check_block(else_body, false);
                 let else_ty = self.infer(else_value);
                 self.pop_scope();
-                for (k, v) in self.moved.drain() {
-                    after.entry(k).or_insert(v);
+                let else_path = self.flow.clone();
+                // D-LIN1 / D-FACT-FLOW1: E0141 — a `#SingleUse` value consumed
+                // on one arm and not the other. `Moved::join` is a union (keeps
+                // either arm's move), so the merged store alone would call this
+                // value consumed and E0140 would never see the gap; check the
+                // two pre-merge snapshots directly for exactly one side moving
+                // it, over the bindings live at this scope before the branch.
+                let scope_depth = self.scope_depth();
+                let mut divergent_single_use: Vec<(String, Span)> = before
+                    .bindings
+                    .iter_at(scope_depth)
+                    .filter_map(|(name, info)| {
+                        let use_span = info.single_use_span?;
+                        if before.moved.contains(name) {
+                            return None;
+                        }
+                        let moved_then = then_path.moved.contains(name);
+                        let moved_else = else_path.moved.contains(name);
+                        if moved_then != moved_else {
+                            Some((name.to_string(), use_span))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                divergent_single_use.sort_by(|a, b| a.1.start.cmp(&b.1.start).then(a.0.cmp(&b.0)));
+                for (name, use_span) in divergent_single_use {
+                    self.diags.push(
+                        crate::Sema::CheckerOwnership::e0141_unconsumed_branch(&name, use_span),
+                    );
                 }
-                self.moved = after;
+                self.flow = crate::Sema::FlowFacts::FlowFacts::merge_paths(
+                    &before,
+                    &[then_path, else_path],
+                );
                 match (then_ty, else_ty) {
                     (Some(a), Some(b)) => {
                         // D-TOOL2: `todo` is diverging; if one branch is a
@@ -935,7 +966,7 @@ impl<'a> Checker<'a> {
                     return None;
                 }
                 // D-UNINIT-SENTINEL2: reading a `Type.{ uninit }` binding before it is written.
-                if self.uninit.contains_key(name) {
+                if self.flow.uninit.contains(name) {
                     self.diags.push(Diagnostic::error(
                         "E0420",
                         format!("`{}` may be read before it is given a value", name),
@@ -949,7 +980,7 @@ impl<'a> Checker<'a> {
                         ),
                         Some(*span),
                     ));
-                    self.uninit.remove(name); // report once, then resolve its type below
+                    self.flow.uninit.remove(name); // report once, then resolve its type below
                 }
                 // D-ALLOC2: E0632 — reading an arena `view` whose backing arena
                 // was already reset. (`alloc` and `reset` go
@@ -1690,6 +1721,7 @@ impl<'a> Checker<'a> {
                     args.iter()
                         .filter_map(|arg| match &arg.expr {
                             Expr::Ident(name, _) => self
+                                .flow
                                 .uninit
                                 .get(name)
                                 .cloned()
@@ -1706,7 +1738,7 @@ impl<'a> Checker<'a> {
                     // `Fixed.over(&bytes)` is the one raw-storage adapter: it
                     // borrows the wrapper without claiming initialization.
                     for (name, _) in &fixed_uninit {
-                        self.uninit.remove(name);
+                        self.flow.uninit.remove(name);
                     }
                 }
                 let inferred = self.infer_method_call(
@@ -1719,7 +1751,9 @@ impl<'a> Checker<'a> {
                     recv_type,
                     resolved_ret,
                 );
-                self.uninit.extend(fixed_uninit);
+                for (name, state) in fixed_uninit {
+                    self.flow.uninit.set(&name, state);
+                }
                 inferred
             }
             Expr::StructLit {
@@ -1950,23 +1984,37 @@ impl<'a> Checker<'a> {
                 })
             }
             Expr::CallValue { callee, args, span } => self.infer_call_value(callee, args, *span),
-            // D-CTMARKER1=C: `$name` comptime splice. Valid only in comptime contexts;
-            // the Comptime interpreter resolves the value. In runtime code: E2712.
-            Expr::ComptimeSplice { name, span, value } => {
+            // D-META-STAGE1=B: a compile-time name resolves from the values the
+            // compiler already computed, under the name as written. There is no
+            // stage boundary to check — inside a compile-time context the
+            // interpreter reads it, and outside one sema folds it here so
+            // codegen only ever sees the value.
+            Expr::ComptimeName { name, span, value } => {
                 if !self.in_comptime {
                     let globals = self.current_ct_globals();
                     if let Some(v) = globals.get(name).cloned() {
-                        let ty = v.jet_type();
+                        // D-META-STAGE1=B: the mark is part of the identifier,
+                        // so a marked name is looked up like any other name and
+                        // answers the type its binding was given. The folded
+                        // value's own shape is the fallback, not the authority:
+                        // it cannot recover a generic argument the value does
+                        // not carry, so `Loadable.Idle` would come back as a
+                        // bare `Loadable` and lose its methods.
+                        let ty = self
+                            .lookup(name)
+                            .map(|info| info.ty.clone())
+                            // A module-level marked const types like any other
+                            // module const: from the registered signature, not
+                            // the folded value (which loses generic arguments —
+                            // `Loadable.idle()` would come back a bare
+                            // `Loadable` and lose its methods).
+                            .or_else(|| self.consts.get(name).cloned())
+                            .unwrap_or_else(|| v.jet_type());
                         *value = Some(v);
                         return Some(ty);
                     }
-                    self.diags.push(Diagnostic::error(
-                        "E2713",
-                        format!("there is no comptime value named `{}`", name),
-                        "`$name` splices a value that was computed by a `comptime` binding or `#Known {}` block".to_string(),
-                        format!("define `#Known {name} :: ...` before using `${name}`"),
-                        Some(*span),
-                    ));
+                    let (name, span) = (name.clone(), *span);
+                    self.unknown_name(&name, span);
                 }
                 None
             }
@@ -3000,6 +3048,21 @@ impl<'a> Checker<'a> {
                     return Some(cty);
                 }
             }
+            // D-LAYOUT-FACTS1=B / D-META-STAGE1=B: the compiler-owned facts a
+            // type carries. `T.$layout`, `T.$name` and `T.$fields` are one
+            // spelling, and each projects the matching `TypeInfo` member, so
+            // the fact answers the same type reflection already answers.
+            if let Some(projected) = crate::Syntax::compiler_fact_member(member) {
+                if self.is_known_enum(type_name) || self.struct_owner_module(type_name, None).is_some()
+                {
+                    if let Some(ty) = core_struct_field(
+                        crate::Syntax::TYPE_TYPE_INFO,
+                        projected,
+                    ) {
+                        return Some(ty);
+                    }
+                }
+            }
             if self.is_known_enum(type_name) {
                 let mut empty = Vec::new();
                 return Some(self.check_enum_lit(type_name, member, &mut empty, span));
@@ -3136,12 +3199,26 @@ impl<'a> Checker<'a> {
                     SwizzleParse::NotSwizzle => {}
                 }
             }
-            if let Some(owner_mod) = self.struct_owner_module(type_name, None) {
-                if let Some(fields) = self.struct_fields_of(owner_mod, type_name) {
+            // `check_struct_lit` names a value built through an import namespace
+            // `alias.Type.{ … }` as `Type::Named("alias.Type")` (disambiguates
+            // same-named structs across modules), but the type registry itself
+            // is keyed by the bare struct name in its owning module. Split the
+            // qualified name back apart so field lookups resolve the same way
+            // construction did — otherwise every field read on a foreign-module
+            // struct value falls through to "only works on struct and tuple
+            // values" (E0302) even though the value genuinely is a struct.
+            let (owner_import_ns, lookup_name) = match type_name.split_once('.') {
+                Some((alias, bare)) if self.imports.contains_key(alias) => {
+                    (Some(alias), bare)
+                }
+                _ => (None, type_name.as_str()),
+            };
+            if let Some(owner_mod) = self.struct_owner_module(lookup_name, owner_import_ns) {
+                if let Some(fields) = self.struct_fields_of(owner_mod, lookup_name) {
                     if let Some((_, _, fty, _)) = fields.iter().find(|(fname, ..)| fname == member) {
                         let fty = fty.clone();
                             if owner_mod != self.module_idx
-                                && !self.field_is_pub_in(owner_mod, type_name, member)
+                                && !self.field_is_pub_in(owner_mod, lookup_name, member)
                             {
                                 self.diags.push(private_item(member, span));
                                 return None;
@@ -3151,14 +3228,14 @@ impl<'a> Checker<'a> {
                             {
                                 self.diags.push(soft_public_use(member, span));
                             }
-                        self.record_field_reference(owner_mod, type_name, member, span);
+                        self.record_field_reference(owner_mod, lookup_name, member, span);
                         return Some(fty);
                     }
                     // D-FIELDPOL1: a computed field is never in `fields` (it's
                     // not stored) but a *read* still resolves its declared
                     // type — only the write side (assignment/incdec/struct-lit)
                     // rejects it with E0339.
-                    if let Some(computed) = self.computed_field_types_of(owner_mod, type_name) {
+                    if let Some(computed) = self.computed_field_types_of(owner_mod, lookup_name) {
                         if let Some((_, cty)) = computed.get(member) {
                             return Some(cty.clone());
                         }

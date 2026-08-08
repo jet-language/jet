@@ -1,0 +1,7 @@
+Warning [L0152]: `order` ends in state `Confirmed` on one path and `Cancelled` on another
+  --> tests/ui/typestate_state_diverges.jet:35:5
+    |
+ 35 |     if {
+    |     ^^
+ Why: typestate (D-STATE1): after two paths meet, a state holds only when both paths agree — here they do not, so `order` is untracked from this point and later state checks on it stay silent
+ Fix: bring both paths to the same state before they meet, or do the work that needs `Confirmed` or `Cancelled` inside the path that reaches it

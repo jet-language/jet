@@ -6,7 +6,7 @@ use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
 
 use super::Diagnostics::{comptime_panic, overflow, unsupported};
-use super::Value::CtValue;
+use crate::AST::CtValue;
 
 pub fn integer_type_layout(ty: &Type) -> Option<(bool, u8)> {
     match ty {

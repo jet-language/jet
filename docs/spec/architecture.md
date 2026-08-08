@@ -547,8 +547,10 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   helper templates. A program that imports every core module but calls none
   should stay in hello-world size territory.
 
-  Embedded Core runtime templates under `crates/jet-codegen/src/Prelude/` are
-  the canonical source for compiler-known Core behavior; rebuild `jet` before
+  Embedded Core runtime templates under `crates/jet-codegen/src/Prelude/` (and,
+  for parts a comptime-reachable seam crate must also call, `crates/jet-foundation`
+  prelude modules) are the canonical source for compiler-known Core behavior;
+  rebuild `jet` before
   smoke-testing any change because `include_str!` snapshots them into the
   binary. A first-party package with a separately buildable source tree must
   not maintain a copied fallback template. `core.archive` is the concrete
@@ -572,8 +574,11 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
 - **R12 — One semantic core, every engine a dumb exhaustive consumer.** TIR is
   the single structured IR after sema. Every executable variant carries semantic
   facts (places, types, patterns, method identities) — never pre-rendered Rust
-  source text. **Core/runtime meaning lives only in Prelude/CoreLib**
-  (`crates/jet-codegen/src/Prelude/**`). Rust spelling lives only in the AOT emit
+  source text. **Core/runtime meaning lives only in the embedded Prelude parts /
+  CoreLib** (`crates/jet-foundation` prelude modules and
+  `crates/jet-codegen/src/Prelude/**`; a part sits in `jet-foundation` when a
+  comptime-reachable seam crate must call it, per I6). Rust spelling lives
+  only in the AOT emit
   layer as calls into that Prelude. Cranelift JIT hosts and interpreter ambient
   bindings are the same kind of layer: marshal args, call the identical
   `jet_*` / Prelude function AOT would call, marshal results. They must not

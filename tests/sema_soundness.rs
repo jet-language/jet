@@ -2,7 +2,6 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 mod common;
 use common::{build_and_run, fixture_matches, normalize_fixture_selector, strip_vetted_prelude_modules};
@@ -92,11 +91,10 @@ fn replay(path: &Path, test: &str) {
 }
 
 fn require_rustc() {
-    let out = Command::new("rustc")
-        .arg("--version")
-        .output()
-        .unwrap_or_else(|e| panic!("sema soundness requires rustc; refusing to skip: {e}"));
-    assert!(out.status.success(), "rustc unavailable; refusing to skip sema soundness");
+    assert!(
+        common::have_rustc(),
+        "rustc unavailable; refusing to skip sema soundness"
+    );
 }
 
 fn expected_code(path: &Path) -> &str {

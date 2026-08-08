@@ -32,7 +32,6 @@ pub mod ServicesLite;
 pub mod AppLite;
 pub mod AuthLite;
 pub mod SyncLite;
-mod DataLite;
 mod DataPipeline;
 mod Diagnostics;
 mod EncodingLite;
@@ -46,7 +45,6 @@ mod RegexLite;
 mod TextLite;
 mod TypedDecode;
 mod UrlLite;
-mod Value;
 pub mod TirBridge;
 
 pub use AmbientRuntime::{
@@ -84,18 +82,10 @@ pub fn runtime_csv_parse(text: &str) -> Result<Vec<Vec<String>>, String> {
     EncodingLite::csv_parse(text)
 }
 
-/// D-DATA-STATUS1 / #708: same status rows as `data.status()` / AOT
-/// `jet_data_status` — used by `jet inspect dossier data`.
-pub fn data_status_rows() -> Vec<(
-    &'static str,
-    &'static str,
-    &'static str,
-    &'static str,
-    &'static str,
-    &'static str,
-    &'static str,
-)> {
-    DataLite::status_rows()
+/// D-DATA-STATUS1 / #708: the same rows `data.status()` returns, from the one
+/// Prelude kernel — used by `jet inspect dossier data`.
+pub fn data_status_rows() -> Vec<(String, String, String, String, String, String, String)> {
+    Methods::data_status_rows()
 }
 pub use Methods::apply_dollar_splices;
 pub use Purity::{check_build_time_io, walk_calls, walk_identifiers};
@@ -103,7 +93,7 @@ pub use Reflect::{
     build_enum_layout_info, build_program_info, build_struct_layout_info, build_struct_type_info,
     build_struct_type_info_with_states, ProgramSemanticFacts,
 };
-pub use Value::{CtReport, CtValue};
+pub use crate::AST::{CtReport, CtValue};
 
 static REPL_INTERRUPT_COUNT: AtomicUsize = AtomicUsize::new(0);
 static REPL_RUNTIME_CALL_ACTIVE: AtomicBool = AtomicBool::new(false);
@@ -1096,7 +1086,7 @@ fn run_repl_step_inner(
     }
 }
 
-/// D-CTMARKER1 (ratified 2026-06-25, piece 2): run a `#Known { … }` block at
+/// D-META-STAGE1=B (formerly D-CTMARKER1, ratified 2026-06-25, piece 2): run a `$ { … }` block at
 /// build time. Purity-checked (E0951/E0958) then tree-walked with fuel cap (E0952).
 /// Pure path only (Stage A); effect tiers wire in c157 (D-CTEFFECT1).
 pub fn run_block_with_imports(

@@ -28,6 +28,16 @@ struct Lexer<'a> {
     allow_reserved_identifiers: bool,
 }
 
+/// The word behind a keyword token. A position that accepts any written word —
+/// a marker name or a marker parameter name (D-VERDICT-1455-1) — needs the
+/// spelling back. `keyword` below stays the one table; this reads it backwards.
+pub fn keyword_spelling(kind: &TokKind) -> Option<&'static str> {
+    Syntax::JET_KEYWORD_LIST
+        .iter()
+        .copied()
+        .find(|word| keyword(word).as_ref() == Some(kind))
+}
+
 fn keyword(name: &str) -> Option<TokKind> {
     match name {
         s if s == Syntax::KW_FN => Some(TokKind::KwFn),

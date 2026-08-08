@@ -11,6 +11,7 @@ use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_void};
 use std::path::Path;
 use std::sync::Mutex;
+use crate::Marshal::{clone_string, alloc_string};
 
 #[cfg(unix)]
 #[link(name = "dl")]
@@ -81,14 +82,6 @@ fn ret_abi(ty: Option<&Type>) -> Option<RetAbi> {
         Some(Type::String) => Some(RetAbi::String),
         _ => None,
     }
-}
-
-fn clone_string(id: i64) -> String {
-    Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(id).unwrap_or_default())
-}
-
-fn alloc_string(s: String) -> i64 {
-    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s))
 }
 
 fn trap(msg: &str) {
@@ -343,22 +336,15 @@ extern "C" fn jet_jit_extern_call(wrapper: i64, args: i64) -> i64 {
     }
 }
 
-pub(crate) struct FfiHostFns {
-    pub call: FuncId,
-}
-
-pub(crate) fn register_ffi_host_symbols(builder: &mut JITBuilder) {
-    builder.symbol("jet_jit_extern_call", jet_jit_extern_call as *const u8);
-}
-
-pub(crate) fn declare_ffi_host_fns(module: &mut JITModule) -> Result<FfiHostFns, String> {
-    let cc = module.target_config().default_call_conv;
-    let mut sig = Signature::new(cc);
-    sig.params.push(AbiParam::new(types::I64));
-    sig.params.push(AbiParam::new(types::I64));
-    sig.returns.push(AbiParam::new(types::I64));
-    let call = module
-        .declare_function("jet_jit_extern_call", Linkage::Import, &sig)
-        .map_err(|e| e.to_string())?;
-    Ok(FfiHostFns { call })
+host_fns! {
+    struct FfiHostFns;
+    register: register_ffi_host_symbols;
+    declare: declare_ffi_host_fns(module) {
+        let cc = module.target_config().default_call_conv;
+        let mut sig = Signature::new(cc);
+        sig.params.push(AbiParam::new(types::I64));
+        sig.params.push(AbiParam::new(types::I64));
+        sig.returns.push(AbiParam::new(types::I64));
+    }
+    call: "jet_jit_extern_call" => jet_jit_extern_call: sig;
 }

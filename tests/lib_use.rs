@@ -17,37 +17,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod common;
+use common::Scratch;
+
 fn jet_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
-}
-
-/// A throwaway directory under the system temp dir, removed on drop.
-struct Scratch {
-    path: PathBuf,
-}
-
-impl Scratch {
-    fn new(tag: &str) -> Scratch {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!(
-            "jet-libuse-{tag}-{nanos}-{:?}",
-            std::thread::current().id()
-        ));
-        fs::create_dir_all(&path).unwrap();
-        Scratch { path }
-    }
-    fn join(&self, p: &str) -> PathBuf {
-        self.path.join(p)
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.path);
-    }
 }
 
 fn write(path: &Path, body: &str) {

@@ -648,6 +648,13 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
         out.push_str(part);
     }
     out.push_str("\npub use crate::jet_std::JetTaskGroupRuntime;\n");
+    // Card #1751: the one 80x24 terminal default, read by CommonTypes.rs's
+    // TerminalPolicy::default (in the kernel closure above) and by
+    // ProcessPty.rs's PtyConfig::default when process/PTY support is emitted.
+    // Unconditional like the kernel closure, so both can always reach it.
+    out.push_str("\nmod terminal_default {\n");
+    out.push_str(include_str!("../Prelude/TerminalDefault.rs"));
+    out.push_str("\n}\n");
 
     let needs_email = core_usage_matches(used_core, &["core.email"]);
     let needs_raylib = core_usage_matches(used_core, &["core.raylib"]);
@@ -796,6 +803,7 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
     out.push_str(include_str!("../Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/CryptoEntropy.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/DNSResolverPolicy.rs"));
+    out.push_str(include_str!("../Prelude/Deadline.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/NetHTTP.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/MathRandomTime.rs"));
 
@@ -865,6 +873,10 @@ fn push_corelib_prelude_body(out: &mut String, used_core: &std::collections::Has
         out.push_str(include_str!("../Prelude/CoreLib/Top/DataFmt.rs"));
     }
     if needs_data {
+        // #1657: the one `core.data` statistics kernel. The JIT host and the
+        // comptime tier `include!` this same file, so every tier runs the same
+        // compensated arithmetic and reports the same `DataError` (I9).
+        out.push_str(include_str!("../Prelude/CoreLib/Top/DataStats.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/DataFlow.rs"));
     }
     if needs_compute {
@@ -1308,8 +1320,18 @@ fn strip_unused_os_signal_prelude(out: String) -> String {
     s
 }
 
+/// Rust identifier for a Jet name.
+///
+/// D-META-STAGE1=B: the compile-time mark rides the name, so a Jet name may
+/// begin with `$`, which Rust cannot spell. A marked name gets its own prefix
+/// rather than losing the mark. That keeps the mapping injective, which the
+/// ratified text requires: a plain name and a marked name can never denote the
+/// same binding, so they can never mangle to the same Rust place either.
 pub(crate) fn mangle(name: &str) -> String {
-    format!("user_{}", name)
+    match name.strip_prefix(crate::Syntax::COMPTIME_MARK) {
+        Some(rest) => format!("userct_{}", rest),
+        None => format!("user_{}", name),
+    }
 }
 
 /// D-TAG1: Rust identifier for an enum variant. A grouped leaf's Jet name is a
@@ -2813,7 +2835,7 @@ fn emit_test_body(cx: &Cx, body: &[crate::AST::Stmt], out: &mut String) {
 
 /// D-UIDEVSHELL1=A (c134 Phase 8): true when the native GTK4 backend prelude
 /// should be emitted — the program constructs `core.ui.gtk_backend()` AND the
-/// active target OS is Linux. `used_core` is collected before `#Known if
+/// active target OS is Linux. `used_core` is collected before `$if
 /// build.os` folds, so a Linux-only backend used under a `.Linux` arm still
 /// shows up on a macOS/Windows build; the `active_os` gate is what actually
 /// keeps the gtk `extern "C"` surface out of a non-Linux target (the backend is

@@ -1195,7 +1195,7 @@ fn stmt_handle_escape(stmt: &crate::AST::Stmt, handle: &str) -> Option<Span> {
         | Stmt::AssumeDet { body, .. }
         | Stmt::ScopeMember { body, .. }
         | Stmt::Live { body, .. } => block(body),
-        // D-CTMARKER1: comptime block erases; no handle can escape a build-time block.
+        // D-META-STAGE1=B (formerly D-CTMARKER1): comptime block erases; no handle can escape a build-time block.
         Stmt::ComptimeBlock { .. } => None,
         Stmt::ComptimeIf {
             cond,
@@ -1350,7 +1350,7 @@ fn expr_handle_escape(e: &crate::AST::Expr, handle: &str) -> Option<Span> {
         | Expr::Todo { .. }
         | Expr::NoElse(_)
         | Expr::UnitLit { .. }
-        | Expr::ComptimeSplice { .. }
+        | Expr::ComptimeName { .. }
         // D-SHIFT1 (c7shift) / D-BINPAT1 (card #506 follow-up): a leaf
         // literal, no nested `Expr` to recurse into.
         | Expr::StrMatchLit(_, _)

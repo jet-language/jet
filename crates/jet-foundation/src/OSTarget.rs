@@ -157,7 +157,7 @@ pub fn os_target_build_context(
     )
 }
 
-/// E-OSTARGET-DISPATCH-ARM (D-OSTARGET2=B): an arm head of a `#Known if
+/// E-OSTARGET-DISPATCH-ARM (D-OSTARGET2=B): an arm head of a `$if
 /// build.os == { }` dispatch is not a bare OS variant (`.Linux`/`.MacOS`/
 /// `.Windows`), or repeats one.
 pub fn os_target_dispatch_arm(
@@ -188,7 +188,7 @@ pub fn os_target_dispatch_arm(
     )
 }
 
-/// E-OSTARGET-DISPATCH-EXHAUSTIVE (D-OSTARGET2=B): a `#Known if build.os ==
+/// E-OSTARGET-DISPATCH-EXHAUSTIVE (D-OSTARGET2=B): a `$if build.os ==
 /// { }` dispatch's arms leave some target OS uncovered and there is no `else`.
 /// Build-independent: enforced regardless of the current `--target` so the same
 /// source compiles (or fails) identically on every platform.

@@ -195,7 +195,7 @@ renumbered, and no new `W` code may be allocated.
 | E0115 | sema  | `break`/`next` outside a loop             |
 | E0987 | sema  | `break(name)`/`next(name)` names no enclosing `name :: loop` (D-LOOPLABEL3, D-LOOPSTATE1) |
 | E0988 | parse/sema | retired dot/`@` loop exits, `name := loop`, or runtime use of a loop name (D-LOOPSTATE1) |
-| E0989 | sema  | `#Known if` condition is not a comptime expression (D-WHEN1) |
+| E0989 | sema  | `$if` condition is not a comptime expression (D-WHEN1) |
 | E0990 | parse | *retired by D-MARKER-CANON1* (was: `@` marker-prefix teaching) |
 | E0116 | sema  | valueless call used as a value            |
 | E0118 | sema  | name already taken (no shadowing)         |
@@ -225,7 +225,7 @@ renumbered, and no new `W` code may be allocated.
 | E0143 | sema  | `consume` of a `#SingleUse` value outside an `#Unsafe("reason")` region/fn — the audited deliberate-discard hatch (D-LIN1-DROP/D-DROP-WORD1) |
 | E0144 | sema  | `result` used inside a `#Pre` condition — it only exists once the function has returned (D-PREPOST1) |
 | E0145 | parse | `#Persist` on a binding that isn't module-level (D-PERSIST1) |
-| E0146 | parse | retired `const` keyword — write `#Known` (D-VERDICT-1308-1) |
+| E0146 | parse | retired `const` keyword — write `$` (D-VERDICT-1308-1) |
 | E0147 | parse | two `{}` holes in a str-match pattern with no literal text between them (D-PARSESTR1/D-PARSESTR2) |
 | E0148 | sema  | a str-match pattern used in an `if == {}` table with no `else` arm (D-PARSESTR1) |
 | E0149 | sema  | a runtime `String` used where `SQL`/`HTML` is expected (D-TYPEDTEXT1) |
@@ -242,6 +242,7 @@ renumbered, and no new `W` code may be allocated.
 | E0806 | sema  | a generator's `return` carries a value (D-STREAMYIELD1) |
 | E0807 | sema  | a `yield`ed value's type doesn't match the stream's element type (D-STREAMYIELD1) |
 | L0151 | sema  | typestate: a declared state has no outgoing `#Transition(S, …)` — a dead-end state (D-STATE-DECL, warning) |
+| L0152 | sema  | typestate: two paths meet and leave one value in different states, so it is untracked from there (D-STATE1, D-FACT-FLOW1, warning) |
 | E0201 | sema  | `take` (`^`) required; value can't be copied |
 | E0202 | sema  | `mut` (`&`) required at call site — write access not granted |
 | E0203 | sema  | `take` on a non-consuming parameter       |
@@ -344,9 +345,10 @@ renumbered, and no new `W` code may be allocated.
 | E0371 | parse | fence appears outside a binding target or expression statement, or a binding fence carries a non-name entry (D-EACH1=C, D-VERDICT-1320-1) |
 | E0372 | parse | teaching: an effect `if`, `else`, or `loop` body needs braces (D-BRACE1=A) |
 | E0373 | parse | teaching: loop header clauses use commas, not semicolons (D-LOOP-COMMA1=A) |
-| E0374 | parse | teaching: retired `comptime`; use implicit folding or `#Known` (D-VERDICT-1308-1) |
+| E0374 | parse | teaching: retired `comptime`; use implicit folding or `$` (D-VERDICT-1308-1) |
 | E0375 | sema  | retired `#Default` on a field; write `field: T = expr` (D-FIELDDEF1=C) |
 | E0376 | parse | teaching: C-style counter loop `init, cond, step` retired (D-LOOP-HEADER3=D) |
+| E0377 | parse | teaching: retired `#Known`, `#Known if` and the `#Known` block; write the mark on the name (D-META-STAGE1=B) |
 | E0381 | parse | `marker Name(...)` fact stated as an `on` clause, a second parameter list, or a scope block, not a `$`-marked named parameter (D-META-FORM1=A) |
 | L0301 | sema  | unreachable dispatch pattern arm (lint)   |
 | L0302 | sema  | a closed-enum arm table would be clearer with a named subject (lint) |
@@ -449,9 +451,9 @@ renumbered, and no new `W` code may be allocated.
 | E-WEB-TIR-UNSUPPORTED | driver | a web-targeted executable body is outside the checked TIR boundary (D-WEBTIR1) |
 | E-OSTARGET-MIXED-AXIS | sema | a `#Target(OS.*)`-gated impl's file/module also carries a web-bucket ceiling (D-OSTARGET1) |
 | E-OSTARGET-UNMATCHED-CALL | sema | a function/method not gated to match takes or returns a value of a `#Target(OS.*)`-gated type (D-OSTARGET1) |
-| E-OSTARGET-BUILD-CONTEXT | sema | a `#Known if … == { }` OS dispatch's subject is not `build.os` (D-OSTARGET2) |
-| E-OSTARGET-DISPATCH-ARM | sema | a `#Known if build.os == { }` arm head is not a bare `.Linux`/`.MacOS`/`.Windows` variant, or repeats one (D-OSTARGET2) |
-| E-OSTARGET-DISPATCH-EXHAUSTIVE | sema | a `#Known if build.os == { }` dispatch leaves some target OS uncovered with no `else` (D-OSTARGET2) |
+| E-OSTARGET-BUILD-CONTEXT | sema | a `$if … == { }` OS dispatch's subject is not `build.os` (D-OSTARGET2) |
+| E-OSTARGET-DISPATCH-ARM | sema | a `$if build.os == { }` arm head is not a bare `.Linux`/`.MacOS`/`.Windows` variant, or repeats one (D-OSTARGET2) |
+| E-OSTARGET-DISPATCH-EXHAUSTIVE | sema | a `$if build.os == { }` dispatch leaves some target OS uncovered with no `else` (D-OSTARGET2) |
 | E0760 | parser | `#Context` field uses `=` instead of `:` (D-CTX1, S17) |
 | E0761 | parser | unknown `#Context` field name (v1 allows only `allocator`, `logger`, `deadline`) |
 | E0762 | sema   | `#Context` field type mismatch (`allocator` must be an allocator handle; `deadline` must be Int epoch-ms) |
@@ -568,7 +570,7 @@ renumbered, and no new `W` code may be allocated.
 | E0928 | sema  | `#Job fn` reused a reserved lifecycle verb (`run`/`dev`/`build`/`test`) (D-JPK-TASKRUN1, card #476) |
 | E0951 | sema  | comptime code reaches an impure operation (shows call path) |
 | E0952 | sema  | comptime budget exhausted (fuel) |
-| E0953 | sema  | #Known panic :: user-authored compile error (message verbatim) |
+| E0953 | sema  | $panic :: user-authored compile error (message verbatim) |
 | E0954 | parse | *retired by D-S14-PAUSE* (was: two-keyword comptime binding teaching) |
 | E0955 | sema  | comptime file input missing / unreadable (`embed_file` also: not UTF-8) |
 | E0956 | sema  | construct not yet supported in comptime evaluation; `core.compiler` is also explicitly compile-time-only and cannot be called from runtime code (D-FRONTENDAPI1) |
@@ -624,6 +626,7 @@ renumbered, and no new `W` code may be allocated.
 | E1309 | sema  | `#Flag` on a `#CLI` field that is already flag-only (D-CLI-POS1) |
 | E1318 | sema  | a `#Short` value is not one ASCII letter, or two `#CLI` fields use the same short name (D-CLI-FIELD-MARKERS1) |
 | E1319 | sema  | `#Short` or `#Env` has no typed-CLI builder mapping at its field (D-CLI-FIELD-MARKERS1) |
+| E1320 | jetpack | an external hangar root changed between reading its etag and applying a requested mutation |
 | E1321 | sema  | a typed `Output` kind, payload, callable reference, callable contract, visibility, or singular selection is invalid (D-SHAPE-OUTPUT-CALLABLE1) |
 | E1322 | jetpack | workspace/package membership escapes its root (D-ECO-MEMBERS1) |
 | E1323 | jetpack | a nested Package declares `members` instead of leaving membership to the workspace root; the diagnostic names the member manifest source (D-ECO-MEMBERS1) |
@@ -635,10 +638,10 @@ renumbered, and no new `W` code may be allocated.
 | E1329 | jetpack | a lifecycle hook is not explicitly trusted (D-ENV-LIFECYCLE2) |
 | E1330 | sema/jetpack | task metadata has the wrong shape or an unsafe project path (D-TASK-META1) |
 | E1331 | sema | an environment module import escapes its project root (D-ENV-FLAKEPARTS1) |
-| E1332 | sema | one environment or package profile is composed with conflicting definitions (D-ENV-PROFILE1/D-JPK-PROFILE1) |
+| E1332 | sema | one environment preset or package generation is composed with conflicting definitions (D-ENV-PROFILE1/D-JPK-PROFILE1) |
 | E1333 | sema | a typed environment fact, language-pack selection, or dotenv declaration is invalid or conflicting (D-ENV-LIFECYCLE2/D-ENV-LANGPACK1) |
 | E1334 | jetpack | an explicit workspace member is missing or is not a Package directory (D-ECO-MEMBERS1) |
-| E1335 | sema/jetpack | an environment integration or package-profile provider fact is conflicting, lossy, or invalid (D-ENV-INTEGRATIONS1/D-JPK-PROFILE1) |
+| E1335 | sema/jetpack | an environment integration or package-generation provider fact is conflicting, lossy, or invalid (D-ENV-INTEGRATIONS1/D-JPK-PROFILE1) |
 | E1336 | jetpack | an environment image cannot project a service or verified package output (D-ENV-IMAGE1) |
 | E1101 | sema  | task capture needs ownership              |
 | E1102 | sema  | value crossing task/channel boundary is not sendable |
@@ -757,6 +760,7 @@ renumbered, and no new `W` code may be allocated.
 | E1297 | jetpack | `jetpack tool install` bin name collides with a project `#Job fn` (JPK-TOOL-COLLIDE, D-JPK-TOOLRUN1) |
 | E1298 | jetpack | `jetpack tool` ref names an external provider with no hangar realization path yet (JPK-TOOL-PROVIDER, D-JPK-TOOLRUN1) |
 | E1299 | jetpack | Hangar Store v2 path law rejected a store path component (case-fold collision, reserved Windows name, trailing `.`/` `, absolute/dot components) (E4-JP1) |
+| E1300 | jetpack | the retired `--profile` spelling selected an environment composition; presets own that word now (D-CONF-WORD1) |
 | E1315 | jetpack | Hangar Store v2 ingest aborted (source mutated during race-safe copy, unsupported special object/xattr, or digest mismatch on verify) (E4-JP1) |
 | E1316 | jetpack | ambiguous or unmatched typed package variant selection (E4-JP15, D-JPK-VARIANT1) |
 | E1317 | jetpack | a direct CLI ref uses retired provider-first order or the retired `path@` prefix (D-JPK-REF1) |
@@ -908,12 +912,13 @@ membership, profile, managed-file, service, or task state is applied.
 | E1329 | a lifecycle hook is not explicitly trusted | Hooks execute project commands during activation. | Set `trusted: true` after review and approve the changed environment. |
 | E1330 | task metadata or a task path is invalid | Task packages, cache inputs/outputs, cwd, and limits must be deterministic and project-contained. | Use the typed metadata shape and project-relative paths without `..`. |
 | E1331 | an environment import escapes its root | One environment graph cannot import files outside its project boundary. | Use a relative import directory without `..` or an escaping symlink. |
-| E1332 | profile definitions conflict | Composition cannot silently choose one profile's packages, variables, parents, or collision choices over another's. | Merge equal facts or give the profiles different names. |
+| E1332 | preset or generation definitions conflict | Composition cannot silently choose one definition's packages, variables, parents, or collision choices over another's. | Merge equal facts or give them different names. |
 | E1333 | a typed environment fact is invalid | Language packs use one catalog with explicit host, platform, license, and required-tool facts. Dotenv paths stay inside the project, and expert allowlists make secret handling explicit. | Fix the language selection/catalog fact, or use a project-relative file and `Dotenv.{ file, allow, secrets }` with valid variable names. |
 | E1334 | an explicit workspace member is not a Package directory | Workspace membership names existing Package roots; a missing or manifest-free directory cannot become a stable graph node. | Create `package.jet` (or finish migration from `pkg.jet`), correct the path, or use `find("./packages")`. |
-| E1335 | an environment integration or package-profile provider fact is conflicting or lossy | Integrations and package profiles lower into shared typed facts; one graph cannot choose two policies or silently discard package identity, provider, or collision input. | Merge the declarations, use a supported package ref, or select a provider retained by the profile. |
+| E1335 | an environment integration or package-generation provider fact is conflicting or lossy | Integrations and package generations lower into shared typed facts; one graph cannot choose two policies or silently discard package identity, provider, or collision input. | Merge the declarations, use a supported package ref, or select a provider retained by the generation. |
 | E1336 | an environment image cannot project a service or verified package output | D-ENV-IMAGE1 keeps image layers tied to one verified Hangar package output. A service needs the typed supervisor, and an absent, empty, conflicting, or unsafe package `bin` projection cannot be copied into an image. | Run the declared service through `jetpack services`, or realize one executable package output and run `jet image` again. |
-| E1337 | the requested environment profile is not declared | One environment plan activates one `env.<name>` profile; silently merging sibling profiles would mix unrelated packages and variables. | Select one of the declared environment profile names, or omit `--env-profile` to use `dev`, then `default`, then lexical order. |
+| E1300 | `--profile` is retired | Profile answers how hard to optimize a build. A named environment composition is a preset, so one word never answers two questions. | Select the composition with `--preset <name>`, declared under `presets:`. |
+| E1337 | the requested environment module is not declared | One environment plan activates one `env.<name>` module; silently merging siblings would mix unrelated packages and variables. | Select one of the declared module names, or omit `--env-profile` to use `dev`, then `default`, then lexical order. |
 
 ## Dev-loop diagnostics (E2-M4, `jet dev`)
 
@@ -1017,7 +1022,7 @@ CLI.
 |------|-----|-----|
 | `` `#Kernel(.parallel)` cannot prove `{obligation}` ``. | A safe kernel must carry sema facts for bounds, aliasing, captures, races, barrier uniformity, and control flow before TIR. The shipped subset is read-only, effect-free, straight-line code over checked Core compute operations. | Keep parameters read-only, remove effects/provider calls, and use the checked expression subset; put raw device code behind its typed `#Unsafe("reason")` boundary. |
 | a function has more than one `#Kernel` marker. | One function has one explicit kernel mode. | Keep one `#Kernel(.parallel)` marker. |
-| L1101 | A `Task` is dropped without `.join()` or `.detach()`. | The program may end before that task finishes. | Call `.join()` to wait for the result, or `.detach()` if fire-and-forget is intentional. |
+| L1101 | A `Task` still owes `join` (D-CONC-JOIN1, D-FACT-WORD1=A). | The program may end before that task finishes; a task's duty is discharged only by joining it. | Join it with `.join()`, or write `.detach()` to let it go free. |
 | E0040 | `async` or `await` was written. | Jet uses blocking tasks and channels rather than async syntax. | Use `core.tasks as tasks` and call `tasks.spawn(() => work())`. |
 | E0041 (`Mutex`/`RwLock`/`mutex`/`lock`) | `` `<name>` is not in Jet; share data through channels `` | Jet avoids shared mutable state: tasks communicate by sending messages, not sharing memory. | Import `core.tasks as tasks`, create a channel, and use `sender.send`/`channel.receive`. |
 | E0041 (`Semaphore`/`semaphore`) | `` `<name>` is not in Jet; use a bounded channel as a token pool `` | each received token admits one worker until that worker sends the token back | create `tasks.channel<Int>(capacity: N)`, seed N tokens, receive one before work, and send it back afterward |
@@ -1164,8 +1169,6 @@ projection. File-envelope cancellation remains internal task control and is not
 a public `FileCryptoError` variant. Handled errors are ordinary values.
 | E2710 | `` `derive T.{Trait}` body failed while expanding `#{Trait}` on `{Type}` ``. | The user-authored derive body ran at compile time (D-METADERIVE1=A, D-CTCODEGEN1=A) and threw a comptime error — typically an undefined name, a bad method call, or a type mismatch in the body. The span points at the `#{Trait}` rule on the struct that triggered expansion. | Fix the `derive T.{Trait}` body: check that every name it references is bound in scope, every method it calls is valid on the reflected type, and every `emit()` argument is a `String`. |
 | E2711 | Derive orphan rule: neither `` `derive T.{Trait}` `` nor `` `{Type}` `` is local. | A generated implementation has a clear local owner only when its derive provider or target type lives in the entry module (D-METADERIVE1=A). Two imported sides leave the entry package owning neither contract. | Define `derive T.{Trait}` or `{Type}` in the entry module. |
-| E2712 | *retired by D-CTBLOCKEXPOSE1* (was: `$` splice outside comptime context). | Runtime `$name` splices are allowed when a comptime value is in scope. | Define the value with `#Known name :: ...`, or remove the `$` prefix. |
-| E2713 | There is no compile-time value named `{name}`. | `$name` splices a value that was computed by a `#Known` binding or block. | Define `#Known {name} :: ...` before using `$name`. |
 | E2714 | A user derive is written `derive T.{Trait}`. | The type parameter comes first, joined to the trait name with a dot (D-METADERIVE1, amended 2026-07-01); the `derive {Trait} for T` spelling was retired. | Write `derive T.{Trait} { … }`. |
 | L2701 | This regex pattern may catastrophically backtrack on certain inputs. | A regex with unbounded quantifiers nested inside another unbounded quantifier can run in exponential time on adversarial inputs, causing a denial-of-service. Reserved for future `core.regex` patterns. | Anchor the pattern at the start (`^`) or end (`$`), or restructure it to avoid nested quantifiers. |
 
@@ -1409,8 +1412,9 @@ already-freed arena), these track the views themselves.
 | E0371 | This fence is not in an allowed statement position, or one of its entries has the wrong shape (empty entry, trailing comma, non-name in a binding fence, malformed numbered range). | D-EACH1 expands complete binding or expression statements; a binding fence takes plain names or one ascending numbered-name range, an expression fence takes comma-separated expressions. | Move the fence to a binding target or a complete expression statement, or fix the entry. |
 | E0372 | This `{body}` body needs braces. | Braces make the body's boundary visible to readers, editors, and the compiler. | Wrap the body in `{ ... }`; `jet fmt` applies this fix. |
 | E0373 | This loop header uses a semicolon. | Commas separate loop clauses; semicolons separate statements. | Replace `;` with `,`; `jet fmt` applies this fix. |
-| E0374 | `comptime` is retired. | Jet folds ordinary foldable expressions automatically; explicit compile-time demand lives on the marker plane. | Remove the keyword for ordinary code, or replace it with `#Known` when failure to compute now must stop the build. |
+| E0374 | `comptime` is retired. | Jet folds ordinary foldable expressions automatically; explicit compile-time demand lives on the marker plane. | Remove the keyword for ordinary code, or replace it with `$` when failure to compute now must stop the build. |
 | E0375 | `#Default` on a field is retired. | Field absence and construction defaults use the same `=` spelling as parameter defaults (D-FIELDDEF1=C). | Write `field: T = expr` instead of `#Default(expr)`. |
+| E0377 | `#Known` is retired. | Compile time has one mark, `$`, and the mark belongs to the name, so it is written at every mention. | Write `$name :: …` for a binding, `$if <condition> { … }` for a compile-time branch, and `$ { … }` for a compile-time block. |
 | E0376 | C-style counter loop headers are retired. | A three-slot loop header is binding, source, and step rule — not init, condition, and assignment (D-LOOP-HEADER3=D). | Write `loop i, 0..<n { … }` or `loop i, 0..n, 2 { … }`; keep `loop name := value, condition { … }` for mutable state. |
 | E0381 | A fact about a `marker` declaration (its legal sites, whether it repeats) was written as a trailing `on` clause, a second parameter list, or a scope block. | D-META-FORM1=A: the rule's own arguments and facts about the rule share one named-parameter list, told apart by the compile-time `$` sigil — not a second spelling. | Move the fact into the declaration's own parameter list as a `$`-marked named parameter, e.g. `$sites: [.Function, …]`, `$repeatable: true`. |
 
@@ -1463,7 +1467,7 @@ so these are compile-time-only diagnostics. An unknown effect name in a
 |------|------|-----|-----|
 | E-OSTARGET-MIXED-AXIS | `#Target(OS.{os})` can't combine with `#Target({web})` on `{item}`. | The OS axis (`OS.Linux`/`OS.MacOS`/`OS.Windows`, native platform gating) and the web axis (`Wasm`/`JS`/`Web`, D-WASM1's browser partition) are mutually exclusive — one item can't compile for both a specific native OS and a web bucket. | Pick one axis: remove the `#Target(OS.{os})` marker or the web-axis marker. |
 | E-OSTARGET-UNMATCHED-CALL | `{caller}` uses `{gated_type}`, whose `impl` is gated to `#Target(OS.{os})`, without itself being gated to match. | An OS-gated impl only exists in the build for that OS; code reachable on other platforms would hit a missing method, so this is caught at compile time, not left to fail as a link (or a raw rustc) error. | Only use `{gated_type}` from inside an `impl` already gated to `#Target(OS.{os})`, or move `{caller}`'s body into one. |
-| E-OSTARGET-BUILD-CONTEXT | a `#Known if … == { … }` dispatch branches on `build.os`. | `build.os` is the one compiler-known comptime value this dispatch folds on — it selects the arm matching the build's target OS at compile time (D-OSTARGET2). | write `#Known if build.os == { .Linux -> … .MacOS -> … .Windows -> … }`, or use a plain runtime `if` for a value that isn't known at compile time. |
+| E-OSTARGET-BUILD-CONTEXT | a `$if … == { … }` dispatch branches on `build.os`. | `build.os` is the one compiler-known comptime value this dispatch folds on — it selects the arm matching the build's target OS at compile time (D-OSTARGET2). | write `$if build.os == { .Linux -> … .MacOS -> … .Windows -> … }`, or use a plain runtime `if` for a value that isn't known at compile time. |
 | E-OSTARGET-DISPATCH-ARM | `{found}` is not an OS arm — a `build.os` dispatch matches `.Linux`, `.MacOS`, or `.Windows`. | Each arm gates code for exactly one native OS, so its head is a bare, payload-free OS variant — the same set `#Target(OS.*)` uses — and each OS appears at most once. | write `.Linux -> …`, `.MacOS -> …`, or `.Windows -> …` (add an `else -> …` for a shared fallback). |
 | E-OSTARGET-DISPATCH-EXHAUSTIVE | this `build.os` dispatch doesn't cover every target OS — missing: {list}. | A build can target any native OS, so the dispatch must handle each one — otherwise a build for a missing OS would have no arm to run. | add an arm for each missing OS ({list}), or an `else -> …` catch-all. |
 
@@ -1555,6 +1559,7 @@ is a **dead-end** warning (**L0151**) — a half-built machine still compiles.
 | E0163 | increment and decrement can't target an indexed slot. | Write the full update: `map[key] = map[key] + 1` (D-INCR1). | Use `+= 1` on a name, or assign through `=` with the whole right-hand side. |
 | E0154 | A protocol line does not name `client:` or `server:` as its sender. | A two-endpoint protocol needs only the sender. The other endpoint is the receiver, so a transport arrow repeats information. | Write `client: Message(…)` when the client sends, or `server: Message(…)` when the server sends. |
 | L0151 | `{state}` (in `state {type}`) has no outgoing transition. | Typestate (D-STATE-DECL): a state with no `#Transition({state}, …)` is a dead end — a value that reaches it can never advance further. | Add `#Transition({state}, NextState) fn …`, or remove `{state}` from the declaration. |
+| L0152 | `{value}` ends in state `{one}` on one path and `{other}` on another. | Typestate (D-STATE1, D-FACT-FLOW1): after two paths meet, a state holds only when both paths agree — here they do not, so the value is untracked from this point and later state checks on it stay silent. | Bring both paths to the same state before they meet, or do the work that needs the state inside the path that reaches it. |
 
 `check_in` requires a `Confirmed` reservation, but the value is still `Pending`:
 

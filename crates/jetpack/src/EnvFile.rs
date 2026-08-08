@@ -1,4 +1,5 @@
-//! The Jet env file `env.jet` (D-JPK20/U3) — directive surface (D-JPK3).
+//! The Jet env file `env.jet` (D-JPK20/U3) — directive surface (D-JPK17;
+//! D-JPK3 predates the current numbering).
 //!
 //! Phase 1 ships the directive author surface the language supports today:
 //!

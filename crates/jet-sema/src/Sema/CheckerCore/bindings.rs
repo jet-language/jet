@@ -14,6 +14,7 @@ fn direct_fixed_constructor(expr: &Expr) -> bool {
     )
 }
 
+
 fn contains_taskgroup(ty: &Type) -> bool {
     match ty {
         Type::Named(name) => name == Syntax::TYPE_TASKGROUP,
@@ -38,6 +39,7 @@ fn contains_taskgroup(ty: &Type) -> bool {
         | Type::TraitObject(_)
         | Type::IntN { .. }
         | Type::Float32 => false,
+        Type::Quantity { .. } => false,
     }
 }
 pub(crate) fn check_meta_attr_fields(meta: &MetaAttr) -> Vec<Diagnostic> {
@@ -343,20 +345,20 @@ impl<'a> Checker<'a> {
                     constant_value: None,
                 },
             );
-            self.uninit.insert(b.name.clone(), state);
+            self.flow.uninit.set(&b.name, state);
         }
     
         /// A write-convention argument is not a definite-initialization proof:
         /// Jet has no callee contract that guarantees one scalar, or every fixed
         /// slot, was written. Keep the state and reject the unproved handoff.
         pub(crate) fn clear_uninit_mut_args(&mut self, args: &[CallArg]) {
-            if self.uninit.is_empty() {
+            if self.flow.uninit.is_empty() {
                 return;
             }
             for arg in args {
                 if arg.convention == AccessConvention::Write {
                     if let Expr::Ident(n, span) = &arg.expr {
-                        if self.uninit.contains_key(n) {
+                        if self.flow.uninit.contains(n) {
                             self.diags.push(Diagnostic::error(
                                 "E0420",
                                 format!("`{n}` may be read before it is given a value"),
@@ -438,9 +440,10 @@ impl<'a> Checker<'a> {
                 self.lambda_escapes = true;
                 self.lambda_binding = Some(b.name.clone());
             }
-            // D-CTMARKER1=C: `$name` in a comptime binding RHS is valid; set
-            // `in_comptime` before `infer()` so E2712 is suppressed during type
-            // inference of the RHS (the evaluator runs after, independently).
+            // D-META-STAGE1=B: a marked name in a compile-time binding RHS is an
+            // ordinary read of a marked name; set
+            // `in_comptime` before `infer()` so the RHS types in the compile-time
+            // world (the evaluator runs after, independently).
             if b.is_comptime {
                 self.in_comptime = true;
             }
@@ -705,7 +708,14 @@ impl<'a> Checker<'a> {
             } else if !b.mutable {
                 // D-VERDICT-1308-1: an ordinary immutable binding is an
                 // implicit folding opportunity. Failure is silent; only
-                // explicit `#Known` demands a compile-time answer.
+                // explicit `$` demands a compile-time answer.
+                // (mem.address_of specifically always declines to fold — see
+                // the runtime_execution guard at its mint point in
+                // crates/jet-codegen/src/Codegen/TIR/eval/exprs.rs, which
+                // covers this path, the `$` path above, method_calls.rs's
+                // evaluate_constant, and any Expr::Paren-wrapped spelling —
+                // one guard where the value is minted, not a syntactic
+                // pattern match here that a stray `(...)` could dodge.)
                 let globals = self.current_ct_globals();
                 let mut mutated = std::collections::HashMap::new();
                 let folded = crate::Comptime::evaluate_owned_with_imports_opts_collecting(
@@ -743,23 +753,14 @@ impl<'a> Checker<'a> {
             }
             if b.name == "_" {
                 if self.type_is_single_use(&final_ty) {
-                    self.diags.push(Diagnostic::error(
-                        "E0140",
-                        "a `#SingleUse` value cannot be discarded".to_string(),
-                        "this value carries one job that must be completed exactly once"
-                            .to_string(),
-                        "bind it to a name, then move it exactly once to the operation that completes its job"
-                            .to_string(),
-                        Some(b.name_span),
-                    ));
+                    self.diags.push(
+                        crate::Sema::CheckerOwnership::e0140_discarded_wildcard(b.name_span),
+                    );
                 } else if is_task_type(&final_ty) && !self.in_taskgroup_spawn {
-                    self.diags.push(Diagnostic::lint(
-                        "L1101",
-                        "a spawned task is discarded without `.join()`".to_string(),
-                        "the program may end before this task finishes".to_string(),
-                        "bind the task and call `.join()`, or chain `.detach()` for fire-and-forget"
-                            .to_string(),
-                        Some(b.name_span),
+                    self.diags.push(crate::Sema::CheckerOwnership::l1101_unjoined_task(
+                        "this task",
+                        "discarding it into `_` skips the join before the task finishes",
+                        b.name_span,
                     ));
                 }
                 self.current_binding_name = prev_binding_name;

@@ -120,7 +120,7 @@ pub(super) fn project_context_for_entry(path: &Path) -> ProjectContext {
     });
     let ecosystem_root = workspace_root
         .as_deref()
-        .filter(|root| root.join("package.jet").is_file())
+        .filter(|root| root.join(jet_driver::Syntax::PACKAGE_FILE).is_file())
         .map(Path::to_path_buf)
         .or_else(|| find_package_root(entry_dir));
     let project_root = workspace_root
@@ -150,10 +150,17 @@ pub(super) fn project_context_for_entry(path: &Path) -> ProjectContext {
     }
 }
 
+/// Card #1665: walks upward for the canonical E5 Package root — deliberately
+/// narrower than `jet_driver::Loader::find_manifest_root` (used for
+/// `manifest_root` above), which also accepts the migration-era `pkg.jet`.
+/// Keeping this canonical-only (see `ProjectContext::ecosystem_root`'s doc)
+/// stops legacy `pkg.jet` compiler support from becoming a second authority
+/// for a project that already has `package.jet`. One filename, sourced from
+/// the shared `Syntax::PACKAGE_FILE` constant, not a hand-typed literal.
 fn find_package_root(start: &Path) -> Option<PathBuf> {
     let mut dir = start.to_path_buf();
     loop {
-        if dir.join("package.jet").is_file() {
+        if dir.join(jet_driver::Syntax::PACKAGE_FILE).is_file() {
             return Some(dir);
         }
         dir = dir.parent()?.to_path_buf();
@@ -234,7 +241,7 @@ fn collect_project_files(
         push_existing(&mut paths, &root.join(jet_driver::Syntax::PAYLOAD_FILE));
     }
     if let Some(root) = ecosystem_root {
-        push_existing(&mut paths, &root.join("package.jet"));
+        push_existing(&mut paths, &root.join(jet_driver::Syntax::PACKAGE_FILE));
     }
     if let Some(root) = workspace_root {
         push_existing(&mut paths, &root.join(jet_driver::Syntax::WORKSPACE_FILE));
@@ -243,7 +250,7 @@ fn collect_project_files(
             for member in plan.members {
                 let member_dir = root.join(member.path);
                 push_existing(&mut paths, &member_dir.join(jet_driver::Syntax::PAYLOAD_FILE));
-                push_existing(&mut paths, &member_dir.join("package.jet"));
+                push_existing(&mut paths, &member_dir.join(jet_driver::Syntax::PACKAGE_FILE));
                 collect_jet_files(&member_dir, &mut paths);
             }
         }
@@ -261,7 +268,7 @@ fn collect_project_files(
                 == Some(jet_driver::Syntax::PAYLOAD_FILE)
             {
                 "manifest"
-            } else if path.file_name().and_then(|n| n.to_str()) == Some("package.jet") {
+            } else if path.file_name().and_then(|n| n.to_str()) == Some(jet_driver::Syntax::PACKAGE_FILE) {
                 "package"
             } else if path.file_name().and_then(|n| n.to_str())
                 == Some(jet_driver::Syntax::WORKSPACE_FILE)
@@ -415,7 +422,7 @@ pub(super) fn targets_project_json(
 }
 
 fn package_targets_project_json(project_root: &Path, dir: &Path) -> Option<Vec<String>> {
-    if dir.join("package.jet").is_file() {
+    if dir.join(jet_driver::Syntax::PACKAGE_FILE).is_file() {
         return canonical_package_targets_project_json(project_root, dir);
     }
     let manifest_path = dir.join(jet_driver::Syntax::PAYLOAD_FILE);
@@ -445,7 +452,7 @@ fn package_targets_project_json(project_root: &Path, dir: &Path) -> Option<Vec<S
 }
 
 fn package_project_json(project_root: &Path, entry_path: &Path, dir: &Path) -> Option<String> {
-    if dir.join("package.jet").is_file() {
+    if dir.join(jet_driver::Syntax::PACKAGE_FILE).is_file() {
         return canonical_package_project_json(project_root, entry_path, dir);
     }
     let manifest_path = dir.join(jet_driver::Syntax::PAYLOAD_FILE);
@@ -508,7 +515,7 @@ fn canonical_package_facts(
     dir: &Path,
 ) -> Result<jet_driver::Package::PackageFacts, String> {
     jet_driver::Package::PackageFacts::load(dir)
-        .ok_or_else(|| format!("canonical Package `{}` is missing", dir.join("package.jet").display()))?
+        .ok_or_else(|| format!("canonical Package `{}` is missing", dir.join(jet_driver::Syntax::PACKAGE_FILE).display()))?
         .map_err(|error| error.to_string())
 }
 
@@ -522,7 +529,7 @@ fn canonical_package_error(
     format!(
         "{{\"path\":{},\"manifest\":{},\"name\":{},\"version\":\"\",\"target\":\"native\",\"deps\":[],\"targets\":[],\"outputs\":[],\"environments\":[],\"effects_enabled\":false,\"diagnostics\":[{}]}}",
         json_str(&rel_path(project_root, dir)),
-        json_str(&rel_path(project_root, &dir.join("package.jet"))),
+        json_str(&rel_path(project_root, &dir.join(jet_driver::Syntax::PACKAGE_FILE))),
         json_str(dir.file_name().and_then(|name| name.to_str()).unwrap_or("package")),
         diagnostic_json(&diagnostic),
     )
@@ -651,7 +658,7 @@ fn canonical_environments_json(facts: &jet_driver::Package::PackageFacts) -> Str
 fn canonical_package_targets_project_json(project_root: &Path, dir: &Path) -> Option<Vec<String>> {
     let facts = canonical_package_facts(dir).ok()?;
     let package_path = rel_path(project_root, dir);
-    let manifest_rel = rel_path(project_root, &dir.join("package.jet"));
+    let manifest_rel = rel_path(project_root, &dir.join(jet_driver::Syntax::PACKAGE_FILE));
     Some(
         facts
             .outputs
@@ -683,7 +690,7 @@ fn canonical_package_project_json(
         Err(error) => return Some(canonical_package_error(project_root, entry_path, dir, &error)),
     };
     let (workspace_overlays, diagnostics) = match
-        jet_semindex::workspace_overlay_policy_for_entry(&dir.join("package.jet"))
+        jet_semindex::workspace_overlay_policy_for_entry(&dir.join(jet_driver::Syntax::PACKAGE_FILE))
     {
         Ok(Some(policy)) => (
             jet_semindex::workspace_overlay_policy_json(&policy),
@@ -710,7 +717,7 @@ fn canonical_package_project_json(
     Some(format!(
         "{{\"path\":{},\"manifest\":{},\"name\":{},\"version\":{},\"target\":\"native\",\"deps\":[{}],\"targets\":[{}],\"outputs\":[{}],\"environments\":[{}],\"configs\":[{}],\"members\":[{}],\"package_facts\":{},\"workspace_overlays\":{},\"effects_enabled\":false,\"diagnostics\":{}}}",
         json_str(&rel_path(project_root, dir)),
-        json_str(&rel_path(project_root, &dir.join("package.jet"))),
+        json_str(&rel_path(project_root, &dir.join(jet_driver::Syntax::PACKAGE_FILE))),
         json_str(&facts.name),
         json_optional_str(facts.version.as_deref()),
         deps,

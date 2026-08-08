@@ -576,10 +576,13 @@ fn run_browser_scenario(
 fn ensure_jet_built() {
     BUILD_JET.call_once(|| {
         let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let target = canvas_cargo_target_dir(&repo);
+        // card 1640: build into the checkout's own cache. The old hash-keyed
+        // canvas namespace duplicated the whole dep tree (19G per checkout)
+        // to defend a shared CARGO_TARGET_DIR — a layout the repo has since
+        // banned in favor of per-worktree caches.
+        let target = cargo_target_dir(&repo);
         let status = Command::new("cargo")
             .current_dir(&repo)
-            .env("CARGO_TARGET_DIR", &target)
             .arg("build")
             .status()
             .expect("cargo build for Canvas scenarios");
@@ -597,20 +600,6 @@ fn cargo_target_dir(repo: &Path) -> PathBuf {
         Some(dir) => repo.join(dir),
         None => repo.join("target"),
     }
-}
-
-fn canvas_cargo_target_dir(repo: &Path) -> PathBuf {
-    // Cargo fingerprints include source paths, but one shared target can still
-    // reuse another worktree's same-name package artifacts. Keep the cache in
-    // the configured shared target while keying its fingerprint namespace by
-    // this checkout. Running `cargo build` every time then becomes a cheap
-    // no-op only when Cargo proves this worktree's embedded Canvas JS current.
-    let mut hash = 0xcbf29ce484222325_u64;
-    for byte in repo.as_os_str().as_encoded_bytes() {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x100000001b3);
-    }
-    cargo_target_dir(repo).join(format!("canvas-scenarios-{hash:016x}"))
 }
 
 fn canvas_tools() -> Option<&'static CanvasTools> {
@@ -692,7 +681,7 @@ impl CanvasCase {
     fn new(repo: &Path, name: &str) -> CanvasCase {
         let root = std::env::var("JET_VERIFY_TMPDIR")
             .map(PathBuf::from)
-            .unwrap_or_else(|_| repo.join("target/test-tmp"));
+            .unwrap_or_else(|_| std::env::temp_dir().join("jet-test-tmp"));
         let serial = NEXT_CANVAS_CASE.fetch_add(1, Ordering::Relaxed);
         let dir = root.join(format!(
             "canvas_scenario_{}_{}_{}",
@@ -741,7 +730,7 @@ struct DevServer {
 
 impl DevServer {
     fn start(repo: &Path, cwd: &Path, entry: &Path, port: u16) -> DevServer {
-        let jet = canvas_cargo_target_dir(repo).join("debug/jet");
+        let jet = cargo_target_dir(repo).join("debug/jet");
         let mut child = Command::new(jet)
             .current_dir(cwd)
             .arg("dev")

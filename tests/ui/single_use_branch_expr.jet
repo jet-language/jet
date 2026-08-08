@@ -1,0 +1,25 @@
+// D-LIN1 / D-FACT-FLOW1 / E0141: a `#SingleUse` value consumed on one arm of a
+// value-position `if` and dropped on the other. The merged flow store alone
+// would call it consumed either way (`Moved::join` is a union), so this needs
+// its own branch-divergence check.
+#SingleUse struct Lock {
+    resource: String
+}
+
+fn acquire(resource: String) => Lock {
+    return Lock.{resource: ~resource}
+}
+
+fn release(lock: ^Lock) {
+    print("unlocked {lock.resource}")
+}
+
+fn run() {
+    db :: acquire("db")
+    flag :: true
+    x :: if { flag -> {
+        release(^db)
+        1
+    } else -> 2 }
+    print(x)
+}

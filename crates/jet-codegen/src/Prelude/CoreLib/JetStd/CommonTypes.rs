@@ -33,7 +33,12 @@
     impl Default for TerminalPolicy {
         fn default() -> Self {
             Self {
-                size: TerminalSize { cols: 80, rows: 24 },
+                // Card #1751: one 80x24 fact, shared with ProcessPty.rs's
+                // PtyConfig::default via Prelude/TerminalDefault.rs.
+                size: TerminalSize {
+                    cols: super::terminal_default::JET_TERMINAL_DEFAULT_COLS,
+                    rows: super::terminal_default::JET_TERMINAL_DEFAULT_ROWS,
+                },
                 mode: TerminalMode::Cooked,
             }
         }
@@ -807,6 +812,13 @@
     }
 
     // D-BIGINT1: arbitrary-precision integer (std-only limb arithmetic).
+    // #1636: mirrors `CtBigInt` in `crates/jet-foundation/src/Numeric.rs`
+    // limb-for-limb (sign-magnitude, little-endian base 10^9). This copy has
+    // to stay separate, hand-mirrored text: AOT/JIT output is a standalone
+    // Rust program that never links back into the compiler, so it can't
+    // reference `jet_foundation` directly. `crates/jet-jit/src/enc_stream/mod.rs`
+    // and `crates/jet-comptime/src/Comptime/EncodingLite.rs` both use
+    // `CtBigInt` directly instead of keeping their own copy of this file.
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub struct JetBigInt {
         negative: bool,

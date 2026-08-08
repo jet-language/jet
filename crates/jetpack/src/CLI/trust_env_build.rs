@@ -298,7 +298,7 @@ pub(super) fn compose_env(theme: &Theme, roots: &Roots, flags: &Flags, plan: &Ru
                 (name, value)
             })
             .collect();
-    if let Some(profile) = &plan.environment.selected_profile {
+    if let Some(profile) = &plan.environment.selected_preset {
         theme.detail(&format!("profile: {}", profile.applied.join(" -> ")));
         composed_vars.extend(profile.variables.clone());
     }

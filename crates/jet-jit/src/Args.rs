@@ -8,6 +8,7 @@ use cranelift_module::{FuncId, Linkage, Module};
 #[allow(dead_code, unused_imports, clippy::all)]
 mod runtime {
     use super::Concurrency;
+    use crate::Marshal::{alloc_string, clone_string, result_ok};
 
     trait JetShow {
         fn jet_show(&self) -> String;
@@ -20,14 +21,6 @@ mod runtime {
     pub(crate) struct Spec(JetArgsSpec);
     #[derive(Clone)]
     pub(crate) struct Parsed(JetParsedArgs);
-
-    fn clone_str(id: i64) -> String {
-        Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(id).unwrap_or_default())
-    }
-
-    fn alloc_str(s: String) -> i64 {
-        Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s))
-    }
 
     fn list_of_strings(list: i64) -> Vec<String> {
         Concurrency::with_runtime_mut(|rt| {
@@ -100,13 +93,6 @@ mod runtime {
         })
     }
 
-    fn result_ok(bits: u64) -> i64 {
-        Concurrency::with_runtime_mut(|rt| {
-            rt.results.push(crate::JitResultValue { ok: true, bits });
-            rt.results.len() as i64
-        })
-    }
-
     fn result_err(msg: &str) -> i64 {
         Concurrency::with_runtime_mut(|rt| {
             let sid = rt.heap.alloc_string(msg.to_string());
@@ -120,7 +106,7 @@ mod runtime {
 
     fn pack_option_str(opt: JetOutcome<String, JetAbsent>) -> i64 {
         match opt {
-            Ok(s) => alloc_str(s).wrapping_add(1),
+            Ok(s) => alloc_string(s).wrapping_add(1),
             Err(JetAbsent) => 0,
         }
     }
@@ -137,7 +123,7 @@ mod runtime {
     }
 
     pub(super) extern "C" fn jet_jit_args_flag(h: i64, name: i64, help: i64) -> i64 {
-        let spec = jet_args_flag(take_spec(h), &clone_str(name), &clone_str(help));
+        let spec = jet_args_flag(take_spec(h), &clone_string(name), &clone_string(help));
         replace_spec(h, spec)
     }
 
@@ -149,9 +135,9 @@ mod runtime {
     ) -> i64 {
         let spec = jet_args_flag_short(
             take_spec(h),
-            &clone_str(name),
-            &clone_str(short),
-            &clone_str(help),
+            &clone_string(name),
+            &clone_string(short),
+            &clone_string(help),
         );
         replace_spec(h, spec)
     }
@@ -164,9 +150,9 @@ mod runtime {
     ) -> i64 {
         let spec = jet_args_option(
             take_spec(h),
-            &clone_str(name),
-            &clone_str(help),
-            &clone_str(meta),
+            &clone_string(name),
+            &clone_string(help),
+            &clone_string(meta),
         );
         replace_spec(h, spec)
     }
@@ -180,10 +166,10 @@ mod runtime {
     ) -> i64 {
         let spec = jet_args_option_default(
             take_spec(h),
-            &clone_str(name),
-            &clone_str(help),
-            &clone_str(meta),
-            &clone_str(default),
+            &clone_string(name),
+            &clone_string(help),
+            &clone_string(meta),
+            &clone_string(default),
         );
         replace_spec(h, spec)
     }
@@ -196,9 +182,9 @@ mod runtime {
     ) -> i64 {
         let spec = jet_args_option_int(
             take_spec(h),
-            &clone_str(name),
-            &clone_str(help),
-            &clone_str(meta),
+            &clone_string(name),
+            &clone_string(help),
+            &clone_string(meta),
         );
         replace_spec(h, spec)
     }
@@ -212,10 +198,10 @@ mod runtime {
     ) -> i64 {
         let spec = jet_args_option_choice(
             take_spec(h),
-            &clone_str(name),
-            &clone_str(help),
-            &clone_str(meta),
-            &clone_str(choices),
+            &clone_string(name),
+            &clone_string(help),
+            &clone_string(meta),
+            &clone_string(choices),
         );
         replace_spec(h, spec)
     }
@@ -228,9 +214,9 @@ mod runtime {
     ) -> i64 {
         let spec = jet_args_repeat(
             take_spec(h),
-            &clone_str(name),
-            &clone_str(help),
-            &clone_str(meta),
+            &clone_string(name),
+            &clone_string(help),
+            &clone_string(meta),
         );
         replace_spec(h, spec)
     }
@@ -240,7 +226,7 @@ mod runtime {
         name: i64,
         help: i64,
     ) -> i64 {
-        let spec = jet_args_positional(take_spec(h), &clone_str(name), &clone_str(help));
+        let spec = jet_args_positional(take_spec(h), &clone_string(name), &clone_string(help));
         replace_spec(h, spec)
     }
 
@@ -251,21 +237,21 @@ mod runtime {
         sub: i64,
     ) -> i64 {
         let nested = take_spec(sub);
-        let spec = jet_args_subcommand(take_spec(h), &clone_str(name), &clone_str(help), nested);
+        let spec = jet_args_subcommand(take_spec(h), &clone_string(name), &clone_string(help), nested);
         replace_spec(h, spec)
     }
 
     pub(super) extern "C" fn jet_jit_args_version(h: i64, version: i64) -> i64 {
-        let spec = jet_args_version(take_spec(h), &clone_str(version));
+        let spec = jet_args_version(take_spec(h), &clone_string(version));
         replace_spec(h, spec)
     }
 
     pub(super) extern "C" fn jet_jit_args_help(h: i64) -> i64 {
-        alloc_str(take_spec(h).help())
+        alloc_string(take_spec(h).help())
     }
 
     pub(super) extern "C" fn jet_jit_args_completion(h: i64, shell: i64) -> i64 {
-        alloc_str(jet_args_completion(&take_spec(h), &clone_str(shell)))
+        alloc_string(jet_args_completion(&take_spec(h), &clone_string(shell)))
     }
 
     pub(super) extern "C" fn jet_jit_args_parse(h: i64, argv: i64) -> i64 {
@@ -283,26 +269,26 @@ mod runtime {
     }
 
     pub(super) extern "C" fn jet_jit_parsed_flag(h: i64, name: i64) -> i8 {
-        with_parsed(h, |p| i8::from(jet_parsed_flag(p, &clone_str(name))))
+        with_parsed(h, |p| i8::from(jet_parsed_flag(p, &clone_string(name))))
     }
 
     pub(super) extern "C" fn jet_jit_parsed_option(h: i64, name: i64) -> i64 {
-        with_parsed(h, |p| pack_option_str(jet_parsed_option(p, &clone_str(name))))
+        with_parsed(h, |p| pack_option_str(jet_parsed_option(p, &clone_string(name))))
     }
 
     pub(super) extern "C" fn jet_jit_parsed_option_int(h: i64, name: i64) -> i64 {
-        with_parsed(h, |p| pack_option_i64(jet_parsed_option_int(p, &clone_str(name))))
+        with_parsed(h, |p| pack_option_i64(jet_parsed_option_int(p, &clone_string(name))))
     }
 
     pub(super) extern "C" fn jet_jit_parsed_option_float_opt(h: i64, name: i64) -> i64 {
-        with_parsed(h, |p| match jet_parsed_option_float(p, &clone_str(name)) {
+        with_parsed(h, |p| match jet_parsed_option_float(p, &clone_string(name)) {
             Ok(v) => (v.to_bits() as i64).wrapping_add(1),
             Err(JetAbsent) => 0,
         })
     }
 
     pub(super) extern "C" fn jet_jit_parsed_options(h: i64, name: i64) -> i64 {
-        with_parsed(h, |p| list_from_strings(jet_parsed_options(p, &clone_str(name))))
+        with_parsed(h, |p| list_from_strings(jet_parsed_options(p, &clone_string(name))))
     }
 
     pub(super) extern "C" fn jet_jit_parsed_positional(h: i64, idx: i64) -> i64 {
@@ -317,155 +303,67 @@ mod runtime {
 pub(crate) type ArgsSpec = runtime::Spec;
 pub(crate) type ParsedArgs = runtime::Parsed;
 
-pub(crate) struct ArgsHostFns {
-    pub spec: FuncId,
-    pub flag: FuncId,
-    pub flag_short: FuncId,
-    pub option: FuncId,
-    pub option_default: FuncId,
-    pub option_int: FuncId,
-    pub option_choice: FuncId,
-    pub repeat: FuncId,
-    pub positional: FuncId,
-    pub subcommand: FuncId,
-    pub version: FuncId,
-    pub help: FuncId,
-    pub completion: FuncId,
-    pub parse: FuncId,
-    pub parse_or_exit: FuncId,
-    pub parsed_flag: FuncId,
-    pub parsed_option: FuncId,
-    pub parsed_option_int: FuncId,
-    pub parsed_option_float: FuncId,
-    pub parsed_options: FuncId,
-    pub parsed_positional: FuncId,
-    pub parsed_subcommand: FuncId,
+host_fns! {
+    struct ArgsHostFns;
+    register: register_args_symbols;
+    declare: declare_args_host_fns(module) {
+        let cc = module.target_config().default_call_conv;
+        let mut nullary = Signature::new(cc);
+        nullary.returns.push(AbiParam::new(types::I64));
+        let mut unary = Signature::new(cc);
+        unary.params.push(AbiParam::new(types::I64));
+        unary.returns.push(AbiParam::new(types::I64));
+        let mut binary = Signature::new(cc);
+        binary.params.push(AbiParam::new(types::I64));
+        binary.params.push(AbiParam::new(types::I64));
+        binary.returns.push(AbiParam::new(types::I64));
+        let mut binary_i8 = Signature::new(cc);
+        binary_i8.params.push(AbiParam::new(types::I64));
+        binary_i8.params.push(AbiParam::new(types::I64));
+        binary_i8.returns.push(AbiParam::new(types::I8));
+        let mut ternary = Signature::new(cc);
+        for _ in 0..3 {
+            ternary.params.push(AbiParam::new(types::I64));
+        }
+        ternary.returns.push(AbiParam::new(types::I64));
+        let mut quaternary = Signature::new(cc);
+        for _ in 0..4 {
+            quaternary.params.push(AbiParam::new(types::I64));
+        }
+        quaternary.returns.push(AbiParam::new(types::I64));
+        let mut quinary = Signature::new(cc);
+        for _ in 0..5 {
+            quinary.params.push(AbiParam::new(types::I64));
+        }
+        quinary.returns.push(AbiParam::new(types::I64));
+
+
+    }
+    spec: "jet_jit_args_spec" => runtime::jet_jit_args_spec: nullary;
+    flag: "jet_jit_args_flag" => runtime::jet_jit_args_flag: ternary;
+    flag_short: "jet_jit_args_flag_short" => runtime::jet_jit_args_flag_short: quaternary;
+    option: "jet_jit_args_option" => runtime::jet_jit_args_option: quaternary;
+    option_default: "jet_jit_args_option_default" => runtime::jet_jit_args_option_default: quinary;
+    option_int: "jet_jit_args_option_int" => runtime::jet_jit_args_option_int: quaternary;
+    option_choice: "jet_jit_args_option_choice" => runtime::jet_jit_args_option_choice: quinary;
+    repeat: "jet_jit_args_repeat" => runtime::jet_jit_args_repeat: quaternary;
+    positional: "jet_jit_args_positional" => runtime::jet_jit_args_positional: ternary;
+    subcommand: "jet_jit_args_subcommand" => runtime::jet_jit_args_subcommand: quaternary;
+    version: "jet_jit_args_version" => runtime::jet_jit_args_version: binary;
+    help: "jet_jit_args_help" => runtime::jet_jit_args_help: unary;
+    completion: "jet_jit_args_completion" => runtime::jet_jit_args_completion: binary;
+    parse: "jet_jit_args_parse" => runtime::jet_jit_args_parse: binary;
+    parse_or_exit: "jet_jit_args_parse_or_exit" => runtime::jet_jit_args_parse_or_exit: binary;
+    parsed_flag: "jet_jit_parsed_flag" => runtime::jet_jit_parsed_flag: binary_i8;
+    parsed_option: "jet_jit_parsed_option" => runtime::jet_jit_parsed_option: binary;
+    parsed_option_int: "jet_jit_parsed_option_int" => runtime::jet_jit_parsed_option_int: binary;
+    parsed_option_float: "jet_jit_parsed_option_float_opt" => runtime::jet_jit_parsed_option_float_opt: binary;
+    parsed_options: "jet_jit_parsed_options" => runtime::jet_jit_parsed_options: binary;
+    parsed_positional: "jet_jit_parsed_positional" => runtime::jet_jit_parsed_positional: binary;
+    parsed_subcommand: "jet_jit_parsed_subcommand" => runtime::jet_jit_parsed_subcommand: unary;
 }
 
-pub(crate) fn register_args_symbols(builder: &mut JITBuilder) {
-    builder.symbol("jet_jit_args_spec", runtime::jet_jit_args_spec as *const u8);
-    builder.symbol("jet_jit_args_flag", runtime::jet_jit_args_flag as *const u8);
-    builder.symbol(
-        "jet_jit_args_flag_short",
-        runtime::jet_jit_args_flag_short as *const u8,
-    );
-    builder.symbol("jet_jit_args_option", runtime::jet_jit_args_option as *const u8);
-    builder.symbol(
-        "jet_jit_args_option_default",
-        runtime::jet_jit_args_option_default as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_args_option_int",
-        runtime::jet_jit_args_option_int as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_args_option_choice",
-        runtime::jet_jit_args_option_choice as *const u8,
-    );
-    builder.symbol("jet_jit_args_repeat", runtime::jet_jit_args_repeat as *const u8);
-    builder.symbol(
-        "jet_jit_args_positional",
-        runtime::jet_jit_args_positional as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_args_subcommand",
-        runtime::jet_jit_args_subcommand as *const u8,
-    );
-    builder.symbol("jet_jit_args_version", runtime::jet_jit_args_version as *const u8);
-    builder.symbol("jet_jit_args_help", runtime::jet_jit_args_help as *const u8);
-    builder.symbol(
-        "jet_jit_args_completion",
-        runtime::jet_jit_args_completion as *const u8,
-    );
-    builder.symbol("jet_jit_args_parse", runtime::jet_jit_args_parse as *const u8);
-    builder.symbol(
-        "jet_jit_args_parse_or_exit",
-        runtime::jet_jit_args_parse_or_exit as *const u8,
-    );
-    builder.symbol("jet_jit_parsed_flag", runtime::jet_jit_parsed_flag as *const u8);
-    builder.symbol(
-        "jet_jit_parsed_option",
-        runtime::jet_jit_parsed_option as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_parsed_option_int",
-        runtime::jet_jit_parsed_option_int as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_parsed_option_float_opt",
-        runtime::jet_jit_parsed_option_float_opt as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_parsed_options",
-        runtime::jet_jit_parsed_options as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_parsed_positional",
-        runtime::jet_jit_parsed_positional as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_parsed_subcommand",
-        runtime::jet_jit_parsed_subcommand as *const u8,
-    );
-}
 
-pub(crate) fn declare_args_host_fns(module: &mut JITModule) -> Result<ArgsHostFns, String> {
-    let cc = module.target_config().default_call_conv;
-    let mut nullary = Signature::new(cc);
-    nullary.returns.push(AbiParam::new(types::I64));
-    let mut unary = Signature::new(cc);
-    unary.params.push(AbiParam::new(types::I64));
-    unary.returns.push(AbiParam::new(types::I64));
-    let mut binary = Signature::new(cc);
-    binary.params.push(AbiParam::new(types::I64));
-    binary.params.push(AbiParam::new(types::I64));
-    binary.returns.push(AbiParam::new(types::I64));
-    let mut binary_i8 = Signature::new(cc);
-    binary_i8.params.push(AbiParam::new(types::I64));
-    binary_i8.params.push(AbiParam::new(types::I64));
-    binary_i8.returns.push(AbiParam::new(types::I8));
-    let mut ternary = Signature::new(cc);
-    for _ in 0..3 {
-        ternary.params.push(AbiParam::new(types::I64));
-    }
-    ternary.returns.push(AbiParam::new(types::I64));
-    let mut quaternary = Signature::new(cc);
-    for _ in 0..4 {
-        quaternary.params.push(AbiParam::new(types::I64));
-    }
-    quaternary.returns.push(AbiParam::new(types::I64));
-    let mut quinary = Signature::new(cc);
-    for _ in 0..5 {
-        quinary.params.push(AbiParam::new(types::I64));
-    }
-    quinary.returns.push(AbiParam::new(types::I64));
-    let mut import = |name: &str, sig: &Signature| {
-        module
-            .declare_function(name, Linkage::Import, sig)
-            .map_err(|e| e.to_string())
-    };
-    Ok(ArgsHostFns {
-        spec: import("jet_jit_args_spec", &nullary)?,
-        flag: import("jet_jit_args_flag", &ternary)?,
-        flag_short: import("jet_jit_args_flag_short", &quaternary)?,
-        option: import("jet_jit_args_option", &quaternary)?,
-        option_default: import("jet_jit_args_option_default", &quinary)?,
-        option_int: import("jet_jit_args_option_int", &quaternary)?,
-        option_choice: import("jet_jit_args_option_choice", &quinary)?,
-        repeat: import("jet_jit_args_repeat", &quaternary)?,
-        positional: import("jet_jit_args_positional", &ternary)?,
-        subcommand: import("jet_jit_args_subcommand", &quaternary)?,
-        version: import("jet_jit_args_version", &binary)?,
-        help: import("jet_jit_args_help", &unary)?,
-        completion: import("jet_jit_args_completion", &binary)?,
-        parse: import("jet_jit_args_parse", &binary)?,
-        parse_or_exit: import("jet_jit_args_parse_or_exit", &binary)?,
-        parsed_flag: import("jet_jit_parsed_flag", &binary_i8)?,
-        parsed_option: import("jet_jit_parsed_option", &binary)?,
-        parsed_option_int: import("jet_jit_parsed_option_int", &binary)?,
-        parsed_option_float: import("jet_jit_parsed_option_float_opt", &binary)?,
-        parsed_options: import("jet_jit_parsed_options", &binary)?,
-        parsed_positional: import("jet_jit_parsed_positional", &binary)?,
-        parsed_subcommand: import("jet_jit_parsed_subcommand", &unary)?,
-    })
-}
+
+
+

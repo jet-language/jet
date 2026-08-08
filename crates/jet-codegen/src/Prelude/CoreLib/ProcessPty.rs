@@ -14,6 +14,18 @@ pub struct PtyConfig {
     pub raw: bool,
 }
 
+impl Default for PtyConfig {
+    // Card #1751: reads the one 80x24 terminal default instead of hand-typing
+    // it, the same fact CommonTypes.rs's `TerminalPolicy::default` reads.
+    fn default() -> Self {
+        Self {
+            cols: super::terminal_default::JET_TERMINAL_DEFAULT_COLS,
+            rows: super::terminal_default::JET_TERMINAL_DEFAULT_ROWS,
+            raw: false,
+        }
+    }
+}
+
 pub struct PtyPair {
     pub master: File,
     pub slave: File,

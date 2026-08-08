@@ -255,7 +255,7 @@ fn expr_tag(e: &Expr) -> &'static str {
         Expr::TypedLit { .. } => "TypedLit",
         Expr::Paren(..) => "Paren",
         Expr::PatternTest { .. } => "PatternTest",
-        Expr::ComptimeSplice { .. } => "ComptimeSplice",
+        Expr::ComptimeName { .. } => "ComptimeName",
         Expr::CallValue { .. } => "CallValue",
         Expr::IncDec { .. } => "IncDec",
     }
@@ -518,14 +518,30 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 kind: TExprKind::Local(env.local_of(name)),
             }
         }
-        Expr::ComptimeSplice {
+        // Fragment eval must win over the sema value stamp: a baked CtLit is a
+        // value, not a place, so a marked receiver could never advance
+        // (`$r.read_u8()` folded the same byte forever). Mirror the Ident
+        // consts branch: scalars inline, everything else is a ConstRef place
+        // that the evaluator reads and writes back through the comptime scope.
+        Expr::ComptimeName { name, .. }
+            if super::is_eval_fragment() && cx.const_values.contains_key(name) =>
+        {
+            let value = cx.const_values.get(name);
+            let ty = value.map(crate::AST::CtValue::jet_type).unwrap_or(Type::Int);
+            TExpr {
+                kind: lower_comptime_scalar(value, Some(&ty))
+                    .unwrap_or_else(|| TExprKind::ConstRef(name.clone())),
+                ty,
+            }
+        }
+        Expr::ComptimeName {
             value: Some(value), ..
         } => TExpr {
             ty: value.jet_type(),
             kind: TExprKind::CtLit(value.clone()),
         },
-        Expr::ComptimeSplice { name, .. } if super::is_eval_fragment() => {
-            // `$name` resolves from the comptime scope at eval time (D-CTMARKER1=C).
+        Expr::ComptimeName { name, .. } if super::is_eval_fragment() => {
+            // `$name` resolves from the comptime scope at eval time (D-META-STAGE1=B, formerly D-CTMARKER1=C).
             if !env.locals.contains_key(name) {
                 env.bind(name, TLocal::user(name), None);
             }
@@ -534,7 +550,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 kind: TExprKind::Local(env.local_of(name)),
             }
         }
-        Expr::ComptimeSplice { .. } => TExpr {
+        Expr::ComptimeName { .. } => TExpr {
             ty: Type::Int,
             kind: TExprKind::DefaultLit,
         },
@@ -961,7 +977,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         Expr::Call(call) => {
             // An `approx(value)` not consumed immediately by an integer-to-float
             // crossing grants nothing later. Erase its unspellable marker now.
-            if call.name == Type::APPROX_NUMERIC_WIDEN_MARKER && call.args.len() == 1 {
+            if call.widen_approx && call.args.len() == 1 {
                 return lower_expr(&call.args[0].expr, cx, env);
             }
             // c109 Phase 13: `f(args)` where `f` is a LOCAL (a fn-typed binding/param)
@@ -1885,10 +1901,10 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 }
                 _ => false,
             };
-            if member == Syntax::COMPILER_FACT_LAYOUT && compiler_fact_receiver {
+            if Syntax::compiler_fact_member(member).is_some() && compiler_fact_receiver {
                 let recv = lower_expr(receiver, cx, env);
                 return TExpr {
-                    ty: Type::Named(Syntax::TYPE_LAYOUT_INFO.to_string()),
+                    ty: compiler_fact_type(member),
                     kind: TExprKind::Field {
                         recv: Box::new(recv),
                         field: member.clone(),
@@ -3228,4 +3244,18 @@ fn bind_arg_temporaries(
         });
     }
     stmts
+}
+
+/// D-LAYOUT-FACTS1=B / D-META-STAGE1=B: the type a compiler fact answers.
+///
+/// Each fact projects one `TypeInfo` member, so its type is that member's type
+/// and the three facts stay one spelling with one table behind them.
+fn compiler_fact_type(fact: &str) -> Type {
+    match fact {
+        f if f == Syntax::COMPILER_FACT_NAME => Type::String,
+        f if f == Syntax::COMPILER_FACT_FIELDS => {
+            Type::List(Box::new(Type::Named("FieldInfo".to_string())))
+        }
+        _ => Type::Named(Syntax::TYPE_LAYOUT_INFO.to_string()),
+    }
 }

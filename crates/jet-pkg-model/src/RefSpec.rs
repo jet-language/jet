@@ -51,16 +51,11 @@ impl Source {
         }
     }
 
-    /// Whether `name` is one of the built-in source keywords.
+    /// Whether `name` is one of the built-in source keywords. Reads
+    /// `Syntax::REF_SOURCE_PROVIDERS`, the one home for this set — never
+    /// hand-copy the list here.
     pub fn is_builtin(name: &str) -> bool {
-        name == Syntax::REF_SOURCE_NIXPKGS
-            || name == Syntax::REF_SOURCE_GITHUB
-            || name == Syntax::REF_SOURCE_PATH
-            || name == Syntax::REF_SOURCE_CRAN
-            || name == Syntax::REF_SOURCE_LUAROCKS
-            || name == Syntax::REF_SOURCE_RUBY
-            || name == Syntax::REF_SOURCE_PERL
-            || name == Syntax::REF_SOURCE_PHP
+        Syntax::REF_SOURCE_PROVIDERS.contains(&name)
     }
 
     fn builtin(name: &str) -> Option<Source> {

@@ -25,6 +25,8 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
+mod common;
+
 fn example_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/features/packages/outputs_build")
 }
@@ -73,7 +75,7 @@ fn outputs_block_drives_jet_run_jit() {
 
 #[test]
 fn outputs_block_drives_jet_build_aot() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping outputs_block_drives_jet_build_aot (need rustc)");
         return;

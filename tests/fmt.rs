@@ -347,12 +347,12 @@ fn fmt_keeps_optional_return_sugar() {
 
 #[test]
 fn fmt_comptime_os_dispatch_round_trips() {
-    // D-OSTARGET2=B (ratified 2026-07-03): `#Known if build.os == { … }` — the
-    // OS-target dispatch. New token shape: the `#Known if <subject> == { }`
+    // D-OSTARGET2=B (ratified 2026-07-03): `$if build.os == { … }` — the
+    // OS-target dispatch. New token shape: the `$if <subject> == { }`
     // dispatch. Must survive fmt (subject + arms + bodies preserved) and be
     // idempotent (the formatter-round-trip-required rule catches dropped tokens).
     let src = r#"fn run() {
-    #Known if build.os == {
+    $if build.os == {
         .Linux -> {
             b :: LinuxBackend.{ name: "gtk" }
             print(b.label())
@@ -364,8 +364,8 @@ fn fmt_comptime_os_dispatch_round_trips() {
 "#;
     let out = jet::format_source(src).expect("fmt should accept a comptime OS dispatch");
     assert!(
-        out.contains("#Known if build.os == {"),
-        "expected the `#Known if build.os == {{` dispatch head, got:\n{out}"
+        out.contains("$if build.os == {"),
+        "expected the `$if build.os == {{` dispatch head, got:\n{out}"
     );
     // Arms and their bodies survive. Braceless simple arms stay concise; the
     // author-written scoped arm stays braced.
@@ -1616,13 +1616,13 @@ fn fmt_keeps_parens_around_binary_receiver() {
 
 #[test]
 fn fmt_comptime_block_is_idempotent() {
-    // D-CTMARKER1 (ratified 2026-06-25, piece 2): `#Known { … }` formatting
+    // D-CTMARKER1 (ratified 2026-06-25, piece 2): `$ { … }` formatting
     // round-trips — the block keyword, brace, and body all survive a second fmt.
-    let src = r#"#Known limit :: 1000
+    let src = r#"$limit :: 1000
 
 fn run() {
-    #Known {
-        #Known ratio :: limit / 10
+    $ {
+        $ratio :: limit / 10
         if ratio < 1 { panic("bad") }
     }
     print("ok")
@@ -1630,7 +1630,7 @@ fn run() {
 "#;
     let out = jet::format_source(src).expect("fmt should accept comptime block");
     assert!(
-        out.contains("#Known {"),
+        out.contains("$ {"),
         "comptime block keyword + open brace must survive fmt, got:\n{out}"
     );
     let twice = jet::format_source(&out).expect("second fmt should succeed");
@@ -3069,7 +3069,7 @@ fn fmt_preserves_casing_errors_for_sema() {
 fn generic_modules_roundtrip_templates_symbolic_lengths_nested_items_and_alias_chains() {
     let src = r#"module ring<T, capacity: Int, label: String> {
 #Meta(category: label)
-#Known size :: capacity
+$size :: capacity
 pub struct Buffer { slots: [T#capacity] }
 module nested<U> { pub fn keep(value: U) => U { return ~value } }
 module inner = nested<T>
@@ -3290,7 +3290,7 @@ struct Widget {
     #Doc("display name") label: String
 }
 
-#Known limit :: 32
+$limit :: 32
 
 #Inline
 fn hot(a: Int) => Int {
@@ -3308,7 +3308,7 @@ fn run() {
     for needle in [
         "#Codable",
         "#Doc(\"display name\") label: String",
-        "#Known limit :: 32",
+        "$limit :: 32",
         "#Inline",
         "#Off print(\"off\")",
         "#Impure(\"reads the wall clock\") {",

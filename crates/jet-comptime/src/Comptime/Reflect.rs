@@ -5,7 +5,7 @@
 
 use crate::AST::{EnumDef, Field, Func, Marker, StructDef, StructLayout, TypeParam, VariantPayload};
 
-use super::Value::CtValue;
+use crate::AST::CtValue;
 
 #[derive(Debug, Clone, Default)]
 pub struct ProgramSemanticFacts {
@@ -148,8 +148,11 @@ fn ct_struct(type_name: &str, fields: &[(&str, CtValue)]) -> CtValue {
     }
 }
 
-fn marker_names(markers: &[Marker]) -> Vec<CtValue> {
-    markers.iter().map(|m| ct_str(m.name.clone())).collect()
+/// D-TYPE2-PLANE1=A: a marker reflects as the typed record its registry row
+/// describes, at every position it may be written — the type, a field, a
+/// method, a variant. Nothing reflects a marker as a bare name.
+fn marker_infos(markers: &[Marker]) -> Vec<CtValue> {
+    markers.iter().map(marker_info).collect()
 }
 
 fn marker_arg_path(expression: &crate::AST::Expr) -> Option<String> {
@@ -190,7 +193,10 @@ fn marker_arg_value(expression: &crate::AST::Expr, source_type: &str) -> CtValue
 }
 
 fn marker_info(marker: &Marker) -> CtValue {
-    let row = jet_foundation::Policy::applied_rule(&marker.name);
+    // D-META-REG1=A: reflection reads the one registration table, not a
+    // marker-only table beside it. A marker is the row whose target is written
+    // code, so its signature rides on the row.
+    let row = jet_foundation::Registry::row(&marker.name).and_then(|row| row.rule);
     let bindings = row.and_then(|row| row.signature.marker_argument_bindings(marker));
     let args = marker
         .args
@@ -254,7 +260,7 @@ pub fn build_field_info(field: &Field) -> CtValue {
         &[
             ("name", ct_str(field.name.clone())),
             ("ty", ct_str(field.ty.name())),
-            ("markers", ct_list(marker_names(&field.serde_markers))),
+            ("markers", ct_list(marker_infos(&field.serde_markers))),
             ("is_pub", ct_bool(field.is_pub)),
             (
                 "span",
@@ -296,7 +302,7 @@ pub fn build_method_info(method: &Func) -> CtValue {
             // D-REFLECT1: the retained marker nodes, same source as every other
             // consumer. This was hardcoded empty, so reflection reported that a
             // method carried no markers no matter what was written on it.
-            ("markers", ct_list(marker_names(&method.markers))),
+            ("markers", ct_list(marker_infos(&method.markers))),
             ("is_pub", ct_bool(method.is_pub)),
             (
                 "span",
@@ -542,7 +548,7 @@ fn build_enum_type_info(def: &EnumDef, module: &str) -> CtValue {
         ct_struct("FieldInfo", &[
             ("name", ct_str(variant.name.clone())),
             ("ty", ct_str(ty)),
-            ("markers", ct_list(marker_names(&variant.serde_markers))),
+            ("markers", ct_list(marker_infos(&variant.serde_markers))),
             ("is_pub", ct_bool(def.is_pub)),
             ("span", ct_struct(crate::Syntax::TYPE_SOURCE_SPAN, &[
                 ("start", CtValue::Int(variant.name_span.start as i64)),

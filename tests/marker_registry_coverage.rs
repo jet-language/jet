@@ -121,7 +121,7 @@ fn rejected_the_marker(source: &str) -> Vec<String> {
 #[test]
 fn every_active_row_is_reachable_at_a_declared_site() {
     let mut ghosts = Vec::new();
-    for row in Policy::APPLIED_RULES {
+    for row in Policy::APPLIED_RULES.iter() {
         if !matches!(row.status, RuleStatus::Active) {
             continue;
         }
@@ -171,7 +171,7 @@ fn every_active_row_is_reachable_at_a_declared_site() {
 /// nothing, so every retired row must name a non-empty replacement.
 #[test]
 fn every_retired_row_teaches_a_replacement() {
-    for row in Policy::APPLIED_RULES {
+    for row in Policy::APPLIED_RULES.iter() {
         if let RuleStatus::Retired { replacement } = row.status {
             assert!(
                 !replacement.trim().is_empty(),
@@ -196,4 +196,107 @@ fn repeatable_rows_are_declared_not_assumed() {
         vec!["Pre", "Post", "allow"],
         "D-MARK-REPEAT1=A names exactly these repeatable rows"
     );
+}
+
+/// D-META-REG1=A: the marker rows are rows of the one registration table, and a
+/// knowledge plane, a right, a build fact, and a corpus truth are its other
+/// four uses. The coverage guard above walks the marker rows; these walk the
+/// whole table, so no kind gets a guard of its own.
+#[test]
+fn the_one_table_holds_every_kind() {
+    use jet_foundation::Registry::{self, RowKind, RowTarget, SafeDirection};
+
+    for kind in [
+        RowKind::Marker,
+        RowKind::Plane,
+        RowKind::Right,
+        RowKind::Fact,
+        RowKind::Truth,
+    ] {
+        let row = Registry::rows()
+            .iter()
+            .find(|row| row.kind() == kind)
+            .unwrap_or_else(|| panic!("the one table holds no {} row", kind.name()));
+        assert_eq!(row.target.kind(), kind);
+    }
+
+    // A marker row is exactly a row whose target is written code, and it is the
+    // same row the marker registry holds.
+    for row in Policy::APPLIED_RULES.iter() {
+        let registered = Registry::row(row.name)
+            .unwrap_or_else(|| panic!("`#{}` is not in the one table", row.name));
+        assert_eq!(registered.target, RowTarget::Code(row.sites));
+        assert_eq!(registered.rule.map(|rule| rule.name), Some(row.name));
+        assert_eq!(registered.safe_direction, SafeDirection::None);
+    }
+}
+
+/// D-FACT-LAW1=B: every row states which way is safe and which written words
+/// move it the other way; a row with no meaningful direction states none, and a
+/// row that states neither fails the build. This is the law-zero drift guard
+/// extended — one implementation in `Registry::law_violations`, not a second
+/// guard per kind.
+#[test]
+fn every_row_states_the_one_way_law() {
+    let violations = jet_foundation::Registry::law_violations();
+    assert!(
+        violations.is_empty(),
+        "rows that break the one-way law ({}):\n{}",
+        violations.len(),
+        violations.join("\n")
+    );
+}
+
+/// D-ONCE-LAW1=A: a registered truth names a home that exists and a guard that
+/// runs. `Registry::law_violations` already refuses a row with an empty guard
+/// column; only a file read can tell whether the named test is real, so that
+/// half lives here, in the same lint pass, not in a second guard engine.
+#[test]
+fn every_registered_truth_names_a_home_and_a_guard_that_exist() {
+    use std::path::PathBuf;
+
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut violations = Vec::new();
+    for row in jet_foundation::Registry::truths() {
+        let home = row.home.expect("law_violations refuses a truth with no home");
+        if !root.join(home).is_file() {
+            violations.push(format!("`{}` names the home `{home}`, which is not a file", row.name));
+        }
+        let guard = row.guard.expect("law_violations refuses a truth with no guard");
+        match std::fs::read_to_string(root.join(guard.file)) {
+            Ok(source) => {
+                if !source.contains(&format!("fn {}(", guard.test)) {
+                    violations.push(format!(
+                        "`{}` names the guard `{}`, which `{}` does not define",
+                        row.name, guard.test, guard.file
+                    ));
+                }
+            }
+            Err(_) => violations.push(format!(
+                "`{}` names the guard file `{}`, which cannot be read",
+                row.name, guard.file
+            )),
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "registered truths whose home or guard is missing ({}):\n{}",
+        violations.len(),
+        violations.join("\n")
+    );
+}
+
+/// D-FACT-OWN1=A: the ownership prover is not a plane. What it proves still
+/// registers, as a read-only row with no plane algebra.
+#[test]
+fn a_prover_publishes_read_only_rows() {
+    use jet_foundation::Registry::{self, SafeDirection};
+
+    for name in ["Sendability", "ViewProvenance", "Movedness"] {
+        let row = Registry::row(name)
+            .unwrap_or_else(|| panic!("the ownership prover publishes no `{name}` row"));
+        assert!(row.is_prover_supplied(), "`{name}` names no prover");
+        assert_eq!(row.safe_direction, SafeDirection::None);
+        assert!(row.gates.is_empty(), "`{name}` is read-only, so it has no gate");
+    }
 }

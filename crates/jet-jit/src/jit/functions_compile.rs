@@ -820,7 +820,7 @@ pub(crate) fn compile_program_tiered(
     let mut func_ids: HashMap<String, FuncId> = HashMap::new();
     let mut cli_import_id: Option<FuncId> = None;
     if cli_entry {
-        cli_import_id = Some(crate::CLI::declare_cli_main_import(module)?);
+        cli_import_id = Some(host.cli_main);
         let main_id = match existing_main {
             Some(id) => id,
             None => {

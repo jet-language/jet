@@ -1,8 +1,6 @@
 //! E2-M12 observability tests: structured JSON logs, rich panic reports,
 //! safe-locals policy (D-OBS1/D-OBS2/D-OBS3).
 
-use std::process::Command;
-
 mod common;
 
 /// Builds WITHOUT -O so cfg!(debug_assertions) is true (dev-mode locals) —
@@ -15,7 +13,7 @@ fn build_and_run_debug(name: &str, src: &str) -> (i32, String, String) {
 
 #[test]
 fn structured_log_json_fields() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         return;
     }
@@ -78,7 +76,7 @@ fn run() {
 
 #[test]
 fn structured_log_level_filter() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         return;
     }
@@ -108,7 +106,7 @@ fn run() {
 
 #[test]
 fn structured_log_trace_id() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         return;
     }
@@ -132,7 +130,7 @@ fn run() {
 
 #[test]
 fn structured_log_fields_and_span_context() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         return;
     }
@@ -167,7 +165,7 @@ fn run() {
 
 #[test]
 fn structured_log_json_escape() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         return;
     }
@@ -195,7 +193,7 @@ fn run() {
 
 #[test]
 fn rich_panic_shows_jet_location() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         return;
     }
@@ -230,7 +228,7 @@ fn run() {
 
 #[test]
 fn safe_locals_shown_in_dev_mode() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         return;
     }
@@ -266,7 +264,7 @@ fn run() {
 
 #[test]
 fn panic_context_uses_only_lexically_live_locals() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         return;
     }
@@ -383,7 +381,7 @@ fn unsafe_block_locals_not_leaked() {
     // and are therefore always excluded by the type filter.
     // This test confirms the invariant holds by checking that a panic inside an
     // ordinary function with no unsafe block shows only its safe locals.
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         return;
     }
@@ -429,7 +427,7 @@ fn run() {
 
 #[test]
 fn error_return_trace_frames() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         return;
     }
@@ -479,7 +477,7 @@ fn run() {
 
 #[test]
 fn uncaught_err_prints_propagation_chain() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         return;
     }
@@ -524,7 +522,7 @@ fn run() => () ? {
 
 #[test]
 fn propagation_trace_collapses_repeated_frames() {
-    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    let have_rustc = common::have_rustc();
     if !have_rustc {
         return;
     }

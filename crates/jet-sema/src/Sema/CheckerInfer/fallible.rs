@@ -385,6 +385,7 @@ impl<'a> Checker<'a> {
                     args: std::mem::take(args),
                     resolved_ret: None,
                     range_checked: false,
+                    widen_approx: false,
                 };
                 self.check_panic_call(&mut call);
                 *args = call.args;

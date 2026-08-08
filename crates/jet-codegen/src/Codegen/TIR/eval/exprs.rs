@@ -2887,8 +2887,22 @@ impl<'a> EvalCtx<'a> {
                 // AOT lowers to `(&place as *const _ as usize as i64)`. The
                 // interpreter has no real addresses, so mint a stable non-zero
                 // identity from the place path (I9: same non-zero / inequality
-                // facts a program can observe).
+                // facts a program can observe) — but ONLY when this evaluator is
+                // actually running the program (`runtime_execution`). A sema-time
+                // comptime fold (D-VERDICT-1308-1's implicit fold, or an explicit
+                // `#Known`) calls this exact same code path to *try* folding the
+                // binding; baking the synthetic identity as an AOT `i64` literal
+                // there would compile a wild-pointer dereference into the
+                // program — a real memory-safety bug, not just a wrong value.
+                // Refuse so the fold declines and the call lowers to real runtime
+                // codegen instead (I1).
                 if module == "core.mem" && method == "address_of" && args.len() == 1 {
+                    if !self.runtime_execution {
+                        return Err(unsupported(
+                            "`mem.address_of` at compile time",
+                            *source_span,
+                        ));
+                    }
                     let key = tir_place_address_key(&args[0]);
                     return Ok(CtValue::Int(stable_place_address(&key)));
                 }
@@ -3237,41 +3251,38 @@ impl<'a> EvalCtx<'a> {
                 // the TypeInfo value bound to a derive type parameter. It is
                 // not a second stored TypeInfo member; ordinary `.layout`
                 // remains the full-reflection projection.
-                if field == crate::Syntax::COMPILER_FACT_LAYOUT {
+                if let Some(projected) = crate::Syntax::compiler_fact_member(field) {
                     let CtValue::Struct { type_name, fields } = r else {
                         return Err(Diagnostic::error(
                             "E0302",
-                            "`$layout` needs a reflected type value".to_string(),
+                            format!("`{field}` needs a reflected type value"),
                             "compiler facts attach to the type parameter in a derive body"
                                 .to_string(),
-                            "use `T.$layout`, or use `T.reflect().layout` for full reflection"
-                                .to_string(),
+                            format!("use `T.{field}`, or `T.reflect().{projected}` for full reflection"),
                             Some(self.span()),
                         ));
                     };
                     if type_name != crate::Syntax::TYPE_TYPE_INFO {
                         return Err(Diagnostic::error(
                             "E0302",
-                            "`$layout` needs a reflected type value".to_string(),
+                            format!("`{field}` needs a reflected type value"),
                             "compiler facts attach to the type parameter in a derive body"
                                 .to_string(),
-                            "use `T.$layout`, or use `T.reflect().layout` for full reflection"
-                                .to_string(),
+                            format!("use `T.{field}`, or `T.reflect().{projected}` for full reflection"),
                             Some(self.span()),
                         ));
                     }
                     return fields
                         .into_iter()
-                        .find(|(name, _)| name == "layout")
+                        .find(|(name, _)| name == projected)
                         .map(|(_, value)| value)
                         .ok_or_else(|| {
                             Diagnostic::error(
                                 "E0302",
-                                "the reflected type has no `$layout` fact".to_string(),
+                                format!("the reflected type has no `{field}` fact"),
                                 "the compiler fact projection is fixed by D-LAYOUT-FACTS1"
                                     .to_string(),
-                                "use `T.reflect().layout` for the full reflection object"
-                                    .to_string(),
+                                format!("use `T.reflect().{projected}` for the full reflection object"),
                                 Some(self.span()),
                             )
                         });

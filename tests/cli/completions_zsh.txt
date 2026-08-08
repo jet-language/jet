@@ -27,6 +27,7 @@ commands=(
         'lint:Run optional code-quality checks'
         'explain:Explain a diagnostic code'
         'env:Open the project development shell'
+        'cache:Manage host-owned binary-cache bindings'
         'remote:Manage host-owned remote builders'
         'trust:Review or change trusted capabilities'
         'image:Build a declared container image'
@@ -36,6 +37,8 @@ commands=(
         'fetch:Download locked dependencies'
         'update:Update dependency or toolchain pins'
         'init:Create package settings in this directory'
+        'split:Extract closed Package facts into Configs or members'
+        'fold:Reverse a recorded Package source transition'
         'gc:Show values moved into automatic memory management'
         'clean:Remove unused package-store data'
         'emit:Print generated build output'
@@ -57,10 +60,12 @@ flags=(
         '--out[with structural merge\: write the checked result to this path]'
         '--report[with structural diff/merge\: text, json, or editor report]'
         '--repo[with merge install-driver\: Git worktree to configure]'
-        '--json[emit machine-readable diagnostics]'
+        '--json[emit machine-readable facts or diagnostics]'
+        '--quiet[suppress non-error status output]'
         '--color[color\: auto | always | never]'
         '--version[print compiler version]'
         '--check[with fmt\: exit 1 if any file would change (CI gate)]'
+        '--restore-role-files[with init\: restore the exact pre-package.jet role files]'
         '--diff[with fmt --check\: also print unified diffs for each changed file]'
         '--changed[with fmt\: format only VCS-changed .jet files (requires git)]'
         '--skipped[with project parts\: show modules omitted from automatic discovery]'
@@ -73,6 +78,13 @@ flags=(
         '-p[with run/dev/debug/bench/check/build/tasks\: pick a workspace member by name]'
         '--annotated[with new\: include commented example deps]'
         '--force[with publish\: bypass pre-publish gate (with warning)]'
+        '--no-sign[with publish\: skip the optional author signature (registry metadata is still signed)]'
+        '--registry[with keygen/key\: registry name to generate or manage a signing key for]'
+        '--pkg[with bind\: library name for the generated binding module]'
+        '--clang[with bind cpp\: path to the clang binary used to parse the header]'
+        '--ar[with bind cpp\: path to the ar archiver used to build the static library]'
+        '--from[with hangar repair\: signed archive to repair the entry from]'
+        '--to[with hangar copy/export/sign\: destination Hangar root, archive, or signature path]'
         '--message[with yank\: human-readable reason for yanking the version]'
         '--before[with schema squash\: re-baseline migrations before this version]'
         '--spdx[with sbom\: emit SPDX tag-value format (default)]'
@@ -126,6 +138,7 @@ flags=(
         '--seed[with fuzz\: base PRNG seed --seed=<n> (default\: fixed, reproducible)]'
         '--corpus[with fuzz\: corpus directory --corpus=<dir> (default\: .jet/fuzz/<test>)]'
         '--lens[with prove\: project the human report by an exact evidence facet]'
+        '--facts[with expand\: project a specific evidence lens --facts=<lens>]'
         '--annotations[with budget\: CI annotations auto, none, or github]'
         '--baseline[with budget update\: selected baseline name]'
         '--bootstrap[with budget update\: create absent or stale baseline history]'
@@ -139,12 +152,12 @@ _describe -t commands 'command' commands
 elif (( CURRENT == 3 )); then
 case $words[2] in
             registry) _values 'action' 'publish:Publish the current package' 'yank:Stop new installs of a published version' 'keygen:Create a package-signing key' 'key:Manage the package-signing key' 'vendor:Copy dependencies into vendor/' ;;
-            inspect) _values 'action' 'live:Watch a running Jet process' 'graph:Show the build graph' 'query:Search code and build information' 'explain-build:Explain why a target, action, or file is rebuilt' 'compiler:Read compiler facts as versioned JSON' 'impact:Show code affected by a symbol' 'dossier:Show everything known about a file or symbol' 'semindex:Search the code index' 'expand:Show expanded meaning of Jet code' 'unsafe:Review unsafe code and its safeguards' 'schema:Inspect saved data schema versions' 'codemod:Preview or apply code changes' 'audit:Check dependencies for known vulnerabilities' 'sbom:Create a software bill of materials' 'bind:Generate Jet bindings from a foreign header' 'logs:Show recent package build logs' 'search:Search the local package catalog' 'info:Show package details' 'outdated:List dependencies with available updates' ;;
-            hangar) _values 'action' 'verify:Check package-store integrity' 'repair:Repair package-store damage (currently unavailable)' 'copy:Copy an object between package stores (currently unavailable)' 'import:Import an object archive (currently unavailable)' 'export:Export an object archive (currently unavailable)' 'dump:Create a portable object archive (currently unavailable)' 'restore:Restore a portable object archive (currently unavailable)' 'sign:Sign a package-store object (currently unavailable)' 'rollback:Restore an earlier package-store generation' 'generations:List package-store generations' 'du:Show disk use for each stored object' ;;
-            gc) _values 'action' 'report:Show values moved into automatic memory management' ;;
+            inspect) _values 'action' 'live:Watch a running Jet process' 'graph:Show the build graph' 'query:Search code and build information' 'explain-build:Explain why a target, action, or file is rebuilt' 'compiler:Read compiler facts as versioned JSON' 'impact:Show code affected by a symbol' 'dossier:Show everything known about a file or symbol' 'semindex:Search the code index' 'expand:Show expanded meaning of Jet code (use --json for canonical facts)' 'unsafe:Review unsafe code and its safeguards' 'schema:Inspect saved data schema versions' 'codemod:Preview or apply code changes' 'audit:Check dependencies for known vulnerabilities' 'sbom:Create a software bill of materials' 'bind:Generate Jet bindings from a foreign header' 'logs:Show recent package build logs' 'search:Search the local package catalog' 'info:Show package details' 'outdated:List dependencies with available updates' 'reserved:List reserved words and sigils' 'facts:List every registered truth and its guard' ;;
+            hangar) _values 'action' 'verify:Check package-store integrity' 'repair:Repair a damaged Hangar object from a signed archive' 'copy:Copy a verified closure between local Hangars' 'import:Verify and import a signed Hangar archive' 'export:Export a signed Hangar closure' 'dump:Stream a signed Hangar archive' 'restore:Restore a signed Hangar archive from stdin' 'sign:Sign a Hangar object or archive' 'rollback:Restore an earlier package-store generation' 'generations:List package-store generations' 'du:Show disk use for each stored object' ;;
             project) _values 'action' 'parts:List loaded and skipped project modules' ;;
             self) _values 'action' 'toolchain:Show the Jet version selected for this project' 'upgrade:Show how to install a newer Jet release' 'doctor:Find and fix toolchain problems' 'completions:Print shell completions' 'man:Print the Jet manual' 'devtools:Run Jet maintenance tools' 'lsp:Start the language server' ;;
             os) _values 'action' 'push:Deploy one or more Jetos machines' 'bridge:Convert an existing system configuration to Jet' 'services:Manage development services' 'config:Manage Jet settings and trust' ;;
+            gc) _values 'action' 'report:Show values moved into automatic memory management' ;;
             perf) _values 'action' 'run:Run a program and write a .jettrace' 'test:Run tests and write a .jettrace' 'bench:Measure performance and write a .jettrace' 'attach:Attach to a running process and write a .jettrace' 'view:Show a .jettrace summary' 'compare:Compare two .jettrace artifacts' 'export:Export a loss-declared projection of a .jettrace' ;;
         esac
 else

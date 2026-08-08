@@ -256,17 +256,17 @@ fn unicode_text_behavior_matches_comptime_and_aot() {
 use core.text as text
 use core.regex as re
 
-#Known folded :: text.casefold("Straßeİς")
-#Known lowered :: text.lower("ΟΣ")
-#Known uppered :: text.upper("ßև")
-#Known method_lowered :: "__PINNED_UPPER__".to_lower()
-#Known method_uppered :: "__PINNED_LOWER__".to_upper()
-#Known method_trimmed :: "__PINNED_SPACE__jet__PINNED_SPACE__".trim()
-#Known keycap :: text.display_width("1️⃣")
-#Known emoji :: text.display_width("©️")
-#Known ignorable :: text.display_width("́‍")
-#Known classes :: text.is_alphabetic("Ж") && text.is_numeric("٣") && text.is_whitespace(" ")
-#Known regex_space :: re.is_match(.{"\\s"}, " ")
+$folded :: text.casefold("Straßeİς")
+$lowered :: text.lower("ΟΣ")
+$uppered :: text.upper("ßև")
+$method_lowered :: "__PINNED_UPPER__".to_lower()
+$method_uppered :: "__PINNED_LOWER__".to_upper()
+$method_trimmed :: "__PINNED_SPACE__jet__PINNED_SPACE__".trim()
+$keycap :: text.display_width("1️⃣")
+$emoji :: text.display_width("©️")
+$ignorable :: text.display_width("́‍")
+$classes :: text.is_alphabetic("Ж") && text.is_numeric("٣") && text.is_whitespace(" ")
+$regex_space :: re.is_match(.{"\\s"}, " ")
 
 fn run() {
     runtime_folded :: text.casefold("Straßeİς")
