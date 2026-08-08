@@ -762,5 +762,6 @@ fn serde_type_source(ty: &Type) -> String {
             .collect::<Vec<_>>()
             .join(" | "),
         Type::Quantity { .. } => ty.name(),
+        Type::ComputeDim(value) => value.to_string(),
     }
 }

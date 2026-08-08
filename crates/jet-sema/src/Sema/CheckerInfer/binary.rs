@@ -245,9 +245,9 @@ impl<'a> Checker<'a> {
                 label: None,
                 spread: false,
             }],
-            recv_type: (widening && checked)
-                .then(|| Type::CHECKED_NUMERIC_WIDEN_MARKER.to_string()),
+            recv_type: None,
             resolved_ret: Some(target.clone()),
+            checked_widen: widening && checked,
         };
     }
 
@@ -279,6 +279,7 @@ impl<'a> Checker<'a> {
             args: Vec::new(),
             recv_type: Some(type_name.to_string()),
             resolved_ret: Some(Type::Float),
+            checked_widen: false,
         }
     }
 
@@ -311,6 +312,7 @@ impl<'a> Checker<'a> {
             }],
             recv_type: None,
             resolved_ret: Some(Type::Named(destination_name.to_string())),
+            checked_widen: false,
         }
     }
 
@@ -368,6 +370,7 @@ impl<'a> Checker<'a> {
             }],
             recv_type: None,
             resolved_ret: Some(Type::Named(destination_name.to_string())),
+            checked_widen: false,
         }
     }
 
@@ -657,6 +660,7 @@ impl<'a> Checker<'a> {
                             }],
                             recv_type: Some(type_name.clone()),
                             resolved_ret: Some(ret),
+                            checked_widen: false,
                         };
                         *replacement = Some(match op {
                             BinOp::Ne => Expr::Unary(crate::AST::UnOp::Not, Box::new(call), span),

@@ -1271,6 +1271,7 @@ pub(crate) fn synthesize_delegation_method(
         args,
         recv_type: None,
         resolved_ret: None,
+        checked_widen: false,
     };
 
     // Wrap in a return stmt if there's a return type; otherwise a bare expr stmt.

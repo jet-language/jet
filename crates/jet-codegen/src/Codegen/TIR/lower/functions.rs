@@ -44,12 +44,11 @@ fn bind_resource_param(
     if !resource {
         let local_ty = match ty {
             Type::Apply { name, .. } if name == Syntax::TYPE_SHARED_GUARD => Type::Tagged {
-                marker: if convention == AccessConvention::Write {
-                    crate::AST::SHARED_GUARD_EDIT_MARKER
+                marker: crate::AST::TagMarker::Internal(if convention == AccessConvention::Write {
+                    crate::AST::InternalTag::SharedGuardEdit
                 } else {
-                    crate::AST::SHARED_GUARD_READ_MARKER
-                }
-                .to_string(),
+                    crate::AST::InternalTag::SharedGuardRead
+                }),
                 inner: Box::new(ty.clone()),
             },
             _ => ty.clone(),

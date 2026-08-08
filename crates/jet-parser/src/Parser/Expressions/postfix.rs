@@ -90,6 +90,7 @@ impl<'a> Parser<'a> {
                                 }],
                                 recv_type: None,
                                 resolved_ret: None,
+                                checked_widen: false,
                             };
                             continue;
                         } else if matches!(self.peek().kind, TokKind::LParen) {
@@ -167,6 +168,7 @@ impl<'a> Parser<'a> {
                                 args,
                                 recv_type: None,
                                 resolved_ret: None,
+                                checked_widen: false,
                             };
                         } else {
                             expr = Expr::Field(Box::new(expr), member, member_span);
@@ -245,6 +247,7 @@ impl<'a> Parser<'a> {
                                     }],
                                     recv_type: None,
                                     resolved_ret: None,
+                                    checked_widen: false,
                                 };
                                 continue;
                             }

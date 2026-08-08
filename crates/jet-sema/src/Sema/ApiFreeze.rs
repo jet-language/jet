@@ -202,9 +202,11 @@ pub fn canonical_api_type_name(ty: &Type, dimensions: &ApiUnitDimensions) -> Str
         Type::FixedList { elem, len, len_symbol } => format!("[{}#{}]", canonical_api_type_name(elem, dimensions), len_symbol.as_ref().map(|v| v.0.as_str()).map_or_else(|| len.to_string(), str::to_string)),
         Type::Tagged { marker, inner }
             if matches!(
-                marker.as_str(),
-                crate::AST::CORE_CRYPTO_NOMINAL_MARKER
-                    | crate::AST::TERMINAL_FACT_SET_MARKER
+                marker,
+                crate::AST::TagMarker::Internal(
+                    crate::AST::InternalTag::CoreCryptoNominal
+                        | crate::AST::InternalTag::TerminalFactSet
+                )
             ) =>
         {
             canonical_api_type_name(inner, dimensions)

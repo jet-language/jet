@@ -148,6 +148,7 @@ fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             args,
             recv_type,
             resolved_ret,
+            checked_widen,
         } = call
         else {
             unreachable!("method chain contains only method calls")
@@ -161,6 +162,7 @@ fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             args,
             recv_type,
             resolved_ret.as_ref(),
+            *checked_widen,
             cx,
             env,
             lowered_receiver,
@@ -2132,9 +2134,11 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 }
                 if let Type::Tagged { marker, inner } = recv.ty.clone() {
                     if matches!(
-                        marker.as_str(),
-                        crate::AST::SHARED_GUARD_READ_MARKER
-                            | crate::AST::SHARED_GUARD_EDIT_MARKER
+                        marker,
+                        crate::AST::TagMarker::Internal(
+                            crate::AST::InternalTag::SharedGuardRead
+                                | crate::AST::InternalTag::SharedGuardEdit
+                        )
                     ) {
                         if let Type::Apply { name, args } = inner.as_ref() {
                             if name == Syntax::TYPE_SHARED_GUARD && args.len() == 1 {
@@ -2142,8 +2146,10 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                     ty: args[0].clone(),
                                     kind: TExprKind::SharedGuardValue {
                                         guard: Box::new(recv),
-                                        editable: marker
-                                            == crate::AST::SHARED_GUARD_EDIT_MARKER,
+                                        editable: matches!(
+                                            marker,
+                                            crate::AST::TagMarker::Internal(crate::AST::InternalTag::SharedGuardEdit)
+                                        ),
                                     },
                                 };
                             }

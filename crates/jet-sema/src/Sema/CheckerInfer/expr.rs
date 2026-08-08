@@ -712,6 +712,7 @@ impl<'a> Checker<'a> {
                     }],
                     recv_type: None,
                     resolved_ret: None,
+                    checked_widen: false,
                 };
                 self.infer(e)
             }
@@ -1563,6 +1564,7 @@ impl<'a> Checker<'a> {
                             args: Vec::new(),
                             recv_type: None,
                             resolved_ret: None,
+                            checked_widen: false,
                         };
                         return self.infer(e);
                     }
@@ -1612,6 +1614,7 @@ impl<'a> Checker<'a> {
                 args,
                 recv_type,
                 resolved_ret,
+                checked_widen: _,
             } => {
                 // D-SHAPE3a=A: the parser's empty identifier is the unspellable
                 // receiver sentinel for `.new(...)`. Resolve it only from the same
@@ -3158,9 +3161,11 @@ impl<'a> Checker<'a> {
             }
             if let Type::Tagged { marker, inner } = t {
                 if matches!(
-                    marker.as_str(),
-                    crate::AST::SHARED_GUARD_READ_MARKER
-                        | crate::AST::SHARED_GUARD_EDIT_MARKER
+                    marker,
+                    crate::AST::TagMarker::Internal(
+                        crate::AST::InternalTag::SharedGuardRead
+                            | crate::AST::InternalTag::SharedGuardEdit
+                    )
                 ) {
                     if let Type::Apply { name, args } = inner.as_ref() {
                         if name == crate::Syntax::TYPE_SHARED_GUARD && args.len() == 1 {

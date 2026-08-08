@@ -2020,9 +2020,11 @@ impl LowerCtx<'_, '_> {
             Type::Apply { name, .. } if name == jet_foundation::Syntax::TYPE_SHARED_GUARD => true,
             Type::Tagged { marker, inner } => {
                 matches!(
-                    marker.as_str(),
-                    jet_foundation::AST::SHARED_GUARD_READ_MARKER
-                        | jet_foundation::AST::SHARED_GUARD_EDIT_MARKER
+                    marker,
+                    jet_foundation::AST::TagMarker::Internal(
+                        jet_foundation::AST::InternalTag::SharedGuardRead
+                            | jet_foundation::AST::InternalTag::SharedGuardEdit
+                    )
                 ) || Self::is_shared_guard_ty(inner)
             }
             _ => false,

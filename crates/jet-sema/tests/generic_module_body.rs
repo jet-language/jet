@@ -1,4 +1,4 @@
-use jet_sema::AST::{CFfi, Item, LoadedModule, ProgramBundle, Type};
+use jet_sema::AST::{CFfi, Item, LoadedModule, ProgramBundle, TagMarker, Type};
 use jet_sema::Diagnostics::{Diagnostic, Severity};
 use jet_sema::Sema::{check_bundle, CompileMode};
 use jet_sema::{Lexer, Parser, Syntax};
@@ -268,19 +268,29 @@ fn run() {}
     assert!(items.iter().any(|item| matches!(item, Item::Tag(t) if t.name == "M3Int4LawsAudited")));
     let Item::CodeModule(instance) = items.iter().find(|item| matches!(item, Item::CodeModule(m) if m.name == "int_laws")).unwrap() else { unreachable!() };
     let tagged = instance.body.as_ref().unwrap().iter().find_map(|item| match item { Item::Func(f) if f.name == "audited" => Some(&f.params[0].ty), _ => None }).unwrap();
-    assert!(matches!(tagged, Type::Tagged { marker, inner } if marker == "M3Int4LawsAudited" && **inner == Type::Int), "{tagged:?}");
+    assert!(matches!(tagged, Type::Tagged { marker, inner } if matches!(marker, TagMarker::User(name) if name == "M3Int4LawsAudited") && **inner == Type::Int), "{tagged:?}");
     assert!(items.iter().any(|item| matches!(item, Item::Impl(i) if i.type_name == "M3Int4LawsWrapped" && i.trait_name.as_deref() == Some("M3Int4LawsReveal") && i.assoc_type_impls[0].2 == Type::Int)));
     assert!(items.iter().any(|item| matches!(item, Item::ErrorConv(ec) if ec.from_ty == "M3Int4LawsSourceErr" && ec.to_ty == "M3Int4LawsTargetErr")));
 }
 
 #[test]
 fn tag_method_inside_instance_keeps_e0732() {
-    let (_, diagnostics) = check(r#"
+    // The parser owns the tag-method rejection now; the diagnostic text is
+    // unchanged. The template body still may not smuggle a method through a
+    // generic instance.
+    let (tokens, lex) = Lexer::lex(
+        r#"
 module bad<T> { tag Marker { fn forbidden(self) => T; } }
 module instance = bad<Int>
 fn run() {}
-"#);
-    assert_eq!(error_codes(&diagnostics), vec!["E0732"]);
+"#,
+    );
+    assert!(lex.is_empty(), "lexer diagnostics: {lex:?}");
+    let err = Parser::parse(&tokens).expect_err("tag methods are rejected at parse time");
+    assert!(
+        err.iter().any(|d| d.code == "E0732"),
+        "expected E0732 in parse diagnostics: {err:?}"
+    );
 }
 
 #[test]

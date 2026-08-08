@@ -142,6 +142,7 @@ Type::Fn { params, ret, effect_bound, param_contract, return_view_provenance } =
                     base: Box::new(self.resolve_type(*base)),
                     dimension,
                 },
+                Type::ComputeDim(value) => Type::ComputeDim(value),
             }
         }
     

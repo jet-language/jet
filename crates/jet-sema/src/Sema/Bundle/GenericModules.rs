@@ -209,7 +209,13 @@ fn specialize_module_type(
             Type::Apply { args, .. } => args.iter_mut().for_each(|arg| lengths(arg, types, values)),
             Type::Tuple(fields) => fields.iter_mut().for_each(|(_, ty)| lengths(ty, types, values)),
             Type::Tagged { marker, inner } => {
-                if let Some(Type::Named(mapped)) = types.get(marker) { *marker = mapped.clone(); }
+                // Only a user-written tag name (D-QUAL4) can coincide with a
+                // generic type-parameter name; an `Internal` fact never is one.
+                if let crate::AST::TagMarker::User(name) = marker {
+                    if let Some(Type::Named(mapped)) = types.get(name) {
+                        *marker = crate::AST::TagMarker::User(mapped.clone());
+                    }
+                }
                 **inner = crate::Generics::substitute_type(inner, types);
                 lengths(inner, types, values);
             }
@@ -798,6 +804,7 @@ fn type_full_key(ty: &Type) -> Vec<u8> {
                 write(out, base);
                 frame_text(out, &dimension.identity());
             }
+            ComputeDim(value) => { out.push(21); out.extend_from_slice(&value.to_be_bytes()); }
         }
     }
     let mut out = Vec::new();

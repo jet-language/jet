@@ -310,6 +310,7 @@ fn is_cloneable_rec(
             .iter()
             .all(|m| is_cloneable_rec(m, registry, visiting)),
         Type::Quantity { base, .. } => is_cloneable_rec(base, registry, visiting),
+        Type::ComputeDim(_) => true,
     }
 }
 
@@ -426,6 +427,7 @@ fn type_owns_heap_rec(ty: &Type, registry: &TypeRegistry, visiting: &mut HashSet
             .iter()
             .any(|m| type_owns_heap_rec(m, registry, visiting)),
         Type::Quantity { base, .. } => type_owns_heap_rec(base, registry, visiting),
+        Type::ComputeDim(_) => false,
     }
 }
 
@@ -624,7 +626,7 @@ fn secret_bearing_crypto_leaf(name: &str) -> bool {
 pub(crate) fn core_crypto_nominal(ty: Type) -> Type {
     match ty {
         Type::Named(name) if secret_bearing_crypto_leaf(&name) => Type::Tagged {
-            marker: crate::AST::CORE_CRYPTO_NOMINAL_MARKER.to_string(),
+            marker: crate::AST::TagMarker::Internal(crate::AST::InternalTag::CoreCryptoNominal),
             inner: Box::new(Type::Named(name)),
         },
         Type::List(inner) => Type::List(Box::new(core_crypto_nominal(*inner))),
@@ -664,7 +666,7 @@ Type::Fn { params, ret, effect_bound, param_contract, return_view_provenance } =
         // Already-provenanced leaves are idempotent. User flow tags remain
         // transparent wrappers while provenance is installed below them.
         Type::Tagged { marker, inner }
-            if marker == crate::AST::CORE_CRYPTO_NOMINAL_MARKER =>
+            if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::CoreCryptoNominal)) =>
         {
             Type::Tagged { marker, inner }
         }
@@ -688,26 +690,27 @@ Type::Fn { params, ret, effect_bound, param_contract, return_view_provenance } =
             base: Box::new(core_crypto_nominal(*base)),
             dimension,
         },
+        Type::ComputeDim(value) => Type::ComputeDim(value),
     }
 }
 
 pub(crate) fn deterministic_clock_type(ty: Type) -> Type {
     Type::Tagged {
-        marker: crate::AST::DETERMINISTIC_CLOCK_MARKER.to_string(),
+        marker: crate::AST::TagMarker::Internal(crate::AST::InternalTag::DeterministicClock),
         inner: Box::new(ty),
     }
 }
 
 pub(crate) fn system_clock_type(ty: Type) -> Type {
     Type::Tagged {
-        marker: crate::AST::SYSTEM_CLOCK_MARKER.to_string(),
+        marker: crate::AST::TagMarker::Internal(crate::AST::InternalTag::SystemClock),
         inner: Box::new(ty),
     }
 }
 
 pub(crate) fn expiring_secret_loan_type(ty: Type) -> Type {
     Type::Tagged {
-        marker: crate::AST::EXPIRING_SECRET_LOAN_MARKER.to_string(),
+        marker: crate::AST::TagMarker::Internal(crate::AST::InternalTag::ExpiringSecretLoan),
         inner: Box::new(ty),
     }
 }
@@ -716,7 +719,7 @@ pub(crate) fn is_expiring_secret_member_type(ty: &Type) -> bool {
     matches!(
         ty,
         Type::Tagged { marker, inner }
-            if marker == crate::AST::CORE_CRYPTO_NOMINAL_MARKER
+            if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::CoreCryptoNominal))
                 && matches!(
                     inner.as_ref(),
                     Type::Named(name)
@@ -732,7 +735,7 @@ pub(crate) fn expiring_secret_loan_matches(want: &Type, got: &Type) -> bool {
     matches!(
         got,
         Type::Tagged { marker, inner }
-            if marker == crate::AST::EXPIRING_SECRET_LOAN_MARKER
+            if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::ExpiringSecretLoan))
                 && inner.as_ref() == want
     )
 }
@@ -740,7 +743,7 @@ pub(crate) fn expiring_secret_loan_matches(want: &Type, got: &Type) -> bool {
 pub(crate) fn contains_expiring_secret_loan(ty: &Type) -> bool {
     match ty {
         Type::Tagged { marker, .. }
-            if marker == crate::AST::EXPIRING_SECRET_LOAN_MARKER =>
+            if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::ExpiringSecretLoan)) =>
         {
             true
         }
@@ -768,7 +771,7 @@ pub(crate) fn is_deterministic_clock_type(ty: &Type) -> bool {
     matches!(
         ty,
         Type::Tagged { marker, inner }
-            if marker == crate::AST::DETERMINISTIC_CLOCK_MARKER
+            if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::DeterministicClock))
                 && matches!(inner.as_ref(), Type::Named(name) if name == crate::Syntax::CLOCK_TYPE)
     )
 }
@@ -777,7 +780,7 @@ pub(crate) fn is_system_clock_type(ty: &Type) -> bool {
     matches!(
         ty,
         Type::Tagged { marker, inner }
-            if marker == crate::AST::SYSTEM_CLOCK_MARKER
+            if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::SystemClock))
                 && matches!(inner.as_ref(), Type::Named(name) if name == crate::Syntax::CLOCK_TYPE)
     )
 }
@@ -793,7 +796,7 @@ pub(crate) fn is_clock_type(ty: &Type) -> bool {
 pub(crate) fn is_secret_bearing_crypto_type(ty: &Type) -> bool {
     match ty {
         Type::Tagged { marker, inner }
-            if marker == crate::AST::CORE_CRYPTO_NOMINAL_MARKER =>
+            if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::CoreCryptoNominal)) =>
         {
             matches!(inner.as_ref(), Type::Named(name) if secret_bearing_crypto_leaf(name))
         }
@@ -875,6 +878,10 @@ pub(crate) fn is_printable(
         Type::Union(members) => members
             .iter()
             .all(|m| is_printable(m, registry, trait_reg)),
+        // Same as the retired `\0compute.dimension.N` string encoding: it
+        // never matched any of the `Type::Named` arms above, so this stayed
+        // non-printable on its own (only ever seen as a `Type::Apply` arg).
+        Type::ComputeDim(_) => false,
     }
 }
 
@@ -936,6 +943,9 @@ pub(crate) fn is_displayable(
         Type::Union(members) => members
             .iter()
             .all(|m| is_displayable(m, type_reg, trait_reg)),
+        // Same as `is_printable`'s note: preserves the retired string
+        // encoding's behavior (never matched, so non-displayable on its own).
+        Type::ComputeDim(_) => false,
     }
 }
 
@@ -1023,6 +1033,9 @@ pub(crate) fn is_debuggable(
         Type::Union(members) => members
             .iter()
             .all(|m| is_debuggable(m, type_reg, trait_reg)),
+        // Same as `is_printable`'s note: preserves the retired string
+        // encoding's behavior (never matched, so non-debuggable on its own).
+        Type::ComputeDim(_) => false,
     }
 }
 
@@ -1086,6 +1099,8 @@ pub(crate) fn is_equatable(
         // `Type::Apply` trait-lookup path, which never registered an
         // `Equatable` impl for the marker name, so this stayed non-equatable.
         Type::Quantity { .. } => false,
+        // Same note applies to the retired `\0compute.dimension.N` encoding.
+        Type::ComputeDim(_) => false,
     }
 }
 
@@ -1131,6 +1146,8 @@ pub(crate) fn types_comparable(ty: &Type, registry: &TypeRegistry) -> bool {
         // `Type::Apply` trait-lookup path, which never registered an
         // `Equatable` impl for the marker name, so this stayed non-comparable.
         Type::Quantity { .. } => false,
+        // Same note applies to the retired `\0compute.dimension.N` encoding.
+        Type::ComputeDim(_) => false,
     }
 }
 
@@ -1374,7 +1391,7 @@ pub(crate) fn soft_public_use(name: &str, span: Span) -> Diagnostic {
 #[cfg(test)]
 mod tests {
     use super::{core_crypto_nominal, is_secret_bearing_crypto_type};
-    use crate::AST::{Type, CORE_CRYPTO_NOMINAL_MARKER};
+    use crate::AST::{InternalTag, TagMarker, Type};
 
     fn count_core_crypto_markers(ty: &Type) -> usize {
         match ty {
@@ -1399,8 +1416,10 @@ mod tests {
             Type::FixedList { elem, .. } => count_core_crypto_markers(elem),
             Type::Quantity { base, .. } => count_core_crypto_markers(base),
             Type::Tagged { marker, inner } => {
-                usize::from(marker == CORE_CRYPTO_NOMINAL_MARKER)
-                    + count_core_crypto_markers(inner)
+                usize::from(matches!(
+                    marker,
+                    TagMarker::Internal(InternalTag::CoreCryptoNominal)
+                )) + count_core_crypto_markers(inner)
             }
             Type::Union(members) => members.iter().map(count_core_crypto_markers).sum(),
             Type::Int
@@ -1411,6 +1430,7 @@ mod tests {
             | Type::Named(_)
             | Type::TraitObject(_)
             | Type::IntN { .. }
+            | Type::ComputeDim(_)
             | Type::Float32 => 0,
         }
     }
@@ -1432,7 +1452,7 @@ mod tests {
                     len_symbol: None,
                 },
                 Type::Tagged {
-                    marker: "Audit".to_string(),
+                    marker: TagMarker::User("Audit".to_string()),
                     inner: Box::new(Type::Named("X25519SecretKey".to_string())),
                 },
                 Type::Apply {

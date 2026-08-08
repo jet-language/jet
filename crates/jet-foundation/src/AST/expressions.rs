@@ -507,6 +507,14 @@ pub enum Expr {
         /// lowering so codegen never re-infers it (I3). `None` for every other
         /// call shape (their type comes from a `cx` table or is unused).
         resolved_ret: Option<Type>,
+        /// D-NUMWIDEN-CROSS1=E / card #1662: sema sets this when it
+        /// synthesizes this method-call shape as an implicit checked
+        /// integer-to-float conversion. Replaces the retired
+        /// `\0numeric.checked_widen` fake-`recv_type` marker (`recv_type`
+        /// stays `None` on this shape now, so it keeps its one honest
+        /// meaning of "resolved user-defined receiver type"). Lowering
+        /// consumes it without reconstructing the language rule.
+        checked_widen: bool,
     },
     /// D-DOTCTOR1 (ratified 2026-06-25): `Type.{ field: expr, ... }` (named) or
     /// `.{ field: expr, ... }` (inferred — type from context). Replaces the old

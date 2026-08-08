@@ -1474,11 +1474,11 @@ fn shared_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Opti
         ("read", 1) | ("edit", 1) => Some(Some(inner.clone())),
         ("guard_read", 0) => Some(Some(shared_guard_type(
             inner.clone(),
-            crate::AST::SHARED_GUARD_READ_MARKER,
+            crate::AST::InternalTag::SharedGuardRead,
         ))),
         ("guard_edit", 0) => Some(Some(shared_guard_type(
             inner.clone(),
-            crate::AST::SHARED_GUARD_EDIT_MARKER,
+            crate::AST::InternalTag::SharedGuardEdit,
         ))),
         // D-SHARED-CYCLE1=C: expert weak edge for intentional cycles.
         ("downgrade", 0) => Some(Some(Type::Apply {
@@ -1499,9 +1499,9 @@ fn shared_weak_method_return(inner: &Type, method: &str, nargs: usize) -> Option
     }
 }
 
-fn shared_guard_type(inner: Type, marker: &str) -> Type {
+fn shared_guard_type(inner: Type, marker: crate::AST::InternalTag) -> Type {
     Type::Tagged {
-        marker: marker.to_string(),
+        marker: crate::AST::TagMarker::Internal(marker),
         inner: Box::new(Type::Apply {
             name: Syntax::TYPE_SHARED_GUARD.to_string(),
             args: vec![inner],

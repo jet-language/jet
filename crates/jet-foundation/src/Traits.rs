@@ -1004,6 +1004,9 @@ impl TraitRegistry {
             Type::Quantity { base, .. } => {
                 self.auto_derive_type_ready(base, trait_name, type_params, foreign_supports)
             }
+            // A const compute dimension carries no runtime value; it's
+            // compile-time-only, so it's trivially ready for any trait.
+            Type::ComputeDim(_) => true,
             Type::Shared(_) | Type::TraitObject(_) | Type::Fn { .. } => false,
         }
     }
@@ -2165,6 +2168,7 @@ fn field_auto_ok(ty: &Type, owner: &str) -> bool {
         Type::Named(_) => true,
         Type::Apply { name, .. } => name != Syntax::TYPE_SHARED_GUARD,
         Type::Quantity { base, .. } => field_auto_ok(base, owner),
+        Type::ComputeDim(_) => true,
         Type::Shared(_) | Type::TraitObject(_) | Type::Fn { .. } => false,
     }
 }

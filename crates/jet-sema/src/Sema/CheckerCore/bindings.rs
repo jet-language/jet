@@ -40,6 +40,7 @@ fn contains_taskgroup(ty: &Type) -> bool {
         | Type::IntN { .. }
         | Type::Float32 => false,
         Type::Quantity { .. } => false,
+        Type::ComputeDim(_) => false,
     }
 }
 pub(crate) fn check_meta_attr_fields(meta: &MetaAttr) -> Vec<Diagnostic> {

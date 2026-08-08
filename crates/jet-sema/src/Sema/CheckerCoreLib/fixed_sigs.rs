@@ -3190,6 +3190,7 @@ impl CoreDefault {
                 args: Vec::new(),
                 recv_type: None,
                 resolved_ret: None,
+                checked_widen: false,
             },
         }
     }

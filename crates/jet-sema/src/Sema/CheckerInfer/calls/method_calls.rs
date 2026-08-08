@@ -1814,7 +1814,7 @@ impl<'a> Checker<'a> {
             let expiring_clock_is_deterministic = matches!(
                 &recv_ty,
                 Type::Tagged { marker, inner }
-                    if marker == crate::AST::DETERMINISTIC_CLOCK_MARKER
+                    if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::DeterministicClock))
                         && matches!(
                             inner.as_ref(),
                             Type::Apply { name, .. } if name == "ExpiringSecret"
@@ -1825,11 +1825,13 @@ impl<'a> Checker<'a> {
             let recv_ty = match recv_ty {
                 Type::Tagged { marker, inner }
                     if matches!(
-                        marker.as_str(),
-                        crate::AST::SHARED_GUARD_READ_MARKER
-                            | crate::AST::SHARED_GUARD_EDIT_MARKER
-                            | crate::AST::TERMINAL_FACT_SET_MARKER
-                            | crate::AST::CORE_CRYPTO_NOMINAL_MARKER
+                        marker,
+                        crate::AST::TagMarker::Internal(
+                            crate::AST::InternalTag::SharedGuardRead
+                                | crate::AST::InternalTag::SharedGuardEdit
+                                | crate::AST::InternalTag::TerminalFactSet
+                                | crate::AST::InternalTag::CoreCryptoNominal
+                        )
                     ) =>
                 {
                     Type::Tagged { marker, inner }
@@ -3688,9 +3690,11 @@ impl<'a> Checker<'a> {
             let shared_guard_ty = match &recv_ty {
                 Type::Tagged { marker, inner }
                     if matches!(
-                        marker.as_str(),
-                        crate::AST::SHARED_GUARD_READ_MARKER
-                            | crate::AST::SHARED_GUARD_EDIT_MARKER
+                        marker,
+                        crate::AST::TagMarker::Internal(
+                            crate::AST::InternalTag::SharedGuardRead
+                                | crate::AST::InternalTag::SharedGuardEdit
+                        )
                     ) && matches!(
                         inner.as_ref(),
                         Type::Apply { name, .. }
@@ -3707,12 +3711,11 @@ impl<'a> Checker<'a> {
                         _ => false,
                     };
                     Some(Type::Tagged {
-                        marker: if editable {
-                            crate::AST::SHARED_GUARD_EDIT_MARKER
+                        marker: crate::AST::TagMarker::Internal(if editable {
+                            crate::AST::InternalTag::SharedGuardEdit
                         } else {
-                            crate::AST::SHARED_GUARD_READ_MARKER
-                        }
-                        .to_string(),
+                            crate::AST::InternalTag::SharedGuardRead
+                        }),
                         inner: Box::new(recv_ty.clone()),
                     })
                 }
@@ -4057,7 +4060,7 @@ impl<'a> Checker<'a> {
                 let nominal_recv = match &recv_ty {
                     Type::Named(name) => Some(name.as_str()),
                     Type::Tagged { marker, inner }
-                        if marker == crate::AST::CORE_CRYPTO_NOMINAL_MARKER =>
+                        if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::CoreCryptoNominal)) =>
                     {
                         match inner.as_ref() {
                             Type::Named(name) => Some(name.as_str()),

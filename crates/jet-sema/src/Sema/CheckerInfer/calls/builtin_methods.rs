@@ -495,7 +495,7 @@ impl<'a> Checker<'a> {
             if matches!(
                 recv_ty,
                 Type::Tagged { marker, .. }
-                    if marker == crate::AST::TERMINAL_FACT_SET_MARKER
+                    if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::TerminalFactSet))
             ) && method == "has"
             {
                 if let [arg] = args {

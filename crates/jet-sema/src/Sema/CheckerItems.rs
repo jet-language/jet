@@ -984,7 +984,7 @@ impl<'a> Checker<'a> {
         ) -> bool {
             match ty {
                 Type::Tagged { marker, inner }
-                    if marker == crate::AST::DETERMINISTIC_CLOCK_MARKER
+                    if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::DeterministicClock))
                         && crate::Sema::Diagnostics::is_clock_type(inner) =>
                 {
                     false

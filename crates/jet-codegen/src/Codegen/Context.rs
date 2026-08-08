@@ -2175,6 +2175,10 @@ impl Cx {
             // Erased by the `quantity_parts()` guard above `rust_type` returns
             // through; a runtime quantity value IS its base numeric type.
             Type::Quantity { .. } => unreachable!("quantity_parts() erased above"),
+            // A const compute-dimension only ever appears as a `Vec`/`Matrix`
+            // shape arg, intercepted by name above before reaching the
+            // generic `Type::Apply` args recursion that would call here.
+            Type::ComputeDim(_) => unreachable!("compute-dimension arg handled by the Vec/Matrix Apply arm above"),
         }
     }
 
@@ -2295,7 +2299,7 @@ impl Cx {
 
 pub(crate) fn rust_param_type(cx: &Cx, convention: AccessConvention, ty: &Type) -> String {
     if let Type::Tagged { marker, inner } = ty {
-        if marker == crate::AST::CPP_CALLBACK_ABI_MARKER {
+        if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::CppCallbackAbi)) {
             if let Type::Fn { params, ret, .. } = inner.as_ref() {
                 let params = params
                     .iter()
@@ -3908,6 +3912,10 @@ pub(crate) fn field_type_cloneable(
         // Runtime values carry no dimension metadata (I3): cloneable iff the
         // erased base numeric type is.
         Type::Quantity { base, .. } => field_type_cloneable(base, types, param_names),
+        // Same as the retired `\0compute.dimension.N` string encoding: it
+        // never matched the `Type::Named` user-type-registry lookup above
+        // (only ever reached as an `Apply` arg via the fallback above it).
+        Type::ComputeDim(_) => false,
     }
 }
 
@@ -3984,6 +3992,10 @@ pub(crate) fn field_type_comparable(
         // Runtime values carry no dimension metadata (I3): comparable iff the
         // erased base numeric type is.
         Type::Quantity { base, .. } => field_type_comparable(base, types, param_names),
+        // Same as the retired `\0compute.dimension.N` string encoding: it
+        // never matched the `Type::Named` user-type-registry lookup above
+        // (only ever reached as an `Apply` arg via the fallback above it).
+        Type::ComputeDim(_) => false,
     }
 }
 
@@ -4052,6 +4064,10 @@ pub(crate) fn field_type_hashable(
         // erased base numeric type is (a `Quantity<Float, _>` is never
         // hashable, same as bare `Float`).
         Type::Quantity { base, .. } => field_type_hashable(base, types, param_names),
+        // Same as the retired `\0compute.dimension.N` string encoding: it
+        // never matched the `Type::Named` user-type-registry lookup above
+        // (only ever reached as an `Apply` arg via the fallback above it).
+        Type::ComputeDim(_) => false,
     }
 }
 

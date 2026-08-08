@@ -791,7 +791,7 @@ fn type_tags(ty: &Type) -> TagSet {
     match ty {
         Type::Tagged { marker, inner } => {
             let mut tags = type_tags(inner);
-            tags.insert(marker.clone());
+            tags.insert(marker.to_string());
             tags
         }
         _ => TagSet::new(),

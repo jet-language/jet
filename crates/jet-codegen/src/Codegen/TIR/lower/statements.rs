@@ -1031,7 +1031,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             || matches!(
                 &ty,
                 Type::Tagged { marker, inner }
-                    if marker == crate::AST::SHARED_GUARD_EDIT_MARKER
+                    if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::SharedGuardEdit))
                         && matches!(
                             inner.as_ref(),
                             Type::Apply { name, .. }

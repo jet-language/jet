@@ -515,6 +515,7 @@ impl<'a> Parser<'a> {
                                 args,
                                 recv_type: None,
                                 resolved_ret: None,
+                                checked_widen: false,
                             };
                             self.allow_lowercase_leading_dot = previous_lowercase;
                             return Ok(result);

@@ -533,7 +533,7 @@ fn mark_cpp_callback_abi(items: &mut [Item]) {
         for param in &mut function.params {
             if matches!(param.ty, crate::AST::Type::Fn { .. }) {
                 param.ty = crate::AST::Type::Tagged {
-                    marker: crate::AST::CPP_CALLBACK_ABI_MARKER.to_string(),
+                    marker: crate::AST::TagMarker::Internal(crate::AST::InternalTag::CppCallbackAbi),
                     inner: Box::new(param.ty.clone()),
                 };
             }

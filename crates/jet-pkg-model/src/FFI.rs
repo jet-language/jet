@@ -2468,6 +2468,7 @@ fn type_key(ty: &Type) -> String {
         Type::Quantity { base, dimension } => {
             format!("Quantity<{},{}>", type_key(base), dimension.identity())
         }
+        Type::ComputeDim(value) => value.to_string(),
     }
 }
 
@@ -3494,6 +3495,9 @@ fn rust_type(ty: &Type, user_types: &HashSet<String>) -> String {
         // Runtime values carry no dimension metadata (I3): a quantity crosses
         // the C ABI as its erased base numeric type.
         Type::Quantity { base, .. } => rust_type(base, user_types),
+        // A const compute-dimension only ever appears as a `Vec`/`Matrix`
+        // shape arg, never as its own C-FFI-crossing type.
+        Type::ComputeDim(_) => unreachable!("compute-dimension arg is not a C-FFI surface type"),
     }
 }
 

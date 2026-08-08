@@ -55,7 +55,7 @@ fn callback_fn_type(ty: &Type) -> Option<&Type> {
     match ty {
         Type::Fn { .. } => Some(ty),
         Type::Tagged { marker, inner }
-            if marker == crate::AST::CPP_CALLBACK_ABI_MARKER
+            if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::CppCallbackAbi))
                 && matches!(inner.as_ref(), Type::Fn { .. }) =>
         {
             Some(inner)
@@ -353,7 +353,7 @@ pub(crate) fn tir_recv_jet_ty(e: &Expr, env: &LowerEnv) -> Option<Type> {
         // type; the tag has no runtime representation.
         match ty {
             Type::Tagged { marker, inner }
-                if marker == crate::AST::TERMINAL_FACT_SET_MARKER =>
+                if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::TerminalFactSet)) =>
             {
                 dispatch_ty(*inner)
             }

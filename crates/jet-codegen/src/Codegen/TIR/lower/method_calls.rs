@@ -476,6 +476,7 @@ pub(crate) fn lower_method_call(
     args: &[crate::AST::CallArg],
     recv_type: &Option<String>,
     resolved_ret: Option<&Type>,
+    checked_widen: bool,
     cx: &Cx,
     env: &mut LowerEnv,
     lowered_receiver: Option<TExpr>,
@@ -641,7 +642,7 @@ pub(crate) fn lower_method_call(
             {
                 Some((
                     args[0].clone(),
-                    marker == crate::AST::SHARED_GUARD_EDIT_MARKER,
+                    matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::SharedGuardEdit)),
                 ))
             }
             _ => None,
@@ -896,6 +897,7 @@ pub(crate) fn lower_method_call(
                 &lowered_args,
                 recv_type,
                 resolved_ret,
+                checked_widen,
                 cx,
                 env,
                 None,
@@ -3378,12 +3380,12 @@ pub(crate) fn lower_method_call(
                 _ => Type::Int,
             };
             let marker = if method == "guard_edit" {
-                crate::AST::SHARED_GUARD_EDIT_MARKER
+                crate::AST::InternalTag::SharedGuardEdit
             } else {
-                crate::AST::SHARED_GUARD_READ_MARKER
+                crate::AST::InternalTag::SharedGuardRead
             };
             let ty = resolved_ret.cloned().unwrap_or_else(|| Type::Tagged {
-                marker: marker.to_string(),
+                marker: crate::AST::TagMarker::Internal(marker),
                 inner: Box::new(Type::Apply {
                     name: Syntax::TYPE_SHARED_GUARD.to_string(),
                     args: vec![inner],
@@ -3783,11 +3785,11 @@ pub(crate) fn lower_method_call(
         };
         }
     }
-    // D-NUMWIDEN-CROSS1=E: sema owns the checked-crossing decision and leaves
-    // this unspellable marker. Lowering only records adapter facts.
-    if recv_type.as_deref() == Some(Type::CHECKED_NUMERIC_WIDEN_MARKER)
-        && args.len() == 1
-    {
+    // D-NUMWIDEN-CROSS1=E / card #1662: sema owns the checked-crossing
+    // decision and records it in `Expr::MethodCall::checked_widen` (replaces
+    // the retired `\0numeric.checked_widen` fake-`recv_type` marker).
+    // Lowering only records adapter facts.
+    if checked_widen && args.len() == 1 {
         let source = lower_expr(&args[0].expr, cx, env);
         let source_signed = !matches!(source.ty, Type::IntN { signed: false, .. });
         let target = resolved_ret.cloned().unwrap_or(Type::Float);
