@@ -110,6 +110,7 @@
         devShells.default = pkgs.mkShell {
           packages = [
             pkgs.cargo
+            pkgs.sccache
             pkgs.clippy
             pkgs.rustc
             pkgs.gcc
@@ -156,6 +157,7 @@
         devShells.full = pkgs.mkShell {
           packages = [
             pkgs.cargo
+            pkgs.sccache
             # E4-JP9: resolved-symbol native evaluator authority stop-line.
             pkgs.clippy
             pkgs.rustc

@@ -250,7 +250,19 @@ Worktree location is absolute (no exceptions for cloud agents, Cursor, Claude, o
 
 ## Review and verification constraints
 
-Every completed change has one implementer and one fresh-context reviewer:
+Review is risk-tiered (owner decision, 2026-08-08):
+
+- **Mechanical tier — no fresh-context reviewer.** Test-fixture migrations,
+  ledger/baseline row deletions, golden and snapshot blesses, and comment or
+  doc rewording close on met exit criteria plus one orchestrator spot-check
+  of the diff and targeted proof.
+- **Semantics tier — full review, always.** Compiler-semantics changes,
+  invariant-adjacent work, and any change to a guard, ratchet, or test that
+  enforces policy get one fresh-context reviewer. One reviewer may cover the
+  composed stack of 2–3 batches instead of one reviewer per batch.
+
+For the semantics tier, every completed change has one implementer and one
+fresh-context reviewer:
 
 1. **Reviewer:** inspect the diff, acceptance criteria, invariants, and test
    evidence; assume the patch is wrong; report only concrete findings.
