@@ -26,7 +26,7 @@ pub use jet_codegen::{
 // `super::RefSpec`, `crate::EffectBudget`, etc.) is unchanged.
 pub use jet_pkg_model::{
     AdaBind, CBind, CFFI, ComBind, CppBind, DartBind, DotNetBind, EffectBudget, Envelope, FFI, FortranBind,
-    JavaBind, JSON, LintPolicy, Lock, Manifest, Package, PascalBind, Platform,
+    JavaBind, JetLib, JSON, LintPolicy, Lock, Manifest, Package, PascalBind, Platform,
     PowerShellBind, RefSpec, ScriptDeps, TclBind, Variant,
 };
 // Card #367 slice 5: WorkspacePlan/WorkspaceMember + WorkspaceLock read path
