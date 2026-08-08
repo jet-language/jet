@@ -418,7 +418,15 @@ pub(crate) fn emit_require_stop(
                     Some(m) => emit_panic_message_expr(m, cx),
                     None => "\"condition failed\".to_string()".to_string(),
                 };
-                return format!("{{ if !({cond_s}) {{ return Err({msg_s}); }} }}");
+                return format!(
+                    "{{ if !({cond_s}) {{ let _jet_msg = {msg_s}; return Err(jet_test_failure({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &_jet_msg)); }} }}",
+                    file = escape_rust_str(&loc.file),
+                    line = loc.line,
+                    fn_name_esc = escape_rust_str(&loc.fn_name),
+                    src_line_esc = escape_rust_str(&loc.src_line),
+                    col = loc.col,
+                    caret = loc.caret,
+                );
             }
             let msg_s = match msg {
                 Some(m) => emit_panic_message_expr(m, cx),
@@ -431,7 +439,13 @@ pub(crate) fn emit_require_stop(
             let right_s = emit_tir_expr(right, cx);
             if cx.test_mode {
                 return format!(
-                    "{{ let _jet_left = ({left_s}); let _jet_right = ({right_s}); if !(_jet_left == _jet_right) {{ return Err(format!(\"left: {{}}, right: {{}}\", _jet_left.jet_show(), _jet_right.jet_show())); }} }}"
+                    "{{ let _jet_left = ({left_s}); let _jet_right = ({right_s}); if !(_jet_left == _jet_right) {{ let _jet_msg = format!(\"expected {{}}, got {{}}\", _jet_right.jet_show(), _jet_left.jet_show()); return Err(jet_test_failure({file}, {line}, {fn_name_esc}, {src_line_esc}, {col}, {caret}, &_jet_msg)); }} }}",
+                    file = escape_rust_str(&loc.file),
+                    line = loc.line,
+                    fn_name_esc = escape_rust_str(&loc.fn_name),
+                    src_line_esc = escape_rust_str(&loc.src_line),
+                    col = loc.col,
+                    caret = loc.caret,
                 );
             }
             format!(

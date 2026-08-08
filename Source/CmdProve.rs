@@ -12,6 +12,7 @@ use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 use jet::AST::{Expr, Func, Item, Stmt};
+use jet::Codegen::test_report::{JetTestFailure as TestFailure, JetTestReport as TestReport};
 use jet::Diagnostics::{span_line_col, Diagnostic, Severity};
 use jet::ExitCodes;
 
@@ -450,9 +451,15 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
         }
         if show("tests") || lenses.is_empty() {
             if !tests.is_empty() {
-                let passed = tests.iter().filter(|item| item.kind == 0 && item.state == 0).count();
-                let skipped = tests.iter().filter(|item| item.kind == 0 && item.state == 2).count();
-                println!("TESTS    unit: {passed} passed, {test_failed} failed, {skipped} skipped");
+                let report = unit_test_report(&tests);
+                println!("TESTS    unit: {}", report.summary());
+                for item in tests
+                    .iter()
+                    .filter(|item| (item.kind == 0 || item.kind == 2) && item.state == 1)
+                {
+                    println!("{}: FAIL", item.name);
+                    eprint!("{}", test_failure(item).render_detail());
+                }
             }
         }
         if show("budgets") || lenses.is_empty() {
@@ -2649,9 +2656,8 @@ fn render_report(
     let evidence = evidence_rows.join(",");
     let (solver_selected, solver_proved, solver_disproved, solver_unknown, solver_unavailable) =
         crate::ProveSolver::summarize(solver);
-    let unit_passed = tests.iter().filter(|item| (item.kind == 0 || item.kind == 2) && item.state == 0).count();
-    let unit_failed = tests.iter().filter(|item| (item.kind == 0 || item.kind == 2) && item.state == 1).count();
-    let unit_skipped = tests.iter().filter(|item| (item.kind == 0 || item.kind == 2) && item.state >= 2).count();
+    let unit_report = unit_test_report(tests);
+    let unit_summary = unit_report.json_summary();
     let unit_unavailable = tests.iter().filter(|item| (item.kind == 0 || item.kind == 2) && item.state == 3).count();
     let contract_selected = declarations.len();
     let (contract_passed, contract_failed, contract_not_observed, contract_skipped) =
@@ -2668,7 +2674,6 @@ fn render_report(
     let doctest_failed = tests.iter().filter(|item| item.kind == 4 && item.state == 1).count();
     let doctest_skipped = tests.iter().filter(|item| item.kind == 4 && item.state >= 2).count();
     let doctest_selected = doctest_passed + doctest_failed + doctest_skipped;
-    let unit_selected = unit_passed + unit_failed + unit_skipped;
     let deterministic_selected = budgets.facts.iter().filter(|fact| !fact.statistical).count()
         + budgets.rejected.len();
     let deterministic_failed = budgets.facts.iter().filter(|fact| !fact.statistical && fact.outcome == "fail").count();
@@ -2693,7 +2698,7 @@ fn render_report(
     } else {
         "pass"
     };
-    format!("{{\"diagnostics\":[{}],\"evidence\":[{evidence}],\"evidencePolicy\":\"allow_incomplete\",\"exitCode\":{exit_code},\"result\":\"{result}\",\"schemaVersion\":1,\"summaries\":{{\"contract\":{{\"declared\":{contract_selected},\"failed\":{contract_failed},\"notObserved\":{contract_not_observed},\"observed\":{contract_observed},\"passed\":{contract_passed},\"selected\":{contract_selected},\"skipped\":{contract_skipped}}},\"deterministicBudget\":{{\"failed\":{deterministic_failed},\"met\":{deterministic_met},\"selected\":{deterministic_selected},\"skipped\":0,\"unavailable\":{deterministic_unavailable}}},\"doctest\":{{\"failed\":{doctest_failed},\"passed\":{doctest_passed},\"selected\":{doctest_selected},\"skipped\":{doctest_skipped}}},\"frontEnd\":{{\"failed\":{failed},\"proved\":{proved},\"selected\":{front_end_selected},\"skipped\":0}},\"property\":{{\"failed\":{property_failed},\"generatedCases\":{property_cases},\"passed\":{property_passed},\"selected\":{property_selected},\"shrunkFailures\":{property_shrunk_failures},\"skipped\":{property_skipped}}},\"solver\":{{\"disproved\":{solver_disproved},\"proved\":{solver_proved},\"selected\":{solver_selected},\"unavailable\":{solver_unavailable},\"unknown\":{solver_unknown}}},\"statisticalBudget\":{{\"failed\":{statistical_failed},\"met\":{statistical_met},\"selected\":{statistical_selected},\"skipped\":0,\"unavailable\":{statistical_unavailable}}},\"unit\":{{\"failed\":{unit_failed},\"passed\":{unit_passed},\"selected\":{unit_selected},\"skipped\":{unit_skipped}}}}},\"target\":{{\"inputSha256\":{},\"kind\":\"{}\",\"members\":[{members}],\"root\":{}}},\"tool\":{{\"jet\":{},\"proofProducer\":\"jet-prove\",\"targetTriple\":{}}}}}", diagnostics.join(","), json(&target.input_sha256), target.kind, json(&target.root), json(env!("CARGO_PKG_VERSION")), json(&host_target_triple()))
+    format!("{{\"diagnostics\":[{}],\"evidence\":[{evidence}],\"evidencePolicy\":\"allow_incomplete\",\"exitCode\":{exit_code},\"result\":\"{result}\",\"schemaVersion\":1,\"summaries\":{{\"contract\":{{\"declared\":{contract_selected},\"failed\":{contract_failed},\"notObserved\":{contract_not_observed},\"observed\":{contract_observed},\"passed\":{contract_passed},\"selected\":{contract_selected},\"skipped\":{contract_skipped}}},\"deterministicBudget\":{{\"failed\":{deterministic_failed},\"met\":{deterministic_met},\"selected\":{deterministic_selected},\"skipped\":0,\"unavailable\":{deterministic_unavailable}}},\"doctest\":{{\"failed\":{doctest_failed},\"passed\":{doctest_passed},\"selected\":{doctest_selected},\"skipped\":{doctest_skipped}}},\"frontEnd\":{{\"failed\":{failed},\"proved\":{proved},\"selected\":{front_end_selected},\"skipped\":0}},\"property\":{{\"failed\":{property_failed},\"generatedCases\":{property_cases},\"passed\":{property_passed},\"selected\":{property_selected},\"shrunkFailures\":{property_shrunk_failures},\"skipped\":{property_skipped}}},\"solver\":{{\"disproved\":{solver_disproved},\"proved\":{solver_proved},\"selected\":{solver_selected},\"unavailable\":{solver_unavailable},\"unknown\":{solver_unknown}}},\"statisticalBudget\":{{\"failed\":{statistical_failed},\"met\":{statistical_met},\"selected\":{statistical_selected},\"skipped\":0,\"unavailable\":{statistical_unavailable}}},\"unit\":{unit_summary}}},\"target\":{{\"inputSha256\":{},\"kind\":\"{}\",\"members\":[{members}],\"root\":{}}},\"tool\":{{\"jet\":{},\"proofProducer\":\"jet-prove\",\"targetTriple\":{}}}}}", diagnostics.join(","), json(&target.input_sha256), target.kind, json(&target.root), json(env!("CARGO_PKG_VERSION")), json(&host_target_triple()))
 }
 
 fn contract_summary(
@@ -2768,33 +2773,32 @@ fn source_line_for(path: &str, line: u32) -> Option<String> {
         .map(str::to_string)
 }
 
-fn runtime_item_diagnostic(item: &TestItem) -> String {
-    let code = if item.kind == 1 { "E3005" } else { "E3001" };
-    let source_line = source_line_for(&item.path, item.line);
-    let source_line_json = source_line.as_deref().map(json).unwrap_or_else(|| "null".to_string());
-    let width = source_line.as_deref().map_or(1, |line| line.chars().count().max(1));
-    let (why, fix) = if item.kind == 2 {
-        (
-            "the proof child terminated with a panic instead of producing a checked evidence record",
-            "inspect the captured runtime message and fix the panic before relying on this proof",
-        )
-    } else {
-        (
-            "the runtime producer reported a failed checked property or test",
-            "fix the reported property or test, then rerun `jet prove`",
-        )
-    };
-    format!(
-        "{{\"caret\":{{\"startColumn\":1,\"width\":{width}}},\"code\":{},\"context\":[],\"frames\":[],\"message\":{},\"notes\":[{},{}],\"origin\":{{\"producer\":\"jet-runtime\",\"stage\":\"runtime\"}},\"safeLocals\":[],\"severity\":\"error\",\"span\":{{\"endColumn\":{},\"endLine\":{},\"path\":{},\"sourceLine\":{source_line_json},\"startColumn\":1,\"startLine\":{}}},\"type\":\"runtime\"}}",
-        json(code),
-        json(&item.message),
-        json(&format!("Why: {why}")),
-        json(&format!("Fix: {fix}")),
-        width + 1,
-        item.line,
-        json(&item.path),
-        item.line
+fn unit_test_report(tests: &[TestItem]) -> TestReport {
+    let is_unit = |item: &&TestItem| item.kind == 0 || item.kind == 2;
+    TestReport::new(
+        tests.iter().filter(|item| is_unit(item) && item.state == 0).count(),
+        tests.iter().filter(|item| is_unit(item) && item.state == 1).count(),
+        tests.iter().filter(|item| is_unit(item) && item.state >= 2).count(),
     )
+}
+
+fn test_failure(item: &TestItem) -> TestFailure {
+    let source_line = source_line_for(&item.path, item.line).unwrap_or_default();
+    let caret = source_line.chars().count().max(1) as u32;
+    TestFailure::new(
+        "E3001",
+        &item.message,
+        &item.path,
+        item.line,
+        &item.name,
+        &source_line,
+        1,
+        caret,
+    )
+}
+
+fn runtime_item_diagnostic(item: &TestItem) -> String {
+    test_failure(item).json()
 }
 
 fn json(value: &str) -> String {

@@ -307,8 +307,16 @@ fn jet_test_fail_then_fixed() {
         String::from_utf8_lossy(&bad.stdout)
     );
     assert!(
-        String::from_utf8_lossy(&bad.stderr).contains("left:"),
-        "require_eq should print both values on stderr"
+        String::from_utf8_lossy(&bad.stderr).contains("Stop [E3001]"),
+        "require_eq should print the registered test report"
+    );
+    assert!(
+        String::from_utf8_lossy(&bad.stderr).contains("expected 4, got 3"),
+        "require_eq report should preserve expected/got"
+    );
+    assert!(
+        String::from_utf8_lossy(&bad.stderr).contains("-->"),
+        "require_eq report should preserve source location"
     );
 
     let good = Command::new(&jet).arg("test").arg(&fixed).output().unwrap();
