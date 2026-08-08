@@ -104,6 +104,25 @@ fn render_signing_diagnostic(diagnostic: &jet::Diagnostics::Diagnostic) {
     }
 }
 
+fn registry_has_metadata_chain(repo: &Path) -> bool {
+    let checkpoint = repo.join("transparency").join("checkpoint");
+    match fs::symlink_metadata(&checkpoint) {
+        Ok(_) => return true,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => return true,
+    }
+
+    let metadata = repo.join("metadata");
+    match fs::symlink_metadata(&metadata) {
+        Ok(file) if file.file_type().is_symlink() || !file.is_dir() => true,
+        Ok(_) => fs::read_dir(metadata)
+            .map(|mut entries| entries.next().is_some())
+            .unwrap_or(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(_) => true,
+    }
+}
+
 /// `jet registry publish [--force]` — pre-publish gate + SemVer API diff.
 ///
 /// D-PKGS4 (amended): must run `jet build` + `jet test` locally first.
@@ -523,18 +542,23 @@ pub(crate) fn run_publish(force: bool, no_sign: bool, mode: OutputMode) {
         eprintln!("error: invalid registry index path: {error}");
         exit(ExitCodes::USER_ERROR);
     });
-    let metadata = match jet::Publish::refresh_registry_metadata(repo, &registry.name) {
-        Ok(metadata) => metadata,
-        Err(diagnostic) => {
-            eprint!(
-                "{}",
-                jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", &[diagnostic])
-            );
-            exit(ExitCodes::USER_ERROR);
-        }
-    };
     let mut publish_paths = vec![artifact, index];
-    publish_paths.extend(metadata.paths);
+    // D-PKGSIGN-NOSIGN1=A: a keyless first publish has no metadata chain to
+    // refresh. Any checkpoint or sparse metadata makes the registry
+    // established, so refresh still fails closed without its root key.
+    if !no_sign || registry_has_metadata_chain(repo) {
+        let metadata = match jet::Publish::refresh_registry_metadata(repo, &registry.name) {
+            Ok(metadata) => metadata,
+            Err(diagnostic) => {
+                eprint!(
+                    "{}",
+                    jet::render_diagnostics(jet::Syntax::PAYLOAD_FILE, "", &[diagnostic])
+                );
+                exit(ExitCodes::USER_ERROR);
+            }
+        };
+        publish_paths.extend(metadata.paths);
+    }
     if let Err(d) = jet::Publish::push_index(
         &registry,
         repo,
