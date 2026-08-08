@@ -672,11 +672,6 @@ fn unknown_subcommand(cmd: &str) -> ! {
 /// reach the existing real handlers without keeping compatibility aliases.
 fn normalize_frequency_ring_argv(raw: &mut Vec<String>) {
     let Some(first) = raw.first().map(String::as_str) else { return };
-    // D-JPK-IMPORTCMD1 / D-MIGRATE-SRC1: top-level import is canonical and
-    // distinct from the physical hangar archive action.
-    if first == "import" {
-        return;
-    }
     if let Some((group_spec, _)) = jet::CLI::moved_command(first) {
         let group = group_spec.name;
         let verb = first;
@@ -1866,30 +1861,12 @@ fn main() {
             exit(ExitCodes::USER_ERROR);
         }
         "dev" => {
-            // U19 (project-level `jetpack dev`, card c9jetpackgates): bare
-            // `jet dev` with no file argument is a DIFFERENT command from the
-            // file-scoped watch loop below — it realizes the project's
-            // declared env, trust-gates entry, waits for services (U12
-            // no-op today), then runs `fn dev()`/`fn run()`. D-JPK-DISPATCH1=B:
-            // dispatched to the jetpack engine exactly like `env`/`push`,
-            // never linked in-process, so the file-scoped loop keeps working
-            // even with jetpack deleted.
-            if args.get(1).is_none() {
-                let mut fwd = raw.clone();
-                if let Some(pos) = fwd.iter().position(|a| a == "dev") {
-                    fwd.remove(pos);
-                }
-                fwd.insert(0, "dev".to_string());
-                exit(EngineDispatch::dispatch(
-                    jet::Syntax::JETPACK_BINARY_NAME,
-                    "dev",
-                    &fwd,
-                ));
-            }
-            // E2-M4 (D-DEV4): the watch/interpret loop. Re-check and re-run the
-            // entry file on every save, streaming output, for sub-200ms
-            // feedback. The interpreter is a dev convenience only — `jet build`/
-            // `jet run` never touch it (I2/I3).
+            // D-RUN-LAW1=A: every dev verb runs one program; `jet dev` uses
+            // the file-scoped watcher below. Project-level `jetpack dev`
+            // remains owned by Jetpack.
+            // E2-M4 (D-DEV4): re-check and re-run the entry file on every save,
+            // streaming output for sub-200ms feedback. The interpreter is a dev
+            // convenience only — `jet build`/`jet run` never touch it (I2/I3).
             let try_anyway = raw.iter().any(|a| a == "--try-anyway");
             // c139 (D-JIT2=A): --interpret forces tier-0 interpreter; otherwise
             // CraneliftBackend wraps it (M0 delegates, M1+ JIT-compiles).
