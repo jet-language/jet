@@ -383,6 +383,14 @@ An ordinary loop returns one final value only through break payloads. Every
 payload exit must unify. A yielding loop's bare or targeted `break` returns
 the accumulated List, and its `next` omits the current item. Payload breaks
 are rejected in yielding loops because their result is already `[T]`.
+**D-CHOOSE-FIND1=A**: a finite source loop in value position uses a braced
+body with `break value` exits and must be followed by a written exhaustion
+route: `loop item, source { if found(item) { break item } } ?? fallback`.
+The route is part of the expression. `?? next` and `?? break` immediately
+after that closing brace are rejected; use the labeled loop form when the
+exhaustion path must steer another loop. An explicit target,
+`?? next(name)` or `?? break(name)`, remains a named route to an enclosing
+loop.
 `next` enters the target's continuation edge: explicit state runs its
 afterthought then retests; source advances; condition retests; infinite restarts.
 `next()`, `.next()`, and `fn next` remain ordinary uses. After `??`, bare `next`

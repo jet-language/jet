@@ -3,6 +3,7 @@
 //! Split out of the original `CheckerInfer.rs`; behavior unchanged.
 
 use super::*;
+use super::fallible::value_loop_requires_route;
 use crate::Collections::is_map_key_type;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
@@ -507,6 +508,11 @@ impl<'a> Checker<'a> {
         // expected-type position, then rewrites to the ordinary literal shape.
         if matches!(e, Expr::TypedLit { .. }) {
             return self.elaborate_typed_lit(e);
+        }
+        if let Expr::OrFallback { value, .. } = e {
+            if value_loop_requires_route(value) {
+                return self.infer_value_loop_fallback(e);
+            }
         }
         match e {
             // S68 (D-SG2): `if` in expression position. Condition is Bool; each
