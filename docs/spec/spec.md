@@ -1017,9 +1017,10 @@ blocks; only **`jet test`** compiles and runs them.
 **`jet test <file.jet>`** (or a directory of `*.jet` files) builds one harness
 binary per file (no cargo project; R9). Each test runs in isolation; failures
 use a generated unwind boundary (not observable in user code). Output is one
-line per test (`name: pass` / `name: FAIL`), a summary (`N passed, M failed`),
-and exit **1** when any test fails. **`require_eq`** failures print
-`left: …, right: …` on stderr.
+line per test (`name: pass` / `name: FAIL`), a shared summary (`N passed, M
+failed, K skipped`), and exit **1** when any test fails. Failed assertions print
+the registered `Stop [E3001]` report with the Jet source location; equality
+checks say `expected …, got …`.
 
 **Scope members (D-DOTSCOPE1)** — inside a `#Test { … }` body, a
 statement-position `.name { … }` / `.name(args) { … }` resolves against the
@@ -1051,9 +1052,8 @@ mode (structural check).
 - **`.skip { … }` / `.skip("reason") { … }`** — the region is **not executed**
   (emitted as a dead `if false` block, so it still type-checks). When `.skip` is
   the **first** statement the whole test is skipped: it reports `name: skip` and
-  the summary gains a `, K skipped` tail (the classic `N passed, M failed` line is
-  unchanged when nothing skips). A `.skip` later in the body skips only that
-  region; the rest of the test still runs.
+  the shared summary reports its skipped count. A `.skip` later in the body skips
+  only that region; the rest of the test still runs.
 
 **`jet new <name>`** creates `<name>/run.jet` with a zero-argument `fn run()`
 (hello world), plus `<name>/pkg.jet` and `<name>/.gitignore` (`build/`).

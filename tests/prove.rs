@@ -436,8 +436,26 @@ fn prove_uses_structured_test_evidence_and_continues_after_failure() {
     assert_eq!(out.status.code(), Some(1), "{}", String::from_utf8_lossy(&out.stderr));
     let report = String::from_utf8(out.stdout).unwrap();
     assert!(report.contains("\"unit\":{\"failed\":1,\"passed\":1,\"selected\":2"), "{report}");
+    assert!(report.contains("\"schema\":\"jet.report/v1\""), "{report}");
     assert!(report.contains("\"outcome\":\"failed\",\"producer\":\"jet-test\""), "{report}");
     assert!(report.contains("\"outcome\":\"passed\",\"producer\":\"jet-test\""), "{report}");
+
+    let human = Command::new(jet())
+        .current_dir(&root)
+        .args(["prove", "."])
+        .output()
+        .unwrap();
+    assert_eq!(human.status.code(), Some(1), "{}", String::from_utf8_lossy(&human.stderr));
+    assert!(
+        String::from_utf8_lossy(&human.stdout).contains("TESTS    unit: 1 passed, 1 failed, 0 skipped"),
+        "{}",
+        String::from_utf8_lossy(&human.stdout)
+    );
+    assert!(
+        String::from_utf8_lossy(&human.stderr).contains("Stop [E3001]"),
+        "{}",
+        String::from_utf8_lossy(&human.stderr)
+    );
 }
 
 #[test]
