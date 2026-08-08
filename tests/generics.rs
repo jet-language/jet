@@ -29,8 +29,7 @@ fn run() {}
 
     let body_items = r#"
 module complete<T, count: Int, label: String> {
-    $label :: label
-    #Meta(category: $label)
+    #Meta(category: label)
     $value :: count
     $comptime_value :: count + 1
     tag Marked { deny: [Net] }
@@ -46,14 +45,14 @@ module complete<T, count: Int, label: String> {
     module plain { pub fn value() => Int { return count } }
     module nested<U> { pub fn keep(value: U) => U { return ~value } }
     module nested_use = nested<T>
-    #Meta(category: $label)
-    pub fn marked(value: #Marked T) => #Marked T {
-        #Meta(category: $label)
-        local := T.{ value }
-        return ~local
+    #Meta(category: label)
+    pub fn marked(value: ^#Marked T) => #Marked T {
+        #Meta(category: label)
+        local := value
+        return local
     }
     #Test fn identity(value: T) { expect(count == count) }
-    #Bench("complete") { expect($label == $label) }
+    #Bench("complete") { expect(label == label) }
 }
 module complete_use = complete<Int, 3, "generic module">
 fn run() {}
