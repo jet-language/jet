@@ -68,8 +68,8 @@ use crate::AST::{EnumDef, Expr, Func, StructDef, Type};
 
 pub use Interpreter::{DebugHook, DevSink, ReplAuthorizer, ReplEffectRequest, REPL_FUEL_BUDGET, with_runtime_argv};
 pub use Methods::{
-    apply_core_call, apply_data_line_call, apply_impure_core_call, display_core_pure_value,
-    eval_regex_replace_all_with,
+    apply_core_call, apply_data_line_call, apply_impure_core_call,
+    apply_repl_authorized_core_call, display_core_pure_value, eval_regex_replace_all_with,
 };
 pub use Methods::apply_seeded_rng_method;
 #[doc(hidden)]
@@ -566,6 +566,8 @@ pub fn evaluate_with_imports_opts(
         fuel: FUEL_BUDGET,
         sink: None,
         repl_mode: false,
+        repl_grants: &[],
+        repl_authorizer: None,
         emitted_fragments: None,
         embed_inputs: None,
         mutated: None,
@@ -635,6 +637,8 @@ pub fn evaluate_with_imports_opts_collecting_structs<'a>(
         fuel: FUEL_BUDGET,
         sink: None,
         repl_mode: false,
+        repl_grants: &[],
+        repl_authorizer: None,
         emitted_fragments: None,
         embed_inputs: Some(&mut embed_inputs),
         mutated,
@@ -1118,6 +1122,8 @@ pub fn run_block_with_imports(
         fuel: FUEL_BUDGET,
         sink: None,
         repl_mode: false,
+        repl_grants: &[],
+        repl_authorizer: None,
         allow_impure: false,
         impure_depth: 0,
         emitted_fragments: None,

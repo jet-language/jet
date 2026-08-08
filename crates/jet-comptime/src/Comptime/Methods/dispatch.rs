@@ -27,7 +27,7 @@ use super::core_calls::{
     eval_regex_replace_all_with, shuffle_ct_list, sketch_add, solver_new, solver_require,
     with_ambient_rng,
 };
-use super::repl_process::{apply_repl_fs_call, pin_repl_command, repl_effect_request};
+use super::repl_process::apply_repl_authorized_core_call;
 
 // Keep this seeded SplitMix64 stream byte-for-byte with the AOT `jet_rng_*`
 // helpers. `core.random`'s ambient interpreter RNG is intentionally separate.

@@ -7,7 +7,10 @@ use crate::Codegen::TIR::{
     TPlace, TStrPart,
 };
 use crate::Comptime::Builtins::{as_bool, as_int, eval_binop};
-use crate::Comptime::{apply_core_call, apply_impure_core_call, CtReport, CtValue, DevSink};
+use crate::Comptime::{
+    apply_core_call, apply_impure_core_call, apply_repl_authorized_core_call, CtReport, CtValue,
+    DevSink,
+};
 use crate::Diagnostics::{Diagnostic, Span};
 use super::builtins::eval_builtin;
 use super::handles::eval_handle;
@@ -3228,7 +3231,31 @@ impl<'a> EvalCtx<'a> {
                 // comptime keeps depth 0 and must reject — never fall through
                 // to `apply_core_call`, which still hosts AuthLite/SyncLite
                 // and would const-fold storeful Ok(literals) (I9).
-                if self.impure_depth > 0 && self.allow_impure {
+                if self.repl_mode {
+                    let mut sink = self
+                        .sink
+                        .as_ref()
+                        .map(|sink| sink.lock().expect("evaluator sink poisoned"));
+                    apply_repl_authorized_core_call(
+                        module,
+                        method,
+                        argv,
+                        *source_span,
+                        &self.base_dir,
+                        sink.as_deref_mut(),
+                        &self.repl_grants,
+                        self.repl_authorizer.as_deref_mut(),
+                    )
+                    .map(|value| {
+                        mark_unknown_progress_total(
+                            value,
+                            module,
+                            method,
+                            args,
+                            progress_known_total,
+                        )
+                    })
+                } else if self.impure_depth > 0 && self.allow_impure {
                     let mut sink = self
                         .sink
                         .as_ref()
@@ -3240,7 +3267,7 @@ impl<'a> EvalCtx<'a> {
                         *source_span,
                         &self.base_dir,
                         sink.as_deref_mut(),
-                        self.repl_mode,
+                        false,
                         None,
                         None,
                     );
