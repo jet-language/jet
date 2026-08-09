@@ -164,30 +164,12 @@ fn native_call_hook(name: &str, args: &[CtValue]) -> Option<Result<CtValue, Diag
     )
 }
 
-/// Strip call-site "at comptime" framing baked into evaluator `what` strings
-/// before surfacing them as a runtime-tier diagnostic (D-VERDICT-1254-1).
-fn strip_comptime_framing(what: &str) -> String {
-    let mut s = what
-        .strip_suffix(" can't run at compile time yet")
-        .unwrap_or(what)
-        .to_string();
-    if let Some(rest) = s.strip_suffix(" (impure tier)") {
-        s = rest.to_string();
-    }
-    s = s.replace(" at comptime", "");
-    s = s.replace(" at compile time", "");
-    while s.contains("  ") {
-        s = s.replace("  ", " ");
-    }
-    s.trim().to_string()
-}
-
-/// Rewrite shared-evaluator diagnostics that leaked comptime voice into the
-/// default `jet run` / whole-program deopt path. Keeps the code; only what /
-/// why / fix change. Comptime callers never hit this (D-VERDICT-1254-1).
+/// Rewrite shared-evaluator diagnostics that need runtime-tier voice into the
+/// default `jet run` / whole-program deopt path. E0956 already has one shared
+/// what/why/fix constructor, so it passes through unchanged.
 fn rewrite_runtime_tier_diag(d: Diagnostic) -> Diagnostic {
     let construct = match d.code.as_str() {
-        "E0956" => strip_comptime_framing(&d.what),
+        "E0956" => return d,
         "E0951" => d
             .what
             .strip_suffix(" is not allowed in comptime code")

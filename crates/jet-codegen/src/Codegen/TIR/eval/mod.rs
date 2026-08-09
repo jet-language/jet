@@ -91,13 +91,7 @@ pub(super) fn raw_place_local(expr: &TExpr) -> Option<&TLocal> {
 pub use exprs::{stable_place_address, tir_place_address_key};
 
 pub(super) fn unsupported(what: &str, span: Span) -> Diagnostic {
-    Diagnostic::error(
-        "E0956",
-        format!("{what} can't run at compile time yet"),
-        "the canonical TIR evaluator doesn't cover this construct yet".to_string(),
-        "use a simpler form, or run via `jet build` / `jet run`".to_string(),
-        Some(span),
-    )
+    Diagnostic::e0956_unsupported(what, span)
 }
 
 pub(super) fn progress_now() -> f64 {

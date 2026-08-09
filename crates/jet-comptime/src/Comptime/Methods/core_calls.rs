@@ -6,7 +6,7 @@ use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::{CtFloat, Type};
 use super::super::Builtins::as_int;
 use super::super::Diagnostics::unsupported;
-use crate::AST::{CtReport, CtValue};
+use crate::AST::{as_bytes, CtReport, CtValue};
 
 use super::repl_process::run_repl_process;
 
@@ -229,29 +229,6 @@ pub(in super::super) fn as_string(v: &CtValue, span: Span) -> Result<&str, Diagn
         CtValue::Str(s) => Ok(s.as_str()),
         _ => Err(unsupported(
             "non-string argument to comptime string call",
-            span,
-        )),
-    }
-}
-
-/// D-UUIDENC1=A: a `[U8]` argument — either the literal `Bytes` shape
-/// (`embed_bytes`'s output) or a `List` of `Int` elements (an ordinary `[U8]`
-/// list literal), matching whichever the caller happens to be holding.
-pub(super) fn as_bytes(v: &CtValue, span: Span) -> Result<Vec<u8>, Diagnostic> {
-    match v {
-        CtValue::Bytes(bs) => Ok(bs.clone()),
-        CtValue::List(xs) => xs
-            .iter()
-            .map(|x| match x {
-                CtValue::Int(n) if (0..=255).contains(n) => Ok(*n as u8),
-                _ => Err(unsupported(
-                    "a `[U8]` list with an out-of-range element",
-                    span,
-                )),
-            })
-            .collect(),
-        _ => Err(unsupported(
-            "non-`[U8]` argument to comptime encoding call",
             span,
         )),
     }

@@ -202,6 +202,16 @@ impl Diagnostic {
         d
     }
 
+    pub fn e0956_unsupported(what: &str, span: Span) -> Self {
+        Self::error(
+            "E0956",
+            format!("{what} can't run at compile time yet"),
+            "the canonical TIR evaluator doesn't cover this construct yet".to_string(),
+            "use a simpler form, or run via `jet build` / `jet run`".to_string(),
+            Some(span),
+        )
+    }
+
     pub fn source_nesting_exceeded(depth: usize, span: Span) -> Self {
         Self::error(
             "E1403",
