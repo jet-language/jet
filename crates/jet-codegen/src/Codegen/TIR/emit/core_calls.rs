@@ -14,6 +14,294 @@ use crate::Codegen::TIR::struct_field_type;
 use crate::Codegen::TIR::emit::emit_symbol_call;
 use crate::Codegen::TIR::TExpr;
 
+fn compute_tuple_value(ty: &Type, values: &[String]) -> String {
+    let Type::Tuple(fields) = ty else {
+        return "()".to_string();
+    };
+    let plain = crate::Codegen::Tuples::tuple_fields_plain(fields);
+    let name = crate::Codegen::Tuples::tuple_struct_name(&plain);
+    let fields = fields
+        .iter()
+        .zip(values.iter())
+        .map(|((field, _), value)| format!("{}: {}", mangle(field), value))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("{name} {{ {fields} }}")
+}
+
+fn compute_gradient_type(method: &str, ret_ty: &Type) -> Option<Type> {
+    match method {
+        "gradient" => Some(ret_ty.clone()),
+        "value_and_gradient" => match ret_ty {
+            Type::Tuple(fields) => fields
+                .iter()
+                .find(|(name, _)| name == "gradients")
+                .map(|(_, ty)| (**ty).clone()),
+            _ => None,
+        },
+        "vjp" => match ret_ty {
+            Type::Apply { name, args } if name == "VjpRun" && args.len() == 1 => {
+                Some(args[0].clone())
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn compute_result_type<'a>(ret_ty: &'a Type, transform: bool) -> Option<&'a Type> {
+    if !transform {
+        return Some(ret_ty);
+    }
+    match ret_ty {
+        Type::Fn {
+            ret: Some(result),
+            ..
+        } => Some(result),
+        _ => None,
+    }
+}
+
+fn compute_gradient_tuple(gradient_ty: &Type, values: &str) -> String {
+    let Type::Tuple(fields) = gradient_ty else {
+        return "()".to_string();
+    };
+    let values = (0..fields.len())
+        .map(|index| format!("({values})[{index}].clone()"))
+        .collect::<Vec<_>>();
+    compute_tuple_value(gradient_ty, &values)
+}
+
+fn compute_nested_gradient(
+    gradient_ty: &Type,
+    output_ty: &Type,
+    output: &str,
+    tape: &str,
+    targets: &str,
+) -> Option<String> {
+    let Type::Tuple(output_fields) = output_ty else {
+        return None;
+    };
+    let Type::Tuple(gradient_fields) = gradient_ty else {
+        return None;
+    };
+    if gradient_fields.len() == 0
+        || gradient_fields.iter().any(|(_, ty)| !matches!(ty.as_ref(), Type::Tuple(_)))
+        || gradient_fields
+            .iter()
+            .any(|(_, ty)| matches!(ty.as_ref(), Type::Tuple(fields) if fields.len() != output_fields.len()))
+    {
+        return None;
+    }
+    let state_defs = output_fields
+        .iter()
+        .enumerate()
+        .map(|(index, (field, _))| {
+            format!(
+                "let __jet_state_{index} = jet_compute_vjp_begin((({output}).{}).clone(), ({tape}).clone());",
+                mangle(field)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let state_names = output_fields
+        .iter()
+        .enumerate()
+        .map(|(index, _)| format!("__jet_state_{index}"))
+        .collect::<Vec<_>>();
+    let gradient_defs = format!(
+        "let __jet_nested_gradients = jet_compute_nested_gradient_or_panic(&[{}], &{}, \"compute.gradient\");",
+        state_names.join(", "),
+        targets
+    );
+    let values = gradient_fields
+        .iter()
+        .enumerate()
+        .map(|(target_index, (_, inner_ty))| {
+            let Type::Tuple(inner_fields) = inner_ty.as_ref() else {
+                return String::new();
+            };
+            let inner_values = inner_fields
+                .iter()
+                .enumerate()
+                .map(|(component_index, _)| {
+                    format!(
+                        "(__jet_nested_gradients[{component_index}])[{target_index}].clone()"
+                    )
+                })
+                .collect::<Vec<_>>();
+            compute_tuple_value(inner_ty, &inner_values)
+        })
+        .collect::<Vec<_>>();
+    Some(format!(
+        "{{ {state_defs} {gradient_defs} {} }}",
+        compute_tuple_value(gradient_ty, &values)
+    ))
+}
+
+fn emit_compute_transform_call(
+    method: &str,
+    args: &[TExpr],
+    ret_ty: &Type,
+    cx: &Cx,
+) -> Option<String> {
+    if !matches!(method, "gradient" | "value_and_gradient" | "vjp" | "jvp")
+        || args.len() < 2
+    {
+        return None;
+    }
+    let Type::Fn {
+        params: base_params,
+        ret: Some(base_ret),
+        ..
+    } = &args[0].ty
+    else {
+        return None;
+    };
+    let transform = args.len() == 2;
+    let value_count = args.len().saturating_sub(2);
+    let primal_count = if method == "jvp" {
+        if !transform && value_count % 2 != 0 {
+            return None;
+        }
+        base_params.len()
+    } else {
+        base_params.len()
+    };
+    if !transform && value_count != if method == "jvp" {
+        primal_count.saturating_mul(2)
+    } else {
+        primal_count
+    } {
+        return None;
+    }
+    let f = emit_tir_expr(&args[0], cx);
+    let targets = emit_tir_expr(args.last()?, cx);
+    let base_call = |base: &str, inputs: &str| {
+        let call_args = (0..primal_count)
+            .map(|index| format!("({inputs})[{index}].clone()"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("({base})({call_args})")
+    };
+    let result_ty = compute_result_type(ret_ty, transform)?;
+    let gradient_ty = compute_gradient_type(method, result_ty);
+    let nested_gradient = method == "gradient"
+        && matches!(base_ret.as_ref(), Type::Tuple(fields) if fields.iter().all(|(_, ty)| matches!(ty.as_ref(), Type::Named(name) if name == "Tensor")));
+    let result_body = |output: &str, state: &str, tape: &str, target_expr: &str| -> Option<String> {
+        match method {
+            "gradient" => {
+                let gradient_ty = gradient_ty.as_ref()?;
+                if nested_gradient {
+                    return compute_nested_gradient(
+                        gradient_ty,
+                        base_ret,
+                        output,
+                        tape,
+                        target_expr,
+                    );
+                }
+                Some(format!(
+                    "{{ let __jet_result = jet_compute_transform_or_panic(\"gradient\", &{state}, &[], &{target_expr}, \"compute.gradient\"); let JetComputeTransformResult::Gradient(__jet_gradients) = __jet_result else {{ jet_panic(\"Compute.rs\", line!(), \"compute.gradient returned the wrong result\") }}; {} }}",
+                    compute_gradient_tuple(gradient_ty, "__jet_gradients")
+                ))
+            }
+            "value_and_gradient" => {
+                let gradient_ty = gradient_ty.as_ref()?;
+                Some(format!(
+                    "{{ let __jet_result = jet_compute_transform_or_panic(\"value_and_gradient\", &{state}, &[], &{target_expr}, \"compute.value_and_gradient\"); let JetComputeTransformResult::ValueAndGradient {{ value: __jet_value, gradients: __jet_gradients }} = __jet_result else {{ jet_panic(\"Compute.rs\", line!(), \"compute.value_and_gradient returned the wrong result\") }}; {} }}",
+                    compute_tuple_value(result_ty, &["__jet_value".to_string(), compute_gradient_tuple(gradient_ty, "__jet_gradients")])
+                ))
+            }
+            "vjp" => {
+                let gradient_ty = gradient_ty.as_ref()?;
+                Some(format!(
+                    "{{ let __jet_result = jet_compute_transform_or_panic(\"vjp\", &{state}, &[], &{target_expr}, \"compute.vjp\"); let JetComputeTransformResult::Vjp {{ value: __jet_vjp_value, state: __jet_vjp_state }} = __jet_result else {{ jet_panic(\"Compute.rs\", line!(), \"compute.vjp returned the wrong result\") }}; let __jet_pull_state = __jet_vjp_state.clone(); let __jet_grads_state = __jet_vjp_state; let __jet_pull_targets = {target_expr}.clone(); let __jet_grads_targets = {target_expr}.clone(); JetComputeVjpRun {{ value: __jet_vjp_value, pull: std::rc::Rc::new(move |__jet_seed: JetTensor| {{ let __jet_gradients = jet_compute_vjp_pull_or_panic(&__jet_pull_state, &__jet_seed, &__jet_pull_targets, \"compute.vjp.pull\"); {} }}), grads: std::rc::Rc::new(move || {{ let __jet_gradients = jet_compute_vjp_unit_grads_or_panic(&__jet_grads_state, &__jet_grads_targets, \"compute.vjp.grads\"); {} }}) }} }}",
+                    compute_gradient_tuple(gradient_ty, "__jet_gradients"),
+                    compute_gradient_tuple(gradient_ty, "__jet_gradients")
+                ))
+            }
+            "jvp" => {
+                let tangents = if transform {
+                    (0..primal_count)
+                        .map(|index| format!("__jet_arg{}", index + primal_count))
+                        .collect::<Vec<_>>()
+                } else {
+                    (0..primal_count)
+                        .map(|index| emit_tir_expr(&args[index + 1 + primal_count], cx))
+                        .collect::<Vec<_>>()
+                };
+                Some(format!(
+                    "{{ let __jet_result = jet_compute_transform_or_panic(\"jvp\", &{state}, &[{}], &{target_expr}, \"compute.jvp\"); let JetComputeTransformResult::Jvp {{ value: __jet_value, tangent: __jet_tangent }} = __jet_result else {{ jet_panic(\"Compute.rs\", line!(), \"compute.jvp returned the wrong result\") }}; {} }}",
+                    tangents.join(", "),
+                    compute_tuple_value(
+                        result_ty,
+                        &[
+                            "__jet_value".to_string(),
+                            "__jet_tangent".to_string(),
+                        ]
+                    )
+                ))
+            }
+            _ => None,
+        }
+    };
+    let body = if transform {
+        let params = if method == "jvp" {
+            base_params
+                .iter()
+                .chain(base_params.iter())
+                .enumerate()
+                .map(|(index, ty)| format!("__jet_arg{index}: {}", cx.rust_type(ty)))
+                .collect::<Vec<_>>()
+        } else {
+            base_params
+                .iter()
+                .enumerate()
+                .map(|(index, ty)| format!("__jet_arg{index}: {}", cx.rust_type(ty)))
+                .collect::<Vec<_>>()
+        };
+        let target = format!("__jet_targets");
+        let state_setup = if nested_gradient {
+            String::new()
+        } else {
+            "let __jet_state = jet_compute_vjp_begin(__jet_value.clone(), __jet_tape.clone());".to_string()
+        };
+        let result = result_body("__jet_value", "__jet_state", "__jet_tape", &target)?;
+        Some(format!(
+            "{{ let __jet_base = ({f}).clone(); std::rc::Rc::new(move |{}| {{ let (__jet_tape, __jet_inputs) = jet_compute_trace_inputs(vec![{}]); let __jet_value = (__jet_base)({}); {state_setup} let __jet_targets = {}; {} }}) as {} }}",
+            params.join(", "),
+            (0..primal_count)
+                .map(|index| format!("__jet_arg{index}.clone()"))
+                .collect::<Vec<_>>()
+                .join(", "),
+            (0..primal_count)
+                .map(|index| format!("(__jet_inputs)[{index}].clone()"))
+                .collect::<Vec<_>>()
+                .join(", "),
+            targets,
+            result,
+            cx.rust_type(ret_ty)
+        ))
+    } else {
+        let trace_inputs = (0..primal_count)
+            .map(|index| format!("({}).clone()", emit_tir_expr(&args[index + 1], cx)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let call = base_call(&f, "__jet_inputs");
+        let state_setup = if nested_gradient {
+            String::new()
+        } else {
+            "let __jet_state = jet_compute_vjp_begin(__jet_value.clone(), __jet_tape.clone());".to_string()
+        };
+        let result = result_body("__jet_value", "__jet_state", "__jet_tape", "__jet_targets")?;
+        Some(format!(
+            "{{ let (__jet_tape, __jet_inputs) = jet_compute_trace_inputs(vec![{trace_inputs}]); let __jet_value = {call}; {state_setup} let __jet_targets = {targets}; {result} }}"
+        ))
+    };
+    body
+}
+
 fn emit_data_schema_columns(elem_ty: &Type, expand_struct: bool, cx: &Cx) -> String {
     let column = |name: &str, type_name: &str| {
         format!(
@@ -169,6 +457,11 @@ pub(crate) fn emit_tir_core_call(
         regex_fn("jet_crypto_email_ed25519_sign_impl"),
         cx.root_prefix,
     );
+    if module == "core.compute" {
+        if let Some(rendered) = emit_compute_transform_call(method, args, ret_ty, cx) {
+            return rendered;
+        }
+    }
     if let Some(rendered) = emit_plain_core_call(module, method, &arg, &helper) {
         return rendered;
     }
@@ -944,21 +1237,6 @@ pub(crate) fn emit_tir_core_call(
         
         
         
-        ("core.compute", "jvp_add" | "jvp_mul" | "jvp_matmul") => format!(
-            "{}(&({}), &({}), &({}), &({}))",
-            helper(&format!("jet_compute_{method}")),
-            arg(0),
-            arg(1),
-            arg(2),
-            arg(3)
-        ),
-        ("core.compute", "vjp_add" | "vjp_mul" | "vjp_matmul") => format!(
-            "{}(&({}), &({}), &({}))",
-            helper(&format!("jet_compute_{method}_value")),
-            arg(0),
-            arg(1),
-            arg(2)
-        ),
         
         
         

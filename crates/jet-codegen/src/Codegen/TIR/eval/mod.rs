@@ -804,6 +804,50 @@ enum EvalCallable<'a> {
         captured: HashMap<String, CtValue>,
     },
     Named(&'a str),
+    ComputeTransform {
+        base: CtValue,
+        method: String,
+        targets: Vec<i64>,
+        result_ty: Type,
+    },
+    ComputePull {
+        output: CtValue,
+        anchor: CtValue,
+        targets: Vec<i64>,
+        gradient_ty: Type,
+    },
+    ComputeGrads {
+        output: CtValue,
+        anchor: CtValue,
+        targets: Vec<i64>,
+        gradient_ty: Type,
+    },
+}
+
+enum EvalCallableSnapshot<'a> {
+    Lambda {
+        lambda: &'a TIR::TLambda,
+        captured: HashMap<String, CtValue>,
+    },
+    Named(&'a str),
+    ComputeTransform {
+        base: CtValue,
+        method: String,
+        targets: Vec<i64>,
+        result_ty: Type,
+    },
+    ComputePull {
+        output: CtValue,
+        anchor: CtValue,
+        targets: Vec<i64>,
+        gradient_ty: Type,
+    },
+    ComputeGrads {
+        output: CtValue,
+        anchor: CtValue,
+        targets: Vec<i64>,
+        gradient_ty: Type,
+    },
 }
 
 #[derive(Clone)]
@@ -1923,41 +1967,101 @@ impl<'a> EvalCtx<'a> {
     ) -> Result<CtValue, Diagnostic> {
         let index = Self::callable_index(value)
             .ok_or_else(|| unsupported("calling this non-function value", self.span()))?;
-        let (lambda, named, mut captured) = {
+        let target = {
             let runtime = self.runtime.lock().expect("evaluator runtime poisoned");
             match runtime.callables.get(index) {
                 Some(EvalCallable::Lambda { lambda, captured }) => {
-                    (Some(*lambda), None, captured.clone())
+                    EvalCallableSnapshot::Lambda {
+                        lambda: *lambda,
+                        captured: captured.clone(),
+                    }
                 }
-                Some(EvalCallable::Named(name)) => (None, Some(*name), HashMap::new()),
+                Some(EvalCallable::Named(name)) => EvalCallableSnapshot::Named(*name),
+                Some(EvalCallable::ComputeTransform {
+                    base,
+                    method,
+                    targets,
+                    result_ty,
+                }) => EvalCallableSnapshot::ComputeTransform {
+                    base: base.clone(),
+                    method: method.clone(),
+                    targets: targets.clone(),
+                    result_ty: result_ty.clone(),
+                },
+                Some(EvalCallable::ComputePull {
+                    output,
+                    anchor,
+                    targets,
+                    gradient_ty,
+                }) => EvalCallableSnapshot::ComputePull {
+                    output: output.clone(),
+                    anchor: anchor.clone(),
+                    targets: targets.clone(),
+                    gradient_ty: gradient_ty.clone(),
+                },
+                Some(EvalCallable::ComputeGrads {
+                    output,
+                    anchor,
+                    targets,
+                    gradient_ty,
+                }) => EvalCallableSnapshot::ComputeGrads {
+                    output: output.clone(),
+                    anchor: anchor.clone(),
+                    targets: targets.clone(),
+                    gradient_ty: gradient_ty.clone(),
+                },
                 None => return Err(unsupported("calling an unknown function value", self.span())),
             }
         };
-        if let Some(lambda) = lambda {
-            let result = self.eval_tlambda(lambda, args, &mut captured);
-            if result.is_ok() {
-                if let Some(EvalCallable::Lambda {
-                    captured: stored, ..
-                }) = self
-                    .runtime
-                    .lock()
-                    .expect("evaluator runtime poisoned")
-                    .callables
-                    .get_mut(index)
-                {
-                    *stored = captured;
+        match target {
+            EvalCallableSnapshot::Lambda {
+                lambda,
+                mut captured,
+            } => {
+                let result = self.eval_tlambda(lambda, args, &mut captured);
+                if result.is_ok() {
+                    if let Some(EvalCallable::Lambda {
+                        captured: stored, ..
+                    }) = self
+                        .runtime
+                        .lock()
+                        .expect("evaluator runtime poisoned")
+                        .callables
+                        .get_mut(index)
+                    {
+                        *stored = captured;
+                    }
                 }
+                result
             }
-            return result;
+            EvalCallableSnapshot::Named(name) => {
+                let func = self
+                    .funcs
+                    .get(name)
+                    .copied()
+                    .ok_or_else(|| unsupported(&format!("callable function `{name}`"), self.span()))?;
+                let mut child = HashMap::new();
+                self.run_func(func, args, &mut child)
+            }
+            EvalCallableSnapshot::ComputeTransform {
+                base,
+                method,
+                targets,
+                result_ty,
+            } => self.eval_compute_transform(&method, base, args, targets, &result_ty),
+            EvalCallableSnapshot::ComputePull {
+                output,
+                anchor,
+                targets,
+                gradient_ty,
+            } => self.eval_compute_pull(output, anchor, args, targets, &gradient_ty),
+            EvalCallableSnapshot::ComputeGrads {
+                output,
+                anchor,
+                targets,
+                gradient_ty,
+            } => self.eval_compute_grads(output, anchor, args, targets, &gradient_ty),
         }
-        let name = named.expect("callable target");
-        let func = self
-            .funcs
-            .get(name)
-            .copied()
-            .ok_or_else(|| unsupported(&format!("callable function `{name}`"), self.span()))?;
-        let mut child = HashMap::new();
-        self.run_func(func, args, &mut child)
     }
 }
 
@@ -1983,6 +2087,10 @@ fn seed_fragment_distinct_types(
 
 fn seed_fragment_funcs(cx: &mut Cx, funcs: &HashMap<String, &Func>) {
     for (name, function) in funcs {
+        cx.fn_param_names.insert(
+            name.clone(),
+            function.params.iter().map(|parameter| parameter.name.clone()).collect(),
+        );
         cx.fn_type_params.insert(
             name.clone(),
             function

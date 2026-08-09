@@ -84,6 +84,8 @@ pub(crate) struct Cx {
     pub(crate) sigs: HashMap<String, Vec<(AccessConvention, Type)>>,
     /// Top-level function name -> function value type (M8).
     pub(crate) fn_types: HashMap<String, Type>,
+    /// Function name -> source parameter names for labeled compute transforms.
+    pub(crate) fn_param_names: HashMap<String, Vec<String>>,
     /// `(TypeName, method)` -> parameter conventions+types (including `self`).
     pub(crate) method_sigs: HashMap<(String, String), Vec<(AccessConvention, Type)>>,
     /// Method-owned type parameters in declaration order. Owner parameters are
@@ -602,7 +604,7 @@ pub(crate) fn compute_handle_rust_type(name: &str) -> Option<&'static str> {
         "ComputeError" => Some("JetComputeError"),
         "ComputeDevice" => Some("JetComputeDevice"),
         "ComputeStream" => Some("JetComputeStream"),
-        "GradTriple" => Some("JetComputeGradTriple"),
+        "VjpRun" => Some("JetComputeVjpRun"),
         "SparseTensor" => Some("JetSparseCsr"),
         _ => None,
     }
@@ -1638,6 +1640,9 @@ impl Cx {
                     && compute_handle_rust_type("Tensor").is_some() =>
             {
                 format!("{}JetTensor", self.root_prefix)
+            }
+            Type::Apply { name, args } if name == "VjpRun" && args.len() == 1 => {
+                format!("{}JetComputeVjpRun<{}>", self.root_prefix, self.rust_type(&args[0]))
             }
             // D-ALLOC1/D-ALLOC-C (ratified 2026-06-19): allocator opaque types.
             Type::Named(name) if alloc_handle_rust_type(name).is_some() => {
@@ -2789,6 +2794,7 @@ pub(crate) fn build_cx_items(
     let mut cx = Cx {
         sigs: HashMap::new(),
         fn_types: HashMap::new(),
+        fn_param_names: HashMap::new(),
         method_sigs: HashMap::new(),
         method_type_params: HashMap::new(),
         method_self_convs: HashMap::new(),
@@ -3103,6 +3109,10 @@ pub(crate) fn build_cx_items(
     for item in items {
         match item {
             Item::Func(f) => {
+                cx.fn_param_names.insert(
+                    f.name.clone(),
+                    f.params.iter().map(|param| param.name.clone()).collect(),
+                );
                 cx.fn_type_params.insert(
                     f.name.clone(),
                     f.type_params.iter().map(|param| param.name.clone()).collect(),
@@ -3417,13 +3427,17 @@ pub(crate) fn build_cx_items(
                                 f.params.iter().map(|p| (p.convention, p.ty.clone())).collect(),
                             );
                             cx.fn_types.insert(
-                                mangled,
+                                mangled.clone(),
                                 Type::Fn {
                                     params: f.params.iter().map(|p| p.ty.clone()).collect(),
                                     ret: f.return_type.clone().map(Box::new),
                                     effect_bound: None, return_view_provenance: None,
                                     param_contract: None,
                                 },
+                            );
+                            cx.fn_param_names.insert(
+                                mangled,
+                                f.params.iter().map(|param| param.name.clone()).collect(),
                             );
                         }
                     }

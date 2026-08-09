@@ -2279,6 +2279,11 @@ fn check_bundle_opts_for_output_inner(
         .filter(|(key, _)| module_aliases.iter().any(|prefix| key.starts_with(prefix)))
         .map(|(key, summary)| (key.clone(), summary.clone()))
         .collect::<HashMap<_, _>>();
+    super::Effects::check_autodiff_purity(
+        &validation_summaries,
+        &public_solved,
+        &mut diags,
+    );
     // D-CRYPTO-DIAG1: candidate facts survive only when their entire function
     // remains error-free through the solved effect phases below.
     for (module_index, module) in bundle.modules.iter().enumerate() {

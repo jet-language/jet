@@ -2,7 +2,9 @@
 //! by including the same source (`Prelude/CoreLib/Top/Compute.rs`). Marshalling
 //! to `CtValue` lives here; engines must not re-encode tensor law.
 
-use crate::AST::{CtFloat, CtReport, CtValue, Type};
+use crate::AST::{
+    ClosureData, CtFloat, CtOpaque, CtReport, CtValue, Lambda, LambdaBody, LambdaMeta, Type,
+};
 use crate::Diagnostics::{Diagnostic, Span};
 use super::Diagnostics::unsupported;
 
@@ -189,7 +191,135 @@ fn ct_to_transfer(value: &CtValue, span: Span) -> Result<JetComputeTransferRecei
     })
 }
 
+fn tape_rule_to_ct(rule: Option<&JetComputeTapeRule>) -> CtValue {
+    let Some(rule) = rule else {
+        return CtValue::Str("input".to_string());
+    };
+    let (kind, source_shape, axis) = match rule {
+        JetComputeTapeRule::Add => ("add", None, None),
+        JetComputeTapeRule::Sub => ("sub", None, None),
+        JetComputeTapeRule::Mul => ("mul", None, None),
+        JetComputeTapeRule::Div => ("div", None, None),
+        JetComputeTapeRule::Maximum => ("maximum", None, None),
+        JetComputeTapeRule::Minimum => ("minimum", None, None),
+        JetComputeTapeRule::Matmul => ("matmul", None, None),
+        JetComputeTapeRule::Unary(op) => (op.as_str(), None, None),
+        JetComputeTapeRule::Reshape { source_shape } => ("reshape", Some(source_shape), None),
+        JetComputeTapeRule::Broadcast { source_shape } => ("broadcast", Some(source_shape), None),
+        JetComputeTapeRule::ReduceToShape { source_shape } => {
+            ("reduce_to_shape", Some(source_shape), None)
+        }
+        JetComputeTapeRule::Transpose => ("transpose", None, None),
+        JetComputeTapeRule::SumAxis { axis, source_shape } => {
+            ("sum_axis", Some(source_shape), Some(*axis as i64))
+        }
+    };
+    let mut fields = vec![("kind".to_string(), CtValue::Str(kind.to_string()))];
+    if let Some(shape) = source_shape {
+        fields.push((
+            "source_shape".to_string(),
+            CtValue::List(shape.iter().map(|value| CtValue::Int(*value)).collect()),
+        ));
+    }
+    if let Some(axis) = axis {
+        fields.push(("axis".to_string(), CtValue::Int(axis)));
+    }
+    CtValue::Struct {
+        type_name: "__JetComputeRule".to_string(),
+        fields,
+    }
+}
+
+#[derive(Clone)]
+struct JetComputeTapeHandle {
+    tape: std::sync::Arc<std::sync::Mutex<JetComputeTape>>,
+}
+
+fn tape_handle_to_ct(tape: std::sync::Arc<std::sync::Mutex<JetComputeTape>>) -> CtValue {
+    CtValue::Closure(std::sync::Arc::new(ClosureData {
+        lambda: Lambda {
+            take_names: Vec::new(),
+            params: Vec::new(),
+            body: LambdaBody::Block(Vec::new()),
+            span: Span::new(0, 0),
+            meta: LambdaMeta::default(),
+        },
+        captured: std::collections::HashMap::new(),
+        return_type: None,
+        opaque: Some(CtOpaque::new(JetComputeTapeHandle { tape })),
+    }))
+}
+
+fn trace_to_ct(trace: &JetComputeTrace) -> CtValue {
+    let tape_handle = trace.tape.upgrade().unwrap_or_else(|| {
+        jet_panic(
+            "ComputeLite::trace_to_ct",
+            line!(),
+            "autodiff tape ended before its trace was marshalled",
+        )
+    });
+    let tape = tape_handle
+        .lock()
+        .unwrap_or_else(|_| jet_panic("ComputeLite::trace_to_ct", line!(), "autodiff tape is poisoned"));
+    let nodes = tape
+        .nodes
+        .iter()
+        .map(|node| CtValue::Struct {
+            type_name: "__JetComputeNode".to_string(),
+            fields: vec![
+                (
+                    "parents".to_string(),
+                    CtValue::List(
+                        node.parents
+                            .iter()
+                            .map(|parent| CtValue::Int(parent.map_or(-1, |value| value as i64)))
+                            .collect(),
+                    ),
+                ),
+                ("rule".to_string(), tape_rule_to_ct(node.rule.as_ref())),
+                (
+                    "values".to_string(),
+                    CtValue::List(
+                        node.values
+                            .iter()
+                            .map(|value| tensor_to_ct_inner(value, false))
+                            .collect(),
+                    ),
+                ),
+                ("output".to_string(), tensor_to_ct_inner(&node.output, false)),
+            ],
+        })
+        .collect();
+    let inputs = CtValue::List(
+        tape.inputs
+            .iter()
+            .map(|value| tensor_to_ct_inner(value, false))
+            .collect(),
+    );
+    drop(tape);
+    let mut fields = vec![
+        ("identity".to_string(), tape_handle_to_ct(tape_handle)),
+        ("node".to_string(), CtValue::Int(trace.node as i64)),
+        ("inputs".to_string(), inputs),
+        ("nodes".to_string(), CtValue::List(nodes)),
+    ];
+    if let Some(parent) = &trace.parent {
+        fields.push((
+            "parent".to_string(),
+            CtValue::Present(Box::new(trace_to_ct(parent))),
+        ));
+    }
+    CtValue::Struct {
+        type_name: "__JetComputeTrace".to_string(),
+        fields,
+    }
+}
+
 fn tensor_to_ct(tensor: &JetTensor) -> CtValue {
+    tensor_to_ct_inner(tensor, true)
+}
+
+fn tensor_to_ct_inner(tensor: &JetTensor, include_trace: bool) -> CtValue {
     // CtValue owns lists; Prelude remains authority for validation and logical
     // element selection at this engine boundary.
     if let Err(error) = jet_compute_validate_tensor(tensor) {
@@ -210,38 +340,47 @@ fn tensor_to_ct(tensor: &JetTensor) -> CtValue {
         ),
     };
     let data = jet_compute_tensor_values(tensor);
+    let mut fields = vec![
+        (
+            "shape".to_string(),
+            CtValue::List(tensor.shape.iter().map(|d| CtValue::Int(*d)).collect()),
+        ),
+        (
+            "strides".to_string(),
+            CtValue::List(strides.iter().map(|d| CtValue::Int(*d)).collect()),
+        ),
+        (
+            "data".to_string(),
+            CtValue::List(data.iter().map(|v| CtValue::Float(CtFloat::f64(*v))).collect()),
+        ),
+        ("device".to_string(), device_to_ct(tensor.device)),
+        (
+            "last_placement".to_string(),
+            receipt_to_ct(&tensor.last_placement),
+        ),
+        (
+            "last_transfer".to_string(),
+            tensor
+                .last_transfer
+                .as_ref()
+                .map(transfer_to_ct)
+                .map(|value| CtValue::Present(Box::new(value)))
+                .unwrap_or_else(|| {
+                    CtValue::absent(Type::Named("ComputeTransfer".to_string()))
+                }),
+        ),
+    ];
+    if include_trace {
+        if let Some(trace) = &tensor.trace {
+            fields.push((
+                "autodiff".to_string(),
+                CtValue::Present(Box::new(trace_to_ct(trace))),
+            ));
+        }
+    }
     CtValue::Struct {
         type_name: "Tensor".to_string(),
-        fields: vec![
-            (
-                "shape".to_string(),
-                CtValue::List(tensor.shape.iter().map(|d| CtValue::Int(*d)).collect()),
-            ),
-            (
-                "strides".to_string(),
-                CtValue::List(strides.iter().map(|d| CtValue::Int(*d)).collect()),
-            ),
-            (
-                "data".to_string(),
-                CtValue::List(data.iter().map(|v| CtValue::Float(CtFloat::f64(*v))).collect()),
-            ),
-            ("device".to_string(), device_to_ct(tensor.device)),
-            (
-                "last_placement".to_string(),
-                receipt_to_ct(&tensor.last_placement),
-            ),
-            (
-                "last_transfer".to_string(),
-                tensor
-                    .last_transfer
-                    .as_ref()
-                    .map(transfer_to_ct)
-                    .map(|value| CtValue::Present(Box::new(value)))
-                    .unwrap_or_else(|| {
-                        CtValue::absent(Type::Named("ComputeTransfer".to_string()))
-                    }),
-            ),
-        ],
+        fields,
     }
 }
 
@@ -272,7 +411,179 @@ fn as_f64_list(value: &CtValue, span: Span) -> Result<Vec<f64>, Diagnostic> {
     }
 }
 
+fn tape_rule_from_ct(value: &CtValue, span: Span) -> Result<Option<JetComputeTapeRule>, Diagnostic> {
+    let kind = match value {
+        CtValue::Str(kind) => kind.as_str(),
+        CtValue::Struct { type_name, fields } if type_name == "__JetComputeRule" => fields
+            .iter()
+            .find_map(|(name, value)| (name == "kind").then_some(value))
+            .and_then(|value| match value {
+                CtValue::Str(kind) => Some(kind.as_str()),
+                _ => None,
+            })
+            .ok_or_else(|| unsupported("autodiff tape rule", span))?,
+        _ => return Err(unsupported("autodiff tape rule", span)),
+    };
+    if kind == "input" {
+        return Ok(None);
+    }
+    let CtValue::Struct { fields, .. } = value else {
+        return Err(unsupported("autodiff tape rule", span));
+    };
+    let source_shape = || {
+        fields
+            .iter()
+            .find_map(|(name, value)| (name == "source_shape").then_some(value))
+            .ok_or_else(|| unsupported("autodiff source shape", span))
+            .and_then(|value| as_i64_list(value, span))
+    };
+    let axis = || {
+        fields
+            .iter()
+            .find_map(|(name, value)| (name == "axis").then_some(value))
+            .and_then(|value| match value {
+                CtValue::Int(axis) => Some(*axis),
+                _ => None,
+            })
+            .ok_or_else(|| unsupported("autodiff reduction axis", span))
+    };
+    Ok(Some(match kind {
+        "add" => JetComputeTapeRule::Add,
+        "sub" => JetComputeTapeRule::Sub,
+        "mul" => JetComputeTapeRule::Mul,
+        "div" => JetComputeTapeRule::Div,
+        "maximum" => JetComputeTapeRule::Maximum,
+        "minimum" => JetComputeTapeRule::Minimum,
+        "matmul" => JetComputeTapeRule::Matmul,
+        "negate" | "abs" | "exp" | "log" | "sqrt" => {
+            JetComputeTapeRule::Unary(kind.to_string())
+        }
+        "reshape" => JetComputeTapeRule::Reshape {
+            source_shape: source_shape()?,
+        },
+        "broadcast" => JetComputeTapeRule::Broadcast {
+            source_shape: source_shape()?,
+        },
+        "reduce_to_shape" => JetComputeTapeRule::ReduceToShape {
+            source_shape: source_shape()?,
+        },
+        "transpose" => JetComputeTapeRule::Transpose,
+        "sum_axis" => JetComputeTapeRule::SumAxis {
+            axis: usize::try_from(axis()?)
+                .map_err(|_| unsupported("autodiff reduction axis", span))?,
+            source_shape: source_shape()?,
+        },
+        _ => return Err(unsupported("autodiff tape operation", span)),
+    }))
+}
+
+fn trace_from_ct(value: &CtValue, span: Span) -> Result<JetComputeTrace, Diagnostic> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return Err(unsupported("autodiff trace", span));
+    };
+    if type_name != "__JetComputeTrace" {
+        return Err(unsupported("autodiff trace", span));
+    }
+    let field = |name: &str| {
+        fields
+            .iter()
+            .find(|(field, _)| field == name)
+            .map(|(_, value)| value)
+            .ok_or_else(|| unsupported("autodiff trace field", span))
+    };
+    let tape_handle = match field("identity")? {
+        CtValue::Closure(data) => data
+            .opaque
+            .as_ref()
+            .and_then(|opaque| opaque.downcast_ref::<JetComputeTapeHandle>())
+            .map(|handle| handle.tape.clone())
+            .ok_or_else(|| unsupported("autodiff trace identity", span))?,
+        _ => return Err(unsupported("autodiff trace identity", span)),
+    };
+    let node = match field("node")? {
+        CtValue::Int(node) if *node >= 0 => usize::try_from(*node).map_err(|_| unsupported("autodiff trace node", span))?,
+        _ => return Err(unsupported("autodiff trace node", span)),
+    };
+    let inputs = match field("inputs")? {
+        CtValue::List(values) => values
+            .iter()
+            .map(|value| ct_to_tensor_inner(value, span, false))
+            .collect::<Result<Vec<_>, _>>()?,
+        _ => return Err(unsupported("autodiff trace inputs", span)),
+    };
+    let nodes = match field("nodes")? {
+        CtValue::List(values) => values
+            .iter()
+            .map(|value| {
+                let CtValue::Struct { type_name, fields } = value else {
+                    return Err(unsupported("autodiff tape node", span));
+                };
+                if type_name != "__JetComputeNode" {
+                    return Err(unsupported("autodiff tape node", span));
+                }
+                let node_field = |name: &str| {
+                    fields
+                        .iter()
+                        .find(|(field, _)| field == name)
+                        .map(|(_, value)| value)
+                        .ok_or_else(|| unsupported("autodiff tape node field", span))
+                };
+                let parents = match node_field("parents")? {
+                    CtValue::List(values) => values
+                        .iter()
+                        .map(|value| match value {
+                            CtValue::Int(value) if *value < 0 => Ok(None),
+                            CtValue::Int(value) => usize::try_from(*value)
+                                .map(Some)
+                                .map_err(|_| unsupported("autodiff parent", span)),
+                            _ => Err(unsupported("autodiff parent", span)),
+                        })
+                        .collect::<Result<Vec<_>, _>>()?,
+                    _ => return Err(unsupported("autodiff parents", span)),
+                };
+                let rule = tape_rule_from_ct(node_field("rule")?, span)?;
+                let values = match node_field("values")? {
+                    CtValue::List(values) => values
+                        .iter()
+                        .map(|value| ct_to_tensor_inner(value, span, false))
+                        .collect::<Result<Vec<_>, _>>()?,
+                    _ => return Err(unsupported("autodiff node values", span)),
+                };
+                let output = ct_to_tensor_inner(node_field("output")?, span, false)?;
+                Ok(JetComputeTapeNode {
+                    parents,
+                    rule,
+                    values,
+                    output,
+                })
+            })
+            .collect::<Result<Vec<_>, Diagnostic>>()?,
+        _ => return Err(unsupported("autodiff trace nodes", span)),
+    };
+    if node >= nodes.len() {
+        return Err(unsupported("autodiff trace node", span));
+    }
+    let parent = match fields.iter().find(|(name, _)| name == "parent").map(|(_, value)| value) {
+        Some(CtValue::Present(value)) => Some(Box::new(trace_from_ct(value, span)?)),
+        Some(CtValue::Failed(CtReport::Clean(_))) | None => None,
+        Some(_) => return Err(unsupported("autodiff trace parent", span)),
+    };
+    Ok(JetComputeTrace {
+        tape: std::sync::Arc::downgrade(&tape_handle),
+        node,
+        parent,
+    })
+}
+
 fn ct_to_tensor(value: &CtValue, span: Span) -> Result<JetTensor, Diagnostic> {
+    ct_to_tensor_inner(value, span, true)
+}
+
+fn ct_to_tensor_inner(
+    value: &CtValue,
+    span: Span,
+    include_trace: bool,
+) -> Result<JetTensor, Diagnostic> {
     let CtValue::Struct { type_name, fields } = value else {
         return Err(unsupported("Tensor", span));
     };
@@ -291,6 +602,15 @@ fn ct_to_tensor(value: &CtValue, span: Span) -> Result<JetTensor, Diagnostic> {
         CtValue::Failed(CtReport::Clean(_)) => None,
         _ => return Err(unsupported("Tensor last_transfer", span)),
     };
+    let trace = if include_trace {
+        match fields.iter().find(|(name, _)| name == "autodiff").map(|(_, value)| value) {
+            Some(CtValue::Present(value)) => Some(trace_from_ct(value, span)?),
+            Some(CtValue::Failed(CtReport::Clean(_))) | None => None,
+            Some(_) => return Err(unsupported("Tensor autodiff trace", span)),
+        }
+    } else {
+        None
+    };
     let tensor = JetTensor {
         shape: as_i64_list(field("shape")?, span)?,
         strides: as_i64_list(field("strides")?, span)?,
@@ -298,6 +618,7 @@ fn ct_to_tensor(value: &CtValue, span: Span) -> Result<JetTensor, Diagnostic> {
         device: ct_to_device(field("device")?, span)?,
         last_placement: ct_to_receipt(field("last_placement")?, span)?,
         last_transfer,
+        trace,
     };
     jet_compute_validate_tensor(&tensor)
         .map_err(|error| unsupported(&format!("Tensor metadata: {}", error.jet_show()), span))?;
@@ -415,38 +736,6 @@ fn map_err(err: JetComputeError) -> CtValue {
     }
 }
 
-fn grad_to_ct(g: &JetComputeGradTriple) -> CtValue {
-    CtValue::Struct {
-        type_name: "GradTriple".to_string(),
-        fields: vec![
-            ("value".to_string(), tensor_to_ct(&g.value)),
-            ("grad_a".to_string(), tensor_to_ct(&g.grad_a)),
-            ("grad_b".to_string(), tensor_to_ct(&g.grad_b)),
-        ],
-    }
-}
-
-fn ct_to_grad(value: &CtValue, span: Span) -> Result<JetComputeGradTriple, Diagnostic> {
-    let CtValue::Struct { type_name, fields } = value else {
-        return Err(unsupported("GradTriple", span));
-    };
-    if type_name != "GradTriple" && type_name != "JetComputeGradTriple" {
-        return Err(unsupported("GradTriple", span));
-    }
-    let field = |name: &str| {
-        fields
-            .iter()
-            .find(|(n, _)| n == name)
-            .map(|(_, v)| v)
-            .ok_or_else(|| unsupported("GradTriple field", span))
-    };
-    Ok(JetComputeGradTriple {
-        value: ct_to_tensor(field("value")?, span)?,
-        grad_a: ct_to_tensor(field("grad_a")?, span)?,
-        grad_b: ct_to_tensor(field("grad_b")?, span)?,
-    })
-}
-
 fn stream_to_ct(s: &JetComputeStream) -> CtValue {
     CtValue::Struct {
         type_name: "ComputeStream".to_string(),
@@ -539,10 +828,6 @@ fn ct_to_sparse(value: &CtValue, span: Span) -> Result<JetSparseCsr, Diagnostic>
     Ok(sparse)
 }
 
-fn ok_grad(g: JetComputeGradTriple) -> CtValue {
-    CtValue::Present(Box::new(grad_to_ct(&g)))
-}
-
 fn ok_sparse(s: JetSparseCsr) -> CtValue {
     CtValue::Present(Box::new(sparse_to_ct(&s)))
 }
@@ -553,6 +838,158 @@ fn ok_tensor(tensor: JetTensor) -> CtValue {
 
 fn err_compute(err: JetComputeError) -> CtValue {
     CtValue::failed(Box::new(map_err(err)))
+}
+
+fn autodiff_state(
+    output: &CtValue,
+    anchor: &CtValue,
+    span: Span,
+) -> Result<JetComputeVjpState, Diagnostic> {
+    let output = ct_to_tensor(output, span)?;
+    let anchor = ct_to_tensor(anchor, span)?;
+    let tape = anchor
+        .trace
+        .as_ref()
+        .and_then(|trace| trace.tape.upgrade())
+        .or_else(|| output.trace.as_ref().and_then(|trace| trace.tape.upgrade()))
+        .unwrap_or_else(jet_compute_empty_tape);
+    Ok(jet_compute_vjp_begin(output, tape))
+}
+
+fn autodiff_transform_state(
+    method: &str,
+    output: &CtValue,
+    anchor: &CtValue,
+    tangents: &[CtValue],
+    targets: &[i64],
+    span: Span,
+) -> Result<JetComputeTransformResult, Diagnostic> {
+    let state = autodiff_state(output, anchor, span)?;
+    let tangents = tangents
+        .iter()
+        .map(|value| ct_to_tensor(value, span))
+        .collect::<Result<Vec<_>, _>>()?;
+    jet_compute_transform(method, &state, &tangents, targets).map_err(|error| {
+        unsupported(
+            &format!("compute.{method} autodiff: {}", error.jet_show()),
+            span,
+        )
+    })
+}
+
+pub fn autodiff_value(
+    output: &CtValue,
+    anchor: &CtValue,
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let state = autodiff_state(output, anchor, span)?;
+    Ok(tensor_to_ct(&jet_compute_remove_trace_level(
+        &state.value,
+        &state.tape,
+    )))
+}
+
+/// Start one per-call autodiff tape for the Tensor arguments. The returned
+/// values retain the tape through the CtValue boundary; no ambient/global tape
+/// is used.
+pub fn autodiff_trace_inputs(
+    values: &[CtValue],
+    span: Span,
+) -> Result<Vec<CtValue>, Diagnostic> {
+    let inputs = values
+        .iter()
+        .map(|value| ct_to_tensor(value, span))
+        .collect::<Result<Vec<_>, _>>()?;
+    let (tape, tracked) = jet_compute_trace_inputs(inputs);
+    // `tensor_to_ct` places the strong handle in each trace identity.  Keep
+    // this local alive until all tracked arguments have crossed the boundary.
+    let _tape_owner = tape;
+    Ok(tracked.iter().map(tensor_to_ct).collect())
+}
+
+pub fn autodiff_gradient(
+    output: &CtValue,
+    anchor: &CtValue,
+    targets: &[i64],
+    span: Span,
+) -> Result<Vec<CtValue>, Diagnostic> {
+    let JetComputeTransformResult::Gradient(values) = autodiff_transform_state(
+        "gradient",
+        output,
+        anchor,
+        &[],
+        targets,
+        span,
+    )? else {
+        return Err(unsupported("compute.gradient result", span));
+    };
+    Ok(values.iter().map(tensor_to_ct).collect())
+}
+
+pub fn autodiff_unit_grads(
+    output: &CtValue,
+    anchor: &CtValue,
+    targets: &[i64],
+    span: Span,
+) -> Result<Vec<CtValue>, Diagnostic> {
+    autodiff_gradient(output, anchor, targets, span)
+}
+
+pub fn autodiff_nested_gradient(
+    outputs: &[CtValue],
+    anchor: &CtValue,
+    targets: &[i64],
+    span: Span,
+) -> Result<Vec<Vec<CtValue>>, Diagnostic> {
+    let states = outputs
+        .iter()
+        .map(|output| autodiff_state(output, anchor, span))
+        .collect::<Result<Vec<_>, _>>()?;
+    let gradients = jet_compute_nested_gradient(&states, targets).map_err(|error| {
+        unsupported(
+            &format!("compute.gradient autodiff: {}", error.jet_show()),
+            span,
+        )
+    })?;
+    Ok(gradients
+        .iter()
+        .map(|values| values.iter().map(tensor_to_ct).collect())
+        .collect())
+}
+
+pub fn autodiff_vjp_pull(
+    output: &CtValue,
+    anchor: &CtValue,
+    seed: &CtValue,
+    targets: &[i64],
+    span: Span,
+) -> Result<Vec<CtValue>, Diagnostic> {
+    let seed = ct_to_tensor(seed, span)?;
+    let state = match autodiff_transform_state("vjp", output, anchor, &[], targets, span)? {
+        JetComputeTransformResult::Vjp { state, .. } => state,
+        _ => return Err(unsupported("compute.vjp result", span)),
+    };
+    let values = jet_compute_vjp_pull_or_panic(&state, &seed, targets, "compute.vjp.pull");
+    Ok(values.iter().map(tensor_to_ct).collect())
+}
+
+pub fn autodiff_jvp(
+    output: &CtValue,
+    anchor: &CtValue,
+    tangents: &[CtValue],
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let JetComputeTransformResult::Jvp { tangent, .. } = autodiff_transform_state(
+        "jvp",
+        output,
+        anchor,
+        tangents,
+        &[],
+        span,
+    )? else {
+        return Err(unsupported("compute.jvp result", span));
+    };
+    Ok(tensor_to_ct(&tangent))
 }
 
 fn as_float(value: &CtValue, span: Span) -> Result<f64, Diagnostic> {
@@ -787,72 +1224,6 @@ pub fn apply(
             Ok(b) => CtValue::Present(Box::new(CtValue::Bool(b))),
             Err(e) => err_compute(e),
         }),
-        "jvp_add" | "jvp_mul" | "jvp_matmul" => Ok(match if method == "jvp_add" {
-            jet_compute_jvp_add(
-                &ct_to_tensor(one(0)?, span)?,
-                &ct_to_tensor(one(1)?, span)?,
-                &ct_to_tensor(one(2)?, span)?,
-                &ct_to_tensor(one(3)?, span)?,
-            )
-        } else if method == "jvp_matmul" {
-            jet_compute_jvp_matmul(
-                &ct_to_tensor(one(0)?, span)?,
-                &ct_to_tensor(one(1)?, span)?,
-                &ct_to_tensor(one(2)?, span)?,
-                &ct_to_tensor(one(3)?, span)?,
-            )
-        } else {
-            jet_compute_jvp_mul(
-                &ct_to_tensor(one(0)?, span)?,
-                &ct_to_tensor(one(1)?, span)?,
-                &ct_to_tensor(one(2)?, span)?,
-                &ct_to_tensor(one(3)?, span)?,
-            )
-        } {
-            Ok(t) => ok_tensor(t),
-            Err(e) => err_compute(e),
-        }),
-        "vjp_add" | "vjp_mul" | "vjp_matmul" => Ok(match if method == "vjp_add" {
-            jet_compute_vjp_add_value(
-                &ct_to_tensor(one(0)?, span)?,
-                &ct_to_tensor(one(1)?, span)?,
-                &ct_to_tensor(one(2)?, span)?,
-            )
-        } else if method == "vjp_matmul" {
-            jet_compute_vjp_matmul_value(
-                &ct_to_tensor(one(0)?, span)?,
-                &ct_to_tensor(one(1)?, span)?,
-                &ct_to_tensor(one(2)?, span)?,
-            )
-        } else {
-            jet_compute_vjp_mul_value(
-                &ct_to_tensor(one(0)?, span)?,
-                &ct_to_tensor(one(1)?, span)?,
-                &ct_to_tensor(one(2)?, span)?,
-            )
-        } {
-            Ok(g) => ok_grad(g),
-            Err(e) => err_compute(e),
-        }),
-        "value_and_grad_mul" => Ok(match jet_compute_value_and_grad_mul(
-            &ct_to_tensor(one(0)?, span)?,
-            &ct_to_tensor(one(1)?, span)?,
-        ) {
-            Ok(g) => ok_grad(g),
-            Err(e) => err_compute(e),
-        }),
-        "grad_value" | "grad_a" | "grad_b" => {
-            let g = ct_to_grad(one(0)?, span)?;
-            Ok(tensor_to_ct(&match method {
-                "grad_value" => jet_compute_grad_value(&g),
-                "grad_a" => jet_compute_grad_a(&g),
-                _ => jet_compute_grad_b(&g),
-            }))
-        }
-        "grad_show" => Ok(CtValue::Str(jet_compute_grad_show(&ct_to_grad(
-            one(0)?,
-            span,
-        )?))),
         "mse_loss" => Ok(match jet_compute_mse_loss(
             &ct_to_tensor(one(0)?, span)?,
             &ct_to_tensor(one(1)?, span)?,

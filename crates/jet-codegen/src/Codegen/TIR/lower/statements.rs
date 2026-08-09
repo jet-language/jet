@@ -693,6 +693,22 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             let init = lower_expr(&b.init, cx, env);
             let canonical: Vec<(String, Type)> = match &init.ty {
                 Type::Tuple(fs) => fs.iter().map(|(n, t)| (n.clone(), (**t).clone())).collect(),
+                Type::Apply { name, args } if name == "VjpRun" && args.len() == 1 => [
+                    ("value".to_string(), Type::Named("Tensor".to_string())),
+                    (
+                        "pull".to_string(),
+                        struct_field_type(cx, &init.ty, "pull")
+                            .unwrap_or_else(|| Type::Fn {
+                                params: vec![Type::Named("Tensor".to_string())],
+                                ret: Some(Box::new(args[0].clone())),
+                                effect_bound: None,
+                                param_contract: None,
+                                return_view_provenance: None,
+                            }),
+                    ),
+                ]
+                .into_iter()
+                .collect(),
                 _ => Vec::new(),
             };
             let move_fields = canonical.iter().any(|(_, ty)| {

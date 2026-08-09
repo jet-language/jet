@@ -2237,6 +2237,15 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // exactly (no deref, no clone — owning reads were rewritten to a `.clone()`
         // MethodCall in sema and excluded from the subset).
         TExprKind::Field { recv, field, boxed } => {
+            if field == "grads"
+                && matches!(
+                    &recv.ty,
+                    Type::Apply { name, args }
+                        if name == "VjpRun" && args.len() == 1
+                )
+            {
+                return format!("({}).grads_or_panic()", emit_tir_expr(recv, cx));
+            }
             let field_rust = emit_field_rust(cx, &recv.ty, field);
             let read = format!("({}).{field_rust}", emit_tir_expr(recv, cx));
             if *boxed {

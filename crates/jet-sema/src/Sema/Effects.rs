@@ -380,6 +380,19 @@ pub fn e0746(api: &str, e: Effect, span: Span) -> Diagnostic {
 /// Per-function summary the checker accumulates during its walk: the effects the
 /// body reaches directly, the user functions it calls (edges for transitivity),
 /// and whether it touches a foreign body (forcing the maximal set).
+#[derive(Debug, Clone)]
+pub struct AutodiffObligation {
+    pub method: String,
+    pub target: String,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct ComputeCallFact {
+    pub method: String,
+    pub span: Span,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct EffectSummary {
     pub direct: EffectSet,
@@ -403,9 +416,90 @@ pub struct EffectSummary {
     /// (`fn(…) =[]=>` / `fn(…) =[E]=>`). Checked against the actual callback's
     /// resolved effects in the post-pass — E0747.
     pub callback_obligations: Vec<CallbackObligation>,
+    /// D-AUTODIFF1: named functions passed to an autodiff transform. Their
+    /// solved rows are checked after the shared effect graph closes, while
+    /// compute's own GPU capability remains admissible for pure Tensor work.
+    pub autodiff_obligations: Vec<AutodiffObligation>,
+    /// Core compute consumers seen in each body; the autodiff post-pass uses
+    /// this to reject operations that cannot preserve a Tensor trace.
+    pub compute_calls: Vec<ComputeCallFact>,
     /// D-MEM-FACTS1 shares this already-complete call graph instead of growing
     /// a parallel reachability mechanism.
     pub memory: super::MemoryFacts::MemorySummary,
+}
+
+/// D-AUTODIFF1: reject a named differentiated function when its solved effect
+/// row reaches an ambient effect. `GPU` is the capability used by pure
+/// `core.compute` Tensor operations and is therefore allowed here.
+pub fn check_autodiff_purity(
+    summaries: &HashMap<String, EffectSummary>,
+    solved: &HashMap<String, EffectSet>,
+    diags: &mut Vec<Diagnostic>,
+) {
+    for summary in summaries.values() {
+        for obligation in &summary.autodiff_obligations {
+            let Some(effects) = solved.get(&obligation.target) else {
+                continue;
+            };
+            let forbidden = effects
+                .iter()
+                .filter(|effect| effect_root(effect) != Effect::GPU.name())
+                .cloned()
+                .collect::<EffectSet>();
+            if forbidden.is_empty() {
+                if let Some(target_summary) = summaries.get(&obligation.target) {
+                    for call in &target_summary.compute_calls {
+                        if !matches!(
+                            call.method.as_str(),
+                            "get"
+                                | "set"
+                                | "to_list"
+                                | "det"
+                                | "inv"
+                                | "solve"
+                                | "fft"
+                                | "serialize"
+                                | "mse_loss"
+                                | "sgd_step"
+                                | "to_sparse"
+                                | "sparse_mv"
+                                | "matmul_f32_tile"
+                        ) {
+                            continue;
+                        }
+                        diags.push(Diagnostic::error(
+                            "E0112",
+                            format!(
+                                "`compute.{}` cannot trace `compute.{}`",
+                                obligation.method, call.method
+                            ),
+                            "this operation consumes, mutates, serializes, or has no registered Tensor derivative rule".to_string(),
+                            "keep the differentiated function on pure differentiable Tensor operations".to_string(),
+                            Some(call.span),
+                        ));
+                    }
+                }
+                continue;
+            }
+            diags.push(Diagnostic::error(
+                "E0112",
+                format!(
+                    "`compute.{}` needs a pure Tensor function",
+                    obligation.method
+                ),
+                format!(
+                    "`{}` reaches {}; autodiff records only pure Tensor operations",
+                    obligation.target,
+                    show_set(&forbidden)
+                ),
+                format!(
+                    "remove the effectful operation from `{}`, or differentiate a pure Tensor function",
+                    obligation.target
+                ),
+                Some(obligation.span),
+            ));
+        }
+    }
 }
 
 /// D-SEMINDEX1: per-function effect summaries and the solved transitive sets,

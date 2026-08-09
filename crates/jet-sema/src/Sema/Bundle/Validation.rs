@@ -42,6 +42,9 @@ pub(super) fn qualified_effect_facts(
             for obligation in &mut summary.callback_obligations {
                 obligation.edges = obligation.edges.iter().map(&resolve_edge).collect();
             }
+            for obligation in &mut summary.autodiff_obligations {
+                obligation.target = resolve_edge(&obligation.target);
+            }
             for call in &mut summary.memory.calls {
                 call.callee = resolve_edge(&call.callee);
             }
@@ -1473,6 +1476,8 @@ pub(crate) fn check_func_body_bundle(
         region_stack: Vec::new(),
         fx_regions: Vec::new(),
         fx_callback_obligations: Vec::new(),
+        fx_autodiff_obligations: Vec::new(),
+        fx_compute_calls: Vec::new(),
         fx_pending_diagnostics: Vec::new(),
         fx_memory_events: Vec::new(),
         fx_memory_open: Vec::new(),
@@ -1745,6 +1750,8 @@ pub(crate) fn check_func_body_bundle(
             unbounded_trait_dispatch: false,
             regions: std::mem::take(&mut ck.fx_regions),
             callback_obligations: std::mem::take(&mut ck.fx_callback_obligations),
+            autodiff_obligations: std::mem::take(&mut ck.fx_autodiff_obligations),
+            compute_calls: std::mem::take(&mut ck.fx_compute_calls),
             memory: super::MemoryFacts::MemorySummary {
                 events: std::mem::take(&mut ck.fx_memory_events),
                 open_dispatches: std::mem::take(&mut ck.fx_memory_open),
