@@ -1217,7 +1217,7 @@ fn compile_bundle_path_build_inner(
         return Err(vec![build_entry_conflict(
             "the package",
             "the selected source file",
-            "`pkg.jet`",
+            "`package.jet`",
             source_span,
         )]);
     }
