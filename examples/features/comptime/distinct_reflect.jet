@@ -1,0 +1,24 @@
+// D-ONCE-DERIVE1=A / D-METAREFLECT1: a distinct capability is one written
+// marker and one lowered derive row in the program reflection view.
+#Comparable CustomerId :: distinct Int
+
+fn build(b: BuildContext) => BuildPlan ? {
+    found := false
+    loop info, b.program.types() {
+        if info.name == "CustomerId" {
+            found = info.reflect().has_marker("Comparable")
+            if !found {
+                b.error(info.span, "REFLECT", "missing marker", "#Comparable was lost", "keep the marker in reflection")
+            }
+        }
+    }
+    app :: b.add_executable("distinct_reflect", ["distinct_reflect.jet"], [])?
+    return b.plan(app)
+}
+
+fn run() {
+    print("distinct marker reflected")
+}
+
+// --- expected output --------------------------------------------------
+// distinct marker reflected

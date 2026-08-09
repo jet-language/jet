@@ -10412,20 +10412,16 @@ struct Packet {
     label: String
 }
 
-#Layout(c)
+#[Layout(c), LayoutFacts]
 struct CPacket {
     count: U32
     flag: U8
-
-    derive LayoutFacts
 }
 
-#Layout(columnar)
+#[Layout(columnar), LayoutFacts]
 struct ColumnPacket {
     count: Int
     label: String
-
-    derive LayoutFacts
 }
 
 fn run() {

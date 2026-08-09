@@ -123,10 +123,7 @@ pub(crate) fn register_distinct(
         d.name.clone(),
         TypeDef::Distinct {
             base: d.base.clone(),
-            is_numeric: d.is_numeric,
-            is_comparable: d.is_comparable,
-            is_printable: d.is_printable,
-            is_codable_as_base: d.is_codable_as_base,
+            derives: d.derives.iter().map(|(name, _)| name.clone()).collect(),
             knowledge: d
                 .range
                 .map_or_else(KnowledgeVector::default, |(lo, hi, _)| {

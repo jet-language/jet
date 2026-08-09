@@ -20,7 +20,7 @@ fn qualify_unit_type(bundle: &ProgramBundle, target: usize, ty: &Type) -> Type {
     })
 }
 /// After `cx.foreign_types` is populated, add the foreign type names to
-/// `cx.type_names` and re-run the cloneable/comparable checks for any local
+/// `cx.type_names` and re-run the cloneability/hashability checks for any local
 /// structs or enums that reference those foreign types as fields.
 pub(crate) fn update_cloneability_with_foreign_types(cx: &mut Cx, items: &[Item]) {
     for name in cx.foreign_types.keys() {
@@ -32,10 +32,6 @@ pub(crate) fn update_cloneability_with_foreign_types(cx: &mut Cx, items: &[Item]
                 if !cx.cloneable.contains(&s.name) && type_is_cloneable_struct(s, &cx.type_names) {
                     cx.cloneable.insert(s.name.clone());
                 }
-                if !cx.comparable.contains(&s.name) && type_is_comparable_struct(s, &cx.type_names)
-                {
-                    cx.comparable.insert(s.name.clone());
-                }
                 if !cx.hashable.contains(&s.name) && type_is_hashable_struct(s, &cx.hashable) {
                     cx.hashable.insert(s.name.clone());
                 }
@@ -43,9 +39,6 @@ pub(crate) fn update_cloneability_with_foreign_types(cx: &mut Cx, items: &[Item]
             Item::Enum(e) => {
                 if !cx.cloneable.contains(&e.name) && type_is_cloneable_enum(e, &cx.type_names) {
                     cx.cloneable.insert(e.name.clone());
-                }
-                if !cx.comparable.contains(&e.name) && type_is_comparable_enum(e, &cx.type_names) {
-                    cx.comparable.insert(e.name.clone());
                 }
                 if !cx.hashable.contains(&e.name) && type_is_hashable_enum(e, &cx.hashable) {
                     cx.hashable.insert(e.name.clone());

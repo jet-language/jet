@@ -127,15 +127,11 @@ pub(crate) enum TypeDef {
         c_layout_tag: Option<crate::AST::CEnumTag>,
     },
     /// D-DIST1 (ratified 2026-06-19): a distinct type — a nominal wrapper over
-    /// a base type. No implicit coercion either direction (E0128). Arithmetic
-    /// only when `is_numeric` (D-DIST3, E0127).
+    /// a base type. No implicit coercion either direction (E0128). Capability
+    /// requests remain ordinary derive rows after registration.
     Distinct {
         base: Type,
-        is_numeric: bool,
-        /// D-CAPBUNDLE1: `#Comparable`/`#Printable`/`#CodableAsBase` grants.
-        is_comparable: bool,
-        is_printable: bool,
-        is_codable_as_base: bool,
+        derives: Vec<String>,
         /// D-TYPE2-FOUND1: semantic facts live on the one type knowledge
         /// vector. The interval plane is projected here for existing checks.
         knowledge: KnowledgeVector,
@@ -404,9 +400,9 @@ impl TypeRegistry {
         matches!(
             self.types.get(name),
             Some(TypeDef::Distinct {
-                is_numeric: true,
+                derives,
                 ..
-            })
+            }) if derives.iter().any(|derive| derive == crate::Syntax::MARKER_NUMERIC)
         )
     }
 
@@ -425,9 +421,9 @@ impl TypeRegistry {
         matches!(
             self.types.get(name),
             Some(TypeDef::Distinct {
-                is_comparable: true,
+                derives,
                 ..
-            })
+            }) if derives.iter().any(|derive| derive == crate::Generics::COMPARABLE)
         )
     }
 
@@ -436,9 +432,9 @@ impl TypeRegistry {
         matches!(
             self.types.get(name),
             Some(TypeDef::Distinct {
-                is_printable: true,
+                derives,
                 ..
-            })
+            }) if derives.iter().any(|derive| derive == crate::Generics::PRINTABLE)
         )
     }
 
@@ -447,9 +443,9 @@ impl TypeRegistry {
         matches!(
             self.types.get(name),
             Some(TypeDef::Distinct {
-                is_codable_as_base: true,
+                derives,
                 ..
-            })
+            }) if derives.iter().any(|derive| derive == crate::Generics::ENCODE)
         )
     }
 

@@ -34,6 +34,10 @@ fn enum_has_view_payload(cx: &Cx, e: &EnumDef) -> bool {
     })
 }
 
+fn distinct_has_derive(d: &DistinctDef, name: &str) -> bool {
+    d.derives.iter().any(|(derive, _)| derive == name)
+}
+
 fn add_view_lifetime_generic(generics: String) -> String {
     if generics.is_empty() {
         "<'__jet_view>".to_string()
@@ -52,32 +56,6 @@ fn add_view_lifetime_arg(args: String) -> String {
     } else {
         args
     }
-}
-
-fn structural_trait_bounds(
-    s: &StructDef,
-    trait_name: &str,
-    native_bound: &str,
-    required: &HashMap<String, Vec<String>>,
-) -> HashMap<String, Vec<String>> {
-    let names: HashSet<&str> = s.type_params.iter().map(|param| param.name.as_str()).collect();
-    let mut used = HashSet::new();
-    for field in s.fields.iter().filter(|field| field.computed.is_none()) {
-        Generics::collect_type_param_mentions(&field.ty, &names, &mut used);
-    }
-    let mut extra: HashMap<String, Vec<String>> = used
-        .into_iter()
-        .map(|name| {
-            (
-                name,
-                vec![trait_name.to_string(), native_bound.to_string()],
-            )
-        })
-        .collect();
-    for (name, bounds) in required {
-        extra.entry(name.clone()).or_default().extend(bounds.clone());
-    }
-    extra
 }
 
 pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
@@ -104,31 +82,32 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
         .fields
         .iter()
         .any(|f| cx.type_contains_shared_guard(&f.ty));
-    let mut derives: Vec<&str> = Vec::new();
+    // Backend representation derives only. Jet capability implementations are
+    // expanded into parsed Jet items in Sema/Registration/Derives.rs; these
+    // Rust attributes do not grant or validate a Jet capability.
+    let mut rust_derives: Vec<&str> = Vec::new();
     if !has_fn_field && !has_shared_guard_field && s.type_params.is_empty() {
-        derives.push("Debug");
+        rust_derives.push("Debug");
     }
     if cx.cloneable.contains(&s.name)
         && !has_shared_guard_field
         && !has_mutable_view_field
     {
-        derives.push("Clone");
-    }
-    if cx.comparable.contains(&s.name) && !has_shared_guard_field {
-        derives.push("PartialEq");
+        rust_derives.push("Clone");
     }
     if cx.hashable.contains(&s.name) && !has_shared_guard_field {
-        derives.push("Eq");
-        derives.push("Hash");
-    }
-    if cx.partial_ord.contains(&s.name) && !has_shared_guard_field {
-        derives.push("PartialOrd");
+        // Eq/Hash are Rust storage traits for hash-backed collections. Keep
+        // their required PartialEq representation derive separate from Jet's
+        // Equatable implementation.
+        rust_derives.push("PartialEq");
+        rust_derives.push("Eq");
+        rust_derives.push("Hash");
     }
     // Visibility is enforced by sema (E0605); Rust-level `pub` everywhere
     // keeps cross-module references compiling (R2: sema is the gatekeeper).
-    // D-REPRC1: `#layout(c)` stamps `#[repr(C)]` before any `#[derive(...)]`.
+    // D-REPRC1: `#layout(c)` stamps `#[repr(C)]` before representation attrs.
     let repr_c = s.layout == Some(crate::AST::StructLayout::C);
-    if derives.is_empty() {
+    if rust_derives.is_empty() {
         if repr_c {
             out.push_str(&format!(
                 "#[repr(C)]\npub struct {}{} {{\n",
@@ -145,14 +124,14 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
     } else if repr_c {
         out.push_str(&format!(
             "#[repr(C)]\n#[derive({})]\npub struct {}{} {{\n",
-            derives.join(", "),
+            rust_derives.join(", "),
             user_type_rust(&s.name),
             type_params
         ));
     } else {
         out.push_str(&format!(
             "#[derive({})]\npub struct {}{} {{\n",
-            derives.join(", "),
+            rust_derives.join(", "),
             user_type_rust(&s.name),
             type_params
         ));
@@ -166,65 +145,6 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
         out.push_str(&format!("    pub {}: {},\n", mangle(&f.name), field_ty));
     }
     out.push_str("}\n\n");
-    if !has_shared_guard_field
-        && (cx.auto_equatable.contains(&s.name) || cx.partial_ord.contains(&s.name))
-        && !cx
-            .trait_methods
-            .contains(&(s.name.clone(), "equal".to_string()))
-    {
-        let type_rust = user_type_rust(&s.name);
-        if s.type_params.is_empty() {
-            let (impl_params, type_args) = if has_view_field {
-                ("<'__jet_view>", "<'__jet_view>")
-            } else {
-                ("", "")
-            };
-            out.push_str(&format!(
-                "impl{impl_params} user_Equatable for {type_rust}{type_args} {{ fn equal(&self, rhs: &Self) -> bool {{ self == rhs }} }}\n\n"
-            ));
-        } else {
-            let extra =
-                structural_trait_bounds(s, Generics::EQUATABLE, "PartialEq", &clone_extra);
-            let mut params = Generics::rust_type_param_list(&s.type_params, &extra);
-            let mut args = Generics::type_param_rust_list(&s.type_params);
-            if has_view_field {
-                params = add_view_lifetime_generic(params);
-                args = add_view_lifetime_arg(args);
-            }
-            out.push_str(&format!(
-                "impl{params} user_Equatable for {type_rust}{args} {{ fn equal(&self, rhs: &Self) -> bool {{ self == rhs }} }}\n\n"
-            ));
-        }
-    }
-    if cx.partial_ord.contains(&s.name)
-        && !cx
-            .trait_methods
-            .contains(&(s.name.clone(), "compare".to_string()))
-    {
-        let type_rust = user_type_rust(&s.name);
-        if s.type_params.is_empty() {
-            let (impl_params, type_args) = if has_view_field {
-                ("<'__jet_view>", "<'__jet_view>")
-            } else {
-                ("", "")
-            };
-            out.push_str(&format!(
-                "impl{impl_params} user_Comparable for {type_rust}{type_args} {{ fn compare(&self, rhs: &Self) -> user_Ordering {{ if self < rhs {{ user_Ordering::user_Less }} else if self > rhs {{ user_Ordering::user_Greater }} else {{ user_Ordering::user_Equal }} }} }}\n\n"
-            ));
-        } else {
-            let extra =
-                structural_trait_bounds(s, Generics::COMPARABLE, "PartialOrd", &clone_extra);
-            let mut params = Generics::rust_type_param_list(&s.type_params, &extra);
-            let mut args = Generics::type_param_rust_list(&s.type_params);
-            if has_view_field {
-                params = add_view_lifetime_generic(params);
-                args = add_view_lifetime_arg(args);
-            }
-            out.push_str(&format!(
-                "impl{params} user_Comparable for {type_rust}{args} {{ fn compare(&self, rhs: &Self) -> user_Ordering {{ if self < rhs {{ user_Ordering::user_Less }} else if self > rhs {{ user_Ordering::user_Greater }} else {{ user_Ordering::user_Equal }} }} }}\n\n"
-            ));
-        }
-    }
     if !s.type_params.is_empty() {
         let jetshow_extra = Generics::rust_extra_jetshow_bounds(&s.type_params);
         let mut impl_bounds = jetshow_extra.clone();
@@ -354,11 +274,11 @@ fn emit_columnar_storage(cx: &Cx, s: &StructDef, out: &mut String) {
     let name = &s.name;
     let cn = format!("user_{name}_columns");
 
-    let mut derives: Vec<&str> = vec!["Debug"];
+    let mut rust_derives: Vec<&str> = vec!["Debug"];
     if cx.cloneable.contains(name) {
-        derives.push("Clone");
+        rust_derives.push("Clone");
     }
-    out.push_str(&format!("#[derive({})]\n", derives.join(", ")));
+    out.push_str(&format!("#[derive({})]\n", rust_derives.join(", ")));
     out.push_str(&format!("pub struct {cn} {{\n"));
     for f in &fields {
         out.push_str(&format!(
@@ -1019,16 +939,16 @@ pub(crate) fn emit_anonymous_unions(cx: &Cx, items: &[Item], out: &mut String) {
         let hashable = members
             .iter()
             .all(|m| crate::Codegen::Context::field_type_hashable(m, &cx.hashable, &empty));
-        let mut derives = Vec::new();
+        let mut rust_derives = Vec::new();
         if !has_shared_guard {
-            derives.extend(["Debug", "Clone", "PartialEq"]);
+            rust_derives.extend(["Debug", "Clone", "PartialEq"]);
         }
         if !has_shared_guard && hashable {
-            derives.push("Eq");
-            derives.push("Hash");
+            rust_derives.push("Eq");
+            rust_derives.push("Hash");
         }
-        if !derives.is_empty() {
-            out.push_str(&format!("#[derive({})]\n", derives.join(", ")));
+        if !rust_derives.is_empty() {
+            out.push_str(&format!("#[derive({})]\n", rust_derives.join(", ")));
         }
         out.push_str(&format!("pub enum user_{name} {{\n"));
         for m in &members {
@@ -1247,25 +1167,22 @@ pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
             .iter()
             .any(|field| cx.type_contains_shared_guard(&field.ty)),
     });
-    let mut derives = Vec::new();
+    // Debug/Clone are backend representation traits. Equality and ordering
+    // are ordinary Jet impls produced by sema and are never Rust-derived here.
+    let mut rust_derives = Vec::new();
     if !has_shared_guard {
-        derives.push("Debug");
+        rust_derives.push("Debug");
     }
     if !has_shared_guard
         && !has_mutable_view_payload
         && cx.cloneable.contains(&e.name)
     {
-        derives.push("Clone");
-    }
-    if !has_shared_guard && cx.comparable.contains(&e.name) {
-        derives.push("PartialEq");
+        rust_derives.push("Clone");
     }
     if !has_shared_guard && cx.hashable.contains(&e.name) {
-        derives.push("Eq");
-        derives.push("Hash");
-    }
-    if !has_shared_guard && cx.partial_ord.contains(&e.name) {
-        derives.push("PartialOrd");
+        rust_derives.push("PartialEq");
+        rust_derives.push("Eq");
+        rust_derives.push("Hash");
     }
     if let Some(tag) = e.c_layout_tag() {
         let repr = match tag {
@@ -1278,8 +1195,8 @@ pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
         emit_c_enum_declaration(e, tag, out);
         out.push_str(&format!("#[repr({repr})]\n"));
     }
-    if !derives.is_empty() {
-        out.push_str(&format!("#[derive({})]\n", derives.join(", ")));
+    if !rust_derives.is_empty() {
+        out.push_str(&format!("#[derive({})]\n", rust_derives.join(", ")));
     }
     let view_generic = if has_view_payload {
         "<'__jet_view>"
@@ -1320,28 +1237,6 @@ pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
         ""
     };
     let type_arg = impl_generic;
-    if !has_shared_guard
-        && (cx.auto_equatable.contains(&e.name) || cx.partial_ord.contains(&e.name))
-        && !cx
-            .trait_methods
-            .contains(&(e.name.clone(), "equal".to_string()))
-    {
-        out.push_str(&format!(
-            "impl{impl_generic} user_Equatable for user_{0}{type_arg} {{ fn equal(&self, rhs: &Self) -> bool {{ self == rhs }} }}\n\n",
-            e.name
-        ));
-    }
-    if !has_shared_guard
-        && cx.partial_ord.contains(&e.name)
-        && !cx
-            .trait_methods
-            .contains(&(e.name.clone(), "compare".to_string()))
-    {
-        out.push_str(&format!(
-            "impl{impl_generic} user_Comparable for user_{0}{type_arg} {{ fn compare(&self, rhs: &Self) -> user_Ordering {{ if self < rhs {{ user_Ordering::user_Less }} else if self > rhs {{ user_Ordering::user_Greater }} else {{ user_Ordering::user_Equal }} }} }}\n\n",
-            e.name
-        ));
-    }
     if !has_shared_guard && cx.auto_printable.contains(&e.name) {
         out.push_str(&format!(
             "impl{impl_generic} JetShow for user_{}{type_arg} {{\n    fn jet_show(&self) -> String {{ {} }}\n}}\n\n",
@@ -2050,33 +1945,26 @@ fn emit_trait_method(
 /// codegen can access it for `.raw()` (lowers to `.0`).
 pub(crate) fn emit_distinct(cx: &Cx, d: &DistinctDef, out: &mut String) {
     let base_rust = cx.rust_type(&d.base);
-    // All distinct types are Debug + Clone + PartialEq (always comparable with
-    // their own kind) + Copy when the base is Copy.
+    // Backend representation derives only. The distinct type's Jet
+    // Equatable/Comparable implementations come from the sema source path.
     let base_is_copy = matches!(d.base, Type::Int | Type::Float | Type::Bool | Type::Char);
-    let mut derives = vec!["Debug", "Clone", "PartialEq"];
+    let mut rust_derives = vec!["Debug", "Clone"];
     if base_is_copy {
-        derives.push("Copy");
+        rust_derives.push("Copy");
     }
-    if d.is_numeric || d.is_comparable {
-        // PartialOrd needed for ordered comparisons; also useful for #Numeric types.
-        derives.push("PartialOrd");
+    if distinct_has_derive(d, crate::Syntax::MARKER_NUMERIC)
+        && !distinct_has_derive(d, crate::Generics::COMPARABLE)
+    {
+        // #Numeric keeps its specialized native ordering rule. #Comparable
+        // dispatches through the sema-generated Jet hook instead.
+        rust_derives.push("PartialOrd");
     }
     out.push_str(&format!(
         "#[repr(transparent)]\n#[derive({})]\npub struct user_{}(pub {});\n\n",
-        derives.join(", "),
+        rust_derives.join(", "),
         d.name,
         base_rust
     ));
-    out.push_str(&format!(
-        "impl user_Equatable for user_{0} {{ fn equal(&self, rhs: &Self) -> bool {{ self == rhs }} }}\n\n",
-        d.name
-    ));
-    if d.is_numeric || d.is_comparable {
-        out.push_str(&format!(
-            "impl user_Comparable for user_{0} {{ fn compare(&self, rhs: &Self) -> user_Ordering {{ if self < rhs {{ user_Ordering::user_Less }} else if self > rhs {{ user_Ordering::user_Greater }} else {{ user_Ordering::user_Equal }} }} }}\n\n",
-            d.name
-        ));
-    }
     // Unit-family print follows Display so an explicit Display impl overrides
     // the generated magnitude + symbol default. Other distinct types keep
     // their existing debug-shaped JetShow output.
@@ -2122,7 +2010,7 @@ pub(crate) fn emit_distinct(cx: &Cx, d: &DistinctDef, out: &mut String) {
         ));
     }
     // #Numeric: implement Add, Sub, Mul, Div (same-type arithmetic).
-    if d.is_numeric {
+    if distinct_has_derive(d, crate::Syntax::MARKER_NUMERIC) {
         for (trait_name, op) in &[("Add", "+"), ("Sub", "-"), ("Mul", "*"), ("Div", "/")] {
             if d.range.is_none() {
                 out.push_str(&format!(
@@ -2165,7 +2053,7 @@ pub(crate) fn emit_distinct(cx: &Cx, d: &DistinctDef, out: &mut String) {
     // D-CAPBUNDLE1 `#Printable`: forward `{value}` interpolation (JetDisplay)
     // to the base value's own rendering — a distinct type starts inert, so
     // without this marker sema never lets a value reach here (E0138).
-    if d.is_printable {
+    if distinct_has_derive(d, crate::Generics::PRINTABLE) {
         out.push_str(&format!(
             "impl JetDisplay for user_{n} {{\n    fn jet_display(&self) -> String {{ (self.0).jet_display() }}\n}}\n\n",
             n = d.name
@@ -2174,7 +2062,10 @@ pub(crate) fn emit_distinct(cx: &Cx, d: &DistinctDef, out: &mut String) {
     // D-CAPBUNDLE1 `#CodableAsBase`: encode/decode via the base type's own
     // wire representation (`user_Encode`/`user_Decode`, the same traits
     // struct/enum `#[Codable]` derives target — I8: one wire mechanism).
-    if d.is_codable_as_base && !cx.used_core.is_empty() {
+    if distinct_has_derive(d, crate::Generics::ENCODE)
+        && distinct_has_derive(d, crate::Generics::DECODE)
+        && !cx.used_core.is_empty()
+    {
         out.push_str(&format!(
             "impl crate::user_Encode for user_{n} {{\n    fn jet_encode(&self) -> crate::jet_std::DataTree {{ crate::user_Encode::jet_encode(&self.0) }}\n}}\n\n",
             n = d.name

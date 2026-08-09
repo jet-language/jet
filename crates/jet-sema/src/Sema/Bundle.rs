@@ -1404,46 +1404,20 @@ fn check_bundle_opts_for_output_inner(
                         ) {
                                 Ok(fragments) => {
                                     for fragment in fragments {
-                                        let (toks, lex_diags) = crate::Lexer::lex(&fragment);
-                                        if !lex_diags.is_empty() {
-                                            let detail = lex_diags
-                                                .first()
-                                                .map(|d| d.what.as_str())
-                                                .unwrap_or("the generated text could not be read");
-                                            diags.push(Diagnostic::error(
-                                                "E2710",
-                                                format!(
-                                                    "`derive T.{}` generated invalid Jet while expanding `#{}` on `{}`",
-                                                    derive_name, derive_name, s.name
-                                                ),
-                                                format!(
-                                                    "generated source did not pass the ordinary lexer and parser: {detail}"
-                                                ),
+                                        let what = format!(
+                                            "`derive T.{}` generated invalid Jet while expanding `#{}` on `{}`",
+                                            derive_name, derive_name, s.name
+                                        );
+                                        if let Some(mut parsed) =
+                                            super::Registration::parse_generated_fragment(
+                                                &fragment,
+                                                what,
                                                 "fix the `derive` body so every emitted fragment is valid Jet source".to_string(),
-                                                Some(*derive_span),
-                                            ));
-                                            continue;
-                                        }
-                                        match crate::Parser::parse(&toks) {
-                                            Ok(mut prog) => new_items.extend(prog.items.drain(..)),
-                                            Err(parse_diags) => {
-                                                let detail = parse_diags
-                                                    .first()
-                                                    .map(|d| d.what.as_str())
-                                                    .unwrap_or("the generated text was not valid Jet");
-                                                diags.push(Diagnostic::error(
-                                                    "E2710",
-                                                    format!(
-                                                        "`derive T.{}` generated invalid Jet while expanding `#{}` on `{}`",
-                                                        derive_name, derive_name, s.name
-                                                    ),
-                                                    format!(
-                                                        "generated source did not pass the ordinary lexer and parser: {detail}"
-                                                    ),
-                                                    "fix the `derive` body so every emitted fragment is valid Jet source".to_string(),
-                                                    Some(*derive_span),
-                                                ));
-                                            }
+                                                *derive_span,
+                                                &mut diags,
+                                            )
+                                        {
+                                            new_items.extend(parsed.drain(..));
                                         }
                                     }
                                 }
@@ -1536,6 +1510,9 @@ fn check_bundle_opts_for_output_inner(
         }
 
         st.consts.extend(comptime_types);
+        // D-ONCE-DERIVE1=A / I3: built-in capability requests re-enter as
+        // ordinary Jet impl blocks before the final trait registration pass.
+        super::Registration::expand_builtin_derive_items(&mut module.items, &mut diags);
         // D-SERDE2=A/R11: built-in codecs re-enter as ordinary Jet source in
         // bundle builds too; this is the production multi-file path.
         super::Registration::expand_builtin_serde_items(&mut module.items, &mut diags);
@@ -2730,6 +2707,7 @@ mod structure_tests {
         let ordered = [
             "expand_generic_module_aliases(bundle, &mut diags);",
             "mangle_inline_sibling_calls(bundle);",
+            "super::Registration::expand_builtin_derive_items(&mut module.items, &mut diags);",
             "super::Registration::expand_builtin_serde_items(&mut module.items, &mut diags);",
             "register_type_methods(&module.items, &mut st.registry, &mut diags);",
             "register_impl_methods(&module.items, &mut st.registry, &mut diags);",

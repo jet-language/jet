@@ -146,7 +146,7 @@ fn derive_source_reentry() {
     assert!(
         serde_registration.contains("source.push_str(&format!(\"impl {}.Encode")
             && serde_registration.contains("source.push_str(&format!(\"impl {}.Decode")
-            && serde_registration.contains("parse_builtin_serde_fragment(&source")
+            && serde_registration.contains("parse_generated_fragment(\n            &source")
             && serde_registration.contains("crate::Parser::parse(&tokens)"),
         "built-in codecs must emit ordinary Jet impl fragments and parse them"
     );

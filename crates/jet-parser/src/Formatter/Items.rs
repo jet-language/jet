@@ -444,11 +444,6 @@ impl<'a> Fmt<'a> {
         self.write(&crate::Generics::format_type_params(params));
     }
 
-    fn fmt_derive_line(&mut self, trait_name: &str) {
-        self.write("derive ");
-        self.write(trait_name);
-    }
-
     /// D-SHAPE2 / D-SERDE2–8: render one applied rule.
     pub(super) fn fmt_marker(&mut self, m: &Marker) {
         if m.negated {
@@ -514,41 +509,6 @@ impl<'a> Fmt<'a> {
             self.write(&format!("#{}({})", Syntax::MARKER_LAYOUT, variant));
             self.newline();
         }
-    }
-
-    /// Body `derive Name` lines for a type, minus the derives that the leading
-    /// `#[…]` rules already account for. `Codable` expands to `Encode`+`Decode`;
-    /// `Encode`/`Decode` and any user-trait marker map to themselves. The remaining
-    /// `derives` came from `derive Name` lines in the body and must re-emit there.
-    fn body_derive_lines(derives: &[(String, Span)], type_markers: &[Marker]) -> Vec<(String, Span)> {
-        let mut covered: Vec<String> = Vec::new();
-        for m in type_markers {
-            match m.name.as_str() {
-                Syntax::MARKER_CODABLE => {
-                    covered.push(Syntax::MARKER_ENCODE.to_string());
-                    covered.push(Syntax::MARKER_DECODE.to_string());
-                }
-                // Serde *attribute* markers never reach `derives`; skip them.
-                Syntax::MARKER_RENAME_ALL
-                | Syntax::MARKER_DENY_UNKNOWN_FIELDS
-                | Syntax::MARKER_TAG
-                | Syntax::MARKER_UNTAGGED
-                | Syntax::MARKER_RENAME
-                | Syntax::MARKER_SKIP
-                | Syntax::MARKER_DEFAULT
-                | Syntax::MARKER_FLATTEN => {}
-                other => covered.push(other.to_string()),
-            }
-        }
-        let mut out = Vec::new();
-        for (name, span) in derives {
-            if let Some(pos) = covered.iter().position(|c| c == name) {
-                covered.remove(pos);
-            } else {
-                out.push((name.clone(), *span));
-            }
-        }
-        out
     }
 
     fn fmt_trait_impl_block(&mut self, block: &TraitImplBlock) {
@@ -915,49 +875,27 @@ impl<'a> Fmt<'a> {
         self.fmt_type_params(&s.type_params);
         self.write(" {");
         self.newline();
-        // Only `derive Name` lines the user wrote in the body re-emit here; derives
-        // lifted from the `#[…]` list are already rendered above.
-        let body_derives = Self::body_derive_lines(&s.derives, &s.type_markers);
         let derives_decode = s
             .derives
             .iter()
             .any(|(name, _)| name == crate::Generics::DECODE);
         self.with_indent(|f| {
-            // Preserve source order of fields vs body `derive` lines (lossless).
-            enum BodyPart<'a> {
-                Field(&'a Field),
-                Derive(&'a str),
-            }
-            let mut parts: Vec<(usize, BodyPart<'_>)> = s
-                .fields
-                .iter()
-                .map(|field| (field.name_span.start, BodyPart::Field(field)))
-                .collect();
-            for (name, span) in &body_derives {
-                parts.push((span.start, BodyPart::Derive(name.as_str())));
-            }
-            parts.sort_by_key(|(start, _)| *start);
-            for (i, (_, part)) in parts.iter().enumerate() {
+            for (i, field) in s.fields.iter().enumerate() {
                 if i > 0 {
                     f.newline();
                 }
-                match part {
-                    BodyPart::Field(field) => {
-                        f.emit_leading(field.name_span.start);
-                        let decodes_field = derives_decode
-                            && !field.serde_markers.iter().any(|marker| {
-                                matches!(
-                                    marker.name.as_str(),
-                                    Syntax::MARKER_SKIP | Syntax::MARKER_FLATTEN
-                                )
-                            });
-                        f.fmt_field(field, decodes_field);
-                    }
-                    BodyPart::Derive(trait_name) => f.fmt_derive_line(trait_name),
-                }
+                f.emit_leading(field.name_span.start);
+                let decodes_field = derives_decode
+                    && !field.serde_markers.iter().any(|marker| {
+                        matches!(
+                            marker.name.as_str(),
+                            Syntax::MARKER_SKIP | Syntax::MARKER_FLATTEN
+                        )
+                    });
+                f.fmt_field(field, decodes_field);
             }
             for (i, block) in s.trait_impls.iter().enumerate() {
-                if i > 0 || !s.fields.is_empty() || !body_derives.is_empty() {
+                if i > 0 || !s.fields.is_empty() {
                     f.newline();
                     f.newline();
                 }
@@ -966,7 +904,6 @@ impl<'a> Fmt<'a> {
             for (i, m) in s.methods.iter().enumerate() {
                 if i > 0
                     || !s.fields.is_empty()
-                    || !body_derives.is_empty()
                     || !s.trait_impls.is_empty()
                 {
                     f.newline();
@@ -979,7 +916,6 @@ impl<'a> Fmt<'a> {
             // in the struct body, same spacing rule as the sections above.
             if !s.validate_block.is_empty() {
                 if !s.fields.is_empty()
-                    || !body_derives.is_empty()
                     || !s.trait_impls.is_empty()
                     || !s.methods.is_empty()
                 {
@@ -1014,7 +950,6 @@ impl<'a> Fmt<'a> {
         self.fmt_type_params(&e.type_params);
         self.write(" {");
         self.newline();
-        let body_derives = Self::body_derive_lines(&e.derives, &e.type_markers);
         let derives_decode = e
             .derives
             .iter()
@@ -1030,14 +965,8 @@ impl<'a> Fmt<'a> {
             } else {
                 f.fmt_enum_grouped(e, derives_decode);
             }
-            for (i, (trait_name, _)) in body_derives.iter().enumerate() {
-                if i > 0 || !e.variants.is_empty() {
-                    f.newline();
-                }
-                f.fmt_derive_line(trait_name);
-            }
             for (i, block) in e.trait_impls.iter().enumerate() {
-                if i > 0 || !e.variants.is_empty() || !body_derives.is_empty() {
+                if i > 0 || !e.variants.is_empty() {
                     f.newline();
                     f.newline();
                 }
@@ -1046,7 +975,6 @@ impl<'a> Fmt<'a> {
             for (i, m) in e.methods.iter().enumerate() {
                 if i > 0
                     || !e.variants.is_empty()
-                    || !body_derives.is_empty()
                     || !e.trait_impls.is_empty()
                 {
                     f.newline();

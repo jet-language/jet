@@ -298,7 +298,8 @@ fn deriving_instance_tag_keeps_e0731() {
     let (_, diagnostics) = check(r#"
 module bad<T> {
     tag Marker { deny: [Net] }
-    struct Value { item: T; derive Marker }
+    #Marker
+    struct Value { item: T }
 }
 module instance = bad<Int>
 fn run() {}

@@ -15,11 +15,12 @@ fn user_operator_traits_route_through_tir() {
 struct Vec2 { x: Int y: Int }
 struct Holder { value: Vec2 }
 struct EqBox<T: Equatable> { value: T }
-struct Rank<T: Comparable> { value: T derive Comparable }
-struct NestedRank<T> {
+#Comparable
+struct Rank<T: Comparable> { value: T }
+#Comparable
+struct NestedRank<T: Comparable> {
     head: T?
     tail: [T]
-    derive Comparable
 }
 struct Adder<T: Add> { value: T }
 

@@ -42,7 +42,7 @@ impl<'a> Parser<'a> {
                     continue;
                 }
                 if matches!(self.peek().kind, TokKind::KwDerive) {
-                    derives.push(self.derive_line()?);
+                    return Err(self.retired_derive_line());
                 } else if matches!(self.peek().kind, TokKind::KwImpl) {
                     trait_impls.push(self.trait_impl_block()?);
                 } else {
@@ -481,13 +481,23 @@ impl<'a> Parser<'a> {
             })
         }
     
-        /// S55: `derive Comparable;` inside a type body.
-        pub(super) fn derive_line(&mut self) -> Result<(String, Span), Diagnostic> {
-            let start = self.bump().span;
-            let (trait_name, _) = self.expect_ident("after `derive`")?;
-            self.finish_stmt()?;
-            Ok((trait_name, start))
+    /// D-ONCE-DERIVE1=A: body-line capability requests are retired. The
+    /// `derive` keyword is reserved for provider definitions at item scope.
+    pub(super) fn retired_derive_line(&mut self) -> Diagnostic {
+        let derive_span = self.bump().span;
+        let (trait_name, _) = match self.expect_ident("after `derive`") {
+            Ok(value) => value,
+            Err(diagnostic) => return diagnostic,
+        };
+        if let Err(diagnostic) = self.finish_stmt() {
+            return diagnostic;
         }
+        if trait_name == crate::Generics::DEBUG {
+            crate::Generics::e0922(derive_span)
+        } else {
+            crate::Generics::e0929(&trait_name, derive_span)
+        }
+    }
     
         /// True when the cursor is at an `#[ … ]` applied-rule group (D-SHAPE2).
         pub(in crate::Parser) fn at_marker_list(&self) -> bool {

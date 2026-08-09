@@ -5,7 +5,7 @@
 //! target type's shape. `.markers` preserves written markers; the expanded
 //! view contains only derives lowered from them.
 
-use crate::AST::{EnumDef, Field, Func, Marker, StructDef, StructLayout, TypeParam, VariantPayload};
+use crate::AST::{DistinctDef, EnumDef, Field, Func, Marker, StructDef, StructLayout, TypeParam, VariantPayload};
 
 use crate::AST::CtValue;
 
@@ -356,8 +356,8 @@ fn derived_marker_info(name: &str) -> CtValue {
 }
 
 /// Keep user-written markers separate from derives lowered from them. The
-/// parser gives lowered derives the source marker's name span; body derive
-/// lines start at `derive`, so they stay in the written view.
+/// parser gives lowered derives the source marker's name span, so source
+/// markers stay in `markers` and their lowered rows appear in `expanded_markers`.
 fn type_level_marker_views(
     type_markers: &[Marker],
     serde_markers: &[Marker],
@@ -524,6 +524,47 @@ pub fn build_struct_type_info_with_states(s: &StructDef, states: &[String]) -> C
                 ),
             ),
         ],
+    )
+}
+
+/// Build the same reflection handle for a nominal distinct type. Distinct
+/// capability rows are kept in `derives`, so the written `#Comparable` marker
+/// remains visible in `.markers` while its lowered row is also available in
+/// `.expanded_markers`.
+pub fn build_distinct_type_info(d: &DistinctDef, module: &str) -> CtValue {
+    let layout = layout_info("default", "physical layout unspecified", "distinct declaration", Vec::<(String, String)>::new());
+    let (markers, expanded_markers) =
+        type_level_marker_views(&d.type_markers, &[], &d.derives);
+    qualify_info(
+        ct_struct(
+            "TypeInfo",
+            &[
+                ("name", ct_str(d.name.clone())),
+                ("layout", layout),
+                (
+                    "span",
+                    ct_struct(
+                        crate::Syntax::TYPE_SOURCE_SPAN,
+                        &[
+                            ("start", CtValue::Int(d.name_span.start as i64)),
+                            ("end", CtValue::Int(d.name_span.end as i64)),
+                        ],
+                    ),
+                ),
+                ("fields", ct_list(Vec::new())),
+                ("methods", ct_list(Vec::new())),
+                ("type_params", ct_list(Vec::new())),
+                ("markers", ct_list(markers)),
+                ("expanded_markers", ct_list(expanded_markers)),
+                ("states", ct_list(Vec::new())),
+                ("transitions", ct_list(Vec::new())),
+                ("facts", ct_list(Vec::new())),
+                ("implements", ct_list(Vec::new())),
+            ],
+        ),
+        module,
+        &d.name,
+        "distinct",
     )
 }
 
@@ -712,6 +753,39 @@ pub fn build_program_info(
                             if let Some((_, CtValue::List(values))) = fields.iter_mut().find(|(name, _)| name == "implements") { values.extend(traits.iter().cloned().map(ct_str)); }
                             if let Some((_, CtValue::List(values))) = fields.iter_mut().find(|(name, _)| name == "methods") { values.extend(methods.iter().cloned()); }
                             if let Some((_, CtValue::List(values))) = fields.iter_mut().find(|(name, _)| name == "transitions") { values.extend(transitions.iter().cloned()); }
+                        }
+                    }
+                    types.push(info.clone());
+                    package_types.push(info);
+                }
+                crate::AST::Item::Distinct(def) => {
+                    let mut info = build_distinct_type_info(def, &module.alias);
+                    if let CtValue::Struct { fields, .. } = &mut info {
+                        if let Some((_, CtValue::List(values))) =
+                            fields.iter_mut().find(|(name, _)| name == "facts")
+                        {
+                            *values = reflected_facts(&facts.fact_registry);
+                        }
+                    }
+                    if let Some((traits, methods, transitions)) =
+                        external_impls.get(&(module.alias.clone(), def.name.clone()))
+                    {
+                        if let CtValue::Struct { fields, .. } = &mut info {
+                            if let Some((_, CtValue::List(values))) =
+                                fields.iter_mut().find(|(name, _)| name == "implements")
+                            {
+                                values.extend(traits.iter().cloned().map(ct_str));
+                            }
+                            if let Some((_, CtValue::List(values))) =
+                                fields.iter_mut().find(|(name, _)| name == "methods")
+                            {
+                                values.extend(methods.iter().cloned());
+                            }
+                            if let Some((_, CtValue::List(values))) =
+                                fields.iter_mut().find(|(name, _)| name == "transitions")
+                            {
+                                values.extend(transitions.iter().cloned());
+                            }
                         }
                     }
                     types.push(info.clone());

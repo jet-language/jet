@@ -1461,8 +1461,9 @@ auto-derived; `{value#Debug}` selects it; `#Redact` on a field renders
 bracket syntax. Built-in `[T]`/`Map` keep native paths.
 
 **D-ROLLBACK-TRAIT**: `trait Rollback { type Snapshot; fn snapshot(self) =>
-Snapshot; fn restore(&self, snap: Snapshot) }`; restore total;
-`derive Rollback` = field-wise clone impl.
+Snapshot; fn restore(&self, snap: Snapshot) }`; restore total; the
+compiler-generated field-wise Rollback implementation is the canonical
+implementation.
 
 **D-EXT1 — Extensibility ceiling**: Tier 0/1 (methods, traits, operators on
 own types via bundles) open to all; Tier 2 DSL blocks stdlib-only; Tier 3

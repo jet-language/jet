@@ -362,10 +362,10 @@ pub fn e0905(type_name: &str, trait_name: &str, span: Span, needs_derive: bool) 
         "use explicit Float comparisons or sort by a total key that handles NaN".to_string()
     } else if needs_derive && (trait_name == COMPARABLE || trait_name == SERIALIZE) {
         format!(
-            "add `derive {trait_name};` inside the `{type_name}` body, or write a different approach"
+            "write `#{trait_name}` before `{type_name}`, or use a different approach"
         )
     } else if trait_name == COMPARABLE {
-        format!("add `derive Comparable;` inside `{type_name}`, or use `sort_by` with a key")
+        format!("write `#Comparable` before `{type_name}`, or use `sort_by` with a key")
     } else {
         format!("write `impl {type_name}: {trait_name} {{ … }}` with every required method")
     };
@@ -488,6 +488,20 @@ pub fn e0922(span: Span) -> Diagnostic {
             .to_string(),
         "write `#Debug` before the type to opt in, `#!Debug` to opt out, or implement `Debug` by hand"
             .to_string(),
+        Some(span),
+    )
+}
+
+/// D-ONCE-DERIVE1=A: the body-line capability request was replaced by the
+/// marker request. The `derive` keyword remains reserved for provider
+/// definitions (`derive T.Trait { … }`).
+pub fn e0929(trait_name: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0929",
+        format!("`derive {trait_name}` inside a type body is retired"),
+        "a capability request has one spelling: the marker before the type; `derive` defines providers"
+            .to_string(),
+        format!("write `#{trait_name}` before the type"),
         Some(span),
     )
 }

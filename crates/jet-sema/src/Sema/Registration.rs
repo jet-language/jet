@@ -9,6 +9,7 @@ use crate::AST::{
 use std::collections::{HashMap, HashSet};
 
 mod Items;
+mod Derives;
 mod Serde;
 
 pub(crate) use Items::{
@@ -16,7 +17,8 @@ pub(crate) use Items::{
     register_const, register_distinct, register_enum, register_impl_methods, register_struct,
     register_type_alias, register_type_methods,
 };
-pub(super) use Serde::expand_builtin_serde_items;
+pub(super) use Derives::expand_builtin_derive_items;
+pub(super) use Serde::{expand_builtin_serde_items, parse_generated_fragment};
 
 fn is_void_named(ty: &Type) -> bool {
     matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
