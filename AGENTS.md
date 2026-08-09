@@ -53,6 +53,7 @@ Read this file, then relevant code, tests, and the current diff. Load only task-
 - Tower backlog ranking: `plugins/tower/skills/tower-rank/SKILL.md`;
 - Tower board prep (plans/ballots): `plugins/tower/skills/tower-prep/SKILL.md`;
 - Tower backlog burndown (orchestrated closeout): `plugins/tower/skills/tower-burndown/SKILL.md`;
+- orchestrating other agents (burndown, sweep, multi-card wave): `docs/agents/orchestration.md`;
 - Jet audits / research / cleanup routing: `.agents/skills/JetSkillsRouter.md`;
 - completion claims: `.agents/skills/verify/SKILL.md` (code closeout only);
 - a specialized task: the matching skill named in the request or skill catalog.
@@ -320,3 +321,8 @@ Triage roles map to Tower card tags and `kind` (not phases). See `docs/agents/tr
 ### Domain docs
 
 Single-context: root `CONTEXT.md` + `docs/adr/`. See `docs/agents/domain.md`.
+
+### Orchestration
+
+Dispatching other agents (burndowns, sweeps, multi-card waves): `docs/agents/orchestration.md`.
+Results-not-activity, role boundaries, worker briefs, batch rhythm, board hygiene, recovery.
