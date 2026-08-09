@@ -7,7 +7,7 @@ use std::sync::OnceLock;
 
 use crate::AST::{ComptimeInput, Expr, Func, ProgramBundle, Stmt, StructDef, Type};
 use crate::Diagnostics::Diagnostic;
-use crate::Comptime::{CtValue, DevSink, ReplAuthorizer};
+use crate::Comptime::{CtValue, DevSink, PurityStage, ReplAuthorizer};
 
 fn reflected_struct_field<'a>(value: &'a CtValue, field: &str) -> Option<&'a CtValue> {
     let CtValue::Struct { fields, .. } = value else {
@@ -416,6 +416,12 @@ pub enum StmtOutcome {
 
 pub struct Hooks {
     pub run_bundle: fn(&ProgramBundle, &mut DevSink, bool) -> Result<CtValue, Diagnostic>,
+    /// Runtime/deopt callers must carry their stage explicitly.  Keeping the
+    /// legacy three-argument hook preserves the direct dev/test seam; the
+    /// staged hook prevents a runtime fragment from inheriting build-time
+    /// purity defaults.
+    pub run_bundle_at_stage:
+        fn(&ProgramBundle, &mut DevSink, bool, PurityStage) -> Result<CtValue, Diagnostic>,
     pub eval_expr: fn(&mut ExprEvalRequest<'_>) -> Result<CtValue, Diagnostic>,
     pub eval_block: fn(&mut BlockEvalRequest<'_>) -> Result<StmtOutcome, Diagnostic>,
 }
@@ -438,6 +444,18 @@ pub fn run_bundle(
     allow_impure: bool,
 ) -> Result<CtValue, Diagnostic> {
     (hooks().run_bundle)(bundle, sink, allow_impure)
+}
+
+/// Run a whole program through an explicit purity stage.  Runtime/deopt must
+/// use [`PurityStage::RunTime`]; build-time evaluation keeps using the
+/// expression/block seams, which retain their build-time gate.
+pub fn run_bundle_at_stage(
+    bundle: &ProgramBundle,
+    sink: &mut DevSink,
+    allow_impure: bool,
+    stage: PurityStage,
+) -> Result<CtValue, Diagnostic> {
+    (hooks().run_bundle_at_stage)(bundle, sink, allow_impure, stage)
 }
 
 pub fn eval_expr(req: &mut ExprEvalRequest<'_>) -> Result<CtValue, Diagnostic> {

@@ -495,6 +495,9 @@ pub fn ambient_core_call(
     args: Vec<CtValue>,
     span: Span,
 ) -> Option<Result<CtValue, Diagnostic>> {
+    if let Some(result) = crate::enc_stream::ambient_core_call(module, method, args.clone(), span) {
+        return Some(result);
+    }
     // I9: core.http.server adapters call the same Prelude helpers as AOT/JIT.
     if module == "core.http.server" {
         return Some(ambient_http_server_call(method, &args, span));
@@ -1195,6 +1198,9 @@ pub fn ambient_handle(
     args: &mut [CtValue],
     span: Span,
 ) -> Option<Result<CtValue, Diagnostic>> {
+    if let Some(result) = crate::enc_stream::ambient_handle(op, recv, args, span) {
+        return Some(result);
+    }
     if let Some(result) = ambient_webapp_handle(op, recv, args, span) {
         return Some(result);
     }

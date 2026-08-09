@@ -2329,6 +2329,30 @@ pub fn run_program_with_structs(
     struct_fields: HashMap<String, Vec<(String, bool)>>,
     struct_field_types: HashMap<String, Vec<(String, crate::AST::Type)>>,
 ) -> Result<CtValue, Diagnostic> {
+    run_program_with_structs_at_stage(
+        program,
+        base_dir,
+        sink,
+        globals,
+        core_imports,
+        allow_impure,
+        struct_fields,
+        struct_field_types,
+        Comptime::PurityStage::RunTime,
+    )
+}
+
+pub fn run_program_with_structs_at_stage(
+    program: &JitProgram,
+    base_dir: &Path,
+    sink: &mut DevSink,
+    globals: HashMap<String, CtValue>,
+    core_imports: &HashMap<String, String>,
+    allow_impure: bool,
+    struct_fields: HashMap<String, Vec<(String, bool)>>,
+    struct_field_types: HashMap<String, Vec<(String, crate::AST::Type)>>,
+    stage: Comptime::PurityStage,
+) -> Result<CtValue, Diagnostic> {
     // The evaluator's exhaustive expression dispatcher is intentionally one
     // semantic spine, but its large Rust frame makes ordinary test/CLI stacks
     // too small for nested aggregate literals. Keep the public runtime seam
@@ -2349,6 +2373,7 @@ pub fn run_program_with_structs(
                         allow_impure,
                         struct_fields,
                         struct_field_types,
+                        stage,
                     )
                 })
             })
@@ -2366,6 +2391,7 @@ fn run_program_with_structs_on_stack(
     allow_impure: bool,
     struct_fields: HashMap<String, Vec<(String, bool)>>,
     mut struct_field_types: HashMap<String, Vec<(String, crate::AST::Type)>>,
+    stage: Comptime::PurityStage,
 ) -> Result<CtValue, Diagnostic> {
     validate_kernel_proofs(program)?;
     // Fresh EventLite stores per whole-program run (REPL / warm cache / workers).
@@ -2393,10 +2419,14 @@ fn run_program_with_structs_on_stack(
         core_imports,
         globals,
         allow_impure,
-        // Runtime `run_bundle` / deopt: ambient Tier-2 I/O matches AOT `jet run`.
-        // Comptime purity still uses eval_expr/eval_block with explicit depths.
-        impure_depth: if allow_impure { 1 } else { 0 },
-        runtime_execution: true,
+        // Whole-program runtime/deopt carries RunTime explicitly.  Comptime
+        // purity still uses eval_expr/eval_block with build-time defaults.
+        impure_depth: if matches!(stage, Comptime::PurityStage::RunTime) && allow_impure {
+            1
+        } else {
+            0
+        },
+        runtime_execution: matches!(stage, Comptime::PurityStage::RunTime),
         prefer_tir_calls: false,
         repl_mode: false,
         repl_grants: Vec::new(),
@@ -2520,6 +2550,7 @@ pub fn install_comptime_bridge() {
     INSTALLED.get_or_init(|| {
         Comptime::TirBridge::install(Comptime::TirBridge::Hooks {
             run_bundle,
+            run_bundle_at_stage,
             eval_expr: eval_expr_hook,
             eval_block: eval_block_hook,
         });
@@ -2530,6 +2561,15 @@ fn run_bundle(
     bundle: &ProgramBundle,
     sink: &mut DevSink,
     allow_impure: bool,
+) -> Result<CtValue, Diagnostic> {
+    run_bundle_at_stage(bundle, sink, allow_impure, Comptime::PurityStage::RunTime)
+}
+
+fn run_bundle_at_stage(
+    bundle: &ProgramBundle,
+    sink: &mut DevSink,
+    allow_impure: bool,
+    stage: Comptime::PurityStage,
 ) -> Result<CtValue, Diagnostic> {
     let program = lower_interp_program(bundle).ok_or_else(|| {
         Diagnostic::error(
@@ -2579,7 +2619,7 @@ fn run_bundle(
             }
         }
     }
-    run_program_with_structs(
+    run_program_with_structs_at_stage(
         &program,
         &bundle.project_root,
         sink,
@@ -2588,6 +2628,7 @@ fn run_bundle(
         allow_impure,
         collect_struct_fields(bundle),
         collect_struct_field_types(bundle),
+        stage,
     )
 }
 

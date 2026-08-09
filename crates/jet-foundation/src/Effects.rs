@@ -240,6 +240,21 @@ pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
             _ => Some(Effect::Net),
         };
     }
+    // Encoding stream constructors own a live file handle.  Whole-value
+    // codecs remain pure; only reader/writer construction reaches the host.
+    if matches!(
+        (module, method),
+        (
+            "core.encoding.json"
+                | "core.encoding.jsonl"
+                | "core.encoding.csv"
+                | "core.encoding.xml"
+                | "core.encoding.cbor",
+            "reader" | "writer"
+        )
+    ) {
+        return Some(Effect::FS);
+    }
     Some(match module {
         // D-COMPUTE-PLACE1=D: `.Auto` is the beginner placement default and
         // may select an accelerator, so compute operations carry GPU until an
