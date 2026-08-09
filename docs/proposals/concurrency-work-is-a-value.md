@@ -106,7 +106,7 @@ line references prove each claim.
 | 9 | `Receiver<T>` cannot be written in a signature; a dead `Channel` entry can | `type_assign.rs:284` |
 | 10 | Streams run on the task scheduler with a separately written shutdown law — and the copies drifted | D-STREAMYIELD1 vs `field-audit-2026-08-03.md:194` |
 | 11 | `select` does not work on the interpreter tier; the `.read` arm is dropped on every tier | `TIR/eval/exprs.rs:5139`, `emit/helpers.rs:225` |
-| 12 | The STM law says "retried on conflict"; the runtime ships ordered locks with no retry | `syntax-decisions.md:1828` vs `RuntimeControl.rs:115-140` |
+| 12 | The earlier STM text differed from the shipped ordered-lock commit | `docs/spec/syntax-decisions.md:1903-1907` and `crates/jet-codegen/src/Prelude/Core/RuntimeControl.rs:115-140` |
 
 ## The surface
 
@@ -285,8 +285,9 @@ amends D-SHARED-API1 and D-TXN2.
 
 ### 5. Schedules, pools, and services — D-CONC-SCHED1=A
 
-**Today.** The schedule marker parses its own private duration table. There is
-no worker cap. The service plane is ratified but unbuilt.
+**Today.** The schedule marker still parses its private duration table. There is
+no worker cap. The service topology is ratified; its typed schedule consumer is
+unshipped.
 
 **Ratified law.** Scheduling is typed data on the work.
 
@@ -303,11 +304,15 @@ fn nightly_backup() {
 ```
 
 - One vocabulary: a **job** is a task the runtime starts. Card #1448's naming
-  cleanup lands inside this.
+  cleanup is part of this law.
 - The schedule value becomes typed data behind the unchanged marker, so
   `jet dev`, services, and jetos read one value.
 - The service plane (D-SERVICE1) then builds as: a supervisor is a task that
   owns a group; a restart rule is data on that group. No new mechanism.
+
+The ratified law deletes the private schedule table. The current implementation
+still accepts only `ns`, `us`, `ms`, `s`, and `min`; the D-TYPE2-TIME1 value,
+`2h`/`1d`, and service/jetos consumers are unshipped.
 
 ### 6. Protocols — clearer, and on the same three facts
 
@@ -357,7 +362,8 @@ Settled answers:
   results, because it *is* results.
 - **Time.** `after 100ms`, `Every(5min)`, and deadlines all read the one
   Duration rail that D-TYPE2-TIME1 (card #1497) defines. The private schedule
-  suffix table dies.
+  suffix table is retired by law; the current parser boundary is recorded
+  above.
 - **Knowledge planes.** State, duty, and reach are registered planes in the
   v2 fact registry. Send-safety is the crossing plane settled by
   D-CONC-CROSS1=A. Facts become nameable and reflectable like every other

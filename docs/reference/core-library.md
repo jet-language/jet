@@ -2408,8 +2408,8 @@ typed decode failures. Rule expressions are purity-checked (S60/E3401): a `check
 condition and message may reference only the struct's own fields and pure
 calls, never Net/DB/IO. Derived decoders invoke this validator after shape
 decoding; hand codecs opt in explicitly. The `Validate.over(s)` use-site
-escape (for rules needing outside context, like a database lookup) remains
-follow-on work — see docs/spec/syntax-decisions.md's D-VALIDATE1 entry.
+escape (for rules needing outside context, like a database lookup) is
+unshipped; see docs/spec/syntax-decisions.md's D-VALIDATE1 entry.
 
 **Field attributes** (D-SERDE5):
 
