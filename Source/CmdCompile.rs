@@ -1872,7 +1872,7 @@ const IGNORED_DIRS: &[&str] = &[
 ];
 
 /// Recursively collect source `.jet` files under `dir`, skipping IGNORED_DIRS
-/// and the canonical or retired package manifest. Canonical Package and Config files use
+/// and the retired package manifest. The canonical Package and Config files use
 /// the typed package formatter in the preflight path below.
 /// Entries are sorted deterministically.
 fn walk_jet_files(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -1887,7 +1887,6 @@ fn walk_jet_files(dir: &Path, out: &mut Vec<PathBuf>) {
                 walk_jet_files(&path, out);
             }
         } else if path.extension().and_then(|e| e.to_str()) == Some(jet::Syntax::FILE_EXT)
-            && path.file_name().and_then(|name| name.to_str()) != Some(jet::Syntax::PACKAGE_FILE)
             && path.file_name().and_then(|name| name.to_str()) != Some(jet::Syntax::PAYLOAD_FILE)
         {
             out.push(path);

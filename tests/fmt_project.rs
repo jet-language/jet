@@ -95,9 +95,9 @@ fn explicit_dir_arg_formats_files() {
     assert_ne!(read(&f), UNFORMATTED);
 }
 
-/// Directory traversal skips `package.jet`; an explicit `package.jet` path stays intentional.
+/// Directory traversal validates `package.jet`; an explicit path stays intentional.
 #[test]
-fn explicit_dir_ignores_package_manifest() {
+fn explicit_dir_reports_invalid_package_manifest() {
     let dir = tmpdir(&line!().to_string());
     let source = write(&dir, "src/main.jet", UNFORMATTED);
     let manifest = write(
@@ -115,14 +115,11 @@ fn explicit_dir_ignores_package_manifest() {
         .unwrap();
     assert_eq!(
         check.status.code(),
-        Some(1),
-        "only the ordinary source should need formatting\nstderr: {}",
+        Some(2),
+        "invalid package manifest must fail project formatting\nstderr: {}",
         String::from_utf8_lossy(&check.stderr)
     );
-    assert!(
-        !String::from_utf8_lossy(&check.stdout).contains(jet::Syntax::PACKAGE_FILE),
-        "directory check must not report package.jet"
-    );
+    assert_eq!(read(&source), UNFORMATTED);
     assert_eq!(fs::read(&manifest).unwrap(), manifest_before);
 
     let format = Command::new(jet())
@@ -133,11 +130,11 @@ fn explicit_dir_ignores_package_manifest() {
         .unwrap();
     assert_eq!(
         format.status.code(),
-        Some(0),
-        "directory format should ignore package.jet\nstderr: {}",
+        Some(2),
+        "directory format should reject invalid package.jet\nstderr: {}",
         String::from_utf8_lossy(&format.stderr)
     );
-    assert_ne!(read(&source), UNFORMATTED);
+    assert_eq!(read(&source), UNFORMATTED);
     assert_eq!(fs::read(&manifest).unwrap(), manifest_before);
 
     let explicit = Command::new(jet())
