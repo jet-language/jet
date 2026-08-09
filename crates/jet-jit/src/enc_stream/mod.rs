@@ -1411,10 +1411,10 @@ pub(crate) fn ambient_handle(
     ) {
         return None;
     }
-    let Some(handle) = match recv {
+    let Some(handle) = (match recv {
         CtValue::Int(handle) if *handle > 0 => Some(*handle),
         _ => None,
-    } else {
+    }) else {
         return Some(Err(ambient_unsupported("stream handle receiver", span)));
     };
     use std::io::{BufRead, Write};

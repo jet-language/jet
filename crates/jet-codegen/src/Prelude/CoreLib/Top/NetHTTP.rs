@@ -1335,7 +1335,7 @@ fn jet_net_socket_addr(host: &String, port: i64) -> Result<JetSocketAddr, JetNet
         Ok(address) => Ok(address),
         Err(_) => {
             use std::net::ToSocketAddrs;
-            text.to_socket_addrs()?
+            match text.to_socket_addrs() { Ok(iter) => iter, Err(e) => return Err(jet_net_io_error("resolve socket address", Some(text), e)) }
                 .next()
                 .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "no address"))
         }
