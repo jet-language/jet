@@ -1424,16 +1424,31 @@ fn check_bundle_opts_for_output_inner(
                                 }
                                 // E2710: derive body failed at comptime. Wrap with context
                                 // pointing at the #TraitName trigger on the struct.
-                            Err(inner) => diags.push(Diagnostic::error(
+                            Err(inner) => {
+                                let layout_refusal =
+                                    inner.code == "E0956" && inner.what.contains("D-LAYOUT-FACTS1=B");
+                                let why = if layout_refusal {
+                                    format!("{}; {}", inner.what, inner.why)
+                                } else {
+                                    inner.what.clone()
+                                };
+                                let fix = if layout_refusal {
+                                    inner.fix.clone()
+                                } else {
+                                    "fix the `derive` body so it generates valid Jet at compile time"
+                                        .to_string()
+                                };
+                                diags.push(Diagnostic::error(
                                     "E2710",
                                     format!(
                                         "`derive T.{}` body failed while expanding `#{}` on `{}`",
                                         derive_name, derive_name, s.name
                                     ),
-                                    inner.what.clone(),
-                                    "fix the `derive` body so it generates valid Jet at compile time".to_string(),
+                                    why,
+                                    fix,
                                     Some(*derive_span),
-                            )),
+                                ));
+                            }
                         }
                     }
                 }

@@ -741,6 +741,17 @@ pub fn compiler_fact_member(fact: &str) -> Option<&'static str> {
 pub const TYPE_LAYOUT_INFO: &str = "LayoutInfo";
 pub const TYPE_LAYOUT_FIELD: &str = "LayoutField";
 
+/// D-LAYOUT-FACTS1=B: byte facts remain unavailable until a canonical target
+/// layout engine exists. Keep this vocabulary shared by sema and comptime so
+/// neither path turns the typed absence into a silent answer.
+pub fn is_layout_byte_fact(type_name: &str, field: &str) -> bool {
+    matches!(
+        (type_name, field),
+        (TYPE_LAYOUT_INFO, "size" | "alignment" | "stride")
+            | (TYPE_LAYOUT_FIELD, "offset" | "size")
+    )
+}
+
 /// Internal AST spelling for the typed selector in `T.$layout[.field]`.
 /// Keeping the selector in an existing `Expr::Ident` avoids a second AST
 /// variant for a compile-time-only projection. It is never formatted as this

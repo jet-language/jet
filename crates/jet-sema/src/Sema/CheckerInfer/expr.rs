@@ -3216,6 +3216,21 @@ impl<'a> Checker<'a> {
             }
         }
         if let Type::Named(type_name) = t {
+            // D-LAYOUT-FACTS1=B: `None(Int)` preserves the ratified wall, but
+            // reading a byte fact must identify the missing canonical target
+            // layout engine instead of becoming a silent absent value.
+            if Syntax::is_layout_byte_fact(type_name, member) {
+                self.diags.push(Diagnostic::error(
+                    "E0956",
+                    format!(
+                        "`{type_name}.{member}` is unavailable until a canonical target layout engine ships (D-LAYOUT-FACTS1=B)"
+                    ),
+                    "D-LAYOUT-FACTS1=B keeps byte facts absent until a canonical target layout engine exists".to_string(),
+                    "read `kind`, `target`, `guarantee`, and `source`, or a field's `name` and `ty`; ship the canonical target layout engine before reading byte facts".to_string(),
+                    Some(span),
+                ));
+                return None;
+            }
             // D-SWIZZLE1: named lane swizzles on vector/SIMD types (not matrices).
             if is_swizzleable_math_type(type_name) && !self.registry.contains(type_name) {
                 match parse_swizzle_member(member, type_name) {
