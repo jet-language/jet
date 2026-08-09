@@ -389,12 +389,16 @@ impl<'a> Fmt<'a> {
                 self.fmt_expr(value, Prec::OrFallback);
             }
             Stmt::Continue(_) => self.write(Syntax::KW_NEXT),
-            Stmt::BreakLabel(name, _) if name.starts_with("__jet_collect_loop_") => {
+            Stmt::BreakLabel(name, _)
+                if name.starts_with("__jet_collect_loop_")
+                    || name.starts_with("__jet_value_loop_") =>
+            {
                 self.write("break")
             }
             Stmt::BreakLabel(name, _) => self.write(&format!("break({})", name)),
             Stmt::BreakLabelValue(name, _, value, _)
-                if name.starts_with("__jet_collect_loop_") =>
+                if name.starts_with("__jet_collect_loop_")
+                    || name.starts_with("__jet_value_loop_") =>
             {
                 self.write("break ");
                 self.fmt_expr(value, Prec::OrFallback);

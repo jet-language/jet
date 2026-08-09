@@ -141,10 +141,10 @@ extern "C" fn jet_jit_time_duration_unit(value: i64, unit: i64) -> i64 {
         5 => 3_600_000_000_000,
         _ => 1,
     };
-    match crate::jit::runtime_host::duration_kernel::jet_duration_kernel_from_int(value, scale) {
+    match crate::runtime_host::duration_kernel::jet_duration_kernel_from_int(value, scale) {
         Some(ns) => result_ok(ns as u64),
         None => result_err(
-            crate::jit::runtime_host::duration_kernel::jet_duration_kernel_int_error_reason()
+            crate::runtime_host::duration_kernel::jet_duration_kernel_int_error_reason()
                 .into(),
         ),
     }

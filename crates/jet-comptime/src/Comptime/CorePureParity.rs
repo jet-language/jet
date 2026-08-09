@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 
 use super::mime_kernel;
-use crate::AST::{CtFloat, CtReport, CtValue, Type};
+use crate::AST::{as_bytes, CtFloat, CtReport, CtValue, Type};
 use crate::Diagnostics::{Diagnostic, Span};
 
 use crate::Comptime::Builtins::{as_bool, as_int};
@@ -901,18 +901,18 @@ fn crypto_hkdf(args: &[CtValue], span: Span) -> EvalResult {
         return Ok(CtValue::failed(Box::new(crypto_error("HKDF-SHA256 output length must be 0..8160"))));
     }
     let bytes = crate::Comptime::CryptoLite::hkdf_sha256(
-        &bytes_value(one(args, 0, "core.crypto.expert", "hkdf_sha256_raw", span)?, span)?,
-        &bytes_value(one(args, 1, "core.crypto.expert", "hkdf_sha256_raw", span)?, span)?,
-        &bytes_value(one(args, 2, "core.crypto.expert", "hkdf_sha256_raw", span)?, span)?,
+        &as_bytes(one(args, 0, "core.crypto.expert", "hkdf_sha256_raw", span)?, span)?,
+        &as_bytes(one(args, 1, "core.crypto.expert", "hkdf_sha256_raw", span)?, span)?,
+        &as_bytes(one(args, 2, "core.crypto.expert", "hkdf_sha256_raw", span)?, span)?,
         length as usize,
     );
     Ok(CtValue::Present(Box::new(crypto_secret("Secret", bytes))))
 }
 
 fn crypto_ed25519_verify(args: &[CtValue], span: Span) -> EvalResult {
-    let public = bytes_value(one(args, 0, "core.crypto.expert", "ed25519_verify_strict", span)?, span)?;
-    let message = bytes_value(one(args, 1, "core.crypto.expert", "ed25519_verify_strict", span)?, span)?;
-    let signature = bytes_value(one(args, 2, "core.crypto.expert", "ed25519_verify_strict", span)?, span)?;
+    let public = as_bytes(one(args, 0, "core.crypto.expert", "ed25519_verify_strict", span)?, span)?;
+    let message = as_bytes(one(args, 1, "core.crypto.expert", "ed25519_verify_strict", span)?, span)?;
+    let signature = as_bytes(one(args, 2, "core.crypto.expert", "ed25519_verify_strict", span)?, span)?;
     if public.len() != 32 {
         return Ok(CtValue::failed(Box::new(crypto_error(&format!(
             "expert.ed25519_verify_strict: public must be exactly 32; got {}",
@@ -942,8 +942,8 @@ fn crypto_ed25519_verify(args: &[CtValue], span: Span) -> EvalResult {
 }
 
 fn crypto_ed25519_sign(args: &[CtValue], span: Span) -> EvalResult {
-    let seed = bytes_value(one(args, 0, "core.crypto.expert", "ed25519_sign", span)?, span)?;
-    let message = bytes_value(one(args, 1, "core.crypto.expert", "ed25519_sign", span)?, span)?;
+    let seed = as_bytes(one(args, 0, "core.crypto.expert", "ed25519_sign", span)?, span)?;
+    let message = as_bytes(one(args, 1, "core.crypto.expert", "ed25519_sign", span)?, span)?;
     if seed.len() != 32 {
         return Ok(CtValue::failed(Box::new(crypto_error(&format!(
             "expert.ed25519_sign: seed must be exactly 32; got {}",
@@ -1017,10 +1017,10 @@ fn crypto_aead_seal(
     nonce_length: usize,
     aes: bool,
 ) -> EvalResult {
-    let key = bytes_value(one(args, 0, "core.crypto.expert", operation, span)?, span)?;
-    let nonce = bytes_value(one(args, 1, "core.crypto.expert", operation, span)?, span)?;
-    let plaintext = bytes_value(one(args, 2, "core.crypto.expert", operation, span)?, span)?;
-    let aad = bytes_value(one(args, 3, "core.crypto.expert", operation, span)?, span)?;
+    let key = as_bytes(one(args, 0, "core.crypto.expert", operation, span)?, span)?;
+    let nonce = as_bytes(one(args, 1, "core.crypto.expert", operation, span)?, span)?;
+    let plaintext = as_bytes(one(args, 2, "core.crypto.expert", operation, span)?, span)?;
+    let aad = as_bytes(one(args, 3, "core.crypto.expert", operation, span)?, span)?;
     if let Some(error) =
         crypto_aead_lengths(operation, &key, &nonce, nonce_length, &plaintext, &aad, false)
     {
@@ -1046,10 +1046,10 @@ fn crypto_aead_open(
     operation: &str,
     nonce_length: usize,
 ) -> EvalResult {
-    let key = bytes_value(one(args, 0, "core.crypto.expert", operation, span)?, span)?;
-    let nonce = bytes_value(one(args, 1, "core.crypto.expert", operation, span)?, span)?;
-    let ciphertext = bytes_value(one(args, 2, "core.crypto.expert", operation, span)?, span)?;
-    let aad = bytes_value(one(args, 3, "core.crypto.expert", operation, span)?, span)?;
+    let key = as_bytes(one(args, 0, "core.crypto.expert", operation, span)?, span)?;
+    let nonce = as_bytes(one(args, 1, "core.crypto.expert", operation, span)?, span)?;
+    let ciphertext = as_bytes(one(args, 2, "core.crypto.expert", operation, span)?, span)?;
+    let aad = as_bytes(one(args, 3, "core.crypto.expert", operation, span)?, span)?;
     if let Some(error) =
         crypto_aead_lengths(operation, &key, &nonce, nonce_length, &ciphertext, &aad, true)
     {
@@ -1076,7 +1076,7 @@ fn crypto_argon2id(args: &[CtValue], span: Span) -> EvalResult {
     ) {
         Some(CtValue::Bytes(bytes)) => bytes.clone(),
         Some(CtValue::List(bytes)) => {
-            bytes_value(&CtValue::List(bytes.clone()), span)?
+            as_bytes(&CtValue::List(bytes.clone()), span)?
         }
         _ => {
             return Err(unsupported(
@@ -1085,7 +1085,7 @@ fn crypto_argon2id(args: &[CtValue], span: Span) -> EvalResult {
             ))
         }
     };
-    let salt = bytes_value(one(args, 1, "core.crypto.expert", "argon2id", span)?, span)?;
+    let salt = as_bytes(one(args, 1, "core.crypto.expert", "argon2id", span)?, span)?;
     let memory_kib = int_arg(args, 2, span)?;
     let iterations = int_arg(args, 3, span)?;
     let lanes = int_arg(args, 4, span)?;
@@ -1132,8 +1132,8 @@ fn crypto_argon2id(args: &[CtValue], span: Span) -> EvalResult {
 }
 
 fn crypto_x25519(args: &[CtValue], span: Span) -> EvalResult {
-    let secret = bytes_value(one(args, 0, "core.crypto.expert", "x25519_raw", span)?, span)?;
-    let public = bytes_value(one(args, 1, "core.crypto.expert", "x25519_raw", span)?, span)?;
+    let secret = as_bytes(one(args, 0, "core.crypto.expert", "x25519_raw", span)?, span)?;
+    let public = as_bytes(one(args, 1, "core.crypto.expert", "x25519_raw", span)?, span)?;
     if secret.len() != 32 || public.len() != 32 {
         return Ok(CtValue::failed(Box::new(crypto_error("X25519 keys must contain exactly 32 bytes"))));
     }
@@ -1148,7 +1148,7 @@ fn crypto_extract(args: &[CtValue], index: usize, type_name: &str, span: Span) -
     let value = one(args, index, "core.crypto.expert", "secret_bytes", span)?;
     match field(value, type_name, "bytes") {
         Some(CtValue::Bytes(bytes)) => Ok(CtValue::Bytes(bytes.clone())),
-        Some(CtValue::List(bytes)) => bytes_value(&CtValue::List(bytes.clone()), span).map(CtValue::Bytes),
+        Some(CtValue::List(bytes)) => as_bytes(&CtValue::List(bytes.clone()), span).map(CtValue::Bytes),
         _ => Err(unsupported(&format!("malformed {type_name} value"), span)),
     }
 }

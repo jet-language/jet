@@ -34,7 +34,14 @@ pub fn parse_document_bytes(bytes: &[u8]) -> Result<xml::Value, xml::Error> {
 }
 
 pub fn render_document(value: &xml::Value) -> Result<String, xml::Error> {
-    xml::render_document(&checked(value))
+    xml::render_document(&checked(value)).map_err(|reason| xml::Error {
+        kind: xml::Reason::Shape,
+        offset: 0,
+        line: None,
+        column: None,
+        path: String::new(),
+        reason,
+    })
 }
 
 pub fn render_document_bytes(

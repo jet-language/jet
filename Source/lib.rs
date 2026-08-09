@@ -97,6 +97,7 @@ pub use jet_repl as REPL;
 pub use jet_repl::{SemanticSymbols, Term};
 pub mod BuildCache;
 pub mod RunCache;
+pub mod RuntimeCache;
 pub mod BudgetProviders;
 pub mod BudgetStore;
 pub use jet_driver::BudgetView;
@@ -154,9 +155,27 @@ pub fn compile_with_target(
 /// need not define `main`; use `compile_with_path` when building or running.
 pub fn check_with_path(file: &str) -> Vec<Diagnostic> {
     with_compiler_stack(|| {
+        if let Some(diagnostics) = check_workspace_file(file) {
+            return diagnostics;
+        }
         let mut queries = jet_driver::QueryService::CompilerQueries::new();
         queries.check_disk(file, true).diagnostics.as_ref().clone()
     })
+}
+
+/// Workspace sources use the workspace evaluator as their front end. Keep its
+/// diagnostics in the same carrier as ordinary source checks so callers use
+/// the shared renderer and JSON path.
+fn check_workspace_file(file: &str) -> Option<Vec<Diagnostic>> {
+    let path = absolute_source_path(file);
+    if path.file_name().and_then(|name| name.to_str()) != Some(Syntax::WORKSPACE_FILE) {
+        return None;
+    }
+    let root = path.parent().unwrap_or(std::path::Path::new("."));
+    match jetpack::WorkspaceFile::load(root)? {
+        Ok(_) => Some(Vec::new()),
+        Err(diagnostic) => Some(vec![diagnostic]),
+    }
 }
 
 /// Full sema type-check for `jet eval`: runs the same pipeline as `compile`
@@ -1232,7 +1251,7 @@ pub fn check_document(path: &str, text: &str) -> Vec<Diagnostic> {
 /// Stdout is captured but not returned; callers render with `render_pretty()`
 /// (human) or `to_json()` (machine/`--json`).
 ///
-/// Returns `Err` diagnostics (E3401/E0951/E0952/E0953) on failure.
+/// Returns `Err` diagnostics (E3401/E0952/E0953) on failure.
 pub fn eval_pure_program_value(src: &str, file: &str) -> Result<CtValue, Vec<Diagnostic>> {
     with_compiler_stack(|| eval_pure_program_value_inner(src, file))
 }
@@ -1282,7 +1301,7 @@ fn eval_pure_program_value_inner(src: &str, file: &str) -> Result<CtValue, Vec<D
 /// `run()` function is interpreted using the comptime engine; any print calls
 /// are captured; the captured output is returned as a JSON string value.
 ///
-/// Returns `Err` diagnostics (E3401/E0951/E0952/E0953) on failure.
+/// Returns `Err` diagnostics (E3401/E0952/E0953) on failure.
 pub fn eval_pure_program(src: &str, file: &str) -> Result<String, Vec<Diagnostic>> {
     with_compiler_stack(|| eval_pure_program_inner(src, file))
 }

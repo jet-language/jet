@@ -181,6 +181,193 @@ impl RegistryRow {
     }
 }
 
+/// D-FACT-LAW1=B / D-FACTDECL1=A: the non-code rows are read from Prelude
+/// declarations. The source carries the columns that define the law; this
+/// type only holds their parsed form for the one registry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FactDeclaration {
+    pub name: &'static str,
+    pub target: RowTarget,
+    pub safe_direction: SafeDirection,
+    pub gates: &'static [&'static str],
+    pub published_by: Option<&'static str>,
+    pub decision: &'static str,
+}
+
+/// The one authority for the non-code registration rows.
+pub const FACT_SOURCE: &str = include_str!("../../jet-codegen/src/Prelude/Facts.jet");
+
+static FACT_DECLARATIONS: LazyLock<Vec<FactDeclaration>> = LazyLock::new(read_fact_declarations);
+
+/// Read every `fact` declaration in `FACT_SOURCE`.
+pub fn fact_declarations() -> &'static [FactDeclaration] {
+    &FACT_DECLARATIONS
+}
+
+fn read_fact_declarations() -> Vec<FactDeclaration> {
+    FACT_SOURCE
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with("fact "))
+        .map(fact_declaration)
+        .collect()
+}
+
+fn fact_declaration(line: &str) -> FactDeclaration {
+    let rest = line["fact ".len()..].trim();
+    let open = rest
+        .find('(')
+        .unwrap_or_else(|| panic!("fact declaration without a parameter list: {line}"));
+    let close = rest
+        .rfind(')')
+        .unwrap_or_else(|| panic!("fact declaration without a closing `)`: {line}"));
+    let name = leak(rest[..open].trim());
+    let mut target = None;
+    let mut safe_direction = None;
+    let mut gates = None;
+    let mut published_by = None;
+    let mut decision = None;
+
+    for entry in split_top_level(&rest[open + 1..close]) {
+        let (label, value) = entry
+            .split_once(':')
+            .unwrap_or_else(|| panic!("fact parameter without `:` in {line}: {entry}"));
+        let (label, value) = (label.trim(), value.trim());
+        match label {
+            "$holds" => target = Some(fact_target(value, line)),
+            "$safe" => safe_direction = Some(fact_direction(value, line)),
+            "$gates" => gates = Some(fact_gates(value, line)),
+            "$proved_by" => published_by = Some(leak(value)),
+            "$decision" => decision = Some(leak(&unquote(value, line))),
+            other => panic!("unknown fact column `{other}` in {line}"),
+        }
+    }
+
+    FactDeclaration {
+        name,
+        target: target.unwrap_or_else(|| panic!("fact declaration without `$holds`: {line}")),
+        safe_direction: safe_direction
+            .unwrap_or_else(|| panic!("fact declaration without `$safe`: {line}")),
+        gates: gates.unwrap_or_else(|| panic!("fact declaration without `$gates`: {line}")),
+        published_by,
+        decision: decision.unwrap_or_else(|| panic!("fact declaration without `$decision`: {line}")),
+    }
+}
+
+fn fact_target(value: &str, line: &str) -> RowTarget {
+    match value.strip_prefix('.').unwrap_or(value) {
+        "Value" => RowTarget::Value,
+        "Scope" => RowTarget::Scope,
+        "Build" => RowTarget::Build,
+        other => panic!("`{other}` is not a fact target in {line}"),
+    }
+}
+
+fn fact_direction(value: &str, line: &str) -> SafeDirection {
+    match value.strip_prefix('.').unwrap_or(value) {
+        "Gain" => SafeDirection::Gain,
+        "Shrink" => SafeDirection::Shrink,
+        "Discharge" => SafeDirection::Discharge,
+        "None" => SafeDirection::None,
+        other => panic!("`{other}` is not a safe direction in {line}"),
+    }
+}
+
+fn fact_gates(value: &str, line: &str) -> &'static [&'static str] {
+    let inner = value
+        .strip_prefix('[')
+        .and_then(|rest| rest.strip_suffix(']'))
+        .unwrap_or_else(|| panic!("fact gates must be a list in {line}"));
+    leak_slice(
+        split_top_level(inner)
+            .into_iter()
+            .filter(|gate| !gate.is_empty())
+            .map(|gate| leak(gate.strip_prefix('.').unwrap_or(gate)))
+            .collect(),
+    )
+}
+
+/// Comma-separated fact columns at nesting depth zero, outside strings.
+fn split_top_level(text: &str) -> Vec<&str> {
+    let mut entries = Vec::new();
+    let mut start = 0usize;
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (index, byte) in text.as_bytes().iter().enumerate() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if *byte == b'\\' {
+                escaped = true;
+            } else if *byte == b'"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match *byte {
+            b'"' => in_string = true,
+            b'[' | b'(' | b'{' => depth += 1,
+            b']' | b')' | b'}' => depth -= 1,
+            b',' if depth == 0 => {
+                entries.push(text[start..index].trim());
+                start = index + 1;
+            }
+            _ => {}
+        }
+    }
+    let last = text[start..].trim();
+    if !last.is_empty() {
+        entries.push(last);
+    }
+    entries
+}
+
+fn unquote(value: &str, line: &str) -> String {
+    let inner = value
+        .strip_prefix('"')
+        .and_then(|rest| rest.strip_suffix('"'))
+        .unwrap_or_else(|| panic!("fact decision must be quoted in {line}"));
+    let mut out = String::with_capacity(inner.len());
+    let mut escaped = false;
+    for character in inner.chars() {
+        match (escaped, character) {
+            (true, other) => {
+                out.push(other);
+                escaped = false;
+            }
+            (false, '\\') => escaped = true,
+            (false, other) => out.push(other),
+        }
+    }
+    out
+}
+
+// ponytail: fact rows are read once and live for the process, so source strings
+// are leaked instead of threading lifetimes through the registry.
+fn leak(text: &str) -> &'static str {
+    Box::leak(text.to_string().into_boxed_str())
+}
+
+fn leak_slice<T>(items: Vec<T>) -> &'static [T] {
+    Box::leak(items.into_boxed_slice())
+}
+
+fn fact_row(declaration: &FactDeclaration) -> RegistryRow {
+    RegistryRow {
+        name: declaration.name,
+        target: declaration.target,
+        safe_direction: declaration.safe_direction,
+        gates: declaration.gates,
+        published_by: declaration.published_by,
+        rule: None,
+        home: None,
+        renderers: &[],
+        guard: None,
+        decision: declaration.decision,
+    }
+}
+
 /// D-ONCE-LAW1=A: one row of a truth the corpus states once. The three columns
 /// a marker or a plane leaves empty are the whole difference, so this writes
 /// the rest of the shape down once instead of at every row.
@@ -226,153 +413,6 @@ fn marker_row(rule: &'static AppliedRule) -> RegistryRow {
     }
 }
 
-/// The gate words that are not markers: Prelude calls and settings a writer
-/// spells at the site to loosen a fact. Every other gate word is a marker row of
-/// this table. `law_violations` fails a row that names a word from neither list,
-/// so no row can invent a gate that nothing spells.
-const PRELUDE_GATES: &[&str] = &[
-    // D-TYPE2-EXACT1: the certainty gates.
-    "approx",
-    "raw",
-    "wrapping",
-    // D-CONC-JOIN1: the duty gates.
-    "detach",
-    "drop",
-    // D-CONF-MERGE1: the audited build exception.
-    "Force",
-];
-
-/// The rows that attach to something other than written code: the named
-/// instances of the one law (D-FACT-LAW1=B) and the read-only rows the
-/// ownership prover publishes (D-FACT-OWN1=A).
-const NON_CODE_ROWS: &[RegistryRow] = &[
-    RegistryRow {
-        name: "Exactness",
-        target: RowTarget::Value,
-        safe_direction: SafeDirection::Gain,
-        gates: &["approx", "raw", "wrapping"],
-        published_by: None,
-        rule: None,
-        home: None,
-        renderers: &[],
-        guard: None,
-        decision: "D-TYPE2-EXACT1",
-    },
-    // A narrowed optional gains certainty for free and the fact ends at the
-    // branch boundary, so nothing loosens it and this row names no gate.
-    RegistryRow {
-        name: "Flow",
-        target: RowTarget::Value,
-        safe_direction: SafeDirection::Gain,
-        gates: &[],
-        published_by: None,
-        rule: None,
-        home: None,
-        renderers: &[],
-        guard: None,
-        decision: "D-FLOWTYPE1",
-    },
-    RegistryRow {
-        name: "Taint",
-        target: RowTarget::Value,
-        safe_direction: SafeDirection::Gain,
-        gates: &["Scrub"],
-        published_by: None,
-        rule: None,
-        home: None,
-        renderers: &[],
-        guard: None,
-        decision: "D-TAG-SURFACE1",
-    },
-    RegistryRow {
-        name: "Duty",
-        target: RowTarget::Value,
-        safe_direction: SafeDirection::Discharge,
-        gates: &["detach", "drop"],
-        published_by: None,
-        rule: None,
-        home: None,
-        renderers: &[],
-        guard: None,
-        decision: "D-CONC-JOIN1",
-    },
-    RegistryRow {
-        name: "Rights",
-        target: RowTarget::Scope,
-        safe_direction: SafeDirection::Shrink,
-        gates: &["Unsafe", "Impure", "Grant"],
-        published_by: None,
-        rule: None,
-        home: None,
-        renderers: &[],
-        guard: None,
-        decision: "D-AUTHORITY-MODEL1",
-    },
-    RegistryRow {
-        name: "PackagePolicy",
-        target: RowTarget::Scope,
-        safe_direction: SafeDirection::Shrink,
-        gates: &["Unsafe", "Grant"],
-        published_by: None,
-        rule: None,
-        home: None,
-        renderers: &[],
-        guard: None,
-        decision: "D-PACKAGE-POLICY-SCOPE1",
-    },
-    RegistryRow {
-        name: "BuildSettings",
-        target: RowTarget::Build,
-        safe_direction: SafeDirection::Shrink,
-        gates: &["Force"],
-        published_by: None,
-        rule: None,
-        home: None,
-        renderers: &[],
-        guard: None,
-        decision: "D-CONF-MERGE1",
-    },
-    // D-FACT-OWN1=A: the ownership prover is not a plane. These three rows are
-    // what it publishes, read-only, with no plane algebra and no gate — a
-    // window is closed by the prover, never loosened by a written word.
-    RegistryRow {
-        name: "Sendability",
-        target: RowTarget::Value,
-        safe_direction: SafeDirection::None,
-        gates: &[],
-        published_by: Some("ownership"),
-        rule: None,
-        home: None,
-        renderers: &[],
-        guard: None,
-        decision: "D-FACT-OWN1",
-    },
-    RegistryRow {
-        name: "ViewProvenance",
-        target: RowTarget::Value,
-        safe_direction: SafeDirection::None,
-        gates: &[],
-        published_by: Some("ownership"),
-        rule: None,
-        home: None,
-        renderers: &[],
-        guard: None,
-        decision: "D-MEMPROVENANCE3",
-    },
-    RegistryRow {
-        name: "Movedness",
-        target: RowTarget::Value,
-        safe_direction: SafeDirection::None,
-        gates: &[],
-        published_by: Some("ownership"),
-        rule: None,
-        home: None,
-        renderers: &[],
-        guard: None,
-        decision: "D-MEM1",
-    },
-];
-
 /// D-ONCE-LAW1=A: the truths the corpus states once.
 ///
 /// Each row is a place where one meaning used to be written down two or more
@@ -404,11 +444,11 @@ const TRUTH_ROWS: &[RegistryRow] = &[
     ),
     truth_row(
         "AotCoreCalls",
-        "crates/jet-codegen/src/Codegen/TIR/emit/core_calls.rs",
+        "crates/jet-foundation/src/Syntax/core_calls.rs",
         &["AOT emit of every plain core.* call"],
         Guard {
-            test: "no_bespoke_arm_repeats_a_table_row",
-            file: "crates/jet-codegen/src/Codegen/TIR/emit/core_calls.rs",
+            test: "aot_projection_is_complete_both_directions",
+            file: "tests/core_call_table.rs",
             proof: GuardProof::CountsSites,
         },
         "D-ONCE-LAW1",
@@ -459,13 +499,14 @@ const TRUTH_ROWS: &[RegistryRow] = &[
     ),
 ];
 
-/// The one table. Marker rows come from the marker registry, every other kind
-/// from `NON_CODE_ROWS` and `TRUTH_ROWS`; nothing else may hold a row.
+/// The one table. Marker rows come from the marker registry, fact rows from
+/// Prelude declarations, and truths from their one source; nothing else may
+/// hold a row.
 static REGISTRY: LazyLock<Vec<RegistryRow>> = LazyLock::new(|| {
     APPLIED_RULES
         .iter()
         .map(marker_row)
-        .chain(NON_CODE_ROWS.iter().copied())
+        .chain(FACT_DECLARATIONS.iter().map(fact_row))
         .chain(TRUTH_ROWS.iter().copied())
         .collect()
 });
@@ -519,7 +560,9 @@ fn check(rows: &[RegistryRow]) -> Vec<String> {
             ));
         }
         for gate in row.gates {
-            let spelled = PRELUDE_GATES.contains(gate)
+            let spelled = fact_declarations()
+                .iter()
+                .any(|declaration| declaration.gates.iter().any(|candidate| candidate == gate))
                 || rows
                     .iter()
                     .any(|candidate| candidate.name == *gate && candidate.rule.is_some());

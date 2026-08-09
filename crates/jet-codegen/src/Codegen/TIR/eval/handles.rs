@@ -6,6 +6,9 @@ use crate::Codegen::TIR::THandleOp;
 use super::unsupported;
 use super::browser;
 
+// The shared Duration kernel is one file included per engine; this instance
+// only reads the error reason, so the unused arithmetic entry points stay.
+#[allow(dead_code)]
 mod duration_kernel {
     include!("../../../Prelude/Core/Duration.rs");
 }

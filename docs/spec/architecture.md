@@ -52,7 +52,7 @@ D-COMPILERSEAMS1/2 split the compiler into workspace seam crates. The root
 | `jet-comptime` | comptime values and interpreter support | no user-facing surface by itself |
 | `jet-sema` | all semantic checks, collects all front-end diagnostics | yes (E01xx+) |
 | `jet-codegen` | checked program to Rust text; TIR is internal here | **never** |
-| `jet-pkg-model` | **L1**, shared read-only package/config data model: `pkg.jet` manifest parsing, lock, hangar store listing, ref classification, FFI bridge construction, inline script deps, §6 structural `Merge`, the `BuildRecipe` data shape, plus the pure effect-budget/lint-policy computation over that data (no network/provider/shell) | package/FFI diagnostics |
+| `jet-pkg-model` | **L1**, shared read-only package/config data model: `package.jet` manifest parsing, lock, hangar store listing, ref classification, FFI bridge construction, inline script deps, §6 structural `Merge`, the `BuildRecipe` data shape, plus the pure effect-budget/lint-policy computation over that data (no network/provider/shell) | package/FFI diagnostics |
 | `jet-env-model` | **L2**, the shared pure plan model (card #367 slice 4): `ModuleEval` (the computed-modules evaluator) and its typed plan outputs (`EnvPlan`/`SystemPlan`/`ImagePlan`/`FleetPlan`/…). Depends on `jet-pkg-model` (L1) + `jet-codegen`; no provider/store/network/shell | plan-evaluation diagnostics |
 | `jetpack` | **L3**, package manager engine: provider/network/shell realization, JetOS, CLI — depends on `jet-pkg-model` (L1) for read-only data and `jet-env-model` (L2) for the plan model it realizes | package/JetOS diagnostics |
 | `jetos` | `jetos` binary front door for OS workflows; still dispatches into `jetpack`'s `os` verb (JetOS realization hasn't physically relocated out of `jetpack::JetOS` — that's a distinct, still-open scope gate, not part of slice 4) | package/JetOS diagnostics (via `jetpack`) |
@@ -526,19 +526,24 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   depend on either responsibility. Another backend replaces the codegen and
   binary-build edges without changing the front end.
 - **R8 — Small, self-contained binaries.** The root binary build path in
-  `Source/CmdCompile.rs` calls `rustc` directly with `strip=symbols` and thin LTO,
-  so the linker keeps only
-  what the program uses ("only link what's needed"). Output is one
-  self-contained native binary. Floor: Rust's std links a baseline
+  `Source/CmdCompile.rs` calls `rustc` directly with `strip=symbols` and thin LTO.
+  It links a content-addressed runtime `rlib`, so rustc does not compile the
+  fixed embedded runtime for each program. The cache key includes the exact
+  runtime bytes, rustc identity, target and profile flags, and explicit profile
+  environment.
+  The linker keeps only what the program uses ("only link what's needed"). The
+  output is one self-contained native binary. Rust's std links a baseline
   (low-hundreds-of-KB), accepted as the cost of a beginner-friendly
   std-backed runtime — we do NOT pursue `no_std` in v1 (it would remove
   the conveniences priority #2 depends on). A size-minimal profile
   (`opt-level="z"`, possibly `panic=abort`) is decision S15, exposed
   later as `jet build --small`; the default leans toward speed.
 - **R9 — A file is a complete program.** `jet run foo.jet` compiles and
-  runs a single file with no manifest, no project folder, no config.
-  The compiler invokes `rustc` on one generated `.rs` file — it never
-  creates or requires a Cargo project for user code. Agents must not add
+  runs a single file with no manifest, no project folder, and no config.
+  The generated `.rs` file remains a complete standalone program for audits.
+  Native builds can split its marked fixed-runtime block into Jet's hidden
+  cached `rlib`, then compile and link the generated user program. This process
+  does not create or require a Cargo project for user code. Agents must not add
   a mandatory project structure, lockfile, or manifest for users; any
   future multi-file/package story is opt-in and post-v1 (see roadmap).
 - **R10 — Std is pay-for-what-you-call.** M10 standard-library modules are

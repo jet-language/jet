@@ -1,7 +1,7 @@
 //! Comment-preserving in-place edits to the `deps: { … }` block of a
-//! `pkg.jet` manifest (mirrors the old jet.toml `add_dependency`/`remove`).
+//! `package.jet` manifest (mirrors the old jet.toml `add_dependency`/`remove`).
 
-/// Render a compiler-side `DepSpec` back into `pkg.jet` dep-value syntax.
+/// Render a compiler-side `DepSpec` back into `package.jet` dep-value syntax.
 fn render_dep_spec(name: &str, spec: &crate::Manifest::DepSpec) -> String {
     use crate::Manifest::{DepSpec, GitSelector};
     match spec {

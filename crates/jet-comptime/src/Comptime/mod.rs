@@ -69,8 +69,8 @@ use crate::AST::{EnumDef, Expr, Func, StructDef, Type};
 
 pub use Interpreter::{DebugHook, DevSink, ReplAuthorizer, ReplEffectRequest, REPL_FUEL_BUDGET, with_runtime_argv};
 pub use Methods::{
-    apply_core_call, apply_data_line_call, apply_impure_core_call, display_core_pure_value,
-    eval_regex_replace_all_with,
+    apply_core_call, apply_data_line_call, apply_impure_core_call,
+    apply_repl_authorized_core_call, display_core_pure_value, eval_regex_replace_all_with,
 };
 pub use Methods::apply_seeded_rng_method;
 #[doc(hidden)]
@@ -507,7 +507,7 @@ pub fn evaluate(
     )
 }
 
-/// Like `evaluate` but with module alias map for D-CTCORE1 whitelisted Core calls.
+/// Like `evaluate` but with module aliases for effect-approved Core calls.
 pub fn evaluate_with_imports(
     init: &crate::AST::Expr,
     funcs: &HashMap<String, &Func>,
@@ -567,6 +567,8 @@ pub fn evaluate_with_imports_opts(
         fuel: FUEL_BUDGET,
         sink: None,
         repl_mode: false,
+        repl_grants: &[],
+        repl_authorizer: None,
         emitted_fragments: None,
         embed_inputs: None,
         mutated: None,
@@ -636,6 +638,8 @@ pub fn evaluate_with_imports_opts_collecting_structs<'a>(
         fuel: FUEL_BUDGET,
         sink: None,
         repl_mode: false,
+        repl_grants: &[],
+        repl_authorizer: None,
         emitted_fragments: None,
         embed_inputs: Some(&mut embed_inputs),
         mutated,
@@ -934,10 +938,11 @@ pub fn run_repl_main_with_fuel(
 /// trailing `;` to detect a bare expression and passes `suppress = false`; a
 /// statement ending in `;` passes `suppress = true`.
 ///
-/// D-CTCORE1: `core_imports` maps alias → Core module path (e.g. `"math"` →
-/// `"core.math"`) from the session's accumulated `use` declarations, so
-/// whitelisted pure Core calls (e.g. `math.sqrt(16.0)`) execute inline instead
-/// of raising E0956. Pass `&HashMap::new()` when no imports are active.
+/// D-META-EFFECT1: `core_imports` maps alias → Core module path (e.g. `"math"`
+/// → `"core.math"`) from the session's accumulated `use` declarations, so
+/// effect-approved implemented Core calls (e.g. `math.sqrt(16.0)`) execute
+/// inline instead of raising E0956. Pass `&HashMap::new()` when no imports
+/// are active.
 pub fn run_repl_step(
     stmts: &[crate::AST::Stmt],
     funcs: &HashMap<String, &Func>,
@@ -1119,6 +1124,8 @@ pub fn run_block_with_imports(
         fuel: FUEL_BUDGET,
         sink: None,
         repl_mode: false,
+        repl_grants: &[],
+        repl_authorizer: None,
         allow_impure: false,
         impure_depth: 0,
         emitted_fragments: None,
@@ -1149,7 +1156,7 @@ pub fn evaluate_owned(
     )
 }
 
-/// Like `evaluate_owned` but with module alias map for D-CTCORE1 whitelisted Core calls.
+/// Like `evaluate_owned` but with module aliases for effect-approved Core calls.
 pub fn evaluate_owned_with_imports(
     init: &crate::AST::Expr,
     funcs: &HashMap<String, Func>,

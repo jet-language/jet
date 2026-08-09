@@ -458,18 +458,8 @@ gaps:
   ui/ui_component_kit: paint_form: jit call to unknown function `button_view`
 
 # Run-tier gaps: stems this file calls compile_covered that the corpus gate
-# still records as failing under default `jet run`. Every row is an E0956 row
-# from docs/audits/jit-run-tier-vs-aot-parity-audit-2026-07-28.md, quoting that
-# audit's reason. Each one works under `jet build` / `--release` and dies under
-# `jet run`, so each is a real I9 parity failure, parked here only so the
-# cross-check can name its owner instead of the conflict staying invisible.
-#
-# The four comptime rows are owed to card #1543 (D-META-EFFECT1=A, one effect
-# model at both stages): `can this run at compile time` is a closed Rust
-# allow-list today, which is what raises E0956, and #1543 retires it. Do not fix
-# them by reclassifying the stem.
+# still records as failing under default `jet run`. This section is empty after
+# the four #1543 comptime stems left the stale E0956 parking state. New rows
+# need a concrete reason and owner; never hide a run-tier failure by moving it
+# out of `compile_covered:`.
 run_gaps:
-  comptime/embed: call `embed_file` can't run at compile time yet — owed to #1543 (D-META-EFFECT1)
-  comptime/embed_bytes: call `embed_bytes` can't run at compile time yet — owed to #1543 (D-META-EFFECT1)
-  comptime/find: call `find` can't run at compile time yet — owed to #1543 (D-META-EFFECT1)
-  comptime/find_empty: call `find` can't run at compile time yet — owed to #1543 (D-META-EFFECT1)

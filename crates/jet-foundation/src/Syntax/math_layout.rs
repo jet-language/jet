@@ -130,8 +130,12 @@ pub const WATCHER_MODULE: &str = "core.watcher";
 pub const TYPE_WATCH_HANDLE: &str = "WatchHandle";
 pub const TYPE_WATCH_SET: &str = "WatchSet";
 pub const TYPE_WATCH_EVENT: &str = "WatchEvent";
-/// D-HONESTNUM1=A: the science measurement type name.
+/// D-HONESTNUM1=A / D-TYPE2-UNCERT1=A (ratified 2026-08-06): the science
+/// measurement type name and the measured knowledge grade.
 pub const TYPE_MEASUREMENT: &str = "Measurement";
+/// D-TYPE2-IMAG1=A (ratified 2026-08-06): the carrier named by imaginary
+/// numeric literals with the `i` suffix.
+pub const TYPE_COMPLEX: &str = "Complex";
 
 /// D-LISTMAP-CANON1=A: legacy list spelling; `[T]` is canonical.
 pub const TYPE_LIST: &str = "List";
@@ -156,6 +160,10 @@ pub const TYPE_ITER: &str = "Iter";
 pub const TYPE_REMOVE_BY: &str = "RemoveBy";
 /// D-RANGE-VALUE1=A: one nominal integer range for inclusive and half-open values.
 pub const TYPE_RANGE: &str = "Range";
+/// D-TYPE2-SPELL1=A (ratified 2026-08-06): the structural inline refinement
+/// form. Bounds are literal-only; this row records the spelling before #1549
+/// makes it legal in every type position.
+pub const TYPE_INLINE_RANGE: &str = "Int(lo..hi)";
 
 /// S41 (ratified M5): character type.
 pub const TYPE_CHAR: &str = "Char";

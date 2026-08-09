@@ -217,9 +217,7 @@ fn run() {{
     input :: files.open("{input_rel}") ?? panic("open")
     reader :: json.reader(^input, encoding.EncodingLimits.safe()) ?? panic("reader")
     count := 0
-    loop count < 100000 {{
-        maybe :: reader.next() ?? panic("next")
-        if maybe == None {{ break }}
+    loop item, reader {{
         count++
     }}
     print(count)
@@ -239,9 +237,7 @@ fn run() {{
     input :: files.open("{input_rel}") ?? panic("open")
     reader :: jsonl.reader(^input) ?? panic("reader")
     count := 0
-    loop count < 100000 {{
-        maybe :: reader.next() ?? panic("next")
-        if maybe == None {{ break }}
+    loop item, reader {{
         count++
     }}
     print(count)
@@ -261,9 +257,7 @@ fn run() {{
     input :: files.open("{input_rel}") ?? panic("open")
     reader :: csv.reader(^input) ?? panic("reader")
     count := 0
-    loop count < 100000 {{
-        maybe :: reader.next() ?? panic("next")
-        if maybe == None {{ break }}
+    loop item, reader {{
         count++
     }}
     print(count)
@@ -283,9 +277,7 @@ fn run() {{
     input :: files.open("{input_rel}") ?? panic("open")
     reader :: cbor.reader(^input) ?? panic("reader")
     count := 0
-    loop count < 100000 {{
-        maybe :: reader.next() ?? panic("next")
-        if maybe == None {{ break }}
+    loop item, reader {{
         count++
     }}
     print(count)

@@ -570,8 +570,8 @@ fn dependency_effect_declaration_joins_the_package_view() {
     fs::create_dir_all(&dependency).unwrap();
     fs::create_dir_all(&app).unwrap();
     fs::write(
-        dependency.join("pkg.jet"),
-        "payload: { name: \"audit\", version: \"0.1.0\" }\n",
+        dependency.join("package.jet"),
+        "name: \"audit\"\nversion: \"0.1.0\"\n",
     )
     .unwrap();
     fs::write(
@@ -580,8 +580,8 @@ fn dependency_effect_declaration_joins_the_package_view() {
     )
     .unwrap();
     fs::write(
-        app.join("pkg.jet"),
-        "payload: { name: \"app\", version: \"0.1.0\" }\ndeps: { audit: ../audit }\n",
+        app.join("package.jet"),
+        "name: \"app\"\nversion: \"0.1.0\"\ndeps: { audit: ../audit }\n",
     )
     .unwrap();
     let entry = app.join("main.jet");

@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{mpsc, Arc, Mutex, OnceLock};
 
-use jet_codegen::AST::{CtFloat, CtKey, CtValue, Type};
+use jet_codegen::AST::{as_bytes, CtFloat, CtKey, CtValue, Type};
 use jet_codegen::Diagnostics::{Diagnostic, Span};
 
 use crate::Crypto;
@@ -26,13 +26,7 @@ mod wire {
 }
 
 fn unsupported(what: &str, span: Span) -> Diagnostic {
-    Diagnostic::error(
-        "E0956",
-        format!("{what} can't run in the interpreter yet"),
-        "this ambient host call is missing an interpreter binding".to_string(),
-        "report this as a runtime-tier coverage gap".to_string(),
-        Some(span),
-    )
+    Diagnostic::e0956_unsupported(what, span)
 }
 
 fn crypto_err(msg: impl Into<String>) -> CtValue {
@@ -78,23 +72,6 @@ fn io_error(kind: &str, cause: impl Into<String>) -> CtValue {
                 ],
             },
         )],
-    }
-}
-
-fn as_bytes(v: &CtValue, span: Span) -> Result<Vec<u8>, Diagnostic> {
-    match v {
-        CtValue::Bytes(b) => Ok(b.clone()),
-        CtValue::List(items) => {
-            let mut out = Vec::with_capacity(items.len());
-            for item in items {
-                match item {
-                    CtValue::Int(n) if (0..=255).contains(n) => out.push(*n as u8),
-                    _ => return Err(unsupported("byte list element", span)),
-                }
-            }
-            Ok(out)
-        }
-        _ => Err(unsupported("bytes argument", span)),
     }
 }
 

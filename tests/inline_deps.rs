@@ -1,10 +1,10 @@
 //! U11 (D-JPK-SCRIPTDEP1=A) — inline script dependencies.
 //!
 //! A manifest-less `.jet` script may open with `use pkg#version;` instead of
-//! shipping a `pkg.jet`. These tests drive the real `jet` binary end to end:
+//! shipping a `package.jet`. These tests drive the real `jet` binary end to end:
 //! `jet run` resolves + locks by file-content hash, `jet fetch --lock` writes a
 //! `<script>.lock` sidecar, and `jet init <script>` lifts the inline refs into
-//! a generated `pkg.jet`. Resolution is offline-only today (no external
+//! a generated `package.jet`. Resolution is offline-only today (no external
 //! network/registry fetch — see `crates/jet-driver/src/Jetpack/ScriptDeps.rs`):
 //! a local `.jet/inline-deps/<name>/<version>/` copy stands in as the
 //! resolvable "provider" fixture, mirroring Jetpack's own committed-fixture
@@ -209,11 +209,11 @@ fn jet_lock_unresolved_dep_is_e1253() {
 }
 
 // ─────────────────────────────────────────────
-// jet_init_lifts_uses_into_pkg_jet
+// jet_init_lifts_uses_into_package_jet
 // ─────────────────────────────────────────────
 
 #[test]
-fn jet_init_lifts_uses_into_pkg_jet() {
+fn jet_init_lifts_uses_into_package_jet() {
     if !jet_bin().is_file() {
         return;
     }
@@ -233,12 +233,12 @@ fn jet_init_lifts_uses_into_pkg_jet() {
         String::from_utf8_lossy(&out.stderr)
     );
 
-    let manifest_path = dir.join("pkg.jet");
-    assert!(manifest_path.is_file(), "jet init should write pkg.jet");
+    let manifest_path = dir.join("package.jet");
+    assert!(manifest_path.is_file(), "jet init should write package.jet");
     let manifest = fs::read_to_string(&manifest_path).unwrap();
     assert!(
         manifest.contains("textkit"),
-        "expected the inline dep lifted into pkg.jet, got:\n{manifest}"
+        "expected the inline dep lifted into package.jet, got:\n{manifest}"
     );
     assert!(
         manifest.contains("\"1.4\""),
@@ -256,7 +256,7 @@ fn jet_init_without_script_is_unchanged() {
     let dir = tmp_dir("init_bare");
     let out = jet_cmd(&["init"], &dir);
     assert!(out.status.success());
-    let manifest = fs::read_to_string(dir.join("pkg.jet")).unwrap();
-    assert!(manifest.contains("payload:"));
+    let manifest = fs::read_to_string(dir.join("package.jet")).unwrap();
+    assert!(manifest.contains("name:"));
     assert!(!manifest.contains("textkit"));
 }

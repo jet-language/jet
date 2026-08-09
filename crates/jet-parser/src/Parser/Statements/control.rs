@@ -148,16 +148,84 @@ impl<'a> Parser<'a> {
             None
         };
         if !matches!(self.peek().kind, TokKind::Arrow) {
-            return Err(Diagnostic::error(
-                "E0003",
-                "this statement loop is used where a value is required".to_string(),
-                "a finite loop produces a value only when its body starts with `->`".to_string(),
-                "add `-> value`, or move the effect-only loop out of this expression".to_string(),
-                Some(start),
-            ));
+            // D-CHOOSE-FIND1=A: a finite source loop in value position uses
+            // its ordinary braced body. Sema later requires the surrounding
+            // `??` route and attaches that route to this result carrier.
+            if !matches!(self.peek().kind, TokKind::LBrace) {
+                return Err(Diagnostic::error(
+                    "E0003",
+                    "this statement loop is used where a value is required".to_string(),
+                    "a finite loop produces a value only with a braced search body or `->`"
+                        .to_string(),
+                    "add `-> value`, or write `{ ... break value } ?? fallback`".to_string(),
+                    Some(start),
+                ));
+            }
+            self.bump();
+            let mut body = self.block_stmts();
+            let exhaustion_span = self.toks[self.pos - 1].span;
+            if let Some(cond) = guard {
+                body = vec![Stmt::Switch {
+                    subject: Expr::Bool(true, start),
+                    arms: vec![SwitchArm {
+                        span: cond.span(),
+                        cond,
+                        body,
+                    }],
+                    else_body: None,
+                    span: start,
+                }];
+            }
+            let result_label = format!("__jet_value_loop_{}", start.start);
+            rewrite_collect_root_exits(&mut body, &result_label, 0);
+            let loop_stmt = if let Some((init, cond, step)) = counted {
+                Stmt::CountedLoop {
+                    init,
+                    cond,
+                    step,
+                    body,
+                    span: start,
+                    label: None,
+                }
+            } else {
+                let mut nested = body;
+                for (var, var_span, var2, kind) in clauses.into_iter().rev() {
+                    nested = vec![Stmt::For {
+                        var,
+                        var_span,
+                        var2,
+                        kind,
+                        body: nested,
+                        span: start,
+                        label: None,
+                    }];
+                }
+                nested.pop().expect("a value loop has a source clause")
+            };
+            let end = exhaustion_span.end.max(loop_stmt.span().end).max(start.end);
+            let lambda = crate::AST::Lambda {
+                take_names: Vec::new(),
+                params: Vec::new(),
+                body: crate::AST::LambdaBody::Block(vec![Stmt::Loop {
+                    body: vec![loop_stmt],
+                    span: start,
+                    label: Some((result_label, start)),
+                }]),
+                span: Span::new(start.start, end),
+                meta: crate::AST::LambdaMeta {
+                    result_loop: true,
+                    requires_exhaustion_route: true,
+                    exhaustion_span: Some(exhaustion_span),
+                    ..crate::AST::LambdaMeta::default()
+                },
+            };
+            return Ok(Expr::CallValue {
+                callee: Box::new(Expr::Lambda(lambda)),
+                args: Vec::new(),
+                span: Span::new(start.start, end),
+            });
         }
         self.bump();
-
         let mut body = if matches!(self.peek().kind, TokKind::LBrace) {
             self.bump();
             let previous_tail_depth = self.callable_tail_block_depth;
@@ -2188,14 +2256,23 @@ impl<'a> Parser<'a> {
         let mut parens = 0usize;
         let mut brackets = 0usize;
         let mut saw_body = false;
+        let mut nested_loop_pending = false;
+        let mut nested_loop_braces = Vec::new();
         for (index, token) in self.toks.iter().enumerate().skip(self.pos + 3) {
             match token.kind {
                 TokKind::LBrace => {
                     braces += 1;
                     saw_body = true;
+                    if nested_loop_pending {
+                        nested_loop_braces.push(braces);
+                        nested_loop_pending = false;
+                    }
                 }
                 TokKind::RBrace if braces == 0 => break,
                 TokKind::RBrace => {
+                    if nested_loop_braces.last() == Some(&braces) {
+                        nested_loop_braces.pop();
+                    }
                     braces -= 1;
                     if saw_body && braces == 0 {
                         break;
@@ -2206,6 +2283,7 @@ impl<'a> Parser<'a> {
                 TokKind::LBracket => brackets += 1,
                 TokKind::RBracket => brackets = brackets.saturating_sub(1),
                 TokKind::Arrow if braces == 0 && parens == 0 && brackets == 0 => return true,
+                TokKind::KwLoop if braces >= 1 => nested_loop_pending = true,
                 TokKind::KwBreak if parens == 0 && brackets == 0 => {
                     let next = self.toks.get(index + 1).map(|token| &token.kind);
                     let targets_label = matches!(next, Some(TokKind::LParen))
@@ -2217,7 +2295,11 @@ impl<'a> Parser<'a> {
                             self.toks.get(index + 3).map(|token| &token.kind),
                             Some(TokKind::Comma)
                         );
-                    let bare_payload = braces == 1
+                    // D-CHOOSE-FIND1=A: a search payload may sit under an
+                    // `if` (or another non-loop control block), but not under
+                    // an explicitly nested loop.
+                    let bare_payload = braces >= 1
+                        && nested_loop_braces.is_empty()
                         && !matches!(
                             next,
                             Some(TokKind::Semi | TokKind::RBrace | TokKind::LParen)

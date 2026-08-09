@@ -19,14 +19,15 @@ sprawl.
 
 Users learn:
 
-- **`pkg.jet`** — the only reserved package filename.
+- **`package.jet`** — the only reserved package filename.
 - **`jet`** — the only command they type.
 
 Everything else is a role module:
 
 ```jet
-// pkg.jet
-payload: { name: "pulseops", version: "0.4.0" }
+// package.jet
+name: "pulseops"
+version: "0.4.0"
 
 packages: {
     pulseops: executable { entry: "src/run.jet" }
@@ -73,7 +74,7 @@ The filename is organization. The declaration is meaning.
 | Rung | User writes | Command |
 |---|---|---|
 | 0 script | one `.jet` file, optionally `use pkg#ver` | `jet run app.jet` |
-| 1 package | `pkg.jet` with `payload`, `deps`, `packages` | `jet build`, `jet add`, `jet registry publish` |
+| 1 package | `package.jet` with bare `name`/`version`, `deps`, `packages` | `jet build`, `jet add`, `jet registry publish` |
 | 2 environment | `module env.dev { ... }` in any `.jet` file | `jet env`, `jet dev`, `jet services` |
 | 3 machine | `module system.laptop { ... }` | `jet switch`, `jet store rollback`, `jet store generations` |
 | 4 fleet | `module fleet.prod { ... }` | `jet push prod` |
@@ -93,7 +94,7 @@ fn run() {
 
 `jet run stats.jet` resolves, locks by file-content hash, and runs. `jet store lock
 stats.jet` writes a sidecar for committed reproducibility. `jet init` lifts the
-inline deps into a generated `pkg.jet`. Rung 0 stays manifest-free.
+inline deps into a generated `package.jet`. Rung 0 stays manifest-free.
 
 ## Env vs Dev
 
@@ -210,7 +211,7 @@ scope.
 
 ## Ad-Hoc Adapters
 
-Some useful things have no `pkg.jet`, no flake, and no nixpkgs equivalent. The
+Some useful things have no `package.jet`, no flake, and no nixpkgs equivalent. The
 escape hatch (ratified, D-JPK-ADAPTER1=A) is an adapter package:
 
 ```jet

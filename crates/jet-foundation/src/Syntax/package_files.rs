@@ -177,9 +177,9 @@ pub const MARKER_SINGLE_USE: &str = "SingleUse"; // D-LIN1
 /// the work is routed through explicit deterministic/mockable capabilities.
 pub const MARKER_REPLAYABLE: &str = "Replayable";
 
-/// D-REFINE1: directive-plane invariant marker for distinct refinements.
-/// First shipped form is `#Invariant("value >= lo && value < hi")` before a
-/// `distinct Int` declaration; sema normalizes it to proof-carrying bounds.
+/// D-TYPE2-REFINE1=A (ratified 2026-08-06): `#Invariant` retires in favor of
+/// the direct range fact in `distinct Int(lo..hi)`. Keep this migration anchor
+/// until #1548 removes the parser/sema references; it is not a new live form.
 pub const MARKER_INVARIANT: &str = "Invariant";
 
 /// D-MUSTUSE1 (c18iwxqx): `#MustUse` — marks a type, function, or method whose

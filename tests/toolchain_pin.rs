@@ -46,7 +46,7 @@ fn init_report_and_update_roundtrip() {
 
     let out = run(&["init"], &dir);
     assert!(out.status.success(), "init failed: {out:?}");
-    let manifest = std::fs::read_to_string(dir.join("pkg.jet")).unwrap();
+    let manifest = std::fs::read_to_string(dir.join("package.jet")).unwrap();
     assert!(manifest.contains("jet:"), "init wrote no pin:\n{manifest}");
 
     let out = run(&["self", "toolchain"], &dir);
@@ -84,8 +84,8 @@ fn bad_pin_reports_e1249() {
     // range form like `>=9` is instead the legacy E1208 compat constraint.
     write(
         &dir,
-        "pkg.jet",
-        "payload: { name: \"x\", version: \"1\", jet: 1.x }\n",
+        "package.jet",
+        "name: \"x\"\nversion: \"1\"\njet: 1.x\n",
     );
     write(&dir, "main.jet", "module x { fn run() { } }\n");
     let out = run(&["build", "main.jet"], &dir);
@@ -103,8 +103,8 @@ fn offline_unlocked_channel_reports_e1250() {
     // pin a channel other than the running toolchain's, with no lock present
     write(
         &dir,
-        "pkg.jet",
-        "payload: { name: \"x\", version: \"1\", jet: 0.9 }\n",
+        "package.jet",
+        "name: \"x\"\nversion: \"1\"\njet: 0.9\n",
     );
     write(&dir, "main.jet", "module x { fn run() { } }\n");
     let out = run(&["build", "main.jet", "--offline"], &dir);
@@ -121,8 +121,8 @@ fn platform_miss_reports_e1251() {
     // 0.9 differs from the running 1.x channel; online, no fixture object.
     write(
         &dir,
-        "pkg.jet",
-        "payload: { name: \"x\", version: \"1\", jet: 0.9 }\n",
+        "package.jet",
+        "name: \"x\"\nversion: \"1\"\njet: 0.9\n",
     );
     write(&dir, "main.jet", "module x { fn run() { } }\n");
     let out = run(&["build", "main.jet"], &dir);
@@ -137,8 +137,8 @@ fn init_refuses_to_clobber_reports_e1252() {
     let dir = scratch("clobber");
     write(
         &dir,
-        "pkg.jet",
-        "payload: { name: \"x\", version: \"1\" }\n",
+        "package.jet",
+        "name: \"x\"\nversion: \"1\"\n",
     );
     let out = run(&["init"], &dir);
     let err = String::from_utf8_lossy(&out.stderr);
@@ -159,8 +159,8 @@ fn in_channel_pin_runs_native_without_writing_lock() {
     };
     write(
         &dir,
-        "pkg.jet",
-        &format!("payload: {{ name: \"x\", version: \"1\", jet: {running_channel} }}\n"),
+        "package.jet",
+        &format!("name: \"x\"\nversion: \"1\"\njet: {running_channel}\n"),
     );
     write(&dir, "main.jet", "fn run() { print(\"ok\") }\n");
     let out = run(&["build", "main.jet"], &dir);

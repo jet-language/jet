@@ -52,7 +52,8 @@ existing drift found during review.
   `=[Exec]=>`, etc.).
 - Pure functions carry no effect markers; the compiler enforces this.
 - A function that performs multiple effects lists all of them; no hidden IO.
-- Comptime-evaluable functions satisfy D-CTCORE1's pure-Core whitelist.
+- Comptime eligibility follows the shared effect fact: an empty effect set is
+  Tier 0, and recorded Tier-1 inputs are locked for reproducibility.
 
 ## Law 5 — Allocation budget
 

@@ -1,11 +1,11 @@
-//! `pkg.jet` package-manifest loading (M12.1, S52, U1/U10, D-JPK23).
+//! `package.jet` package-manifest loading (M12.1, S52, U1/U10, D-JPK23).
 //!
 //! The on-disk format is Jet syntax, not TOML — `src/jetpack/packmanifest.rs`
-//! is the structural parser for `pkg.jet`'s `payload:`/`deps:`/`exports:`
-//! shape; this module owns the compiler-facing `Manifest` type that
+//! is the structural parser for `package.jet`'s bare identity and typed
+//! `deps:`/`outputs:` shape; this module owns the compiler-facing `Manifest` type that
 //! `loader.rs`/`fetch.rs`/`lock.rs`/`store.rs` operate on, the toolchain
 //! check (E1208), and the comment-preserving `jet add`/`jet remove` edits.
-//! `pkg.jet` replaces the old TOML `jet.toml` as a clean break (U1/U10) —
+//! `package.jet` replaces the old TOML `jet.toml` as a clean break (U1/U10) —
 //! no back-compat alias.
 
 use crate::Diagnostics::{Diagnostic, Span};
@@ -85,7 +85,7 @@ pub fn e2001(requested: &str) -> Diagnostic {
         format!(
             "editions opt a project into a specific era of Jet syntax. A newer edition can use syntax this compiler does not understand. This toolchain supports editions up to {}, but `{}` asks for `{}`.",
             latest_edition(),
-            Syntax::PAYLOAD_FILE,
+            Syntax::PACKAGE_FILE,
             requested,
         ),
         format!(
@@ -93,7 +93,7 @@ pub fn e2001(requested: &str) -> Diagnostic {
             Syntax::BINARY_NAME,
             Syntax::MANIFEST_FIELD_EDITION,
             latest_edition(),
-            Syntax::PAYLOAD_FILE,
+            Syntax::PACKAGE_FILE,
         ),
         None,
     )
@@ -218,9 +218,9 @@ pub struct Manifest {
     /// Rust crate dependencies for `extern rust` blocks. Always empty today:
     /// `extern rust "crate@version" { … }` (S50) carries its own version
     /// pin in source, so nothing has ever read this map — kept for shape
-    /// stability, not parsed from `pkg.jet`.
+    /// stability, not parsed from `package.jet`.
     pub dependencies_rust: BTreeMap<String, String>,
-    /// Raw `pkg.jet` text (preserved for comment-preserving edits).
+    /// Raw `package.jet` text (preserved for comment-preserving edits).
     pub raw: String,
 }
 
@@ -237,7 +237,7 @@ pub struct PackageMeta {
     pub description: Option<String>,
     pub license: Option<String>,
     pub repository: Option<String>,
-    /// D-RINGLAYER1=A: optional runtime ceiling from `runtime:` in `payload`.
+    /// D-RINGLAYER1=A: optional runtime ceiling from `runtime:` in the Package.
     pub layer: Option<crate::Syntax::RuntimeLayer>,
 }
 
@@ -289,18 +289,14 @@ pub fn parse(path: &Path, raw: &str) -> Result<Manifest, Diagnostic> {
     Package::to_manifest(&facts, raw)
 }
 
-/// The path to the package manifest in a project dir. The canonical
-/// `package.jet` wins; `pkg.jet` is accepted only as migration-era input.
+/// The path to the one package manifest in a project dir.
 pub fn manifest_path_in(dir: &Path) -> std::path::PathBuf {
-    let canonical = dir.join(Syntax::PACKAGE_FILE);
-    if canonical.is_file() {
-        canonical
-    } else {
-        dir.join(Syntax::PAYLOAD_FILE)
-    }
+    dir.join(Syntax::PACKAGE_FILE)
 }
 
-/// Whether both manifest spellings exist in this directory — ambiguous.
+/// Whether both the canonical manifest and a retired alias exist. The alias
+/// is never parsed, but a mixed root is rejected so migration cannot silently
+/// hide a second Package identity.
 pub fn has_both_manifests(dir: &Path) -> bool {
     dir.join(Syntax::PACKAGE_FILE).is_file() && dir.join(Syntax::PAYLOAD_FILE).is_file()
 }
@@ -326,7 +322,7 @@ pub fn load(dir: &Path) -> Option<Result<Manifest, Diagnostic>> {
         Err(e) => {
             return Some(Err(e1206(
                 &pack_path.display().to_string(),
-                &format!("couldn't read {}: {}", Syntax::PAYLOAD_FILE, e),
+                &format!("couldn't read {}: {}", Syntax::PACKAGE_FILE, e),
             )));
         }
     };
@@ -408,7 +404,7 @@ fn version_ge(a: &str, b: &str) -> bool {
 // ──────────────────────────────────────────────
 
 /// Insert or update a dependency in the `deps: { … }` block, preserving
-/// comments and existing entries. Returns the updated `pkg.jet` text.
+/// comments and existing entries. Returns the updated `package.jet` text.
 pub fn add_dependency(raw: &str, name: &str, spec: &DepSpec) -> String {
     Package::add_dep(raw, name, spec)
 }
@@ -418,7 +414,7 @@ pub fn remove_dependency(raw: &str, name: &str) -> String {
     Package::remove_dep(raw, name)
 }
 
-/// Generate a `pkg.jet` template for `jet new`.
+/// Generate a `package.jet` template for `jet new`.
 pub fn new_template(name: &str, annotated: bool) -> String {
     Package::new_template(name, annotated)
 }
@@ -514,7 +510,7 @@ fn e1221(_file: &str, detail: &str) -> Diagnostic {
         "E1221",
         format!(
             "`{}` has a malformed `{}`/`{}` block",
-            Syntax::PAYLOAD_FILE,
+            Syntax::PACKAGE_FILE,
             Syntax::MANIFEST_BLOCK_EFFECTS,
             Syntax::MANIFEST_BLOCK_GRANTS,
         ),
@@ -531,11 +527,11 @@ fn e1221(_file: &str, detail: &str) -> Diagnostic {
 fn e1206(_file: &str, detail: &str) -> Diagnostic {
     Diagnostic::error(
         "E1206",
-        format!("`{}` has a shape error", Syntax::PAYLOAD_FILE),
+        format!("`{}` has a shape error", Syntax::PACKAGE_FILE),
         detail.to_string(),
         format!(
             "check `{}` against docs/spec/syntax-decisions.md (U1)",
-            Syntax::PAYLOAD_FILE
+            Syntax::PACKAGE_FILE
         ),
         None,
     )
@@ -550,7 +546,7 @@ pub fn e1209(_file: &str, section: &str) -> Diagnostic {
         format!(
             "remove the `{}` block from `{}`, or leave it empty",
             section,
-            Syntax::PAYLOAD_FILE
+            Syntax::PACKAGE_FILE
         ),
         None,
     )
@@ -559,7 +555,7 @@ pub fn e1209(_file: &str, section: &str) -> Diagnostic {
 fn e1210(_file: &str, detail: &str) -> Diagnostic {
     Diagnostic::error(
         "E1210",
-        format!("`{}` lists an unknown target", Syntax::PAYLOAD_FILE),
+        format!("`{}` lists an unknown target", Syntax::PACKAGE_FILE),
         detail.to_string(),
         format!(
             "use a shipped target: `{}`, `{}`, `{}`, `{}`, `{}`, or `{}`",
@@ -577,7 +573,7 @@ fn e1210(_file: &str, detail: &str) -> Diagnostic {
 fn e1211(_file: &str, detail: &str) -> Diagnostic {
     Diagnostic::error(
         "E1211",
-        format!("`{}` uses the removed `kind:` field", Syntax::PAYLOAD_FILE),
+        format!("`{}` uses the removed `kind:` field", Syntax::PACKAGE_FILE),
         detail.to_string(),
         format!(
             "write `{}: [{}]` (or `[{}]`) instead",
@@ -592,7 +588,7 @@ fn e1211(_file: &str, detail: &str) -> Diagnostic {
 fn e1216(_file: &str, detail: &str) -> Diagnostic {
     Diagnostic::error(
         "E1216",
-        format!("`{}` has an invalid target field", Syntax::PAYLOAD_FILE),
+        format!("`{}` has an invalid target field", Syntax::PACKAGE_FILE),
         detail.to_string(),
         format!(
             "a target block accepts `{}: \"…\"` and `{}: \"…\"`",
@@ -608,7 +604,7 @@ pub fn e1212(_file: &str, name: &str) -> Diagnostic {
         "E1212",
         format!(
             "`{}` declares package `{name}` but no `module {name}` was found",
-            Syntax::PAYLOAD_FILE
+            Syntax::PACKAGE_FILE
         ),
         format!(
             "each `packages:` name must correspond to a `module <name> {{ … }}` declaration in a `.{}` file in the source tree",
@@ -617,7 +613,7 @@ pub fn e1212(_file: &str, name: &str) -> Diagnostic {
         format!(
             "add a `.{}` file containing `module {name} {{ … }}`, or remove `{name}` from `packages:` in `{}`",
             Syntax::FILE_EXT,
-            Syntax::PAYLOAD_FILE,
+            Syntax::PACKAGE_FILE,
         ),
         None,
     )
@@ -633,7 +629,7 @@ pub fn e1213(_file: &str, name: &str, paths: &[std::path::PathBuf]) -> Diagnosti
         "E1213",
         format!(
             "`{}` declares package `{name}` but `module {name}` is ambiguous",
-            Syntax::PAYLOAD_FILE
+            Syntax::PACKAGE_FILE
         ),
         format!("`module {name}` was found in multiple files: {list}; each package name must map to exactly one module"),
         format!("rename one of the conflicting `module {name}` declarations so each package has a unique name"),
@@ -642,7 +638,7 @@ pub fn e1213(_file: &str, name: &str, paths: &[std::path::PathBuf]) -> Diagnosti
 }
 
 /// D-BUILDPROFILE1: emit E1219 when the user passes `--profile=<name>` but
-/// `name` is not a blessed default (`release`/`debug`) or defined in `pkg.jet`'s
+/// `name` is not a blessed default (`release`/`debug`) or defined in `package.jet`'s
 /// `build { }` block. `defined` is the sorted list of profiles the user did define.
 /// E1258 (D-PLUGIN1=B, c81): a `target: plugin` package's own code uses an
 /// effect — plugins are deny-by-default (the wasmtime host registers zero
@@ -674,7 +670,7 @@ pub fn e1259(detail: &str) -> Diagnostic {
 
 pub fn e1219(name: &str, defined: &[String]) -> Diagnostic {
     let note = if defined.is_empty() {
-        "no profiles are defined in the `build { }` block of `pkg.jet`".to_string()
+        "no profiles are defined in the `build { }` block of `package.jet`".to_string()
     } else {
         format!("defined profiles: {}", defined.join(", "))
     };
@@ -687,7 +683,7 @@ pub fn e1219(name: &str, defined: &[String]) -> Diagnostic {
             Syntax::BUILD_PROFILE_RELEASE,
             Syntax::BUILD_PROFILE_DEBUG,
             Syntax::BUILD_PROFILE_CI,
-            Syntax::PAYLOAD_FILE,
+            Syntax::PACKAGE_FILE,
         ),
         None,
     )

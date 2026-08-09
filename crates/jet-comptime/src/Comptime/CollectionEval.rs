@@ -6,7 +6,7 @@ use crate::Diagnostics::{Diagnostic, Span};
 
 use super::Builtins::{as_int, cmp};
 use super::Diagnostics::{index_oob, unsupported};
-use crate::AST::CtValue;
+use crate::AST::{as_bytes, CtValue};
 
 mod set_semantics {
     #[allow(unused_imports)]
@@ -77,23 +77,6 @@ fn as_string(v: &CtValue, span: Span) -> Result<String, Diagnostic> {
     match v {
         CtValue::Str(s) => Ok(s.clone()),
         _ => Err(unsupported("non-String argument to ByteBuffer", span)),
-    }
-}
-
-fn as_bytes(v: &CtValue, span: Span) -> Result<Vec<u8>, Diagnostic> {
-    match v {
-        CtValue::Bytes(bs) => Ok(bs.clone()),
-        CtValue::List(xs) => xs
-            .iter()
-            .map(|x| match x {
-                CtValue::Int(n) if (0..=255).contains(n) => Ok(*n as u8),
-                _ => Err(unsupported(
-                    "a `[U8]` list with an out-of-range element",
-                    span,
-                )),
-            })
-            .collect(),
-        _ => Err(unsupported("non-`[U8]` argument to ByteBuffer", span)),
     }
 }
 

@@ -1,7 +1,8 @@
 # Library reuse and linking
 
 **Card:** #1421 (plan) → #1422 (build). **Ratified:** D-LIB-REUSE1=B,
-D-LIB-EXPORT1=C, D-LIB-DYNTRUST1=A, D-LIB-NAME1=A (2026-08-06).
+D-LIB-EXPORT1=C, D-LIB-DYNTRUST1=A, D-LIB-NAME1=A, D-LIB-CALLGRANT1=A
+(2026-08-08).
 **Status:** ratified, unbuilt.
 
 ## Goal
@@ -155,7 +156,7 @@ version check. This mirrors the inbound binder direction (D-FFI-UNIFY1=A,
 D-FFI-PY1=A) rather than adding a second mechanism.
 
 ```jet
-# pkg.jet
+# package.jet
 name: "flightlog"
 outputs: .{
   core: .Library.{ native: true, entry: Flightlog, bindings: [c, python, swift] }
@@ -182,7 +183,7 @@ load site, and a library asking for more is refused before it is mapped.
 effects: .{ read: ["./mods/f16"] }
 
 # the host grants a narrower or equal set
-mods := Mod.load_all("./mods", grant: .{ read: ["./mods"] })?
+mod := Mod.load("./mods/f16.jetlib", grant: .{ read: ["./mods"] })?
 ```
 
 The compiler already proves a package cannot use an effect it did not declare,
@@ -239,6 +240,7 @@ be trusted, it is rebuilt silently rather than offered with a warning.
 | **D-LIB-EXPORT1=C** | `Library` also emits a native static and shared library, a C header, and generated bindings per named language. |
 | **D-LIB-DYNTRUST1=A** | A loaded library declares its effects; the host grants a set at the load site; anything more is refused before mapping. |
 | **D-LIB-NAME1=A** | A field on the ratified `Library` output, not a new output kind. Loadable files use the `.jetlib` suffix. |
+| **D-LIB-CALLGRANT1=A** | `Mod.load(path, grant: .{ ... })?` keeps the grant at the load site; loaded exports are typed members such as `mod.on_tick(dt)`. |
 
 ## Build order
 

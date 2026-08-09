@@ -19,7 +19,7 @@ fn checked_project(
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
-        dir.join("pkg.jet"),
+        dir.join("package.jet"),
         format!(
             "name: \"{name}\"\nversion: \"1.0.0\"\n{manifest_policy}\n"
         ),
@@ -46,7 +46,7 @@ fn project_diagnostics(name: &str, manifest_policy: &str, source: &str) -> Vec<S
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
-        dir.join("pkg.jet"),
+        dir.join("package.jet"),
         format!(
             "name: \"{name}\"\nversion: \"1.0.0\"\n{manifest_policy}\n"
         ),
@@ -298,7 +298,7 @@ fn package_default_reaches_nested_and_dependency_modules() {
     let _ = std::fs::remove_dir_all(&nested_dir);
     std::fs::create_dir_all(&nested_dir).unwrap();
     std::fs::write(
-        nested_dir.join("pkg.jet"),
+        nested_dir.join("package.jet"),
         "name: \"nested\"\nversion: \"1\"\npolicy: .{ auto_derive: false }\n",
     )
     .unwrap();
@@ -327,7 +327,7 @@ fn package_default_reaches_nested_and_dependency_modules() {
     std::fs::create_dir_all(&app).unwrap();
     std::fs::create_dir_all(dep.join(".jet")).unwrap();
     std::fs::write(
-        app.join("pkg.jet"),
+        app.join("package.jet"),
         "name: \"app\"\nversion: \"1\"\ndeps: { dep: ../dep }\npolicy: .{ auto_derive: true }\n",
     )
     .unwrap();
@@ -337,7 +337,7 @@ fn package_default_reaches_nested_and_dependency_modules() {
     )
     .unwrap();
     std::fs::write(
-        dep.join("pkg.jet"),
+        dep.join("package.jet"),
         "name: \"dep\"\nversion: \"1\"\npolicy: .{ auto_derive: false }\n",
     )
     .unwrap();
@@ -388,7 +388,7 @@ fn same_named_dependency_type_keeps_its_own_auto_derive_policy() {
     std::fs::create_dir_all(dep.join(".jet")).unwrap();
     std::fs::create_dir_all(open_dep.join(".jet")).unwrap();
     std::fs::write(
-        app.join("pkg.jet"),
+        app.join("package.jet"),
         "name: \"app\"\n\
          version: \"1\"\n\
          deps: {\n\
@@ -418,7 +418,7 @@ fn run() {
     )
     .unwrap();
     std::fs::write(
-        dep.join("pkg.jet"),
+        dep.join("package.jet"),
         "name: \"dep\"\nversion: \"1\"\npolicy: .{ auto_derive: false }\n",
     )
     .unwrap();
@@ -428,7 +428,7 @@ fn run() {
     )
     .unwrap();
     std::fs::write(
-        open_dep.join("pkg.jet"),
+        open_dep.join("package.jet"),
         "name: \"open_dep\"\nversion: \"1\"\n",
     )
     .unwrap();
